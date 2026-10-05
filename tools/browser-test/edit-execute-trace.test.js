@@ -327,7 +327,9 @@ async function openExecutePopoverForCard(page, fnId) {
       assert(await page.locator('.path-value-popover-body').textContent() === JSON.stringify(value, null, 2),
         'keyboard disclosure shows the complete captured value');
       await page.keyboard.press('Escape');
-      await page.click('.path-view-clear');
+      await page.keyboard.press('Escape');
+      assert(await page.locator('.path-view-panel').count() === 0,
+        'second Escape clears the path after the value popup closes');
     }
 
     console.log('PASS');

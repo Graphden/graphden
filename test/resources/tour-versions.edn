@@ -9,7 +9,7 @@
  "branches" {:version 2, :steps "6326538513c566189d346361a63a38e75ea1bedb"}
  "components-and-pages" {:version 2, :steps "1edd3031e8453661c3c921a32fcfe7de89195ec7"}
  "custom-script-escape-hatch" {:version 1, :steps "6888c73f5709486153de1f056cea1c220e0fa128"}
- "debugging-traces" {:version 1, :steps "23481cce15441b886d3340a82a54d34a5bd9dbf7"}
+ "debugging-traces" {:version 2, :steps "15ae38e272eadae0648838af9c3ec51fc62bcc27"}
  "distributing-packages" {:version 1, :steps "9321ea00d5b2718c8bddcb3320c2334a052481c8"}
  "effects-and-secrets" {:version 3, :steps "8984b3b3ab297c40edb2b1d3f98037b112591fdf"}
  "errors-and-diagnostics" {:version 1, :steps "8514d93aeeddfe0d7fca3d9d56d9ac21bcfb613a"}

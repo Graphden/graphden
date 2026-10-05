@@ -1157,7 +1157,7 @@
              :chapter "Composing"
              :text-only? true
              :title "Live fragments: htmx from the graph"
-             :reads "a server clock as a fragment, auto-refresh with :trigger, POST forms, SSE streams, and when to use which layer. No tour: mounting a route needs a rebuild or an app."}
+             :reads "a server clock as a fragment, route mounting, auto-refresh with :trigger, POST forms, SSE streams, and when to use which layer."}
             {:id "15"
              :slug "executing-a-fn"
              :chapter "Running it"
@@ -1351,7 +1351,7 @@
             {:id "18"
              :slug "debugging-traces"
              :chapter "Running it"
-             :version 1
+             :version 2
              :title "Tracing a run"
              :reads "adds catching a live HTTP request."
              :steps
@@ -1435,11 +1435,16 @@
                :target ".execute-show-path-btn"
                :check {:kind "dom" :selector ".path-view-panel"}}
               {:title "Read the path"
-               :body "Every fn that ran lights up and the rest dims: your three fns, and str-upper, whose badge counts its calls — 3×, once per word, because map ran it inside its own loop. The view zooms to the lit cards, and each footer reads like a run log, time on the left and the return on the right: the list of words, the list upper-cased, the sentence. [[✕ clear]] in the panel at the bottom restores the view. Click [[Next]]."
+               :body "Every fn that ran lights up and the rest dims: your three fns, and str-upper, whose badge counts its calls — 3×, once per word, because map called it for each word. Each footer shows timing on the left and a captured value on the right. A value ending in … is shortened for display; you can open its full captured value. With [[Trace path]] alone, you see calls, timing and cache hits; [[+ capture values]] adds the values. Click [[Next]]."
                :target ".node-overlay.path-highlighted"
                :check {:kind "manual"}}
+              {:title "Open a captured value"
+               :body "Click the value on the tutorial-shout card, or focus it and press [[Enter]]. The popup shows the whole upper-cased list. Shortening its badge does not shorten the stored value. If capture could not store a value, the popup explains that instead."
+               :target ".node-overlay[data-fn-name=\"tutorial-shout\"] .path-value-badge"
+               :targets [".node-overlay[data-fn-name=\"tutorial-shout\"] .path-value-badge" ".path-value-popover"]
+               :check {:kind "dom" :selector ".path-value-popover-body"}}
               {:title "Open the call tree"
-               :body "The same record as a list. In the Inspector's Runs tab the saved run sits under the form with a [[tree]] button — click it."
+               :body "Press [[Esc]] to close the value popup. In the Inspector's Runs tab the saved run sits under the form with a [[tree]] button — click it to read the same execution as a list of calls."
                :target ".execute-history-tree-btn"
                :check {:kind "dom" :selector ".trace-view-panel .trace-row"}}
               {:title "Read the tree"
@@ -2081,7 +2086,7 @@
              :chapter "Your organization"
              :text-only? true
              :title "Packages — namespaces, fns.edn, impls.clj, deps"
-             :reads "the shape on disk, package.edn, declaration vs Clojure code, sync at startup, and an external package from its own git repo. No tour: files and `bb rebuild` live outside the editor."}
+             :reads "the shape on disk, package.edn, graph declarations vs Clojure implementations, sync at startup, and an external package from its own git repo."}
             {:id "32"
              :slug "distributing-packages"
              :chapter "Your organization"
@@ -2174,7 +2179,7 @@
              :chapter "Your organization"
              :text-only? true
              :title "Working offline: a local instance, git snapshots, push/pull"
-             :reads "starting a local instance, keeping the graph in git, push and pull against the hub, and what does not travel. No tour: it needs a second instance."}
+             :reads "starting a local instance, keeping the graph in git, push and pull between instances, and what does not travel."}
             {:id "35"
              :slug "services"
              :chapter "Your organization"
@@ -2428,7 +2433,7 @@
              :chapter "Your organization"
              :text-only? true
              :title "Queues — asynchronous work between services"
-             :reads "why a queue and why Postgres, publishing and consuming, the knobs, and the contract in the graph. No tour: it needs a second service running while a tour would hold the page."}
+             :reads "why a queue and why Postgres, publishing, a background consumer, retry and dead-letter handling, and the message contract in the graph."}
             {:id "40"
              :slug "marketplace-themes-keymaps"
              :chapter "Your organization"
@@ -2489,13 +2494,13 @@
              :chapter "Your organization"
              :text-only? true
              :title "The package lifecycle — both sides of a version"
-             :reads "the author publishes, the consumer installs, fixes what they do not own, and follows the next version. No tour: a two-role loop cannot be played from one seat."}
+             :reads "author and consumer roles on two branches: publish, install, contribute a fix, and follow the next version."}
             {:id "42"
              :slug "ai-clients-and-api-tokens"
              :chapter "Your organization"
              :text-only? true
              :title "AI clients and API tokens: the graph over /mcp"
-             :reads "connecting Claude Code or Cursor, branch scoping, the agent cycle, and the rights an API token hands out. No tour: the set-up lives in a terminal and an AI client."}]}}}
+             :reads "connecting an external MCP client, branch scoping, the agent cycle, and creating, limiting and revoking API tokens in Settings."}]}}}
 
   ;; Where the written lessons are served: `GRAPHDEN_TUTORIAL_BASE` when
   ;; the deployment sets it (a translation, an intranet mirror), else the

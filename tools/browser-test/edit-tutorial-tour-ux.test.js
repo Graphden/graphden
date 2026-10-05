@@ -501,7 +501,15 @@ const {
     assert(path.chips.some((c) => /^= value$/.test(c) || /HELLO/.test(c)),
       'the list hops carry value chips: ' + JSON.stringify(path.chips));
     assert(await clickTourButton(page, 'Next'), 'Read the path Next');
+    await waitTourTitle(page, 'Open a captured value', 150000);
+    const captured = page.locator('.node-overlay[data-fn-name="tutorial-shout"] .path-value-badge');
+    await captured.focus();
+    await page.keyboard.press('Enter');
+    await page.waitForSelector('.path-value-popover-body');
+    assert(JSON.stringify(JSON.parse(await page.locator('.path-value-popover-body').textContent()))
+      === JSON.stringify(['HELLO', 'BIG', 'WORLD']), 'captured list opens in full from keyboard');
     await waitTourTitle(page, 'Open the call tree', 150000);
+    await page.keyboard.press('Escape');
     await page.waitForSelector('#gd-insp-runs .execute-history-tree-btn', {timeout: 30000});
     await page.click('#gd-insp-runs .execute-history-tree-btn');
     await waitTourTitle(page, 'Read the tree', 150000);

@@ -262,7 +262,7 @@ function wireBranchPopoverHandlers(popover, current) {
   // popover.
   popover.querySelectorAll('.branch-row[data-branch-name]').forEach((row) => {
     row.addEventListener('click', async (e) => {
-      if (e.target.closest('.branch-row-actions')) return;
+      if (e.target.closest('.branch-row-actions button, .branch-row-more-menu')) return;
       const name = row.getAttribute('data-branch-name');
       if (name === current) { closeBranchPopover(); return; }
       // A row in the "Merged" group is folded away; opening it brings it

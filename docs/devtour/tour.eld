@@ -4,7 +4,7 @@
 ;; (:file + :head) rather than baked source, so emacs shows live code.
 (:title "Graphden — developer tour"
  :definition-return "Return to the tour"
- :mins 736.9
+ :mins 736.6
  :glossary ((:id "graph-function" :title "Graph function" :say "A stored definition of a computation, identified by a function ID. It can declare arguments or specialize parent functions by [inheritance](#term/inheritance) and [bindings](#term/binding). A function ID identifies the definition; its name is a label within a namespace.")
  (:id "base-function" :title "Base function" :say "A [graph function](#term/graph-function) with a registered host-language implementation. Composed functions obtain the implementation through their parents and supply arguments through graph [bindings](#term/binding). A base function is distinct from the base branch used in version resolution.")
  (:id "context" :title "Execution context" :say "The runtime value carrying storage, implementations, caches, and execution policy. It determines the data and branch visible to a call. A branch-specific context may resolve the same function ID differently from another context.")
@@ -225,7 +225,7 @@
      :say "Stores each function's computed argument types, return type, and [effects](#term/effect) in the [rich-types registry](#term/rich-types). Compiler decisions, runtime checks, [secret redaction](#term/secret), and editor labels read this data. Writes target the active branch's registry, so checking one branch does not overwrite another branch's types.")
     (:key "types/rich-type-of-id" :n 19 :gi 83 :defn "rich-type-of-id" :ns "graphden.executor.registry.core" :file "src/graphden/executor/registry/core.clj" :line 644 :lang "clj" :mins 1.3 :head "(defn rich-type-of-id" :see nil :refs nil :siblings (("types/record-rich-types!" . "record-rich-types!"))
      :say "Looks up [rich type information](#term/rich-types) by function ID. Names may repeat across namespaces and are not a unique identity. The remaining name index supports [base functions](#term/base-function) and older call sites; new consumers should use IDs. See the [identity model](../../docs/adr/ADR-identity-model.md).")))
-  (:id "crud" :title "Graph API — reads, writes, and execution" :status "toured" :mins 68.8 :summary "Request validation, stored edits, execution results, and views."
+  (:id "crud" :title "Graph API — reads, writes, and execution" :status "toured" :mins 68.5 :summary "Request validation, stored edits, execution results, and views."
    :steps
    ((:key "crud/extract-entity-params" :n 1 :gi 84 :defn "extract-entity-params" :ns "graphden.crud.request" :file "src/graphden/crud/request.clj" :line 128 :lang "clj" :mins 1.5 :head "(defn extract-entity-params" :see nil :refs nil :siblings (("crud/read-json-body" . "read-json-body"))
      :say "Extracts entity type and ID from an HTTP mutation request. It prefers parsed [Reitit](#term/ring) path parameters and falls back to parsing the request URI.")
@@ -249,7 +249,7 @@
      :say "Invalidates affected caches after a stored change and emits a PostgreSQL notification for other processes. The notification carries update information so their compiled functions can refresh.")
     (:key "crud/resolve-fn" :n 11 :gi 94 :defn "resolve-fn" :ns "graphden.crud.fn-execution.lookup" :file "src/graphden/crud/fn_execution/lookup.clj" :line 97 :lang "clj" :mins 1.2 :head "(defn resolve-fn" :see nil :refs nil :siblings nil
      :say "Resolves the function ID or name from an execution request into the stored function row. This lookup begins request execution and result persistence.")
-    (:key "crud/public-free-entries" :n 12 :gi 95 :defn "public-free-entries" :ns "graphden.executor.compile.surface" :file "src/graphden/executor/compile/surface.clj" :line 85 :lang "clj" :mins 5.5 :head "(defn public-free-entries" :see nil :refs (("executor/build-ref-renames" . "build-ref-renames")) :siblings nil
+    (:key "crud/public-free-entries" :n 12 :gi 95 :defn "public-free-entries" :ns "graphden.executor.compile.surface" :file "src/graphden/executor/compile/surface.clj" :line 85 :lang "clj" :mins 5.2 :head "(defn public-free-entries" :see nil :refs (("executor/build-ref-renames" . "build-ref-renames")) :siblings nil
      :say "Computes public [free arguments](#term/free-argument) for execution forms, service validation, and graph placeholders. It combines renamed public arguments with [captured arguments](#term/capture) found inside [higher-order functions](#term/hof), removes inputs supplied by enclosing scopes, and deduplicates by [slot](#term/slot) identity. These consumers therefore share one definition of required input.")
     (:key "crud/apply-execute" :n 13 :gi 96 :defn "apply-execute" :ns "graphden.crud.fn-execution" :file "src/graphden/crud/fn_execution.clj" :line 123 :lang "clj" :mins 2.0 :head "(defn apply-execute" :see nil :refs nil :siblings nil
      :say "Coordinates `/api/execute`: resolves the function, version, and [free arguments](#term/free-argument); acquires a [concurrency permit](#term/concurrency-permit); submits execution to a future; then handles pending, successful, or failed results. This is a request-management layer around the executor from the first block.")

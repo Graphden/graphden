@@ -158,7 +158,7 @@ Resolves the function ID or name from an execution request into the stored funct
 :CUSTOM_ID: crud/public-free-entries
 :FILE: src/graphden/executor/compile/surface.clj
 :LINE: 85
-:MINS: 5.5
+:MINS: 5.2
 :END:
 
 Computes public [[file:glossary.org::#term/free-argument][free arguments]] for execution forms, service validation, and graph placeholders. It combines renamed public arguments with [[file:glossary.org::#term/capture][captured arguments]] found inside [[file:glossary.org::#term/hof][higher-order functions]], removes inputs supplied by enclosing scopes, and deduplicates by [[file:glossary.org::#term/slot][slot]] identity. These consumers therefore share one definition of required input.

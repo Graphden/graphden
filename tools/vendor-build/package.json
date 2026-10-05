@@ -3,7 +3,8 @@
   "private": true,
   "description": "Builds the vendored CodeMirror 6 bundle for resources/packages/web/vendor/. Run `npm install && npm run build` after bumping versions.",
   "scripts": {
-    "build": "esbuild cm-entry.js --bundle --minify --format=iife --outfile=../../resources/packages/web/vendor/codemirror.min.js"
+    "build": "esbuild cm-entry.js --bundle --minify --format=iife --outfile=../../resources/packages/web/vendor/codemirror.min.js",
+    "build:preact": "esbuild preact-entry.js --bundle --minify --format=iife --global-name=GraphdenPreact --legal-comments=inline --outfile=../../resources/packages/web/vendor/preact.min.js"
   },
   "dependencies": {
     "@codemirror/autocomplete": "6.18.6",
@@ -17,7 +18,8 @@
     "@codemirror/state": "6.5.2",
     "@codemirror/view": "6.38.1",
     "@lezer/highlight": "1.2.1",
-    "@nextjournal/lang-clojure": "1.0.0"
+    "@nextjournal/lang-clojure": "1.0.0",
+    "preact": "11.0.0"
   },
   "devDependencies": {
     "esbuild": "0.25.8"

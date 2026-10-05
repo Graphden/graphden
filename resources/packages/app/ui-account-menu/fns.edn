@@ -150,15 +150,34 @@
   {:name :settings-row :parent :hiccup
    :args {:tag "button"
           :attrs {:value {:type "button" :class "auth-menu-item" :role "menuitem"
-                          :tabindex -1 :data-action "settings" :data-item "Settings"}}
+                          :key "settings" :tabindex -1 :data-action "settings" :data-item "Settings"}}
           :children ["Settings"]}}
   {:name :organization-row :parent :hiccup
    :args {:tag "button"
           :attrs {:value {:type "button" :class "auth-menu-item" :role "menuitem"
-                          :tabindex -1 :data-action "operate" :data-item "Organization"}}
+                          :key "operate" :tabindex -1 :data-action "operate" :data-item "Organization"}}
           :children ["Organization"]}}
   {:name :_account-menu-common-rows :parent :list
    :args {:items [:settings-row :organization-row]}}
+  {:name :account-menu-common-tree :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "auth-menu-common"}}
+          :children :_account-menu-common-rows}}
+  {:name :account-menu-item-highlight :parent :zipmap
+   :return-type :text-map
+   :args {:keys ["background-color"] :vals [:account-menu-hover]}}
+  {:name :_account-menu-hover-rule :parent :zipmap
+   :return-type {:selector :text :declarations :text-map}
+   :args {:keys [{:value :selector} {:value :declarations}]
+          :vals ["& .auth-menu-item:hover" :account-menu-item-highlight]}}
+  {:name :_account-menu-focus-rule :parent :zipmap
+   :return-type {:selector :text :declarations :text-map}
+   :args {:keys [{:value :selector} {:value :declarations}]
+          :vals ["& .auth-menu-item:focus-visible" :account-menu-item-highlight]}}
+  {:name :account-menu-styles :parent :list
+   :return-type [:list {:selector :text :declarations :text-map}]
+   :args {:items [{:value {:selector "&" :declarations {"display" "contents"}}}
+                  {:value {:selector "& > .auth-menu-common" :declarations {"display" "contents"}}}
+                  :_account-menu-hover-rule :_account-menu-focus-rule]}}
   {:name :account-menu-frame :parent :hiccup
    :args {:tag "div"
           :attrs {:value {:class "auth-menu" :role "menu" :aria-label "Account and editor"}}
@@ -175,5 +194,5 @@
    :args {:keys [{:value :duration-ms} {:value :offset-y} {:value :opacity}]
           :vals [:account-menu-animation-duration :_account-menu-offset :_account-menu-opacity]}}
   {:name :account-menu-view :parent :zipmap
-   :args {:keys [{:value :frame} {:value :common-rows} {:value :active} {:value :phase} {:value :handled} {:value :theme-tokens} {:value :menu-tokens} {:value :motion}]
-          :vals [:account-menu-frame :_account-menu-common-rows :account-menu-active-index :account-menu-phase :_account-menu-handled :_theme-tokens :_account-menu-tokens :_account-menu-motion]}}]}
+   :args {:keys [{:value :frame} {:value :common-rows} {:value :common-tree} {:value :styles} {:value :active} {:value :phase} {:value :handled} {:value :theme-tokens} {:value :menu-tokens} {:value :motion}]
+          :vals [:account-menu-frame :_account-menu-common-rows :account-menu-common-tree :account-menu-styles :account-menu-active-index :account-menu-phase :_account-menu-handled :_theme-tokens :_account-menu-tokens :_account-menu-motion]}}]}

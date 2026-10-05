@@ -80,10 +80,11 @@ function openShellMenu() {
 
   // Management destinations — rare places, one click deep by design.
   if (graphFrame) {
-    for (const row of graphFrame.rows) {
-      row.addEventListener('click', () => goSurface(row.dataset.action));
-      menu.appendChild(row);
-    }
+    graphFrame.rowHost.addEventListener('click', (event) => {
+      const row = [...graphFrame.rowHost.firstElementChild.children].find((item) => item.contains(event.target));
+      if (row && ['settings', 'operate'].includes(row.dataset.action)) goSurface(row.dataset.action);
+    });
+    menu.appendChild(graphFrame.rowHost);
   } else {
     item('Settings', () => goSurface('settings'));
     item('Organization', () => goSurface('operate'));
@@ -223,7 +224,7 @@ function openShellMenu() {
   positionAuthPopover();
   document.getElementById('auth-lock-btn')?.setAttribute('aria-expanded', 'true');
   if (graphFrame) {
-    window.gdShellMenuGraph.mount(menu, pop, () => closeAuthPopover(true));
+    window.gdShellMenuGraph.mount(menu, pop, () => closeAuthPopover(true), graphFrame);
     return;
   }
   const first = menuItems()[0];

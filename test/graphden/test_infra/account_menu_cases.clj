@@ -5,12 +5,21 @@
     [graphden.crud.request :as request]))
 
 
+(def common-rows
+  [[:button {:type "button" :class "auth-menu-item" :role "menuitem"
+             :key "settings" :tabindex -1 :data-action "settings" :data-item "Settings"} "Settings"]
+   [:button {:type "button" :class "auth-menu-item" :role "menuitem"
+             :key "operate" :tabindex -1 :data-action "operate" :data-item "Organization"} "Organization"]])
+
+
 (def view
   {:frame [:div {:class "auth-menu" :role "menu" :aria-label "Account and editor"}]
-   :common-rows [[:button {:type "button" :class "auth-menu-item" :role "menuitem"
-                           :tabindex -1 :data-action "settings" :data-item "Settings"} "Settings"]
-                 [:button {:type "button" :class "auth-menu-item" :role "menuitem"
-                           :tabindex -1 :data-action "operate" :data-item "Organization"} "Organization"]]
+   :common-rows common-rows
+   :common-tree (into [:div {:class "auth-menu-common"}] common-rows)
+   :styles [{:selector "&" :declarations {"display" "contents"}}
+            {:selector "& > .auth-menu-common" :declarations {"display" "contents"}}
+            {:selector "& .auth-menu-item:hover" :declarations {"background-color" "#abcdef"}}
+            {:selector "& .auth-menu-item:focus-visible" :declarations {"background-color" "#abcdef"}}]
    :active 2 :phase "open" :handled false
    :theme-tokens {"--gd-flow" "#123456" "--bg" "#abcdef"}
    :menu-tokens {"--gd-account-menu-hover" "#abcdef"}

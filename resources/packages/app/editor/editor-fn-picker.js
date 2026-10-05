@@ -45,6 +45,7 @@ let fnPickerEscHandler = null;
 // caller already passes it as opts.anchorEl; keeping it here lets close()
 // hand the keyboard back however the picker was dismissed.
 let fnPickerAnchor = null;
+let fnPickerGraphDispose = null;
 
 // Installed once — reads the live element and is inert while closed.
 installTabTrap({
@@ -53,8 +54,10 @@ installTabTrap({
 });
 
 function closeFnPicker() {
+  const hadFocus = !!fnPickerEl?.contains(document.activeElement);
+  fnPickerGraphDispose?.();
+  fnPickerGraphDispose = null;
   if (fnPickerEl) {
-    const hadFocus = fnPickerEl.contains(document.activeElement);
     fnPickerEl.remove();
     fnPickerEl = null;
     if (hadFocus) returnFocusTo(fnPickerAnchor);
@@ -196,7 +199,7 @@ function openFnPicker(opts) {
   // rows carry name / ns / return / effects / fit but no id.
   async function loadTypedCandidates() {
     if (!expected) return;
-    const giveUp = () => { serverFailed = true; if (fnPickerEl) render(); };
+    const giveUp = () => { serverFailed = true; if (fnPickerEl === el) render(); };
     if (typeof authFetch !== 'function' || !API?.api_types_candidates) { giveUp(); return; }
     let data;
     try {
@@ -209,7 +212,7 @@ function openFnPicker(opts) {
       data = await r.json();
     } catch (_) { giveUp(); return; }
     if (!data?.ok || !Array.isArray(data.candidates)) { giveUp(); return; }
-    if (!fnPickerEl) return;   // closed while the fetch was in flight
+    if (fnPickerEl !== el) return;   // closed while the fetch was in flight
     for (const c of data.candidates) {
       if (!c?.name || c.name.startsWith('_anon-')) continue;
       const qualified = c.ns ? (c.ns + '.' + c.name) : c.name;
@@ -272,6 +275,18 @@ function openFnPicker(opts) {
   list.setAttribute('role', 'listbox');
   list.setAttribute('aria-label', expected ? 'Functions, compatible first' : 'Functions');
   el.appendChild(list);
+  const graphPicker = window.gdFnPickerGraph?.ready ? window.gdFnPickerGraph.mount(list, (c, bareName) => {
+    const compatible = expected && serverLoaded ? c.compatible !== false : null;
+    const lastDot = c.qualified.lastIndexOf('.');
+    const label = (name) => typeof displayLabel === 'function' ? displayLabel(name) : name;
+    const fit = compatible === true && typeof pickerTierOf === 'function' ? pickerTierOf(expected, c) : 'exact';
+    return {label: bareName ? label(c.name) : lastDot >= 0 ? c.qualified.slice(0, lastDot + 1) + label(c.qualified.slice(lastDot + 1)) : label(c.qualified),
+      compatible, fit, 'fit-label': typeof pickerTierLabel === 'function' ? pickerTierLabel(expected, fit) : fit,
+      'fit-title': typeof pickerTierTitle === 'function' ? pickerTierTitle(expected, fit) : '', kind: c.kind || '',
+      'return-label': compactTypeChipText(c.richReturn, c.flatReturn) || '',
+      effects: (c.effects || []).map((code) => ({code: String(code), label: String(code).toUpperCase()}))};
+  }) : null;
+  fnPickerGraphDispose = () => graphPicker?.dispose();
 
   // A one-line summary under the list: how many rows, how many hidden.
   const status = document.createElement('div');
@@ -304,10 +319,11 @@ function openFnPicker(opts) {
   // re-read afterwards, since the list was rebuilt), so a fast reader can
   // never be told a good fn is a mismatch.
   async function choose(c, rowEl) {
+    if (fnPickerEl !== el) return;
     let cur = c;
     if (expected && !serverLoaded && !serverFailed && loadPromise) {
       await loadPromise;
-      if (!fnPickerEl) return;
+      if (fnPickerEl !== el) return;
       cur = candidates.find((x) => x.qualified === c.qualified) || c;
     }
     if (expected && serverLoaded && cur.compatible === false) explainAndOfferAnyway(cur, rowEl);
@@ -315,6 +331,7 @@ function openFnPicker(opts) {
   }
 
   async function pickFn(c) {
+    if (fnPickerEl !== el) return;
     let fn = c.id ? (graphData.fns || []).find(f => f.id === c.id) : null;
     // A server-sourced candidate carries a name but no id yet (it may be
     // outside the loaded set) — resolve it by QUALIFIED name on pick, so
@@ -322,6 +339,7 @@ function openFnPicker(opts) {
     if (!fn && !c.id && c.qualified && typeof resolveFnByName === 'function') {
       try { fn = await resolveFnByName(c.qualified); } catch (_) { /* fall through */ }
     }
+    if (fnPickerEl !== el) return;
     closeFnPicker();
     if (typeof opts.onPick === 'function') {
       opts.onPick(fn || { id: c.id, name: c.name });
@@ -336,6 +354,7 @@ function openFnPicker(opts) {
   // `.mismatch-explainer` element so dismissal + anchor positioning reuse
   // the mismatch-explainer machinery. Offers "Pick anyway".
   async function explainAndOfferAnyway(c, anchorRow) {
+    if (fnPickerEl !== el) return;
     if (!expected || !c.id) { pickFn(c); return; }
     const params = new URLSearchParams({
       expected: JSON.stringify(expected),
@@ -350,6 +369,7 @@ function openFnPicker(opts) {
       pickFn(c);
       return;
     }
+    if (fnPickerEl !== el) return;
     const ex = (typeof ensureMismatchExplainerEl === 'function')
                ? ensureMismatchExplainerEl()
                : null;
@@ -409,6 +429,7 @@ function openFnPicker(opts) {
   const setActive = (idx) => {
     if (!visibleRows.length) return;
     idx = Math.max(0, Math.min(idx, visibleRows.length - 1));
+    if (graphPicker) { if (idx !== activeIdx) { activeIdx = idx; render(); } return; }
     if (visibleRows[activeIdx]) {
       visibleRows[activeIdx].rowEl.classList.remove('fn-picker-row-active');
       visibleRows[activeIdx].rowEl.setAttribute('aria-selected', 'false');
@@ -536,6 +557,21 @@ function openFnPicker(opts) {
       ? pickerArrange(candidates, { q, expected, openGroups, closedGroups, showOther })
       : { exact: [], groups: [{ ns: null, rows: candidates.slice(0, 120), open: true }], shown: 0, total: candidates.length, hiddenOther: 0 };
 
+    if (graphPicker) {
+      try { visibleRows = graphPicker.render(arranged, {q, expected, showOther, activeIdx}); }
+      catch (error) { closeFnPicker(); gdToast('Picker graph unavailable: ' + error.message); return; }
+      activeIdx = Math.min(activeIdx, Math.max(0, visibleRows.length - 1));
+      const active = visibleRows[activeIdx]?.rowEl;
+      if (active) search.setAttribute('aria-activedescendant', active.id);
+      else search.removeAttribute('aria-activedescendant');
+      const hidden = arranged.total - arranged.shown;
+      const pending = expected && !serverLoaded && !serverFailed;
+      status.textContent = (arranged.total === 0 ? '' : arranged.shown + ' of ' + arranged.total
+        + (hidden > 0 ? q ? ' — type more to narrow' : ' — open a namespace or type a name' : ''))
+        + (pending ? ' · checking types…' : '');
+      place();
+      return;
+    }
     list.innerHTML = '';
     visibleRows = [];
     const addRow = (host, c, bareName) => {
@@ -623,7 +659,24 @@ function openFnPicker(opts) {
     else search.removeAttribute('aria-activedescendant');
     place();
   }
+  if (graphPicker) {
+    const entryFor = (event) => {
+      const row = event.target.closest('[data-picker-key]');
+      return visibleRows.find((entry) => entry.rowEl === row);
+    };
+    list.addEventListener('mouseover', (event) => {
+      const entry = entryFor(event);
+      if (entry) setActive(visibleRows.indexOf(entry));
+    });
+    list.addEventListener('click', (event) => {
+      const entry = entryFor(event);
+      if (entry?.group) toggleGroup(entry.group);
+      else if (entry) void choose(entry.c, entry.rowEl);
+      else if (event.target.closest('[data-picker-toggle="other"]')) { showOther = !showOther; render(); }
+    });
+  }
   render();
+  if (fnPickerEl !== el) return;
   // Augment the loaded candidates with the whole-graph type-compatible set
   // (no-op unless an expected type was supplied); `choose` awaits it.
   loadPromise = loadTypedCandidates();
@@ -633,16 +686,18 @@ function openFnPicker(opts) {
   // its name. searchFns merges matches into the cache; rebuild + re-render.
   let _pickerSearchSeq = 0;
   let _pickerSearchTimer = null;
+  fnPickerGraphDispose = () => { clearTimeout(_pickerSearchTimer); graphPicker?.dispose(); };
   search.addEventListener('input', () => {
     activeIdx = 0;
     render();
-    const q = search.value.trim();
-    if (!q || typeof searchFns !== 'function') return;
     const seq = ++_pickerSearchSeq;
     clearTimeout(_pickerSearchTimer);
+    const q = search.value.trim();
+    if (!q || fnPickerEl !== el || typeof searchFns !== 'function') return;
     _pickerSearchTimer = setTimeout(() => {
+      if (fnPickerEl !== el) return;
       searchFns(q).then(() => {
-        if (seq !== _pickerSearchSeq || !fnPickerEl) return;   // superseded, or closed
+        if (seq !== _pickerSearchSeq || fnPickerEl !== el) return;   // superseded, or closed
         candidates = buildCandidates();
         render();
       }).catch((err) => { console.error('fn-picker search failed', err); });
@@ -676,9 +731,10 @@ function openFnPicker(opts) {
     }
   });
 
-  setTimeout(() => search.focus(), 0);
+  setTimeout(() => { if (fnPickerEl === el) search.focus(); }, 0);
 
-  fnPickerOutsideHandler = (e) => {
+  const outsideHandler = (e) => {
+    if (fnPickerEl !== el) return;
     if (!el.contains(e.target)) {
       // The mismatch explainer popover lives outside the picker but
       // is logically part of the same flow — clicks inside it
@@ -690,9 +746,11 @@ function openFnPicker(opts) {
       if (typeof opts.onCancel === 'function') opts.onCancel();
     }
   };
-  setTimeout(() => document.addEventListener('pointerdown', fnPickerOutsideHandler), 0);
+  fnPickerOutsideHandler = outsideHandler;
+  setTimeout(() => { if (fnPickerEl === el) document.addEventListener('pointerdown', outsideHandler); }, 0);
 
   fnPickerEscHandler = (e) => {
+    if (fnPickerEl !== el) return;
     if (e.key === 'Escape') {
       e.preventDefault();
       closeFnPicker();

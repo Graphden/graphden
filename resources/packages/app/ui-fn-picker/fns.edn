@@ -1,0 +1,254 @@
+{:namespace "app.ui-fn-picker"
+ :fns
+ [{:name :_picker-none :parent :const
+   :args {:value nil}}
+  {:name :_picker-row-key :parent :get
+   :args {:coll {:as :row} :key {:value :key} :default ""}}
+  {:name :_picker-row-qualified-name :parent :get
+   :args {:coll {:as :row} :key {:value :qualified-name} :default ""}}
+  {:name :_picker-row-option-id :parent :get
+   :args {:coll {:as :row} :key {:value :option-id} :default ""}}
+  {:name :_picker-row-label :parent :get
+   :args {:coll {:as :row} :key {:value :label} :default ""}}
+  {:name :_picker-row-compatible :parent :get
+   :args {:coll {:as :row} :key {:value :compatible} :default nil}}
+  {:name :_picker-row-active :parent :get
+   :args {:coll {:as :row} :key {:value :active} :default false}}
+  {:name :_picker-row-fit :parent :get
+   :args {:coll {:as :row} :key {:value :fit} :default "exact"}}
+  {:name :_picker-row-fit-label :parent :get
+   :args {:coll {:as :row} :key {:value :fit-label} :default ""}}
+  {:name :_picker-row-fit-title :parent :get
+   :args {:coll {:as :row} :key {:value :fit-title} :default ""}}
+  {:name :_picker-row-kind :parent :get
+   :args {:coll {:as :row} :key {:value :kind} :default ""}}
+  {:name :_picker-row-return-label :parent :get
+   :args {:coll {:as :row} :key {:value :return-label} :default ""}}
+  {:name :_picker-row-effects :parent :get
+   :args {:coll {:as :row} :key {:value :effects} :default {:value []}}}
+  {:name :_picker-row-unknown :parent :equal?
+   :args {:a :_picker-row-compatible :b nil}}
+  {:name :_picker-row-verdict-class :parent :if
+   :args {:test :_picker-row-compatible :then "fn-picker-row-ok" :else "fn-picker-row-no"}}
+  {:name :_picker-row-verdict-text :parent :if
+   :args {:test :_picker-row-compatible :then "✓" :else "✗"}}
+  {:name :_picker-row-verdict-attrs :parent :zipmap
+   :args {:keys [{:value :class} {:value :aria-hidden}] :vals [:_picker-row-verdict-class "true"]}}
+  {:name :_picker-row-verdict-node :parent :hiccup
+   :args {:tag "span" :attrs :_picker-row-verdict-attrs :children [:_picker-row-verdict-text]}}
+  {:name :_picker-row-verdict :parent :if
+   :args {:test :_picker-row-unknown :then :_picker-none :else :_picker-row-verdict-node}}
+  {:name :_picker-row-neutral-class :parent :if
+   :args {:test :_picker-row-active :then "fn-picker-row fn-picker-row-active" :else "fn-picker-row"}}
+  {:name :_picker-row-compatible-class :parent :if
+   :args {:test :_picker-row-active :then "fn-picker-row fn-picker-row-compat fn-picker-row-active" :else "fn-picker-row fn-picker-row-compat"}}
+  {:name :_picker-row-incompatible-class :parent :if
+   :args {:test :_picker-row-active :then "fn-picker-row fn-picker-row-incompat fn-picker-row-active" :else "fn-picker-row fn-picker-row-incompat"}}
+  {:name :_picker-row-known-class :parent :if
+   :args {:test :_picker-row-compatible :then :_picker-row-compatible-class :else :_picker-row-incompatible-class}}
+  {:name :_picker-row-class :parent :if
+   :args {:test :_picker-row-unknown :then :_picker-row-neutral-class :else :_picker-row-known-class}}
+  {:name :_picker-row-selected :parent :if
+   :args {:test :_picker-row-active :then "true" :else "false"}}
+  {:name :_picker-row-mismatch-title :parent :if
+   :args {:test :_picker-row-compatible :then "" :else "Not a subtype of the expected type — click to see why (and pick anyway)"}}
+  {:name :_picker-row-title :parent :if
+   :args {:test :_picker-row-unknown :then "" :else :_picker-row-mismatch-title}}
+  {:name :_picker-row-attrs :parent :zipmap
+   :args {:keys [{:value :key} {:value :id} {:value :class} {:value :role} {:value :aria-selected} {:value :data-picker-key} {:value :data-fn-name} {:value :title}] :vals [:_picker-row-key :_picker-row-option-id :_picker-row-class "option" :_picker-row-selected :_picker-row-key :_picker-row-qualified-name :_picker-row-title]}}
+  {:name :_picker-row-label-node :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "fn-picker-row-main"}} :children [:_picker-row-label]}}
+  {:name :picker-fit-classes :parent :zipmap
+   :args {:keys ["captures" "ignores"] :vals ["fn-picker-row-fit fn-picker-fit-captures" "fn-picker-row-fit fn-picker-fit-ignores"]}}
+  {:name :_picker-row-fit-class :parent :get
+   :args {:coll :picker-fit-classes :key :_picker-row-fit :default "fn-picker-row-fit"}}
+  {:name :_picker-row-fit-attrs :parent :zipmap
+   :args {:keys [{:value :class} {:value :title}] :vals [:_picker-row-fit-class :_picker-row-fit-title]}}
+  {:name :_picker-row-fit-node :parent :hiccup
+   :args {:tag "span" :attrs :_picker-row-fit-attrs :children [:_picker-row-fit-label]}}
+  {:name :_picker-row-fit-exact :parent :equal?
+   :args {:a :_picker-row-fit :b "exact"}}
+  {:name :_picker-row-fit-known :parent :if
+   :args {:test :_picker-row-fit-exact :then :_picker-none :else :_picker-row-fit-node}}
+  {:name :_picker-row-fit-compatible :parent :if
+   :args {:test :_picker-row-compatible :then :_picker-row-fit-known :else :_picker-none}}
+  {:name :_picker-row-fit-chip :parent :if
+   :args {:test :_picker-row-unknown :then :_picker-none :else :_picker-row-fit-compatible}}
+  {:name :picker-kind-classes :parent :zipmap
+   :args {:keys ["refinement" "record" "union" "variant" "list" "fn-type" "base-fn" "primitive"] :vals ["fn-picker-row-kind fn-picker-row-kind-refinement" "fn-picker-row-kind fn-picker-row-kind-record" "fn-picker-row-kind fn-picker-row-kind-union" "fn-picker-row-kind fn-picker-row-kind-variant" "fn-picker-row-kind fn-picker-row-kind-list" "fn-picker-row-kind fn-picker-row-kind-fn-type" "fn-picker-row-kind fn-picker-row-kind-base-fn" "fn-picker-row-kind fn-picker-row-kind-primitive"]}}
+  {:name :_picker-row-kind-class :parent :get
+   :args {:coll :picker-kind-classes :key :_picker-row-kind :default "fn-picker-row-kind"}}
+  {:name :_picker-row-kind-attrs :parent :zipmap
+   :args {:keys [{:value :class} {:value :title}] :vals [:_picker-row-kind-class "Function kind"]}}
+  {:name :_picker-row-kind-node :parent :hiccup
+   :args {:tag "span" :attrs :_picker-row-kind-attrs :children [:_picker-row-kind]}}
+  {:name :_picker-row-kind-empty :parent :equal?
+   :args {:a :_picker-row-kind :b ""}}
+  {:name :_picker-row-kind-chip :parent :if
+   :args {:test :_picker-row-kind-empty :then :_picker-none :else :_picker-row-kind-node}}
+  {:name :_picker-effect-code :parent :get
+   :args {:coll {:as :effect} :key {:value :code} :default ""}}
+  {:name :_picker-effect-label :parent :get
+   :args {:coll {:as :effect} :key {:value :label} :default ""}}
+  {:name :picker-effect-classes :parent :zipmap
+   :args {:keys ["db" "env" "io" "network" "time" "misc" "random" "process" "raw-sql"] :vals ["effects-chip effects-chip-db" "effects-chip effects-chip-env" "effects-chip effects-chip-io" "effects-chip effects-chip-network" "effects-chip effects-chip-time" "effects-chip effects-chip-misc" "effects-chip effects-chip-random" "effects-chip effects-chip-process" "effects-chip effects-chip-raw-sql"]}}
+  {:name :_picker-effect-class :parent :get
+   :args {:coll :picker-effect-classes :key :_picker-effect-code :default "effects-chip"}}
+  {:name :_picker-effect-attrs :parent :zipmap
+   :args {:keys [{:value :key} {:value :class}] :vals [:_picker-effect-code :_picker-effect-class]}}
+  {:name :picker-effect :parent :hiccup :lambda-params [:effect]
+   :args {:tag "span" :attrs :_picker-effect-attrs :children [:_picker-effect-label]}}
+  {:name :_picker-row-effect-nodes :parent :map
+   :args {:func :picker-effect :coll :_picker-row-effects}}
+  {:name :_picker-row-effect-count :parent :count
+   :args {:coll :_picker-row-effects}}
+  {:name :_picker-row-effects-empty :parent :equal?
+   :args {:a :_picker-row-effect-count :b 0}}
+  {:name :_picker-row-effects-node :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "fn-picker-row-effects"}} :children :_picker-row-effect-nodes}}
+  {:name :_picker-row-effects-chip :parent :if
+   :args {:test :_picker-row-effects-empty :then :_picker-none :else :_picker-row-effects-node}}
+  {:name :_picker-row-return-node :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "fn-picker-row-rt"}} :children ["→ " :_picker-row-return-label]}}
+  {:name :_picker-row-return-empty :parent :equal?
+   :args {:a :_picker-row-return-label :b ""}}
+  {:name :_picker-row-return-chip :parent :if
+   :args {:test :_picker-row-return-empty :then :_picker-none :else :_picker-row-return-node}}
+  {:name :picker-row :parent :hiccup :lambda-params [:row]
+   :args {:tag "div" :attrs :_picker-row-attrs :children [:_picker-row-verdict :_picker-row-label-node :_picker-row-fit-chip :_picker-row-kind-chip :_picker-row-effects-chip :_picker-row-return-chip]}}
+  {:name :_picker-model-rows :parent :get
+   :args {:coll {:as :model} :key {:value :rows} :default {:value []}}}
+  {:name :picker-rows :parent :map
+   :args {:func :picker-row :coll :_picker-model-rows}}
+  {:name :picker-row-list :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "fn-picker-rows"}} :children :picker-rows}}
+  {:name :picker-active-background :parent :const :return-type :text
+   :args {:value "color-mix(in srgb, var(--fg) 12%, transparent)"}}
+  {:name :_picker-active-declarations :parent :zipmap :return-type :text-map
+   :args {:keys ["background-color"] :vals [:picker-active-background]}}
+  {:name :_picker-active-rule :parent :zipmap
+   :args {:keys [{:value :selector} {:value :declarations}] :vals ["& .fn-picker-row-active" :_picker-active-declarations]}}
+  {:name :picker-styles :parent :list
+   :args {:items [:_picker-active-rule]}}
+  {:name :_picker-section-key :parent :get
+   :args {:coll {:as :section} :key {:value :key} :default ""}}
+  {:name :_picker-section-header-key :parent :get
+   :args {:coll {:as :section} :key {:value :header-key} :default ""}}
+  {:name :_picker-section-option-id :parent :get
+   :args {:coll {:as :section} :key {:value :option-id} :default ""}}
+  {:name :_picker-section-kind :parent :get
+   :args {:coll {:as :section} :key {:value :kind} :default "group"}}
+  {:name :_picker-section-label :parent :get
+   :args {:coll {:as :section} :key {:value :label} :default ""}}
+  {:name :_picker-section-count :parent :get
+   :args {:coll {:as :section} :key {:value :count} :default 0}}
+  {:name :_picker-section-other-count :parent :get
+   :args {:coll {:as :section} :key {:value :other-count} :default 0}}
+  {:name :_picker-section-foldable :parent :get
+   :args {:coll {:as :section} :key {:value :foldable} :default false}}
+  {:name :_picker-section-open :parent :get
+   :args {:coll {:as :section} :key {:value :open} :default true}}
+  {:name :_picker-section-active :parent :get
+   :args {:coll {:as :section} :key {:value :active} :default false}}
+  {:name :_picker-section-truncated :parent :get
+   :args {:coll {:as :section} :key {:value :truncated} :default false}}
+  {:name :_picker-section-show-header :parent :get
+   :args {:coll {:as :section} :key {:value :show-header} :default true}}
+  {:name :_picker-section-rows :parent :get
+   :args {:coll {:as :section} :key {:value :rows} :default {:value []}}}
+  {:name :_picker-section-exact :parent :equal?
+   :args {:a :_picker-section-kind :b "exact"}}
+  {:name :_picker-section-group-class :parent :if
+   :args {:test :_picker-section-open :then "fn-picker-group" :else "fn-picker-group fn-picker-group-folded"}}
+  {:name :_picker-section-class :parent :if
+   :args {:test :_picker-section-exact :then "fn-picker-exact" :else :_picker-section-group-class}}
+  {:name :_picker-section-attrs :parent :zipmap
+   :args {:keys [{:value :key} {:value :class}] :vals [:_picker-section-key :_picker-section-class]}}
+  {:name :_picker-header-toggle-class :parent :if
+   :args {:test :_picker-section-active :then "fn-picker-ns-header fn-picker-ns-toggle fn-picker-row-active" :else "fn-picker-ns-header fn-picker-ns-toggle"}}
+  {:name :_picker-header-selected :parent :if
+   :args {:test :_picker-section-active :then "true" :else "false"}}
+  {:name :_picker-header-expanded :parent :if
+   :args {:test :_picker-section-open :then "true" :else "false"}}
+  {:name :_picker-header-toggle-attrs :parent :zipmap
+   :args {:keys [{:value :key} {:value :id} {:value :class} {:value :role} {:value :aria-selected} {:value :aria-expanded} {:value :data-picker-key}] :vals [:_picker-section-header-key :_picker-section-option-id :_picker-header-toggle-class "option" :_picker-header-selected :_picker-header-expanded :_picker-section-header-key]}}
+  {:name :_picker-header-readonly-attrs :parent :const
+   :args {:value {:class "fn-picker-ns-header"}}}
+  {:name :_picker-header-attrs :parent :if
+   :args {:test :_picker-section-foldable :then :_picker-header-toggle-attrs :else :_picker-header-readonly-attrs}}
+  {:name :_picker-header-arrow-text :parent :if
+   :args {:test :_picker-section-open :then "▼" :else "▶"}}
+  {:name :_picker-header-arrow-node :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "fn-picker-disclosure-arrow"}} :children [:_picker-header-arrow-text]}}
+  {:name :_picker-header-arrow :parent :if
+   :args {:test :_picker-section-foldable :then :_picker-header-arrow-node :else :_picker-none}}
+  {:name :_picker-section-root-label :parent :equal?
+   :args {:a :_picker-section-label :b ""}}
+  {:name :_picker-header-group-label :parent :if
+   :args {:test :_picker-section-root-label :then "(root)" :else :_picker-section-label}}
+  {:name :_picker-header-label :parent :if
+   :args {:test :_picker-section-exact :then "Exact match" :else :_picker-header-group-label}}
+  {:name :_picker-header-label-node :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "fn-picker-ns-name"}} :children [:_picker-header-label]}}
+  {:name :_picker-header-other-text :parent :list
+   :args {:items [" · " :_picker-section-other-count " other"]}}
+  {:name :_picker-header-no-other :parent :equal?
+   :args {:a :_picker-section-other-count :b 0}}
+  {:name :_picker-header-other :parent :if
+   :args {:test :_picker-header-no-other :then :_picker-none :else :_picker-header-other-text}}
+  {:name :_picker-header-count-node :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "fn-picker-ns-count"}} :children [" · " :_picker-section-count :_picker-header-other]}}
+  {:name :_picker-header-node :parent :hiccup
+   :args {:tag "div" :attrs :_picker-header-attrs :children [:_picker-header-arrow :_picker-header-label-node :_picker-header-count-node]}}
+  {:name :_picker-header :parent :if
+   :args {:test :_picker-section-show-header :then :_picker-header-node :else :_picker-none}}
+  {:name :_picker-section-row-nodes :parent :map
+   :args {:func :picker-row :coll :_picker-section-rows}}
+  {:name :_picker-section-visible-rows :parent :if
+   :args {:test :_picker-section-open :then :_picker-section-row-nodes :else :_picker-none}}
+  {:name :_picker-section-more-node :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "fn-picker-more"}} :children ["… more — type to narrow"]}}
+  {:name :_picker-section-more-open :parent :if
+   :args {:test :_picker-section-truncated :then :_picker-section-more-node :else :_picker-none}}
+  {:name :_picker-section-more :parent :if
+   :args {:test :_picker-section-open :then :_picker-section-more-open :else :_picker-none}}
+  {:name :picker-section :parent :hiccup :lambda-params [:section]
+   :args {:tag "div" :attrs :_picker-section-attrs :children [:_picker-header :_picker-section-visible-rows :_picker-section-more]}}
+  {:name :_picker-model-sections :parent :get
+   :args {:coll {:as :model} :key {:value :sections} :default {:value []}}}
+  {:name :_picker-model-empty-kind :parent :get
+   :args {:coll {:as :model} :key {:value :empty-kind} :default "none"}}
+  {:name :_picker-model-show-other-toggle :parent :get
+   :args {:coll {:as :model} :key {:value :show-other-toggle} :default false}}
+  {:name :_picker-model-show-other :parent :get
+   :args {:coll {:as :model} :key {:value :show-other} :default false}}
+  {:name :_picker-model-hidden-other :parent :get
+   :args {:coll {:as :model} :key {:value :hidden-other} :default 0}}
+  {:name :_picker-section-nodes :parent :map
+   :args {:func :picker-section :coll :_picker-model-sections}}
+  {:name :picker-empty-labels :parent :zipmap
+   :args {:keys ["search" "compatible" "all"] :vals ["No fn is named like that" "No compatible fns yet" "No fns"]}}
+  {:name :_picker-empty-text :parent :get
+   :args {:coll :picker-empty-labels :key :_picker-model-empty-kind :default ""}}
+  {:name :_picker-no-empty-state :parent :equal?
+   :args {:a :_picker-model-empty-kind :b "none"}}
+  {:name :_picker-empty-node :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "fn-picker-empty"}} :children [:_picker-empty-text]}}
+  {:name :_picker-empty :parent :if
+   :args {:test :_picker-no-empty-state :then :_picker-none :else :_picker-empty-node}}
+  {:name :_picker-other-pressed :parent :if
+   :args {:test :_picker-model-show-other :then "true" :else "false"}}
+  {:name :_picker-other-attrs :parent :zipmap
+   :args {:keys [{:value :type} {:value :class} {:value :aria-pressed} {:value :data-picker-toggle}] :vals ["button" "fn-picker-other-toggle" :_picker-other-pressed "other"]}}
+  {:name :_picker-show-other-label :parent :list
+   :args {:items ["Show " :_picker-model-hidden-other " fns of other types"]}}
+  {:name :_picker-other-label :parent :if
+   :args {:test :_picker-model-show-other :then "Hide fns of other types" :else :_picker-show-other-label}}
+  {:name :_picker-other-node :parent :hiccup
+   :args {:tag "button" :attrs :_picker-other-attrs :children [:_picker-other-label]}}
+  {:name :_picker-other-toggle :parent :if
+   :args {:test :_picker-model-show-other-toggle :then :_picker-other-node :else :_picker-none}}
+  {:name :picker-list :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "fn-picker-results"}} :children [:_picker-empty :_picker-section-nodes :_picker-other-toggle]}}
+  {:name :picker-view :parent :zipmap
+   :args {:keys [{:value :tree} {:value :styles}] :vals [:picker-list :picker-styles]}} ]}

@@ -4,7 +4,7 @@ The product review runs in the real editor on an isolated self-hosted instance.
 Prepare an editable copy of the ordinary account-menu and theme graphs:
 
 ```sh
-bb -cp src tools/ui_preview/prepare.clj --account-menu http://localhost:9100 account-menu-review user.account-menu
+bb -cp src tools/ui_preview/prepare.clj --account-menu --picker http://localhost:9100 account-menu-review user.account-menu
 ```
 
 `AUTH_TOKEN` supplies authentication when required. Preparation refuses tenancy
@@ -42,11 +42,40 @@ After saving an edit, reload the browser document to load its updated plan.
 Selecting another graph only changes the editor selection; this bounded review
 does not yet refresh the running menu plan automatically after every save.
 
-The browser backend still supports only `const`, `if`, `equal?`, `list`, `get`,
+The next, unmerged renderer slice uses locally bundled Preact for DOM
+reconciliation. `GraphdenRenderer` accepts live Hiccup values, including finite
+sequences produced by graph `map`, and preserves keyed elements between renders.
+Keys are normalized to strings; duplicate sibling keys are rejected before
+rendering. Component owners must dispose their renderer when the surface closes.
+It does not evaluate graph functions or attach business callbacks. Native host
+code owns authorized actions, focus, anchored positioning and animation playback.
+
+`account-menu-common-tree` supplies the managed menu subtree;
+`account-menu-styles` supplies structured selector/declaration records. Theme
+colors feed those declarations through ordinary graph dependencies. The host
+checks and scopes rules to the component before serializing CSS. Matching live
+components share one stylesheet; disposal releases it. Arbitrary stylesheet
+text, HTML, script attributes and network URLs are outside this renderer contract.
+The picker uses one managed list subtree; native search input, type checking,
+ranking, selection callbacks and mismatch explanation retain their existing
+owners. `picker-section`, `picker-row` and `picker-effect` create the actual
+markup through ordinary nested `map` calls. The runtime budget for this review
+is 100,000 operations: 120 rows with all nine supported effect badges and a
+folded group require 89,705 in the differential fixture. It is a bounded review,
+not an unrestricted browser implementation of all Graphden functions.
+
+There is no application transpilation step or CDN dependency: Preact uses the
+existing, separate vendor-build pipeline.
+
+The browser backend supports `const`, `if`, `equal?`, `list`, `map`, `get`,
 `assoc`, `zipmap`, `count`, `add`, `mod`, and `hiccup`. The server resolves
 inheritance, bindings and renames with the existing compiler helpers. The client
 executes an ID-based derived plan; it does not resolve graph names or redefine
-inheritance. Calls and arguments are lazy and memoized per entry invocation.
+inheritance. Static `map` callbacks support zero or one lambda parameter and
+ordinary captured inputs; identity references and functions that produce
+callables are rejected. JVM `map` eagerly realizes callbacks but returns a
+sequence, which the browser preserves. Calls and arguments are lazy and memoized
+per entry invocation.
 Keyword/string identity is preserved. Values are nil, booleans, safe integers,
 strings, keywords, vectors and maps with string or keyword keys; finite result
 sequences are materialized with a bound. Unsupported values/operations fail.

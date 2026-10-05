@@ -93,6 +93,12 @@
     constructor(items) { this.items = items; }
     *[Symbol.iterator]() { for (const item of this.items) yield force(item); }
   }
+  const isSequence = (value) => value instanceof LazySequence;
+  // Internal only: supplied values and the result codec cannot mint or carry
+  // callables. A closure always names a checked target in this plan.
+  class GraphClosure {
+    constructor(invoke) { this.invoke = invoke; }
+  }
   function sequence(value) {
     if (value === null) return [];
     if (Array.isArray(value) || value instanceof LazySequence) return value;
@@ -107,6 +113,19 @@
   const operations = {
     const: (arg) => arg('value'),
     list: (arg) => arg('items'),
+    map: (arg, tick) => {
+      const func = arg('func');
+      if (!(func instanceof GraphClosure)) throw new Error('Browser map requires a graph callback');
+      const values = [];
+      for (const item of sequence(arg('coll'))) {
+        tick();
+        if (values.length >= 50000) throw new Error('Browser graph sequence limit exceeded');
+        values.push(func.invoke(item));
+      }
+      // JVM map is doall(map ...): eager callbacks, but a seq rather than a
+      // vector. Preserve get/equality/Hiccup semantics until result encoding.
+      return new LazySequence(values);
+    },
     get: (arg) => lookup(arg('coll'), arg('key'), arg('default')),
     assoc: (arg) => {
       const source = arg('map');
@@ -168,12 +187,29 @@
       let remaining = operationLimit;
       const cache = new WeakMap();
       function tick() { if (--remaining < 0) throw new Error('Browser graph operation limit exceeded'); }
+      function closure(value, frame) {
+        const captured = {slots: new Map(frame.slots), names: new Map(frame.names)};
+        for (const {slot, name} of value.translation) {
+          if (!captured.slots.has(slot) && captured.names.has(name)) {
+            const item = captured.names.get(name);
+            // Match apply-hof-translation: copying an env thunk into the slot
+            // route can recurse through the same deferred binding chain.
+            if (!(item instanceof Thunk)) captured.slots.set(slot, item);
+          }
+        }
+        return new GraphClosure((item) => {
+          const invocation = {slots: captured.slots, names: new Map(captured.names)};
+          if (value.lambdaParams.length) invocation.names.set(value.lambdaParams[0], item);
+          return call(value.fn, invocation);
+        });
+      }
       function expr(value, frame) {
         tick();
         switch (value.kind) {
           case 'literal': return decode(value.value);
           case 'read': return force(frame.slots.has(value.slot) ? frame.slots.get(value.slot) : frame.names.has(value.name) ? frame.names.get(value.name) : null);
           case 'seq': return new LazySequence(value.items.map((item) => new Thunk(() => expr(item, frame))));
+          case 'closure': return closure(value, frame);
           case 'call': {
             let calleeFrame = frame;
             if (value.renames.length) {
@@ -205,7 +241,7 @@
           const args = new Map(fn.args.map((arg) => [arg.name, new Thunk(() => expr(arg.expr, frame))]));
           const operation = primitives.get(fn.primitive);
           if (!operation) throw new Error('Missing browser primitive: ' + fn.primitive);
-          try { return operation((name) => args.has(name) ? args.get(name).force() : null); }
+          try { return operation((name) => args.has(name) ? args.get(name).force() : null, tick); }
           catch (error) { if (!error.fnId) error.fnId = fnId; throw error; }
         });
         byFunction.set(fnId, result);
@@ -215,7 +251,7 @@
     }
     return {run};
   }
-  const api = {createRuntime, encode, decode, keyword, Keyword, equal};
+  const api = {createRuntime, encode, decode, keyword, Keyword, equal, isSequence};
   host.GraphdenBrowser = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window === 'undefined' ? globalThis : window);

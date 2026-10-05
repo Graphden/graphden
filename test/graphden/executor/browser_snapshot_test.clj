@@ -1,6 +1,7 @@
 (ns graphden.executor.browser-snapshot-test
   (:require
     [cheshire.core :as json]
+    [clojure.edn :as edn]
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [graphden.crud.type-check :as type-check]
@@ -9,6 +10,7 @@
     [graphden.executor.compile-runtime :as runtime]
     [graphden.executor.registry.core :as registry]
     [graphden.packages.records :as records]
+    [graphden.packages.records.types :as record-types]
     [graphden.storage.remote.core :as remote]
     [graphden.types.check :as check]
     [graphden.types.check.provenance :as provenance]
@@ -27,40 +29,45 @@
 
 
 (defn- fixture
-  [extra leaf]
-  (let [definitions (into [constant] (map #(assoc % :namespace "snapshot"))
-                          (conj (vec extra) (merge {:name :leaf :parent :const
-                                                    :args {:value {:value "public"}}} leaf)))
-        names (into {} (map (fn [d] [(:name d) (records/fn-id (:namespace d) (:name d))])) definitions)
-        by-name (into {} (map (juxt :name identity)) definitions)
-        namespaces {"core.logic" (random-uuid) "snapshot" (random-uuid)}
-        rows (concat (records/boot-primitive-records)
-                     (mapcat #(records/parse-fn-def % names by-name) definitions))
-        entity-rows (reduce (fn [acc row]
-                              (update acc (:kind row) (fnil conj [])
-                                      (cond-> (dissoc row :kind)
-                                        (:namespace-id row)
-                                        (update :namespace-id namespaces))))
-                            {} rows)
-        namespace-rows (mapv (fn [[n id]] {:id id :name n}) namespaces)
-        captured {:graph {:fns (:fn entity-rows) :slots (:slot entity-rows)
-                          :fn-slots (:fn-slot entity-rows) :bindings (:binding entity-rows)
-                          :list-items (:binding-list-item entity-rows)}
-                  :namespaces namespace-rows}
-        storage (remote/from-bundle (assoc entity-rows :ns namespace-rows))
-        rich (atom {:by-id {} :by-name {}})
-        captured-types (atom nil)]
-    (binding [registry/*rich-types-override* rich
-              registry/*per-org-rich-override* (atom {})
-              types/*type-aliases-override* (atom {})
-              shapes/*marker-registry-override* (atom {:secret {:monotone? true :hide-result? true}})
-              runtime/*per-org-aliases-override* (atom {})]
-      (runtime/register-type-aliases-from-db! (:graph captured) ::fixture
-                                              (ns-path/path-map namespace-rows))
-      (registry/record-rich-types! (:const names) :const constant)
-      (check/check-fn-def! (type-check/reconstruct-fn-def storage (:leaf names)))
-      (reset! captured-types {:aliases (types/aliases-snapshot) :markers (shapes/markers-snapshot)}))
-    (merge {:snapshot captured :rich @rich :id (:leaf names)} @captured-types)))
+  ([extra leaf] (fixture [constant] extra leaf))
+  ([primitives extra leaf]
+   (let [definitions (into (vec primitives) (map #(assoc % :namespace "snapshot"))
+                           (conj (vec extra) (merge {:name :leaf :parent :const
+                                                     :args {:value {:value "public"}}} leaf)))
+         names (into {} (map (fn [d] [(:name d) (records/fn-id (:namespace d) (:name d))])) definitions)
+         by-name (into {} (map (juxt :name identity)) definitions)
+         namespaces (into {} (map (fn [n] [n (random-uuid)]))
+                          (distinct (map :namespace definitions)))
+         rows (concat (records/boot-primitive-records)
+                      (mapcat record-types/inline-fn-type-rows-from-fn-def definitions)
+                      (mapcat #(records/parse-fn-def % names by-name) definitions))
+         entity-rows (reduce (fn [acc row]
+                               (update acc (:kind row) (fnil conj [])
+                                       (cond-> (dissoc row :kind)
+                                         (:namespace-id row)
+                                         (update :namespace-id namespaces))))
+                             {} rows)
+         namespace-rows (mapv (fn [[n id]] {:id id :name n}) namespaces)
+         captured {:graph {:fns (:fn entity-rows) :slots (:slot entity-rows)
+                           :fn-slots (:fn-slot entity-rows) :bindings (:binding entity-rows)
+                           :list-items (:binding-list-item entity-rows)}
+                   :namespaces namespace-rows}
+         storage (remote/from-bundle (assoc entity-rows :ns namespace-rows))
+         rich (atom {:by-id {} :by-name {}})
+         captured-types (atom nil)]
+     (binding [registry/*rich-types-override* rich
+               registry/*per-org-rich-override* (atom {})
+               types/*type-aliases-override* (atom {})
+               shapes/*marker-registry-override* (atom {:secret {:monotone? true :hide-result? true}})
+               runtime/*per-org-aliases-override* (atom {})]
+       (runtime/register-type-aliases-from-db! (:graph captured) ::fixture
+                                               (ns-path/path-map namespace-rows))
+       (doseq [{:keys [name] :as primitive} primitives]
+         (registry/record-rich-types! (get names name) name primitive))
+       (doseq [{:keys [name parent]} definitions :when parent]
+         (check/check-fn-def! (type-check/reconstruct-fn-def storage (get names name))))
+       (reset! captured-types {:aliases (types/aliases-snapshot) :markers (shapes/markers-snapshot)}))
+     (merge {:snapshot captured :rich @rich :id (:leaf names) :ids names} @captured-types))))
 
 
 (defn- policy-of
@@ -73,6 +80,36 @@
 (defn- export
   [{:keys [snapshot id policy] :as f}]
   (snapshot/export-snapshot snapshot {} {:view id} (or policy (policy-of f))))
+
+
+(deftest map-callback-policy-and-provenance-survive-the-hof-boundary
+  (let [map-definition (-> (edn/read-string (slurp "resources/packages/core/hof/fns.edn"))
+                           :fns first (assoc :namespace "core.hof"))
+        {:keys [ids] :as f}
+        (fixture [constant map-definition]
+                 [{:name :callback :parent :const :lambda-params []
+                   :args {:value {:value "public"}}}]
+                 {:parent :map :args {:func :callback :coll [1 2]}})
+        callback (:callback ids)]
+    (testing "a freshly checked map includes the callback definition and closure"
+      (let [functions (:functions (export f))]
+        (is (some #(= (str callback) (:id %)) functions))
+        (is (some #(= {:kind "closure" :fn (str callback) :lambdaParams [] :translation []}
+                      (:expr %))
+                  (mapcat :args functions)))))
+    (testing "original secret output or captured argument cannot become plain"
+      (doseq [signature [(assoc-in f [:rich :by-id callback :return] [:secret :text])
+                         (assoc-in f [:rich :by-id callback :args] {:theme [:secret :text]})]]
+        (is (= :visibility-denied (:reason (failure #(export signature)))))))
+    (testing "changed callback rows cannot use a stale plain signature"
+      (let [changed (update-in f [:snapshot :graph :bindings]
+                               #(mapv (fn [row]
+                                        (cond-> row (= callback (:fn-id row))
+                                                (assoc :value "private-replacement"))) %))
+            error (failure #(export changed))]
+        (is (= :type-source-mismatch (:reason error)))
+        (is (= callback (:fn-id error)))
+        (is (not (str/includes? (pr-str error) "private-replacement")))))))
 
 
 (deftest checked-ordinary-copy-exports-without-publishing-types

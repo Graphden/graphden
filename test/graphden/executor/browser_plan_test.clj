@@ -16,8 +16,11 @@
     [graphden.packages.loader :as loader]
     [graphden.packages.records :as records]
     [graphden.packages.records.ids :as ids]
+    [graphden.packages.records.types :as record-types]
     [graphden.storage.postgres.codec :as codec]
-    [graphden.test-infra.account-menu-cases :as account-menu]))
+    [graphden.test-infra.account-menu-cases :as account-menu]
+    [graphden.test-infra.browser-map-cases :as browser-map]
+    [graphden.test-infra.browser-picker-cases :as browser-picker]))
 
 
 (use-fixtures :each
@@ -40,6 +43,7 @@
          names (into {} (map (fn [d] [(:name d) (ids/fn-id (:namespace d) (:name d))])) defs)
          by-name (into {} (map (juxt :name identity)) defs)
          rows (concat (ids/boot-primitive-records)
+                      (mapcat record-types/inline-fn-type-rows-from-fn-def defs)
                       (mapcat #(records/parse-fn-def % names by-name) defs))
          tables {:fn :fns :slot :slots :fn-slot :fn-slots
                  :binding :bindings :binding-list-item :list-items}]
@@ -321,37 +325,165 @@
               {:value (browser/encode-result
                         ((get compiled (get ids entry))
                          (runtime/translate-named-args (get ids entry) inputs lookup) {}))}
-              (catch Exception _ {:error true})))
+              (catch Exception e {:error true :message (ex-message e)})))
           cases)))
+
+
+(defn- browser-results
+  [plan cases]
+  (let [request {:plan plan
+                 :cases (mapv (fn [{:keys [entry inputs operation-limit measure-operations]}]
+                                (cond-> {:entry (name entry)
+                                         :inputs (into {} (map (fn [[k v]] [(name k) (browser/encode-value v)])) inputs)}
+                                  operation-limit (assoc :operationLimit operation-limit)
+                                  measure-operations (assoc :measureOperations true))) cases)}
+        {:keys [exit out err]} (sh/sh "node" "tools/runtime-test/browser-plan-runner.js"
+                                      :in (json/generate-string request))]
+    (is (zero? exit) err)
+    (when (zero? exit) (json/parse-string-strict out true))))
 
 
 (defn- assert-differential!
   [graph impls ids cases]
   (let [entries (select-keys ids (map :entry cases))
         plan (browser/export-plan graph impls entries {:allow-fn? (constantly true)})
-        request {:plan plan
-                 :cases (mapv (fn [{:keys [entry inputs]}]
-                                {:entry (name entry)
-                                 :inputs (into {} (map (fn [[k v]] [(name k) (browser/encode-value v)])) inputs)})
-                              cases)}
-        {:keys [exit out err]} (sh/sh "node" "tools/runtime-test/browser-plan-runner.js"
-                                      :in (json/generate-string request))
+        browser (browser-results plan cases)
         jvm (jvm-results graph impls ids cases)]
-    (is (zero? exit) err)
-    (when (zero? exit)
-      (let [browser (json/parse-string-strict out true)]
-        (is (= (count cases) (count browser)))
-        (doseq [[test-case jvm-result browser-result] (map vector cases jvm browser)]
-          (testing (str (:entry test-case) " " (:inputs test-case))
-            (if (:error test-case)
-              (do (is (:error jvm-result)) (is (string? (:error browser-result))))
-              (do
-                (is (nil? (:error jvm-result)))
-                (is (nil? (:error browser-result)) (:error browser-result))
-                (when (and (:value jvm-result) (:value browser-result))
-                  (is (= (:expected test-case)
-                         (browser/decode-value (:value jvm-result))
-                         (browser/decode-value (:value browser-result)))))))))))))
+    (when browser
+      (is (= (count cases) (count browser)))
+      (doseq [[test-case jvm-result browser-result] (map vector cases jvm browser)]
+        (testing (binding [*print-length* 4 *print-level* 4]
+                   (str (:entry test-case) " " (pr-str (:inputs test-case))))
+          (if (:error test-case)
+            (do (is (:error jvm-result)) (is (string? (:error browser-result))))
+            (do
+              (is (nil? (:error jvm-result)) (:message jvm-result))
+              (is (nil? (:error browser-result)) (:error browser-result))
+              (when (contains? test-case :sequence)
+                (is (= (:sequence test-case) (:sequence browser-result))))
+              (when (and (:value jvm-result) (:value browser-result))
+                (is (= (:expected test-case)
+                       (browser/decode-value (:value jvm-result))
+                       (browser/decode-value (:value browser-result))))))))))))
+
+
+(defn- map-fixture
+  ([] (map-fixture browser-map/definitions))
+  ([definitions]
+   (let [loaded (loader/load-packages ["web"])
+         base-defs (select-keys (:base-fn-defs loaded)
+                                [:const :if :list :mod :get :equal? :count :map :hiccup :zipmap])
+         type-defs (remove #(or (:parent %) (:parents %)) (:fn-defs loaded))
+         primitives (into (vec type-defs) (map (fn [[n d]] (assoc d :name n))) base-defs)]
+     (assoc (graph-of primitives definitions)
+            :impls (into {} (map (fn [[n d]] [n (:impl d)])) base-defs)))))
+
+
+(deftest browser-map-matches-jvm-for-ordinary-views-and-captures
+  (let [{:keys [graph impls ids]} (map-fixture)]
+    (assert-differential! graph impls ids browser-map/cases)))
+
+
+(defn- full-picker-case
+  []
+  (let [rows (mapv (fn [index]
+                     (assoc browser-picker/dense-row
+                            :key (str "candidate-" index)
+                            :option-id (str "gd-fixture-option-" index)
+                            :qualified-name (str "core.candidate-" index)
+                            :label (str "candidate-" index)
+                            :active (zero? index)))
+                   (range 120))
+        rendered (mapv (fn [{:keys [key option-id qualified-name label active]}]
+                         (-> browser-picker/rendered-dense-row
+                             (assoc-in [1 :key] key)
+                             (assoc-in [1 :id] option-id)
+                             (assoc-in [1 :data-picker-key] key)
+                             (assoc-in [1 :data-fn-name] qualified-name)
+                             (assoc-in [1 :aria-selected] (str active))
+                             (assoc-in [1 :class] (str "fn-picker-row fn-picker-row-compat"
+                                                       (when active " fn-picker-row-active")))
+                             (assoc-in [3 2] label))) rows)]
+    {:entry :picker-view
+     :inputs {:model (-> browser-picker/full-model
+                         (assoc-in [:sections 0 :rows] rows)
+                         (assoc-in [:sections 0 :count] 120)
+                         (assoc-in [:sections 1 :option-id] "gd-fixture-option-120"))}
+     :expected (-> browser-picker/rendered-full-view
+                   (assoc-in [:tree 3 0 3] rendered)
+                   (assoc-in [:tree 3 0 2 4 3] 120)
+                   (assoc-in [:tree 3 1 2 1 :id] "gd-fixture-option-120"))
+     :operation-limit 100000}))
+
+
+(deftest real-picker-matches-jvm-including-120-rows-with-all-badges
+  (let [definitions (:fns (edn/read-string (slurp "resources/packages/app/ui-fn-picker/fns.edn")))
+        {:keys [graph impls ids]} (map-fixture definitions)
+        full-case (full-picker-case)
+        plan (browser/export-plan graph impls (select-keys ids [:picker-view])
+                                  {:allow-fn? (constantly true)})]
+    (assert-differential! graph impls ids (conj browser-picker/cases full-case))
+    (let [[default-result measured]
+          (browser-results plan [(dissoc full-case :operation-limit)
+                                 (assoc full-case :measure-operations true)])]
+      (is (nil? (:error measured)) (:error measured))
+      (when-let [operations (:operations measured)]
+        (println "Picker 120 rows, all badges: minimum operation budget" operations)
+        (is (<= operations 100000))
+        (if (<= operations 10000)
+          (is (= (:value measured) (:value default-result)))
+          (is (= "Browser graph operation limit exceeded" (:error default-result))))))))
+
+
+(deftest browser-map-keeps-one-budget-across-all-callbacks
+  (let [{:keys [graph impls ids]} (map-fixture)
+        plan (browser/export-plan graph impls (select-keys ids [:constant-map :nested-map])
+                                  {:allow-fn? (constantly true)})
+        cases [{:entry :constant-map :inputs {:items [1 2]} :operation-limit 100}
+               {:entry :constant-map :inputs {:items (vec (range 100))} :operation-limit 100}
+               {:entry :nested-map :inputs {:items (vec (repeat 10 (vec (range 10))))}
+                :operation-limit 100}]
+        [small large nested] (browser-results plan cases)]
+    (is (= [7 7] (some-> (:value small) browser/decode-value)))
+    (doseq [result [large nested]]
+      (is (= "Browser graph operation limit exceeded" (:error result))))))
+
+
+(deftest browser-map-callbacks-remain-static-checked-dependencies
+  (let [{:keys [graph ids] :as fixture} (map-fixture)
+        callback (:read-item ids)
+        export #(browser/export-plan % {} {:view (:mapped ids)}
+                                     {:allow-fn? (constantly true)})]
+    (testing "the callback is exported and visibility is checked on its path"
+      (is (some #(= (str callback) (:id %)) (:functions (export graph))))
+      (let [error (failure #(browser/export-plan graph {} {:view (:mapped ids)}
+                                                 {:allow-fn? (fn [id] (not= id callback))}))]
+        (is (= :visibility-denied (:reason error)))
+        (is (= [(:mapped ids) callback] (:path error)))))
+    (testing "concealed callback is rejected before any browser execution"
+      (let [hidden (update graph :fns
+                           #(mapv (fn [row] (cond-> row (= callback (:id row)) (assoc :concealed? true))) %))]
+        (is (= :concealed-function (:reason (failure #(export hidden)))))))
+    (testing "a free callback cannot arrive as a supplied JS callable or id"
+      (is (= :callable-binding (:reason (failure #(export-fixture fixture :map))))))
+    (testing "a callback whose result is callable is never double-wrapped"
+      (registry/record-rich-types-raw! callback :read-item
+                                       {:return [:fn {:item :any} :any] :args {:item :any}})
+      (is (= :callable-binding (:reason (failure #(export graph))))))))
+
+
+(deftest browser-map-rejects-multiple-parameters-and-callable-environments
+  (let [definitions [{:name :pair :parent :list :lambda-params [:left :right]
+                      :args {:items [{:as :left} {:as :right}]}}
+                     {:name :mapped :parent :map :args {:func :pair :coll [1]}}]
+        fixture (map-fixture definitions)]
+    (is (= :callable-arity (:reason (failure #(export-fixture fixture :mapped))))))
+  (let [definitions [{:name :read-item :parent :const :lambda-params [:item]
+                      :args {:value {:as :item}}}
+                     {:name :rows :parent :map :args {:coll [1 2]}}
+                     {:name :view :parent :const :args {:value :rows :func :read-item}}]
+        fixture (map-fixture definitions)]
+    (is (= :callable-binding (:reason (failure #(export-fixture fixture :view)))))))
 
 
 (deftest browser-runtime-matches-jvm-for-stored-compositions-test
@@ -386,10 +518,12 @@
                                (assoc-in [:args :value] "#6688aa"))) definitions)
               {:keys [graph ids]} (graph-of primitive-rows edited)
               view-case (first (filter #(= :account-menu-view (:entry %)) cases))
+              hover (if local? "#6688aa" "#224466")
               expected (-> account-menu/view
                            (assoc-in [:theme-tokens "--bg"] "#224466")
-                           (assoc-in [:menu-tokens "--gd-account-menu-hover"]
-                                     (if local? "#6688aa" "#224466")))]
+                           (assoc-in [:menu-tokens "--gd-account-menu-hover"] hover)
+                           (assoc-in [:styles 2 :declarations "background-color"] hover)
+                           (assoc-in [:styles 3 :declarations "background-color"] hover))]
           (assert-differential! graph impls ids [(assoc view-case :expected expected)]))))))
 
 

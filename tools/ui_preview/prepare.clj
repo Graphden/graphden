@@ -33,8 +33,24 @@
      data)))
 
 
+(defn- pure-definitions
+  [project account-menu? picker?]
+  (mapcat (fn [module-name]
+            (let [module (edn/read-string (slurp (io/file project "resources/packages/app" module-name "fns.edn")))]
+              (take-while #(not= :_ui-preview-export (:name %)) (:fns module))))
+          (cond-> [(if account-menu? "ui-account-menu" "ui-preview")]
+            picker? (conj "ui-fn-picker"))))
+
+
+(defn- validate-plan!
+  [url query expected]
+  (let [plan (request url :get (str "/ui-preview/plan?" query) nil)]
+    (when-not (= expected (:entries plan))
+      (throw (ex-info "Preview entry functions do not resolve to the editable copy" {})))))
+
+
 (defn- prepare
-  [url branch root account-menu?]
+  [url branch root account-menu? picker?]
   (when-not (and (seq branch)
                  (re-matches #"[a-zA-Z][a-zA-Z0-9_-]*(?:\.[a-zA-Z][a-zA-Z0-9_-]*)*" root))
     (throw (ex-info "A nonempty branch and a dotted graph namespace are required" {})))
@@ -47,9 +63,7 @@
     (throw (ex-info "The running prototype lacks browser-plan-export; rebuild this worktree first" {})))
   (let [graph-namespace (str root ".review_" (subs (str (random-uuid)) 0 8))
         project (java.io.File/.getParentFile (java.io.File/.getParentFile (java.io.File/.getParentFile (java.io.File/.getCanonicalFile (io/file *file*)))))
-        module-name (if account-menu? "ui-account-menu" "ui-preview")
-        module (edn/read-string (slurp (io/file project "resources/packages/app" module-name "fns.edn")))
-        pure (take-while #(not= :_ui-preview-export (:name %)) (:fns module))
+        pure (pure-definitions project account-menu? picker?)
         entries (if account-menu?
                   {:initial :account-menu-initial :update :account-menu-update :view :account-menu-view}
                   {:initial :menu-initial :update :menu-update :view :menu-view})
@@ -61,24 +75,29 @@
         encoded-branch (java.net.URLEncoder/encode branch "UTF-8")
         query (str "branch=" encoded-branch "&initial=" (:initial expected)
                    "&update=" (:update expected) "&view=" (:view expected))
+        picker-id (when picker? (str (ids/fn-id graph-namespace :picker-view)))
         plan-id (str (ids/fn-id graph-namespace :browser-plan))
         result (request url :post (str "/api/import/graph?target=" encoded-branch "&create=true")
                         (pr-str {:fns definitions}))]
     (try
       (when (seq (:skipped-owned result))
         (throw (ex-info "Preview import unexpectedly referenced package-owned identities" {})))
-      (let [plan (if account-menu?
-                   (request url :get (str "/ui-preview/plan?" query) nil)
-                   (:result (request url :post (str "/api/execute?branch=" encoded-branch)
-                                     (json/generate-string {:fn-id plan-id :args {} :timeout-ms 15000})
-                                     "application/json")))]
-        (when-not (= expected (:entries plan))
-          (throw (ex-info "Preview entry functions do not resolve to the editable copy" {}))))
-      (cond-> {:branch branch :namespace graph-namespace :entries expected
+      (if account-menu?
+        (validate-plan! url query expected)
+        (let [plan (:result (request url :post (str "/api/execute?branch=" encoded-branch)
+                                    (json/generate-string {:fn-id plan-id :args {} :timeout-ms 15000})
+                                    "application/json"))]
+          (when-not (= expected (:entries plan))
+            (throw (ex-info "Preview entry functions do not resolve to the editable copy" {})))))
+      (when picker?
+        (validate-plan! url (str "branch=" encoded-branch "&initial=" (:initial expected)
+                                "&update=" (:update expected) "&view=" picker-id)
+                        (assoc expected :view picker-id)))
+      (cond-> {:branch branch :namespace graph-namespace :entries (cond-> expected picker? (assoc :picker-view picker-id))
                :url (if account-menu?
                       (str url "/?branch=" encoded-branch
                            "&ui-initial=" (:initial expected) "&ui-update=" (:update expected)
-                           "&ui-view=" (:view expected) "#" graph-namespace ".theme-canvas-background")
+                           "&ui-view=" (:view expected) (when picker? (str "&ui-picker-view=" picker-id)) "#" graph-namespace ".theme-canvas-background")
                       (str url "/ui-preview?branch=" encoded-branch
                            "&graph=" graph-namespace "&plan=" plan-id))}
         (not account-menu?) (assoc :plan-id plan-id))
@@ -91,12 +110,13 @@
 
 
 (try
-  (let [account-menu? (boolean (some #{"--account-menu"} *command-line-args*))
-        args (remove #{"--account-menu"} *command-line-args*)
+  (let [picker? (boolean (some #{"--picker"} *command-line-args*))
+        account-menu? (or picker? (boolean (some #{"--account-menu"} *command-line-args*)))
+        args (remove #{"--account-menu" "--picker"} *command-line-args*)
         [url branch root] args]
     (when-not (and (= 3 (count args)) url branch root)
-      (throw (ex-info "Usage: bb -cp src tools/ui_preview/prepare.clj [--account-menu] <url> <new-branch> <namespace-root>" {})))
-    (println (json/generate-string (prepare url branch root account-menu?))))
+      (throw (ex-info "Usage: bb -cp src tools/ui_preview/prepare.clj [--account-menu] [--picker] <url> <new-branch> <namespace-root>" {})))
+    (println (json/generate-string (prepare url branch root account-menu? picker?))))
   (catch Exception error
     (binding [*out* *err*] (println (Throwable/.getMessage error) (ex-data error)))
     (System/exit 1)))

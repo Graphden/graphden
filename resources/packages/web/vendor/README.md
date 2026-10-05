@@ -24,6 +24,19 @@ Vendored (not CDN) so deployments carry no third-party runtime
 dependency: air-gapped installs work, the version is pinned by the
 repo, and the supply chain ends at this checkout.
 
+## preact.min.js
+
+- Source: npm `preact@11.0.0`, bundled by the existing
+  `tools/vendor-build/` tooling (`npm ci && npm run build:preact`).
+- License: MIT; the upstream text is preserved in `preact.LICENSE`.
+- Exposes `window.GraphdenPreact.h` and `.render`. Component definitions,
+  state transitions and styles remain ordinary Graphden functions; the
+  library only reconciles their computed element trees with the DOM.
+- Included in the editor's existing hashed bundle. No CDN or new
+  application compilation step is required.
+- To upgrade: pin the new version in the vendor-build lockfile, rebuild
+  this bundle, update the license and run the renderer/browser checks.
+
 ## codemirror.min.js
 
 - Source: built from npm packages by `tools/vendor-build/`

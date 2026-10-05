@@ -150,6 +150,7 @@
         (for [[ns-path names] [["core.logic" [:const :if :equal?]]
                                ["core.collections" [:list :get :assoc :zipmap :count]]
                                ["core.arithmetic" [:add :mod]]
+                               ["core.hof" [:map]]
                                ["web.html" [:hiccup]]]
               n names]
           [(ids/fn-id ns-path n) (name n)])))
@@ -205,22 +206,41 @@
       :item (str (:id item)))))
 
 
+(defn- closure-expr
+  "Only map's statically bound callback is supported. Reuse the JVM's
+   parameter/capture decisions; callable producers and env HOFs stay closed."
+  [{:keys [kind slot-id ref-id] :as binding} fid lookups context]
+  (when-not (and (= :ref kind)
+                 (= slot-id (ids/slot-id (ids/fn-id "core.hof" :map) :func))
+                 (not (:env-binding? context)))
+    (reject! :callable-binding context))
+  (let [params (r/hof-lambda-params ref-id slot-id binding fid lookups)
+        translation (r/build-hof-translation ref-id params lookups)]
+    (when (> (count params) 1) (reject! :callable-arity context))
+    {:kind "closure" :fn (str ref-id)
+     :lambdaParams (mapv wire-name params)
+     :translation (mapv (fn [[sid n]] {:slot (str sid) :name (wire-name n)})
+                        (sort-by (comp str key) translation))}))
+
+
 (defn- binding-expr
   [binding fid lookups context]
   (let [{:keys [kind slot-id ext-name env-name ref-id items binder-fn-id]} binding
         context (assoc context :slot-id slot-id)]
-    (when (or (:is-fn binding) (:produces-callable? binding))
+    (when (:produces-callable? binding)
       (reject! :callable-binding context))
-    (case kind
-      :value (literal-expr (:value binding) context)
-      :free (read-expr (l/effective-reader-slot-id fid slot-id lookups)
-                       (or ext-name env-name))
-      :ref (call-expr ref-id fid lookups)
-      :seq (do
-             (when (:lazy-seq? binding) (reject! :lazy-sequence-slot context))
-             {:kind "seq"
-              :items (mapv #(item-expr % (or binder-fn-id fid) lookups context) items)})
-      (reject! :binding-kind context))))
+    (if (:is-fn binding)
+      (closure-expr binding fid lookups context)
+      (case kind
+        :value (literal-expr (:value binding) context)
+        :free (read-expr (l/effective-reader-slot-id fid slot-id lookups)
+                         (or ext-name env-name))
+        :ref (call-expr ref-id fid lookups)
+        :seq (do
+               (when (:lazy-seq? binding) (reject! :lazy-sequence-slot context))
+               {:kind "seq"
+                :items (mapv #(item-expr % (or binder-fn-id fid) lookups context) items)})
+        (reject! :binding-kind context)))))
 
 
 (defn- binding-deps
@@ -256,7 +276,7 @@
             :env (mapv (fn [entry]
                          {:name (wire-name (:env-name entry))
                           :slot (str (:slot-id entry))
-                          :expr (binding-expr entry fid lookups context)})
+                          :expr (binding-expr entry fid lookups (assoc context :env-binding? true))})
                        env)
             :args (mapv (fn [entry]
                           {:slot (str (:slot-id entry))

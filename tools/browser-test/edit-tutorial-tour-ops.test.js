@@ -118,8 +118,7 @@ const {
     // ⚙ lives in the row's ⋯ menu now (readability redesign).
     await page.waitForSelector(
       '.branch-row-more[data-more-branch="tutorial-release"]', {timeout: 15000});
-    await page.evaluate(() => document.querySelector(
-      '.branch-row-more[data-more-branch="tutorial-release"]').click());
+    await page.locator('.branch-row-more[data-more-branch="tutorial-release"]').click();
     await page.waitForSelector(
       '.branch-row-more-menu.open .branch-row-protect[data-protect-branch="tutorial-release"]',
       {timeout: 15000});

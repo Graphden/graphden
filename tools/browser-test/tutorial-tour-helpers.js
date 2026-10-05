@@ -696,10 +696,11 @@ async function switchBranchViaChip(page, name) {
   // IS hittable (waitClickable above already asserted that).
   await page.evaluate(() => document.getElementById('branch-chip-btn').click());
   await page.waitForSelector('.branch-row[data-branch-name]', {timeout: 15000});
-  await page.evaluate((n) => {
-    Array.from(document.querySelectorAll('.branch-row[data-branch-name]'))
-      .find((r) => r.getAttribute('data-branch-name') === n).click();
-  }, name);
+  const rowSelector = await page.evaluate((n) =>
+    '.branch-row[data-branch-name="' + CSS.escape(n) + '"]', name);
+  // A real pointer click scrolls the list and verifies that the row is
+  // hittable. Calling row.click() in page JS hid clipped-row regressions.
+  await page.locator(rowSelector).click({timeout: 120000});
   await page.waitForFunction((n) => {
     const cur = new URLSearchParams(location.search).get('branch');
     return n === 'main' ? !cur : cur === n;

@@ -1736,7 +1736,7 @@
             {:id "24"
              :slug "review"
              :chapter "The editor"
-             :version 1
+             :version 2
              :title "Review: propose and approve"
              :reads "covers the review flow in full, and the push-only rule from lesson 23."
              ;; Like lesson 23 this lesson MANAGES branches itself — a
@@ -1778,7 +1778,7 @@
                :check {:kind "on-branch" :name "tutorial-release"}
                :creates {:type "branch" :name "tutorial-release"}}
               {:title "Protect it"
-               :body "Open the branch chip again, click [[⋯]] on the tutorial-release row and choose [[⚙ Protection…]]. Set [[Required approvals]] to [[1]]. From now on, a merge into tutorial-release needs one recorded approval — the rule lives on the TARGET."
+               :body "Open the branch chip again. Active branches are sorted with main first, the current branch next, then the others by name; scroll inside the list when a row is below the visible area. Click [[⋯]] on tutorial-release and choose [[⚙ Protection…]]. Set [[Required approvals]] to [[1]]: a merge into this target now needs one recorded approval."
                :target "#branch-chip-btn"
                :targets ["#branch-chip-btn" ".branch-popover" ".branch-row-more[data-more-branch=\"tutorial-release\"]" ".branch-row-more-menu.open .branch-row-protect[data-protect-branch=\"tutorial-release\"]" "#gd-protect-pop"]
                :check {:kind "dom" :selector ".branch-row-more.on[data-more-branch=\"tutorial-release\"]"}}
@@ -1793,17 +1793,17 @@
                :target ".arg-value-editable"
                :check {:kind "binding-value" :name "review-demo" :slot "value" :value "2"}}
               {:title "Back to the release branch"
-               :body "Open the branch chip and click the tutorial-release row — you review from the target's side."
+               :body "Open the branch chip, scroll its branch list to tutorial-release and click that row — you review from the target's side."
                :target "#branch-chip-btn"
                :targets ["#branch-chip-btn" ".branch-popover"]
                :check {:kind "on-branch" :name "tutorial-release"}}
               {:title "Try to merge — refused"
-               :body "Click [[⇢]] on the tutorial-feature row and confirm. The merge is refused: “requires 1 approval(s)”. No branch slips into a protected target unreviewed — not even yours."
+               :body "Open the branch chip if it is closed. Scroll its branch list to tutorial-feature, click [[⇢]] on that row and confirm. The merge is refused: “requires 1 approval(s)”. The target requires review even for your own branch."
                :target "#branch-chip-btn"
                :targets ["#branch-chip-btn" ".branch-popover" ".branch-row-merge[data-merge-source=\"tutorial-feature\"]"]
                :check {:kind "dom" :selector "#branch-popover-error:not(.hidden)"}}
               {:title "Propose it"
-               :body "Click [[⋯]] on the tutorial-feature row and choose [[📤 Propose for review]] — the branch is now submitted for review into its base, and the popover header counts “1 proposal awaiting review”. Proposed branches are the reviewer's to-do list."
+               :body "Find tutorial-feature in the branch list (scroll if needed), click its [[⋯]] and choose [[📤 Propose for review]]. The branch is submitted for review into its base; the popover header counts “1 proposal awaiting review”."
                :target "#branch-chip-btn"
                :targets ["#branch-chip-btn" ".branch-row-more[data-more-branch=\"tutorial-feature\"]" ".branch-row-more-menu.open .branch-row-propose[data-propose-branch=\"tutorial-feature\"]"]
                :check {:kind "dom" :selector ".branch-row-approve[data-approve-branch=\"tutorial-feature\"]"}}

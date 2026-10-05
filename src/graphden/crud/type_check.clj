@@ -257,7 +257,7 @@
       renamed-view {:as (keyword (:name renamed-view))
                     :type (some-> (:type-fn-id renamed-view)
                                   (->> (get fn-by-id))
-                                  :name keyword)}
+                                  row->kw)}
       :else nil)))
 
 
@@ -398,9 +398,12 @@
                                 (when-let [n (name-for (:slot-id b))]
                                   [(:slot-id b) n])))
                         own-bindings)))
-              ;; Resolve any ref-targets in bindings AND their list
-              ;; items into fn-by-id so binding-shape-for-edn can name
-              ;; them. Item refs were missed originally — a ref item
+              ;; Resolve binding/list refs AND the types of rename views
+              ;; into fn-by-id so binding-shape-for-edn can name them.
+              ;; A rename-only type need not occur in a parent, return or
+              ;; value ref; omitting it silently widens {:as ... :type T}
+              ;; to :any when a saved graph is checked again.
+              ;; Item refs were missed originally — a ref item
               ;; reconstructed as `nil` ("literal nil"), so the checker
               ;; compared `:null` against the element type instead of
               ;; the ref's return type (wrong diagnostic, and a
@@ -410,7 +413,8 @@
                           (sp/query-entities storage :binding-list-item
                                              {:binding-id (mapv :id own-bindings)}))
               ref-ids (->> (concat (keep :ref-fn-id own-bindings)
-                                   (keep :ref-fn-id item-rows))
+                                   (keep :ref-fn-id item-rows)
+                                   (keep :type-fn-id (vals renamed-view-by-source)))
                            distinct
                            (remove #(contains? fn-by-id %)))
               fn-by-id+refs (cond-> fn-by-id

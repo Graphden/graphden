@@ -378,6 +378,10 @@ const {
       'the cell kept its value between runs (' + JSON.stringify(before)
       + ' → ' + JSON.stringify(after) + ')');
     await finishAndDelete(page);
+    for (const name of ['tutorial-cell', 'tutorial-bump']) {
+      const remaining = await api(page, 'GET', '/api/graph/entities?scope=search&q=' + name);
+      assert(!(remaining.fns || []).some((fn) => fn.name === name), name + ' was removed by lesson cleanup');
+    }
     console.log('  lesson 12: walked + cleaned (state survived the second run)');
 
     // ---------- Lesson 18 — tracing a run ----------
@@ -551,6 +555,10 @@ const {
     console.log('  lesson 18: Recent row navigated to '
       + await page.evaluate(() => location.hash));
     await finishAndDelete(page);
+    for (const name of ['tutorial-sentence', 'tutorial-shout', 'tutorial-words']) {
+      const remaining = await api(page, 'GET', '/api/graph/entities?scope=search&q=' + name);
+      assert(!(remaining.fns || []).some((fn) => fn.name === name), name + ' was removed by lesson cleanup');
+    }
     console.log('  lesson 18: walked + cleaned (pipeline + path + tree + peek + trail)');
 
     console.log('PASS');

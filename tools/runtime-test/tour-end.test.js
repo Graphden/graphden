@@ -100,7 +100,7 @@ function makeWorld(opts) {
     _tourSurvivors: async (created) => (o.survivors || created),
     _tourDeleteCreated: async (created) => {
       calls.push('deleteCreated ' + created.map((c) => c.name).join(','));
-      return { failed: [] };
+      return { failed: o.failedItems || [] };
     },
     _tourDeleteCreatedBranches: async () => { calls.push('deleteBranches'); return o.failedBranches || []; },
     _tourDeleteNamespaces: async () => { calls.push('deleteNamespaces'); return []; },
@@ -242,6 +242,23 @@ const finishedOn = (id, extra) => Object.assign(
       'BEFORE the next lesson opens (got: ' + JSON.stringify(w.calls) + ')');
     assert(w.queued() === null,
       'nothing is parked — no reload to survive, so it starts here');
+  });
+
+  await test('a refused in-place cleanup keeps its ledger and does not start the next lesson', async () => {
+    const created = [{type: 'fn', name: 'greet'}];
+    const failedItems = [...created];
+    const w = makeWorld({state: finishedOn('01', {created}), failedItems});
+    await w.ctx._tourEnd();
+    w.btn('Start 02 · Slots').click();
+    await new Promise((r) => setTimeout(r, 0));
+    assert(!w.calls.includes('startIsolated 02'), 'refused cleanup does not start another lesson');
+    assert(w.btn('Delete them'), 'the cleanup action remains available for retry');
+    assert(vm.runInContext('_tourState.created.length', w.ctx) === 1,
+      'the session retains the original cleanup ledger');
+    failedItems.length = 0;
+    w.btn('Delete them').click();
+    await new Promise((r) => setTimeout(r, 0));
+    assert(w.pop() === null, 'successful retry closes the dialog');
   });
 
   await test('a lesson that made nothing says so and offers what is next', async () => {

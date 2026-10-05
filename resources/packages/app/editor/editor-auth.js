@@ -25,6 +25,7 @@
 // This file is the auth STATE + `authFetch` / `authMutate` + the login popover.
 
 const AUTH_STORAGE_KEY = 'graphden.auth.password';
+let stopAuthAnchorObservation = null;
 
 const LOCK_CLOSED_SVG = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>';
 const LOCK_OPEN_SVG   = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.5-2"/></svg>';
@@ -484,11 +485,12 @@ function positionAuthPopover() {
   popover.style.left = '0px';
   const popRect = popover.getBoundingClientRect();
   const margin = 8;
-  const top = lockRect.bottom + 6;
+  const top = Math.max(margin, Math.min(lockRect.bottom + 6, window.innerHeight - popRect.height - margin));
   // Right-align with the lock when there's room; clamp left to >= margin.
-  const left = Math.max(margin, lockRect.right - popRect.width);
+  const left = Math.max(margin, Math.min(lockRect.right - popRect.width, window.innerWidth - popRect.width - margin));
   popover.style.top = top + 'px';
   popover.style.left = left + 'px';
+  if (!stopAuthAnchorObservation) stopAuthAnchorObservation = observePopoverAnchor(popover, lock, positionAuthPopover);
 }
 
 function closeAuthPopover(immediate = false) {
@@ -501,6 +503,8 @@ function closeAuthPopover(immediate = false) {
   const chip = document.getElementById('auth-lock-btn');
   const hadFocus = popover.contains(document.activeElement);
   window.gdShellMenuGraph?.dispose();
+  stopAuthAnchorObservation?.();
+  stopAuthAnchorObservation = null;
   popover.classList.add('hidden');
   chip?.setAttribute('aria-expanded', 'false');
   if (hadFocus && chip && typeof focusSafely === 'function') focusSafely(chip);

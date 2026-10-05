@@ -46,6 +46,7 @@ let fnPickerEscHandler = null;
 // hand the keyboard back however the picker was dismissed.
 let fnPickerAnchor = null;
 let fnPickerGraphDispose = null;
+let stopFnPickerAnchorObservation = null;
 
 // Installed once — reads the live element and is inert while closed.
 installTabTrap({
@@ -54,6 +55,8 @@ installTabTrap({
 });
 
 function closeFnPicker() {
+  stopFnPickerAnchorObservation?.();
+  stopFnPickerAnchorObservation = null;
   const hadFocus = !!fnPickerEl?.contains(document.activeElement);
   fnPickerGraphDispose?.();
   fnPickerGraphDispose = null;
@@ -235,12 +238,12 @@ function openFnPicker(opts) {
   el.setAttribute('aria-label', expected
     ? ('Pick a function compatible with ' + (typeof formatTypeHint === 'function' ? formatTypeHint(expected) : 'expected type'))
     : 'Pick a function');
-  const rect = opts.anchorEl.getBoundingClientRect();
-  el.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 380)) + 'px';
   // Below the anchor when it fits, otherwise pushed up so the whole
   // popover stays on screen — re-run after every render, because folding
   // a group changes the height.
   const place = () => {
+    const rect = opts.anchorEl.getBoundingClientRect();
+    el.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - el.offsetWidth - 8)) + 'px';
     const h = el.offsetHeight;
     let top = rect.bottom + 6;
     if (top + h > window.innerHeight - 8) top = Math.max(8, window.innerHeight - h - 8);
@@ -310,6 +313,7 @@ function openFnPicker(opts) {
 
   document.body.appendChild(el);
   fnPickerEl = el;
+  stopFnPickerAnchorObservation = observePopoverAnchor(el, opts.anchorEl, place);
 
   // -------- Pick / explainer wiring --------
 

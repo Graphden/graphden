@@ -48,6 +48,34 @@ function anchorBelowClamped(el, anchorEl, opts) {
   el.style.top = top + 'px';
 }
 
+// Follow a mounted popup's anchor, coalescing layout changes into one frame.
+// The owner must stop observation before hiding or removing its popup.
+function observePopoverAnchor(el, anchor, place) {
+  const controller = new AbortController();
+  let frame = null;
+  const schedule = () => {
+    if (frame !== null || controller.signal.aborted) return;
+    frame = requestAnimationFrame(() => {
+      frame = null;
+      if (el.isConnected && anchor.isConnected) place();
+    });
+  };
+  const options = {signal: controller.signal, passive: true};
+  window.addEventListener('resize', schedule, options);
+  document.addEventListener('scroll', schedule, {...options, capture: true});
+  window.visualViewport?.addEventListener('resize', schedule, options);
+  window.visualViewport?.addEventListener('scroll', schedule, options);
+  const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null;
+  observer?.observe(el);
+  observer?.observe(anchor);
+  return () => {
+    controller.abort();
+    observer?.disconnect();
+    if (frame !== null) cancelAnimationFrame(frame);
+    frame = null;
+  };
+}
+
 // Install a document-level dismiss handler for a singleton popover.
 // `getEl` returns the popover root (or null if not built yet); `getAnchor`
 // (optional) returns the current anchor — pointerdowns inside it are ignored so

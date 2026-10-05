@@ -116,12 +116,6 @@
    :args {:test :_picker-row-return-empty :then :_picker-none :else :_picker-row-return-node}}
   {:name :picker-row :parent :hiccup :lambda-params [:row]
    :args {:tag "div" :attrs :_picker-row-attrs :children [:_picker-row-verdict :_picker-row-label-node :_picker-row-fit-chip :_picker-row-kind-chip :_picker-row-effects-chip :_picker-row-return-chip]}}
-  {:name :_picker-model-rows :parent :get
-   :args {:coll {:as :model} :key {:value :rows} :default {:value []}}}
-  {:name :picker-rows :parent :map
-   :args {:func :picker-row :coll :_picker-model-rows}}
-  {:name :picker-row-list :parent :hiccup
-   :args {:tag "div" :attrs {:value {:class "fn-picker-rows"}} :children :picker-rows}}
   {:name :picker-active-background :parent :const :return-type :text
    :args {:value "color-mix(in srgb, var(--fg) 12%, transparent)"}}
   {:name :_picker-active-declarations :parent :zipmap :return-type :text-map
@@ -251,4 +245,4 @@
   {:name :picker-list :parent :hiccup
    :args {:tag "div" :attrs {:value {:class "fn-picker-results"}} :children [:_picker-empty :_picker-section-nodes :_picker-other-toggle]}}
   {:name :picker-view :parent :zipmap
-   :args {:keys [{:value :tree} {:value :styles}] :vals [:picker-list :picker-styles]}} ]}
+   :args {:keys [{:value :tree} {:value :styles}] :vals [:picker-list :picker-styles]}}]}

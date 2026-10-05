@@ -217,7 +217,7 @@
   };
   window.gdShellMenuGraph = integration;
   window.gdRefreshGraphTheme = refreshTheme;
-  document.addEventListener('DOMContentLoaded', () => { void integration.reload(); }, {once: true});
+  document.addEventListener('DOMContentLoaded', () => { if (isAuthenticated() || accountsAuthed) void integration.reload(); }, {once: true});
   window.addEventListener('gd-auth-changed', () => {
     requestGeneration++;
     if (ready || runtime) { dispose(); window.gdClearGraphTheme(); runtime = null; integration.ready = false; }

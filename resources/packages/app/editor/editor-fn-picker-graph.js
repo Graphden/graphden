@@ -111,7 +111,7 @@
     },
   };
   window.gdFnPickerGraph = integration;
-  document.addEventListener('DOMContentLoaded', () => { void load(); }, {once: true});
+  document.addEventListener('DOMContentLoaded', () => { if (isAuthenticated() || accountsAuthed) void load(); }, {once: true});
   window.addEventListener('gd-auth-changed', () => {
     invalidate();
     if (isAuthenticated() || accountsAuthed) void load();

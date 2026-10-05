@@ -18,7 +18,7 @@ const branch = 'account-menu-' + process.pid + '-' + Date.now().toString(36);
   try {
     namespaceBaseline = await captureFixtureNamespaces(page);
     prepared = JSON.parse(execFileSync('bb', ['-cp', 'src', 'tools/ui_preview/prepare.clj',
-      '--account-menu', BASE, branch, 'user.ui-preview'], {encoding: 'utf8', timeout: 120000,
+      '--account-menu', '--picker', BASE, branch, 'user.ui-preview'], {encoding: 'utf8', timeout: 120000,
       env: {...process.env, AUTH_TOKEN: AUTH}}));
     await page.goto(BASE + '/?branch=' + encodeURIComponent(branch));
     const baseTheme = await page.evaluate(() => ({
@@ -43,6 +43,26 @@ const branch = 'account-menu-' + process.pid + '-' + Date.now().toString(36);
     });
     assert(themed.accent === '#aabbcc' && themed.canvas === '#112233',
       'graph defaults follow an existing custom theme without overwriting it');
+    await page.waitForFunction(() => window.gdFnPickerGraph?.ready, null, {timeout: 120000});
+    await page.evaluate(async () => {
+      await searchFns('const');
+      window.openFnPicker({anchorEl: document.getElementById('auth-lock-btn'), onPick() {}});
+    });
+    const picker = page.locator('.fn-picker-popover');
+    await picker.waitFor();
+    assert(await picker.locator('[data-gd-ui-style]').count() === 1,
+      'the real picker renders its list through the graph component');
+    await picker.locator('.fn-picker-search').fill('const');
+    await page.waitForFunction(() => document.querySelector('.fn-picker-row'));
+    const stableRow = await page.locator('.fn-picker-row').first().evaluateHandle((node) => node);
+    await picker.locator('.fn-picker-search').press('ArrowDown');
+    assert(await stableRow.evaluate((node) => node.isConnected),
+      'keyboard selection retains the keyed candidate DOM');
+    await picker.locator('.fn-picker-search').press('Escape');
+    assert(await page.locator('.fn-picker-popover').count() === 0,
+      'Escape disposes the managed picker');
+    assert(await page.locator('style[data-gd-ui-styles]').count() === 0,
+      'closing the picker releases its graph stylesheet');
     const chip = page.locator('#auth-lock-btn');
     await chip.click();
     const menu = page.locator('#auth-popover [role="menu"]');

@@ -1,5 +1,7 @@
 (ns graphden.test-infra.browser-picker-cases
-  "Actual picker row graphs, including finite nested HOFs and retained badges.")
+  "Actual picker row graphs, including finite nested HOFs and retained badges."
+  (:require
+    [clojure.string :as str]))
 
 
 (def row
@@ -25,7 +27,7 @@
 
 
 (def dense-effects
-  (mapv (fn [code] {:code code :label (.toUpperCase ^String code)})
+  (mapv (fn [code] {:code code :label (str/upper-case code)})
         ["db" "env" "io" "network" "time" "misc" "random" "process" "raw-sql"]))
 
 
@@ -75,10 +77,7 @@
 
 
 (def cases
-  [{:entry :picker-row-list :inputs {:model {:rows []}}
-    :expected [:div {:class "fn-picker-rows"}]}
-   {:entry :picker-row-list :inputs {:model {:rows [row]}}
-    :expected [:div {:class "fn-picker-rows"} rendered-row]}
+  [{:entry :picker-row :inputs {:row row} :expected rendered-row}
    {:entry :picker-styles :inputs {} :expected styles}
    {:entry :picker-view :inputs {:model full-model} :expected rendered-full-view}
    {:entry :picker-view

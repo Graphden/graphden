@@ -1,11 +1,11 @@
 // A real external reference must keep in-place cleanup available for retry.
 const {chromium} = require('playwright');
-const {assert, newContext, api, nodeApiJson, waitForServerHealthy, BASE} = require('./edit-test-helpers');
+const {assert, newContext, api, waitForServerHealthy, BASE} = require('./edit-test-helpers');
 const suffix = process.pid + '-' + Date.now().toString(36);
 const branch = 'cleanup-retry-' + suffix;
 const ownedName = 'cleanup-owned-' + suffix;
 const externalName = 'cleanup-dependent-' + suffix;
-const branchApi = (method, path, body) => nodeApiJson(method, path, body, {'X-Graphden-Branch': branch});
+const branchApi = (method, path, body) => api(null, method, path, body, {'X-Graphden-Branch': branch});
 const search = (name) => branchApi('GET', '/api/graph/entities?scope=search&q=' + encodeURIComponent(name));
 
 (async () => {

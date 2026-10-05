@@ -8521,6 +8521,16 @@ button.lambda-params-chip:focus-visible { outline: 1px solid var(--accent); }
 .gd-insp-flag-row [data-effect] { cursor: pointer; }
 .gd-insp-flag-row [data-effect]:focus-visible { outline: 1px solid var(--accent); }
 
+/* Empty canvas navigation hint; no additional toolbar control. */
+.graph-empty-state {
+  position: absolute;
+  inset: 40% 2rem auto;
+  color: var(--muted-fg);
+  text-align: center;
+  pointer-events: none;
+}
+.graph-empty-state[hidden] { display: none; }
+
 /* REDUCED MOTION — must stay the LAST block in this file: it overrides at
    equal specificity, so any rule after it wins again (docs/ACCESSIBILITY.md;
    pinned by tools/runtime-test/css-reduced-motion-last.test.js). */
@@ -8550,13 +8560,3 @@ button.lambda-params-chip:focus-visible { outline: 1px solid var(--accent); }
     opacity: 0.75;
   }
 }
-
-/* Empty canvas navigation hint; no additional toolbar control. */
-.graph-empty-state {
-  position: absolute;
-  inset: 40% 2rem auto;
-  color: var(--muted-fg);
-  text-align: center;
-  pointer-events: none;
-}
-.graph-empty-state[hidden] { display: none; }

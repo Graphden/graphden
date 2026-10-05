@@ -53,8 +53,7 @@ const {
     await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
     await page.waitForSelector('.row-actions-popover button', {timeout: 15000});
     await page.evaluate(() => {
-      Array.from(document.querySelectorAll('.row-actions-popover button'))
-        .find((b) => b.textContent.trim() === '▶')
+      document.querySelector('.row-actions-popover [data-action="run-fn"]')
         .dispatchEvent(new MouseEvent('click', {bubbles: true}));
     });
     await page.waitForSelector('.execute-popover.visible .execute-run-btn',
@@ -458,8 +457,7 @@ const {
     // capture confirm is a native dialog; the page-level handler accepts it.
     await openRowActionsFor(page, 'tutorial-sentence');
     await page.evaluate(() => {
-      Array.from(document.querySelectorAll('.row-actions-popover button'))
-        .find((b) => b.textContent.trim() === '▶')
+      document.querySelector('.row-actions-popover [data-action="run-fn"]')
         .dispatchEvent(new MouseEvent('click', {bubbles: true}));
     });
     await page.waitForSelector('.execute-popover.visible .execute-run-btn', {timeout: 15000});

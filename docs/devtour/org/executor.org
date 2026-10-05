@@ -24,13 +24,13 @@ From stored definitions to callable code and results.
 :PROPERTIES:
 :CUSTOM_ID: executor/execute~2
 :FILE: src/graphden/executor/compile_runtime.clj
-:LINE: 1564
+:LINE: 1587
 :MINS: 4.0
 :END:
 
 Runs a previously compiled [[file:glossary.org::#term/graph-function][graph function]]. It first checks cancellation and any configured execution-permission guard, then binds the [[file:glossary.org::#term/effect][allowed effects]] for the call. The [[file:glossary.org::#term/compiled-registry][compiled registry]] maps function IDs to [[file:glossary.org::#term/closure][closures]]: callable Clojure functions retaining their prepared dependencies. ~execute~ looks up the [[file:glossary.org::#term/closure][closure]], translates named input into slot-ID and name keys, and calls ~(closure translated ctx)~.
 
-- source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn execute][src/graphden/executor/compile_runtime.clj:1564]]
+- source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn execute][src/graphden/executor/compile_runtime.clj:1587]]
 - see also :: [[file:executor.org::#executor/registry][registry]]
 - same file :: [[file:executor.org::#executor/registry][registry]], [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:platform.org::#platform/cloud-forbidden-effects][cloud-forbidden-effects]]
 
@@ -65,13 +65,13 @@ Loads the graph cache while protecting concurrent writes. Before reading storage
 :PROPERTIES:
 :CUSTOM_ID: executor/registry
 :FILE: src/graphden/executor/compile_runtime.clj
-:LINE: 992
+:LINE: 1015
 :MINS: 2.8
 :END:
 
 Returns the [[file:glossary.org::#term/compiled-registry][compiled registry]], a map from function IDs to Clojure [[file:glossary.org::#term/closure][closures]]. An existing registry can be served while a background rebuild refreshes it. If no registry exists yet, compilation runs under the [[file:glossary.org::#term/invalidation][invalidation]] lock; a second check prevents concurrent callers from compiling the same context twice. Later writes can invalidate or update this registry.
 
-- source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn registry][src/graphden/executor/compile_runtime.clj:992]]
+- source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn registry][src/graphden/executor/compile_runtime.clj:1015]]
 - see also :: [[file:executor.org::#executor/rebuild!][rebuild!]]
 - same file :: [[file:executor.org::#executor/execute~2][execute]], [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:platform.org::#platform/cloud-forbidden-effects][cloud-forbidden-effects]]
 - referenced from :: [[file:executor.org::#executor/execute~2][execute]], [[file:boot.org::#boot/compiled-registry][compiled-registry]]
@@ -80,13 +80,13 @@ Returns the [[file:glossary.org::#term/compiled-registry][compiled registry]], a
 :PROPERTIES:
 :CUSTOM_ID: executor/rebuild!
 :FILE: src/graphden/executor/compile_runtime.clj
-:LINE: 675
+:LINE: 698
 :MINS: 3.4
 :END:
 
 Reads stored graph rows, builds lookup indexes, and compiles functions. It then fills the graph and dependency caches and replaces the [[file:glossary.org::#term/compiled-registry][compiled registry]]. The following steps explain how persisted function definitions become callable Clojure [[file:glossary.org::#term/closure][closures]].
 
-- source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn rebuild!][src/graphden/executor/compile_runtime.clj:675]]
+- source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn rebuild!][src/graphden/executor/compile_runtime.clj:698]]
 - see also :: [[file:executor.org::#executor/build-lookups][build-lookups]], [[file:executor.org::#executor/compile-all][compile-all]]
 - same file :: [[file:executor.org::#executor/execute~2][execute]], [[file:executor.org::#executor/registry][registry]], [[file:platform.org::#platform/cloud-forbidden-effects][cloud-forbidden-effects]]
 - referenced from :: [[file:executor.org::#executor/registry][registry]], [[file:storage.org::#storage/ExecutionGraph][ExecutionGraph]], [[file:boot.org::#boot/compiled-registry][compiled-registry]]

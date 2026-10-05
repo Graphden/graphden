@@ -131,11 +131,20 @@ async function putDescription(page, fnId, desc) {
       return {
         visible: !!p && !p.classList.contains('hidden'),
         restoreBtnCount: restoreBtns.length,
-        restoreVersionIds: restoreBtns.map(
+        disabledRestoreCount: restoreBtns.filter((b) => b.disabled).length,
+        disabledRestoreTitle: restoreBtns.find((b) => b.disabled)?.title,
+        header: p.querySelector('.fn-versions-header')?.textContent,
+        restoreVersionIds: restoreBtns.filter((b) => !b.disabled).map(
           (b) => b.getAttribute('data-fn-version-id')),
       };
     });
     assert(popoverState.visible, '⌛ popover visible');
+    assert(popoverState.disabledRestoreCount === 1,
+           'current fields have one disabled Restore action');
+    assert(popoverState.disabledRestoreTitle.includes('already match'),
+           'disabled Restore explains why it is unavailable');
+    assert(popoverState.header.includes('field versions'),
+           'history identifies its function-field scope');
     assert(popoverState.restoreBtnCount >= 2,
            '≥ 2 Restore buttons (on historic v1 + v2): '
            + popoverState.restoreBtnCount);

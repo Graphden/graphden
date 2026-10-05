@@ -620,6 +620,12 @@ create separate `:binding-version` / `:binding-list-item-version` /
 `:fn-slot-version` rows; the `:fn` row's `:fn-version-id` is
 UNCHANGED.
 
+The editor labels this timeline as **field versions**. Restore copies the
+historic description, constraint, type/base metadata and expected effects;
+it leaves names, argument bindings and inherited structure unchanged. The
+action is disabled when those visible fields already match the effective
+current branch, including an older equal state or an inherited version.
+
 Consequence: two `:fn-execution` rows pointing at the same
 `:fn-version-id` can have produced different results if a binding
 changed in between. The history filter ("show me runs of the

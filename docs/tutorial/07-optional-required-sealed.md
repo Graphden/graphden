@@ -36,9 +36,9 @@ may be left unbound: the implementation has a fallback. `subs` is one
 
 On a card of your own the free `end` is drawn like any free slot, but
 its `+` is **dimmed**, and the small lock after its type chip — `🔓`,
-faint until you hover the label — reads *Optional — the fn runs without
-it*. (A package fn's card shows neither `+` nor badge for a free slot —
-it is not yours to bind; extend it first.) The
+faint until you hover the label or focus the button — reads
+*Optional — the fn runs without it*. (A package fn's card shows neither
+`+` nor badge for a free slot — it is not yours to bind; extend it first.) The
 Run form (lesson 15) lists it the same way. Bind it or don't; either
 runs.
 
@@ -130,8 +130,10 @@ Run a fn without its optional input, seal a slot, then require it:
    (`core.strings`). Three free slots; `end` is declared optional —
    you will see it on your own child next.
 2. `⋯` → **Extend** → `tutorial-cut` → **Save**.
-3. Hover the `end` label and its faint `🔓`: *Optional — the fn runs
-   without it.*
+3. Click the faint `🔓` beside `end` and inspect the restrictions.
+   **Require it here** makes this input mandatory; **Seal against
+   descendants** prevents children from binding it. Leave both unchecked
+   and click **Cancel** before binding the other inputs.
 4. `+` on `string` → **Bind literal** → `graphden` → **Save**; `+`
    on `start` → `5` → **Save**. Leave `end` alone.
 5. `⋯` → **▶ Run** → **Run**: `"den"` — `end` defaulted to the end

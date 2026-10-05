@@ -19,10 +19,12 @@
     [graphden.executor.compile.renames :as r]
     [graphden.executor.compile.surface :as surface]
     [graphden.executor.registry.core :as reg]
+    [graphden.packages.owned :as owned]
     [graphden.packages.records.types :as record-types]
     [graphden.storage.protocol.core :as sp]
     [graphden.types.core :as types]
-    [graphden.util.counters :as counters]))
+    [graphden.util.counters :as counters]
+    [graphden.util.ns-path :as ns-path]))
 
 
 ;; =============================================================================
@@ -215,6 +217,15 @@
         graph)))
 
 
+(defn- qualified-type-name
+  [ns-paths {:keys [namespace-id name]}]
+  (when-let [path (get ns-paths namespace-id)]
+    ;; Match the package authoring boundary: materialized @version
+    ;; namespaces keep their existing bare-name compatibility.
+    (when (and name (re-matches #"[A-Za-z0-9._-]+" path))
+      (keyword path name))))
+
+
 (defn register-type-aliases-from-db!
   "Walk type-rows in the just-loaded graph and register them as type-
    aliases — the runtime equivalent of system/core's
@@ -238,18 +249,28 @@
    `source` names whose view of the graph this is (the branch — see
    `alias-source`): a type-row that source registered before and no
    longer has (deleted / renamed through the API) leaves the registry,
-   unless another source still declares it (`types/sync-db-aliases!`)."
+   unless another source still declares it (`types/sync-db-aliases!`).
+
+   `ns-paths` maps namespace ids to dotted paths. Qualified names and
+   id-resolved type references retain their namespace; bare aliases keep
+   their legacy collision behavior. The graph's five-table shape stays
+   unchanged: the storage caller reads namespace paths once per refresh."
   ([graph] (register-type-aliases-from-db! graph ::unscoped))
-  ([{:keys [fns slots fn-slots]} source]
+  ([graph source] (register-type-aliases-from-db! graph source {}))
+  ([{:keys [fns slots fn-slots]} source ns-paths]
    (let [fn-by-id   (into {} (map (juxt :id identity)) fns)
          slot-by-id (into {} (map (juxt :id identity)) slots)
          slots-by-fn (group-by :fn-id fn-slots)
-         name-by-id (fn [id] (some-> (get fn-by-id id) :name keyword))
+         name-by-id (fn [id]
+                      (when-let [row (get fn-by-id id)]
+                        (or (qualified-type-name ns-paths row)
+                            (some-> (:name row) keyword))))
          candidates
-         (keep
+         (mapcat
            (fn [f]
              (when-let [nm (some-> (:name f) keyword)]
-               (let [own-slots (->> (get slots-by-fn (:id f) [])
+               (let [qualified (qualified-type-name ns-paths f)
+                     own-slots (->> (get slots-by-fn (:id f) [])
                                     (sort-by :position)
                                     (keep #(get slot-by-id (:slot-id %))))
                      role (record-types/type-row-role f (seq own-slots))
@@ -310,22 +331,17 @@
                             (:constraint f)
 
                             nil)
-                     ;; A platform row the packages declared keeps its
-                     ;; DECLARED body: the slot walk above can only name
-                     ;; type-rows, so a union / fn-typed field comes back as
-                     ;; its storage kind (`:any`) — wider than fns.edn said,
-                     ;; and wide enough to fail contravariance on every
-                     ;; fn-typed slot naming the record (types/core
-                     ;; `package-alias-bodies`). Tenant rows (`:org-id` set)
-                     ;; are the API's own and keep the rebuilt shape.
-                     body (if (nil? (:org-id f))
-                            (or (types/package-alias-body nm) body)
+                     ;; Package declarations preserve structural fields that
+                     ;; storage cannot reconstruct. An untenanted user row is
+                     ;; not a package row, even when its short name matches.
+                     body (if (owned/owned-fn-id? (:id f))
+                            (or (types/package-alias-body (or qualified nm)) body)
                             body)]
-                 (when body {:nm nm :body body :org (:org-id f)
-                             ;; Owner id feeds the alias-collision
-                             ;; diagnostic — per-ns names may repeat,
-                             ;; a silent alias overwrite must not.
-                             :owner (:id f)}))))
+                 (when body
+                   (map (fn [alias-name]
+                          {:nm alias-name :body body :org (:org-id f)
+                           :owner (:id f)})
+                        (cond-> [nm] qualified (conj qualified)))))))
            fns)
          {:keys [failed]} (types/register-type-aliases-batch
                             (map (juxt :nm :body :owner) candidates))
@@ -406,6 +422,13 @@
   (storage-alias-source (compile-storage ctx)))
 
 
+(defn- register-storage-type-aliases!
+  [ctx graph]
+  (register-type-aliases-from-db!
+    graph (alias-source ctx)
+    (ns-path/path-map (sp/query-entities (compile-storage ctx) :ns {}))))
+
+
 (defn refresh-type-registries-from-storage!
   "Light-weight equivalent of `rebuild!` that ONLY refreshes type
    registries (aliases + rich-types snapshot of current DB type-rows)
@@ -417,7 +440,7 @@
    on-demand by the next `execute` (via `registry`'s lazy fallback)."
   [ctx]
   (let [graph (graph-in-hand ctx (compile-storage ctx))]
-    (register-type-aliases-from-db! graph (alias-source ctx))
+    (register-storage-type-aliases! ctx graph)
     graph))
 
 
@@ -602,7 +625,7 @@
   ([ctx graph] (prep-compile-inputs ctx graph nil))
   ([ctx graph {:keys [defer-aliases?]}]
    (when-not defer-aliases?
-     (register-type-aliases-from-db! graph (alias-source ctx)))
+     (register-storage-type-aliases! ctx graph))
    (let [fns-map (if (map? (:fns graph))
                    (:fns graph)
                    (into {} (map (juxt :id identity)) (:fns graph)))]
@@ -650,7 +673,7 @@
         ctx
         (fn []
           (if (unchanged?)
-            (do (register-type-aliases-from-db! graph (alias-source ctx))
+            (do (register-storage-type-aliases! ctx graph)
                 (reset! (:compiled-registry ctx) compiled)
                 (prime-graph-cache! ctx graph)
                 (prime-compile-deps! ctx lookups)

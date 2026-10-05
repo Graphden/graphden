@@ -22,7 +22,7 @@
  "keyboard-and-accessibility" {:version 1, :steps "7d9d89e48bd24849fbfedb7018def98089119a05"}
  "lists" {:version 2, :steps "078ca125f752d67b8aaa9e90483dabd743077d98"}
  "marketplace-themes-keymaps" {:version 2, :steps "40c04fb737ec6868ce2c65fd05bf694ec91550ff"}
- "optional-required-sealed" {:version 1, :steps "0beb80c41c1191f421df83f3f189471b11c31f5f"}
+ "optional-required-sealed" {:version 2, :steps "e74c18a11d76e59fe91ef0823fbf5b19a2fafe21"}
  "parents-and-inheritance" {:version 2, :steps "94d209afaa817876be2033a0fc7deb912e61cac4"}
  "plans-and-tiers" {:version 1, :steps "9be038d41425d8cdfdd5a20aaf56dc4605b50b52"}
  "reading-a-card" {:version 1, :steps "1ea6771ae3efd4ec0f7b07468896d515cd21d058"}

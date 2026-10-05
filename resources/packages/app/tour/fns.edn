@@ -662,7 +662,7 @@
             {:id "07"
              :slug "optional-required-sealed"
              :chapter "Basics"
-             :version 1
+             :version 2
              :title "Optional, required and sealed"
              :reads "has the fns, and the whole optional / required / sealed matrix."
              :steps
@@ -685,9 +685,13 @@
                :target nil
                :check {:kind "selected" :name "tutorial-cut"}}
               {:title "Optional, on the label"
-               :body "Hover the end label: after its type chip a faint lock appears — [[🔓]]. Its tooltip reads Optional — the fn runs without it. That is the slot's declaration, `:required false` on subs; the dimmed [[+]] says the same. Click [[Next]]."
+               :body "Hover or focus the end label's [[🔓]]: Optional means the fn runs without this argument; the dimmed [[+]] says the same. Click the lock to inspect the restrictions."
                :target ".edge-label-overlay[data-arg-name=\"end\"] .seal-badge"
-               :check {:kind "manual"}}
+               :check {:kind "dom" :selector ".arg-value-edit-popover[aria-label=\"Seals on end\"]"}}
+              {:title "Close the restrictions without changing them"
+               :body "[[Require it here]] makes :end mandatory from this function down. [[Seal against descendants]] prevents descendants from binding it. These are separate restrictions. Leave both unchecked and click [[Cancel]]; next you will bind :string."
+               :target ".arg-value-edit-popover[aria-label=\"Seals on end\"] .arg-value-edit-btn-secondary"
+               :check {:kind "dom-absent" :selector ".arg-value-edit-popover[aria-label=\"Seals on end\"]"}}
               {:title "Bind the string"
                :body "Click the [[+]] on :string, choose [[Bind literal]], type `graphden` — then [[Save]]."
                :target ".placeholder-binder[data-fn-name=\"tutorial-cut\"][data-arg-name=\"string\"]"

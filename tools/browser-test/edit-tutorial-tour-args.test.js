@@ -217,8 +217,15 @@ const {
     }));
     assert(optional.dimmed === true && optional.badge === 'optional',
       'the optional slot is dimmed and its badge says so (got: ' + JSON.stringify(optional) + ')');
-    assert(await clickTourButton(page, 'Next'), 'lesson 07 optional Next');
+    await page.locator('.edge-label-overlay[data-arg-name="end"] .seal-badge').click();
+    await waitTourTitle(page, 'Close the restrictions without changing them', 150000);
+    const restrictions = page.locator('.arg-value-edit-popover[aria-label="Seals on end"]');
+    assert(!await restrictions.locator('input[data-seal="required"]').isChecked()
+      && !await restrictions.locator('input[data-seal="terminal"]').isChecked(),
+    'both restrictions start unchecked');
+    await restrictions.getByRole('button', {name: 'Cancel', exact: true}).click();
     await waitTourTitle(page, 'Bind the string', 150000);
+    assert(await restrictions.count() === 0, 'the restrictions close before literal binding');
     await bindPlaceholderOn(page, 'tutorial-cut', 'string', 'literal', 'graphden');
     await waitTourTitle(page, 'And the start', 150000);
     await bindPlaceholderOn(page, 'tutorial-cut', 'start', 'literal', '5');

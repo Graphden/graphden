@@ -23,6 +23,7 @@
     [graphden.executor.compile.deps :as deps]
     [graphden.executor.context :as exec-ctx]
     [graphden.packages.records.ids :as ids]
+    [graphden.packages.records.wire :as wire]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.context :as tc]
     [graphden.types.check :as types-check]
@@ -206,6 +207,24 @@
        vec))
 
 
+(defn- row->kw
+  [row]
+  (when-let [n (:name row)]
+    (if-let [nsp (::ns-path row)]
+      (keyword nsp n)
+      (keyword n))))
+
+
+(defn- row->type-kw
+  [row]
+  ;; Alias registration keeps materialized @version namespaces bare-only
+  ;; (packages/sync and compile-runtime). Function refs use row->kw instead:
+  ;; their rich-type name index supports those qualified namespaces.
+  (if (some-> (::ns-path row) wire/edn-keyword-ns?)
+    (row->kw row)
+    (some-> (:name row) keyword)))
+
+
 (defn binding-shape-for-edn
   "Convert one DB binding row + its list-items into the EDN-shape value
    `check-fn-def!` expects:
@@ -228,14 +247,6 @@
         ;; sibling in the EDN `{:as :name :type T}` shape).
         renamed-view (get renamed-view-by-source (:slot-id b))
         ref-id (:ref-fn-id b)
-        row->kw (fn [row]
-                  (when-let [n (:name row)]
-                    ;; reconstruct pre-annotates rows with ::ns-path so
-                    ;; per-ns duplicate names emit QUALIFIED and resolve
-                    ;; precisely through the registry's dual index.
-                    (if-let [nsp (::ns-path row)]
-                      (keyword nsp n)
-                      (keyword n))))
         ref-name (when ref-id (some-> (get fn-by-id ref-id) row->kw))]
     (cond
       (some? items)
@@ -257,7 +268,7 @@
       renamed-view {:as (keyword (:name renamed-view))
                     :type (some-> (:type-fn-id renamed-view)
                                   (->> (get fn-by-id))
-                                  row->kw)}
+                                  row->type-kw)}
       :else nil)))
 
 
@@ -303,12 +314,7 @@
               ;; namespace) is exactly where duplicates live.
               ns-paths (delay (ns-path/path-map (sp/query-entities storage :ns {})))
               fn-by-id (annotate-rows ns-paths fn-by-id)
-              parent-name (fn [pid]
-                            (let [row (get fn-by-id pid)]
-                              (when-let [n (:name row)]
-                                (if-let [nsp (::ns-path row)]
-                                  (keyword nsp n)
-                                  (keyword n)))))
+              parent-name (fn [pid] (row->kw (get fn-by-id pid)))
               own-bindings (sp/query-entities storage :binding {:fn-id fn-id})
               ;; Phase 6c — own fn-slot rows of `fn-id` carry the
               ;; renamed-view slots (the FK link replacing the legacy
@@ -434,7 +440,7 @@
                          own-bindings)
               ret-name (some-> (:return-type-fn-id own)
                                (->> (get fn-by-id+refs))
-                               :name keyword)]
+                               row->type-kw)]
           (cond-> {:name (some-> (:name own) keyword)
                    ;; The ROW id — editor-created fns have RANDOM ids
                    ;; (not the sync path's name-derived uuid-v5), so the
@@ -559,48 +565,9 @@
 
 
 (defn- dependent-recheck-plan
-  "Return transitive dependents of `fn-id` in dependency order, using
-   the already-primed reverse dependency index. A changed callee is
-   checked before its caller, so callers observe the fresh rich type.
-   Cycles are tolerated: the closure walk terminates, and any cyclic
-   remainder is returned in stable ID order for best-effort checking."
   [reverse-deps fn-id]
-  (let [dependents (disj (deps/transitive-blast reverse-deps [fn-id]) fn-id)
-        initial-indegree
-        (reduce (fn [degrees source]
-                  (reduce (fn [acc dependent]
-                            (if (contains? dependents dependent)
-                              (update acc dependent inc)
-                              acc))
-                          degrees
-                          (get reverse-deps source #{})))
-                (zipmap dependents (repeat 0))
-                dependents)
-        ready (into (sorted-set-by #(compare (str %1) (str %2)))
-                    (keep (fn [[id degree]] (when (zero? degree) id)))
-                    initial-indegree)]
-    (loop [ready ready
-           indegree initial-indegree
-           ordered []]
-      (if-let [id (first ready)]
-        (let [ready (disj ready id)
-              [indegree ready]
-              (reduce (fn [[degrees queue] dependent]
-                        (if-let [degree (get degrees dependent)]
-                          (let [next-degree (dec degree)]
-                            [(assoc degrees dependent next-degree)
-                             (if (zero? next-degree)
-                               (conj queue dependent)
-                               queue)])
-                          [degrees queue]))
-                      [indegree ready]
-                      (get reverse-deps id #{}))]
-          (recur ready indegree (conj ordered id)))
-        (let [cyclic (->> indegree
-                          (keep (fn [[id degree]] (when (pos? degree) id)))
-                          (sort-by str))]
-          {:ordered (into ordered cyclic)
-           :cyclic (vec cyclic)})))))
+  (deps/dependency-order
+    reverse-deps (disj (deps/transitive-blast reverse-deps [fn-id]) fn-id)))
 
 
 (defn direct-dependents

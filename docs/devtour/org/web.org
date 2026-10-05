@@ -249,11 +249,11 @@ Ranks already-admissible function candidates by how their parameters fit a calla
 :PROPERTIES:
 :CUSTOM_ID: web/sync-fn-defs-branch!
 :FILE: resources/packages/storage/branches/impls.clj
-:LINE: 32
+:LINE: 49
 :MINS: 2.4
 :END:
 
 Synchronizes function definitions into a specified branch for [[file:glossary.org::#term/mcp][MCP]] and bundle-import callers. It uses the same synchronization checks as packaged definitions and invalidates the target branch's [[file:glossary.org::#term/compiled-registry][compiled registry]]. The target may differ from the branch carrying the HTTP request.
 
-- source :: [[file:../../../resources/packages/storage/branches/impls.clj::(defbase sync-fn-defs-branch!][resources/packages/storage/branches/impls.clj:32]]
+- source :: [[file:../../../resources/packages/storage/branches/impls.clj::(defbase sync-fn-defs-branch!][resources/packages/storage/branches/impls.clj:49]]
 - see also :: [[file:executor.org::#executor/sync-fns-to-storage!][sync-fns-to-storage!]], [[file:boot.org::#boot/dispatch-first][dispatch-first]]

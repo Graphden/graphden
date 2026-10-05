@@ -257,3 +257,47 @@
    `transitive-blast`; only the walked dep-map differs."
   [forward-deps root-ids]
   (reachable-closure forward-deps root-ids))
+
+
+(defn dependency-order
+  "Order the selected fn IDs dependencies-first using the reverse index.
+   Dependencies outside this selection are already recorded. A cyclic
+   remainder is returned in stable ID order for best-effort diagnostics;
+   callers receive it separately so they can report the invalid graph."
+  [reverse-deps fn-ids]
+  (let [selected (set fn-ids)
+        initial-indegree
+        (reduce (fn [degrees source]
+                  (reduce (fn [acc dependent]
+                            (if (contains? selected dependent)
+                              (update acc dependent inc)
+                              acc))
+                          degrees
+                          (get reverse-deps source #{})))
+                (zipmap selected (repeat 0))
+                selected)
+        ready (into (sorted-set-by #(compare (str %1) (str %2)))
+                    (keep (fn [[id degree]] (when (zero? degree) id)))
+                    initial-indegree)]
+    (loop [ready ready
+           indegree initial-indegree
+           ordered []]
+      (if-let [id (first ready)]
+        (let [ready (disj ready id)
+              [indegree ready]
+              (reduce (fn [[degrees queue] dependent]
+                        (if-let [degree (get degrees dependent)]
+                          (let [next-degree (dec degree)]
+                            [(assoc degrees dependent next-degree)
+                             (if (zero? next-degree)
+                               (conj queue dependent)
+                               queue)])
+                          [degrees queue]))
+                      [indegree ready]
+                      (get reverse-deps id #{}))]
+          (recur ready indegree (conj ordered id)))
+        (let [cyclic (->> indegree
+                          (keep (fn [[id degree]] (when (pos? degree) id)))
+                          (sort-by str))]
+          {:ordered (into ordered cyclic)
+           :cyclic (vec cyclic)})))))

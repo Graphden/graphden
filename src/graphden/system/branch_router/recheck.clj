@@ -22,6 +22,8 @@
     [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.crud.type-check :as type-check]
+    [graphden.executor.compile-runtime :as compile-runtime]
+    [graphden.executor.compile.deps :as deps]
     [graphden.executor.registry.core :as registry-core]
     [graphden.packages.records :as records]
     [graphden.storage.protocol.core :as sp]
@@ -66,6 +68,9 @@
           fn-rows)))
 
 
+(declare record-fn-types!)
+
+
 (defn- recheck-user-fns!
   "Re-run `type-check-fn-after-mutation!` for every editor-authored fn
    visible on `branch-ctx`'s branch, repopulating the per-branch
@@ -87,12 +92,7 @@
                    :cap max-user-fn-recheck})
 
         :else
-        (do (doseq [id ids]
-              (try
-                (type-check/type-check-fn-after-mutation! storage id)
-                (catch Exception t
-                  (log/debug t "ctx-build diagnostics recheck failed for fn"
-                             {:branch-id branch-id :fn-id id}))))
+        (do (record-fn-types! branch-ctx branch-id ids)
             (log/debug "ctx-build diagnostics recompute done"
                        {:branch-id branch-id :checked (count ids)}))))
     (catch Exception t
@@ -140,12 +140,18 @@
    binds `branch-ctx`'s slices (`call-with-ctx-slices`) and decides
    whether to run it inline or on a future. Best-effort per fn."
   [branch-ctx branch-id fn-ids]
-  (doseq [id fn-ids]
-    (try
-      (type-check/type-check-fn-after-mutation! (:storage branch-ctx) id)
-      (catch Exception t
-        (log/debug t "slice type re-record failed for fn"
-                   {:branch-id branch-id :fn-id id})))))
+  (when (seq fn-ids)
+    (let [{:keys [ordered cyclic]}
+          (deps/dependency-order (compile-runtime/ctx-reverse-deps branch-ctx) fn-ids)]
+      (when (seq cyclic)
+        (log/warn "cycle in branch type recheck; checking remaining fns in stable order"
+                  {:branch-id branch-id :cycle-fn-ids cyclic}))
+      (doseq [id ordered]
+        (try
+          (type-check/type-check-fn-after-mutation! (:storage branch-ctx) id)
+          (catch Exception t
+            (log/debug t "slice type re-record failed for fn"
+                       {:branch-id branch-id :fn-id id})))))))
 
 
 (defn record-own-fn-types!
@@ -161,6 +167,18 @@
   (when (and *recheck-user-fns?*
              (<= (count fn-ids) max-user-fn-recheck))
     (record-fn-types! branch-ctx branch-id fn-ids)))
+
+
+(defn record-imported-fn-types!
+  "Record a successful import's exact IDs before returning to its caller.
+   Unlike the bounded startup sweep, a mutation must not silently skip a
+   large bundle. Invalid definitions keep their ordinary diagnostics;
+   this does not grant a type to a definition that failed checking."
+  [branch-ctx branch-id fn-ids]
+  (when (seq fn-ids)
+    (call-with-ctx-slices
+      branch-ctx
+      #(record-fn-types! branch-ctx branch-id fn-ids))))
 
 
 (defn recheck-ctx-types!

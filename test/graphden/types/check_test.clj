@@ -2276,3 +2276,24 @@
     (is (some? (check/check-fn-def! {:name :dir-ok :parent :dir-rec-int-y
                                      :args {:rec :dir-int-y-ok}})))
     (is (= :text (:return (registry/rich-type-of :dir-ok))))))
+
+
+(deftest zipmap-string-keys-keep-their-type-through-literal-wrapping
+  (doseq [[keys-form vals-form]
+          [[["up" "down"] ["before" "after"]]
+           [[{:value "up" :literal? false} {:value "down" :literal? false}]
+            [{:value "before" :literal? false} {:value "after" :literal? false}]]]]
+    (check/check-fn-def! {:name :string-key-map :parent :zipmap
+                          :args {:keys keys-form :vals vals-form}})
+    (is (= [:map :text :text] (:return (registry/rich-type-of :string-key-map))))
+    (check/check-fn-def! {:name :dynamic-key :parent :const
+                          :args {:value {:as :key :type :text}}})
+    (check/check-fn-def! {:name :string-key-read :parent :get :return-type :text
+                          :args {:coll :string-key-map :key :dynamic-key :default ""}})
+    (is (= :text (:return (registry/rich-type-of :string-key-read)))))
+  (testing "keyword literals remain an exact record"
+    (check/check-fn-def! {:name :keyword-key-map :parent :zipmap
+                          :args {:keys [{:value :up} {:value :down}]
+                                 :vals ["before" 2]}})
+    (is (= {:up :text :down :int}
+           (:return (registry/rich-type-of :keyword-key-map))))))

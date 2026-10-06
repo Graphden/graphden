@@ -13,6 +13,7 @@
     [graphden.executor.defbase :refer [defbase]]
     [graphden.packages.compat :as compat]
     [graphden.packages.export :as export]
+    [graphden.packages.rebase :as rebase]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.wire :as wire]
     [graphden.packages.registry-shared :as shared]
@@ -22,6 +23,7 @@
     [graphden.storage.sql.pg :as pg]
     [graphden.system.branch-router :as br]
     [graphden.system.branch-router.epoch :as br-epoch]
+    [graphden.system.branch-router.recheck :as recheck]
     [graphden.system.deploy-config :as deploy-config]
     [graphden.tenancy.context :as tc]
     [graphden.versioning.storage.core :as vs]))
@@ -265,9 +267,7 @@
    dependents rather than clear + rebuild the whole registry. Does NOT
    invalidate itself (update combines these ids with rewritten-ref owners)."
   [storage ns-root version fns]
-  (let [materialized (mapv (fn [fd]
-                             (update fd :namespace #(version-qualified-ns ns-root version %)))
-                           fns)]
+  (let [materialized (rebase/rebase-bundle fns #(version-qualified-ns ns-root version %))]
     (pkg-sync/sync-bundle! storage materialized)))
 
 
@@ -434,6 +434,16 @@
 ;; Install (reference), fork (copy-on-write), materialize.
 ;; ---------------------------------------------------------------------------
 
+(defn- complete-bundle-sync!
+  "Publish successful imports to this branch's compiled and rich-type slices.
+   The first restricted execution must see checked types without a warmup."
+  [ctx fn-ids]
+  (let [storage (request/require-storage ctx)]
+    (exec-ctx/invalidate-graph-cache! ctx fn-ids)
+    (recheck/record-imported-fn-types! ctx (vs/current-branch-id storage) fn-ids)
+    (br-epoch/note-graph-epoch-validated! storage)))
+
+
 ;; Fork apply-core (PACKAGE_DISTRIBUTION §4.5): sync a bundle's fns into
 ;; the graph AT THEIR ORIGINAL namespace (copy-on-write duplicate into the
 ;; caller's project) + delta-invalidate — the write and its invalidation
@@ -442,13 +452,12 @@
 (defbase fork-package-fns
   [fns]
   (cr/record-effect! :db)
-  (let [storage (request/require-storage ctx)
-        forked-ids (pkg-sync/sync-bundle! storage fns)]
-    ;; Delta-invalidate: the forked fns (+ dependents) recompile, not the
-    ;; whole registry — a full clear here froze constrained instances.
-    (exec-ctx/invalidate-graph-cache! ctx forked-ids)
-    (br-epoch/note-graph-epoch-validated! (request/require-storage ctx))
-    (count fns)))
+  (recheck/call-with-ctx-slices
+    ctx
+    #(let [storage (request/require-storage ctx)
+           forked-ids (pkg-sync/sync-bundle! storage fns)]
+       (complete-bundle-sync! ctx forked-ids)
+       (count fns))))
 
 
 ;; Materialize apply-core (PACKAGE_DISTRIBUTION §4.2): sync a bundle's
@@ -458,10 +467,11 @@
 (defbase materialize-package-fns
   [ns-root version fns]
   (cr/record-effect! :db)
-  (let [mat-ids (materialize-fns! (request/require-storage ctx) ns-root version fns)]
-    (exec-ctx/invalidate-graph-cache! ctx mat-ids)
-    (br-epoch/note-graph-epoch-validated! (request/require-storage ctx))
-    (count mat-ids)))
+  (recheck/call-with-ctx-slices
+    ctx
+    #(let [mat-ids (materialize-fns! (request/require-storage ctx) ns-root version fns)]
+       (complete-bundle-sync! ctx mat-ids)
+       (count mat-ids))))
 
 
 (defbase version-qualified-ns-fn
@@ -497,13 +507,13 @@
 (defbase rewrite-refs-to-version
   [ns-root old-version new-version fns]
   (cr/record-effect! :db)
-  (let [storage (request/require-storage ctx)
-        {rewritten :count :keys [owners]}
-        (rewrite-refs-to-version! storage ns-root old-version new-version fns)]
-    ;; Delta — a full clear here recompiled ~3600 fns and froze the server.
-    (exec-ctx/invalidate-graph-cache! ctx owners)
-    (br-epoch/note-graph-epoch-validated! storage)
-    rewritten))
+  (recheck/call-with-ctx-slices
+    ctx
+    #(let [storage (request/require-storage ctx)
+           {rewritten :count :keys [owners]}
+           (rewrite-refs-to-version! storage ns-root old-version new-version fns)]
+       (complete-bundle-sync! ctx owners)
+       rewritten)))
 
 
 ;; ---------------------------------------------------------------------------

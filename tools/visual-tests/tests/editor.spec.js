@@ -31,9 +31,9 @@ async function waitForGraphRendered(page) {
 }
 
 async function setTheme(page, theme) {
+  await page.waitForFunction(() => window.gdPrefsReady && window.gdShellMenuGraph?.ready);
   await page.evaluate((t) => {
-    if (t === 'dark') document.body.classList.add('theme-dark');
-    else document.body.classList.remove('theme-dark');
+    applyTheme(t === 'dark');
   }, theme);
   await page.evaluate(() => new Promise(requestAnimationFrame));
 }

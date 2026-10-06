@@ -123,9 +123,36 @@
   }
   window.gdApplyThemeGraphPreference = applyPreference;
   window.gdThemeGraphStatus = () => status;
-  window.gdCreateThemeGraph = (anchorEl) => {
+  window.gdCreateThemeGraph = async (anchorEl) => {
     const owner = window.gdPrefOwner;
-    openNamespacePicker({anchorEl, onPick: (namespace) => { void create(namespace, owner); }});
+    const branch = getCurrentBranchName();
+    const organization = org();
+    const own = generation;
+    if (!window.gdPrefsReady || !owner || !anchorEl?.isConnected || anchorEl.disabled) return;
+    const sameContext = () => own === generation && owner === window.gdPrefOwner
+      && branch === getCurrentBranchName() && organization === org();
+    const current = () => sameContext() && anchorEl.isConnected
+      && !anchorEl.closest('[hidden], [inert]');
+    try {
+      // Settings can be ready before the editor's namespace tree at boot.
+      if (!Array.isArray(graphData?.namespaces)) {
+        anchorEl.disabled = true;
+        notify('Loading namespaces…');
+        await loadGraphData();
+      }
+      if (!current()) return;
+      // loadGraphData reports fetch failures but resolves without a shell.
+      if (!Array.isArray(graphData?.namespaces)) throw new Error('unavailable');
+      notify('');
+      openNamespacePicker({anchorEl, onPick: (namespace) => {
+        if (current()) void create(namespace, owner);
+      }});
+    } catch (_) {
+      if (current()) notify('Namespaces could not be loaded. Try Create graph again.');
+    } finally {
+      anchorEl.disabled = false;
+      if (sameContext() && status === 'Loading namespaces…') notify('');
+    }
   };
   window.gdChooseThemeGraph = (anchorEl) => openFnPicker({anchorEl,
     expectedType: {mode: 'text', tokens: ['map', 'text', 'text'], fonts: ['map', 'text', 'text'], scale: 'int'},

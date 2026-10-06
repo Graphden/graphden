@@ -73,7 +73,7 @@ const ANY = 'vcd-any' + RUN;
     await page.selectOption('.value-form-as-select', 'text');
     await page.waitForSelector('.value-form-host input[data-field-kind="text"]', {timeout: 15000});
     await page.fill('.value-form-host input[data-field-kind="text"]', 'tick');
-    await page.waitForFunction(() => /OK/.test(document.querySelector('.arg-value-edit-status')?.textContent || ''), null, {timeout: 5000});
+    await page.waitForFunction(() => document.querySelector('.arg-value-edit-status')?.classList.contains('ok'), null, {timeout: 5000});
     await page.click('.arg-value-edit-popover .arg-value-edit-btn:not(.arg-value-edit-btn-secondary):not(.arg-value-edit-btn-danger)');
     await page.waitForFunction(() => !document.querySelector('.arg-value-edit-popover'), null, {timeout: 20000});
     await page.waitForFunction((n) => Array.from(document.querySelectorAll('.arg-value-text')).some((e) => e.textContent === '"tick"'), null, {timeout: 30000});

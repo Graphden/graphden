@@ -95,10 +95,10 @@ async function cleanup(page) {
     await page.waitForSelector('.fn-picker-popover', {timeout: 5000});
     // The type-compatible candidate set now loads from the server
     // (/api/types/candidates) async — wait for it to populate before
-    // probing the row count.
+    // probing the category count. Large categories remain folded until searched.
     await page.waitForFunction(
       () => (document.querySelector('.fn-picker-popover')
-        ?.querySelectorAll('.fn-picker-list > *').length || 0) > 5,
+        ?.querySelectorAll('.fn-picker-list .fn-picker-ns-toggle').length || 0) > 5,
       null,
       {timeout: 15000, polling: 50});
     const pickerState = await page.evaluate(() => {
@@ -106,12 +106,12 @@ async function cleanup(page) {
       return {
         visible: !!p,
         hasSearch: !!p?.querySelector('.fn-picker-search'),
-        rowCount: p?.querySelectorAll('.fn-picker-list > *').length || 0,
+        categoryCount: p?.querySelectorAll('.fn-picker-list .fn-picker-ns-toggle').length || 0,
       };
     });
     assert(pickerState.visible, 'fn-picker opens');
-    assert(pickerState.rowCount > 5,
-           'picker lists candidate fns: ' + pickerState.rowCount);
+    assert(pickerState.categoryCount > 5,
+           'picker lists candidate categories: ' + pickerState.categoryCount);
 
     // ===================================================================
     // Phase D: filter to current-time-ms + click → ref written.

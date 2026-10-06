@@ -292,13 +292,13 @@ Removes vault paths from shared bundles by default and leaves the corresponding 
 :PROPERTIES:
 :CUSTOM_ID: packages/publish-package-apply
 :FILE: resources/packages/registry/registry/impls.clj
-:LINE: 143
+:LINE: 145
 :MINS: 2.0
 :END:
 
 Stores a published bundle as an immutable ~:package-version~ row identified by version and content hash. Installation materializes definitions in a version-qualified namespace and records a [[file:glossary.org::#term/semver][pin]]. Updating or rolling back changes references to the selected package version.
 
-- source :: [[file:../../../resources/packages/registry/registry/impls.clj::(defbase publish-package-apply][resources/packages/registry/registry/impls.clj:143]]
+- source :: [[file:../../../resources/packages/registry/registry/impls.clj::(defbase publish-package-apply][resources/packages/registry/registry/impls.clj:145]]
 - same file :: [[file:packages.org::#packages/upsert-pin!][upsert-pin!]]
 
 * 23. upsert-pin!

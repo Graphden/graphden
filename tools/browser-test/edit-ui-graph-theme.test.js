@@ -69,7 +69,7 @@ const branch = 'ui-theme-' + process.pid + '-' + Date.now().toString(36);
       'editing the graph key mapping changes browser behavior');
     const originalAccent = execFileSync('bb', ['-cp', 'src', '-e',
       `(require '[graphden.packages.records.ids :as ids]) (print (str (ids/fn-id "app.ui-preview" :accent-color)))`],
-    {encoding: 'utf8'}).trim();
+      {encoding: 'utf8', cwd: path.resolve(__dirname, '../..')}).trim();
     const mainAccent = await api(page, 'POST', '/api/execute?branch=main',
       {'fn-id': originalAccent, args: {}, 'timeout-ms': 15000});
     assert(mainAccent.result === '#14b8a6', 'main retains its original graph token');

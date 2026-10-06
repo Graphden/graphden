@@ -272,14 +272,20 @@
 (def ^:private shipped-asset-kinds #{"js" "css" "svg" "html" "md"})
 
 
+;; This template is already public in the bundled browser artifact. Keep
+;; other EDN sources/configuration behind the ordinary :io boundary.
+(def ^:private shipped-public-data
+  #{"packages/app/ui-theme-template/fns.edn"})
+
+
 (defn- shipped-asset-path?
-  "The allow-list: under `packages/`, no parent-dir segment, one of the
-   asset extensions."
+  "Public asset extensions or explicitly published data; never arbitrary EDN."
   [path]
   (and (string? path)
        (str/starts-with? path "packages/")
        (not (str/includes? path ".."))
-       (contains? shipped-asset-kinds (last (str/split path #"\.")))))
+       (or (contains? shipped-asset-kinds (last (str/split path #"\.")))
+           (contains? shipped-public-data path))))
 
 
 (def ^:private shipped-assets

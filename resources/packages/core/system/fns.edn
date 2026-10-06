@@ -592,14 +592,14 @@
   ;; is the same bytes for every org and every visitor (it is what the
   ;; browser downloads anyway), so a request under the cloud's effect gate
   ;; may read it. Bounded to ASSET KINDS under `packages/` — `.js .css .svg
-  ;; .html .md`, no `..` — so it is not a door to config (`cloud/*.edn`),
-  ;; sources (`.clj`/`.edn`) or anything a tenant should not see through a
-  ;; path it chose. Anything else stays with `:read-resource-or-nil` (`:io`).
+  ;; .html .md`, no `..`, plus the explicitly public theme template. This
+  ;; keeps config (`cloud/*.edn`) and other sources (`.clj`/`.edn`) behind
+  ;; `:read-resource-or-nil` (`:io`).
   ;; Before this the editor's asset routes read the classpath per request
   ;; and the tenancy addon had to widen `:io` for the UI shell's exact
   ;; paths — a request-level exception that no longer needs to exist.
   {:name :shipped-asset
-   :description "A shipped frontend asset as text — one of `.js .css .svg .html .md` under `packages/`, read once per process and cached. Pure (`:effects #{}`): the same public bytes for everyone. Throws `validation-error/shipped-asset-path` for a path outside that shape and `execution-error/resource-not-found` when the build does not carry the file. `:read-resource-or-nil` (`:io`) remains the primitive for a caller-chosen path."
+   :description "A shipped frontend asset as text — one of `.js .css .svg .html .md` under `packages/` or the explicitly public `packages/app/ui-theme-template/fns.edn`, read once per process and cached. Pure (`:effects #{}`): the same public bytes for everyone. Throws `validation-error/shipped-asset-path` for a path outside that shape and `execution-error/resource-not-found` when the build does not carry the file. `:read-resource-or-nil` (`:io`) remains the primitive for a caller-chosen path."
    :args {:path {:type :text :description "Classpath path of the asset, e.g. `packages/app/editor/editor-styles.css`."}}
    :return-type :text
    :effects #{}}

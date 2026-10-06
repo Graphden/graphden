@@ -56,7 +56,7 @@
    :args {:ns-id {:ref :_ui-theme-create-child-id :type :uuid}}}
   {:name :_ui-theme-create-source :parent :get
    :args {:coll {:parent :parse-edn
-                 :args {:string {:parent :read-resource
+                 :args {:string {:parent :shipped-asset
                                  :args {:path "packages/app/ui-theme-template/fns.edn"}}}}
           :key {:value :fns} :default []}}
   {:name :_ui-theme-create-definition :parent :assoc

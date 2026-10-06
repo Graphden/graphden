@@ -33,11 +33,16 @@
     (testing "a shipped asset reads as its exact text — under the cloud's request gate"
       (is (= (slurp (io/resource "packages/app/auth-pages/auth.css"))
              (run gated "packages/app/auth-pages/auth.css"))))
-    (testing "the allow-list: only asset kinds under packages/, no parent-dir segments"
+    (testing "the published theme data is readable without exposing neighbouring EDN sources"
+      (is (= (slurp (io/resource "packages/app/ui-theme-template/fns.edn"))
+             (run gated "packages/app/ui-theme-template/fns.edn"))))
+    (testing "the allow-list: only public assets/data, no parent-dir segments"
       (doseq [bad ["cloud/prod.edn"
                    "system-prod.edn"
                    "packages/core/system/impls.clj"
                    "packages/core/system/fns.edn"
+                   "packages/app/ui-theme/fns.edn"
+                   "packages/app/ui-theme-template/package.edn"
                    "packages/../system-prod.edn"
                    "graphden-build-hashes.json"]]
         (is (= :validation-error/shipped-asset-path (ex-type #(run gated bad)))

@@ -1,6 +1,7 @@
 // Product slice: the existing account menu and canvas consume editable graphs.
 const {chromium} = require('playwright');
 const {execFileSync} = require('node:child_process');
+const path = require('node:path');
 const {isDeepStrictEqual} = require('node:util');
 const {assert, newContext, api, waitForServerHealthy, AUTH, BASE} = require('./edit-test-helpers');
 const {removeUseSiteBinding, bindPlaceholderOn, editBoundValue} = require('./tutorial-tour-helpers');
@@ -19,7 +20,7 @@ const branch = 'account-menu-' + process.pid + '-' + Date.now().toString(36);
     namespaceBaseline = await captureFixtureNamespaces(page);
     prepared = JSON.parse(execFileSync('bb', ['-cp', 'src', 'tools/ui_preview/prepare.clj',
       '--account-menu', '--picker', BASE, branch, 'user.ui-preview'], {encoding: 'utf8', timeout: 120000,
-      env: {...process.env, AUTH_TOKEN: AUTH}}));
+      cwd: path.resolve(__dirname, '../..'), env: {...process.env, AUTH_TOKEN: AUTH}}));
     await page.goto(BASE + '/?branch=' + encodeURIComponent(branch));
     const baseTheme = await page.evaluate(() => ({
       accent: getComputedStyle(document.body).getPropertyValue('--gd-flow').trim(),

@@ -2,6 +2,7 @@
 // after loading. Run against the isolated self-hosted prototype instance.
 const {chromium} = require('playwright');
 const {execFileSync} = require('node:child_process');
+const path = require('node:path');
 const {isDeepStrictEqual} = require('node:util');
 const {assert, newContext, api, waitForServerHealthy, AUTH, BASE} = require('./edit-test-helpers');
 const {captureFixtureNamespaces, cleanupGraphFixture} = require('./ui-graph-fixture-cleanup');
@@ -18,7 +19,7 @@ const branch = 'ui-preview-' + process.pid + '-' + Date.now().toString(36);
     namespaceBaseline = await captureFixtureNamespaces(page);
     prepared = JSON.parse(execFileSync('bb', ['-cp', 'src', 'tools/ui_preview/prepare.clj',
       BASE, branch, 'user.ui-preview'], {encoding: 'utf8', timeout: 120000,
-      env: {...process.env, AUTH_TOKEN: AUTH}}));
+      cwd: path.resolve(__dirname, '../..'), env: {...process.env, AUTH_TOKEN: AUTH}}));
     assert(prepared.branch === branch, 'ordinary editable preview branch created');
     await page.goto(prepared.url);
     await page.waitForFunction(() => !!window.uiGraphPreview, null, {timeout: 120000});

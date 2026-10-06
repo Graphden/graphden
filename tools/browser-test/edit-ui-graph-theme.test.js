@@ -2,6 +2,7 @@
 // Keep the edit in an ephemeral branch; main's package value is untouched.
 const {chromium} = require('playwright');
 const {execFileSync} = require('node:child_process');
+const path = require('node:path');
 const {assert, newContext, api, waitForServerHealthy, AUTH, BASE} = require('./edit-test-helpers');
 const {editBoundValue, removeUseSiteBinding, bindPlaceholderOn} = require('./tutorial-tour-helpers');
 const {captureFixtureNamespaces, cleanupGraphFixture} = require('./ui-graph-fixture-cleanup');
@@ -20,7 +21,7 @@ const branch = 'ui-theme-' + process.pid + '-' + Date.now().toString(36);
     await page.goto(BASE + '/');
     prepared = JSON.parse(execFileSync('bb', ['-cp', 'src', 'tools/ui_preview/prepare.clj',
       BASE, branch, 'user.ui-preview'], {encoding: 'utf8', timeout: 120000,
-      env: {...process.env, AUTH_TOKEN: AUTH}}));
+      cwd: path.resolve(__dirname, '../..'), env: {...process.env, AUTH_TOKEN: AUTH}}));
     assert(prepared.branch === branch, 'temporary editable graph branch created');
     const query = '?branch=' + encodeURIComponent(branch);
     await page.goto(BASE + '/' + query + '#' + prepared.namespace + '.accent-color');

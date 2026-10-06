@@ -13,7 +13,7 @@ function fixture() {
   const applied = [];
   const writes = [];
   const window = {
-    API: {api_ui_theme_evaluate: '/api/ui/theme/evaluate'},
+    API: {api_ui_theme_evaluate: '/api/ui/theme/evaluate', api_ui_theme_create: '/api/ui/theme/create'},
     gdPrefsReady: true,
     gdPrefOwner: 'owner-a',
     gdApplyThemePayload: (payload) => applied.push(payload),
@@ -29,7 +29,8 @@ function fixture() {
     authFetch: (url, options) => new Promise((resolve) => requests.push({url, options, resolve})),
   };
   const ctx = vm.createContext({window, Event, AbortController, setTimeout, clearTimeout,
-    graphdenCurrentOrg: 'org-a', isAuthenticated: () => false, accountsAuthed: false});
+    graphdenCurrentOrg: 'org-a', isAuthenticated: () => false, accountsAuthed: false,
+    openNamespacePicker: (options) => { window.namespacePicker = options; }});
   vm.runInContext(source, ctx);
   const selection = {graph: {'fn-id': '11111111-1111-1111-1111-111111111111', org: 'org-a', branch: 'theme'},
     payload: {tokens: {'--bg': '#111111'}}};
@@ -38,6 +39,19 @@ function fixture() {
 }
 
 (async () => {
+  {
+    const f = fixture();
+    f.window.gdCreateThemeGraph({});
+    f.window.namespacePicker.onPick({id: 'parent-id'});
+    assert.equal(f.requests[0].url, '/api/ui/theme/create', 'creation uses the generated path key');
+    assert.deepEqual(JSON.parse(f.requests[0].options.body), {'namespace-id': 'parent-id', owner: 'owner-a'});
+    f.requests[0].resolve({ok: false, json: async () => ({ok: false})});
+    await new Promise(setImmediate);
+    f.window.gdCreateThemeGraph({});
+    f.window.gdPrefOwner = 'owner-b';
+    f.window.namespacePicker.onPick({id: 'parent-id'});
+    assert.equal(f.requests.length, 1, 'a picker opened by another owner cannot create a theme');
+  }
   {
     const f = fixture();
     await f.window.gdApplyThemeGraphPreference({...f.selection, graph: {...f.selection.graph, org: 'org-b'}});

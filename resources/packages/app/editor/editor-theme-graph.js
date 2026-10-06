@@ -96,7 +96,7 @@
     if (!owner || owner !== window.gdPrefOwner) return;
     notify('Creating theme graph…');
     try {
-      const response = await window.authFetch(window.API.api_ui_theme_create_template, {
+      const response = await window.authFetch(window.API.api_ui_theme_create, {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({'namespace-id': namespace?.id || null, owner}),
       });

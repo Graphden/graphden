@@ -84,9 +84,9 @@
    even when its namespace shares the moved prefix."
   [definitions namespace-fn]
   (let [remap (into {}
-                    (map (fn [{:keys [namespace name]}]
-                           [(keyword (or namespace "") (clojure.core/name name))
-                            (keyword (or (namespace-fn namespace) "") (clojure.core/name name))]))
+                    (map (fn [{fn-ns :namespace fn-name :name}]
+                           [(keyword (or fn-ns "") (name fn-name))
+                            (keyword (or (namespace-fn fn-ns) "") (name fn-name))]))
                     definitions)
         ref-fn #(get remap % %)]
     (mapv #(-> (map-definition-refs ref-fn %)

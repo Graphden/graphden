@@ -126,7 +126,7 @@
     copy.appendChild(hint);
     row.appendChild(copy);
     const actions = el('div', 'gd-theme-btns');
-    if (window.API?.api_ui_theme_create_template && !current?.graph) {
+    if (window.API?.api_ui_theme_create && !current?.graph) {
       const create = el('button', 'gd-set-btn', 'Create graph…');
       create.type = 'button';
       create.id = 'gd-theme-create-graph';

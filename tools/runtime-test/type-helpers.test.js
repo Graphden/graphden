@@ -66,6 +66,17 @@ function test(name, fn) {
 }
 
 
+test('portable regex refinements validate literals and reject trailing input', () => {
+  const pattern = '^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})(?![\\s\\S])';
+  const type = ['refine', 'text', ['matches', pattern]];
+  for (const value of ['#abc', '#ABCD', '#aabbcc', '#aabbcc80']) {
+    assert(ctx.validateLiteralAgainstType(value, type).ok, value + ' accepted');
+  }
+  for (const value of ['wrong', '#12345', '#aabbcc\n', '#ggg']) {
+    assert(!ctx.validateLiteralAgainstType(value, type).ok, value + ' rejected');
+  }
+});
+
 test('refinementChain walks refine links, then one primitive super', () => {
   const userPort = ctx.refinementChain('user-port');
   assert(userPort.steps.length === 3,
@@ -186,6 +197,32 @@ assert(ctx.compactTypeChipText(['weird'], { not: 'a string' }) === 'weird',
 assert(ctx.compactTypeChipText(['union', 'bool', 'float', 'int', 'null', 'text', ['list', 'any']],
   ['union', 'bool']) === 'union',
   'a wide union with an array `flat` says "union", not the joined array');
+
+assert(ctx.refinementOK('abc', ['matches', '\\Aabc\\z']) === 'unknown',
+  'Java-only anchors remain undecided in the browser');
+assert(ctx.refinementOK('a', ['matches', '\\p{L}']) === 'unknown',
+  'Java Unicode classes are not interpreted as literal letters');
+
+// Explicit nominal labels survive inheritance without replacing the rich type.
+const oldLookups = ctx.lookups;
+const oldInheritance = ctx.getInheritanceChain;
+ctx.lookups = {
+  fnMap: new Map([['color-id', {name:'color', 'base-fn-id':'text-id'}],
+    ['parent', {name:'color-const'}], ['plain-id', {name:'text'}]]),
+  bindingMap: new Map(),
+  slotMap: new Map([['view', {'source-slot-id':'source'}]]),
+  bindingByFnSlot: new Map([['parent|source', {'type-override-fn-id':'color-id'}]])
+};
+ctx.getInheritanceChain = () => ['child', 'parent'];
+assert(ctx.namedRefinementPin({'fn-id':'child', 'slot-id':'view'}) === 'color',
+  'an inherited refinement pin retains its nominal label through a rename');
+ctx.lookups.bindingMap.set('own', {'type-override-fn-id':'plain-id'});
+assert(ctx.namedRefinementPin({'fn-id':'child','slot-id':'view','binding-id':'own'}) === null,
+  'a nearer plain pin is not relabeled as an ancestor refinement');
+assert(ctx.namedRefinementPin({'fn-id':'child','slot-id':'view','item-id':'item'}) === null,
+  'sequence items keep their element-type presentation');
+ctx.lookups = oldLookups;
+ctx.getInheritanceChain = oldInheritance;
 
 // --- displayLiteralLabel: whitespace-only strings print their characters ---
 assert(ctx.displayLiteralLabel('" "').text === '"\u2423"', 'a lone space prints as ␣');

@@ -133,3 +133,11 @@
       (doseq [as ["" 7]]
         (let [[_ _ control] (:form (value-form! {:binding-id (str (:id b)) :as as}))]
           (is (in-tree? control "number") (str "as " (pr-str as))))))))
+
+
+(deftest color-form-is-selected-by-refinement
+  (let [form (vf/build-form harness/*context* (vf/resolve-form :color) "" nil "#abcd")]
+    (is (in-tree? form "color"))
+    (is (in-tree? form "HEX color"))
+    (is (in-tree? form "Alpha (0–255)"))
+    (is (some #(and (map? %) (contains? % "data-form-type")) (tree-seq coll? seq form)))))

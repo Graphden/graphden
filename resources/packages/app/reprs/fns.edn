@@ -328,12 +328,35 @@
    :args {:caption :_repr-at-caption-text
           :source :_repr-at-source-text}}
 
+  {:name :_repr-color-rect
+   :parent :hiccup
+   :args {:tag "rect"
+          :attrs {:parent :assoc
+                  :args {:map {:value {:width "12" :height "12" :rx "2"}}
+                         :key {:value :fill} :value {:as :value :type :core.refinements/color}}}
+          :children []}}
+  {:name :_repr-color
+   :description "Compact HEX color swatch. Pure graph-authored SVG; the shared sanitizer controls its paint and attributes."
+   :parent :hiccup
+   :args {:tag "svg" :attrs {:value {:width "12" :height "12" :viewBox "0 0 12 12" :aria-hidden "true"}}
+          :children [:_repr-color-rect]}}
+  {:name :_repr-color-value
+   :description "Run-result color representation: the compact swatch and the original copyable HEX spelling."
+   :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "repr-color-value"}}
+          :children [:_repr-color {:as :value :type :core.refinements/color}]}}
+  {:name :_value-inline-repr-registry
+   :description "Compact canvas value representations, using the same typed pure rendering and sanitization contract as result representations. Canvas allocates a 12px presentation slot; absence retains the text label."
+   :parent :const
+   :args {:value [["core.refinements/color" "_repr-color"]]}}
+
   ;; --- the dispatch registry ---
 
   {:name :_value-repr-registry
    :description "Type -> repr-fn dispatch table for typed value representations. Each pair is [type-name repr-fn-name]; a VECTOR type-name is a structural key ([\"list\" \"numeric\"] means [:list :numeric]). Matched by `subtype?`, most-specific wins. Repr fns must be PURE (value -> hiccup); the resolver refuses effectful targets and sanitizes output (graphden.web.hiccup-sanitize) before the editor inlines it. Add a repr fn-def + a row here to extend — no executor / resolver change needed."
    :parent :const
-   :args {:value [[["list" "numeric"] "_repr-numeric-list"]
+   :args {:value [["core.refinements/color" "_repr-color-value"]
+                  [["list" "numeric"] "_repr-numeric-list"]
                   [["list" ["map" "keyword" "any"]] "_repr-record-list"]
                   ["script-tag" "_repr-asset-tag"]
                   ["style-tag" "_repr-asset-tag"]

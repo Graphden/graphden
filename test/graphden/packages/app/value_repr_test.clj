@@ -5,13 +5,19 @@
    and hiccup sanitization. Runs `:_er-succeeded-body` over the real
    synced graph (golden clone)."
   (:require
+    [clojure.edn :as edn]
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.crud.type-check :as type-check]
     [graphden.crud.value-form :as vform]
     [graphden.crud.value-repr :as vrepr]
     [graphden.executor.interface :as exec]
+    [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
+    [graphden.storage.protocol.core :as sp]
     [graphden.test-infra.exec-harness :as harness]
+    [graphden.types.check :as check]
+    [graphden.types.check.provenance :as provenance]
     [graphden.types.core :as types]))
 
 
@@ -40,7 +46,8 @@
    `resources/packages/app/reprs/fns.edn`. Tests that overwrite the
    registry restore THIS, so a stale copy silently strips shipped
    rows for whatever deftest runs next."
-  [[["list" "numeric"] "_repr-numeric-list"]
+  [["core.refinements/color" "_repr-color-value"]
+   [["list" "numeric"] "_repr-numeric-list"]
    [["list" ["map" "keyword" "any"]] "_repr-record-list"]
    ["script-tag" "_repr-asset-tag"]
    ["style-tag" "_repr-asset-tag"]
@@ -320,3 +327,75 @@
     (let [f (succeeded-body "just a string")]
       (is (not (tree-string-containing f "repr-source-wrap")))
       (is (in-tree? f "execute-result-scalar")))))
+
+
+(deftest compact-literal-representations
+  (let [color-id (harness/fn-id "color")
+        color-row (sp/read-entity harness/*storage* :fn color-id)
+        type-rows (vals (type-check/chain-fns-by-id harness/*storage* color-row))
+        parent-id (random-uuid)
+        child-id (random-uuid)
+        slot-id (random-uuid)
+        view-id (random-uuid)
+        unrelated-id (random-uuid)
+        unrelated-slot-id (random-uuid)
+        graph {:fns (into (vec type-rows)
+                          [{:id parent-id :name "typed-parent"}
+                           {:id child-id :parent-ids [parent-id]}
+                           {:id unrelated-id :name "color"}])
+               :slots [{:id slot-id}
+                       {:id view-id :source-slot-id slot-id}
+                       {:id unrelated-slot-id :type-fn-id unrelated-id}]
+               :bindings [{:fn-id parent-id :slot-id slot-id
+                           :type-override-fn-id color-id}]}
+        node (fn [v]
+               {:data {:type "arg" :argType "jsonb" :value v
+                       :fnId (str child-id) :slotId (str view-id)}})
+        unrelated (assoc-in (node "#abc") [:data :slotId] (str unrelated-slot-id))
+        values {:nodes (into (vec (repeat 100 unrelated))
+                             [(node "#abc") (node "#abc") (node "wrong")
+                              (assoc-in (node "#abc") [:data :secretRef] true)])
+                :edges []}
+        rendered (vrepr/annotate-literals harness/*context* values graph)
+        [first-node second-node invalid-node secret-node] (drop 100 (:nodes rendered))]
+    (is (every? #(nil? (get-in % [:data :literalRepr])) (take 100 (:nodes rendered)))
+        "same-named unrelated types neither render nor consume the preview budget")
+    (is (in-tree? (get-in first-node [:data :literalRepr]) "#abc")
+        "inherited narrowing survives a rename and an uninformative display label")
+    (is (= (get-in first-node [:data :literalRepr]) (get-in second-node [:data :literalRepr])))
+    (is (nil? (get-in invalid-node [:data :literalRepr])))
+    (is (nil? (get-in secret-node [:data :literalRepr])))
+    (is (= (:edges values) (:edges rendered)))))
+
+
+(deftest shipped-color-specialization-roundtrip
+  (let [source (->> (edn/read-string (slurp "resources/packages/core/refinements/fns.edn"))
+                    :fns (filter #(= :color-const (:name %))) first
+                    (#(assoc % :namespace "core.refinements")))
+        _ (check/check-fn-def! source)
+        id (harness/fn-id "color-const")
+        stored (type-check/reconstruct-fn-def harness/*storage* id)]
+    (is (= {:value {:type :core.refinements/color}} (:args stored)))
+    (is (provenance/matches? (registry/rich-type-of-id id)
+                             (check/checker-view stored))
+        "the browser backend accepts the exact stored specialization it checked")))
+
+
+(deftest typed-same-name-rename-checker-view
+  (is (= {:value {:type :text}}
+         (:args (check/checker-view {:args {:value {:as :value :type :text}}}))))
+  (is (= {:value {:as :other :type :text}}
+         (:args (check/checker-view {:args {:value {:as :other :type :text}}})))))
+
+
+(deftest built-in-color-registry-ignores-a-user-namesake
+  (binding [types/*type-aliases-override* (atom (types/aliases-snapshot))
+            types/*alias-view* nil]
+    (types/register-type-alias! :color :int)
+    (let [builtin (types/resolve-alias :core.refinements/color)
+          inline (vform/registry-pairs harness/*context* "_value-inline-repr-registry")
+          forms (vform/registry-pairs harness/*context*)]
+      (is (= "_repr-color" (vform/pick-form-fn inline builtin)))
+      (is (nil? (vform/pick-form-fn inline :color)))
+      (is (= "_form-color" (vform/pick-form-fn forms builtin)))
+      (is (not= "_form-color" (vform/pick-form-fn forms :color))))))

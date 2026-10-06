@@ -261,6 +261,22 @@ function findBindingOverrideChain(fnId, slotId) {
 }
 
 
+// Nominal label of an explicit refinement pin, including inherited pins.
+// Keep dispatch and validation on the rich type; this is presentation only.
+function namedRefinementPin(arg) {
+  if (!arg || arg['item-id'] || !lookups?.fnMap) return null;
+  const binding = lookups.bindingMap?.get(arg['binding-id']);
+  let pin = binding?.['type-override-fn-id'];
+  let sid = arg['slot-id'];
+  for (let depth = 0; !pin && sid && depth < 16; depth++) {
+    pin = findBindingOverrideChain(arg['fn-id'], sid)[0]?.overrideFnId;
+    sid = lookups.slotMap?.get(sid)?.['source-slot-id'];
+  }
+  const row = pin ? lookups.fnMap.get(pin) : null;
+  return row?.['base-fn-id'] && row.name ? row.name : null;
+}
+
+
 // Companion to `expectedSlotType`: reports HOW a slot's effective type
 // resolved — the 4-tier priority chain (binding type-override →
 // backward-unified slot-type → bound-fn return-type → slot
@@ -447,6 +463,12 @@ function refinementOK(v, constraint) {
     case '<=':   return typeof v === 'number' && typeof rhs === 'number' && v <= rhs;
     case '=':    return v === rhs;
     case 'not=': return v !== rhs;
+    case 'matches':
+      if (typeof v !== 'string' || typeof rhs !== 'string') return 'unknown';
+      // Java-only regex syntax must keep its previous undecided result;
+      // JavaScript may silently interpret those escapes as literal letters.
+      if (/\\[AGZzQERhHVpPeN]|\\x\{|\(\?[a-z-]|\+\+|\*\+|\?\+|\}\+|&&/.test(rhs)) return 'unknown';
+      try { return new RegExp(rhs).test(v); } catch (_) { return 'unknown'; }
     // `[:in [m…]]` — membership in a finite set. Keyword members
     // serialise without their colon, the editor's keyword values
     // keep it, so accept either form.

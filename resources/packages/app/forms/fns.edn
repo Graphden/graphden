@@ -34,6 +34,20 @@
                            "data-form-field" ""
                            "data-field-kind" "text"}]}}
 
+  {:name :_form-color
+   :description "HEX color editor with a native color picker, alpha and manual text input; uses the standard field collection and refinement validation."
+   :parent :const
+   :args {:value ["div" {"class" "value-form-widget"
+                         "data-form-widget" "color"}
+                  ["input" {"type" "color" "aria-label" "Color"}]
+                  ["input" {"type" "number" "min" "0" "max" "255" "step" "1"
+                            "data-color-alpha" "" "aria-label" "Alpha (0–255)"}]
+                  ["input" {"type" "text" "class" "arg-value-edit-input"
+                            "aria-label" "HEX color" "placeholder" "#RRGGBB"
+                            "data-form-field" "" "data-field-kind" "text"}]
+                  ["svg" {"width" "24" "height" "24" "aria-hidden" "true"}
+                   ["rect" {"width" "24" "height" "24" "rx" "3"}]]]}}
+
   {:name :_form-number
    :description "Numeric input — the form for `:int` / `:numeric` / `:float` slots."
    :parent :const
@@ -257,6 +271,7 @@
    :description "Type -> form-fn dispatch table for /api/value-form. Each pair is [type-name form-fn-name] (type-name may be a VECTOR for structural keys — the marker row [\"secret\" \"any\"] means [:secret :any]). Leaf types subtype-match, most-specific wins, falling back to _form-json; a COMPOSITE type matches only its exact row (the hiccup-node row) — see `crud.value-form/exact-form-fn`."
    :parent :const
    :args {:value [["text" "_form-text"]
+                  ["core.refinements/color" "_form-color"]
                   ["int" "_form-number"]
                   ["numeric" "_form-number"]
                   ["float" "_form-number"]

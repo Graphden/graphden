@@ -64,6 +64,14 @@ function createArgOverlay(node, container) {
     content.dataset.secretRef = 'true';
     content.title = 'Secret — the value lives in the vault at this path';
   }
+  const repr = node.data('literalRepr');
+  if (repr && !secretRef) {
+    const preview = document.createElement('span');
+    preview.className = 'arg-literal-preview';
+    preview.setAttribute('aria-hidden', 'true');
+    const rendered = renderHiccup(repr);
+    if (rendered) { preview.appendChild(rendered); content.prepend(preview); }
+  }
   row.appendChild(content);
 
   // Persistent mismatch indicator. If this arg's literal value would
@@ -508,10 +516,8 @@ function createProvenanceBadge(narrowingInfo, arg) {
 // wider (text label fits "timestamptz" at ~9px). Click →
 // enterArgTypeEditMode when editable; pure label when readOnly.
 //
-// Refinements render as a stacked two-line chip — base type on top,
-// constraint below at smaller weight — so the visual answers "this is
-// a SUBTYPE of <base>, narrowed by <constraint>" without forcing the
-// user to read the constraint syntax `int (> 0)` as a single phrase.
+// Named refinement pins show their nominal label. Short anonymous
+// constraints may use a second line; full constraints stay in the tooltip.
 function createTypeChip(arg, options) {
   const readOnly = !!(options?.readOnly)
                 || typeof enterArgTypeEditMode !== 'function';
@@ -526,7 +532,8 @@ function createTypeChip(arg, options) {
   const richType = (effectiveRich === 'any' && flatType !== 'any')
                    ? null
                    : effectiveRich;
-  const display = compactTypeChipText(richType, flatType);
+  const alias = namedRefinementPin(arg);
+  const display = alias || compactTypeChipText(richType, flatType);
   const chip = document.createElement('span');
   chip.className = 'arg-type-chip' + (readOnly ? ' arg-type-chip-readonly' : '');
   // Refinement stacking — two paths reach here:
@@ -541,7 +548,7 @@ function createTypeChip(arg, options) {
     ? richType
     : resolveRefinementAlias(richType);
   const refineConstraint = refinementConstraintText(refineStruct);
-  if (refineConstraint) {
+  if (refineConstraint && !alias && refineConstraint.length <= 24) {
     chip.classList.add('arg-type-chip-refine');
     const base = document.createElement('span');
     base.className = 'arg-type-chip-refine-base';

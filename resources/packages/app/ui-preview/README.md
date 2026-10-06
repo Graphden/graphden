@@ -30,6 +30,11 @@ strings `--gd-flow`, `--bg`, and the scoped `--gd-account-menu-hover`. Existing
 preferences and light/dark styling remain the base; graph overrides do not write
 back to the preference store.
 
+Color values extend `color-const`, whose value slot is narrowed to the ordinary
+`color` refinement. Its registered form offers RGB, alpha and manual HEX input,
+and its compact representation is drawn next to canvas literals. The host
+resolves effective CSS theme colors to HEX before supplying the pure graph.
+
 To edit a shared value, open `theme-canvas-background`, remove its `value`
 reference to `_theme-base-canvas-background` and bind a color string instead.
 Both canvas and menu hover consume it. Then open `account-menu-hover`, remove

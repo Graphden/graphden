@@ -73,7 +73,7 @@
  ;; strings the lint (and the audit) follow as refs.
  :registry-fns
  {"src/graphden/crud/value_form.clj" [:_value-form-registry]
-  "src/graphden/crud/value_repr.clj" [:_value-repr-registry]}
+  "src/graphden/crud/value_repr.clj" [:_value-repr-registry :_value-inline-repr-registry]}
 
  ;; The by-name API itself, plus pass-through wrappers and comments that
  ;; merely mention it — nothing is entered from these.
@@ -105,7 +105,9 @@
    :http-server]}
 
  :vocabulary
- {:picker-view "app.ui-fn-picker review entry: tools/ui_preview/prepare.clj imports an editable copy; editor-fn-picker-graph.js executes its UUID, resources/packages/app/ui-preview/README.md"
+ {
+  :ensure-color "docs/TYPES.md — explicit text-to-color boundary for graph-built HEX values"
+  :picker-view "app.ui-fn-picker review entry: tools/ui_preview/prepare.clj imports an editable copy; editor-fn-picker-graph.js executes its UUID, resources/packages/app/ui-preview/README.md"
   :account-menu-initial "app.ui-account-menu review entry: tools/ui_preview/prepare.clj imports an editable copy; editor-shell-menu-graph.js runs it by UUID, resources/packages/app/ui-preview/README.md"
   :account-menu-update "app.ui-account-menu review entry: imported by tools/ui_preview/prepare.clj and executed by UUID in the browser runtime, resources/packages/app/ui-preview/README.md"
   :account-menu-view "app.ui-account-menu review entry: imported by tools/ui_preview/prepare.clj and executed by UUID in the browser runtime, resources/packages/app/ui-preview/README.md"

@@ -51,6 +51,17 @@ function test(name, fn) {
   try { fn(); } catch (e) { failures += 1; console.error('  ✗ threw: ' + e.message); }
 }
 
+test('custom widget validity is collected without imposing strict numeric bounds', () => {
+  const input = document.createElement('input');
+  input.value = 'wrong';
+  input.validity = {customError: true};
+  input.validationMessage = 'Invalid color';
+  eq(ctx.readFieldValue(input, 'text'), {value: 'wrong', error: 'Invalid color'}, 'widget error is retained');
+  input.validity = {customError: false, rangeUnderflow: true};
+  input.value = '-1';
+  eq(ctx.readFieldValue(input, 'number'), {value: -1}, 'existing error-tolerant numeric collection is unchanged');
+});
+
 // A control as the server renders it: `data-form-field` marks it, the path
 // says where its value lands, the kind says how to coerce.
 function field(kind, fieldPath, props) {

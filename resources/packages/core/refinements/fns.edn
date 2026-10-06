@@ -37,6 +37,10 @@
   {:name :non-blank-text
    :refine {:base :text :constraint [:matches "\\S"]}}
 
+  {:name :color
+   :description "Concrete HEX color: #RGB, #RGBA, #RRGGBB or #RRGGBBAA. Alpha is optional; CSS expressions and contextual colors are not values of this type."
+   :refine {:base :text :constraint [:matches "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})(?![\\s\\S])"]}}
+
   {:name :url
    :refine {:base :text :constraint [:matches "^https?://"]}}
 
@@ -233,6 +237,22 @@
                                  {:parent :gt :args {:nums [{:as :value} 0]}}]}}
           :refine-name {:value :positive-int}
           :constraint [:> 0]}}
+
+  {:name :color-const
+   :description "Reusable color value function. Its value argument is narrowed to color, including in descendants that replace its binding."
+   :parent :core.logic/const
+   :return-type :core.refinements/color
+   :args {:value {:as :value :type :core.refinements/color}}}
+
+  {:name :ensure-color
+   :description "Validate a HEX color at a text boundary; preserve the original spelling and alpha."
+   :parent :_refinement-narrow
+   :return-type :color
+   :args {:value {:as :value :type :text}
+          :test {:parent :re-find?
+                 :args {:string {:as :value} :pattern {:value "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})(?![\\s\\S])"}}}
+          :refine-name {:value :color}
+          :constraint [:matches "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})(?![\\s\\S])"]}}
 
   {:name :ensure-url
    :description "Validate that `:value` matches the `:url` refinement (`^https?://`); return as `:url`. Throws `refinement/violated` otherwise. The narrower for graph-built URLs (string concatenation types as `:text` — this is the explicit point it re-earns `:url`)."

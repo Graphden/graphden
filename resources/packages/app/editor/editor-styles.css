@@ -8537,6 +8537,37 @@ button.lambda-params-chip:focus-visible { outline: 1px solid var(--accent); }
 /* REDUCED MOTION — must stay the LAST block in this file: it overrides at
    equal specificity, so any rule after it wins again (docs/ACCESSIBILITY.md;
    pinned by tools/runtime-test/css-reduced-motion-last.test.js). */
+/* Compact graph-authored representations share one bounded inline slot. */
+.arg-literal-preview {
+  display: inline-flex;
+  width: 12px;
+  height: 12px;
+  margin-right: 4px;
+  vertical-align: middle;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--bg);
+  outline: 1px solid var(--line);
+}
+
+[data-form-widget="color"] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+[data-form-widget="color"] input[type="number"] {
+  width: 64px;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line);
+}
+
+[data-form-widget="color"] .arg-value-edit-input {
+  flex: 1;
+  min-width: 0;
+}
+
 @media (prefers-reduced-motion: reduce) {
   /* Near-zero rather than `none`: keeps transitionend firing for any
      future listener while being imperceptible. */

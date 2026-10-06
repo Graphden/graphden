@@ -25,6 +25,7 @@
     [clojure.string :as str]
     [graphden.crud.entities.list :as entity-list]
     [graphden.crud.types-api :as types-api]
+    [graphden.crud.value-repr :as value-repr]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.context :as exec-ctx]
     [graphden.executor.defbase :refer [defbase]]
@@ -97,6 +98,12 @@
   (strip-facts/annotate elements graph))
 
 
+(defbase _layout-literal-reprs-apply
+  "Attach bounded compact type representations through the shared pure rendering boundary."
+  [elements graph]
+  (value-repr/annotate-literals ctx elements graph))
+
+
 ;; === Registry ===
 
 (defn- seal-note
@@ -158,5 +165,6 @@
    :_load-graph-cached _load-graph-cached
    :_parse-layout-body {:impl _parse-layout-body :taint-propagate? true}
    :_layout-build-apply {:impl _layout-build-apply :taint-propagate? true}
+   :_layout-literal-reprs-apply {:impl _layout-literal-reprs-apply :taint-propagate? true}
    :_layout-place-apply {:impl _layout-place-apply :taint-propagate? true}
    :_layout-strip-facts-apply {:impl _layout-strip-facts-apply :taint-propagate? true}})

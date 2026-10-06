@@ -2439,7 +2439,14 @@
           (fn [args]
             (into {}
                   (map (fn [[k v]]
-                         [k (if (and (map? v) (vector? (:append v))) (:append v) v)]))
+                         [k (cond
+                              (and (map? v) (vector? (:append v))) (:append v)
+                              ;; The parser preserves the inherited slot for
+                              ;; a typed same-name rename, but stores no rename
+                              ;; view. Its checker meaning is the same pin.
+                              (and (map? v) (= k (:as v)) (contains? v :type))
+                              (dissoc v :as)
+                              :else v)]))
                   args))))
 
 

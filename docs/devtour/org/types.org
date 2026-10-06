@@ -210,13 +210,13 @@ Chooses return-type inference for the root [[file:glossary.org::#term/base-funct
 :PROPERTIES:
 :CUSTOM_ID: types/check-fn-def!
 :FILE: src/graphden/types/check.clj
-:LINE: 2446
+:LINE: 2453
 :MINS: 8.7
 :END:
 
 Checks one function definition against its parents and inherited [[file:glossary.org::#term/slot][slots]]. It validates argument changes and [[file:glossary.org::#term/effect][effects]], checks [[file:glossary.org::#term/binding][bindings]], computes the return type, and records detailed type information for later dependent functions.
 
-- source :: [[file:../../../src/graphden/types/check.clj::(defn check-fn-def!][src/graphden/types/check.clj:2446]]
+- source :: [[file:../../../src/graphden/types/check.clj::(defn check-fn-def!][src/graphden/types/check.clj:2453]]
 - same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/rule-return][rule-return]], [[file:types.org::#types/check-all-defs!][check-all-defs!]]
 - referenced from :: [[file:crud.org::#crud/type-check-fn-after-mutation!][type-check-fn-after-mutation!]]
 
@@ -224,13 +224,13 @@ Checks one function definition against its parents and inherited [[file:glossary
 :PROPERTIES:
 :CUSTOM_ID: types/check-all-defs!
 :FILE: src/graphden/types/check.clj
-:LINE: 2573
+:LINE: 2580
 :MINS: 1.9
 :END:
 
 Checks definitions in [[file:glossary.org::#term/topological-order][dependency order]], registering each result before dependent definitions need it. This performs the full graph type sweep using the same single-definition checker.
 
-- source :: [[file:../../../src/graphden/types/check.clj::(defn check-all-defs!][src/graphden/types/check.clj:2573]]
+- source :: [[file:../../../src/graphden/types/check.clj::(defn check-all-defs!][src/graphden/types/check.clj:2580]]
 - same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/rule-return][rule-return]], [[file:types.org::#types/check-fn-def!][check-fn-def!]]
 - referenced from :: [[file:packages.org::#packages/sync-fn-entities-from-packages!][sync-fn-entities-from-packages!]]
 

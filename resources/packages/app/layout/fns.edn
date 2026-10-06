@@ -90,6 +90,12 @@
    :args {:elements {:type :_layout-elements-shape}}
    :return-type :_layout-response-shape}
 
+  {:name :_layout-literal-reprs-apply
+   :description "Attach compact typed literal representations using the graph-held inline repr registry."
+   :args {:elements {:type :_layout-elements-shape}
+          :graph {:type :_graph-snapshot-shape}}
+   :return-type :_layout-elements-shape}
+
   {:name :_layout-strip-facts-apply
    :description "Single library call — annotate fn-nodes with the strip facts (`:returnTypeAlias` / `:ruleOwner` / `:branchLocal`) the editor's bottom-of-card strips render. See `graphden.layout.strip-facts` for the fact semantics."
    :args {:elements {:type :_layout-elements-shape}
@@ -238,12 +244,16 @@
   ;; FN-DEFS: layout pipeline composition
   ;; =============================================================================
 
+  {:name :_layout-elements-with-reprs
+   :parent :_layout-literal-reprs-apply
+   :args {:elements :_layout-elements-with-strips}}
+
   ;; build → strip-facts → place. Free args `graph` + `parsed`
   ;; propagate up from the inner stages.
   {:name :_compute-layout
    :description "Run the build → strip-facts → place layout pipeline for one parsed request. Composition of `:_layout-build-elements` → `:_layout-strip-facts` → `:_layout-place`. Owns `:graph` as an explicit free pin — value flows down to the build + annotate stages by name match."
    :parent :_layout-place
-   :args {:elements :_layout-elements-with-strips
+   :args {:elements :_layout-elements-with-reprs
           :graph {:type :_graph-snapshot-shape
                   :description "Full entity graph snapshot — typically supplied by `:_load-graph-cached`."}}}
 

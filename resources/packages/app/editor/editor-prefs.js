@@ -505,9 +505,23 @@ function gdClearGraphTheme() {
   }
   graphThemePrevious.clear();
 }
+// Resolve the effective CSS theme at the browser boundary, so the pure graph
+// receives concrete HEX colors even when a saved theme uses rgb()/hsl().
+function gdConcreteThemeColor(value) {
+  if (/^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(value)) return value;
+  if (!CSS.supports('color', value)) throw new Error('Invalid theme color');
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 1;
+  const context = canvas.getContext('2d', {willReadFrequently: true});
+  context.fillStyle = value;
+  context.fillRect(0, 0, 1, 1);
+  const [r, g, b, a] = context.getImageData(0, 0, 1, 1).data;
+  return '#' + [r, g, b, ...(a === 255 ? [] : [a])].map(n => n.toString(16).padStart(2, '0')).join('');
+}
 function gdGraphThemeBase() {
   gdClearGraphTheme();
-  return {accent: gdThemeTokenValue('--gd-flow'), 'canvas-background': gdThemeTokenValue('--bg')};
+  return {accent: gdConcreteThemeColor(gdThemeTokenValue('--gd-flow')),
+    'canvas-background': gdConcreteThemeColor(gdThemeTokenValue('--bg'))};
 }
 function gdApplyGraphTheme(tokens) {
   gdClearGraphTheme();

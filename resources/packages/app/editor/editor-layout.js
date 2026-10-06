@@ -241,7 +241,7 @@ function calculateNodeSize(nodeData) {
     // its opacity changes) — measure it too, or the closing quote is what
     // the ellipsis eats. 16 = the text's own 8px side padding.
     const pencilW = measureCanvasText(' \u270e', (10 * argScale) + 'px "SF Mono", Monaco, monospace');
-    const width = Math.ceil(Math.max(40 * argScale, textW + pencilW + 16 + chipW + linkW + 6));
+    const width = Math.ceil(Math.max(40 * argScale, textW + pencilW + 16 + chipW + linkW + 6 + (nodeData.literalRepr ? 16 : 0)));
     return {
       width,
       height: Math.round((22 + DRAG_HANDLE_HEIGHT) * argScale)  // content (padding 4+4 + line 14) + drag handle

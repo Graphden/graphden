@@ -166,7 +166,7 @@ function installRawToggle(hostEl, payloadValue) {
 // ============================================================================
 
 // POST the slot identifiers to /api/value-form. Read-only endpoint —
-// plain fetch, no auth. Returns the `{ok, form, value}` payload, or
+// branch-aware authFetch. Returns the `{ok, form, value}` payload, or
 // null on any network / HTTP failure (caller falls back).
 // `as` (optional) — a type NAME: the form for that narrower type instead
 // of the slot's own (the "as:" chooser on a wide slot).
@@ -178,7 +178,7 @@ async function fetchValueForm(arg, as) {
   if (arg['item-id'])    body['item-id']    = arg['item-id'];
   if (as)                body.as            = as;
   try {
-    const r = await fetch(API.api_value_form, {
+    const r = await authFetch(API.api_value_form, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)

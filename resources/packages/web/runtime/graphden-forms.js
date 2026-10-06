@@ -28,39 +28,40 @@
 // <script>. (Attributes ARE applied verbatim via setAttribute, incl.
 // on* handlers — the trusted-server hiccup is the trust boundary,
 // not this renderer.)
-function renderHiccup(node) {
+function renderHiccup(node, namespace) {
   if (Array.isArray(node)) {
     // Fragment — a bare list of elements (head is itself an array).
     if (node.length > 0 && Array.isArray(node[0])) {
       const frag = document.createDocumentFragment();
-      for (const child of node) appendHiccupChild(frag, child);
+      for (const child of node) appendHiccupChild(frag, child, namespace);
       return frag;
     }
     const tag = node[0];
     if (typeof tag !== 'string') return null;
-    const el = document.createElement(tag);
+    const childNamespace = tag === 'svg' ? 'http://www.w3.org/2000/svg' : namespace;
+    const el = childNamespace ? document.createElementNS(childNamespace, tag) : document.createElement(tag);
     let i = 1;
     const maybeAttrs = node[1];
     if (maybeAttrs && typeof maybeAttrs === 'object' && !Array.isArray(maybeAttrs)) {
       applyHiccupAttrs(el, maybeAttrs);
       i = 2;
     }
-    for (; i < node.length; i++) appendHiccupChild(el, node[i]);
+    for (; i < node.length; i++) appendHiccupChild(el, node[i], childNamespace);
     return el;
   }
   if (node === null || node === undefined || node === false) return null;
   return document.createTextNode(String(node));
 }
 
-function appendHiccupChild(parent, child) {
+function appendHiccupChild(parent, child, namespace) {
   if (child === null || child === undefined || child === false) return;
   if (Array.isArray(child)) {
     // A nested seq of elements (e.g. a Clojure `for`) — flatten one level.
     if (child.length > 0 && Array.isArray(child[0])) {
-      for (const c of child) appendHiccupChild(parent, c);
+      for (const c of child) appendHiccupChild(parent, c, namespace);
       return;
     }
-    const rendered = renderHiccup(child);
+    const rendered = renderHiccup(child, namespace);
     if (rendered) parent.appendChild(rendered);
     return;
   }
@@ -98,6 +99,9 @@ function applyHiccupAttrs(el, attrs) {
 // Coerce one control's raw value per its `data-field-kind`.
 // Returns {value} or {value, error}.
 function readFieldValue(el, kind) {
+  if (el.validity?.customError) {
+    return {value: el.value, error: el.validationMessage || 'Invalid value.'};
+  }
   if (kind === 'bool') return { value: !!el.checked };
   const raw = (el.value != null) ? el.value : '';
   const trimmed = raw.trim();

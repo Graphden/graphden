@@ -40,8 +40,13 @@
   ([definitions] (graph-of primitive-defs definitions))
   ([primitives definitions]
    (let [defs (into (vec primitives) (map #(assoc % :namespace "preview")) definitions)
-         names (into {} (map (fn [d] [(:name d) (ids/fn-id (:namespace d) (:name d))])) defs)
-         by-name (into {} (map (juxt :name identity)) defs)
+         names (into {} (mapcat (fn [d]
+                                  (let [id (ids/fn-id (:namespace d) (:name d))]
+                                    [[(:name d) id]
+                                     [(keyword (:namespace d) (name (:name d))) id]]))) defs)
+         by-name (into {} (mapcat (fn [d]
+                                    [[(:name d) d]
+                                     [(keyword (:namespace d) (name (:name d))) d]])) defs)
          rows (concat (ids/boot-primitive-records)
                       (mapcat record-types/inline-fn-type-rows-from-fn-def defs)
                       (mapcat #(records/parse-fn-def % names by-name) defs))
@@ -529,7 +534,8 @@
         base-defs (select-keys (:base-fn-defs loaded)
                                [:const :if :list :mod :get :assoc :equal? :count :zipmap :add :hiccup])
         type-defs (remove #(or (:parent %) (:parents %)) (:fn-defs loaded))
-        primitive-rows (into (vec type-defs) (map (fn [[n d]] (assoc d :name n))) base-defs)
+        primitive-rows (conj (into (vec type-defs) (map (fn [[n d]] (assoc d :name n))) base-defs)
+                             (first (filter #(= :color-const (:name %)) (:fn-defs loaded))))
         definitions (:fns (edn/read-string (slurp "resources/packages/app/ui-account-menu/fns.edn")))
         impls (into {} (map (fn [[n d]] [n (:impl d)])) base-defs)
         cases (account-menu/cases)]

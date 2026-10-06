@@ -3,7 +3,7 @@
  [{:name :_account-menu-event :type {:kind :text :key :text :index :int}}
   {:name :_account-menu-state :type {:phase :text :active :int :handled :bool}}
   {:name :_account-menu-context :type {:items [:list :text]}}
-  {:name :_account-menu-theme :type {:accent :text :canvas-background :text}}
+  {:name :_account-menu-theme :type {:accent :core.refinements/color :canvas-background :core.refinements/color}}
   {:name :account-menu-initial :parent :const :return-type :_account-menu-state
    :args {:value {:value {:phase "closed" :active 0 :handled false}}}}
   {:name :account-menu-phase :parent :get :return-type :text
@@ -130,15 +130,15 @@
   {:name :account-menu-update :parent :if
    :args {:test :_account-menu-event-animation-finished :then :_account-menu-finished :else :_account-menu-open-update}}
   ;; Theme inputs are the effective built-in/saved theme BEFORE this graph layer.
-  {:name :_theme-base-accent :parent :get :return-type :text
+  {:name :_theme-base-accent :parent :get :return-type :core.refinements/color
    :args {:coll {:as :theme :type :_account-menu-theme} :key {:value :accent} :default "#137c74"}}
-  {:name :theme-accent :parent :const :return-type :text
+  {:name :theme-accent :parent :core.refinements/color-const :return-type :core.refinements/color
    :args {:value :_theme-base-accent}}
-  {:name :_theme-base-canvas-background :parent :get :return-type :text
+  {:name :_theme-base-canvas-background :parent :get :return-type :core.refinements/color
    :args {:coll {:as :theme :type :_account-menu-theme} :key {:value :canvas-background} :default "#eff1f0"}}
-  {:name :theme-canvas-background :parent :const :return-type :text
+  {:name :theme-canvas-background :parent :core.refinements/color-const :return-type :core.refinements/color
    :args {:value :_theme-base-canvas-background}}
-  {:name :account-menu-hover :parent :const :return-type :text
+  {:name :account-menu-hover :parent :core.refinements/color-const :return-type :core.refinements/color
    :args {:value :theme-canvas-background}}
   {:name :_theme-tokens :parent :zipmap
    :args {:keys [{:value "--gd-flow"} {:value "--bg"}]

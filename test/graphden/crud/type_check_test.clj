@@ -234,6 +234,32 @@
           (is (= {:a {:value 5}} (:args fd))))
         (finally (sp/close storage)))))
 
+  (testing "a type-only binding preserves its narrowing without a rename or value"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [base (setup/create-base-fn! storage "rfd-typed")
+              slot (setup/create-slot! storage "value" :text)
+              _ (setup/attach-slot! storage (:id base) (:id slot) 0)
+              target (setup/create-base-fn! storage "rfd-narrow")
+              child (setup/create-composed-fn! storage "rfd-typed-child" (:id base))]
+          (sp/create-entity storage :binding {:id (random-uuid) :fn-id (:id child)
+                                              :slot-id (:id slot)
+                                              :type-override-fn-id (:id target)})
+          (is (= {:value {:type :rfd-narrow}}
+                 (:args (tc/reconstruct-fn-def storage (:id child))))))
+        (finally (sp/close storage)))))
+
+  (testing "an owned typed free argument survives reconstruction without a binding"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [base (setup/create-base-fn! storage "rfd-free-parent")
+              child (setup/create-composed-fn! storage "rfd-free-child" (:id base))
+              slot (setup/create-slot! storage "extra" :int)]
+          (setup/attach-slot! storage (:id child) (:id slot) 0)
+          (is (= {:extra {:type :int}}
+                 (:args (tc/reconstruct-fn-def storage (:id child))))))
+        (finally (sp/close storage)))))
+
   (testing "ref binding surfaces as the bound fn's name keyword"
     (let [storage (setup/create-test-storage)]
       (try

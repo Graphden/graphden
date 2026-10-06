@@ -7,7 +7,7 @@ Request validation, stored edits, execution results, and views.
 
 after: storage, types
 
-[[file:index.org][index]] · ~69 min
+[[file:index.org][index]] · ~68 min
 
 * 1. extract-entity-params
 :PROPERTIES:
@@ -119,13 +119,13 @@ Creates a row, checks the resulting function's types, and applies rename-slot up
 :PROPERTIES:
 :CUSTOM_ID: crud/type-check-fn-after-mutation!
 :FILE: src/graphden/crud/type_check.clj
-:LINE: 487
+:LINE: 514
 :MINS: 4.8
 :END:
 
 Reconstructs and checks the changed function, updating branch-specific diagnostics. ~:reject-secret?~ marks secret-related failures for the caller to reject instead of storing them as ordinary warnings. The following ~type-check-fn-and-dependents!~ also checks direct callers using the compiler's reverse dependency index.
 
-- source :: [[file:../../../src/graphden/crud/type_check.clj::(defn type-check-fn-after-mutation!][src/graphden/crud/type_check.clj:487]]
+- source :: [[file:../../../src/graphden/crud/type_check.clj::(defn type-check-fn-after-mutation!][src/graphden/crud/type_check.clj:514]]
 - see also :: [[file:types.org::#types/check-fn-def!][check-fn-def!]]
 
 * 10. notify-after-write!
@@ -208,39 +208,39 @@ Stores a completed future's result, error, or cancellation on the execution row.
 :PROPERTIES:
 :CUSTOM_ID: crud/render-repr
 :FILE: src/graphden/crud/value_repr.clj
-:LINE: 77
-:MINS: 2.3
+:LINE: 163
+:MINS: 2.0
 :END:
 
 Chooses a [[file:glossary.org::#term/graph-function][graph function]] that renders a result value as [[file:glossary.org::#term/hiccup][Hiccup]], using the declared or inferred type and falling back to literal classification. It runs with ~:allowed-effects #{}~ and sanitizes the output before insertion into the editor [[file:glossary.org::#term/hiccup][DOM]]. See [[file:../../../docs/EXECUTION.md][typed result representations]].
 
-- source :: [[file:../../../src/graphden/crud/value_repr.clj::(defn render-repr][src/graphden/crud/value_repr.clj:77]]
+- source :: [[file:../../../src/graphden/crud/value_repr.clj::(defn render-repr][src/graphden/crud/value_repr.clj:163]]
 - referenced from :: [[file:editor.org::#editor/enterArgValueEditMode][enterArgValueEditMode]], [[file:platform.org::#platform/sanitize-hiccup][sanitize-hiccup]]
 
 * 17. resolve-form
 :PROPERTIES:
 :CUSTOM_ID: crud/resolve-form
 :FILE: src/graphden/crud/value_form.clj
-:LINE: 472
+:LINE: 473
 :MINS: 3.5
 :END:
 
 Converts an effective [[file:glossary.org::#term/slot][slot]] type into a pure form descriptor for a record, list, union, or leaf. It resolves aliases and variants on the server and bounds recursion depth, so the browser need not reimplement the type grammar.
 
-- source :: [[file:../../../src/graphden/crud/value_form.clj::(defn resolve-form][src/graphden/crud/value_form.clj:472]]
+- source :: [[file:../../../src/graphden/crud/value_form.clj::(defn resolve-form][src/graphden/crud/value_form.clj:473]]
 - same file :: [[file:crud.org::#crud/build-form][build-form]]
 
 * 18. build-form
 :PROPERTIES:
 :CUSTOM_ID: crud/build-form
 :FILE: src/graphden/crud/value_form.clj
-:LINE: 778
+:LINE: 779
 :MINS: 5.8
 :END:
 
 Renders a form descriptor as [[file:glossary.org::#term/hiccup][Hiccup]]: records become field groups, unions get a choice of variant, and leaf types use the registered form functions. ~GET /partials/value-form~ returns this [[file:glossary.org::#term/htmx][server-rendered fragment]], which [[file:glossary.org::#term/htmx][HTMX]] inserts into the inspector. See [[file:../../../docs/PARTIALS.md][partials]].
 
-- source :: [[file:../../../src/graphden/crud/value_form.clj::(defn build-form][src/graphden/crud/value_form.clj:778]]
+- source :: [[file:../../../src/graphden/crud/value_form.clj::(defn build-form][src/graphden/crud/value_form.clj:779]]
 - same file :: [[file:crud.org::#crud/resolve-form][resolve-form]]
 
 * 19. run-captured!

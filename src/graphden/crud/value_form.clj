@@ -27,6 +27,7 @@
 
    Sits alongside `graphden.crud.type-check` in the crud.* layer."
   (:require
+    [cheshire.core :as json]
     [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.crud.entities.list :as entity-list]
@@ -711,7 +712,7 @@
         ;; Native HTML `min`/`max` give the browser affordance; the
         ;; live type-check (`validateLiteralAgainstType`) stays the
         ;; source of truth, so no `data-field-min/max` mirror.
-        extra   (cond-> {}
+        extra   (cond-> {"data-form-type" (json/generate-string t)}
                   (seq path)    (assoc "data-field-path" path)
                   id            (assoc "id" id)
                   (:min bounds) (assoc "min" (:min bounds))

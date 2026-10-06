@@ -386,7 +386,7 @@ int / float / bool / keyword / JSON). Picking one does two things at
 once: the form becomes that type's control with its validation, and
 **Save narrows the binding** — `binding.type-override-fn-id` on
 this `(fn, slot)`, exactly what an fns.edn author writes as
-`:refine {value {:type :text}}` (§ Type Narrowing Through
+`:args {:value {:type :text}}` (§ Type Narrowing Through
 Inheritance). The type chip's "Change type" popover is the same
 narrowing without a value.
 
@@ -954,8 +954,8 @@ When a fn-def inherits from a parent and the user wants to declare a more specif
 
 {:name :send-email
  :parent :http-post
- :args {:url "https://api.mail.com/send"}
- :refine {:body {:type {:to :text, :subject :text, :body :text}}}}
+ :args {:url "https://api.mail.com/send"
+        :body {:type {:to :text, :subject :text, :body :text}}}}
 
 ;; body narrowed: :jsonb → {:to :text, :subject :text, :body :text}
 ;; {:to :text, ...} ⊂ :jsonb → valid narrowing ✓
@@ -966,7 +966,7 @@ Further inheritance can narrow further:
 ```edn
 {:name :send-welcome
  :parent :send-email
- :refine {:body {:type {:to :text, :subject [:= "Welcome!"], :body :text}}}}
+ :args {:body {:type {:to :text, :subject [:refine :text [:= "Welcome!"]], :body :text}}}}
 ;; subject narrowed to literal value
 ```
 
@@ -975,7 +975,7 @@ Widening is an error:
 ```edn
 {:name :broken
  :parent :send-email
- :refine {:body {:type :jsonb}}}
+ :args {:body {:type :jsonb}}}
 ;; :jsonb ⊄ {:to :text, ...} → ERROR: cannot widen type
 ```
 
@@ -1667,3 +1667,17 @@ fails on a new fn-def because the checker can't trace a
 runtime guard, add `:type T` to the binding form with a
 one-line comment naming the guard. Phase E catches it loudly;
 fix is a 30-second edit.
+
+### Concrete colors
+
+`:color` refines text to HEX values: `#RGB`, `#RGBA`, `#RRGGBB` or
+`#RRGGBBAA`. `:ensure-color` validates text produced by another graph and
+returns a color, or throws `:refinement/violated`. CSS expressions and contextual
+values such as `var(...)` are outside this concrete value type.
+
+The value-form registry selects the graph-authored color controls; the browser
+widget synchronizes the native RGB picker, alpha and manual text value. The
+resolved type is passed to the form, so validation uses its refinement rather
+than a widget-specific copy of the constraint. Compact canvas representations
+use `_value-inline-repr-registry`, through the same pure execution and Hiccup
+sanitization boundary as `_value-repr-registry` for run results.

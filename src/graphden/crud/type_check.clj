@@ -269,7 +269,30 @@
                     :type (some-> (:type-fn-id renamed-view)
                                   (->> (get fn-by-id))
                                   row->type-kw)}
+      (:type-override-fn-id b)
+      {:type (some-> (get fn-by-id (:type-override-fn-id b)) row->type-kw)}
       :else nil)))
+
+
+(defn- declared-free-args
+  "Owned free slots are argument declarations, even without a binding row.
+   Inherited junctions and rename views are handled by their existing paths."
+  [own-fn-slots parent-fn-slots own-bindings slot-by-id fn-by-id]
+  (let [parent-slot-ids (set (map :slot-id parent-fn-slots))
+        bound-slot-ids (set (map :slot-id own-bindings))]
+    (into {}
+          (keep (fn [fs]
+                  (let [sid (:slot-id fs)
+                        slot (get slot-by-id sid)
+                        row (get fn-by-id (:type-fn-id slot))]
+                    (when (and slot (not (:source-slot-id slot))
+                               (not (contains? parent-slot-ids sid))
+                               (not (contains? bound-slot-ids sid)))
+                      [(keyword (:name slot))
+                       {:type (or (row->type-kw row)
+                                  (when (:constraint row)
+                                    (rich-type-from-row row fn-by-id)))}]))))
+          own-fn-slots)))
 
 
 (defn- annotate-rows
@@ -420,6 +443,8 @@
                                              {:binding-id (mapv :id own-bindings)}))
               ref-ids (->> (concat (keep :ref-fn-id own-bindings)
                                    (keep :ref-fn-id item-rows)
+                                   (keep :type-override-fn-id own-bindings)
+                                   (keep :type-fn-id (keep #(get slot-by-id (:slot-id %)) own-fn-slots))
                                    (keep :type-fn-id (vals renamed-view-by-source)))
                            distinct
                            (remove #(contains? fn-by-id %)))
@@ -427,7 +452,9 @@
                               (seq ref-ids)
                               (merge (annotate-rows
                                        ns-paths (sp/read-entities storage :fn ref-ids))))
-              args (into {}
+              declared-args (declared-free-args own-fn-slots fn-slots own-bindings
+                                                slot-by-id fn-by-id+refs)
+              args (into declared-args
                          (keep (fn [b]
                                  (when-let [slot (get slot-by-id (:slot-id b))]
                                    (when-let [shape (binding-shape-for-edn

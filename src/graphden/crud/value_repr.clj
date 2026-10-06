@@ -26,9 +26,12 @@
   (:require
     [clojure.tools.logging :as log]
     [graphden.crud.request :as request]
+    [graphden.crud.type-check :as type-check]
     [graphden.crud.value-form :as value-form]
+    [graphden.executor.compile.renames :as renames]
     [graphden.executor.interface :as executor]
     [graphden.executor.registry.core :as registry]
+    [graphden.layout.data :as layout-data]
     [graphden.types.check.literals :as types-lit]
     [graphden.types.core :as types]
     [graphden.web.hiccup-sanitize :as sanitize]))
@@ -74,6 +77,89 @@
       :else (types-lit/classify-literal value))))
 
 
+(defn render-typed-repr
+  "Render through a preloaded registry using an explicit value type. This
+   shared boundary executes only pure graphs and sanitizes their output."
+  [ctx registry type value]
+  (when-let [fn-name (value-form/pick-form-fn registry type)]
+    (some-> (executor/execute-by-name
+              (assoc ctx :allowed-effects #{}) fn-name {:value value})
+            sanitize/sanitize-hiccup)))
+
+
+(defn- effective-literal-type
+  "Resolve the actual slot type, including inherited narrowing and rename
+   views, from the already loaded graph. Never dispatch by a display name."
+  [{:keys [fnId slotId]} {:keys [fn-map slot-map binding-by-fn-slot] :as lookups}]
+  (let [fid (request/parse-uuid-or-clear fnId)
+        sid (request/parse-uuid-or-clear slotId)
+        slot-ids (renames/chain-source-slot-ids sid slot-map)
+        chain (layout-data/get-inheritance-chain* fid lookups)
+        tid (or (some (fn [ancestor]
+                        (some #(get-in binding-by-fn-slot
+                                       [[ancestor %] :type-override-fn-id])
+                              slot-ids)) chain)
+                (:type-fn-id (get slot-map sid)))
+        row (get fn-map tid)
+        rich (registry/rich-type-of-id tid)]
+    (when row
+      ;; Refinement constraints come from the selected type ID. A record
+      ;; named "color" must never resolve through the built-in color alias.
+      (when-let [t (if (or (:base-fn-id row) (:element-fn-id row))
+                     (type-check/rich-type-from-row row fn-map)
+                     (:return rich))]
+        {:id tid :name (:name row) :type t}))))
+
+
+(defn- valid-literal?
+  [t value]
+  (and t (not (types/contains-marker? t))
+       (or (types/subtype? (types-lit/classify-literal value) t)
+           (and (types/refine-type? t)
+                (types/subtype? (types-lit/classify-literal value)
+                                (types/refine-base t))
+                (true? (types-lit/literal-satisfies-refinement?
+                         value (types/refine-constraint t)))))))
+
+
+(defn annotate-literals
+  "Attach compact typed representations to visible literal nodes. Read the
+   graph registry once, reuse equal previews, and bound distinct executions.
+   Secret/resolver values and invalid refinements never reach a repr graph."
+  [ctx elements graph]
+  (if (false? (:ok elements))
+    elements
+    (let [rows (value-form/registry-pairs ctx "_value-inline-repr-registry")
+          lookups {:fn-map (into {} (map (juxt :id identity)) (:fns graph))
+                   :slot-map (into {} (map (juxt :id identity)) (:slots graph))
+                   :binding-by-fn-slot (into {} (map (fn [b] [[(:fn-id b) (:slot-id b)] b]))
+                                             (:bindings graph))
+                   :chain-cache (atom {})}
+          previews (atom {})]
+      (update elements :nodes
+              (fn [nodes]
+                (mapv
+                  (fn [node]
+                    (let [{:keys [type value secretRef]} (:data node)
+                          info (when (and (= type "arg") (not secretRef))
+                                 (effective-literal-type (:data node) lookups))
+                          t (:type info)
+                          eligible? (and (valid-literal? t value)
+                                         (value-form/pick-form-fn rows t))
+                          k [(:id info) value]]
+                      (if-not eligible?
+                        node
+                        (let [repr (if (contains? @previews k)
+                                     (get @previews k)
+                                     (when (< (count @previews) 64)
+                                       (let [r (try (render-typed-repr ctx rows t value)
+                                                    (catch Exception _ nil))]
+                                         (swap! previews assoc k r)
+                                         r)))]
+                          (cond-> node repr (assoc-in [:data :literalRepr] repr))))))
+                  nodes))))))
+
+
 (defn render-repr
   "Resolve + execute + sanitize the registered representation of
    `value` as returned by fn `fn-id`. Returns sanitized hiccup, or
@@ -91,13 +177,8 @@
   (try
     (when (some? value)
       (when-let [dt (dispatch-type (declared-return-type fn-id) value)]
-        (when-let [fn-name (value-form/pick-form-fn
-                             (value-form/registry-pairs ctx registry-fn-name)
-                             dt)]
-          (some-> (executor/execute-by-name
-                    (assoc ctx :allowed-effects #{})
-                    fn-name {:value value})
-                  sanitize/sanitize-hiccup))))
+        (render-typed-repr ctx (value-form/registry-pairs ctx registry-fn-name)
+                           dt value)))
     (catch Exception e
       (log/warn e "value-repr render failed — falling back to shape pane")
       nil)))

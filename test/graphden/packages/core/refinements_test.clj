@@ -89,3 +89,12 @@
     (is (= :refinement/violated (ex-of "ensure-non-empty-text" "")))
     (is (= :refinement/violated (ex-of "ensure-non-empty-text" nil)))
     (is (= :refinement/violated (ex-of "ensure-non-empty-text" 42)))))
+
+
+(deftest concrete-colors-validate-at-the-boundary
+  (testing "HEX colors retain spelling and alpha"
+    (doseq [v ["#abc" "#AbCd" "#12aBcD" "#11223380"]]
+      (is (= v (call "ensure-color" v)))))
+  (testing "non-colors are rejected"
+    (doseq [v ["hello" "#12" "#12345" "#gggggg" "red" "var(--bg)" "#112233\n" 42 nil]]
+      (is (= :refinement/violated (ex-of "ensure-color" v))))))

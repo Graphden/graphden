@@ -7,7 +7,7 @@ Loading, rendering, actions, forms, comparisons, and preferences.
 
 after: web, layout
 
-[[file:index.org][index]] · ~71 min
+[[file:index.org][index]] · ~72 min
 
 * 1. initGraph
 :PROPERTIES:
@@ -143,7 +143,7 @@ Orders function-picker candidates without accessing the [[file:glossary.org::#te
 :CUSTOM_ID: editor/enterArgValueEditMode
 :FILE: resources/packages/app/editor/editor-edit-modes.js
 :LINE: 226
-:MINS: 7.1
+:MINS: 7.2
 :END:
 
 Asks ~/api/value-form~ for a widget appropriate to the [[file:glossary.org::#term/slot][slot]], then dispatches by ~data-form-widget~. The client does not choose the widget from raw type tags. After saving, it reloads [[file:glossary.org::#term/binding][bindings]] and lookups because changing a value changes stored graph rows.
@@ -191,13 +191,13 @@ Applies user key overrides by stable shortcut ID. The registry keeps defaults fo
 :PROPERTIES:
 :CUSTOM_ID: editor/authFetch
 :FILE: resources/packages/app/editor/editor-auth.js
-:LINE: 111
+:LINE: 113
 :MINS: 1.2
 :END:
 
 Sends authenticated editor requests and handles 401 by clearing the stored credential and opening sign-in. HTTP 4xx responses still resolve normally: callers must inspect the response status. A ~try/catch~ alone detects network exceptions, not rejected HTTP writes.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-auth.js::async function authFetch(url, opts = {}) {][resources/packages/app/editor/editor-auth.js:111]]
+- source :: [[file:../../../resources/packages/app/editor/editor-auth.js::async function authFetch(url, opts = {}) {][resources/packages/app/editor/editor-auth.js:113]]
 - referenced from :: [[file:editor.org::#editor/initGraph][initGraph]]
 
 * 16. _tourTick

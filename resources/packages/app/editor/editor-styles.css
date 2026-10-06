@@ -100,6 +100,7 @@
      compatibility hints, error tooltips. Same hue across themes so
      "green = ok / red = problem" is unambiguous. */
   --success-fg: #4ade80;
+  --success-fg-strong: #087443;
   --error-fg: #ff6b6b;
   /* WCAG-AA-safe error TEXT on the light surface (#ff6b6b is 2.6:1
      on the light bg — fine as a glow/border accent, too low for
@@ -229,6 +230,7 @@ body.theme-dark {
   /* Status colours — slight desaturation against the dark background
      so they don't vibrate. Hue still maps green=ok / red=error. */
   --success-fg: #5be08a;
+  --success-fg-strong: #5be08a;
   --error-fg: #f77;
   /* On the dark surface the base red already clears AA for text. */
   --error-fg-strong: #f77;
@@ -2219,7 +2221,7 @@ body.gd-no-execute .execute-cancel-btn {
    reverts to a free-arg). Floated to the LEFT of the row so it's
    visually separated from the commit/dismiss pair on the right. */
 .arg-value-edit-btn-danger {
-  background: transparent; color: var(--error-fg);
+  background: transparent; color: var(--error-fg-strong);
   border-color: color-mix(in srgb, var(--error-fg) 50%, var(--card-border));
   margin-right: auto;
 }
@@ -2263,7 +2265,7 @@ body.gd-no-execute .execute-cancel-btn {
 .arg-value-edit-hint {
   font-size: 0.6875rem; color: var(--muted-fg);
   font-style: italic;
-  padding: 2px 0; opacity: 0.85;
+  padding: 2px 0;
 }
 
 /* "in <namespace>" row of the Extend popover: caption + compact
@@ -2321,8 +2323,8 @@ body.gd-no-execute .execute-cancel-btn {
   font-size: 0.6875rem; padding: 2px 0; min-height: 14px;
   font-family: var(--mono);
 }
-.arg-value-edit-status.ok  { color: var(--success-fg); }
-.arg-value-edit-status.err { color: var(--error-fg); }
+.arg-value-edit-status.ok  { color: var(--success-fg-strong); }
+.arg-value-edit-status.err { color: var(--error-fg-strong); }
 
 /* Value-form — the type-aware editor form fetched from
    /api/value-form and rendered into the value-edit popover. The host

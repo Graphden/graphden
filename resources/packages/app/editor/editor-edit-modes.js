@@ -245,7 +245,9 @@ function enterArgValueEditMode(arg, anchorEl) {
       if (expected && typeof formatTypeHint === 'function') {
         const hint = document.createElement('div');
         hint.className = 'arg-value-edit-hint';
-        hint.textContent = 'Expected: ' + formatTypeHint(expected);
+        const nominal = typeof namedRefinementPin === 'function' ? namedRefinementPin(arg) : null;
+        hint.textContent = 'Expected: ' + (nominal || formatTypeHint(expected));
+        hint.title = formatTypeHint(expected);
         root.appendChild(hint);
       }
       let asSelect = null;

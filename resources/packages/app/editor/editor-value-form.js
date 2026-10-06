@@ -41,7 +41,8 @@ function installFormLiveValidation(hostEl, expected, statusEl) {
     }
     if (expected && typeof validateLiteralAgainstType === 'function') {
       const r = validateLiteralAgainstType(collected.value, expected);
-      statusEl.textContent = (r.ok ? '✓ ' : '✗ ') + (r.message || '');
+      statusEl.textContent = r.ok ? '✓ Valid' : '✗ ' + (r.message || '');
+      statusEl.title = r.message || '';
       statusEl.classList.toggle('ok', !!r.ok);
       statusEl.classList.toggle('err', !r.ok);
     } else {
@@ -166,7 +167,7 @@ function installRawToggle(hostEl, payloadValue) {
 // ============================================================================
 
 // POST the slot identifiers to /api/value-form. Read-only endpoint —
-// branch-aware authFetch. Returns the `{ok, form, value}` payload, or
+// the shared fetch wrapper carries branch/auth. Returns `{ok, form, value}`, or
 // null on any network / HTTP failure (caller falls back).
 // `as` (optional) — a type NAME: the form for that narrower type instead
 // of the slot's own (the "as:" chooser on a wide slot).
@@ -178,7 +179,7 @@ async function fetchValueForm(arg, as) {
   if (arg['item-id'])    body['item-id']    = arg['item-id'];
   if (as)                body.as            = as;
   try {
-    const r = await authFetch(API.api_value_form, {
+    const r = await fetch(API.api_value_form, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)

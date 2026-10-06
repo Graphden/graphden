@@ -110,6 +110,10 @@ async function newContext(chromium, opts = {}) {
     hasTouch: !!process.env.GRAPHDEN_VIEWPORT,
     isMobile: false,
   });
+  if (process.env.GRAPHDEN_SESSION_COOKIE) {
+    await ctx.addCookies([{name: 'gd_session', value: process.env.GRAPHDEN_SESSION_COOKIE,
+      url: BASE, httpOnly: true, secure: BASE.startsWith('https:')}]);
+  }
   await ctx.addInitScript(({auth, compactPass}) => {
     // about:blank has no origin → localStorage access throws. The
     // navigation to localhost runs the init script again on a real

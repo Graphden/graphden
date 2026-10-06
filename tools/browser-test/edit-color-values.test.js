@@ -12,10 +12,6 @@ const branch = 'color-values-' + process.pid + '-' + Date.now().toString(36);
 (async () => {
   await waitForServerHealthy();
   const {browser, page} = await newContext(chromium, {boot: false});
-  if (process.env.GRAPHDEN_SESSION_COOKIE) {
-    await page.context().addCookies([{name: 'gd_session', value: process.env.GRAPHDEN_SESSION_COOKIE,
-      url: BASE, httpOnly: true, secure: BASE.startsWith('https:')}]);
-  }
   const errors = [];
   let prepared;
   let baseline;

@@ -152,8 +152,8 @@ app-base package (`app-base/prefs/fns.edn`, works without the registry):
 
 | Route | Purpose |
 |---|---|
-| `GET /api/prefs` | the current user's preferences `{"theme": …, "keymap": …}` |
-| `PUT /api/prefs/:key` body `{value}` | store one (`theme` / `keymap`; 400 `unknown-key`, 413 `too-large` over 64 KB) |
+| `GET /api/prefs` | the current user's preferences `{"theme": …, "keymap": …}`; `Cache-Control: no-store` and `X-Graphden-Preference-Owner` identify this response's owner |
+| `PUT /api/prefs/:key` body `{value, owner?}` | store one (`theme` / `keymap`; 400 `unknown-key`, 413 `too-large` over 64 KB). When supplied, `owner` must match the authenticated user (403 `wrong-user` otherwise); older clients may omit it |
 
 HTMX contract of the partials: every root is `div[data-marketplace]` with
 `hx-target="closest [data-marketplace]" hx-swap="outerHTML"`, which htmx
@@ -165,6 +165,35 @@ takes effect at once — and mirrors the open item into the URL
 copied link lands on the same package.
 
 ## 5. Themes
+
+A personal theme may additionally select an ordinary function graph using
+`graph: {"fn-id", org, branch, label}` alongside the existing `source` and
+`payload` fields. The payload preserves the last successful colors if the graph
+is later unavailable. Selection affects only the preference owner; editing a
+shared graph can affect users who explicitly selected that same graph.
+Self-hosted accounts provide distinct preference owners. An installation with
+authentication disabled or one shared token retains its existing shared
+`anonymous` preference identity; it has no separate server-side user profiles.
+
+`POST /api/ui/theme/evaluate` accepts `{"fn-id", org, owner, args: {}}` with the
+ordinary branch header. The organization and owner must match the request;
+normal graph read and execution authorization still apply. Effects, secret
+results and invalid theme values are refused. Graph-produced colors use the
+`color` refinement's HEX formats; existing saved theme payloads retain their
+older supported formats.
+
+`POST /api/ui/theme/create` accepts `{"namespace-id": UUID|null, owner}` and
+creates a uniquely named child namespace with ordinary theme functions under a
+writable destination. It returns `{ok: true, namespace}`. The functions can be
+edited through the graph editor and distributed through the existing function
+package mechanism. Applying an existing marketplace color payload remains
+supported and replaces the graph selection.
+
+If an import fails after reserving its child namespace, the endpoint removes
+only its exact function identities and returns the retained namespace path
+with `create-failed`. It does not delete that namespace: another writer may
+already have added content there. The existing namespace controls can remove
+an unwanted empty namespace.
 
 A theme payload (`editor-prefs.js`):
 

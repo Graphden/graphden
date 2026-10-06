@@ -133,8 +133,10 @@ hand — it lives on a row only the platform writes.
 
 ## Your own theme
 
-Open **Settings → Appearance**. The light / dark toggle is where it
-was. Below it, **Custom theme** — click **Customize…**:
+Open **Settings → Appearance**. If you already follow a theme graph,
+first click **Use saved colors**; this keeps its current colors and makes
+them an independent preference. Under **Custom theme**, click
+**Customize…**:
 
 - **Base** — light or dark, the stylesheet your colours sit on.
 - **Text size** — a slider from 70 % to 160 %; the whole editor is
@@ -155,6 +157,33 @@ you, but a theme you share will be used by people whose eyes are not
 yours.
 
 **Reset to built-in** clears it all.
+
+## Edit a theme as a graph
+
+In **Settings → Appearance → Theme graph**, click **Create graph…** and
+choose a namespace you can write. The editor creates a new child namespace,
+selects its `theme` function for your personal appearance, and opens that
+graph. It contains ordinary functions for the mode, colors, fonts and scale.
+
+Open `theme-canvas-color` and edit its `value`. Its `color` type provides
+a color picker and manual HEX input, including transparency; invalid text
+cannot be saved through the form. Save the graph: your editor applies the
+new color automatically. **Open graph** returns to the selected function;
+**Use graph…** selects another accessible function returning a theme.
+
+Selection is personal. Another user's editor changes only if they select
+the same graph themselves. To make an independent variation, create your
+own theme graph or fork a shared function package. To distribute an editable
+theme, publish its namespace as a function package using
+[Lesson 32](32-distributing-packages.md), then select the installed `theme`
+function. The **Themes** marketplace tab also continues to support saved
+color payloads, which are independent snapshots.
+
+The selected graph belongs to its saved organization and branch. Switching
+organizations does not execute it in the new organization. If it is deleted,
+inaccessible or invalid, the editor keeps its last successful colors and
+shows a short status in Appearance. **Use saved colors** stops following it;
+**Reset to built-in** clears the selection and custom colors.
 
 ## Save, share, roll back
 

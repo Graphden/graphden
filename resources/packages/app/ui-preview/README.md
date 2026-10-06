@@ -1,6 +1,20 @@
 # Graph-backed editor account menu
 
-The product review runs in the real editor on an isolated self-hosted instance.
+The ordinary editor uses bundled graph plans for the account menu and function
+picker by default, including when tenancy is active. These plans contain only
+shipped package definitions; enabling them does not export tenant graphs or
+change another user's preferences. Regenerate the checked-in artifacts with
+`clojure -M:dev tools/ui_preview/generate_builtin_plans.clj` after changing their
+source graphs. The generator validates the supported primitive ABI and records
+a source fingerprint; its tests check that the artifacts match the sources.
+
+Settings → Appearance can select an ordinary personal theme graph. It executes
+on the server through the normal access checks, with effects disabled and a
+bounded execution time. Only the validated theme result reaches the browser.
+The selected graph and its last successful colors are stored in the existing
+owner-scoped preference. This is independent of the developer review URLs below.
+
+The editable product review runs in the real editor on a self-hosted instance.
 Prepare an editable copy of the ordinary account-menu and theme graphs:
 
 ```sh
@@ -47,7 +61,7 @@ After saving an edit, reload the browser document to load its updated plan.
 Selecting another graph only changes the editor selection; this bounded review
 does not yet refresh the running menu plan automatically after every save.
 
-The next, unmerged renderer slice uses locally bundled Preact for DOM
+The renderer uses locally bundled Preact for DOM
 reconciliation. `GraphdenRenderer` accepts live Hiccup values, including finite
 sequences produced by graph `map`, and preserves keyed elements between renders.
 Keys are normalized to strings; duplicate sibling keys are rejected before
@@ -89,7 +103,9 @@ Keyword/string identity is preserved. Values are nil, booleans, safe integers,
 strings, keywords, vectors and maps with string or keyword keys; finite result
 sequences are materialized with a bound. Unsupported values/operations fail.
 
-Export is unavailable when tenancy is active. The authenticated export captures
+Arbitrary graph-plan export is unavailable when tenancy is active. This does not
+disable the shipped default plans or server-evaluated personal themes.
+The authenticated export captures
 one read-only database snapshot and derives its type policy from those same
 rows in isolated registries. Original classifications are frozen before that read from already resolved
 built-in type shapes, with fixed built-in secret semantics. Custom marker tags

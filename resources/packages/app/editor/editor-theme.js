@@ -87,7 +87,7 @@
     copy.appendChild(el('div', 'gd-set-label', 'Custom theme'));
     const hint = el('div', 'gd-set-hint');
     const src = current?.source;
-    hint.textContent = current?.payload
+    hint.textContent = current?.graph ? 'Graph: ' + (current.graph.label || 'Theme') : current?.payload
       ? (src?.name ? 'Based on ' + src.name + '@' + src.version + (current.dirty ? ' (edited)' : '') : 'Unsaved local edits')
       : 'Built-in look — the Theme toggle above picks light or dark.';
     copy.appendChild(hint);
@@ -98,7 +98,7 @@
     edit.id = 'gd-theme-edit';
     edit.setAttribute('aria-expanded', _root.dataset.editing === '1' ? 'true' : 'false');
     edit.addEventListener('click', () => { _root.dataset.editing = _root.dataset.editing === '1' ? '0' : '1'; render(); });
-    btns.appendChild(edit);
+    if (!current?.graph) btns.appendChild(edit);
     if (current?.payload) {
       const reset = el('button', 'gd-set-btn', 'Reset to built-in');
       reset.type = 'button';
@@ -111,6 +111,51 @@
       btns.appendChild(reset);
     }
     row.appendChild(btns);
+    host.appendChild(row);
+  }
+
+  function renderGraphRow(host, current) {
+    if (!window.gdChooseThemeGraph) return;
+    const row = el('div', 'gd-set-row');
+    const copy = el('div', 'gd-set-copy');
+    copy.appendChild(el('div', 'gd-set-label', 'Theme graph'));
+    const message = window.gdThemeGraphStatus?.();
+    const hint = el('div', 'gd-set-hint', message || 'Choose an ordinary function that returns a theme.');
+    hint.id = 'gd-theme-graph-status';
+    hint.setAttribute('role', 'status');
+    copy.appendChild(hint);
+    row.appendChild(copy);
+    const actions = el('div', 'gd-theme-btns');
+    if (window.API?.api_ui_theme_create_template && !current?.graph) {
+      const create = el('button', 'gd-set-btn', 'Create graph…');
+      create.type = 'button';
+      create.id = 'gd-theme-create-graph';
+      create.title = 'Create an editable theme in a namespace you can write.';
+      create.addEventListener('click', () => window.gdCreateThemeGraph(create));
+      actions.appendChild(create);
+    }
+    const choose = el('button', 'gd-set-btn', 'Use graph…');
+    choose.type = 'button';
+    choose.id = 'gd-theme-choose-graph';
+    choose.addEventListener('click', () => window.gdChooseThemeGraph(choose));
+    actions.appendChild(choose);
+    if (current?.graph) {
+      const open = el('button', 'gd-set-btn', 'Open graph');
+      open.type = 'button';
+      open.addEventListener('click', () => { void window.gdOpenThemeGraph(current.graph); });
+      actions.appendChild(open);
+      const detach = el('button', 'gd-set-btn', 'Use saved colors');
+      detach.type = 'button';
+      detach.id = 'gd-theme-detach-graph';
+      detach.title = 'Keep these colors and stop following the graph.';
+      detach.addEventListener('click', () => {
+        const payload = window.gdActiveThemePayload() || current.payload;
+        commit(payload, current.source, true);
+        render();
+      });
+      actions.appendChild(detach);
+    }
+    row.appendChild(actions);
     host.appendChild(row);
   }
 
@@ -164,6 +209,7 @@
   }
 
   function renderEditor(host, current) {
+    if (current?.graph) return;
     if (_root.dataset.editing !== '1') return;
     const payload = workingPayload();
     const box = el('div', 'gd-theme-editor');
@@ -275,8 +321,15 @@
     _root = document.getElementById('gd-theme-root');
     if (!_root) return;
     const current = pref();
+    const mode = document.getElementById('gd-set-theme');
+    if (mode) {
+      mode.disabled = !!current?.graph;
+      mode.title = current?.graph ? 'Edit the mode in your theme graph, or use saved colors to stop following it.' : '';
+      mode.textContent = document.body.classList.contains('theme-dark') ? 'Dark' : 'Light';
+    }
     _root.replaceChildren();
     renderActiveRow(_root, current);
+    renderGraphRow(_root, current);
     renderSavedRow(_root, current);
     renderEditor(_root, current);
   }
@@ -293,4 +346,8 @@
   window.gdRenderThemePane = gdRenderThemePane;
   window.gdThemeWorkingPayload = workingPayload;
   window.gdThemeContrast = contrast;
+  window.addEventListener('gd-theme-graph-status', () => {
+    const hint = document.getElementById('gd-theme-graph-status');
+    if (hint) hint.textContent = window.gdThemeGraphStatus() || 'Choose an ordinary function that returns a theme.';
+  });
 })();

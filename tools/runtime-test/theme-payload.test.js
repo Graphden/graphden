@@ -47,6 +47,7 @@ function styleStub() {
 }
 
 function makeCtx() {
+  const events = new Map();
   const classes = new Set();
   const body = {
     style: styleStub(),
@@ -60,15 +61,36 @@ function makeCtx() {
       body, documentElement: html,
       getElementById: () => null, addEventListener() {}, readyState: 'complete',
     },
-    window: { addEventListener() {}, innerWidth: 1200 },
+    window: { addEventListener: (name, callback) => events.set(name, callback), innerWidth: 1200 },
     localStorage: { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); } },
     getComputedStyle: () => ({ getPropertyValue: () => '' }),
     requestAnimationFrame: (fn) => fn(),
     fetch: () => Promise.reject(new Error('offline')),
   });
   vm.runInContext(fs.readFileSync(path.join(EDITOR, 'editor-prefs.js'), 'utf8'), ctx, { filename: 'editor-prefs.js' });
-  return { ctx, body, html, classes, store };
+  return { ctx, body, html, classes, store, events };
 }
+
+test('a preference response from the previous account cannot install its theme', async () => {
+  const {ctx, events, store} = makeCtx();
+  let respond;
+  ctx.window.API = {api_prefs: '/api/prefs'};
+  ctx.window.authFetch = () => new Promise((resolve) => { respond = resolve; });
+  const pending = ctx.window.gdPrefsRefresh();
+  events.get('gd-auth-changed')();
+  assert(store['graphden.prefs.server'] === '{}', 'account changes clear the previous local mirror too');
+  respond({ok: true, headers: new Headers({'X-Graphden-Preference-Owner': 'owner-a'}),
+    json: async () => ({theme: {payload: {tokens: {'--bg': '#112233'}}}})});
+  await pending;
+  assert(ctx.window.gdPrefRead('theme') === null, 'old account preferences are discarded');
+  assert(ctx.window.gdPrefsReady === false, 'a stale response cannot mark preferences verified');
+  assert(ctx.window.gdPrefOwner === null, 'the old owner is not restored');
+  ctx.window.authFetch = async () => ({ok: true,
+    headers: new Headers({'X-Graphden-Preference-Owner': 'owner-b'}), json: async () => ({})});
+  await ctx.window.gdPrefsRefresh();
+  assert(ctx.window.gdPrefOwner === 'owner-b', 'the new authenticated owner is captured');
+  assert(ctx.window.gdPrefsReady === true, 'only a current response marks preferences verified');
+});
 
 test('graph theme overlay preserves personal values and rejects unsafe colors', () => {
   const {ctx, body} = makeCtx();
@@ -83,6 +105,42 @@ test('graph theme overlay preserves personal values and rejects unsafe colors', 
   ctx.window.gdApplyThemePayload({tokens: {'--gd-flow': '#aabbcc'}});
   ctx.window.gdClearGraphTheme();
   assert(body.style.getPropertyValue('--gd-flow') === '#aabbcc', 'a newly selected personal theme replaces the previous base');
+});
+
+test('a newer refresh wins even before an account-change probe arrives', async () => {
+  const {ctx} = makeCtx();
+  const requests = [];
+  ctx.window.API = {api_prefs: '/api/prefs'};
+  ctx.window.authFetch = () => new Promise(resolve => requests.push(resolve));
+  const older = ctx.window.gdPrefsRefresh();
+  const newer = ctx.window.gdPrefsRefresh();
+  const theme = {payload: {tokens: {'--bg': '#223344'}}};
+  requests[1]({ok: true, headers: new Headers({'X-Graphden-Preference-Owner': 'owner-b'}),
+    json: async () => ({theme})});
+  await newer;
+  requests[0]({ok: true, headers: new Headers({'X-Graphden-Preference-Owner': 'owner-a'}),
+    json: async () => ({theme: {payload: {tokens: {'--bg': '#112233'}}}})});
+  await older;
+  assert(ctx.window.gdPrefOwner === 'owner-b', 'a delayed older refresh cannot switch the owner back');
+  assert(ctx.window.gdPrefRead('theme') === theme, 'the newer account preference stays selected');
+});
+
+test('a changed server owner discards writes from the previous account', async () => {
+  const {ctx} = makeCtx();
+  ctx.window.API = {api_prefs: '/api/prefs'};
+  ctx.window.authFetch = async () => ({ok: true,
+    headers: new Headers({'X-Graphden-Preference-Owner': 'owner-a'}), json: async () => ({})});
+  await ctx.window.gdPrefsRefresh();
+  let respond;
+  ctx.window.authFetch = () => new Promise(resolve => { respond = resolve; });
+  const pending = ctx.window.gdPrefsRefresh();
+  await ctx.window.gdPrefWrite('theme', {payload: {tokens: {'--bg': '#112233'}}});
+  const theme = {payload: {tokens: {'--bg': '#223344'}}};
+  respond({ok: true, headers: new Headers({'X-Graphden-Preference-Owner': 'owner-b'}),
+    json: async () => ({theme})});
+  await pending;
+  assert(ctx.window.gdPrefOwner === 'owner-b', 'the server response detects a cookie changed in another tab');
+  assert(ctx.window.gdPrefRead('theme') === theme, 'local edits by the previous owner are never merged into the new owner');
 });
 
 test('a prefs refresh in flight never clobbers a key written after it started', async () => {

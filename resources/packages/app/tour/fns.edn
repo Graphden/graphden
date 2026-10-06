@@ -2441,7 +2441,7 @@
             {:id "40"
              :slug "marketplace-themes-keymaps"
              :chapter "Your organization"
-             :version 2
+             :version 3
              :requires "publish-packages"
              :title "Marketplace, themes & keymaps"
              :reads "covers what a listing describes, your own theme and keys, and save / share / roll back."
@@ -2451,9 +2451,9 @@
                :target nil
                :check {:kind "manual"}}
               {:title "Open the theme editor"
-               :body "Open the account menu, choose [[Settings]] — Appearance is the first section. Click [[Customize…]] to open the token editor."
+               :body "Open the account menu, choose [[Settings]] — Appearance is the first section. If a theme graph is selected, click [[Use saved colors]] to keep its colors without following the graph. Click [[Customize…]] to open the token editor."
                :target "#auth-lock-btn, .auth-avatar"
-               :targets ["#auth-lock-btn, .auth-avatar" ".auth-menu-item[data-item=\"Settings\"]" "#gd-theme-edit"]
+               :targets ["#auth-lock-btn, .auth-avatar" ".auth-menu-item[data-item=\"Settings\"]" "#gd-theme-detach-graph, #gd-theme-edit"]
                :check {:kind "dom" :selector "#gd-theme-editor"}}
               {:title "Pick a paper"
                :body "Under Grounds click the [[Paper]] swatch and choose any colour — the editor follows at once, and the choice is already saved as your preference. The contrast line tells you when ink on paper drops under 4.5:1."

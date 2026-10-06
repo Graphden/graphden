@@ -1,0 +1,19 @@
+{:namespace "app.ui-theme-template"
+ :description "An ordinary theme graph. Fork this namespace to edit your own colors and select theme in Appearance."
+ :fns
+ [{:name :theme-accent-color :parent :core.refinements/color-const
+   :return-type :core.refinements/color :args {:value "#2563eb"}}
+  {:name :theme-canvas-color :parent :core.refinements/color-const
+   :return-type :core.refinements/color :args {:value "#f8fafc"}}
+  {:name :theme-mode :parent :core.logic/const :return-type :text :args {:value "light"}}
+  {:name :theme-fonts :parent :core.logic/const :return-type :core.refinements/text-map :args {:value {:value {}}}}
+  {:name :theme-scale :parent :core.logic/const :return-type :core.refinements/non-negative-int :args {:value 100}}
+  {:name :theme-tokens :parent :core.collections/zipmap :return-type :core.refinements/text-map
+   :args {:keys ["--gd-flow" "--bg"] :vals [:theme-accent-color :theme-canvas-color]}}
+  {:name :theme-output
+   :type {:mode :text :tokens :core.refinements/text-map :fonts :core.refinements/text-map
+          :scale :core.refinements/non-negative-int}}
+  {:name :theme :parent :core.collections/zipmap
+   :return-type :theme-output
+   :args {:keys [{:value :mode} {:value :tokens} {:value :fonts} {:value :scale}]
+          :vals [:theme-mode :theme-tokens :theme-fonts :theme-scale]}}]}

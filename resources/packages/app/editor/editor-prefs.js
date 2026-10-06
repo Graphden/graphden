@@ -417,6 +417,10 @@ const _prefListeners = new Set();
 // the keys" step never saw its (default: …) badge (a gate flake, twice).
 let _prefsGen = 0;
 const _prefWrittenGen = {};
+let _prefsIdentityGen = 0;
+let _prefsRefreshGen = 0;
+window.gdPrefsReady = false;
+window.gdPrefOwner = null;
 
 function gdPrefRead(key) { return _prefs?.[key] ?? null; }
 
@@ -424,7 +428,10 @@ function gdPrefRead(key) { return _prefs?.[key] ?? null; }
 // shortcut registry). Idempotent — safe to call on every refresh.
 function gdPrefApply(key) {
   const v = gdPrefRead(key);
-  if (key === 'theme') gdApplyThemePayload(v?.payload || null);
+  if (key === 'theme') {
+    if (window.gdApplyThemeGraphPreference) void window.gdApplyThemeGraphPreference(v);
+    else gdApplyThemePayload(v?.payload || null);
+  }
   if (key === 'keymap' && typeof window.gdApplyKeymap === 'function') window.gdApplyKeymap(v?.payload?.bindings || null);
 }
 
@@ -434,20 +441,24 @@ function gdPrefNotify(key) {
 
 // Write a preference: apply now, mirror locally, persist server-side.
 async function gdPrefWrite(key, value) {
+  const identity = _prefsIdentityGen;
+  const owner = window.gdPrefOwner;
   _prefsGen += 1;
   _prefWrittenGen[key] = _prefsGen;
   _prefs = Object.assign({}, _prefs, { [key]: value });
   writePrefsMirror(_prefs);
   gdPrefApply(key);
   gdPrefNotify(key);
+  if (identity !== _prefsIdentityGen) return false;
   const api = window.API;
   if (!api || typeof api.api_prefs_key !== 'function') return false;
   try {
     const f = window.authFetch || fetch;
     const r = await f(api.api_prefs_key(key), {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }),
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({value, ...(owner ? {owner} : {})}),
     });
-    return r.ok;
+    return identity === _prefsIdentityGen && r.ok;
   } catch (_) { return false; }
 }
 
@@ -456,12 +467,23 @@ async function gdPrefsRefresh() {
   const api = window.API;
   if (!api || typeof api.api_prefs !== 'string') return;
   const startedAt = _prefsGen;
+  const identity = _prefsIdentityGen;
+  const refresh = ++_prefsRefreshGen;
   try {
     const f = window.authFetch || fetch;
     const r = await f(api.api_prefs);
     if (!r.ok) return;
     const map = await r.json();
+    if (identity !== _prefsIdentityGen || refresh !== _prefsRefreshGen) return;
     if (!map || typeof map !== 'object') return;
+    const owner = r.headers?.get('X-Graphden-Preference-Owner') || null;
+    // A cookie can change in another tab before this tab probes /auth/me.
+    // Do not merge writes from its previous owner into this server response.
+    if (window.gdPrefOwner && owner !== window.gdPrefOwner) {
+      _prefsIdentityGen++;
+      _prefsGen++;
+      for (const key of Object.keys(_prefWrittenGen)) delete _prefWrittenGen[key];
+    }
     // A key the user wrote while this request was in flight is newer than
     // the answer — the local value stands.
     const merged = Object.assign({}, map);
@@ -469,6 +491,8 @@ async function gdPrefsRefresh() {
       if (gen > startedAt) merged[key] = _prefs?.[key] ?? null;
     }
     _prefs = merged;
+    window.gdPrefOwner = owner;
+    window.gdPrefsReady = true;
     writePrefsMirror(_prefs);
     gdPrefApply('theme');
     gdPrefApply('keymap');
@@ -478,6 +502,22 @@ async function gdPrefsRefresh() {
 }
 
 function gdPrefOnChange(fn) { _prefListeners.add(fn); return () => _prefListeners.delete(fn); }
+
+// A delayed refresh from the previous account must never install its theme or
+// graph selection after sign-in changes. The next authenticated refresh wins.
+window.addEventListener('gd-auth-changed', () => {
+  _prefsIdentityGen++;
+  _prefsGen++;
+  _prefs = {};
+  writePrefsMirror(_prefs);
+  for (const key of Object.keys(_prefWrittenGen)) delete _prefWrittenGen[key];
+  window.gdPrefsReady = false;
+  window.gdPrefOwner = null;
+  gdPrefApply('theme');
+  gdPrefApply('keymap');
+  gdPrefNotify('theme');
+  gdPrefNotify('keymap');
+});
 
 window.gdThemeTokens = THEME_TOKENS;
 window.gdThemeFontVars = THEME_FONT_VARS;

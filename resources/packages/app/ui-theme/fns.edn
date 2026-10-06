@@ -1,0 +1,115 @@
+{:namespace "app.ui-theme"
+ :description "Evaluate a selected personal theme graph in the caller's organization and branch."
+ :fns
+ [{:name :_ui-theme-evaluate
+   :description "Run a plain, effect-free theme with bounded execution. Preserve the request's storage and execute guard; return only validated colors/fonts/scale or a fixed refusal."
+   :args {:input {:type :jsonb}}
+   :return-type :keyword-map
+   :effects #{:db :time}}
+  {:name :_ui-theme-evaluate-handler :parent :json-envelope-response
+   :lambda-params [:request]
+   :args {:envelope {:parent :_ui-theme-evaluate :args {:input :parse-json-body}}}}
+  {:name :api-ui-theme-evaluate :parent :app.routes.auth/post
+   :description "POST /api/ui/theme/evaluate — authenticated, current-org/current-branch execution of a personal theme; never exports its implementation."
+   :args {:path "/ui/theme/evaluate" :handler :_ui-theme-evaluate-handler}}
+  ;; The caller selects only an existing parent identity. Source definitions
+  ;; and the fresh child name are fixed/server-generated, never caller data.
+  {:name :_ui-theme-create-owner :parent :get
+   :args {:coll {:as :input :type :jsonb} :key {:value :owner} :default nil}}
+  {:name :_ui-theme-create-parent-raw :parent :get
+   :args {:coll {:as :input :type :jsonb} :key {:value :namespace-id} :default nil}}
+  {:name :_ui-theme-create-parent-id :parent :parse-uuid
+   :args {:string :_ui-theme-create-parent-raw}}
+  {:name :_ui-theme-create-parent-row :parent :get-entity
+   :args {:entity-type "ns" :id {:ref :_ui-theme-create-parent-id :type :uuid}}}
+  {:name :_ui-theme-create-parent-valid? :parent :or
+   :args {:values [{:parent :nil? :args {:value :_ui-theme-create-parent-raw}}
+                   {:parent :and
+                    :args {:values [:_ui-theme-create-parent-id :_ui-theme-create-parent-row]}}]}}
+  {:name :_ui-theme-create-parent-path :parent :fn-ns-path
+   :args {:ns-id :_ui-theme-create-parent-id}}
+  {:name :_ui-theme-create-depth-valid? :parent :lt
+   :description "Keep the child inside fn-ns-path's 20-level bound; never import under a truncated path."
+   :args {:nums [{:parent :count
+                  :args {:coll {:parent :str-split
+                                :args {:string :_ui-theme-create-parent-path :separator "\\."}}}} 19]}}
+  {:name :_ui-theme-create-input-valid? :parent :and
+   :description "Owner assertion precedes namespace reads. Null parent uses the normal root namespace write guard. Extra fields are refused."
+   :args {:values [{:parent :equal? :args {:a :_ui-theme-create-owner :b :current-user-id}}
+                   {:parent :equal? :args {:a {:parent :count :args {:coll {:as :input :type :jsonb}}} :b 2}}
+                   {:parent :contains? :args {:coll {:as :input :type :jsonb} :key {:value :namespace-id}}}
+                   :_ui-theme-create-parent-valid? :_ui-theme-create-depth-valid?]}}
+  {:name :_ui-theme-create-refusal :parent :const
+   :args {:value {:value {:ok false :reason "create-unavailable" :http-status 403}}}}
+  {:name :_ui-theme-create-error :parent :const
+   :args {:value {:value {:ok false :reason "create-failed" :http-status 422}}}}
+  {:name :_ui-theme-create-name :parent :str
+   :args {:parts ["theme_" :random-uuid]}}
+  {:name :_ui-theme-create-child :parent :create-entity
+   :args {:entity-type "ns"
+          :data {:parent :zipmap
+                 :args {:keys [{:value :name} {:value :parent-id}]
+                        :vals [:_ui-theme-create-name :_ui-theme-create-parent-id]}}}}
+  {:name :_ui-theme-create-child-id :parent :get
+   :args {:coll {:as :created :type :keyword-map} :key {:value :id} :default nil}}
+  {:name :_ui-theme-create-destination :parent :fn-ns-path
+   :args {:ns-id {:ref :_ui-theme-create-child-id :type :uuid}}}
+  {:name :_ui-theme-create-source :parent :get
+   :args {:coll {:parent :parse-edn
+                 :args {:string {:parent :read-resource
+                                 :args {:path "packages/app/ui-theme-template/fns.edn"}}}}
+          :key {:value :fns} :default []}}
+  {:name :_ui-theme-create-definition :parent :assoc
+   :lambda-params [:item]
+   :args {:map {:as :item :type :keyword-map}
+          :key {:value :namespace} :value {:as :destination :type :text}}}
+  {:name :_ui-theme-create-definitions :parent :map
+   :args {:coll :_ui-theme-create-source :func :_ui-theme-create-definition}}
+  {:name :_ui-theme-create-sync :parent :sync-fn-defs-branch!
+   :args {:branch-id :current-branch-id
+          :fn-defs {:ref :_ui-theme-create-definitions :type [:list :keyword-map]}}}
+  {:name :_ui-theme-create-success :parent :zipmap
+   :args {:keys [{:value :ok} {:value :namespace}]
+          :vals [true {:as :destination :type :text}]}}
+  {:name :_ui-theme-create-sync-body :parent :do
+   :args {:steps [:_ui-theme-create-sync :_ui-theme-create-success]}}
+
+  ;; Rollback is limited to the exact deterministic template identities in the NEW child.
+  ;; Keep the namespace itself: no graph-level empty check can make its
+  ;; later deletion atomic with another writer creating content beneath it.
+  {:name :_ui-theme-create-cleanup-id :parent :fn-def-id
+   :args {:fn-def {:ref :_ui-theme-create-definition :type :keyword-map}}}
+  {:name :_ui-theme-create-cleanup-row :parent :get-entity
+   :args {:entity-type "fn" :id :_ui-theme-create-cleanup-id}}
+  {:name :_ui-theme-create-cleanup-one :parent :if
+   :lambda-params [:item]
+   :args {:test :_ui-theme-create-cleanup-row
+          :then {:parent :delete-entity
+                 :args {:entity-type "fn"
+                        :id {:ref :_ui-theme-create-cleanup-id :type :uuid}}}
+          :else false}}
+  {:name :_ui-theme-create-cleanup-fns :parent :map
+   :args {:coll {:parent :reverse :args {:coll :_ui-theme-create-source}}
+          :func :_ui-theme-create-cleanup-one}}
+  {:name :_ui-theme-create-recovery :parent :zipmap
+   :description "A failed import keeps its freshly reserved namespace. An empty-check followed by deletion cannot protect a concurrent writer; ordinary namespace deletion remains available to the user."
+   :args {:keys [{:value :ok} {:value :reason} {:value :http-status} {:value :namespace}]
+          :vals [false "create-failed" 422 {:as :destination :type :text}]}}
+  {:name :_ui-theme-create-rollback :parent :do
+   :args {:steps [:_ui-theme-create-cleanup-fns :_ui-theme-create-recovery]}}
+  {:name :_ui-theme-create-reserved :parent :try
+   :description "The created namespace row and its path are lexical bindings shared with rollback; no random/create expression is recomputed on failure."
+   :args {:body :_ui-theme-create-sync-body :on-throw :_ui-theme-create-rollback
+          :created :_ui-theme-create-child :destination :_ui-theme-create-destination}}
+  {:name :_ui-theme-create-dispatch :parent :if
+   :args {:test :_ui-theme-create-input-valid?
+          :then :_ui-theme-create-reserved :else :_ui-theme-create-refusal}}
+  {:name :_ui-theme-create-envelope :parent :try
+   :args {:body :_ui-theme-create-dispatch :on-throw :_ui-theme-create-error
+          :input :parse-json-body}}
+  {:name :_ui-theme-create-handler :parent :json-envelope-response
+   :lambda-params [:request]
+   :args {:envelope :_ui-theme-create-envelope}}
+  {:name :api-ui-theme-create-template :parent :app.routes.auth/post
+   :description "POST /api/ui/theme/create — copy the ordinary theme template into a fresh child of the selected writable namespace. Uses the current branch and owner, without requiring the optional registry package."
+   :args {:path "/ui/theme/create" :handler :_ui-theme-create-handler}}]}

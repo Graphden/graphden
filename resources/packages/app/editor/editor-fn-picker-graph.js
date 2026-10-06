@@ -1,7 +1,8 @@
-// Review-only list rendering. Search IO, type verdicts and selection stay native.
+// Graph list rendering. Search IO, type verdicts and selection stay native.
 (() => {
   const params = new URLSearchParams(location.search);
-  if (!params.has('ui-picker-view')) return;
+  const review = params.has('ui-picker-view');
+  if (!review && !window.GraphdenBuiltinPlans) return;
   const api = window.GraphdenBrowser;
   const get = (value, name) => value instanceof Map ? value.get(api.keyword(name)) : undefined;
   const value = (item) => Array.isArray(item) ? item.map(value)
@@ -19,12 +20,17 @@
   async function load() {
     const own = ++generation;
     try {
-      const entries = {initial: params.get('ui-initial'), update: params.get('ui-update'), view: params.get('ui-picker-view')};
-      if (!params.get('branch') || params.get('branch') === 'main'
-        || Object.values(entries).some((id) => !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id || ''))) throw new Error('Choose an explicit review branch and picker entry');
-      const response = await window.authFetch('/ui-preview/plan?' + new URLSearchParams({branch: getCurrentBranchName(), ...entries}), {cache: 'no-store'});
-      const plan = await response.json();
-      if (!response.ok || plan.ok === false) throw new Error(plan.reason || 'Graph export refused');
+      let plan;
+      if (review) {
+        const entries = {initial: params.get('ui-initial'), update: params.get('ui-update'), view: params.get('ui-picker-view')};
+        if (!params.get('branch') || params.get('branch') === 'main'
+          || Object.values(entries).some((id) => !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id || ''))) throw new Error('Choose an explicit review branch and picker entry');
+        const response = await window.authFetch('/ui-preview/plan?' + new URLSearchParams({branch: getCurrentBranchName(), ...entries}), {cache: 'no-store'});
+        plan = await response.json();
+        if (!response.ok || plan.ok === false) throw new Error(plan.reason || 'Graph export refused');
+      } else {
+        plan = window.GraphdenBuiltinPlans.plans.fnPicker;
+      }
       if (own !== generation) return;
       runtime = api.createRuntime(plan, {operationLimit: 150000});
       integration.ready = true;
@@ -115,9 +121,9 @@
     },
   };
   window.gdFnPickerGraph = integration;
-  document.addEventListener('DOMContentLoaded', () => { if (isAuthenticated() || accountsAuthed) void load(); }, {once: true});
+  document.addEventListener('DOMContentLoaded', () => { if (!review || isAuthenticated() || accountsAuthed) void load(); }, {once: true});
   window.addEventListener('gd-auth-changed', () => {
     invalidate();
-    if (isAuthenticated() || accountsAuthed) void load();
+    if (!review || isAuthenticated() || accountsAuthed) void load();
   });
 })();

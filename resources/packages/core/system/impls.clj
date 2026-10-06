@@ -86,6 +86,11 @@
   (try (edn/read-string string) (catch Exception _ nil)))
 
 
+(defbase fn-def-id
+  [fn-def]
+  (ids/fn-id (:namespace fn-def) (:name fn-def)))
+
+
 (defbase platform-owned-def?
   "Is `fn-def`'s deterministic `(namespace, name)` fn-id one the package
    sync wrote this boot? The per-def predicate behind the
@@ -543,6 +548,7 @@
    :to-json-pretty {:impl to-json-pretty :taint-propagate? true}
    :parse-json {:impl parse-json :taint-propagate? true}
    :parse-edn {:impl parse-edn :taint-propagate? true}
+   :fn-def-id {:impl fn-def-id :taint-propagate? true}
    :platform-owned-def? {:impl platform-owned-def? :taint-propagate? true}
    :system-property system-property-fn
    :jvm-uptime-ms jvm-uptime-ms-fn

@@ -1,9 +1,10 @@
-// A review-only graph controls the real account menu's markup and transitions.
+// Shipped graphs control the account menu; explicit review entries override them.
 // Auth, capabilities, callbacks and positioning stay in their existing owners.
 (() => {
   const params = new URLSearchParams(location.search);
   const names = ['ui-initial', 'ui-update', 'ui-view'];
-  if (!names.some((name) => params.has(name))) return;
+  const review = names.some((name) => params.has(name));
+  if (!review && !window.GraphdenBuiltinPlans) return;
   const api = window.GraphdenBrowser;
   const key = api.keyword;
   const get = (map, name) => map instanceof Map ? map.get(key(name)) : undefined;
@@ -197,13 +198,18 @@
     async reload() {
       const generation = ++requestGeneration;
       try {
-        if (names.some((name) => !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(params.get(name) || ''))
-          || !params.get('branch') || params.get('branch') === 'main') throw new Error('Choose an explicit review branch and three entry functions');
-        const query = new URLSearchParams({branch: getCurrentBranchName()});
-        names.forEach((name) => { query.set(name.slice(3), params.get(name)); });
-        const response = await window.authFetch('/ui-preview/plan?' + query, {cache: 'no-store'});
-        const plan = await response.json();
-        if (!response.ok || plan.ok === false) throw new Error(plan.reason || 'Graph export refused');
+        let plan;
+        if (review) {
+          if (names.some((name) => !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(params.get(name) || ''))
+            || !params.get('branch') || params.get('branch') === 'main') throw new Error('Choose an explicit review branch and three entry functions');
+          const query = new URLSearchParams({branch: getCurrentBranchName()});
+          names.forEach((name) => { query.set(name.slice(3), params.get(name)); });
+          const response = await window.authFetch('/ui-preview/plan?' + query, {cache: 'no-store'});
+          plan = await response.json();
+          if (!response.ok || plan.ok === false) throw new Error(plan.reason || 'Graph export refused');
+        } else {
+          plan = window.GraphdenBuiltinPlans.plans.accountMenu;
+        }
         if (generation !== requestGeneration) return;
         if (mounted) closeMounted();
         runtime = api.createRuntime(plan);
@@ -220,10 +226,10 @@
   };
   window.gdShellMenuGraph = integration;
   window.gdRefreshGraphTheme = refreshTheme;
-  document.addEventListener('DOMContentLoaded', () => { if (isAuthenticated() || accountsAuthed) void integration.reload(); }, {once: true});
+  document.addEventListener('DOMContentLoaded', () => { if (!review || isAuthenticated() || accountsAuthed) void integration.reload(); }, {once: true});
   window.addEventListener('gd-auth-changed', () => {
     requestGeneration++;
     if (ready || runtime) { closeMounted(); window.gdClearGraphTheme(); runtime = null; integration.ready = false; }
-    if (isAuthenticated() || accountsAuthed) void integration.reload();
+    if (!review || isAuthenticated() || accountsAuthed) void integration.reload();
   });
 })();

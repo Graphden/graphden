@@ -119,6 +119,11 @@
                                               :description "Parsed fn-def maps (fns.edn shape); nil treated as empty."}
                                       :default {:value []}}}}}}}
 
+  {:name :fn-def-id
+   :description "Deterministic UUID of an ordinary fn-def from its namespace and name, using the same identity derivation as package/import sync. Use for identity-safe lookups or rollback; equal bare names in different namespaces remain distinct."
+   :args {:fn-def {:type :keyword-map :description "Fn-def with :name and optional :namespace; other fields do not affect identity."}}
+   :return-type :uuid}
+
   {:name :platform-owned-def?
    :description "Is `fn-def`'s deterministic (namespace, name) fn-id package-synced this boot? The per-def form of `:platform-owned-def-names`, for filtering a bundle by IDENTITY — a user's `my.ns/port` shares only a bare name with the platform's `:port`."
    :args {:fn-def {:type :keyword-map :description "One parsed fn-def map (fns.edn shape)."}}

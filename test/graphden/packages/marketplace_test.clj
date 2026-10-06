@@ -340,7 +340,7 @@
                                 {:request-method :post :query-params {"name" "apply-me" "version" "1.0.0"} :headers {}})]
       (is (re-find #"Applied" (:body resp)))
       (is (re-find #"mk-current" (:body resp)) "the version row is marked active"))
-    (let [row (first (sp/query-entities (storage) :ui-pref {:key "theme"}))]
+    (let [row (first (sp/query-entities (storage) :ui-pref {:key "theme" :owner-id "anonymous"}))]
       (is (= "anonymous" (:owner-id row)))
       (is (= {:name "apply-me" :version "1.0.0"} (get-in row [:value :source])))
       (is (= "dark" (get-in row [:value :payload :mode]))))
@@ -370,6 +370,26 @@
                                 (assoc (json-req {:value (str/join (repeat 70000 "x"))})
                                        :request-method :put :path-params {:key "theme"}))]
       (is (= 413 (:status resp))))))
+
+
+(deftest preference-owner-assertion-prevents-cross-account-writes
+  (binding [tc/*current-principal* {:authenticated? true :user-id "prefs-owner-a"}]
+    (let [response (setup/via-graph *bootstrap* :_prefs-get-handler (get-req {}))]
+      (is (= "prefs-owner-a" (get-in response [:headers "X-Graphden-Preference-Owner"])))
+      (is (= "no-store" (get-in response [:headers "Cache-Control"])))))
+  (binding [tc/*current-principal* {:authenticated? true :user-id "prefs-owner-b"}]
+    (let [request (assoc (json-req {:owner "prefs-owner-a" :value theme-payload})
+                         :request-method :put :path-params {:key "theme"})
+          response (setup/via-graph *bootstrap* :_pref-put-handler request)]
+      (is (= 403 (:status response)))
+      (is (= "wrong-user" (:reason (body-json response))))
+      (is (empty? (sp/query-entities (storage) :ui-pref {:owner-id "prefs-owner-b"})))
+      (let [accepted (setup/via-graph *bootstrap* :_pref-put-handler
+                                      (assoc request :body (json/generate-string
+                                                             {:owner "prefs-owner-b" :value theme-payload})))]
+        (is (= 200 (:status accepted)))
+        (is (= "prefs-owner-b"
+               (:owner-id (first (sp/query-entities (storage) :ui-pref {:owner-id "prefs-owner-b"})))))))))
 
 
 (defn- with-fixture-roster

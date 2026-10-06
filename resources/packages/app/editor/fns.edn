@@ -62,6 +62,7 @@
                   ;; shortcut registry (the keymap pane re-registers keys).
                   "packages/app/editor/editor-marketplace.js"
                   "packages/app/editor/editor-theme.js"
+                  "packages/app/editor/editor-theme-graph.js"
                   "packages/app/editor/editor-keymap.js"
                   ;; Feedback ("Report a problem") — early so its uncaught-
                   ;; error ring buffer sees everything after boot; the shell
@@ -75,6 +76,7 @@
                   "packages/app/ui-preview/browser-runtime.js"
                   "packages/app/ui-preview/graph-styles.js"
                   "packages/app/ui-preview/graph-renderer.js"
+                  "packages/app/ui-preview/builtin-plans.js"
                   "packages/app/editor/editor-shell-menu-graph.js"
                   "packages/app/editor/editor-fn-picker-graph.js"
                   "packages/app/editor/editor-shell-menu.js"

@@ -60,6 +60,7 @@ let accountsMode = false;
 let accountsAuthed = false;
 async function probeAccountsAuth() {
   const wasAuthed = accountsAuthed;
+  const priorAccount = window.gdAccount?.id;
   try {
     const r = await fetch('/auth/me', { headers: { Accept: 'application/json' } });
     const ct = (r.headers.get('content-type') || '');
@@ -83,7 +84,7 @@ async function probeAccountsAuth() {
     }
   } catch (_) { /* network/parse failure → treat as no accounts */ }
   if (accountsMode) {
-    if (wasAuthed !== accountsAuthed) window.dispatchEvent(new Event('gd-auth-changed'));
+    if (wasAuthed !== accountsAuthed || priorAccount !== window.gdAccount?.id) window.dispatchEvent(new Event('gd-auth-changed'));
     renderAuthLock();
     // The sidebar (edit affordances + admin panels) is painted at boot, BEFORE
     // this async probe resolves — with isAuthenticated() still false for a

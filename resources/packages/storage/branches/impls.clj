@@ -50,10 +50,10 @@
   "Sync `fn-defs` into the branch `branch-id` and delta-invalidate THAT
    branch's compiled registry. Returns the synced fn-ids as text.
 
-   Atomic by construction: the namespace upsert, the fn sync and the
-   invalidation land together — a half-synced bundle leaves a branch
-   whose registry disagrees with its rows (same carve-out as
-   `merge-branch!`). Writes go through the SAME `sync-bundle!` the
+   A failed sync can leave partial namespace/function rows; callers that
+   require compensation must track their own identities and clean up only
+   those rows. Registry invalidation follows a successful sync.
+   Writes go through the SAME `sync-bundle!` the
    package loader uses, so an AI's proposal or an imported bundle meets
    the same constraints (cycles, name collisions, seals, type-check) as a
    human's fns.edn. The two callers — the MCP `upsert-fn-defs` tool and

@@ -37,6 +37,8 @@
     ;; Returns caller entry identities and their selected graph content;
     ;; the exporter is not a declassification boundary.
     :_ui-preview-export :_ui-preview-export-ids
+    ;; Selected ordinary theme graph and args determine the validated payload.
+    :_ui-theme-evaluate :fn-def-id
     :_apply-create-list-type-body :_apply-create-record-type-body
     :_apply-create-record-type-rollback :_apply-create-secret-body
     :_apply-inline-bind-body :_apply-secret-rollback
@@ -206,6 +208,8 @@
   #{:fork-package-fns :materialize-package-fns :rewrite-refs-to-version
     ;; Entry identities select the exported content and also appear in it.
     :_ui-preview-export :_ui-preview-export-ids
+    ;; Selected ordinary theme graph and args determine the validated payload.
+    :_ui-theme-evaluate :fn-def-id
     ;; Wide-slot audit: conservatively propagate every content-derived result.
     :_apply-create-list-type-body :_apply-create-record-type-body :_apply-create-record-type-rollback :_apply-inline-bind-body :_apply-secret-rollback :_apply-update-record-type-body :_apply-update-record-type-rollback :_execute-apply :_layout-build-apply :_layout-place-apply :_layout-strip-facts-apply :_layout-literal-reprs-apply :_parse-layout-body :_rotate-secret-not-owned? :_seq-append-load-binding :_seq-move-load-item :_seq-update-load-item :_tests-run-apply :_tests-status-apply :approvals-report :authenticate-request :branch-lint-findings :breaking-changes-between :brotli-bytes :build-form :byte-count :candidate-fit :classify-literal :closed-enum-of :compatible-type-names :count-tour-event! :count-tour-step! :count-valid-approvals :create-entity :cron-fire-after :decode-row :describe-type-mismatch :diff-value-against-type :dispatch-to-branch :error-boundary-wrap :extract-entity-params :fix :fn-type-bound-effects :gzip-bytes :json-to-type :merge-branch! :middleware :missing-package-dependencies :package-version-materialized? :pg-execute :pg-query :pg-tx :pkg-delete-guard-reason :pkg-write-guard-reason :platform-owned-def? :publish-package-apply :query-entities :query-param :realize-request-body :resolve-fn :resolve-form :ring-create-default-handler :ring-handler :ring-router :secret-path-args :set-branch-archived! :set-branch-require-merge! :set-branch-review-policy! :set-review-state! :slot-shaped-type-row? :sql-exec :sql-query :sse-stream :storage-query-identities :stringify-response-headers :strip-hidden-impl :strip-secret-paths :subtype? :sync-fn-defs-branch! :try-apply-create :try-apply-seq-append :try-apply-seq-move :try-apply-seq-update :try-apply-tighten :try-apply-update :update-entity :utf8-bytes :viewer-path-trace :write-rej
     :round :ui-pref-write! :url-encode :moderate-package-version! ; marketplace: answer caller content
@@ -270,3 +274,25 @@
                                       (assoc-in plain [slot :type] [:secret input-type])
                                       :jsonb))
                 (str primitive " secret " slot " must taint the selected plan"))))))))
+
+
+(deftest personal-theme-evaluation-preserves-input-taint
+  (let [definitions (:base-fn-defs (loader/load-packages ["app"]))]
+    (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
+              registry/*per-org-rich-override* (atom {})]
+      (registry/record-rich-types! :_ui-theme-evaluate (get definitions :_ui-theme-evaluate))
+      (is (= :keyword-map
+             (check/rule-return :_ui-theme-evaluate {:input {:type :jsonb}} :keyword-map)))
+      (is (= [:secret :keyword-map]
+             (check/rule-return :_ui-theme-evaluate
+                                {:input {:type [:secret :jsonb]}} :keyword-map))))))
+
+
+(deftest fn-definition-identity-does-not-declassify-its-source
+  (let [definition (get (:base-fn-defs (loader/load-packages ["core"])) :fn-def-id)]
+    (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
+              registry/*per-org-rich-override* (atom {})]
+      (registry/record-rich-types! :fn-def-id definition)
+      (is (= :uuid (check/rule-return :fn-def-id {:fn-def {:type :keyword-map}} :uuid)))
+      (is (= [:secret :uuid]
+             (check/rule-return :fn-def-id {:fn-def {:type [:secret :keyword-map]}} :uuid))))))

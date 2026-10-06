@@ -450,6 +450,7 @@ async function loadGraphData() {
     // `@`-surface hash (management screen up) or no hash — just repaint.
     renderGraph(true);
   }
+  window.dispatchEvent(new Event('gd-graph-changed'));
 }
 
 // ============================================================================

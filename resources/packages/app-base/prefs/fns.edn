@@ -52,8 +52,12 @@
   {:name :_prefs-get-handler
    :lambda-params []
    :description "Ring handler for GET /api/prefs — the current user's `{key value}` preferences as JSON."
-   :parent :json-handler
-   :args {:data :ui-prefs-read}}
+   :parent :ring-response
+   :args {:status 200
+          :body {:parent :to-json-string :args {:data :ui-prefs-read}}
+          :headers {:parent :zipmap
+                    :args {:keys ["Content-Type" "Cache-Control" "X-Graphden-Preference-Owner"]
+                           :vals ["application/json; charset=utf-8" "no-store" :current-user-id]}}}}
 
   {:name :api-prefs-get
    :description "GET /api/prefs — the current user's editor preferences (`{\"theme\" …, \"keymap\" …}`). Auth-required; per-principal."
@@ -69,6 +73,16 @@
 
   {:name :_pref-put-value
    :parent :get :args {:coll :parse-json-body :key {:value :value} :default nil}}
+
+  {:name :_pref-put-owner
+   :parent :get :args {:coll :parse-json-body :key {:value :owner} :default nil}}
+  {:name :_pref-put-wrong-owner?
+   :parent :if
+   :args {:test {:parent :equal? :args {:a :_pref-put-owner :b nil}}
+          :then false
+          :else {:parent :not
+                 :args {:value {:parent :equal?
+                                :args {:a :_pref-put-owner :b :current-user-id}}}}}}
 
   ;; A preference is a small selection document (a theme's tokens, a
   ;; keymap's overrides) — cap it so the row can't become a blob store.
@@ -97,6 +111,10 @@
    :parent :_pref-put-err
    :args {:vals [{:value false} {:value "too-large"} :_pref-put-key {:value 413}]}}
 
+  {:name :_pref-put-err-owner
+   :parent :_pref-put-err
+   :args {:vals [{:value false} {:value "wrong-user"} :_pref-put-key {:value 403}]}}
+
   {:name :_pref-put-ok
    :parent :zipmap
    :args {:keys [{:value :ok} {:value :key} {:value :value}]
@@ -105,7 +123,8 @@
 
   {:name :_pref-put-result
    :parent :cond
-   :args {:clauses [:_pref-put-unknown? :_pref-put-err-key
+   :args {:clauses [:_pref-put-wrong-owner? :_pref-put-err-owner
+                    :_pref-put-unknown? :_pref-put-err-key
                     :_pref-put-too-large? :_pref-put-err-size
                     {:value true} :_pref-put-ok]}}
 

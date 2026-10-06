@@ -35,10 +35,10 @@ const json = (body, status = 200) => ({
 // A fresh editor-main per case. `routes(url)` answers fetches; a route may
 // return a function (called at fetch time) to act mid-flight.
 function boot({ routes, accounts = false, tenancyClass = false }) {
-  const calls = { popover: [], entityList: 0, href: null, requery: 0 };
+  const calls = { popover: [], entityList: 0, href: null, requery: 0, events: [] };
   const rowActions = new Map([['b1', {}]]);
   const ctx = vm.createContext({
-    console,
+    console, Event,
     API: { api_graph_entities: '/api/graph/entities', api_types: '/api/types', api_value_kinds: '/api/value-kinds' },
     location: { pathname: '/', search: '', hash: '#app.x',
                 set href(v) { calls.href = v; }, get href() { return calls.href; } },
@@ -60,6 +60,7 @@ function boot({ routes, accounts = false, tenancyClass = false }) {
   });
   ctx.window = ctx;
   ctx.window.addEventListener = () => {};
+  ctx.window.dispatchEvent = (event) => calls.events.push(event.type);
   ctx.window.gdAccountsReady = Promise.resolve(accounts);
   ctx.window.location = ctx.location;
   ctx.fetch = (url) => {
@@ -108,6 +109,8 @@ function racingRoutes(ctxRef, typesBody) {
     assert(b.ctx.typeUsagesCache.size === 0, which + ': type Used-by cache cleared');
     assert(b.calls.entityList >= 1, which + ': Explorer repainted');
     assert(b.calls.requery >= 1, which + ': an active search is asked again');
+    assert(b.calls.events.includes('gd-graph-changed') === (which === 'loadGraphData'),
+      which + ': only a completed mutation refresh announces changed graph data');
   }
 
   console.log(' unparseable /api/types: initGraph blanks, loadGraphData keeps the prior registry');

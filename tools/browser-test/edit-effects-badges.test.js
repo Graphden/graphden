@@ -15,7 +15,7 @@ const {assert, newContext} = require('./edit-test-helpers');
     // web-server transitively depends on http-server (network, process,
     // state), env-required (env), read-resource (io), CRUD handlers (db)
     // + the raw-SQL storage primitives (raw-sql), current-time-ms (time).
-    // All eight categories should land on the web-server card. (:process
+    // Theme creation adds random UUIDs. All nine categories should land on the web-server card. (:process
     // marks fns that spawn supervised background work — the
     // service-eligibility flag; :raw-sql marks the raw-SQL escape hatches
     // blocked for cloud/tenant graphs.)
@@ -28,14 +28,14 @@ const {assert, newContext} = require('./edit-test-helpers');
       {timeout: 20000, polling: 100});
     // The effects strip renders in the overlay pass off the loaded subtree,
     // after the root card's graphReady gate — poll until web-server's strip
-    // is fully populated (all 8 chips) before reading, else the exact-set
+    // is fully populated (all 9 chips) before reading, else the exact-set
     // assertion races a partial/empty strip.
     await page.waitForFunction(
       () => {
         const overlay = Array.from(document.querySelectorAll('.node-overlay'))
           .find(el => (el.textContent || '').trim().startsWith('web-server'));
         const strip = overlay?.querySelector('.effects-strip');
-        return !!strip && strip.querySelectorAll('.effects-chip').length === 8;
+        return !!strip && strip.querySelectorAll('.effects-chip').length === 9;
       },
       null,
       {timeout: 15000, polling: 100});
@@ -62,8 +62,8 @@ const {assert, newContext} = require('./edit-test-helpers');
     });
     assert(!probe.error, probe.error || 'probe ok');
     const tags = probe.chips.map(c => c.text).sort();
-    assert(JSON.stringify(tags) === JSON.stringify(['db', 'env', 'io', 'network', 'process', 'raw-sql', 'state', 'time']),
-           'web-server chips show all eight categories (incl. :state from http-server wrap + :raw-sql from the storage layer): ' + JSON.stringify(tags));
+    assert(JSON.stringify(tags) === JSON.stringify(['db', 'env', 'io', 'network', 'process', 'random', 'raw-sql', 'state', 'time']),
+           'web-server chips show all nine categories (including random UUIDs from theme creation): ' + JSON.stringify(tags));
     for (const c of probe.chips) {
       assert(c.cls.includes('effects-chip-' + c.text),
              'chip "' + c.text + '" has matching colour class');

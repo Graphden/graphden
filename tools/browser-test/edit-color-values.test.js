@@ -44,6 +44,8 @@ const branch = 'color-values-' + process.pid + '-' + Date.now().toString(36);
     const text = widget.getByRole('textbox', {name: 'HEX color'});
     const alpha = widget.getByRole('spinbutton', {name: 'Alpha (0–255)'});
     await text.waitFor();
+    assert(await page.locator('.value-form-raw-toggle').count() === 0,
+      'a manual text widget has no redundant raw mode that bypasses validation');
     assert(await text.inputValue() === '#1234', 'manual notation and alpha are preserved on open');
     assert(await alpha.inputValue() === '68', 'short HEX alpha expands correctly');
     await text.fill('wrong');

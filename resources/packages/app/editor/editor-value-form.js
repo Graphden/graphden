@@ -106,6 +106,11 @@ function formValueIsBlank(v) {
 function installRawToggle(hostEl, payloadValue) {
   const root = hostEl.querySelector('[data-form-root]');
   if (!root || formIsRawAlready(root)) return;
+  // A text widget with its own manual input already exposes the literal.
+  // A second raw editor duplicates it and bypasses the widget's validation.
+  const fields = root.querySelectorAll('[data-form-field]');
+  if (fields.length === 1 && root.querySelector('[data-form-widget]')
+      && fields[0].tagName === 'INPUT' && fields[0].getAttribute('data-field-kind') === 'text') return;
   const bar = document.createElement('div');
   bar.className = 'value-form-toolbar';
   const btn = document.createElement('button');

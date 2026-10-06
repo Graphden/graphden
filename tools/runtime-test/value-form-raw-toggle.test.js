@@ -2,8 +2,10 @@
 // (editor-value-form.js `installRawToggle`).
 //
 // A typed form renders controls for the RESOLVED slot type — the
-// toggle guarantees the author can always enter a value of a DIFFERENT
-// shape: another JSON object, a bare number, a plain string. Asserted
+// toggle permits entering a DIFFERENT shape for ordinary controls:
+// another JSON object, a bare number, a plain string. A custom text widget
+// already owns manual entry and its validation, so it needs no duplicate.
+// Asserted
 // here as pure DOM+data transforms over mini-dom:
 //   - the toggle mounts on a typed form, not on an already-raw one
 //   - raw mode is ONE smart-parse textarea, prefilled from the typed

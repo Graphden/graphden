@@ -224,11 +224,11 @@
   {:name :ui-preview-plan-route :parent :get-auth-required
    :args {:path "/ui-preview/plan" :handler :_ui-preview-plan-handler}
    :expects-effects #{:db}}
-  {:name :_ui-preview-runtime-source :parent :read-resource :return-type :js-source
+  {:name :_ui-preview-runtime-source :parent :shipped-asset :return-type :js-source
    :args {:path "packages/app/ui-preview/browser-runtime.js"}}
-  {:name :_ui-preview-adapter-source :parent :read-resource :return-type :js-source
+  {:name :_ui-preview-adapter-source :parent :shipped-asset :return-type :js-source
    :args {:path "packages/app/ui-preview/browser-adapter.js"}}
-  {:name :_ui-preview-style-source :parent :read-resource :return-type :css-source
+  {:name :_ui-preview-style-source :parent :shipped-asset :return-type :css-source
    :args {:path "packages/app/ui-preview/preview.css"}}
   {:name :_ui-preview-runtime-script :parent :wrap-custom-script
    :args {:body :_ui-preview-runtime-source}}
@@ -258,4 +258,4 @@
           :scripts [:_ui-preview-runtime-script :_ui-preview-adapter-script]}}
   {:name :ui-preview-page-route :parent :get-route
    :args {:path "/ui-preview" :handler :_ui-preview-page-handler}
-   :expects-effects #{:io}}]}
+   :expects-effects #{}}]}

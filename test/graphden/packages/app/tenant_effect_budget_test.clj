@@ -20,7 +20,9 @@
       the restricted ctx, answer 200."
   (:require
     [cheshire.core :as json]
+    [clojure.java.io :as io]
     [clojure.set :as set]
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.registry.core :as registry]
@@ -117,6 +119,16 @@
 (defn- restricted-bootstrap
   []
   (update ga/*bootstrap* :ctx assoc :allowed-effects cr/cloud-request-allowed-effects))
+
+
+(deftest ui-preview-renders-shipped-assets-for-a-tenant-request
+  (let [resp (setup/via-graph (restricted-bootstrap) :_ui-preview-page-handler
+                              {:request-method :get :uri "/ui-preview"})]
+    (is (= 200 (:status resp)))
+    (doseq [asset ["browser-runtime.js" "browser-adapter.js" "preview.css"]]
+      (is (str/includes? (str (:body resp))
+                         (slurp (io/resource (str "packages/app/ui-preview/" asset))))
+          (str "the tenant response includes the shipped " asset)))))
 
 
 (deftest branch-popover-renders-for-a-tenant-request

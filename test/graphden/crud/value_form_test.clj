@@ -466,6 +466,25 @@
           (is (= :bool (vf/resolve-slot-effective-type
                          storage {:fn-id (:id fr) :slot-id (:id slot)})))))
 
+      (testing "a bound descendant retains its parent's explicit type pin"
+        (let [slot (setup/create-slot! storage "inherited-value" :any)
+              parent (setup/create-base-fn! storage "pinned-parent")
+              child (sp/create-entity storage :fn
+                                      {:name "pinned-child" :parent-ids [(:id parent)]})
+              _ (sp/create-entity storage :binding
+                                  {:fn-id (:id parent) :slot-id (:id slot)
+                                   :type-override-fn-id (get setup/primitive-fn-ids :text)})
+              binding (setup/bind-value! storage (:id child) (:id slot) "hello")]
+          (is (= :text (vf/resolve-slot-effective-type storage {:binding-id (:id binding)})))
+          (let [provenance (vf/slot-type-provenance storage {:binding-id (:id binding)})]
+            (is (= :override (:winner provenance)))
+            (is (= (:id parent) (get-in provenance [:tiers 0 :source :fn-id]))))
+          (sp/update-entity storage :binding (:id binding)
+                            {:type-override-fn-id (get setup/primitive-fn-ids :int)})
+          (is (= :int (vf/resolve-slot-effective-type storage {:binding-id (:id binding)})))
+          (sp/update-entity storage :binding (:id binding) {:type-override-fn-id nil})
+          (is (= :text (vf/resolve-slot-effective-type storage {:binding-id (:id binding)})))))
+
       (testing "a list-item resolves to the list's element type"
         (let [list-fn (sp/create-entity storage :fn
                                         {:name "int-list"

@@ -135,7 +135,7 @@
             [:slot-types (keyword (:name slot-row))])))
 
 
-(declare inheritance-chain-info)
+(declare inheritance-chain-info find-binding-override-chain)
 
 
 (defn- declared-arg-type
@@ -234,7 +234,11 @@
         slot-id   (or slot-id (:slot-id bnd))
         slot      (when slot-id (sp/read-entity storage :slot slot-id))
         owning    (when fn-id (sp/read-entity storage :fn fn-id))
+        inherited (when (and fn-id slot-id (nil? (:type-override-fn-id bnd)))
+                    (first (find-binding-override-chain
+                             storage (inheritance-chain-info storage fn-id) slot-id)))
         slot-type (or (type-fn-rich storage (:type-override-fn-id bnd))
+                      (type-fn-rich storage (:override-fn-id inherited))
                       (backward-unified-slot-type owning slot)
                       (slot-declared-type storage fn-id slot))
         resolved  (some-> slot-type types/resolve-alias)]
@@ -424,7 +428,10 @@
             ;; popover open did ~N round-trips per helper (was ~25 for
             ;; a 5-deep chain).
             (let [chain-info   (when fn-id (inheritance-chain-info storage fn-id))
-                  override-fid (:type-override-fn-id bnd)
+                  chain        (when chain-info
+                                 (find-binding-override-chain storage chain-info slot-id))
+                  override     (first chain)
+                  override-fid (or (:type-override-fn-id bnd) (:override-fn-id override))
                   own-fn       (when fn-id (get-in chain-info [:fn-map fn-id]))
                   ;; Tier 2 is skipped under an explicit override —
                   ;; mirrors `resolve-slot-effective-type`'s `or`-fall-
@@ -440,8 +447,10 @@
                   ;; app/editor-provenance).
                   tiers        [{:key :override
                                  :type (type-of-fn-id storage override-fid)
-                                 :source (when (and override-fid (:name own-fn))
-                                           {:fn-name (:name own-fn) :fn-id fn-id})}
+                                 :source (when override-fid
+                                           (if (:type-override-fn-id bnd)
+                                             {:fn-name (:name own-fn) :fn-id fn-id}
+                                             (select-keys override [:fn-name :fn-id])))}
                                 {:key :unified
                                  :type unified
                                  :source (when (and (some? unified) (:name own-fn))
@@ -462,9 +471,7 @@
                                            declared
                                            (type-of-fn-id storage (:type-fn-id slot))))
                                  :source declaring}]
-                  winner       (some (fn [t] (when (some? (:type t)) (:key t))) tiers)
-                  chain        (when chain-info
-                                 (find-binding-override-chain storage chain-info slot-id))]
+                  winner       (some (fn [t] (when (some? (:type t)) (:key t))) tiers)]
               {:winner winner
                :tiers tiers
                :inheritance-chain (or chain [])})))))))

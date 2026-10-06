@@ -221,26 +221,26 @@ Chooses a [[file:glossary.org::#term/graph-function][graph function]] that rende
 :PROPERTIES:
 :CUSTOM_ID: crud/resolve-form
 :FILE: src/graphden/crud/value_form.clj
-:LINE: 473
+:LINE: 480
 :MINS: 3.5
 :END:
 
 Converts an effective [[file:glossary.org::#term/slot][slot]] type into a pure form descriptor for a record, list, union, or leaf. It resolves aliases and variants on the server and bounds recursion depth, so the browser need not reimplement the type grammar.
 
-- source :: [[file:../../../src/graphden/crud/value_form.clj::(defn resolve-form][src/graphden/crud/value_form.clj:473]]
+- source :: [[file:../../../src/graphden/crud/value_form.clj::(defn resolve-form][src/graphden/crud/value_form.clj:480]]
 - same file :: [[file:crud.org::#crud/build-form][build-form]]
 
 * 18. build-form
 :PROPERTIES:
 :CUSTOM_ID: crud/build-form
 :FILE: src/graphden/crud/value_form.clj
-:LINE: 779
+:LINE: 786
 :MINS: 5.8
 :END:
 
 Renders a form descriptor as [[file:glossary.org::#term/hiccup][Hiccup]]: records become field groups, unions get a choice of variant, and leaf types use the registered form functions. ~GET /partials/value-form~ returns this [[file:glossary.org::#term/htmx][server-rendered fragment]], which [[file:glossary.org::#term/htmx][HTMX]] inserts into the inspector. See [[file:../../../docs/PARTIALS.md][partials]].
 
-- source :: [[file:../../../src/graphden/crud/value_form.clj::(defn build-form][src/graphden/crud/value_form.clj:779]]
+- source :: [[file:../../../src/graphden/crud/value_form.clj::(defn build-form][src/graphden/crud/value_form.clj:786]]
 - same file :: [[file:crud.org::#crud/resolve-form][resolve-form]]
 
 * 19. run-captured!

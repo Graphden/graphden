@@ -3474,7 +3474,7 @@ textarea.value-form-hiccup {
   background: color-mix(in srgb, var(--success-fg) 6%, transparent);
 }
 .fn-picker-row-incompat {
-  opacity: 0.7;
+  color: var(--muted-fg);
 }
 
 /* Section grouping — sticky-ish headers above each list, plus a

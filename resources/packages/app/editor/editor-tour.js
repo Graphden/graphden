@@ -397,6 +397,7 @@ function _tourAdvance(skipped) {
     if (!dup) _tourState.created.push(step.creates);
   }
   _tourState.step += 1;
+  _tourState.activeBranch = _tourSessionBranch();
   _tourSaveState();
   _tourCount('step', lesson.id, _tourState.step);
   if (_tourState.step >= lesson.steps.length) {
@@ -436,7 +437,12 @@ function _tourArm() {
 
 // Show a tour that is still in memory but no longer running.
 function _tourResume() {
-  if (!_tourState) { _tourTeardown(); return; }
+  if (!_tourState) {
+    // Closing Lessons on another branch dismisses only the catalogue.
+    _tourTeardown(true);
+    return;
+  }
+  if (_tourState.phase === 'cleanup') { _tourEnd(_tourState.nextLessonId); return; }
   _tourRenderStep();
   _tourArm();
 }
@@ -504,10 +510,10 @@ function _tourCopy(key, fallback, vars) {
 }
 
 
-function _tourTeardown() {
+function _tourTeardown(keepSaved = false) {
   _tourState = null;
   _tourReserveForSheet(0);
-  _tourSaveState();
+  if (!keepSaved) _tourSaveState();
   if (_tourTimer) { clearInterval(_tourTimer); _tourTimer = null; }
   if (_tourEls) {
     _tourEls.dim.remove();
@@ -587,6 +593,7 @@ function _tourCount(event, lessonId, step) {
 
 
 async function _tourFetchLessons() {
+  if (window.gdAccountsReady) await window.gdAccountsReady;
   if (_tourLessons) return _tourLessons;
   if (!(window.API && API.api_tour)) return null;
   try {
@@ -598,7 +605,7 @@ async function _tourFetchLessons() {
 }
 
 // Entry point — shell menu and ?tutorial=NN both land here.
-async function startTutorial(lessonId, resumeStep, resumeCreated) {
+async function startTutorial(lessonId, resumeStep, resumeCreated, session) {
   const lessons = await _tourFetchLessons();
   if (!lessons) {
     if (typeof gdToast === 'function') gdToast('Tutorial unavailable on this deployment');
@@ -619,14 +626,14 @@ async function startTutorial(lessonId, resumeStep, resumeCreated) {
     gdShellSurface('build');
   }
   _tourState = {
+    ...session,
     lessonId: lesson.id,
     step: Math.min(resumeStep || 0, lesson.steps.length - 1),
     created: resumeCreated || [],
+    activeBranch: _tourSessionBranch(),
+    // Do not manufacture provenance when resuming an older saved session.
+    principal: session ? session.principal : _tourSessionPrincipal(),
   };
-  {
-    const cur = _tourCurrentBranch();
-    if (cur && /^tutorial-/.test(cur)) _tourState.branch = cur;
-  }
   _tourSaveState();
   _tourEnsureEls();
   _tourRenderStep();
@@ -641,6 +648,7 @@ async function startTutorial(lessonId, resumeStep, resumeCreated) {
 // for ?tutorial=NN (param stripped, survives the ?demo=1 reload), else
 // resumes a mid-lesson tour from localStorage.
 async function maybeStartTutorial() {
+  if (window.gdAccountsReady) await window.gdAccountsReady;
   const params = new URLSearchParams(window.location.search);
   const requested = params.get('tutorial');
   // Read-and-clear ALWAYS, even when something else wins this load: a queued
@@ -664,7 +672,14 @@ async function maybeStartTutorial() {
   }
   const saved = _tourLoadState();
   if (saved?.lessonId) {
-    return startTutorial(saved.lessonId, saved.step, saved.created);
+    const branch = saved.activeBranch || saved.sandboxBranch || saved.branch || 'main';
+    if (branch !== _tourSessionBranch()) {
+      // Branch lessons explicitly ask for a reload onto another branch.
+      await _tourFetchLessons();
+      if (_tourExpectedBranch(saved) !== _tourSessionBranch()) return false;
+      saved.activeBranch = _tourSessionBranch();
+    }
+    return _tourRestoreSession(saved);
   }
   return false;
 }
@@ -682,7 +697,7 @@ async function startTutorialIsolated(lessonId) {
   }
   const canBranch = window.API && API.api_branches
     && typeof switchToBranch === 'function';
-  const onMain = canBranch && !_tourCurrentBranch();
+  const onMain = canBranch && _tourSessionBranch() === 'main';
   // A lesson that MANAGES branches itself (lesson 23) opts out of the
   // scratch-branch isolation — double-wrapping broke its own "main
   // never saw it" beat and leaked the scratch branch.
@@ -703,7 +718,8 @@ async function startTutorialIsolated(lessonId) {
     if (typeof gdToast === 'function') gdToast('Starting in place (no branch)');
     return startTutorial(lessonId);
   }
-  _tourState = { lessonId, step: 0, created: [], branch };
+  _tourState = { lessonId, step: 0, created: [], sandboxBranch: branch,
+    activeBranch: branch, principal: _tourSessionPrincipal() };
   _tourSaveState();
   // switchToBranch preserves the hash — drop a surface deep link
   // (#@organization etc.) so the reload resumes the tour on Build,

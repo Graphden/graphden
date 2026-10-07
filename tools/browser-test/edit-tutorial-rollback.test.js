@@ -21,7 +21,7 @@ const CHILD = BRANCH + '-child';
       && document.querySelector('#branch-chip-name')?.textContent.trim() === name, BRANCH);
     await page.evaluate(async ({branch, child}) => {
       _tourLessons = {lessons: [{id: '01', steps: [{}]}]};
-      _tourState = {lessonId: '01', step: 1, branch,
+      _tourState = {lessonId: '01', step: 1, sandboxBranch: branch, principal: _tourSessionPrincipal(),
         created: [{type: 'branch', name: child}, {type: 'fn', name: 'created'}]};
       history.replaceState(null, '', location.pathname + location.search + '#tutorial.created');
       await _tourEnd();

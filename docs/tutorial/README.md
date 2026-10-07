@@ -120,6 +120,22 @@ the lesson that follows, plus the first one you have not read when that
 is a different lesson — and starting it from the dialog cleans the
 finished lesson up first (deleting its branch, or the rows it created).
 
+If a tab closes or reloads before cleanup finishes, its lesson and creation
+ledger remain in this browser. Open **Interactive tutorial** in the account
+menu to continue the saved step or choose **End lesson & clean up**. Returning
+on another branch leaves the lesson paused; recovery switches back to its
+original context before cleanup. Reloading a cleanup dialog restores that
+decision, including a failed deletion that can be retried. Choosing another
+lesson first asks whether to delete or keep the pending lesson's work.
+**Keep branch** and **Keep & close** end the tracked session and retain the
+data; later lessons do not claim a retained branch for rollback.
+Sessions saved by an older editor use their recorded items for cleanup;
+their legacy branch name alone cannot authorize a full branch rollback.
+Cleanup pauses when the original account or organization cannot be verified,
+or the original branch is unavailable. **Cancel** retains the saved session;
+**Keep & close** ends tracking without deleting graph data. Inspect any
+remaining branch from the branch menu.
+
 Every tour is the SHOWN half of its lesson; the written lesson is the
 whole of it — the model behind the steps, the branches of the topic the
 tour does not walk (cardinality and per-branch services in 35, closure

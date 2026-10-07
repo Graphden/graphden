@@ -164,10 +164,10 @@ Compiles functions in [[file:glossary.org::#term/topological-order][dependency o
 :CUSTOM_ID: executor/compile-fn
 :FILE: src/graphden/executor/compile_eager.clj
 :LINE: 1280
-:MINS: 8.2
+:MINS: 8.3
 :END:
 
-Builds one runtime [[file:glossary.org::#term/closure][closure]] ~(fn [fa ctx])~. It prepares argument builders, environment [[file:glossary.org::#term/binding][bindings]], and name aliases at compile time. At execution time the [[file:glossary.org::#term/closure][closure]] assembles the argument map from caller input and those builders, then calls ~(impl args ctx)~.
+Builds one runtime [[file:glossary.org::#term/closure][closure]] ~(fn [fa ctx])~. It prepares argument builders, [[file:glossary.org::#term/binding][bindings]] to inputs outside the root's slots, and name aliases at compile time. At execution time the [[file:glossary.org::#term/closure][closure]] assembles the argument map from caller input and those builders, then calls ~(impl args ctx)~.
 
 - source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn compile-fn][src/graphden/executor/compile_eager.clj:1280]]
 - see also :: [[file:executor.org::#executor/arg-builder][arg-builder]], [[file:executor.org::#executor/resolve-impl][resolve-impl]]

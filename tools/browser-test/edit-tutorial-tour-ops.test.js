@@ -184,7 +184,7 @@ const {
     await waitTourTitle(page, 'Approve it', 150000);
     await page.evaluate(() => document.querySelector(
       '.branch-row-approve[data-approve-branch="tutorial-feature"]').click());
-    await page.waitForSelector('.branch-appr-count.ok', {timeout: 30000});
+    await page.waitForSelector('.branch-row-approve[data-approve-branch="tutorial-feature"][data-approved="1"] + .branch-appr-count.ok', {timeout: 30000});
     await waitTourTitle(page, 'Ready to land — and why we stop', 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 24 ready-to-land Next');
     await waitTourTitle(page, 'Back to main', 150000);

@@ -117,11 +117,46 @@ test('fn-exists / fn-parent read the graph, not the DOM', () => {
          'parent differs');
 });
 
-test('fn-parent accepts an unresolved parent id — the row may not be cached', () => {
+test('fn-parent resolves either client source and waits for unknown ids', () => {
   const state = withFn();
   state.lookups.fnMap.delete(PARENT.id);
   assert(checkIn(state, { kind: 'fn-parent', name: 'greet', parent: 'const' }) === true,
-         'structurally parented is enough when the parent row is not loaded');
+         'graph payload resolves a parent absent from the lazy cache');
+  state.graphData.fns = [FN];
+  assert(checkIn(state, { kind: 'fn-parent', name: 'greet', parent: 'const' }) === false,
+         'an unresolved id cannot prove the requested parent');
+  assert(checkIn(state, { kind: 'fn-parent', name: 'greet', parent: 'other' }) === false,
+         'an unknown MI parent cannot prove a second parent');
+});
+
+test('list-values rejects append, wrong value and wrong order', () => {
+  const state = withFn();
+  state.lookups.bindingsByFn.set(FN.id, [{ id: 'seq', 'slot-id': SLOT.id }]);
+  const check = { kind: 'list-values', name: 'greet', slot: 'value', values: [2, 0, 1] };
+  const probe = (values) => {
+    state.lookups.itemsByBinding.set('seq', values.map((value) => ({ value })));
+    return checkIn(state, check);
+  };
+  assert(probe([2, 1]) === false, 'before insertion');
+  assert(probe([2, 1, 0]) === false, 'wrong append does not count as insert-before');
+  assert(probe([0, 2, 1]) === false, 'wrong insertion position');
+  assert(probe([2, 9, 1]) === false, 'wrong inserted value');
+  assert(probe([2, 0, 1, 3]) === false, 'extra item');
+  assert(probe(['2', '0', '1']) === true, 'JSON string literals round-trip');
+  assert(probe([2, 0, 1]) === true, 'exact intended order');
+  state.lookups.itemsByBinding.get('seq')[1]['ref-fn-id'] = 'fn-ref';
+  assert(checkIn(state, check) === false, 'a fn-ref is not the requested literal');
+});
+
+test('fn-field holds description edits and restoration until the intended text lands', () => {
+  const state = withFn();
+  const check = { kind: 'fn-field', name: 'greet', field: 'description', value: 'first draft' };
+  assert(checkIn(state, check) === false, 'an unsaved description does not complete');
+  state.lookups.fnMap.get(FN.id).description = 'second draft';
+  assert(checkIn(state, check) === false, 'the current second draft does not complete restoration');
+  state.lookups.fnMap.get(FN.id).description = 'first draft';
+  assert(checkIn(state, check) === true, 'the intended saved or restored draft completes');
+  delete state.lookups.fnMap.get(FN.id).description;
 });
 
 test('ns-exists matches ROOT namespaces only', () => {
@@ -305,6 +340,28 @@ test('result-value verifies the current result, including the values in its rows
   assert(!checkIn(state('not JSON'), first), 'an invalid result does not pass');
   assert(!checkIn({}, first), 'no result does not pass');
   assert(!checkIn(state('["tick"]'), {kind: 'result-value'}), 'a missing expected value does not pass');
+});
+
+test('successful Run checks reject errors and wrong deterministic results', () => {
+  const pane = '.execute-popover.visible .execute-result-pane';
+  const raw = '.execute-popover.visible .execute-result-host .execute-result-raw pre';
+  const error = '.execute-popover.visible .execute-result-host .execute-error-pane';
+  for (const value of [2, 10, 'ALPHA', 'BETA', '{"a":1}', 6, 'den', ['GRAPH', 'DEN']]) {
+    const check = {kind: 'result-value', value};
+    assert(!checkIn({dom: {[error]: true}}, check), 'an error cannot complete ' + JSON.stringify(value));
+    assert(!checkIn({dom: {[pane]: true, [raw]: {textContent: 'null'}}}, check),
+      'a wrong value cannot complete ' + JSON.stringify(value));
+    assert(checkIn({dom: {[pane]: true, [raw]: {textContent: JSON.stringify(value)}}}, check),
+      'the promised value completes ' + JSON.stringify(value));
+  }
+});
+
+test('review completion is scoped to the requested approved branch', () => {
+  const selector = '.branch-row-approve[data-approve-branch="tutorial-feature"][data-approved="1"] + .branch-appr-count.ok';
+  const check = {kind: 'dom', selector};
+  assert(!checkIn({dom: {'.branch-appr-count.ok': true}}, check),
+    'an approval on another branch does not complete the lesson');
+  assert(checkIn({dom: {[selector]: true}}, check), 'the requested approved branch completes');
 });
 
 test('arg-named reads the edge label — the rename has no other client trace', () => {

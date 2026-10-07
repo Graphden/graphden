@@ -90,11 +90,12 @@ function _tourCheckPasses(check) {
         if (!fn) return false;
         const parents = fn['parent-ids'] || [];
         if (!parents.length) return false;
-        // If the parent row isn't in the lazy cache yet, accept any parent —
-        // the lesson's instruction was followed structurally.
+        // A missing lazy-cache row is not evidence of the requested parent.
+        // The graph payload may still carry it; otherwise wait for it to load.
         return parents.some((pid) => {
-          const p = lookups?.fnMap ? lookups.fnMap.get(pid) : null;
-          return p ? p.name === check.parent : true;
+          const p = (typeof lookups !== 'undefined' ? lookups?.fnMap?.get(pid) : null)
+            || (typeof graphData !== 'undefined' ? graphData?.fns?.find((f) => f.id === pid) : null);
+          return !!p && p.name === check.parent;
         });
       }
       case 'binding-bound': {
@@ -242,6 +243,19 @@ function _tourCheckPasses(check) {
           if (!s || s.name !== check.slot) return false;
           const items = lookups.itemsByBinding?.get(b.id) || [];
           return items.length > 0 && String(items[0].value) === String(check.value);
+        });
+      }
+      case 'list-values': {
+        // Exact local literal sequence: appending is not inserting, and a
+        // commutative Run result cannot prove that an item moved correctly.
+        const fn = _tourFindFn(check.name);
+        if (!fn || typeof lookups === 'undefined' || !lookups || !Array.isArray(check.values)) return false;
+        return (lookups.bindingsByFn?.get(fn.id) || []).some((b) => {
+          const slot = lookups.slotMap?.get(b['slot-id']);
+          if (!slot || slot.name !== check.slot) return false;
+          const items = lookups.itemsByBinding?.get(b.id) || [];
+          return items.length === check.values.length && items.every((item, i) =>
+            !item['ref-fn-id'] && item.value != null && String(item.value) === String(check.values[i]));
         });
       }
       case 'fn-field': {

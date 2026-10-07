@@ -30,7 +30,7 @@
    reader's own Next button — no predicate."
   #{"manual" "fn-exists" "fn-parent" "ns-exists" "binding-bound" "binding-value"
     "bindings-count" "list-items" "selected" "on-branch" "arg-named" "expanded"
-    "dom" "dom-absent" "input-value" "result-value" "binding-absent" "list-first" "fn-field"})
+    "dom" "dom-absent" "input-value" "result-value" "binding-absent" "list-first" "list-values" "fn-field"})
 
 
 (def ^:private creates-types
@@ -154,6 +154,10 @@
         "binding-absent"
         (is (and (some? (get-in s [:check :name])) (some? (get-in s [:check :slot])))
             (str "lesson " (:id l) " / “" (:title s) "”: binding-absent needs :name + :slot"))
+        "list-values"
+        (is (and (some? (get-in s [:check :name])) (some? (get-in s [:check :slot]))
+                 (vector? (get-in s [:check :values])))
+            (str "lesson " (:id l) " / “" (:title s) "”: list-values needs :name + :slot + :values"))
         "list-first"
         (is (and (some? (get-in s [:check :name])) (some? (get-in s [:check :slot]))
                  (contains? (:check s) :value))

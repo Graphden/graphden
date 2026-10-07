@@ -110,6 +110,7 @@ function makeWorld(opts) {
     _tourSay: (m) => said.push(m),
     gdToast: (m) => toasts.push(m),
     startTutorialIsolated: (id) => started.push(id),
+    _tourChooseLesson: (id) => started.push(id),
     _tourBtn: (label, cls, onClick) => {
       const b = document.createElement('button');
       b.className = 'gd-tour-btn' + (cls ? ' ' + cls : '');

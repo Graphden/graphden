@@ -74,6 +74,7 @@ function makeWorld(opts) {
   const o = Object.assign({ done: [], survivors: null, deleted: [] }, opts);
   const store = new Map();
   if (o.done.length) store.set('graphden.tour.done', JSON.stringify(o.done));
+  if (o.saved) store.set('graphden.tour', JSON.stringify(o.saved));
   const document = createDocument();
   const calls = [];
   const ctx = {
@@ -87,14 +88,20 @@ function makeWorld(opts) {
       setItem: (k, v) => store.set(k, String(v)),
       removeItem: (k) => store.delete(k),
     },
-    location: { href: 'http://x/', pathname: '/', search: '', hash: o.hash || '' },
+    location: { href: 'http://x/', pathname: '/', search: o.branch ? '?branch=' + o.branch : '', hash: o.hash || '' },
     history: { replaceState: (_state, _title, url) => calls.push('replaceState ' + url) },
     API: { api_branches_ref: (b) => '/api/branches/' + b, api_branches: '/api/branches' },
     authFetch: async (url, init) => {
       calls.push(((init && init.method) || 'GET') + ' ' + url);
+      if (url === '/api/branches' && !init?.method) {
+        const names = o.availableBranches || [o.branch, o.state?.sandboxBranch,
+          o.state?.branch, o.saved?.sandboxBranch, o.saved?.branch, o.saved?.activeBranch];
+        return {ok: true, json: async () => names.filter(Boolean).map((name) => ({name}))};
+      }
       return { ok: true, json: async () => ({ ok: !o.branchFailure }) };
     },
     switchToBranch: (b) => calls.push('switchToBranch ' + b),
+    getCurrentBranchName: () => o.branch ?? o.state?.sandboxBranch ?? o.state?.branch ?? 'main',
     gdToast: (m) => calls.push('toast ' + m),
     // The cleanup module is NOT loaded — these are its seams, recorded.
     _tourSurvivors: async (created) => (o.survivors || created),
@@ -111,6 +118,7 @@ function makeWorld(opts) {
   ctx.window.gdAnnounce = (m) => calls.push('announce ' + m);
   vm.createContext(ctx);
   vm.runInContext(read('editor-tour.js'), ctx);
+  vm.runInContext(read('editor-tour-session.js'), ctx);
   // The end-of-lesson dialogs and the spotlight geometry they hide moved to
   // their own files (2026-09-13); the browser loads them right after the engine.
   vm.runInContext(read('editor-tour-spot.js'), ctx);
@@ -129,6 +137,7 @@ function makeWorld(opts) {
   const pop = () => document.body.querySelector('div#gd-tour-pop');
   return {
     ctx, calls, pop,
+    saved: () => JSON.parse(store.get('graphden.tour') || 'null'),
     queued: () => store.get('graphden.tour.next') || null,
     title: () => pop()?.querySelector('div.gd-tour-title')?.textContent || null,
     next: () => pop()?.querySelector('div.gd-tour-next') || null,
@@ -142,7 +151,7 @@ function makeWorld(opts) {
 // A lesson whose step index ran PAST its last step — the finished shape.
 const finishedOn = (id, extra) => Object.assign(
   { lessonId: id, step: (LESSONS.lessons.find((l) => l.id === id).steps.length),
-    created: [] }, extra || {});
+    created: [], ...(extra?.branch ? {sandboxBranch: extra.branch} : {}) }, extra || {});
 
 (async () => {
   await test('a branch run offers the rollback, and parks the next lesson across it',
@@ -310,6 +319,219 @@ const finishedOn = (id, extra) => Object.assign(
     assert(!withRows.next(),
       'but nothing is suggested next (got: ' + JSON.stringify(withRows.btns()) + ')');
   });
+
+  await test('a reload at Finish restores cleanup, not the final lesson step', async () => {
+    const saved = finishedOn('01', { branch: 'tutorial-owned', activeBranch: 'tutorial-owned',
+      created: [{type: 'branch', name: 'child'}] });
+    const w = makeWorld({state: null, saved, branch: 'tutorial-owned'});
+    assert(await w.ctx.maybeStartTutorial(), 'the interrupted session is recovered');
+    assert(w.title() === 'Delete the tutorial branch?', 'the cleanup decision is restored');
+    assert(w.saved().step === 2 && w.saved().phase === 'cleanup',
+      'the finished step and cleanup phase survive another reload');
+    assert(w.saved().created[0].name === 'child', 'the original ledger survives recovery');
+  });
+
+  await test('Finish recovery also works before the lesson catalogue is cached', async () => {
+    const saved = finishedOn('01', {created: [{type: 'fn', name: 'owned'}]});
+    const w = makeWorld({state: null, saved});
+    vm.runInContext('_tourLessons = null;', w.ctx);
+    w.ctx.API.api_tour = '/api/tour';
+    w.ctx.authFetch = async () => ({ok: true, json: async () => LESSONS});
+    await w.ctx.maybeStartTutorial();
+    assert(w.title() === 'Clean up tutorial items?', 'boot fetches the catalogue before interpreting the finished step');
+    assert(w.saved().step === 2, 'the final step is not clamped while loading the catalogue');
+  });
+
+  await test('Lessons restores an interruption from its original branch', async () => {
+    const saved = {lessonId: '01', step: 1, sandboxBranch: 'tutorial-owned',
+      activeBranch: 'tutorial-child', created: [{type: 'branch', name: 'tutorial-child'}]};
+    const w = makeWorld({state: null, saved, branch: 'main'});
+    assert(await w.ctx.maybeStartTutorial() === false, 'boot stays on the chosen branch');
+    assert(w.saved().sandboxBranch === 'tutorial-owned', 'boot preserves sandbox ownership');
+    await w.ctx.openTutorialMenu();
+    assert(w.btn('Continue 01 · First fn — step 2/2'), 'Lessons offers the saved step');
+    w.btn('End lesson & clean up').click();
+    await new Promise((r) => setTimeout(r, 0));
+    assert(w.calls.includes('switchToBranch tutorial-owned'),
+      'cleanup returns to the owned sandbox before deleting namespace versions');
+    assert(w.saved().activeBranch === 'tutorial-child', 'restoring context preserves the last step branch');
+    assert(w.saved().created[0].name === 'tutorial-child', 'restoring context preserves the ledger');
+    assert(w.saved().phase === 'cleanup', 'the cleanup intent crosses the branch reload');
+  });
+
+  await test('Cancel in Lessons preserves a session stored on another branch', async () => {
+    const saved = {lessonId: '01', step: 1, activeBranch: 'work', created: []};
+    const w = makeWorld({state: null, saved, branch: 'main'});
+    await w.ctx.openTutorialMenu();
+    w.btn('Cancel').click();
+    assert(w.pop() === null, 'Cancel dismisses the catalogue');
+    assert(JSON.stringify(w.saved()) === JSON.stringify(saved), 'Cancel leaves the session resumable');
+  });
+
+  await test('an explicitly requested lesson branch switch still resumes automatically', async () => {
+    const saved = {lessonId: '01', step: 1, activeBranch: 'main', created: []};
+    const w = makeWorld({state: null, saved, branch: 'lesson-branch'});
+    vm.runInContext('_tourLessons.lessons[0].steps[1].check = {kind: "on-branch", name: "lesson-branch"};', w.ctx);
+    w.ctx.startTutorial = async (_id, _step, _created, session) => {
+      w.calls.push('resume ' + session.activeBranch);
+      return true;
+    };
+    assert(await w.ctx.maybeStartTutorial(), 'the branch lesson resumes after its requested reload');
+    assert(w.calls.includes('resume lesson-branch'), 'the new active branch is passed to the engine');
+  });
+
+  await test('a tutorial-prefixed retained branch grants no rollback ownership', async () => {
+    const w = makeWorld({state: null, branch: 'tutorial-kept'});
+    w.ctx._tourRenderStep = () => {};
+    w.ctx._tourArm = () => {};
+    await w.ctx.startTutorial('01');
+    assert(!w.saved().sandboxBranch, 'starting a lesson does not claim the retained branch');
+    await w.ctx._tourEnd();
+    assert(!w.btn('Delete branch & return'), 'ending the lesson never offers the retained branch for deletion');
+    assert(!w.calls.some((c) => /^DELETE /.test(c)), 'the retained branch is untouched');
+  });
+
+  await test('legacy branch metadata restores context but never proves ownership', async () => {
+    const saved = {lessonId: '01', step: 1, branch: 'tutorial-legacy-kept',
+      created: [{type: 'fn', name: 'lesson-owned'}]};
+    const w = makeWorld({state: null, saved, branch: 'tutorial-legacy-kept'});
+    w.ctx._tourRenderStep = () => {};
+    w.ctx._tourArm = () => {};
+    assert(await w.ctx.maybeStartTutorial(), 'the legacy lesson still resumes on its recorded branch');
+    assert(w.saved().created[0].name === 'lesson-owned', 'its ledger remains available');
+    await w.ctx._tourEnd();
+    assert(w.title() === 'Clean up tutorial items?', 'legacy cleanup uses the existing per-item confirmation');
+    assert(!w.btn('Delete branch & return'), 'a legacy branch field cannot offer rollback');
+    w.btn('Delete them').click();
+    await new Promise((r) => setTimeout(r, 0));
+    assert(w.calls.includes('deleteCreated lesson-owned'), 'only recorded lesson work is cleaned');
+    assert(!w.calls.some((c) => /^DELETE \/api\/branches\//.test(c)), 'the retained legacy branch is never deleted');
+  });
+
+  await test('sandbox ownership survives resuming on a lesson child branch', async () => {
+    const saved = {lessonId: '01', step: 1, sandboxBranch: 'tutorial-owned',
+      activeBranch: 'child', created: [{type: 'branch', name: 'child'}]};
+    const w = makeWorld({state: null, saved, branch: 'child'});
+    w.ctx._tourRenderStep = () => {};
+    w.ctx._tourArm = () => {};
+    assert(await w.ctx.maybeStartTutorial(), 'a reload on the active child resumes');
+    assert(w.saved().sandboxBranch === 'tutorial-owned', 'the child does not replace sandbox ownership');
+    assert(w.saved().created[0].name === 'child', 'the child cleanup ledger survives');
+  });
+
+  await test('choosing another lesson cannot replace a refused cleanup ledger', async () => {
+    const failedItems = [{type: 'fn', name: 'owned'}];
+    const w = makeWorld({state: {lessonId: '01', step: 1, activeBranch: 'main', created: failedItems},
+      failedItems});
+    await w.ctx.openTutorialMenu();
+    w.btn('02 · Slots').click();
+    await new Promise((r) => setTimeout(r, 0));
+    assert(w.saved().lessonId === '01' && w.saved().nextLessonId === '02',
+      'the pending lesson remains the current session');
+    w.btn('Delete them').click();
+    await new Promise((r) => setTimeout(r, 0));
+    assert(!w.calls.includes('startIsolated 02'), 'refused cleanup does not launch the chosen lesson');
+    assert(w.saved().created[0].name === 'owned', 'refused cleanup retains its original ledger');
+    failedItems.length = 0;
+    w.btn('Delete them').click();
+    await new Promise((r) => setTimeout(r, 0));
+    assert(w.calls.includes('startIsolated 02'), 'a successful retry launches the requested lesson');
+  });
+
+  await test('a missing original branch cannot turn recovery into a name sweep on main', async () => {
+    const saved = {lessonId: '01', step: 1, activeBranch: 'deleted-work',
+      created: [{type: 'fn', name: 'same-name-on-main'}]};
+    const w = makeWorld({state: null, saved, branch: 'main', availableBranches: []});
+    await w.ctx.openTutorialMenu();
+    w.btn('End lesson & clean up').click();
+    await new Promise((r) => setTimeout(r, 0));
+    assert(w.title() === 'Tutorial branch unavailable', 'the recovery dialog explains the missing context');
+    assert(!w.calls.some((c) => /^deleteCreated|^DELETE|^switchToBranch/.test(c)),
+      'recovery neither writes on main nor reloads into a deleted branch');
+    w.btn('Cancel').click();
+    assert(w.saved().created[0].name === 'same-name-on-main', 'Cancel retains the ledger for a later recovery');
+    assert(w.pop() === null, 'Cancel dismisses the blocked recovery dialog');
+  });
+
+  for (const changed of [{accountId: 'other', orgId: 'org'},
+    {accountId: 'owner', orgId: 'other-org'}, null]) {
+    await test('cleanup requires the original account and org: ' + JSON.stringify(changed), async () => {
+      const state = {lessonId: '01', step: 1, activeBranch: 'main',
+        principal: changed, created: [{type: 'fn', name: 'same-name'}]};
+      const w = makeWorld({state});
+      w.ctx.gdAccount = {id: 'owner'};
+      w.ctx.graphdenCurrentOrg = 'org';
+      await w.ctx._tourEnd();
+      assert(w.title() === 'Tutorial context changed', 'mismatched or unknown provenance is explained');
+      assert(!w.calls.some((c) => /^deleteCreated|^DELETE/.test(c)), 'no ledger names are deleted in the new principal context');
+      w.btn('Keep & close').click();
+      assert(w.saved() === null && w.pop() === null, 'Keep closes the session without changing graph data');
+    });
+  }
+
+  await test('a cookie account change after opening cleanup is rechecked before deletion', async () => {
+    const w = makeWorld({state: {lessonId: '01', step: 1, activeBranch: 'main',
+      principal: {accountId: 'owner', orgId: null}, created: [{type: 'fn', name: 'same-name'}]}});
+    w.ctx.gdAccount = {id: 'owner'};
+    await w.ctx._tourEnd();
+    assert(w.btn('Delete them'), 'the original account can see its cleanup offer');
+    w.ctx.gdAccountsReady = Promise.resolve(true);
+    w.ctx.fetch = async () => ({ok: true, json: async () => ({account: {id: 'different'}})});
+    w.btn('Delete them').click();
+    await new Promise((r) => setTimeout(r, 0));
+    assert(w.title() === 'Tutorial context changed', 'the fresh account probe blocks cleanup');
+    assert(!w.calls.some((c) => /^deleteCreated/.test(c)), 'the stale dialog cannot write as the new account');
+  });
+
+  await test('a fresh organization header is checked before a stale dialog can delete', async () => {
+    const w = makeWorld({state: {lessonId: '01', step: 1, activeBranch: 'main',
+      principal: {accountId: 'owner', orgId: 'original-org'}, created: [{type: 'fn', name: 'same-name'}]}});
+    w.ctx.gdAccount = {id: 'owner'};
+    w.ctx.graphdenCurrentOrg = 'original-org';
+    w.ctx.API.api_graph_entities = '/api/graph/entities';
+    let activeOrg = 'original-org';
+    w.ctx.authFetch = async () => ({ok: true, headers: {get: () => activeOrg}});
+    await w.ctx._tourEnd();
+    assert(w.btn('Delete them'), 'a matching real org header confirms cleanup context');
+    activeOrg = 'other-org';
+    w.btn('Delete them').click();
+    await new Promise((r) => setTimeout(r, 0));
+    assert(w.title() === 'Tutorial context changed', 'a same-origin org switch blocks the old dialog');
+    assert(!w.calls.some((c) => /^deleteCreated/.test(c)), 'no names are deleted in the new organization');
+  });
+
+  for (const confirmedOrg of ['demo-org', null]) {
+    await test('an accountless tenant requires a confirmed org: ' + confirmedOrg, async () => {
+      const w = makeWorld({state: {lessonId: '01', step: 1, activeBranch: 'main',
+        principal: {accountId: null, orgId: 'demo-org'}, created: [{type: 'fn', name: 'demo-created'}]}});
+      w.ctx.graphdenCurrentOrg = 'demo-org';
+      w.ctx.gdAccountsReady = Promise.resolve(true);
+      w.ctx.fetch = async () => ({ok: false, status: 401,
+        json: async () => ({error: 'unauthenticated'})});
+      w.ctx.API.api_graph_entities = '/api/graph/entities';
+      w.ctx.authFetch = async () => ({ok: true, headers: {get: () => confirmedOrg}});
+      await w.ctx._tourEnd();
+      assert(w.title() === (confirmedOrg ? 'Clean up tutorial items?' : 'Tutorial context changed'),
+        'demo cleanup is available only when its actual org header confirms the context');
+      assert(!w.calls.some((c) => /^deleteCreated/.test(c)), 'rendering the decision never mutates demo data');
+    });
+  }
+
+  for (const failure of ['401', 'network']) {
+    await test('an unconfirmed account blocks deletion: ' + failure, async () => {
+      const w = makeWorld({state: {lessonId: '01', step: 1, activeBranch: 'main',
+        principal: {accountId: 'owner', orgId: null}, created: [{type: 'fn', name: 'owned'}]}});
+      w.ctx.gdAccount = {id: 'owner'};
+      w.ctx.gdAccountsReady = Promise.resolve(true);
+      w.ctx.fetch = async () => {
+        if (failure === 'network') throw new Error('offline');
+        return {ok: false, status: 401, json: async () => ({error: 'unauthenticated'})};
+      };
+      await w.ctx._tourEnd();
+      assert(w.title() === 'Tutorial context changed', 'the stale remembered account is insufficient');
+      assert(!w.calls.some((c) => /^deleteCreated/.test(c)), 'no mutation occurs after failed account confirmation');
+    });
+  }
 
   console.log('');
   console.log(failures ? '✗ ' + failures + ' failed, ' + passes + ' passed'

@@ -36,7 +36,8 @@ const search = (name) => branchApi('GET', '/api/graph/entities?scope=search&q=' 
     // represents work the reader kept outside this lesson and must survive.
     await page.evaluate(async (name) => {
       await _tourFetchLessons();
-      _tourState = {lessonId: '18', step: 0, created: [{type: 'fn', name}]};
+      _tourState = {lessonId: '18', step: 0, principal: _tourSessionPrincipal(),
+        created: [{type: 'fn', name}]};
       await _tourEnd();
     }, ownedName);
     await page.getByRole('button', {name: 'Delete them', exact: true}).click();

@@ -342,6 +342,28 @@ test('result-value verifies the current result, including the values in its rows
   assert(!checkIn(state('["tick"]'), {kind: 'result-value'}), 'a missing expected value does not pass');
 });
 
+test('successful Run checks reject errors and wrong deterministic results', () => {
+  const pane = '.execute-popover.visible .execute-result-pane';
+  const raw = '.execute-popover.visible .execute-result-host .execute-result-raw pre';
+  const error = '.execute-popover.visible .execute-result-host .execute-error-pane';
+  for (const value of [2, 10, 'ALPHA', 'BETA', '{"a":1}', 6, 'den', ['GRAPH', 'DEN']]) {
+    const check = {kind: 'result-value', value};
+    assert(!checkIn({dom: {[error]: true}}, check), 'an error cannot complete ' + JSON.stringify(value));
+    assert(!checkIn({dom: {[pane]: true, [raw]: {textContent: 'null'}}}, check),
+      'a wrong value cannot complete ' + JSON.stringify(value));
+    assert(checkIn({dom: {[pane]: true, [raw]: {textContent: JSON.stringify(value)}}}, check),
+      'the promised value completes ' + JSON.stringify(value));
+  }
+});
+
+test('review completion is scoped to the requested approved branch', () => {
+  const selector = '.branch-row-approve[data-approve-branch="tutorial-feature"][data-approved="1"] + .branch-appr-count.ok';
+  const check = {kind: 'dom', selector};
+  assert(!checkIn({dom: {'.branch-appr-count.ok': true}}, check),
+    'an approval on another branch does not complete the lesson');
+  assert(checkIn({dom: {[selector]: true}}, check), 'the requested approved branch completes');
+});
+
 test('arg-named reads the edge label — the rename has no other client trace', () => {
   assert(checkIn({ edgeLabels: ['nums', 'greeting'] },
                  { kind: 'arg-named', arg: 'greeting' }) === true, 'label found');

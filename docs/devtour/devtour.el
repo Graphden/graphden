@@ -229,7 +229,7 @@
           (insert (propertize (format "\n%s: %s\n" (car pair)
                                       (mapconcat #'cdr (cdr pair) ", "))
                               'face 'devtour-meta))))
-      (insert (propertize "\n[n]ext [p]rev [b]ack [s]ee-also [g]index [o]source [q]uit\n"
+      (insert (propertize "\n[n]ext [p]rev [b]ack [s]ee-also [i]index [o]source [q]uit\n"
                           'face 'devtour-meta))
       (goto-char (point-min))
       (setq buffer-read-only t))

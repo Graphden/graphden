@@ -214,7 +214,7 @@
            from the string \"name\"; namespaced keywords can identify references. The classpath is the
            collection of code and resource locations visible to the JVM."}
   {:id "mcp" :title "MCP"
-   :say "Model Context [Protocol](#term/protocol): a [protocol](#term/protocol) through which tools
+   :say "Model Context Protocol: a communication protocol through which tools
            such as coding assistants call server-provided operations. Graphden exposes optional graph
            operations through its MCP package; those writes still use the normal branch and graph
            validation paths."}
@@ -314,7 +314,8 @@
 
     {:ns graphden.executor.compile-eager :defn compile-fn
      :say "Builds one runtime [closure](#term/closure) `(fn [fa ctx])`. It prepares argument builders,
-           environment [bindings](#term/binding), and name aliases at compile time. At execution time
+           [bindings](#term/binding) to inputs outside the root's slots, and name aliases at compile time.
+           At execution time
            the [closure](#term/closure) assembles the argument map from caller input and those
            builders, then calls `(impl args ctx)`."
      :see [[:executor "arg-builder"] [:executor "resolve-impl"]]}
@@ -1020,7 +1021,7 @@
      :say "Passes the loaded configuration to `ig/init`, which initializes components in [dependency
            order](#term/topological-order). Requiring the `init.*` namespaces registers their
            `ig/init-key` implementations before this call. The next steps show the
-           [principal](#term/auth) components."}
+           main components."}
 
     {:ns graphden.system.init.storage :defn ig/init-key :dispatch :db/postgres
      :say "Opens the PostgreSQL connection pool and initializes the declared schema. An optional

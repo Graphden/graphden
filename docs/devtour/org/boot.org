@@ -60,7 +60,7 @@ Reads profile configuration with Aero, then merges [[file:glossary.org::#term/in
 :MINS: 1.0
 :END:
 
-Passes the loaded configuration to ~ig/init~, which initializes components in [[file:glossary.org::#term/topological-order][dependency order]]. Requiring the ~init.*~ namespaces registers their ~ig/init-key~ implementations before this call. The next steps show the [[file:glossary.org::#term/auth][principal]] components.
+Passes the loaded configuration to ~ig/init~, which initializes components in [[file:glossary.org::#term/topological-order][dependency order]]. Requiring the ~init.*~ namespaces registers their ~ig/init-key~ implementations before this call. The next steps show the main components.
 
 - source :: [[file:../../../src/graphden/system/interface.clj::(defn start!][src/graphden/system/interface.clj:38]]
 

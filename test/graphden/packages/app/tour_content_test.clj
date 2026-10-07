@@ -2,15 +2,12 @@
   "Contract tests for the interactive tutorial's lesson scripts
    (`:_tour-lessons` in `resources/packages/app/tour/fns.edn`).
 
-   209 steps across 25 lessons are DATA, served verbatim to the editor
-   at `GET /api/tour` — and until this file existed nothing checked
-   them. A `:check {:kind …}` typo, a `:creates {:type …}` the client
-   cannot clean up, a `:requires` naming neither a capability nor a
-   known signal, a chapter that appears twice in the reading order:
-   each ships silently and shows up as a dead step in front of a
-   reader. The browser guards walk 19 of the lessons, take minutes,
-   and run only on the gate; the six organization lessons they cannot
-   walk are exactly the ones this file still covers.
+   Lessons are DATA, served verbatim to the editor at `GET /api/tour`.
+   A `:check {:kind …}` typo, a `:creates {:type …}` the client cannot
+   clean up, an unknown capability or a duplicate reading-order entry
+   can leave a reader stuck. These fast structural checks complement
+   browser walkthroughs, including lessons whose organization capabilities
+   may be unavailable in a particular deployment.
 
    Pure EDN — no loader, no HTTP, no browser. The vocabularies below
    mirror `editor-tour-checks.js` (`_tourCheckPasses`),

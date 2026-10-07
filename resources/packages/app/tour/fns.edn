@@ -91,6 +91,8 @@
 ;;                                                    is clear)
 ;;                      {:kind "list-items" :name N :slot S :count C}  the list
 ;;                                                    under N's slot S holds C items
+;;                      {:kind "list-values" :name N :slot S :values [V …]}
+;;                                                    exact local literal order
 ;;                      {:kind "list-first" :name N :slot S :value V}  …and its
 ;;                                                    first item is the literal V
 ;;                      {:kind "binding-absent" :name N :slot S}  N has no binding
@@ -569,7 +571,7 @@
             {:id "06"
              :slug "lists"
              :chapter "Basics"
-             :version 2
+             :version 3
              :title "Lists: seed, append, close"
              :reads "has the fns, and the append / closed-list rules in full."
              :steps
@@ -609,7 +611,7 @@
                :body "Click [[+]] on the 1 — the second item now — choose [[Insert literal]], type `0` — then [[Save]]. The list reads 2, 0, 1: an append can be an insert at a position, and the later items shift down."
                :target ".edge-seq-item[data-index=\"1\"] .arg-seq-btn-insert"
                :targets [".edge-seq-item[data-index=\"1\"] .arg-seq-btn-insert" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
-               :check {:kind "list-items" :name "tutorial-base-sum" :slot "nums" :count 3}}
+               :check {:kind "list-values" :name "tutorial-base-sum" :slot "nums" :values [2 0 1]}}
               {:title "Now extend the seeded fn"
                :body "Click [[⋯]] on the tutorial-base-sum row, [[Extend]], name it `tutorial-sum-more` — [[Save]]."
                :target ".node-overlay[data-fn-name=\"tutorial-base-sum\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
@@ -1879,7 +1881,7 @@
             {:id "26"
              :slug "version-history"
              :chapter "The editor"
-             :version 1
+             :version 2
              :title "Version history"
              :reads "covers the per-version run history and how this reads on a branch."
              :steps
@@ -1901,12 +1903,12 @@
                :body "Click [[⋯]] on the tutorial-versioned row and choose [[i]] (Description). A small note opens — click its [[✎ Edit]], type `first draft` and [[Save]]. That write appends a version row — the fn now has two."
                :target ".node-overlay[data-fn-name=\"tutorial-versioned\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
                :targets [".node-overlay[data-fn-name=\"tutorial-versioned\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"description\"]" ".description-tooltip" ".description-tooltip-textarea"]
-               :check {:kind "manual"}}
+               :check {:kind "fn-field" :name "tutorial-versioned" :field "description" :value "first draft"}}
               {:title "And another"
                :body "Do it once more: [[⋯]] → [[i]] → [[✎ Edit]], this time `second draft`, [[Save]]. Three version rows now — the create and two edits. Nothing was replaced."
                :target ".node-overlay[data-fn-name=\"tutorial-versioned\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
                :targets [".node-overlay[data-fn-name=\"tutorial-versioned\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"description\"]" ".description-tooltip" ".description-tooltip-textarea"]
-               :check {:kind "manual"}}
+               :check {:kind "fn-field" :name "tutorial-versioned" :field "description" :value "second draft"}}
               {:title "Open the history"
                :body "Click [[⋯]] and then [[⌛]] — version history. Every version row for this fn, newest first, ACROSS BRANCHES: each row names the branch it was written on, so a fn you edited on a fork shows both timelines here."
                :target ".node-overlay[data-fn-name=\"tutorial-versioned\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
@@ -1915,7 +1917,7 @@
               {:title "Restore the first draft"
                :body "Click [[restore]] on the row that says first draft and confirm. Read the confirm text as you accept it: it writes a NEW version row carrying the historic fields. Nothing after it is deleted."
                :target ".fn-versions-popover"
-               :check {:kind "manual"}}
+               :check {:kind "fn-field" :name "tutorial-versioned" :field "description" :value "first draft"}}
               {:title "History is append-only"
                :body "Reopen [[⌛]]. There are FOUR rows now — the restore is itself a version. That is what makes this button safe: restoring the row you were on before puts you back, and no state exists in which the button lost your work."
                :target ".node-overlay[data-fn-name=\"tutorial-versioned\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"

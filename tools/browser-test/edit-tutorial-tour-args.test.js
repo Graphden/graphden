@@ -107,6 +107,12 @@ const {
     await waitTourTitle(page, 'Swap them', 150000);
     await moveSeqItem(page, 1, 'up');
     await waitTourTitle(page, 'Insert before', 150000);
+    const insertion = await page.evaluate(() => ({
+      kind: _tourStep().check.kind,
+      passes: _tourCheckPasses(_tourStep().check),
+    }));
+    assert(insertion.kind === 'list-values' && insertion.passes === false,
+      'insert-before waits for the intended sequence: ' + JSON.stringify(insertion));
     await insertSeqLiteralBefore(page, 1, '0');
     await waitTourTitle(page, 'Now extend the seeded fn', 150000);
     const order = await page.evaluate(() => {

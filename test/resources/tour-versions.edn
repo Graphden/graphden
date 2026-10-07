@@ -20,7 +20,7 @@
  "grants" {:version 1, :steps "f54a1f416cbe54f9ddb654a87f4a423b1e62a72a"}
  "higher-order-functions" {:version 4, :steps "803664d9ec525888527118fed06e4ca07c892958"}
  "keyboard-and-accessibility" {:version 1, :steps "7d9d89e48bd24849fbfedb7018def98089119a05"}
- "lists" {:version 2, :steps "078ca125f752d67b8aaa9e90483dabd743077d98"}
+ "lists" {:version 3, :steps "128d610aa882223873d1bad6a178bf4bb082f675"}
  "marketplace-themes-keymaps" {:version 3, :steps "1d5b8b9cda2428d3b2ca516498afee74c8d40246"}
  "optional-required-sealed" {:version 2, :steps "e74c18a11d76e59fe91ef0823fbf5b19a2fafe21"}
  "parents-and-inheritance" {:version 2, :steps "94d209afaa817876be2033a0fc7deb912e61cac4"}
@@ -37,6 +37,6 @@
  "tests" {:version 1, :steps "f7418ce3b2e656ab68d3114eb9a041270720fa11"}
  "types" {:version 1, :steps "cf035f8d069e7cc531e0549c70ca90a9ac0e8877"}
  "users-admin" {:version 1, :steps "7be1e4b9306c3e9aaeb12a9a0f14ab38d0984ad7"}
- "version-history" {:version 1, :steps "49c839353313a5fe7efef8b02f27ff7707c2246a"}
+ "version-history" {:version 2, :steps "ab18d10371dc3dcac6fe82fcc17c84f7e9439d7e"}
  "working-across-orgs" {:version 1, :steps "994aa5a41c991aeee76b21bf592fe0da21bd9893"}
  "workspaces" {:version 2, :steps "8ce8a28c7055d57c04c16c00e65ef4f6b4f1e627"}}

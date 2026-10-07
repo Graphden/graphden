@@ -116,8 +116,9 @@ Seed a list, extend it from a child, then close it:
    move it, `+` inserts before it, `×` removes it. Click `↑` on the
    `2` — the list reads `2, 1`. Then `+` on the `1` → **Insert
    literal** → `0` → **Save**: `2, 0, 1`. Order is the items'
-   `position`, and it is yours to change; an append can be an
-   insert, and the later items shift down.
+   `position`, and it is yours to change; inserting shifts the later
+   items down. The guided tour checks `2, 0, 1` here — appending `0`
+   to the tail gives a different order and does not complete this step.
 5. `⋯` on `tutorial-base-sum` → **Extend** → `tutorial-sum-more` →
    **Save**. The new card shows no `:nums` yet — the list is the
    parent's. Click the `tutorial-base-sum` row on the card to unfold

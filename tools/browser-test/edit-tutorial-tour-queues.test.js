@@ -115,13 +115,16 @@ async function cleanup(page, finish) {
     await waitTourTitle(page, 'Open random-uuid');
     await filterAndSelect(page, 'core.system.random-uuid', 'random-uuid');
     await waitTourTitle(page, 'Choose an unused queue name');
+    const uuidFnId = await page.evaluate(() => selectedFnId);
+    assert(UUID.test(uuidFnId || ''), 'UUID Run source has an exact selected identity');
     await openRun(page, 'random-uuid', false);
-    const raw = '.execute-popover.visible .execute-result-raw pre';
-    await page.waitForFunction(selector => {
-      try { return /^[0-9a-f-]{36}$/i.test(JSON.parse(document.querySelector(selector)?.textContent)); }
-      catch (_) { return false; }
-    }, raw, {timeout: 30000});
-    const queue = JSON.parse(await page.locator(raw).textContent());
+    const scalar = '.execute-popover.visible .execute-result-scalar';
+    await page.waitForFunction(({selector, fnId}) => {
+      const value = document.querySelector(selector);
+      return value?.closest('.execute-result-host')?.gdExecutionFnId === fnId
+        && /^[0-9a-f-]{36}$/i.test(value.textContent.trim());
+    }, {selector: scalar, fnId: uuidFnId}, {timeout: 30000});
+    const queue = (await page.locator(scalar).textContent()).trim();
     assert(UUID.test(queue), 'queue channel is the actual random-uuid Run result');
     assert(await clickTourButton(page, 'Next'), 'record the unused channel');
 

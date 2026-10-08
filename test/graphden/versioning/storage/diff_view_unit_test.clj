@@ -187,7 +187,9 @@
     (is (= {:entity-name :binding
             :entity-id (str eid)
             :change :modified
+            :slot-id (str sid)
             :slot-name "port"
+            :binding-id (str eid)
             :fields [{:field "value" :source "9090" :target "8080"}]}
            e))
     (is (not (contains? e :preview)))))
@@ -205,7 +207,10 @@
     (is (= {:entity-name :binding-list-item
             :entity-id (str eid)
             :change :added-in-source
+            :slot-id (str sid)
             :slot-name "nums"
+            :binding-id (str bid)
+            :item-id (str eid)
             :position 3
             :preview "10"}
            e))

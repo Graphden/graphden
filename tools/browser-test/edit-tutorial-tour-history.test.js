@@ -250,11 +250,13 @@ async function openVersionHistory(page) {
       'inherited menu retains help without stretching: ' + JSON.stringify(inheritedMenu));
     await page.keyboard.press('Escape');
 
+    assert(await page.evaluate(() => _tourStep().check.kind === 'fn-field'
+      && !_tourCheckPasses(_tourStep().check)), 'first edit waits for the saved description');
     await setDescription(page, 'first draft');
-    assert(await clickTourButton(page, 'Next'), 'lesson 26 first-edit Next');
     await waitTourTitle(page, 'And another', 30000);
+    assert(await page.evaluate(() => !_tourCheckPasses(_tourStep().check)),
+      'the first draft cannot complete the second edit');
     await setDescription(page, 'second draft');
-    assert(await clickTourButton(page, 'Next'), 'lesson 26 second-edit Next');
 
     await waitTourTitle(page, 'Open the history', 30000);
     await openVersionHistory(page);
@@ -270,6 +272,9 @@ async function openVersionHistory(page) {
     assert(/first draft/.test(rowText) && /second draft/.test(rowText),
       'both descriptions are in the timeline (got: ' + rowText.slice(0, 160) + ')');
 
+    assert(await page.evaluate(() => _tourStep().check.kind === 'fn-field'
+      && !_tourCheckPasses(_tourStep().check)), 'the second draft cannot complete restoration');
+
     // Restore the "first draft" row — the dialog handler accepts the confirm.
     await page.evaluate(() => {
       const row = Array.from(document.querySelectorAll('.fn-versions-row'))
@@ -281,7 +286,6 @@ async function openVersionHistory(page) {
       const j = await r.json();
       return (j.fns || []).some((f) => f.id === id && f.description === 'first draft');
     }, _lessonFnId, 60000), 'restore put "first draft" back on the fn');
-    assert(await clickTourButton(page, 'Next'), 'lesson 26 restored Next');
 
     await waitTourTitle(page, 'History is append-only', 30000);
     // Re-open the popover and let the NEW row land: the restore's write and

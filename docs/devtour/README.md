@@ -5,15 +5,16 @@ who just joined and needs to find their feet in the whole system.
 
 This is the counterpart to [`docs/tutorial/`](../tutorial/README.md): the
 tutorial teaches a *user* how to drive the editor; this tour walks a
-*contributor* through the Clojure that makes it run — organized into the
-system's relatively independent **blocks**, code-first, with real navigation
+*contributor* through the graph definitions, Clojure, and browser code that make
+it run — organized into the system's relatively independent **blocks**, code-first, with real navigation
 (a block map, next/prev along a spine, a see-also cross-link, and a Back stack
 that returns you along the path you actually took).
 
 ## How to read it
 
 Three reading paths, one source of truth. All three are baked by `bb devtour`
-and drift-checked in CI, so they can never disagree about what the code says.
+and drift-checked in CI. The page contains source from the last bake; Emacs and
+Org open live files. Regenerate after editing a toured form to keep them aligned.
 
 ### 1. The page
 
@@ -95,9 +96,19 @@ fold with the outline, or keep your own notes next to the steps.
 
 ### Where to start
 
-Read the blocks in dependency order, starting with Executor. Boot explains
-process startup and is a useful alternative starting point. Editor reads
-JavaScript; the remaining blocks primarily read Clojure.
+You need basic Clojure and HTTP knowledge, but no prior Graphden experience.
+Begin with the first Executor step: it explains a small graph definition and
+why composition is stored as data. Read its path through `compile-fn`,
+`arg-builder`, `defbase`, and `resolve-arg`; then visit Packages' `process-module`,
+`parse-composed`, `add`, and `sync-fn-entities-from-packages!`. This connects an
+authored definition to stored rows and an executable function before the deeper
+cache, type, and branch mechanisms.
+
+For the full tour, read blocks in dependency order. Boot explains process startup
+and is a useful alternative starting point. Editor reads JavaScript plus its
+server-side graph-plan and personal-theme boundaries. Services and Platform can
+wait until you need long-running functions or deployment policy. The Repositories
+block explains how the same core is assembled for self-hosting and cloud.
 
 Technical terms link to definitions outside the numbered steps. Opening a
 browser definition leaves progress unchanged; Back returns to the prior step.
@@ -113,6 +124,80 @@ documents. Use `../../docs/...` for checkout-relative document links in the
 source; the HTML and Org generators adjust their output paths, including
 translated output outside this repository. Adding a definition never adds a
 step, changes a source anchor, or changes saved progress.
+
+### Follow one edit through the system
+
+Use search (`/`) for these step names; use see-also to follow connections and
+Back to return to the place you left. This route traces a user saving a literal
+argument in the inspector:
+
+1. **Editor: `enterArgValueEditMode` → `writeBindingFields`.** A type-specific
+   widget saves an own binding for a function and slot. The writer chooses POST
+   or PUT; `authMutate` encodes the form and uses `authFetch` for credentials.
+   The fetch wrapper in `editor-branch-context.js` selects the current branch.
+2. **Web: `write-rej`.** Open
+   [web/crud-write/fns.edn](../../resources/packages/web/crud-write/fns.edn)
+   beside the primitive. `_create-parsed` / `_update-parsed`, the validation
+   definitions, and the apply definitions compose parsing, rejection, and writes.
+   For PUT, `_update-apply-success` explicitly orders invalidation, notification,
+   and response through `:do`; the primitive does not conceal this pipeline.
+3. **Branches: `VersionedStorage`.** The storage protocol writes a version in
+   the selected branch. **Graph API: `type-check-fn-after-mutation!`** shows why
+   a saved edit may have type warnings; secret violations instead require rejection.
+4. **Graph API: `notify-after-write!`.** Invalidation updates local caches and
+   PostgreSQL notifications reach other processes. **Executor: `registry`**
+   and **Branches: `validate-graph-epoch!`** explain refresh and missed-event recovery.
+5. **Editor: `buildLookups` → `fetchBackendLayout` → `renderGraph`.** Reloaded
+   rows feed client indexes, server layout, and measured browser cards. A later
+   Run travels through **Graph API: `apply-execute`** to **Executor: `execute`**.
+
+The generic `crud/create-entity` entry is another API caller; the public editor
+route's parse → validate → apply composition lives in the package graph above.
+
+### Make and test a first change
+
+Choose the owning layer before editing. Constants, defaults, references, and
+multi-step composition belong in `resources/packages/<package>/<module>/fns.edn`.
+Use `impls.clj` for a small primitive adapting a Clojure/Java/library operation,
+and `src/graphden/` for shared executor, storage, or checker mechanisms. A base
+implementation should not call another registered base implementation: put that
+dependency in a graph definition. See [PHILOSOPHY](../PHILOSOPHY.md) and the
+[package decision matrix](../PACKAGES.md#5-base-function-vs-fn-def-decision-matrix).
+
+A small first exercise is to extend the existing graph test
+`core.tests/add-sums-every-number` in
+[core/tests/fns.edn](../../resources/packages/core/tests/fns.edn). Change its
+subject's `:nums` from `[1 2 3 4]` to `[1 2 3 4 5]` and its `:expected` from
+`10` to `15`, updating the description. Its inline subject inherits `:add`;
+the named test inherits `:assert-eq` and passes only when execution does not
+throw. This changes a real fn-def and checks the graph route without changing
+the arithmetic primitive.
+
+Read [CLAUDE.md](../../CLAUDE.md) and the
+[worktree contract](../../dev/wtq/AGENT.md), then work in your claimed checkout:
+
+```bash
+bb wt claim first-graph-change "Extend the arithmetic graph test"
+# cd to the WORKTREE path printed above; make the edit there
+bb type-sweep
+bb graph-lint
+bb wt test --focus graphden.packages.platform-tests-test/every-platform-test-passes
+```
+
+That focused test loads the shipped graph and runs package-owned tests, including
+your edited definition. It needs Docker for its isolated database fixture. The
+editor's ordinary Run all excludes package-owned tests, so it is not a substitute.
+For a primitive change, use its direct host test as well; arithmetic lives in
+[arithmetic_test.clj](../../test/graphden/packages/core/arithmetic_test.clj), run
+with `bb wt test --focus graphden.packages.core.arithmetic-test`. For a shared
+mechanism, find its focused namespace under `test/graphden/` and test the relevant
+behavior at that boundary.
+
+Use `bb wt up` to exercise application behavior on your own instance when needed.
+After changing a toured form, run `bb devtour`; then `bb lint` checks the edited
+checkout and baked tour. Follow the worktree contract for CI and serialized
+landing. The fn-def graph tests and Clojure host tests cover different boundaries;
+pick the one that actually executes the layer you changed.
 
 ## How it works
 

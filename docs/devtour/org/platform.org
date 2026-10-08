@@ -59,7 +59,8 @@ Provides core's single-token [[file:glossary.org::#term/auth][authentication]] b
 Lists [[file:glossary.org::#term/effect][effects]] forbidden for sandboxed graph execution, including environment, I/O, network, process, and raw SQL access. Core's ~record-effect!~ enforces the currently allowed set; the [[file:glossary.org::#term/integrant][addon]] selects that set. ~:raw-sql~ is separate from controlled database operations.
 
 - source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(def cloud-forbidden-effects][src/graphden/executor/compile_runtime.clj:1306]]
-- same file :: [[file:executor.org::#executor/execute~2][execute]], [[file:executor.org::#executor/registry][registry]], [[file:executor.org::#executor/rebuild!][rebuild!]]
+- same file :: [[file:executor.org::#executor/execute~2][execute]], [[file:executor.org::#executor/registry][registry]], [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:executor.org::#executor/record-effect!][record-effect!]]
+- referenced from :: [[file:executor.org::#executor/record-effect!][record-effect!]]
 
 * 5. check-target!
 :PROPERTIES:

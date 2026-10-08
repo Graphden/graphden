@@ -281,6 +281,12 @@ prefix resolves, and org's `::<head>' search lands on the anchored form."
   (goto-char (point-min))
   (execute-kbd-macro (kbd "TAB"))
   (should (button-at (point)))
+  ;; Introductory prose may link to a source document before a definition.
+  ;; Exercise the glossary round trip without assuming the first link's kind.
+  (cl-loop repeat 20
+           until (string-prefix-p "#term/" (or (button-get (button-at (point)) 'help-echo) ""))
+           do (execute-kbd-macro (kbd "TAB")))
+  (should (string-prefix-p "#term/" (button-get (button-at (point)) 'help-echo)))
   (let ((origin (current-buffer)) (origin-point (point))
         (pos devtour--pos) (last devtour--last)
         (seen (hash-table-count devtour--seen)))

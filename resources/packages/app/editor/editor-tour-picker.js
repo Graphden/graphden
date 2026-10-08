@@ -270,6 +270,10 @@ async function openTutorialMenu() {
     return;
   }
   const { pop } = _tourEnsureEls();
+  if (typeof _tourTimer !== 'undefined' && _tourTimer) {
+    clearInterval(_tourTimer);
+    _tourTimer = null;
+  }
   _tourSpotHide();   // both spotlight layers — the ring AND the scrim
   pop.replaceChildren();
   pop.classList.add('gd-tour-visible');
@@ -353,12 +357,15 @@ async function openTutorialMenu() {
   if (saved?.lessonId) {
     const paused = (lessons.lessons || []).find((l) => l.id === saved.lessonId);
     if (paused) {
+      const ended = saved.phase === 'cleanup' || saved.step >= (paused.steps || []).length;
       const resume = _tourBtn(
-        'Continue ' + _tourLessonLabel(paused)
-        + ' — step ' + ((saved.step || 0) + 1) + '/' + (paused.steps || []).length,
+        (ended ? 'Clean up ' : 'Continue ') + _tourLessonLabel(paused)
+        + (ended ? '' : ' — step ' + ((saved.step || 0) + 1) + '/' + (paused.steps || []).length),
         'gd-tour-btn-primary gd-tour-btn-resume',
-        () => startTutorial(paused.id, saved.step, saved.created));
+        () => _tourRestoreSession(saved));
       pop.appendChild(resume);
+      if (!ended) pop.appendChild(_tourBtn(
+        'End lesson & clean up', 'gd-tour-btn-quiet', () => _tourRestoreSession(saved, true)));
     }
   }
 
@@ -417,7 +424,7 @@ async function openTutorialMenu() {
         btn.appendChild(note);
       } else {
         btn = _tourBtn(label, 'gd-tour-btn-primary',
-                       () => { if (need.allowed) startTutorialIsolated(lesson.id); });
+                       () => { if (need.allowed) _tourChooseLesson(lesson.id); });
       }
       // The row is a CONTAINER, not just the button: a done lesson carries a
       // second control (take the ✓ off), and a control nested inside a button

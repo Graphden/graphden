@@ -42,7 +42,7 @@ function _tourNextSection(lessonId, note, start) {
   return { label: _tourCopy('next-label', 'Next up'), note, actions };
 }
 
-async function _tourEnd() {
+async function _tourEnd(nextLessonId = null) {
   // STOP THE POLL FIRST, before any await. The last `_tourAdvance` moves the
   // step index past the end, so the very next tick sees no step and tears the
   // tour down — including `_tourState`. That fired while this function was
@@ -51,6 +51,21 @@ async function _tourEnd() {
   // them" deleted NOTHING and still reported "Tutorial items deleted".
   // (Reproduced on the stack: 600ms poll vs a ~1.5s survivors read.)
   if (_tourTimer) { clearInterval(_tourTimer); _tourTimer = null; }
+  // Namespace versions must be cleaned in the owned sandbox, even when a
+  // lesson or the reader switched away from it before ending the session.
+  const ownedBranch = _tourOwnedBranch(_tourState);
+  const cleanupBranch = ownedBranch || _tourState?.activeBranch
+    || _tourState?.branch || _tourSessionBranch();
+  if (cleanupBranch !== _tourSessionBranch()) {
+    return _tourRestoreSession(_tourState, true, nextLessonId);
+  }
+  if (_tourState) {
+    _tourState.phase = 'cleanup';
+    _tourState.activeBranch = _tourSessionBranch();
+    if (nextLessonId) _tourState.nextLessonId = nextLessonId;
+    _tourSaveState();
+  }
+  if (!await _tourConfirmCleanupContext(cleanupBranch)) return;
   // Read what the lesson made ONCE, here — the dialog's buttons run much
   // later, and nothing else may be holding the state by then.
   const created = (_tourState?.created) || [];
@@ -68,13 +83,14 @@ async function _tourEnd() {
   // not only while standing on it. A lesson that ended after switching
   // away (or a mis-scoped lesson) used to skip this offer entirely and
   // leak one tutorial-* branch per run.
-  if (_tourState?.branch) {
-    const branch = _tourState.branch;
+  if (ownedBranch) {
+    const branch = ownedBranch;
     // `thenStart` — a lesson id to open once the rollback lands. It cannot be
     // started here: the rollback ends in a branch switch, and a branch switch
     // is a page load. Park it and let `maybeStartTutorial` pick it up on the
     // other side.
     const rollback = async (thenStart) => {
+      if (!await _tourConfirmCleanupContext(cleanupBranch)) return;
       let ok = true;
       try {
         // Children first — a fork the lesson itself made (lesson 23) would
@@ -118,9 +134,10 @@ async function _tourEnd() {
                       + ' removes everything the lesson created and returns you'
                       + ' to main.', { branch }),
       primary: [_tourCopy('branch-confirm', 'Delete branch & return'),
-                () => rollback(null)],
-      quiet: [_tourCopy('branch-keep', 'Keep branch'), () => _tourTeardown()],
-      next: finished && _tourNextSection(
+                () => rollback(nextLessonId)],
+      quiet: [_tourCopy('branch-keep', 'Keep branch'),
+              () => _tourKeepAndContinue(nextLessonId, branch)],
+      next: !nextLessonId && finished && _tourNextSection(
         lessonId,
         _tourCopy('next-note-branch',
                   'Deletes this branch first, then opens the next lesson.'),
@@ -142,6 +159,11 @@ async function _tourEnd() {
   // next lesson to offer (the last one, or everything ahead locked) it still
   // vanishes — a card whose only button is Close is furniture.
   if (!survivors.length) {
+    if (nextLessonId) {
+      _tourTeardown();
+      startTutorialIsolated(nextLessonId);
+      return;
+    }
     const next = finished && _tourNextSection(
       lessonId, null, (id) => { _tourTeardown(); startTutorialIsolated(id); });
     if (!next) { _tourTeardown(); return; }
@@ -158,6 +180,7 @@ async function _tourEnd() {
 
   const listOf = (rows) => rows.map((c) => c.type + ' “' + c.name + '”').join(', ');
   const cleanup = async () => {
+    if (!await _tourConfirmCleanupContext(cleanupBranch)) return false;
     const { failed } = await _tourDeleteCreated(created);
     if (failed.length) {
       _tourReport(false, _tourCopy('cleanup-failed',
@@ -167,6 +190,7 @@ async function _tourEnd() {
     }
     _tourTeardown();
     _tourReport(true, _tourCopy('cleanup-done', 'Tutorial items deleted'));
+    if (nextLessonId) startTutorialIsolated(nextLessonId);
     return true;
   };
   _tourDialog({
@@ -176,8 +200,9 @@ async function _tourEnd() {
                     + ' explore? (Deletes are soft.)',
                     { items: listOf(survivors) }),
     primary: [_tourCopy('cleanup-confirm', 'Delete them'), cleanup],
-    quiet: [_tourCopy('cleanup-keep', 'Keep & close'), () => _tourTeardown()],
-    next: finished && _tourNextSection(
+    quiet: [_tourCopy('cleanup-keep', 'Keep & close'),
+            () => _tourKeepAndContinue(nextLessonId)],
+    next: !nextLessonId && finished && _tourNextSection(
       lessonId,
       _tourCopy('next-note-items',
                 'Deletes the items above first, then opens the next lesson.'),

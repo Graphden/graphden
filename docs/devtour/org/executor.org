@@ -5,20 +5,24 @@
 
 From stored definitions to callable code and results.
 
-[[file:index.org][index]] · ~84 min
+[[file:index.org][index]] · ~87 min
 
 * 1. execute
 :PROPERTIES:
 :CUSTOM_ID: executor/execute
 :FILE: src/graphden/executor/interface.clj
 :LINE: 72
-:MINS: 1.8
+:MINS: 2.8
 :END:
+
+Graphden puts composition in stored data and small operations in Clojure. For example, ~{:name :three :parent :add :args {:nums [1 2]}}~ describes a function returning 3; it does not define a Clojure function body. It inherits ~:add~'s ~:nums~ slot and binds that slot to two list items. The stored form has a ~fn~ row, a ~binding~ row targeting the inherited slot, and two ~binding-list-item~ rows. The parent's ~fn-slot~ links its function to the immutable slot. See the existing arithmetic examples in [[file:../../../resources/packages/core/tests/fns.edn][core.tests]].
+
+The executor compiles this description into a callable Clojure function. References prepare deferred inputs: an ~:if~ implementation reads only its selected branch, so the other branch does not run. Defaults and composition belong in ~fns.edn~; add an ~impls.clj~ primitive when an operation needs a host library or runtime facility. This keeps dependencies visible instead of hiding a pipeline inside one implementation.
 
 ~execute~ accepts an [[file:glossary.org::#term/context][execution context]], a [[file:glossary.org::#term/graph-function][graph function]] ID (~fn-id~), and named [[file:glossary.org::#term/free-argument][free arguments]]. The context determines which storage and branch the call sees. This public entry validates the argument map and delegates execution to ~compile-runtime~.
 
 - source :: [[file:../../../src/graphden/executor/interface.clj::(defn execute][src/graphden/executor/interface.clj:72]]
-- see also :: [[file:executor.org::#executor/create-context][create-context]]
+- see also :: [[file:executor.org::#executor/create-context][create-context]], [[file:packages.org::#packages/add][add]], [[file:executor.org::#executor/arg-builder][arg-builder]]
 
 * 2. execute
 :PROPERTIES:
@@ -32,7 +36,7 @@ Runs a previously compiled [[file:glossary.org::#term/graph-function][graph func
 
 - source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn execute][src/graphden/executor/compile_runtime.clj:1587]]
 - see also :: [[file:executor.org::#executor/registry][registry]]
-- same file :: [[file:executor.org::#executor/registry][registry]], [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:platform.org::#platform/cloud-forbidden-effects][cloud-forbidden-effects]]
+- same file :: [[file:executor.org::#executor/registry][registry]], [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:executor.org::#executor/record-effect!][record-effect!]], [[file:platform.org::#platform/cloud-forbidden-effects][cloud-forbidden-effects]]
 
 * 3. create-context
 :PROPERTIES:
@@ -73,7 +77,7 @@ Returns the [[file:glossary.org::#term/compiled-registry][compiled registry]], a
 
 - source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn registry][src/graphden/executor/compile_runtime.clj:1015]]
 - see also :: [[file:executor.org::#executor/rebuild!][rebuild!]]
-- same file :: [[file:executor.org::#executor/execute~2][execute]], [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:platform.org::#platform/cloud-forbidden-effects][cloud-forbidden-effects]]
+- same file :: [[file:executor.org::#executor/execute~2][execute]], [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:executor.org::#executor/record-effect!][record-effect!]], [[file:platform.org::#platform/cloud-forbidden-effects][cloud-forbidden-effects]]
 - referenced from :: [[file:executor.org::#executor/execute~2][execute]], [[file:boot.org::#boot/compiled-registry][compiled-registry]]
 
 * 6. rebuild!
@@ -88,7 +92,7 @@ Reads stored graph rows, builds lookup indexes, and compiles functions. It then 
 
 - source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn rebuild!][src/graphden/executor/compile_runtime.clj:698]]
 - see also :: [[file:executor.org::#executor/build-lookups][build-lookups]], [[file:executor.org::#executor/compile-all][compile-all]]
-- same file :: [[file:executor.org::#executor/execute~2][execute]], [[file:executor.org::#executor/registry][registry]], [[file:platform.org::#platform/cloud-forbidden-effects][cloud-forbidden-effects]]
+- same file :: [[file:executor.org::#executor/execute~2][execute]], [[file:executor.org::#executor/registry][registry]], [[file:executor.org::#executor/record-effect!][record-effect!]], [[file:platform.org::#platform/cloud-forbidden-effects][cloud-forbidden-effects]]
 - referenced from :: [[file:executor.org::#executor/registry][registry]], [[file:storage.org::#storage/ExecutionGraph][ExecutionGraph]], [[file:boot.org::#boot/compiled-registry][compiled-registry]]
 
 * 7. sync-fns-to-storage!
@@ -116,7 +120,7 @@ Builds lookup maps for functions, [[file:glossary.org::#term/slot][slots]], [[fi
 
 - source :: [[file:../../../src/graphden/executor/compile/lookups.clj::(defn build-lookups][src/graphden/executor/compile/lookups.clj:103]]
 - same file :: [[file:executor.org::#executor/root-fn][root-fn]]
-- referenced from :: [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:packages.org::#packages/resolve-slot-owner][resolve-slot-owner]], [[file:editor.org::#editor/buildLookups][buildLookups]]
+- referenced from :: [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:packages.org::#packages/resolve-slot-owner][resolve-slot-owner]], [[file:editor.org::#editor/buildLookups][buildLookups]], [[file:editor.org::#editor/export-plan][export-plan]]
 
 * 9. root-fn
 :PROPERTIES:
@@ -164,10 +168,10 @@ Compiles functions in [[file:glossary.org::#term/topological-order][dependency o
 :CUSTOM_ID: executor/compile-fn
 :FILE: src/graphden/executor/compile_eager.clj
 :LINE: 1280
-:MINS: 8.2
+:MINS: 8.3
 :END:
 
-Builds one runtime [[file:glossary.org::#term/closure][closure]] ~(fn [fa ctx])~. It prepares argument builders, environment [[file:glossary.org::#term/binding][bindings]], and name aliases at compile time. At execution time the [[file:glossary.org::#term/closure][closure]] assembles the argument map from caller input and those builders, then calls ~(impl args ctx)~.
+Builds one runtime [[file:glossary.org::#term/closure][closure]] ~(fn [fa ctx])~. It prepares argument builders, [[file:glossary.org::#term/binding][bindings]] to inputs outside the root's slots, and name aliases at compile time. At execution time the [[file:glossary.org::#term/closure][closure]] assembles the argument map from caller input and those builders, then calls ~(impl args ctx)~.
 
 - source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn compile-fn][src/graphden/executor/compile_eager.clj:1280]]
 - see also :: [[file:executor.org::#executor/arg-builder][arg-builder]], [[file:executor.org::#executor/resolve-impl][resolve-impl]]
@@ -187,7 +191,7 @@ Builds a [[file:glossary.org::#term/thunk][deferred computation]] for one argume
 - source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn- arg-builder][src/graphden/executor/compile_eager.clj:1055]]
 - see also :: [[file:executor.org::#executor/resolve-arg][resolve-arg]]
 - same file :: [[file:executor.org::#executor/compile-all][compile-all]], [[file:executor.org::#executor/compile-fn][compile-fn]], [[file:executor.org::#executor/resolve-impl][resolve-impl]], [[file:executor.org::#executor/call-with-cache][call-with-cache]]
-- referenced from :: [[file:executor.org::#executor/collect-bindings][collect-bindings]], [[file:executor.org::#executor/compile-fn][compile-fn]], [[file:executor.org::#executor/resolve-arg][resolve-arg]], [[file:executor.org::#executor/map-fn][map-fn]]
+- referenced from :: [[file:executor.org::#executor/execute][execute]], [[file:executor.org::#executor/collect-bindings][collect-bindings]], [[file:executor.org::#executor/compile-fn][compile-fn]], [[file:executor.org::#executor/resolve-arg][resolve-arg]], [[file:executor.org::#executor/map-fn][map-fn]]
 
 * 14. resolve-impl
 :PROPERTIES:
@@ -232,7 +236,22 @@ Reads one argument: evaluates a [[file:glossary.org::#term/thunk][thunk]] when n
 - see also :: [[file:executor.org::#executor/arg-builder][arg-builder]]
 - referenced from :: [[file:executor.org::#executor/arg-builder][arg-builder]], [[file:executor.org::#executor/defbase][defbase]]
 
-* 17. call-with-cache
+* 17. record-effect!
+:PROPERTIES:
+:CUSTOM_ID: executor/record-effect!
+:FILE: src/graphden/executor/compile_runtime.clj
+:LINE: 1529
+:MINS: 2.1
+:END:
+
+An effectful primitive calls this before touching external state. It rejects an operation outside the execution's allowed effect set, then records the effect for tracing. Declaring effects for type inference is a separate responsibility; this runtime check enforces the current policy. An empty allowed set rejects every recorded effect, while nil means unrestricted execution.
+
+- source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn record-effect!][src/graphden/executor/compile_runtime.clj:1529]]
+- see also :: [[file:platform.org::#platform/cloud-forbidden-effects][cloud-forbidden-effects]], [[file:editor.org::#editor/evaluate][evaluate]]
+- same file :: [[file:executor.org::#executor/execute~2][execute]], [[file:executor.org::#executor/registry][registry]], [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:platform.org::#platform/cloud-forbidden-effects][cloud-forbidden-effects]]
+- referenced from :: [[file:editor.org::#editor/evaluate][evaluate]]
+
+* 18. call-with-cache
 :PROPERTIES:
 :CUSTOM_ID: executor/call-with-cache
 :FILE: src/graphden/executor/compile_eager.clj
@@ -245,7 +264,7 @@ Caches referenced-function results during one top-level execution. The key inclu
 - source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn- call-with-cache][src/graphden/executor/compile_eager.clj:706]]
 - same file :: [[file:executor.org::#executor/compile-all][compile-all]], [[file:executor.org::#executor/compile-fn][compile-fn]], [[file:executor.org::#executor/arg-builder][arg-builder]], [[file:executor.org::#executor/resolve-impl][resolve-impl]]
 
-* 18. map-fn
+* 19. map-fn
 :PROPERTIES:
 :CUSTOM_ID: executor/map-fn
 :FILE: resources/packages/core/hof/impls.clj
@@ -258,7 +277,7 @@ Caches referenced-function results during one top-level execution. The key inclu
 - source :: [[file:../../../resources/packages/core/hof/impls.clj::(defbase map-fn ][resources/packages/core/hof/impls.clj:11]]
 - see also :: [[file:executor.org::#executor/arg-builder][arg-builder]]
 
-* 19. fix-fn
+* 20. fix-fn
 :PROPERTIES:
 :CUSTOM_ID: executor/fix-fn
 :FILE: resources/packages/core/recursion/impls.clj
@@ -270,7 +289,7 @@ Implements explicit recursion. Direct cycles through ~ref-fn-id~ are rejected du
 
 - source :: [[file:../../../resources/packages/core/recursion/impls.clj::(defbase fix-fn][resources/packages/core/recursion/impls.clj:20]]
 
-* 20. hof-lambda-params
+* 21. hof-lambda-params
 :PROPERTIES:
 :CUSTOM_ID: executor/hof-lambda-params
 :FILE: src/graphden/executor/compile/renames.clj
@@ -283,7 +302,7 @@ Determines which [[file:glossary.org::#term/free-argument][free arguments]] are 
 - source :: [[file:../../../src/graphden/executor/compile/renames.clj::(defn hof-lambda-params][src/graphden/executor/compile/renames.clj:995]]
 - same file :: [[file:executor.org::#executor/build-ref-renames][build-ref-renames]], [[file:executor.org::#executor/compute-rename-aliases][compute-rename-aliases]]
 
-* 21. build-ref-renames
+* 22. build-ref-renames
 :PROPERTIES:
 :CUSTOM_ID: executor/build-ref-renames
 :FILE: src/graphden/executor/compile/renames.clj
@@ -298,7 +317,7 @@ Builds the name translation at a reference call. If a caller exposes an argument
 - same file :: [[file:executor.org::#executor/hof-lambda-params][hof-lambda-params]], [[file:executor.org::#executor/compute-rename-aliases][compute-rename-aliases]]
 - referenced from :: [[file:packages.org::#packages/build-rename-slot-records][build-rename-slot-records]]
 
-* 22. compute-rename-aliases
+* 23. compute-rename-aliases
 :PROPERTIES:
 :CUSTOM_ID: executor/compute-rename-aliases
 :FILE: src/graphden/executor/compile/renames.clj

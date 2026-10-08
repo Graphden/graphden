@@ -294,7 +294,7 @@ EDN is a data format used for Graphden definitions. A keyword such as :name is d
 :CUSTOM_ID: term/mcp
 :END:
 
-Model Context [[file:glossary.org::#term/protocol][Protocol]]: a [[file:glossary.org::#term/protocol][protocol]] through which tools such as coding assistants call server-provided operations. Graphden exposes optional graph operations through its MCP package; those writes still use the normal branch and graph validation paths.
+Model Context Protocol: a communication protocol through which tools such as coding assistants call server-provided operations. Graphden exposes optional graph operations through its MCP package; those writes still use the normal branch and graph validation paths.
 
 * Semantic version and installation pin
 :PROPERTIES:

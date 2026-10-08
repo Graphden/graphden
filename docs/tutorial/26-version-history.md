@@ -126,6 +126,8 @@ for as long as you can reach its id.
 1. Extend `const` (core.logic) into `tutorial-versioned` — the fn the
    tour builds — and edit its **description** twice (⋯ → `i`: `first
    draft`, then `second draft`), so the timeline has something to show.
+   In the guided tour each edit advances after the named draft is saved;
+   the restore advances after `first draft` is back on the fn.
 2. Open ⋯ → **⌛**. Three rows: the two edits and the create.
 3. Click the OLDEST row to expand it. If that version ever ran, its
    executions are listed; a version that never ran says so.

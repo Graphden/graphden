@@ -91,6 +91,8 @@
 ;;                                                    is clear)
 ;;                      {:kind "list-items" :name N :slot S :count C}  the list
 ;;                                                    under N's slot S holds C items
+;;                      {:kind "list-values" :name N :slot S :values [V …]}
+;;                                                    exact local literal order
 ;;                      {:kind "list-first" :name N :slot S :value V}  …and its
 ;;                                                    first item is the literal V
 ;;                      {:kind "binding-absent" :name N :slot S}  N has no binding
@@ -205,7 +207,7 @@
            [{:id "01"
              :slug "fn-defs"
              :chapter "Basics"
-             :version 1
+             :version 2
              :title "Your first function"
              :reads "explains where fn-defs live, the two kinds of fn, and a fn-def that uses another one."
              :steps
@@ -244,10 +246,8 @@
                :body "Click the [[⋯]] button on the card's top row, then [[▶ Run]], then [[Run]] in the Run pane that opens in the right panel."
                :target ".node-overlay[data-fn-name=\"one-plus-one\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
                :targets [".node-overlay[data-fn-name=\"one-plus-one\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
-               ;; A SETTLED result — the pane class a rendered value carries, or the
-               ;; client's error pane. `> *` also matched the "Submitting…" spinner,
-               ;; so the run steps used to advance before anything had come back.
-               :check {:kind "dom" :selector ".execute-result-host .execute-result-pane, .execute-result-host .execute-error-pane"}}
+               ;; Complete only when the promised successful value is visible.
+               :check {:kind "result-value" :value 2}}
               {:title "Two"
                :body "There it is: 2. Nothing was built or deployed — the card you drew IS the program, and the pane on the right is its output. Change one of the numbers and run again, and the answer follows. Click [[Next]]."
                :target ".execute-result-host"
@@ -310,7 +310,7 @@
             {:id "03"
              :slug "parents-and-inheritance"
              :chapter "Basics"
-             :version 2
+             :version 3
              :title "Parents and inheritance"
              :reads "goes further: multiple parents, and why a value an ancestor set is final."
              :steps
@@ -349,10 +349,8 @@
                :body "Click [[⋯]] on the add-10 row, then [[▶ Run]], then [[Run]]."
                :target ".node-overlay[data-fn-name=\"add-10\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
                :targets [".node-overlay[data-fn-name=\"add-10\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
-               ;; A SETTLED result — the pane class a rendered value carries, or the
-               ;; client's error pane. `> *` also matched the "Submitting…" spinner,
-               ;; so the run steps used to advance before anything had come back.
-               :check {:kind "dom" :selector ".execute-result-host .execute-result-pane, .execute-result-host .execute-error-pane"}}
+               ;; Complete only when the promised successful value is visible.
+               :check {:kind "result-value" :value 10}}
               {:title "Ten"
                :body "10 — the seed is the whole list so far, and the child ran the PARENT's implementation over its own binding; add itself was not touched. A caller can append to that list, which is what the next step builds. Click [[Next]]."
                :target ".execute-result-host"
@@ -400,7 +398,7 @@
             {:id "04"
              :slug "slots-and-bindings"
              :chapter "Basics"
-             :version 2
+             :version 3
              :title "Slots and bindings"
              :reads "explains why four entities instead of one, when a fn owns its own slot, renames, and type overrides."
              :steps
@@ -433,10 +431,8 @@
                :body "Click [[⋯]] on the tutorial-a row, then [[▶ Run]], then [[Run]]."
                :target ".node-overlay[data-fn-name=\"tutorial-a\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
                :targets [".node-overlay[data-fn-name=\"tutorial-a\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
-               ;; A SETTLED result — the pane class a rendered value carries, or the
-               ;; client's error pane. `> *` also matched the "Submitting…" spinner,
-               ;; so the run steps used to advance before anything had come back.
-               :check {:kind "dom" :selector ".execute-result-host .execute-result-pane, .execute-result-host .execute-error-pane"}}
+               ;; Complete only when the promised successful value is visible.
+               :check {:kind "result-value" :value "ALPHA"}}
               {:title "ALPHA"
                :body "alpha went in, ALPHA came out — str-upper's implementation, over the binding that lives on tutorial-a. Click [[Next]]."
                :target ".execute-result-host"
@@ -465,10 +461,8 @@
                :body "Click [[⋯]] on the tutorial-b row, then [[▶ Run]], then [[Run]]."
                :target ".node-overlay[data-fn-name=\"tutorial-b\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
                :targets [".node-overlay[data-fn-name=\"tutorial-b\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
-               ;; A SETTLED result — the pane class a rendered value carries, or the
-               ;; client's error pane. `> *` also matched the "Submitting…" spinner,
-               ;; so the run steps used to advance before anything had come back.
-               :check {:kind "dom" :selector ".execute-result-host .execute-result-pane, .execute-result-host .execute-error-pane"}}
+               ;; Complete only when the promised successful value is visible.
+               :check {:kind "result-value" :value "BETA"}}
               {:title "BETA"
                :body "Same slot, same implementation, a different binding — BETA. Two children, two outputs, and a parent that never changed. Click [[Next]]."
                :target ".execute-result-host"
@@ -491,7 +485,7 @@
             {:id "05"
              :slug "free-arguments"
              :chapter "Basics"
-             :version 1
+             :version 2
              :title "Free arguments"
              :reads "adds deep propagation through several levels."
              :steps
@@ -507,10 +501,8 @@
                :body "Click [[⋯]] on the to-json-string row, then [[▶ Run]]. The Run pane opens in the right panel with a data field — the free slot surfaced as your input. Enter `{\"a\": 1}` and [[Run]]."
                :target ".node-overlay[data-fn-name=\"to-json-string\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
                :targets [".node-overlay[data-fn-name=\"to-json-string\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
-               ;; A SETTLED result — the pane class a rendered value carries, or the
-               ;; client's error pane. `> *` also matched the "Submitting…" spinner,
-               ;; so the run steps used to advance before anything had come back.
-               :check {:kind "dom" :selector ".execute-result-host .execute-result-pane, .execute-result-host .execute-error-pane"}}
+               ;; Complete only when the promised successful value is visible.
+               :check {:kind "result-value" :value "{\"a\":1}"}}
               {:title "A string came back"
                :body "The pane shows {\"a\":1} in quotes — a STRING now, not a map: the fn did its job on the value you typed into the free slot, and nothing in the graph was written. Click [[Next]]."
                :target ".execute-result-host"
@@ -569,7 +561,7 @@
             {:id "06"
              :slug "lists"
              :chapter "Basics"
-             :version 2
+             :version 4
              :title "Lists: seed, append, close"
              :reads "has the fns, and the append / closed-list rules in full."
              :steps
@@ -609,7 +601,7 @@
                :body "Click [[+]] on the 1 — the second item now — choose [[Insert literal]], type `0` — then [[Save]]. The list reads 2, 0, 1: an append can be an insert at a position, and the later items shift down."
                :target ".edge-seq-item[data-index=\"1\"] .arg-seq-btn-insert"
                :targets [".edge-seq-item[data-index=\"1\"] .arg-seq-btn-insert" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
-               :check {:kind "list-items" :name "tutorial-base-sum" :slot "nums" :count 3}}
+               :check {:kind "list-values" :name "tutorial-base-sum" :slot "nums" :values [2 0 1]}}
               {:title "Now extend the seeded fn"
                :body "Click [[⋯]] on the tutorial-base-sum row, [[Extend]], name it `tutorial-sum-more` — [[Save]]."
                :target ".node-overlay[data-fn-name=\"tutorial-base-sum\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
@@ -633,7 +625,7 @@
                :body "Click [[⋯]] on the tutorial-sum-more row, then [[▶ Run]], then [[Run]]."
                :target ".node-overlay[data-fn-name=\"tutorial-sum-more\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
                :targets [".node-overlay[data-fn-name=\"tutorial-sum-more\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
-               :check {:kind "dom" :selector ".execute-result-host .execute-result-pane, .execute-result-host .execute-error-pane"}}
+               :check {:kind "result-value" :value 6}}
               {:title "Six"
                :body "2 + 0 + 1 + 3: the parent's seed and your append, one list at run time. Run tutorial-base-sum and it still answers 3 — you extended its list, you did not edit it. Click [[Next]]."
                :target ".execute-result-host"
@@ -662,7 +654,7 @@
             {:id "07"
              :slug "optional-required-sealed"
              :chapter "Basics"
-             :version 2
+             :version 3
              :title "Optional, required and sealed"
              :reads "has the fns, and the whole optional / required / sealed matrix."
              :steps
@@ -706,7 +698,7 @@
                :body "Click [[⋯]] on the tutorial-cut row, then [[▶ Run]], then [[Run]] — the form asks for nothing you must fill."
                :target ".node-overlay[data-fn-name=\"tutorial-cut\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
                :targets [".node-overlay[data-fn-name=\"tutorial-cut\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
-               :check {:kind "dom" :selector ".execute-result-host .execute-result-pane, .execute-result-host .execute-error-pane"}}
+               :check {:kind "result-value" :value "den"}}
               {:title "den"
                :body "\"den\" — :end defaulted to the end of the string. Optional means exactly that: a fallback lives in the implementation. Click [[Next]]."
                :target ".execute-result-host"
@@ -836,7 +828,7 @@
             {:id "09"
              :slug "higher-order-functions"
              :chapter "Composing"
-             :version 4
+             :version 5
              :title "Higher-order functions"
              :reads "goes further: callables that take several arguments matched by name, closure capture, and the λ declaration in fns."
              :steps
@@ -886,7 +878,7 @@
                :body "An edge now runs from str-upper into :func — the callback is wired, and nothing has run. [[⋯]] on the tutorial-map row → [[▶ Run]] → [[Run]]. Nothing to fill in — every slot is bound."
                :target ".node-overlay[data-fn-name=\"tutorial-map\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
                :targets [".node-overlay[data-fn-name=\"tutorial-map\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
-               :check {:kind "dom" :selector ".execute-result-host .execute-result-pane, .execute-result-host .execute-error-pane"}}
+               :check {:kind "result-value" :value ["GRAPH" "DEN"]}}
               {:title "Once per item"
                :body "GRAPH, DEN — two strings went in and each came out upper-cased: str-upper ran once per item, and you never called it. map did, handing each element in as its one argument. That is the whole HOF contract — the argument is passed unrun and the impl drives it. And notice the order you worked in: the data first, the callback last — each value you bound made the next choice smaller. Click [[Next]]."
                :target ".execute-result-host"
@@ -1745,7 +1737,7 @@
             {:id "24"
              :slug "review"
              :chapter "The editor"
-             :version 2
+             :version 3
              :title "Review: propose and approve"
              :reads "covers the review flow in full, and the push-only rule from lesson 23."
              ;; Like lesson 23 this lesson MANAGES branches itself — a
@@ -1820,7 +1812,7 @@
                :body "Click [[✅]] on the same row. Its badge flips to 1/1 — the requirement is met. (By default your OWN approval counts, so a solo user is never locked out; a team that wants four-eyes review unticks “Count the author's own approval” in ⚙.)"
                :target "#branch-chip-btn"
                :targets ["#branch-chip-btn" ".branch-row-approve[data-approve-branch=\"tutorial-feature\"]"]
-               :check {:kind "dom" :selector ".branch-appr-count.ok"}}
+               :check {:kind "dom" :selector ".branch-row-approve[data-approve-branch=\"tutorial-feature\"][data-approved=\"1\"] + .branch-appr-count.ok"}}
               {:title "Ready to land — and why we stop"
                :body "The badge reads 1/1: pressing [[⇢]] now WOULD land the merge. The tour leaves it unclicked on purpose — a merge is by-reference (the target reads the source's version rows), so a merged branch becomes part of its target's history and can no longer be deleted. Landing this one would make the sandbox permanent; in real work that permanence is exactly the point."
                :target nil
@@ -1879,7 +1871,7 @@
             {:id "26"
              :slug "version-history"
              :chapter "The editor"
-             :version 1
+             :version 2
              :title "Version history"
              :reads "covers the per-version run history and how this reads on a branch."
              :steps
@@ -1901,12 +1893,12 @@
                :body "Click [[⋯]] on the tutorial-versioned row and choose [[i]] (Description). A small note opens — click its [[✎ Edit]], type `first draft` and [[Save]]. That write appends a version row — the fn now has two."
                :target ".node-overlay[data-fn-name=\"tutorial-versioned\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
                :targets [".node-overlay[data-fn-name=\"tutorial-versioned\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"description\"]" ".description-tooltip" ".description-tooltip-textarea"]
-               :check {:kind "manual"}}
+               :check {:kind "fn-field" :name "tutorial-versioned" :field "description" :value "first draft"}}
               {:title "And another"
                :body "Do it once more: [[⋯]] → [[i]] → [[✎ Edit]], this time `second draft`, [[Save]]. Three version rows now — the create and two edits. Nothing was replaced."
                :target ".node-overlay[data-fn-name=\"tutorial-versioned\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
                :targets [".node-overlay[data-fn-name=\"tutorial-versioned\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"description\"]" ".description-tooltip" ".description-tooltip-textarea"]
-               :check {:kind "manual"}}
+               :check {:kind "fn-field" :name "tutorial-versioned" :field "description" :value "second draft"}}
               {:title "Open the history"
                :body "Click [[⋯]] and then [[⌛]] — version history. Every version row for this fn, newest first, ACROSS BRANCHES: each row names the branch it was written on, so a fn you edited on a fork shows both timelines here."
                :target ".node-overlay[data-fn-name=\"tutorial-versioned\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
@@ -1915,7 +1907,7 @@
               {:title "Restore the first draft"
                :body "Click [[restore]] on the row that says first draft and confirm. Read the confirm text as you accept it: it writes a NEW version row carrying the historic fields. Nothing after it is deleted."
                :target ".fn-versions-popover"
-               :check {:kind "manual"}}
+               :check {:kind "fn-field" :name "tutorial-versioned" :field "description" :value "first draft"}}
               {:title "History is append-only"
                :body "Reopen [[⌛]]. There are FOUR rows now — the restore is itself a version. That is what makes this button safe: restoring the row you were on before puts you back, and no state exists in which the button lost your work."
                :target ".node-overlay[data-fn-name=\"tutorial-versioned\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"

@@ -90,11 +90,12 @@ function _tourCheckPasses(check) {
         if (!fn) return false;
         const parents = fn['parent-ids'] || [];
         if (!parents.length) return false;
-        // If the parent row isn't in the lazy cache yet, accept any parent —
-        // the lesson's instruction was followed structurally.
+        // A missing lazy-cache row is not evidence of the requested parent.
+        // The graph payload may still carry it; otherwise wait for it to load.
         return parents.some((pid) => {
-          const p = lookups?.fnMap ? lookups.fnMap.get(pid) : null;
-          return p ? p.name === check.parent : true;
+          const p = (typeof lookups !== 'undefined' ? lookups?.fnMap?.get(pid) : null)
+            || (typeof graphData !== 'undefined' ? graphData?.fns?.find((f) => f.id === pid) : null);
+          return !!p && p.name === check.parent;
         });
       }
       case 'binding-bound': {
@@ -244,6 +245,19 @@ function _tourCheckPasses(check) {
           return items.length > 0 && String(items[0].value) === String(check.value);
         });
       }
+      case 'list-values': {
+        // Exact local literal sequence: appending is not inserting, and a
+        // commutative Run result cannot prove that an item moved correctly.
+        const fn = _tourFindFn(check.name);
+        if (!fn || typeof lookups === 'undefined' || !lookups || !Array.isArray(check.values)) return false;
+        return (lookups.bindingsByFn?.get(fn.id) || []).some((b) => {
+          const slot = lookups.slotMap?.get(b['slot-id']);
+          if (!slot || slot.name !== check.slot) return false;
+          const items = lookups.itemsByBinding?.get(b.id) || [];
+          return items.length === check.values.length && items.every((item, i) =>
+            !item['ref-fn-id'] && item.value != null && String(item.value) === String(check.values[i]));
+        });
+      }
       case 'fn-field': {
         // A field of the fn ROW equals `check.value` — the card strips
         // that write the row (λ lambda-params, 📍 branch-local). Compared
@@ -260,14 +274,21 @@ function _tourCheckPasses(check) {
         // includes "is still in the DOM but hidden".
         return !_tourDomVisible(check.selector);
       case 'result-value': {
-        // Inspect the current Run pane's raw JSON, not its item count or
-        // presentation labels. Submitting clears the result host, so an
+        // Inspect the current Run pane's value, using raw JSON for shaped
+        // results and rendered text for scalars. Submitting clears the host, so an
         // earlier result cannot complete a step while the new run is pending.
         if (!_tourDomVisible('.execute-popover.visible .execute-result-pane')) return false;
         const raw = document.querySelector(
           '.execute-popover.visible .execute-result-host .execute-result-raw pre');
-        if (!raw || !Object.hasOwn(check, 'value')) return false;
-        return JSON.stringify(JSON.parse(raw.textContent)) === JSON.stringify(check.value);
+        if (!Object.hasOwn(check, 'value')) return false;
+        if (raw) return JSON.stringify(JSON.parse(raw.textContent)) === JSON.stringify(check.value);
+        // The production scalar pane has no Raw details; it renders the
+        // primitive directly. This proves the displayed value, not its type:
+        // numeric 2 and text "2" share that markup. Shaped results use raw JSON.
+        if (!['number', 'string', 'boolean'].includes(typeof check.value)) return false;
+        const scalar = document.querySelector(
+          '.execute-popover.visible .execute-result-host .execute-result-scalar');
+        return !!scalar && scalar.textContent === String(check.value);
       }
       case 'input-value': {
         // A form control's CURRENT value — what `dom` cannot see, because a

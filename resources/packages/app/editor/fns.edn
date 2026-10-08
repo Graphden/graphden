@@ -250,6 +250,7 @@
                   "packages/app/editor/editor-tour-checks.js"
                   "packages/app/editor/editor-tour-cleanup.js"
                   "packages/app/editor/editor-tour.js"
+                  "packages/app/editor/editor-tour-session.js"
                   ;; Spotlight geometry + the end-of-lesson dialogs — the
                   ;; engine's two halves that grew past it.
                   "packages/app/editor/editor-tour-spot.js"

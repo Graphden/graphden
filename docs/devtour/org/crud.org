@@ -127,6 +127,7 @@ Reconstructs and checks the changed function, updating branch-specific diagnosti
 
 - source :: [[file:../../../src/graphden/crud/type_check.clj::(defn type-check-fn-after-mutation!][src/graphden/crud/type_check.clj:514]]
 - see also :: [[file:types.org::#types/check-fn-def!][check-fn-def!]]
+- referenced from :: [[file:editor.org::#editor/writeBindingFields][writeBindingFields]]
 
 * 10. notify-after-write!
 :PROPERTIES:
@@ -139,7 +140,7 @@ Reconstructs and checks the changed function, updating branch-specific diagnosti
 Invalidates affected caches after a stored change and emits a PostgreSQL notification for other processes. The notification carries update information so their compiled functions can refresh.
 
 - source :: [[file:../../../src/graphden/crud/entities/invalidation.clj::(defn notify-after-write!][src/graphden/crud/entities/invalidation.clj:219]]
-- referenced from :: [[file:storage.org::#storage/make-emitter][make-emitter]]
+- referenced from :: [[file:storage.org::#storage/make-emitter][make-emitter]], [[file:editor.org::#editor/writeBindingFields][writeBindingFields]]
 
 * 11. resolve-fn
 :PROPERTIES:
@@ -177,6 +178,7 @@ Computes public [[file:glossary.org::#term/free-argument][free arguments]] for e
 Coordinates ~/api/execute~: resolves the function, version, and [[file:glossary.org::#term/free-argument][free arguments]]; acquires a [[file:glossary.org::#term/concurrency-permit][concurrency permit]]; submits execution to a future; then handles pending, successful, or failed results. This is a request-management layer around the executor from the first block.
 
 - source :: [[file:../../../src/graphden/crud/fn_execution.clj::(defn apply-execute][src/graphden/crud/fn_execution.clj:123]]
+- referenced from :: [[file:editor.org::#editor/evaluate][evaluate]]
 
 * 14. create-pending-with-args!
 :PROPERTIES:
@@ -215,7 +217,7 @@ Stores a completed future's result, error, or cancellation on the execution row.
 Chooses a [[file:glossary.org::#term/graph-function][graph function]] that renders a result value as [[file:glossary.org::#term/hiccup][Hiccup]], using the declared or inferred type and falling back to literal classification. It runs with ~:allowed-effects #{}~ and sanitizes the output before insertion into the editor [[file:glossary.org::#term/hiccup][DOM]]. See [[file:../../../docs/EXECUTION.md][typed result representations]].
 
 - source :: [[file:../../../src/graphden/crud/value_repr.clj::(defn render-repr][src/graphden/crud/value_repr.clj:163]]
-- referenced from :: [[file:editor.org::#editor/enterArgValueEditMode][enterArgValueEditMode]], [[file:platform.org::#platform/sanitize-hiccup][sanitize-hiccup]]
+- referenced from :: [[file:platform.org::#platform/sanitize-hiccup][sanitize-hiccup]]
 
 * 17. resolve-form
 :PROPERTIES:
@@ -229,6 +231,7 @@ Converts an effective [[file:glossary.org::#term/slot][slot]] type into a pure f
 
 - source :: [[file:../../../src/graphden/crud/value_form.clj::(defn resolve-form][src/graphden/crud/value_form.clj:480]]
 - same file :: [[file:crud.org::#crud/build-form][build-form]]
+- referenced from :: [[file:editor.org::#editor/enterArgValueEditMode][enterArgValueEditMode]]
 
 * 18. build-form
 :PROPERTIES:

@@ -517,11 +517,16 @@ const {
     // records the edition they finished. What only a browser can show: the
     // count really lands on the account menu's row, the chips really sit on
     // the rows, and the header's counters agree with storage. The last look
-    // listed 01–03 only, so every other lesson is "new"; no shipped lesson is
-    // past edition 1 yet, so the bump is staged in the fetched scripts.
-    await page.evaluate(() => {
-      localStorage.setItem('graphden.tour.done', JSON.stringify({'01': 1, '02': 1}));
-      localStorage.setItem('graphden.tour.seen', JSON.stringify({'01': 1, '02': 1, '03': 1}));
+    // listed 01–03 at their shipped editions, so every other lesson is "new".
+    // Only 02 changes after that look; later shipped edition bumps must not
+    // accidentally turn 01 into a second updated lesson in this fixture.
+    await page.evaluate(async () => {
+      const ls = await _tourFetchLessons();
+      const edition = (id) => _tourVersionOf(ls.lessons.find((lesson) => lesson.id === id));
+      localStorage.setItem('graphden.tour.done', JSON.stringify({'01': edition('01'), '02': edition('02')}));
+      localStorage.setItem('graphden.tour.seen', JSON.stringify({
+        '01': edition('01'), '02': edition('02'), '03': edition('03'),
+      }));
       localStorage.removeItem('graphden.tour');
     });
     await page.goto(BASE + '/');
@@ -529,7 +534,8 @@ const {
       null, {timeout: 60000, polling: 200});
     const staged = await page.evaluate(async () => {
       const ls = await _tourFetchLessons();
-      ls.lessons.find((l) => l.id === '02').version = 2;
+      const changed = ls.lessons.find((lesson) => lesson.id === '02');
+      changed.version = _tourVersionOf(changed) + 1;
       return ls.lessons.length;
     });
     await page.click('#auth-lock-btn');

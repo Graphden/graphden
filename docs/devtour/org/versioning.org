@@ -35,6 +35,7 @@ This [[file:glossary.org::#term/protocol][storage decorator]] forwards non-versi
 
 - source :: [[file:../../../src/graphden/versioning/storage/core.clj::(defrecord VersionedStorage][src/graphden/versioning/storage/core.clj:768]]
 - same file :: [[file:versioning.org::#versioning/wrap-with-versioning][wrap-with-versioning]], [[file:versioning.org::#versioning/create-entity-versioned!][create-entity-versioned!]]
+- referenced from :: [[file:editor.org::#editor/writeBindingFields][writeBindingFields]]
 
 * 3. create-entity-versioned!
 :PROPERTIES:

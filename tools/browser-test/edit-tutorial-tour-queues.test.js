@@ -4,6 +4,7 @@
 // may explicitly skip; failed availability reads and missing controls fail.
 const {chromium} = require('playwright');
 const {assert, newContext, BASE} = require('./edit-test-helpers');
+const {readQueueError} = require('./queue-error-diagnostic');
 const {waitTourTitle, clickTourButton, filterAndSelect, extendViaRowActions,
   bindNamedPlaceholder, openRowActionsFor, editBoundValue, openOperateSection,
   tourWhere} = require('./tutorial-tour-helpers');
@@ -213,6 +214,18 @@ async function cleanup(page, finish) {
     await waitTourTitle(page, 'Restart the same service');
     await serviceSettings(page, true, service.id);
     try {
+      if (process.env.GRAPHDEN_QUEUE_DIAGNOSTIC_DB_CONTAINER) {
+        const deadline = Date.now() + 90000;
+        while (Date.now() < deadline) {
+          const diagnostic = readQueueError(message.id, queue);
+          if (diagnostic.absent) break;
+          if (diagnostic.errorPresent) {
+            console.error('Exact repaired queue failure: ' + JSON.stringify(diagnostic));
+            throw new Error('Repaired handler failed its first observed attempt');
+          }
+          await page.waitForTimeout(200);
+        }
+      }
       await waitTourTitle(page, 'Stop the worker', 90000);
     } catch (error) {
       console.error('Exact ACK gate flags: ' + JSON.stringify(await page.evaluate(async ({serviceId, messageId, executionId}) => {

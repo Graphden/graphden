@@ -41,8 +41,8 @@ repo, and the supply chain ends at this checkout.
 
 - Source: built from npm packages by `tools/vendor-build/`
   (`npm install && npm run build`); versions pinned in its
-  `package.json` (@codemirror/* 6.x, @nextjournal/lang-clojure 1.0.0,
-  esbuild bundler).
+  `package.json` (@codemirror/* 6.x: state 6.7.6, view 6.43.14,
+  merge 6.12.2; @nextjournal/lang-clojure 1.0.0; esbuild 0.28.2).
 - License: MIT (@codemirror/*, @lezer/*) + ISC (@nextjournal/*).
 - Exposes `window.CM` — EditorView/EditorState/MergeView, the standard
   keymaps/extensions, and `CM.langs` {javascript, css, json, clojure}.

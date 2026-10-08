@@ -131,12 +131,12 @@ const {assert, newContext} = require('./edit-test-helpers');
       }
       return now - window.geometryIdleSince >= 200;
     }, null, {timeout: 10000});
-    const idle = await page.evaluate(async () => {
-      const before = window.geometryCalls;
-      const ticks = window.geometryTicks;
-      await new Promise((resolve) => setTimeout(resolve, 1300));
-      return {calls: window.geometryCalls - before, ticks: window.geometryTicks - ticks};
-    });
+    const idleStart = await page.evaluate(() => ({calls: window.geometryCalls, ticks: window.geometryTicks}));
+    await page.waitForFunction((ticks) => window.geometryTicks >= ticks + 2,
+      idleStart.ticks, {timeout: 10000, polling: 50});
+    const idle = await page.evaluate((before) => ({
+      calls: window.geometryCalls - before.calls, ticks: window.geometryTicks - before.ticks,
+    }), idleStart);
     assert(idle.calls === 0 && idle.ticks >= 2, 'completion polling remains live without idle geometry scans: ' + JSON.stringify(idle));
     await page.evaluate(() => selectFnByName('const'));
     await page.waitForSelector('.node-overlay', {timeout: 60000});

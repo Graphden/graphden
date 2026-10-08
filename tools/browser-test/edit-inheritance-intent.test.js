@@ -32,6 +32,18 @@ async function openIntent(page, fnName, depth = 1) {
   await page.waitForSelector('.inheritance-intent-popover [data-preview]');
 }
 
+async function revealTrigger(page, fnName) {
+  await page.evaluate(async name => {
+    toggleCollapsed(true);
+    for (let i = 0; i < 2; i++) await new Promise(requestAnimationFrame);
+    const trigger = document.querySelector('.node-overlay[data-fn-name="' + name
+      + '"] .ancestor-line[data-level="1"] button.more-actions-trigger');
+    const rect = trigger.getBoundingClientRect();
+    setViewportPan(viewport.pan.x + 175 - rect.left, viewport.pan.y + 90 - rect.top);
+    for (let i = 0; i < 2; i++) await new Promise(requestAnimationFrame);
+  }, fnName);
+}
+
 (async () => {
   const { browser, page } = await newContext(chromium, { boot: false });
   const errors = [];
@@ -93,11 +105,18 @@ async function openIntent(page, fnName, depth = 1) {
     await page.evaluate(() => initGraph());
     await openIntent(page, names.F);
     await page.setViewportSize({ width: 390, height: 240 });
+    await page.waitForSelector('.inheritance-intent-popover', { state: 'detached' });
+    assert(true, 'resizing the graph anchor offscreen dismisses its popup');
+    await revealTrigger(page, names.F);
+    await openIntent(page, names.F);
     const bounds = await page.locator('.inheritance-intent-popover').boundingBox();
     assert(bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= 390
       && bounds.y + bounds.height <= 240, 'intent stays inside narrow viewport');
     await page.screenshot({ path: '/tmp/graphden-inheritance-intent-narrow.png' });
     await page.setViewportSize({ width: 1400, height: 900 });
+    await page.evaluate(() => closeInheritanceIntent());
+    await revealTrigger(page, names.F);
+    await openIntent(page, names.F);
     await page.fill('[data-variation-name]', names.copy);
     await page.click('[data-action="inheritance-variation"]');
     await page.waitForSelector('.node-overlay[data-fn-name="' + names.copy + '"]');

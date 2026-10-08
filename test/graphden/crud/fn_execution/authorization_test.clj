@@ -62,7 +62,8 @@
     (fn [_]
       (let [effects (atom 0)
             seen (atom [])
-            ctx {:compiled-registry (atom {selected-id (fn [_ _] (swap! effects inc))})
+            ctx {:graph-cache (atom {:fns [] :slots [] :fn-slots [] :bindings [] :binding-list-items []})
+                 :compiled-registry (atom {selected-id (fn [_ _] (swap! effects inc))})
                  :execute-guard (fn [_ id]
                                   (swap! seen conj [id tc/*current-principal*])
                                   (throw (ex-info "denied" {:type :authz/forbidden})))}

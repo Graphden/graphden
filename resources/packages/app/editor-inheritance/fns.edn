@@ -5,29 +5,29 @@
    :parent :assert-some
    :args {:value {:parent :query-param
                   :args {:request {:as :request} :param-name "command"}}}}
-  {:name :_inheritance-command
+  {:name :_inheritance-intent-command
    :parent :parse-inheritance-command
    :args {:body {:parent :parse-json
                  :args {:string :_inheritance-query-command :keywordize true}}}}
-  {:name :_inheritance-preview
+  {:name :_inheritance-intent-preview
    :parent :preview-inheritance
-   :args {:command :_inheritance-command :request {:as :request}}}
+   :args {:command :_inheritance-intent-command :request {:as :request}}}
   {:name :_inheritance-parent-edge?
    :parent :equal?
-   :args {:a {:parent :get :args {:coll :_inheritance-command :key {:value :kind} :default nil}}
+   :args {:a {:parent :get :args {:coll :_inheritance-intent-command :key {:value :kind} :default nil}}
           :b "parent-edge"}}
   {:name :_inheritance-source-id
    :parent :get
-   :args {:coll :_inheritance-command :key {:value :source-fn-id} :default nil}}
+   :args {:coll :_inheritance-intent-command :key {:value :source-fn-id} :default nil}}
   {:name :_inheritance-allowed?
    :parent :get
-   :args {:coll :_inheritance-preview :key {:value :allowed} :default false}}
+   :args {:coll :_inheritance-intent-preview :key {:value :allowed} :default false}}
   {:name :_inheritance-reason
    :parent :get
-   :args {:coll :_inheritance-preview :key {:value :reason} :default ""}}
+   :args {:coll :_inheritance-intent-preview :key {:value :reason} :default ""}}
   {:name :_inheritance-target
    :parent :get
-   :args {:coll :_inheritance-preview :key {:value :target} :default {:value {}}}}
+   :args {:coll :_inheritance-intent-preview :key {:value :target} :default {:value {}}}}
   {:name :_inheritance-target-name
    :parent :coalesce
    :args {:value {:parent :get
@@ -41,11 +41,11 @@
    :args {:parts ["Create variation for " :_inheritance-target-name]}}
   {:name :_inheritance-preview-json
    :parent :to-json-string
-   :args {:data :_inheritance-preview}}
+   :args {:data :_inheritance-intent-preview}}
   {:name :_inheritance-proposed-name
    :parent :get
    :args {:coll {:parent :get
-                 :args {:coll :_inheritance-preview :key {:value :proposed} :default {:value {}}}}
+                 :args {:coll :_inheritance-intent-preview :key {:value :proposed} :default {:value {}}}}
           :key {:value :name} :default ""}}
   {:name :_inheritance-name-input
    :parent :hiccup

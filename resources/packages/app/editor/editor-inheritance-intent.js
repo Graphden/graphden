@@ -110,6 +110,10 @@ async function applyIntentPreview(preview, proposedName) {
     inheritanceIntentPending = false;
     if (!result) return;
     closeInheritanceIntent();
+    if (typeof _tourLoadInheritanceCheckSource === 'function') {
+      try { await _tourLoadInheritanceCheckSource(preview); }
+      catch (error) { gdToast('Change saved. ' + error.message); }
+    }
     await initGraph();
     if (result['created-fn-id']) await navigateInheritanceSource(result['created-fn-id']);
   } catch (error) {

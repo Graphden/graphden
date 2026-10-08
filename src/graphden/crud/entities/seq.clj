@@ -208,7 +208,8 @@
      :rejection (cond
                   pkg-reason {:error pkg-reason :http-status 403}
                   (:error req-pos) req-pos
-                  synth-rej {:error (:reason synth-rej)})}))
+                  synth-rej {:error (:reason synth-rej)}
+                  :else nil)}))
 
 
 (defn- append-sequence!

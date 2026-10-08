@@ -20,7 +20,7 @@ const {
     // Seed the description's dark-theme regression before the tutorial
     // sheet exists, so Settings remains reachable by an ordinary click.
     await page.goto(BASE + '/');
-    await page.waitForSelector('#search-input');
+    await page.waitForSelector('#search-input', {state: 'attached'});
     if (!await page.evaluate(() => document.body.classList.contains('theme-dark'))) {
       await page.evaluate(() => gdShellSurface('settings'));
       await page.locator('#gd-set-theme').click();

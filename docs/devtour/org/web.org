@@ -138,6 +138,7 @@ Exposes pre-write validation as one [[file:glossary.org::#term/base-function][ba
 
 - source :: [[file:../../../resources/packages/web/crud-write/impls.clj::(defbase write-rej][resources/packages/web/crud-write/impls.clj:35]]
 - see also :: [[file:crud.org::#crud/write-rej][write-rej]], [[file:crud.org::#crud/apply-create-core][apply-create-core]]
+- referenced from :: [[file:editor.org::#editor/writeBindingFields][writeBindingFields]]
 
 * 11. form-decode
 :PROPERTIES:
@@ -164,7 +165,7 @@ Constructs a [[file:glossary.org::#term/hiccup][Hiccup]] element from tag, attri
 - source :: [[file:../../../resources/packages/web/html/impls.clj::(defbase hiccup-element][resources/packages/web/html/impls.clj:26]]
 - see also :: [[file:editor.org::#editor/bindActionDispatch][bindActionDispatch]], [[file:editor.org::#editor/loadPartial][loadPartial]]
 - same file :: [[file:web.org::#web/h-raw][h-raw]], [[file:web.org::#web/render-hiccup][render-hiccup]]
-- referenced from :: [[file:editor.org::#editor/bindActionDispatch][bindActionDispatch]]
+- referenced from :: [[file:editor.org::#editor/bindActionDispatch][bindActionDispatch]], [[file:editor.org::#editor/mount][mount]]
 
 * 13. h-raw
 :PROPERTIES:

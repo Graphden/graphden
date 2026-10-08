@@ -194,6 +194,7 @@ A concrete arithmetic [[file:glossary.org::#term/base-function][base function]]:
 
 - source :: [[file:../../../resources/packages/core/arithmetic/impls.clj::(defbase add ][resources/packages/core/arithmetic/impls.clj:54]]
 - see also :: [[file:executor.org::#executor/defbase][defbase]]
+- referenced from :: [[file:executor.org::#executor/execute][execute]]
 
 * 15. sync-namespaces!
 :PROPERTIES:
@@ -255,10 +256,10 @@ Chooses an unqualified [[file:glossary.org::#term/edn][keyword]] for a unique re
 :CUSTOM_ID: packages/encode-unreadable-kws
 :FILE: src/graphden/packages/records/wire.clj
 :LINE: 70
-:MINS: 1.3
+:MINS: 1.4
 :END:
 
-Before writing [[file:glossary.org::#term/edn][EDN]] text, replaces otherwise unreadable [[file:glossary.org::#term/edn][keywords]] with tagged literals such as ~#graphden/ref~. Registered readers restore the original [[file:glossary.org::#term/edn][keywords]] during import. In-memory and JSONB paths use their own value-preserving codecs.
+Before writing [[file:glossary.org::#term/edn][EDN]] text, replaces otherwise unreadable [[file:glossary.org::#term/edn][keywords]] with tagged literals such as ~#graphden/ref~. Registered readers restore the original [[file:glossary.org::#term/edn][keywords]] during import. This step protects the EDN text boundary. JSONB storage has a different contract: its JSON reader keywordizes object keys.
 
 - source :: [[file:../../../src/graphden/packages/records/wire.clj::(defn encode-unreadable-kws][src/graphden/packages/records/wire.clj:70]]
 

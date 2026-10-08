@@ -8,7 +8,12 @@
 ;; (`bb devtour-check`) fails if an anchor stops resolving or the HTML drifts.
 {:title "Graphden — developer tour"
  :intro
- "This tour explains how Graphden stores, compiles, and runs [graph
+ "Graphden stores program composition as data: which function specializes which parent, and
+           where each input comes from. Small Clojure primitives provide the operations; the graph
+           connects them. This makes reuse, dependencies, types, and branch-specific changes visible
+           to the editor and executor. See the [design rationale](../../docs/PHILOSOPHY.md).
+
+           This tour explains how Graphden stores, compiles, and runs [graph
            functions](#term/graph-function). It assumes basic Clojure and HTTP knowledge. A [graph
            function](#term/graph-function) describes a computation; an [argument slot](#term/slot)
            identifies one input, and a [binding](#term/binding) supplies that input. An [execution
@@ -16,6 +21,11 @@
            registry](#term/compiled-registry) maps function IDs to callable Clojure
            [closures](#term/closure). Follow a linked term whenever you need its definition;
            definitions are outside the numbered steps and do not change reading progress.
+
+           Start with Executor for a worked composition and its execution path. Packages explains
+           the source files that author that graph; Graph API and Editor connect it to a user's edit.
+           The [reading routes and first change](../../docs/devtour/README.md) give a shorter path
+           through these mechanisms before you explore every block.
 
            Read the blocks in [dependency order](#term/topological-order), starting with Executor.
            Boot is also a useful starting point if you want to understand process startup first. The
@@ -232,12 +242,26 @@
    :after []
    :steps
    [{:ns graphden.executor.interface :defn execute
-     :say "`execute` accepts an [execution context](#term/context), a [graph
+     :say "Graphden puts composition in stored data and small operations in Clojure. For example,
+           `{:name :three :parent :add :args {:nums [1 2]}}` describes a function returning 3;
+           it does not define a Clojure function body. It inherits `:add`'s `:nums` slot and binds
+           that slot to two list items. The stored form has a `fn` row, a `binding` row targeting
+           the inherited slot, and two `binding-list-item` rows. The parent's `fn-slot` links its
+           function to the immutable slot. See the existing arithmetic examples in
+           [core.tests](../../resources/packages/core/tests/fns.edn).
+
+           The executor compiles this description into a callable Clojure function. References
+           prepare deferred inputs: an `:if` implementation reads only its selected branch, so the
+           other branch does not run. Defaults and composition belong in `fns.edn`; add an
+           `impls.clj` primitive when an operation needs a host library or runtime facility. This
+           keeps dependencies visible instead of hiding a pipeline inside one implementation.
+
+           `execute` accepts an [execution context](#term/context), a [graph
            function](#term/graph-function) ID (`fn-id`), and named [free
            arguments](#term/free-argument). The context determines which storage and branch the call
            sees. This public entry validates the argument map and delegates execution to
            `compile-runtime`."
-     :see [[:executor "create-context"]]}
+     :see [[:executor "create-context"] [:packages "add"] [:executor "arg-builder"]]}
 
     {:ns graphden.executor.compile-runtime :defn execute
      :say "Runs a previously compiled [graph function](#term/graph-function). It first checks
@@ -346,6 +370,14 @@
            ordinary value. The base implementation triggers referenced computations only by reading
            the corresponding argument. Compare with `arg-builder`, which prepared that deferred value."
      :see [[:executor "arg-builder"]]}
+
+    {:ns graphden.executor.compile-runtime :defn record-effect!
+     :say "An effectful primitive calls this before touching external state. It rejects an operation
+           outside the execution's allowed effect set, then records the effect for tracing. Declaring
+           effects for type inference is a separate responsibility; this runtime check enforces the
+           current policy. An empty allowed set rejects every recorded effect, while nil means
+           unrestricted execution."
+     :see [[:platform "cloud-forbidden-effects"] [:editor "evaluate"]]}
 
     {:ns graphden.executor.compile-eager :defn call-with-cache
      :say "Caches referenced-function results during one top-level execution. The key includes the
@@ -925,8 +957,8 @@
     {:ns graphden.packages.records.wire :defn encode-unreadable-kws
      :say "Before writing [EDN](#term/edn) text, replaces otherwise unreadable [keywords](#term/edn)
            with tagged literals such as `#graphden/ref`. Registered readers restore the original
-           [keywords](#term/edn) during import. In-memory and JSONB paths use their own
-           value-preserving codecs."}
+           [keywords](#term/edn) during import. This step protects the EDN text boundary. JSONB
+           storage has a different contract: its JSON reader keywordizes object keys."}
     {:ns graphden.packages.export :defn external-deps
      :say "Finds references leaving an exported namespace subtree and records them as dependencies.
            References into version-qualified package namespaces also produce package dependencies. The
@@ -1204,8 +1236,10 @@
   {:id :editor
    :title "Editor — browser behavior"
    :status :toured
-   :summary "Loading, rendering, actions, forms, comparisons, and preferences."
-   :paths ["resources/packages/app/editor/" "resources/packages/web/runtime/"]
+   :summary "Loading, graph-backed controls, actions, forms, and preferences."
+   :paths ["resources/packages/app/editor/" "resources/packages/web/runtime/"
+           "resources/packages/app/ui-preview/" "src/graphden/editor/"
+           "src/graphden/executor/browser_plan.clj"]
    :after [:web :layout]
    :steps
    [{:file "resources/packages/app/editor/editor-main.js" :defn initGraph
@@ -1268,12 +1302,54 @@
            Exact-name matches come first, followed by namespace groups and compatibility/fit ranking.
            Typed searches show all matches; browsing can fold groups. The server's `candidate-fit` in
            the Web block supplies fit metadata without changing type admissibility."}
+
+    {:ns graphden.executor.browser-plan :defn export-plan
+     :say "The ordinary account menu and function picker use bundled graph plans for their local
+           state or markup. This exporter resolves inheritance, bindings, and renames on the server
+           and emits an ID-based plan for supported primitives; the browser does not resolve graph
+           names itself. Shipped plans are generated during development. Exporting an editable
+           graph instead requires an authenticated, consistently checked snapshot and is unavailable
+           under tenancy. See the [graph-backed UI contract](../../resources/packages/app/ui-preview/README.md)."
+     :see [[:executor "build-lookups"] [:editor "createRuntime"]]}
+
+    {:file "resources/packages/app/ui-preview/browser-runtime.js" :defn createRuntime
+     :say "Creates the bounded browser interpreter for that plan. Each entry invocation has lazy
+           argument reads, memoized calls, and an operation limit; unsupported primitives fail.
+           This backend supports a small part of the graph vocabulary, separate from the JVM
+           executor. `editor-shell-menu-graph.js` and `editor-fn-picker-graph.js` connect shipped
+           plans to real controls; native host code retains authentication, search, type verdicts,
+           authorized actions, and focus."
+     :see [[:editor "mount"] [:editor "pickerArrange"]]}
+
+    {:file "resources/packages/app/ui-preview/graph-renderer.js" :defn mount
+     :say "Gives a graph component its own empty DOM host. `render` validates live Hiccup and scoped
+           style rules before applying them, preserving keyed elements across updates. `dispose`
+           removes the subtree and releases its stylesheet. The renderer consumes values rather
+           than executing graph functions; host code still owns the control's events and authorized
+           callbacks. Follow this lifecycle when changing a graph-backed menu or picker."
+     :see [[:editor "createRuntime"] [:web "hiccup-element"]]}
+
     {:file "resources/packages/app/editor/editor-edit-modes.js" :defn enterArgValueEditMode
      :say "Asks `/api/value-form` for a widget appropriate to the [slot](#term/slot), then dispatches
            by `data-form-widget`. The client does not choose the widget from raw type tags. After
            saving, it reloads [bindings](#term/binding) and lookups because changing a value changes
            stored graph rows."
-     :see [[:crud "render-repr"]]}
+     :see [[:crud "resolve-form"] [:editor "writeBindingFields"]]}
+
+    {:file "resources/packages/app/editor/editor-edit-modes.js" :defn writeBindingFields
+     :say "Follow a user saving a literal input: this writer targets its function and slot, creating
+           an own binding with POST or updating an existing one with PUT. `authMutate` sends the
+           form body through `authFetch`; `editor-branch-context.js` attaches the current branch
+           to API requests. The public handler is composed in
+           [web/crud-write/fns.edn](../../resources/packages/web/crud-write/fns.edn): parse, reject
+           unsafe changes, apply the write, then invalidate and notify. Versioned storage records
+           the change in that branch. Ordinary type diagnostics can accompany a successful save;
+           structural or secret-flow violations reject it. The caller reloads rows and lookups,
+           then layout and rendering show the new value. Use the reading route in
+           [setup](../../docs/devtour/README.md) to follow the whole round trip."
+     :see [[:web "write-rej"] [:versioning "VersionedStorage"]
+           [:crud "type-check-fn-after-mutation!"] [:crud "notify-after-write!"]
+           [:editor "buildLookups"] [:editor "fetchBackendLayout"]]}
 
     {:file "resources/packages/app/editor/editor-diff-mode.js" :defn gdEnterDiffMode
      :say "Loads grouped differences for a selected comparison branch. Explorer badges, canvas
@@ -1285,7 +1361,18 @@
      :say "Applies a validated theme payload as inline CSS custom properties on the body. The
            sanitizer permits known tokens and supported color values, rejecting injected declarations
            or URLs. A localStorage copy applies before first paint; saved server preferences reconcile
-           afterward. See [themes](../../docs/MARKETPLACE.md)."}
+           afterward. A selected personal theme graph is evaluated on the server before this
+           function receives its validated colors. See [themes](../../docs/MARKETPLACE.md)."
+     :see [[:editor "evaluate"]]}
+
+    {:ns graphden.editor.theme :defn evaluate
+     :say "Evaluates a selected personal theme graph in the request's existing organisation and
+           branch. It uses the normal execution access checks, requires a non-secret pure graph,
+           permits no effects, and limits execution to 750 ms. Only a validated theme payload
+           reaches CSS; source graphs and execution traces are not returned. This server path is
+           independent of the bundled local menu and picker plans. `editor-theme-graph.js` applies
+           successful results and keeps saved colors when evaluation is unavailable."
+     :see [[:crud "apply-execute"] [:executor "record-effect!"] [:editor "gdApplyThemePayload"]]}
     {:file "resources/packages/app/editor/editor-shortcuts.js" :defn gdApplyKeymap
      :say "Applies user key overrides by stable shortcut ID. The registry keeps defaults for reset and
            applies overrides when late shortcuts register too. Settings and shortcut help read the

@@ -64,8 +64,10 @@ async function openIntent(page, fnName, depth = 1) {
       'menu explains function identity scope');
     await page.click('[data-action="inheritance-source"]');
     await page.waitForFunction(id => selectedFnId === id, P.id);
+    await page.waitForSelector('.node-overlay[data-fn-name="' + names.P + '"]');
     assert(true, 'Go to source navigates by source UUID');
     await page.evaluate(id => navigateInheritanceSource(id), F.id);
+    await page.waitForSelector('.node-overlay[data-fn-name="' + names.F + '"]');
     await openIntent(page, names.F);
     await page.keyboard.press('Escape');
     await page.waitForSelector('.inheritance-intent-popover', { state: 'detached' });

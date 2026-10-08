@@ -1379,11 +1379,13 @@ async function bindNamedPlaceholder(page, argName, kind, text) {
     await page.fill('.fn-picker-popover input', text);
     await page.waitForFunction((n) => {
       return Array.from(document.querySelectorAll('.fn-picker-row')).some((r) =>
-        (r.querySelector('.fn-picker-row-main')?.textContent || '').includes(n));
+        r.dataset.fnName === n.replace(/\//g, '.')
+          || (!/[./]/.test(n) && (r.querySelector('.fn-picker-row-main')?.textContent || '').includes(n)));
     }, text, {timeout: 30000, polling: 150});
     await page.evaluate((n) => {
       Array.from(document.querySelectorAll('.fn-picker-row')).find((r) =>
-        (r.querySelector('.fn-picker-row-main')?.textContent || '').includes(n)).click();
+        r.dataset.fnName === n.replace(/\//g, '.')
+          || (!/[./]/.test(n) && (r.querySelector('.fn-picker-row-main')?.textContent || '').includes(n))).click();
     }, text);
     await page.waitForFunction(() => !document.querySelector('.fn-picker-popover'),
       null, {timeout: 30000, polling: 150});

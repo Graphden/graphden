@@ -300,13 +300,37 @@ const {
     await page.click('#gd-ws-chip');
     await page.getByRole('button', {name: 'Open view fn tutorial-function-view', exact: true}).click();
     await page.waitForSelector('.node-overlay[data-fn-name="tutorial-function-view"]');
+    console.log('  exact view effect flags: ' + JSON.stringify(await page.evaluate(async id => {
+      const fn = lookups.fnMap.get(id);
+      const cached = richTypeEntryOf(fn);
+      const response = await authFetch('/api/types');
+      const types = response.ok ? await response.json() : {};
+      const fresh = types[fn?.name];
+      const base = [...lookups.fnMap.values()].find(row => row.name === 'app.views.explorer-view');
+      const hasDb = effects => Array.isArray(effects) && effects.some(effect => effect.replace(/^:/, '') === 'db');
+      return {selectedMatches: selectedFnId === id, fnPresent: !!fn,
+        parentMatches: !!base && fn?.['parent-ids']?.includes(base.id),
+        cachedPresent: !!cached, cachedHasDb: hasDb(cached?.effects),
+        freshStatus: response.status, freshPresent: !!fresh,
+        freshIdentityMatches: fresh?.['fn-id'] === id, freshHasDb: hasDb(fresh?.effects)};
+    }, viewId)));
     if (await page.locator('.node-overlay[data-fn-name="tutorial-function-view"] .fn-run-trigger').count()) {
       await page.click('.node-overlay[data-fn-name="tutorial-function-view"] .fn-run-trigger');
     } else {
       await page.click('.node-overlay[data-fn-name="tutorial-function-view"] .ancestor-line[data-level="0"] .more-actions-trigger');
       await page.click('.row-actions-popover [data-action="run"]');
     }
-    await page.waitForSelector('.execute-popover.visible .execute-confirm-checkbox');
+    try {
+      await page.waitForSelector('.execute-popover.visible .execute-confirm-checkbox');
+    } catch (error) {
+      console.error('  exact view run flags: ' + JSON.stringify(await page.evaluate(id => ({
+        selectedMatches: selectedFnId === id, runReady: !!document.querySelector('#gd-insp-run-host .execute-popover.visible'),
+        warning: !!document.querySelector('#gd-insp-run-host .execute-effects-warning'),
+        checkbox: !!document.querySelector('#gd-insp-run-host .execute-confirm-checkbox'),
+        disabled: document.querySelector('#gd-insp-run-host .execute-run-btn')?.disabled,
+      }), viewId)));
+      throw error;
+    }
     assert(await page.locator('.execute-popover.visible .execute-run-btn').isDisabled(), 'database effect requires consent');
     await page.check('.execute-popover.visible .execute-confirm-checkbox');
     await page.click('.execute-popover.visible .execute-run-btn');

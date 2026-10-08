@@ -21,7 +21,8 @@ function gdTourStageUIComponentsManifest(request, manifest) {
     token: receipt.token, receipt: 'pending'};
   for (const row of manifest.namespaces) _tourState.created.push({type: 'ns',
     id: row.id, name: row.name, 'parent-id': row['parent-id'], ...fields});
-  for (const row of manifest.functions) _tourState.created.push({type: 'fn', ...row, ...fields});
+  for (const row of manifest.functions) _tourState.created.push({type: 'fn', ...row, ...fields,
+    'cleanup-order-root-id': manifest.roots['configuration-id']});
   _tourState.uiComponentManifests ||= [];
   _tourState.uiComponentManifests.push(receipt);
   _tourSaveState();

@@ -225,8 +225,54 @@ async function _tourDeleteFn(id, options) {
 // still refuses is retried while other removals unblock it. The lesson can
 // create a caller before the function it later references, so reverse creation
 // order alone is insufficient. A stalled pass gets one retry, then reports it.
+// Dependency data is only an ordering hint. Every deletion still performs
+// the exact receipt's fresh identity lookup and the server's normal DELETE.
+function _tourOrderFnDeletes(entries, graph) {
+  if (!Array.isArray(graph?.fns) || !Array.isArray(graph.bindings)
+      || !Array.isArray(graph['list-items'])) return entries;
+  const byId = new Map(entries.map(row => [row.id, row]));
+  const own = new Set(byId.keys());
+  const edges = new Map(entries.map(row => [row.id, new Set()]));
+  const add = (from, to) => { if (own.has(from) && own.has(to)) edges.get(from).add(to); };
+  for (const fn of graph.fns) {
+    for (const field of ['base-fn-id', 'return-type-fn-id', 'element-fn-id']) add(fn.id, fn[field]);
+    for (const parent of fn['parent-ids'] || []) add(fn.id, parent);
+  }
+  for (const binding of graph.bindings) {
+    for (const field of ['ref-fn-id', 'resolver-fn-id', 'type-override-fn-id']) add(binding['fn-id'], binding[field]);
+  }
+  const owners = new Map(graph.bindings.map(row => [row.id, row['fn-id']]));
+  for (const item of graph['list-items']) add(owners.get(item['binding-id']), item['ref-fn-id']);
+  const indegree = new Map(entries.map(row => [row.id, 0]));
+  for (const dependencies of edges.values()) for (const id of dependencies) indegree.set(id, indegree.get(id) + 1);
+  const queue = entries.filter(row => indegree.get(row.id) === 0);
+  const ordered = [];
+  for (let index = 0; index < queue.length; index++) {
+    const row = queue[index];
+    ordered.push(row);
+    for (const id of edges.get(row.id)) {
+      indegree.set(id, indegree.get(id) - 1);
+      if (indegree.get(id) === 0) queue.push(byId.get(id));
+    }
+  }
+  // Cyclic or missing edges retain ordinary retry/refusal behavior.
+  const seen = new Set(ordered.map(row => row.id));
+  return ordered.concat(entries.filter(row => !seen.has(row.id)));
+}
+
+async function _tourFnDeleteOrder(entries, options) {
+  const roots = new Set(entries.map(row => row['cleanup-order-root-id']).filter(Boolean));
+  if (roots.size !== 1) return entries;
+  const root = [...roots][0];
+  if (!entries.some(row => row.id === root && row.creation === 'create-only-manifest')) return entries;
+  try {
+    const response = await authFetch(API.api_graph_entities + '?scope=subtree&root-id=' + encodeURIComponent(root), options);
+    return response.ok ? _tourOrderFnDeletes(entries, await response.json()) : entries;
+  } catch (_) { return entries; }
+}
+
 async function _tourDeleteFns(created, options) {
-  let pending = created.filter((c) => c.type === 'fn').reverse();
+  let pending = await _tourFnDeleteOrder(created.filter((c) => c.type === 'fn').reverse(), options);
   for (let pass = 0; pending.length; pass++) {
     const failed = [];
     for (const c of pending) {

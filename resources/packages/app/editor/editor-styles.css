@@ -7609,6 +7609,13 @@ a.gd-set-btn { text-decoration: none; display: inline-flex; align-items: center;
   padding-bottom: max(14px, env(safe-area-inset-bottom));
 }
 
+/* Fixed Run/review controls near the bottom stay reachable: the geometry
+   places the lesson at the top edge when that avoids the current target. */
+#gd-tour-pop.gd-tour-sheet.gd-tour-sheet-top {
+  inset: 0 0 auto;
+  border-radius: 0 0 12px 12px;
+}
+
 /* While the sheet is up, the panels a lesson points at get its height as
    bottom padding — otherwise a row under the sheet cannot be scrolled clear
    of it: the Explorer is exactly viewport-tall, so there is nothing below to

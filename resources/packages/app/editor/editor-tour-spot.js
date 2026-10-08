@@ -6,7 +6,7 @@
 // cut the target out of the scrim; `_tourPosition` places the popover clear of
 // the PANEL its target lives in (not merely of the target — 35 steps anchor
 // into the Explorer, and 16px right of a 250px filter box is over the rows the
-// step says to click), docking to the bottom edge as a sheet under 700px
+// step says to click), docking clear of the target as a sheet under 700px
 // (`_tourNarrow`, `_tourReserveForSheet`); `_tourPickSpot` + the `*Rects`
 // helpers find the free spot with the least overlap over canvas nodes, the
 // entity list and floating chrome. Reads `_tourEls` / `_tourState` from
@@ -243,7 +243,9 @@ function _tourPosition() {
   const { pop } = _tourEls;
   const narrow = _tourNarrow();
   pop.classList.toggle('gd-tour-sheet', narrow);
-  _tourReserveForSheet(narrow && pop.classList.contains('gd-tour-visible')
+  if (!narrow) pop.classList.remove('gd-tour-sheet-top');
+  _tourReserveForSheet(narrow && !pop.classList.contains('gd-tour-sheet-top')
+                       && pop.classList.contains('gd-tour-visible')
                        ? pop.offsetHeight : 0);
   const effSel = _tourEffTarget(step);
   const target = effSel ? document.querySelector(effSel) : null;
@@ -261,7 +263,17 @@ function _tourPosition() {
     ? _tourWithEntityList(rect) : rect;
 
   if (visible && narrow) {
-    // Spotlight still anchors; the sheet's own geometry is in the stylesheet.
+    // A fixed inspector/popover cannot always scroll above a bottom sheet.
+    // Keep the full-size lesson card at the edge with least target overlap.
+    const pw = pop.offsetWidth || window.innerWidth;
+    const ph = pop.offsetHeight || 180;
+    const best = _tourPickSpot([
+      {left: 0, top: window.innerHeight - ph},
+      {left: 0, top: 0},
+    ], pw, ph, spotRect, _tourFloatingRects(), 0);
+    const atTop = best.top === 0;
+    pop.classList.toggle('gd-tour-sheet-top', atTop);
+    _tourReserveForSheet(atTop ? 0 : ph);
     const pad = 6;
     _tourSpotRect(spotRect.left - pad, spotRect.top - pad,
                   spotRect.width + pad * 2, spotRect.height + pad * 2);
@@ -496,11 +508,11 @@ function _tourNodeRects() {
 // Pick the popover spot: clamp each candidate into the viewport, hard-weight
 // covering the TARGET, soft-weight covering any floating surface; first
 // zero-score candidate wins, else the least-covering one.
-function _tourPickSpot(cands, pw, ph, targetRect, avoidRects) {
+function _tourPickSpot(cands, pw, ph, targetRect, avoidRects, margin = 12) {
   let best = null;
   for (const c of cands) {
-    const left = Math.min(Math.max(12, c.left), Math.max(12, window.innerWidth - pw - 12));
-    const top = Math.min(Math.max(12, c.top), Math.max(12, window.innerHeight - ph - 12));
+    const left = Math.min(Math.max(margin, c.left), Math.max(margin, window.innerWidth - pw - margin));
+    const top = Math.min(Math.max(margin, c.top), Math.max(margin, window.innerHeight - ph - margin));
     let score = 0;
     if (targetRect) score += _tourOverlapArea(left, top, pw, ph, targetRect) * 1000;
     for (const r of avoidRects) score += _tourOverlapArea(left, top, pw, ph, r);

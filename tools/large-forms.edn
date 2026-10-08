@@ -108,7 +108,5 @@
   "one unit: cache clear + epoch bump + delta seed, under the invalidation lock"
   "graphden.executor.context/splice-graph-cache!"
   "one unit: the in-place cache patch, same lock, same invariant"
-  "graphden.crud.entities.seq/apply-seq-append-core"
-  "one unit: synthetic-binding materialise + position compute + pre-reject share a binding id that cannot cross a node boundary without a race"
   "graphden.system.init.exec/ig/init-key :exec/context"
   "one unit: the boot wiring of the execution context; every binding is one component it needs"}}

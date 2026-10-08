@@ -69,7 +69,9 @@ async function ledger(page) {
     assert(!(Array.isArray(registry) ? registry : registry.packages || [])
       .some(row => row.name === 'tutorial-greet'), 'do not claim an existing publication');
 
-    await page.goto(BASE + '/?branch=main&tutorial=41');
+    await page.goto(BASE + '/?branch=main');
+    await page.evaluate(() => window.openTutorialMenu());
+    await page.locator('[data-lesson-id="41"] .gd-tour-btn-primary').dispatchEvent('click');
     await waitTourTitle(page, 'Author and consumer', 150000);
     assert(await clickTourButton(page, 'Next'), 'start the author/consumer loop');
     await waitTourTitle(page, 'Create the author branch');

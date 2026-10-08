@@ -292,7 +292,7 @@
 
 (deftest saved-view-publishes-its-inherited-effect-signature
   (with-storage
-    (fn [storage ctx base]
+    (fn [_storage ctx base]
       (registry/record-rich-types-raw!
         (:id base) :explorer-view
         {:return :keyword-map :args {:name :text :kinds :sequence} :effects #{:db}})

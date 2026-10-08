@@ -7,7 +7,7 @@ Branch-specific reads, conflict detection, and cache refresh.
 
 after: storage
 
-[[file:index.org][index]] · ~97 min
+[[file:index.org][index]] · ~98 min
 
 * 1. wrap-with-versioning
 :PROPERTIES:
@@ -54,13 +54,13 @@ Creates an [[file:glossary.org::#term/branch-view][identity row]] and a [[file:g
 :PROPERTIES:
 :CUSTOM_ID: versioning/in-transaction
 :FILE: src/graphden/storage/tx.clj
-:LINE: 71
-:MINS: 1.4
+:LINE: 124
+:MINS: 2.6
 :END:
 
 Finds the underlying database pool and rebuilds the [[file:glossary.org::#term/protocol][storage-decorator]] chain around a transaction connection. Each write still passes through its existing [[file:glossary.org::#term/protocol][decorators]]. Transaction-scoped [[file:glossary.org::#term/advisory-lock][advisory locks]] used by uniqueness checks remain held until the transaction ends.
 
-- source :: [[file:../../../src/graphden/storage/tx.clj::(defn in-transaction][src/graphden/storage/tx.clj:71]]
+- source :: [[file:../../../src/graphden/storage/tx.clj::(defn in-transaction][src/graphden/storage/tx.clj:124]]
 
 * 5. entity-config
 :PROPERTIES:

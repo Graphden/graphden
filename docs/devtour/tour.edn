@@ -769,12 +769,12 @@
            validation."}
     {:ns graphden.crud.entities.record-type :defn apply-create-record-type-body
      :say "Creates the function row, [slot](#term/slot) rows, and function-slot links for a record
-           type. Each successful write is appended to a journal. The journal supports compensating
-           cleanup if a later write fails; this sequence is not a database transaction."}
+           type under the semantic writer guard in one database transaction. Cache invalidation runs
+           after commit; a failed transaction clears the legacy compensation journal."}
     {:ns graphden.crud.entities.record-type :defn apply-create-rollback
      :say "On failure, traverses the creation journal backward and attempts to delete each created
-           row. This is best-effort compensation, not transactional atomicity: cleanup can itself
-           fail, in which case the code logs the need for manual cleanup."}
+           row for storage implementations without database transactions. PostgreSQL failures have
+           already rolled back and cleared the journal, so replay cannot damage restored rows."}
     {:ns graphden.crud.entities :defn apply-create-core
      :say "Creates a row, checks the resulting function's types, and applies rename-slot updates.
            Ordinary type errors leave the edit stored and return `:type-warnings`.

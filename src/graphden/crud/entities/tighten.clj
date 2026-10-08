@@ -29,9 +29,12 @@
     [graphden.crud.types-api :as types-api]
     [graphden.executor.registry.core :as registry]
     [graphden.packages.records :as records]
+    [graphden.storage.graph-writer :as writer]
     [graphden.storage.protocol.core :as sp]
+    [graphden.storage.tx :as tx]
     [graphden.tenancy.context :as tenancy]
-    [graphden.types.core :as types]))
+    [graphden.types.core :as types]
+    [graphden.versioning.storage.resolution :as resolution]))
 
 
 (defn commit-tighten!
@@ -102,7 +105,7 @@
                    post-rej (assoc :type-warnings [(:diagnostic post-rej)]))}))))
 
 
-(defn tighten-fn-type-impl!
+(defn- tighten-fn-type!
   "Compute a narrower fn-type constraint by selectively replacing
    `args`, `ret`, or `effects` from the current effective type.
    `delta` is `{:args {…} :ret T :effects [\"io\" …]}` — any subset.
@@ -120,7 +123,7 @@
    the owning fn's direct dependents; the 3-arity — the test-only
    entry — passes none, and no dependent is re-checked."
   ([storage binding-id delta]
-   (tighten-fn-type-impl! nil storage binding-id delta))
+   (tighten-fn-type! nil storage binding-id delta))
   ([ctx storage binding-id delta]
    (let [b (sp/read-entity storage :binding binding-id)]
      (cond
@@ -187,6 +190,31 @@
                    (commit-tighten! ctx storage binding-id b new-c nil)))))))))))
 
 
+(defn tighten-fn-type-impl!
+  "Serialize the effective-type read, narrowing checks and anonymous type /
+   binding writes. Rejection rolls back only this transaction's new rows."
+  ([storage binding-id delta]
+   (tighten-fn-type-impl! nil storage binding-id delta))
+  ([ctx storage binding-id delta]
+   (let [pooled? (some? (tx/datasource storage))]
+     (when pooled? (tx/assert-owns-commit! storage))
+     (try
+       (writer/call-with-write
+         storage :graph
+         (fn [bound]
+           (binding [resolution/*merges-memo* (atom {})]
+             (let [binding-row (sp/read-entity bound :binding binding-id)
+                   result (if-let [reason (pkg-guard/write-rejection bound :binding binding-row)]
+                            {:status :rejected :reason reason}
+                            (tighten-fn-type! (when ctx (assoc ctx :storage bound))
+                                              bound binding-id delta))]
+               (if (and pooled? (not= 200 (:status result)))
+                 (throw (ex-info "Tightening rejected" {::rejection result}))
+                 result)))))
+       (catch clojure.lang.ExceptionInfo e
+         (if-let [result (::rejection (ex-data e))] result (throw e)))))))
+
+
 (defn tighten-effects-impl!
   "Thin wrapper — `tighten-fn-type-impl!` with
    only the `:effects` delta filled in. Tests load this symbol
@@ -201,9 +229,5 @@
    `tighten-fn-type-impl!` unchanged — the outer graph dispatches on
    `:status` and runs invalidate + response."
   [parsed ctx]
-  (let [storage (request/require-storage ctx)
-        binding-row (some->> (:binding-id parsed)
-                             (sp/read-entity storage :binding))]
-    (if-let [pkg-reason (pkg-guard/write-rejection storage :binding binding-row)]
-      {:status :rejected :reason pkg-reason}
-      (tighten-fn-type-impl! ctx storage (:binding-id parsed) (:delta parsed)))))
+  (tighten-fn-type-impl! ctx (request/require-storage ctx)
+                         (:binding-id parsed) (:delta parsed)))

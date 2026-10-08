@@ -73,7 +73,7 @@
                                 {:value :aria-describedby}]
                          :vals ["button" "inheritance-variation"
                                 {:parent :not :args {:value :_inheritance-allowed?}}
-                                "inheritance-intent-reason"]}}
+                                "inheritance-intent-reason inheritance-intent-scope"]}}
           :children [:_inheritance-variation-label]}}
   {:name :_inheritance-ancestor-button
    :parent :if
@@ -90,7 +90,7 @@
           :else "Replaces this own reference. All consumers of its owner see the change. Preserves the source."}}
   {:name :_inheritance-scope-node
    :parent :hiccup
-   :args {:tag "p" :attrs {:value {:class "inheritance-intent-scope"}}
+   :args {:tag "p" :attrs {:value {:id "inheritance-intent-scope" :class "inheritance-intent-scope"}}
           :children [:_inheritance-scope]}}
   {:name :_inheritance-reason-node
    :parent :hiccup

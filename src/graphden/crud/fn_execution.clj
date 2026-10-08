@@ -120,6 +120,23 @@
                     :diagnostics (vec diags)}})))
 
 
+(defn- authorization-rejection
+  "Authorize the submitted root independently of the trusted API handler.
+   Denial is a safe HTTP refusal before graph loading, rows or futures."
+  [ctx fn-row]
+  (when-let [guard (:execute-guard ctx)]
+    (try
+      (guard ctx (:id fn-row))
+      nil
+      (catch clojure.lang.ExceptionInfo error
+        (if (= :authz/forbidden (:type (ex-data error)))
+          (let [token? (some? (:token-scope (ex-data error)))
+                reason (if token? :token-scope :forbidden)]
+            {:ok false :status :rejected :http-status 403
+             :error (name reason) :error-data {:reason reason}})
+          (throw error))))))
+
+
 (defn apply-execute
   "Stage 3 — submit the future, deref with timeout. Returns one of:
      {:status :succeeded :result … :execution-id? :declared-effects …}
@@ -141,7 +158,8 @@
    ;; through the 3-arity, so the request does ONE resolve, not two.
    (apply-execute ctx parsed (lookup/resolve-fn (request/require-storage ctx) parsed)))
   ([ctx parsed fn-row]
-   (or (type-error-rejection (request/require-storage ctx) fn-row)
+   (or (authorization-rejection ctx fn-row)
+       (type-error-rejection (request/require-storage ctx) fn-row)
        (apply-execute* ctx parsed fn-row))))
 
 

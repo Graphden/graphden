@@ -867,7 +867,10 @@
   [ctx fn-id args {:keys [cancel-flag trace execution path-trace explicit?]}]
   (bound-fn*
     (fn []
-      (binding [cr/*cancel-check*
+      ;; bound-fn* retains the principal, but the trusted request handler's
+      ;; authorization belongs to another root. Recheck this run on the worker.
+      (binding [cr/*execute-authorized* false
+                cr/*cancel-check*
                 #(when @cancel-flag
                    (throw (InterruptedException. "execution cancelled")))
                 cr/*effect-trace* trace

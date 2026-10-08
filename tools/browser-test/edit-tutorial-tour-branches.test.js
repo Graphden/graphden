@@ -17,6 +17,16 @@ const {
   try {
     await hardCleanup(page);
     const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
+    // Seed the description's dark-theme regression before the tutorial
+    // sheet exists, so Settings remains reachable by an ordinary click.
+    await page.goto(BASE + '/');
+    await page.waitForSelector('#search-input');
+    if (!await page.evaluate(() => document.body.classList.contains('theme-dark'))) {
+      await page.evaluate(() => gdShellSurface('settings'));
+      await page.locator('#gd-set-theme').click();
+      await page.waitForFunction(() => document.body.classList.contains('theme-dark'));
+      await page.evaluate(() => gdShellSurface('build'));
+    }
     await page.goto(BASE + '/?tutorial=23');
     await waitTourTitle(page, 'Branches are views, not copies', 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 23 Next');

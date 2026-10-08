@@ -20,13 +20,14 @@ async function ownedBranchRow(page, branch) {
 async function mergeOwnedSource(page, source, target) {
   assert(new URL(page.url()).searchParams.get('branch') === target.name, 'merge stays on the owned sibling target');
   const row = await ownedBranchRow(page, source);
-  const [, response] = await Promise.all([
+  const [, receipt] = await Promise.all([
     page.waitForNavigation({waitUntil: 'load', timeout: 60000}),
     page.waitForResponse(r => r.request().method() === 'POST'
-      && new URL(r.url()).pathname === '/api/branches/' + target.id + '/merge', {timeout: 60000}),
+      && new URL(r.url()).pathname === '/api/branches/' + target.id + '/merge', {timeout: 60000})
+      .then(async response => ({ok: response.ok(), committed: (await response.json()).ok === true})),
     row.locator('.branch-row-merge').click(),
   ]);
-  assert(response.ok() && (await response.json()).ok === true, 'exact sibling target merge committed');
+  assert(receipt.ok && receipt.committed, 'exact sibling target merge committed');
 }
 
 async function switchToOwnedBranch(page, branch) {

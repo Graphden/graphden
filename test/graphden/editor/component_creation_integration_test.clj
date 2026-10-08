@@ -124,6 +124,26 @@
     (is (:ok (:body (apply-preview reserved))) "same reservation can be retried after rollback")))
 
 
+(deftest quota-refusal-returns-429-and-rolls-back-the-bundle
+  (let [storage (:storage ga/*bootstrap*)
+        reserved (preview)
+        before (graph-identities storage)
+        original @#'pg-crud/create-entity]
+    (binding [pg-crud/*create-entity-override*
+              (fn [datasource entity data fields]
+                (when (= entity :fn)
+                  (throw (ex-info "Private quota diagnostic"
+                                  {:type :quota/entity-limit :org "private-org" :entity :fn})))
+                (binding [pg-crud/*create-entity-override* nil]
+                  (original datasource entity data fields)))]
+      (let [result (apply-preview reserved)]
+        (is (= 429 (:status result)))
+        (is (= {:ok false :committed false
+                :reason "Your plan's graph limit has been reached. Free capacity or upgrade your plan before creating UI graphs."}
+               (:body result)))
+        (is (= before (graph-identities storage)))))))
+
+
 (deftest two-independent-copies-export-only-the-selected-component
   (let [ctx (:ctx ga/*bootstrap*)
         storage (:storage ctx)

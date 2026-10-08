@@ -8,6 +8,7 @@
   (doseq [[data expected-status] [[{:http-status 400} 400]
                                   [{:http-status 409 :type :authz/forbidden} 409]
                                   [{:type :authz/forbidden} 403]
+                                  [{:type :quota/entity-limit :org "private-org" :entity :fn} 429]
                                   [{:type :browser-plan/unsupported} 422]
                                   [{:type :storage-error/candidate-limit} 422]
                                   [{:type :storage-error/bounded-query-unsupported} 422]

@@ -147,6 +147,7 @@
         status (or http-status
                    (cond
                      (= type :authz/forbidden) 403
+                     (= type :quota/entity-limit) 429
                      (contains? #{:browser-plan/unsupported :storage-error/candidate-limit
                                   :storage-error/bounded-query-unsupported} type) 422
                      :else 500))
@@ -155,6 +156,7 @@
                  403 "Choose an available writable namespace for your UI graphs."
                  409 "The UI graph preview has changed. Refresh and try Create again."
                  422 "This UI graph template is unavailable. Choose another template or try again later."
+                 429 "Your plan's graph limit has been reached. Free capacity or upgrade your plan before creating UI graphs."
                  "UI graphs were not created. Try Create again after refreshing.")]
     {:ok false :committed false :reason reason :http-status status}))
 

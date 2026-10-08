@@ -357,7 +357,7 @@ Collects only the selected [[file:glossary.org::#term/reachable-graph][reachable
 :CUSTOM_ID: editor/export-current
 :FILE: src/graphden/editor/components.clj
 :LINE: 93
-:MINS: 1.6
+:MINS: 1.9
 :END:
 
 Reads the current user's authoritative configuration preference and exports a bounded JSON plan for one component. It never evaluates selected code to discover entry UUIDs. Source and policy use one snapshot; fresh checking cannot erase cached secret metadata. The editor host still owns callbacks, search, navigation and the validated DOM contract.

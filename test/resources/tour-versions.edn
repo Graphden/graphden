@@ -4,7 +4,7 @@
 ;; not — bump `:version` (readers who finished the lesson are told to re-read)
 ;; or, for a cosmetic edit, refresh this file — and when a lesson's version is
 ;; not the one recorded here (refresh after every bump). See the fns.edn header.
-{"ai-clients-and-api-tokens" {:version 1, :steps "da53127bc73e3ef475ee12b965b95fb680ca9412"}
+{"ai-clients-and-api-tokens" {:version 2, :steps "80e107f421297613cc29cb30b0c4eb950e9065f9"}
  "apps" {:version 2, :steps "c4365c3f00dc28ea233ba70c2d8f4413f28c01b0"}
  "asset-overrides" {:version 2, :steps "d8d7d29a089b3300a929417f1d3490a8fda65ef0"}
  "branches" {:version 3, :steps "90d46a43c26c026b58471c97d05dd20c20a79587"}

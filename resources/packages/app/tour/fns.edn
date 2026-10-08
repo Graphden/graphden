@@ -3131,7 +3131,7 @@
             {:id "42"
              :slug "ai-clients-and-api-tokens"
              :chapter "Your organization"
-             :version 1
+             :version 2
              :in-place true
              :requires "api-tokens"
              :title "AI clients and API tokens: the graph over /mcp"

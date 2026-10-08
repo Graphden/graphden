@@ -240,22 +240,7 @@ function renderMiRow(line, levelInfo, idx, ctx) {
     span.style.position = 'relative';
     bindFullNameHover(span, span, f.name);
     const miClearPreview = () => { onPreviewLeave(); clearPreview(nodeId); restoreStyles(); };
-    if (rootAffordancesVisible && lineFnEntity) {
-    // graph-first-exception: selected canvas controls attach to in-page overlay identity.
-    // Delegate to the single Inspector Run owner.
-    const run = document.createElement('button');
-    run.type = 'button';
-    run.className = 'fn-run-trigger';
-    run.textContent = '▶ Run';
-    run.setAttribute('aria-label', 'Run ' + (lineFnEntity.name || 'this function'));
-    run.addEventListener('pointerdown', event => event.stopPropagation());
-    run.addEventListener('click', event => {
-      event.stopPropagation();
-      showExecutePopover(lineFnEntity, run);
-    });
-    line.appendChild(run);
-  }
-  const cardFnEntity = lookups?.fnMap?.get(ctx.originalFnId) || null;
+    const cardFnEntity = lookups?.fnMap?.get(ctx.originalFnId) || null;
     const miEditable = levelInfo.depth === 1
       && typeof isAuthenticated === 'function' && isAuthenticated()
       && implementationFnIds?.has(ctx.originalFnId);
@@ -417,6 +402,21 @@ function renderSingleFnRow(line, levelInfo, ctx) {
   }
   const lineClearPreview = () => { onPreviewLeave(); clearPreview(nodeId); restoreStyles(); };
   const lineFnEntity = lookups?.fnMap?.get(lineFn.fnId) || null;
+  if (rootAffordancesVisible && lineFnEntity) {
+    // graph-first-exception: selected canvas controls attach to in-page overlay identity.
+    // Delegate to the single Inspector Run owner.
+    const run = document.createElement('button');
+    run.type = 'button';
+    run.className = 'fn-run-trigger';
+    run.textContent = '▶ Run';
+    run.setAttribute('aria-label', 'Run ' + (lineFnEntity.name || 'this function'));
+    run.addEventListener('pointerdown', event => event.stopPropagation());
+    run.addEventListener('click', event => {
+      event.stopPropagation();
+      showExecutePopover(lineFnEntity, run);
+    });
+    line.appendChild(run);
+  }
   // Secret fns wear the same 🔒 the tree rows use — on canvas the only
   // tell used to be the parent name "secret-leaf". The marker also
   // explains the model: the graph stores the VAULT PATH, never the value.

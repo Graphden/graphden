@@ -28,6 +28,20 @@ async function tokens(page) {
   page.removeAllListeners('console');
   let errors = 0;
   page.on('pageerror', () => { errors++; });
+  page.on('response', async response => {
+    const path = new URL(response.url()).pathname;
+    if (!['/auth/me', '/api/execute'].includes(path)
+      || !response.request().headers().authorization?.startsWith('Bearer ')) return;
+    const body = await response.json().catch(() => null);
+    const verdict = await page.evaluate(accountId => ({
+      accountMatches: !!accountId && accountId === _tourState?.principal?.accountId,
+      selectedReadable: !!selectedFnId && !!lookups?.fnMap?.has(selectedFnId),
+    }), body?.account?.id || null).catch(() => ({accountMatches: false, selectedReadable: false}));
+    console.log(JSON.stringify({diagnostic: 'token-access-probe',
+      stage: path === '/auth/me' ? 'authenticate' : 'execute', status: response.status(),
+      error: body?.error === 'unauthenticated' ? 'unauthenticated'
+        : body?.error === 'token-scope' ? 'token-scope' : 'other', ...verdict}));
+  });
   page.on('dialog', dialog => { void dialog.accept(); });
   let finished = false;
   try {
@@ -77,6 +91,7 @@ async function tokens(page) {
       assert(await page.locator('#gd-acct-toks [data-token-id="' + entry.id + '"]').isVisible(),
         'exact token is visible in the masked Account list');
       await page.locator('#gd-acct-tok-reveal [data-token-check]').click();
+      console.log('CHECK token access verification requested');
       await waitTourTitle(page, 'Revoke and verify');
       await page.locator('#gd-acct-toks [data-revoke-token="' + entry.id + '"]').click();
       await waitTourTitle(page, 'Continue with your client');

@@ -1745,6 +1745,16 @@ async function setFnDescription(page, fnName, text) {
     return fn?.name === name ? fn.id : null;
   }, fnName);
   assert(fnId, 'description edit targets the selected ' + fnName + ' UUID');
+  // Exercise the dark-form regression explicitly; a fresh context starts
+  // in the product's light theme and has no preference fixture.
+  if (!await page.evaluate(() => document.body.classList.contains('theme-dark'))) {
+    await page.evaluate(() => gdShellSurface('settings'));
+    await page.locator('#gd-set-theme').click();
+    await page.waitForFunction(() => document.body.classList.contains('theme-dark'),
+      null, {timeout: 15000});
+    await page.evaluate(() => gdShellSurface('build'));
+  }
+
   // ⋯ → i TOGGLES a pinned description tooltip, and only a pinned one grows
   // the ✎ Edit button — so this is a sequence with state, not three
   // independent clicks. Drive it as one attempt and retry the whole thing:

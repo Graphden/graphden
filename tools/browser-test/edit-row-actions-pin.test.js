@@ -22,6 +22,7 @@ const {assert, api, getEntities, newContext, deleteFnByName} =
 
 const RUN_ID = '-' + process.pid + '-' + Date.now().toString(36);
 const PROBE_FN = 'row-actions-pin-probe' + RUN_ID;
+const PROBE_DESC = 'Description text long enough to wrap across several lines. '.repeat(3).trim();
 
 
 async function cleanup(page) {
@@ -52,7 +53,8 @@ async function popoverVisible(page) {
     const constFn = ents.fns.find((f) => f.name === 'const');
     assert(constFn, ':const baseline resolved');
     await api(page, 'POST', '/api/entities/fn',
-              'name=' + PROBE_FN + '&parent-ids=' + constFn.id);
+              'name=' + PROBE_FN + '&parent-ids=' + constFn.id
+              + '&description=' + encodeURIComponent(PROBE_DESC));
 
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')
                     + '/#' + PROBE_FN);
@@ -164,6 +166,18 @@ async function popoverVisible(page) {
     await edit.focus();
     await edit.press('Enter');
     await page.fill('.description-tooltip-textarea', 'draft to discard');
+    await page.setViewportSize({width: 390, height: 844});
+    const tooltipInViewport = () => {
+      const r = document.querySelector('.description-tooltip').getBoundingClientRect();
+      return r.left >= 11 && r.right <= innerWidth - 11
+        && r.top >= 11 && r.bottom <= innerHeight - 11;
+    };
+    await page.waitForFunction(tooltipInViewport);
+    assert(await page.evaluate(tooltipInViewport),
+           'resizing to 390px keeps the description editor inside the viewport');
+    await page.setViewportSize({width: 1400, height: 900});
+    await page.waitForFunction(() => document.querySelector(
+      '.description-tooltip').getBoundingClientRect().left > 390);
     await description.click();
     assert(await page.locator('.description-tooltip-textarea').inputValue() === 'draft to discard',
            'activating Description while editing retains the pinned draft');
@@ -195,13 +209,17 @@ async function popoverVisible(page) {
     await page.waitForFunction(() => !document.querySelector(
       '.description-tooltip-btn-secondary').disabled);
     await page.unroute('**/api/entities/fn/*');
+    await page.setViewportSize({width: 390, height: 844});
+    await page.waitForFunction(tooltipInViewport);
     await page.keyboard.press('Escape');
     assert(await page.locator('.description-tooltip-textarea').count() === 0,
            'first Escape discards the description draft');
-    assert(await page.locator('.description-tooltip-body').textContent() === '(no description)',
+    assert(await page.locator('.description-tooltip-body').textContent() === PROBE_DESC,
            'Escape restores the saved description');
     assert(await edit.evaluate((el) => el === document.activeElement),
            'Escape returns focus to Edit after replacing the textarea');
+    assert(await page.evaluate(tooltipInViewport),
+           'read mode after cancellation retains viewport margins at 390px');
     assert(await popoverVisible(page), 'description Escape leaves its parent row menu open');
     assert(await page.locator('#gd-tour-pop .gd-tour-title').textContent() === tourTitle,
            'cancelling the draft leaves the running tour on the same step');

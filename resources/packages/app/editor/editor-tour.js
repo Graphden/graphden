@@ -415,6 +415,52 @@ function _tourAdvance(skipped) {
   }
 }
 
+// Stage the new identity before APPLY so a successful server write followed
+// by a lost response still remains eligible for lesson cleanup. Never infer
+// the new row by name: an existing function may already have that spelling.
+function _tourTrackInheritanceVariation(preview) {
+  const step = _tourStep();
+  const proposed = preview?.proposed;
+  if (!preview?.allowed || preview.request?.action !== 'variation'
+      || step?.creates?.type !== 'fn' || proposed?.name !== step.creates.name
+      || !proposed.id || !Object.hasOwn(proposed, 'namespace-id')) return;
+  if (_tourState.created.some(created => created.id === proposed.id)) return;
+  _tourState.created.push({ type: 'fn', id: proposed.id, name: proposed.name,
+    'namespace-id': proposed['namespace-id'], 'source-fn-id': preview.request['source-fn-id'] });
+  _tourState.activeBranch = _tourSessionBranch();
+  _tourSaveState();
+}
+
+// Reparenting removes the original source from the new canvas closure. Read
+// it by canonical UUID without polluting the editor cache; this lesson proof
+// belongs only to its creation and branch, and disappears with the tour state.
+async function _tourLoadInheritanceCheckSource(preview) {
+  const state = _tourState;
+  const step = _tourStep();
+  if (!state || step?.check?.kind !== 'fn-sibling-variation') return;
+  const created = state.created.find(row => row.id === preview.proposed?.id);
+  if (!created?.['source-fn-id'] || created['source-fn-id'] !== preview.source?.id) return;
+  const branch = _tourSessionBranch();
+  if (state.activeBranch !== branch) return;
+  const response = await authFetch(API.api_graph_entities
+    + '?scope=subtree&root-id=' + encodeURIComponent(created['source-fn-id']));
+  if (!response.ok) throw new Error('Source verification is unavailable.');
+  const payload = await response.json();
+  const source = Array.isArray(payload?.fns)
+    && payload.fns.find(row => row.id === created['source-fn-id']);
+  if (!source || source.name !== step.check.source
+      || source['namespace-id'] !== preview.source?.['namespace-id']
+      || !Array.isArray(source['parent-ids'])
+      || !source['parent-ids'].every(id => typeof id === 'string' && id.length > 0)) {
+    throw new Error('Source verification returned an unexpected identity or parents.');
+  }
+  if (_tourState !== state || _tourStep() !== step || _tourSessionBranch() !== branch) return;
+  created['verified-source'] = {id: source.id, name: source.name,
+    'namespace-id': source['namespace-id'], 'parent-ids': source['parent-ids']};
+  created['verified-source-branch'] = branch;
+  _tourSaveState();
+}
+
 // Step back one. The checks are stateless predicates over the graph, so a
 // re-entered step re-evaluates on the next tick; nothing is rolled back.
 function _tourBack() {

@@ -1,0 +1,114 @@
+{:namespace "app.editor"
+ :description "Inheritance intent partial: authoritative preview, UUID navigation and explicit mutation scope."
+ :fns
+ [{:name :_inheritance-query-command
+   :parent :assert-some
+   :args {:value {:parent :query-param
+                  :args {:request {:as :request} :param-name "command"}}}}
+  {:name :_inheritance-intent-command
+   :parent :parse-inheritance-command
+   :args {:body {:parent :parse-json
+                 :args {:string :_inheritance-query-command :keywordize true}}}}
+  {:name :_inheritance-intent-preview
+   :parent :preview-inheritance
+   :args {:command :_inheritance-intent-command :request {:as :request}}}
+  {:name :_inheritance-parent-edge?
+   :parent :equal?
+   :args {:a {:parent :get :args {:coll :_inheritance-intent-command :key {:value :kind} :default nil}}
+          :b "parent-edge"}}
+  {:name :_inheritance-source-id
+   :parent :get
+   :args {:coll :_inheritance-intent-command :key {:value :source-fn-id} :default nil}}
+  {:name :_inheritance-allowed?
+   :parent :get
+   :args {:coll :_inheritance-intent-preview :key {:value :allowed} :default false}}
+  {:name :_inheritance-reason
+   :parent :get
+   :args {:coll :_inheritance-intent-preview :key {:value :reason} :default ""}}
+  {:name :_inheritance-target
+   :parent :get
+   :args {:coll :_inheritance-intent-preview :key {:value :target} :default {:value {}}}}
+  {:name :_inheritance-target-name
+   :parent :coalesce
+   :args {:value {:parent :get
+                  :args {:coll :_inheritance-target :key {:value :qualified-name} :default nil}}
+          :default {:parent :coalesce
+                    :args {:value {:parent :get
+                                   :args {:coll :_inheritance-target :key {:value :name} :default nil}}
+                           :default "this function"}}}}
+  {:name :_inheritance-variation-label
+   :parent :str
+   :args {:parts ["Create variation for " :_inheritance-target-name]}}
+  {:name :_inheritance-preview-json
+   :parent :to-json-string
+   :args {:data :_inheritance-intent-preview}}
+  {:name :_inheritance-proposed-name
+   :parent :get
+   :args {:coll {:parent :get
+                 :args {:coll :_inheritance-intent-preview :key {:value :proposed} :default {:value {}}}}
+          :key {:value :name} :default ""}}
+  {:name :_inheritance-name-input
+   :parent :hiccup
+   :args {:tag "input"
+          :attrs {:parent :assoc
+                  :args {:map {:value {:type "text" :data-variation-name "true"
+                                       :aria-label "Variation name" :placeholder "Variation name"}}
+                         :key {:value :value} :value :_inheritance-proposed-name}}
+          :children {:value []}}}
+  {:name :_inheritance-name-or-nil
+   :parent :if
+   :args {:test :_inheritance-allowed? :then :_inheritance-name-input :else nil}}
+  {:name :_inheritance-source-button
+   :parent :hiccup
+   :args {:tag "button"
+          :attrs {:parent :assoc
+                  :args {:map {:value {:type "button" :data-action "inheritance-source"}}
+                         :key {:value :data-fn-id} :value {:parent :to-str :args {:value :_inheritance-source-id}}}}
+          :children ["Go to source"]}}
+  {:name :_inheritance-variation-button
+   :parent :hiccup
+   :args {:tag "button"
+          :attrs {:parent :zipmap
+                  :args {:keys [{:value :type} {:value :data-action} {:value :disabled}
+                                {:value :aria-describedby}]
+                         :vals ["button" "inheritance-variation"
+                                {:parent :not :args {:value :_inheritance-allowed?}}
+                                "inheritance-intent-reason inheritance-intent-scope"]}}
+          :children [:_inheritance-variation-label]}}
+  {:name :_inheritance-ancestor-button
+   :parent :if
+   :args {:test :_inheritance-parent-edge?
+          :then {:parent :hiccup
+                 :args {:tag "button"
+                        :attrs {:value {:type "button" :data-action "inheritance-ancestors"}}
+                        :children ["Choose ancestor…"]}}
+          :else nil}}
+  {:name :_inheritance-scope
+   :parent :if
+   :args {:test :_inheritance-parent-edge?
+          :then "Changes this function for all its consumers in this branch. Preserves the source."
+          :else "Replaces this own reference. All consumers of its owner see the change. Preserves the source."}}
+  {:name :_inheritance-scope-node
+   :parent :hiccup
+   :args {:tag "p" :attrs {:value {:id "inheritance-intent-scope" :class "inheritance-intent-scope"}}
+          :children [:_inheritance-scope]}}
+  {:name :_inheritance-reason-node
+   :parent :hiccup
+   :args {:tag "p" :attrs {:value {:id "inheritance-intent-reason" :class "inheritance-intent-reason"}}
+          :children [:_inheritance-reason]}}
+  {:name :_inheritance-actions
+   :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "inheritance-intent-actions"}}
+          :children [:_inheritance-source-button :_inheritance-name-or-nil
+                     :_inheritance-variation-button :_inheritance-ancestor-button]}}
+  {:name :_inheritance-intent-view
+   :parent :hiccup
+   :args {:tag "div"
+          :attrs {:parent :assoc
+                  :args {:map {:value {:class "inheritance-intent"}}
+                         :key {:value :data-preview} :value :_inheritance-preview-json}}
+          :children [:_inheritance-actions :_inheritance-reason-node :_inheritance-scope-node]}}
+  {:name :_partial-inheritance-intent-handler
+   :lambda-params [:request]
+   :parent :html-ok-response
+   :args {:body {:parent :render-hiccup :args {:hiccup :_inheritance-intent-view}}}}]}

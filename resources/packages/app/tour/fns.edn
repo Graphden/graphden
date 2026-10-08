@@ -654,7 +654,7 @@
             {:id "07"
              :slug "optional-required-sealed"
              :chapter "Basics"
-             :version 3
+             :version 4
              :title "Optional, required and sealed"
              :reads "has the fns, and the whole optional / required / sealed matrix."
              :steps
@@ -722,9 +722,10 @@
                :body "string and start are not on this card at all — bound above, FINAL; nothing to fill. :end is here, but its [[+]] is a lock. Hover it: Sealed in tutorial-cut — descendants cannot bind this slot. The server refuses the write too. Click [[Next]]."
                :target ".placeholder-sealed[data-arg-name=\"end\"]"
                :check {:kind "manual"}}
-              {:title "Back to tutorial-cut"
-               :body "Type `tutorial-cut` in the Explorer filter and click its row — the seal is lifted where it was set."
-               :target "input[placeholder=\"Filter...\"]"
+              {:title "Go to the source"
+               :body "On the tutorial-cut ancestor row, click [[⋯]], [[Inheritance…]], then [[Go to source]]. This opens the exact source function — the seal is lifted where it was set."
+               :target ".node-overlay[data-fn-name=\"tutorial-cut-more\"] .ancestor-line[data-level=\"1\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-cut-more\"] .ancestor-line[data-level=\"1\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"inheritance-intent\"]" ".inheritance-intent-popover [data-action=\"inheritance-source\"]"]
                :check {:kind "selected" :name "tutorial-cut"}}
               {:title "Require it instead"
                :body "Click the [[🔒]] after end: untick [[Seal against descendants]], tick [[Require it here]], then [[Save]]. From tutorial-cut down, :end must be supplied — a one-way ratchet no descendant can loosen."
@@ -739,6 +740,37 @@
                :body "No lock: the child may bind :end again. And the [[+]] is no longer dimmed — required since tutorial-cut, a run without it would fail with missing-required-arg. Click [[Next]]."
                :target ".placeholder-binder[data-fn-name=\"tutorial-cut-more\"][data-arg-name=\"end\"]"
                :check {:kind "manual"}}
+              {:title "Seal the source again"
+               :body "On the tutorial-cut ancestor row: [[⋯]] → [[Inheritance…]] → [[Go to source]]. Tick [[Seal against descendants]] for :end and [[Save]]. Keep [[Require it here]] unchanged. This time we will preserve the source."
+               :target ".node-overlay[data-fn-name=\"tutorial-cut-more\"] .ancestor-line[data-level=\"1\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-cut-more\"] .ancestor-line[data-level=\"1\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"inheritance-intent\"]" ".inheritance-intent-popover [data-action=\"inheritance-source\"]" ".edge-label-overlay[data-arg-name=\"end\"] .seal-badge" ".arg-value-edit-popover"]
+               :check {:kind "binding-flag" :name "tutorial-cut" :slot "end" :field "terminal" :value true}}
+              {:title "Return to the child"
+               :body "Open `tutorial-cut-more`. :end is locked again, because its parent remains sealed."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "tutorial-cut-more"}}
+              {:title "Create a variation for the child"
+               :body "On the tutorial-cut ancestor row: [[⋯]] → [[Inheritance…]]. Set [[Variation name]] to `_tutorial-cut-local`, then [[Create variation for tutorial-cut-more]]. This changes tutorial-cut-more for all its consumers in this branch; tutorial-cut and its other children stay unchanged. The new source opens."
+               :target ".node-overlay[data-fn-name=\"tutorial-cut-more\"] .ancestor-line[data-level=\"1\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-cut-more\"] .ancestor-line[data-level=\"1\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"inheritance-intent\"]" ".inheritance-intent-popover"]
+               :check {:kind "fn-sibling-variation" :name "tutorial-cut-more" :source "tutorial-cut" :variation "_tutorial-cut-local"}
+               :creates {:type "fn" :name "_tutorial-cut-local"}}
+              {:title "Lift only the copied seal"
+               :body "On `_tutorial-cut-local`, open the [[🔒]] for :end. Untick only [[Seal against descendants]], then [[Save]]. Leave requiredness unchanged. A copied own seal is yours to lift here; restrictions inherited above this source stay closed."
+               :target ".edge-label-overlay[data-arg-name=\"end\"] .seal-badge"
+               :check {:kind "binding-flag" :name "_tutorial-cut-local" :slot "end" :field "terminal" :value false}}
+              {:title "Read the changed child"
+               :body "Open `tutorial-cut-more`: :end has a [[+]] again. It is still required; we lifted only the copied own seal. The child's own composition was preserved."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "tutorial-cut-more"}}
+              {:title "Inspect ancestor choices"
+               :body "On `_tutorial-cut-local`'s ancestor row, [[⋯]] → [[Inheritance…]] → [[Choose ancestor…]]. These are recommended ancestors, checked by the server. They are not every compatible function. Read the choices, then [[Cancel]] to keep this lesson's parent. Existing parent editing remains available."
+               :target ".node-overlay[data-fn-name=\"tutorial-cut-more\"] .ancestor-line[data-level=\"1\"] button.more-actions-trigger"
+               :check {:kind "manual"}}
+              {:title "The original stays sealed"
+               :body "Open `tutorial-cut` in the Explorer: its own seal is still closed. Editing the variation did not change the original source."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "tutorial-cut"}}
               {:title "Optional, required, sealed"
                :body "Optional is the declaration; required-here tightens it one way; a seal keeps a free slot out of descendants' hands; a value does that by itself. One lock says all of it — hover it anywhere. Click [[Finish]] to clean up or keep what you made."
                :target nil

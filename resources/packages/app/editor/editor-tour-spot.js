@@ -74,6 +74,25 @@ function _tourStartPositioning() {
     }
     schedule();
   };
+  const followNativeMotion = (event) => {
+    const animation = event.detail;
+    const target = animation?.effect?.target;
+    if (!target || ownLayer(target)) return;
+    const step = _tourStep();
+    const selectors = [step?.target, ...(step?.targets || [])].filter(Boolean);
+    if (!selectors.some((selector) => [...document.querySelectorAll(selector)]
+      .some((el) => el === target || target.contains(el)))) return;
+    const timing = animation.effect.getComputedTiming();
+    if (!timing || !Number.isFinite(timing.endTime)) return;
+    // Native owners expose cancellation and playState, so finite motion can
+    // run longer than the legacy CSS event budget without losing alignment.
+    motions.set(animation, Number.POSITIVE_INFINITY);
+    // Completion/cancellation schedules the final geometry, including zero
+    // duration reduced motion. An aborted observer cannot enqueue another frame.
+    animation.finished.then(schedule, schedule);
+    schedule();
+  };
+  document.addEventListener('gd-geometry-animation', followNativeMotion, {...options, capture: true});
   document.addEventListener('transitionrun', followMotion, {...options, capture: true});
   document.addEventListener('animationstart', followMotion, {...options, capture: true});
   const stopViewport = typeof onViewportChanged === 'function' ? onViewportChanged(schedule) : null;

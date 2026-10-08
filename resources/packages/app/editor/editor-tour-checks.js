@@ -98,6 +98,23 @@ function _tourCheckPasses(check) {
           return !!p && p.name === check.parent;
         });
       }
+      case 'fn-sibling-variation': {
+        const target = _tourFindFn(check.name);
+        const parentIds = target?.['parent-ids'] || [];
+        if (parentIds.length !== 1) return false;
+        const copy = lookups?.fnMap?.get(parentIds[0]);
+        const created = typeof _tourState !== 'undefined'
+          && _tourState?.created?.find(row => row.id === parentIds[0]);
+        const verified = created?.['verified-source'];
+        const source = _tourFindFn(check.source) || (verified?.id === created?.['source-fn-id']
+          && verified?.name === check.source
+          && created?.['verified-source-branch'] === _tourSessionBranch() ? verified : null);
+        if (!source || parentIds[0] === source.id) return false;
+        return !!copy && !!created && copy.name === check.variation
+          && copy['namespace-id'] === target['namespace-id']
+          && created['namespace-id'] === copy['namespace-id']
+          && JSON.stringify(copy['parent-ids'] || []) === JSON.stringify(source['parent-ids'] || []);
+      }
       case 'binding-bound': {
         // The slot row belongs to the PARENT (slots are inherited);
         // the binding row belongs to the checked fn — so walk the fn's
@@ -114,6 +131,19 @@ function _tourCheckPasses(check) {
           // the content lives in binding-list-item rows.
           const items = lookups.itemsByBinding?.get(b.id) || [];
           return items.length > 0;
+        });
+      }
+      case 'binding-flag': {
+        if (typeof check.value !== 'boolean'
+            || !['terminal', 'list-closed', 'required', 'list-append'].includes(check.field)) return false;
+        const created = typeof _tourState !== 'undefined'
+          && _tourState?.created?.find(row => row.id && row.name === check.name);
+        const fn = created ? lookups?.fnMap?.get(created.id) : _tourFindFn(check.name);
+        if (!fn || !lookups?.bindingsByFn?.has(fn.id)) return false;
+        return lookups.bindingsByFn.get(fn.id).some(binding => {
+          const slot = lookups.slotMap?.get(binding['slot-id']);
+          return binding['fn-id'] === fn.id && slot?.name === check.slot
+            && Boolean(binding[check.field]) === check.value;
         });
       }
       case 'selected': {

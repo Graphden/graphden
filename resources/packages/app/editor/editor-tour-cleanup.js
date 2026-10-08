@@ -51,7 +51,8 @@ async function _tourSurvivors(created) {
       // a row missing from this report is never offered for deletion.
       case 'fn':
         try {
-          if (_tourFindFn(c.name) || await _tourFnIdByName(c.name)) out.push(c);
+          if (c.id ? await _tourFnIdForCreation(c)
+            : _tourFindFn(c.name) || await _tourFnIdByName(c.name)) out.push(c);
         } catch (_) { out.push(c); }
         break;
       case 'ns':
@@ -127,6 +128,33 @@ async function _tourFnIdByName(name) {
   return payload.fns.find((f) => f.name === name)?.id || null;
 }
 
+async function _tourFnIdForCreation(created) {
+  if (!created.id) return _tourFnIdByName(created.name);
+  const response = await authFetch(API.api_graph_entities
+    + '?scope=subtree&root-id=' + encodeURIComponent(created.id));
+  if (!response.ok) throw new Error('Function lookup failed');
+  const payload = await response.json();
+  if (!Array.isArray(payload.fns)) throw new Error('Invalid function lookup response');
+  const fn = payload.fns.find(row => row.id === created.id);
+  if (!fn) return null;
+  if (fn.name !== created.name || fn['namespace-id'] !== created['namespace-id']) {
+    throw new Error('Created function identity changed; keep it for manual review.');
+  }
+  return fn.id;
+}
+
+// Clear only the selected identity whose DELETE actually succeeded. A failed
+// lookup/delete or another surviving selection must keep its graph and context.
+async function _tourDeleteFn(id) {
+  try {
+    const response = await authMutate('DELETE', API.api_entities_type_id('fn', id));
+    if (response?.ok === false) return false;
+    if (response?.ok === true && typeof selectedFnId !== 'undefined'
+        && selectedFnId === id && typeof gdClearSelection === 'function') gdClearSelection();
+    return true;
+  } catch (_) { return false; }
+}
+
 // NEWEST FIRST. A lesson that builds a chain creates the target before the fn
 // that points at it (lesson 12: the cell, then the swap that writes to it),
 // and the server refuses to delete a fn something still references — correctly.
@@ -140,10 +168,9 @@ async function _tourDeleteFns(created) {
     const failed = [];
     for (const c of pending) {
       try {
-        const id = await _tourFnIdByName(c.name);
+        const id = await _tourFnIdForCreation(c);
         if (!id) continue;
-        if (!await _tourDeleted(
-          () => authMutate('DELETE', API.api_entities_type_id('fn', id)))) failed.push(c);
+        if (!await _tourDeleteFn(id)) failed.push(c);
       } catch (_) { failed.push(c); }
     }
     if (pass > 0 && failed.length === pending.length) return failed;
@@ -228,7 +255,7 @@ async function _tourDeleteNamespaces(created) {
         if (f['namespace-id'] !== ns.id) continue;
         // Best-effort: another row may still reference it, and the namespace
         // delete below is what reports the outcome either way.
-        await _tourDeleted(() => authMutate('DELETE', API.api_entities_type_id('fn', f.id)));
+        await _tourDeleteFn(f.id);
       }
     } catch (_) { /* best-effort — the delete below reports the truth */ }
     const ok = await _tourDeleted(

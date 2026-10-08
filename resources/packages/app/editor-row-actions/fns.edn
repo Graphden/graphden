@@ -245,6 +245,25 @@
           :then :_partial-row-actions-peek-button
           :else {:value nil}}}
 
+  {:name :_partial-row-actions-inheritance-command
+   :parent :query-param
+   :args {:request {:as :request} :param-name "inheritance-command"}}
+
+  {:name :_partial-row-actions-inheritance-button
+   :parent :hiccup
+   :args {:tag "button"
+          :attrs {:parent :assoc
+                  :args {:map {:value {:type "button" :class "action-icon"
+                                       :data-action "inheritance-intent" :aria-label "Inheritance…"}}
+                         :key {:value :data-inheritance-command}
+                         :value :_partial-row-actions-inheritance-command}}
+          :children ["↳"]}}
+
+  {:name :_partial-row-actions-inheritance-button-or-nil
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_partial-row-actions-inheritance-command}}
+          :then :_partial-row-actions-inheritance-button :else nil}}
+
   ;; --- Toolbar assembly ---
 
   {:name :_partial-row-actions-col-header-children-raw
@@ -253,7 +272,8 @@
    :args {:items [:_partial-row-actions-ns-button
                   :_partial-row-actions-i-button
                   :_partial-row-actions-open-button-or-nil
-                  :_partial-row-actions-peek-button-or-nil]}}
+                  :_partial-row-actions-peek-button-or-nil
+                  :_partial-row-actions-inheritance-button-or-nil]}}
 
   {:name :_partial-row-actions-col-header-children
    :description "Non-nil children — `↗` drops out when the caller requested `show-open=false`."
@@ -328,7 +348,8 @@
                   :_partial-row-actions-open-button-or-nil
                   :_partial-row-actions-peek-button-or-nil
                   :_partial-row-actions-remove-mi-button-or-nil
-                  :_partial-row-actions-add-mi-button-or-nil]}}
+                  :_partial-row-actions-add-mi-button-or-nil
+                  :_partial-row-actions-inheritance-button-or-nil]}}
 
   {:name :_partial-row-actions-cell-children
    :parent :filter
@@ -524,7 +545,8 @@
                   :_partial-row-actions-seq-insert-button-or-nil
                   :_partial-row-actions-remove-use-site-button-or-nil
                   :_partial-row-actions-change-use-site-button-or-nil
-                  :_partial-row-actions-extend-use-site-button-or-nil]}}
+                  :_partial-row-actions-extend-use-site-button-or-nil
+                  :_partial-row-actions-inheritance-button-or-nil]}}
 
   {:name :_partial-row-actions-use-site-children
    :parent :filter

@@ -4,15 +4,23 @@
     [cheshire.core :as json]
     [clojure.edn :as edn]
     [clojure.java.shell :as sh]
-    [clojure.test :refer [deftest is testing]]
+    [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.browser-plan :as plan]
+    [graphden.executor.browser-snapshot :as snapshot]
+    [graphden.executor.compile-runtime :as runtime]
+    [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
+    [graphden.executor.test-setup :as setup]
     [graphden.packages.owned :as owned]
     [graphden.packages.records.ids :as ids]
+    [graphden.storage.protocol.core :as sp]
     [graphden.test-infra.account-menu-cases :as account-menu]
     [graphden.test-infra.browser-picker-cases :as picker]
     [graphden.types.core :as types]
     [graphden.types.core.shapes :as shapes]))
+
+
+(use-fixtures :once (setup/create-container-fixture) exec/with-isolated-rich-types)
 
 
 ;; Build tooling deliberately stays off the server's production classpath.
@@ -121,3 +129,34 @@
           (doseq [[expected actual] (map vector cases (json/parse-string-strict out true))]
             (is (nil? (:error actual)) (:error actual))
             (is (= (:expected expected) (some-> (:value actual) plan/decode-value)))))))))
+
+
+(deftest stored-picker-disabled-state-exports-with-checked-source
+  (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
+            registry/*per-org-rich-override* (atom {})
+            types/*type-aliases-override* (atom {})
+            types/*alias-view* nil
+            runtime/*per-org-aliases-override* (atom {})]
+    (let [{:keys [storage ctx]} (setup/bootstrap-crud-graph-from-golden!)]
+      (try
+        (let [captured (snapshot/read-snapshot storage)
+              policy (tool 'check-source! (tool 'source-definitions) captured storage)
+              row-id (ids/fn-id "app.ui-fn-picker" :picker-row)
+              value-id (ids/fn-id "app.ui-fn-picker" :_picker-row-disabled-value)
+              exported (snapshot/export-snapshot captured {} {:view row-id} policy)
+              cases (filterv #(= :picker-row (:entry %)) picker/cases)
+              request {:plan exported
+                       :cases (mapv (fn [{:keys [inputs]}]
+                                      {:entry "view"
+                                       :inputs {"row" (plan/encode-value (:row inputs))}}) cases)}
+              {:keys [exit out err]} (sh/sh "node" "tools/runtime-test/browser-plan-runner.js"
+                                            :in (json/generate-string request))]
+          (is (= :plain (get-in policy [:classes value-id])))
+          (is (some #(= (str value-id) (:id %)) (:functions exported)))
+          (is (zero? exit) err)
+          (when (zero? exit)
+            (doseq [[{:keys [inputs expected]} actual] (map vector cases (json/parse-string-strict out true))]
+              (is (nil? (:error actual)) (:error actual))
+              (is (= expected (exec/execute ctx row-id inputs)
+                     (some-> (:value actual) plan/decode-value)) (pr-str inputs)))))
+        (finally (sp/close storage))))))

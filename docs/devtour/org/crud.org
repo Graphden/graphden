@@ -79,26 +79,26 @@ Checks whether a proposed mutation must be rejected before storage is changed. C
 :PROPERTIES:
 :CUSTOM_ID: crud/apply-create-record-type-body
 :FILE: src/graphden/crud/entities/record_type.clj
-:LINE: 429
+:LINE: 437
 :MINS: 0.9
 :END:
 
 Creates the function row, [[file:glossary.org::#term/slot][slot]] rows, and function-slot links for a record type under the semantic writer guard in one database transaction. Cache invalidation runs after commit; a failed transaction clears the legacy compensation journal.
 
-- source :: [[file:../../../src/graphden/crud/entities/record_type.clj::(defn apply-create-record-type-body][src/graphden/crud/entities/record_type.clj:429]]
+- source :: [[file:../../../src/graphden/crud/entities/record_type.clj::(defn apply-create-record-type-body][src/graphden/crud/entities/record_type.clj:437]]
 - same file :: [[file:crud.org::#crud/apply-create-rollback][apply-create-rollback]]
 
 * 7. apply-create-rollback
 :PROPERTIES:
 :CUSTOM_ID: crud/apply-create-rollback
 :FILE: src/graphden/crud/entities/record_type.clj
-:LINE: 116
+:LINE: 118
 :MINS: 1.8
 :END:
 
 On failure, traverses the creation journal backward and attempts to delete each created row for storage implementations without database transactions. PostgreSQL failures have already rolled back and cleared the journal, so replay cannot damage restored rows.
 
-- source :: [[file:../../../src/graphden/crud/entities/record_type.clj::(defn apply-create-rollback][src/graphden/crud/entities/record_type.clj:116]]
+- source :: [[file:../../../src/graphden/crud/entities/record_type.clj::(defn apply-create-rollback][src/graphden/crud/entities/record_type.clj:118]]
 - same file :: [[file:crud.org::#crud/apply-create-record-type-body][apply-create-record-type-body]]
 
 * 8. apply-create-core

@@ -56,7 +56,7 @@
                       (deliver entered true)
                       (deref release 15000 :timeout))))]
     (try
-      (is (= true (deref entered 10000 :timeout)))
+      (is (true? (deref entered 10000 :timeout)))
       (let [applying (future (apply!))]
         (try
           (is (pos? (await-waiter storage)))

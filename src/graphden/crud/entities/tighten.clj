@@ -34,6 +34,8 @@
     [graphden.storage.tx :as tx]
     [graphden.tenancy.context :as tenancy]
     [graphden.types.core :as types]
+    [graphden.versioning.branch-local :as branch-local]
+    [graphden.versioning.storage.core :as versioned]
     [graphden.versioning.storage.resolution :as resolution]))
 
 
@@ -198,21 +200,25 @@
   ([ctx storage binding-id delta]
    (let [pooled? (some? (tx/datasource storage))]
      (when pooled? (tx/assert-owns-commit! storage))
-     (try
-       (writer/call-with-write
-         storage :graph
-         (fn [bound]
-           (binding [resolution/*merges-memo* (atom {})]
-             (let [binding-row (sp/read-entity bound :binding binding-id)
-                   result (if-let [reason (pkg-guard/write-rejection bound :binding binding-row)]
-                            {:status :rejected :reason reason}
-                            (tighten-fn-type! (when ctx (assoc ctx :storage bound))
-                                              bound binding-id delta))]
-               (if (and pooled? (not= 200 (:status result)))
-                 (throw (ex-info "Tightening rejected" {::rejection result}))
-                 result)))))
-       (catch clojure.lang.ExceptionInfo e
-         (if-let [result (::rejection (ex-data e))] result (throw e)))))))
+     (let [result (try
+                    (writer/call-with-write
+                      storage :graph
+                      (fn [bound]
+                        (resolution/call-with-fresh-memos
+                          (fn []
+                            (let [binding-row (sp/read-entity bound :binding binding-id)
+                                  result (if-let [reason (pkg-guard/write-rejection bound :binding binding-row)]
+                                           {:status :rejected :reason reason}
+                                           (tighten-fn-type! (when ctx (assoc ctx :storage bound))
+                                                             bound binding-id delta))]
+                              (if (and pooled? (not= 200 (:status result)))
+                                (throw (ex-info "Tightening rejected" {::rejection result}))
+                                result))))))
+                    (catch clojure.lang.ExceptionInfo e
+                      (if-let [result (::rejection (ex-data e))] result (throw e))))]
+       (resolution/forget-read-memos!)
+       (branch-local/invalidate! (versioned/unwrap storage))
+       result))))
 
 
 (defn tighten-effects-impl!

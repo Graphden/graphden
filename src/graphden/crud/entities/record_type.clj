@@ -17,6 +17,8 @@
     [graphden.storage.graph-writer :as writer]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.tx :as tx]
+    [graphden.versioning.branch-local :as branch-local]
+    [graphden.versioning.storage.core :as versioned]
     [graphden.versioning.storage.resolution :as resolution]))
 
 
@@ -410,8 +412,9 @@
                  (writer/call-with-write
                    storage :graph
                    (fn [bound]
-                     (binding [resolution/*merges-memo* (atom {})]
-                       (apply! parsed journal (assoc ctx :storage bound)))))
+                     (resolution/call-with-fresh-memos
+                       (fn []
+                         (apply! parsed journal (assoc ctx :storage bound))))))
                  (catch Exception e
                    ;; The graph's on-throw still runs. Replaying deletes/creates
                    ;; after SQL rollback would corrupt the restored pre-image.
@@ -421,8 +424,13 @@
         seed (if (= entity-type :fn-slot) {:fn-id fn-id} {:id fn-id})]
     ;; Once SQL committed, an invalidation failure must not replay writes.
     (when pooled? (reset! journal []))
-    (inval/invalidate! ctx storage entity-type seed)
-    (inval/notify-after-write! ctx storage entity-type :write seed)
+    (resolution/forget-read-memos!)
+    (branch-local/invalidate! (versioned/unwrap storage))
+    (resolution/call-with-fresh-memos
+      (fn []
+        (let [seed (assoc seed :org-id (:org-id (sp/read-entity storage :fn fn-id)))]
+          (inval/invalidate! ctx storage entity-type seed)
+          (inval/notify-after-write! ctx storage entity-type :write seed))))
     result))
 
 

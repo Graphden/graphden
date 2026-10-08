@@ -475,17 +475,20 @@
   (let [storage (request/require-storage ctx)
         pooled? (some? (tx/datasource storage))]
     (when pooled? (tx/assert-owns-commit! storage))
-    (try
-      (writer/call-with-write
-        storage :graph
-        (fn [bound]
-          (binding [resolution/*merges-memo* (atom {})]
-            (let [result (apply! bound (assoc ctx :storage bound))]
-              (if (and pooled? (:error result))
-                (throw (ex-info "Sequence write rejected" {::rejection result}))
-                result)))))
-      (catch clojure.lang.ExceptionInfo e
-        (if-let [result (::rejection (ex-data e))] result (throw e))))))
+    (let [result (try
+                   (writer/call-with-write
+                     storage :graph
+                     (fn [bound]
+                       (resolution/call-with-fresh-memos
+                         (fn []
+                           (let [result (apply! bound (assoc ctx :storage bound))]
+                             (if (and pooled? (:error result))
+                               (throw (ex-info "Sequence write rejected" {::rejection result}))
+                               result))))))
+                   (catch clojure.lang.ExceptionInfo e
+                     (if-let [result (::rejection (ex-data e))] result (throw e))))]
+      (resolution/forget-read-memos!)
+      result)))
 
 
 (defn apply-seq-append-core

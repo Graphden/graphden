@@ -14,7 +14,7 @@
 (def rendered-row
   [:div {:key "candidate-one" :id "gd-fixture-option-0"
          :class "fn-picker-row fn-picker-row-compat fn-picker-row-active"
-         :role "option" :aria-selected "true" :data-picker-key "candidate-one"
+         :role "option" :aria-selected "true" :aria-disabled "false" :data-picker-key "candidate-one"
          :data-fn-name "core.add" :title ""}
    [:span {:class "fn-picker-row-ok" :aria-hidden "true"} "✓"]
    [:span {:class "fn-picker-row-main"} "add"]
@@ -78,8 +78,18 @@
 
 (def cases
   [{:entry :picker-row :inputs {:row row} :expected rendered-row}
+   {:entry :picker-row :inputs {:row (assoc row :disabled false)} :expected rendered-row}
+   {:entry :picker-row :inputs {:row (assoc row :disabled true :title "Inheritance would create a cycle")}
+    :expected (-> rendered-row
+                  (assoc-in [1 :aria-disabled] "true")
+                  (assoc-in [1 :title] "Inheritance would create a cycle"))}
    {:entry :picker-styles :inputs {} :expected styles}
    {:entry :picker-view :inputs {:model full-model} :expected rendered-full-view}
+   {:entry :picker-view
+    :inputs {:model (update-in full-model [:sections 0 :rows 0]
+                               assoc :disabled true :title "Inheritance would create a cycle")}
+    :expected (update-in rendered-full-view [:tree 3 0 3 0 1]
+                         assoc :aria-disabled "true" :title "Inheritance would create a cycle")}
    {:entry :picker-view
     :inputs {:model {:sections [] :empty-kind "search" :show-other-toggle false :show-other false :hidden-other 0}}
     :expected {:tree [:div {:class "fn-picker-results"}

@@ -2,6 +2,8 @@
 // dependencies, graph-owned keyboard behavior and exact receipt cleanup.
 // GRAPHDEN_URL=http://localhost:<port> node tools/browser-test/edit-ui-components.test.js
 'use strict';
+const fs = require('node:fs');
+const {unexpectedCleanupErrors} = require('./owned-cleanup-errors');
 const {chromium} = require('playwright');
 const {newContext} = require('./edit-test-helpers');
 const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
@@ -9,6 +11,8 @@ const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
   const {browser, page} = await newContext(chromium, {boot: false});
   const errors = [];
   const attempts = new Map();
+  const deletes = [];
+  let ownedIds = new Set();
   const stages = new Map([
     ['/api/ui/components/plan', 'component-plan'],
     ['/api/ui/theme/evaluate', 'theme-evaluate'],
@@ -18,6 +22,7 @@ const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
   const themeReasons = new Set(['not-plain-pure', 'evaluation-failed', 'result-unavailable', 'timeout', 'unavailable']);
   const refusalCodes = new Set(['policy-refresh-required', 'tainted-result', 'runtime-effects', 'not-plain-pure', 'graph-changed']);
   page.on('response', async response => {
+    if (response.request().method() === 'DELETE') deletes.push({url: response.url(), status: response.status()});
     const stage = stages.get(new URL(response.url()).pathname);
     if (!stage) return;
     const attempt = (attempts.get(stage) || 0) + 1;
@@ -29,13 +34,19 @@ const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
     console.log(JSON.stringify({diagnostic: 'ui-graph-refusal', stage, attempt, status: 422,
       code, retryable: body?.retryable === true, reason}));
   });
-  page.on('pageerror', error => errors.push(error.message));
-  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  page.on('pageerror', error => errors.push({kind: 'pageerror', text: error.message}));
+  page.on('console', message => { if (message.type() === 'error') errors.push({kind: 'console', text: message.text(), url: message.location().url}); });
   page.on('dialog', dialog => dialog.accept());
   try {
-    await walkUIComponentsLesson(page);
+    await walkUIComponentsLesson(page, {cleanupOnly: process.env.GRAPHDEN_COMPONENT_CLEANUP_ONLY === '1',
+      onReceipt: async receipt => {
+        const path = '/tmp/graphden-native25-ledger-' + process.pid + '.json';
+        fs.writeFileSync(path, JSON.stringify(receipt), {mode: 0o600, flag: 'wx'});
+        ownedIds = new Set(receipt.manifest.functions.map(row => row.id));
+        console.log(JSON.stringify({diagnostic: 'owned-creation-receipt', path}));
+      }});
     console.log('PASS lesson 25 walkthrough completed; checking console');
-    if (errors.length) throw new Error('Console errors: ' + errors.join('\n'));
+    if (unexpectedCleanupErrors(errors, deletes, ownedIds, true).length) throw new Error('Unexpected browser errors');
   } catch (error) {
     const frames = String(error.stack || '').split('\n').flatMap(line => {
       const match = line.match(/\/(tutorial-ui-components-helpers|edit-ui-components|tutorial-tour-helpers)\.js:(\d+):(\d+)\)?$/);

@@ -1007,7 +1007,7 @@ async function waitTourClosed(page, ms) {
 }
 
 
-async function finishAndDelete(page) {
+async function finishAndDelete(page, cleanupTimeout = 20000) {
   assert(await clickTourButton(page, 'Finish'), 'Finish button');
   await waitTourTitle(page, 'Clean up tutorial items?');
   // The cleanup prompt's title lands one render before its buttons — clicking
@@ -1021,7 +1021,7 @@ async function finishAndDelete(page) {
   null, {timeout: 120000, polling: 150});
   assert(await clickTourButton(page, 'Delete them'), 'Delete them button');
   await page.waitForFunction(() => !document.querySelector('#gd-tour-pop'),
-    null, {timeout: 20000, polling: 200});
+    null, {timeout: cleanupTimeout, polling: 200});
 }
 
 

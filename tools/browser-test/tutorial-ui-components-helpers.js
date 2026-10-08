@@ -91,7 +91,13 @@ async function waitForPersonalMenuHome(page, fnId, configuration) {
   }, {fnId, configuration}, {timeout: 60000});
 }
 
-async function walkUIComponentsLesson(page) {
+function componentCleanupTimeout(manifest) {
+  // Each exact receipt row needs an ownership GET and DELETE; dependency
+  // refusals may require another pass. The condition still returns early.
+  return Math.max(120000, (manifest.functions.length + manifest.namespaces.length) * 10000);
+}
+
+async function walkUIComponentsLesson(page, {onReceipt = async () => {}, cleanupOnly = false} = {}) {
   await page.goto(BASE + '/?tutorial=25');
   await waitTourTitle(page, 'Personal graphs, real editor components', 150000);
   assert(await clickTourButton(page, 'Next'), 'lesson 25 starts');
@@ -140,38 +146,49 @@ async function walkUIComponentsLesson(page) {
     'the authoritative creation request retains the selected namespace UUID');
   assert(manifest.namespaces.find(row => row.id === receipt.request['root-id'])?.['parent-id'] === destinationId,
     'the created manifest root belongs to the intended namespace UUID');
-  await page.locator('[data-ui-graph="theme-id"]').click();
-  await waitTourTitle(page, 'Change a shared color');
-  const canvas = await selectCreatedLeaf(page, manifest, 'theme', 'theme-canvas-color');
-  await editOwnValue(page, canvas, 'value', '#fff7ed');
-  await waitTourTitle(page, 'Open the menu view', 60000);
-  await waitForPersonalMenuValue(page, canvas, manifest.roots['configuration-id'], '#fff7ed', '--bg');
-  await openGroup(page, 'menu-id');
-  await waitTourTitle(page, 'A local menu value');
-  const hover = await selectCreatedLeaf(page, manifest, 'menu', 'account-menu-hover');
-  await editOwnValue(page, hover, 'value', '#fed7aa');
-  await waitForPersonalMenuValue(page, hover, manifest.roots['configuration-id'], '#fed7aa');
-  await page.locator('.auth-avatar:visible, #auth-lock-btn:visible').first().click();
-  await waitTourTitle(page, 'Open the menu behavior', 60000);
-  await openGroup(page, 'menu-update-id');
-  await waitTourTitle(page, 'Change a keyboard decision');
-  const keymap = await selectCreatedLeaf(page, manifest, 'menu', 'account-menu-key-map');
-  await editOwnValue(page, keymap, 'vals', 'last', 2);
-  await waitForPersonalMenuHome(page, keymap, manifest.roots['configuration-id']);
-  await page.locator('.auth-avatar:visible, #auth-lock-btn:visible').first().click();
-  await page.locator('.auth-menu [role="menuitem"]').first().focus();
-  await page.keyboard.press('Home');
-  await waitTourTitle(page, 'Open the picker view', 60000);
-  await openGroup(page, 'picker-id');
-  await waitTourTitle(page, 'The boundary and cleanup');
-  await page.screenshot({path: '/tmp/graphden-personal-ui-components.png'});
-  await finishAndDelete(page);
+  await onReceipt(receipt);
+  if (cleanupOnly) {
+    await page.keyboard.press('Escape');
+    await waitTourTitle(page, 'Clean up tutorial items?');
+    assert(await clickTourButton(page, 'Delete them'), 'ordinary Cancel/Delete cleanup');
+    await page.waitForFunction(() => !document.querySelector('#gd-tour-pop'),
+      null, {timeout: componentCleanupTimeout(manifest), polling: 200});
+  } else {
+    await page.locator('[data-ui-graph="theme-id"]').click();
+    await waitTourTitle(page, 'Change a shared color');
+    const canvas = await selectCreatedLeaf(page, manifest, 'theme', 'theme-canvas-color');
+    await editOwnValue(page, canvas, 'value', '#fff7ed');
+    await waitTourTitle(page, 'Open the menu view', 60000);
+    await waitForPersonalMenuValue(page, canvas, manifest.roots['configuration-id'], '#fff7ed', '--bg');
+    await openGroup(page, 'menu-id');
+    await waitTourTitle(page, 'A local menu value');
+    const hover = await selectCreatedLeaf(page, manifest, 'menu', 'account-menu-hover');
+    await editOwnValue(page, hover, 'value', '#fed7aa');
+    await waitForPersonalMenuValue(page, hover, manifest.roots['configuration-id'], '#fed7aa');
+    await page.locator('.auth-avatar:visible, #auth-lock-btn:visible').first().click();
+    await waitTourTitle(page, 'Open the menu behavior', 60000);
+    await openGroup(page, 'menu-update-id');
+    await waitTourTitle(page, 'Change a keyboard decision');
+    const keymap = await selectCreatedLeaf(page, manifest, 'menu', 'account-menu-key-map');
+    await editOwnValue(page, keymap, 'vals', 'last', 2);
+    await waitForPersonalMenuHome(page, keymap, manifest.roots['configuration-id']);
+    await page.locator('.auth-avatar:visible, #auth-lock-btn:visible').first().click();
+    await page.locator('.auth-menu [role="menuitem"]').first().focus();
+    await page.keyboard.press('Home');
+    await waitTourTitle(page, 'Open the picker view', 60000);
+    await openGroup(page, 'picker-id');
+    await waitTourTitle(page, 'The boundary and cleanup');
+    await page.screenshot({path: '/tmp/graphden-personal-ui-components.png'});
+    await finishAndDelete(page, componentCleanupTimeout(manifest));
+  }
   const after = await page.evaluate(() => ({components: gdPrefRead('components'), theme: gdPrefRead('theme'), branch: getCurrentBranchName()}));
   assert(JSON.stringify(after) === JSON.stringify(previous), 'cleanup restores previous Appearance selections and keeps the current branch');
-  const rows = await api(page, 'GET', '/api/graph/entities?scope=tree');
+  const rows = await api(page, 'GET', '/api/graph/entities?scope=index');
   for (const namespace of manifest.namespaces) {
     assert(!rows.namespaces.some(row => row.id === namespace.id), 'the exact created namespace is gone');
   }
+  const remaining = new Set(rows.fns.map(row => row.id));
+  assert(manifest.functions.every(row => !remaining.has(row.id)), 'every exact created function is gone');
   return manifest;
 }
-module.exports = {walkUIComponentsLesson, selectCreatedLeaf, editOwnValue, waitForPersonalMenuValue, waitForPersonalMenuHome};
+module.exports = {componentCleanupTimeout, walkUIComponentsLesson, selectCreatedLeaf, editOwnValue, waitForPersonalMenuValue, waitForPersonalMenuHome};

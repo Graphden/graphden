@@ -1014,7 +1014,10 @@ async function waitTourClosed(page, ms) {
 
 async function finishAndDelete(page, cleanupTimeout = 20000) {
   assert(await clickTourButton(page, 'Finish'), 'Finish button');
-  await waitTourTitle(page, 'Clean up tutorial items?');
+  await page.waitForFunction(() => {
+    const title = document.querySelector('#gd-tour-pop .gd-tour-title')?.textContent.trim();
+    return title === 'Clean up tutorial items?' || title === 'Delete the tutorial branch?';
+  }, null, {timeout: 120000, polling: 150});
   // The cleanup prompt's title lands one render before its buttons — clicking
   // on the title alone raced the button into existence on a loaded stack.
   // The deadline matches the other tour waits (the gate's shared stack can

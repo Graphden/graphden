@@ -192,7 +192,7 @@ const tick = () => new Promise((r) => setTimeout(r, 5));
 
   await test('graph Save round-trip keeps all reference and categorical axes; updates exact UUID', async () => {
     const {ctx, fetches} = filtersCtx();
-    ctx.API.api_view_save = ctx.window.API.api_view_save = '/api/views/save';
+    ctx.API.api_views_save = ctx.window.API.api_views_save = '/api/views/save';
     let rows = [{id: 'view-existing', name: 'same-name', 'namespace-id': null, filters: {
       uses: ['u1', 'u2'], also: ['v1', 'v2'], kinds: ['apps', 'fn'], problems: ['failed', 'lint'],
       effects: ['io', 'db'], namespaces: ['core', 'web'], exclude: ['core.tests'], name: 'needle', unused: true,
@@ -237,7 +237,7 @@ const tick = () => new Promise((r) => setTimeout(r, 5));
 
   await test('committed Save keeps a newer draft; graph identity never aliases a device label', async () => {
     const {ctx} = filtersCtx();
-    ctx.API.api_view_save = ctx.window.API.api_view_save = '/api/views/save';
+    ctx.API.api_views_save = ctx.window.API.api_views_save = '/api/views/save';
     let resolveSave, command;
     const rows = [{id: 'first-id', name: 'same-label', filters: {name: 'first'}}];
     ctx.authFetch = async (url, options) => {

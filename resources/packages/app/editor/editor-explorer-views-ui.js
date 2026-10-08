@@ -418,7 +418,7 @@ function _renderViewPop(el) {
       _renderViewPop(el);
     };
     save.addEventListener('click', trySave);
-    nameIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); if (window.API && API.api_view_save) share.click(); else trySave(); } });
+    nameIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); if (window.API && API.api_views_save) share.click(); else trySave(); } });
     nameIn.addEventListener('input', () => { msg.hidden = true; });
     const share = document.createElement('button');
     share.type = 'button';
@@ -440,7 +440,7 @@ function _renderViewPop(el) {
     });
     form.appendChild(nameIn);
     form.appendChild(msg);
-    if (window.API && API.api_view_save) form.appendChild(share);
+    if (window.API && API.api_views_save) form.appendChild(share);
     form.appendChild(save);
     el.appendChild(form);
   }
@@ -452,7 +452,7 @@ function _renderViewPop(el) {
 // atomic graph API owns validation, full replacement and publication.
 let _graphViewSaveSeq = 0;
 async function gdShareViewToGraph(name) {
-  if (!(window.API && API.api_view_save)) throw new Error('Saving to the graph is not available here');
+  if (!(window.API && API.api_views_save)) throw new Error('Saving to the graph is not available here');
   const seq = ++_graphViewSaveSeq;
   const edit = gdEditingGraphView();
   const revision = gdFilterRevision();
@@ -466,7 +466,7 @@ async function gdShareViewToGraph(name) {
     command['namespace-id'] = typeof gdLastUsedNs === 'function' ? gdLastUsedNs() || null : null;
     if (typeof _tourTrackGraphViewCreation === 'function') _tourTrackGraphViewCreation(command);
   }
-  const response = await authFetch(API.api_view_save, {method: 'POST',
+  const response = await authFetch(API.api_views_save, {method: 'POST',
     headers: {'Content-Type': 'application/json'}, body: JSON.stringify(command)});
   const result = await response.json();
   if (!response.ok || !result.ok || !result.committed || !result.view?.id) {

@@ -8,7 +8,12 @@ const {rootAction, apps, closePopover, mint, openPreview, exactFnPresent} = requ
 async function walkLesson30(page, base, {label = 'native-app-' + randomBytes(6).toString('hex'),
   onHandler = () => {}, onAppAttempt = () => {}} = {}) {
   const name = 'tutorial-page';
-  await page.goto(base + '/?tutorial=30');
+  // Use the same chooser as readers: lesson 30 needs its owned sandbox,
+  // while a direct tutorial URL intentionally starts on the current branch.
+  await page.goto(base + '/?branch=main');
+  await page.waitForFunction(() => typeof window.openTutorialMenu === 'function');
+  await page.evaluate(() => window.openTutorialMenu());
+  await page.locator('[data-lesson-id="30"] .gd-tour-btn-primary').dispatchEvent('click');
   await waitTourTitle(page, 'Serving the graph to the public', 150000);
   await clickTourButton(page, 'Next');
   await waitTourTitle(page, 'Something to serve');

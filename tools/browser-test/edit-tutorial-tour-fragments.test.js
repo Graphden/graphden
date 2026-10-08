@@ -37,7 +37,12 @@ const {walkLesson30} = require('./tutorial-app-helpers');
   let failed = false;
   const createdIds = [];
   try {
-    await page.goto(BASE + '/?tutorial=14');
+    // The Lessons chooser owns sandbox creation; the direct tutorial URL
+    // starts in place and cannot prove the branch ownership below.
+    await page.goto(BASE + '/?branch=main');
+    await page.waitForFunction(() => typeof window.openTutorialMenu === 'function');
+    await page.evaluate(() => window.openTutorialMenu());
+    await page.locator('[data-lesson-id="14"] .gd-tour-btn-primary').dispatchEvent('click');
     await waitTourTitle(page, 'A real fragment request', 150000);
     await clickTourButton(page, 'Next');
     await waitTourTitle(page, 'Open html-ok-response');

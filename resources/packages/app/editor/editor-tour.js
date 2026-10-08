@@ -415,6 +415,22 @@ function _tourAdvance(skipped) {
   }
 }
 
+// Stage the new identity before APPLY so a successful server write followed
+// by a lost response still remains eligible for lesson cleanup. Never infer
+// the new row by name: an existing function may already have that spelling.
+function _tourTrackInheritanceVariation(preview) {
+  const step = _tourStep();
+  const proposed = preview?.proposed;
+  if (!preview?.allowed || preview.request?.action !== 'variation'
+      || step?.creates?.type !== 'fn' || proposed?.name !== step.creates.name
+      || !proposed.id || !Object.hasOwn(proposed, 'namespace-id')) return;
+  if (_tourState.created.some(created => created.id === proposed.id)) return;
+  _tourState.created.push({ type: 'fn', id: proposed.id, name: proposed.name,
+    'namespace-id': proposed['namespace-id'] });
+  _tourState.activeBranch = _tourSessionBranch();
+  _tourSaveState();
+}
+
 // Step back one. The checks are stateless predicates over the graph, so a
 // re-entered step re-evaluates on the next tick; nothing is rolled back.
 function _tourBack() {

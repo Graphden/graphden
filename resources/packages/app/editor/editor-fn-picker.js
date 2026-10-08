@@ -110,6 +110,9 @@ function openFnPicker(opts) {
     || (firstExcluded && typeof lookups !== 'undefined' ? lookups?.fnMap?.get(firstExcluded)?.['namespace-id'] : null)
     || null;
   const expected = opts.expectedType || null;
+  // An authoritative, UUID-first bounded set (e.g. inheritance ancestors)
+  // stays separate from the whole-graph type picker and its escape hatch.
+  const fixedCandidates = Array.isArray(opts.candidates) ? opts.candidates : null;
   // The server's whole-graph verdict, keyed by QUALIFIED name (two fns may
   // share a bare name across namespaces). `serverLoaded` flips when the
   // fetch lands: from then on the verdict is authoritative both ways — a
@@ -170,6 +173,7 @@ function openFnPicker(opts) {
   // globally-named fns are eligible — anonymous locals can't be referenced
   // by id from another fn's binding graph anyway.
   function buildCandidates() {
+    if (fixedCandidates) return fixedCandidates.filter(c => c.id && !excludeSet.has(c.id));
     const local = (graphData.fns || [])
       .filter(f => f?.name && !excludeSet.has(f.id))
       .map(toCandidate);
@@ -235,9 +239,9 @@ function openFnPicker(opts) {
   el.className = 'fn-picker-popover';
   el.setAttribute('role', 'dialog');
   el.setAttribute('aria-modal', 'false');
-  el.setAttribute('aria-label', expected
+  el.setAttribute('aria-label', opts.label || (expected
     ? ('Pick a function compatible with ' + (typeof formatTypeHint === 'function' ? formatTypeHint(expected) : 'expected type'))
-    : 'Pick a function');
+    : 'Pick a function'));
   // Below the anchor when it fits, otherwise pushed up so the whole
   // popover stays on screen — re-run after every render, because folding
   // a group changes the height.
@@ -279,13 +283,13 @@ function openFnPicker(opts) {
   list.setAttribute('aria-label', expected ? 'Functions, compatible first' : 'Functions');
   el.appendChild(list);
   let graphPicker = window.gdFnPickerGraph?.ready ? window.gdFnPickerGraph.mount(list, (c, bareName) => {
-    const compatible = expected && serverLoaded ? c.compatible !== false : null;
+    const compatible = fixedCandidates ? c.compatible : expected && serverLoaded ? c.compatible !== false : null;
     const lastDot = c.qualified.lastIndexOf('.');
     const label = (name) => typeof displayLabel === 'function' ? displayLabel(name) : name;
-    const fit = compatible === true && typeof pickerTierOf === 'function' ? pickerTierOf(expected, c) : 'exact';
+    const fit = !fixedCandidates && compatible === true && typeof pickerTierOf === 'function' ? pickerTierOf(expected, c) : 'exact';
     return {label: bareName ? label(c.name) : lastDot >= 0 ? c.qualified.slice(0, lastDot + 1) + label(c.qualified.slice(lastDot + 1)) : label(c.qualified),
-      compatible, fit, 'fit-label': typeof pickerTierLabel === 'function' ? pickerTierLabel(expected, fit) : fit,
-      'fit-title': typeof pickerTierTitle === 'function' ? pickerTierTitle(expected, fit) : '', kind: c.kind || '',
+      compatible, ...(fixedCandidates ? { title: c.reason || '' } : {}), fit, 'fit-label': !fixedCandidates && typeof pickerTierLabel === 'function' ? pickerTierLabel(expected, fit) : fit,
+      'fit-title': !fixedCandidates && typeof pickerTierTitle === 'function' ? pickerTierTitle(expected, fit) : '', kind: c.kind || '',
       'return-label': compactTypeChipText(c.richReturn, c.flatReturn) || '',
       effects: (c.effects || []).map((code) => ({code: String(code), label: String(code).toUpperCase()}))};
   }) : null;
@@ -325,6 +329,10 @@ function openFnPicker(opts) {
   async function choose(c, rowEl) {
     if (fnPickerEl !== el) return;
     let cur = c;
+    if (fixedCandidates && c.compatible === false) {
+      status.textContent = c.reason || 'This ancestor is unavailable.';
+      return;
+    }
     if (expected && !serverLoaded && !serverFailed && loadPromise) {
       await loadPromise;
       if (fnPickerEl !== el) return;
@@ -346,7 +354,7 @@ function openFnPicker(opts) {
     if (fnPickerEl !== el) return;
     closeFnPicker();
     if (typeof opts.onPick === 'function') {
-      opts.onPick(fn || { id: c.id, name: c.name });
+      opts.onPick(fn || { id: c.id, name: c.name }, c);
     }
   }
 
@@ -449,7 +457,7 @@ function openFnPicker(opts) {
   // group already says where it lives); the Exact-match block spells the
   // namespace out, because that block mixes namespaces.
   function renderRow(c, idx, bareName) {
-    const compat = (expected && serverLoaded) ? (c.compatible !== false) : null;
+    const compat = fixedCandidates ? c.compatible : (expected && serverLoaded) ? (c.compatible !== false) : null;
     const row = document.createElement('div');
     row.className = 'fn-picker-row'
       + (compat === true ? ' fn-picker-row-compat' : '')
@@ -479,7 +487,7 @@ function openFnPicker(opts) {
 
     // The fit tier as a chip — only when it is NOT the expectation: an
     // exact fit is what the ✓ already says.
-    if (compat === true && typeof pickerTierOf === 'function') {
+    if (!fixedCandidates && compat === true && typeof pickerTierOf === 'function') {
       const tier = pickerTierOf(expected, c);
       if (tier !== 'exact') {
         const chip = document.createElement('span');
@@ -490,7 +498,8 @@ function openFnPicker(opts) {
       }
     }
     if (compat === false) {
-      row.title = 'Not a subtype of the expected type — click to see why (and pick anyway)';
+      row.title = fixedCandidates ? c.reason || 'This ancestor is unavailable.'
+        : 'Not a subtype of the expected type — click to see why (and pick anyway)';
     }
 
     // Kind annotation pill — refinement / record / union / variant /
@@ -705,7 +714,7 @@ function openFnPicker(opts) {
     const seq = ++_pickerSearchSeq;
     clearTimeout(_pickerSearchTimer);
     const q = search.value.trim();
-    if (!q || fnPickerEl !== el || typeof searchFns !== 'function') return;
+    if (fixedCandidates || !q || fnPickerEl !== el || typeof searchFns !== 'function') return;
     _pickerSearchTimer = setTimeout(() => {
       if (fnPickerEl !== el) return;
       searchFns(q).then(() => {

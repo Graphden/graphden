@@ -7,7 +7,7 @@ Loading, graph-backed controls, actions, forms, and preferences.
 
 after: web, layout
 
-[[file:index.org][index]] · ~90 min
+[[file:index.org][index]] · ~92 min
 
 * 1. initGraph
 :PROPERTIES:
@@ -121,14 +121,26 @@ Loads a [[file:glossary.org::#term/htmx][server-rendered HTML fragment]] into a 
 :CUSTOM_ID: editor/loadRowActionsContent
 :FILE: resources/packages/app/editor/editor-row-actions.js
 :LINE: 411
-:MINS: 3.6
+:MINS: 3.8
 :END:
 
 Loads the row-action menu as a server fragment, caching HTML by request URL. Compatibility for adding a parent is recalculated against current client lookups rather than trusted from stale HTML. See [[file:../../../docs/EDITOR_ROW_ACTIONS.md][row actions]].
 
 - source :: [[file:../../../resources/packages/app/editor/editor-row-actions.js::async function loadRowActionsContent(host, fnId, context, opts) {][resources/packages/app/editor/editor-row-actions.js:411]]
 
-* 10. pickerArrange
+* 10. applyInheritancePreview
+:PROPERTIES:
+:CUSTOM_ID: editor/applyInheritancePreview
+:FILE: resources/packages/app/editor/editor-inheritance-api.js
+:LINE: 36
+:MINS: 1.4
+:END:
+
+Inheritance changes use an authoritative preview followed by one atomic apply. The browser confirms the exact orphan binding IDs and echoes the snapshot digest; a stale request never silently accepts a refreshed deletion set. Parent-edge variation creates a sibling source and reparents the target, preserving its own composition. All consumers of that target in the branch see the change; the original source stays unchanged. The graph partial owns availability and scope wording. See [[file:../../../docs/tutorial/07-optional-required-sealed.md][lesson 7]].
+
+- source :: [[file:../../../resources/packages/app/editor/editor-inheritance-api.js::async function applyInheritancePreview(preview, beforeApply) {][resources/packages/app/editor/editor-inheritance-api.js:36]]
+
+* 11. pickerArrange
 :PROPERTIES:
 :CUSTOM_ID: editor/pickerArrange
 :FILE: resources/packages/app/editor/editor-fn-picker-rank.js
@@ -141,7 +153,7 @@ Orders function-picker candidates without accessing the [[file:glossary.org::#te
 - source :: [[file:../../../resources/packages/app/editor/editor-fn-picker-rank.js::function pickerArrange(candidates, opts) {][resources/packages/app/editor/editor-fn-picker-rank.js:122]]
 - referenced from :: [[file:editor.org::#editor/createRuntime][createRuntime]]
 
-* 11. export-plan
+* 12. export-plan
 :PROPERTIES:
 :CUSTOM_ID: editor/export-plan
 :FILE: src/graphden/executor/browser_plan.clj
@@ -154,7 +166,7 @@ The ordinary account menu and function picker use bundled graph plans for their 
 - source :: [[file:../../../src/graphden/executor/browser_plan.clj::(defn export-plan][src/graphden/executor/browser_plan.clj:335]]
 - see also :: [[file:executor.org::#executor/build-lookups][build-lookups]], [[file:editor.org::#editor/createRuntime][createRuntime]]
 
-* 12. createRuntime
+* 13. createRuntime
 :PROPERTIES:
 :CUSTOM_ID: editor/createRuntime
 :FILE: resources/packages/app/ui-preview/browser-runtime.js
@@ -168,7 +180,7 @@ Creates the bounded browser interpreter for that plan. Each entry invocation has
 - see also :: [[file:editor.org::#editor/mount][mount]], [[file:editor.org::#editor/pickerArrange][pickerArrange]]
 - referenced from :: [[file:editor.org::#editor/export-plan][export-plan]], [[file:editor.org::#editor/mount][mount]]
 
-* 13. mount
+* 14. mount
 :PROPERTIES:
 :CUSTOM_ID: editor/mount
 :FILE: resources/packages/app/ui-preview/graph-renderer.js
@@ -182,7 +194,7 @@ Gives a graph component its own empty DOM host. ~render~ validates live Hiccup a
 - see also :: [[file:editor.org::#editor/createRuntime][createRuntime]], [[file:web.org::#web/hiccup-element][hiccup-element]]
 - referenced from :: [[file:editor.org::#editor/createRuntime][createRuntime]]
 
-* 14. enterArgValueEditMode
+* 15. enterArgValueEditMode
 :PROPERTIES:
 :CUSTOM_ID: editor/enterArgValueEditMode
 :FILE: resources/packages/app/editor/editor-edit-modes.js
@@ -196,7 +208,7 @@ Asks ~/api/value-form~ for a widget appropriate to the [[file:glossary.org::#ter
 - see also :: [[file:crud.org::#crud/resolve-form][resolve-form]], [[file:editor.org::#editor/writeBindingFields][writeBindingFields]]
 - same file :: [[file:editor.org::#editor/writeBindingFields][writeBindingFields]]
 
-* 15. writeBindingFields
+* 16. writeBindingFields
 :PROPERTIES:
 :CUSTOM_ID: editor/writeBindingFields
 :FILE: resources/packages/app/editor/editor-edit-modes.js
@@ -211,7 +223,7 @@ Follow a user saving a literal input: this writer targets its function and slot,
 - same file :: [[file:editor.org::#editor/enterArgValueEditMode][enterArgValueEditMode]]
 - referenced from :: [[file:editor.org::#editor/enterArgValueEditMode][enterArgValueEditMode]]
 
-* 16. gdEnterDiffMode
+* 17. gdEnterDiffMode
 :PROPERTIES:
 :CUSTOM_ID: editor/gdEnterDiffMode
 :FILE: resources/packages/app/editor/editor-diff-mode.js
@@ -223,7 +235,7 @@ Loads grouped differences for a selected comparison branch. Explorer badges, can
 
 - source :: [[file:../../../resources/packages/app/editor/editor-diff-mode.js::async function gdEnterDiffMode(otherBranch) {][resources/packages/app/editor/editor-diff-mode.js:509]]
 
-* 17. gdApplyThemePayload
+* 18. gdApplyThemePayload
 :PROPERTIES:
 :CUSTOM_ID: editor/gdApplyThemePayload
 :FILE: resources/packages/app/editor/editor-prefs.js
@@ -237,7 +249,7 @@ Applies a validated theme payload as inline CSS custom properties on the body. T
 - see also :: [[file:editor.org::#editor/evaluate][evaluate]]
 - referenced from :: [[file:editor.org::#editor/evaluate][evaluate]]
 
-* 18. evaluate
+* 19. evaluate
 :PROPERTIES:
 :CUSTOM_ID: editor/evaluate
 :FILE: src/graphden/editor/theme.clj
@@ -251,7 +263,7 @@ Evaluates a selected personal theme graph in the request's existing organisation
 - see also :: [[file:crud.org::#crud/apply-execute][apply-execute]], [[file:executor.org::#executor/record-effect!][record-effect!]], [[file:editor.org::#editor/gdApplyThemePayload][gdApplyThemePayload]]
 - referenced from :: [[file:executor.org::#executor/record-effect!][record-effect!]], [[file:editor.org::#editor/gdApplyThemePayload][gdApplyThemePayload]]
 
-* 19. gdApplyKeymap
+* 20. gdApplyKeymap
 :PROPERTIES:
 :CUSTOM_ID: editor/gdApplyKeymap
 :FILE: resources/packages/app/editor/editor-shortcuts.js
@@ -263,7 +275,7 @@ Applies user key overrides by stable shortcut ID. The registry keeps defaults fo
 
 - source :: [[file:../../../resources/packages/app/editor/editor-shortcuts.js::function gdApplyKeymap(bindings) {][resources/packages/app/editor/editor-shortcuts.js:81]]
 
-* 20. authFetch
+* 21. authFetch
 :PROPERTIES:
 :CUSTOM_ID: editor/authFetch
 :FILE: resources/packages/app/editor/editor-auth.js
@@ -276,7 +288,7 @@ Sends authenticated editor requests and handles 401 by clearing the stored crede
 - source :: [[file:../../../resources/packages/app/editor/editor-auth.js::async function authFetch(url, opts = {}) {][resources/packages/app/editor/editor-auth.js:114]]
 - referenced from :: [[file:editor.org::#editor/initGraph][initGraph]]
 
-* 21. _tourTick
+* 22. _tourTick
 :PROPERTIES:
 :CUSTOM_ID: editor/_tourTick
 :FILE: resources/packages/app/editor/editor-tour.js
@@ -289,7 +301,7 @@ Evaluates the current interactive lesson step against editor state. Lesson data 
 - source :: [[file:../../../resources/packages/app/editor/editor-tour.js::function _tourTick() {][resources/packages/app/editor/editor-tour.js:309]]
 - referenced from :: [[file:editor.org::#editor/_tourStartPositioning][_tourStartPositioning]]
 
-* 22. _tourStartPositioning
+* 23. _tourStartPositioning
 :PROPERTIES:
 :CUSTOM_ID: editor/_tourStartPositioning
 :FILE: resources/packages/app/editor/editor-tour-spot.js

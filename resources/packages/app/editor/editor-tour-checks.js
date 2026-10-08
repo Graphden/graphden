@@ -98,6 +98,19 @@ function _tourCheckPasses(check) {
           return !!p && p.name === check.parent;
         });
       }
+      case 'fn-sibling-variation': {
+        const target = _tourFindFn(check.name);
+        const source = _tourFindFn(check.source);
+        const parentIds = target?.['parent-ids'] || [];
+        if (!source || parentIds.length !== 1 || parentIds[0] === source.id) return false;
+        const copy = lookups?.fnMap?.get(parentIds[0]);
+        const created = typeof _tourState !== 'undefined'
+          && _tourState?.created?.find(row => row.id === parentIds[0]);
+        return !!copy && !!created && copy.name === check.variation
+          && copy['namespace-id'] === target['namespace-id']
+          && created['namespace-id'] === copy['namespace-id']
+          && JSON.stringify(copy['parent-ids'] || []) === JSON.stringify(source['parent-ids'] || []);
+      }
       case 'binding-bound': {
         // The slot row belongs to the PARENT (slots are inherited);
         // the binding row belongs to the checked fn — so walk the fn's

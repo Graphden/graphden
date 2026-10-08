@@ -143,11 +143,39 @@ Run a fn without its optional input, seal a slot, then require it:
 7. `⋯` → **Extend** → `tutorial-cut-more` → **Save**. On the child,
    `string` and `start` are gone — final — and `end` shows a lock
    where its `+` would be. Hover it.
-8. Back on `tutorial-cut` (filter, click the row), open the `🔒`
-   again: untick **Seal**, tick **Require it here**, **Save**.
+8. On the `tutorial-cut` ancestor row: `⋯` → **Inheritance…** →
+   **Go to source**. This opens the exact source function. Open its `🔒`:
+   untick **Seal**, tick **Require it here**, **Save**.
 9. Open `tutorial-cut-more` once more: the `+` on `end` is back, and
    no longer dimmed — from `tutorial-cut` down, `end` must be
    supplied.
+10. Open `tutorial-cut` again. Seal `end` once more and leave requiredness
+    unchanged. Return to `tutorial-cut-more`: its inherited `end` is locked.
+11. On its `tutorial-cut` ancestor row: `⋯` → **Inheritance…**. Set
+    **Variation name** to `_tutorial-cut-local`, then click
+    **Create variation for tutorial-cut-more**. The new source opens.
+    It is a sibling of `tutorial-cut`; the child now inherits from it and
+    keeps its own composition.
+12. On `_tutorial-cut-local`, untick only **Seal against descendants** for
+    `end` and save. Keep requiredness unchanged. Return to
+    `tutorial-cut-more`: its `+` is back, and the input remains required.
+    Open `tutorial-cut` separately: the original seal is still closed.
+13. On the child's `_tutorial-cut-local` ancestor row, open **Inheritance…**
+    → **Choose ancestor…**. These are recommended ancestors checked by the
+    server, rather than a complete catalogue of compatible functions.
+    **Cancel** to keep the current parent. Existing parent editing remains
+    available for other functions and multiple parents.
+
+A variation changes `tutorial-cut-more` for **all its consumers in this
+branch**. It preserves `tutorial-cut` and its other children. A copied own
+seal can be lifted on the new source; restrictions inherited above that
+source remain closed. Shared slot declarations retain their identities,
+so creating a variation does not give them independent requiredness.
+
+For one explicit own reference binding, the same menu can create a sibling
+and replace that binding atomically. This changes the binding's owner and
+all consumers of that owner. Inherited bindings and list items are outside
+this operation; unavailable actions show the server's reason.
 
 ## What we glossed over
 

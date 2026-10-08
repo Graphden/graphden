@@ -72,7 +72,7 @@ async function hardCleanup(page) {
                      'tutorial-hello',
                      // lessons 06 / 07 — children before parents.
                      'tutorial-sum-more', 'tutorial-base-sum',
-                     'tutorial-cut-more', 'tutorial-cut',
+                     'tutorial-cut-more', '_tutorial-cut-local', 'tutorial-cut',
                      // lesson 03's MI fn and lesson 09's callable (2026-09-20).
                      'tutorial-json-ok', 'tutorial-upper',
                      // lesson 16's secret-typed slot demo.

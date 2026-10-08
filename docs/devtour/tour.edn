@@ -1297,6 +1297,15 @@
            for adding a parent is recalculated against current client lookups rather than trusted from
            stale HTML. See [row actions](../../docs/EDITOR_ROW_ACTIONS.md)."}
 
+    {:file "resources/packages/app/editor/editor-inheritance-api.js" :defn applyInheritancePreview
+     :say "Inheritance changes use an authoritative preview followed by one atomic apply.
+           The browser confirms the exact orphan binding IDs and echoes the snapshot digest;
+           a stale request never silently accepts a refreshed deletion set. Parent-edge variation
+           creates a sibling source and reparents the target, preserving its own composition.
+           All consumers of that target in the branch see the change; the original source stays
+           unchanged. The graph partial owns availability and scope wording. See
+           [lesson 7](../../docs/tutorial/07-optional-required-sealed.md)."}
+
     {:file "resources/packages/app/editor/editor-fn-picker-rank.js" :defn pickerArrange
      :say "Orders function-picker candidates without accessing the [DOM](#term/hiccup) or network.
            Exact-name matches come first, followed by namespace groups and compatibility/fit ranking.

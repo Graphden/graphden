@@ -413,6 +413,20 @@ function renderSingleFnRow(line, levelInfo, ctx) {
   // hover-driven expansion as before. `buildPopoverContent` defers
   // building the icons until the popover actually opens, so unhovered
   // rows pay no DOM cost.
+  const directParents = cardFnEntity?.['parent-ids'] || [];
+  const parentIntent = lineSignedIn && levelInfo.depth === 1
+    && directParents.length === 1 && directParents[0] === lineFn.fnId
+    ? { action: 'variation', kind: 'parent-edge', 'target-fn-id': ctx.originalFnId,
+      'source-fn-id': lineFn.fnId, 'expected-parent-id': lineFn.fnId } : null;
+  const refBinding = useSiteArg && lookups?.bindingMap?.get(useSiteArg['binding-id']);
+  const refIntent = lineSignedIn && useSiteArg?.['binding-id'] && !useSiteArg['item-id']
+    && gv.node(nodeId)?.incomingEdges().length === 1
+    && refBinding?.['fn-id'] === useSiteArg['fn-id']
+    && refBinding?.['slot-id'] === useSiteArg['slot-id']
+    && refBinding?.['ref-fn-id'] === lineFn.fnId
+    ? { action: 'variation', kind: 'own-ref', 'owner-fn-id': useSiteArg['fn-id'],
+      'binding-id': useSiteArg['binding-id'], 'slot-id': useSiteArg['slot-id'],
+      'source-fn-id': lineFn.fnId, 'expected-old-ref-id': lineFn.fnId } : null;
   const buildPopoverContent = (host) => {
     // HTMX migration Phase A3: when the row is a use-site-arg
     // (signed-in user on an editable card with exactly one editable
@@ -442,7 +456,8 @@ function renderSingleFnRow(line, levelInfo, ctx) {
         showOpen: !!lineShowOpen,
         editable: (typeof graphdenIsFnOwned !== 'function')
                   || !ownerFn || graphdenIsFnOwned(ownerFn),
-        useSiteArg: useSiteArg
+        useSiteArg: useSiteArg,
+        inheritanceCommand: refIntent
       });
     }
     // HTMX migration Phase A4: root-row context (▶⌛⚙✎+✕ plus the
@@ -485,7 +500,8 @@ function renderSingleFnRow(line, levelInfo, ctx) {
         // → offered only on a card the principal owns. Read-only otherwise.
         editable: (typeof graphdenIsFnOwned !== 'function')
                   || !cardFnEntity || graphdenIsFnOwned(cardFnEntity),
-        cardFnId: cardFnEntity.id
+        cardFnId: cardFnEntity.id,
+        inheritanceCommand: parentIntent
       });
     }
     // Fall-through: read-only viewers + non-root, non-parent-edit
@@ -494,7 +510,8 @@ function renderSingleFnRow(line, levelInfo, ctx) {
     // `data-context` value is debug-only).
     if (typeof loadRowActionsContent === 'function') {
       return loadRowActionsContent(host, lineFn.fnId, 'col-header', {
-        showOpen: !!lineShowOpen
+        showOpen: !!lineShowOpen,
+        inheritanceCommand: parentIntent
       });
     }
   };

@@ -436,6 +436,9 @@ async function loadRowActionsContent(host, fnId, context, opts) {
             + (opts.useSiteArg?.['item-id']
                 ? '&seq-item=true' + _seqEdgeParams(opts.useSiteArg)
                 : '')
+            + (opts.inheritanceCommand
+                ? '&inheritance-command=' + encodeURIComponent(JSON.stringify(opts.inheritanceCommand))
+                : '')
             + (opts.editBlockReason
                 ? '&edit-block-reason='
                   + encodeURIComponent(opts.editBlockReason)

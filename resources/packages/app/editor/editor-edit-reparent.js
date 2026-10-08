@@ -17,11 +17,11 @@
 // the sole parent.
 //
 // Each operation runs through `performReparentCascade` so orphan
-// bindings (those whose slot vanishes from the new parent closure)
-// are deleted in the same network round-trip as the `parent-ids` PUT.
+// bindings are previewed by the server, explicitly confirmed, and deleted
+// atomically with the parent-set change.
 //
-// Globals consumed: lookups, API, openFnPicker, authMutate,
-// extractResponseError, initGraph, wouldCycle, getQualifiedFnName,
+// Globals consumed: lookups, openFnPicker, runInheritanceCommand,
+// initGraph, wouldCycle, getQualifiedFnName,
 // withBusy, isOpInflight, isAuthenticated.
 
 // =============================================================================
@@ -142,61 +142,19 @@ function compatibleMIParentInfo(targetFnId, currentParentIds) {
 let _lastCascadeError = null;
 
 async function performReparentCascade(fnId, newParentIds) {
-  if (!lookups?.bindingsByFn) return false;
-  // 1. Walk current bindings on this fn. A binding is orphaned when
-  //    its slot lives on a fn no longer reachable through the new
-  //    parent set — keeping such a binding would leave a dangling
-  //    override on a slot the fn no longer knows about. The
-  //    reachable-slot set is derived from each new parent's full
-  //    inheritance closure.
-  const reachableSlots = new Set();
-  const visited = new Set();
-  const collectSlotsFrom = (fid) => {
-    if (visited.has(fid)) return;
-    visited.add(fid);
-    const fn = lookups.fnMap.get(fid);
-    if (!fn) return;
-    const fnSlots = (lookups.fnSlotsByFn?.get(fid)) || [];
-    for (const fs of fnSlots) reachableSlots.add(fs['slot-id']);
-    for (const p of (fn['parent-ids'] || [])) collectSlotsFrom(p);
-  };
-  for (const p of newParentIds) collectSlotsFrom(p);
-
-  const currentBindings = lookups.bindingsByFn.get(fnId) || [];
-  const orphans = currentBindings.filter(b => !reachableSlots.has(b['slot-id']));
-
-  // 2. DELETE orphan bindings.
-  for (const b of orphans) {
-    try {
-      const r = await authMutate('DELETE',
-                                 API.api_entities_type_id('binding', b.id));
-      if (!r?.ok) {
-        _lastCascadeError = await extractResponseError(r);
-        return false;
-      }
-    } catch (e) { _lastCascadeError = e?.message || null; return false; }
-  }
-
-  // 3. PUT new parent-ids on the fn itself. Empty list is encoded as
-  //    the literal string `parent-ids=` so the backend resets the FK
-  //    column to NULL, surfacing the fn back to the "set parent…"
-  //    state. `authMutate`'s field-map form strips empty-string values,
-  //    which would silently drop a clear-parents request — pass the
-  //    pre-encoded body when the new list is empty.
+  _lastCascadeError = null;
   try {
-    const body = newParentIds.length === 0
-      ? 'parent-ids='
-      : { 'parent-ids': newParentIds.join(',') };
-    const r = await authMutate('PUT',
-                               API.api_entities_type_id('fn', fnId),
-                               body);
-    if (!r?.ok) {
-      _lastCascadeError = await extractResponseError(r);
-      return false;
-    }
-  } catch (e) { _lastCascadeError = e?.message || null; return false; }
-
-  return true;
+    const result = await runInheritanceCommand({
+      action: 'reparent',
+      kind: 'parent-edge',
+      'target-fn-id': fnId,
+      'parent-ids': newParentIds,
+    });
+    return Boolean(result);
+  } catch (error) {
+    _lastCascadeError = error?.message || 'Inheritance change failed.';
+    return false;
+  }
 }
 
 async function _runCascadeWithBusy(fn, newParentIds, opLabel) {
@@ -212,14 +170,13 @@ async function _runCascadeWithBusy(fn, newParentIds, opLabel) {
   const ok = (typeof withBusy === 'function')
     ? await withBusy(opKey, opLabel + ' ' + display + '…', work)
     : await work();
-  if (!ok) {
+  if (!ok && _lastCascadeError) {
     // Surface the backend's actual rejection reason (409 write-rej
     // bodies: cross-branch guard, resolver guard, free-args guard) —
     // the generic alert hid exactly the text that tells the user what
     // to change.
     const why = _lastCascadeError ? '\n\nServer said: ' + _lastCascadeError : '';
-    alert('Re-parent failed — some changes may be partial; re-saving '
-          + 'retries idempotently.' + why);
+    alert('Re-parent failed.' + why);
     _lastCascadeError = null;
   }
   return ok;
@@ -248,7 +205,6 @@ async function removeParentInline(fn, parentIdToRemove) {
       + '(no inheritance).'
     : '';
   if (!confirm('Remove parent "' + removedName + '"?'
-               + ' Bindings on slots no longer reachable will be deleted.'
                + tail)) return;
   await _runCascadeWithBusy(fn, next, 'Removing parent from');
 }

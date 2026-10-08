@@ -39,6 +39,7 @@ shape, self-hosted included.
 | package-owned target of POST /api/secret-bindings, PUT /api/types/record | 403 (envelope `:http-status`) |
 | `validation-error/*`, `constraint-violation/*` (other), `type-check/*`, `packages/*`, `refinement/*`, `execution-error/*`, `graph-error/*`, `secrets/*`, `sequence-op/*`, execute rejected (other) | 400 |
 | `branch-router/*` | 404 |
+| `inheritance/*`, `graph-write/*` | 409 |
 | unknown / internal | 500 (opaque `:ref`) |
 
 Deliberate exceptions: the MCP route is JSON-RPC (spec-mandated

@@ -915,10 +915,27 @@
 
   ;; --- /api top group (combines all /api/* sub-groups + the standalone leaves) ---
 
+  {:name :api-inheritance-preview
+   :description "POST /api/inheritance/preview — authorized transient inheritance plan."
+   :parent :post-auth-required
+   :args {:path "/inheritance/preview" :handler :_inheritance-preview-handler}}
+
+  {:name :api-inheritance-apply
+   :description "POST /api/inheritance/apply — atomic expected-state guarded inheritance change."
+   :parent :post-auth-required
+   :args {:path "/inheritance/apply" :handler :_inheritance-apply-handler}}
+
+  {:name :partial-inheritance-intent
+   :description "GET /partials/inheritance-intent — graph-native decisions for a JSON command query parameter."
+   :parent :get-auth-required
+   :args {:path "/partials/inheritance-intent" :handler :_partial-inheritance-intent-handler}}
+
   {:name :api-routes
    :description "/api/* — full API surface. To add API versioning (e.g. `/v1`), wrap this in a list with the version prefix as first item — one change instead of one-per-endpoint."
    :parent :list
    :args {:items ["/api"
+                  :api-inheritance-preview
+                  :api-inheritance-apply
                   :api-assets-save
                   :api-assets-revert
                   :api-assets-baseline

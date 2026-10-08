@@ -29,6 +29,7 @@
                   :codemirror-js-asset
                   :editor-css-asset
                   :graphden-components-css-asset
+                  :partial-inheritance-intent
                   :partial-effect
                   :partial-branch-verification
                   :partial-auth-form

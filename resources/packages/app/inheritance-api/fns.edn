@@ -1,0 +1,43 @@
+{:namespace "app.inheritance"
+ :description "Inheritance intentions: read-only preview and one atomic decorated apply. Ordinary entity PUT keeps its existing semantics."
+ :fns
+ [{:name :parse-inheritance-command
+   :description "Validate the wire action and exact UUID use-site; preserve action/kind strings for the editor graph."
+   :args {:body {:type :keyword-map :description "JSON command with UUID identities."}}
+   :return-type :keyword-map}
+
+  {:name :preview-inheritance
+   :description "Authorize the exact use-site and projected graph; return a transient expected-state digest and exact orphan UUIDs. Readable refusals retain source navigation."
+   :args {:command {:type :keyword-map}
+          :request {:type :ring-request-shape :description "Request scope pin."}}
+   :return-type :keyword-map
+   :effects #{:db}}
+
+  {:name :apply-inheritance
+   :description "Repeat preview under the writer lock, atomically create/replace or delete orphans/reparent, then publish after commit."
+   :args {:command {:type :keyword-map}
+          :request {:type :ring-request-shape :description "Request scope pin."}}
+   :return-type :keyword-map
+   :effects #{:db}}
+
+  {:name :_inheritance-command
+   :parent :parse-inheritance-command
+   :args {:body {:ref :parse-json-body :type :keyword-map}}}
+
+  {:name :_inheritance-preview
+   :parent :preview-inheritance
+   :args {:command :_inheritance-command}}
+
+  {:name :_inheritance-apply
+   :parent :apply-inheritance
+   :args {:command :_inheritance-command}}
+
+  {:name :_inheritance-preview-handler
+   :lambda-params [:request]
+   :parent :json-handler
+   :args {:data :_inheritance-preview}}
+
+  {:name :_inheritance-apply-handler
+   :lambda-params [:request]
+   :parent :json-envelope-response
+   :args {:envelope :_inheritance-apply}}]}

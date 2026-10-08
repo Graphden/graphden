@@ -16,6 +16,7 @@ const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
     ['/api/ui/components/create/apply', 'create-apply'],
   ]);
   const themeReasons = new Set(['not-plain-pure', 'evaluation-failed', 'result-unavailable', 'timeout', 'unavailable']);
+  const refusalCodes = new Set(['policy-refresh-required', 'tainted-result', 'runtime-effects', 'not-plain-pure', 'graph-changed']);
   page.on('response', async response => {
     const stage = stages.get(new URL(response.url()).pathname);
     if (!stage) return;
@@ -23,7 +24,7 @@ const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
     attempts.set(stage, attempt);
     if (response.status() !== 422) return;
     const body = await response.json().catch(() => null);
-    const code = body?.code === 'policy-refresh-required' ? 'policy-refresh-required' : 'unclassified';
+    const code = refusalCodes.has(body?.code) ? body.code : 'unclassified';
     const reason = stage === 'theme-evaluate' && themeReasons.has(body?.reason) ? body.reason : 'unclassified';
     console.log(JSON.stringify({diagnostic: 'ui-graph-refusal', stage, attempt, status: 422,
       code, retryable: body?.retryable === true, reason}));

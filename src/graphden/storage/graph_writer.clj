@@ -18,6 +18,15 @@
     "Trusted private-org id, or nil for a public writer."))
 
 
+(defprotocol GraphWriterAdmission
+
+  (writer-scope-for
+    [storage mutation]
+    "Trusted private-org scope for all identities changed by this mutation.
+     Unknown or shared identities require global admission. The classification
+     is repeated after acquiring the lock; it never grants write permission."))
+
+
 (defprotocol GraphWriteAuthorization
 
   (authorize-graph-write!
@@ -70,9 +79,12 @@
 
 
 (defn- trusted-scope
-  [storage]
-  (when (satisfies? GraphWriterScope storage)
-    (let [scope (writer-scope storage)]
+  [storage mutation]
+  (when (or (satisfies? GraphWriterAdmission storage)
+            (satisfies? GraphWriterScope storage))
+    (let [scope (if (satisfies? GraphWriterAdmission storage)
+                  (writer-scope-for storage mutation)
+                  (writer-scope storage))]
       (when (and (string? scope) (not (str/blank? scope)) (not= "public" scope))
         scope))))
 
@@ -103,15 +115,16 @@
 
 
 (defn- enter-writer!
-  [storage]
+  [storage mutation]
   (let [context tx/*transaction-context*
         _ (when-not (and context @(:active? context))
             (throw (ex-info "Graph writer context is inactive"
                             {:type :graph-write/invalid-context})))
         delegated (delegated-scope storage context)
         requested (if (and (:owned? context)
-                           (satisfies? GraphWriterScope storage))
-                    (or (trusted-scope storage) :global)
+                           (or (satisfies? GraphWriterAdmission storage)
+                               (satisfies? GraphWriterScope storage)))
+                    (or (trusted-scope storage mutation) :global)
                     (or delegated :global))
         held @(:writer-scope context)]
     (when (and held (not= :global held) (not= held requested))
@@ -120,6 +133,12 @@
     (when-not held
       (acquire-locks! (:connection context) requested)
       (reset! (:writer-scope context) requested))
+    (when (and (not= :global requested)
+               (or (satisfies? GraphWriterAdmission storage)
+                   (satisfies? GraphWriterScope storage))
+               (not= requested (trusted-scope storage mutation)))
+      (throw (ex-info "Graph writer ownership changed while waiting; retry"
+                      {:type :graph-write/stale-scope})))
     (tx/with-writer-context storage)))
 
 
@@ -128,14 +147,15 @@
    semantic writer lock until the OUTER transaction commits or rolls back.
    Reentrant physical writes join only the current internal context token.
    No pooled backend means no concurrency or atomicity promise."
-  [storage entity-name f]
-  (if (and (or (= :graph entity-name) (contains? semantic-entities entity-name))
-           (tx/datasource storage))
-    (do
-      ;; Reject stale/foreign tokens before borrowing another connection.
-      (delegated-scope storage tx/*transaction-context*)
-      (tx/in-transaction storage #(f (enter-writer! %))))
-    (f storage)))
+  [storage mutation f]
+  (let [entity-name (if (map? mutation) (:entity mutation) mutation)]
+    (if (and (or (= :graph entity-name) (contains? semantic-entities entity-name))
+             (tx/datasource storage))
+      (do
+        ;; Reject stale/foreign tokens before borrowing another connection.
+        (delegated-scope storage tx/*transaction-context*)
+        (tx/in-transaction storage #(f (enter-writer! % mutation))))
+      (f storage))))
 
 
 (defmacro with-write

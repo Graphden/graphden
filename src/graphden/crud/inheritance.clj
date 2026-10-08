@@ -52,7 +52,7 @@
 (defn preview
   [ctx command]
   (let [storage (request/require-storage ctx)]
-    (writer/with-write [storage :graph]
+    (writer/with-write [storage {:entity :fn :ids [(or (:target-fn-id command) (:owner-fn-id command))]}]
                        (if (= "candidates" (:action command))
                          (candidates storage command)
                          (:model (fresh-plan storage command))))))
@@ -158,7 +158,7 @@
   [storage command]
   (try
     (tx/assert-owns-commit! storage)
-    (writer/with-write [storage :graph]
+    (writer/with-write [storage {:entity :fn :ids [(or (:target-fn-id command) (:owner-fn-id command))]}]
                        (let [plan (fresh-plan storage command)]
                          (apply-plan! storage plan command)))
     (catch clojure.lang.ExceptionInfo e

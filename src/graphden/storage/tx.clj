@@ -100,7 +100,7 @@
    a caller outside `in-transaction`."
   [storage]
   (let [ds (datasource storage)]
-    (and (instance? Connection ds) (not (.getAutoCommit ^Connection ds)))))
+    (and (instance? Connection ds) (not (Connection/.getAutoCommit ^Connection ds)))))
 
 
 (defn assert-owns-commit!

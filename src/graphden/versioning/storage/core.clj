@@ -777,6 +777,14 @@
       (writer/writer-scope base-storage)))
 
 
+  writer/GraphWriterAdmission
+
+  (writer-scope-for
+    [_ mutation]
+    (when (satisfies? writer/GraphWriterAdmission base-storage)
+      (writer/writer-scope-for base-storage mutation)))
+
+
   writer/GraphWriteAuthorization
 
   (authorize-graph-write!
@@ -831,18 +839,20 @@
 
   writer/GraphCreationAuthorization
 
-  (authorize-graph-creation! [_ fn-data requested-branch-id]
+  (authorize-graph-creation!
+    [_ fn-data requested-branch-id]
     (when-not (= branch-id requested-branch-id)
       (throw (ex-info "Creation branch does not match the storage"
                       {:type :authz/forbidden})))
     (assert-not-merge-protected! base-storage branch-id :fn)
     (writer/assert-creation-authorized! base-storage fn-data branch-id))
 
+
   sp/StorageCRUD
 
   (create-entity
     [this entity-name data]
-    (writer/with-write [this entity-name]
+    (writer/with-write [this {:entity entity-name :rows [data]}]
                        (let [base-storage (:base-storage this)]
                          (assert-not-merge-protected! base-storage branch-id entity-name)
                          (with-write* base-storage entity-name
@@ -861,7 +871,7 @@
 
   (update-entity
     [this entity-name id data]
-    (writer/with-write [this entity-name]
+    (writer/with-write [this {:entity entity-name :ids [id] :rows [(assoc data :id id)]}]
                        (let [base-storage (:base-storage this)]
                          (assert-not-merge-protected! base-storage branch-id entity-name)
                          (with-write* base-storage entity-name
@@ -873,7 +883,7 @@
 
   (delete-entity
     [this entity-name id]
-    (writer/with-write [this entity-name]
+    (writer/with-write [this {:entity entity-name :ids [id]}]
                        (let [base-storage (:base-storage this)]
                          (assert-not-merge-protected! base-storage branch-id entity-name)
                          (with-write* base-storage entity-name
@@ -941,7 +951,7 @@
 
   (create-entities
     [this entity-name data-seq]
-    (writer/with-write [this entity-name]
+    (writer/with-write [this {:entity entity-name :rows data-seq}]
                        (let [base-storage (:base-storage this)]
                          (assert-not-merge-protected! base-storage branch-id entity-name)
                          (with-write* base-storage entity-name
@@ -962,7 +972,7 @@
 
   (update-entities
     [this entity-name data-seq]
-    (writer/with-write [this entity-name]
+    (writer/with-write [this {:entity entity-name :ids (mapv :id data-seq) :rows data-seq}]
                        (let [base-storage (:base-storage this)]
                          (assert-not-merge-protected! base-storage branch-id entity-name)
                          (with-write* base-storage entity-name
@@ -974,7 +984,7 @@
 
   (upsert-entities
     [this entity-name data-seq]
-    (writer/with-write [this entity-name]
+    (writer/with-write [this {:entity entity-name :rows data-seq}]
                        (let [base-storage (:base-storage this)]
                          (assert-not-merge-protected! base-storage branch-id entity-name)
                          (if-not (res/versioned-entity? entity-name)
@@ -1002,7 +1012,7 @@
 
   (delete-entities
     [this entity-name ids]
-    (writer/with-write [this entity-name]
+    (writer/with-write [this {:entity entity-name :ids ids}]
                        (let [base-storage (:base-storage this)]
                          (assert-not-merge-protected! base-storage branch-id entity-name)
                          (with-write* base-storage entity-name
@@ -1119,7 +1129,7 @@
          ;; committed first is seen (no child planted under a missing
          ;; parent), a delete that comes second sees this child and refuses.
          (writer/call-with-write
-           base :branch
+           base {:entity :branch :rows [{}]}
            (fn [st]
              (mrg/lock-branches! st parent-id)
              (when-not (sp/read-entity st :branch parent-id)
@@ -1458,7 +1468,7 @@
      ;; harmless over-invalidation, a committed delete is always preceded
      ;; by a visible bump.
      (let [binding-versions (with-bump* base :branch
-                              (fn [] (writer/call-with-write base :branch #(delete-branch-rows! % branch-id))))]
+                              (fn [] (writer/call-with-write base {:entity :branch :ids [branch-id]} #(delete-branch-rows! % branch-id))))]
        ;; Drop any cached chain that referenced this branch as an
        ;; ancestor — globals survive across CRUD calls and would
        ;; otherwise still hand back the pre-delete chain.
@@ -1515,7 +1525,7 @@
         ;; override's path and a list item's position may all have been
         ;; taken by a live row since the delete.
         (writer/call-with-write
-          base entity-name
+          base {:entity entity-name :ids [id]}
           (fn [st]
             (assert-not-merge-protected! st branch-id entity-name)
             (uniq/xact-lock! (tx/datasource st) (uniq/row-lock-keys branch-id entity-name [id]))

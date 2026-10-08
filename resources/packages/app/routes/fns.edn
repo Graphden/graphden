@@ -917,12 +917,12 @@
 
   {:name :api-inheritance-preview
    :description "POST /api/inheritance/preview — authorized transient inheritance plan."
-   :parent :post-auth-required
+   :parent :post
    :args {:path "/inheritance/preview" :handler :_inheritance-preview-handler}}
 
   {:name :api-inheritance-apply
    :description "POST /api/inheritance/apply — atomic expected-state guarded inheritance change."
-   :parent :post-auth-required
+   :parent :post
    :args {:path "/inheritance/apply" :handler :_inheritance-apply-handler}}
 
   {:name :partial-inheritance-intent

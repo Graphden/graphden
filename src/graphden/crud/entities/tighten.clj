@@ -202,7 +202,7 @@
      (when pooled? (tx/assert-owns-commit! storage))
      (let [result (try
                     (writer/call-with-write
-                      storage :graph
+                      storage {:entity :binding :ids [binding-id]}
                       (fn [bound]
                         (resolution/call-with-fresh-memos
                           (fn []

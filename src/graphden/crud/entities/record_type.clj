@@ -410,7 +410,9 @@
         _ (when pooled? (tx/assert-owns-commit! storage))
         result (try
                  (writer/call-with-write
-                   storage :graph
+                   storage (if-let [id (:fn-id parsed)]
+                             {:entity :fn :ids [id]}
+                             {:entity :fn :rows [{}]})
                    (fn [bound]
                      (resolution/call-with-fresh-memos
                        (fn []

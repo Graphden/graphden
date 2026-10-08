@@ -138,6 +138,27 @@ namespaces first. An addon fragment overrides indirection keys
   autocommit, without its collision locks. RLS holds inside the
   transaction because its connection comes from the org-aware pool on the
   request thread.
+- **Semantic graph writers** — `storage.graph-writer/call-with-write` holds
+  PostgreSQL transaction advisory locks across validation and the entire outer
+  commit or rollback. Public, raw and unknown writers take an exclusive global
+  lock. A trusted private writer takes that lock shared and its organization
+  lock exclusive, so separate organizations can edit their private graph rows
+  concurrently. These locks precede branch, row, identity and collision locks;
+  compilation and whole-graph type checks run after they are released.
+  `GraphWriterAdmission/writer-scope-for` classifies the identities a mutation
+  changes, including the identity behind a version row. A private actor can
+  have an authorized write to a public identity; that operation still needs
+  global admission. Classification repeats after waiting, and a changed owner
+  refuses the operation without upgrading a held lock. Namespace and row
+  authorization still run through the actual decorators under the lock.
+  `VersionedStorage` explicitly forwards admission and preview authorization.
+  Unknown decorators use global admission and cannot advertise writable
+  previews. A transaction token only permits physical storage calls to join
+  the same active context and exact connection; caller metadata grants no
+  authority. Compound inheritance apply rejects foreign JDBC transactions
+  whose commit boundary it does not own. It invalidates and publishes only
+  after the actual commit; publication failures report committed success with
+  warnings and preserve the new function UUID.
 - **Schema extensions** — `:db/schema {:extensions […]}` lets the addon add
   entities (`:org`, `:user`, `:grant`, `:role`, `:domain`, `:token`, …)
   without editing core schemas.

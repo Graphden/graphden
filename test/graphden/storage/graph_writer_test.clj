@@ -104,7 +104,7 @@
                           (deliver entered true)
                           @release)))]
         (try
-          (is (= true (deref entered 10000 :timeout)))
+          (is (true? (deref entered 10000 :timeout)))
           (let [same-org (future (write-fn! acme "acme-second"))]
             (try
               (is (= 1 (await-writer storage)))
@@ -134,7 +134,7 @@
                   (writer/call-with-write held :graph
                                           (fn [_] (deliver entered true) @release)))]
     (try
-      (is (= true (deref entered 10000 :timeout)))
+      (is (true? (deref entered 10000 :timeout)))
       (let [blocked (future (write-fn! waiting name))]
         (try
           (is (= 1 (await-writer storage)))
@@ -230,3 +230,43 @@
   (is (= :authz/forbidden
          (exception-type #(writer/assert-write-authorized!
                             {:org-id "acme"} :fn {} (random-uuid))))))
+
+
+(defrecord IdentityWriter
+  [base id]
+
+  writer/GraphWriterAdmission
+
+  (writer-scope-for
+    [_ _mutation]
+    (:org-id (get (sp/read-entities base :fn [id]) id))))
+
+
+(deftest ownership-is-rechecked-after-waiting-before-any-write-test
+  (with-storage
+    (fn [storage]
+      (let [row (sp/create-entity storage :fn {:name "ownership-before-wait" :org-id "acme"})
+            entered (promise)
+            release (promise)
+            applied? (atom false)
+            holding (future
+                      (writer/call-with-write
+                        storage :graph
+                        (fn [bound]
+                          (deliver entered true)
+                          (when-not (true? (deref release 10000 false))
+                            (throw (ex-info "Ownership test timed out" {})))
+                          (sp/update-entity bound :fn (:id row) {:org-id nil}))))]
+        (try
+          (is (true? (deref entered 10000 false)))
+          (let [waiting (future
+                          (exception-type
+                            #(writer/call-with-write
+                               (->IdentityWriter storage (:id row)) {:entity :fn :ids [(:id row)]}
+                               (fn [_] (reset! applied? true)))))]
+            (is (= 1 (await-writer storage)))
+            (deliver release true)
+            (is (not= :timeout (deref holding 10000 :timeout)))
+            (is (= :graph-write/stale-scope (deref waiting 10000 :timeout)))
+            (is (false? @applied?) "Stale admission never reaches the write callback"))
+          (finally (deliver release true) (deref holding 10000 nil)))))))

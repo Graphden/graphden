@@ -471,13 +471,13 @@
 (defn- apply-sequence-write
   "The guard covers fresh reads, validation and the complete mutation.
    Error envelopes abort the SQL transaction, including compensating writes."
-  [ctx apply!]
+  [ctx mutation apply!]
   (let [storage (request/require-storage ctx)
         pooled? (some? (tx/datasource storage))]
     (when pooled? (tx/assert-owns-commit! storage))
     (let [result (try
                    (writer/call-with-write
-                     storage :graph
+                     storage mutation
                      (fn [bound]
                        (resolution/call-with-fresh-memos
                          (fn []
@@ -495,7 +495,7 @@
   "Append/insert using a live binding and slot closure, in one transaction."
   [parsed seq-binding ctx]
   (apply-sequence-write
-    ctx
+    ctx {:entity :fn :ids [(:fn-id parsed)]}
     (fn [storage bound-ctx]
       (if-let [current (refresh-append-binding storage (:fn-id parsed) seq-binding)]
         (append-sequence! parsed current bound-ctx)
@@ -508,7 +508,7 @@
    cannot move an item in its former binding or resurrect a deleted item."
   [parsed _item ctx]
   (apply-sequence-write
-    ctx
+    ctx {:entity :binding-list-item :ids [(:item-id parsed)]}
     (fn [storage bound-ctx]
       (if-let [current (sp/read-entity storage :binding-list-item (:item-id parsed))]
         (move-sequence! parsed current bound-ctx)
@@ -519,7 +519,7 @@
   "Re-read the item under the guard before validation, update and rollback."
   [parsed _item ctx]
   (apply-sequence-write
-    ctx
+    ctx {:entity :binding-list-item :ids [(:item-id parsed)]}
     (fn [storage bound-ctx]
       (if-let [current (sp/read-entity storage :binding-list-item (:item-id parsed))]
         (update-sequence! parsed current bound-ctx)

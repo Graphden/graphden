@@ -202,14 +202,14 @@
   "Claim the path and create graph rows in one guarded SQL phase. Vault I/O
    follows its commit. Failed SQL clears only this phase's compensation
    entries; committed rows retain them for a later Vault failure."
-  [ctx journal reserve!]
+  [ctx journal mutation reserve!]
   (let [storage (request/require-storage ctx)
         pooled? (some? (tx/datasource storage))
         before @journal]
     (when pooled? (tx/assert-owns-commit! storage))
     (let [result (try
                    (writer/call-with-write
-                     storage :graph
+                     storage mutation
                      (fn [bound]
                        (res/call-with-fresh-memos
                          #(reserve! (assoc ctx :storage bound)))))
@@ -239,7 +239,7 @@
         binding-id (UUID/randomUUID)
         {:keys [path]}
         (reserve-secret-rows!
-          ctx journal
+          ctx journal {:entity :fn :rows [{:id fn-id}]}
           (fn [bound-ctx]
             (let [bound (request/require-storage bound-ctx)
                   path (claim-path! bound (:path parsed))
@@ -292,7 +292,7 @@
         binding-id (UUID/randomUUID)
         {:keys [path]}
         (reserve-secret-rows!
-          ctx journal
+          ctx journal {:entity :fn :ids [fn-id]}
           (fn [bound-ctx]
             (let [storage (request/require-storage bound-ctx)
                   _ (refuse-package-owner! storage fn-id)

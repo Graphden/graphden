@@ -175,7 +175,7 @@
             data (cond-> data
                    (and (= et :fn) (nil? (:id data))) (assoc :id (random-uuid)))
             _ (reject-generic-audit-write! et)
-            result (writer/with-write [storage et]
+            result (writer/with-write [storage {:entity et :rows [data]}]
                                       (res/call-with-fresh-memos
                                         (fn []
                                           (assert-write-valid! storage et data)
@@ -207,7 +207,7 @@
             et (keyword entity-type)
             publish? (owns-publication? storage)
             _ (reject-generic-audit-write! et)
-            result (writer/with-write [storage et]
+            result (writer/with-write [storage {:entity et :ids [id] :rows [(assoc data :id id)]}]
                                       (res/call-with-fresh-memos
                                         (fn []
                                           (let [check-data (if-let [ks (owner-identity-fields et)]
@@ -825,7 +825,9 @@
     (when pooled? (tx/assert-owns-commit! storage))
     (try
       (writer/call-with-write
-        storage (:entity-type parsed)
+        storage (if-let [id (:id-uuid parsed)]
+                  {:entity (:entity-type parsed) :ids [id] :rows [(assoc (:entity-data parsed) :id id)]}
+                  {:entity (:entity-type parsed) :rows [(:entity-data parsed)]})
         (fn [bound]
           (res/call-with-fresh-memos
             (fn []

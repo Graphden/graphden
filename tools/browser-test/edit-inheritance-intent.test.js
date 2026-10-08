@@ -39,7 +39,7 @@ async function openIntent(page, fnName, depth = 1) {
   page.on('dialog', dialog => dialog.accept());
   let namespaceId;
   try {
-    await api(page, 'POST', '/api/entities/namespace', 'name=' + encodeURIComponent(nsName));
+    await api(page, 'POST', '/api/entities/ns', 'name=' + encodeURIComponent(nsName));
     const tree = await api(page, 'GET', '/api/graph/entities?scope=tree');
     namespaceId = tree.namespaces?.find(row => row.name === nsName && !row['parent-id'])?.id;
     assert(namespaceId, 'owned namespace created');
@@ -151,7 +151,7 @@ async function openIntent(page, fnName, depth = 1) {
       await deleteFnByName(page, name);
     }
     if (namespaceId) {
-      const response = await nodeApi('DELETE', '/api/entities/namespace/' + namespaceId);
+      const response = await nodeApi('DELETE', '/api/entities/ns/' + namespaceId);
       assert(response.ok, 'fixture namespace cleaned');
     }
     await browser.close();

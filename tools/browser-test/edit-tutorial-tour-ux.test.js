@@ -357,6 +357,12 @@ const {
     await page.check('.execute-popover.visible .execute-confirm-checkbox');
     await page.click('.execute-popover.visible .execute-run-btn');
     await waitTourTitle(page, 'Back to the whole tree', 150000);
+    const viewResult = await page.evaluate(() => JSON.parse(document.querySelector(
+      '#gd-insp-run-host .execute-result-raw pre').textContent));
+    assert(Array.isArray(viewResult.fns) && viewResult.fns.some(fn => fn.id === viewId)
+      && viewResult.fns.every(fn => fn.name.includes('tutorial-function-view'))
+      && Number.isInteger(viewResult.total) && viewResult.total >= viewResult.fns.length,
+    'saved view Run returns its own UUID and only matching filtered functions');
     await page.click('#kind-filters .kind-toggle[data-kind="all"]');
     await waitTourTitle(page, "That's filters and views", 60000);
     await finishAndDelete(page);

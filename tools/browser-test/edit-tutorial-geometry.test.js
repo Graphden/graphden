@@ -148,13 +148,18 @@ const {assert, newContext} = require('./edit-test-helpers');
     }, null, {timeout: 10000});
     const idleStart = await page.evaluate(() => {
       window.geometryIdleRecords = [];
+      window.geometryIdleMutationCount = 0;
       window.geometryResizeSignals = [];
       window.geometryIdleObserver = new MutationObserver((records) => {
         for (const record of records) {
           if (record.target.closest?.('#gd-tour-pop, #gd-tour-spot, #gd-tour-dim')
             || record.target.parentElement?.closest('#gd-tour-pop, #gd-tour-spot, #gd-tour-dim')) continue;
-          window.geometryIdleRecords.push({type: record.type, name: record.attributeName,
-            target: record.target.outerHTML?.slice(0, 180)});
+          window.geometryIdleMutationCount++;
+          if (window.geometryIdleRecords.length < 5) {
+            const target = record.target.nodeType === 1 ? record.target : record.target.parentElement;
+            window.geometryIdleRecords.push({type: record.type, name: record.attributeName,
+              target: target?.id || target?.tagName + '.' + String(target?.className || '')});
+          }
         }
       });
       window.geometryIdleObserver.observe(document.body, {subtree: true, attributes: true, childList: true, characterData: true});
@@ -165,9 +170,10 @@ const {assert, newContext} = require('./edit-test-helpers');
     const idle = await page.evaluate((before) => {
       window.geometryIdleObserver.disconnect();
       return {calls: window.geometryCalls - before.calls, ticks: window.geometryTicks - before.ticks,
-        mutations: window.geometryIdleRecords, resizes: window.geometryResizeSignals};
+        mutations: window.geometryIdleMutationCount, samples: window.geometryIdleRecords,
+        resizes: window.geometryResizeSignals};
     }, idleStart);
-    const layoutChanged = idle.mutations.length > 0 || idle.resizes.length > 0;
+    const layoutChanged = idle.mutations > 0 || idle.resizes.length > 0;
     assert(idle.ticks >= 2 && (layoutChanged || idle.calls === 0),
       'completion polling performs no geometry scans without layout signals: ' + JSON.stringify(idle));
     await page.evaluate(() => selectFnByName('const'));

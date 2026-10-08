@@ -439,16 +439,21 @@ function gdPrefNotify(key) {
   for (const fn of _prefListeners) { try { fn(key, gdPrefRead(key)); } catch (_) {} }
 }
 
-// Write a preference: apply now, mirror locally, persist server-side.
+// Component plans resolve the server's selection, so publish that preference
+// only after persistence. Other preferences retain their immediate tab effect.
 async function gdPrefWrite(key, value) {
   const identity = _prefsIdentityGen;
   const owner = window.gdPrefOwner;
   _prefsGen += 1;
-  _prefWrittenGen[key] = _prefsGen;
-  _prefs = Object.assign({}, _prefs, { [key]: value });
-  writePrefsMirror(_prefs);
-  gdPrefApply(key);
-  gdPrefNotify(key);
+  const generation = _prefsGen;
+  _prefWrittenGen[key] = generation;
+  const publish = () => {
+    _prefs = Object.assign({}, _prefs, { [key]: value });
+    writePrefsMirror(_prefs);
+    gdPrefApply(key);
+    gdPrefNotify(key);
+  };
+  if (key !== 'components') publish();
   if (identity !== _prefsIdentityGen) return false;
   const api = window.API;
   if (!api || typeof api.api_prefs_key !== 'function') return false;
@@ -458,7 +463,11 @@ async function gdPrefWrite(key, value) {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({value, ...(owner ? {owner} : {})}),
     });
-    return identity === _prefsIdentityGen && r.ok;
+    const saved = identity === _prefsIdentityGen && r.ok;
+    if (key !== 'components') return saved;
+    if (!saved || _prefWrittenGen[key] !== generation) return false;
+    publish();
+    return true;
   } catch (_) { return false; }
 }
 

@@ -60,6 +60,20 @@ async function walkUIComponentsLesson(page) {
   await settings(page);
   await waitTourTitle(page, 'Create personal graphs');
   const previous = await page.evaluate(() => ({components: gdPrefRead('components'), theme: gdPrefRead('theme'), branch: getCurrentBranchName()}));
+  const preferencePath = await page.evaluate(() => new URL(API.api_prefs_key('components'), location.href).pathname);
+  const matchesSelectionWrite = url => url.pathname === preferencePath;
+  let selectionWaitedForPersistence = false;
+  const holdSelectionWrite = async route => {
+    if (route.request().method() !== 'PUT') return route.continue();
+    try {
+      // Delay the real write, without synthesizing its response. The first
+      // plan must not race the server's authoritative preference lookup.
+      await page.waitForTimeout(300);
+      selectionWaitedForPersistence = await page.evaluate(value =>
+        JSON.stringify(gdPrefRead('components')) === JSON.stringify(value), previous.components);
+    } finally { await route.continue(); }
+  };
+  await page.route(matchesSelectionWrite, holdSelectionWrite);
   await page.locator('#gd-ui-components-create').click();
   const picker = page.locator('.fn-picker-popover[aria-label="Pick a namespace"]');
   // A cloud runner supplies the full authorized path. Resolve its actual
@@ -78,7 +92,9 @@ async function walkUIComponentsLesson(page) {
   await option.click();
   assert((await previewRequest).postDataJSON()['namespace-id'] === destinationId,
     'the visible picker sends the intended namespace UUID to the real preview');
-  await waitTourTitle(page, 'Open the theme group', 150000);
+  try { await waitTourTitle(page, 'Open the theme group', 150000); }
+  finally { await page.unroute(matchesSelectionWrite, holdSelectionWrite); }
+  assert(selectionWaitedForPersistence, 'the personal selection waits for the real preference write before loading plans');
   const receipt = await page.evaluate(() => _tourState.uiComponentManifests.at(-1));
   const manifest = receipt.manifest;
   assert(receipt.request['namespace-id'] === destinationId,

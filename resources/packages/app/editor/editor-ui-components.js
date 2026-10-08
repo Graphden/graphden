@@ -32,6 +32,38 @@
       return evaluator.run(entry, argumentsForGraph);
     }};
   }
+  function waitForPolicy(signal) {
+    if (signal?.aborted) return Promise.reject(new DOMException('Selection changed', 'AbortError'));
+    return new Promise((resolve, reject) => {
+      const finish = aborted => {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', abort);
+        if (aborted) reject(new DOMException('Selection changed', 'AbortError'));
+        else resolve();
+      };
+      const abort = () => finish(true);
+      const timer = setTimeout(() => finish(false), 1000);
+      signal?.addEventListener('abort', abort, {once: true});
+    });
+  }
+  async function loadPlan(component, chosen, started, signal) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (started !== stamp() || signal?.aborted) throw new DOMException('Selection changed', 'AbortError');
+      const response = await window.authFetch(window.API.api_ui_components_plan, {
+        method: 'POST', signal, cache: 'no-store',
+        headers: {'Content-Type': 'application/json', 'X-Graphden-Branch': chosen['branch-id']},
+        body: JSON.stringify({component}),
+      });
+      const result = await response.json();
+      if (started !== stamp() || signal?.aborted) throw new DOMException('Selection changed', 'AbortError');
+      if (attempt < 2 && response.status === 422 && !response.ok && result.ok === false
+        && result.code === 'policy-refresh-required' && result.retryable === true) {
+        await waitForPolicy(signal);
+        continue;
+      }
+      return {response, result};
+    }
+  }
   window.gdLoadUIComponentRuntime = async (component, builtin, options = {}, signal) => {
     const chosen = selection();
     if (!chosen) {
@@ -42,13 +74,7 @@
     }
     const started = stamp();
     try {
-      const response = await window.authFetch(window.API.api_ui_components_plan, {
-        method: 'POST', signal, cache: 'no-store',
-        headers: {'Content-Type': 'application/json', 'X-Graphden-Branch': chosen['branch-id']},
-        body: JSON.stringify({component}),
-      });
-      const result = await response.json();
-      if (started !== stamp() || signal?.aborted) throw new DOMException('Selection changed', 'AbortError');
+      const {response, result} = await loadPlan(component, chosen, started, signal);
       if (!response.ok || !result.ok || result['selection-id'] !== chosen['fn-id']) throw new Error('unavailable');
       const checked = runtime(result.plan, options);
       runtimeIdentities.set(component, {stamp: started, id: chosen['fn-id']});
@@ -57,7 +83,7 @@
       window.dispatchEvent(new Event('gd-ui-components-status'));
       return checked;
     } catch (error) {
-      if (error.name === 'AbortError' || started !== stamp()) throw new DOMException('Selection changed', 'AbortError');
+      if (error.name === 'AbortError' || signal?.aborted || started !== stamp()) throw new DOMException('Selection changed', 'AbortError');
       runtimeIdentities.delete(component);
       status(component, 'Personal UI graphs are unavailable. Using built-in components.');
       return runtime(builtin, options);

@@ -20,7 +20,9 @@ async function selectCreatedLeaf(page, manifest, group, name) {
   const fn = manifest.functions.find(row => row.name === name && row['namespace-id'] === namespace.id);
   assert(fn, 'the named value belongs to the exact created group');
   await page.locator('input[placeholder="Filter..."]').fill(name);
-  await page.locator('#entity-list .entity-item[data-fn-id="' + fn.id + '"] .name').click();
+  // Search pins exact matches above the namespace tree, so the same UUID
+  // legitimately has two rows. Click its first visible presentation.
+  await page.locator('#entity-list .entity-item[data-fn-id="' + fn.id + '"]:visible .name').first().click();
   await page.waitForFunction(id => selectedFnId === id, fn.id);
   const card = page.locator('.node-overlay[data-fn-name="' + name + '"]');
   await card.locator('.ancestor-line').first().click();
@@ -132,4 +134,4 @@ async function walkUIComponentsLesson(page) {
   }
   return manifest;
 }
-module.exports = {walkUIComponentsLesson};
+module.exports = {walkUIComponentsLesson, selectCreatedLeaf};

@@ -94,7 +94,9 @@ async function tokens(page) {
   } catch (_) {
     // Deliberately omit exception text: automation errors can quote DOM.
     process.exitCode = 1;
-    console.error('FAIL token lesson walkthrough; no secret-bearing artifacts recorded');
+    const step = await page.evaluate(() => typeof _tourState !== 'undefined'
+      && Number.isInteger(_tourState?.step) ? _tourState.step : null).catch(() => null);
+    console.error('FAIL token lesson walkthrough at step ' + step + '; no secret-bearing artifacts recorded');
   } finally {
     if (!finished) {
       await page.evaluate(async () => { if (_tourState) await _tourEnd(); }).catch(() => {});

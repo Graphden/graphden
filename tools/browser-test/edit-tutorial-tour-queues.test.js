@@ -212,7 +212,37 @@ async function cleanup(page, finish) {
     await filterAndSelect(page, 'tutorial-queue-worker', 'tutorial-queue-worker');
     await waitTourTitle(page, 'Restart the same service');
     await serviceSettings(page, true, service.id);
-    await waitTourTitle(page, 'Stop the worker', 90000);
+    try {
+      await waitTourTitle(page, 'Stop the worker', 90000);
+    } catch (error) {
+      console.error('Exact ACK gate flags: ' + JSON.stringify(await page.evaluate(async ({serviceId, messageId, executionId}) => {
+        const entry = _tourState.created.find(row => row.type === 'service' && row.id === serviceId);
+        const handler = _tourState.created.find(row => row.type === 'fn' && row.name === 'tutorial-queue-handler');
+        const read = await authFetch('/partials/queues/message?message-id=' + encodeURIComponent(messageId));
+        const row = read.ok ? await read.json() : null;
+        const cache = await fetchServices();
+        const serviceRow = cache?.services?.find(item => item.id === serviceId);
+        const runRead = await authFetch(API.api_execute_id(executionId));
+        const run = runRead.ok ? await runRead.json() : null;
+        const bindings = lookups.bindingsByFn?.get(handler?.id) || [];
+        const literal = name => bindings.find(binding => lookups.slotMap?.get(binding['slot-id'])?.name === name);
+        const statuses = new Set(['succeeded', 'failed', 'running', 'pending', 'cancelled']);
+        const codes = new Set(['execution/free-args', 'validation/type-mismatch', 'execution/type-mismatch', 'parse-json/invalid-json']);
+        return {messageReadStatus: read.status, messageExact: row?.id === messageId,
+          messageAbsent: !!row && Object.keys(row).length === 0,
+          messageState: ['pending', 'dead'].includes(row?.state) ? row.state : 'other-or-absent', attempts: row?.attempts,
+          desiredEnabled: !!serviceRow?.['enabled?'], runningCount: (await readServiceInstances(serviceId)).count,
+          serviceBranchMatches: serviceRow?.['branch-id'] === entry?.['branch-id'],
+          handlerStringRepaired: literal('string')?.value === '{}', handlerKeywordizeTrue: literal('keywordize')?.value === true,
+          children: (run?.children || []).map(child => {
+            const status = String(child.status).replace(/^:/, '');
+            const code = child['error-type'];
+            return {handlerMatches: child['fn-id'] === handler?.id,
+              status: statuses.has(status) ? status : 'other', errorCode: codes.has(code) ? code : 'other-or-unavailable'};
+          })};
+      }, {serviceId: service.id, messageId: message.id, executionId: message['execution-id']})));
+      throw error;
+    }
     assert(Object.keys(await messageState(page, message.id)).length === 0, 'ACK removes the exact requeued message');
     const handled = await page.evaluate(async executionId => {
       const response = await authFetch(API.api_execute_id(executionId));

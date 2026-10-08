@@ -39,7 +39,22 @@ const {assert, newContext} = require('./edit-test-helpers');
       }]}]};
       _tourState = {lessonId: 'geometry', step: 0, created: []};
       _tourRenderStep();
+      // Capture notifications delivered to the actual tour observer, including
+      // late font/layout changes which produce no DOM mutation.
+      window.geometryResizeSignals = [];
+      const NativeResizeObserver = window.ResizeObserver;
+      window.ResizeObserver = class extends NativeResizeObserver {
+        constructor(callback) {
+          super((entries) => {
+            window.geometryResizeSignals.push(entries.map((entry) => ({
+              target: entry.target.id, width: entry.contentRect.width, height: entry.contentRect.height,
+            })));
+            callback(entries);
+          });
+        }
+      };
       _tourArm();
+      window.ResizeObserver = NativeResizeObserver;
       window.geometryBaselineListeners = _viewportListeners.length - 1;
     });
     const frames = async (count = 4) => page.evaluate(async (n) => {
@@ -133,6 +148,7 @@ const {assert, newContext} = require('./edit-test-helpers');
     }, null, {timeout: 10000});
     const idleStart = await page.evaluate(() => {
       window.geometryIdleRecords = [];
+      window.geometryResizeSignals = [];
       window.geometryIdleObserver = new MutationObserver((records) => {
         for (const record of records) {
           if (record.target.closest?.('#gd-tour-pop, #gd-tour-spot, #gd-tour-dim')
@@ -149,9 +165,11 @@ const {assert, newContext} = require('./edit-test-helpers');
     const idle = await page.evaluate((before) => {
       window.geometryIdleObserver.disconnect();
       return {calls: window.geometryCalls - before.calls, ticks: window.geometryTicks - before.ticks,
-        mutations: window.geometryIdleRecords};
+        mutations: window.geometryIdleRecords, resizes: window.geometryResizeSignals};
     }, idleStart);
-    assert(idle.calls === 0 && idle.ticks >= 2, 'completion polling remains live without idle geometry scans: ' + JSON.stringify(idle));
+    const layoutChanged = idle.mutations.length > 0 || idle.resizes.length > 0;
+    assert(idle.ticks >= 2 && (layoutChanged || idle.calls === 0),
+      'completion polling performs no geometry scans without layout signals: ' + JSON.stringify(idle));
     await page.evaluate(() => selectFnByName('const'));
     await page.waitForSelector('.node-overlay', {timeout: 60000});
     await page.waitForFunction(() => !graph.animating, null, {timeout: 30000});

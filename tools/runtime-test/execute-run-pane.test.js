@@ -308,6 +308,74 @@ function boot({ effects = false } = {}) {
       'no Cancel for a finished run');
   }
 
+  console.log(' completed inline receipt belongs to the submitted UUID, not a later selection');
+  {
+    const t = boot();
+    await mountA(t);
+    const host = t.doc.querySelector('.execute-result-host');
+    const fn = {id: 'A'};
+    const pending = t.ctx.submitExecution(fn, {}, false, false, false, host,
+      t.doc.querySelector('.execute-cancel-btn'));
+    await t.flush();
+    fn.id = 'B';
+    t.ctx.__releasePost();
+    await pending;
+    assert(t.posts.at(-1)['fn-id'] === 'A', 'request was submitted for A');
+    assert(host.gdExecutionFnId === 'A', 'completed receipt remains A despite the later selection');
+  }
+
+  console.log(' a late inline partial cannot stamp or repaint a newer completed run');
+  {
+    const t = boot();
+    await mountA(t);
+    const host = t.doc.querySelector('.execute-result-host');
+    const cancel = t.doc.querySelector('.execute-cancel-btn');
+    const [held, release] = t.hold();
+    t.ctx.__partialHandler = () => held;
+    const first = t.ctx.submitExecution({id: 'A'}, {}, false, false, false, host, cancel);
+    await t.flush();
+    t.ctx.__releasePost();
+    await t.flush();
+    t.ctx.__partialHandler = null;
+    const second = t.ctx.submitExecution({id: 'B'}, {}, false, false, false, host, cancel);
+    await t.flush();
+    t.ctx.__releasePost();
+    await second;
+    const result = host.innerHTML;
+    release(t.res(null, 'LATE-A'));
+    await first;
+    assert(host.gdExecutionFnId === 'B', 'B owns the current receipt');
+    assert(host.innerHTML === result, 'late A cannot repaint B');
+  }
+
+  console.log(' pending, failed, cancelled and tainted runs clear the prior successful receipt');
+  for (const status of ['pending', 'failed', 'cancelled', 'tainted', 'rejected']) {
+    const t = boot();
+    await mountA(t);
+    const host = t.doc.querySelector('.execute-result-host');
+    await run(t, {status: 'succeeded', result: 1});
+    assert(host.gdExecutionFnId === 'A', status + ': prior success recorded');
+    t.doc.querySelector('.execute-run-btn').click();
+    await t.flush();
+    assert(!host.gdExecutionFnId, status + ': pending request already clears receipt');
+    t.setExec(() => ({status, 'execution-id': status === 'pending' ? 'next' : null}));
+    t.ctx.__releasePost();
+    await t.flush();
+    assert(!host.gdExecutionFnId, status + ': no successful receipt synthesized');
+  }
+
+  console.log(' a completed poll records its actual row UUID');
+  {
+    const t = boot();
+    await mountA(t);
+    const host = t.doc.querySelector('.execute-result-host');
+    await run(t, {status: 'pending', 'execution-id': 'poll-row'});
+    t.ctx.__pollHandler = () => t.res({status: 'succeeded', 'fn-id': 'actual-row-fn'});
+    t.timers.shift()();
+    await t.flush();
+    assert(host.gdExecutionFnId === 'actual-row-fn', 'poll identity comes from the completed stored row');
+  }
+
   if (fails) { console.error(`✗ ${fails} failed, ${passes} passed`); process.exit(1); }
   console.log(`✓ ${passes} passed`);
 })();

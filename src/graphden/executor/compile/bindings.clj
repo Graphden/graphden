@@ -227,10 +227,12 @@
    Decision is keyed on the registered return-type via the rich-types
    registry — purely type-driven, never on fn name; an undeclared
    return inherits along the parent chain (`effective-return-type`).
-   Any fn-def whose computed `:return` is a `[:fn …]` type takes this
-   branch."
+   A marker-wrapped callable also takes this branch: its stored type keeps
+   the markers, and callable-signature carries them onto invocation results.
+   This dispatch only chooses evaluation versus wrapping; it grants no
+   permission to consume a secret as a plain value."
   [ref-fn-id lookups]
-  (types/fn-type? (effective-return-type ref-fn-id lookups)))
+  (some? (types/callable-signature (effective-return-type ref-fn-id lookups))))
 
 
 (defn- lazy-seq-arg-names

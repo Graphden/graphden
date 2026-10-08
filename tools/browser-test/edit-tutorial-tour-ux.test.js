@@ -260,7 +260,7 @@ const {
     await page.type('.fn-picker-popover .fn-picker-search', 'const');
     await page.waitForSelector('.fn-picker-popover .fn-picker-row[data-fn-name="core.logic.const"]', {timeout: 20000});
     await page.click('.fn-picker-popover .fn-picker-row[data-fn-name="core.logic.const"]');
-    await waitTourTitle(page, 'Save it as a view', 150000);
+    await waitTourTitle(page, 'Create a graph view', 150000);
     // The tree is now the computed membership — non-empty for :const.
     await page.waitForFunction(() =>
       document.querySelectorAll('#entity-list .entity-item').length > 0,
@@ -271,29 +271,52 @@ const {
     }));
     assert(viewRows.rows > 0, 'the uses filter renders members (' + viewRows.rows + ' rows)');
     assert(viewRows.chips.join() === 'uses core.logic.const', 'a "uses" chip names the fn (got: ' + viewRows.chips.join() + ')');
-    await page.click('#gd-ws-chip');
-    await page.waitForSelector('#gd-ws-pop .gd-views-input', {timeout: 15000});
-    await page.fill('#gd-ws-pop .gd-views-input', 'on-const');
-    await page.keyboard.press('Enter');
-    await waitTourTitle(page, 'Back to the whole tree', 150000);
-    assert(await page.evaluate(() => document.querySelector('#gd-ws-chip b')?.textContent === 'on-const'
-      && gdReadViews().some((v) => v.name === 'on-const')), 'the view is saved and named on the chip');
+    await page.evaluate(() => gdCloseFilterAdd());
+    await page.click('#kind-filters .kind-toggle[data-kind="all"]');
+    await page.click('#kind-filters .kind-toggle[data-kind="fn"]');
+    await page.click('#gd-filter-add');
+    await page.fill('.gd-filter-add-pop input[aria-label="Only names containing"]', 'tutorial-');
+    await page.press('.gd-filter-add-pop input[aria-label="Only names containing"]', 'Enter');
     await page.keyboard.press('Escape');
-    await page.evaluate(() => toggleKind('all'));
-    await waitTourTitle(page, "Back to the whole tree");
-    await page.waitForFunction(() => !document.querySelector('#gd-filter-chips .gd-filter-chip'), null, {timeout: 15000, polling: 100});
-    // …and the saved view comes back from the chip's popover.
     await page.click('#gd-ws-chip');
-    await page.waitForSelector('#gd-ws-pop .gd-views-apply[aria-label="Apply view on-const"]', {timeout: 15000});
-    await page.click('#gd-ws-pop .gd-views-apply[aria-label="Apply view on-const"]');
-    await page.waitForFunction(() => document.querySelector('#gd-ws-chip b')?.textContent === 'on-const'
-      && document.querySelectorAll('#entity-list .entity-item').length > 0, null, {timeout: 30000, polling: 200});
-    console.log('  lesson 22: the saved view re-applies from the chip');
-    await page.evaluate(() => { toggleKind('all'); gdDeleteView('on-const'); });
+    await page.fill('#gd-ws-pop .gd-views-input', 'tutorial-function-view');
+    await page.getByRole('button', {name: 'Save in graph', exact: true}).click();
+    await waitTourTitle(page, 'Edit the same view', 150000);
+    const viewId = await page.evaluate(() => gdActiveViewId());
+    assert(viewId, 'graph Save retains the preassigned identity');
+    await page.keyboard.press('Escape');
+    await page.click('#gd-ws-chip');
+    await page.click('#gd-ws-pop [data-edit-view="' + viewId + '"]');
+    await page.fill('.gd-filter-add-pop input[aria-label="Only names containing"]', 'tutorial-function-view');
+    await page.press('.gd-filter-add-pop input[aria-label="Only names containing"]', 'Enter');
+    await page.keyboard.press('Escape');
+    await page.click('#gd-ws-chip');
+    await page.getByRole('button', {name: 'Save changes', exact: true}).click();
+    await waitTourTitle(page, 'Run the view', 150000);
+    const persisted = (await api(page, 'GET', '/api/views')).find(view => view.id === viewId);
+    assert(persisted?.filters.kinds.join() === 'fn' && persisted.filters.name === 'tutorial-function-view',
+      'Edit preserves the kind and changes name on the same persisted view UUID');
+    await page.keyboard.press('Escape');
+    await page.click('#gd-ws-chip');
+    await page.getByRole('button', {name: 'Open view fn tutorial-function-view', exact: true}).click();
+    await page.waitForSelector('.node-overlay[data-fn-name="tutorial-function-view"]');
+    if (await page.locator('.node-overlay[data-fn-name="tutorial-function-view"] .fn-run-trigger').count()) {
+      await page.click('.node-overlay[data-fn-name="tutorial-function-view"] .fn-run-trigger');
+    } else {
+      await page.click('.node-overlay[data-fn-name="tutorial-function-view"] .ancestor-line[data-level="0"] .more-actions-trigger');
+      await page.click('.row-actions-popover [data-action="run"]');
+    }
+    await page.waitForSelector('.execute-popover.visible .execute-confirm-checkbox');
+    assert(await page.locator('.execute-popover.visible .execute-run-btn').isDisabled(), 'database effect requires consent');
+    await page.check('.execute-popover.visible .execute-confirm-checkbox');
+    await page.click('.execute-popover.visible .execute-run-btn');
+    await waitTourTitle(page, 'Back to the whole tree', 150000);
+    await page.click('#kind-filters .kind-toggle[data-kind="all"]');
     await waitTourTitle(page, "That's filters and views", 60000);
-    assert(await clickTourButton(page, 'Finish'), 'lesson 22 Finish');
-    await waitTourClosed(page, 30000);
-    console.log('  lesson 22: walked (nothing created)');
+    await finishAndDelete(page);
+    const viewsAfterCleanup = await api(page, 'GET', '/api/views');
+    assert(!viewsAfterCleanup.some(view => view.id === viewId), 'lesson cleanup removed the exact created view');
+    console.log('  lesson 22: created, edited both conditions, ran and cleaned exact UUID');
 
     // ---------- Lesson 12 — in-graph state ----------
     await page.goto(BASE + '/?tutorial=12');
@@ -456,21 +479,21 @@ const {
       assert(await page.evaluate((n) => !!document.querySelector('.node-overlay[data-fn-name="' + n + '"]'), name),
         name + ' is on the canvas before the run');
     }
-    // Run the ROOT with history + trace + capture values — the values are
-    // what the path view prints on the cards and the tree lists. The
-    // capture confirm is a native dialog; the page-level handler accepts it.
-    await openRowActionsFor(page, 'tutorial-sentence');
-    await page.evaluate(() => {
-      document.querySelector('.row-actions-popover [data-action="run-fn"]')
-        .dispatchEvent(new MouseEvent('click', {bubbles: true}));
-    });
+    // The visible node Run uses the existing Inspector pane.
+    await page.click('.node-overlay[data-fn-name="tutorial-sentence"] .fn-run-trigger');
     await page.waitForSelector('.execute-popover.visible .execute-run-btn', {timeout: 15000});
-    await page.evaluate(() => {
-      for (const sel of ['.execute-persist-checkbox', '.execute-trace-checkbox']) {
-        const cb = document.querySelector('.execute-popover.visible ' + sel);
-        if (cb && !cb.checked) cb.click();
-      }
-    });
+    const options = page.locator('.execute-popover.visible .execute-options');
+    assert(!(await options.evaluate(element => element.open)), 'Run options start collapsed');
+    await options.locator('summary').click();
+    await page.check('.execute-popover.visible .execute-persist-checkbox');
+    await page.check('.execute-popover.visible .execute-trace-checkbox');
+    await page.click('.execute-popover.visible .execute-run-btn');
+    await waitTourTitle(page, 'Draw the timing path', 150000);
+    await page.click('.execute-show-path-btn');
+    await waitTourTitle(page, 'Run with captured values', 150000);
+    assert(await page.locator('.path-trace-badge').count() > 0, 'timing path has actual call badges');
+    assert(await page.locator('.path-value-badge').count() === 0, 'without capture there are no value badges');
+    await page.keyboard.press('Escape');
     await page.click('.execute-popover.visible .execute-capture-values-checkbox');
     assert(await page.evaluate(() =>
       document.querySelector('.execute-popover.visible .execute-capture-values-checkbox').checked),

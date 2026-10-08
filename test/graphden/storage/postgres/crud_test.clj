@@ -22,6 +22,7 @@
     [graphden.storage.protocol.config :as sp-config]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.test-helpers :as th]
+    [graphden.storage.tx :as tx]
     [next.jdbc :as jdbc]))
 
 
@@ -30,6 +31,97 @@
 
 
 ;; === StorageCRUD tests ===
+
+(deftest batch-slot-mutations-evict-warmed-identity-rows
+  (let [storage (setup/create-test-storage)]
+    (try
+      (sp/initialize storage (setup/make-graph-schema))
+      (setup/seed-primitives! storage)
+      (let [slot (setup/create-slot! storage "cached-slot" :int)
+            id (:id slot)
+            physical #(first (sp/query-entities storage :slot {:id id}))]
+        (is (= slot (sp/read-entity storage :slot id)))
+        (sp/update-entities storage :slot [{:id id :description "batch update"}])
+        (is (= "batch update" (:description (sp/read-entity storage :slot id))))
+        (is (= (physical) (sp/read-entity storage :slot id)))
+        (sp/upsert-entities storage :slot [(assoc slot :description "batch upsert")])
+        (is (= "batch upsert" (:description (sp/read-entity storage :slot id))))
+        (is (= (physical) (sp/read-entity storage :slot id)))
+        (is (= 1 (sp/delete-entities storage :slot [id])))
+        (is (nil? (physical)) "The identity was physically reclaimed")
+        (is (nil? (sp/read-entity storage :slot id)) "No cached row survives the batch delete")
+        (sp/create-entities storage :slot [(assoc slot :name "recreated-slot")])
+        (is (= "recreated-slot" (:name (sp/read-entity storage :slot id))))
+        (is (= (physical) (sp/read-entity storage :slot id))))
+      (finally (sp/close storage)))))
+
+
+(deftest late-slot-read-cannot-repopulate-a-reclaimed-identity
+  (let [storage (setup/create-test-storage)
+        read-done (promise)
+        release (promise)
+        reader (atom nil)]
+    (try
+      (sp/initialize storage (setup/make-graph-schema))
+      (setup/seed-primitives! storage)
+      (let [slot (setup/create-slot! storage "late-slot" :int)
+            id (:id slot)]
+        ;; Pause AFTER the real SQL read returned, before cache admission.
+        (reset! reader
+                (future
+                  (binding [util/*jdbc-override*
+                            {:execute-one!
+                             (fn [ds sql opts]
+                               (let [row (jdbc/execute-one! ds sql opts)]
+                                 (when (str/includes? (first sql) "FROM \"slot\"")
+                                   (deliver read-done true)
+                                   (when-not (true? (deref release 10000 false))
+                                     (throw (ex-info "Slot read barrier timed out" {}))))
+                                 row))}]
+                    (sp/read-entity storage :slot id))))
+        (is (true? (deref read-done 10000 false)))
+        (is (= 1 (sp/delete-entities storage :slot [id])))
+        (deliver release true)
+        (is (= id (:id (deref @reader 10000 nil))) "The first reader saw the pre-delete snapshot")
+        (is (empty? (sp/query-entities storage :slot {:id id})))
+        (is (nil? (sp/read-entity storage :slot id)) "Its late result cannot leave a cached ghost"))
+      (finally
+        (deliver release true)
+        (when @reader (future-cancel @reader))
+        (sp/close storage)))))
+
+
+(deftest slot-cache-misses-during-an-outer-write-do-not-survive-commit
+  (let [storage (setup/create-test-storage)
+        deleted (promise)
+        release (promise)
+        writer (atom nil)]
+    (try
+      (sp/initialize storage (setup/make-graph-schema))
+      (setup/seed-primitives! storage)
+      (let [slot (setup/create-slot! storage "pending-delete-slot" :int)
+            id (:id slot)]
+        (reset! writer
+                (future
+                  (tx/in-transaction
+                    storage
+                    (fn [st]
+                      (sp/delete-entities st :slot [id])
+                      (is (nil? (sp/read-entity st :slot id)) "Transaction reads bypass the shared cache")
+                      (deliver deleted true)
+                      (when-not (true? (deref release 10000 false))
+                        (throw (ex-info "Slot write barrier timed out" {})))))))
+        (is (true? (deref deleted 10000 false)))
+        (is (= id (:id (sp/read-entity storage :slot id))) "Another connection still sees the committed row")
+        (deliver release true)
+        (is (nil? (deref @writer 10000 :timeout)))
+        (is (empty? (sp/query-entities storage :slot {:id id})))
+        (is (nil? (sp/read-entity storage :slot id)) "The pre-commit miss was never cached"))
+      (finally
+        (deliver release true)
+        (when @writer (future-cancel @writer))
+        (sp/close storage)))))
+
 
 (deftest crud-create-entity-test
   (testing "create-entity with provided id"

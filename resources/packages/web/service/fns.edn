@@ -32,20 +32,20 @@
  :description "Service-to-service: resolve a service fn to the address it answers on (the fn IS the value) and call it over HTTP; the contract is fn-defs both sides share."
  :fns
  [{:name :service-endpoint-shape
-   :description "Where a running service answers — `{host, port, url}`. `url` is the origin (`http://host:port`, or the public origin an addon resolves); join a path onto it."
+   :description "Where a running service answers — `{host, port, url}`. `url` is the base URL: a listener origin, an isolated app origin, or a temporary publication URL including its reserved path. Append paths without dropping that base path."
    :type {:host :text
           :port :port
           :url :url}}
 
   {:name :service-endpoint
-   :description "The address the service named by `:service` currently answers on. Reads the `:endpoint` the reconciler recorded on the service's row for this branch (or, on the cloud, the app-route domain the addon resolves). Throws `service/not-running` when the service has no enabled row on this branch, hasn't started, or isn't a listener — an honest failure a caller wraps in `:try` / a retry."
+   :description "The address the service named by `:service` currently answers on. Prefers a live listener endpoint on this branch, then an active temporary HTTP publication, then an ordinary app-route resolved by the deployment. Throws `service/not-running` when no endpoint is available — an honest failure a caller wraps in `:try` / a retry."
    :args {:service {:type :fn-ref
                     :description "The service fn — a `:fn-ref` slot: the fn's identity is passed, the fn is never evaluated (binding a listener here does not start it)."}}
    :return-type :service-endpoint-shape
    :effects #{:db}}
 
   {:name :service-url
-   :description "The origin URL a service answers on — `:service-endpoint`'s `url` field. Free: `:service`."
+   :description "The complete base URL a service or published handler answers on — `:service-endpoint`'s `url` field. Free: `:service`."
    :parent :get
    :args {:coll :service-endpoint
           :key {:value :url}
@@ -68,13 +68,13 @@
    :args {:maps [{:as :headers :type :text-map} :trace-headers]}}
 
   {:name :service-get
-   :description "HTTP GET against a service: `:http-get` with `:url` = the service's origin + `:path`, and the caller's trace header merged into `:headers`. Free: `:service` (the service fn), `:path` (e.g. `\"/orders\"`), `:headers`, `:auth-value`, `:timeout-ms`. Returns `{:status :headers :body}`."
+   :description "HTTP GET against a service: `:http-get` with `:url` = the service's base URL + `:path`, and the caller's trace header merged into `:headers`. Free: `:service` (the service fn), `:path` (e.g. `\"/orders\"`), `:headers`, `:auth-value`, `:timeout-ms`. Returns `{:status :headers :body}`."
    :parent :http-get
    :args {:url {:ref :_service-url-join :type :url}
           :headers :_service-headers}}
 
   {:name :service-post
-   :description "HTTP POST against a service: `:http-post` with `:url` = the service's origin + `:path`, and the caller's trace header merged into `:headers`. Free: `:service`, `:path`, `:body` (text — JSON-encode upstream via `:to-json-string`), `:headers`, `:auth-value`, `:timeout-ms`."
+   :description "HTTP POST against a service: `:http-post` with `:url` = the service's base URL + `:path`, and the caller's trace header merged into `:headers`. Free: `:service`, `:path`, `:body` (text — JSON-encode upstream via `:to-json-string`), `:headers`, `:auth-value`, `:timeout-ms`."
    :parent :http-post
    :args {:url {:ref :_service-url-join :type :url}
           :headers :_service-headers}}

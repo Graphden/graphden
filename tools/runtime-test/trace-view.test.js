@@ -59,6 +59,21 @@ function boot(reply) {
   x?.click();
   assert(!t.doc.querySelector('.trace-view-panel'), '× closes the panel');
 
+  const row = t.doc.createElement('div');
+  row.className = 'trace-row';
+  const summary = t.doc.createElement('summary');
+  row.appendChild(summary);
+  const tree = t.doc.createElement('div');
+  tree.appendChild(row);
+  t.ctx._bindTraceViewActions(tree);
+  let consumed = false;
+  row.dispatchEvent({type: 'keydown', key: 'Enter', target: summary,
+    preventDefault() { consumed = true; }});
+  assert(!consumed, 'native summary Enter keeps its disclosure default');
+  row.dispatchEvent({type: 'keydown', key: ' ', target: summary,
+    preventDefault() { consumed = true; }});
+  assert(!consumed, 'native summary Space keeps its disclosure default');
+
   if (fails) { console.error(`✗ ${fails} failed, ${passes} passed`); process.exit(1); }
   console.log(`✓ ${passes} passed`);
 })();

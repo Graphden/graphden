@@ -64,7 +64,7 @@
                     {:parent :equal? :args {:a {:as :type-str} :b {:value "binding-list-item"}}}
                     {:parent :parse-binding-list-item-from-form :args {:form-data {:as :form-data}}}
                     {:parent :equal? :args {:a {:as :type-str} :b {:value "service"}}}
-                    {:parent :parse-service-from-form :args {:form-data {:as :form-data}}}
+                    {:parent :parse-service-create-from-form :args {:form-data {:as :form-data}}}
                     {:value true}
                     {:value nil}]}}
 
@@ -560,6 +560,17 @@
    :args {:coll {:as :result} :key {:value :type-warnings} :default nil}}
 
   {:name :_create-apply-ok-response
+   :description "Successful create response retains the committed row UUID for clients that track their own creations. HTML and warning bodies remain unchanged."
+   :parent :assoc
+   :args {:map :_create-apply-ok-body-response :key {:value :headers}
+          :value {:parent :merge
+                  :args {:maps [{:parent :get :args {:coll :_create-apply-ok-body-response
+                                                     :key {:value :headers} :default {}}}
+                                {:parent :zipmap
+                                 :args {:keys [{:value "X-Graphden-Created-Id"}]
+                                        :vals [{:parent :to-str :args {:value :_create-apply-created-id}}]}}]}}}}
+
+  {:name :_create-apply-ok-body-response
    :parent :if
    :args {:test {:parent :some? :args {:value :_create-apply-type-warnings}}
           :then :_create-apply-ok-warn-response

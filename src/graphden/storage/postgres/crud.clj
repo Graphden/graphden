@@ -3,6 +3,7 @@
    Generic entity operations for create, read, update, delete, query."
   (:require
     [clojure.tools.logging :as log]
+    [graphden.storage.bounded-query :as bounded]
     [graphden.storage.postgres.codec :as codec]
     [graphden.storage.postgres.errors :as errors]
     [graphden.storage.postgres.junction :as junction]
@@ -334,6 +335,41 @@
                                      (if (and fields (junction/has-ref-many? fields))
                                        (junction/populate-ref-many-fields ds entity-name records fields)
                                        records))))))
+
+
+(defn query-identity-candidates
+  "Cap distinct owner candidates in SQL without projecting payload data.
+   For versioned reads, ANY matching version is a conservative superset;
+   create-time identity owner columns do not describe branch-local moves."
+  [ds entity-name where fields {:keys [version-entity version-id-field]} max-candidates]
+  (let [where (bounded/candidate-where entity-name where max-candidates)]
+    (sp/standard-query-validations! entity-name fields where)
+    (let [identity-fields fields
+          qualified (fn [field]
+                      (keyword (str (if (and version-entity (not= :id field)) "versions." "ident.")
+                                    (name field))))
+          fields (into {} (map (fn [[field definition]] [(qualified field) definition])) fields)
+          where (into {} (map (fn [[field value]] [(qualified field) value])) where)
+          columns (cond-> [[:ident.id :id]]
+                    (contains? identity-fields :org-id) (conj [:ident.org_id :org_id]))
+          query (sql/format
+                  (cond-> {:select-distinct columns
+                           :from [[(keyword (util/kw->snake-case entity-name)) :ident]]
+                           :where (build-where-clause where fields)
+                           :limit (inc max-candidates)}
+                    version-entity
+                    (assoc :join [[(keyword (util/kw->snake-case version-entity)) :versions]
+                                  [:= :ident.id
+                                   (keyword (str "versions." (util/kw->snake-case version-id-field)))]]))
+                  {:quoted true})]
+      (util/with-sql-error-handling "Database error" :query-identity-candidates
+                                    {:entity-name entity-name}
+                                    (let [rows (util/exec! ds query)]
+                                      (bounded/check-candidate-count! rows max-candidates)
+                                      (with-meta (mapv #(codec/row->entity %
+                                                                           (select-keys identity-fields [:id :org-id]))
+                                                       rows)
+                                        {::sp/candidate-count (count rows)}))))))
 
 
 (defn query-latest-per-group

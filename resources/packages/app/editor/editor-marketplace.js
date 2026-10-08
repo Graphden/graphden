@@ -277,6 +277,8 @@
       if (!name || !version) { setResult('Name and version are required.', false); return; }
       go.disabled = true;
       setResult('Saving…', true);
+      const receipt = typeof gdTourBeginPackagePublish === 'function'
+        ? gdTourBeginPackagePublish({name, version}) : null;
       try {
         const r = await fetcher()(api().api_marketplace_publish, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -291,6 +293,7 @@
         });
         const j = r.ok ? await r.json() : null;
         if (j?.ok) {
+          if (typeof gdTourRecordPackagePublish === 'function') gdTourRecordPackagePublish(receipt, j);
           setResult('Saved ' + name + '@' + version + (j.public ? ' — public in the marketplace.' : '.'), true);
           if (typeof opts.onDone === 'function') opts.onDone(j);
           // Stays open: the reader (and the tutorial) get to see the

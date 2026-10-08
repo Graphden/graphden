@@ -35,9 +35,15 @@ function boot() {
   let reply = () => ({ ok: true, status: 200, text: async () => 'FORM heartbeat-' + seen.fetches });
   const ctx = vm.createContext({
     console, Promise, URLSearchParams,
+    setTimeout: () => 1, clearTimeout() {},
+    addEventListener: (name, handler) => { seen[name] = handler; },
+    getCurrentBranchName: () => seen.branch || 'lesson-queue',
+    gdAccount: {id: 'owner'}, graphdenCurrentOrg: 'org-a',
     document: doc,
     API: { api_entities_type_id: (t, id) => '/api/entities/' + t + '/' + id,
-           api_services_reconcile: '/api/services/reconcile', api_services: '/api/services' },
+           api_services_reconcile: '/api/services/reconcile', api_services: '/api/services',
+           api_branches: '/api/branches', api_orgs_services: '/api/orgs/services',
+           api_orgs_services_create: '/api/orgs/services/create', api_orgs_services_update: '/api/orgs/services/update' },
     installPopoverDismiss() {},
     anchorBelowClamped() {},
     gdEscapeHtml: (s) => s,
@@ -83,7 +89,7 @@ function boot() {
     get() { return this.textContent; },
     set(v) {
       this.textContent = '';
-      if (String(v).startsWith('FORM')) {
+      if (String(v).startsWith('FORM') || String(v).includes('service-popover-save-btn')) {
         const x = doc.createElement('button');
         x.className = 'service-popover-close';
         this.appendChild(x);
@@ -91,7 +97,8 @@ function boot() {
         for (const cls of ['service-popover-save-btn', 'service-popover-delete-btn']) {
           const b = doc.createElement('button');
           b.className = cls;
-          b.dataset.existingServiceId = 's1';
+          b.dataset.existingServiceId = String(v).startsWith('FORM') ? 's1'
+            : (String(v).match(/data-existing-service-id="([^"]*)"/)?.[1] || '');
           this.appendChild(b);
         }
         this.appendChild(doc.createTextNode(String(v)));
@@ -169,6 +176,63 @@ const popover = (doc) => doc.querySelector('.service-popover');
     const last = t.seen.returned[t.seen.returned.length - 1];
     assert(last === t.seen.rebuilt && last?.isConnected,
       label + ': focus handed to the rebuilt ' + (gone ? '⋯' : 'badge'));
+  }
+
+  console.log(' dedicated services preserve exact branches and fail closed on lookup errors');
+  const branchId = 'a1111111-1111-1111-1111-111111111111';
+  const otherBranchId = 'b2222222-2222-2222-2222-222222222222';
+  function tenant(t, rows = []) {
+    vm.runInContext("_tenantPlanTier = 'dedicated'", t.ctx);
+    const requests = [];
+    t.ctx.authFetch = async (url, options = {}) => {
+      requests.push({url, options});
+      return {ok: true, status: 200, json: async () => url === '/api/branches'
+        ? [{id: branchId, name: 'lesson-queue'}, {id: otherBranchId, name: 'prod'}] : rows};
+    };
+    return requests;
+  }
+  for (const existing of [false, true]) {
+    const t = boot();
+    const requests = tenant(t, existing ? [{id: 's1', 'fn-id': 'f1', 'branch-id': otherBranchId}] : []);
+    await t.ctx.showServicePopover({id: 'f1'}, t.anchor);
+    popover(t.doc).querySelector('.service-popover-save-btn').click();
+    for (let i = 0; i < 30; i++) await Promise.resolve();
+    const write = requests.find(row => row.options.method === 'POST');
+    assert(new URLSearchParams(write?.options.body).get('branch-id') === (existing ? otherBranchId : branchId),
+      existing ? 'editing preserves original service branch' : 'new service uses exact active branch UUID');
+  }
+  for (const failedUrl of ['/api/orgs/services', '/api/branches']) {
+    const t = boot();
+    tenant(t);
+    const fetch = t.ctx.authFetch;
+    t.ctx.authFetch = async (url, opts) => url === failedUrl ? {ok: false, status: 503} : fetch(url, opts);
+    await t.ctx.showServicePopover({id: 'f1'}, t.anchor);
+    assert(!popover(t.doc).querySelector('.service-popover-save-btn'), failedUrl + ' failure cannot create on main');
+    assert(!!popover(t.doc).querySelector('.service-popover-error'), failedUrl + ' failure is visible');
+  }
+  for (const changed of ['branch', 'principal', 'authorization']) {
+    const t = boot();
+    tenant(t);
+    let release;
+    t.ctx.authFetch = () => new Promise(resolve => { release = resolve; });
+    const opening = t.ctx.showServicePopover({id: 'f1'}, t.anchor);
+    if (changed === 'branch') t.seen.branch = 'prod';
+    if (changed === 'principal') t.ctx.gdAccount = {id: 'other'};
+    if (changed === 'authorization') t.seen['gd-auth-changed']();
+    release({ok: true, json: async () => []});
+    await opening;
+    assert(!popover(t.doc).querySelector('.service-popover-save-btn'), changed + ' discards late form');
+  }
+  {
+    const t = boot();
+    let first;
+    t.setReply(() => new Promise(resolve => { first = resolve; }));
+    const opening = t.ctx.showServicePopover({id: 'f1'}, t.anchor);
+    t.setReply(() => ({ok: true, text: async () => 'FORM latest'}));
+    await t.ctx.showServicePopover({id: 'f1'}, t.anchor);
+    first({ok: true, text: async () => 'FORM stale'});
+    await opening;
+    assert(popover(t.doc).textContent.includes('latest'), 'reopening same UUID ignores old response');
   }
 
   if (fails) { console.error(`✗ ${fails} failed, ${passes} passed`); process.exit(1); }

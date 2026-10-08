@@ -26,65 +26,65 @@ Lists primitive value types and the special types ~:any~ and ~:never~. ~:any~ ac
 :PROPERTIES:
 :CUSTOM_ID: types/child-types
 :FILE: src/graphden/types/core/shapes.clj
-:LINE: 434
+:LINE: 452
 :MINS: 1.7
 :END:
 
 Returns the nested types inside each compound type: records, lists, maps, tuples, refinements, secrets, unions, and functions. This traversal shows the data representation used by the rest of the type checker.
 
-- source :: [[file:../../../src/graphden/types/core/shapes.clj::(defn child-types][src/graphden/types/core/shapes.clj:434]]
+- source :: [[file:../../../src/graphden/types/core/shapes.clj::(defn child-types][src/graphden/types/core/shapes.clj:452]]
 - same file :: [[file:types.org::#types/primitives][primitives]], [[file:types.org::#types/taint-with-secret-if-tainted][taint-with-secret-if-tainted]]
 
 * 3. well-formed?
 :PROPERTIES:
 :CUSTOM_ID: types/well-formed?
 :FILE: src/graphden/types/core.clj
-:LINE: 153
+:LINE: 154
 :MINS: 2.8
 :END:
 
 Validates the syntax of type expressions before later checker stages use them. Cases verify the required shape of function arguments, [[file:glossary.org::#term/effect][effects]], refinements, secret wrappers, and other supported types.
 
-- source :: [[file:../../../src/graphden/types/core.clj::(defn well-formed?][src/graphden/types/core.clj:153]]
+- source :: [[file:../../../src/graphden/types/core.clj::(defn well-formed?][src/graphden/types/core.clj:154]]
 - same file :: [[file:types.org::#types/make-union][make-union]], [[file:types.org::#types/desugar-variant][desugar-variant]], [[file:types.org::#types/subtype?][subtype?]], [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/unify][unify]], [[file:types.org::#types/strip-null][strip-null]]
 
 * 4. make-union
 :PROPERTIES:
 :CUSTOM_ID: types/make-union
 :FILE: src/graphden/types/core.clj
-:LINE: 230
+:LINE: 231
 :MINS: 5.4
 :END:
 
 Normalizes a union type: flattens nested unions, removes duplicates and ~:never~, and removes alternatives already covered by another member. A union means that a value may have any one of its member types.
 
-- source :: [[file:../../../src/graphden/types/core.clj::(defn make-union][src/graphden/types/core.clj:230]]
+- source :: [[file:../../../src/graphden/types/core.clj::(defn make-union][src/graphden/types/core.clj:231]]
 - same file :: [[file:types.org::#types/well-formed?][well-formed?]], [[file:types.org::#types/desugar-variant][desugar-variant]], [[file:types.org::#types/subtype?][subtype?]], [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/unify][unify]], [[file:types.org::#types/strip-null][strip-null]]
 
 * 5. desugar-variant
 :PROPERTIES:
 :CUSTOM_ID: types/desugar-variant
 :FILE: src/graphden/types/core.clj
-:LINE: 329
+:LINE: 330
 :MINS: 2.5
 :END:
 
 Converts a variant declaration into a union of records whose tag field has a fixed value. This lets the checker use existing record, union, and [[file:glossary.org::#term/subtype][refinement]] rules instead of a separate runtime representation for variants.
 
-- source :: [[file:../../../src/graphden/types/core.clj::(defn desugar-variant][src/graphden/types/core.clj:329]]
+- source :: [[file:../../../src/graphden/types/core.clj::(defn desugar-variant][src/graphden/types/core.clj:330]]
 - same file :: [[file:types.org::#types/well-formed?][well-formed?]], [[file:types.org::#types/make-union][make-union]], [[file:types.org::#types/subtype?][subtype?]], [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/unify][unify]], [[file:types.org::#types/strip-null][strip-null]]
 
 * 6. subtype?
 :PROPERTIES:
 :CUSTOM_ID: types/subtype?
 :FILE: src/graphden/types/core.clj
-:LINE: 1238
+:LINE: 1239
 :MINS: 13.3
 :END:
 
 Tests whether every value allowed by ~actual~ is also allowed by ~expected~. Its ordered cases handle special types, unions, primitives, refinements, structural types, and [[file:glossary.org::#term/secret][secret markers]]. For unions, every actual alternative must fit, while an expected union needs at least one matching alternative. Read the case for the two shapes being compared.
 
-- source :: [[file:../../../src/graphden/types/core.clj::(defn subtype?][src/graphden/types/core.clj:1238]]
+- source :: [[file:../../../src/graphden/types/core.clj::(defn subtype?][src/graphden/types/core.clj:1239]]
 - same file :: [[file:types.org::#types/well-formed?][well-formed?]], [[file:types.org::#types/make-union][make-union]], [[file:types.org::#types/desugar-variant][desugar-variant]], [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/unify][unify]], [[file:types.org::#types/strip-null][strip-null]]
 - referenced from :: [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/taint-with-secret-if-tainted][taint-with-secret-if-tainted]]
 
@@ -92,13 +92,13 @@ Tests whether every value allowed by ~actual~ is also allowed by ~expected~. Its
 :PROPERTIES:
 :CUSTOM_ID: types/constraint-implies?
 :FILE: src/graphden/types/core.clj
-:LINE: 1174
+:LINE: 1175
 :MINS: 2.6
 :END:
 
 Checks whether one [[file:glossary.org::#term/subtype][refinement condition]] implies another, including numeric bounds and set membership. [[file:glossary.org::#term/subtype][Subtype]] checking uses it to compare types such as positive and non-negative integers.
 
-- source :: [[file:../../../src/graphden/types/core.clj::(defn constraint-implies?][src/graphden/types/core.clj:1174]]
+- source :: [[file:../../../src/graphden/types/core.clj::(defn constraint-implies?][src/graphden/types/core.clj:1175]]
 - see also :: [[file:types.org::#types/subtype?][subtype?]]
 - same file :: [[file:types.org::#types/well-formed?][well-formed?]], [[file:types.org::#types/make-union][make-union]], [[file:types.org::#types/desugar-variant][desugar-variant]], [[file:types.org::#types/subtype?][subtype?]], [[file:types.org::#types/unify][unify]], [[file:types.org::#types/strip-null][strip-null]]
 
@@ -106,39 +106,39 @@ Checks whether one [[file:glossary.org::#term/subtype][refinement condition]] im
 :PROPERTIES:
 :CUSTOM_ID: types/unify
 :FILE: src/graphden/types/core.clj
-:LINE: 1684
+:LINE: 1685
 :MINS: 9.8
 :END:
 
 [[file:glossary.org::#term/unification][Unification]] finds substitutions for [[file:glossary.org::#term/unification][type variables]] that make two type expressions compatible. The [[file:glossary.org::#term/unification][occurs check]] prevents a variable from being defined recursively through itself. Structural cases recurse into function, collection, and record types; the result is a substitution map or ~::fail~. Directional assignability is checked separately.
 
-- source :: [[file:../../../src/graphden/types/core.clj::(defn unify][src/graphden/types/core.clj:1684]]
+- source :: [[file:../../../src/graphden/types/core.clj::(defn unify][src/graphden/types/core.clj:1685]]
 - same file :: [[file:types.org::#types/well-formed?][well-formed?]], [[file:types.org::#types/make-union][make-union]], [[file:types.org::#types/desugar-variant][desugar-variant]], [[file:types.org::#types/subtype?][subtype?]], [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/strip-null][strip-null]]
 
 * 9. strip-null
 :PROPERTIES:
 :CUSTOM_ID: types/strip-null
 :FILE: src/graphden/types/core.clj
-:LINE: 306
+:LINE: 307
 :MINS: 1.8
 :END:
 
 Removes null from a top-level union; a type containing only null becomes ~:never~. Secret wrappers remain intact. Control-flow checks and ~:coalesce~ use this shared narrowing operation.
 
-- source :: [[file:../../../src/graphden/types/core.clj::(defn strip-null][src/graphden/types/core.clj:306]]
+- source :: [[file:../../../src/graphden/types/core.clj::(defn strip-null][src/graphden/types/core.clj:307]]
 - same file :: [[file:types.org::#types/well-formed?][well-formed?]], [[file:types.org::#types/make-union][make-union]], [[file:types.org::#types/desugar-variant][desugar-variant]], [[file:types.org::#types/subtype?][subtype?]], [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/unify][unify]]
 
 * 10. taint-with-secret-if-tainted
 :PROPERTIES:
 :CUSTOM_ID: types/taint-with-secret-if-tainted
 :FILE: src/graphden/types/core/shapes.clj
-:LINE: 502
+:LINE: 520
 :MINS: 3.2
 :END:
 
 Marks a return type as secret when an input contains a secret and the function's rule propagates that marker. The ~[:secret …]~ wrapper carries information needed for subsequent type checks and result [[file:glossary.org::#term/secret][redaction]]; it does not itself store the secret value.
 
-- source :: [[file:../../../src/graphden/types/core/shapes.clj::(defn taint-with-secret-if-tainted][src/graphden/types/core/shapes.clj:502]]
+- source :: [[file:../../../src/graphden/types/core/shapes.clj::(defn taint-with-secret-if-tainted][src/graphden/types/core/shapes.clj:520]]
 - see also :: [[file:types.org::#types/subtype?][subtype?]]
 - same file :: [[file:types.org::#types/primitives][primitives]], [[file:types.org::#types/child-types][child-types]]
 - referenced from :: [[file:crud.org::#crud/apply-create-secret-body][apply-create-secret-body]]
@@ -159,13 +159,13 @@ Infers a structural type from a literal Clojure value, including collections, re
 :PROPERTIES:
 :CUSTOM_ID: types/check-binding!
 :FILE: src/graphden/types/check.clj
-:LINE: 483
+:LINE: 484
 :MINS: 5.6
 :END:
 
 Checks one [[file:glossary.org::#term/binding][binding]]'s actual type against the [[file:glossary.org::#term/slot][slot]]'s expected type. It combines literal classification, [[file:glossary.org::#term/subtype][subtype]] checks, and type-variable [[file:glossary.org::#term/unification][unification]]. Since [[file:glossary.org::#term/unification][unification]] chooses substitutions rather than proving assignment direction, ~gradual/fits?~ checks the resulting direction afterward.
 
-- source :: [[file:../../../src/graphden/types/check.clj::(defn- check-binding!][src/graphden/types/check.clj:483]]
+- source :: [[file:../../../src/graphden/types/check.clj::(defn- check-binding!][src/graphden/types/check.clj:484]]
 - same file :: [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/rule-return][rule-return]], [[file:types.org::#types/check-fn-def!][check-fn-def!]], [[file:types.org::#types/check-all-defs!][check-all-defs!]]
 
 * 13. fits?
@@ -184,39 +184,39 @@ Checks assignment direction after [[file:glossary.org::#term/unification][unific
 :PROPERTIES:
 :CUSTOM_ID: types/signature-return
 :FILE: src/graphden/types/check.clj
-:LINE: 2127
+:LINE: 2152
 :MINS: 3.9
 :END:
 
 Infers a return type from a [[file:glossary.org::#term/unification][polymorphic signature]] when there is no custom ~:return-type-rule~. It unifies declared argument types with actual types and substitutes the resulting variable values into the declared return type. Custom rules remain necessary when inference depends on literal values or registry data.
 
-- source :: [[file:../../../src/graphden/types/check.clj::(defn signature-return][src/graphden/types/check.clj:2127]]
+- source :: [[file:../../../src/graphden/types/check.clj::(defn signature-return][src/graphden/types/check.clj:2152]]
 - same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/rule-return][rule-return]], [[file:types.org::#types/check-fn-def!][check-fn-def!]], [[file:types.org::#types/check-all-defs!][check-all-defs!]]
 
 * 15. rule-return
 :PROPERTIES:
 :CUSTOM_ID: types/rule-return
 :FILE: src/graphden/types/check.clj
-:LINE: 2180
+:LINE: 2205
 :MINS: 2.5
 :END:
 
 Chooses return-type inference for the root [[file:glossary.org::#term/base-function][base function]]: custom rule first, declared signature next, then static return type. If the root propagates [[file:glossary.org::#term/secret][secret markings]] and an input is secret, the result is wrapped accordingly.
 
-- source :: [[file:../../../src/graphden/types/check.clj::(defn rule-return][src/graphden/types/check.clj:2180]]
+- source :: [[file:../../../src/graphden/types/check.clj::(defn rule-return][src/graphden/types/check.clj:2205]]
 - same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/check-fn-def!][check-fn-def!]], [[file:types.org::#types/check-all-defs!][check-all-defs!]]
 
 * 16. check-fn-def!
 :PROPERTIES:
 :CUSTOM_ID: types/check-fn-def!
 :FILE: src/graphden/types/check.clj
-:LINE: 2453
-:MINS: 8.7
+:LINE: 2478
+:MINS: 8.8
 :END:
 
 Checks one function definition against its parents and inherited [[file:glossary.org::#term/slot][slots]]. It validates argument changes and [[file:glossary.org::#term/effect][effects]], checks [[file:glossary.org::#term/binding][bindings]], computes the return type, and records detailed type information for later dependent functions.
 
-- source :: [[file:../../../src/graphden/types/check.clj::(defn check-fn-def!][src/graphden/types/check.clj:2453]]
+- source :: [[file:../../../src/graphden/types/check.clj::(defn check-fn-def!][src/graphden/types/check.clj:2478]]
 - same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/rule-return][rule-return]], [[file:types.org::#types/check-all-defs!][check-all-defs!]]
 - referenced from :: [[file:crud.org::#crud/type-check-fn-after-mutation!][type-check-fn-after-mutation!]]
 
@@ -224,13 +224,13 @@ Checks one function definition against its parents and inherited [[file:glossary
 :PROPERTIES:
 :CUSTOM_ID: types/check-all-defs!
 :FILE: src/graphden/types/check.clj
-:LINE: 2580
+:LINE: 2606
 :MINS: 1.9
 :END:
 
 Checks definitions in [[file:glossary.org::#term/topological-order][dependency order]], registering each result before dependent definitions need it. This performs the full graph type sweep using the same single-definition checker.
 
-- source :: [[file:../../../src/graphden/types/check.clj::(defn check-all-defs!][src/graphden/types/check.clj:2580]]
+- source :: [[file:../../../src/graphden/types/check.clj::(defn check-all-defs!][src/graphden/types/check.clj:2606]]
 - same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/rule-return][rule-return]], [[file:types.org::#types/check-fn-def!][check-fn-def!]]
 - referenced from :: [[file:packages.org::#packages/sync-fn-entities-from-packages!][sync-fn-entities-from-packages!]]
 

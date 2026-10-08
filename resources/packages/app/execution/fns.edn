@@ -2631,10 +2631,8 @@
   {:name :_sp-instance-rows
    :parent :if
    :args {:test :_sp-has-existing?
-          :then {:parent :query-entities
-                 :args {:entity-type "service-instance"
-                        :where {:parent :assoc-empty
-                                :args {:key {:value :service-id} :value :_sp-existing-id}}}}
+          :then {:parent :service-instance-rows
+                 :args {:service-id :_sp-existing-id}}
           :else {:value []}}}
 
   {:name :_sp-instance-field-host

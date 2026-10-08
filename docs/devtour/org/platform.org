@@ -13,13 +13,13 @@ after: services
 :PROPERTIES:
 :CUSTOM_ID: platform/platform-tier?
 :FILE: src/graphden/tenancy/context.clj
-:LINE: 43
+:LINE: 62
 :MINS: 1.3
 :END:
 
 Tests whether the current request has platform-level context rather than an organisation context. The tenancy [[file:glossary.org::#term/integrant][addon]] binds ~*current-org*~; core code reads this shared interface without importing private policy implementation.
 
-- source :: [[file:../../../src/graphden/tenancy/context.clj::(defn platform-tier?][src/graphden/tenancy/context.clj:43]]
+- source :: [[file:../../../src/graphden/tenancy/context.clj::(defn platform-tier?][src/graphden/tenancy/context.clj:62]]
 - same file :: [[file:platform.org::#platform/notify!][notify!]], [[file:constellation.org::#constellation/install-org-cap-fn!][install-org-cap-fn!]], [[file:constellation.org::#constellation/tenancy-addon-active?][tenancy-addon-active?]]
 - referenced from :: [[file:boot.org::#boot/read-config][read-config]], [[file:constellation.org::#constellation/install-org-cap-fn!][install-org-cap-fn!]]
 
@@ -27,13 +27,13 @@ Tests whether the current request has platform-level context rather than an orga
 :PROPERTIES:
 :CUSTOM_ID: platform/notify!
 :FILE: src/graphden/tenancy/context.clj
-:LINE: 215
+:LINE: 257
 :MINS: 1.0
 :END:
 
 Passes a domain event to an installed notification handler, such as a package-moderation decision. The [[file:glossary.org::#term/integrant][addon]] decides recipients and delivery. With no handler the event is ignored; delivery failure does not reverse the domain write.
 
-- source :: [[file:../../../src/graphden/tenancy/context.clj::(defn notify!][src/graphden/tenancy/context.clj:215]]
+- source :: [[file:../../../src/graphden/tenancy/context.clj::(defn notify!][src/graphden/tenancy/context.clj:257]]
 - same file :: [[file:platform.org::#platform/platform-tier?][platform-tier?]], [[file:constellation.org::#constellation/install-org-cap-fn!][install-org-cap-fn!]], [[file:constellation.org::#constellation/tenancy-addon-active?][tenancy-addon-active?]]
 
 * 3. single-token-provider

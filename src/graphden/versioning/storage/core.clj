@@ -33,6 +33,7 @@
    It is independently usable: VersionedStorage(BaseStorage) works without any cache.
    CachedStorage(VersionedStorage(BaseStorage)) works via simple stacking."
   (:require
+    [graphden.http-host.lease :as http-lease]
     [graphden.storage.graph-writer :as writer]
     [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.core :as sp]
@@ -947,6 +948,22 @@
     (sp/query-latest-per-group base-storage entity-name where group-cols))
 
 
+  sp/StorageBoundedQuery
+
+  (query-identity-candidates
+    [_ entity-name where version-source max-candidates]
+    (sp/query-identity-candidates base-storage entity-name where
+                                  (or version-source
+                                      (select-keys (get res/entity-config entity-name)
+                                                   [:version-entity :version-id-field]))
+                                  max-candidates))
+
+
+  (query-bounded-entities
+    [_ entity-name where max-candidates]
+    (res/resolve-bounded-entities base-storage entity-name branch-id where max-candidates))
+
+
   sp/StorageBatchCRUD
 
   (create-entities
@@ -1108,7 +1125,7 @@
    Arguments:
    - versioned-storage: VersionedStorage instance
    - branch-name: Name for the new branch (must be unique)
-   - opts: Optional map with :base-branch-id to fork from a different
+   - opts: Optional map with create-only :id UUID, :base-branch-id to fork from a different
      branch, :forbid-invalid? to set the merge-policy flag
      (error-tolerance Phase 5 — merges INTO the branch are refused
      while recorded type diagnostics exist on either side), and the
@@ -1118,8 +1135,10 @@
      open core)."
   ([versioned-storage branch-name]
    (create-branch! versioned-storage branch-name {}))
-  ([versioned-storage branch-name {:keys [base-branch-id forbid-invalid?
+  ([versioned-storage branch-name {:keys [id base-branch-id forbid-invalid?
                                           owner-id write-policy require-merge?]}]
+   (when (and (some? id) (not (uuid? id)))
+     (throw (ex-info "Branch id must be a UUID" {:type :invalid-data :field :id})))
    (let [base (:base-storage versioned-storage)
          parent-id (or base-branch-id (:branch-id versioned-storage))]
      (with-bump* base :branch
@@ -1135,8 +1154,13 @@
              (when-not (sp/read-entity st :branch parent-id)
                (throw (ex-info "Base branch not found"
                                {:type :not-found :branch-id parent-id})))
+             ;; Caller-chosen identities are create-only. Never adopt, update
+             ;; or revive a branch already carrying that UUID.
+             (when (and id (sp/read-entity st :branch id))
+               (throw (ex-info "Branch identity already exists"
+                               {:type :constraint-violation/branch-id-exists :branch-id id})))
              (sp/create-entity st :branch
-                               (cond-> {:id (random-uuid)
+                               (cond-> {:id (or id (random-uuid))
                                         :name branch-name
                                         :base-branch-id parent-id
                                         :created-at (now)}
@@ -1368,6 +1392,12 @@
   (mrg/lock-branches! st branch-id)
   (assert-no-children! st branch-id)
   (assert-not-merge-source! st branch-id)
+  ;; Publication uses the same branch lock before reserving capacity. Revoke
+  ;; its exact session UUIDs before the branch disappears, without touching
+  ;; account sessions. Lease cleanup never takes a graph/branch lock.
+  (when (contains? (sp/current-entities st) :session)
+    (tenancy-context/with-org tenancy-context/public-org
+                              (http-lease/revoke-branch! st branch-id)))
   ;; Soft-disable services scoped to this branch so the reconciler stops
   ;; them on its next pass — see the docstring's cascade note. The
   ;; `:service` entity is only registered when the services schema is
@@ -1467,8 +1497,12 @@
      ;; (bump-then-write, same as the merge path): a rolled-back bump is
      ;; harmless over-invalidation, a committed delete is always preceded
      ;; by a visible bump.
+     ;; This compound delete includes unscoped branch-merge rows. Admit it
+     ;; globally before taking branch/identity locks: admitting only the own
+     ;; branch would require a forbidden lock upgrade during its cascade.
+     ;; All writes still pass through the existing decorated authorization.
      (let [binding-versions (with-bump* base :branch
-                              (fn [] (writer/call-with-write base {:entity :branch :ids [branch-id]} #(delete-branch-rows! % branch-id))))]
+                              (fn [] (writer/call-with-write base :graph #(delete-branch-rows! % branch-id))))]
        ;; Drop any cached chain that referenced this branch as an
        ;; ancestor — globals survive across CRUD calls and would
        ;; otherwise still hand back the pre-delete chain.

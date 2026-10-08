@@ -271,6 +271,15 @@ registerActionHandler('service-settings', (btn, e, _host) => {
 });
 
 
+registerActionHandler('http-host', (btn, e, _host) => {
+  e.preventDefault();
+  e.stopPropagation();
+  const fnId = btn.dataset.fnId || btn.closest('[data-fn-id]')?.dataset.fnId;
+  const fnEntity = lookups?.fnMap?.get(fnId);
+  if (fnEntity && typeof showHttpHostPopover === 'function') showHttpHostPopover(fnEntity, btn);
+});
+
+
 registerActionHandler('apps', (btn, e, _host) => {
   e.preventDefault();
   e.stopPropagation();

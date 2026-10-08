@@ -394,7 +394,12 @@
       (is (contains? result "core.arithmetic"))
       (is (contains? result "web"))
       (is (= 3 (count (get-in @state [:entities :ns])))
-          "three ns entities were created"))))
+          "three ns entities were created")
+      (is (= (set (vals result)) (set (map :id (:created-namespaces (meta result)))))
+          "receipt names only actual newly created namespace UUIDs")
+      (is (empty? (:created-namespaces
+                    (meta (loader/sync-namespaces! mock-storage #{"core.arithmetic" "web"}))))
+          "a retry never claims existing namespaces"))))
 
 
 (deftest sync-namespaces-empty-input-returns-empty-map

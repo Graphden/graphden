@@ -7,7 +7,7 @@ Reconciliation, service discovery, tracing, and executor placement.
 
 after: executor
 
-[[file:index.org][index]] · ~50 min
+[[file:index.org][index]] · ~57 min
 
 * 1. extend-builder
 :PROPERTIES:
@@ -115,15 +115,53 @@ Checks service handles for liveness and exit status. A stopped instance loses it
 :PROPERTIES:
 :CUSTOM_ID: services/resolve-endpoint
 :FILE: src/graphden/services/endpoint.clj
-:LINE: 86
+:LINE: 93
+:MINS: 1.7
+:END:
+
+Resolves a service identity to an active endpoint on the caller's branch, preferring a live local instance, then a finite HTTP publication and an addon resolver; otherwise it reports ~:service/not-running~. The ~:fn-ref~ argument passes identity without executing the named function.
+
+- source :: [[file:../../../src/graphden/services/endpoint.clj::(defn resolve-endpoint][src/graphden/services/endpoint.clj:93]]
+
+* 10. publish!
+:PROPERTIES:
+:CUSTOM_ID: services/publish!
+:FILE: src/graphden/http_host/core.clj
+:LINE: 199
+:MINS: 3.4
+:END:
+
+Authorizes a typed request handler on an exact branch without invoking it. The existing graph writer and branch guards precede the publication capacity lock; the session lease and optional isolated app route commit together. The client supplies a create-only UUID so lost-response cleanup can revoke the exact publication.
+
+- source :: [[file:../../../src/graphden/http_host/core.clj::(defn publish!][src/graphden/http_host/core.clj:199]]
+- same file :: [[file:services.org::#services/serve][serve]]
+
+* 11. serve
+:PROPERTIES:
+:CUSTOM_ID: services/serve
+:FILE: src/graphden/http_host/core.clj
+:LINE: 282
+:MINS: 2.0
+:END:
+
+Checks deadline, branch existence, current owner and execute grants before each public request. A bounded shared-pool invocation receives sanitized request fields and returns only bounded text or JSON. It starts no persistent service or tenant listener.
+
+- source :: [[file:../../../src/graphden/http_host/core.clj::(defn serve][src/graphden/http_host/core.clj:282]]
+- same file :: [[file:services.org::#services/publish!][publish!]]
+
+* 12. call-with-capacity-lock
+:PROPERTIES:
+:CUSTOM_ID: services/call-with-capacity-lock
+:FILE: src/graphden/http_host/lease.clj
+:LINE: 54
 :MINS: 1.6
 :END:
 
-Resolves a service identity to an active endpoint on the caller's branch, preferring a live local instance. It may fall back to an addon-provided resolver; otherwise it reports ~:service/not-running~. The ~:fn-ref~ argument passes identity without executing the named function.
+Serializes finite publication admission and cleanup across all pods using a short PostgreSQL advisory transaction lock. Callbacks must not acquire graph or branch locks; this preserves graph → branch → capacity lock ordering during branch deletion.
 
-- source :: [[file:../../../src/graphden/services/endpoint.clj::(defn resolve-endpoint][src/graphden/services/endpoint.clj:86]]
+- source :: [[file:../../../src/graphden/http_host/lease.clj::(defn call-with-capacity-lock][src/graphden/http_host/lease.clj:54]]
 
-* 10. run-traced!
+* 13. run-traced!
 :PROPERTIES:
 :CUSTOM_ID: services/run-traced!
 :FILE: src/graphden/crud/fn_execution/trace.clj
@@ -135,7 +173,7 @@ Connects traced service calls across HTTP using ~X-Graphden-Trace~. The handler 
 
 - source :: [[file:../../../src/graphden/crud/fn_execution/trace.clj::(defn run-traced!][src/graphden/crud/fn_execution/trace.clj:120]]
 
-* 11. extend-builder
+* 14. extend-builder
 :PROPERTIES:
 :CUSTOM_ID: services/extend-builder~2
 :FILE: src/graphden/schema/queue/schema.clj
@@ -147,7 +185,7 @@ Declares a PostgreSQL-backed job queue with status, attempts, due time, and a vi
 
 - source :: [[file:../../../src/graphden/schema/queue/schema.clj::(defn extend-builder][src/graphden/schema/queue/schema.clj:74]]
 
-* 12. placement-for
+* 15. placement-for
 :PROPERTIES:
 :CUSTOM_ID: services/placement-for
 :FILE: src/graphden/fleet/placement.clj
@@ -159,7 +197,7 @@ Finds the placement of an [[file:glossary.org::#term/fleet][execution cell]], id
 
 - source :: [[file:../../../src/graphden/fleet/placement.clj::(defn placement-for][src/graphden/fleet/placement.clj:11]]
 
-* 13. forward-or-nil
+* 16. forward-or-nil
 :PROPERTIES:
 :CUSTOM_ID: services/forward-or-nil
 :FILE: src/graphden/fleet/router.clj
@@ -171,7 +209,7 @@ Forwards an internal request when it arrives at an executor that does not own th
 
 - source :: [[file:../../../src/graphden/fleet/router.clj::(defn forward-or-nil][src/graphden/fleet/router.clj:114]]
 
-* 14. cell-weight
+* 17. cell-weight
 :PROPERTIES:
 :CUSTOM_ID: services/cell-weight
 :FILE: src/graphden/fleet/metrics.clj
@@ -183,7 +221,7 @@ Combines a [[file:glossary.org::#term/fleet][cell]]'s dependency-graph size and 
 
 - source :: [[file:../../../src/graphden/fleet/metrics.clj::(defn cell-weight][src/graphden/fleet/metrics.clj:60]]
 
-* 15. pack
+* 18. pack
 :PROPERTIES:
 :CUSTOM_ID: services/pack
 :FILE: src/graphden/fleet/packer.clj
@@ -195,7 +233,7 @@ Builds a placement by sorting [[file:glossary.org::#term/fleet][cells]] from hea
 
 - source :: [[file:../../../src/graphden/fleet/packer.clj::(defn pack][src/graphden/fleet/packer.clj:69]]
 
-* 16. rebalance
+* 19. rebalance
 :PROPERTIES:
 :CUSTOM_ID: services/rebalance
 :FILE: src/graphden/fleet/rebalance.clj
@@ -207,7 +245,7 @@ Improves an existing placement one move at a time, moving a [[file:glossary.org:
 
 - source :: [[file:../../../src/graphden/fleet/rebalance.clj::(defn rebalance][src/graphden/fleet/rebalance.clj:81]]
 
-* 17. plan-tick
+* 20. plan-tick
 :PROPERTIES:
 :CUSTOM_ID: services/plan-tick
 :FILE: src/graphden/fleet/control_loop.clj
@@ -220,7 +258,7 @@ Plans one control tick without performing moves. Unassigned [[file:glossary.org:
 - source :: [[file:../../../src/graphden/fleet/control_loop.clj::(defn plan-tick][src/graphden/fleet/control_loop.clj:63]]
 - same file :: [[file:services.org::#services/run-tick!][run-tick!]]
 
-* 18. run-tick!
+* 21. run-tick!
 :PROPERTIES:
 :CUSTOM_ID: services/run-tick!
 :FILE: src/graphden/fleet/control_loop.clj
@@ -233,7 +271,7 @@ Reads current [[file:glossary.org::#term/fleet][cells]] and placements, calls ~p
 - source :: [[file:../../../src/graphden/fleet/control_loop.clj::(defn run-tick!][src/graphden/fleet/control_loop.clj:191]]
 - same file :: [[file:services.org::#services/plan-tick][plan-tick]]
 
-* 19. move-cell!
+* 22. move-cell!
 :PROPERTIES:
 :CUSTOM_ID: services/move-cell!
 :FILE: src/graphden/fleet/controller.clj

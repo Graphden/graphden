@@ -738,7 +738,9 @@
    intermediate parents (`core` when only `core.arithmetic` is in the
    map) keep `nil`.
 
-   Returns a map {ns-path-string → ns-entity-id} for downstream use."
+   Returns a map {ns-path-string → ns-entity-id} for downstream use. Metadata
+   :created-namespaces contains only rows this call actually created, for
+   installer receipts; an existing/public namespace is never claimed."
   ([storage namespace-paths]
    (sync-namespaces! storage namespace-paths {}))
   ([storage namespace-paths descriptions]
@@ -762,7 +764,8 @@
                                  [(str (:parent-id ns-entity) ":" (:name ns-entity))
                                   ns-entity]))
                           (sp/query-entities storage :ns {}))
-           result (atom {})]
+           result (atom {})
+           created (atom [])]
        (doseq [ns-path sorted]
          (let [segments (str/split ns-path #"\.")
                parent-path (when (> (count segments) 1)
@@ -783,9 +786,10 @@
                                                 (cond-> {:name seg-name
                                                          :parent-id parent-id}
                                                   description (assoc :description description)))]
+               (swap! created conj (select-keys new-entity [:id :name :parent-id]))
                (swap! result assoc ns-path (:id new-entity))))))
        (log/info "Synced" (count @result) "namespaces:" (keys @result))
-       @result))))
+       (with-meta @result {:created-namespaces @created})))))
 
 
 ;; =============================================================================

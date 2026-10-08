@@ -68,13 +68,13 @@ Passes the loaded configuration to ~ig/init~, which initializes components in [[
 :PROPERTIES:
 :CUSTOM_ID: boot/postgres
 :FILE: src/graphden/system/init/storage.clj
-:LINE: 102
+:LINE: 110
 :MINS: 1.1
 :END:
 
 Opens the PostgreSQL connection pool and initializes the declared schema. An optional ~:datasource-wrap~ lets the tenancy [[file:glossary.org::#term/integrant][addon]] attach organisation context to each connection for row-level security. The versioned-storage component subsequently wraps this storage.
 
-- source :: [[file:../../../src/graphden/system/init/storage.clj::(defmethod ig/init-key :db/postgres ][src/graphden/system/init/storage.clj:102]]
+- source :: [[file:../../../src/graphden/system/init/storage.clj::(defmethod ig/init-key :db/postgres ][src/graphden/system/init/storage.clj:110]]
 - see also :: [[file:versioning.org::#versioning/wrap-with-versioning][wrap-with-versioning]]
 - referenced from :: [[file:storage.org::#storage/MalliDataSchema][MalliDataSchema]]
 
@@ -96,13 +96,13 @@ Loads core, web, app, [[file:glossary.org::#term/integrant][addon]] packages, an
 :PROPERTIES:
 :CUSTOM_ID: boot/context
 :FILE: src/graphden/system/init/exec.clj
-:LINE: 135
-:MINS: 6.6
+:LINE: 136
+:MINS: 6.7
 :END:
 
 Builds the base [[file:glossary.org::#term/context][execution context]], including [[file:glossary.org::#term/auth][authentication]], request scoping, execution checks, vault access, notifications, and [[file:glossary.org::#term/fleet][fleet]] forwarding. Branch-specific contexts are derived later. ~:compile-storage~ may provide a privileged structural graph view; it must not be confused with organisation-scoped application data reads.
 
-- source :: [[file:../../../src/graphden/system/init/exec.clj::(defmethod ig/init-key :exec/context][src/graphden/system/init/exec.clj:135]]
+- source :: [[file:../../../src/graphden/system/init/exec.clj::(defmethod ig/init-key :exec/context][src/graphden/system/init/exec.clj:136]]
 - see also :: [[file:executor.org::#executor/create-context][create-context]]
 - same file :: [[file:boot.org::#boot/compiled-registry][compiled-registry]]
 - referenced from :: [[file:constellation.org::#constellation/merge-addon][merge-addon]]
@@ -111,13 +111,13 @@ Builds the base [[file:glossary.org::#term/context][execution context]], includi
 :PROPERTIES:
 :CUSTOM_ID: boot/compiled-registry
 :FILE: src/graphden/system/init/exec.clj
-:LINE: 235
+:LINE: 237
 :MINS: 0.9
 :END:
 
 Compiles the graph before serving the first request so the base context starts with a populated [[file:glossary.org::#term/compiled-registry][compiled registry]]. Subsequent graph changes can still invalidate or update it; this startup compilation does not make the registry permanent.
 
-- source :: [[file:../../../src/graphden/system/init/exec.clj::(defmethod ig/init-key :exec/compiled-registry ][src/graphden/system/init/exec.clj:235]]
+- source :: [[file:../../../src/graphden/system/init/exec.clj::(defmethod ig/init-key :exec/compiled-registry ][src/graphden/system/init/exec.clj:237]]
 - see also :: [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:executor.org::#executor/registry][registry]]
 - same file :: [[file:boot.org::#boot/context][context]]
 

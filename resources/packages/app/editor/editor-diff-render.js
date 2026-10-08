@@ -46,6 +46,7 @@ function gdDiffRenderEntry(e, opts) {
   row.className = 'branch-diff-entry ' + gdDiffChangeClass(e.change);
   row.setAttribute('data-anchor-name', e['entity-name']);
   row.setAttribute('data-anchor-id', e['entity-id']);
+  if (e['slot-id']) row.setAttribute('data-slot-id', e['slot-id']);
   if (e['slot-name']) row.setAttribute('data-slot-name', e['slot-name']);
   row.appendChild(gdDiffMarkerEl(e.change));
   const label = document.createElement('span');

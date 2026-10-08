@@ -19,7 +19,7 @@ were deliberately left in JS.
 | `col-header` | ancestor column header; read-only fall-through rows | ns / i / ↗ / 👁 Peek |
 | `cell` | MI cell; parent-edit row | ns / i / ↗ / 👁 Peek / × Remove-MI / + Add-MI (last two when `editable=true`) |
 | `use-site-arg` | argument at a use-site | ns / i / ↗ / 👁 Peek / × Remove-binding / ✎ Change-value / + Extend-in-place (last three when `editable=true`) |
-| `root-row` | the selected fn's root row | ns / i / ↗ / ▶ Run / ⌛ History / ⚙ Service / ▣ Apps / ✎ Rename / + Extend / ⬆ Wrap / ✕ Delete |
+| `root-row` | the selected fn's root row | ns / i / ↗ / ▶ Run / ⌛ History / ⚙ Service / HTTP / ▣ Apps / ✎ Rename / + Extend / ⬆ Wrap / ✕ Delete |
 
 `+ Extend` at a use-site is the SAME `extend-fn` action the root row has;
 the dispatcher sees `data-binding-id` on the host and `enterExtendEditMode`
@@ -40,6 +40,12 @@ is loaded — the row renders unconditionally and the CLIENT hides it when
 `window.API.api_orgs_apps` is absent (`_applyAppsAvailabilityState`, run on
 both fresh and cached renders). Its handler opens `showFnAppsPopover`
 (`editor-apps.js`), whose content is the addon's `GET /partials/fn-apps`.
+
+HTTP opens the finite publication dialog (`editor-http-host.js`), whose markup
+comes from `GET /partials/http-host-popover`. The authenticated host capability
+controls availability. It publishes a bounded text/JSON request handler and owns
+Stop for its exact lease; the separate ⚙ Service action keeps its existing
+persistent-service permissions and quota.
 
 ## Query-param matrix (as actually built)
 

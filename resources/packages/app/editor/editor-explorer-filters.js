@@ -55,6 +55,9 @@ function gdEmptyFilters() {
 // ---------------------------------------------------------------------------
 
 let _filters = gdEmptyFilters();
+let _filterRevision = 0;
+let _viewId = null;
+let _editingGraphView = null; // Explicit UUID edit context; never inferred from a label.
 let _viewName = null;           // the saved view the active set came from, if any
 let _viewMembers = null;        // [{id,name,…}] | null while loading | undefined when no server axis
 let _viewTotal = null;          // the server's count before the 500 cap (null = not truncated)
@@ -86,7 +89,7 @@ function _normFilters(raw) {
 
 function _saveFilters() {
   try {
-    localStorage.setItem(FILTERS_KEY, JSON.stringify({ filters: _filters, view: _viewName }));
+    localStorage.setItem(FILTERS_KEY, JSON.stringify({ filters: _filters, view: _viewName, viewId: _viewId }));
   } catch (_) { /* private mode */ }
 }
 
@@ -165,6 +168,7 @@ function _loadFilters() {
     if (raw && typeof raw === 'object') {
       _filters = _normFilters(raw.filters);
       _viewName = typeof raw.view === 'string' ? raw.view : null;
+      _viewId = typeof raw.viewId === 'string' ? raw.viewId : null;
     }
   } catch (_) { /* defaults */ }
 }
@@ -176,6 +180,8 @@ _loadFilters();
 
 function gdFilters() { return _filters; }
 function gdActiveViewName() { return _viewName; }
+function gdActiveViewId() { return _viewId; }
+function gdFilterRevision() { return _filterRevision; }
 
 // Chip-level count and "anything on?" for the trail / clear button.
 function gdFilterCount(f = _filters) {
@@ -227,6 +233,7 @@ _syncLensSet();
 // overlay pass (applyKindFilters) is enough; anything structural (namespaces,
 // a server axis) rebuilds the tree.
 function _afterChange(announce, kindsOnly) {
+  _filterRevision += 1;
   _syncLensSet();
   _saveFilters();
   if (typeof syncKindFilterBar === 'function') syncKindFilterBar();
@@ -247,7 +254,7 @@ function _afterChange(announce, kindsOnly) {
 
 // Any edit of the set detaches it from the view it came from — the view
 // stays saved; the chip reads "N filters" until you save again.
-function _detachView() { _viewName = null; }
+function _detachView() { _viewName = null; _viewId = null; }
 
 function gdToggleKind(kind) {
   const axis = KIND_AXIS.includes(kind) ? 'kinds' : PROBLEM_AXIS.includes(kind) ? 'problems' : null;
@@ -320,13 +327,20 @@ function gdToggleUnused() {
 // "◍ all" — every filter off, the view detached. The one gesture that
 // always brings the whole tree back.
 function gdClearFilters() {
+  _editingGraphView = null;
   _filters = gdEmptyFilters();
   _viewName = null;
+  _viewId = null;
   _afterChange('All functions');
 }
 
 // Apply a saved filter set (a personal or graph view) as the active set.
 async function gdApplyView(view) {
+  if (view.shared && view.unsupported?.length) {
+    if (typeof gdToast === 'function') gdToast('This view has computed filters. Edit its graph to change them.');
+    return false;
+  }
+  _editingGraphView = null;
   const f = _normFilters(view.filters);
   // A view migrated from a text rule may carry `uses` by NAME — resolve
   // once against the graph and persist the id.
@@ -350,15 +364,28 @@ async function gdApplyView(view) {
   }
   _filters = f;
   _viewName = view.name;
+  _viewId = view.shared ? view.id : null;
   _afterChange('View ' + view.name);
+  return true;
 }
+
+async function gdBeginGraphViewEdit(view) {
+  if (!view?.id || !view.shared || view.unsupported?.length) return false;
+  if (!(await gdApplyView(view))) return false;
+  _editingGraphView = view;
+  return true;
+}
+function gdEditingGraphView() { return _editingGraphView; }
 
 // Save the active set under a name (personal). Replaces a same-named view.
 function gdSaveView(name) {
+  _editingGraphView = null;
   const views = gdReadViews().filter((v) => v.name !== name);
   views.unshift({ name, filters: JSON.parse(JSON.stringify(_filters)) });
   gdWriteViews(views);
   _viewName = name;
+  _viewId = null;
+  _filterRevision += 1;
   _saveFilters();
   if (typeof gdSyncViewChip === 'function') gdSyncViewChip();
   if (typeof window.gdAnnounce === 'function') window.gdAnnounce('Saved view ' + name);
@@ -366,7 +393,7 @@ function gdSaveView(name) {
 
 function gdDeleteView(name) {
   gdWriteViews(gdReadViews().filter((v) => v.name !== name));
-  if (_viewName === name) { _viewName = null; _saveFilters(); if (typeof gdSyncViewChip === 'function') gdSyncViewChip(); }
+  if (!_viewId && _viewName === name) { _viewName = null; _saveFilters(); if (typeof gdSyncViewChip === 'function') gdSyncViewChip(); }
 }
 
 // ---------------------------------------------------------------------------
@@ -392,9 +419,8 @@ function _fetchViewMembers(quiet) {
     views: _filters.views.map((v) => v.id),
     // The client already narrows by these; sending them too keeps the
     // member list (and its truncation) honest about what is on screen.
-    // `apps` is the tenancy addon's notion — the server matches nothing
-    // for it, so it stays a client overlay (fnKindVisible) only.
-    kinds: _filters.kinds.filter((k) => k !== 'apps'),
+    kinds: _filters.kinds,
+    problems: _filters.problems,
     namespaces: _filters.namespaces,
     exclude: _filters.exclude,
   };
@@ -450,27 +476,19 @@ async function gdFetchSharedViews(force) {
   try {
     const r = await authFetch(API.api_views);
     const rows = r.ok ? await r.json() : [];
-    _sharedViews = (rows || []).map((v) => {
-      const f = gdEmptyFilters();
-      const src = v.filters || {};
-      f.kinds = (src.kinds || []).map(String).filter((k) => KIND_AXIS.includes(k));
-      f.namespaces = (src.namespaces || []).map(String);
-      f.exclude = (src.exclude || []).map(String);
-      f.effects = (src.effects || []).map(String);
-      f.unused = !!src.unused;
-      f.name = typeof src.name === 'string' ? src.name : '';
-      f.uses = (src.uses || []).map((id) => {
-        const fn = (typeof lookups !== 'undefined') ? lookups?.fnMap?.get(id) : null;
-        return { id, name: fn ? ((typeof getQualifiedFnName === 'function' ? getQualifiedFnName(fn) : fn.name) || id) : id };
-      });
-      return { name: v.name, id: v.id, filters: f, shared: true, also: src.also || [] };
+    const viewNames = new Map((rows || []).map(view => [view.id, view.name]));
+    _sharedViews = (rows || []).map(view => {
+      const src = view.filters || {};
+      const reference = id => {
+        const fn = typeof lookups !== 'undefined' ? lookups?.fnMap?.get(id) : null;
+        return {id, name: viewNames.get(id) || (fn
+          ? (typeof getQualifiedFnName === 'function' ? getQualifiedFnName(fn) : fn.name) : null) || id};
+      };
+      const filters = _normFilters({...src,
+        uses: (src.uses || []).map(reference),
+        views: [...new Set([...(src.views || []), ...(src.also || [])])].map(reference)});
+      return {...view, filters, shared: true};
     });
-    // A view's `also` names another graph view — it applies as a
-    // "view <name>" chip (the `views` axis), resolved against the list.
-    const nameOf = new Map(_sharedViews.map((v) => [v.id, v.name]));
-    for (const v of _sharedViews) {
-      v.filters.views = (v.also || []).map((id) => ({ id, name: nameOf.get(id) || id }));
-    }
   } catch (_) { _sharedViews = []; }
   return _sharedViews;
 }
@@ -479,8 +497,10 @@ function gdSharedViewsCached() { return _sharedViews; }
 
 // A view just saved in the graph under `name` IS the active set — name it
 // on the chip without touching the filters.
-function gdMarkViewApplied(name) {
+function gdMarkViewApplied(name, id) {
   _viewName = name;
+  _viewId = id || null;
+  _editingGraphView = null;
   _saveFilters();
   if (typeof gdSyncViewChip === 'function') gdSyncViewChip();
 }
@@ -512,11 +532,15 @@ window.gdAddView = gdAddView;
 window.gdRemoveView = gdRemoveView;
 window.gdClearFilters = gdClearFilters;
 window.gdApplyView = gdApplyView;
+window.gdBeginGraphViewEdit = gdBeginGraphViewEdit;
+window.gdEditingGraphView = gdEditingGraphView;
 window.gdSaveView = gdSaveView;
 window.gdDeleteView = gdDeleteView;
 window.gdReadViews = gdReadViews;
 window.gdWriteViews = gdWriteViews;
 window.gdActiveViewName = gdActiveViewName;
+window.gdActiveViewId = gdActiveViewId;
+window.gdFilterRevision = gdFilterRevision;
 window.gdRefreshViewMembers = gdRefreshViewMembers;
 window.gdFetchSharedViews = gdFetchSharedViews;
 window.gdInvalidateSharedViews = gdInvalidateSharedViews;

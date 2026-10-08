@@ -45,6 +45,22 @@ const VAL_FN = 'cmp-val' + RUN_ID;
 // replaced ref, whose "there" side draws as a ghost subtree.
 const INSIDE_FN = 'cmp-inside' + RUN_ID;
 const REF_FN = 'cmp-ref' + RUN_ID;
+const CHAIN_FNS = ['cmp-middle', 'cmp-leaf', 'cmp-top'].map((name) => name + RUN_ID);
+const PAIR_FN = 'cmp-pair' + RUN_ID;
+
+async function writeEntity(page, type, fields, {id, branch} = {}) {
+  const status = await page.evaluate(async ({type, fields, id, branch}) => {
+    const body = new URLSearchParams();
+    for (const [key, value] of Object.entries(fields)) body.set(key, value);
+    const response = await window.authFetch('/api/entities/' + type + (id ? '/' + id : ''), {
+      method: id ? 'PUT' : 'POST',
+      headers: {'Content-Type': 'application/x-www-form-urlencoded',
+        ...(branch ? {'X-Graphden-Branch': branch} : {})}, body: body.toString(),
+    });
+    return response.status;
+  }, {type, fields, id, branch});
+  assert(status === 200, 'write ' + type + ' succeeds: ' + status);
+}
 
 async function cleanup(page) {
   try {
@@ -53,7 +69,7 @@ async function cleanup(page) {
                                        {headers: {'X-Graphden-Branch': branch}});
       return r.ok ? r.json() : null;
     }, FEAT);
-    for (const nm of [INSIDE_FN, REF_FN, EFF_FN, VAL_FN, 'cmp-sugg-fn' + RUN_ID]) {
+    for (const nm of [PAIR_FN, ...CHAIN_FNS.slice().reverse(), INSIDE_FN, REF_FN, EFF_FN, VAL_FN, 'cmp-sugg-fn' + RUN_ID]) {
       const f = (ents?.fns || []).find((x) => x.name === nm);
       if (f) {
         await page.evaluate(async (id) => {
@@ -295,6 +311,28 @@ async function cleanup(page) {
       return r.status;
     }, {id: refBindingId, refFnId: timeFn.id, branch: FEAT});
     assert(refEdit === 200, 'ref probe re-pointed at :current-time-ms on feat: ' + refEdit);
+    // One unchanged long chain inherits a change in its middle. The root
+    // also uses REF_FN independently; revealing one keeps the other visible.
+    let chainParent = valId;
+    for (const name of CHAIN_FNS) {
+      await writeEntity(page, 'fn', {name, 'parent-ids': chainParent});
+      const entities = await api(page, 'GET', '/api/graph/entities');
+      chainParent = entities.fns.find((fn) => fn.name === name)?.id;
+      assert(chainParent, 'long chain identity resolved: ' + name);
+    }
+    const chainTopId = chainParent;
+    const add = allEnts.fns.find((fn) => fn.name === 'add');
+    assert(add, ':add resolved for two independent composition branches');
+    await writeEntity(page, 'fn', {name: PAIR_FN, 'parent-ids': add.id});
+    const pairEntities = await api(page, 'GET', '/api/graph/entities');
+    const pairId = pairEntities.fns.find((fn) => fn.name === PAIR_FN)?.id;
+    for (const [name, ref] of [['a', chainTopId], ['b', refId]]) {
+      const slotId = pairEntities['fn-slots'].filter((row) => row['fn-id'] === add.id)
+        .map((row) => pairEntities.slots.find((slot) => slot.id === row['slot-id']))
+        .find((slot) => slot.name === name)?.id;
+      assert(slotId, 'composition slot resolved: ' + name);
+      await writeEntity(page, 'binding', {'fn-id': pairId, 'slot-id': slotId, 'ref-fn-id': ref});
+    }
     assert((await api(page, 'POST',
                       '/api/branches/' + encodeURIComponent(FEAT) + '/propose',
                       {proposed: true}))?.ok, 'feat proposed');
@@ -470,11 +508,22 @@ async function cleanup(page) {
     assert(true, 'canvas rings the changed bound arg');
 
     // --- UX-v4: the diff as a graph -------------------------------------
-    // (1) the node-level change is written ON the node: the value the
-    //     compared branch holds, under yours.
+    // (1) literal replacement is two nodes linked as a replacement, not an
+    //     inline before/after string and not a pair of unrelated add/deletes.
+    await page.waitForSelector('.gd-ghost-literal[data-entity-id="' + valBindingId + '"]', {timeout: 20000});
+    const counterpart = await page.evaluate((bindingId) => {
+      const el = document.querySelector('.gd-ghost-literal[data-entity-id="' + bindingId + '"]');
+      return {value: el.querySelector('.gd-ghost-literal-value').textContent,
+        branch: el.dataset.branch, anchor: el.dataset.anchorId, controls: el.querySelectorAll('button,input').length,
+        replacement: document.querySelector('.gd-ghost-replacement-label')?.textContent,
+        current: !!gv.node(el.dataset.anchorId)};
+    }, valBindingId);
+    assert(counterpart.value === '2' && counterpart.branch === FEAT && counterpart.current
+      && counterpart.controls === 0 && counterpart.replacement === 'replacement',
+      'exact source literal is a separate read-only node linked to the real occurrence: ' + JSON.stringify(counterpart));
     const wasText = await page.evaluate(
       () => Array.from(document.querySelectorAll('.arg-diff-was')).map((e) => e.textContent).join(' | '));
-    assert(/there: 2/.test(wasText), 'the arg carries the there-value line: ' + JSON.stringify(wasText));
+    assert(!/there: 2/.test(wasText), 'literal replacement has no inline there-value duplication');
     // (2) the Explorer row carries a one-line digest of the change.
     await page.fill('#search-input', VAL_FN);
     await page.waitForFunction((nm) => {
@@ -507,12 +556,41 @@ async function cleanup(page) {
     assert(true, 'canvas rings the changed-inside card dashed, with a ∿ badge');
     await page.click('.fn-diff-inside-badge');
     await page.waitForSelector('.arg-overlay-diff-focus', {timeout: 20000});
+    await page.waitForSelector('.gd-ghost-literal[data-entity-id="' + valBindingId + '"]', {timeout: 20000});
     const revealed = await page.evaluate(() => ({
       focus: document.querySelectorAll('.arg-overlay-diff-focus').length,
-      was: Array.from(document.querySelectorAll('.arg-diff-was')).map((e) => e.textContent).join(' | '),
+      source: document.querySelector('.gd-ghost-literal-value')?.textContent,
     }));
-    assert(revealed.focus >= 1 && /there: 2/.test(revealed.was),
+    assert(revealed.focus >= 1 && revealed.source === '2',
            '∿ click reveals the parent\'s Δ row inside the card: ' + JSON.stringify(revealed));
+    // A changed middle ancestor in a long chain, alongside a second graph.
+    await page.evaluate(async (name) => { await selectFnByName(name); }, PAIR_FN);
+    const chainSelector = '.node-overlay[data-fn-name="' + CHAIN_FNS[2] + '"]';
+    await page.waitForSelector(chainSelector + ' .fn-diff-inside-badge', {timeout: 20000});
+    const chainInfo = await page.evaluate((id) => window.gdDiffAffectedInfo(id), chainTopId);
+    assert(chainInfo?.depth === 3 && chainInfo.via === valId,
+      'long chain traces the changed middle ancestor: ' + JSON.stringify(chainInfo));
+    await page.click(chainSelector + ' .fn-diff-inside-badge');
+    await page.waitForSelector(chainSelector + ' .fn-diff-ancestor-badge', {timeout: 20000});
+    assert(await page.locator('.node-overlay[data-fn-name="' + REF_FN + '"]').count() > 0,
+      'revealing the chain leaves the independent ref graph visible');
+    await page.click(chainSelector + ' .fn-diff-ancestor-badge');
+    await page.waitForFunction((id) => document.getElementById('gd-inspector')?.dataset.fnId === id,
+      valId, {timeout: 20000});
+    const beforeRefresh = await page.evaluate(() => ({
+      fn: document.getElementById('gd-inspector').dataset.fnId,
+      selected: selectedFnId,
+      expansions: Array.from(expansionState, ([id, state]) => [id, state.fullDepth]),
+    }));
+    await page.evaluate(() => window.gdDiffModeRefresh());
+    const afterRefresh = await page.evaluate(() => ({
+      fn: document.getElementById('gd-inspector').dataset.fnId,
+      selected: selectedFnId,
+      expansions: Array.from(expansionState, ([id, state]) => [id, state.fullDepth]),
+    }));
+    assert(JSON.stringify(beforeRefresh) === JSON.stringify(afterRefresh),
+      'refresh retains selected ancestor, navigation root and expansion');
+    await page.waitForSelector('#gd-diff-insp [data-anchor-id="' + valId + '"]', {timeout: 20000});
     // (4) a replaced ref: the compared branch's side hangs beside the
     //     card as a ghost subtree; the edge label marks the differing arg.
     await page.evaluate(async (nm) => { await selectFnByName(nm); }, REF_FN);

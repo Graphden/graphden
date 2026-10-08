@@ -52,6 +52,14 @@
   (or *epoch-state-override* global-epoch-state))
 
 
+(defn validated-watermark
+  "The epoch through which every cached graph effect is known applied. A
+   source-export boundary compares this with an uncached database epoch;
+   the request router's grace window is not a source-visibility certificate."
+  []
+  (:w @(epoch-state)))
+
+
 (defn seed-watermark!
   "Advance the watermark to the sequence's current value — for a ctx that
    was just built from the CURRENT graph (the router's default-branch

@@ -84,7 +84,7 @@ function makeRowExpander(resultHostEl) {
                                   body['declared-effects']);
         // Traced run (Debug P2) — offer the canvas path highlight.
         if (typeof appendPathViewAffordance === 'function') {
-          appendPathViewAffordance(resultHostEl, body['path-trace']);
+          appendPathViewAffordance(resultHostEl, body['path-trace'], body['fn-id']);
         }
       }
     } catch (e) {

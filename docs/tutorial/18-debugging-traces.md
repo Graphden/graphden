@@ -32,9 +32,9 @@ sits paused holding threads.
 Take any composed fn of yours (something with a few refs — the
 `slugify` test subject from lesson 17, or any page fn):
 
-1. Open its Run pane — `⋯ → ▶ Run` lands the Inspector on the
+1. Click **▶ Run** on the selected card (or `⋯ → ▶ Run`) — this lands the Inspector on the
    **Runs** tab.
-2. Check **Trace path**, and **Save to history** — the trace is
+2. Open **Run options**. Check **Trace path**, and **Save to history** — the trace is
    stored on the run, so an unsaved run keeps it only until you
    navigate away. If you also want per-node return values, check
    **+ capture values** — it asks for an explicit confirm with a
@@ -44,7 +44,9 @@ Take any composed fn of yours (something with a few refs — the
    traversed fn card, the one you ran included, gets a timing badge
    (`3× 12ms`, `cache`, `secret`), and with values captured, a chip
    with its return: short values print right on the card (`= "HI"`,
-   `= 11`), longer ones read `= value` and open on click.
+   `= 11`), longer ones end in `…` and open the full captured value on click.
+   `= unavailable` means that invocation’s value was not stored; opening it
+   explains the capture limit rather than showing an earlier value.
 4. In the history list under the form, the traced row carries two
    extra buttons:
    - **path** — the same aggregate canvas highlight;
@@ -71,7 +73,7 @@ Captured values have caps of their own, each reported rather than
 silent:
 
 - a single value over **4 KB** is not captured — the card's chip
-  reads `= 4KB+` and its popover explains the cap;
+  reads `= unavailable` and its popover explains the cap;
 - when all captured values together pass the **16 MB** budget, the
   oldest entries drop first and the path panel says `some values
   dropped`;

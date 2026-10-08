@@ -1,240 +1,181 @@
 # Lesson 41 — The package lifecycle: both sides of a version
 
-**Goal**: by the end of this lesson you have walked the whole loop
-between a package's **author** and its **consumer** on one instance:
-publish, install and build on it, follow versions, fix a package you
-did not write, send the fix back, accept it, ship the next version,
-retire the old one — and you know which of those doors changes when the
-other party is in another organization or on another graphden.
+**Goal**: publish two versions as an author, install them as a consumer,
+keep an old pin, update, roll back, and update again. You play both roles
+on two branches of the same instance. The interactive lesson creates and
+removes its own branches, graphs, pins, versions and empty namespaces.
 
-**Concepts**: the two roles, **reference vs inherit** (why one follows
-versions and the other does not), **fork when the source is out of
-reach**, the **contribution doors** (a proposal on a shared instance, a
-hub push or an EDN bundle across instances), **retiring a version**,
-and the **install audit** as the author's view of who is where.
+This follows [Lesson 32](32-distributing-packages.md) for the individual
+package actions. [Lesson 23](23-branches.md) and [Lesson 24](24-review.md)
+cover contribution and review on this instance; the last section explains
+how a contribution travels from another organization or registry.
 
-This lesson assumes [Lesson 32](32-distributing-packages.md) (publish /
-install / update / fork / withdraw, one action at a time) and
-[Lesson 24](24-review.md) (propose → approve → merge). Here they are
-strung into the loop people actually run.
+## Two roles, two sibling branches
 
-## Two roles, one instance
-
-The author and the consumer are usually different people — a teammate,
-another organization on the cloud, someone on another graphden. To walk
-both halves without a second account, this lesson plays them on two
-**branches**:
-
-| Branch | Plays | Holds |
+| Branch | Role | Holds |
 |---|---|---|
-| `vendor` | the author's trunk | the source namespace `acme.greet` |
-| `site` | the consumer's project | a pin on `acme-greet` and a fn built on it |
+| `tutorial-vendor` | Author | Source namespace `tutorial-greetings` |
+| `tutorial-site` | Consumer | A pin on `tutorial-greet` and its own `welcome` graph |
 
-Both fork from `main`, so neither sees the other's edits — which is
-exactly the situation between two parties. The last section says what
-changes when they really are two parties.
+Create both branches from `main`. Neither sees the other's later version
+rows. Main stays unchanged. These branches belong to the lesson; do not
+reuse an existing branch with either name.
 
-## Part 1 — the author publishes
+## Publish the first version
 
-1. Click the branch chip; in the create row type `vendor` and create
-   it (it forks from the branch you are on — be on `main`).
-2. At the bottom of the Explorer click **New namespace** and type
-   `acme.greet`. Hover the new row, click its **+**, choose **New
-   graph…**, type `greet`, Enter. On the card click **set parent…**
-   and pick `const`; click the **+** on `:value`, **Bind literal**,
-   enter `"Hello, world."` (a JSON string, quotes included), Save.
-3. Hover the `acme.greet` row and click **⬆**. Package name
-   `acme-greet`, version `1.0.0`, Publish. (On a cloud with
-   organizations, tick **Public** if the consumer is outside yours.)
+1. Switch to `main`, open the branch chip, enter `tutorial-vendor`,
+   and click **Create**.
+2. Click **New namespace**, type `tutorial-greetings`, and press Enter.
+   On its row click **+** → **New graph…**, name it `greet`, Enter.
+3. On the new card choose **set parent…** → `core.logic.const`.
+   On `:value`, **+** → **Bind literal**, enter `1`, **Save**.
+4. Hover `tutorial-greetings`, click **⬆**, enter package name
+   `tutorial-greet` and version `1.0.0`, then **Publish**. Keep the
+   release private: both roles use your current organization.
+5. Close the publish form with **×**.
 
-That is the author's release: an immutable `:package-version` row
-holding the namespace's fn-defs, visible in the packages chip and on
-the Marketplace.
+A publication stores an immutable package version. Editing the source
+later changes neither that version nor any consumer's pin.
 
-## Part 2 — the consumer installs and builds on it
+## Install and build a consumer
 
-1. Switch to `main`, create the branch `site` from it.
-2. Open the **packages** chip, expand **+ Install a package**, click
-   **Install** on `acme-greet 1.0.0`. The pin appears in the table; the
-   Explorer gains a namespace `acme.greet@1-0-0` — the version's fns,
-   materialized once and **referenced**, not copied
-   ([Lesson 32 § Install](32-distributing-packages.md#install--by-reference-not-by-copy)).
-   Note that `acme.greet` itself is *not* here: the author's source
-   lives on `vendor`, out of the consumer's reach — as it would be
-   across organizations.
-3. New namespace `shop`; in it, **New graph…** → `welcome` with parent
-   `to-str`. Click the **+** on `:value`, choose **Bind fn-ref**, and
-   pick `greet` under `acme.greet@1-0-0`.
-4. `⋯` → **▶ Run** on `welcome`: `"Hello, world."`.
+1. Switch to `main`; create `tutorial-site` from it.
+2. Open **packages** → **+ Install a package** and click **Install**
+   on `tutorial-greet 1.0.0`. The branch gets a pin and the Explorer
+   gains `tutorial-greetings@1-0-0`. Close the panel with **×**.
+3. Create namespace `tutorial-shop` and graph `welcome` within it.
+   Set its parent to `core.strings.to-str`.
+4. On `:value`, **+** → **Bind fn-ref**, type `greet`, and choose
+   `tutorial-greetings@1-0-0.greet`.
+5. Select `tutorial-shop.welcome`, click **▶ Run** on its card, then
+   **Run** in the Inspector. The displayed result is `1`, a string
+   produced by `to-str`.
 
-**Reference, don't inherit.** `welcome` *references* the package fn
-(a binding). Had you made `greet` its **parent** instead, `welcome`
-would stay on `1.0.0` forever: an update rewrites your project's
-*bindings* to the new version's namespace, but parent links are
-identity-level and never rewritten
-([ADR — parent-set identity](../adr/ADR-parent-set-identity.md)).
-Inherit from a package fn only when you mean "this exact version";
-reference it when you mean "whatever version I have pinned".
+**Reference or inherit?** This consumer references the package graph
+through a binding. A pin update rewrites its own references into the new
+version's namespace. Had `greet` been its parent, the parent identity
+would have stayed on that exact version. Use inheritance for an exact
+parent; use a reference when the consumer should follow its pin.
+See [the parent-set identity decision](../adr/ADR-parent-set-identity.md).
 
-## Part 3 — the consumer fixes what they do not own
+## Publish an edit, then follow it
 
-The period at the end of `"Hello, world."` is, let us say, a bug. The
-consumer has two doors, and which one is open depends on where the
-author's **source** is.
+1. Switch to `tutorial-vendor`; select `tutorial-greetings.greet`.
+   Change its bound `:value` to `2`, **Save**.
+2. Clear the Explorer filter if needed, hover the source namespace,
+   click **⬆**, and publish `tutorial-greet 1.0.1`. Close the form.
+3. Switch to `tutorial-site`; select `tutorial-shop.welcome` and run
+   it again. It still returns `1`: publishing has not moved its pin.
+4. Open **packages**. On the installed row enter `1.0.1` and click
+   **↑**. Close the panel. Welcome's binding now points at
+   `tutorial-greetings@1-0-1.greet`; run it and read `2`.
+5. Enter `1.0.0` on that same installed row and click **↑**. Its
+   reference returns to `tutorial-greetings@1-0-0.greet`; run it and
+   read `1`. An update and a rollback use the same action.
+6. Enter `1.0.1`, **↑**, and run once more: `2`.
 
-### Door A — the source is on this instance: propose
+A changed value with the same functions and argument types is compatible
+with a patch release. Removing a function or narrowing an argument needs
+a major release; the publish action checks compatibility before saving.
+The version box also accepts `latest` and semver constraints, as explained
+in [Lesson 32](32-distributing-packages.md).
 
-On a shared instance (a teammate's package), the source namespace is
-a branch away. Do not fork — edit the source on a branch of the
-author's trunk and propose it, exactly Lesson 24:
+The lesson checks three things separately: the saved branch pin, the
+actual binding's referenced function UUID, and the current run's result.
+A typed version, another graph called `greet`, or an old result alone
+cannot complete these steps.
 
-1. Switch to `vendor`. In its `⋯` menu choose **⚙ Protection…** and
-   set **Required approvals** to `1` — the author's trunk now refuses
-   unreviewed merges. (You are wearing the author's hat for this step.)
-2. Still on `vendor`, create the branch `fix-greet` (so it forks from
-   `vendor`). Open `acme.greet.greet` there and change `:value` to
-   `"Hello, world!"`.
-3. Switch back to `vendor`. On the `fix-greet` row: `⋯` → **📤
-    Propose for review**. Now as the author: `✅` on the row (the badge
-    reads `1/1`), then `⇢` — the fix is on the trunk. Nothing has
-    shipped yet: the published `1.0.0` is immutable, and the consumer
-    on `site` still runs `"Hello, world."`.
+## Finish and retry safely
 
-### Door B — the source is out of reach: fork
+Return to `main`, click **Finish**, then **Delete created entities**.
+Cleanup first uninstalls this lesson's exact pin in `tutorial-site`, then
+removes the sibling branches, its exact published versions, and its empty
+namespaces. The lesson has no merge dependencies, so neither branch needs
+to be archived. Deleting a branch alone does not remove its registry pin.
 
-When the package came from another organization or was pulled from
-another graphden ([Lesson 32 § another registry](32-distributing-packages.md#installing-from-another-graphdens-registry)),
-there is no branch of the author's to edit. **Fork** copies the
-version's fns into *your* graph at their original namespace, where
-they are yours to edit:
+Creation receipts are saved before branch reloads. If a publish or install
+reply is lost, the lesson retains that pending item in **Lessons** for
+review and retry. It does not claim an existing version or namespace by
+name, and it does not withdraw other versions of the same package.
+**Keep** ends cleanup tracking and preserves your work deliberately.
 
-- On `site`, open the packages chip and click **Fork** on
-  `acme-greet 1.0.0`. Reload: the Explorer now has `acme.greet` with
-  an editable `greet` — a copy on your branch, no pin written. (Try
-  it now if you like; `site` does not see `vendor`'s source, so this
-  is the out-of-reach case. Delete the copy afterwards or leave it —
-  it does not affect the rest.)
-- Edit the copy, then point `welcome` at it (**Bind fn-ref** again,
-  this time `greet` under `acme.greet`) — or keep the pin for the
-  fns you did not change and reference only the fixed one.
-- **When Fork refuses** — a namespace built into *this* instance from
-  disk answers `package-owned`:
-  [Lesson 32 § Fork](32-distributing-packages.md#fork--copy-on-write-when-you-want-to-edit).
+On a real project, withdrawal removes a published version only when no
+branch pins it; otherwise the action returns `still-installed`. The
+organization's package install audit shows which branches still use it.
+Uninstalling a pin does not itself withdraw the published version.
 
-Sending the fix back from a fork is the **contribution door**; it
-depends on where the author is:
+## Contributing a fix
 
-| The author is… | Send the fix as… |
+The interactive loop uses your own source. To fix a teammate's package
+on the same instance, branch from its source, compare the change, propose
+it and review it as in Lessons 23 and 24. Merging the source change still
+does not publish a new immutable version or move a consumer's pin.
+
+If the source belongs to another organization or another Graphden, there
+is no author branch for you to edit. **Fork** copies a published version
+into your graph at its original namespace and writes no pin. Edit that
+copy and point your own binding at it. Fork refuses a namespace owned by
+a built-in package; that source must change on disk, as in Lesson 31.
+
+Sending the fix back depends on access to the author:
+
+| Author | Contribution |
 |---|---|
-| a teammate on this instance | Door A — no fork needed |
-| running a hub you can reach | push your branch: `push/<branch>`, owner-stamped, reviewed on the hub with Δ compare ([Lesson 34 § 3](34-offline-and-push.md#3-push-your-work-to-the-hub)) |
-| anywhere you can send a file | the fn-defs as an EDN bundle; the author applies it to a review branch (below) |
+| Teammate on this instance | Source branch and review, Lessons 23–24 |
+| Reachable hub | Owner-stamped branch push and compare, [Lesson 34](34-offline-and-push.md) |
+| Someone who can receive a file | An EDN bundle applied to a fresh review branch |
 
-The bundle door is one request. The author lands it on a fresh
-branch, compares, merges:
+For example, the author can import a received bundle into a new branch:
 
 ```bash
 curl -X POST "http://localhost:9002/api/import/graph?target=contrib/greet&create=true" \
   -H "Authorization: Bearer $AUTH_TOKEN" \
   -H "Content-Type: application/edn" \
-  --data-binary '{:fns [{:name :greet :namespace "acme.greet"
-                         :parent :const :args {:value "Hello, world!"}}]}'
-# → {"ok":true,"branch":"contrib/greet","fn-ids":[…],"skipped-owned":[],"adopted":[]}
+  --data-binary '{:fns [{:name :greet :namespace "tutorial-greetings"
+                         :parent :const :args {:value 2}}]}'
 ```
 
-`skipped-owned` lists any fn the bundle tried to write over a built-in
-package — the same protection Fork enforces, reported instead of
-refused because an import is a snapshot, not a copy of one package.
+Inspect the import's `skipped-owned` and `adopted` results, compare, and
+review before merging. Import reports attempts to overwrite built-in
+package functions instead of silently taking ownership of them. The
+interactive lesson does not simulate a remote registry or a hub push.
 
-## Part 4 — the author ships, the consumer follows
+## The same version loop over HTTP
 
-1. On `vendor`, hover `acme.greet`, **⬆**, `acme-greet` `1.0.1`,
-    Publish. The version is checked against `1.0.0` before the row is
-    written: same fns, same args, a changed value — compatible, so a
-    patch number is right. (A removed fn or a narrowed arg would be
-    refused under `1.x` and need `2.0.0` — [Lesson 32 § Publish](32-distributing-packages.md#publish--freeze-a-namespace-into-the-registry).)
-2. On `site`, open the packages chip, type `1.0.1` in the installed
-    row's version box and click `↑`. The pin moves and every binding
-    of yours that pointed into `acme.greet@1-0-0` now points into
-    `acme.greet@1-0-1` — `welcome` included.
-3. **▶ Run** `welcome`: `"Hello, world!"`. Type `1.0.0`, `↑` — back to
-    the period; `1.0.1`, `↑` — forward again. A consumer who pinned
-    `^1.0` gets the same move by typing `latest`.
+Set `X-Graphden-Branch` to the author or consumer branch for each request.
+Publish, install, and update accept JSON bodies.
 
-### Retiring the old version
-
-1. Withdraw `1.0.0`: it is no longer pinned by any branch, so it goes.
-
-    ```bash
-    curl -X DELETE "http://localhost:9002/api/packages/withdraw?name=acme-greet&version=1.0.0" \
-      -H "Authorization: Bearer $AUTH_TOKEN"
-    # → {"ok":true,"withdrawn":"acme-greet"}
-    ```
-
-    Now try `version=1.0.1`: **409 `still-installed`** — `site` pins
-    it. The gate is per *version*: a branch that moved on does not
-    keep the old row alive; a branch that has not moved keeps its
-    version until it does.
-2. Before withdrawing anything on a real registry, look at the
-    **Organization** surface's packages section
-    ([Lesson 32 § Governance](32-distributing-packages.md#governance--the-organization-surfaces-packages-view)):
-    the **install audit** lists every pin — which branch is on which
-    version — so the author knows who a withdrawal would hit and who
-    has not updated yet.
-
-## Cleanup
-
-Uninstall on `site` (`×` on the pin) and delete `site` from the
-branch popover. `vendor` and `fix-greet` stay: a merged source cannot
-be deleted while its target exists, and a branch with children cannot
-either — **archive** them instead (`⋯` → Archive), which folds them
-into the popover's Merged group ([Lesson 23](23-branches.md)).
-
-## The same loop over HTTP
-
-Every step above has a JSON sibling; `?branch=` picks the branch the
-request acts on.
-
-| Step | Request |
+| Action | Request |
 |---|---|
-| publish | `POST /api/packages/publish?branch=vendor` `{"name":"acme-greet","version":"1.0.0","ns-root":"acme.greet"}` |
-| install | `POST /api/packages/install?branch=site` `{"name":"acme-greet","version":"1.0.0"}` → `{"ok":true,"namespace":"acme.greet@1-0-0",…}` |
-| fork | `POST /api/packages/fork?branch=site` `{"name":"acme-greet","version":"1.0.0"}` → `{"ok":true,"forked":1}` or `{"ok":false,"reason":"package-owned","owned":[…]}` |
-| propose / approve / merge | `POST /api/branches/fix-greet/propose`, `POST /api/branches/fix-greet/approve`, `POST /api/branches/vendor/merge` `{"source":"fix-greet"}` |
-| update / rollback | `POST /api/packages/update?branch=site` `{"name":"acme-greet","version":"1.0.1"}` → `{"ok":true,"from":"1.0.0","to":"1.0.1","rewritten-refs":1}` |
-| uninstall | `DELETE /api/packages/uninstall?name=acme-greet&branch=site` |
-| withdraw | `DELETE /api/packages/withdraw?name=acme-greet&version=1.0.0` |
-| contribute a bundle | `POST /api/import/graph?target=<branch>&create=true` with an EDN `{:fns […]}` body |
+| Publish | `POST /api/packages/publish` with `{"name":"tutorial-greet","version":"1.0.0","ns-root":"tutorial-greetings"}` |
+| Install | `POST /api/packages/install` with `{"name":"tutorial-greet","version":"1.0.0"}` |
+| Update or rollback | `POST /api/packages/update` with the package name and target version |
+| Uninstall | `DELETE /api/packages/uninstall?name=tutorial-greet` |
+| Withdraw one version | `DELETE /api/packages/withdraw?name=tutorial-greet&version=1.0.0` |
 
-## When the two parties really are two
+Install and update return the saved pin, version UUID/hash, and namespaces
+created by that materialization. A repeated operation does not claim
+existing namespaces. Uninstall and withdrawal optionally take an
+`expected-id` query parameter: an identity mismatch refuses the operation
+before removing anything. This protects cleanup from a same-name replacement.
 
-| Situation | What changes |
-|---|---|
-| Same instance, same org | Nothing — Door A is the whole story. |
-| Same cloud, another org | The consumer sees the version only if it was published **Public**; the source is out of reach, so Door B. |
-| Another graphden | The consumer pulls the version through the remote-install form (a mirror); Door B, and the fix travels as a hub push or a bundle. |
-| A package built into the instance | Neither door: the change is a `fns.edn` edit and a `bb rebuild` (Lesson 31). |
+## When the roles belong to different parties
 
-## What we glossed over
+On the same cloud, another organization sees only a release published
+**Public**. Its consumer cannot edit your source, so it uses a fork to
+prepare a contribution. Another Graphden can pull a version through the
+remote-install form; its contribution travels as a hub push or EDN bundle.
+These are real external operations described in Lessons 31 and 34, not
+additional local fixtures created by this walkthrough.
 
-- **Marketplace metadata** — description, category, tags, the ★
-  rating and the ↓ install count the author sees: [Lesson 40](40-marketplace-themes-keymaps.md).
-- **Suggested changes** on a proposal (a reviewer's counter-edit,
-  applied with one click) and anchored review comments: [Lesson 24](24-review.md).
-- **Dependencies** — a bundle records the external fn-names it needs;
-  install and fork refuse with `missing-dependencies` when the target
-  graph lacks one.
-- **Secrets in a package** — a fn that reads a secret publishes with a
-  manifest of the paths it needs, and install lists them as
-  `needs-definition` until the consumer defines them
-  ([Lesson 16](16-effects-and-secrets.md)).
+Package dependencies must be present before installation. A package that
+reads secrets carries the required paths; the consumer defines them in its
+own environment, as in [Lesson 16](16-effects-and-secrets.md). For ratings,
+metadata and install counts, see [Lesson 40](40-marketplace-themes-keymaps.md).
 
 ## Next
 
-[Lesson 42 — AI clients and API tokens](42-ai-clients-and-api-tokens.md):
-letting an AI coding client read, extend and run the graph on a branch
-of its own, and the tokens that bound what it may do. The written docs
-continue where the tutorial stops:
-[docs/PACKAGE_DISTRIBUTION.md](../PACKAGE_DISTRIBUTION.md) for the
-registry's design and API, [docs/MARKETPLACE.md](../MARKETPLACE.md)
-for the marketplace.
+[Lesson 42 — AI clients and API tokens](42-ai-clients-and-api-tokens.md)
+connects a coding client to the graph on a branch of its own.
+[Package distribution](../PACKAGE_DISTRIBUTION.md) documents the registry
+and its API in more detail.

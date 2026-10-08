@@ -2297,3 +2297,51 @@
                                  :vals ["before" 2]}})
     (is (= {:up :text :down :int}
            (:return (registry/rich-type-of :keyword-key-map))))))
+
+
+(deftest inherited-callable-slot-informs-polymorphic-return-rules
+  (let [signature [:fn {:input :int} [:secret :text] #{:db}]]
+    (registry/record-rich-types! :configured-body
+                                 {:args {:input :int :config :text}
+                                  :lambda-params [:input]
+                                  :return-type [:secret :text] :effects #{:db}})
+    (check/check-fn-def! {:name :callable-constant :parent :const
+                          :args {:value {:type signature}}
+                          :return-type signature})
+    (check/check-fn-def! {:name :configured-constructor :parent :callable-constant
+                          :args {:value :configured-body}})
+    (let [result (:return (registry/rich-type-of :configured-constructor))]
+      (is (= [:secret signature] result)
+          "Returning the callable does not substitute its future evaluated result")
+      (is (= signature (check/assemble-fn-type :configured-constructor)))
+      (is (not (types-core/subtype? result signature)))
+      (is (thrown? clojure.lang.ExceptionInfo
+            (check/check-fn-def! {:name :declassified-constructor :parent :const
+                                  :args {:value {:ref :configured-constructor
+                                                 :type (assoc signature 2 :text)}}}))
+          "A marked callable cannot claim a public invocation result"))))
+
+
+(deftest stored-own-bindings-keep-parent-context-out-of-reference-rules
+  (let [validated [:refine :text [:matches "^validated$"]]]
+    ;; The checked source's return is narrower than the generic get rule.
+    ;; A coll on an unrelated parent must not replace that checked result.
+    (registry/record-rich-types-raw!
+      :validated-field
+      {:args {:coll [:map :keyword :any]} :return validated :primary-parent :get
+       :resolved-bindings {:key {:type :keyword :value :field :value-present true}}})
+    (registry/record-rich-types-raw!
+      :unrelated-parent-context
+      {:args {:value 'a} :return :any :primary-parent :const
+       :resolved-bindings {:coll {:type [:map :keyword :text] :value nil}}})
+    (check/check-fn-def! {:name :isolated-own-binding :parent :unrelated-parent-context
+                          :args {:value :validated-field}})
+    (is (= validated
+           (get-in (registry/rich-type-of :isolated-own-binding)
+                   [:resolved-bindings :value :type])))
+    (check/check-fn-def! {:name :own-context-binding :parent :unrelated-parent-context
+                          :args {:value :validated-field :coll {:type [:map :keyword :int]}}})
+    (is (= (types-core/make-union [:int :null])
+           (get-in (registry/rich-type-of :own-context-binding)
+                   [:resolved-bindings :value :type]))
+        "Direct own capture still narrows a reference through the original own-context pass")))

@@ -9,18 +9,24 @@
     : item && typeof item === 'object' ? new Map(Object.entries(item).map(([name, field]) => [api.keyword(name), value(field)])) : item;
   let runtime = null;
   let generation = 0;
+  let pending = null;
   const instances = new Set();
   function invalidate() {
     generation++;
+    pending?.abort();
     runtime = null;
     integration.ready = false;
     if (instances.size) window.closeFnPicker?.();
     for (const instance of [...instances]) instance.dispose();
   }
   async function load() {
-    const own = ++generation;
+    invalidate();
+    const own = generation;
+    const controller = new AbortController();
+    pending = controller;
     try {
       let plan;
+      let loadedRuntime;
       if (review) {
         const entries = {initial: params.get('ui-initial'), update: params.get('ui-update'), view: params.get('ui-picker-view')};
         if (!params.get('branch') || params.get('branch') === 'main'
@@ -30,18 +36,25 @@
         if (!response.ok || plan.ok === false) throw new Error(plan.reason || 'Graph export refused');
       } else {
         plan = window.GraphdenBuiltinPlans.plans.fnPicker;
+        loadedRuntime = await window.gdLoadUIComponentRuntime('fn-picker', plan, {operationLimit: 150000}, controller.signal);
       }
       if (own !== generation) return;
-      runtime = api.createRuntime(plan, {operationLimit: 150000});
+      if (instances.size) window.closeFnPicker?.();
+      for (const instance of [...instances]) instance.dispose();
+      runtime = loadedRuntime || api.createRuntime(plan, {operationLimit: 150000});
       integration.ready = true;
     } catch (error) {
-      if (own !== generation) return;
+      if (own !== generation || error.name === 'AbortError') return;
       invalidate();
+      if (!review) window.gdUIComponentFailed?.('fn-picker');
       if (typeof gdToast === 'function') gdToast('Picker graph unavailable: ' + error.message);
+    } finally {
+      if (pending === controller) pending = null;
     }
   }
   const integration = {
     ready: false,
+    reload: load,
     mount(host, formatCandidate) {
       if (!runtime) return null;
       const evaluator = runtime;

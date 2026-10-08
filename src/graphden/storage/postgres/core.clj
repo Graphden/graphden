@@ -22,7 +22,8 @@
     [graphden.storage.postgres.pool :as pool]
     [graphden.storage.postgres.util :as util]
     [graphden.storage.protocol.core :as sp]
-    [graphden.storage.protocol.generic-constraints :as gc])
+    [graphden.storage.protocol.generic-constraints :as gc]
+    [graphden.storage.tx :as tx])
   (:import
     (java.sql
       SQLException)))
@@ -41,6 +42,37 @@
 
 
 ;; === Storage record ===
+
+(defn- evict-slot-rows!
+  "Forget successful slot mutations, including batch branch reclamation."
+  [slot-row-cache entity-name ids]
+  (when (= :slot entity-name)
+    (swap! slot-row-cache
+           (fn [rows]
+             (let [{:keys [generation writers]} (meta rows)
+                   active (into #{} (filter deref) writers)
+                   active (cond-> active
+                            tx/*transaction-context* (conj (:active? tx/*transaction-context*)))]
+               (with-meta (apply dissoc rows ids)
+                 {:generation (inc (or generation 0)) :writers active}))))))
+
+
+(defn- read-slot-row
+  "Cache only reads that cannot overlap a slot mutation or its outer commit."
+  [slot-row-cache id read-row]
+  (let [snapshot @slot-row-cache
+        {:keys [generation writers]} (meta snapshot)
+        cacheable? (and (nil? tx/*transaction-context*) (not-any? deref writers))]
+    (or (when (nil? tx/*transaction-context*) (get snapshot id))
+        (when-some [row (read-row)]
+          (when cacheable?
+            (swap! slot-row-cache
+                   (fn [rows]
+                     (if (= generation (:generation (meta rows)))
+                       (assoc rows id row)
+                       rows))))
+          row))))
+
 
 (defn- build-entity-fields-index
   "Builds an index of entity-name -> field-specs from raw metadata.
@@ -194,8 +226,8 @@
 
   (read-entity
     [_this entity-name id]
-    ;; :slot identity rows are immutable post-create and never deleted
-    ;; (no update/delete call site repo-wide), yet they are read one-at-
+    ;; :slot identity rows are immutable during ordinary editing, yet
+    ;; branch reclamation can delete unused slots. They are read one-at-
     ;; a-time on every value-form / binding type-check / provenance /
     ;; cross-org-ref guard — 163k single-row lookups on a 1.6k-row table
     ;; in one demo window. Cache the RAW row per storage instance (below
@@ -203,11 +235,9 @@
     ;; read). nil results are NOT cached — a slot created later by
     ;; another instance must stay readable.
     (if (= :slot entity-name)
-      (or (get @slot-row-cache id)
-          (when-some [row (crud/read-entity pool entity-name id
-                                            (get-entity-fields pool metadata-cache lock entity-name))]
-            (swap! slot-row-cache assoc id row)
-            row))
+      (read-slot-row slot-row-cache id
+                     #(crud/read-entity pool entity-name id
+                                        (get-entity-fields pool metadata-cache lock entity-name)))
       (crud/read-entity pool entity-name id
                         (get-entity-fields pool metadata-cache lock entity-name))))
 
@@ -218,7 +248,7 @@
                        (let [pool (:pool this)]
                          ;; No live code path mutates :slot; the eviction is insurance so a
                          ;; future mutation path cannot silently serve a stale cached row.
-                         (when (= :slot entity-name) (swap! slot-row-cache dissoc id))
+                         (evict-slot-rows! slot-row-cache entity-name [id])
                          (crud/update-entity pool entity-name id data
                                              (get-entity-fields pool metadata-cache lock entity-name)))))
 
@@ -227,7 +257,7 @@
     [this entity-name id]
     (writer/with-write [this entity-name]
                        (let [pool (:pool this)]
-                         (when (= :slot entity-name) (swap! slot-row-cache dissoc id))
+                         (evict-slot-rows! slot-row-cache entity-name [id])
                          (crud/delete-entity pool entity-name id))))
 
 
@@ -250,14 +280,35 @@
                                  (get-entity-fields pool metadata-cache lock entity-name)))
 
 
+  sp/StorageBoundedQuery
+
+  (query-identity-candidates
+    [_ entity-name where version-source max-candidates]
+    (crud/query-identity-candidates pool entity-name where
+                                    (get-entity-fields pool metadata-cache lock entity-name)
+                                    version-source max-candidates))
+
+
+  (query-bounded-entities
+    [this entity-name where max-candidates]
+    (let [candidates (sp/query-identity-candidates this entity-name where nil max-candidates)
+          ids (mapv :id candidates)]
+      (with-meta (if (seq ids)
+                   (vec (sp/query-entities this entity-name (assoc where :id ids)))
+                   [])
+        (meta candidates))))
+
+
   sp/StorageBatchCRUD
 
   (create-entities
     [this entity-name data-seq]
     (writer/with-write [this entity-name]
-                       (let [pool (:pool this)]
-                         (crud/create-entities pool entity-name data-seq
-                                               (get-entity-fields pool metadata-cache lock entity-name)))))
+                       (let [pool (:pool this)
+                             rows (crud/create-entities pool entity-name data-seq
+                                                        (get-entity-fields pool metadata-cache lock entity-name))]
+                         (evict-slot-rows! slot-row-cache entity-name (map :id rows))
+                         rows)))
 
 
   (read-entities
@@ -269,24 +320,30 @@
   (update-entities
     [this entity-name data-seq]
     (writer/with-write [this entity-name]
-                       (let [pool (:pool this)]
-                         (crud/update-entities pool entity-name data-seq
-                                               (get-entity-fields pool metadata-cache lock entity-name)))))
+                       (let [pool (:pool this)
+                             rows (crud/update-entities pool entity-name data-seq
+                                                        (get-entity-fields pool metadata-cache lock entity-name))]
+                         (evict-slot-rows! slot-row-cache entity-name (map :id data-seq))
+                         rows)))
 
 
   (upsert-entities
     [this entity-name data-seq]
     (writer/with-write [this entity-name]
-                       (let [pool (:pool this)]
-                         (crud/upsert-entities pool entity-name data-seq
-                                               (get-entity-fields pool metadata-cache lock entity-name)))))
+                       (let [pool (:pool this)
+                             rows (crud/upsert-entities pool entity-name data-seq
+                                                        (get-entity-fields pool metadata-cache lock entity-name))]
+                         (evict-slot-rows! slot-row-cache entity-name (map :id rows))
+                         rows)))
 
 
   (delete-entities
     [this entity-name ids]
     (writer/with-write [this entity-name]
-                       (let [pool (:pool this)]
-                         (crud/delete-entities pool entity-name ids))))
+                       (let [pool (:pool this)
+                             deleted (crud/delete-entities pool entity-name ids)]
+                         (evict-slot-rows! slot-row-cache entity-name ids)
+                         deleted)))
 
 
   (query-ref-many-owners

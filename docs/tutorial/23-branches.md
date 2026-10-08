@@ -38,13 +38,36 @@ branch shows:
   edited the same entity itself. Only what you touched is pinned.
 - **A merge carries a branch's own changes onto the target, and from
   then on they count as the target's.** Merging `feat` into `main`
-  writes one merge record; nothing is copied (which is why a merged
-  branch can't be deleted).
+  writes one merge record; nothing is copied. The source cannot be
+  deleted while a surviving target still reads through that merge.
 - **A conflict is one entity edited on both sides since the fork, to
   different content.** Identical edits on both sides are not a
   conflict; a change that reached `main` through someone else's
   merge IS `main`'s change, so a second branch editing the same
   entity is asked, not silently overwritten.
+
+## A removable tutorial sandbox
+
+The guided tour keeps tutorial functions off your real `main`. Create
+`tutorial-sandbox` first and extend `str-upper` into `branch-demo` there.
+Bind `base version`, try the branch-local toggle, then turn it off again:
+this demonstration needs transferable versions.
+
+Fork `tutorial-branch` from that sandbox. Change the existing function's
+binding to `branch version`, set its description to `source draft`, and
+extend it into the new child `branch-added`. Return to the common sandbox
+and create `tutorial-merge-target`: source and target are siblings.
+
+Compare the source from the target. The existing UUID has a field edit
+and a binding replacement; the child is an addition. Merge the source,
+then change its value to `second branch version`. The target still reads
+the first merge until you merge the source again.
+
+Finish and choose **Delete created entities**. Cleanup returns to `main`,
+deletes the merged target first, then the source, then their common base.
+The tour retains the actual creation UUIDs across reloads and cancellation;
+a same-named replacement is never claimed as a tutorial branch. No archive
+is needed to keep these practice branches hidden.
 
 ## The fork → edit → diff → merge loop
 
@@ -147,7 +170,9 @@ approvals on the target, comment threads and suggestions — is
      (click one to switch there).
    - **The canvas.** Changed cards and their changed args ring, and
      the change is written ON the node: the value the other branch
-     holds sits under yours, struck through (`there: branch version`);
+     holds appears as a separate read-only literal node, connected to
+     the current value by a dashed **replacement** link. The counterpart
+     names the compared branch; list items keep their own occurrence UUID.
      a renamed fn shows its other name on the card; an arg you bound
      here only rings green.
    - **The inspector.** Selecting a changed fn shows its exact
@@ -238,6 +263,20 @@ keeps following `main` after the sync, exactly as before it. Taking
 to it on `main` is a conflict again.
 
 ## What DOESN'T merge: branch-local fn-defs
+
+Ordinary functions merge by default. The exercise above turns the flag on
+to demonstrate its effect, then turns it off so the shared function can
+merge. You do not need to disable this flag on every new function.
+
+Keep shared logic separate from configuration. An application can take a
+query callable; distinct `prod-query` and `test-query` functions construct
+it with their own connection values. The ordinary
+[callable constructor](09-higher-order-functions.md#a-function-that-returns-a-function)
+captures those values. Distinct start functions reference the corresponding
+query identities. Updating `test-query` changes that identity; it does not
+replace a reference to `prod-query` just because both share an ancestor.
+Editing `prod-query` itself on a test branch still edits the same identity
+and normally participates in merging. Names do not select an environment.
 
 Some fn-defs encode environment-specific runtime config — a
 web-server's port, a Vault secret's path, a cron schedule. You

@@ -7,7 +7,7 @@ Request validation, stored edits, execution results, and views.
 
 after: storage, types
 
-[[file:index.org][index]] · ~63 min
+[[file:index.org][index]] · ~67 min
 
 * 1. extract-entity-params
 :PROPERTIES:
@@ -52,13 +52,13 @@ Resolves the requested branch by UUID or name before writing. The resulting bran
 :PROPERTIES:
 :CUSTOM_ID: crud/create-entity
 :FILE: src/graphden/crud/entities.clj
-:LINE: 187
+:LINE: 188
 :MINS: 0.8
 :END:
 
 Creates one row through the generic write API. It checks the caller's [[file:glossary.org::#term/auth][capability]], validates the proposed change with ~write-rej~, writes through ~sp/create-entity~, then invalidates caches and sends notifications.
 
-- source :: [[file:../../../src/graphden/crud/entities.clj::(defn create-entity][src/graphden/crud/entities.clj:187]]
+- source :: [[file:../../../src/graphden/crud/entities.clj::(defn create-entity][src/graphden/crud/entities.clj:188]]
 - same file :: [[file:crud.org::#crud/apply-create-core][apply-create-core]]
 - referenced from :: [[file:constellation.org::#constellation/every-addon-facing-var-still-resolves-test][every-addon-facing-var-still-resolves-test]]
 
@@ -105,13 +105,13 @@ On failure, traverses the creation journal backward and attempts to delete each 
 :PROPERTIES:
 :CUSTOM_ID: crud/apply-create-core
 :FILE: src/graphden/crud/entities.clj
-:LINE: 846
+:LINE: 847
 :MINS: 1.1
 :END:
 
 Repeats structural validation under the semantic writer guard, then creates the row, optional rename view, and checks the resulting function in one SQL transaction. Ordinary type errors keep the edit and return ~:type-warnings~; an optional rename failure rolls back its savepoint without losing the binding. [[file:glossary.org::#term/secret][Secret-flow]] rejection rolls back the whole SQL change, independently of the diagnostics store. See [[file:../../../docs/SECRETS.md][secrets]].
 
-- source :: [[file:../../../src/graphden/crud/entities.clj::(defn apply-create-core][src/graphden/crud/entities.clj:846]]
+- source :: [[file:../../../src/graphden/crud/entities.clj::(defn apply-create-core][src/graphden/crud/entities.clj:847]]
 - same file :: [[file:crud.org::#crud/create-entity][create-entity]]
 - referenced from :: [[file:web.org::#web/write-rej][write-rej]]
 
@@ -178,7 +178,7 @@ Computes public [[file:glossary.org::#term/free-argument][free arguments]] for e
 Coordinates ~/api/execute~: resolves the function, version, and [[file:glossary.org::#term/free-argument][free arguments]]; acquires a [[file:glossary.org::#term/concurrency-permit][concurrency permit]]; submits execution to a future; then handles pending, successful, or failed results. This is a request-management layer around the executor from the first block.
 
 - source :: [[file:../../../src/graphden/crud/fn_execution.clj::(defn apply-execute][src/graphden/crud/fn_execution.clj:123]]
-- referenced from :: [[file:editor.org::#editor/evaluate][evaluate]]
+- referenced from :: [[file:editor.org::#editor/submitExecution][submitExecution]], [[file:editor.org::#editor/evaluate][evaluate]]
 
 * 14. create-pending-with-args!
 :PROPERTIES:
@@ -299,24 +299,34 @@ Finds tests affected by a write through reverse dependencies. It selects tests w
 :PROPERTIES:
 :CUSTOM_ID: crud/graph-list-env
 :FILE: src/graphden/crud/entities/list.clj
-:LINE: 498
+:LINE: 496
 :MINS: 3.3
 :END:
 
 Builds a shared lazy read environment over the graph cache. Separate projections produce namespace trees, function lists, searches, subtrees, or a full graph listing. Server-assigned roles distinguish types from functions. This is the shared data source behind editor list refreshes.
 
-- source :: [[file:../../../src/graphden/crud/entities/list.clj::(defn- graph-list-env][src/graphden/crud/entities/list.clj:498]]
-- same file :: [[file:crud.org::#crud/view-members][view-members]]
+- source :: [[file:../../../src/graphden/crud/entities/list.clj::(defn- graph-list-env][src/graphden/crud/entities/list.clj:496]]
 
 * 24. view-members
 :PROPERTIES:
 :CUSTOM_ID: crud/view-members
-:FILE: src/graphden/crud/entities/list.clj
-:LINE: 1049
-:MINS: 1.4
+:FILE: src/graphden/crud/entities/views.clj
+:LINE: 365
+:MINS: 2.6
 :END:
 
-Evaluates graph filters for the Explorer and saved graph views. Filter dimensions are combined with AND; ~:uses~ follows reverse dependencies by function ID, and ~:views~ intersects other views with a cycle check. Ad-hoc filtering and the saved ~:explorer-view~ function use this same evaluator.
+Evaluates graph filters for the Explorer and saved graph views. Filter dimensions are combined with AND; ~:uses~ follows reverse dependencies by function ID, and ~:views~ intersects other views with a cycle check. Ad-hoc filtering and the saved ~:explorer-view~ function use this same evaluator. Problems come from current-branch diagnostics, failures and lint; apps use the installed org-scoped route reader. Intersections run before the final result limit, so a nested view never loses later matches.
 
-- source :: [[file:../../../src/graphden/crud/entities/list.clj::(defn view-members][src/graphden/crud/entities/list.clj:1049]]
-- same file :: [[file:crud.org::#crud/graph-list-env][graph-list-env]]
+- source :: [[file:../../../src/graphden/crud/entities/views.clj::(defn view-members][src/graphden/crud/entities/views.clj:365]]
+
+* 25. save!
+:PROPERTIES:
+:CUSTOM_ID: crud/save!
+:FILE: src/graphden/crud/views.clj
+:LINE: 47
+:MINS: 2.0
+:END:
+
+Saves a complete filter set as an ordinary explorer-view function and bindings. The owned writer transaction repeats authorization and validation before applying every row. Existing scalar identity slots remain valid; additional references are lists of const compositions with fn-ref bindings, so targets are named without being executed. Unrepresentable inherited or computed clauses reject the whole write. Cache invalidation and notifications happen after commit, and a publication failure is reported as committed rather than pretending the database rolled back.
+
+- source :: [[file:../../../src/graphden/crud/views.clj::(defn save!][src/graphden/crud/views.clj:47]]

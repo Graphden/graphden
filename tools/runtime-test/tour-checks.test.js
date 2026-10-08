@@ -44,6 +44,11 @@ function checkIn(state, check) {
     graphData: state.graphData || null,
     lookups: state.lookups || null,
     selectedFnId: state.selectedFnId || null,
+    _tourState: state.tourState || null,
+    _tourPrincipalMatches: () => state.principalMatches !== false,
+    _tourSessionBranch: () => state.branch || 'main',
+    gdSharedViewsCached: () => state.views || [],
+    gdEmptyFilters: () => ({kinds: [], problems: [], namespaces: [], exclude: [], uses: [], effects: [], unused: false, name: '', views: []}),
     expansionState: state.expansionState || new Map(),
     window: { location: { search: state.search || '' } },
     URLSearchParams,
@@ -68,13 +73,48 @@ function checkIn(state, check) {
         const hit = domHits[sel];
         if (!hit) return [];
         const size = hit === 'hidden' ? 0 : 10;
-        return [{ getBoundingClientRect: () => ({ width: size, height: size }) }];
+        return [{...(typeof hit === 'object' ? hit : {}), getBoundingClientRect: () => ({ width: size, height: size }) }];
       },
     },
   });
   vm.runInContext(source, ctx);
   return ctx._tourCheckPasses(check);
 }
+
+// The gate consumes actual trace payload, not a checked option or stale badge.
+for (const values of [false, true]) {
+  const fn = {id: 'trace-root', name: 'trace-root'};
+  const entries = [{'fn-id': fn.id, ...(values ? {value: null} : {})}];
+  const state = {lookups: {fnMap: new Map([[fn.id, fn]])},
+    dom: {'.execute-show-path-btn': {gdPathTrace: {entries}, gdExecutionFnId: fn.id}}};
+  assert(checkIn(state, {kind: 'execution-trace', name: fn.name, values}), 'actual trace capture mode passes');
+  assert(!checkIn(state, {kind: 'execution-trace', name: fn.name, values: !values}), 'wrong capture mode blocks');
+  state.dom['.execute-show-path-btn'].gdExecutionFnId = 'other-root';
+  assert(!checkIn(state, {kind: 'execution-trace', name: fn.name, values}), 'a trace invoking the fn from another root blocks');
+  state.dom['.execute-show-path-btn'].gdExecutionFnId = fn.id;
+  entries[0]['fn-id'] = 'other-root';
+  assert(!checkIn(state, {kind: 'execution-trace', name: fn.name, values}), 'different executed identity blocks');
+}
+test('graph view gates require the exact staged identity and all persisted conditions', () => {
+  const filters = {kinds: ['fn'], problems: [], namespaces: [], exclude: [], uses: [], effects: [], unused: false, name: 'tutorial-', views: []};
+  const view = {id: 'created', name: 'tutorial-function-view', 'namespace-id': null, filters};
+  const state = {tourState: {created: [{...view, type: 'fn'}], activeBranch: 'main'}, views: [view]};
+  const check = {kind: 'graph-view-filters', name: view.name, filters: {kinds: ['fn'], name: 'tutorial-'}};
+  assert(checkIn(state, check), 'persisted two-axis view completes creation');
+  assert(!checkIn({...state, views: [{...view, id: 'same-name-other'}]}, check), 'same label cannot substitute another UUID');
+  assert(!checkIn({...state, views: [{...view, filters: {...filters, kinds: []}}]}, check), 'a lost kind condition keeps the gate closed');
+  assert(!checkIn({...state, views: [{...view, filters: {...filters, effects: ['db']}}]}, check), 'unexpected extra predicates cannot silently complete the step');
+  assert(!checkIn({...state, branch: 'other'}, check), 'another branch cannot reuse the proof');
+  assert(!checkIn({...state, principalMatches: false}, check), 'another principal cannot reuse the proof');
+  assert(!checkIn({...state, views: [{...view, 'namespace-id': 'elsewhere'}]}, check), 'namespace mismatch cannot vouch for cleanup identity');
+  const run = {kind: 'graph-view-run', name: view.name};
+  const dom = {'.execute-popover.visible .execute-result-pane': true,
+    '.execute-popover.visible .execute-result-host .execute-result-raw pre': {textContent: JSON.stringify({fns: [{id: 'created'}], total: 1})}};
+  assert(checkIn({...state, selectedFnId: 'created', dom}, run), 'actual current result includes the view itself');
+  assert(!checkIn({...state, selectedFnId: 'other', dom}, run), 'another selected function cannot complete Run');
+  assert(!checkIn({...state, selectedFnId: 'created', dom: {...dom,
+    '.execute-popover.visible .execute-result-host .execute-result-raw pre': {textContent: '{"fns":[],"total":0}'}}}, run), 'empty or wrong query does not complete Run');
+});
 
 // --- shared fixtures --------------------------------------------------------
 

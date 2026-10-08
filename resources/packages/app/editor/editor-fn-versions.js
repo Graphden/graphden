@@ -17,6 +17,7 @@ let _fnVersionsPopover = null;
 let _fnVersionsAnchor = null;
 let _fnVersionsFnId = null;
 let _fnVersionsFnEntity = null;
+let _fnVersionsEpoch = 0;
 
 function ensureFnVersionsPopover() {
   if (_fnVersionsPopover) return _fnVersionsPopover;
@@ -42,6 +43,7 @@ function ensureFnVersionsPopover() {
 }
 
 function closeFnVersionsPopover() {
+  _fnVersionsEpoch += 1;
   if (_fnVersionsPopover) {
     _fnVersionsPopover.classList.add('hidden');
     _fnVersionsAnchor = null;
@@ -58,11 +60,15 @@ function closeFnVersionsPopover() {
 // innerHTML writes stay inert until we tell it about them. And the close ×
 // is re-attached afterwards, because innerHTML replaces the whole subtree —
 // the button is a child of the popover, so every body write drops it.
-function setFnVersionsBody(el, html, process) {
+function mountFnVersionsContent(el, html, fnEntity) {
   el.innerHTML = html;
-  if (process && window.htmx && typeof window.htmx.process === 'function') {
-    window.htmx.process(el);
-  }
+  if (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(el);
+  bindFnVersionsActions(el, fnEntity);
+}
+
+function setFnVersionsBody(el, html, process, fnEntity) {
+  if (process) mountFnVersionsContent(el, html, fnEntity);
+  else el.innerHTML = html;
   if (typeof ensurePopoverClose === 'function') {
     ensurePopoverClose(el, closeFnVersionsPopover, 'Close version history');
   }
@@ -70,6 +76,7 @@ function setFnVersionsBody(el, html, process) {
 
 async function showFnVersionsPopover(fnEntity, anchorEl) {
   if (!fnEntity?.id) return;
+  const epoch = ++_fnVersionsEpoch;
   const popover = ensureFnVersionsPopover();
   _fnVersionsAnchor = anchorEl;
   _fnVersionsFnId = fnEntity.id;
@@ -90,6 +97,7 @@ async function showFnVersionsPopover(fnEntity, anchorEl) {
 
   try {
     const resp = await window.authFetch(url);
+    if (epoch !== _fnVersionsEpoch) return;
     if (resp.status === 401) {
       setFnVersionsBody(popover, '<div class="fn-versions-error">'
         + 'Sign in to view version history.</div>');
@@ -105,15 +113,15 @@ async function showFnVersionsPopover(fnEntity, anchorEl) {
     // while this fetch was in flight must NOT clobber the newer popover
     // content. (Previously the guard ran AFTER the swap, so a slow
     // response overwrote the fast one with wrong rows + dead buttons.)
-    if (_fnVersionsFnId !== fnEntity.id) return;
-    setFnVersionsBody(popover, html, true);
+    if (epoch !== _fnVersionsEpoch) return;
+    setFnVersionsBody(popover, html, true, fnEntity);
   } catch (err) {
+    if (epoch !== _fnVersionsEpoch) return;
     setFnVersionsBody(popover, '<div class="fn-versions-error">'
       + 'Failed: ' + (err?.message || 'network error') + '</div>');
     return;
   }
 
-  bindFnVersionsActions(popover, fnEntity);
   if (typeof anchorBelowClamped === 'function') {
     anchorBelowClamped(popover, anchorEl, { fallbackW: 320, fallbackH: 180 });
   }
@@ -133,6 +141,7 @@ function bindFnVersionsActions(popover, fnEntity) {
   });
 
   popover.querySelectorAll('.fn-versions-restore').forEach((btn) => {
+    if (btn.disabled) return;
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();   // don't trigger row-top hx-get
       await restoreFnVersion(fnEntity, btn.getAttribute('data-fn-version-id'));
@@ -216,3 +225,4 @@ function shortTimestamp(ts) {
 }
 
 window.showFnVersionsPopover = showFnVersionsPopover;
+window.mountFnVersionsContent = mountFnVersionsContent;

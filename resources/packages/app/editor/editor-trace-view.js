@@ -109,6 +109,7 @@ function _bindTraceViewActions(panel) {
       _traceSelectRow(row);
     });
     row.addEventListener('keydown', (e) => {
+      if (e.target !== row) return; // Native summary/value controls own their keys.
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
         _traceSelectRow(row);

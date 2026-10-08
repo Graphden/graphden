@@ -341,6 +341,7 @@
     // Theme editor (Appearance) + keyboard layout (Keyboard) — their own
     // modules; each renders once and keeps itself in sync afterwards.
     if (typeof window.gdRenderThemePane === 'function') window.gdRenderThemePane();
+    window.gdRenderUIComponentCatalog?.();
     if (typeof window.gdRenderKeymapPane === 'function') window.gdRenderKeymapPane();
 
     const hashEl = document.getElementById('gd-set-hash');

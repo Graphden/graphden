@@ -70,6 +70,7 @@ function gdSyncViewChip() {
     chip.classList.toggle('gd-ctx-chip-active', n > 0);
     // The applied view by name — what the tour's / a test's check reads.
     if (gdActiveViewName()) chip.setAttribute('data-view', gdActiveViewName()); else chip.removeAttribute('data-view');
+    if (gdActiveViewId()) chip.setAttribute('data-view-id', gdActiveViewId()); else chip.removeAttribute('data-view-id');
   }
 }
 
@@ -312,7 +313,7 @@ function _renderViewPop(el) {
   el.appendChild(head);
   const hint = document.createElement('div');
   hint.className = 'gd-views-pop-hint';
-  hint.textContent = 'A view is a saved set of filters. Yours live in this browser; a view saved in the graph is an fn extending explorer-view — versioned, shared with everyone on the branch.';
+  hint.textContent = 'Save in the graph to share on this branch. Device only stays in this browser.';
   el.appendChild(hint);
 
   const all = document.createElement('button');
@@ -324,14 +325,14 @@ function _renderViewPop(el) {
   el.appendChild(all);
 
   const mine = gdReadViews();
-  if (mine.length) _section(el, 'Your views');
+  if (mine.length) _section(el, 'Device only');
   for (const v of mine) {
     const row = document.createElement('div');
     row.className = 'gd-views-row';
     const apply = document.createElement('button');
     apply.type = 'button';
     apply.className = 'gd-views-apply';
-    apply.textContent = (gdActiveViewName() === v.name ? '● ' : '') + v.name;
+    apply.textContent = (!gdActiveViewId() && gdActiveViewName() === v.name ? '● ' : '') + v.name;
     apply.title = _summarise(v.filters);
     apply.setAttribute('aria-label', 'Apply view ' + v.name);
     apply.addEventListener('click', () => { gdApplyView(v); gdCloseViewPop(); });
@@ -354,28 +355,44 @@ function _renderViewPop(el) {
     const apply = document.createElement('button');
     apply.type = 'button';
     apply.className = 'gd-views-apply';
-    apply.textContent = (gdActiveViewName() === v.name ? '● ' : '') + v.name;
+    apply.textContent = (gdActiveViewId() === v.id ? '● ' : '') + v.name;
     apply.title = _summarise(v.filters);
     apply.setAttribute('aria-label', 'Apply view ' + v.name + ' from the graph');
+    apply.disabled = !!v.unsupported?.length;
+    if (apply.disabled) apply.title = 'Computed filters — edit the graph to preserve them.';
     apply.addEventListener('click', () => { gdApplyView(v); gdCloseViewPop(); });
     const open = document.createElement('button');
     open.type = 'button';
     open.className = 'gd-views-del';
-    open.textContent = '↗';
+    open.textContent = 'Edit graph';
     open.title = 'Open the view fn on the canvas';
     open.setAttribute('aria-label', 'Open view fn ' + v.name);
     open.addEventListener('click', () => {
       gdCloseViewPop();
       if (typeof gdNavigateToFn === 'function') gdNavigateToFn(v.id, v.name);
     });
+    const edit = document.createElement('button');
+    edit.type = 'button';
+    edit.className = 'gd-views-del';
+    edit.textContent = 'Edit filters';
+    edit.dataset.editView = v.id;
+    edit.disabled = !!v.unsupported?.length;
+    edit.title = edit.disabled ? 'Computed filters must be edited on the graph.' : 'Change this graph view using typed filters';
+    edit.addEventListener('click', async () => {
+      if (!(await gdBeginGraphViewEdit(v))) return;
+      const anchor = _viewPopAnchor;
+      gdCloseViewPop();
+      gdOpenFilterAdd(anchor);
+    });
     row.appendChild(apply);
+    row.appendChild(edit);
     row.appendChild(open);
     el.appendChild(row);
   }
 
   // Save the active set.
-  if (gdFiltersActive()) {
-    _section(el, 'Save the current filters');
+  if (gdFiltersActive() || gdEditingGraphView()) {
+    _section(el, gdEditingGraphView() ? 'Edit ' + gdEditingGraphView().name : 'Save the current filters');
     const form = document.createElement('div');
     form.className = 'gd-views-form';
     const nameIn = document.createElement('input');
@@ -383,7 +400,8 @@ function _renderViewPop(el) {
     nameIn.placeholder = 'View name';
     nameIn.className = 'gd-views-input';
     nameIn.setAttribute('aria-label', 'View name');
-    if (gdActiveViewName()) nameIn.value = gdActiveViewName();
+    if (gdEditingGraphView()) nameIn.value = gdEditingGraphView().name;
+    else if (gdActiveViewName()) nameIn.value = gdActiveViewName();
     const msg = document.createElement('div');
     msg.className = 'gd-views-form-msg';
     msg.setAttribute('role', 'status');
@@ -391,7 +409,8 @@ function _renderViewPop(el) {
     const save = document.createElement('button');
     save.type = 'button';
     save.className = 'gd-views-save';
-    save.textContent = 'Save view';
+    save.textContent = 'Device only';
+    save.title = 'Save only in this browser; this does not change a graph view.';
     const trySave = () => {
       const name = nameIn.value.trim();
       if (!name) { msg.textContent = 'Give the view a name'; msg.hidden = false; nameIn.focus(); return; }
@@ -399,81 +418,78 @@ function _renderViewPop(el) {
       _renderViewPop(el);
     };
     save.addEventListener('click', trySave);
-    nameIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); trySave(); } });
+    nameIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); if (window.API && API.api_view_save) share.click(); else trySave(); } });
     nameIn.addEventListener('input', () => { msg.hidden = true; });
     const share = document.createElement('button');
     share.type = 'button';
     share.className = 'gd-views-save gd-views-share';
-    share.textContent = 'Save in the graph…';
-    share.title = 'Create an fn extending explorer-view with these filters bound — everyone on the branch gets the view';
-    share.addEventListener('click', () => { gdCloseViewPop(); gdShareViewToGraph(nameIn.value.trim() || gdActiveViewName() || ''); });
+    share.textContent = gdEditingGraphView() ? 'Save changes' : 'Save in graph';
+    share.disabled = typeof isAuthenticated === 'function' && !isAuthenticated();
+    share.title = share.disabled ? 'Sign in to save a graph view'
+      : (gdEditingGraphView() ? 'Update this graph view for everyone on the branch' : 'Save a versioned view for everyone on the branch');
+    share.addEventListener('click', async () => {
+      if (!nameIn.value.trim()) { msg.textContent = 'Give the view a name'; msg.hidden = false; nameIn.focus(); return; }
+      share.disabled = save.disabled = nameIn.disabled = true;
+      try {
+        await gdShareViewToGraph(nameIn.value.trim());
+        if (_viewPopEl === el) _renderViewPop(el);
+      } catch (error) {
+        msg.textContent = error.message;
+        msg.hidden = false;
+      } finally { save.disabled = nameIn.disabled = false; share.disabled = typeof isAuthenticated === 'function' && !isAuthenticated(); }
+    });
     form.appendChild(nameIn);
     form.appendChild(msg);
+    if (window.API && API.api_view_save) form.appendChild(share);
     form.appendChild(save);
-    if (window.API && API.api_views) form.appendChild(share);
     el.appendChild(form);
   }
 
   if (typeof ensurePopoverClose === 'function') ensurePopoverClose(el, gdCloseViewPop, 'Close views');
 }
 
-// "Save in the graph…" — an ordinary fn create (parent explorer-view) plus
-// one binding per active axis, through the same entity API every editor
-// form uses. The problem axes are not shareable (this branch's live state,
-// not a definition) and are left out; `uses` takes the first fn — a graph
-// view holds ONE, more compose through `also`.
+// graph-first-exception: the draft is the browser's active filter set. The
+// atomic graph API owns validation, full replacement and publication.
+let _graphViewSaveSeq = 0;
 async function gdShareViewToGraph(name) {
-  if (typeof postEntity !== 'function' || typeof authMutate !== 'function' || !(window.API && API.api_graph_entities)) {
-    if (typeof gdToast === 'function') gdToast('Saving to the graph is not available here');
-    return;
+  if (!(window.API && API.api_view_save)) throw new Error('Saving to the graph is not available here');
+  const seq = ++_graphViewSaveSeq;
+  const edit = gdEditingGraphView();
+  const revision = gdFilterRevision();
+  const branch = typeof getCurrentBranchName === 'function' ? getCurrentBranchName() : null;
+  const filters = gdFilters();
+  const command = {name, filters: {...filters,
+    uses: filters.uses.map(row => row.id), views: filters.views.map(row => row.id)}};
+  if (edit) command.id = edit.id;
+  else {
+    command['create-id'] = crypto.randomUUID();
+    command['namespace-id'] = typeof gdLastUsedNs === 'function' ? gdLastUsedNs() || null : null;
+    if (typeof _tourTrackGraphViewCreation === 'function') _tourTrackGraphViewCreation(command);
   }
-  const nm = name || window.prompt('Name for the view fn (it becomes a fn in your graph):', gdActiveViewName() || '');
-  if (!nm) return;
-  try {
-    // The base-fn and its slots, by name.
-    const sr = await authFetch(API.api_graph_entities + '?scope=search&q=explorer-view');
-    const base = ((sr.ok ? await sr.json() : {}).fns || []).find((f) => f.name === 'explorer-view');
-    if (!base) throw new Error('the explorer-view base-fn is not loaded on this deployment');
-    const sub = await authFetch(API.api_graph_entities + '?scope=subtree&root-id=' + encodeURIComponent(base.id))
-      .then((r) => (r.ok ? r.json() : null));
-    const slotId = (n) => (sub?.slots || []).find((s) => s.name === n)?.id;
-    const nsId = (typeof gdLastUsedNs === 'function') ? (gdLastUsedNs() || '') : '';
-    const r = await postEntity('fn', { name: nm, 'parent-ids': base.id, 'namespace-id': nsId || '' });
-    if (!(r && r.status >= 200 && r.status < 300)) throw new Error(await (typeof responseError === 'function' ? responseError(r) : Promise.resolve('HTTP ' + r.status)));
-    const created = (typeof resolveJustCreatedFn === 'function') ? await resolveJustCreatedFn(nm, nsId || null) : null;
-    if (!created?.id) throw new Error('created ' + nm + ' but could not find it to bind — reload and bind by hand');
-    const bind = async (slot, fields) => {
-      const sid = slotId(slot);
-      if (!sid) return;
-      await authMutate('POST', API.api_entities_type('binding'),
-        Object.assign({ 'fn-id': created.id, 'slot-id': sid }, fields));
-    };
-    if (gdFilters().uses.length) {
-      await bind('uses', { 'ref-fn-id': gdFilters().uses[0].id });
-      if (gdFilters().uses.length > 1 && typeof gdToast === 'function') {
-        gdToast('A graph view holds ONE "uses" fn — the first was kept; compose views with "also" for more');
-      }
-    }
-    if (gdFilters().effects.length) await bind('effects', { value: JSON.stringify(gdFilters().effects) });
-    if (gdFilters().kinds.length) await bind('kinds', { value: JSON.stringify(gdFilters().kinds) });
-    if (gdFilters().namespaces.length) await bind('namespaces', { value: JSON.stringify(gdFilters().namespaces) });
-    if (gdFilters().exclude.length) await bind('exclude', { value: JSON.stringify(gdFilters().exclude) });
-    if (gdFilters().unused) await bind('unused', { value: 'true' });
-    if (gdFilters().name) await bind('name', { value: JSON.stringify(gdFilters().name) });
-    if (gdFilters().views.length) {
-      await bind('also', { 'ref-fn-id': gdFilters().views[0].id });
-      if (gdFilters().views.length > 1 && typeof gdToast === 'function') {
-        gdToast('A graph view holds ONE "also" — the first was kept; chain views for more');
-      }
-    }
-    gdInvalidateSharedViews();
-    gdMarkViewApplied(nm);
-    if (typeof gdToast === 'function') gdToast('View "' + nm + '" saved in the graph');
-    if (typeof initGraph === 'function') await initGraph();
-    if (typeof selectJustCreatedFn === 'function') selectJustCreatedFn(nm);
-  } catch (e) {
-    if (typeof gdToast === 'function') gdToast('Could not save the view: ' + (e.message || e));
+  const response = await authFetch(API.api_view_save, {method: 'POST',
+    headers: {'Content-Type': 'application/json'}, body: JSON.stringify(command)});
+  const result = await response.json();
+  if (!response.ok || !result.ok || !result.committed || !result.view?.id) {
+    if ((result.committed === false || (response.status >= 400 && response.status < 500)) && typeof _tourRejectGraphViewCreation === 'function') _tourRejectGraphViewCreation(command);
+    throw new Error((result.reason || result.error || 'Could not save the view')
+      + (edit ? ' Open Edit graph to change inherited or computed clauses.' : ''));
   }
+  let reloadFailed = false;
+  if (typeof initGraph === 'function' && (typeof getCurrentBranchName !== 'function' || getCurrentBranchName() === branch)) {
+    try { await initGraph(); } catch (_) { reloadFailed = true; }
+  }
+  gdInvalidateSharedViews();
+  await gdFetchSharedViews(true);
+  const saved = gdSharedViewsCached().find(view => view.id === result.view.id);
+  // A late successful write must not replace a newer draft or another branch.
+  if (seq === _graphViewSaveSeq && gdFilterRevision() === revision && gdEditingGraphView() === edit
+      && (typeof getCurrentBranchName !== 'function' || getCurrentBranchName() === branch)) {
+    if (saved) await gdApplyView(saved);
+    else gdMarkViewApplied(result.view.name, result.view.id);
+  }
+  if (typeof gdToast === 'function') gdToast(reloadFailed || !saved || result['publication-warnings']?.length
+    ? 'View saved. Refresh to reload derived state.' : 'View saved in the graph');
+  return result.view;
 }
 
 // ---------------------------------------------------------------------------

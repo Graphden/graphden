@@ -218,23 +218,32 @@
     (or (nil? exp) (> exp (now)))))
 
 
+(defn authenticating-session?
+  "Whether an existing session row may authenticate now. Internal lease
+   consumers use the same kind/deadline rule when rechecking a source token."
+  [row]
+  (and (some? row) (contains? #{nil "api"} (:kind row)) (session-live? row)))
+
+
 (defn mint-session!
   "Create a `:session` for `account-id`, returning the RAW token (this is the
    only moment it exists in the clear — only its hash is stored). `opts`:
    `:ttl-ms` (default 24h; nil ⇒ never expires), `:kind`, `:label`,
-   `:scopes` (space-separated scope names for an API bearer; nil ⇒ unscoped)."
+   `:scopes` (space-separated scope names for an API bearer; nil ⇒ unscoped),
+   optional `:id` (UUID for create-only response recovery; never an upsert)."
   ([storage account-id] (mint-session! storage account-id nil))
   ([storage account-id opts]
    (let [ttl-ms (get opts :ttl-ms default-session-ttl-ms)
          token (crypto/random-token)]
      (sp/create-entity storage :session
-                       {:token-hash (crypto/sha256-hex token)
-                        :account-id account-id
-                        :expires-at (when ttl-ms (+ (now) ttl-ms))
-                        :kind (:kind opts)
-                        :label (:label opts)
-                        :scopes (:scopes opts)
-                        :created-at (now)})
+                       (cond-> {:token-hash (crypto/sha256-hex token)
+                                :account-id account-id
+                                :expires-at (when ttl-ms (+ (now) ttl-ms))
+                                :kind (:kind opts)
+                                :label (:label opts)
+                                :scopes (:scopes opts)
+                                :created-at (now)}
+                         (:id opts) (assoc :id (:id opts))))
      token)))
 
 
@@ -284,7 +293,7 @@
   (when-not (str/blank? token)
     (when-let [s (first (sp/query-entities storage :session
                                            {:token-hash (crypto/sha256-hex token)}))]
-      (when (and (contains? #{nil "api"} (:kind s)) (session-live? s))
+      (when (authenticating-session? s)
         (when-let [acct (account-of storage (:account-id s))]
           (when (= "active" (:status acct))
             (touch-session! storage s)
@@ -314,16 +323,19 @@
 
 
 (defn mint-preview-token!
-  "Mint a preview capsule for `account-id`: kind \"preview\",
-   `preview-token-ttl-ms` TTL, scope string binding (org, fn-id,
-   branch-id) — all three DNS-/UUID-shaped, so the space-separated
-   `:scopes` encoding is unambiguous. Returns the raw token."
-  [storage account-id org fn-id branch-id]
-  (mint-session! storage account-id
-                 {:ttl-ms preview-token-ttl-ms
-                  :kind "preview"
-                  :label "preview"
-                  :scopes (str org " " fn-id " " branch-id)}))
+  "Mint a two-minute preview capsule for an active account. The optional
+   handler mode is distinct from component previews; both retain kind preview
+   so neither capsule can authenticate as a login or API session."
+  ([storage account-id org fn-id branch-id]
+   (mint-preview-token! storage account-id org fn-id branch-id :component))
+  ([storage account-id org fn-id branch-id mode]
+   (when-not (#{:component :handler} mode)
+     (throw (ex-info "Unknown preview mode" {:type :validation-error/invalid-data})))
+   (mint-session! storage account-id
+                  {:ttl-ms preview-token-ttl-ms
+                   :kind "preview"
+                   :label (if (= :handler mode) "preview-handler" "preview")
+                   :scopes (str org " " fn-id " " branch-id)})))
 
 
 (defn preview-grant-by-token
@@ -336,15 +348,18 @@
   (when-not (str/blank? token)
     (when-let [s (first (sp/query-entities storage :session
                                            {:token-hash (crypto/sha256-hex token)}))]
-      (when (and (= "preview" (:kind s)) (session-live? s))
+      (when (and (= "preview" (:kind s))
+                 (#{"preview" "preview-handler"} (:label s))
+                 (session-live? s))
         (when-let [acct (account-of storage (:account-id s))]
           (when (= "active" (:status acct))
             (let [[org fn-id branch-id] (str/split (str (:scopes s)) #"\s+")]
               (when (and org fn-id branch-id)
-                {:account-id (:account-id s)
-                 :org org
-                 :fn-id fn-id
-                 :branch-id branch-id}))))))))
+                (cond-> {:account-id (:account-id s)
+                         :org org
+                         :fn-id fn-id
+                         :branch-id branch-id}
+                  (= "preview-handler" (:label s)) (assoc :mode :handler))))))))))
 
 
 (defn revoke-token!

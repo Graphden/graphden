@@ -401,10 +401,10 @@ const {
         textCount: document.querySelector('.gd-tour-count-text')?.textContent || null,
       };
     });
-    assert(cat.textRows.length === 6
+    assert(cat.textRows.length === 2
       && cat.textRows.every(([id, href]) => /\/tutorial\/\d\d-[a-z0-9-]+$/.test(href || ''))
-      && cat.textRows.map(([id]) => id).join(',') === '14,31,34,39,41,42',
-      'the six text-only lessons are catalogue rows that open their text (got: '
+      && cat.textRows.map(([id]) => id).join(',') === '31,34',
+      'the two external setup lessons open their written instructions (got: '
       + JSON.stringify(cat.textRows) + ')');
     assert(cat.readBtns === cat.tourRows && cat.tourRows > 30,
       'every toured row carries a ↗ to its written lesson (' + cat.readBtns + '/' + cat.tourRows + ')');
@@ -415,7 +415,7 @@ const {
       'the same summary is accessible on focus');
     assert(cat.addsTotal === 0,
       'the catalogue has no duplicate written links or expanded summaries');
-    assert(cat.textCount === '6 text only',
+    assert(cat.textCount === '2 text only',
       'the header counts the text-only lessons apart (got: ' + cat.textCount + ')');
     assert(/^Continue 04 · Slots and bindings — step 3\//.test(cat.resume || ''),
       'a paused lesson resumes from where it stopped (got: ' + cat.resume + ')');

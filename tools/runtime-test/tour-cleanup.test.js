@@ -51,7 +51,7 @@ function test(name, fn) {
 // recorded in `calls`, so ORDER is assertable.
 
 function makeCtx(world) {
-  const w = Object.assign({fns: [], namespaces: [], packages: [], refuse: () => false}, world);
+  const w = Object.assign({fns: [], namespaces: [], packages: [], installed: [], branches: [], refuse: () => false}, world);
   const calls = [];
   const respond = (method, url) => {
     calls.push(method + ' ' + url);
@@ -59,11 +59,20 @@ function makeCtx(world) {
     if (refusal === 'throw') throw new Error('network down');
     const status = refusal ? (refusal === true ? 409 : refusal) : 200;
     let payload = {};
-    if (url.startsWith('/api/branches/')) {
+    if (url.startsWith('/api/http-host/')) {
+      payload = {ok: !w.publicationFailure};
+    } else if (url.startsWith('/api/branches/')) {
       payload = w.branchMissing ? {ok: false, reason: 'not-found'} : {ok: !w.branchFailure};
+    } else if (url === '/api/branches') {
+      payload = w.branches;
+    } else if (url === '/api/packages/installed') {
+      payload = w.installed;
     } else if (url.includes('scope=search')) {
       const q = decodeURIComponent(url.split('q=')[1] || '');
       payload = {fns: w.fns.filter((f) => f.name === q)};
+    } else if (url.includes('scope=subtree')) {
+      const id = decodeURIComponent(url.split('root-id=')[1]);
+      payload = {fns: w.fns.filter(fn => fn.id === id)};
     } else if (url.includes('scope=namespace')) {
       const id = url.split('namespace-id=')[1];
       payload = {fns: w.fns.filter((f) => f['namespace-id'] === id)};
@@ -81,6 +90,8 @@ function makeCtx(world) {
   };
   const ctx = vm.createContext({
     console,
+    HTTP_HOST_API: '/api/http-host',
+    _tourPrincipalMatches: ({principal}) => principal === 'current-owner',
     graphData: {namespaces: w.namespaces},
     initGraph: () => Promise.resolve(),
     _tourFindFn: (name) => w.fns.find((f) => f.name === name) || null,
@@ -88,6 +99,8 @@ function makeCtx(world) {
     authMutate: (method, url) => respond(method, url),
     API: {
       api_packages: '/api/packages',
+      api_packages_installed: '/api/packages/installed',
+      api_branches: '/api/branches',
       api_packages_withdraw: '/api/packages/withdraw',
       api_packages_uninstall: '/api/packages/uninstall',
       api_graph_entities: '/api/graph/entities',
@@ -101,9 +114,97 @@ function makeCtx(world) {
 
 const FN = (name, ns) => ({id: 'id-' + name, name, 'namespace-id': ns || null});
 
+const NS = (id, name) => ({type: 'ns', id, name, 'parent-id': null, receipt: 'created'});
+const PV = (version = '1.0.0') => ({type: 'package-version', name: 'mycorp-hello',
+  id: 'release-' + version, version, 'content-hash': 'hash-' + version, receipt: 'created'});
+const PIN = {type: 'package-install', id: 'pin-id', name: 'mycorp-hello', version: '1.0.0',
+  'branch-id': 'site-id', 'branch-name': 'site', receipt: 'created'};
+
 // --- cases ------------------------------------------------------------------
 
 const tests = [
+
+  test('an unresolved worker blocks branch and graph deletion', async () => {
+    const {ctx, calls} = makeCtx({});
+    const service = {type: 'service', id: 'exact-service', name: 'worker', receipt: 'pending'};
+    const branch = {type: 'branch', id: 'branch-id', name: 'lesson', 'base-branch-id': 'main-id'};
+    const fn = {type: 'fn', id: 'worker-id', name: 'worker'};
+    ctx._tourCleanupServices = async () => [service];
+    const result = await ctx._tourDeleteCreated([service, branch, fn]);
+    assert(result.failed.length === 3, 'all dependent graph receipts retained');
+    assert(calls.length === 0, 'no branch or graph mutation before worker stop');
+  }),
+
+  test('publication cleanup uses exact staged UUIDs and the confirmed principal', async () => {
+    const good = {type: 'http-publication', id: 'exact-id', name: 'same-name', principal: 'current-owner'};
+    const other = {...good, id: 'other-id', principal: 'different-owner'};
+    const missing = {...good, id: null};
+    const {ctx, calls} = makeCtx({});
+    const failed = await ctx._tourDeleteHttpPublications([good, other, missing]);
+    assert(failed.length === 2, 'unconfirmed principal and absent identity stay in the ledger');
+    assert(calls.join() === 'DELETE /api/http-host/exact-id', 'cleanup never searches by name or uses another owner');
+  }),
+
+  test('failed publication cleanup retains every exact UUID, including same-name leases', async () => {
+    const created = ['first-id', 'second-id'].map(id => ({
+      type: 'http-publication', id, name: 'same-name', principal: 'current-owner',
+    }));
+    for (const world of [{publicationFailure: true}, {refuse: () => 403}, {refuse: () => 'throw'}]) {
+      const {ctx} = makeCtx(world);
+      const result = await ctx._tourDeleteCreated(created);
+      assert(result.failed.length === 2, 'each refused identity survives independently');
+      assert(result.failed[0].id !== result.failed[1].id, 'same-name leases are not collapsed');
+    }
+  }),
+
+  test('preference recovery sees exact failures before dedupe and thrown recovery stays resumable', async () => {
+    const left = {type: 'fn', name: 'ui', id: 'left', 'namespace-id': 'left-ns', receipt: 'created'};
+    const right = {...left, id: 'right', 'namespace-id': 'right-ns'};
+    const fixture = makeCtx({fns: [left, right], refuse: method => method === 'DELETE'});
+    fixture.ctx.window = fixture.ctx;
+    fixture.ctx.gdTourRestoreUIComponentPreferences = (_created, rawFailed) => {
+      assert(rawFailed.some(row => row.id === 'left') && rawFailed.some(row => row.id === 'right'),
+        'same-named configurations keep both exact failed UUIDs at restoration boundary');
+      return [];
+    };
+    await fixture.ctx._tourDeleteCreated([left, right]);
+    const empty = makeCtx({});
+    empty.ctx.window = empty.ctx;
+    let saved = 0;
+    empty.ctx._tourSaveState = () => { saved++; };
+    empty.ctx.gdTourRestoreUIComponentPreferences = () => { throw new Error('preference write rejected'); };
+    const ledger = [];
+    const result = await empty.ctx._tourDeleteCreated(ledger);
+    assert(result.failed.length === 1 && result.failed[0].type === 'preference', 'failed preference write is not cleanup success');
+    assert(ledger.length === 1 && saved > 0, 'empty graph cleanup retains a persisted recovery marker');
+    assert((await empty.ctx._tourSurvivors(ledger)).length === 1, 'Lessons retry keeps the recovery state visible');
+  }),
+
+  test('fixed create-only manifest reconciles lost replies by exact fn/ns tuples', async () => {
+    const proof = {receipt: 'pending', creation: 'create-only-manifest',
+      'manifest-root-id': 'root-id', 'branch-id': 'sandbox-id', 'branch-name': 'sandbox'};
+    const fn = {...proof, type: 'fn', id: 'new-fn', name: 'config', 'namespace-id': 'new-ns'};
+    const ns = {...proof, type: 'ns', id: 'new-ns', name: 'components', 'parent-id': null};
+    const created = makeCtx({fns: [{id: fn.id, name: fn.name, 'namespace-id': ns.id}],
+      namespaces: [{id: ns.id, name: ns.name, 'parent-id': null}]});
+    assert((await created.ctx._tourDeleteFns([fn])).length === 0, 'exact new fn is recoverable after lost apply reply');
+    assert((await created.ctx._tourDeleteNamespaces([ns])).length === 0, 'exact new namespace is recoverable');
+    assert(created.calls.includes('DELETE /api/entities/fn/new-fn')
+      && created.calls.includes('DELETE /api/entities/ns/new-ns'), 'only staged UUIDs are deleted');
+    const mismatch = makeCtx({fns: [{id: fn.id, name: fn.name, 'namespace-id': 'another-ns'}],
+      namespaces: [{id: ns.id, name: ns.name, 'parent-id': 'different-parent'}]});
+    assert((await mismatch.ctx._tourDeleteFns([fn])).length === 1, 'changed fn identity retains pending receipt');
+    assert((await mismatch.ctx._tourDeleteNamespaces([ns])).length === 1, 'changed namespace identity retains pending receipt');
+    assert(!mismatch.calls.some(call => call.startsWith('DELETE')), 'never mutate a mismatched manifest identity');
+    const absent = makeCtx({});
+    assert((await absent.ctx._tourDeleteFns([fn])).length === 0
+      && (await absent.ctx._tourDeleteNamespaces([ns])).length === 0, 'a rolled back manifest has nothing to delete');
+    assert(!absent.calls.some(call => call.startsWith('DELETE')), 'absent IDs never trigger name adoption');
+    const incomplete = makeCtx({});
+    assert((await incomplete.ctx._tourDeleteNamespaces([{...ns, 'branch-id': null}])).length === 1,
+      'incomplete create-only provenance fails closed');
+    assert(!incomplete.calls.length, 'unproven pending receipt is not reconciled');
+  }),
 
   test('branch cleanup deletes children first and reports HTTP 200 refusals', async () => {
     const created = [{type: 'branch', name: 'parent'}, {type: 'branch', name: 'child'}];
@@ -240,40 +341,63 @@ const tests = [
     assert(missing.ctx.selectedFnId === 'id-selected' && missingClears === 0, 'inaccessible lookup cannot clear selection');
   }),
 
-  test('the PIN goes before the namespace holding the materialised copy', async () => {
-    const created = [{type: 'ns', name: 'mycorp'},
-                     {type: 'package-version', name: 'mycorp-hello'},
-                     {type: 'ns', name: 'mycorp@1-0-0'}];
+  test('exact PIN goes before branch, exact release and owned empty namespace', async () => {
+    const created = [NS('ns-1', 'mycorp'), PV(), PIN,
+      {type: 'branch', id: 'site-id', name: 'site', 'base-branch-id': 'main-id'},
+      NS('ns-2', 'mycorp@1-0-0')];
     const {ctx, calls} = makeCtx({
       namespaces: [{id: 'ns-1', name: 'mycorp'}, {id: 'ns-2', name: 'mycorp@1-0-0'}],
-      packages: [{name: 'mycorp-hello', version: '1.0.0'}],
+      packages: [PV(), {...PV('1.0.1'), id: 'someone-elses-release'}],
+      installed: [{id: PIN.id, 'package-name': PIN.name, version: PIN.version, 'branch-id': PIN['branch-id']}],
+      branches: [{id: 'site-id', name: 'site', 'base-branch-id': 'main-id'}],
     });
     const {failed} = await ctx._tourDeleteCreated(created);
     assert(failed.length === 0, 'a clean pass reports nothing');
-    const unpin = calls.findIndex((c) => c.includes('/packages/uninstall'));
-    const withdraw = calls.findIndex((c) => c.includes('/packages/withdraw'));
-    const nsDelete = calls.findIndex((c) => c.startsWith('DELETE /api/entities/ns/'));
-    assert(unpin >= 0 && withdraw > unpin,
-           'unpin, THEN withdraw (got unpin=' + unpin + ' withdraw=' + withdraw + ')');
-    assert(nsDelete > withdraw,
-           'and both before the namespace delete (ns=' + nsDelete + ')');
+    const unpin = calls.findIndex(c => c.includes('/packages/uninstall'));
+    const branch = calls.findIndex(c => c === 'DELETE /api/branches/site-id');
+    const withdraw = calls.findIndex(c => c.includes('/packages/withdraw'));
+    const namespace = calls.findIndex(c => c.startsWith('DELETE /api/entities/ns/'));
+    assert(unpin >= 0 && branch > unpin && withdraw > branch && namespace > withdraw,
+      'remove pin before branch and release, then delete its namespace');
+    assert(calls.filter(c => c.includes('/packages/withdraw')).length === 1
+      && calls[withdraw].includes('expected-id=release-1.0.0'), 'never withdraw another visible version with the same name');
+    assert(calls[unpin].includes('expected-id=pin-id'), 'conditional deletion targets the actual pin UUID');
   }),
 
-  test('a namespace is emptied before it is deleted', async () => {
-    const created = [{type: 'ns', name: 'mycorp'}];
-    const {ctx, calls} = makeCtx({
-      namespaces: [{id: 'ns-1', name: 'mycorp'}],
-      fns: [FN('installed-copy', 'ns-1')],
-    });
-    await ctx._tourDeleteCreated(created);
-    const child = calls.indexOf('DELETE /api/entities/fn/id-installed-copy');
-    const parent = calls.indexOf('DELETE /api/entities/ns/ns-1');
-    assert(child >= 0, 'the contents the install materialised are removed');
-    assert(parent > child, 'the namespace goes after (a non-empty one 409s)');
+  test('lost branch reply uses the staged UUID and exact base, never its name replacement', async () => {
+    const pending = {type: 'branch', name: 'site', id: 'proposed-site',
+      'base-branch-id': 'main-id', receipt: 'pending'};
+    const t = makeCtx({branches: [{id: 'proposed-site', name: 'site', 'base-branch-id': 'main-id'}]});
+    assert((await t.ctx._tourDeleteCreatedBranches([pending])).length === 0, 'exact committed branch is recoverable');
+    assert(t.calls.includes('DELETE /api/branches/proposed-site'), 'remove the pre-staged UUID');
+    const replacement = makeCtx({branches: [{id: 'other-site', name: 'site', 'base-branch-id': 'main-id'}]});
+    assert((await replacement.ctx._tourDeleteCreatedBranches([pending])).length === 0, 'the staged UUID is already absent');
+    assert(!replacement.calls.some(call => call.startsWith('DELETE')), 'never remove a same-name replacement');
+    const moved = makeCtx({branches: [{id: 'proposed-site', name: 'site', 'base-branch-id': 'different'}]});
+    assert((await moved.ctx._tourDeleteCreatedBranches([pending])).length === 1, 'changed base retains the receipt');
+    assert(!moved.calls.some(call => call.startsWith('DELETE')), 'changed identity metadata refuses cleanup');
+  }),
+
+  test('a pending/lost pin receipt blocks deletion of its owned branch', async () => {
+    const created = [{...PIN, id: null, receipt: 'pending'},
+      {type: 'branch', id: 'site-id', name: 'site', 'base-branch-id': 'main-id'}];
+    const {ctx, calls} = makeCtx({});
+    const {failed} = await ctx._tourDeleteCreated(created);
+    assert(failed.length === 2, 'both the unresolved pin and retained branch are reported');
+    assert(!calls.some(c => c.startsWith('DELETE ')), 'unknown ownership cannot authorize deletion or lose its routing context');
+    assert((await ctx._tourSurvivors(created)).length === 2, 'pending item stays visible after reload');
+  }),
+
+  test('namespace cleanup refuses unknown receipts and never sweeps added contents', async () => {
+    const {ctx, calls} = makeCtx({namespaces: [{id: 'ns-1', name: 'mycorp'}],
+      fns: [FN('someone-added', 'ns-1')], refuse: (m, u) => m === 'DELETE' && u === '/api/entities/ns/ns-1'});
+    const failed = await ctx._tourDeleteNamespaces([NS('ns-1', 'mycorp'), {type: 'ns', name: 'existing'}]);
+    assert(failed.length === 2, 'nonempty and unproven namespaces are retained');
+    assert(!calls.some(c => c.includes('DELETE /api/entities/fn/')), 'never delete another edit merely because it is inside a created namespace');
   }),
 
   test('a refused namespace delete is reported', async () => {
-    const created = [{type: 'ns', name: 'mycorp'}];
+    const created = [NS('ns-1', 'mycorp')];
     const {ctx} = makeCtx({
       namespaces: [{id: 'ns-1', name: 'mycorp'}],
       refuse: (m, u) => m === 'DELETE' && u.includes('/entities/ns/'),
@@ -316,7 +440,7 @@ const tests = [
     const out = await ctx._tourSurvivors([
       {type: 'fn', name: 'greet'},
       {type: 'ns', name: 'mycorp'},
-      {type: 'package-version', name: 'mycorp-hello'},
+      PV(),
     ]);
     assert(out.length === 0,
            'nothing exists, so nothing is listed (got: ' + JSON.stringify(out) + ')');

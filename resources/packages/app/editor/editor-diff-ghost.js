@@ -18,9 +18,8 @@
 // Exposes `gdDiffGhostsRender(container)` (called at the end of
 // `createNodeOverlays`), `gdDiffGhostsSync()`, and the two invalidations
 // compare mode calls: `gdDiffGhostsReset()` on enter / exit (drops the
-// clusters AND the subtree cache) and `gdDiffGhostsDropCache()` on a
-// refresh — either way the next render reads the compared branch as it
-// is now.
+// clusters AND the subtree cache), including after a comparison refresh.
+// `gdDiffGhostsDropCache()` is available for a cache-only invalidation.
 
 const GD_GHOST_MAX_CARDS = 8;
 const GD_GHOST_MAX_ROWS = 6;
@@ -196,6 +195,40 @@ function _gdGhostLinkEl() {
   return svg;
 }
 
+// A literal counterpart is the same binding/list-item occurrence on the
+// compared branch, never a new fn identity or an editable canvas node.
+function _gdGhostLiteralEl(lk, want, branch) {
+  const binding = lk.bindingsByFn.get(want.fnId)?.find(row => row.id === want.bindingId);
+  if (!binding || binding['fn-id'] !== want.fnId || binding['slot-id'] !== want.slotId) return null;
+  const row = want.itemId ? lk.itemsByBinding?.get(binding?.id)?.find(item => item.id === want.itemId) : binding;
+  if (!row || row['ref-fn-id'] || row.value === undefined || row.value === null) return null;
+  const el = document.createElement('div');
+  el.className = 'gd-ghost-cluster gd-ghost-literal';
+  Object.assign(el.dataset, {anchorId: want.anchorId, entityId: want.entityId,
+    fnId: want.fnId, slotId: want.slotId, bindingId: want.bindingId, branch});
+  if (want.itemId) el.dataset.itemId = want.itemId;
+  el.style.width = GD_GHOST_CARD_W + 'px';
+  el.setAttribute('role', 'group');
+  el.setAttribute('aria-label', 'Replacement literal on "' + branch + '", read-only: ' + want.text);
+  const label = document.createElement('div');
+  label.className = 'gd-ghost-literal-label';
+  label.textContent = want.slot + ' · ' + branch + ' · read-only';
+  const value = document.createElement('div');
+  value.className = 'gd-ghost-literal-value';
+  value.textContent = want.text;
+  value.title = want.text;
+  el.appendChild(label);
+  el.appendChild(value);
+  return el;
+}
+
+function _gdGhostReplacementLabel(link) {
+  const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  text.setAttribute('class', 'gd-ghost-replacement-label');
+  text.textContent = 'replacement';
+  link.appendChild(text);
+}
+
 // Anchor geometry in graph coords.
 function _gdGhostAnchorBox(anchorId) {
   const n = gv.node(anchorId);
@@ -227,6 +260,11 @@ function _gdGhostPlace(g) {
   g.link.style.top = '0px';
   g.link.firstChild.setAttribute('d',
     'M' + x0 + ',' + box.y + ' L' + x0 + ',' + (y + h));
+  const label = g.link.querySelector('.gd-ghost-replacement-label');
+  if (label) {
+    label.setAttribute('x', x0 + 5);
+    label.setAttribute('y', box.y - GD_GHOST_GAP_Y / 2);
+  }
 }
 
 function gdDiffGhostsSync() {
@@ -254,48 +292,56 @@ function gdDiffGhostsReset() {
 // bound HERE is an edge to a card, anchored on that card.
 function _gdGhostWants() {
   if (typeof gdDiffModeActive !== 'function' || !gdDiffModeActive()) return [];
-  if (typeof gdDiffSlotDetails !== 'function' || typeof argRowFromNode !== 'function') return [];
+  if (typeof gdDiffArgDetails !== 'function' || typeof argRowFromNode !== 'function') return [];
   const wants = [];
   const seen = new Set();
-  const consider = (fnId, slot, anchorId) => {
-    if (!fnId || !slot || !anchorId) return;
-    const d = gdDiffSlotDetails(fnId)?.[slot];
-    if (!d?.sourceRef || d.sourceRef === d.targetRef) return;
-    const key = fnId + '|' + slot;
+  const consider = (arg, anchorId) => {
+    if (!arg?.['fn-id'] || !arg['slot-id'] || !anchorId) return;
+    const d = gdDiffArgDetails(arg);
+    const literal = typeof gdDiffLiteralChange === 'function' ? gdDiffLiteralChange(d) : null;
+    if (!literal && (!d?.sourceRef || d.sourceRef === d.targetRef)) return;
+    const key = arg['fn-id'] + '|' + arg['slot-id'] + '|' + (arg['item-id'] || '') + '|' + anchorId;
     if (seen.has(key)) return;
     seen.add(key);
-    wants.push({ fnId, slot, anchorId, ref: d.sourceRef });
+    const slot = arg.name + (arg['item-id'] ? '[' + d.position + ']' : '');
+    wants.push({ fnId: arg['fn-id'], slot, anchorId, ref: d.sourceRef,
+      ...(literal ? {literal: true, entityId: d.entityId, bindingId: d.bindingId,
+        itemId: d.itemId || null, slotId: arg['slot-id'], text: literal.source} : {}) });
   };
   for (const n of gv.nodes()) {
     if (n.data('type') === 'fn' && !n.data('isPlaceholder')) continue;
     const arg = argRowFromNode(n.data());
-    if (arg?.['fn-id'] && arg.name) consider(arg['fn-id'], arg.name, n.id());
+    consider(arg, n.id());
   }
   for (const e of gv.edges()) {
     const name = e.data('argName');
     const t = e.target();
     if (!name || !t || t.data('type') !== 'fn' || t.data('isPlaceholder')) continue;
-    const owner = e.data('fnId') || e.source()?.data('originalFnId');
-    consider(owner, name, t.id());
+    consider(argRowFromNode(e.data()), t.id());
   }
   return wants;
 }
 
 function gdDiffGhostsRender(container) {
   gdDiffGhostsClear();
+  const epoch = ++_gdGhostEpoch;
   const wants = _gdGhostWants();
   if (!wants.length) return;
   const branch = gdDiffModeBranch();
-  const epoch = ++_gdGhostEpoch;
   const host = container || (typeof getGraphLayer === 'function' ? getGraphLayer() : null);
   if (!host) return;
   for (const w of wants) {
-    gdDiffGhostSubtree(branch, w.ref).then((lk) => {
+    gdDiffGhostSubtree(branch, w.literal ? w.fnId : w.ref).then((lk) => {
       if (epoch !== _gdGhostEpoch || !lk) return;
       if (!gv.node(w.anchorId)) return;
-      const el = _gdGhostClusterEl(lk, w.ref, branch, w.slot, w.anchorId);
+      const el = w.literal ? _gdGhostLiteralEl(lk, w, branch)
+        : _gdGhostClusterEl(lk, w.ref, branch, w.slot, w.anchorId);
       if (!el) return;
       const link = _gdGhostLinkEl();
+      if (w.literal) {
+        link.classList.add('gd-ghost-literal-link');
+        _gdGhostReplacementLabel(link);
+      }
       host.appendChild(link);
       host.appendChild(el);
       const g = { el, link, anchorId: w.anchorId, rootId: w.ref };

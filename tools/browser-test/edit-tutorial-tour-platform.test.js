@@ -1,4 +1,4 @@
-// Lessons 35, 32, 25 — services, package distribution, asset overrides.
+// Lessons 35, 32, 25 — finite HTTP, package distribution, personal UI graphs.
 //
 // Part of the interactive-tutorial drift guard: walks every step of its
 // lessons by doing the real UI actions, so a renamed class or a changed
@@ -7,8 +7,8 @@
 // tutorial-tour-helpers.js.
 //
 // These three are the tours that CARRY a `:requires` yet still run on this
-// stack: it is single-tenant, so services are manageable, the registry is
-// open, and the Assets panel exists. The org tours (27-30, 33, 36, 37) need
+// stack: it has an authenticated HTTP host, an open registry, and writable
+// graph namespaces. The org tours (27-30, 33, 36, 37) need
 // a tenancy addon and can only be checked as LOCKED — that assertion lives
 // in edit-tutorial-tour-picker.test.js.
 //
@@ -17,130 +17,31 @@
 
 const {chromium} = require('playwright');
 const {assert, newContext, api} = require('./edit-test-helpers');
+const {handlerPreviewTestOptions} = require('./handler-preview-test-options');
 const {
   hardCleanup, waitTourTitle, clickTourButton, filterAndSelect,
-  extendViaRowActions, createRootNamespace, createFnInNamespace,
-  setParentViaStrip, finishAndDelete, tourWhere, bindFirstPlaceholder,
-  bindFnRefPlaceholder, bindPlaceholderOn, extendInPlace,
-  openOperateSection, waitUntil, waitTourClosed,
+  createRootNamespace, createFnInNamespace, setParentViaStrip,
+  finishAndDelete, tourWhere, openOperateSection, waitTourClosed,
 } = require('./tutorial-tour-helpers');
 
-const ASSET_PATH = 'packages/app/editor/editor-styles.css';
-const ASSET_MARKER = '/* tour-25-guard */';
+const {trackPublications, walkLesson35} = require('./tutorial-http-helpers');
 
-// Belt-and-braces: the lesson reverts the override through the UI, but a
-// failure mid-walk would leave the row behind and every later page load on
-// this stack would serve it.
-async function revertAssetViaApi(page, base) {
-  await page.evaluate(async ({b, p}) => {
-    await window.authFetch(b + '/api/assets/revert?path=' + encodeURIComponent(p),
-                           {method: 'DELETE'}).catch(() => {});
-  }, {b: base, p: ASSET_PATH}).catch(() => {});
-}
+const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
 
 (async () => {
-  const {browser, page} = await newContext(chromium, {boot: false});
+  const {browser, page} = await newContext(chromium, {...handlerPreviewTestOptions(), boot: false});
   // Uninstall and revert both confirm natively.
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
   console.log('edit-tutorial-tour-platform — lessons 35 / 32 / 25');
+  const cleanupPublications = trackPublications(page);
   let failed = false;
   const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
   try {
     await hardCleanup(page);
 
-    // ---------- lesson 35 — services (the row, not a deploy) ----------
-    await page.goto(BASE + '/?tutorial=35');
-    await waitTourTitle(page, 'Fns that keep running', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 35 Next');
-    // Built from the outside in (2026-09-16): the daemon first; its body
-    // is the base fn bound into :body and EXTENDED IN PLACE from its card.
-    await waitTourTitle(page, 'Find future');
-    await filterAndSelect(page, 'future', 'future');
-    await waitTourTitle(page, 'The daemon', 150000);
-    await extendViaRowActions(page, 'tutorial-daemon', 'future');
-    await waitTourTitle(page, 'tutorial-daemon is open', 150000);
-    await waitTourTitle(page, 'Give it a body', 150000);
-    // A callable slot — the `+` opens the picker straight away.
-    await bindPlaceholderOn(page, 'tutorial-daemon', 'body', 'fn-ref', 'const');
-    await waitTourTitle(page, 'Make the thunk yours, in place', 150000);
-    await extendInPlace(page, 'const', 'tutorial-tick');
-    await waitTourTitle(page, 'Give it something to return', 150000);
-    // A wide (`:any`) slot smart-parses: a bare word lands as text. The
-    // `+` hangs off tutorial-tick's card but WRITES on the daemon: a
-    // callable's open input is a closure capture at the call site.
-    await bindPlaceholderOn(page, 'tutorial-daemon', 'value', 'literal', 'tick');
-    // The step gates on SELECTION, not on a button — the bind already leaves
-    // the daemon selected, so this only waits for the gate to clear.
-    await waitTourTitle(page, 'Where a fn becomes a service', 150000);
-    await filterAndSelect(page, 'tutorial-daemon', 'tutorial-daemon');
-    await waitTourTitle(page, 'Open the service settings', 150000);
-    // ⋯ → ⚙. The gear is server-rendered in the row-actions partial, and a
-    // blocked one is aria-disabled — NOT `button.disabled` — so a plain
-    // `.click()` on it silently does nothing. Assert the enabled shape.
-    // Pinned to the DAEMON's own row: tutorial-tick's card is on this canvas
-    // too, and its use-site ⋯ has no ⚙.
-    const daemonTrig = '.node-overlay[data-fn-name="tutorial-daemon"] .ancestor-line[data-level="0"] button.more-actions-trigger';
-    await page.waitForSelector(daemonTrig, {timeout: 30000});
-    await page.dispatchEvent(daemonTrig, 'mousedown');
-    await page.waitForSelector('.row-actions-popover button', {timeout: 15000});
-    const gear = await page.evaluate(() => {
-      const btn = Array.from(document.querySelectorAll('.row-actions-popover button'))
-        .find((b) => b.textContent.trim() === '⚙');
-      if (!btn) return {found: false};
-      const blocked = btn.disabled || btn.getAttribute('aria-disabled') === 'true'
-        || btn.className.includes('action-icon-disabled');
-      if (!blocked) btn.click();
-      return {found: true, blocked, title: btn.getAttribute('title')};
-    });
-    assert(gear.found, 'the ⚙ button is in the row-actions popover');
-    assert(!gear.blocked,
-      'the ⚙ is enabled once the free arg is bound (got: ' + gear.title + ')');
-    await page.waitForSelector('.service-popover', {timeout: 20000});
-    await waitTourTitle(page, 'Create it — switched OFF', 150000);
-    // The lesson is explicit: create it DISABLED. A fn with no :process
-    // work would otherwise be started by the reconciler on this stack.
-    await page.waitForSelector('.service-popover-enabled', {timeout: 15000});
-    await page.evaluate(() => {
-      const box = document.querySelector('.service-popover-enabled');
-      if (box.checked) box.click();
-    });
-    const enabledOff = await page.$eval('.service-popover-enabled', (b) => !b.checked);
-    assert(enabledOff, 'the Enabled box is unticked before creating');
-    await page.evaluate(() => document.querySelector('.service-popover-save-btn').click());
-    // The popover CLOSES on a successful write (the node stays in the DOM,
-    // hidden, with its stale "Saving…" label) — so the row is confirmed
-    // through the API, and Delete needs the gear opened again.
-    await page.waitForFunction(() => {
-      const el = document.querySelector('.service-popover');
-      return !el || el.style.display === 'none';
-    }, null, {timeout: 20000, polling: 200});
-    const created = await page.evaluate(async () => {
-      const d = await (await window.authFetch('/api/services')).json();
-      return (d.services || []).some((s) => s['fn-name'] === 'tutorial-daemon');
-    });
-    assert(created, 'the :service row exists after Create service');
-    assert(await clickTourButton(page, 'Next'), 'lesson 35 created Next');
-    await waitTourTitle(page, 'What the row means', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 35 row-means Next');
-    await waitTourTitle(page, 'Remove it');
-    await page.dispatchEvent(daemonTrig, 'mousedown');
-    await page.waitForSelector('.row-actions-popover button', {timeout: 15000});
-    await page.evaluate(() => {
-      Array.from(document.querySelectorAll('.row-actions-popover button'))
-        .find((b) => b.textContent.trim() === '⚙').click();
-    });
-    await page.waitForSelector('.service-popover-delete-btn', {timeout: 20000});
-    await page.evaluate(() => document.querySelector('.service-popover-delete-btn').click());
-    // `waitUntil`, not `waitForFunction`: Playwright does not await an async
-    // predicate — the pending Promise is truthy and the wait returns at once.
-    assert(await waitUntil(page, async () => {
-      const d = await (await window.authFetch('/api/services')).json();
-      return !(d.services || []).some((s) => s['fn-name'] === 'tutorial-daemon');
-    }, null, 20000), 'the :service row is gone after Delete');
-    assert(await clickTourButton(page, 'Next'), 'lesson 35 removed Next');
-    await waitTourTitle(page, "That's supervision", 150000);
-    await finishAndDelete(page);
-    console.log('  lesson 35: walked + cleaned (service row created, then deleted)');
+    // ---------- lesson 35 — actual finite HTTP publication ----------
+    await walkLesson35(page, BASE, finishAndDelete);
+    console.log('  lesson 35: real public response + Stop + exact cleanup');
 
     // ---------- lesson 32 — publish / install / uninstall ----------
     await page.goto(BASE + '/?tutorial=32');
@@ -266,86 +167,10 @@ async function revertAssetViaApi(page, base) {
     await finishAndDelete(page);
     console.log('  lesson 32: walked + cleaned (published, pinned, unpinned)');
 
-    // ---------- lesson 25 — editing the editor's own assets ----------
-    await page.goto(BASE + '/?tutorial=25');
-    await waitTourTitle(page, 'The editor is served from the graph too', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 25 Next');
-    await waitTourTitle(page, 'Open Assets');
-    // Through the account menu, with the retry the nav's re-render needs —
-    // the same helper five other lessons' walks use. The old one-shot
-    // `gdShellSurface('operate')` + single click raced at a phone viewport.
-    await openOperateSection(page, 'assets');
-    await waitTourTitle(page, 'Open the stylesheet', 150000);
-    await page.waitForSelector('[data-section="assets"] .gd-asset-row', {timeout: 20000});
-    await page.evaluate((path) => {
-      const row = Array.from(document.querySelectorAll('[data-section="assets"] .gd-asset-row'))
-        .find((r) => r.textContent.includes(path));
-      row.querySelector('.gd-asset-edit-btn').click();
-    }, ASSET_PATH);
-    await waitTourTitle(page, 'Change something you will notice', 150000);
-    // The textarea is CodeMirror-enhanced — write through the gdCode seam so
-    // the view and the serialized value stay in sync (see edit-asset-override).
-    await page.waitForFunction(() => {
-      const t = document.querySelector('#gd-asset-editor textarea[name="content"]');
-      return t && t.value.includes('--gd-');
-    }, null, {timeout: 20000, polling: 200});
-    await page.$eval('#gd-asset-editor textarea[name="content"]',
-      (t, marker) => { window.gdCode.set(t, window.gdCode.get(t) + '\n' + marker + '\n'); },
-      ASSET_MARKER);
-    await page.evaluate(() => document.querySelector('#gd-asset-editor .gd-asset-save-btn').click());
-    await page.waitForSelector('.gd-asset-chip-override', {timeout: 30000});
-    await waitTourTitle(page, 'Reload to run it', 150000);
-    // The step exists because the running page still holds the OLD bundle —
-    // and the tour has to survive the reload it asks for.
-    await page.reload({waitUntil: 'networkidle'});
-    await waitTourTitle(page, 'Reload to run it', 60000);
-    const rolled = await page.evaluate(async () => {
-      const href = document.querySelector('link[href*="editor.css"]').getAttribute('href');
-      const baked = (await (await fetch('/version')).json()).frontend.slice(0, 12);
-      return !href.includes(baked);
-    });
-    assert(rolled, 'the reloaded shell links the rolled ?v= (override in effect)');
-    assert(await clickTourButton(page, 'Next'), 'lesson 25 reload Next');
-    await waitTourTitle(page, 'See exactly what you changed', 150000);
-    // After the reload the shell remounts: wait for the panel's rows, not
-    // just a one-shot nav click, before hunting for the specific override row.
-    await openOperateSection(page, 'assets');
-    const assetRow = page.locator('[data-section="assets"] .gd-asset-row')
-      .filter({has: page.locator('.gd-asset-edit-btn[value="' + ASSET_PATH + '"]')});
-    await assetRow.locator('.gd-asset-chip-override').waitFor({state: 'visible', timeout: 20000});
-    const editResponse = page.waitForResponse((r) =>
-      r.url().includes('/partials/asset-edit') && r.request().method() === 'GET');
-    await assetRow.locator('.gd-asset-edit-btn[value="' + ASSET_PATH + '"]').click();
-    const editResult = await editResponse;
-    assert(editResult.ok(), 'opening the overridden asset succeeds (' + editResult.status() + ')');
-    await page.waitForSelector('#gd-asset-editor form.gd-asset-edit-form', {timeout: 30000});
-    await page.waitForSelector('#gd-asset-editor .gd-asset-diff-btn', {timeout: 30000});
-    await page.evaluate(() => document.querySelector('#gd-asset-editor .gd-asset-diff-btn').click());
-    // CodeMirror mounts only the visible lines, so the marker — the last line
-    // of a 4000-line file — proves the merge view opened AT the change.
-    await page.waitForFunction((marker) => {
-      const pane = document.querySelector('#gd-asset-editor .gd-asset-diff');
-      return !!pane && pane.textContent.includes(marker);
-    }, ASSET_MARKER, {timeout: 20000});
-    assert(await clickTourButton(page, 'Next'), 'lesson 25 diff Next');
-    await waitTourTitle(page, 'Put it back', 150000);
-    await page.waitForSelector('#gd-asset-editor .gd-asset-revert-btn', {timeout: 20000});
-    await page.evaluate(() => document.querySelector('#gd-asset-editor .gd-asset-revert-btn').click());
-    await page.waitForFunction(() => !document.querySelector('.gd-asset-chip-override'),
-      null, {timeout: 30000, polling: 300});
-    await waitTourTitle(page, 'What this is for', 150000);
-    assert(await clickTourButton(page, 'Finish'), 'lesson 25 Finish');
-    await waitTourClosed(page, 20000);
-    // The lesson creates no graph entities, so there is no cleanup prompt (the
-    // finished card is dismissed above) — the only trace it could leave is the
-    // override row, and that is reverted.
-    const overrideGone = await page.evaluate(async () => {
-      const r = await fetch('/version');
-      const baked = (await r.json()).frontend.slice(0, 12);
-      const href = document.querySelector('link[href*="editor.css"]').getAttribute('href');
-      return {baked, href};
-    });
-    console.log('  lesson 25: walked + reverted (' + overrideGone.href + ')');
+    // Lesson 25 uses the same native Appearance/graph walkthrough as its
+    // dedicated cloud-compatible regression. Source overrides keep their
+    // independent edit-asset-override coverage.
+    await walkUIComponentsLesson(page);
 
     console.log('PASS');
   } catch (err) {
@@ -357,7 +182,8 @@ async function revertAssetViaApi(page, base) {
       console.error('  screenshot: /tmp/edit-tutorial-tour-platform-fail.png');
     } catch (_) { /* page may be gone */ }
   } finally {
-    await revertAssetViaApi(page, BASE);
+    try { await cleanupPublications(); }
+    catch (error) { failed = true; console.error(error); }
     await hardCleanup(page);
     await browser.close();
   }

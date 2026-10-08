@@ -134,7 +134,7 @@ async function pollOnce(execId, resultHostEl) {
   // below was in flight. Every write into resultHostEl and every
   // stopPolling() is guarded by this — a stale poll would otherwise paint
   // over the newer run's pane, or kill its poll (and hide its Cancel).
-  const current = () => pollState?.execId === execId;
+  const current = () => pollState?.execId === execId && resultHostEl.isConnected !== false;
   try {
     const r = await authFetch(API.api_execute_id(execId),
                               { method: 'GET' });
@@ -166,6 +166,7 @@ async function pollOnce(execId, resultHostEl) {
         resultHostEl.textContent = '';
         if (bodyResp.ok) {
           resultHostEl.innerHTML = html;
+          if (status === 'succeeded') resultHostEl.gdExecutionFnId = row['fn-id'];
         } else {
           resultHostEl.appendChild(renderErrorPane('Load error: HTTP '
                                                    + bodyResp.status));
@@ -179,7 +180,7 @@ async function pollOnce(execId, resultHostEl) {
                                 row['runtime-effects'],
                                 row['declared-effects']);
       if (typeof appendPathViewAffordance === 'function') {
-        appendPathViewAffordance(resultHostEl, row['path-trace']);
+        appendPathViewAffordance(resultHostEl, row['path-trace'], row['fn-id']);
       }
       // The submit-time re-read ran while this row was still pending —
       // the failed lens's counts only know the outcome from here.
@@ -292,6 +293,12 @@ async function submitExecution(fnEntity, args, persist, trace, captureValues,
   // This run supersedes whatever the pane was still polling: left alive, an
   // earlier pending run's poll would land its result over this one's.
   stopPolling();
+  const fnId = fnEntity.id;
+  const generation = {};
+  resultHostEl.gdExecutionGeneration = generation;
+  delete resultHostEl.gdExecutionFnId;
+  const current = () => resultHostEl.gdExecutionGeneration === generation
+    && resultHostEl.isConnected !== false;
   resultHostEl.textContent = '';
   resultHostEl.appendChild(renderSubmitSpinner('Submitting…'));
   // The marker below describes THIS run: a lesson-11 persisted run
@@ -299,16 +306,19 @@ async function submitExecution(fnEntity, args, persist, trace, captureValues,
   // now (lesson 19 gates its "Break it on purpose" step on it).
   delete document.body.dataset.gdPersistedRun;
   try {
+    const ticket = typeof gdTourBeginQueueRun === 'function' ? gdTourBeginQueueRun(fnId, persist) : null;
     const r = await authFetch(API.api_execute, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 'fn-id': fnEntity.id,
+      body: JSON.stringify({ 'fn-id': fnId,
                               'args': args,
                               'persist?': persist,
                               'trace?': trace,
                               'capture-values?': captureValues }),
     });
     const body = await r.json().catch(() => null);
+    if (ticket) gdTourQueueRunResult(ticket, r, body);
+    if (!current()) return;
     resultHostEl.textContent = '';
     if (!r.ok) {
       const msg = authFetchErrorMessage(r, {
@@ -355,15 +365,21 @@ async function submitExecution(fnEntity, args, persist, trace, captureValues,
               // fn-id drives the typed-repr / component-preview
               // dispatch server-side; the inline /api/execute
               // response doesn't carry it.
-              body: JSON.stringify({ ...body, 'fn-id': fnEntity.id }),
+              body: JSON.stringify({ ...body, 'fn-id': fnId }),
             });
+        const html = bodyResp.ok ? await bodyResp.text() : null;
+        if (!current()) return;
         if (bodyResp.ok) {
-          resultHostEl.innerHTML = await bodyResp.text();
+          resultHostEl.innerHTML = html;
+          // Inline responses are correlated with the immutable submitted UUID;
+          // they contain no fn-id. A selection change cannot relabel this run.
+          if (status === 'succeeded') resultHostEl.gdExecutionFnId = fnId;
         } else {
           resultHostEl.appendChild(renderErrorPane('Load error: HTTP '
                                                    + bodyResp.status));
         }
       } catch (e) {
+        if (!current()) return;
         resultHostEl.appendChild(renderErrorPane('Load error: ' + e.message));
       }
     }
@@ -373,9 +389,10 @@ async function submitExecution(fnEntity, args, persist, trace, captureValues,
     // Traced run (Debug P2) — the inline response carries the captured
     // :path-trace; offer the canvas highlight right from the result pane.
     if (typeof appendPathViewAffordance === 'function') {
-      appendPathViewAffordance(resultHostEl, body?.['path-trace']);
+      appendPathViewAffordance(resultHostEl, body?.['path-trace'], fnEntity.id);
     }
   } catch (e) {
+    if (!current()) return;
     resultHostEl.textContent = '';
     resultHostEl.appendChild(renderErrorPane('Network error: ' + e.message));
   }

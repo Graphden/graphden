@@ -24,6 +24,7 @@
   (:require
     [clojure.set :as set]
     [graphden.schema.versioned.schema :as vts]
+    [graphden.storage.bounded-query :as bounded]
     [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.context :as tc]
@@ -406,6 +407,22 @@
       []
       (resolve-all-entities* base-storage entity-name branch-id where
                              version-entity version-id-field entity-ids))))
+
+
+(defn resolve-bounded-entities
+  "Resolve all owner candidates from ANY matching version, then apply the
+   complete predicate after ordinary branch/merge/tombstone resolution.
+   The decorated identity scan refuses overflow before any version load."
+  [base-storage entity-name branch-id where max-candidates]
+  (let [{:keys [version-entity version-id-field]} (get entity-config entity-name)
+        ids (bounded/candidate-ids base-storage entity-name where
+                                   {:version-entity version-entity :version-id-field version-id-field}
+                                   max-candidates)]
+    (with-meta (if (seq ids)
+                 (vec (resolve-all-entities* base-storage entity-name branch-id where
+                                             version-entity version-id-field ids))
+                 [])
+      (meta ids))))
 
 
 (defn- resolve-all-entities*

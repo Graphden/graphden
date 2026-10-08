@@ -1,21 +1,65 @@
-# Lesson 25 — Editing the editor: asset overrides
+# Lesson 25 — Editing the editor: personal UI graphs
 
-**Goal**: by the end of this lesson you can change the editor's
-own JavaScript and CSS from inside the editor, see the change
-live, diff it against what shipped, and put it back.
+**Goal**: create personal named graphs for the editor, change a shared theme
+value and a local menu value, and change a menu keyboard decision. This works
+on cloud and self-hosted deployments with ordinary graph permissions.
 
-**Concepts introduced**: the **Assets panel** (Organization →
-Assets), the `:resource-override` row, **per-branch** overrides,
-the rolling `?v=` asset hash, **Diff vs baseline**, **Revert to
-baseline**, and the **JS syntax gate**.
+## Personal UI graphs
 
-> **Scope: single-tenant instances.** The Assets panel is your own
-> deployment's, and it edits the frontend every session on that
-> instance loads. On the multi-tenant cloud it is hidden and its
-> writes are platform-only — an editable, shared frontend would be
-> a stored-XSS surface across tenants. So this lesson is for a
-> self-hosted graphden (`bb rebuild` + `localhost:9002`, or your
-> own server); the interactive tour is offered only there.
+Sign in to use the Appearance graph catalog. Access to the lesson means the
+interface is available; creation still checks namespace read, view-impl, write
+and execute permissions and the current quota on the server.
+
+Open **Settings → Appearance → UI graphs**, then **Create personal graphs**.
+Choose an existing namespace where you can write and inspect the source. The
+editor creates a fresh child with Theme, Menu and Picker groups and a `ui`
+configuration. Its four function references select the menu's initial state,
+update and view, and the picker view. Selecting it changes your own editor
+preference; it does not select it for other users.
+
+The group buttons open exact function identities. **Configuration** shows the
+entry bindings, **Theme** the shared named values, **Menu behavior** the event
+and state decisions, **Menu view** the rendered component and styles, and
+**Picker view** the candidate presentation. Existing graph controls edit their
+dependencies; a rename does not redirect a saved identity to another function.
+
+1. Open **Theme** and follow its values to `theme-canvas-color`. Set its own
+   `value` to `#fff7ed`. The copied color wrapper inherits the canonical color
+   type, so the existing color form applies. This leaf feeds the canvas and
+   the menu background.
+2. Open **Menu view** and edit `account-menu-hover` to `#fed7aa`. This leaf has
+   its own literal and local menu token; changing it leaves the canvas color
+   unchanged. Open the menu to inspect the result.
+3. Open **Menu behavior**, follow the event helpers to `account-menu-key-map`,
+   and change the third `vals` item, corresponding to Home, from `first` to
+   `last`. Open the menu and press Home: both focus and the graph's active
+   index move to the last item.
+4. Open **Picker view** to inspect its rows, groups and styles. Search,
+   compatibility verdicts and selection remain native. The graph authors the
+   presentation; it does not replace those decisions.
+
+Changes to a named shared value affect all graphs referencing that value in
+this bundle. A local leaf affects its dependent component. Ordinary branch
+and ownership rules still apply when you edit a function with other consumers.
+
+The component host keeps the supported operation and DOM contract, account
+callbacks, search and navigation. Personal graph dependencies need source
+access, and the selected configuration needs execution access. Unsupported,
+effectful or unavailable graphs fall back to built-in controls with a reason.
+No arbitrary JavaScript, HTML or source-file override is loaded by this flow.
+
+The interactive lesson records the exact server-proposed identities before
+creation. Cleanup removes only those functions and empty namespaces; it keeps
+changed or inaccessible identities for review. It restores the previous
+Appearance selections only while the current selections still point at the
+lesson's deleted graphs. **Keep & close** retains the graphs and selection.
+
+## Advanced self-hosted source files
+
+**Organization → Source files** retains the legacy file override tool. It
+changes the deployed editor source rather than a personal graph component.
+This tool is available on self-hosted instances; shared cloud editor source is
+platform-owned. Use UI graphs for the personal component exercises above.
 
 ## What an override is
 
@@ -37,7 +81,7 @@ Three properties follow from it being an ordinary row:
 
 ## The panel
 
-Open **Organization → Assets**. Every servable frontend file is
+Open **Organization → Source files**. Every servable frontend file is
 listed with a chip: `baseline` (serving what shipped) or
 `override` (serving yours). `edit` opens the file in a code
 editor — the same CodeMirror the `:js-source` slots use, with
@@ -71,7 +115,7 @@ and fetches the fresh bundle — the reload step below, as one click.
 ## The syntax gate
 
 A JS file with a syntax error would break the **whole**
-concatenated bundle on the next load — including the Assets panel
+concatenated bundle on the next load — including the Source files panel
 you would need in order to fix it. So a JS override is parsed
 before it is written, and a broken one is refused with the parse
 error instead of being saved. CSS is not gated the same way: a
@@ -80,7 +124,7 @@ dead page.
 
 ## Try it: restyle the editor, then put it back
 
-1. **Organization → Assets**, find
+1. **Organization → Source files**, find
    `packages/app/editor/editor-styles.css`, click `edit`.
 2. Scroll to the end and append a rule you will notice — for
    example:

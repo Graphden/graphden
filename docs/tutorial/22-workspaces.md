@@ -4,7 +4,7 @@
 the namespaces you work in, to everything built on a given fn, to
 fns with a given effect, or to what nothing uses — combine those,
 save the set as a **view**, and share a view with your team as an
-fn in the graph. All without changing anything for anyone else.
+fn in the graph. Browser filters affect your Explorer; saving or editing a graph view changes its shared definition.
 
 **Concepts introduced**: **filter** (one chip, one predicate),
 **view** (a named set of filters), the **view chip**, **+ filter**,
@@ -27,7 +27,7 @@ depths:
 - a **view** is a named, saved set — yours in this browser, or an
   fn in the graph when the team should have it too.
 
-Nothing here changes the graph. A filter is about what is *listed*,
+Changing a browser filter leaves the graph intact. A filter is about what is *listed*,
 never about what is *reachable*: fns outside the set still exist,
 still run, and references to them still resolve. Search always looks
 across the whole graph, so a filtered-out fn is still findable by
@@ -98,24 +98,31 @@ you are looking at. Click it:
 ```text
 VIEWS
   ◍ All functions — no filters
-  Your views
+  Device only
     ● on-const                ×
     web-services              ×
   In the graph
-    api-surface               ↗
+    api-surface   Edit filters   Edit graph
   Save the current filters
-    [ View name ]  Save view   Save in the graph…
+    [ View name ]  Save in graph   Device only
 ```
 
-**Save view** names the active set; the chip reads the name from
-then on, and editing the set (any chip on or off) detaches it — the
-chip reads `3 filters` until you save again. Pick a saved view to
-get its set back. Views and the active set are per browser: another
-device starts at **All functions**, signing out does not clear them.
+**Save in graph** is the primary action (also **Enter** in the name
+field). It creates a versioned view for this branch. **Device only** saves
+an independent named filter set in this browser and does not update a
+same-named graph view. Device views and the active filters survive reload;
+another device starts with its own preferences.
+
+Pick a saved view to restore its conditions. Changing a chip detaches the
+active set from its saved label. To update an existing graph view, use its
+**Edit filters** button: the name field is prefilled and **Save changes**
+updates that exact view identity. Ordinary filter edits keep this explicit
+edit context; **◍ all**, applying another view or saving **Device only**
+leaves it.
 
 ## A view saved in the graph
 
-**Save in the graph…** turns the active set into an ordinary fn:
+**Save in graph** turns the active set into an ordinary fn:
 
 ```clojure
 {:name :api-surface
@@ -125,17 +132,23 @@ device starts at **All functions**, signing out does not clear them.
         :uses :http-server}}
 ```
 
-`explorer-view` is a base-fn whose slots are the filter axes —
-`name`, `uses` (a `:fn-ref`: the fn's *identity*, so a rename never
-empties the view and the edge is not a dependency), `effects`,
-`kinds`, `namespaces`, `exclude`, `unused`, and `also` (another view,
-also by reference — members must be in it too; that view may `also` a
-third, so views compose by chaining instead of repeating chips). A
-view fn is versioned, branch-scoped and reviewable like any other
-change; every editor on the branch lists it under **In the graph**;
-**↗** opens it on the canvas; **▶ Run** answers the member list. The
-problem chips (failed / type errors / lint) are this branch's live
-state, not a definition, and are not saved.
+`explorer-view` runs a query over the current branch. Its conditions include
+`name`, `uses`, `effects`, `kinds`, `problems`, `namespaces`, `exclude`,
+`unused`, and membership in other views (`also`). The save operation retains
+**every** selected uses / also reference, not just the first. References
+carry fn identities, so a rename does not change what they mean. Multiple
+uses and views intersect; namespace and kind choices OR within their axis.
+Problem predicates evaluate the current failed / type-error / lint state.
+The Apps kind uses the same installed addon data as the Apps panel.
+
+The graph view is an ordinary fn, versioned and reviewable like any other
+change. **Edit graph** opens it by identity; **▶ Run** returns matching
+functions, the total count, and whether the displayed list was capped.
+Saving or editing sends all conditions in one transaction. A failed save
+leaves the draft in place. A view with computed clauses cannot be flattened
+into editable chips; **Edit graph** is the explicit way to change it.
+Inherited fixed clauses can also refuse replacement, preserving the original
+view and explaining the graph fallback.
 
 You can write one by hand too — extend `explorer-view` like any
 base-fn, from the editor or an `fns.edn`.
@@ -158,16 +171,22 @@ base-fn, from the editor or an `fns.edn`.
 4. Reload the page — your chips survive.
 5. Click **◍ all** — the full graph is back.
 6. **+ filter** → **+ pick a fn**, type `const`, pick `const`
-   (core.logic). The tree is now the fns built on `:const`. Open the
-   view chip, name it `on-const`, press **Enter**: the chip reads
-   `on-const`.
-7. In the same popover, **Save in the graph…** — the fn is created under
-   the name in the field, no further prompt.
-   A fn `on-const` (parent `explorer-view`) appears in the graph; the
-   popover lists it under **In the graph**, and **▶ Run** on its
-   card answers the member list.
-8. **◍ all**, then reopen the view chip and pick `on-const` again —
-   the set comes back.
+   (`core.logic`). Inspect the computed members; then **◍ all** clears
+   this exercise.
+7. Turn on **Functions**. In **+ filter**, set **Name contains** to
+   `tutorial-` and press **Enter**. Open the view chip, name the set
+   `tutorial-function-view` and choose **Save in graph**. Both predicates
+   must be saved. **Device only** is the separate browser option.
+8. Open the view chip → **Edit filters** for this graph view. Change
+   **Name contains** to `tutorial-function-view`; then reopen the view
+   chip and **Save changes**. The Functions condition stays, and the same
+   view is updated.
+9. **Edit graph** beside the view opens its fn. Click **▶ Run**,
+   acknowledge the displayed database effect and press **Run**. The result
+   includes the view itself, which satisfies both conditions.
+10. **◍ all** returns to the whole tree. Finish the guided lesson and
+    delete its created view; cleanup uses the exact identity created by
+    this session.
 
 ## Next
 

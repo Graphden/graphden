@@ -24,10 +24,13 @@ constructor:
 {:type [:fn {:item a} b]}  ; a callable from `:item` of type `a` to `b`
 ```
 
-When a slot is `:fn`-typed, the executor PASSES THE FN-ID
-unchanged to the impl. The impl invokes the callable however it
-likes — once per element of a sequence (for `:map`), once with
-no input (for `:future`), N times in a loop, etc.
+When a slot is `:fn`-typed, the implementation receives a callable
+prepared by the executor, rather than a function ID. A reference to an
+ordinary function becomes a callable without running its body. A reference
+to a function whose return type is itself `[:fn …]` is evaluated to obtain
+that returned callable. The implementation then invokes the callable —
+once per element for `:map`, once with no input for `:future`, or as its
+own contract specifies.
 
 ## `:map` — the canonical example
 
@@ -140,19 +143,67 @@ time, the executor supplies them as `{:request <ring-req>}`.
 The user doesn't write any glue — the names propagate
 automatically through ref chains AND through HOF boundaries.
 
-## "A function that returns a function"?
+## A function that returns a function
 
-Coming from Clojure you may reach for a factory — a fn that takes
-parameters and returns the callable you then hand to `:map`. There is
-no such step here, because a graph fn with unbound free args already
-IS that returned callable: binding some of its args
-(`{:name :add-5 :parent :add :args {:nums [5]}}`) is the factory
-call, the bound args are the
-closure, and the still-free arg is the lambda parameter the HOF
-supplies per element. Referencing a fn into a `:fn`-typed slot always
-passes the fn itself, unrun — the executor never evaluates it first
-to obtain another function. Partial application by inheritance
-replaces currying, and the composition stays visible in the graph.
+You can specialize a graph by inheritance and pass it directly as a
+callback. You can also construct a callable at execution time, just as
+in Clojure. Its declared return type tells the executor to evaluate the
+constructor when another function needs the returned callable.
+
+For example, an application can accept a database-query callable rather
+than connection parameters. A constructor captures the connection
+parameters; its returned function accepts one request record containing
+SQL and query parameters:
+
+```edn
+{:name :query-sql :parent :get
+ :args {:coll {:as :request :type {:sql :text :params [:list :jsonb]}}
+        :key {:value :sql} :default nil}
+ :return-type :text}
+
+{:name :query-params :parent :get
+ :args {:coll {:as :request :type {:sql :text :params [:list :jsonb]}}
+        :key {:value :params} :default nil}
+ :return-type [:list :jsonb]}
+
+{:name :query-body :parent :sql-query
+ :args {:sql :query-sql :params :query-params}
+ :lambda-params [:request]}
+
+{:name :query-constructor :parent :const
+ :args {:value {:type [:fn {:request {:sql :text :params [:list :jsonb]}}
+                       [:secret [:list :jsonb]] #{:db :network}]}}
+ :return-type [:fn {:request {:sql :text :params [:list :jsonb]}}
+               [:secret [:list :jsonb]] #{:db :network}]}
+
+{:name :make-query :parent :query-constructor
+ :args {:value :query-body}}
+```
+
+First declare the open function-typed `:value` slot on `query-constructor`,
+then bind `query-body` on its child. Combining `:ref` and `:type` in one
+binding instead asserts a type for the referenced function's evaluated
+result; that is a different contract and fails this check.
+
+The typed slot prepares `query-body` as a callable; `const` returns that
+callable. `request` is its per-call input. The other
+free arguments — `url`, `user`, and `password` — belong to the constructor
+and are captured when it runs. Constructing the callable does not execute
+a SQL query; invoking it does.
+
+The callable's result keeps `:secret`: the SQL password is secret-typed,
+and the existing taint rules also mark the query result. Consumers must
+retain that contract; this constructor does not make SQL results public
+or bypass trace and result redaction.
+
+Separate `prod-query` and `test-query` functions can extend `make-query`
+with different connection values. The shared application takes their
+result in a function-typed argument. These are ordinary functions and
+references, with normal type and effect checks; they introduce no new
+environment entity. For merge behavior, see
+[configuration and branches](23-branches.md#what-doesnt-merge-branch-local-fn-defs).
+The existing `sql-query` implementation opens a connection per invocation;
+this construction does not add connection pooling.
 
 ## Iterating vs one-shot
 
@@ -187,11 +238,11 @@ Without that explicitness, a Ring handler whose ref chain happens to mention
 `:request` would have `:request` swallowed as the one-shot
 lambda input — breaking the wrap.
 
-This sounds intricate. The good news: as a user writing
-fn-defs, you don't think about it. The runtime handles it. The
-gate just means "things-that-look-iterating use `:item`,
-things-that-look-one-shot use `:arg`" — pick the matching name
-in your base-fn impl and the dispatch picks the right behavior.
+When authoring a graph, declare which inputs the callback receives on
+each call if several free arguments could qualify. The remaining inputs
+are captured. When authoring a base implementation, follow the callable
+shape declared on its slot: the compiler uses that type together with
+`:lambda-params` to prepare the argument mapping.
 
 ## Try it
 
@@ -269,13 +320,14 @@ reverse works too: binding `str-upper` first would have narrowed
 last; [docs/TYPES.md § Narrowing as a way of working](../TYPES.md#narrowing-as-a-way-of-working)
 has the rules and the limits.
 
-When a callable slot takes SEVERAL arguments — `reduce`'s
-`(acc, item) → acc`, say — the picker matches by name instead, and
+When a callable slot takes SEVERAL arguments, the picker matches by name, and
 a callee of your own has to expose args of those names; `{:as :item}`
 in `fns.edn` (or a rename on the edge label, lesson 04) is how you
 give it one. graphden's own test for `map`,
 `map-applies-the-callable-to-every-item` (`core.tests`), shows the
 named form: a small fn adding 1 to `:item`, over `[1 2 3]`.
+Graphden's `reduce` callback takes one `:pair` vector containing
+`[acc item]`; it does not receive two separate positional arguments.
 
 ### Going further (fns.edn / MCP only)
 

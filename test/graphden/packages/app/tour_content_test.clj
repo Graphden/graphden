@@ -25,20 +25,24 @@
 (def ^:private check-kinds
   "Every `:check :kind` `_tourCheckPasses` implements. `manual` is the
    reader's own Next button — no predicate."
-  #{"manual" "fn-exists" "fn-parent" "ns-exists" "binding-bound" "binding-value"
+  #{"service-state" "queue-state" "ui-component" "execution-trace" "manual" "fn-exists" "fn-parent" "ns-exists" "binding-bound" "binding-value"
     "binding-flag" "fn-sibling-variation" "bindings-count" "list-items" "selected" "on-branch" "arg-named" "expanded"
-    "dom" "dom-absent" "input-value" "result-value" "binding-absent" "list-first" "list-values" "fn-field"})
+    "dom" "dom-absent" "input-value" "result-value" "binding-absent" "list-first" "list-values" "fn-field"
+    "graph-view-filters" "graph-view-run" "review-comment" "created-branch" "app-route-created"
+    "owned-entity" "package-published" "package-pin" "package-reference" "package-run"
+    "token-created" "token-execute-denied" "token-revoked" "token-form-scopes"})
 
 
 (def ^:private creates-types
   "Every `:creates :type` the cleanup pass can both REPORT and delete."
-  #{"fn" "ns" "branch" "package-version"})
+  #{"fn" "ns" "branch" "package-version" "http-publication" "api-token" "app-route" "service" "queue-message"})
 
 
 (def ^:private require-signals
   "The `:requires` values that are named conditions rather than
    capabilities (REQUIRE_SIGNALS in the picker)."
-  #{"services" "assets" "org"})
+  #{"services" "assets" "org" "package-lifecycle" "temporary-http"
+    "api-tokens" "personal-ui-graphs" "handler-preview"})
 
 
 (def ^:private known-capabilities
@@ -135,9 +139,29 @@
                " is not implemented by _tourCheckPasses " (pr-str check-kinds)))
       ;; A check that needs an argument and doesn't get one can never pass.
       (case kind
-        ("fn-exists" "selected" "on-branch" "expanded")
+        ("fn-exists" "selected" "on-branch" "expanded" "created-branch" "app-route-created")
         (is (some? (get-in s [:check :name]))
             (str "lesson " (:id l) " / “" (:title s) "”: " kind " needs :name"))
+        "execution-trace"
+        (is (and (not (str/blank? (get-in s [:check :name])))
+                 (boolean? (get-in s [:check :values])))
+            (str "lesson " (:id l) " / “" (:title s) "”: execution-trace needs :name + boolean :values"))
+        "ui-component"
+        (let [check (:check s)
+              action (:action check)]
+          (is (contains? #{"created" "open" "literal" "menu-local" "home-last"} action)
+              "UI component checks need an implemented action")
+          (when (= action "open")
+            (is (contains? #{"configuration-id" "theme-id" "menu-id" "menu-update-id" "picker-id"} (:root check))
+                "Open checks use a manifest root identity"))
+          (when (contains? #{"literal" "menu-local" "home-last"} action)
+            (is (and (contains? #{"theme" "menu" "picker"} (:group check))
+                     (not (str/blank? (:name check))) (not (str/blank? (:slot check))))
+                "Mutation checks identify an owned namespace, function and slot"))
+          (when (contains? #{"literal" "menu-local"} action)
+            (is (string? (:value check)) "Value checks require the actual expected literal"))
+          (when (= action "menu-local")
+            (is (string? (:canvas check)) "Local menu edits must preserve the shared canvas color")))
         "fn-parent"
         (is (and (some? (get-in s [:check :name])) (some? (get-in s [:check :parent])))
             (str "lesson " (:id l) " / “" (:title s) "”: fn-parent needs :name + :parent"))
@@ -178,12 +202,48 @@
         (is (and (not (str/blank? (get-in s [:check :selector])))
                  (string? (get-in s [:check :value])))
             (str "lesson " (:id l) " / “" (:title s) "”: input-value needs :selector + a string :value"))
+        "graph-view-filters"
+        (is (and (string? (get-in s [:check :name]))
+                 (map? (get-in s [:check :filters]))
+                 (seq (get-in s [:check :filters])))
+            (str "lesson " (:id l) ": graph-view-filters needs name and expected axes"))
+        "graph-view-run"
+        (is (string? (get-in s [:check :name]))
+            (str "lesson " (:id l) ": graph-view-run needs the owned view name"))
         "result-value"
         (is (contains? (:check s) :value)
             (str "lesson " (:id l) " / “" (:title s) "”: result-value needs :value"))
+        "owned-entity"
+        (is (and (contains? #{"ns" "fn"} (get-in s [:check :type]))
+                 (not (str/blank? (get-in s [:check :name]))))
+            "owned-entity needs a supported type and name")
+        ("package-published" "package-pin")
+        (is (and (not (str/blank? (get-in s [:check :name])))
+                 (not (str/blank? (get-in s [:check :version]))))
+            "package receipt check needs an exact name and version")
+        "package-reference"
+        (is (every? #(not (str/blank? (get-in s [:check %]))) [:name :version :owner :slot :fn])
+            "package-reference needs coordinates and the owning use site")
+        "package-run"
+        (is (and (not (str/blank? (get-in s [:check :name]))) (contains? (:check s) :value))
+            "package-run needs the owned function name and observed value")
+        "token-created"
+        (is (and (not (str/blank? (get-in s [:check :name])))
+                 (= "write" (get-in s [:check :scopes]))
+                 (= 7 (get-in s [:check :ttl-days])))
+            "token-created needs the owned label, restricted scopes and bounded expiry")
+        "token-form-scopes"
+        (is (= "write" (get-in s [:check :scopes])) "Token scope exercise keeps only write")
+        ("token-execute-denied" "token-revoked")
+        (is (not (str/blank? (get-in s [:check :name])))
+            "token verification needs its owned label")
         "arg-named"
         (is (some? (get-in s [:check :arg]))
             (str "lesson " (:id l) " / “" (:title s) "”: arg-named needs :arg"))
+        "review-comment"
+        (is (and (not (str/blank? (get-in s [:check :name])))
+                 (not (str/blank? (get-in s [:check :text]))))
+            (str "lesson " (:id l) " / “" (:title s) "”: review-comment needs :name + :text"))
         nil))))
 
 
@@ -409,3 +469,20 @@
                 (str/includes? text "self-host"))
             (str "lesson " (:id l) " requires " (pr-str need)
                  " but its written lesson never says what it needs"))))))
+
+
+(deftest branch-lessons-create-owned-context-before-user-functions
+  (doseq [lesson (filter #(contains? #{"23" "24"} (:id %)) (lessons))]
+    (is (:in-place lesson))
+    (is (= "main" (:cleanup-branch lesson))
+        "Cancellation must return to the stable root before removing sibling dependencies")
+    (let [creations (keep :creates (:steps lesson))
+          first-creation (first creations)]
+      (is (= "branch" (:type first-creation))
+          "The tutorial function must be born on its owned base, never main")
+      (is (some #(= "fn" (:type %)) creations)))
+    (doseq [step (:steps lesson)
+            :when (= "branch" (get-in step [:creates :type]))]
+      (is (= {:kind "created-branch" :name (get-in step [:creates :name])}
+             (:check step))
+          "An existing same-named branch cannot establish cleanup ownership"))))

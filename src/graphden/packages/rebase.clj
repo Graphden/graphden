@@ -28,6 +28,7 @@
     (keyword? type) (ref-fn type)
     (types/type-spec-map? type) (update type :type #(map-type-refs ref-fn %))
     (map? type) (update-vals type #(map-type-refs ref-fn %))
+    (and (vector? type) (empty? type)) type
     (vector? type)
     (case (first type)
       :refine (update type 1 #(map-type-refs ref-fn %))
@@ -35,9 +36,11 @@
               (update 1 #(map-type-refs ref-fn %))
               (update 2 #(map-type-refs ref-fn %)))
       :variant (into [:variant] (map-variant-refs ref-fn (rest type)))
-      ;; Lists, tuples, maps, unions and information-flow markers contain
-      ;; types. A marker name can itself be a named type in this bundle.
-      (mapv #(map-type-refs ref-fn %) type))
+      ;; Structural type constructors are grammar, not fn references. Custom
+      ;; information-flow marker identities may still belong to the bundle.
+      (into [(if (contains? #{:list :tuple :map :union :secret} (first type))
+               (first type) (ref-fn (first type)))]
+            (map #(map-type-refs ref-fn %)) (rest type)))
     :else type))
 
 
@@ -92,3 +95,11 @@
     (mapv #(-> (map-definition-refs ref-fn %)
                (update :namespace namespace-fn))
           definitions)))
+
+
+(defn rewrite-references
+  "Apply an explicit identity mapping only to fn-def reference positions.
+   Importers can qualify fixed ABI references without changing literal keys,
+   values, descriptions or constraints. Parsing still validates the result."
+  [definition ref-fn]
+  (map-definition-refs ref-fn definition))

@@ -2112,7 +2112,9 @@ body.gd-no-write [data-action="remove-use-site-binding"],
 body.gd-no-write [data-action="service-settings"] {
   display: none !important;
 }
-body.gd-no-execute [data-action="run-fn"] {
+body.gd-no-execute [data-action="run-fn"],
+body.gd-no-execute [data-action="http-host"],
+body.gd-no-temporary-http [data-action="http-host"] {
   display: none !important;
 }
 
@@ -2550,6 +2552,18 @@ textarea.value-form-hiccup {
 .gd-ghost-row-v { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gd-ghost-row-ref .gd-ghost-row-v { color: var(--error-fg); }
 .gd-ghost-more { color: var(--muted-fg); font-style: italic; }
+/* Literal counterparts preserve binding/item occurrence identity. The dashed
+   replacement connector differs from the graph's ordinary argument edges. */
+.gd-ghost-literal {
+  border: 1px dashed var(--accent); border-radius: 6px;
+  background: var(--card-bg); color: var(--card-fg);
+}
+.gd-ghost-literal-label { padding: 3px 6px; color: var(--muted-fg); }
+.gd-ghost-literal-value {
+  padding: 4px 6px; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.gd-ghost-replacement-label { fill: var(--muted-fg); font-size: 0.625rem; }
+.gd-ghost-literal-link path { stroke: var(--accent); }
 
 /* Arg type-chip — small text label "[int]" / "[fn]" docked to the
    right edge of an arg-overlay or trailing an edge-label. Click flips
@@ -3509,6 +3523,19 @@ textarea.value-form-hiccup {
    place so the user doesn't have to discover hover-revealed icons
    scattered across the card. Always visible (no hover gate),
    ≥44px touch targets on pointer-coarse devices. */
+/* Selected root Run delegates to the Inspector's existing run pane. */
+.fn-run-trigger {
+  position: absolute;
+  right: 25px; top: 2px;
+  padding: 1px 5px;
+  font: inherit;
+  color: var(--card-fg); background: var(--card-bg);
+  border: 1px solid var(--card-border); border-radius: 3px;
+  cursor: pointer;
+}
+.fn-run-trigger:hover { background: var(--hover-bg); }
+.fn-run-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
 .fn-action-toolbar {
   display: flex; flex-wrap: wrap; align-items: center;
   gap: 4px;
@@ -5047,6 +5074,11 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   margin-bottom: 6px;
 }
 
+/* Optional tracing and persistence stay collapsed; effect consent stays visible. */
+.execute-options { margin: 6px 0; }
+.execute-options > summary { cursor: pointer; color: var(--muted-fg); }
+.execute-options > summary:focus-visible { outline: 2px solid var(--accent); }
+
 .execute-options-row {
   display: flex; flex-direction: column; gap: 4px;
   margin-bottom: 8px;
@@ -5684,7 +5716,9 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .path-value-popover {
   position: fixed;
   z-index: 10003;
-  max-width: 420px;
+  max-width: min(420px, calc(100vw - 16px));
+  box-sizing: border-box;
+  overflow: auto;
   background: var(--card-bg); color: var(--card-fg);
   border: 1px solid var(--card-border);
   border-radius: 4px;
@@ -5693,6 +5727,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   box-shadow: var(--shadow-lg);
 }
 .path-value-popover-head {
+  padding-right: 24px;
   font-weight: 600;
   margin-bottom: 6px;
   white-space: nowrap;
@@ -8622,6 +8657,9 @@ button.lambda-params-chip:focus-visible { outline: 1px solid var(--accent); }
 .inheritance-intent-reason:empty {
   display: none;
 }
+
+/* Appearance: graph groups wrap within the available settings pane. */
+.gd-ui-components-actions { flex-wrap: wrap; justify-content: flex-start; }
 
 @media (prefers-reduced-motion: reduce) {
   /* Near-zero rather than `none`: keeps transitionend firing for any

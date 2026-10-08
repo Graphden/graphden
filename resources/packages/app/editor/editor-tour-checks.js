@@ -39,6 +39,14 @@ function _tourFindFn(name) {
   return null;
 }
 
+function _tourFnForCheck(check) {
+  if (!check['owned?']) return _tourFindFn(check.name);
+  if (typeof _tourState === 'undefined' || !_tourPrincipalMatches(_tourState)) return null;
+  const created = _tourState?.created?.find(
+    row => row.type === 'fn' && row.name === check.name && row.id && row.receipt === 'created');
+  return created && typeof lookups !== 'undefined' ? lookups?.fnMap?.get(created.id) : null;
+}
+
 // A `dom` check asks whether the reader can SEE the thing, not whether it is
 // in the document: the editor keeps whole surfaces mounted and hidden (the
 // Organization panels exist from boot), so `querySelector` alone completed
@@ -72,10 +80,49 @@ function _tourFnRowHidden(name) {
 }
 
 
+function _tourCreatedGraphView(name) {
+  if (typeof _tourState === 'undefined' || !_tourState
+      || !_tourPrincipalMatches(_tourState) || _tourState.activeBranch !== _tourSessionBranch()
+      || typeof gdSharedViewsCached !== 'function') return null;
+  return (gdSharedViewsCached() || []).find(view => _tourState.created.some(row => row.id
+    && row.type === 'fn' && row.name === name && view.id === row.id
+    && view.name === row.name && view['namespace-id'] === row['namespace-id'])) || null;
+}
+
 function _tourCheckPasses(check) {
   if (!check || check.kind === 'manual') return false;
   try {
     switch (check.kind) {
+      case 'service-state':
+      case 'queue-state':
+        return gdTourServiceCheck(check);
+      case 'graph-view-filters': {
+        const view = _tourCreatedGraphView(check.name);
+        if (!view || view.unsupported?.length || !check.filters || typeof gdEmptyFilters !== 'function') return false;
+        const expected = {...gdEmptyFilters(), ...check.filters};
+        return Object.entries(expected).every(([axis, value]) => {
+          const actual = view.filters[axis];
+          return Array.isArray(value) ? Array.isArray(actual)
+            && JSON.stringify([...actual].sort()) === JSON.stringify([...value].sort())
+            : actual === value;
+        });
+      }
+      case 'graph-view-run': {
+        const view = _tourCreatedGraphView(check.name);
+        if (!view || selectedFnId !== view.id || !_tourDomVisible('.execute-popover.visible .execute-result-pane')) return false;
+        const raw = document.querySelector('.execute-popover.visible .execute-result-host .execute-result-raw pre');
+        const result = raw && JSON.parse(raw.textContent);
+        return Array.isArray(result?.fns) && result.fns.some(fn => fn.id === view.id)
+          && Number.isInteger(result.total) && result.total >= result.fns.length;
+      }
+      case 'token-form-scopes':
+        return _tourDomVisible('#gd-acct-mint-form') && _tourTokenScopes(
+          [...document.querySelectorAll('#gd-acct-tok-scopes input:checked')]
+            .map(input => input.value).join(' ')) === check.scopes;
+      case 'token-created':
+      case 'token-execute-denied':
+      case 'token-revoked':
+        return _tourTokenCheck(check);
       case 'ns-exists':
         // ROOT namespaces only: `name` is the SEGMENT, not the path, so a
         // nested ns elsewhere (the cloud's landing.tutorial lesson pages)
@@ -86,7 +133,7 @@ function _tourCheckPasses(check) {
       case 'fn-exists':
         return !!_tourFindFn(check.name);
       case 'fn-parent': {
-        const fn = _tourFindFn(check.name);
+        const fn = _tourFnForCheck(check);
         if (!fn) return false;
         const parents = fn['parent-ids'] || [];
         if (!parents.length) return false;
@@ -96,6 +143,18 @@ function _tourCheckPasses(check) {
           const p = (typeof lookups !== 'undefined' ? lookups?.fnMap?.get(pid) : null)
             || (typeof graphData !== 'undefined' ? graphData?.fns?.find((f) => f.id === pid) : null);
           return !!p && p.name === check.parent;
+        });
+      }
+      case 'execution-trace': {
+        const fn = _tourFindFn(check.name);
+        if (!fn || typeof check.values !== 'boolean') return false;
+        return [...document.querySelectorAll('.execute-show-path-btn')].some(button => {
+          if (button.gdExecutionFnId !== fn.id) return false;
+          const entries = button.gdPathTrace?.entries;
+          if (!Array.isArray(entries) || !entries.some(entry => entry['fn-id'] === fn.id)) return false;
+          const hasValues = entries.some(entry => Object.hasOwn(entry, 'value') || entry['value-truncated?']);
+          const rect = button.getBoundingClientRect();
+          return hasValues === check.values && rect.width > 0 && rect.height > 0;
         });
       }
       case 'fn-sibling-variation': {
@@ -120,7 +179,7 @@ function _tourCheckPasses(check) {
         // the binding row belongs to the checked fn — so walk the fn's
         // bindings and resolve each slot's name, never slotByFnAndName
         // (which is keyed by the slot-OWNING fn).
-        const fn = _tourFindFn(check.name);
+        const fn = _tourFnForCheck(check);
         if (!fn || typeof lookups === 'undefined' || !lookups) return false;
         const list = (lookups.bindingsByFn?.get(fn.id)) || [];
         return list.some((b) => {
@@ -176,7 +235,7 @@ function _tourCheckPasses(check) {
         // items" — `binding-bound` is true after the FIRST append, so a
         // lesson that asks for a second number (`:add`'s :nums, 1 + 1)
         // needs to count the binding-list-item rows, not the binding.
-        const fn = _tourFindFn(check.name);
+        const fn = _tourFnForCheck(check);
         if (!fn || typeof lookups === 'undefined' || !lookups) return false;
         const list = (lookups.bindingsByFn?.get(fn.id)) || [];
         return list.some((b) => {
@@ -191,7 +250,7 @@ function _tourCheckPasses(check) {
         // which is what a step asking for two sibling slots needs: the
         // canvas decides which placeholder sits where, and a lesson must
         // not depend on that.
-        const fn = _tourFindFn(check.name);
+        const fn = _tourFnForCheck(check);
         if (!fn || typeof lookups === 'undefined' || !lookups) return false;
         const list = (lookups.bindingsByFn?.get(fn.id)) || [];
         const bound = list.filter((b) => {
@@ -205,7 +264,7 @@ function _tourCheckPasses(check) {
         // binding-bound, but the literal must equal `check.value`. Compared
         // as TEXT: a JSON literal round-trips through jsonb, so 42 can come
         // back as a number or a string depending on the slot's type.
-        const fn = _tourFindFn(check.name);
+        const fn = _tourFnForCheck(check);
         if (!fn || typeof lookups === 'undefined' || !lookups) return false;
         const list = (lookups.bindingsByFn?.get(fn.id)) || [];
         return list.some((b) => {
@@ -215,6 +274,7 @@ function _tourCheckPasses(check) {
                     && String(b.value) === String(check.value));
         });
       }
+      case 'ui-component': return window.gdTourUIComponentCheck?.(check) || false;
       case 'expanded': {
         // "the card of fn `name` is unfolded to at least `depth`" — read
         // from the COMMITTED expansion (`expansionState`), never the hover
@@ -251,7 +311,7 @@ function _tourCheckPasses(check) {
         // binding that values, refs or fills `check.slot` — what a reader
         // sees after Delete on a bound literal (the `+` is back). A
         // flag-only binding (a seal, a rename) does not count as bound.
-        const fn = _tourFindFn(check.name);
+        const fn = _tourFnForCheck(check);
         if (!fn || typeof lookups === 'undefined' || !lookups) return false;
         const list = (lookups.bindingsByFn?.get(fn.id)) || [];
         return !list.some((b) => {
@@ -265,7 +325,7 @@ function _tourCheckPasses(check) {
         // The FIRST item of the sequence slot `check.slot` reads
         // `check.value` — how a lesson sees that ↑ / ↓ moved an item.
         // Items are position-sorted in `itemsByBinding`.
-        const fn = _tourFindFn(check.name);
+        const fn = _tourFnForCheck(check);
         if (!fn || typeof lookups === 'undefined' || !lookups) return false;
         const list = (lookups.bindingsByFn?.get(fn.id)) || [];
         return list.some((b) => {
@@ -278,7 +338,7 @@ function _tourCheckPasses(check) {
       case 'list-values': {
         // Exact local literal sequence: appending is not inserting, and a
         // commutative Run result cannot prove that an item moved correctly.
-        const fn = _tourFindFn(check.name);
+        const fn = _tourFnForCheck(check);
         if (!fn || typeof lookups === 'undefined' || !lookups || !Array.isArray(check.values)) return false;
         return (lookups.bindingsByFn?.get(fn.id) || []).some((b) => {
           const slot = lookups.slotMap?.get(b['slot-id']);
@@ -292,7 +352,7 @@ function _tourCheckPasses(check) {
         // A field of the fn ROW equals `check.value` — the card strips
         // that write the row (λ lambda-params, 📍 branch-local). Compared
         // as JSON so `[]`, `["string"]` and `true` all pin exactly.
-        const fn = _tourFindFn(check.name);
+        const fn = _tourFnForCheck(check);
         if (!fn) return false;
         return JSON.stringify(fn[check.field] ?? null) === JSON.stringify(check.value ?? null);
       }
@@ -329,6 +389,41 @@ function _tourCheckPasses(check) {
         const el = document.querySelector(check.selector);
         if (!el) return false;
         return String(el.value ?? '') === String(check.value ?? '');
+      }
+      case 'review-comment': {
+        const fn = _tourFnForCheck(check);
+        if (!fn?.id || typeof check.text !== 'string' || !check.text) return false;
+        const selector = '.branch-diff-anchor-thread[data-anchor-name="fn"][data-anchor-id="'
+          + fn.id + '"] .branch-comment';
+        return Array.from(document.querySelectorAll(selector)).some((row) => {
+          if (!row.dataset.commentId || row.querySelector('.branch-comment-body')?.textContent !== check.text) return false;
+          const rect = row.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0;
+        });
+      }
+      case 'created-branch': {
+        const created = typeof _tourState !== 'undefined' && _tourState?.created?.some(
+          (row) => row.type === 'branch' && row.name === check.name && row.id && row['base-branch-id']
+            && row.receipt !== 'pending');
+        return !!created && _tourCurrentBranch() === check.name;
+      }
+      case 'owned-entity':
+        return typeof _tourOwnedEntityPasses === 'function' && _tourOwnedEntityPasses(check);
+      case 'app-route-created':
+        return typeof gdTourAppCreationPasses === 'function' && gdTourAppCreationPasses(check);
+      case 'package-published':
+        return typeof _tourPackagePublishedPasses === 'function' && _tourPackagePublishedPasses(check);
+      case 'package-pin':
+        return typeof _tourPackagePinPasses === 'function' && _tourPackagePinPasses(check);
+      case 'package-reference':
+        return typeof _tourPackageReferencePasses === 'function' && _tourPackageReferencePasses(check);
+      case 'package-run': {
+        const owner = typeof _tourState === 'undefined' ? null : _tourState?.created?.find(
+          row => row.type === 'fn' && row.name === check.name && row.id && row.receipt === 'created');
+        const host = document.querySelector('.execute-popover.visible .execute-result-host');
+        return !!owner && _tourPrincipalMatches(_tourState)
+          && host?.gdExecutionFnId === owner.id
+          && _tourCheckPasses({kind: 'result-value', value: check.value});
       }
       default:
         return false;

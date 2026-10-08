@@ -268,6 +268,16 @@
           :refine-name {:value :url}
           :constraint [:matches "^https?://"]}}
 
+  {:name :ensure-non-blank-text
+   :description "Public text-to-non-blank-text boundary for runtime form fields (docs/TYPES.md). Validate a non-whitespace character and return the original value; throws refinement/violated otherwise."
+   :parent :_refinement-narrow
+   :return-type :non-blank-text
+   :args {:value {:as :value :type :text}
+          :test {:parent :re-find?
+                 :args {:string {:as :value} :pattern {:value "\\S"}}}
+          :refine-name {:value :non-blank-text}
+          :constraint [:matches "\\S"]}}
+
   {:name :ensure-non-empty-text
    :description "Validate that `:value` is a non-empty `:text`; return as `:non-empty-text`. Throws `refinement/violated` otherwise."
    :parent :_refinement-narrow

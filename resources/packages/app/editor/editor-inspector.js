@@ -62,11 +62,13 @@
   function gdInspectorRender(fnId) {
     const el = document.getElementById('gd-inspector');
     if (!el) return;
+    inspHistoryToken = null;
 
     // `lookups` is a bundle-level `let` (not a window property), so read the
     // lexical global directly rather than `window.lookups` (which is undefined).
     const lk = (typeof lookups !== 'undefined') ? lookups : null;
     const fn = (fnId && lk?.fnMap) ? lk.fnMap.get(fnId) : null;
+    el.dataset.fnId = fn?.id || '';
     // Every path below replaces the whole column — tear down the outgoing
     // tab body's CodeMirror views (the Run pane's code-typed args) first.
     window.gdCode?.destroyWithin?.(el);
@@ -334,7 +336,8 @@
   // executions, so htmx.process the swapped-in fragment.
   let inspHistoryToken = null;
   function gdLoadInspectorHistory(fnId, fn) {
-    inspHistoryToken = fnId;
+    const token = {};
+    inspHistoryToken = token;
     const branch = (typeof getCurrentBranchName === 'function') ? getCurrentBranchName() : 'main';
     const url = '/partials/fn-versions?fn-id=' + encodeURIComponent(fnId)
       + '&current-branch=' + encodeURIComponent(branch)
@@ -342,14 +345,13 @@
     fetch(url)
       .then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
       .then((txt) => {
-        if (inspHistoryToken !== fnId) return;
+        if (inspHistoryToken !== token) return;
         const host = document.getElementById('gd-insp-history');
         if (!host) return;
-        host.innerHTML = txt;
-        if (typeof htmx !== 'undefined' && htmx.process) htmx.process(host);
+        mountFnVersionsContent(host, txt, fn);
       })
       .catch(() => {
-        if (inspHistoryToken !== fnId) return;
+        if (inspHistoryToken !== token) return;
         const host = document.getElementById('gd-insp-history');
         if (host) {
           host.innerHTML = '<div class="gd-insp-runs-loading">'

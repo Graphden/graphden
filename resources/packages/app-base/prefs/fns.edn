@@ -32,9 +32,9 @@
    :effects #{:db :time}}
 
   {:name :pref-keys
-   :description "The preference keys the editor knows — the vocabulary PUT /api/prefs/:key accepts. `theme` = the active editor theme, `keymap` = the active keyboard layout."
+   :description "The preference keys the editor knows — the vocabulary PUT /api/prefs/:key accepts. `theme` = the active editor theme, `keymap` = the active keyboard layout, `components` = personal menu/picker graph identities."
    :parent :const
-   :args {:value ["theme" "keymap"]}}
+   :args {:value ["theme" "keymap" "components"]}}
 
   {:name :pref-key-known?
    :description "Is `:pref-key` one of `:pref-keys`? (`|`-delimited membership test — a pure string check, no HOF closure.)"

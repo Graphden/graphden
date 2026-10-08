@@ -11,12 +11,29 @@
 
 let servicePopoverEl = null;
 let servicePopoverAnchor = null;
-// The fn whose popover is CURRENTLY being opened. Set at the top of every
-// open; after an await we compare against it and bail if the user has since
-// opened another fn's popover — a slow response must not clobber the newer
-// one with the wrong fn's service form. (Supersession guard, mirrors
-// editor-fn-versions.js.)
-let servicePopoverFnId = null;
+// One opening owns every callback, including a second opening of the same fn.
+let servicePopoverContext = null;
+let serviceInstanceTimer = null;
+
+function serviceSessionKey() {
+  return JSON.stringify([window.gdAccount?.id || null,
+    typeof graphdenCurrentOrg === 'undefined' ? null : graphdenCurrentOrg,
+    typeof getCurrentBranchName === 'function' ? getCurrentBranchName() : null]);
+}
+
+function serviceContextCurrent(context) {
+  return !!context && servicePopoverContext === context && context.session === serviceSessionKey();
+}
+
+function showServiceError(el, anchorEl, message) {
+  el.textContent = '';
+  const error = document.createElement('div');
+  error.className = 'service-popover-error';
+  error.setAttribute('role', 'alert');
+  error.textContent = message;
+  el.appendChild(error);
+  presentServicePopover(el, anchorEl);
+}
 
 // Cached snapshot of /api/services. Refreshed on every open; the
 // row-actions popover hasn't been pinned long enough for staleness
@@ -51,7 +68,9 @@ function hideServicePopover() {
     catch (_) {}
   }
   servicePopoverAnchor = null;
-  servicePopoverFnId = null; // an in-flight open now sees a mismatch and bails
+  servicePopoverContext = null;
+  if (serviceInstanceTimer !== null) clearTimeout(serviceInstanceTimer);
+  serviceInstanceTimer = null;
 }
 
 
@@ -173,8 +192,10 @@ async function fetchServices() {
 // Side effect: also refreshes servicesCache so subsequent sync reads
 // (`getServiceForFnId` for the badge, `loadAllServiceFnIds` for the
 // sidebar filter) see the freshest data without a duplicate roundtrip.
-async function refreshServicesCache() {
-  servicesCache = await fetchServices();
+async function refreshServicesCache(context) {
+  const cache = await fetchServices();
+  if (context && !serviceContextCurrent(context)) return null;
+  servicesCache = cache;
   return servicesCache;
 }
 
@@ -302,6 +323,7 @@ async function saveService(existingId, fnId, data) {
   // that branch's ExecutionContext. We always emit the key so a PUT
   // can switch a service from "any branch" to "this branch" and back.
   if (data.branchId) body.set('branch-id', data.branchId);
+  if (!existingId && data.createId) body.set('create-id', data.createId);
   let url;
   let method = 'POST';
   if (tenantServiceMode()) {
@@ -366,8 +388,9 @@ async function reconcileServices() {
 // pod). Deliberately minimal: enabled? + restart-policy + save/delete. Emits the
 // SAME class names + `data-existing-service-id` the server partial does, so the
 // shared `wireServicePopoverHandlers` binds it unchanged — and the absent
-// cardinality / branch / pool-size controls default to singleton / none there.
-function tenantServicePopoverHtml(fnEntity, svc) {
+// cardinality / pool-size controls default to singleton / none there. The
+// branch is resolved explicitly and is read-only on this dedicated form.
+function tenantServicePopoverHtml(fnEntity, svc, branch) {
   const existingId = gdEscapeHtml(svc?.id || '');
   const enabled = svc ? !!svc['enabled?'] : true;
   const policy = svc?.['restart-policy'] || 'always';
@@ -389,8 +412,9 @@ function tenantServicePopoverHtml(fnEntity, svc) {
     +     '<div class="service-popover-policy-label">Restart policy</div>'
     +     radio('always', 'Always') + radio('on-failure', 'On failure') + radio('never', 'Never')
     +   '</div>'
-    +   '<p class="service-popover-note">Runs on your dedicated executor. '
-    +     'Live run status is not shown here yet.</p>'
+    +   '<p class="service-popover-note">Branch: ' + gdEscapeHtml(branch.label) + '</p>'
+    +   '<p class="service-popover-note">Runs on your dedicated executor.</p>'
+    +   (existingId ? '<div class="service-popover-live" aria-live="polite">Loading running copies…</div>' : '')
     + '</div>'
     + '<div class="service-popover-actions">'
     +   '<button class="service-popover-save-btn" data-existing-service-id="' + existingId + '">'
@@ -403,18 +427,67 @@ function tenantServicePopoverHtml(fnEntity, svc) {
 }
 
 
-async function showTenantServicePopover(el, fnEntity, anchorEl) {
-  // Fresh desired-state read — the badge cache may be empty/stale, and the
-  // popover must reflect the current row so a save is an update, not a dup.
-  let svc = null;
-  try { await refreshServicesCache(); svc = getServiceForFnId(fnEntity.id); }
-  catch (_) { /* fall through — render the create form */ }
-  if (servicePopoverFnId !== fnEntity.id) return; // superseded by a newer open
-  el.innerHTML = tenantServicePopoverHtml(fnEntity, svc);
-  wireServicePopoverHandlers(el, fnEntity);
-  presentServicePopover(el, anchorEl);
+async function serviceBranchForDialog(svc, context) {
+  const response = await authFetch(API.api_branches);
+  if (!response.ok) throw new Error('Branch lookup failed (HTTP ' + response.status + ')');
+  const body = await response.json();
+  const rows = Array.isArray(body) ? body : body?.branches;
+  if (!Array.isArray(rows)) throw new Error('Branch lookup unavailable');
+  // Existing rows keep their original branch, including legacy null. New
+  // services require the exact active branch; lookup failure never means main.
+  if (svc && !svc['branch-id']) return {id: null, label: 'Default branch (legacy service)'};
+  const branch = rows.find(row => svc ? row.id === svc['branch-id'] : row.name === context.branch);
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(branch?.id || '')
+      || !branch.name) throw new Error('Service branch unavailable');
+  return {id: branch.id, label: branch.name};
 }
 
+async function readServiceInstances(serviceId) {
+  const response = await authFetch('/partials/service-instances?service-id=' + encodeURIComponent(serviceId));
+  if (!response.ok) throw new Error('Running copies unavailable (HTTP ' + response.status + ')');
+  const html = await response.text();
+  const holder = document.createElement('div');
+  holder.innerHTML = html;
+  const rows = holder.querySelector('.service-popover-instances');
+  const raw = rows?.dataset.instanceCount;
+  const count = Number(raw);
+  if (rows?.dataset.serviceId !== serviceId || !/^\d+$/.test(raw || '') || !Number.isSafeInteger(count)) {
+    throw new Error('Running copies unavailable');
+  }
+  return {count, html};
+}
+
+async function refreshServiceInstances(el, serviceId, context) {
+  const host = el.querySelector('.service-popover-live');
+  if (!host || !serviceContextCurrent(context)) return;
+  try {
+    const result = await readServiceInstances(serviceId);
+    if (!serviceContextCurrent(context)) return;
+    host.innerHTML = result.html;
+  } catch (error) {
+    if (!serviceContextCurrent(context)) return;
+    host.textContent = error.message;
+  }
+  serviceInstanceTimer = setTimeout(() => refreshServiceInstances(el, serviceId, context), 4000);
+}
+
+async function showTenantServicePopover(el, fnEntity, anchorEl, context) {
+  try {
+    const cache = await fetchServices();
+    if (!serviceContextCurrent(context)) return;
+    if (!Array.isArray(cache?.services)) throw new Error('Service lookup unavailable');
+    servicesCache = cache;
+    const svc = getServiceForFnId(context.fnId);
+    const branch = await serviceBranchForDialog(svc, context);
+    if (!serviceContextCurrent(context)) return;
+    el.innerHTML = tenantServicePopoverHtml(fnEntity, svc, branch);
+    wireServicePopoverHandlers(el, fnEntity, context, branch.id);
+    presentServicePopover(el, anchorEl);
+    if (svc) void refreshServiceInstances(el, svc.id, context);
+  } catch (error) {
+    if (serviceContextCurrent(context)) showServiceError(el, anchorEl, error.message);
+  }
+}
 
 function showTenantPopoverBody(el, anchorEl, bodyHtml) {
   el.innerHTML = bodyHtml;
@@ -427,13 +500,17 @@ function showTenantPopoverBody(el, anchorEl, bodyHtml) {
 async function showServicePopover(fnEntity, anchorEl) {
   if (!fnEntity || !anchorEl) return;
   const el = ensureServicePopoverEl();
-  servicePopoverFnId = fnEntity.id; // supersession token for the awaits below
+  if (serviceInstanceTimer !== null) clearTimeout(serviceInstanceTimer);
+  serviceInstanceTimer = null;
+  const context = {fnId: fnEntity.id, session: serviceSessionKey(),
+    branch: typeof getCurrentBranchName === 'function' ? getCurrentBranchName() : null};
+  servicePopoverContext = context;
   el.textContent = '';
   if (isRealTenant()) {
     // A tenant never reaches the platform server partial (it reads the
     // tenant-forbidden :service). Dedicated tier → the management form; any
     // other tenant tier → an upgrade note.
-    if (tenantServiceMode()) { await showTenantServicePopover(el, fnEntity, anchorEl); return; }
+    if (tenantServiceMode()) { await showTenantServicePopover(el, fnEntity, anchorEl, context); return; }
     showTenantPopoverBody(el, anchorEl, ''
       + '<div class="service-popover-header">'
       +   '<span class="service-popover-title">Service</span>'
@@ -445,33 +522,25 @@ async function showServicePopover(fnEntity, anchorEl) {
       + '</div>');
     return;
   }
-  const showError = (msg) => {
-    el.textContent = '';
-    const err = document.createElement('div');
-    err.className = 'service-popover-error';
-    err.setAttribute('role', 'alert');
-    err.textContent = msg;
-    el.appendChild(err);
-    presentServicePopover(el, anchorEl);
-  };
+  const showError = (message) => showServiceError(el, anchorEl, message);
   let resp;
   try {
     resp = await authFetch(
       '/partials/service-popover?fn-id=' + encodeURIComponent(fnEntity.id));
   } catch (err) {
-    if (servicePopoverFnId !== fnEntity.id) return; // superseded
+    if (!serviceContextCurrent(context)) return; // superseded
     showError('Failed to load service settings: ' + (err?.message || 'network error'));
     return;
   }
-  if (servicePopoverFnId !== fnEntity.id) return; // superseded
+  if (!serviceContextCurrent(context)) return; // superseded
   if (!resp.ok) {
     showError('Failed to load service settings (HTTP ' + resp.status + ')');
     return;
   }
   const html = await resp.text();
-  if (servicePopoverFnId !== fnEntity.id) return; // superseded
+  if (!serviceContextCurrent(context)) return; // superseded
   el.innerHTML = html;
-  wireServicePopoverHandlers(el, fnEntity);
+  wireServicePopoverHandlers(el, fnEntity, context);
   presentServicePopover(el, anchorEl);
 }
 
@@ -479,7 +548,7 @@ async function showServicePopover(fnEntity, anchorEl) {
 // Bind close / save / delete handlers to the swapped partial body.
 // The save and delete buttons carry `data-existing-service-id` —
 // non-empty → PUT/DELETE that id, empty → POST a new row.
-function wireServicePopoverHandlers(el, fnEntity) {
+function wireServicePopoverHandlers(el, fnEntity, context, tenantBranchId) {
   const close = el.querySelector('.service-popover-close');
   if (close) {
     close.addEventListener('click', (e) => {
@@ -494,10 +563,12 @@ function wireServicePopoverHandlers(el, fnEntity) {
     const originalLabel = saveBtn.textContent;
     saveBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
+      if (!serviceContextCurrent(context)) return;
       saveBtn.disabled = true;
       saveBtn.textContent = 'Saving…';
       const enabled = !!el.querySelector('.service-popover-enabled')?.checked;
-      const branchId = el.querySelector('.service-popover-branch-select')?.value || null;
+      const branchId = tenantServiceMode() ? tenantBranchId
+        : el.querySelector('.service-popover-branch-select')?.value || null;
       const policy = el.querySelector('input[name="service-restart-policy"]:checked')?.value
                      || 'always';
       const cardinality = el.querySelector('input[name="service-cardinality"]:checked')?.value
@@ -506,18 +577,26 @@ function wireServicePopoverHandlers(el, fnEntity) {
       // Save + reconcile are TWO independent calls with different
       // failure consequences (see prior version for full rationale).
       let resp;
+      let ticket;
       try {
-        resp = await saveService(existingId, fnEntity.id,
-                                 { enabled, restartPolicy: policy, cardinality, branchId, poolSize });
+        if (!existingId && typeof gdTourBeginServiceCreation === 'function') {
+          ticket = gdTourBeginServiceCreation({id: context.fnId, name: fnEntity.name}, branchId);
+        }
+        resp = await saveService(existingId, context.fnId,
+                                 { enabled, restartPolicy: policy, cardinality, branchId, poolSize, createId: ticket?.id });
+        if (ticket) gdTourServiceCreationResult(ticket, resp);
       } catch (err) {
+        if (!serviceContextCurrent(context)) return;
         alert('Save failed (network error): ' + (err?.message || err));
         saveBtn.disabled = false;
         saveBtn.textContent = originalLabel;
         return;
       }
+      if (!serviceContextCurrent(context)) return;
       if (!resp?.ok) {
         const text = (resp && typeof extractResponseError === 'function')
           ? await extractResponseError(resp) : 'network error';
+        if (!serviceContextCurrent(context)) return;
         alert('Save failed (' + (resp?.status) + '): ' + String(text).slice(0, 300));
         saveBtn.disabled = false;
         saveBtn.textContent = originalLabel;
@@ -528,7 +607,7 @@ function wireServicePopoverHandlers(el, fnEntity) {
       // reconcile catches anything else.
       try {
         const rec = await reconcileServices();
-        if (rec && !rec.ok) {
+        if (serviceContextCurrent(context) && rec && !rec.ok) {
           alert('Saved but reconcile failed — restart the pod or call '
                 + 'POST /api/services/reconcile manually.');
         }
@@ -539,8 +618,9 @@ function wireServicePopoverHandlers(el, fnEntity) {
       // badge (including the one just created) render empty until a reload
       // or filter toggle. Re-fetch, then rebuild overlays so the badge
       // appears immediately.
-      try { await refreshServicesCache(); } catch (_) { servicesCache = null; }
-      closeServicePopoverAndRebuild(fnEntity.id);
+      if (!serviceContextCurrent(context)) return;
+      try { await refreshServicesCache(context); } catch (_) { servicesCache = null; }
+      if (serviceContextCurrent(context)) closeServicePopoverAndRebuild(fnEntity.id);
     });
   }
 
@@ -549,23 +629,27 @@ function wireServicePopoverHandlers(el, fnEntity) {
     const existingId = delBtn.dataset.existingServiceId || '';
     delBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
+      if (!serviceContextCurrent(context)) return;
       if (!confirm('Delete the :service for :' + (fnEntity.name || '(anonymous)')
                    + '? The running fn will stop on reconcile.')) return;
       delBtn.disabled = true;
       try {
         const r = await deleteService(existingId);
+        if (!serviceContextCurrent(context)) return;
         if (!r?.ok) {
           alert('Delete failed (' + (r?.status) + ')');
           delBtn.disabled = false;
           return;
         }
         await reconcileServices();
+        if (!serviceContextCurrent(context)) return;
         // Re-prime the cache + rebuild overlays (see the save handler) so
         // the removed badge disappears immediately instead of every badge
         // going blank until reload.
-        try { await refreshServicesCache(); } catch (_) { servicesCache = null; }
-        closeServicePopoverAndRebuild(fnEntity.id);
+        try { await refreshServicesCache(context); } catch (_) { servicesCache = null; }
+        if (serviceContextCurrent(context)) closeServicePopoverAndRebuild(fnEntity.id);
       } catch (err) {
+        if (!serviceContextCurrent(context)) return;
         alert('Delete failed (network error): ' + (err?.message || err));
         delBtn.disabled = false;
       }
@@ -584,6 +668,11 @@ installPopoverDismiss({
 });
 
 
+window.addEventListener?.('gd-auth-changed', () => {
+  hideServicePopover();
+  servicesCache = null;
+});
+window.readServiceInstances = readServiceInstances;
 window.showServicePopover = showServicePopover;
 window.hideServicePopover = hideServicePopover;
 window.loadAllServiceFnIds = loadAllServiceFnIds;

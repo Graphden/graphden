@@ -10,7 +10,7 @@
 //
 // Coverage (Phase A–E):
 //   A. ⚙ button enabled on the probe; popover opens in CREATE mode.
-//   B. Title / Save / no Delete button / branch-picker / no sibling-warn.
+//   B. Title / Save / no Delete button / exact active branch / no sibling-warn.
 //   C. Create & reconcile — :service row persists, reconciler tracks
 //      the run in the `running` atom.
 //   D. Re-open popover → EDIT mode (title flips, Delete appears,
@@ -171,17 +171,29 @@ async function openServicePopover(page) {
     // ===================================================================
     // Phase A: open the popover via the actual ⚙ gear button.
     // ===================================================================
+    const currentBranchName = await page.evaluate(() => getCurrentBranchName() || 'main');
+    const visibleBranches = await api(page, 'GET', '/api/branches');
+    const currentBranch = (Array.isArray(visibleBranches) ? visibleBranches : visibleBranches.branches)
+      ?.find(row => row.name === currentBranchName);
+    assert(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(currentBranch?.id || ''),
+           'current branch resolves to its exact visible identity');
     let opened = await openServicePopover(page);
     assert(opened, '⚙ button enabled + popover opens (service-eligible)');
 
     const createState = await page.evaluate(() => {
       const p = document.querySelector('.service-popover.visible');
+      const branchSelect = p.querySelector('.service-popover-branch-select');
+      const branchNote = Array.from(p.querySelectorAll('.service-popover-note'))
+        .find(note => note.textContent.trim().startsWith('Branch: '));
       return {
         title: p.querySelector('.service-popover-title')?.textContent,
         saveLabel: p.querySelector('.service-popover-save-btn')?.textContent,
         deleteBtnExists: !!p.querySelector('.service-popover-delete-btn'),
-        branchPickerOptionCount: p.querySelectorAll(
-          '.service-popover-branch-select option').length,
+        branchId: branchSelect?.value || null,
+        branchLabel: branchSelect
+          ? branchSelect.selectedOptions[0]?.textContent.trim()
+          : branchNote?.textContent.trim().slice('Branch: '.length),
+        readOnlyBranch: !branchSelect && !!branchNote,
         siblingWarnPresent: !!p.querySelector('.service-popover-sibling-warn'),
       };
     });
@@ -192,15 +204,26 @@ async function openServicePopover(page) {
            'save button reads "Create & reconcile"');
     assert(!createState.deleteBtnExists,
            'no Delete button — nothing exists to delete yet');
-    assert(createState.branchPickerOptionCount >= 2,
-           'branch picker carries (any) + main: ' + createState.branchPickerOptionCount);
+    assert(createState.branchLabel === currentBranch.name,
+           'service dialog displays the captured current branch label');
+    assert(createState.readOnlyBranch || createState.branchId === currentBranch.id,
+           'editable branch selection carries the captured current branch UUID');
     assert(!createState.siblingWarnPresent,
            'no cross-branch sibling-warn at create time');
 
     // Click Create & reconcile.
-    await page.evaluate(() => {
-      document.querySelector('.service-popover-save-btn').click();
-    });
+    const createPath = await page.evaluate(() => new URL(tenantServiceMode()
+      ? API.api_orgs_services_create : API.api_entities_type('service'), window.location.origin).pathname);
+    const [createRequest] = await Promise.all([
+      page.waitForRequest(request => request.method() === 'POST'
+        && new URL(request.url()).pathname === createPath,
+      {timeout: 30000}),
+      page.evaluate(() => {
+        document.querySelector('.service-popover-save-btn').click();
+      }),
+    ]);
+    assert(new URLSearchParams(createRequest.postData()).get('branch-id') === currentBranch.id,
+           'service create submits the exact captured branch UUID');
     // Poll from Node side — page.waitForFunction with an async
     // predicate had inconsistent timing here (predicate returns a
     // Promise; the polling loop sometimes saw the Promise as truthy
@@ -231,6 +254,8 @@ async function openServicePopover(page) {
     assert(persistedSvc.running,
            'reconciler tracked the start in the running atom: '
            + JSON.stringify(persistedSvc.running).slice(0, 200));
+    assert(persistedSvc['branch-id'] === currentBranch.id,
+           'running service retains the submitted branch identity');
 
     // ===================================================================
     // Phase B: re-open popover → EDIT mode.

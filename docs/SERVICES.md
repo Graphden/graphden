@@ -6,6 +6,10 @@ also write `:service` rows directly through `/api/entities/service`.
 The reconciler turns enabled rows into running futures, supervises
 startup failures, and stops them on shutdown.
 
+For a public URL that invokes a handler once per request, see
+[Temporary HTTP handlers](TEMPORARY_HTTP.md). That finite host uses the existing
+HTTP origin or isolated apps domain and does not start a persistent service.
+
 Reconcile fires on integrant init, on every CRUD mutation, on a
 `service:*` NOTIFY from a sibling pod, **and on a periodic tick**
 (`:exec/service-reconciler`, ~15s). The tick makes the reconciler

@@ -5,7 +5,8 @@
    `resolve-endpoint` turns a service fn's id into `{:host :port :url}`:
    from a LIVE instance (a row whose heartbeat is fresh and that has a
    port) of the fn's enabled `:service` row on the caller's branch —
-   preferring a copy on this very pod — else from the `resolver` seam an
+   preferring a copy on this very pod — then from a finite HTTP publication
+   on that exact branch, else from the `resolver` seam an
    addon installs (on the cloud a tenant fn is served as an `:app-route`
    behind a public domain, and service-to-service traffic goes through
    that domain like any outbound call — no internal address to exempt
@@ -25,6 +26,12 @@
                  service rows resolve. `defonce` so a namespace reload keeps
                  the installed fn."}
   resolver
+  (atom nil))
+
+
+(defonce ^{:doc "The finite HTTP host's `(ctx, fn-id) → endpoint` callback.
+                 Installed and cleared with the branch router lifecycle."}
+  temporary-resolver
   (atom nil))
 
 
@@ -90,6 +97,7 @@
   (let [rows (service-rows-for storage fn-id)
         instance (first (live-instances-for storage rows (or (:executor-id ctx) "local")))
         resolved (or (some-> instance instance-endpoint)
+                     (when-let [f @temporary-resolver] (f ctx fn-id))
                      (when-let [f @resolver] (f ctx fn-id)))]
     (or resolved
         (throw (ex-info (str "Service is not running: no live instance for fn " fn-id

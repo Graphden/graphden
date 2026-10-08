@@ -91,6 +91,15 @@
     (is (= :refinement/violated (ex-of "ensure-non-empty-text" 42)))))
 
 
+(deftest non-blank-text-validates-without-changing-the-value
+  (testing "a non-whitespace character suffices; surrounding whitespace is preserved"
+    (doseq [v ["hello" " x " "\t\nvalue\t"]]
+      (is (= v (call "ensure-non-blank-text" v)))))
+  (testing "blank text and non-text values never acquire the refinement"
+    (doseq [v ["" " " "\t\r\n" nil 42]]
+      (is (= :refinement/violated (ex-of "ensure-non-blank-text" v))))))
+
+
 (deftest concrete-colors-validate-at-the-boundary
   (testing "HEX colors retain spelling and alpha"
     (doseq [v ["#abc" "#AbCd" "#12aBcD" "#11223380"]]

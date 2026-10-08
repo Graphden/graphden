@@ -139,6 +139,16 @@ window.selectJustCreatedFn = selectJustCreatedFn;
 
 
 async function selectFnByName(name, updateHistory = true) {
+  // Identity bookmarks retain ordinary navigation across renamed functions.
+  // An exact subtree read supplies the authoritative row in this branch.
+  if (/^fn:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(name)) {
+    const id = name.slice(3).toLowerCase();
+    if (await ensureSubtreeFor(id) && graphData.fns.some(fn => fn.id === id)) {
+      if (typeof gdShellSurface === 'function') gdShellSurface('build');
+      selectFn(id, updateHistory);
+    }
+    return;
+  }
   // Fast path: already-loaded fn (simple or qualified name).
   let fn = (graphData.fns || []).find(f => f.name === name);
   if (!fn && lookups) {

@@ -132,12 +132,12 @@
     ;; content. Same class as the :graph-* reads.
     :view-members :explorer-view :explorer-views
     :loop-until-interrupted :lt :lte :map :map-xf
-    :materialize-package-fns :max-memory :merge :merge-branch!
+    :materialize-package-fns :materialize-package-receipt :max-memory :merge :merge-branch!
     :merge-post-commit! :merge-skipped-branch-local
     :middleware :missing-package-dependencies :mod :mul :name
     :namespace-external-deps :neg :neq
     :nil? :non-blank? :not :notify-after-write :or :os-arch
-    :os-load-average :os-name :os-processors :package-upsert-pin
+    :os-load-average :os-name :os-processors :package-upsert-pin :package-pin-receipt
     :package-version-materialized? :pairs->map :parse-constraint
     :incompatible-dependency-bumps  :parse-edn :parse-graph-edn :parse-int :parse-json :parse-uuid :pg-execute
     :pg-notify :pg-query :pg-tx :pick-encoding
@@ -207,7 +207,8 @@
    SECRETS.md § T3 set. Before changing this, for each ADDED name ask \"does it
    pass/transform caller content? then it needs `:taint-propagate?`\"; for each
    REMOVED name confirm it genuinely no longer handles content."
-  #{:fork-package-fns :materialize-package-fns :rewrite-refs-to-version
+  #{:fork-package-fns :materialize-package-fns :materialize-package-receipt
+    :package-pin-receipt :rewrite-refs-to-version
     ;; Parsing echoes command fields; preview/apply derive descriptors and
     ;; outcomes from those fields. None is a declassification boundary.
     :parse-inheritance-command :preview-inheritance :apply-inheritance

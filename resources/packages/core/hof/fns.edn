@@ -3,7 +3,7 @@
 
 
 {:namespace "core.hof"
- :description "Higher-order primitives — map/filter/reduce/comp/partial and friends. The `:func` slot is `:fn`-typed so the executor passes a HOF-wrapped callable, not a value."
+ :description "Higher-order primitives — map, filter, reduce, comp and call. Function-typed slots accept callables: the executor wraps an ordinary function reference or evaluates a reference whose return type is itself a function."
  :fns
  [{:name :map
    :description "Apply a callable to each item in a collection (Clojure's `map`), eagerly — `:coll` is required. The transducer form is `:map-xf`."

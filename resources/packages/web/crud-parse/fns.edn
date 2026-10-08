@@ -54,7 +54,7 @@
   {:name :_form-body-kw-callback
    :description "HOF callback — `:str-to-keyword` of the `:value` HOF-iteration key."
    :parent :str-to-keyword
-   :args {:string {:as :value}}}
+   :args {:string {:as :value :type :text}}}
 
   {:name :parse-form-body-kw
    :description "Parse an `application/x-www-form-urlencoded` request body into a `{keyword value}` map. Empty map when body missing or content-type doesn't match. Keyword-keyed variant of `:parse-form-body`."
@@ -843,6 +843,27 @@
                                                        :key {:value :branch-id}
                                                        :default nil}}}}]}}
           :else {:value {}}}}
+
+  {:name :_parse-svc-form-create-id-fragment
+   :description "Optional create-only service UUID. Presence with invalid text is an error, never a request for a random identity."
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :create-id}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :id}]
+                        :vals [{:parent :assert-some
+                                :args {:value {:parent :parse-uuid
+                                               :args {:string {:parent :get
+                                                               :args {:coll {:as :form-data}
+                                                                      :key {:value :create-id}
+                                                                      :default nil}}}}}}]}}
+          :else {:value {}}}}
+
+  {:name :parse-service-create-from-form
+   :description "Create-only service form parsing: ordinary service fields plus optional create-id, mapped to the inserted UUID. Updates use parse-service-from-form and cannot retarget identity."
+   :parent :merge
+   :args {:maps [:parse-service-from-form :_parse-svc-form-create-id-fragment]
+          :form-data {:type :_form-data-shape}}}
 
   {:name :parse-service-from-form
    :description "Extract a `:service` entity's field map. `:fn-id` (UUID) names the fn the supervisor must run; `:enabled?` (bool, encoded `\"true\"`/`\"false\"` in form-data) toggles reconciliation; `:restart-policy` (`:always` / `:on-failure` / `:never`) selects the supervisor strategy; `:cardinality` (`:singleton` / `:per-pod` / `:pool`, optional) says how many pods run it at once; `:pool-size` (int, optional) is the pod count for `:pool`; `:branch-id` (UUID, optional) scopes the run to a specific branch's ExecutionContext. Empty form values clear the corresponding column."

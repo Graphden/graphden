@@ -8,16 +8,19 @@
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.compile.deps :as deps]
+    [graphden.executor.context :as context]
     [graphden.executor.interface :as exec]
     [graphden.executor.runtime :as rt]
     [graphden.executor.test-setup :as setup]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.test-infra.impls :as impls]))
 
 
 (use-fixtures :once
   (setup/create-container-fixture)
   exec/with-clean-registry
-  exec/with-isolated-rich-types)
+  exec/with-isolated-rich-types
+  (impls/impls-fixture "core" "logic"))
 
 
 (defn- graph-rows
@@ -109,3 +112,47 @@
           (is (= {:got (:id target)} (exec/execute ctx (:id outer) {})))
           (is (= [] @calls)))
         (finally (sp/close storage))))))
+
+
+(deftest identity-consts-in-a-list-preserve-target-ids-test
+  (let [storage (setup/create-branch-versioned-test-storage)
+        calls (atom [])]
+    (try
+      (exec/register-base-fn! :const (impls/impl-of :const))
+      (let [const-fn (setup/create-base-fn! storage "const")
+            value-slot (setup/create-slot! storage "value" :any)
+            _ (setup/attach-slot! storage (:id const-fn) (:id value-slot) 0)
+            list-type (sp/create-entity storage :fn
+                                        {:element-fn-id (:uuid setup/primitive-fn-ids)})
+            targets (mapv (fn [suffix]
+                            (let [base (:target (build-consumer! storage suffix calls))]
+                              (setup/create-composed-fn! storage (str "target-" suffix) (:id base))))
+                          ["list-a" "list-b"])
+            adapters (mapv (fn [target]
+                             (let [adapter (setup/create-composed-fn!
+                                             storage (str "_identity-" (:name target)) (:id const-fn))]
+                               (sp/create-entity storage :binding
+                                                 {:fn-id (:id adapter) :slot-id (:id value-slot)
+                                                  :ref-fn-id (:id target)
+                                                  :type-override-fn-id (:fn-ref setup/primitive-fn-ids)})
+                               adapter))
+                           targets)
+            collection (setup/create-composed-fn! storage "identity-list" (:id const-fn))
+            binding-row (sp/create-entity storage :binding
+                                          {:fn-id (:id collection) :slot-id (:id value-slot)
+                                           :type-override-fn-id (:id list-type) :list-append true})
+            _ (doseq [[position adapter] (map-indexed vector adapters)]
+                (sp/create-entity storage :binding-list-item
+                                  {:binding-id (:id binding-row) :position position
+                                   :ref-fn-id (:id adapter)}))
+            ctx (setup/default-registry-ctx storage)
+            expected (mapv :id targets)]
+        (testing "ordinary const bindings return identities through ordinary list items"
+          (is (= expected (vec (exec/execute ctx (:id collection) {}))))
+          (is (= [] @calls)))
+        (testing "renaming a target preserves the stored references and their values"
+          (sp/update-entity storage :fn (:id (first targets)) {:name "renamed-list-target"})
+          (context/invalidate-graph-cache! ctx [(:id (first targets))])
+          (is (= expected (vec (exec/execute ctx (:id collection) {}))))
+          (is (= [] @calls))))
+      (finally (sp/close storage)))))

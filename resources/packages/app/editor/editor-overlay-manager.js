@@ -185,8 +185,7 @@ function createPlaceholderOverlay(node, container) {
   // Compare mode: an arg UNBOUND here but bound there shows what it is
   // bound to there, right on the placeholder — even when the reader
   // cannot bind it (signed out, package-owned).
-  const diffD = (arg?.name && typeof gdDiffSlotDetails === 'function')
-    ? gdDiffSlotDetails(arg['fn-id'])?.[arg.name] || null : null;
+  const diffD = typeof gdDiffArgDetails === 'function' ? gdDiffArgDetails(arg) : null;
   // A package-synced fn's bindings are re-synced on every boot and the API
   // refuses the write with a 403 — so don't offer a "+" that cannot land.
   // Extend it into a child and the placeholder appears there instead.

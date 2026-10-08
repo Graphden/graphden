@@ -220,9 +220,12 @@ function enterExtendEditMode(fn, anchorEl, opts) {
         const nsId = ns.nsId;
         pendingNsId = nsId || null;
         const fields = { name: newName, 'parent-ids': fn.id, 'namespace-id': nsId };
+        const receipt = typeof gdTourBeginEntityCreation === 'function'
+          ? gdTourBeginEntityCreation('fn', newName, {'namespace-id': nsId || null}) : null;
         try {
           const r = await postEntity('fn', fields);
           if (!(r && r.status >= 200 && r.status < 300)) return false;
+          if (typeof gdTourRecordEntityCreation === 'function') gdTourRecordEntityCreation(receipt, r);
           if (typeof gdRememberLastNs === 'function') gdRememberLastNs(nsId || null);
           if (!useSiteArg) {
             if (typeof gdUndoRecordCreatedFn === 'function') {

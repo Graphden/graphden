@@ -2,7 +2,7 @@
 //
 //   1. compose a filter set (uses + namespace + effect) from the chips;
 //   2. "Save in the graph…" → an fn extending `explorer-view` with the
-//      axes bound (through the entity API, like every editor form);
+//      all axes bound through the atomic view save API;
 //   3. `GET /api/views` lists it with the axes decoded;
 //   4. the view chip's popover shows it under "In the graph"; applying it
 //      restores the same chips and the same member list;
@@ -20,10 +20,27 @@ const {assert, newContext, api, deleteFnByName, BASE} = require('./edit-test-hel
 
 const VIEW_A = 'e2e-app-on-const';
 const VIEW_B = 'e2e-app-on-const-handlers';
+const VIEW_C = 'e2e-full-view-' + process.pid + '-' + Date.now().toString(36);
+const VIEW_D = VIEW_C + '-computed';
 
 (async () => {
   const {browser, page} = await newContext(chromium);
   let failed = false;
+  const ownedViews = new Set();
+  const ownedAdapters = new Set();
+  page.on('request', request => {
+    if (request.method() !== 'POST' || new URL(request.url()).pathname !== '/api/views/save') return;
+    const command = request.postDataJSON();
+    if ([VIEW_A, VIEW_C, VIEW_D].includes(command?.name) && command['create-id']) ownedViews.add(command['create-id']);
+  });
+  async function recordFreshAdapters(id) {
+    const data = await api(page, 'GET', '/api/graph/entities?scope=subtree&root-id=' + encodeURIComponent(id));
+    const bindingIds = new Set((data.bindings || []).filter(row => row['fn-id'] === id).map(row => row.id));
+    const refs = new Set((data['list-items'] || []).filter(row => bindingIds.has(row['binding-id'])).map(row => row['ref-fn-id']));
+    // These are adapters of a brand-new view (no previous owner bindings).
+    // Never collect the target identities stored inside their fn-ref values.
+    for (const row of data.fns || []) if (refs.has(row.id) && /^_view-(uses|views)-/.test(row.name || '')) ownedAdapters.add(row.id);
+  }
   try {
     for (const n of [VIEW_B, VIEW_A]) await deleteFnByName(page, n).catch(() => {});
     await page.goto(BASE + '/');
@@ -48,14 +65,17 @@ const VIEW_B = 'e2e-app-on-const-handlers';
     assert(before.length > 0, 'the chip set has members (' + before.length + ')');
 
     // 2. Save in the graph…
-    await page.evaluate((nm) => gdShareViewToGraph(nm), VIEW_A);
+    await page.click('#gd-ws-chip');
+    await page.fill('#gd-ws-pop .gd-views-input', VIEW_A);
+    await page.getByRole('button', {name: 'Save in graph', exact: true}).click();
     await page.waitForFunction((nm) => document.querySelector('#gd-ws-chip b')?.textContent === nm,
       VIEW_A, {timeout: 60000, polling: 200});
-    await page.waitForTimeout(1500);
+    await page.keyboard.press('Escape');
 
     // 3. listed with the axes decoded
     const views = await api(page, 'GET', '/api/views');
     const a = (Array.isArray(views) ? views : []).find((v) => v.name === VIEW_A);
+    if (a) { ownedViews.add(a.id); await recordFreshAdapters(a.id); }
     assert(a, 'GET /api/views lists the saved view (got: ' + JSON.stringify(views).slice(0, 200) + ')');
     assert(a && a.filters.uses.join() === constId && a.filters.namespaces.join() === 'app'
       && a.filters.effects.join() === 'network',
@@ -102,6 +122,7 @@ const VIEW_B = 'e2e-app-on-const-handlers';
     const bId = (await api(page, 'GET', '/api/graph/entities?scope=search&q=' + VIEW_B)).fns
       .find((f) => f.name === VIEW_B)?.id;
     assert(bId, 'the second view fn was created');
+    if (bId) ownedViews.add(bId);
     await api(page, 'POST', '/api/entities/binding', 'fn-id=' + bId + '&slot-id=' + slots.also + '&ref-fn-id=' + a.id);
     await api(page, 'POST', '/api/entities/binding', 'fn-id=' + bId + '&slot-id=' + slots.name + '&value=' + encodeURIComponent('"handler"'));
     await page.waitForTimeout(800);
@@ -130,6 +151,68 @@ const VIEW_B = 'e2e-app-on-const-handlers';
     const ranB = (runB.result?.fns || []).map((f) => f.id).sort();
     assert(JSON.stringify(ranB) === JSON.stringify(expectedIds),
       '▶ Run of the composed view fn agrees (' + runB.status + ', ' + ranB.length + ')');
+
+    // Full draft → atomic create → typed edit → atomic update. All axes
+    // round-trip together, including two uses and two also references.
+    await page.evaluate(({constId, evId, aId, bId}) => {
+      gdClearFilters();
+      gdAddUses({id: constId, name: 'const'}); gdAddUses({id: evId, name: 'explorer-view'});
+      gdAddView({id: aId, name: 'first view'}); gdAddView({id: bId, name: 'second view'});
+      gdToggleKind('apps'); gdToggleKind('fn'); gdToggleKind('failed'); gdToggleKind('lint');
+      gdToggleNamespace('app'); gdToggleExclude('app.tests');
+      gdToggleEffect('db'); gdToggleUnused(); gdSetName('no-fixture-members');
+    }, {constId, evId, aId: a.id, bId});
+    await page.click('#gd-ws-chip');
+    await page.fill('#gd-ws-pop .gd-views-input', VIEW_C);
+    await page.getByRole('button', {name: 'Device only', exact: true}).click();
+    assert(await page.evaluate(name => gdReadViews().some(view => view.name === name), VIEW_C), 'secondary Device only stores the full browser view');
+    assert(!(await api(page, 'GET', '/api/views')).some(view => view.name === VIEW_C), 'Device only does not create a graph view');
+    await page.getByRole('button', {name: 'Save in graph', exact: true}).click();
+    await page.waitForFunction(name => gdActiveViewName() === name && gdActiveViewId(), VIEW_C, {timeout: 60000});
+    const cId = await page.evaluate(() => gdActiveViewId());
+    ownedViews.add(cId); await recordFreshAdapters(cId);
+    await page.keyboard.press('Escape');
+    await page.click('#gd-ws-chip');
+    await page.click('#gd-ws-pop [data-edit-view="' + cId + '"]');
+    await page.fill('.gd-filter-add-pop input[aria-label="Only names containing"]', 'edited-fixture-members');
+    await page.press('.gd-filter-add-pop input[aria-label="Only names containing"]', 'Enter');
+    await page.keyboard.press('Escape');
+    await page.click('#gd-ws-chip');
+    await page.getByRole('button', {name: 'Save changes', exact: true}).click();
+    await page.waitForFunction(() => gdEditingGraphView() === null, null, {timeout: 60000});
+    await page.keyboard.press('Escape');
+    const c = (await api(page, 'GET', '/api/views')).find(row => row.id === cId);
+    assert(c?.filters.uses.length === 2 && c.filters.also.length === 2, 'frontend edit retains all uses/also identities');
+    assert(c?.filters.kinds.includes('apps') && c.filters.kinds.includes('fn')
+      && c.filters.problems.join() === 'failed,lint' && c.filters.effects.join() === 'db'
+      && c.filters.namespaces.join() === 'app' && c.filters.exclude.join() === 'app.tests'
+      && c.filters.unused === true && c.filters.name === 'edited-fixture-members', 'frontend edit retains every other predicate');
+    const actualMembers = await api(page, 'POST', '/api/views/members', {...c.filters, views: c.filters.also});
+    const actualRun = await api(page, 'POST', '/api/execute', {'fn-id': cId, args: {}, 'persist?': false});
+    assert(actualRun.status === 'succeeded' && JSON.stringify((actualRun.result?.fns || []).map(row => row.id).sort())
+      === JSON.stringify((actualMembers.fns || []).map(row => row.id).sort()), 'saved all-axis query runs with the same membership');
+    await page.screenshot({path: '/tmp/graphden-view-full-filters.png'});
+    // A genuine computed clause is not a lossy projection into editable chips.
+    await page.evaluate(() => { gdClearFilters(); gdToggleKind('fn'); });
+    const computed = await page.evaluate(name => gdShareViewToGraph(name), VIEW_D);
+    ownedViews.add(computed.id);
+    const strRows = await api(page, 'GET', '/api/graph/entities?scope=search&q=str');
+    const strId = strRows.fns.find(row => row.name === 'str' && !row['parent-ids']?.length)?.id;
+    assert(strId, 'computed text source identity is installed');
+    const bindingResult = await api(page, 'POST', '/api/entities/binding',
+      'fn-id=' + computed.id + '&slot-id=' + slots.name + '&ref-fn-id=' + strId);
+    assert(!(bindingResult.status >= 400) && bindingResult.ok !== false, 'computed name binding saved through real graph API');
+    await page.evaluate(async () => { gdInvalidateSharedViews(); await gdFetchSharedViews(true); });
+    await page.click('#gd-ws-chip');
+    const unsupportedEdit = page.locator('#gd-ws-pop [data-edit-view="' + computed.id + '"]');
+    assert(await unsupportedEdit.isDisabled(), 'computed graph condition cannot be overwritten by the chip editor');
+    assert(/graph/.test(await unsupportedEdit.getAttribute('title')), 'disabled edit explains the graph alternative');
+    const openComputed = page.getByRole('button', {name: 'Open view fn ' + VIEW_D, exact: true});
+    assert(await openComputed.isEnabled(), 'Edit graph remains available');
+    await openComputed.click();
+    await page.waitForFunction(id => selectedFnId === id, computed.id, {timeout: 30000});
+    assert(await page.evaluate(id => selectedFnId === id, computed.id), 'graph fallback navigates by exact UUID');
+
 
     // A graph write while a server-side filter is on re-evaluates the
     // members (quietly — the list never blanks): add a fn that uses const
@@ -194,8 +277,17 @@ const VIEW_B = 'e2e-app-on-const-handlers';
     console.log('FAIL: ' + (err && err.message || err));
     await page.screenshot({path: '/tmp/edit-explorer-views-graph-fail.png'}).catch(() => {});
   } finally {
+    for (const n of ['e2e-uses-const-probe']) await deleteFnByName(page, n).catch(() => {});
+    for (const id of [...ownedViews].reverse()) {
+      const result = await api(page, 'DELETE', '/api/entities/fn/' + id).catch(error => ({error: error.message}));
+      if (result?.ok === false || result?.error || (result?.status >= 400 && result.status !== 404)) { failed = true; console.log('FAIL: exact owned view cleanup failed'); }
+    }
+    for (const id of ownedAdapters) {
+      const result = await api(page, 'DELETE', '/api/entities/fn/' + id).catch(error => ({error: error.message}));
+      if (result?.ok === false || result?.error || (result?.status >= 400 && result.status !== 404)) { failed = true; console.log('FAIL: owned view adapter cleanup failed'); }
+    }
+    await page.evaluate(name => gdDeleteView(name), VIEW_C).catch(() => {});
     await page.close().catch(() => {});
-    for (const n of ['e2e-uses-const-probe', VIEW_B, VIEW_A]) await deleteFnByName(page, n).catch(() => {});
     await browser.close();
   }
   process.exit(failed ? 1 : 0);

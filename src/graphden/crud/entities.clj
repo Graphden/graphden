@@ -27,6 +27,7 @@
     [graphden.crud.entities.record-type :as record-type]
     [graphden.crud.entities.seq :as seq-ops]
     [graphden.crud.entities.tighten :as tighten]
+    [graphden.crud.entities.views :as views]
     [graphden.crud.package-guard :as pkg-guard]
     [graphden.crud.request :as request]
     [graphden.crud.secret-shape :as secret-shape]
@@ -898,8 +899,8 @@
 (def graph-index               entity-list/graph-index)
 (def graph-subtree             entity-list/graph-subtree)
 (def graph-full                entity-list/graph-full)
-(def view-members              entity-list/view-members)
-(def list-explorer-views       entity-list/list-explorer-views)
+(def view-members              views/view-members)
+(def list-explorer-views       views/list-explorer-views)
 
 (def parse-create-record-type        record-type/parse-create-record-type)
 (def apply-create-record-type-body   record-type/apply-create-record-type-body)

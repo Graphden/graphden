@@ -40,6 +40,13 @@ never offers to install one.
 
 ## 2. Data model
 
+For graph compositions, `set-package-pin` and `remove-package-pin` are
+the programmatic pin API for the current branch. `remove-package-pin`
+accepts `:pkg-name` and returns `{:ok true :package-name … :removed …}`;
+repeating it after removal returns `:removed false`. HTTP uninstall also
+checks an optional expected pin UUID against the selected row before
+deleting it, so tutorial cleanup cannot remove a replacement pin.
+
 One artifact entity, three companions (`src/graphden/schema/packages/schema.clj`):
 
 | Entity | Role | Tenancy classification |

@@ -605,6 +605,14 @@
                           :aria-label "Version history"}}
           :children [{:value "⌛"}]}}
 
+  {:name :_partial-row-actions-http-host-button
+   :parent :hiccup
+   :args {:tag "button"
+          :attrs {:value {:type "button" :class "action-icon"
+                          :data-action "http-host" :title "Publish a temporary public HTTP handler"
+                          :aria-label "Publish HTTP"}}
+          :children ["HTTP"]}}
+
   ;; ⚙ Service — two flavours based on whether the fn has free args
   ;; (blocked → disabled + reason in the title + class).
   {:name :_partial-row-actions-service-button-enabled
@@ -764,6 +772,7 @@
                   :_partial-row-actions-run-button
                   :_partial-row-actions-history-button
                   :_partial-row-actions-service-button
+                  :_partial-row-actions-http-host-button
                   :_partial-row-actions-apps-button
                   :_partial-row-actions-rename-button-or-owned-nil
                   :_partial-row-actions-extend-button

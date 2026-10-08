@@ -20,172 +20,15 @@ const {chromium} = require('playwright');
 const {assert, newContext, api} = require('./edit-test-helpers');
 const {
   hardCleanup, waitTourTitle, clickTourButton, tourWhere, filterAndSelect,
-  extendViaRowActions, openRowActionsFor, finishAndDelete, openOperateSection,
+  extendViaRowActions, openRowActionsFor, finishAndDelete, openOperateSection, setFnDescription,
   waitUntil,
 } = require('./tutorial-tour-helpers');
 
 
-// Set a fn's description through the ⋯ → i inline editor — the edit lesson
-// 28 asks for twice, and the cheapest write that cuts a new `:fn-version`
-// (a binding write would NOT: it versions the binding, not the fn).
 let _lessonFnId = null;
-
 async function setDescription(page, text) {
-  // ⋯ → i TOGGLES a pinned description tooltip, and only a pinned one grows
-  // the ✎ Edit button — so this is a sequence with state, not three
-  // independent clicks. Drive it as one attempt and retry the whole thing:
-  // a half-open tooltip left by the previous attempt is exactly what makes
-  // the save fire against a null entity id ("Save failed — check that
-  // you're signed in", on a session that is signed in).
-  for (let attempt = 0; attempt < 4; attempt++) {
-    // Reset: close whatever is open, unpin, drop the row-actions popover.
-    // The pinned/editing flags are module-scope `let`s in
-    // editor-tooltips.js — not window properties, so poking
-    // `window.descriptionTooltipSticky` never touched them: after the
-    // FIRST save the tooltip stayed pinned, the next ⋯ → i UNPINNED it
-    // (the action toggles), no Edit button grew, and all three attempts
-    // fell through in seconds. The tooltip's own × button is the one
-    // public path that resets both flags — use it.
-    await page.evaluate(() => {
-      // Edit mode renders no × — leave it through Cancel first (clears the
-      // editing flag and re-renders read mode, × included), then unpin.
-      const cancel = Array.from(document.querySelectorAll('.description-tooltip-btn'))
-        .find((b) => b.textContent.trim() === 'Cancel');
-      if (cancel) cancel.click();
-      const close = document.querySelector('.description-tooltip-close');
-      if (close) close.click();
-    });
-    await page.keyboard.press('Escape').catch(() => {});
-    // KEEP THE SLEEP. Escape is asynchronous in its EFFECT — the editor's
-    // keydown handler unpins and closes on a later tick — and there is no
-    // single observable that says "Escape has been processed": waiting for
-    // the row-actions popover to be gone is not it (tried, two gate runs,
-    // `setDescription` failed 5/5 both times). Until the editor exposes
-    // that state, this is a settle by measurement, not by hope.
-    await page.waitForTimeout(400);
-
-    // THIS fn's ⋯, not the first in the document: right after the extend the
-    // canvas can still be the parent's card alone, and its ⋯ → i → Save is a
-    // PUT on package-owned `const` — 400, and a "first draft" that never
-    // existed (one 2026-09-05 gate).
-    await openRowActionsFor(page, 'tutorial-versioned', 30000);
-    await page.waitForSelector('.row-actions-popover [data-action="description"]',
-                               {timeout: 15000});
-    await page.evaluate(() => {
-      document.querySelector('.row-actions-popover [data-action="description"]')
-        .dispatchEvent(new MouseEvent('click', {bubbles: true}));
-    });
-
-    const opened = await page.waitForFunction(
-      () => Array.from(document.querySelectorAll('.description-tooltip-btn'))
-        .some((b) => /Edit/.test(b.textContent)),
-      null, {timeout: 10000, polling: 200}).then(() => true).catch(() => false);
-    if (!opened) {
-      console.log('  attempt ' + (attempt + 1) + ': the pinned tooltip never grew its Edit button');
-      continue;
-    }
-
-    await page.evaluate(() => {
-      Array.from(document.querySelectorAll('.description-tooltip-btn'))
-        .find((b) => /Edit/.test(b.textContent)).click();
-    });
-    const editing = await page.waitForSelector('.description-tooltip-textarea',
-                                               {timeout: 10000})
-      .then(() => true).catch(() => false);
-    if (!editing) {
-      console.log('  attempt ' + (attempt + 1) + ': Edit did not open the textarea');
-      continue;
-    }
-
-    const editorColors = await page.evaluate(() => {
-      const ta = document.querySelector('.description-tooltip-textarea');
-      return {
-        dark: document.body.classList.contains('theme-dark'),
-        editor: getComputedStyle(ta).backgroundColor,
-        page: getComputedStyle(document.body).backgroundColor,
-      };
-    });
-    assert(editorColors.dark && editorColors.editor === editorColors.page,
-      'description editor uses the dark form surface: ' + JSON.stringify(editorColors));
-
-    await page.evaluate((v) => {
-      const ta = document.querySelector('.description-tooltip-textarea');
-      ta.value = v;
-      ta.dispatchEvent(new Event('input', {bubbles: true}));
-      Array.from(document.querySelectorAll('.description-tooltip-btn'))
-        .find((b) => b.textContent.trim() === 'Save').click();
-    }, text);
-
-    // Confirm against the SERVER, not `window.graphData`: the editor's graph
-    // state is a script-scope binding the modules share, and what a page
-    // evaluate sees under `window.graphData` is not reliably the same object
-    // the description patch wrote into.
-    // Pin the check to THE fn this lesson created: a same-named leftover
-    // from an earlier run (cleanup is best-effort) once satisfied a
-    // name-only match while this fn's own save was still out, and the
-    // helper moved on with one version fewer than the lesson expects.
-    if (!_lessonFnId) {
-      _lessonFnId = await page.evaluate(async () => {
-        const r = await fetch('/api/graph/entities?scope=search&q=tutorial-versioned');
-        const j = await r.json();
-        const mine = (j.fns || []).filter((f) => f.name === 'tutorial-versioned');
-        // the fresh one carries no description yet
-        return (mine.find((f) => !f.description) || mine[0])?.id || null;
-      });
-    }
-    // `waitUntil` (a Node-side poll over `page.evaluate`), NOT
-    // `waitForFunction` with an async predicate: Playwright does not await
-    // the predicate's Promise, and a pending Promise is truthy — so the old
-    // form returned on its first tick, "landed" was always true, and the
-    // check above this comment was decorative for as long as it existed.
-    const landed = await waitUntil(page, async ([v, id]) => {
-      const r = await fetch('/api/graph/entities?scope=search&q=tutorial-versioned');
-      const j = await r.json();
-      return (j.fns || []).some((f) => f.id === id && f.description === v);
-    }, [text, _lessonFnId], 20000);
-    if (landed) {
-      // The server has the value; the CLIENT leaves edit mode when its own
-      // save request returns (the textarea gives way to read mode). Wait
-      // for that — showDescriptionTooltip is a no-op while editing, so the
-      // next call's ⋯ → i would otherwise open nothing.
-      const left = await page.waitForFunction(
-        () => !document.querySelector('.description-tooltip-textarea'),
-        null, {timeout: 30000, polling: 100}).then(() => true).catch(() => false);
-      if (!left) {
-        // The value is on the server; the client's own save round-trip is
-        // still out under load — Cancel clears the editing flag without
-        // touching what landed.
-        console.log('  save landed but the tooltip is still in edit mode — cancelling the stale editor');
-        await page.evaluate(() => {
-          Array.from(document.querySelectorAll('.description-tooltip-btn'))
-            .find((b) => b.textContent.trim() === 'Cancel')?.click();
-        });
-      }
-      // Leave the tooltip closed and unpinned for the next call.
-      await page.evaluate(() => {
-        const close = document.querySelector('.description-tooltip-close');
-        if (close) close.click();
-      });
-      return;
-    }
-    // Why it did not land. The editor puts the reason in the tooltip's
-    // error line — a refusal the server explained, a missing id, a real
-    // auth problem. Before this, three silent retries and a bare "did not
-    // land" was all a failing gate reported, and diagnosing it meant
-    // reproducing a load-dependent flake by hand.
-    const why = await page.evaluate(() => {
-      const err = document.querySelector('.description-tooltip-error');
-      return {
-        error: err && err.style.display !== 'none' ? err.textContent.trim() : null,
-        editing: !!document.querySelector('.description-tooltip-textarea'),
-        tooltipOpen: !!document.querySelector('.description-tooltip'),
-      };
-    }).catch(() => null);
-    console.log('  attempt ' + (attempt + 1) + ' did not land: ' + JSON.stringify(why));
-  }
-  throw new Error('setDescription("' + text + '") did not land after 3 attempts');
+  _lessonFnId = await setFnDescription(page, 'tutorial-versioned', text);
 }
-
 
 async function openVersionHistory(page) {
   // The lesson fn's ⋯ — `const`'s history has rows enough to satisfy the
@@ -260,7 +103,7 @@ async function openVersionHistory(page) {
 
     await waitTourTitle(page, 'Open the history', 30000);
     await openVersionHistory(page);
-    await waitTourTitle(page, 'Restore the first draft', 60000);
+    await waitTourTitle(page, 'Same history in the Inspector', 60000);
 
     const before = await page.evaluate(() =>
       document.querySelectorAll('.fn-versions-row').length);
@@ -271,13 +114,30 @@ async function openVersionHistory(page) {
         .map((r) => r.textContent.trim()).join(' | '));
     assert(/first draft/.test(rowText) && /second draft/.test(rowText),
       'both descriptions are in the timeline (got: ' + rowText.slice(0, 160) + ')');
+    const currentRestore = await page.evaluate(() => {
+      const row = Array.from(document.querySelectorAll('.fn-versions-row'))
+        .find((item) => /second draft/.test(item.textContent));
+      const button = row?.querySelector('.fn-versions-restore');
+      return {disabled: button?.disabled, scope: button?.title,
+        header: document.querySelector('.fn-versions-header')?.textContent};
+    });
+    assert(currentRestore.disabled && /argument bindings/i.test(currentRestore.scope)
+      && /field versions/.test(currentRestore.header),
+      'current fields cannot be restored again; scope is explicit: ' + JSON.stringify(currentRestore));
+
+    // Restore through the Inspector's Versions tab. It uses the same partial
+    // as the popover, so its controls must receive the same mount/action wiring.
+    await page.keyboard.press('Escape');
+    await page.click('#gd-insp-tab-history');
+    await page.waitForSelector('#gd-insp-history .fn-versions-row', {timeout: 20000});
+    await waitTourTitle(page, 'Restore the first draft', 60000);
 
     assert(await page.evaluate(() => _tourStep().check.kind === 'fn-field'
       && !_tourCheckPasses(_tourStep().check)), 'the second draft cannot complete restoration');
 
     // Restore the "first draft" row — the dialog handler accepts the confirm.
     await page.evaluate(() => {
-      const row = Array.from(document.querySelectorAll('.fn-versions-row'))
+      const row = Array.from(document.querySelectorAll('#gd-insp-history .fn-versions-row'))
         .find((r) => /first draft/.test(r.textContent) && !/second draft/.test(r.textContent));
       row.querySelector('.fn-versions-restore').click();
     });

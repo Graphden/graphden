@@ -9,6 +9,39 @@ function _tourSessionBranch() {
     ? getCurrentBranchName() : (new URLSearchParams(location.search).get('branch') || 'main');
 }
 
+// Capture the actual successful creation before branch switching reloads the
+// page. A name-only on-branch check cannot establish ownership of an old branch.
+function gdTourRecordBranchCreation(branch) {
+  const step = _tourStep();
+  if (!_tourState || !_tourPrincipalMatches(_tourState)
+      || step?.creates?.type !== 'branch' || step.creates.name !== branch?.name
+      || !branch.id || !branch['base-branch-id']) return;
+  if (_tourState.created.some((row) => row.type === 'branch' && row.name === branch.name)) return;
+  _tourState.created.push({type: 'branch', id: branch.id, name: branch.name,
+    'base-branch-id': branch['base-branch-id']});
+  _tourSaveState();
+}
+window.gdTourRecordBranchCreation = gdTourRecordBranchCreation;
+
+// The view writer accepts this fresh UUID separately from an update identity.
+// Persist it before POST; a lost response must never trigger name-only cleanup.
+function _tourTrackGraphViewCreation(command) {
+  const step = _tourStep();
+  if (!_tourState || step?.creates?.type !== 'fn' || step.creates.name !== command.name
+      || !_tourPrincipalMatches(_tourState) || _tourState.activeBranch !== _tourSessionBranch()
+      || !command['create-id'] || _tourState.created.some(row => row.id === command['create-id'])) return;
+  _tourState.created.push({type: 'fn', id: command['create-id'], name: command.name,
+    'namespace-id': command['namespace-id']});
+  _tourState.activeBranch = _tourSessionBranch();
+  _tourSaveState();
+}
+
+function _tourRejectGraphViewCreation(command) {
+  if (!_tourState || !command['create-id']) return;
+  _tourState.created = _tourState.created.filter(row => row.id !== command['create-id']);
+  _tourSaveState();
+}
+
 function _tourExpectedBranch(saved) {
   const lesson = (_tourLessons?.lessons || []).find((l) => l.id === saved.lessonId);
   const check = lesson?.steps?.[saved.step]?.check;
@@ -17,6 +50,11 @@ function _tourExpectedBranch(saved) {
 
 function _tourOwnedBranch(saved) {
   return saved?.sandboxBranch || null;
+}
+
+function _tourCleanupBranch(saved) {
+  return _tourOwnedBranch(saved) || saved?.cleanupBranch || saved?.activeBranch
+    || saved?.branch || _tourSessionBranch();
 }
 
 function _tourSessionPrincipal() {
@@ -94,6 +132,12 @@ function _tourUnavailableContext(branch) {
 
 async function _tourConfirmCleanupContext(branch) {
   if (!await _tourConfirmPrincipal(_tourState)) return false;
+  // Revoking a public URL is identity/owner-scoped, so it is safe even if
+  // either lesson branch disappeared. Graph cleanup still requires its
+  // original branch and retains the existing fail-closed boundary below.
+  if (typeof _tourDeleteHttpPublications === 'function') {
+    await _tourDeleteHttpPublications(_tourState?.created || []);
+  }
   if (branch === _tourSessionBranch() && await _tourBranchAvailable(branch)) {
     // The response may have refreshed the org header while it was in flight.
     return _tourConfirmPrincipal(_tourState);
@@ -112,8 +156,11 @@ async function _tourRestoreSession(saved, cleanup = false, nextLessonId = null) 
   _tourSaveState();
   if (!await _tourConfirmPrincipal(_tourState)) return false;
   const ending = cleanup || saved.phase === 'cleanup';
-  const branch = (ending && _tourOwnedBranch(saved))
-    || saved.activeBranch || saved.sandboxBranch || saved.branch || 'main';
+  if (ending && typeof _tourDeleteHttpPublications === 'function') {
+    await _tourDeleteHttpPublications(_tourState.created || []);
+  }
+  const branch = ending ? _tourCleanupBranch(saved)
+    : saved.activeBranch || saved.sandboxBranch || saved.branch || 'main';
   if (branch !== _tourSessionBranch() && typeof switchToBranch === 'function') {
     if (!await _tourBranchAvailable(branch)) {
       _tourUnavailableContext(branch);
@@ -147,4 +194,94 @@ function _tourKeepAndContinue(lessonId, branch) {
   } else {
     startTutorialIsolated(lessonId);
   }
+}
+
+
+// Org-mode entry: run the lesson on its OWN branch — create
+// tutorial-<lesson>-<suffix> off main, switch (the reload resumes the
+// saved tour state on the branch), and the end-of-tour dialog offers
+// branch deletion = full rollback. Falls back to a plain in-place tour
+// when branch creation is unavailable (401/403/older deploys).
+async function startTutorialIsolated(lessonId) {
+  const lessons = await _tourFetchLessons();
+  if (!lessons) {
+    if (typeof gdToast === 'function') gdToast('Tutorial unavailable on this deployment');
+    return false;
+  }
+  const canBranch = window.API && API.api_branches
+    && typeof switchToBranch === 'function';
+  const onMain = canBranch && _tourSessionBranch() === 'main';
+  // A lesson that MANAGES branches itself (lesson 23) opts out of the
+  // scratch-branch isolation — double-wrapping broke its own "main
+  // never saw it" beat and leaked the scratch branch.
+  const lesson = (lessons.lessons || []).find((l) => l.id === lessonId);
+  if (lesson?.['in-place']) return startTutorial(lessonId);
+  if (!canBranch || !onMain) return startTutorial(lessonId);
+  const branch = 'tutorial-' + lessonId + '-'
+    + Math.random().toString(36).slice(2, 6);
+  const principal = _tourSessionPrincipal();
+  let base;
+  let id;
+  try {
+    base = await _tourReadBranchBase('main');
+    if (!_tourPrincipalMatches({principal})) throw new Error('Tutorial principal changed');
+    id = window.crypto.randomUUID();
+  } catch (_) {
+    if (typeof gdToast === 'function') gdToast('Starting in place (no branch)');
+    return startTutorial(lessonId);
+  }
+  // Save exact create-only ownership BEFORE sending the mutation. A reload or
+  // ambiguous response restores cleanup on main, without claiming a name.
+  const pending = {type: 'branch', name: branch, id, 'base-branch-id': base.id, receipt: 'pending'};
+  const state = {lessonId, step: 0, created: [pending], activeBranch: 'main',
+    cleanupBranch: 'main', phase: 'cleanup', principal};
+  _tourState = state;
+  _tourSaveState();
+  try {
+    const response = await authFetch(API.api_branches, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id, name: branch, 'base-branch-id': base.id}),
+    });
+    const body = await response.json().catch(() => null);
+    if (_tourState !== state || !_tourPrincipalMatches(state)) return false;
+    if ((response.status >= 400 && response.status < 500) || (response.ok && body?.ok === false)) {
+      _tourState.created = [];
+      _tourSaveState();
+      if (typeof gdToast === 'function') gdToast('Starting in place (no branch)');
+      return startTutorial(lessonId);
+    }
+    const row = body?.branch;
+    if (!response.ok || body?.ok !== true || row?.id !== id
+        || row.name !== branch || row['base-branch-id'] !== base.id) throw new Error('Unconfirmed branch creation');
+    pending.receipt = 'created';
+  } catch (_) {
+    if (_tourState === state) {
+      if (typeof gdToast === 'function') gdToast('Branch creation could not be confirmed. Cleanup remains available in Lessons.');
+      await _tourEnd();
+    }
+    return false;
+  }
+  Object.assign(state, {sandboxBranch: branch, sandboxBranchId: id,
+    sandboxBaseBranchId: base.id, activeBranch: branch});
+  delete state.phase;
+  _tourSaveState();
+  if (/^#@/.test(location.hash)) {
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (_) {}
+  }
+  switchToBranch(branch);
+  return true;
+}
+
+// The public URL is a separately revocable artifact. Stage its server-create
+// UUID before POST; never recover it by function name after a lost response.
+function _tourTrackHttpPublication(id, fn) {
+  const step = _tourStep();
+  if (!_tourState || step?.creates?.type !== 'http-publication'
+      || step.creates.name !== fn.name || !id) return;
+  if (_tourState.created.some(created => created.type === 'http-publication' && created.id === id)) return;
+  if (!_tourState.sessionId) _tourState.sessionId = crypto.randomUUID();
+  _tourState.created.push({type: 'http-publication', id, name: fn.name, 'fn-id': fn.id,
+    'namespace-id': fn['namespace-id'] ?? null, sessionId: _tourState.sessionId,
+    branch: _tourSessionBranch(), principal: _tourSessionPrincipal()});
+  _tourSaveState();
 }

@@ -585,8 +585,15 @@
    :return-type :int
    :effects #{:db}}
 
+  {:name :materialize-package-receipt
+   :description "Materialize and publish the bundle, returning the count and only namespace rows actually created inside the materialization transaction. Existing namespaces are never claimed."
+   :args {:ns-root {:type :text} :version {:type :text} :fns {:type [:list :jsonb]}}
+   :return-type {:materialized :int
+                 :created-namespaces [:list {:id :uuid :name :text :parent-id :nullable-uuid}]}
+   :effects #{:db}}
+
   {:name :rewrite-refs-to-version
-   :description "Rewrite apply-core: repoint the project's OWN refs from the OLD to the NEW version of the package rooted at `:ns-root` (package-internal refs untouched; shared-remap invariant) + delta-invalidate the owner fns whose compiled form changed — a coupled write+invalidation pair, same class as fork / materialize. Returns the rewritten-ref count. The rest of update/rollback — materialize-if-needed, pin repoint — is graph composition (`:_upd-rewritten`)."
+   :description "Rewrite apply-core: repoint the project's OWN refs from the OLD to the NEW version of the package rooted at `:ns-root` (package-internal refs untouched; shared-remap invariant) + delta-invalidate the owner fns whose compiled form changed — a coupled write+invalidation pair, same class as fork / materialize. Returns the rewritten-ref count. The rest of update/rollback — materialize-if-needed, pin repoint — is graph composition (`:_upd-ok`)."
    :args {:ns-root {:type :text :description "Package ns-root."}
           :old-version {:type :text :description "Currently pinned version."}
           :new-version {:type :text :description "Target version (already resolved)."}
@@ -906,8 +913,27 @@
    :args {:coll {:parent :query-entities
                  :args {:entity-type {:value "package-version"} :where :_wd-where}}}}
 
+  {:name :_wd-selected-id
+   :parent :get
+   :args {:coll {:as :withdraw-row} :key {:value :id} :default nil}}
+
+  {:name :_wd-expected-id
+   :parent :query-param
+   :args {:request {:as :request} :param-name {:value "expected-id"}}}
+
+  {:name :_wd-identity-mismatch?
+   :parent :and
+   :args {:values [{:parent :some? :args {:value :_wd-expected-id}}
+                   {:parent :not :args {:value {:parent :equal?
+                                                :args {:a :_wd-expected-id
+                                                       :b {:parent :to-str :args {:value :_wd-selected-id}}}}}}]}}
+
+  {:name :_wd-err-identity
+   :parent :json-envelope-response
+   :args {:envelope {:value {:ok false :reason "identity-changed" :http-status 409}}}}
+
   {:name :_wd-missing?
-   :parent :nil? :args {:value :_wd-row}}
+   :parent :nil? :args {:value {:as :withdraw-row}}}
 
   ;; Pins are per-branch rows keyed by package name + VERSION — any branch
   ;; counts, so the lookup deliberately drops the branch filter the install
@@ -929,7 +955,7 @@
   {:name :_wd-do-delete
    :description "Capability-gated delete of the :package-version row (via `:withdraw-package-apply`, which enforces `:publish-packages` at the core — mirrors publish). NOT the bare `:delete-entity`, which was auth-only and let a non-publisher erase published versions."
    :parent :withdraw-package-apply
-   :args {:id {:parent :get :args {:coll :_wd-row :key {:value :id} :default nil}}}}
+   :args {:id :_wd-selected-id}}
 
   {:name :_wd-ok-envelope
    :parent :assoc
@@ -954,13 +980,15 @@
   {:name :_wd-result
    :parent :cond
    :args {:clauses [:_wd-missing? :_wd-err-missing
+                    :_wd-identity-mismatch? :_wd-err-identity
                     :_wd-pinned?  :_wd-err-pinned
                     {:value true} :_wd-ok]}}
 
   {:name :withdraw-package-handler
    :lambda-params [:request]
    :description "Ring handler for DELETE /api/packages/withdraw — deletes the `(name, version)` :package-version row unless some branch still pins the package."
-   :parent :_wd-result}
+   :parent :_wd-result
+   :args {:withdraw-row :_wd-row}}
 
   {:name :api-packages-withdraw
    :description "DELETE /api/packages/withdraw?name=<pkg>&version=<v> — withdraw a published version. 409 while any branch pins it, 404 when the version is unknown. Auth-required."
@@ -1342,8 +1370,8 @@
    :args {:ns-root {:ref :_inst-i-ns-root :type :text}
           :version {:ref :_inst-i-resolved :type :text}
           :fns {:ref :_inst-i-fns :type [:list :jsonb]}}}
-  {:name :_inst-i-mat-count
-   :parent :materialize-package-fns
+  {:name :_inst-i-materialization
+   :parent :materialize-package-receipt
    :args {:ns-root {:ref :_inst-i-ns-root :type :text}
           :version {:ref :_inst-i-resolved :type :text}
           :fns {:ref :_inst-i-fns :type [:list :jsonb]}}}
@@ -1353,10 +1381,10 @@
   {:name :_inst-i-mat-maybe
    :parent :if
    :args {:test :_inst-i-materialized?
-          :then {:value nil}
-          :else :_inst-i-mat-count}}
+          :then {:value {:materialized 0 :created-namespaces []}}
+          :else :_inst-i-materialization}}
   {:name :_inst-i-pin
-   :parent :package-upsert-pin
+   :parent :package-pin-receipt
    :args {:pkg-name {:ref :_inst-op-name :type :text}
           :pkg-version {:ref :_inst-i-resolved :type :text}}}
   {:name :_inst-i-vq-ns
@@ -1370,12 +1398,21 @@
   {:name :_inst-i-secrets
    :parent :get
    :args {:coll :_inst-i-row :key {:value :secrets} :default {:value []}}}
+  {:name :_package-created-namespaces
+   :parent :get
+   :args {:coll {:as :materialization-receipt} :key {:value :created-namespaces} :default {:value []}}}
+
   {:name :_inst-ok
    :parent :zipmap
    :args {:keys [{:value :ok} {:value :name} {:value :version} {:value :namespace}
-                 {:value :needs-definition}]
+                 {:value :needs-definition} {:value :created-namespaces} {:value :pin}
+                 {:value :package-version-id} {:value :content-hash}]
           :vals [{:value true} :_inst-op-name :_inst-i-resolved :_inst-i-vq-ns
-                 :_inst-i-secrets]}}
+                 :_inst-i-secrets
+                 :_package-created-namespaces
+                 {:as :pin-receipt}
+                 {:parent :get :args {:coll :_inst-i-row :key {:value :id} :default nil}}
+                 {:parent :get :args {:coll :_inst-i-row :key {:value :content-hash} :default nil}}]}}
   {:name :_inst-rest-empty?
    :parent :empty?
    :args {:coll {:ref :_inst-rest :type [:list :any]}}}
@@ -1388,7 +1425,9 @@
           :else :_inst-advance}}
   {:name :_inst-write-then-continue
    :parent :do
-   :args {:steps [:_inst-i-mat-maybe :_inst-i-pin :_inst-after-write]}}
+   :args {:steps [{:as :materialization-receipt} {:as :pin-receipt} :_inst-after-write]
+          :materialization-receipt :_inst-i-mat-maybe
+          :pin-receipt :_inst-i-pin}}
   {:name :_inst-do-install
    :parent :if
    :args {:test :_inst-i-missing-any?
@@ -1558,8 +1597,8 @@
   {:name :_upd-mat-maybe
    :parent :if
    :args {:test :_upd-materialized?
-          :then {:value nil}
-          :else :_mat-count}}
+          :then {:value {:materialized 0 :created-namespaces []}}
+          :else :_mat-receipt}}
 
   {:name :_upd-rewrite
    :description "Repoint the project's own refs old→new — the coupled write+invalidate core of update/rollback."
@@ -1570,14 +1609,9 @@
           :fns {:ref :_pkgv-fns :type [:list :jsonb]}}}
 
   {:name :_upd-pin
-   :parent :package-upsert-pin
+   :parent :package-pin-receipt
    :args {:pkg-name {:as :pkg-name}
           :pkg-version {:ref :_pkgv-resolved :type :text}}}
-
-  {:name :_upd-rewritten
-   :description "Update/rollback write sequence: materialize the target if needed, rewrite the project's refs old→new, repoint the pin. Returns the rewritten-ref count (the trailing `:_upd-rewrite` ref is result-cached — it re-reads the count, it does not re-run the write)."
-   :parent :do
-   :args {:steps [:_upd-mat-maybe :_upd-rewrite :_upd-pin :_upd-rewrite]}}
 
   {:name :_upd-err-not-installed
    :parent :zipmap
@@ -1587,15 +1621,31 @@
   {:name :_upd-result
    :description "`{:ok :name :from :to :rewritten-refs}` over `:vals` — the update outcome."
    :parent :zipmap
-   :args {:keys [{:value :ok} {:value :name} {:value :from} {:value :to} {:value :rewritten-refs}]}}
+   :args {:keys [{:value :ok} {:value :name} {:value :from} {:value :to} {:value :rewritten-refs}
+                 {:value :created-namespaces} {:value :pin} {:value :package-version-id} {:value :content-hash}]}}
 
   {:name :_upd-noop
    :parent :_upd-result
-   :args {:vals [{:value true} {:as :pkg-name} :_upd-old :_pkgv-resolved {:value 0}]}}
+   :args {:vals [{:value true} {:as :pkg-name} :_upd-old :_pkgv-resolved {:value 0}
+                 {:value []} :_pin-row
+                 {:parent :get :args {:coll :_pkgv-row :key {:value :id} :default nil}}
+                 {:parent :get :args {:coll :_pkgv-row :key {:value :content-hash} :default nil}}]}}
+
+  {:name :_upd-ok-envelope
+   :parent :_upd-result
+   :args {:vals [{:value true} {:as :pkg-name} :_upd-old :_pkgv-resolved {:as :rewritten}
+                 :_package-created-namespaces
+                 {:as :pin-receipt}
+                 {:parent :get :args {:coll :_pkgv-row :key {:value :id} :default nil}}
+                 {:parent :get :args {:coll :_pkgv-row :key {:value :content-hash} :default nil}}]}}
 
   {:name :_upd-ok
-   :parent :_upd-result
-   :args {:vals [{:value true} {:as :pkg-name} :_upd-old :_pkgv-resolved :_upd-rewritten]}}
+   :description "Bind each write result once, then force materialization, ref rewrite and pin in that order before exposing their receipts."
+   :parent :do
+   :args {:steps [{:as :materialization-receipt} {:as :rewritten} {:as :pin-receipt} :_upd-ok-envelope]
+          :materialization-receipt :_upd-mat-maybe
+          :rewritten :_upd-rewrite
+          :pin-receipt :_upd-pin}}
 
   {:name :update-package-version
    :description "Update (or roll back) an installed package to a different version: materialize the target, REWRITE the project's own refs from the pinned version to the target (package-internal refs untouched), repoint the pin. Symmetric (older version = rollback). Pure graph :cond — rejects on not-installed / not-found / missing-dependencies; same-version is a no-op; the apply core (`:update-package-apply`) is the coupled write+invalidate unit."
@@ -1702,11 +1752,15 @@
           :fn-ns {:type :text :description "The fn's namespace; left as-is when not under ns-root."}}
    :return-type :text}
 
-  {:name :_mat-count
-   :parent :materialize-package-fns
+  {:name :_mat-receipt
+   :parent :materialize-package-receipt
    :args {:ns-root {:ref :_pkgv-ns-root :type :text}
           :version {:ref :_pkgv-resolved :type :text}
           :fns {:ref :_pkgv-fns :type [:list :jsonb]}}}
+
+  {:name :_mat-count
+   :parent :get
+   :args {:coll :_mat-receipt :key {:value :materialized} :default {:value 0}}}
 
   {:name :_mat-vq-ns
    :parent :version-qualified-ns
@@ -1744,6 +1798,12 @@
    :return-type :text
    :effects #{:db :time}}
 
+  {:name :package-pin-receipt
+   :description "Upsert this branch's pin and return the actual written row identity. Updating a pin preserves its UUID."
+   :args {:pkg-name {:type :text} :pkg-version {:type :text}}
+   :return-type {:id :uuid :package-name :text :version :text :branch-id :uuid}
+   :effects #{:db :time}}
+
   {:name :_pin-branch-text
    :parent :package-upsert-pin
    :args {:pkg-name {:as :pkg-name :type :text} :pkg-version {:as :pkg-version :type :text}}}
@@ -1761,6 +1821,10 @@
    :parent :query-entities
    :args {:entity-type {:value "package-install"} :where :_pins-where-branch}}
 
+  {:name :_inst-entry-id
+   :parent :to-str
+   :args {:value {:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}}}
+
   {:name :_inst-entry-name
    :parent :get :args {:coll {:as :item} :key {:value :package-name} :default nil}}
 
@@ -1777,26 +1841,26 @@
 
   {:name :_inst-entry
    :parent :zipmap
-   :args {:keys [{:value :package-name} {:value :version} {:value :branch-id} {:value :installed-at}]
-          :vals [:_inst-entry-name :_inst-entry-version :_inst-entry-branch :_inst-entry-at]}}
+   :args {:keys [{:value :package-name} {:value :version} {:value :branch-id} {:value :installed-at} {:value :id}]
+          :vals [:_inst-entry-name :_inst-entry-version :_inst-entry-branch :_inst-entry-at :_inst-entry-id]}}
 
   {:name :list-installed-packages
    :description "Every package pinned on the current branch — `[{:package-name :version :branch-id :installed-at} …]`. Powers GET /api/packages/installed and the editor's installed list. Pure graph composition."
    :parent :map
    :args {:func :_inst-entry :coll :_inst-rows}
    :return-type [:list {:package-name :any :version :any
-                        :branch-id :text :installed-at :text}]}
+                        :branch-id :text :installed-at :text :id :text}]}
 
   ;; Uninstall — pure graph composition: find the pin (shared
   ;; `:_pin-row` lookup), delete it when present, return the
   ;; idempotent envelope.
   {:name :_unpin-present?
    :parent :some?
-   :args {:value :_pin-row}}
+   :args {:value {:as :pin-row}}}
 
   {:name :_unpin-id
    :parent :get
-   :args {:coll :_pin-row :key {:value :id} :default nil}}
+   :args {:coll {:as :pin-row} :key {:value :id} :default nil}}
 
   {:name :_unpin-delete
    :parent :delete-entity
@@ -1813,10 +1877,16 @@
    :args {:keys [{:value :ok} {:value :package-name} {:value :removed}]
           :vals [{:value true} {:as :pkg-name} :_unpin-present?]}}
 
-  {:name :remove-package-pin
+  {:name :remove-package-pin-from-row
    :description "Drop the pin for `(current-branch, :pkg-name)` — uninstall. Idempotent; `:removed false` when nothing was pinned. Pure graph composition (`:do` forces the delete before the envelope)."
    :parent :do
    :args {:steps [:_unpin-maybe :_unpin-envelope]}
+   :return-type :keyword-map}
+
+  {:name :remove-package-pin
+   :description "Idempotent uninstall on the current branch; bind the selected pin row once before deleting its exact UUID."
+   :parent :remove-package-pin-from-row
+   :args {:pin-row :_pin-row}
    :return-type :keyword-map}
 
   ;; ---------------------------------------------------------------------
@@ -2336,14 +2406,32 @@
    :description "Nil-safe `(str name)` — narrows :query-param's :nullable-text to :text for :remove-package-pin (empty string → idempotent :removed false)."
    :parent :to-str :args {:value :_uninstall-pkg-name-raw}}
   {:name :_uninstall-do
-   :parent :remove-package-pin :args {:pkg-name :_uninstall-pkg-name}}
+   :parent :remove-package-pin-from-row :args {:pkg-name :_uninstall-pkg-name}}
+  {:name :_uninstall-expected-id
+   :parent :query-param
+   :args {:request {:as :request} :param-name {:value "expected-id"}}}
+  {:name :_uninstall-identity-mismatch?
+   :parent :and
+   :args {:values [{:parent :some? :args {:value :_uninstall-expected-id}}
+                   :_unpin-present?
+                   {:parent :not :args {:value {:parent :equal?
+                                                :args {:a :_uninstall-expected-id
+                                                       :b {:parent :to-str :args {:value :_unpin-id}}}}}}]}}
+  {:name :_uninstall-err-identity
+   :parent :json-envelope-response
+   :args {:envelope {:value {:ok false :reason "identity-changed" :http-status 409}}}}
+
   {:name :_uninstall-then-panel
    :description "Remove the pin, THEN render the refreshed panel — `:do` forces order so :list-installed-packages excludes the removed pin."
    :parent :do :args {:steps [:_uninstall-do :_pkg-panel-html]}}
   {:name :_uninstall-handler
    :lambda-params [:request]
    :description "Ring handler for DELETE /api/packages/uninstall — removes the pin and returns the refreshed Packages panel as text/html."
-   :parent :html-ok-response :args {:body :_uninstall-then-panel}}
+   :parent :if
+   :args {:test :_uninstall-identity-mismatch?
+          :then :_uninstall-err-identity
+          :else {:parent :html-ok-response :args {:body :_uninstall-then-panel}}
+          :pin-row :_pin-row :pkg-name :_uninstall-pkg-name}}
   {:name :api-packages-uninstall
    :description "DELETE /api/packages/uninstall?name=<pkg> — uninstall (unpin) a package from the current branch. Auth-required."
    :parent :delete
@@ -2443,13 +2531,27 @@
           :children [:_pkg-install-notice-maybe :_pkg-panel-body :_pkg-avail-details :_pkg-publish-details]}}
   {:name :_pkg-install-panel-html
    :parent :render-hiccup :args {:hiccup :_pkg-install-panel-root}}
-  {:name :_pkg-install-then-panel
-   :description "Install, THEN render the refreshed panel (with the needs-secrets notice when applicable) — `:do` forces order so :list-installed-packages includes the new pin."
-   :parent :do :args {:steps [:_pkg-install-do :_pkg-install-panel-html]}}
+  {:name :_package-panel-receipt-json
+   :parent :to-json-string
+   :args {:data {:as :outcome :type :keyword-map}}}
+  {:name :_package-panel-receipt-headers
+   :parent :zipmap
+   :args {:keys [{:value "Content-Type"} {:value "X-Graphden-Package-Receipt"}]
+          :vals [{:value "text/html; charset=utf-8"}
+                 {:parent :url-encode :args {:string :_package-panel-receipt-json}}]}}
+  {:name :_package-panel-receipt-ring
+   :parent :ring-response
+   :args {:status {:value 200} :headers :_package-panel-receipt-headers
+          :body {:as :panel-body :type :text}}}
+  {:name :package-panel-receipt-response
+   :description "Evaluate the mutation once before rendering the panel; preserve its exact receipt in an URL-encoded JSON response header for browser consumers."
+   :parent :do
+   :args {:steps [{:as :outcome :type :keyword-map} :_package-panel-receipt-ring]}}
   {:name :_pkg-install-panel-handler
    :lambda-params [:request]
-   :description "Ring handler for POST /api/packages/panel-install — installs and returns the refreshed Packages panel as text/html."
-   :parent :html-ok-response :args {:body :_pkg-install-then-panel}}
+   :description "Install and render the panel with the actual write receipt."
+   :parent :package-panel-receipt-response
+   :args {:outcome :_pkg-install-do :panel-body :_pkg-install-panel-html}}
   {:name :api-packages-panel-install
    :description "POST /api/packages/panel-install?name=<pkg>&version=<v> — install a published version from the editor panel; returns the refreshed panel HTML. Auth-required."
    :parent :post
@@ -2465,13 +2567,11 @@
   ;; ---------------------------------------------------------------------
   {:name :_pkg-update-do
    :parent :update-package-version :args {:pkg-name :_pkg-form-name :pkg-version :_pkg-form-version}}
-  {:name :_pkg-update-then-panel
-   :description "Update/rollback, THEN render the refreshed panel — `:do` forces order so the installed table shows the new version."
-   :parent :do :args {:steps [:_pkg-update-do :_pkg-panel-html]}}
   {:name :_pkg-update-panel-handler
    :lambda-params [:request]
-   :description "Ring handler for POST /api/packages/panel-update — updates and returns the refreshed Packages panel as text/html."
-   :parent :html-ok-response :args {:body :_pkg-update-then-panel}}
+   :description "Update/rollback and render the panel with the actual write receipt."
+   :parent :package-panel-receipt-response
+   :args {:outcome :_pkg-update-do :panel-body :_pkg-panel-html}}
   {:name :api-packages-panel-update
    :description "POST /api/packages/panel-update — update/rollback an installed package to the form-supplied version from the editor panel; returns the refreshed panel HTML. Auth-required."
    :parent :post

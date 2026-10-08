@@ -165,16 +165,17 @@
   {:name :account-menu-item-highlight :parent :zipmap
    :return-type :text-map
    :args {:keys ["background-color"] :vals [:account-menu-hover]}}
+  {:name :_account-menu-style :type {:selector :text :declarations :text-map}}
   {:name :_account-menu-hover-rule :parent :zipmap
-   :return-type {:selector :text :declarations :text-map}
+   :return-type :_account-menu-style
    :args {:keys [{:value :selector} {:value :declarations}]
           :vals ["& .auth-menu-item:hover" :account-menu-item-highlight]}}
   {:name :_account-menu-focus-rule :parent :zipmap
-   :return-type {:selector :text :declarations :text-map}
+   :return-type :_account-menu-style
    :args {:keys [{:value :selector} {:value :declarations}]
           :vals ["& .auth-menu-item:focus-visible" :account-menu-item-highlight]}}
   {:name :account-menu-styles :parent :list
-   :return-type [:list {:selector :text :declarations :text-map}]
+   :return-type [:list :_account-menu-style]
    :args {:items [{:value {:selector "&" :declarations {"display" "contents"}}}
                   {:value {:selector "& > .auth-menu-common" :declarations {"display" "contents"}}}
                   :_account-menu-hover-rule :_account-menu-focus-rule]}}

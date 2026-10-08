@@ -46,7 +46,7 @@ const OP_SECTION_LABELS = {
   grants: 'Grants', users: 'Members', roles: 'Roles', orgs: 'Organizations',
   packages: 'Packages', stats: 'Monitoring',
   'platform-access': 'Platform access', moderation: 'Moderation',
-  assets: 'Assets', queues: 'Queues', tests: 'Tests', debug: 'Debug', executors: 'Executor',
+  assets: 'Source files', queues: 'Queues', tests: 'Tests', debug: 'Debug', executors: 'Executor',
 };
 
 // Show one section's pane on a surface and mark its nav item; hide the rest.

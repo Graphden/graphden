@@ -166,6 +166,26 @@
      result, not the mechanism."))
 
 
+(defprotocol StorageBoundedQuery
+  "Complete owner-bounded reads with an identity-candidate resource budget.
+   Overflow is refused before payload/version reads; this is not pagination.
+   Only fn-slot/binding fn-id and list-item binding-id predicates
+   are supported; versioned ownership uses all matching version rows. Unknown decorators must explicitly opt in and preserve ACLs."
+
+  (query-identity-candidates
+    [this entity-name where version-source max-candidates]
+    "Returns bounded identity/ownership projections, without value data.
+     Refuses overflow before visibility filtering; never returns a truncated set.
+     version-source optionally supplies :version-entity/:version-id-field.
+     Vector metadata ::candidate-count retains the SQL count before filtering.")
+
+  (query-bounded-entities
+    [this entity-name where max-candidates]
+    "Returns the complete matching visible rows after ordinary resolution,
+     or refuses conservatively when identity candidates exceed the budget.
+     Vector metadata ::candidate-count charges the same candidate budget."))
+
+
 (defprotocol StorageBatchCRUD
   "Protocol for batch CRUD operations."
 

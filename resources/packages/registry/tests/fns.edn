@@ -126,6 +126,13 @@
   ;; =====================================================================
   ;; String-keyed maps are built with `:zipmap` at run time: a `{:value {"p" …}}`
   ;; literal round-trips through jsonb with its keys keywordised.
+  {:name :_review-test-expected-summary
+   :description "Construct an expected summary from literal fields; validate counts as non-negative without repeating the aggregation under test."
+   :parent :zipmap
+   :args {:keys [{:value :count} {:value :avg}]
+          :vals [{:as :count :type :non-negative-int}
+                 {:as :avg :type :numeric}]}}
+
   {:name :review-map-aggregates-count-and-rounded-average
    :description "`{name {:count n :avg x}}` — the average rounded HALF_UP to one decimal (17 / 4 = 4.25 → 4.3). Ratings whose mean is a non-terminating decimal (e.g. 14 / 3) are avoided: `:round` over the ratio `:div` yields throws — a core arithmetic gap, not this fold's contract."
    :parent :assert-eq
@@ -136,7 +143,8 @@
                                             {:value [{:package-name "q" :rating 2}]}]}}}}
           :expected {:parent :zipmap
                      :args {:keys [{:value "p"} {:value "q"}]
-                            :vals [{:value {:count 4 :avg 4.3}} {:value {:count 1 :avg 2.0}}]}}}}
+                            :vals [{:parent :_review-test-expected-summary :args {:count 4 :avg 4.3}}
+                                   {:parent :_review-test-expected-summary :args {:count 1 :avg 2.0}}]}}}}
 
   {:name :review-map-is-empty-without-reviews
    :parent :assert

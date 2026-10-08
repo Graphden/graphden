@@ -390,6 +390,24 @@
     :else              :any))
 
 
+(defn callable-signature
+  "Invocation signature of a structural callable value, including a marked
+   callable. Outer markers stay on the stored value type; this projection
+   carries each onto the invocation result. It is NOT marker subtyping or
+   declassification. Non-callable values, marked or otherwise, return nil."
+  [t]
+  (loop [inner t tags []]
+    (cond
+      (marker-type? inner) (recur (marker-inner inner) (conj tags (marker-tag inner)))
+      (fn-type? inner) (if (seq tags)
+                         (make-fn-type (fn-args inner)
+                                       (reduce (fn [ret tag] (make-marker-type tag ret))
+                                               (fn-ret inner) (rseq tags))
+                                       (fn-effects inner))
+                         inner)
+      :else nil)))
+
+
 (defn list-elem
   [t]
   (when (list-type? t) (nth t 1)))

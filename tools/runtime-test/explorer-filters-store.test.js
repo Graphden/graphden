@@ -48,6 +48,7 @@ function filtersCtx(seed) {
   const lensKinds = new Set();
   const ctx = vm.createContext({
     console,
+    crypto: require('node:crypto').webcrypto,
     document,
     window: { gdAnnounce: (m) => announced.push(m),
               API: { api_graph_entities: '/api/graph/entities', api_views_members: '/api/views/members', api_views: '/api/views' } },
@@ -173,7 +174,7 @@ const tick = () => new Promise((r) => setTimeout(r, 5));
     assert(labels.join('|') === 'name handler|view api-surface', 'chips for the two axes: ' + labels.join('|'));
     const call = fetches.filter((f) => f.url === '/api/views/members').pop();
     assert(call && call.body.name === 'handler' && call.body.views.join() === 'v1', 'posted name + view ids: ' + JSON.stringify(call?.body));
-    assert(call && !call.body.kinds.includes('apps'), 'apps stays a client overlay — never sent to the server');
+    assert(call && call.body.kinds.includes('apps'), 'apps reaches the authoritative membership callback');
     assert(ctx.gdFilterCount() === 3, 'counted: ' + ctx.gdFilterCount());
   });
 
@@ -187,6 +188,80 @@ const tick = () => new Promise((r) => setTimeout(r, 5));
     assert(ctx.gdViewMembers().length === 0, 'the set is empty');
     ctx.gdRemoveUses('gone-1');
     assert(chips.children.length === 0, 'removing the chip clears it');
+  });
+
+  await test('graph Save round-trip keeps all reference and categorical axes; updates exact UUID', async () => {
+    const {ctx, fetches} = filtersCtx();
+    ctx.API.api_view_save = ctx.window.API.api_view_save = '/api/views/save';
+    let rows = [{id: 'view-existing', name: 'same-name', 'namespace-id': null, filters: {
+      uses: ['u1', 'u2'], also: ['v1', 'v2'], kinds: ['apps', 'fn'], problems: ['failed', 'lint'],
+      effects: ['io', 'db'], namespaces: ['core', 'web'], exclude: ['core.tests'], name: 'needle', unused: true,
+    }}];
+    let rejectSave = false;
+    ctx.authFetch = async (url, options) => {
+      const body = options?.body ? JSON.parse(options.body) : null;
+      fetches.push({url, body});
+      if (url === '/api/views/save') {
+        if (rejectSave) return {ok: false, json: async () => ({ok: false, committed: false, reason: 'Inherited clauses prevent replacement'})};
+        const view = {id: body.id || 'created-id', name: body.name, 'namespace-id': null,
+          filters: {...body.filters, also: body.filters.views}};
+        rows = [view];
+        return {ok: true, json: async () => ({ok: true, committed: true, view})};
+      }
+      return {ok: true, json: async () => url === '/api/views' ? rows : {fns: []}};
+    };
+    const decoded = (await ctx.gdFetchSharedViews(true))[0];
+    assert(decoded.filters.problems.join() === 'failed,lint' && decoded.filters.kinds.join() === 'apps,fn', 'graph read preserves problems and apps');
+    assert(decoded.filters.uses.length === 2 && decoded.filters.views.length === 2, 'all uses and also references decoded');
+    await ctx.gdBeginGraphViewEdit(decoded);
+    ctx.gdSetName('edited');
+    await ctx.gdShareViewToGraph('renamed');
+    const save = fetches.find(row => row.url === '/api/views/save').body;
+    assert(save.id === 'view-existing', 'edit uses selected UUID even when labels collide or rename');
+    assert(save.filters.uses.join() === 'u1,u2' && save.filters.views.join() === 'v1,v2', 'save keeps every reference, not only the first');
+    assert(save.filters.problems.join() === 'failed,lint' && save.filters.kinds.includes('apps') && save.filters.name === 'edited', 'save sends a full replacement');
+    const saved = ctx.gdSharedViewsCached()[0];
+    await ctx.gdBeginGraphViewEdit(saved);
+    ctx.gdToggleEffect('network');
+    rejectSave = true;
+    let error;
+    try { await ctx.gdShareViewToGraph('renamed'); } catch (e) { error = e; }
+    assert(error?.message.includes('Edit graph'), 'final-clause rejection has an explicit graph fallback');
+    assert(ctx.gdEditingGraphView().id === 'view-existing' && ctx.gdFilters().effects.includes('network'), 'failed atomic save retains the exact edit draft');
+    rows = [{...saved, unsupported: ['uses']}];
+    const unsupported = (await ctx.gdFetchSharedViews(true))[0];
+    assert(unsupported.unsupported[0] === 'uses', 'read retains computable-clause metadata');
+    assert(!(await ctx.gdBeginGraphViewEdit(unsupported)), 'unsupported graph view is never projected as an editable partial set');
+    assert(ctx.gdFilters().effects.includes('network'), 'unsupported apply/edit cannot replace the current draft');
+  });
+
+  await test('committed Save keeps a newer draft; graph identity never aliases a device label', async () => {
+    const {ctx} = filtersCtx();
+    ctx.API.api_view_save = ctx.window.API.api_view_save = '/api/views/save';
+    let resolveSave, command;
+    const rows = [{id: 'first-id', name: 'same-label', filters: {name: 'first'}}];
+    ctx.authFetch = async (url, options) => {
+      if (url === '/api/views/save') {
+        command = JSON.parse(options.body);
+        return new Promise(resolve => {resolveSave = resolve;});
+      }
+      return {ok: true, json: async () => url === '/api/views' ? rows : {fns: []}};
+    };
+    await ctx.gdApplyView({...rows[0], shared: true});
+    assert(ctx.gdActiveViewId() === 'first-id', 'applied graph view keeps its UUID');
+    ctx.gdSaveView('same-label');
+    assert(ctx.gdActiveViewId() === null, 'device save is a distinct scope with the same label');
+    ctx.gdSetName('submitted');
+    const pending = ctx.gdShareViewToGraph('same-label');
+    assert(/^[a-f0-9-]{36}$/.test(command['create-id']) && !command.id, 'new graph save preassigns a creation UUID distinct from update id');
+    ctx.gdSetName('newer draft');
+    resolveSave({ok: true, json: async () => ({ok: true, committed: true,
+      view: {id: command['create-id'], name: command.name},
+      'publication-warnings': [{stage: 'notify', reason: 'Refresh'}]})});
+    const result = await pending;
+    assert(result.id === command['create-id'], 'committed warning retains the exact created identity');
+    assert(ctx.gdFilters().name === 'newer draft' && ctx.gdActiveViewName() === null,
+      'late success does not overwrite or mislabel edits made while Save was pending');
   });
 
   console.log(failures === 0 ? 'PASS: ' + passes + ' assertions' : 'FAIL: ' + failures + ' of ' + (passes + failures));

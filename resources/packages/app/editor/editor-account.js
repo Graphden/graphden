@@ -143,16 +143,35 @@ async function gdAcctTotpDisable() {
 
 // ---- API tokens (tenancy addon only — probe reveals the section) -----------
 
+let _gdAcctTokenEpoch = 0;
+let _gdAcctTokenListEpoch = 0;
+
+function gdAcctTokenPrincipal() {
+  return typeof _tourSessionPrincipal === 'function' ? _tourSessionPrincipal()
+    : {accountId: window.gdAccount?.id || null, orgId: null};
+}
+
+function gdAcctTokenPrincipalMatches(principal) {
+  const current = gdAcctTokenPrincipal();
+  return current.accountId === principal.accountId && current.orgId === principal.orgId;
+}
+
 async function gdAcctLoadTokens() {
   const sec = document.getElementById('gd-acct-tok-sec');
   const host = document.getElementById('gd-acct-toks');
   if (!sec || !host) return;
+  const epoch = ++_gdAcctTokenListEpoch;
+  const principal = gdAcctTokenPrincipal();
   const [s, j] = await gdAcctGet('/api/my-tokens/list'); // api-url-drift-allow: route-collection
+  if (epoch !== _gdAcctTokenListEpoch || !gdAcctTokenPrincipalMatches(principal)
+      || document.getElementById('gd-acct-toks') !== host) return;
   if (s !== 200 || !Array.isArray(j)) return; // addon absent → section stays hidden
   sec.hidden = false;
   host.innerHTML = j.length
     ? j.map((t) =>
-      "<div class='gd-acct-row'><div class='gd-set-copy'>"
+      "<div class='gd-acct-row' data-token-id='" + gdEscapeHtml(t.id) + "'"
+      + (typeof _tourTokenEntry === 'function' && _tourTokenEntry(t.label)?.id === t.id ? ' data-tour-token' : '')
+      + "><div class='gd-set-copy'>"
       + "<div class='gd-set-label'>" + (gdEscapeHtml(t.label) || '(unlabeled)') + '</div>'
       + "<div class='gd-set-hint'>" + gdEscapeHtml(t.scopes || 'unscoped') + ' · '
       + (t['expires-at'] ? 'expires ' + gdAcctFmtDate(t['expires-at']) : 'no expiry')
@@ -177,14 +196,38 @@ async function gdAcctMintToken() {
     .map((c) => c.value).join(' ');
   if (!scopes) { gdAcctSay('Pick at least one scope.'); return; }
   const ttl = document.getElementById('gd-acct-tok-ttl')?.value;
-  const [s, j] = await gdAcctPostForm('/api/my-tokens', { label, scopes, 'ttl-days': ttl }); // api-url-drift-allow: route-collection
-  if (s !== 200 || !j.token) { gdAcctSay('Could not create a token.'); return; }
+  const epoch = ++_gdAcctTokenEpoch;
+  const principal = gdAcctTokenPrincipal();
   const reveal = document.getElementById('gd-acct-tok-reveal');
+  if (reveal) { reveal.innerHTML = ''; delete reveal.dataset.tokenId; }
+  const ticket = typeof gdTourBeginTokenCreation === 'function'
+    ? gdTourBeginTokenCreation(label, scopes, ttl) : null;
+  const fields = {label, scopes, 'ttl-days': ttl, ...(ticket ? {id: ticket.id} : {})};
+  let s;
+  let j;
+  try {
+    [s, j] = await gdAcctPostForm('/api/my-tokens', fields); // api-url-drift-allow: route-collection
+  } catch (_) {
+    if (epoch === _gdAcctTokenEpoch && gdAcctTokenPrincipalMatches(principal)) {
+      gdAcctSay(ticket ? 'Creation reply unavailable. Lessons retains this token’s exact ID for cleanup.'
+        : 'Creation reply unavailable. Refresh the token list before retrying.');
+    }
+    return;
+  }
+  if (ticket) {
+    if (s === 200) gdTourRecordTokenCreation(ticket, j);
+    else gdTourRejectTokenCreation(ticket, s);
+  }
+  if (epoch !== _gdAcctTokenEpoch || !gdAcctTokenPrincipalMatches(principal)
+      || document.getElementById('gd-acct-tok-reveal') !== reveal) return;
+  if (s !== 200 || !j.token) { gdAcctSay('Could not create a token.'); return; }
   if (reveal) {
+    reveal.dataset.tokenId = j.id;
     reveal.innerHTML =
       "<div class='gd-set-hint'>Copy your new token now — it will not be shown again:</div>"
       + "<code class='gd-set-code gd-acct-secret'>" + gdEscapeHtml(j.token) + '</code>'
-      + "<button type='button' class='gd-set-btn' onclick='gdAcctCopyToken(this)'>Copy</button>";
+      + "<button type='button' class='gd-set-btn' onclick='gdAcctCopyToken(this)'>Copy</button>"
+      + (ticket ? "<button type='button' class='gd-set-btn' data-token-check onclick='gdTourCheckRevealedToken()'>Check restricted access</button>" : '');
   }
   const labelInput = document.getElementById('gd-acct-tok-label');
   if (labelInput) labelInput.value = '';
@@ -206,10 +249,21 @@ function gdAcctCopyToken(btn) {
 
 async function gdAcctRevokeToken(id) {
   if (!confirm('Revoke this token? Anything still using it will stop working.')) return;
+  const principal = gdAcctTokenPrincipal();
+  const reveal = document.getElementById('gd-acct-tok-reveal');
+  const bearer = reveal?.dataset.tokenId === id ? reveal.querySelector('code')?.textContent : null;
   const [s] = await gdAcctPostForm('/api/my-tokens/revoke', { id }); // api-url-drift-allow: route-collection
+  if (!gdAcctTokenPrincipalMatches(principal)) return;
   if (s === 200) {
-    const reveal = document.getElementById('gd-acct-tok-reveal');
-    if (reveal) reveal.innerHTML = '';
+    ++_gdAcctTokenEpoch;
+    if (reveal) { reveal.innerHTML = ''; delete reveal.dataset.tokenId; }
+    if (typeof gdTourRecordTokenRevocation === 'function') {
+      try {
+        await gdTourRecordTokenRevocation(id);
+        if (bearer) await gdTourProbeTokenAccess(id, bearer, true);
+      } catch (_) { /* Listing/verification can retry; the revoke was already committed. */ }
+    }
+    if (!gdAcctTokenPrincipalMatches(principal)) return;
     gdAcctLoadTokens();
     gdAcctSay('Token revoked.', true);
   } else {
@@ -220,6 +274,8 @@ async function gdAcctRevokeToken(id) {
 // ---- Card render (called by gdRenderSettings on every Settings open) -------
 
 async function gdRenderAccountCard() {
+  ++_gdAcctTokenEpoch;
+  ++_gdAcctTokenListEpoch;
   const card = document.getElementById('gd-set-account');
   const navBtn = document.querySelector('#gd-settings-nav [data-section="account"]');
   const root = document.getElementById('gd-acct-root');

@@ -28,6 +28,8 @@
 
 const {chromium} = require('playwright');
 const {assert} = require('./edit-test-helpers');
+const {handlerPreviewTestOptions} = require('./handler-preview-test-options');
+const {walkLesson30} = require('./tutorial-app-helpers');
 const {
   waitTourTitle, clickTourButton, tourWhere, filterAndSelect,
   extendViaRowActions, bindFirstPlaceholder,
@@ -45,6 +47,8 @@ const RUN = Math.random().toString(36).slice(2, 8);
 const INVITEE = 'guard-invitee-' + RUN + '@example.com';
 const APP_LABEL = 'tourguard' + RUN;
 const PAGE_FN = 'tutorial-page';
+let appCreationId = null;
+let pageCreation = null;
 const GRANT_NS = 'tutorial-grant-' + RUN;
 const ROLE_NAME = 'tourguard-role-' + RUN;
 
@@ -54,14 +58,16 @@ const ROLE_NAME = 'tourguard-role-' + RUN;
 // tenancy the bearer is not a credential, the probe never goes green, and the
 // header would shadow the session cookie this guard signs in with.
 async function tenancyContext() {
+  const options = handlerPreviewTestOptions();
   const browser = await chromium.launch({
     headless: true,
     args: ['--js-flags=--max-old-space-size=1024', '--disable-dev-shm-usage',
-           '--no-sandbox', '--no-zygote', '--in-process-gpu'],
+           '--no-sandbox', '--no-zygote', '--in-process-gpu', ...(options.launchArgs || [])],
   });
   const vp = (process.env.GRAPHDEN_VIEWPORT || '1400x900').split('x').map(Number);
   const ctx = await browser.newContext({
     viewport: {width: vp[0] || 1400, height: vp[1] || 900},
+    ignoreHTTPSErrors: options.ignoreHTTPSErrors === true,
   });
   const page = await ctx.newPage();
   return {browser, page};
@@ -240,60 +246,11 @@ async function lesson17(page) {
 
 
 async function lesson20(page) {
-  await page.goto(BASE + '/?tutorial=30');
-  await waitTourTitle(page, 'Serving the graph to the public', 150000);
-  assert(await clickTourButton(page, 'Next'), 'lesson 30 opening Next');
-
-  await waitTourTitle(page, 'Something to serve', 30000);
-  await filterAndSelect(page, 'const', 'const');
-  await waitTourTitle(page, 'Make it yours', 60000);
-  await extendViaRowActions(page, PAGE_FN);
-  // "tutorial-page is open" completes on the SELECTION the extend just made —
-  // no button to press, the tour walks itself to the bind step.
-  await waitTourTitle(page, 'tutorial-page is open', 60000);
-  await waitTourTitle(page, 'Answer like a web server', 60000);
-  await bindFirstPlaceholder(page,
-    '{"status": 200, "headers": {"Content-Type": "text/html"},'
-    + ' "body": "<h1>Hello from my app</h1>"}');
-  await waitTourTitle(page, 'Open its Apps', 60000);
-  // Publishing starts from the fn now: ⋯ on the tutorial-page row → ▣ Apps.
-  await page.waitForFunction((name) => {
-    return Array.from(document.querySelectorAll('.node-overlay')).some((ov) =>
-      ov.textContent.trim().startsWith(name)
-      && ov.querySelector('button.more-actions-trigger'));
-  }, PAGE_FN, {timeout: 90000, polling: 200});
-  await page.evaluate((name) => {
-    const ov = Array.from(document.querySelectorAll('.node-overlay')).find((o) =>
-      o.textContent.trim().startsWith(name)
-      && o.querySelector('button.more-actions-trigger'));
-    ov.querySelector('button.more-actions-trigger')
-      .dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
-  }, PAGE_FN);
-  await page.waitForFunction(() => {
-    const b = document.querySelector('.row-actions-popover [data-action="apps"]');
-    return !!b && !b.hidden; // hidden = tenancy addon absent — a real failure here
-  }, null, {timeout: 15000, polling: 100});
-  await page.evaluate(() => {
-    document.querySelector('.row-actions-popover [data-action="apps"]')
-      .dispatchEvent(new MouseEvent('click', {bubbles: true}));
+  await walkLesson30(page, BASE, {label: APP_LABEL,
+    onHandler: creation => { pageCreation = creation; },
+    onAppAttempt: id => { appCreationId = id; },
   });
-  await page.waitForSelector('.fn-apps-popover.visible [data-fn-apps]', {timeout: 15000});
-  await waitTourTitle(page, 'Publish it', 60000);
-
-  // Manual step in the tour — performed here, because "the host appears and
-  // the app is live" is the whole lesson. The fn is implied by the popover;
-  // only the label is typed.
-  await submitPanelForm(page, '[data-fn-apps] form.app-create-form',
-                        {label: APP_LABEL});
-  await page.waitForFunction((label) => {
-    return Array.from(document.querySelectorAll('[data-fn-apps] .fn-app-row'))
-      .some((row) => row.textContent.includes(label));
-  }, APP_LABEL, {timeout: 30000, polling: 300});
-  assert(await clickTourButton(page, 'Next'), 'lesson 30 published Next');
-
-  await waitTourTitle(page, "That's publishing", 30000);
-  await finishTour(page, 'lesson 30');
-  console.log('  lesson 30: walked — extended :const, bound a response, published an app');
+  console.log('  lesson 30: typed HTML, ordinary Apps receipt, real branch preview and exact cleanup');
 }
 
 
@@ -442,7 +399,7 @@ async function lesson31(page) {
 
 async function cleanup(page) {
   try {
-    await page.evaluate(async ({invitee, label, ns, fn}) => {
+    await page.evaluate(async ({invitee, label, ns, fn, role, appId, creation}) => {
       const post = (url, body) => fetch(url, {
         method: 'POST',
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
@@ -463,7 +420,7 @@ async function cleanup(page) {
       // only shapes the re-rendered block, which cleanup ignores).
       const appRows = await fetch('/api/orgs/apps').then((r) => r.json()).catch(() => []);
       for (const row of (Array.isArray(appRows) ? appRows : [])) {
-        if (row.label === label) {
+        if (row.id === appId && row.label === label && row['handler-fn-id'] === creation?.id) {
           await post('/partials/fn-apps/delete', 'id=' + encodeURIComponent(row.id));
         }
       }
@@ -472,15 +429,18 @@ async function cleanup(page) {
       const m = grants.match(new RegExp('hx-delete="(/api/entities/grant/[^"]+)"[^>]*>[^<]*</button>\\\\s*</td>\\\\s*</tr>'));
       if (grants.includes(ns) && m) await fetch(m[1], {method: 'DELETE'}).catch(() => {});
       // The fn lesson 30 created, if its own cleanup did not run.
-      const found = await fetch('/api/graph/entities?scope=search&q=' + fn)
-        .then((r) => r.json()).catch(() => ({}));
+      const found = creation?.id ? await fetch('/api/graph/entities?scope=subtree&root-id=' + creation.id,
+        {headers: {'X-Graphden-Branch': creation.branch}})
+        .then((r) => r.json()).catch(() => ({})) : {};
       for (const f of (found.fns || [])) {
-        if (f.name === fn) {
-          await fetch('/api/entities/fn/' + f.id, {method: 'DELETE'}).catch(() => {});
+        if (f.id === creation?.id && f.name === fn
+            && (f['namespace-id'] ?? null) === (creation['namespace-id'] ?? null)) {
+          await fetch('/api/entities/fn/' + f.id, {method: 'DELETE',
+            headers: {'X-Graphden-Branch': creation.branch}}).catch(() => {});
         }
       }
     }, {invitee: INVITEE, label: APP_LABEL, ns: GRANT_NS, fn: PAGE_FN,
-        role: ROLE_NAME});
+        role: ROLE_NAME, appId: appCreationId, creation: pageCreation});
   } catch (_) { /* the page may be gone */ }
 }
 

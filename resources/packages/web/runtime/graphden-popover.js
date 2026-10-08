@@ -30,6 +30,11 @@ function gdEscapeHtml(s) {
 // trigger and scrolls it in the larger vertical gap; `scale` budgets CSS zoom.
 function anchorBelowClamped(el, anchorEl, opts) {
   const margin = opts?.margin || 8;
+  const bounds = opts?.viewport || {offsetLeft: 0, offsetTop: 0, width: window.innerWidth, height: window.innerHeight};
+  const viewportLeft = bounds.offsetLeft || 0;
+  const viewportTop = bounds.offsetTop || 0;
+  const viewportRight = viewportLeft + bounds.width;
+  const viewportBottom = viewportTop + bounds.height;
   el.style.display = 'block';
   el.style.left = '0px';
   el.style.top = '-9999px';
@@ -42,8 +47,8 @@ function anchorBelowClamped(el, anchorEl, opts) {
   if (opts?.constrainHeight) {
     // Keep a hover-open surface outside its trigger even when neither side
     // has room for the full body. Border-box includes the popup's chrome.
-    const below = Math.max(0, window.innerHeight - r.bottom - 2 * margin);
-    const above = Math.max(0, r.top - 2 * margin);
+    const below = Math.max(0, viewportBottom - r.bottom - 2 * margin);
+    const above = Math.max(0, r.top - viewportTop - 2 * margin);
     const useBelow = below >= h || below >= above;
     const available = useBelow ? below : above;
     el.style.boxSizing = 'border-box';
@@ -51,13 +56,13 @@ function anchorBelowClamped(el, anchorEl, opts) {
     el.style.overflowY = 'auto';
     h = Math.min(h, available);
     top = useBelow ? r.bottom + margin : r.top - h - margin;
-  } else if (top + h + margin > window.innerHeight) {
-    top = Math.max(margin, r.top - h - margin);
+  } else if (top + h + margin > viewportBottom) {
+    top = Math.max(viewportTop + margin, r.top - h - margin);
   }
-  if (left + w + margin > window.innerWidth) {
-    left = Math.max(margin, window.innerWidth - w - margin);
+  if (left + w + margin > viewportRight) {
+    left = Math.max(viewportLeft + margin, viewportRight - w - margin);
   }
-  if (left < margin) left = margin;
+  if (left < viewportLeft + margin) left = viewportLeft + margin;
   el.style.left = left + 'px';
   el.style.top = top + 'px';
 }

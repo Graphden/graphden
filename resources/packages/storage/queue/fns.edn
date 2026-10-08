@@ -210,9 +210,9 @@
           :args :_queue-nack-args}}
 
   ;; --- The Postgres-backed consumer ---------------------------------
-  ;; Knobs live on these two fn-defs; to change them, derive your own
-  ;; (`{:parent :queue-take :args {...}}`) and bind it to `:take` /
-  ;; `:nack` on your consumer.
+  ;; The pg template binds these references. To choose different knobs,
+  ;; derive the earlier :queue-consumer with open backend slots and bind
+  ;; configured :queue-take / :queue-nack / :queue-extend callables there.
   {:name :_pg-queue-take
    :description "`:queue-take` with the default knobs — batches of 10, a 30 s visibility timeout, a 5 s wait on an empty queue. `:queue` stays free (captured from the consumer)."
    :parent :queue-take

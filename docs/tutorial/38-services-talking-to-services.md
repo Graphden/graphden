@@ -1,135 +1,69 @@
-# Lesson 38 — Services talking to services: the contract lives in the graph
+# Lesson 38 — HTTP calls by function identity
 
-**Goal**: by the end of this lesson you can run two services, have
-one call the other over HTTP by *naming* it — no address typed
-anywhere — and keep the contract between them (paths, shapes) in one
-place that both sides reference, so a change moves both and the
-type-checker catches a drift.
+**Goal:** name a published handler by UUID, resolve its public URL, make an actual
+HTTP GET, and receive a changed response after editing the graph.
 
-**Concepts introduced**: `:service-endpoint`, the `:fn-ref` slot type
-(a fn's *identity*), `:service-instance`, `:service-get` /
-`:service-get-json`, the contract namespace, `service/not-running`.
-
-**You need**: lesson 35 (a service is a no-arg fn the reconciler keeps
-alive) and lesson 23 (branches) — a self-hosted instance, or a
-dedicated-tier org on the cloud (services need one; see the last
-section for what changes there).
-
-## The idea in one paragraph
-
-A service that listens somewhere *answers* somewhere. When the
-reconciler starts an `:http-server` service it records where — a
-`:service-instance` row with the host, the bound port and a heartbeat
-— and deletes it when the service stops. Another fn can then ask for that address by
-naming the service fn itself: `:service-endpoint :service
-:orders-service`. That slot is typed `:fn-ref`, which means *the fn's
-identity*: the consumer receives the producer's id, never runs it
-(binding a listener there does not start a second one), and the edge
-is not a dependency — so two services may even name each other. From
-the address, `:service-get` builds the URL and `:http-get` does the
-rest. The address is data the platform knows, the call is explicit
-HTTP in the graph, and nothing is typed by hand.
+**You need:** the authenticated finite HTTP host from lesson 35. Ordinary cloud
+users can take this lesson; it creates no persistent service or listener port.
 
 ## Try it
 
-You will create a producer service on a free port, a consumer that
-calls it, and watch the address appear and disappear.
+1. Extend `text-ok-response` as `tutorial-contract-answer` and bind its `:body`
+   to `hello`. Choose **⋯ → HTTP → Publish for 30 minutes**.
+2. Extend `service-endpoint` as `tutorial-http-address`. Bind its `:service` slot
+   with **Bind fn-ref** to `tutorial-contract-answer`. This stores the handler
+   UUID without executing it.
+3. **Run** the address function and confirm the database effect if requested.
+   Read its result: `host`, `port`, and `url`. Keep the whole URL, including any
+   publication path. On a deployment behind TLS this is an HTTPS URL.
+4. After Run finishes, copy that URL into another browser tab. The real HTTP
+   response must show `hello`. Return to the editor.
+5. Edit the handler's bound literal to `updated` and save. Leave its publication
+   and the address function's fn-ref unchanged.
+6. Reload the same public tab. Its response must now be `updated`.
+7. Stop the publication through **⋯ → HTTP**. Reload its URL to verify it is
+   unavailable, then finish the lesson and remove its created items.
 
-0. **The shortest version first** (what the in-editor tour does): a
-   response, a listener that hands it out, made a service, and a
-   consumer that names it. Extend `:text-ok-response` (filter
-   `text-ok-response`, `⋯` → **Extend**, name `tutorial-hello`) and
-   bind its `body` → `hello`. Extend `:http-server` (name
-   `tutorial-server`); on the card bind `handler` → `tutorial-hello`
-   (a response with nothing left to bind ignores the request — a valid
-   handler) and `port` → a free port; `⋯` → `⚙` →
-   **Create & reconcile** with **Enabled** ticked — the reconciler
-   starts it and records where it answers. Then extend `:service-get`
-   (name `tutorial-fetch`); bind its `service` placeholder with
-   **Bind fn-ref** → `tutorial-server` and `path` with
-   **Bind literal** → `/hello`; `⋯` → `▶`, tick the effects box,
-   **Run**. The result is the listener's answer — status 200, `hello`
-   in the body — and nothing named a host or a port. `⋯` → `⚙` →
-   **Delete service** on the listener stops it; the same call now
-   answers `service/not-running`. The rest of this walkthrough does the
-   same with a JSON producer and puts the contract in a shared namespace.
+These requests run sequentially, so the exercise also works with one execution
+slot. A busy executor may return 503: finish another run and retry. The browser
+request is real HTTP, and the published handler still obeys its execution quota,
+current permissions, effect restrictions, and deadline.
 
-1. **The producer.** Add these fn-defs the way you add any (the editor,
-   `upsert-fn-defs` over `/mcp` — [docs/MCP_CLIENTS.md](../MCP_CLIENTS.md) —
-   or a package module, lesson 31). Pick a port nothing else uses:
+## Calling from a graph
 
-   ```edn
-   {:name :orders-ok :parent :json-ok-response
-    :args {:body "{\"orders\":[1,2,3]}"}}
+`service-get` composes the same identity resolution with an ordinary outbound
+HTTP GET. Bind `:service` to the handler's fn-ref and `:path` to `/hello`. Its
+result contains the HTTP status, headers and body. Network permissions, outbound
+address checks, rate limits and timeouts still apply.
 
-   {:name :orders-ring :parent :encode-stringify-wrap
-    :args {:base-handler :orders-ok}}
+A graph calling a handler on its own executor needs capacity for both calls:
+its Run holds an execution slot and worker while waiting for the HTTP response.
+With one organization slot, the handler returns 503. A saturated shared worker
+pool can also cause a timeout. Use sufficient capacity or a separately hosted
+endpoint for such nested calls; publishing does not increase these limits.
 
-   {:name :orders-service :parent :http-server
-    :args {:handler :orders-ring :port 9101}}
-   ```
+Core resolves a base URL containing its reserved publication path; cloud resolves
+an isolated apps origin. Do not strip that base path when building a request.
+Never put a private bearer token in the public URL. The handler receives
+sanitized request fields and returns bounded plain text or JSON.
 
-   `:json-ok-response` is the 200 + `application/json` template;
-   `:encode-stringify-wrap` is the post-processing wrap every listener
-   wants (it turns the header map back into the strings http-kit
-   expects). `:orders-service` is service-eligible: no free args,
-   declares `:process`.
+## The same identity seam for persistent services
 
-2. **Make it a service.** Click `⚙` on `:orders-service` → "Make
-   service" → *Create & reconcile* (lesson 35). The reconciler starts
-   it within a second. Open the `⚙` popover again: under the status
-   line, *Running copies* lists the copy — `127.0.0.1:9101 · local ·
-   seen <time>` — and the time moves every fifteen seconds. The same
-   rows are `GET /api/entities/service-instance?service-id=<id>` (on
-   the cloud you see your org's). That is the
-   reconciler talking: `:http-server` returned its handle with the
-   bound port as metadata, the pod that started it added its own host,
-   and it heartbeats the row every tick.
+On a self-hosted or dedicated executor, `service-endpoint` first prefers an
+active listener instance on the caller's branch. The reconciler maintains its
+host, port and heartbeat. A temporary publication is a separate fallback, and
+an ordinary configured cloud app may also resolve through the existing addon.
+The function UUID still names the target without invoking it. No active endpoint
+means `service/not-running`; it does not guess another branch.
 
-3. **The consumer.** Add:
-
-   ```edn
-   {:name :fetch-orders :parent :service-get-json
-    :args {:service :orders-service :path "/orders"}}
-   ```
-
-   Look at `:fetch-orders` on the canvas: an edge to `:orders-service`
-   into the `service` slot — the slot's type badge says `fn-ref`. Its
-   free args are `headers`, `body`, `auth-value`, `timeout-ms` (from
-   `:http-get` — optional knobs, so the Run form folds them under
-   "4 optional"); `service` and `path` are bound.
-
-   Extending `:service-get-json` from the editor works the same way:
-   the card shows `service` and `path` as dashed placeholders even
-   though both live deeper in the template (on `:service-endpoint` and
-   the URL join) — a card lists every hole of its composition, the
-   same set the Run pane asks for — and the `+` binds them on your fn.
-
-4. **Run it.** ▶ on `:fetch-orders` — the Run pane shows
-   `{:orders [1 2 3]}`. Trace (lesson 18) shows the chain:
-   `:service-endpoint` (a `:db` read of the row) → `:service-url` →
-   `:http-get` against `http://127.0.0.1:9101/orders` → `:parse-json`.
-
-5. **Stop the producer.** Disable the service (`⚙` popover, or
-   `PUT /api/entities/service/<id>` with `{"enabled?": false}`). The
-   instance row is deleted. ▶ on `:fetch-orders`
-   again: `service/not-running` — *no live instance for fn …
-   (the service row exists but no copy is alive, or it is not a
-   listener)*. Nothing guessed, nothing cached: the consumer is told
-   the truth, and a real consumer wraps the call in `:retry` (tries,
-   a pause between them, the last failure rethrown) and, for a producer
-   that answers slowly rather than not at all, `:with-timeout` (the
-   reconciler brings the producer back on its own; lesson 35's restart
-   policy).
-
-6. **Enable it again.** The instance is back, the call works again.
-   Delete the service and the three fn-defs when you are done.
+The following sections describe shared contracts and the existing persistent
+service model. Temporary publications do not create service-instance rows or
+promise persistent-service tracing.
 
 ## The contract lives in the graph
 
-In the walkthrough the path `"/orders"` and the response shape were
-typed twice — once in the producer, once in the consumer. Put them in
-one place both sides reference and they cannot drift:
+For a larger application, define paths and response shapes once, then reference
+them from both the producer and consumer:
 
 ```edn
 ;; svc-orders.api — the contract: paths + shapes, owned by the producer's team
@@ -145,10 +79,10 @@ one place both sides reference and they cannot drift:
  :args {:service :orders-service :path :orders-path}}
 ```
 
-Rename the path constant and both the route and the consumer follow;
-narrow `:orders-shape` and the type-checker reports the side that no
-longer matches at write time — the `protobuf` effect, with no separate
-IDL, because a type *is* a fn here (lesson 08). With two teams in one
+Change the path constant's value and both the route and consumer use the new
+path. Narrow `:orders-shape` and the type-checker reports which graph no
+longer matches. The contract is an ordinary type function (lesson 08),
+so no separate interface-definition file is needed. With two teams in one
 org, the contract namespace belongs to the producer's team and the
 consumer's team holds `read` on it (lesson 28 — a role can be the
 grant's subject, so the team is one row).
@@ -171,9 +105,8 @@ grant's subject, so the team is one row).
 
 ## Following a call across services
 
-Trace (lesson 18) shows the call tree of one execution, and in step 4
-it ended at `:http-get` — the producer's side was a separate world.
-It isn't any more. Run `:fetch-orders` from the Run pane once again
+For persistent HTTP services, Trace (lesson 18) can follow a call beyond
+`:http-get`. Run `:fetch-orders` from the Run pane
 and open the run's result: under it, a **Downstream calls** list names
 `:orders-ring`, the producer's handler, with its status. Open the
 producer's Runs tab: the request `:fetch-orders` made is a run of its

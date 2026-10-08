@@ -282,6 +282,7 @@ function initDiffConversation(container, sourceName, sourceRef, opts) {
   const commentRow = (c, chipText) => {
     const row = document.createElement('div');
     row.className = 'branch-comment';
+    if (c.id) row.dataset.commentId = c.id;
     const meta = document.createElement('span');
     meta.className = 'branch-comment-meta';
     meta.textContent = (c['author-id'] || 'anonymous') + ' · '
@@ -365,6 +366,8 @@ function initDiffConversation(container, sourceName, sourceRef, opts) {
   const mountThread = (anchorEl, comments, withComposer) => {
     const thread = document.createElement('div');
     thread.className = 'branch-diff-anchor-thread';
+    thread.dataset.anchorName = anchorEl.getAttribute('data-anchor-name');
+    thread.dataset.anchorId = anchorEl.getAttribute('data-anchor-id');
     comments.forEach((c) => { thread.appendChild(commentRow(c)); });
     if (withComposer) {
       thread.appendChild(composer(anchorEl.getAttribute('data-anchor-name'),

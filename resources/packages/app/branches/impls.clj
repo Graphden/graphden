@@ -149,13 +149,15 @@
    policy is set. Atomic §3.1 boundary; the response-shape building
    lives in graph (`:_create-branch-apply` → `:as-json-branch` +
    `:zipmap` envelope), not here."
-  [branch-name base-branch-id forbid-invalid? write-policy require-merge?]
+  [branch-name base-branch-id forbid-invalid? write-policy require-merge? branch-id]
   (cr/record-effect! :db)
   (let [policy (normalize-write-policy write-policy)
         owner (:user-id tc/*current-principal*)
         row (vs/create-branch! (request/require-storage ctx)
                                branch-name
                                (cond-> {:base-branch-id base-branch-id}
+                                 (some? branch-id)
+                                 (assoc :id branch-id)
                                  (some? forbid-invalid?)
                                  (assoc :forbid-invalid? forbid-invalid?)
                                  (some? owner)

@@ -55,8 +55,7 @@ async function _tourEnd(nextLessonId = null) {
   // Namespace versions must be cleaned in the owned sandbox, even when a
   // lesson or the reader switched away from it before ending the session.
   const ownedBranch = _tourOwnedBranch(_tourState);
-  const cleanupBranch = ownedBranch || _tourState?.activeBranch
-    || _tourState?.branch || _tourSessionBranch();
+  const cleanupBranch = _tourCleanupBranch(_tourState);
   if (cleanupBranch !== _tourSessionBranch()) {
     return _tourRestoreSession(_tourState, true, nextLessonId);
   }
@@ -94,24 +93,54 @@ async function _tourEnd(nextLessonId = null) {
       if (!await _tourConfirmCleanupContext(cleanupBranch)) return;
       let ok = true;
       try {
-        // Children first — a fork the lesson itself made (lesson 23) would
-        // otherwise block its parent's delete.
-        const failedBranches = await _tourDeleteCreatedBranches(created);
-        if (failedBranches.length) ok = false;
-        // Namespaces are IDENTITY rows with no branch scope — deleting
-        // the branch removes every version row the lesson wrote, but a
-        // namespace the lesson created would stay visible on main as an
-        // empty orphan. "Full rollback" includes it: clear + delete the
-        // created ns rows FIRST, while this branch still resolves (the
-        // fetch wrapper stamps its header; after the branch delete the
-        // same requests would 4xx on a dead branch).
-        const nsOnly = created.filter((c) => c.type === 'ns');
-        if (nsOnly.length && typeof _tourDeleteNamespaces === 'function') {
-          const failedNs = await _tourDeleteNamespaces(nsOnly);
-          if (failedNs.length) ok = false;
+        const appFailures = created.some(row => row.type === 'app-route')
+          ? await _tourDeleteAppRoutes(created) : [];
+        _tourSaveState();
+        if (appFailures.length) {
+          _tourReport(false, 'Kept lesson graph: its app route could not be removed. Return through Lessons to retry cleanup.');
+          return;
         }
-        // Keep the sandbox available for retry when dependent cleanup failed.
-        if (ok) ok = await _tourDeleteBranch(branch);
+        const serviceFailures = typeof _tourCleanupServices === 'function' ? await _tourCleanupServices(created) : [];
+        if (serviceFailures.length) {
+          _tourSaveState();
+          _tourReport(false, 'Kept lesson graph: worker stop or publish outcome could not be confirmed. '
+            + 'Check the exact service and run, then retry cleanup.');
+          return;
+        }
+        const pinFailures = await _tourUnpinPackages(created);
+        _tourSaveState();
+        if (pinFailures.length) {
+          _tourReport(false, 'Kept package pins: their creation or removal could not be confirmed. '
+            + 'Return through Lessons to retry cleanup.');
+          return;
+        }
+        const children = created.filter(row => !(_tourState.sandboxBranchId && row.type === 'branch'
+          && row.id === _tourState.sandboxBranchId));
+        const failedBranches = await _tourDeleteCreatedBranches(children);
+        if (failedBranches.length) ok = false;
+        if (ok) ok = _tourState?.sandboxBranchId
+          ? await _tourDeleteOwnedBranch({type: 'branch', name: branch, id: _tourState.sandboxBranchId,
+            'base-branch-id': _tourState.sandboxBaseBranchId})
+          : await _tourDeleteBranch(branch);
+        if (ok) {
+          // Namespace identities and published artifacts outlive branch rows.
+          // The deleted sandbox cannot route requests; finish via main while
+          // retaining exact receipts and the original principal.
+          _tourState.sandboxBranch = null;
+          _tourState.sandboxBranchId = null;
+          _tourState.sandboxBaseBranchId = null;
+          _tourState.cleanupBranch = 'main';
+          _tourState.activeBranch = 'main';
+          _tourSaveState();
+          const options = {headers: {'X-Graphden-Branch': 'main'}};
+          const remaining = created.filter(row => !['branch', 'package-install'].includes(row.type));
+          const result = await _tourDeleteCreated(remaining, options);
+          if (result.failed.length) {
+            _tourReport(false, 'Kept tutorial items: exact cleanup could not finish. Return through Lessons to retry.');
+            if (typeof switchToBranch === 'function') switchToBranch(null, {clearSelection: true});
+            return;
+          }
+        }
       } catch (_) { ok = false; }
       if (!ok) {
         _tourReport(false, _tourCopy('branch-failed',
@@ -179,7 +208,9 @@ async function _tourEnd(nextLessonId = null) {
     return;
   }
 
-  const listOf = (rows) => rows.map((c) => c.type + ' “' + c.name + '”').join(', ');
+  const listOf = (rows) => rows.map(c => c.type + ' “' + c.name
+    + (c.version ? '@' + c.version : '') + '”'
+    + (c.receipt === 'pending' ? ' (creation response unavailable; retained for review)' : '')).join(', ');
   const cleanup = async () => {
     if (!await _tourConfirmCleanupContext(cleanupBranch)) return false;
     const { failed } = await _tourDeleteCreated(created);

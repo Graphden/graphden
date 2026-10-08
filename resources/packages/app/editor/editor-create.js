@@ -233,6 +233,8 @@ function openNsPublishPopover(anchorEl, nsPath) {
     if (!name || !version) { setResult('Name and version are required.', false); return; }
     goBtn.disabled = true;
     setResult('Publishing…', true);
+    const receipt = typeof gdTourBeginPackagePublish === 'function'
+      ? gdTourBeginPackagePublish({name, version, 'ns-root': nsPath}) : null;
     try {
       const publicInput = pop.querySelector('#gd-nspub-public');
       const resp = await authFetch(API.api_packages_publish, {
@@ -247,8 +249,15 @@ function openNsPublishPopover(anchorEl, nsPath) {
         }),
       });
       if (resp.ok) {
-        let fnCount = null;
-        try { fnCount = (await resp.json())['fn-count']; } catch (_) { /* body optional */ }
+        const body = await resp.json().catch(() => null);
+        if (typeof gdTourRecordPackagePublish === 'function') gdTourRecordPackagePublish(receipt, body);
+        if (body?.ok !== true) {
+          setResult(body?.reason ? 'Not published: ' + body.reason
+            : 'Publication response unavailable. Check the registry; the tutorial keeps this attempt for review.', false);
+          goBtn.disabled = false;
+          return;
+        }
+        const fnCount = body['fn-count'];
         setResult('Published ' + name + '@' + version
           + (fnCount != null ? ' (' + fnCount + ' fns)' : '')
           + ' — install it from the packages chip.', true);
@@ -510,8 +519,13 @@ function buildCreateRow(indent) {
       const fields = createType === 'ns'
         ? { name, 'parent-id': activeCreate.parentNsId || '' }
         : { name, 'namespace-id': activeCreate.parentNsId || '' };
+      const receipt = typeof gdTourBeginEntityCreation === 'function'
+        ? gdTourBeginEntityCreation(createType, name, createType === 'ns'
+          ? {'parent-id': activeCreate.parentNsId || null}
+          : {'namespace-id': activeCreate.parentNsId || null}) : null;
       const response = await postEntity(createType, fields);
       if (response.status >= 200 && response.status < 300) {
+        if (typeof gdTourRecordEntityCreation === 'function') gdTourRecordEntityCreation(receipt, response);
         const parentNsId = activeCreate.parentNsId || null;
         if (createType !== 'ns' && typeof gdRememberLastNs === 'function') {
           gdRememberLastNs(parentNsId);
@@ -527,8 +541,12 @@ function buildCreateRow(indent) {
         // graph card immediately. Without this, only the sidebar
         // refreshes and the canvas keeps showing whatever was there
         // (or nothing) — reads as a hang.
-        if (createType === 'fn' && typeof selectJustCreatedFn === 'function') {
-          selectJustCreatedFn(name);
+        if (createType === 'fn') {
+          const createdId = response.headers?.get('X-Graphden-Created-Id');
+          if (createdId && typeof ensureSubtreeFor === 'function' && typeof selectFn === 'function') {
+            await ensureSubtreeFor(createdId);
+            selectFn(createdId);
+          } else if (typeof selectJustCreatedFn === 'function') selectJustCreatedFn(name);
         }
       } else {
         throw new Error(await extractResponseError(response));

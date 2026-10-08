@@ -221,6 +221,10 @@ function renderMiRow(line, levelInfo, idx, ctx) {
   levelInfo.fns.forEach((f, i) => {
     const span = document.createElement('span');
     span.textContent = displayLabel(f.name);
+    if (levelInfo.depth > 0 && typeof gdDiffAncestorBadgeEl === 'function') {
+      const badge = gdDiffAncestorBadgeEl(f.fnId);
+      if (badge) span.appendChild(badge);
+    }
     const miShowOpen = !!f.name && !(isNavRoot && levelInfo.depth === 0);
     // Right inset reserves the single more-actions trigger slot;
     // per-cell affordances live in the popover it opens, not in the
@@ -236,7 +240,22 @@ function renderMiRow(line, levelInfo, idx, ctx) {
     span.style.position = 'relative';
     bindFullNameHover(span, span, f.name);
     const miClearPreview = () => { onPreviewLeave(); clearPreview(nodeId); restoreStyles(); };
-    const cardFnEntity = lookups?.fnMap?.get(ctx.originalFnId) || null;
+    if (rootAffordancesVisible && lineFnEntity) {
+    // graph-first-exception: selected canvas controls attach to in-page overlay identity.
+    // Delegate to the single Inspector Run owner.
+    const run = document.createElement('button');
+    run.type = 'button';
+    run.className = 'fn-run-trigger';
+    run.textContent = '▶ Run';
+    run.setAttribute('aria-label', 'Run ' + (lineFnEntity.name || 'this function'));
+    run.addEventListener('pointerdown', event => event.stopPropagation());
+    run.addEventListener('click', event => {
+      event.stopPropagation();
+      showExecutePopover(lineFnEntity, run);
+    });
+    line.appendChild(run);
+  }
+  const cardFnEntity = lookups?.fnMap?.get(ctx.originalFnId) || null;
     const miEditable = levelInfo.depth === 1
       && typeof isAuthenticated === 'function' && isAuthenticated()
       && implementationFnIds?.has(ctx.originalFnId);
@@ -376,11 +395,11 @@ function renderSingleFnRow(line, levelInfo, ctx) {
     && lineSignedIn
     && lookups?.fnMap
     && implementationFnIds?.has(ctx.originalFnId);
-  // Right padding reserves the single slot for the more-actions
-  // trigger (`⋯`) — every per-row affordance now lives in the popover
+  // Right padding reserves the more-actions trigger and, on the selected
+  // root, the visible Run button. Other per-row affordances live in the popover
   // it opens, OUTSIDE the card silhouette. Left padding is just the
   // small breathing room around the name.
-  const rightPad = 24;
+  const rightPad = rootAffordancesVisible ? 76 : 24;
   const leftPad = 8;
   line.style.padding = '4px ' + rightPad + 'px 4px ' + leftPad + 'px';
   line.style.textAlign = 'left';
@@ -392,6 +411,10 @@ function renderSingleFnRow(line, levelInfo, ctx) {
   // levels expand together).
   line.style.cursor = 'pointer';
   line.textContent = displayLabel(lineFn.name);
+  if (levelInfo.depth > 0 && typeof gdDiffAncestorBadgeEl === 'function') {
+    const badge = gdDiffAncestorBadgeEl(lineFn.fnId);
+    if (badge) line.appendChild(badge);
+  }
   const lineClearPreview = () => { onPreviewLeave(); clearPreview(nodeId); restoreStyles(); };
   const lineFnEntity = lookups?.fnMap?.get(lineFn.fnId) || null;
   // Secret fns wear the same 🔒 the tree rows use — on canvas the only

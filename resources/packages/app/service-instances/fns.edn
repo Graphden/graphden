@@ -1,0 +1,55 @@
+{:namespace "app.execution"
+ :description "Registered running copies of one exact service, readable through org-scoped storage."
+ :fns
+ [{:name :service-instance-rows
+   :description "Read registered copies by exact service UUID. The storage decorator supplies org visibility; this does not read the tenant-forbidden desired service row."
+   :parent :query-entities
+   :args {:entity-type "service-instance"
+          :where {:parent :assoc-empty
+                  :args {:key {:value :service-id}
+                         :value {:as :service-id :type :uuid}}}}}
+
+  {:name :_service-instances-count
+   :parent :count
+   :args {:coll :service-instance-rows}}
+
+  {:name :_service-instances-attrs
+   :parent :zipmap
+   :args {:keys [{:value :class} {:value :data-service-id} {:value :data-instance-count}]
+          :vals ["service-popover-instances"
+                 {:parent :to-str :args {:value {:as :service-id :type :uuid}}}
+                 :_service-instances-count]}}
+
+  {:name :_service-instances-list
+   :parent :hiccup
+   :args {:tag {:value "ul"} :attrs {:value {:class "service-popover-instance-list"}}
+          :children {:parent :map
+                     :args {:func :_sp-instance-li :coll :service-instance-rows}}}}
+
+  {:name :_service-instances-content
+   :parent :if
+   :args {:test {:parent :zero? :args {:number :_service-instances-count}}
+          :then {:value [:div {:class "service-popover-instance-none"} "No registered running copy."]}
+          :else :_service-instances-list}}
+
+  {:name :service-instances-hiccup
+   :description "Registered copies and heartbeats for a service UUID, independent of desired-state access. An empty list is not a promise about an unreachable process."
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs :_service-instances-attrs
+          :children [{:value [:div {:class "service-popover-instances-title"} "Running copies"]}
+                     :_service-instances-content]}}
+
+  {:name :_service-instances-request-id
+   :parent :assert-some
+   :return-type :uuid
+   :args {:value {:parent :parse-uuid
+                  :args {:string {:parent :query-param
+                                  :args {:param-name "service-id"}}}}}}
+
+  {:name :_partial-service-instances-handler
+   :description "Auth-gated rendering of one service's registered copies. Missing/malformed UUIDs are rejected before querying rows."
+   :lambda-params [:request]
+   :parent :html-ok-response
+   :args {:body {:parent :render-hiccup
+                 :args {:hiccup :service-instances-hiccup
+                        :service-id :_service-instances-request-id}}}}]}

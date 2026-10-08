@@ -1183,9 +1183,70 @@
             {:id "14"
              :slug "htmx-fragments"
              :chapter "Composing"
-             :text-only? true
+             :version 2
+             :requires "handler-preview"
              :title "Live fragments: htmx from the graph"
-             :reads "a server clock as a fragment, route mounting, auto-refresh with :trigger, POST forms, SSE streams, and when to use which layer."}
+             :reads "isolated HTML preview, relative HTMX requests, expiry recovery, regular app routes, POST forms and SSE streams."
+             :steps
+             [{:title "A real fragment request"
+               :body "This lesson opens a typed HTML handler on an isolated apps domain. HTMX makes a real HTTPS request and swaps the selected server fragment without reloading the page. The preview lasts two minutes and uses the current lesson branch. It is separate from the 30-minute text/JSON publication."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Open html-ok-response"
+               :body "Find `html-ok-response` in web.response and select it. Its status and HTML content type are already bound."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "html-ok-response"}}
+              {:title "Create your HTML handler"
+               :body "Click [[⋯]] on html-ok-response → [[Extend]]. Name it `tutorial-fragment-handler` and [[Save]]."
+               :target ".node-overlay[data-fn-name=\"html-ok-response\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :check {:kind "fn-parent" :name "tutorial-fragment-handler" :parent "html-ok-response"}
+               :creates {:type "fn" :name "tutorial-fragment-handler"}}
+              {:title "Open your handler"
+               :body "Find and select `tutorial-fragment-handler`."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "tutorial-fragment-handler"}}
+              {:title "Bind the page"
+               :body "Click [[+]] on :body → [[Bind literal]]. Paste this HTML as the string value and [[Save]]: `<!doctype html><html><head><meta name=\"htmx-config\" content='{\"selfRequestsOnly\":false,\"withCredentials\":false,\"allowEval\":false}'><script src=\"assets/htmx.min.js\"></script></head><body><button hx-get=\"fragment\" hx-select=\"#fragment\" hx-target=\"#out\">Refresh</button><div id=\"out\"><p id=\"fragment\">First fragment</p></div></body></html>` The two URLs are relative to the capsule; the selected #fragment stays inside the returned page."
+               :target ".placeholder-binder[data-fn-name=\"tutorial-fragment-handler\"][data-arg-name=\"body\"]"
+               :check {:kind "bindings-count" :name "tutorial-fragment-handler" :count 1}}
+              {:title "Open your handler's Apps"
+               :body "The isolated preview needs an app host owned by your organization. On tutorial-fragment-handler, click [[⋯]] → [[Apps]]. We will create one here, so this lesson also needs manage-apps access."
+               :target ".node-overlay[data-fn-name=\"tutorial-fragment-handler\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-fragment-handler\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"apps\"]" ".fn-apps-popover.visible"]
+               :check {:kind "dom" :selector ".fn-apps-popover.visible [data-fn-apps]"}}
+              {:title "Create the lesson's app host"
+               :body "Choose a unique subdomain label, using lower-case letters, digits and hyphens, then click [[+ Add app]]. The handler is already selected. This creates a real app route; the lesson records its exact identity. The HTML preview will still use this lesson branch. [[Finish]] removes this route before removing its handler and branch."
+               :target ".fn-apps-popover.visible .app-create-form"
+               :check {:kind "app-route-created" :name "tutorial-fragment-handler"}
+               :creates {:type "app-route" :name "tutorial-fragment-handler"}}
+              {:title "Open the preview controls"
+               :body "Close Apps, then click [[⋯]] on tutorial-fragment-handler → [[HTTP]]. Use [[Preview HTML handler]], not the text/JSON Publish action."
+               :target ".node-overlay[data-fn-name=\"tutorial-fragment-handler\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :check {:kind "dom" :selector ".http-host-popover.visible"}}
+              {:title "Make a two-minute preview"
+               :body "Click [[Preview HTML handler]]. This checks the captured branch and your current execute access. It does not start a background service."
+               :target ".http-host-popover.visible [data-handler-preview-mint]"
+               :check {:kind "dom" :selector ".http-host-popover.visible [data-handler-preview-url]:not([hidden])"}}
+              {:title "Open the real page"
+               :body "Click [[Open HTML preview]]. In the new tab, read First fragment, then click [[Refresh]]. Keep this tab open and return to the editor. Its URL is a short-lived capability: do not share or log it."
+               :target ".http-host-popover.visible [data-handler-preview-url]"
+               :check {:kind "manual"}}
+              {:title "Edit the server response"
+               :body "Close the HTTP popover. In tutorial-fragment-handler, click the :body literal to edit it. Replace only `First fragment` with `Second fragment` inside the HTML; keep the page, button and URLs. [[Save]]."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Fetch the changed fragment"
+               :body "Return to the preview tab and click [[Refresh]] without reloading the page. The text must become Second fragment. HTMX fetched the current graph response and selected #fragment. Return here only after checking the change."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "If the two minutes expired"
+               :body "An expired capsule is denied. In the editor, reopen tutorial-fragment-handler → [[⋯]] → [[HTTP]], click [[Preview HTML handler]] again, then [[Open HTML preview]]. Use that new tab and close the old one. The saved page still has Refresh, so you can repeat the edit-and-fetch check without recreating the graph or restarting the lesson."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Finish and remove the lesson graph"
+               :body "Close the preview tab, then [[Finish]]. Cleanup first removes the exact lesson app route, then the owned graph and branch; the captured preview never falls back to main. A remaining token expires after two minutes. Longer-lived HTML apps use an isolated app mount, described in the guide."
+               :target nil
+               :check {:kind "manual"}}]}
             {:id "15"
              :slug "executing-a-fn"
              :chapter "Running it"
@@ -1379,7 +1440,7 @@
             {:id "18"
              :slug "debugging-traces"
              :chapter "Running it"
-             :version 2
+             :version 3
              :title "Tracing a run"
              :reads "adds catching a live HTTP request."
              :steps
@@ -1454,10 +1515,19 @@
                :targets [".node-overlay[data-fn-name=\"tutorial-shout\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"peek-fn\"]" ".fn-peek-panel"]
                :check {:kind "dom" :selector ".fn-peek-panel"}}
               {:title "Run it with a trace"
-               :body "Press [[Esc]] to close the peek. Then [[⋯]] on tutorial-sentence → [[▶ Run]]. Tick [[Save to history]], [[Trace path]], then [[+ capture values]] and accept the cost estimate — then [[Run]]. The answer is HELLO BIG WORLD, and under it a new button appears: [[Show path on canvas]]."
-               :target ".node-overlay[data-fn-name=\"tutorial-sentence\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
-               :targets [".node-overlay[data-fn-name=\"tutorial-sentence\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-popover.visible"]
-               :check {:kind "dom" :selector ".execute-show-path-btn"}}
+               :body "Press [[Esc]] to close the peek. Click [[▶ Run]] on the selected tutorial-sentence card. Open [[Run options]], tick [[Save to history]] and [[Trace path]], and leave [[+ capture values]] off. Click [[Run]]: HELLO BIG WORLD returns with a path recorded, without intermediate values."
+               :target ".node-overlay[data-fn-name=\"tutorial-sentence\"] .fn-run-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-sentence\"] .fn-run-trigger" ".execute-popover.visible"]
+               :check {:kind "execution-trace" :name "tutorial-sentence" :values false}}
+              {:title "Draw the timing path"
+               :body "Click [[Show path on canvas]]. Calls, durations and cache hits appear; value chips do not. This mode records the route without copying each return value."
+               :target ".execute-show-path-btn"
+               :check {:kind "dom" :selector ".path-view-panel"}}
+              {:title "Run with captured values"
+               :body "Clear the path with [[Esc]]. In [[Run options]], tick [[+ capture values]] and accept the cost estimate. Click [[Run]] again: this execution records the return values too."
+               :target ".execute-options > summary"
+               :targets [".execute-options > summary" ".execute-capture-values-checkbox" ".execute-run-btn"]
+               :check {:kind "execution-trace" :name "tutorial-sentence" :values true}}
               {:title "Draw the path"
                :body "Click [[Show path on canvas]]."
                :target ".execute-show-path-btn"
@@ -1646,12 +1716,12 @@
             {:id "22"
              :slug "workspaces"
              :chapter "The editor"
-             :version 2
+             :version 3
              :title "Filters and views"
              :reads "walks the graph-saved view and composing views with `also`."
              :steps
              [{:title "One way to narrow the tree"
-               :body "Everything that narrows the Explorer is a FILTER — a chip under the filter box: a kind (you met those in lesson 20), a namespace, a fn something is built on, an effect, unused. Filters combine. A saved set of them is a VIEW. Nothing here changes the graph — only what you look at."
+               :body "Everything that narrows the Explorer is a FILTER — a chip under the filter box: a kind (you met those in lesson 20), a namespace, a fn something is built on, an effect, unused. Filters combine. A saved set of them is a VIEW. Changing filters changes what you look at. Saving a view in the graph creates a shared, versioned fn."
                :target "#kind-filters"
                :check {:kind "manual"}}
               {:title "Add a namespace filter"
@@ -1672,36 +1742,53 @@
                :target "#gd-filter-add"
                :targets ["#gd-filter-add" ".gd-filter-add-pop [data-action=\"add-uses\"]" ".fn-picker-popover"]
                :check {:kind "dom" :selector "#gd-filter-chips .gd-filter-chip[title^=\"Only fns using\"]"}}
-              {:title "Save it as a view"
-               :body "Click the view chip ([[1 filter]]), name the set `on-const` and press [[Enter]]. The chip now reads [[on-const]]; the view is yours, in this browser. The same popover holds [[Save in the graph…]] — that makes the view an fn extending explorer-view, versioned and shared with everyone on the branch, with the fn it uses bound by identity, so a rename never empties it."
+              {:title "Create a graph view"
+               :body "Close the picker and click [[◍ all]] to clear the uses exercise. Turn on [[Functions]], then [[+ filter]] → [[Name contains]]: enter `tutorial-` and press [[Enter]]. Close that menu. Open the view chip, name the view `tutorial-function-view` and press [[Save in graph]] (or [[Enter]]). This saves BOTH conditions as one ordinary, versioned fn. [[Device only]] saves a separate browser preference."
+               :target "#kind-filters .kind-toggle[data-kind=\"all\"]"
+               :targets ["#kind-filters .kind-toggle[data-kind=\"all\"]" "#gd-filter-add" ".gd-filter-add-pop input[aria-label=\"Only names containing\"]" "#gd-ws-chip" "#gd-ws-pop .gd-views-input"]
+               :check {:kind "graph-view-filters" :name "tutorial-function-view"
+                       :filters {:kinds ["fn"] :name "tutorial-"}}
+               :creates {:type "fn" :name "tutorial-function-view"}}
+              {:title "Edit the same view"
+               :body "In the view chip, find [[tutorial-function-view]] under [[In the graph]] and choose [[Edit filters]]. Change [[Name contains]] to `tutorial-function-view` and press [[Enter]]. Close the filter menu, reopen the view chip and press [[Save changes]]. The function condition must remain; this edits the selected view's identity, rather than creating another same-named view. Computed or fixed inherited conditions use [[Edit graph]] instead."
                :target "#gd-ws-chip"
-               :targets ["#gd-ws-chip" "#gd-ws-pop .gd-views-input"]
-               :check {:kind "dom" :selector "#gd-ws-chip[data-view=\"on-const\"]"}}
+               :targets ["#gd-ws-chip" "#gd-ws-pop [data-edit-view]" ".gd-filter-add-pop input[aria-label=\"Only names containing\"]" "#gd-ws-pop .gd-views-share"]
+               :check {:kind "graph-view-filters" :name "tutorial-function-view"
+                       :filters {:kinds ["fn"] :name "tutorial-function-view"}}}
+              {:title "Run the view"
+               :body "Open the view chip and choose [[Edit graph]] beside [[tutorial-function-view]]. Its graph contains the same two conditions. Click [[▶ Run]] (or [[⋯]] → [[Run]]), acknowledge the displayed database effect, then press [[Run]]. The result lists matching functions — including this view itself. Filters narrow the Explorer; the saved fn also runs as a query."
+               :target "#gd-ws-chip"
+               :targets ["#gd-ws-chip" "#gd-ws-pop .gd-views-del" ".node-overlay[data-fn-name=\"tutorial-function-view\"]" ".execute-popover.visible"]
+               :check {:kind "graph-view-run" :name "tutorial-function-view"}}
               {:title "Back to the whole tree"
-               :body "Click [[◍ all]]. The filters go, the view stays saved — reopen the view chip any time and pick [[on-const]] to get it back."
+               :body "Click [[◍ all]]. The filters go; the saved view stays in the graph until cleanup. Another browser on this branch can apply it too."
                :target "#kind-filters .kind-toggle[data-kind=\"all\"]"
                :check {:kind "dom-absent" :selector "#gd-filter-chips .gd-filter-chip"}}
               {:title "That's filters and views"
-               :body "One idea, three depths: a chip narrows the tree, a set of chips is what you are looking at, a named set is a view — yours in this browser, or an fn in the graph when the team should have it too. The ⊘ on a namespace row is a filter as well (a [[not …]] chip). Click [[Finish]]."
+               :body "A chip narrows the tree. Save in graph creates a shared view; Edit filters updates it by identity; Run evaluates it. Device only keeps a separate browser preference. Click [[Finish]], then choose [[Delete created]] to remove only this lesson's view."
                :target nil
                :check {:kind "manual"}}]}
             {:id "23"
              :slug "branches"
              :chapter "The editor"
-             :version 2
+             :version 3
              :title "Branches"
              :reads "adds protected branches and the merge-time rules behind 📍."
-             ;; This lesson MANAGES branches itself (fork, edit, return to
-             ;; main) — running it inside a tour scratch branch broke its
-             ;; own story: "main never saw it" showed an empty canvas
-             ;; (branch-demo was born on the scratch branch, invisible from
-             ;; the real main) and the scratch branch leaked past cleanup.
+             ;; This lesson owns its common base and both siblings. Returning
+             ;; to main before cleanup allows target → source → base deletion.
              :in-place true
+             :cleanup-branch "main"
              :steps
              [{:title "Branches are views, not copies"
-               :body "A branch is a name plus a pointer to its parent. Editing on a branch writes a VERSION row scoped to it; main keeps its own. You will make a small fn, fork a branch, change it there, and watch main stay untouched."
+               :body "Branches share identities and resolve version rows. You will create an owned sandbox, fork two sibling branches, compare a replacement and an addition, then merge and remerge into the target. All tutorial functions live below the sandbox; your real main stays untouched."
                :target nil
                :check {:kind "manual"}}
+              {:title "Create the common sandbox"
+               :body "Open the branch chip, enter `tutorial-sandbox` and click [[Create]]. It is the common base of this lesson's two sibling branches. The tour records the actual branch UUID before the reload."
+               :target "#branch-chip-btn"
+               :targets ["#branch-chip-btn" ".branch-popover"]
+               :check {:kind "created-branch" :name "tutorial-sandbox"}
+               :creates {:type "branch" :name "tutorial-sandbox"}}
               {:title "Find str-upper"
                :body "Type `str-upper` in the Explorer filter and click the [[str-upper]] row (core.strings) — a one-slot fn is the easiest thing to give a value to."
                :target "input[placeholder=\"Filter...\"]"
@@ -1717,59 +1804,97 @@
                :body "It inherited str-upper's :string slot, so the [[+]] placeholder is on your card."
                :target nil
                :check {:kind "selected" :name "branch-demo"}}
-              {:title "Give it a value on main"
-               :body "Click the [[+]] on :string, choose [[Bind literal]], type exactly `main version` — then [[Save]]. (The slot is text, so the field takes plain text — no quotes.)"
+              {:title "Give it a value on the sandbox"
+               :body "Click the [[+]] on :string, choose [[Bind literal]], type exactly `base version` — then [[Save]]. (The slot is text, so the field takes plain text — no quotes.)"
                :target ".placeholder-binder"
                :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "binding-value" :name "branch-demo"
-                       :slot "string" :value "main version"}}
-              {:title "Fork a branch"
-               :body "Click the branch chip at the top of the Explorer. In the create row type `tutorial-branch` and click [[Create]]. The editor reloads on the new branch — the URL gains ?branch=tutorial-branch."
-               :target "#branch-chip-btn"
-               :targets ["#branch-chip-btn" ".branch-popover"]
-               :check {:kind "on-branch" :name "tutorial-branch"}
-               :creates {:type "branch" :name "tutorial-branch"}}
-              {:title "Change the value here"
-               :body "You are on tutorial-branch, still looking at branch-demo. Click its value (“main version”) and change it to `branch version` — then [[Save]]."
-               :target ".arg-value-editable"
-               :check {:kind "binding-value" :name "branch-demo"
-                       :slot "string" :value "branch version"}}
-              {:title "Go back to main"
-               :body "Open the branch chip again and click the main row. The editor reloads on main."
-               :target "#branch-chip-btn"
-               :targets ["#branch-chip-btn" ".branch-popover"]
-               :check {:kind "on-branch" :name "main"}}
-              {:title "main never saw it"
-               :body "branch-demo reads “main version” again — your edit is a version row that belongs to tutorial-branch alone. Time to compare the two sides properly."
-               :target "#branch-chip-btn"
-               :check {:kind "manual"}}
+                       :slot "string" :value "base version"}}
               {:title "Pin a fn to its branch"
                :body "Some fns are per-environment configuration — a port, a path, a schedule — and must NOT ride a merge. The bottom of branch-demo's card reads [[📍 merges across branches]]; click it, tick [[Branch-local]], then [[Save]]. It now reads branch-local: version rows of this fn stay on the branch that wrote them, whatever gets merged where. (The flag sits on the fn identity — every branch sees it; a descendant of a branch-local fn is branch-local too.)"
                :target ".node-overlay[data-fn-name=\"branch-demo\"] .branch-local-strip"
                :targets [".node-overlay[data-fn-name=\"branch-demo\"] .branch-local-strip" ".arg-value-edit-popover input[data-branch-local=\"toggle\"]" ".arg-value-edit-popover"]
                :check {:kind "fn-field" :name "branch-demo" :field "branch-local?" :value true}}
+              {:title "Make this demo mergeable"
+               :body "Open the same [[📍]] strip, untick [[Branch-local]] and [[Save]]. This experiment needs ordinary transferable versions. Keeping the flag on would intentionally prevent the source's value from reaching the sibling target."
+               :target ".node-overlay[data-fn-name=\"branch-demo\"] .branch-local-strip"
+               :check {:kind "fn-field" :name "branch-demo" :field "branch-local?" :value false}}
+              {:title "Fork a branch"
+               :body "Click the branch chip at the top of the Explorer. In the create row type `tutorial-branch` and click [[Create]]. The editor reloads on the new branch — the URL gains ?branch=tutorial-branch."
+               :target "#branch-chip-btn"
+               :targets ["#branch-chip-btn" ".branch-popover"]
+               :check {:kind "created-branch" :name "tutorial-branch"}
+               :creates {:type "branch" :name "tutorial-branch"}}
+              {:title "Change the value here"
+               :body "You are on tutorial-branch, still looking at branch-demo. Click its value (“base version”) and change it to `branch version` — then [[Save]]."
+               :target ".arg-value-editable"
+               :check {:kind "binding-value" :name "branch-demo"
+                       :slot "string" :value "branch version"}}
+              {:title "Describe the changed function"
+               :body "On branch-demo choose [[⋯]] → [[i]] → [[✎ Edit]], set the description to `source draft` and [[Save]]. This changes the same fn visible from the common base; it is a field edit, alongside the argument's literal replacement."
+               :target ".node-overlay[data-fn-name=\"branch-demo\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :check {:kind "fn-field" :name "branch-demo" :field "description" :value "source draft"}}
+              {:title "Add a child on the source"
+               :body "On branch-demo choose [[⋯]] → [[Extend]] and name the child `branch-added`. It is a new identity born on the source, distinct from the existing function's field and binding changes."
+               :target ".node-overlay[data-fn-name=\"branch-demo\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :check {:kind "fn-parent" :name "branch-added" :parent "branch-demo"}
+               :creates {:type "fn" :name "branch-added"}}
+              {:title "Go back to the sandbox"
+               :body "Switch to [[tutorial-sandbox]] with the branch chip. The source changes have not reached its common base."
+               :target "#branch-chip-btn"
+               :targets ["#branch-chip-btn" ".branch-popover"]
+               :check {:kind "on-branch" :name "tutorial-sandbox"}}
+              {:title "The common base still has its value"
+               :body "Select [[branch-demo]] in the Explorer. Its value is still `base version`: the source owns the replacement and description edits. The next branch must be a sibling, forked from this common base."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "binding-value" :name "branch-demo" :slot "string" :value "base version"}}
+              {:title "Fork the sibling target"
+               :body "While on tutorial-sandbox, create `tutorial-merge-target` with the branch chip. It is a sibling of tutorial-branch. This arrangement lets cleanup delete the merged target first, then the source, then the common base."
+               :target "#branch-chip-btn"
+               :check {:kind "created-branch" :name "tutorial-merge-target"}
+               :creates {:type "branch" :name "tutorial-merge-target"}}
               {:title "Compare the branches"
-               :body "Click the branch chip and press [[Δ]] on the tutorial-branch row. The EDITOR becomes the diff: a “Δ vs tutorial-branch · 1” chip appears by the branch chip (the number counts the changed fns), changed fns get ± badges in the Explorer (a lens row under the kind chips filters by change type), and opening a changed fn shows its old → new details in the inspector."
+               :body "Click the branch chip and press [[Δ]] on the tutorial-branch row. The EDITOR becomes the diff: a “Δ vs tutorial-branch” chip appears by the branch chip (the number counts the changed fns), the changed function gets ± and the added child gets + badges in the Explorer (a lens row under the kind chips filters by change type), and opening a changed fn shows its old → new details in the inspector."
                :target "#branch-chip-btn"
                :targets ["#branch-chip-btn" ".branch-popover" ".branch-row-diff[data-diff-source=\"tutorial-branch\"]"]
                :check {:kind "dom" :selector "#gd-diff-chip"}}
               {:title "Read it, then exit"
-               :body "branch-demo carries a ± in the tree — that badge IS the whole difference between the branches. Exit compare mode with the chip's [[×]]. (Pressing [[⇢]] on the row would fold the branch into main; the tour leaves that unclicked — a merged branch becomes part of main's history and could no longer be cleaned up at the end. The row's ⋯ menu also holds 💬 Review & comments — the conversation dialog.)"
+               :body "Select branch-demo and read its old → new literal and description in the Inspector. Select branch-added to see an addition separately. Exit compare mode with the chip's [[×]]; the next step performs the real merge."
                :target ".gd-diff-chip-off"
                :check {:kind "dom-absent" :selector "#gd-diff-chip"}}
-              {:title "When both sides touched the same thing"
-               :body "This lesson's branch only ADDED, so a merge is clean. When two branches edit the SAME binding, merge stops and shows a conflict resolver — pick per row which side wins; nothing lands until every row is decided. And when a protected branch requires review, incoming proposals wait in the branch popover — the same [[Δ]] chip you used here reads a proposal's diff before you approve it. The written lesson 23 walks a real conflict end-to-end."
+              {:title "Merge into the sibling target"
+               :body "While on tutorial-merge-target, open the branch chip and press [[⇢]] on tutorial-branch, then confirm. Select branch-demo: its value must become `branch version`. The source remains available for another edit."
+               :target "#branch-chip-btn"
+               :check {:kind "binding-value" :name "branch-demo" :slot "string" :value "branch version"}}
+              {:title "Return to the source"
+               :body "Switch to [[tutorial-branch]] and select [[branch-demo]]."
+               :target "#branch-chip-btn"
+               :check {:kind "on-branch" :name "tutorial-branch"}}
+              {:title "Make a later edit"
+               :body "Change branch-demo's value to `second branch version` and [[Save]]. A merge points at the source as it was when merged; this later version has not reached the target yet."
+               :target ".arg-value-editable"
+               :check {:kind "binding-value" :name "branch-demo" :slot "string" :value "second branch version"}}
+              {:title "Back to the merge target"
+               :body "Switch to [[tutorial-merge-target]] and select [[branch-demo]]."
+               :target "#branch-chip-btn"
+               :check {:kind "on-branch" :name "tutorial-merge-target"}}
+              {:title "The first merge is still a snapshot"
+               :body "The target still reads `branch version`. The source's later edit is separate until you merge again."
                :target nil
-               :check {:kind "manual"}}
+               :check {:kind "binding-value" :name "branch-demo" :slot "string" :value "branch version"}}
+              {:title "Merge the later edit"
+               :body "Press [[⇢]] on tutorial-branch again and confirm. The target now reads `second branch version`. If both sides had changed the same binding independently, the merge would first ask you to choose a side in the conflict resolver."
+               :target "#branch-chip-btn"
+               :check {:kind "binding-value" :name "branch-demo" :slot "string" :value "second branch version"}}
 
               {:title "That's branching"
-               :body "Fork, edit in isolation, compare — and merge with [[⇢]] when a branch has earned it. The branch row also carries a review workflow: ✅ approve inline, with 📤 propose and ⚙ protection under the row's [[⋯]] menu — the NEXT tour lesson (24 · Review) walks that whole cycle, refusal included. Click [[Finish]] to clean up (the branch goes too) or keep it."
+               :body "You compared an existing function's replacement and field edit with a new child, then merged and remerged into its sibling target. Finish → [[Delete created entities]] returns to main, removes the target first, the source next, and the common sandbox last. The next lesson adds comments, approvals and stale-review behavior."
                :target nil
                :check {:kind "manual"}}]}
             {:id "24"
              :slug "review"
              :chapter "The editor"
-             :version 3
+             :version 4
              :title "Review: propose and approve"
              :reads "covers the review flow in full, and the push-only rule from lesson 23."
              ;; Like lesson 23 this lesson MANAGES branches itself — a
@@ -1779,11 +1904,18 @@
              ;; main), so an abort can't leave the user's trunk locked
              ;; behind a review requirement.
              :in-place true
+             :cleanup-branch "main"
              :steps
              [{:title "Review is the target's policy"
-               :body "On GitHub you protect a branch and require approvals before anything merges into it; graphden works the same way. You will build a protected release branch, propose a change into it, watch an unapproved merge get refused, then approve it so the merge WOULD land."
+               :body "On GitHub you protect a branch and require approvals before anything merges into it; graphden works the same way. You will build a protected release branch, propose a change into it, watch an unapproved merge get refused, then approve it, discuss it and watch a later edit require review again. The function is born on your release sandbox; main is untouched."
                :target nil
                :check {:kind "manual"}}
+              {:title "A release branch"
+               :body "Click the branch chip, type `tutorial-release` in the create row and click [[Create]]. This branch plays the role of a protected main — without touching your real one."
+               :target "#branch-chip-btn"
+               :targets ["#branch-chip-btn" ".branch-popover"]
+               :check {:kind "created-branch" :name "tutorial-release"}
+               :creates {:type "branch" :name "tutorial-release"}}
               {:title "Something to change"
                :body "Type `const` in the Explorer filter and click the [[const]] row (core.logic) — the primitive that returns its :value."
                :target "input[placeholder=\"Filter...\"]"
@@ -1800,16 +1932,10 @@
                :target nil
                :check {:kind "selected" :name "review-demo"}}
               {:title "Give it a value"
-               :body "Click the [[+]] on :value, choose [[Bind literal]], enter `1` — then [[Save]]. This is the state your “release” will hold."
+               :body "Click the [[+]] on :value, choose [[Bind literal]], enter `1` — then [[Save]]. This is the state your release sandbox holds."
                :target ".placeholder-binder"
                :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
                :check {:kind "binding-value" :name "review-demo" :slot "value" :value "1"}}
-              {:title "A release branch"
-               :body "Click the branch chip, type `tutorial-release` in the create row and click [[Create]]. This branch plays the role of a protected main — without touching your real one."
-               :target "#branch-chip-btn"
-               :targets ["#branch-chip-btn" ".branch-popover"]
-               :check {:kind "on-branch" :name "tutorial-release"}
-               :creates {:type "branch" :name "tutorial-release"}}
               {:title "Protect it"
                :body "Open the branch chip again. Active branches are sorted with main first, the current branch next, then the others by name; scroll inside the list when a row is below the visible area. Click [[⋯]] on tutorial-release and choose [[⚙ Protection…]]. Set [[Required approvals]] to [[1]]: a merge into this target now needs one recorded approval."
                :target "#branch-chip-btn"
@@ -1819,7 +1945,7 @@
                :body "The ⚙ menu closes itself after your pick and the branch popover is back (if it is not, the chip toggles it). In its create row type `tutorial-feature` and click [[Create]]. It forks from the branch you are ON — tutorial-release — so that is where its proposal will aim."
                :target "#branch-chip-btn"
                :targets ["#branch-chip-btn" ".branch-popover"]
-               :check {:kind "on-branch" :name "tutorial-feature"}
+               :check {:kind "created-branch" :name "tutorial-feature"}
                :creates {:type "branch" :name "tutorial-feature"}}
               {:title "Change the value here"
                :body "Still on review-demo: click its value (“1”) and change it to `2` — then [[Save]]. That edit is the change you are about to put up for review."
@@ -1840,13 +1966,60 @@
                :target "#branch-chip-btn"
                :targets ["#branch-chip-btn" ".branch-row-more[data-more-branch=\"tutorial-feature\"]" ".branch-row-more-menu.open .branch-row-propose[data-propose-branch=\"tutorial-feature\"]"]
                :check {:kind "dom" :selector ".branch-row-approve[data-approve-branch=\"tutorial-feature\"]"}}
+              {:title "Read the proposal"
+               :body "Click [[Δ]] on tutorial-feature. Compare mode shows review-demo's argument as 1 here and 2 there. Select `review-demo` if it is not open; its Inspector shows the same changes with comment controls."
+               :target "#branch-chip-btn"
+               :targets ["#branch-chip-btn" ".branch-row-diff[data-diff-source=\"tutorial-feature\"]"]
+               :check {:kind "dom" :selector "#gd-diff-insp"}}
+              {:title "Comment on this function"
+               :body "Click [[💬]] beside the Inspector's comparison heading. In that thread type `Please keep this value explicit.` and click [[Comment]]. The saved comment stays attached to review-demo's UUID."
+               :target "#gd-diff-insp .gd-diff-insp-head .branch-diff-comment-btn"
+               :targets ["#gd-diff-insp .gd-diff-insp-head .branch-diff-comment-btn" "#gd-diff-insp .branch-diff-anchor-thread .branch-comment-input"]
+               :check {:kind "review-comment" :name "review-demo" :text "Please keep this value explicit."}}
+              {:title "Answer in the same thread"
+               :body "In the same thread type `It stays at 2 in this proposal.` and click [[Comment]]. Both messages belong to this function's review thread; a typed draft does not count as a saved answer."
+               :target "#gd-diff-insp .branch-diff-anchor-thread .branch-comment-input"
+               :check {:kind "review-comment" :name "review-demo" :text "It stays at 2 in this proposal."}}
+              {:title "Return to approval"
+               :body "Exit compare mode with the chip's [[×]]. The conversation stays with the proposal."
+               :target ".gd-diff-chip-off"
+               :check {:kind "dom-absent" :selector "#gd-diff-chip"}}
               {:title "Approve it"
                :body "Click [[✅]] on the same row. Its badge flips to 1/1 — the requirement is met. (By default your OWN approval counts, so a solo user is never locked out; a team that wants four-eyes review unticks “Count the author's own approval” in ⚙.)"
                :target "#branch-chip-btn"
                :targets ["#branch-chip-btn" ".branch-row-approve[data-approve-branch=\"tutorial-feature\"]"]
                :check {:kind "dom" :selector ".branch-row-approve[data-approve-branch=\"tutorial-feature\"][data-approved=\"1\"] + .branch-appr-count.ok"}}
+              {:title "Edit after approval"
+               :body "Open the branch chip and switch to [[tutorial-feature]]. An approval applies to the content that was reviewed; change that content next."
+               :target "#branch-chip-btn"
+               :targets ["#branch-chip-btn" ".branch-popover"]
+               :check {:kind "on-branch" :name "tutorial-feature"}}
+              {:title "A new proposal value"
+               :body "On review-demo, change the argument from 2 to `3` and [[Save]]. This is a new edit after approval."
+               :target ".arg-value-editable"
+               :check {:kind "binding-value" :name "review-demo" :slot "value" :value "3"}}
+              {:title "Return to the reviewer"
+               :body "Switch back to [[tutorial-release]] with the branch chip."
+               :target "#branch-chip-btn"
+               :targets ["#branch-chip-btn" ".branch-popover"]
+               :check {:kind "on-branch" :name "tutorial-release"}}
+              {:title "The earlier approval is stale"
+               :body "Open the branch chip. tutorial-feature no longer has a valid approval: its counter is 0/1. The old approval cannot authorize the value you just changed."
+               :target "#branch-chip-btn"
+               :targets ["#branch-chip-btn" ".branch-row[data-branch-name=\"tutorial-feature\"] .branch-appr-count"]
+               :check {:kind "dom" :selector ".branch-row-approve[data-approve-branch=\"tutorial-feature\"]:not([data-approved=\"1\"]) + .branch-appr-count:not(.ok)"}}
+              {:title "Read the new value"
+               :body "Click [[Δ]] on tutorial-feature again. The Inspector and canvas now show 1 here and 3 there. Your two comments remain attached to the same function. Read the new change, then exit with the chip's [[×]]."
+               :target ".branch-row-diff[data-diff-source=\"tutorial-feature\"]"
+               :targets [".branch-row-diff[data-diff-source=\"tutorial-feature\"]" ".gd-diff-chip-off"]
+               :check {:kind "manual"}}
+              {:title "Approve the changed content"
+               :body "Open the branch chip and click [[✅]] on tutorial-feature again. The new approval is for the current proposal, including its value 3."
+               :target "#branch-chip-btn"
+               :targets ["#branch-chip-btn" ".branch-row-approve[data-approve-branch=\"tutorial-feature\"]"]
+               :check {:kind "dom" :selector ".branch-row-approve[data-approve-branch=\"tutorial-feature\"][data-approved=\"1\"] + .branch-appr-count.ok"}}
               {:title "Ready to land — and why we stop"
-               :body "The badge reads 1/1: pressing [[⇢]] now WOULD land the merge. The tour leaves it unclicked on purpose — a merge is by-reference (the target reads the source's version rows), so a merged branch becomes part of its target's history and can no longer be deleted. Landing this one would make the sandbox permanent; in real work that permanence is exactly the point."
+               :body "The badge reads 1/1 again. Pressing [[⇢]] would now land the reviewed value 3. This lesson keeps the protected child proposal unmerged: its target depends on its parent, so merging it would make this pair's history permanent. Lesson 23 performs a real merge and remerge in a sibling sandbox that can be deleted."
                :target nil
                :check {:kind "manual"}}
               {:title "Back to main"
@@ -1861,49 +2034,68 @@
             {:id "25"
              :slug "asset-overrides"
              :chapter "The editor"
-             :version 1
-             :requires "assets"
+             :version 2
+             :in-place true
+             :requires "personal-ui-graphs"
              :title "Editing the editor"
-             :reads "covers the ?v= hash and when NOT to override."
+             :reads "covers personal graph components, the fixed host boundary, and advanced self-hosted source files."
              :steps
-             [{:title "The editor is served from the graph too"
-               :body "Every file this interface is made of — its JavaScript, its CSS — is served by the same instance you are editing in. An OVERRIDE is a row that shadows one of them by path, per branch, revertible. On a shared cloud that would be a cross-tenant XSS surface, so it exists only on your own deployment — this one."
+             [{:title "Personal graphs, real editor components"
+               :body "The menu's state, events and view, the picker view, and theme values are ordinary named graphs. You can create your own copies on cloud or self-hosted deployments. They affect your editor preference; account actions, search and navigation keep their native owners."
                :target nil
                :check {:kind "manual"}}
-              {:title "Open Assets"
-               :body "Account button (top right — a lock icon on a self-hosted instance) → [[Organization]] → [[Assets]]. Every servable frontend file is listed with a chip: baseline means the shipped file is serving, override means yours is."
+              {:title "Open UI graphs"
+               :body "Open the account menu and choose [[Settings]]. In Appearance, find [[UI graphs]] below the theme controls."
                :target "#auth-lock-btn, .auth-avatar"
-               :targets ["#auth-lock-btn, .auth-avatar" ".auth-menu-item[data-item=\"Organization\"]" "#gd-operate-nav button[data-section=\"assets\"]"]
-               :check {:kind "dom" :selector "#gd-operate-panels > [data-section=\"assets\"]:not([hidden])"}}
-              {:title "Open the stylesheet"
-               :body "Find packages/app/editor/editor-styles.css in the list and click its [[edit]]. The file opens in a code editor — the same one a :js-source slot gets."
-               :target "[data-section=\"assets\"] .gd-asset-edit-btn[value=\"packages/app/editor/editor-styles.css\"]"
-               :check {:kind "dom" :selector ".gd-asset-save-btn"}}
-              {:title "Change something you will notice"
-               :body "Scroll to the very end of the file and append exactly `.gd-tour-title { letter-spacing: 0.08em; }` — then click [[Save override]]. The file's chip flips from baseline to override."
-               :target ".gd-asset-save-btn"
-               :check {:kind "dom" :selector ".gd-asset-chip-override"}}
-              {:title "Reload to run it"
-               :body "Saving rolled the ?v= hash on every asset URL, so the page you are on is still running the OLD css. Reload the tab — the tour comes back where you left it — and look at this title: it is letter-spaced now, because the editor is serving your file."
-               :target nil
-               :check {:kind "manual"}}
-              {:title "See exactly what you changed"
-               :body "The reload closed the panel: open it again (account button → [[Organization]] → [[Assets]]), click [[edit]] on the editor-styles.css row and press [[Diff vs baseline]]. The override is a row, not a patch: the shipped file is untouched underneath, which is what makes the next step total."
+               :targets ["#auth-lock-btn, .auth-avatar" ".auth-menu-item[data-item=\"Settings\"]" "#gd-ui-components-root"]
+               :check {:kind "dom" :selector "#gd-ui-components-root"}}
+              {:title "Create personal graphs"
+               :body "Click [[Create personal graphs]] and choose an existing namespace where you have write, read, view-impl and execute access. The editor creates a fresh child containing Theme, Menu and Picker groups plus a configuration. Both components load those graphs; your previous Appearance selections are saved for cleanup."
+               :target "#gd-ui-components-create"
+               :targets ["#gd-ui-components-create" ".fn-picker-popover"]
+               :check {:kind "ui-component" :action "created"}}
+              {:title "Open the theme group"
+               :body "Click [[Theme]] in UI graphs. This opens the created function by identity, even if another namespace has a function with the same name. Its named value dependencies appear in the graph."
+               :target "[data-ui-graph=\"theme-id\"]"
+               :check {:kind "ui-component" :action "open" :root "theme-id"}}
+              {:title "Change a shared color"
+               :body "Follow the theme's values to [[theme-canvas-color]], or find it in the Explorer inside the created theme namespace. Open its card and edit its own :value to `#fff7ed`, then [[Save]]. The existing color widget still applies: the copied wrapper inherits the canonical color type. This value feeds both the canvas and the menu's background."
+               :target ".node-overlay[data-fn-name=\"theme-canvas-color\"]"
+               :targets [".node-overlay[data-fn-name=\"theme-canvas-color\"]" ".arg-value-edit-popover"]
+               :check {:kind "ui-component" :action "literal" :group "theme" :name "theme-canvas-color" :slot "value" :value "#fff7ed" :token "--bg"}}
+              {:title "Open the menu view"
+               :body "Return to Settings → Appearance → UI graphs and click [[Menu view]]. The component's style, theme values and motion are graph dependencies; the Settings and Organization callbacks remain owned by the editor."
                :target "#auth-lock-btn, .auth-avatar"
-               :targets ["#auth-lock-btn, .auth-avatar" ".auth-menu-item[data-item=\"Organization\"]" "#gd-operate-nav button[data-section=\"assets\"]" "[data-section=\"assets\"] .gd-asset-edit-btn[value=\"packages/app/editor/editor-styles.css\"]" ".gd-asset-diff-btn"]
-               :check {:kind "manual"}}
-              {:title "Put it back"
-               :body "Click [[Revert to baseline]] and confirm. The row is deleted, the shipped file serves again, and the chip reads baseline — reload once more to run it."
-               :target ".gd-asset-revert-btn"
-               :check {:kind "dom-absent" :selector ".gd-asset-chip-override"}}
-              {:title "What this is for"
-               :body "A house style for your deployment, an affordance upstream doesn't have, a quick instrumentation patch while you diagnose something. A JS override is syntax-checked before it is written — a typo would otherwise take down the whole bundle including this panel — while CSS is not, because a bad rule just doesn't apply. Click [[Finish]]."
+               :targets ["#auth-lock-btn, .auth-avatar" ".auth-menu-item[data-item=\"Settings\"]" "[data-ui-graph=\"menu-id\"]"]
+               :check {:kind "ui-component" :action "open" :root "menu-id"}}
+              {:title "A local menu value"
+               :body "Find [[account-menu-hover]] in this graph, or in the Explorer inside the created menu namespace. Open its card and edit its own :value to `#fed7aa`, then [[Save]]. Open the account menu to see its hover color. The canvas stays at the shared `#fff7ed`: this leaf supplies only the menu's local token."
+               :target ".node-overlay[data-fn-name=\"account-menu-hover\"]"
+               :targets [".node-overlay[data-fn-name=\"account-menu-hover\"]" ".arg-value-edit-popover" "#auth-lock-btn, .auth-avatar"]
+               :check {:kind "ui-component" :action "menu-local" :group "menu" :name "account-menu-hover" :slot "value" :value "#fed7aa" :canvas "#fff7ed"}}
+              {:title "Open the menu behavior"
+               :body "Choose [[Settings]] again and click [[Menu behavior]] in UI graphs. This is the update entry: events and the current state flow through ordinary named helpers."
+               :target ".auth-menu-item[data-item=\"Settings\"]"
+               :targets [".auth-menu-item[data-item=\"Settings\"]" "[data-ui-graph=\"menu-update-id\"]"]
+               :check {:kind "ui-component" :action "open" :root "menu-update-id"}}
+              {:title "Change a keyboard decision"
+               :body "Follow the event helpers to [[account-menu-key-map]], or find it in the created menu namespace in the Explorer. Its :keys list includes Home; in the matching third :vals item change `first` to `last`, then [[Save]]. Open the account menu and press Home. Focus now moves to its last item, and the graph's active index follows it."
+               :target ".node-overlay[data-fn-name=\"account-menu-key-map\"]"
+               :targets [".node-overlay[data-fn-name=\"account-menu-key-map\"]" ".arg-value-edit-popover" "#auth-lock-btn, .auth-avatar"]
+               :check {:kind "ui-component" :action "home-last" :group "menu" :name "account-menu-key-map" :slot "vals"}}
+              {:title "Open the picker view"
+               :body "Choose [[Settings]] and click [[Picker view]]. This graph authors the candidate rows, groups and styles. The native picker still owns queries, compatibility checks and selection; editing this view does not replace those decisions."
+               :target ".auth-menu-item[data-item=\"Settings\"]"
+               :targets [".auth-menu-item[data-item=\"Settings\"]" "[data-ui-graph=\"picker-id\"]"]
+               :check {:kind "ui-component" :action "open" :root "picker-id"}}
+              {:title "The boundary and cleanup"
+               :body "Personal components run as bounded data with a fixed DOM and operation contract. They cannot load arbitrary JavaScript, HTML or source files into the editor. Advanced [[Source files]] under Organization retains the legacy self-hosted override tool. Click [[Finish]] to keep these graphs or delete their exact created identities and restore the previous Appearance selections."
                :target nil
                :check {:kind "manual"}}]}
             {:id "26"
              :slug "version-history"
              :chapter "The editor"
-             :version 2
+             :version 3
              :title "Version history"
              :reads "covers the per-version run history and how this reads on a branch."
              :steps
@@ -1936,9 +2128,13 @@
                :target ".node-overlay[data-fn-name=\"tutorial-versioned\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
                :targets [".node-overlay[data-fn-name=\"tutorial-versioned\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"fn-versions\"]"]
                :check {:kind "dom" :selector ".fn-versions-popover .fn-versions-row"}}
+              {:title "Same history in the Inspector"
+               :body "Press [[Escape]] to close the popover, then open the Inspector's [[Versions]] tab. It has the same field versions and actions. Restore is disabled wherever these function fields already match the current branch; argument bindings and parents have separate storage."
+               :target "#gd-insp-tab-history"
+               :check {:kind "dom" :selector "#gd-insp-history .fn-versions-row"}}
               {:title "Restore the first draft"
                :body "Click [[restore]] on the row that says first draft and confirm. Read the confirm text as you accept it: it writes a NEW version row carrying the historic fields. Nothing after it is deleted."
-               :target ".fn-versions-popover"
+               :target "#gd-insp-history"
                :check {:kind "fn-field" :name "tutorial-versioned" :field "description" :value "first draft"}}
               {:title "History is append-only"
                :body "Reopen [[⌛]]. There are FOUR rows now — the restore is itself a version. That is what makes this button safe: restoring the row you were on before puts you back, and no state exists in which the button lost your work."
@@ -1946,7 +2142,7 @@
                :targets [".node-overlay[data-fn-name=\"tutorial-versioned\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"fn-versions\"]"]
                :check {:kind "manual"}}
               {:title "What restore does not touch"
-               :body "Only the fn's own fields travel: description, return type, constraint (never the name). Bindings have their OWN version rows (lesson 04), so a value you rebound stays rebound. Reverting those silently, from a fn-level button, would undo edits you never named."
+               :body "Only the fn's own version fields travel: description, return type and constraint. The name and current parent relationships stay as they are. Bindings have their OWN version rows (lesson 04), so a value you rebound stays rebound. Reverting those silently, from a fn-level button, would undo edits you never named."
                :target nil
                :check {:kind "manual"}}
               {:title "That's the timeline"
@@ -2067,8 +2263,8 @@
             {:id "30"
              :slug "apps"
              :chapter "Your organization"
-             :version 1
-             :requires "manage-apps"
+             :version 2
+             :requires "handler-preview"
              :title "Apps"
              :reads "covers custom domains and the request shape a handler receives."
              :steps
@@ -2077,37 +2273,47 @@
                :target nil
                :check {:kind "manual"}}
               {:title "Something to serve"
-               :body "Type `const` in the Explorer filter and click the [[const]] row — the primitive that returns its :value unchanged. A handler is any fn returning a response map, so :const is enough to publish."
+               :body "Find `html-ok-response` in the Explorer and select it. This typed handler already binds the status and HTML content type; you will supply its body. This lesson needs an account browser session, an isolated apps domain and manage-apps access."
                :target "input[placeholder=\"Filter...\"]"
-               :check {:kind "selected" :name "const"}}
+               :check {:kind "selected" :name "html-ok-response"}}
               {:title "Make it yours"
-               :body "Click [[⋯]] on the const row, choose [[Extend]], name it `tutorial-page` — then [[Save]]."
-               :target ".node-overlay[data-fn-name=\"const\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
-               :targets [".node-overlay[data-fn-name=\"const\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
-               :check {:kind "fn-parent" :name "tutorial-page" :parent "const"}
+               :body "Click [[⋯]] on html-ok-response, choose [[Extend]], name it `tutorial-page` — then [[Save]]."
+               :target ".node-overlay[data-fn-name=\"html-ok-response\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"html-ok-response\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :check {:kind "fn-parent" :name "tutorial-page" :parent "html-ok-response"}
                :creates {:type "fn" :name "tutorial-page"}}
               ;; Selection gate — the bind must land on the child.
               {:title "tutorial-page is open"
-               :body "It inherited :value. Bound to a Ring response map, this fn IS a web page — the same shape lesson 01 returned, now with a content type."
+               :body "It inherited :body. The resulting Ring response is the page; its status and content type come from html-ok-response."
                :target nil
                :check {:kind "selected" :name "tutorial-page"}}
               {:title "Answer like a web server"
-               :body "Click the [[+]] on :value, choose [[Bind literal]], and enter exactly `{\"status\": 200, \"headers\": {\"Content-Type\": \"text/html\"}, \"body\": \"<h1>Hello from my app</h1>\"}` — then [[Save]]."
+               :body "Click [[+]] on :body → [[Bind literal]], enter `<h1>Hello from my app</h1>` as the string and [[Save]]."
                :target ".placeholder-binder"
                :targets [".placeholder-binder" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
-               :check {:kind "binding-bound" :name "tutorial-page" :slot "value"}}
+               :check {:kind "binding-value" :name "tutorial-page" :slot "body" :value "<h1>Hello from my app</h1>"}}
               {:title "Open its Apps"
                :body "Publishing starts from the fn, like declaring a service does. Click [[⋯]] on the tutorial-page row and choose [[▣]] (Apps) — the popover lists the hosts this fn serves (none yet) and a form to add one."
                :target ".node-overlay[data-fn-name=\"tutorial-page\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
                :targets [".node-overlay[data-fn-name=\"tutorial-page\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"apps\"]" ".fn-apps-popover.visible"]
                :check {:kind "dom" :selector ".fn-apps-popover.visible [data-fn-apps]"}}
               {:title "Publish it"
-               :body "Type the subdomain `tutorial` — the fn is already this one, nothing to copy — and click [[+ Add app]]. The host appears in the list, the row gets a ▣ marker in the Explorer, and the app is live immediately — the host answers from the graph as it stands."
+               :body "Choose a unique subdomain label using lower-case letters, digits and hyphens — the fn is already this one, nothing to copy — and click [[+ Add app]]. The host appears in the list and the row gets a ▣ marker in the Explorer. This step completes only after the server confirms your exact new app route."
                :target "[data-fn-apps] form"
+               :check {:kind "app-route-created" :name "tutorial-page"}
+               :creates {:type "app-route" :name "tutorial-page"}}
+              {:title "Preview this lesson branch"
+               :body "Close Apps. Click [[⋯]] on tutorial-page → [[HTTP]] → [[Preview HTML handler]]. The ordinary app host uses main; this two-minute preview executes the exact scratch branch where you just saved the page."
+               :target ".node-overlay[data-fn-name=\"tutorial-page\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-page\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"http-host\"]" ".http-host-popover.visible [data-handler-preview-mint]"]
+               :check {:kind "dom" :selector ".http-host-popover.visible [data-handler-preview-url]:not([hidden])"}}
+              {:title "Read your page"
+               :body "Click [[Open HTML preview]]. In the new tab read Hello from my app, then close that tab and return here. You have served real HTML from this branch on the isolated apps origin."
+               :target ".http-host-popover.visible [data-handler-preview-url]"
                :check {:kind "manual"}}
-              {:title "That's publishing"
-               :body "Click the host to open your page in a new tab — no build step, because there was nothing to build: the row points at a fn, and requests to that host are executed against it. Editing the fn changes what the host serves on the next request; the [[apps]] lens under the Explorer search lists every published fn. Click [[Finish]] to clean up or keep the app."
-               :target "[data-fn-apps]"
+              {:title "Ordinary publication follows a merge"
+               :body "For an ordinary public app, merge the reviewed handler into main using the branch controls from lesson 23, then open its app host. The current lesson stops at a real branch preview so cleanup stays reversible: merging into your real main keeps source history. [[Finish]] lets you keep the app and branch, or removes the exact app route before its handler and branch."
+               :target nil
                :check {:kind "manual"}}]}
             {:id "31"
              :slug "packages"
@@ -2211,73 +2417,79 @@
             {:id "35"
              :slug "services"
              :chapter "Your organization"
-             :version 1
-             :requires "services"
-             :title "Services"
-             :reads "builds a real one — a :future-parented thunk, then a scheduled job — and covers restart policy, cardinality, per-branch services and the dedicated-tier isolation."
-             :steps
-             [{:title "Fns that keep running"
-               :body "Executing a fn answers once. A SERVICE is a row that says “keep this fn running” — a web server, a cron loop — and a reconciler makes reality match it: starts what should run, restarts what died, stops what you disabled."
-               :target nil
-               :check {:kind "manual"}}
-              {:title "Find future"
-               :body "Type `future` in the Explorer filter and click the [[future]] row (core.concurrency). :future is the fn that declares the :process effect — the marker for “spawns supervised background work”. Without it in the parent chain the server refuses to make a service, by design."
-               :target "input[placeholder=\"Filter...\"]"
-               :check {:kind "selected" :name "future"}}
-              {:title "The daemon"
-               :body "Click [[⋯]] on the future row, choose [[Extend]] and name it `tutorial-daemon` — then [[Save]]."
-               :target ".node-overlay[data-fn-name=\"future\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
-               :targets [".node-overlay[data-fn-name=\"future\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
-               :check {:kind "fn-parent" :name "tutorial-daemon" :parent "future"}
-               :creates {:type "fn" :name "tutorial-daemon"}}
-              ;; Selection gate — the bind must land on the child.
-              {:title "tutorial-daemon is open"
-               :body ":body is a callable slot — the [[+]] on your card opens the fn picker straight away; a literal cannot go there. The work it will run does not exist yet: you make it from this slot, without leaving this canvas."
-               :target nil
-               :check {:kind "selected" :name "tutorial-daemon"}}
-              {:title "Give it a body"
-               :body "Click the [[+]] on :body, type `const` in the picker's filter and click the [[const]] row (core.logic) — the primitive that returns its :value. Its card appears under yours, wired into :body: the ref is passed in as the body instead of being executed here."
-               :target ".placeholder-binder[data-fn-name=\"tutorial-daemon\"][data-arg-name=\"body\"]"
-               :targets [".placeholder-binder[data-fn-name=\"tutorial-daemon\"][data-arg-name=\"body\"]" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\".const\"]"]
-               :check {:kind "binding-bound" :name "tutorial-daemon" :slot "body"}}
-              {:title "Make the thunk yours, in place"
-               :body "Click [[⋯]] on the const card, choose [[Extend]] and name it `tutorial-tick` — then [[Save]]. The child takes const's place in :body, and you never left the daemon's canvas. This is the work the service will keep doing — the smallest possible stand-in for a listener or a cron loop."
-               :target ".node-overlay[data-fn-name=\"const\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
-               :targets [".node-overlay[data-fn-name=\"const\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
-               :check {:kind "dom" :selector ".node-overlay[data-fn-name=\"tutorial-tick\"]"}
-               :creates {:type "fn" :name "tutorial-tick"}}
-              {:title "Give it something to return"
-               :body "tutorial-tick's :value edge runs on past its card to a dashed [[+]]: a callable's open input is supplied by its CALLER, so the value you bind here is written on tutorial-daemon and handed to the thunk on every call (lesson 09). Click that [[+]], choose [[Bind literal]] and type `tick` — the slot takes anything, so a bare word is stored as text (a number or `[…]` would land as that; the “as” chooser above the field lets you say so explicitly and narrow the slot). A service has no caller to pass arguments in, so a fn with free args can never become one; tutorial-daemon now has none AND carries :process — the two conditions for a service."
-               :target ".placeholder-binder[data-fn-name=\"tutorial-daemon\"][data-arg-name=\"value\"]"
-               :targets [".placeholder-binder[data-fn-name=\"tutorial-daemon\"][data-arg-name=\"value\"]" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
-               :check {:kind "binding-bound" :name "tutorial-daemon" :slot "value"}}
-              ;; Selection gate — the \u2699 must belong to the daemon.
-              {:title "Where a fn becomes a service"
-               :body "The gear on a card's [[⋯]] menu is where a fn becomes a service. It is a per-fn setting, not a deploy screen."
-               :target nil
-               :check {:kind "selected" :name "tutorial-daemon"}}
-              {:title "Open the service settings"
-               :body "Click [[⋯]] on the card, then the [[⚙]] button."
-               :target ".node-overlay[data-fn-name=\"tutorial-daemon\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
-               :targets [".node-overlay[data-fn-name=\"tutorial-daemon\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"service-settings\"]"]
-               :check {:kind "dom" :selector ".service-popover"}}
-              {:title "Create it — switched OFF"
-               :body "UNTICK [[Enabled]], leave the restart policy as it is (always), and click [[Create & reconcile]]. The popover closes as soon as the row is written — a disabled row is the desired state “this exists but should not be running”, worth writing on purpose, and what keeps this tour from spawning a daemon on your instance."
-               :target ".service-popover"
-               :check {:kind "manual"}}
-              {:title "What the row means"
-               :body "Enabled decides whether the reconciler starts it. Restart policy decides what happens when it exits — always, only on failure, never. The row is scoped to your organization and to the branch you are on, so the same fn can run on dev and prod at once without a second definition."
-               :target nil
-               :check {:kind "manual"}}
-              {:title "Remove it"
-               :body "Open [[⋯]] → [[⚙]] once more: the popover now reads “Service: :tutorial-daemon” and carries the row’s state. Click [[Delete service]]. Deleting the row is how you stop a service for good — the fn itself is untouched."
-               :target ".node-overlay[data-fn-name=\"tutorial-daemon\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
-               :targets [".node-overlay[data-fn-name=\"tutorial-daemon\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"service-settings\"]" ".service-popover"]
-               :check {:kind "manual"}}
-              {:title "That's supervision"
-               :body "A service is desired state, not a deployment: you write the row, the reconciler makes it true. Click [[Finish]] to clean up."
-               :target nil
-               :check {:kind "manual"}}]}
+             :version 2
+             :requires "temporary-http"
+             :title "HTTP handlers and persistent services"
+             :reads "publishes a finite public HTTP handler, calls its real URL, and revokes it; distinguishes this from a dedicated or self-hosted persistent service."
+             :steps [{:title "One request, one execution"
+                      :body "A temporary HTTP publication gives a handler a public URL for 30 minutes. Each request runs the handler once. It does not keep a function running or start a listener. The existing public HTTPS origin handles TLS; you choose no port. Persistent services are a different operation, available on self-hosted or dedicated executors."
+                      :target nil
+                      :check {:kind "manual"}}
+                     {:title "Open text-ok-response"
+                      :body "Find `text-ok-response` in web.response. Its status and text/plain header are already bound; :body supplies the response text."
+                      :target "input[placeholder=\"Filter...\"]"
+                      :check {:kind "selected"
+                              :name "text-ok-response"}}
+                     {:title "Make your own handler"
+                      :body "Click [[⋯]] on text-ok-response, choose [[Extend]], name it `tutorial-http-answer` and [[Save]]."
+                      :target ".node-overlay[data-fn-name=\"text-ok-response\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+                      :check {:kind "fn-parent"
+                              :name "tutorial-http-answer"
+                              :parent "text-ok-response"}
+                      :targets [".node-overlay[data-fn-name=\"text-ok-response\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+                                ".row-actions-popover [data-action=\"extend-fn\"]"
+                                ".arg-value-edit-popover"]
+                      :creates {:type "fn"
+                                :name "tutorial-http-answer"}}
+                     {:title "Open tutorial-http-answer"
+                      :body "Type `tutorial-http-answer` in the Explorer filter and select that function."
+                      :target "input[placeholder=\"Filter...\"]"
+                      :check {:kind "selected"
+                              :name "tutorial-http-answer"}}
+                     {:title "Set the response"
+                      :body "Click [[+]] on :body, choose [[Bind literal]], enter `hello HTTP` and [[Save]]."
+                      :target ".placeholder-binder[data-fn-name=\"tutorial-http-answer\"][data-arg-name=\"body\"]"
+                      :check {:kind "bindings-count"
+                              :name "tutorial-http-answer"
+                              :count 1}
+                      :targets [".placeholder-binder[data-fn-name=\"tutorial-http-answer\"][data-arg-name=\"body\"]"
+                                ".free-arg-bind-chooser"
+                                ".arg-value-edit-popover"]}
+                     {:title "Open HTTP publication"
+                      :body "Click [[⋯]] on tutorial-http-answer, then [[HTTP]]. This publishes a finite request handler; [[⚙ Service settings]] remains the separate control for persistent services."
+                      :target ".node-overlay[data-fn-name=\"tutorial-http-answer\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+                      :check {:kind "dom"
+                              :selector ".http-host-popover.visible"}
+                      :targets [".node-overlay[data-fn-name=\"tutorial-http-answer\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+                                ".row-actions-popover [data-action=\"http-host\"]"]}
+                     {:title "Publish for 30 minutes"
+                      :body "Click [[Publish for 30 minutes]]. Publishing checks the graph without invoking it. If slots are busy, stop an older publication or wait for its deadline, then retry. No service quota or background-process permission is added."
+                      :target ".http-host-popover.visible"
+                      :check {:kind "dom"
+                              :selector ".http-host-popover.visible [data-http-host-url]:not([hidden])"}
+                      :creates {:type "http-publication"
+                                :name "tutorial-http-answer"}}
+                     {:title "Make a real HTTP request"
+                      :body "Click [[Open public URL]]. A new tab must show `hello HTTP` as plain text. This is a real public request: anyone with the URL can make it, until you stop it or its deadline expires. Return to this lesson after reading the response."
+                      :target ".http-host-popover.visible [data-http-host-url]"
+                      :check {:kind "manual"}}
+                     {:title "Open tutorial-http-answer"
+                      :body "Type `tutorial-http-answer` in the Explorer filter and select that function."
+                      :target "input[placeholder=\"Filter...\"]"
+                      :check {:kind "selected"
+                              :name "tutorial-http-answer"}}
+                     {:title "Revoke the public URL"
+                      :body "Click [[⋯]] → [[HTTP]] on tutorial-http-answer, then [[Stop publication]]. Cleanup uses the exact publication UUID, even after a lost create response or removal of its branch."
+                      :target ".node-overlay[data-fn-name=\"tutorial-http-answer\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+                      :check {:kind "dom"
+                              :selector ".http-host-popover.visible[data-http-host-stopped=\"true\"]"}
+                      :targets [".node-overlay[data-fn-name=\"tutorial-http-answer\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+                                ".row-actions-popover [data-action=\"http-host\"]"
+                                ".http-host-popover.visible [data-http-host-stop]"]}
+                     {:title "Verify the URL stopped"
+                      :body "Reload the public tab: it now says the publication is unavailable. The graph remains editable. Finish to remove this lesson’s graph and any retained publication identity."
+                      :target nil
+                      :check {:kind "manual"}}]}
             {:id "36"
              :slug "signing-up-and-in"
              :chapter "Your organization"
@@ -2347,121 +2559,315 @@
             {:id "38"
              :slug "services-talking-to-services"
              :chapter "Your organization"
-             :version 3
-             :requires "services"
-             :title "Services talking to services"
-             :reads "puts the path and the response shape in a namespace both sides reference — the contract, in the graph."
-             :steps
-             [{:title "Two services, one graph"
-               :body "In lesson 35 a service just ran. Here you build a listener, make it a service, and then a fn calls it over HTTP by NAMING it — no address typed anywhere. The reconciler records where every listener answers; a consumer asks for that address by pointing at the service fn itself. Inside out: first what the listener says, then the listener, then the caller."
-               :target nil
-               :check {:kind "manual"}}
-              {:title "The answer"
-               :body "Type `text-ok-response` in the Explorer filter and click the [[text-ok-response]] row (web.response) — a 200 text/plain response whose :body is open."
-               :target "input[placeholder=\"Filter...\"]"
-               :check {:kind "selected" :name "text-ok-response"}}
-              {:title "Extend it"
-               :body "Click [[⋯]] on the text-ok-response row, choose [[Extend]] and name it `tutorial-hello` — then [[Save]]."
-               :target ".node-overlay[data-fn-name=\"text-ok-response\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
-               :targets [".node-overlay[data-fn-name=\"text-ok-response\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
-               :check {:kind "fn-parent" :name "tutorial-hello" :parent "text-ok-response"}
-               :creates {:type "fn" :name "tutorial-hello"}}
-              ;; Selection gate — the bind must land on the child.
-              {:title "tutorial-hello is open"
-               :body "The card has one hole: :body, the text the response carries. Everything else — the status, the content-type header — is already bound by its parents."
-               :target nil
-               :check {:kind "selected" :name "tutorial-hello"}}
-              {:title "What it says"
-               :body "Click the [[+]] on :body, choose [[Bind literal]], type `hello` and [[Save]]. tutorial-hello now has no open input: it is a complete response, ready to be handed out."
-               :target ".placeholder-binder[data-fn-name=\"tutorial-hello\"][data-arg-name=\"body\"]"
-               :targets [".placeholder-binder[data-fn-name=\"tutorial-hello\"][data-arg-name=\"body\"]" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
-               ;; `bindings-count`, not `binding-bound`: `body` is a rename
-               ;; view over assoc's :value, and the binding row lands on the
-               ;; SOURCE slot — a name match would never see it.
-               :check {:kind "bindings-count" :name "tutorial-hello" :count 1}}
-              {:title "A listener"
-               :body "Type `http-server` in the Explorer filter and click the [[http-server]] row (web.http) — the primitive that starts an http-kit listener: a :handler answers every request, a :port is where it listens."
-               :target "input[placeholder=\"Filter...\"]"
-               :check {:kind "selected" :name "http-server"}}
-              {:title "Extend it"
-               :body "Click [[⋯]] on the http-server row, choose [[Extend]] and name it `tutorial-server` — then [[Save]]."
-               :target ".node-overlay[data-fn-name=\"http-server\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
-               :targets [".node-overlay[data-fn-name=\"http-server\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
-               :check {:kind "fn-parent" :name "tutorial-server" :parent "http-server"}
-               :creates {:type "fn" :name "tutorial-server"}}
-              ;; Selection gate — the binds must land on the child.
-              {:title "tutorial-server is open"
-               :body ":handler is a callable slot and :port a number — both still open."
-               :target nil
-               :check {:kind "selected" :name "tutorial-server"}}
-              {:title "Give it the answer"
-               :body "Click the [[+]] on :handler, type `tutorial-hello` in the picker’s filter and click the [[tutorial-hello]] row. A handler is called with each request; tutorial-hello has no input left to take, so it ignores the request and answers `hello` to every path — which is exactly what the picker’s Compatible verdict says."
-               :target ".placeholder-binder[data-fn-name=\"tutorial-server\"][data-arg-name=\"handler\"]"
-               :targets [".placeholder-binder[data-fn-name=\"tutorial-server\"][data-arg-name=\"handler\"]" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"tutorial-hello\"]"]
-               :check {:kind "binding-bound" :name "tutorial-server" :slot "handler"}}
-              {:title "Where it listens"
-               :body "Click the [[+]] on :port, choose [[Bind literal]], type `9101` and [[Save]] — any port nothing else uses on the executor. No free args left, and http-server carries :process: tutorial-server can be a service now."
-               :target ".placeholder-binder[data-fn-name=\"tutorial-server\"][data-arg-name=\"port\"]"
-               :targets [".placeholder-binder[data-fn-name=\"tutorial-server\"][data-arg-name=\"port\"]" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
-               :check {:kind "binding-bound" :name "tutorial-server" :slot "port"}}
-              {:title "Make it a service"
-               :body "Click [[⋯]] on the tutorial-server card, then the [[⚙]] button."
-               :target ".node-overlay[data-fn-name=\"tutorial-server\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
-               :targets [".node-overlay[data-fn-name=\"tutorial-server\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"service-settings\"]"]
-               :check {:kind "dom" :selector ".service-popover"}}
-              {:title "Start it"
-               :body "Leave [[Enabled]] ticked and click [[Create & reconcile]]. The popover closes as the row is written; the reconciler starts the listener at once and records a service-instance — the host and the port it actually bound. That record is what a consumer reads."
-               :target ".service-popover"
-               :check {:kind "manual"}}
-              {:title "A consumer"
-               :body "Type `service-get` in the Explorer filter and click the [[service-get]] row (web.service). :service-get is :http-get whose URL is built from a SERVICE’s recorded address plus a path."
-               :target "input[placeholder=\"Filter...\"]"
-               :check {:kind "selected" :name "service-get"}}
-              {:title "Extend it"
-               :body "Click [[⋯]] on the service-get row, choose [[Extend]] and name it `tutorial-fetch` — then [[Save]]."
-               :target ".node-overlay[data-fn-name=\"service-get\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
-               :targets [".node-overlay[data-fn-name=\"service-get\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
-               :check {:kind "fn-parent" :name "tutorial-fetch" :parent "service-get"}
-               :creates {:type "fn" :name "tutorial-fetch"}}
-              ;; Selection gate — the binds must land on the child.
-              {:title "tutorial-fetch is open"
-               :body "Look at the card: :service and :path are dashed placeholders — holes that live deeper in the template, drawn on your card all the same."
-               :target nil
-               :check {:kind "selected" :name "tutorial-fetch"}}
-              {:title "Which service"
-               :body "Click the [[+]] on the :service placeholder, choose [[Bind fn-ref]], type `tutorial-server` in the picker’s filter and click the [[tutorial-server]] row. The slot’s type badge says fn-ref — the fn’s IDENTITY. Every fn is Compatible here, whatever it returns, because the bound fn is never run: binding the listener does not start a second one; the consumer receives its id and asks the reconciler where it answers."
-               :target ".placeholder-binder[data-arg-name=\"service\"]"
-               :targets [".placeholder-binder[data-arg-name=\"service\"]" ".free-arg-bind-chooser" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name$=\"tutorial-server\"]"]
-               :check {:kind "bindings-count" :name "tutorial-fetch" :count 1}}
-              {:title "Which path"
-               :body "Click the [[+]] on the :path placeholder, choose [[Bind literal]] and type `/hello` — the slot is text, no quotes — then [[Save]]. That is the contract’s other half; between your own services the path is a shared constant both sides reference."
-               :target ".placeholder-binder[data-arg-name=\"path\"]"
-               :targets [".placeholder-binder[data-arg-name=\"path\"]" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
-               :check {:kind "bindings-count" :name "tutorial-fetch" :count 2}}
-              {:title "Ask it"
-               :body "Click [[⋯]] → [[▶]], tick the effects box and [[Run]]. The result is tutorial-server’s answer — status 200 and `hello` in the body. Nothing named a host or a port: the reconciler recorded the listener’s instance, :service-endpoint read it back, :http-get did the rest — and the request carried your run’s trace, so a persisted run would list this hop under Downstream calls. Click [[Next]] when you have read it."
-               :target ".node-overlay[data-fn-name=\"tutorial-fetch\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
-               :targets [".node-overlay[data-fn-name=\"tutorial-fetch\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-confirm-checkbox" ".execute-run-btn:not([disabled])" ".execute-result-host"]
-               :check {:kind "manual"}}
-              {:title "Back to the listener"
-               :body "Type `tutorial-server` in the Explorer filter and click the [[tutorial-server]] row."
-               :target "input[placeholder=\"Filter...\"]"
-               :check {:kind "selected" :name "tutorial-server"}}
-              {:title "Stop it"
-               :body "Click [[⋯]] → [[⚙]]: the popover reads “Service: :tutorial-server” and lists its running copy. Click [[Delete service]]. The listener stops and its record goes with it — run tutorial-fetch now and it answers `service/not-running` instead of guessing an address."
-               :target ".node-overlay[data-fn-name=\"tutorial-server\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
-               :targets [".node-overlay[data-fn-name=\"tutorial-server\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"service-settings\"]" ".service-popover"]
-               :check {:kind "manual"}}
-              {:title "That’s naming a service"
-               :body "The service fn is the value; the address is a fact the platform records; the call is explicit HTTP in the graph. Click [[Finish]] to clean up."
-               :target nil
-               :check {:kind "manual"}}]}
+             :version 4
+             :requires "temporary-http"
+             :title "HTTP calls by function identity"
+             :reads "resolves a published handler by UUID, opens its real HTTP URL, changes its response graph and reads the new response without changing the reference."
+             :steps [{:title "The graph keeps the identity"
+                      :body "A fn-ref names the handler without running it. service-endpoint resolves its current branch publication to a URL. We finish that Run before opening the URL in another tab, so this exercise also works with one execution slot. No background service starts."
+                      :target nil
+                      :check {:kind "manual"}}
+                     {:title "Open text-ok-response"
+                      :body "Find `text-ok-response` in web.response. Its status and text/plain header are already bound; :body supplies the response text."
+                      :target "input[placeholder=\"Filter...\"]"
+                      :check {:kind "selected"
+                              :name "text-ok-response"}}
+                     {:title "Make your own handler"
+                      :body "Click [[⋯]] on text-ok-response, choose [[Extend]], name it `tutorial-contract-answer` and [[Save]]."
+                      :target ".node-overlay[data-fn-name=\"text-ok-response\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+                      :check {:kind "fn-parent"
+                              :name "tutorial-contract-answer"
+                              :parent "text-ok-response"}
+                      :targets [".node-overlay[data-fn-name=\"text-ok-response\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+                                ".row-actions-popover [data-action=\"extend-fn\"]"
+                                ".arg-value-edit-popover"]
+                      :creates {:type "fn"
+                                :name "tutorial-contract-answer"}}
+                     {:title "Open tutorial-contract-answer"
+                      :body "Type `tutorial-contract-answer` in the Explorer filter and select that function."
+                      :target "input[placeholder=\"Filter...\"]"
+                      :check {:kind "selected"
+                              :name "tutorial-contract-answer"}}
+                     {:title "Set the response"
+                      :body "Click [[+]] on :body, choose [[Bind literal]], enter `hello` and [[Save]]."
+                      :target ".placeholder-binder[data-fn-name=\"tutorial-contract-answer\"][data-arg-name=\"body\"]"
+                      :check {:kind "bindings-count"
+                              :name "tutorial-contract-answer"
+                              :count 1}
+                      :targets [".placeholder-binder[data-fn-name=\"tutorial-contract-answer\"][data-arg-name=\"body\"]"
+                                ".free-arg-bind-chooser"
+                                ".arg-value-edit-popover"]}
+                     {:title "Open HTTP publication"
+                      :body "Click [[⋯]] on tutorial-contract-answer, then [[HTTP]]. This publishes a finite request handler; [[⚙ Service settings]] remains the separate control for persistent services."
+                      :target ".node-overlay[data-fn-name=\"tutorial-contract-answer\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+                      :check {:kind "dom"
+                              :selector ".http-host-popover.visible"}
+                      :targets [".node-overlay[data-fn-name=\"tutorial-contract-answer\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+                                ".row-actions-popover [data-action=\"http-host\"]"]}
+                     {:title "Publish for 30 minutes"
+                      :body "Click [[Publish for 30 minutes]]. Publishing checks the graph without invoking it. If slots are busy, stop an older publication or wait for its deadline, then retry. No service quota or background-process permission is added."
+                      :target ".http-host-popover.visible"
+                      :check {:kind "dom"
+                              :selector ".http-host-popover.visible [data-http-host-url]:not([hidden])"}
+                      :creates {:type "http-publication"
+                                :name "tutorial-contract-answer"}}
+                     {:title "Open service-endpoint"
+                      :body "Find `service-endpoint` in web.service. It returns the current endpoint as host, port and URL without making an HTTP request."
+                      :target "input[placeholder=\"Filter...\"]"
+                      :check {:kind "selected"
+                              :name "service-endpoint"}}
+                     {:title "Make your own caller"
+                      :body "Click [[⋯]] on service-endpoint, choose [[Extend]], name it `tutorial-http-address` and [[Save]]."
+                      :target ".node-overlay[data-fn-name=\"service-endpoint\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+                      :check {:kind "fn-parent"
+                              :name "tutorial-http-address"
+                              :parent "service-endpoint"}
+                      :targets [".node-overlay[data-fn-name=\"service-endpoint\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+                                ".row-actions-popover [data-action=\"extend-fn\"]"
+                                ".arg-value-edit-popover"]
+                      :creates {:type "fn"
+                                :name "tutorial-http-address"}}
+                     {:title "Open tutorial-http-address"
+                      :body "Type `tutorial-http-address` in the Explorer filter and select that function."
+                      :target "input[placeholder=\"Filter...\"]"
+                      :check {:kind "selected"
+                              :name "tutorial-http-address"}}
+                     {:title "Bind the handler identity"
+                      :body "Click [[+]] on :service, choose [[Bind fn-ref]], find `tutorial-contract-answer` and select it. The stored UUID names the handler without executing it."
+                      :target ".placeholder-binder[data-arg-name=\"service\"]"
+                      :check {:kind "bindings-count"
+                              :name "tutorial-http-address"
+                              :count 1}
+                      :targets [".placeholder-binder[data-arg-name=\"service\"]"
+                                ".free-arg-bind-chooser"
+                                ".fn-picker-popover"]}
+                     {:title "Resolve the public address"
+                      :body "Click [[⋯]] → [[▶ Run]], confirm the database effect if requested, then [[Run]]. Read the returned URL. It includes the publication path where needed; keep the whole URL. After the result appears, click Next."
+                      :target ".node-overlay[data-fn-name=\"tutorial-http-address\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+                      :check {:kind "manual"}
+                      :targets [".node-overlay[data-fn-name=\"tutorial-http-address\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+                                ".row-actions-popover [data-action=\"run-fn\"]"
+                                ".execute-confirm-checkbox"
+                                ".execute-run-btn:not([disabled])"
+                                ".execute-result-host"]}
+                     {:title "Read the first response"
+                      :body "Copy the returned URL into a new browser tab. The actual HTTP response must show `hello`. Return here and click Next after reading it. This external request starts after Run has finished, so it needs only one execution slot."
+                      :target nil
+                      :check {:kind "manual"}}
+                     {:title "Open tutorial-contract-answer"
+                      :body "Type `tutorial-contract-answer` in the Explorer filter and select that function."
+                      :target "input[placeholder=\"Filter...\"]"
+                      :check {:kind "selected"
+                              :name "tutorial-contract-answer"}}
+                     {:title "Change the response graph"
+                      :body "Click the bound `hello` literal, change it to `updated`, and [[Save]]. Leave the publication and the address function’s fn-ref unchanged. Click Next after saving."
+                      :target ".arg-value-editable"
+                      :check {:kind "manual"}
+                      :targets [".arg-value-editable"
+                                ".arg-value-edit-popover"]}
+                     {:title "Read the changed response"
+                      :body "Reload the same public tab. Its response must now be `updated`. The function UUID and URL stayed the same; the graph on this branch changed. Return and click Next after reading the new response."
+                      :target nil
+                      :check {:kind "manual"}}
+                     {:title "Open tutorial-contract-answer"
+                      :body "Type `tutorial-contract-answer` in the Explorer filter and select that function."
+                      :target "input[placeholder=\"Filter...\"]"
+                      :check {:kind "selected"
+                              :name "tutorial-contract-answer"}}
+                     {:title "Revoke the public URL"
+                      :body "Click [[⋯]] → [[HTTP]] on tutorial-contract-answer, then [[Stop publication]]. Cleanup uses the exact publication UUID, even after a lost create response or removal of its branch."
+                      :target ".node-overlay[data-fn-name=\"tutorial-contract-answer\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+                      :check {:kind "dom"
+                              :selector ".http-host-popover.visible[data-http-host-stopped=\"true\"]"}
+                      :targets [".node-overlay[data-fn-name=\"tutorial-contract-answer\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+                                ".row-actions-popover [data-action=\"http-host\"]"
+                                ".http-host-popover.visible [data-http-host-stop]"]}
+                     {:title "Verify the URL stopped"
+                      :body "Reload the public tab: it now says the publication is unavailable. The graph remains editable. Finish to remove this lesson’s graph and any retained publication identity."
+                      :target nil
+                      :check {:kind "manual"}}]}
             {:id "39"
              :slug "queues"
              :chapter "Your organization"
-             :text-only? true
-             :title "Queues — asynchronous work between services"
-             :reads "why a queue and why Postgres, publishing, a background consumer, retry and dead-letter handling, and the message contract in the graph."}
+             :version 1
+             :requires "services"
+             :title "Queues — publish, retry, requeue and ACK"
+             :reads "adds typed message contracts, the open consumer template, exact-message recovery, and background-worker lifecycle."
+             :steps [{:title "A real background worker"
+                      :body "This lesson starts a persistent consumer on your dedicated or self-hosted executor. It publishes one message, observes five failed attempts, stops the worker, requeues that exact message, repairs the graph and watches it ACK. Ordinary shared-cloud plans use the HTTP lessons instead. Service rows and messages are not branch-versioned; stop and clean them up before deleting the lesson branch."
+                      :target nil
+                      :check {:kind "manual"}}
+                     {:title "Open random-uuid"
+                      :body "Find `random-uuid` in the Explorer and select it."
+                      :target "input[placeholder=\"Filter...\"]"
+                      :check {:kind "selected"
+                              :name "random-uuid"}}
+                     {:title "Choose an unused queue name"
+                      :body "Run `random-uuid` once and copy its result. Keep this UUID as text: you will bind the same literal queue name on both the consumer and publisher. Do not reference random-uuid from those slots: each call would choose a different queue."
+                      :target nil
+                      :check {:kind "manual"}}
+                     {:title "Open parse-json"
+                      :body "Find `parse-json` in the Explorer and select it."
+                      :target "input[placeholder=\"Filter...\"]"
+                      :check {:kind "selected"
+                              :name "parse-json"}}
+                     {:title "Create tutorial-queue-handler"
+                      :body "On `parse-json`, open [[⋯]], choose [[Extend]], enter `tutorial-queue-handler` and [[Save]]."
+                      :target ".node-overlay[data-fn-name=\"parse-json\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+                      :check {:kind "fn-parent"
+                              :name "tutorial-queue-handler"
+                              :parent "parse-json"}
+                      :creates {:type "fn"
+                                :name "tutorial-queue-handler"}}
+                     {:title "Open tutorial-queue-handler"
+                      :body "Find `tutorial-queue-handler` in the Explorer and select it."
+                      :target "input[placeholder=\"Filter...\"]"
+                      :check {:kind "selected"
+                              :name "tutorial-queue-handler"}}
+                     {:title "Bind :string"
+                      :body "Bind a literal on :string: `not JSON`. Save."
+                      :target ".placeholder-binder[data-fn-name=\"tutorial-queue-handler\"][data-arg-name=\"string\"]"
+                      :check {:kind "binding-value"
+                              :name "tutorial-queue-handler"
+                              :slot "string"
+                              :value "not JSON"}}
+                     {:title "Leave the message input unused"
+                      :body "This deliberately broken handler parses its own text. It does not inspect the queued payload yet. The written guide shows typed message contracts. Leave the inherited keywordize default unchanged."
+                      :target nil
+                      :check {:kind "manual"}}
+                     {:title "Open pg-queue-consumer"
+                      :body "Find `pg-queue-consumer` in the Explorer and select it."
+                      :target "input[placeholder=\"Filter...\"]"
+                      :check {:kind "selected"
+                              :name "pg-queue-consumer"}}
+                     {:title "Create tutorial-queue-worker"
+                      :body "On `pg-queue-consumer`, open [[⋯]], choose [[Extend]], enter `tutorial-queue-worker` and [[Save]]."
+                      :target ".node-overlay[data-fn-name=\"pg-queue-consumer\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+                      :check {:kind "fn-parent"
+                              :name "tutorial-queue-worker"
+                              :parent "pg-queue-consumer"}
+                      :creates {:type "fn"
+                                :name "tutorial-queue-worker"}}
+                     {:title "Open tutorial-queue-worker"
+                      :body "Find `tutorial-queue-worker` in the Explorer and select it."
+                      :target "input[placeholder=\"Filter...\"]"
+                      :check {:kind "selected"
+                              :name "tutorial-queue-worker"}}
+                     {:title "Bind :queue"
+                      :body "Bind :queue to the UUID text you copied. This chooses a fresh channel; it does not grant ownership over all messages in a queue."
+                      :target ".placeholder-binder[data-fn-name=\"tutorial-queue-worker\"][data-arg-name=\"queue\"]"
+                      :check {:kind "binding-bound"
+                              :name "tutorial-queue-worker"
+                              :slot "queue"}}
+                     {:title "Bind :handler"
+                      :body "On :handler choose [[Bind reference]], select `tutorial-queue-handler` and save. The worker now has no required free arguments."
+                      :target ".placeholder-binder[data-fn-name=\"tutorial-queue-worker\"][data-arg-name=\"handler\"]"
+                      :check {:kind "binding-bound"
+                              :name "tutorial-queue-worker"
+                              :slot "handler"}}
+                     {:title "Start the worker"
+                      :body "Open [[⋯]] → [[Service settings]]. Keep Enabled checked. The branch must be this lesson’s branch; on self-hosted instances select it explicitly. Click [[Create & reconcile]]. The lesson records the proposed service UUID before sending the request, and waits for a registered running copy."
+                      :target ".node-overlay[data-fn-name=\"tutorial-queue-worker\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+                      :check {:kind "service-state"
+                              :name "tutorial-queue-worker"
+                              :state "running"}
+                      :creates {:type "service"
+                                :name "tutorial-queue-worker"}}
+                     {:title "Open queue-publish"
+                      :body "Find `queue-publish` in the Explorer and select it."
+                      :target "input[placeholder=\"Filter...\"]"
+                      :check {:kind "selected"
+                              :name "queue-publish"}}
+                     {:title "Create tutorial-queue-publish"
+                      :body "On `queue-publish`, open [[⋯]], choose [[Extend]], enter `tutorial-queue-publish` and [[Save]]."
+                      :target ".node-overlay[data-fn-name=\"queue-publish\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+                      :check {:kind "fn-parent"
+                              :name "tutorial-queue-publish"
+                              :parent "queue-publish"}
+                      :creates {:type "fn"
+                                :name "tutorial-queue-publish"}}
+                     {:title "Open tutorial-queue-publish"
+                      :body "Find `tutorial-queue-publish` in the Explorer and select it."
+                      :target "input[placeholder=\"Filter...\"]"
+                      :check {:kind "selected"
+                              :name "tutorial-queue-publish"}}
+                     {:title "Bind :queue"
+                      :body "Bind :queue to the SAME UUID text as the worker. Keep the inherited delay-ms default of zero."
+                      :target ".placeholder-binder[data-fn-name=\"tutorial-queue-publish\"][data-arg-name=\"queue\"]"
+                      :check {:kind "binding-bound"
+                              :name "tutorial-queue-publish"
+                              :slot "queue"}}
+                     {:title "Bind :payload"
+                      :body "Bind :payload to the JSON string `\"original\"`. This is the payload the corrected handler will acknowledge."
+                      :target ".placeholder-binder[data-fn-name=\"tutorial-queue-publish\"][data-arg-name=\"payload\"]"
+                      :check {:kind "binding-bound"
+                              :name "tutorial-queue-publish"
+                              :slot "payload"}}
+                     {:title "Publish once and observe dead letter"
+                      :body "Run with [[Persist]] enabled. Do not run again: each Run publishes another message. After about 25 seconds, the exact message returned by this persisted run reaches five failed attempts and dead state. Open [[Operate]] → [[Queues]] to inspect its error. If the request outcome is unknown, stop the known worker and use manual recovery; the lesson never guesses from a latest run or a queue name."
+                      :target ".execute-trigger"
+                      :check {:kind "queue-state"
+                              :name "tutorial-queue-publish"
+                              :state "dead"}
+                      :creates {:type "queue-message"
+                                :name "tutorial-queue-publish"}}
+                     {:title "Open tutorial-queue-worker"
+                      :body "Find `tutorial-queue-worker` in the Explorer and select it."
+                      :target "input[placeholder=\"Filter...\"]"
+                      :check {:kind "selected"
+                              :name "tutorial-queue-worker"}}
+                     {:title "Stop before requeue"
+                      :body "Open [[Service settings]], clear Enabled and save. Wait for no registered running copy. Keep the service row: you will enable the same UUID after repairing the handler."
+                      :target ".node-overlay[data-fn-name=\"tutorial-queue-worker\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+                      :check {:kind "service-state"
+                              :name "tutorial-queue-worker"
+                              :state "stopped"}}
+                     {:title "Requeue the exact dead letter"
+                      :body "Open [[Operate]] → [[Queues]]. Find this lesson’s queue and the message UUID from Run, then click its [[Requeue]]. Its state becomes pending, attempts reset to zero and error clears. The worker remains stopped, so it cannot take the message yet."
+                      :target nil
+                      :check {:kind "queue-state"
+                              :name "tutorial-queue-publish"
+                              :state "pending"}}
+                     {:title "Open tutorial-queue-handler"
+                      :body "Find `tutorial-queue-handler` in the Explorer and select it."
+                      :target "input[placeholder=\"Filter...\"]"
+                      :check {:kind "selected"
+                              :name "tutorial-queue-handler"}}
+                     {:title "Repair the handler"
+                      :body "Edit your own :string literal from `not JSON` to `{}`. Parsing now succeeds; the consumer will ACK when this handler returns."
+                      :target nil
+                      :check {:kind "binding-value"
+                              :name "tutorial-queue-handler"
+                              :slot "string"
+                              :value "{}"}}
+                     {:title "Open tutorial-queue-worker"
+                      :body "Find `tutorial-queue-worker` in the Explorer and select it."
+                      :target "input[placeholder=\"Filter...\"]"
+                      :check {:kind "selected"
+                              :name "tutorial-queue-worker"}}
+                     {:title "Restart the same service"
+                      :body "Open [[Service settings]], check Enabled and save. Wait for its registered running copy."
+                      :target ".node-overlay[data-fn-name=\"tutorial-queue-worker\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+                      :check {:kind "service-state"
+                              :name "tutorial-queue-worker"
+                              :state "running"}}
+                     {:title "Observe ACK"
+                      :body "The requeued message disappears after successful processing. This check also requires a successful downstream execution of your handler linked to the original publisher run. You can inspect that run’s Downstream calls."
+                      :target nil
+                      :check {:kind "queue-state"
+                              :name "tutorial-queue-publish"
+                              :state "acked"
+                              :handler "tutorial-queue-handler"}}
+                     {:title "Stop the worker"
+                      :body "Open [[Service settings]], clear Enabled and save. Wait for no registered running copy before finishing. Cleanup deletes only this lesson’s exact service and message UUIDs; uncertain outcomes retain the graph for manual review."
+                      :target ".node-overlay[data-fn-name=\"tutorial-queue-worker\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+                      :check {:kind "service-state"
+                              :name "tutorial-queue-worker"
+                              :state "stopped"}}
+                     {:title "Finish and clean up"
+                      :body "Finish and choose cleanup. Service deletion precedes branch and function deletion. No queue-name sweep runs. If the executor or an earlier request is unresolved, keep the cleanup receipt and retry after checking its state."
+                      :target nil
+                      :check {:kind "manual"}}]}
             {:id "40"
              :slug "marketplace-themes-keymaps"
              :chapter "Your organization"
@@ -2520,15 +2926,260 @@
             {:id "41"
              :slug "package-lifecycle"
              :chapter "Your organization"
-             :text-only? true
+             :version 1
+             :in-place true
+             :cleanup-branch "main"
+             :requires "package-lifecycle"
              :title "The package lifecycle — both sides of a version"
-             :reads "author and consumer roles on two branches: publish, install, contribute a fix, and follow the next version."}
+             :reads "adds contribution doors across organizations and registries, exact-version withdrawal, and the install audit."
+             :steps
+             [{:title "Author and consumer"
+               :body "You will publish on tutorial-vendor and consume on its sibling tutorial-site. A package version is immutable; changing its source does not change a consumer’s pin. All graphs and branches in this lesson are created for this loop."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Start on main"
+               :body "Switch to [[main]]. Both lesson branches will fork from it; you will not edit main."
+               :target "#branch-chip-btn"
+               :check {:kind "on-branch" :name "main"}
+               :targets ["#branch-chip-btn" ".branch-popover"]}
+              {:title "Create the author branch"
+               :body "Open the branch chip, enter `tutorial-vendor` and click [[Create]]."
+               :target "#branch-chip-btn"
+               :check {:kind "created-branch" :name "tutorial-vendor"}
+               :targets ["#branch-chip-btn" ".branch-popover"]
+               :creates {:type "branch" :name "tutorial-vendor"}}
+              {:title "Create tutorial-greetings"
+               :body "At the bottom of the Explorer click [[New namespace]], type `tutorial-greetings` and press [[Enter]]. This namespace belongs to the lesson."
+               :target ".create-root-ns-btn"
+               :check {:kind "owned-entity" :type "ns" :name "tutorial-greetings"}
+               :targets [".create-root-ns-btn" ".inline-input"]
+               :creates {:type "ns" :name "tutorial-greetings"}}
+              {:title "Create greet"
+               :body "Expand [[tutorial-greetings]], click its [[+]], choose [[New graph…]], type `greet` and press [[Enter]]. The new graph opens by its own UUID."
+               :target ".ns-header[data-ns-path=\"tutorial-greetings\"]"
+               :check {:kind "owned-entity" :type "fn" :name "greet" :selected? true}
+               :targets [".ns-header[data-ns-path=\"tutorial-greetings\"]" ".create-menu-item[data-type=\"fn\"]" ".inline-input"]
+               :creates {:type "fn" :name "greet"}}
+              {:title "Give greet its parent"
+               :body "On the greet card click [[set parent…]], type `const` and choose [[core.logic.const]]."
+               :target ".reparent-strip"
+               :check {:kind "fn-parent" :name "greet" :parent "const" :owned? true}
+               :targets [".reparent-strip" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name=\"core.logic.const\"]"]}
+              {:title "Set the source to 1"
+               :body "Click the [[+]] on :value, choose [[Bind literal]], enter `1` — then [[Save]]. The consumer will see this edit only after a new publication and a pin change."
+               :target ".placeholder-binder[data-arg-name=\"value\"]"
+               :check {:kind "binding-value" :name "greet" :slot "value" :value "1" :owned? true}
+               :targets [".placeholder-binder[data-arg-name=\"value\"]" ".free-arg-bind-chooser" ".arg-value-edit-popover"]}
+              {:title "Publish 1.0.0"
+               :body "Hover [[tutorial-greetings]] and click [[⬆]]. Enter package name `tutorial-greet`, version `1.0.0`, then [[Publish]]. Keep it private; both branches belong to your current organization."
+               :target ".ns-header[data-ns-path=\"tutorial-greetings\"] .ns-publish-btn"
+               :check {:kind "package-published" :name "tutorial-greet" :version "1.0.0"}
+               :targets [".ns-header[data-ns-path=\"tutorial-greetings\"] .ns-publish-btn" "#gd-nspub-pop"]
+               :creates {:type "package-version" :name "tutorial-greet" :version "1.0.0"}}
+              {:title "Close the publish form"
+               :body "Click the publish form’s [[×]]. The version is saved; closing the form does not withdraw it."
+               :target "#gd-nspub-pop [aria-label=\"Close publish form\"]"
+               :check {:kind "dom-absent" :selector "#gd-nspub-pop"}}
+              {:title "Return to main"
+               :body "Switch to [[main]] before creating the consumer sibling."
+               :target "#branch-chip-btn"
+               :check {:kind "on-branch" :name "main"}
+               :targets ["#branch-chip-btn" ".branch-popover"]}
+              {:title "Create the consumer branch"
+               :body "Enter `tutorial-site` in the branch create row and click [[Create]]. It shares main with tutorial-vendor, not the author’s later edits."
+               :target "#branch-chip-btn"
+               :check {:kind "created-branch" :name "tutorial-site"}
+               :targets ["#branch-chip-btn" ".branch-popover"]
+               :creates {:type "branch" :name "tutorial-site"}}
+              {:title "Install 1.0.0"
+               :body "Open the [[packages]] chip, expand [[+ Install a package]] and click [[Install]] on tutorial-greet 1.0.0. The server saves the branch pin and materializes the version."
+               :target "#gd-pkg-chip"
+               :check {:kind "package-pin" :name "tutorial-greet" :version "1.0.0"}
+               :targets ["#gd-pkg-chip" "[data-packages-panel] details" "[hx-post=\"/api/packages/panel-install?name=tutorial-greet&version=1.0.0\"]"]}
+              {:title "Close the packages panel"
+               :body "Click the packages panel’s [[×]]. The installed namespace is tutorial-greetings@1-0-0."
+               :target "[aria-label=\"Close packages panel\"]"
+               :check {:kind "dom-absent" :selector "[data-packages-panel]"}}
+              {:title "Create tutorial-shop"
+               :body "At the bottom of the Explorer click [[New namespace]], type `tutorial-shop` and press [[Enter]]. This namespace belongs to the lesson."
+               :target ".create-root-ns-btn"
+               :check {:kind "owned-entity" :type "ns" :name "tutorial-shop"}
+               :targets [".create-root-ns-btn" ".inline-input"]
+               :creates {:type "ns" :name "tutorial-shop"}}
+              {:title "Create welcome"
+               :body "Expand [[tutorial-shop]], click its [[+]], choose [[New graph…]], type `welcome` and press [[Enter]]. The new graph opens by its own UUID."
+               :target ".ns-header[data-ns-path=\"tutorial-shop\"]"
+               :check {:kind "owned-entity" :type "fn" :name "welcome" :selected? true}
+               :targets [".ns-header[data-ns-path=\"tutorial-shop\"]" ".create-menu-item[data-type=\"fn\"]" ".inline-input"]
+               :creates {:type "fn" :name "welcome"}}
+              {:title "Give welcome its parent"
+               :body "On the welcome card click [[set parent…]], type `to-str` and choose [[core.strings.to-str]]."
+               :target ".reparent-strip"
+               :check {:kind "fn-parent" :name "welcome" :parent "to-str" :owned? true}
+               :targets [".reparent-strip" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name=\"core.strings.to-str\"]"]}
+              {:title "Reference the installed graph"
+               :body "Click the [[+]] on welcome’s :value, choose [[Bind fn-ref]], type `greet` and pick [[tutorial-greetings@1-0-0.greet]]. Reference the installed graph; inheriting it instead would keep that exact parent identity across a pin update."
+               :target ".placeholder-binder[data-arg-name=\"value\"]"
+               :check {:kind "package-reference" :owner "welcome" :slot "value" :name "tutorial-greet" :version "1.0.0" :fn "greet"}
+               :targets [".placeholder-binder[data-arg-name=\"value\"]" ".free-arg-bind-chooser" ".fn-picker-popover" ".fn-picker-popover .fn-picker-row[data-fn-name=\"tutorial-greetings@1-0-0.greet\"]"]}
+              {:title "Run the first release"
+               :body "Select [[tutorial-shop.welcome]], click [[▶ Run]] on its card, then [[Run]] in the Inspector. Its current result must be `1`."
+               :target ".node-overlay[data-fn-name=\"welcome\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
+               :check {:kind "package-run" :name "welcome" :value "1"}
+               :targets [".node-overlay[data-fn-name=\"welcome\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger" ".execute-popover.visible .execute-run-btn" ".execute-popover.visible .execute-result-pane"]}
+              {:title "Back to the author"
+               :body "Switch to [[tutorial-vendor]]. The consumer’s pin is independent."
+               :target "#branch-chip-btn"
+               :check {:kind "on-branch" :name "tutorial-vendor"}
+               :targets ["#branch-chip-btn" ".branch-popover"]}
+              {:title "Open your source graph"
+               :body "Type `tutorial-greetings.greet` in the Explorer filter and select your [[greet]] row. Use the source namespace, not an installed version."
+               :target "#search-input"
+               :check {:kind "owned-entity" :type "fn" :name "greet" :selected? true}}
+              {:title "Set the source to 2"
+               :body "Click the bound value on :value and change it to `2` — then [[Save]]. The consumer will see this edit only after a new publication and a pin change."
+               :target ".arg-value-editable"
+               :check {:kind "binding-value" :name "greet" :slot "value" :value "2" :owned? true}
+               :targets [".arg-value-editable" ".free-arg-bind-chooser" ".arg-value-edit-popover"]}
+              {:title "Show the source namespace"
+               :body "Clear the Explorer filter with [[×]] so the namespace publish button is visible."
+               :target "#search-clear"
+               :check {:kind "input-value" :selector "#search-input" :value ""}}
+              {:title "Publish 1.0.1"
+               :body "Hover [[tutorial-greetings]] and click [[⬆]]. Enter package name `tutorial-greet`, version `1.0.1`, then [[Publish]]. Keep it private; both branches belong to your current organization."
+               :target ".ns-header[data-ns-path=\"tutorial-greetings\"] .ns-publish-btn"
+               :check {:kind "package-published" :name "tutorial-greet" :version "1.0.1"}
+               :targets [".ns-header[data-ns-path=\"tutorial-greetings\"] .ns-publish-btn" "#gd-nspub-pop"]
+               :creates {:type "package-version" :name "tutorial-greet" :version "1.0.1"}}
+              {:title "Close the publish form"
+               :body "Click the publish form’s [[×]]. The version is saved; closing the form does not withdraw it."
+               :target "#gd-nspub-pop [aria-label=\"Close publish form\"]"
+               :check {:kind "dom-absent" :selector "#gd-nspub-pop"}}
+              {:title "Back to the consumer"
+               :body "Switch to [[tutorial-site]] and select [[tutorial-shop.welcome]]. Publishing alone has not moved its pin."
+               :target "#branch-chip-btn"
+               :check {:kind "on-branch" :name "tutorial-site"}
+               :targets ["#branch-chip-btn" ".branch-popover"]}
+              {:title "The old pin still returns 1"
+               :body "Select [[tutorial-shop.welcome]], click [[▶ Run]] on its card, then [[Run]] in the Inspector. Its current result must be `1`."
+               :target ".node-overlay[data-fn-name=\"welcome\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
+               :check {:kind "package-run" :name "welcome" :value "1"}
+               :targets [".node-overlay[data-fn-name=\"welcome\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger" ".execute-popover.visible .execute-run-btn" ".execute-popover.visible .execute-result-pane"]}
+              {:title "Update the consumer"
+               :body "Open the [[packages]] chip. On the tutorial-greet installed row type `1.0.1` in the version box and click [[↑]]. This changes the pin and rewrites your own references into that version."
+               :target "#gd-pkg-chip"
+               :check {:kind "package-pin" :name "tutorial-greet" :version "1.0.1"}
+               :targets ["#gd-pkg-chip" "[data-packages-panel] .packages-version-input" "[data-packages-panel] .packages-update-btn"]}
+              {:title "Close the packages panel"
+               :body "Click the packages panel’s [[×]] to return to the graph."
+               :target "[aria-label=\"Close packages panel\"]"
+               :check {:kind "dom-absent" :selector "[data-packages-panel]"}}
+              {:title "The binding follows 1.0.1"
+               :body "On welcome, :value must now reference [[tutorial-greetings@1-0-1.greet]]. The lesson checks the actual binding UUID and referenced function’s namespace, separately from the pin."
+               :target nil
+               :check {:kind "package-reference" :owner "welcome" :slot "value" :name "tutorial-greet" :version "1.0.1" :fn "greet"}}
+              {:title "The update returns 2"
+               :body "Select [[tutorial-shop.welcome]], click [[▶ Run]] on its card, then [[Run]] in the Inspector. Its current result must be `2`."
+               :target ".node-overlay[data-fn-name=\"welcome\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
+               :check {:kind "package-run" :name "welcome" :value "2"}
+               :targets [".node-overlay[data-fn-name=\"welcome\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger" ".execute-popover.visible .execute-run-btn" ".execute-popover.visible .execute-result-pane"]}
+              {:title "Roll back the consumer"
+               :body "Open the [[packages]] chip. On the tutorial-greet installed row type `1.0.0` in the version box and click [[↑]]. This changes the pin and rewrites your own references into that version."
+               :target "#gd-pkg-chip"
+               :check {:kind "package-pin" :name "tutorial-greet" :version "1.0.0"}
+               :targets ["#gd-pkg-chip" "[data-packages-panel] .packages-version-input" "[data-packages-panel] .packages-update-btn"]}
+              {:title "Close the packages panel"
+               :body "Click the packages panel’s [[×]] to return to the graph."
+               :target "[aria-label=\"Close packages panel\"]"
+               :check {:kind "dom-absent" :selector "[data-packages-panel]"}}
+              {:title "The binding follows 1.0.0"
+               :body "On welcome, :value must now reference [[tutorial-greetings@1-0-0.greet]]. The lesson checks the actual binding UUID and referenced function’s namespace, separately from the pin."
+               :target nil
+               :check {:kind "package-reference" :owner "welcome" :slot "value" :name "tutorial-greet" :version "1.0.0" :fn "greet"}}
+              {:title "The rollback returns 1"
+               :body "Select [[tutorial-shop.welcome]], click [[▶ Run]] on its card, then [[Run]] in the Inspector. Its current result must be `1`."
+               :target ".node-overlay[data-fn-name=\"welcome\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
+               :check {:kind "package-run" :name "welcome" :value "1"}
+               :targets [".node-overlay[data-fn-name=\"welcome\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger" ".execute-popover.visible .execute-run-btn" ".execute-popover.visible .execute-result-pane"]}
+              {:title "Move forward again"
+               :body "Open the [[packages]] chip. On the tutorial-greet installed row type `1.0.1` in the version box and click [[↑]]. This changes the pin and rewrites your own references into that version."
+               :target "#gd-pkg-chip"
+               :check {:kind "package-pin" :name "tutorial-greet" :version "1.0.1"}
+               :targets ["#gd-pkg-chip" "[data-packages-panel] .packages-version-input" "[data-packages-panel] .packages-update-btn"]}
+              {:title "Close the packages panel"
+               :body "Click the packages panel’s [[×]] to return to the graph."
+               :target "[aria-label=\"Close packages panel\"]"
+               :check {:kind "dom-absent" :selector "[data-packages-panel]"}}
+              {:title "The binding follows 1.0.1"
+               :body "On welcome, :value must now reference [[tutorial-greetings@1-0-1.greet]]. The lesson checks the actual binding UUID and referenced function’s namespace, separately from the pin."
+               :target nil
+               :check {:kind "package-reference" :owner "welcome" :slot "value" :name "tutorial-greet" :version "1.0.1" :fn "greet"}}
+              {:title "The second update returns 2"
+               :body "Select [[tutorial-shop.welcome]], click [[▶ Run]] on its card, then [[Run]] in the Inspector. Its current result must be `2`."
+               :target ".node-overlay[data-fn-name=\"welcome\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
+               :check {:kind "package-run" :name "welcome" :value "2"}
+               :targets [".node-overlay[data-fn-name=\"welcome\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger" ".execute-popover.visible .execute-run-btn" ".execute-popover.visible .execute-result-pane"]}
+              {:title "Return for cleanup"
+               :body "Switch to [[main]]. Finish → [[Delete created entities]] first removes this lesson’s exact pin, then its sibling branches, published versions and empty namespaces. Unknown creation replies stay in Lessons for review; no other package version is withdrawn."
+               :target "#branch-chip-btn"
+               :check {:kind "on-branch" :name "main"}
+               :targets ["#branch-chip-btn" ".branch-popover"]}
+              {:title "That is the version loop"
+               :body "You published twice, kept an old pin, updated, rolled back and updated again. Lessons 23 and 24 cover contribution and review on this instance; the written lesson explains contributions from another organization or registry. Click [[Finish]]."
+               :target nil
+               :check {:kind "manual"}}]}
             {:id "42"
              :slug "ai-clients-and-api-tokens"
              :chapter "Your organization"
-             :text-only? true
+             :version 1
+             :in-place true
+             :requires "api-tokens"
              :title "AI clients and API tokens: the graph over /mcp"
-             :reads "connecting an external MCP client, branch scoping, the agent cycle, and creating, limiting and revoking API tokens in Settings."}]}}}
+             :reads "adds external MCP client setup, branch-scoped tools, and the agent edit/test/review cycle."
+             :steps
+             [{:title "Select a readable function"
+               :body "Find [[core.const]] in the Explorer and select it. We will make a real Execute request for this function with a token that has no Execute scope. The request must be refused before the function runs."
+               :target "#fn-filter"
+               :targets ["#fn-filter" "#entity-list .entity-item[data-name=\"const\"]"]
+               :check {:kind "selected" :name "const"}}
+              {:title "Open Account"
+               :body "Open the account menu, choose [[Settings]], then [[Account]]. API tokens are available on deployments with the tenancy addon and a signed-in account; other deployments keep the written lesson."
+               :target "#auth-lock-btn, .auth-avatar"
+               :targets ["#auth-lock-btn, .auth-avatar" ".auth-menu-item[data-item=\"Settings\"]" "#gd-settings-nav button[data-section=\"account\"]"]
+               :check {:kind "dom" :selector "#gd-acct-tok-sec:not([hidden])"}}
+              {:title "Open the creation form"
+               :body "Click [[Create token…]]. The token belongs to your account; its scopes limit your existing grants."
+               :target "#gd-acct-tok-new"
+               :check {:kind "dom" :selector "#gd-acct-mint-form:not([hidden])"}}
+              {:title "Name this token"
+               :body "Type [[tutorial-token]] in Label. This lesson keeps the exact new token UUID for cleanup, without keeping its bearer value."
+               :target "#gd-acct-tok-label"
+               :check {:kind "input-value" :selector "#gd-acct-tok-label" :value "tutorial-token"}}
+              {:title "Limit its scopes"
+               :body "Keep only [[Edit graph & branches]] checked; turn off [[Execute functions]] and every other scope. A token can narrow your grants, never add rights to your account."
+               :target "#gd-acct-tok-scopes"
+               :check {:kind "token-form-scopes" :scopes "write"}}
+              {:title "Set a short lifetime"
+               :body "Choose [[7 days]]. Expiry limits how long a lost key can be used."
+               :target "#gd-acct-tok-ttl"
+               :check {:kind "input-value" :selector "#gd-acct-tok-ttl" :value "7"}}
+              {:title "Create this token"
+               :body "Click [[Create]]. The lesson checks the actual masked listing, exact UUID, scopes and expiry. Keep the one-time reveal open for the access check."
+               :target "#gd-acct-mint-form button[onclick=\"gdAcctMintToken()\"]"
+               :creates {:type "api-token" :name "tutorial-token"}
+               :check {:kind "token-created" :name "tutorial-token" :scopes "write" :ttl-days 7}}
+              {:title "Verify restricted access"
+               :body "Keep the one-time reveal open and click [[Check restricted access]]. The check first authenticates this token, then sends an Execute request for the selected function. Only the actual [[token-scope]] refusal passes. The bearer is never saved in Lessons."
+               :target "#gd-acct-tok-reveal [data-token-check]"
+               :check {:kind "token-execute-denied" :name "tutorial-token"}}
+              {:title "Revoke and verify"
+               :body "Click [[Revoke]] on tutorial-token and confirm. The row must disappear, and the same bearer must now fail authentication. If you reload before revoking, its one-time value is gone: cleanup can still remove its exact UUID, but start this lesson again to repeat the authentication check."
+               :target "#gd-acct-toks [data-tour-token] [data-revoke-token]"
+               :check {:kind "token-revoked" :name "tutorial-token"}}
+              {:title "Continue with your client"
+               :body "You created a token with a short expiry, proved its scope ceiling and revoked it. The written lesson explains connecting an external MCP client and using a branch. Click [[Finish]]; cleanup removes only token UUIDs created by this lesson, including an ambiguous creation reply."
+               :target nil
+               :check {:kind "manual"}}]}]}}}
 
   ;; Where the written lessons are served: `GRAPHDEN_TUTORIAL_BASE` when
   ;; the deployment sets it (a translation, an intranet mirror), else the

@@ -132,6 +132,24 @@ function ensureFnAppsPopoverEl() {
   el.className = 'fn-apps-popover';
   el.setAttribute('role', 'dialog');
   el.setAttribute('aria-label', 'Apps');
+  el.addEventListener('htmx:configRequest', event => {
+    const form = event.detail?.elt?.closest?.('.app-create-form');
+    if (!form || typeof gdTourBeginAppCreation !== 'function') return;
+    const ticket = gdTourBeginAppCreation(form);
+    if (!ticket) return;
+    form.gdTourAppTicket = ticket;
+    event.detail.parameters['create-id'] = ticket.id;
+  });
+  el.addEventListener('htmx:afterRequest', event => {
+    const xhr = event.detail?.xhr;
+    if (xhr?.gdTourAppTicket && typeof gdTourRecordAppCreation === 'function') {
+      void gdTourRecordAppCreation(xhr.gdTourAppTicket, xhr);
+    }
+  });
+  el.addEventListener('htmx:beforeRequest', event => {
+    const form = event.detail?.elt?.closest?.('.app-create-form');
+    if (form?.gdTourAppTicket) event.detail.xhr.gdTourAppTicket = form.gdTourAppTicket;
+  });
   el.addEventListener('htmx:afterSwap', () => {
     // A create/delete just landed: the swap replaced [data-fn-apps] (focus
     // fell to <body>) and the org's app set changed.

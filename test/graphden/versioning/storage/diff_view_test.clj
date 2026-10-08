@@ -88,6 +88,8 @@
                 "fn's own row sorts first in the group")
             (is (some #(= "description" (:field %)) (:fields fn-e)))
             (is (= "port" (:slot-name b-e)) "binding labeled by its slot")
+            (is (= (str (:id slot)) (:slot-id b-e)))
+            (is (= (str (:id bnd)) (:binding-id b-e)))
             (let [vf-field (first (filter #(= "value" (:field %))
                                           (:fields b-e)))]
               (is (some? vf-field))
@@ -108,6 +110,64 @@
           (let [self (dv/diff-branches-view base (:id feature) (:id feature))]
             (is (zero? (:count self)))
             (is (empty? (:groups self))))))
+      (finally (sp/close base)))))
+
+
+(deftest sibling-tutorial-merge-sandbox-cleans-all-identities-test
+  (let [base (base-storage)
+        v (vs/wrap-with-versioning base)
+        type-fn (sp/create-entity v :fn {:name "existing-public-type" :parent-ids []})
+        counts #(into {} (map (fn [entity] [entity (count (sp/query-entities base entity {}))]))
+                      [:branch :branch-merge :fn :fn-version :slot :fn-slot :fn-slot-version
+                       :binding :binding-version])
+        before (counts)]
+    (try
+      ;; Repeat the exact names, as a reader retaking the same lesson does.
+      (dotimes [_ 2]
+        (let [sandbox (vs/create-branch! v "tutorial-sandbox")
+              common (vs/switch-branch v (:id sandbox))
+              seed (sp/create-entity common :fn {:name "branch-demo" :parent-ids []})
+              slot (sp/create-entity common :slot {:name "value" :type-fn-id (:id type-fn)})
+              _ (sp/create-entity common :fn-slot {:fn-id (:id seed) :slot-id (:id slot) :position 0})
+              binding (sp/create-entity common :binding {:fn-id (:id seed) :slot-id (:id slot) :value 1})
+              source (vs/create-branch! common "tutorial-branch")
+              target (vs/create-branch! common "tutorial-merge-target")
+              source-view (vs/switch-branch v (:id source))
+              target-view (vs/switch-branch v (:id target))]
+          (sp/update-entity source-view :binding (:id binding) {:value 2})
+          (sp/update-entity source-view :fn (:id seed) {:description "changed field"})
+          (sp/create-entity source-view :fn {:name "branch-added" :parent-ids [(:id seed)]})
+          (vs/merge-branch! target-view (:id source))
+          (is (= 2 (:value (sp/read-entity target-view :binding (:id binding)))))
+          (is (= "changed field" (:description (sp/read-entity target-view :fn (:id seed)))))
+          (sp/update-entity source-view :binding (:id binding) {:value 3})
+          (vs/merge-branch! target-view (:id source))
+          (is (= 3 (:value (sp/read-entity target-view :binding (:id binding)))))
+          ;; The target has no children; removing it releases the source's
+          ;; merge references. The common parent then has neither child.
+          (doseq [branch [target source sandbox]]
+            (is (true? (vs/delete-branch! v (:id branch)))))
+          (is (= before (counts))
+              "Actual identity counts return to baseline, including quota-counted fn rows")))
+      (testing "exact UUID revival preserves identity; a reused fn name creates a new identity"
+        (let [original (sp/create-entity v :fn {:name "revivable-tutorial-fn" :parent-ids []})]
+          (binding [vs/*tombstone-delete?* true]
+            (sp/delete-entity v :fn (:id original)))
+          (is (nil? (sp/read-entity v :fn (:id original))))
+          (is (true? (vs/revive-entity! v :fn (:id original))))
+          (is (= (:id original) (:id (sp/read-entity v :fn (:id original)))))
+          (is (= (inc (:fn before)) (:fn (counts))))
+          (binding [vs/*tombstone-delete?* true]
+            (sp/delete-entity v :fn (:id original)))
+          (let [replacement (sp/create-entity v :fn {:name "revivable-tutorial-fn" :parent-ids []})]
+            (is (not= (:id original) (:id replacement)))
+            (is (= "revivable-tutorial-fn" (:name (sp/read-entity v :fn (:id replacement)))))
+            (is (= (+ 2 (:fn before)) (:fn (counts))))
+            ;; Names are labels, unlike binding/fn-slot natural keys.
+            ;; Cleanup retains both exact UUIDs, including the tombstone.
+            (sp/delete-entity v :fn (:id replacement))
+            (sp/delete-entity v :fn (:id original))
+            (is (= before (counts))))))
       (finally (sp/close base)))))
 
 
@@ -165,6 +225,7 @@
             (is (some? fs))
             (is (= :added-in-source (:change fs)))
             (is (= "handler" (:slot-name fs)))
+            (is (= (str (:id slot-b)) (:slot-id fs)))
             (is (= "at position 1" (:preview fs)))))
 
         (testing "a new ref binding shows the referenced fn by NAME"
@@ -179,6 +240,9 @@
             (is (some? it))
             (is (= :modified (:change it)))
             (is (= "items" (:slot-name it)) "labels via its owning binding's slot")
+            (is (= (str (:id slot-c)) (:slot-id it)))
+            (is (= (str (:id lb)) (:binding-id it)))
+            (is (= (str (:id item)) (:item-id it)))
             (is (zero? (:position it)))
             (let [vf-field (first (filter #(= "value" (:field %)) (:fields it)))]
               (is (= "2" (:source vf-field)))

@@ -309,7 +309,10 @@
    :args {:entity-type {:value "package-review"} :where {:value {}}}}
 
   {:name :_mkv-package-name
-   :parent :get :args {:coll {:as :item} :key {:value :package-name} :default {:value ""}}}
+   :parent :get
+   :args {:coll {:as :item :type {:package-name :text}}
+          :key {:value :package-name}
+          :default {:value ""}}}
 
   {:name :_mkv-rating
    :parent :get :args {:coll {:as :item} :key {:value :rating} :default {:value 0}}}

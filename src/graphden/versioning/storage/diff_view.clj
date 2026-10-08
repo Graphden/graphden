@@ -101,14 +101,18 @@
     (cond-> {:entity-name entity-name
              :entity-id (str entity-id)
              :change change}
-      slot-id (assoc :slot-name (:name (get slots-by-id slot-id)))
+      slot-id (assoc :slot-id (str slot-id)
+                     :slot-name (:name (get slots-by-id slot-id)))
+      (= :binding entity-name) (assoc :binding-id (str entity-id))
       ;; The RAW ref ids beside the labels: the editor's compare mode
       ;; draws the compared branch's subtree for a replaced ref, and a
       ;; label cannot be fetched.
       (:ref-fn-id source-version) (assoc :source-ref (str (:ref-fn-id source-version)))
       (:ref-fn-id target-version) (assoc :target-ref (str (:ref-fn-id target-version)))
       (= :binding-list-item entity-name)
-      (assoc :position (:position (side-version diff)))
+      (assoc :binding-id (str (:binding-id (side-version diff)))
+             :item-id (str entity-id)
+             :position (:position (side-version diff)))
       (seq fields) (assoc :fields fields)
       (not= :modified change)
       (assoc :preview (entry-preview fn-names diff)))))

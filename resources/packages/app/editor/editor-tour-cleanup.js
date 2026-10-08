@@ -7,8 +7,8 @@
 //
 // A step declares `:creates {:type … :name …}`; the engine records those and
 // this file both REPORTS what still exists (the end-of-tour offer lists it)
-// and removes it on request. Four kinds exist today — `fn`, `ns`, `branch`
-// and `package-version` — and both halves must know all four: a type known to
+// and removes it on request. Graph rows, branches, publications, apps and
+// tokens all need both reporting and removal: a type known to
 // the deleter but not to the reporter is a row the reader is never told about
 // (and, when it is a lesson's ONLY creation, never offered to delete).
 //
@@ -25,13 +25,13 @@
 
 // --- what still exists ------------------------------------------------------
 
-async function _tourPublishedVersions(name) {
-  try {
-    const r = await authFetch(API.api_packages);
+async function _tourPublishedVersions(name, options) {
+  const r = await authFetch(API.api_packages, options);
+    if (!r.ok) throw new Error("Registry unavailable");
     const rows = await r.json();
-    return (Array.isArray(rows) ? rows : (rows.packages || []))
+    if (!Array.isArray(rows) && !Array.isArray(rows?.packages)) throw new Error("Invalid registry response");
+    return (Array.isArray(rows) ? rows : rows.packages)
       .filter((row) => row?.name === name);
-  } catch (_) { return []; }
 }
 
 // `created` → the subset that is still there, in the same order. Async
@@ -39,6 +39,8 @@ async function _tourPublishedVersions(name) {
 async function _tourSurvivors(created) {
   const out = [];
   for (const c of (created || [])) {
+    if (c.receipt === 'removed') continue;
+    if (c.receipt === 'pending') { out.push(c); continue; }
     switch (c.type) {
       case 'branch':
         // Not a graph row — a routing context. Offer it unconditionally;
@@ -56,10 +58,25 @@ async function _tourSurvivors(created) {
         } catch (_) { out.push(c); }
         break;
       case 'ns':
-        if (await _tourNsByName(c.name)) out.push(c);
+        try { if (c.id ? await _tourNsForCreation(c) : await _tourNsByName(c.name)) out.push(c); }
+        catch (_) { out.push(c); }
         break;
       case 'package-version':
-        if ((await _tourPublishedVersions(c.name)).length) out.push(c);
+        try {
+          if (!c.id || (await _tourPublishedVersions(c.name)).some(row => row.id === c.id)) out.push(c);
+        } catch (_) { out.push(c); }
+        break;
+      case 'package-install':
+        // Keep the receipt until cleanup confirms removal on its saved branch.
+        out.push(c);
+        break;
+      case 'api-token':
+        try { if (!c.id || (await _tourReadTokens()).some(row => row.id === c.id)) out.push(c); }
+        catch (_) { out.push(c); }
+        break;
+      case 'app-route':
+        try { if (await _tourAppForReceipt(c)) out.push(c); }
+        catch (_) { out.push(c); }
         break;
       default:
         // An unknown type must not vanish silently: offer it, let the delete
@@ -85,6 +102,23 @@ async function _tourDeleted(call) {
   } catch (_) { return false; }
 }
 
+
+async function _tourDeleteHttpPublications(created) {
+  const failed = [];
+  for (const row of (created || []).filter(item => item.type === 'http-publication')) {
+    if (!row.id || !row.principal || !_tourPrincipalMatches({principal: row.principal})) {
+      failed.push(row);
+      continue;
+    }
+    try {
+      const response = await authFetch(HTTP_HOST_API + '/' + encodeURIComponent(row.id), {method: 'DELETE'});
+      const body = await response.json();
+      if (!response.ok || body?.ok !== true) failed.push(row);
+    } catch (_) { failed.push(row); }
+  }
+  return failed;
+}
+
 // NEWEST FIRST, like the fn pass: a lesson that forks a branch OFF another
 // lesson branch (lesson 24: tutorial-feature off tutorial-release) creates the
 // parent first, and the server refuses to delete a branch that still has
@@ -102,36 +136,53 @@ async function _tourDeleteBranch(name) {
   } catch (_) { return false; }
 }
 
-async function _tourDeleteCreatedBranches(created) {
+async function _tourDeleteCreatedBranches(created, blocked = new Set()) {
   const branches = (created || []).filter((c) => c.type === 'branch').reverse();
   const retry = [];
   for (const c of branches) {
-    if (!await _tourDeleteBranch(c.name)) retry.push(c);
+    if (blocked.has(c.id) || !await _tourDeleteOwnedBranch(c)) retry.push(c);
   }
   const failed = [];
   for (const c of retry) {
-    if (!await _tourDeleteBranch(c.name)) failed.push(c);
+    if (blocked.has(c.id) || !await _tourDeleteOwnedBranch(c)) failed.push(c);
   }
   return failed;
+}
+
+async function _tourDeleteOwnedBranch(created) {
+  if (created.name === 'main') return false;
+  if (created.receipt === 'pending' && (!created.id || !created['base-branch-id'])) return false;
+  if (!created.id) return _tourDeleteBranch(created.name); // older lesson ledgers
+  try {
+    const response = await authFetch(API.api_branches);
+    if (!response.ok) return false;
+    const payload = await response.json();
+    const rows = Array.isArray(payload) ? payload : payload?.branches;
+    if (!Array.isArray(rows)) return false;
+    const branch = rows.find((row) => row.id === created.id);
+    if (!branch) return true;
+    if (branch.name !== created.name || branch['base-branch-id'] !== created['base-branch-id']) return false;
+    return _tourDeleteBranch(created.id);
+  } catch (_) { return false; }
 }
 
 // Resolve through the SEARCH endpoint, not the lexical graph: the client only
 // holds the SELECTED fn's subtree, so a fn the lesson created earlier can be
 // absent from it by cleanup time — and an absent row reads as "already gone",
 // which is how the first fn of every chain used to survive.
-async function _tourFnIdByName(name) {
+async function _tourFnIdByName(name, options) {
   const r = await authFetch(API.api_graph_entities
-    + '?scope=search&q=' + encodeURIComponent(name));
+    + '?scope=search&q=' + encodeURIComponent(name), options);
   if (!r.ok) throw new Error('Function lookup failed');
   const payload = await r.json();
   if (!Array.isArray(payload.fns)) throw new Error('Invalid function lookup response');
   return payload.fns.find((f) => f.name === name)?.id || null;
 }
 
-async function _tourFnIdForCreation(created) {
-  if (!created.id) return _tourFnIdByName(created.name);
+async function _tourFnIdForCreation(created, options) {
+  if (!created.id) return _tourFnIdByName(created.name, options);
   const response = await authFetch(API.api_graph_entities
-    + '?scope=subtree&root-id=' + encodeURIComponent(created.id));
+    + '?scope=subtree&root-id=' + encodeURIComponent(created.id), options);
   if (!response.ok) throw new Error('Function lookup failed');
   const payload = await response.json();
   if (!Array.isArray(payload.fns)) throw new Error('Invalid function lookup response');
@@ -143,11 +194,23 @@ async function _tourFnIdForCreation(created) {
   return fn.id;
 }
 
+// A server preview can propose a fixed create-only manifest before apply.
+// Only that exact staged operation can reconcile a lost reply by UUID; the
+// ordinary name-only/pending create paths still cannot authorize cleanup.
+function _tourCreateOnlyManifestReceipt(created) {
+  return created.receipt === 'pending' && created.creation === 'create-only-manifest'
+    && !!created.id && !!created['manifest-root-id'] && !!created['branch-id'] && !!created['branch-name']
+    && (created.type === 'fn' ? Object.hasOwn(created, 'namespace-id')
+      : created.type === 'ns' && Object.hasOwn(created, 'parent-id'));
+}
+
 // Clear only the selected identity whose DELETE actually succeeded. A failed
 // lookup/delete or another surviving selection must keep its graph and context.
-async function _tourDeleteFn(id) {
+async function _tourDeleteFn(id, options) {
   try {
-    const response = await authMutate('DELETE', API.api_entities_type_id('fn', id));
+    const response = options
+      ? await authFetch(API.api_entities_type_id('fn', id), {...options, method: 'DELETE'})
+      : await authMutate('DELETE', API.api_entities_type_id('fn', id));
     if (response?.ok === false) return false;
     if (response?.ok === true && typeof selectedFnId !== 'undefined'
         && selectedFnId === id && typeof gdClearSelection === 'function') gdClearSelection();
@@ -162,15 +225,16 @@ async function _tourDeleteFn(id) {
 // still refuses is retried while other removals unblock it. The lesson can
 // create a caller before the function it later references, so reverse creation
 // order alone is insufficient. A stalled pass gets one retry, then reports it.
-async function _tourDeleteFns(created) {
+async function _tourDeleteFns(created, options) {
   let pending = created.filter((c) => c.type === 'fn').reverse();
   for (let pass = 0; pending.length; pass++) {
     const failed = [];
     for (const c of pending) {
+      if (c.receipt === 'pending' && !_tourCreateOnlyManifestReceipt(c)) { failed.push(c); continue; }
       try {
-        const id = await _tourFnIdForCreation(c);
+        const id = await _tourFnIdForCreation(c, options);
         if (!id) continue;
-        if (!await _tourDeleteFn(id)) failed.push(c);
+        if (!await _tourDeleteFn(id, options)) failed.push(c);
       } catch (_) { failed.push(c); }
     }
     if (pass > 0 && failed.length === pending.length) return failed;
@@ -179,34 +243,57 @@ async function _tourDeleteFns(created) {
   return [];
 }
 
-// A published version outlives the namespace it was cut from — and once that
-// namespace is gone, installing the version answers 404. A lesson that
-// publishes therefore withdraws its own release, or it leaves a broken row in
-// the registry every time someone takes the tour.
-//
-// The PIN goes first. Installing materialises the package under
-// `<ns>@<version>`, and the namespace pass below deletes that copy — a pin
-// left pointing at gutted entities is the exact state that makes the next
-// install answer 404 for a package the registry still lists as fine. Ending a
-// lesson half-way (published and installed, but not yet uninstalled by hand)
-// is the ordinary way to reach it.
-async function _tourRemovePackages(created) {
+// Pins survive branch deletion in the schema. Remove only the receipt's exact
+// pin on the saved owned branch BEFORE deleting that branch. A lost response
+// retains a pending ledger item; it cannot authorize a name-only deletion.
+async function _tourUnpinPackages(created) {
   const failed = [];
-  for (const c of created) {
-    if (c.type !== 'package-version') continue;
-    // Idempotent: answers `{removed: false}` when nothing was pinned.
-    const unpinned = await _tourDeleted(
-      () => authFetch(API.api_packages_uninstall
-                      + '?name=' + encodeURIComponent(c.name), { method: 'DELETE' }));
-    if (!unpinned) failed.push(c);
-    for (const row of await _tourPublishedVersions(c.name)) {
-      const gone = await _tourDeleted(
-        () => authFetch(API.api_packages_withdraw
-                        + '?name=' + encodeURIComponent(row.name)
-                        + '&version=' + encodeURIComponent(row.version),
-                        { method: 'DELETE' }));
-      if (!gone) failed.push(c);
+  for (const entry of created.filter(row => row.type === 'package-install')) {
+    if (entry.receipt === 'removed') continue;
+    if (!entry.id || !entry['branch-id'] || entry.receipt !== 'created') { failed.push(entry); continue; }
+    try {
+      const branchResponse = await authFetch(API.api_branches);
+      if (!branchResponse.ok) throw new Error('Branches unavailable');
+      const branchBody = await branchResponse.json();
+      const branches = Array.isArray(branchBody) ? branchBody : branchBody?.branches;
+      const branch = branches?.find(row => row.id === entry['branch-id']);
+      if (!branch || !entry['branch-name'] || entry['branch-name'] === 'main'
+          || branch.name !== entry['branch-name']) throw new Error('Owned branch unavailable');
+      const headers = {'X-Graphden-Branch': entry['branch-id']};
+      const response = await authFetch(API.api_packages_installed, {headers});
+      if (!response.ok) throw new Error('Installed packages unavailable');
+      const rows = await response.json();
+      if (!Array.isArray(rows)) throw new Error('Invalid installed packages response');
+      const pin = rows.find(row => row['package-name'] === entry.name);
+      if (!pin) { entry.receipt = 'removed'; continue; }
+      if (pin.id !== entry.id || pin['branch-id'] !== entry['branch-id'] || pin.version !== entry.version) {
+        failed.push(entry); continue;
+      }
+      if (!await _tourDeleted(() => authFetch(API.api_packages_uninstall
+        + '?name=' + encodeURIComponent(entry.name) + '&expected-id=' + encodeURIComponent(entry.id),
+        {method: 'DELETE', headers}))) failed.push(entry);
+      else entry.receipt = 'removed';
+    } catch (_) { failed.push(entry); }
+  }
+  return failed;
+}
+
+async function _tourRemovePackages(created, options) {
+  const failed = [];
+  for (const entry of created.filter(row => row.type === 'package-version')) {
+    if (!entry.id || !entry.version || !entry['content-hash'] || entry.receipt !== 'created') {
+      failed.push(entry); continue;
     }
+    try {
+      const rows = await _tourPublishedVersions(entry.name, options);
+      const row = rows.find(candidate => candidate.id === entry.id);
+      if (!row) continue;
+      if (row.name !== entry.name || row.version !== entry.version
+          || row['content-hash'] !== entry['content-hash']) { failed.push(entry); continue; }
+      if (!await _tourDeleted(() => authFetch(API.api_packages_withdraw
+        + '?name=' + encodeURIComponent(entry.name) + '&version=' + encodeURIComponent(entry.version)
+        + '&expected-id=' + encodeURIComponent(entry.id), {...options, method: 'DELETE'}))) failed.push(entry);
+    } catch (_) { failed.push(entry); }
   }
   return failed;
 }
@@ -236,31 +323,33 @@ async function _tourNsByName(name) {
   }
 }
 
-async function _tourDeleteNamespaces(created) {
+async function _tourNsForCreation(created, options) {
+  const response = await authFetch(API.api_graph_entities + '?scope=tree', options);
+  if (!response.ok) throw new Error('Namespace lookup failed');
+  const body = await response.json();
+  if (!Array.isArray(body.namespaces)) throw new Error('Invalid namespace response');
+  const namespace = body.namespaces.find(row => row.id === created.id);
+  if (!namespace) return null;
+  if (namespace.name !== created.name || (namespace['parent-id'] || null) !== (created['parent-id'] || null)) {
+    throw new Error('Created namespace identity changed');
+  }
+  return namespace;
+}
+
+async function _tourDeleteNamespaces(created, options) {
   const failed = [];
-  for (const c of created) {
-    if (c.type !== 'ns') continue;
-    const ns = await _tourNsByName(c.name);
-    if (!ns) continue;
-    // A namespace the lesson caused to exist can hold rows the lesson did not
-    // create by hand — installing a package materialises its fns under
-    // `<ns>@<version>`. Clear the contents first, or the delete 409s on a
-    // non-empty namespace and the copy is left behind. `scope=namespace` is
-    // the listing for a NAMESPACE; `subtree` takes a FN id and answers empty.
+  // Child namespaces first. A refused nonempty namespace is retained; never
+  // clear arbitrary contents that another edit may have added since creation.
+  for (const entry of created.filter(row => row.type === 'ns').reverse()) {
+    if (!entry.id || (entry.receipt !== 'created' && !_tourCreateOnlyManifestReceipt(entry))) {
+      failed.push(entry); continue;
+    }
     try {
-      const sub = await authFetch(API.api_graph_entities
-                                  + '?scope=namespace&namespace-id=' + ns.id);
-      const payload = await sub.json();
-      for (const f of (payload.fns || [])) {
-        if (f['namespace-id'] !== ns.id) continue;
-        // Best-effort: another row may still reference it, and the namespace
-        // delete below is what reports the outcome either way.
-        await _tourDeleteFn(f.id);
-      }
-    } catch (_) { /* best-effort — the delete below reports the truth */ }
-    const ok = await _tourDeleted(
-      () => authMutate('DELETE', API.api_entities_type_id('ns', ns.id)));
-    if (!ok) failed.push(c);
+      if (!await _tourNsForCreation(entry, options)) continue;
+      if (!await _tourDeleted(() => options
+        ? authFetch(API.api_entities_type_id('ns', entry.id), {...options, method: 'DELETE'})
+        : authMutate('DELETE', API.api_entities_type_id('ns', entry.id)))) failed.push(entry);
+    } catch (_) { failed.push(entry); }
   }
   return failed;
 }
@@ -271,18 +360,55 @@ async function _tourDeleteNamespaces(created) {
 // this runs long after the tour stopped, and reading a state something else
 // may have cleared turned "delete what the lesson made" into "delete nothing,
 // report success".
-async function _tourDeleteCreated(created) {
+async function _tourDeleteCreated(created, options) {
+  const activeApps = created.some(row => row.type === 'app-route')
+    ? await _tourDeleteAppRoutes(created) : [];
+  if (activeApps.length) {
+    // A public app must be removed before deleting its handler or branch.
+    if (typeof _tourSaveState === 'function') _tourSaveState();
+    return {failed: created.filter(row => row.receipt !== 'removed')};
+  }
+  const activeServices = typeof _tourCleanupServices === 'function' ? await _tourCleanupServices(created) : [];
+  if (activeServices.length) {
+    // Keep the whole lesson graph when a worker's stop or a publish outcome
+    // cannot be proved. No branch/function deletion beneath a running worker.
+    if (typeof _tourSaveState === 'function') _tourSaveState();
+    return {failed: created.filter(row => row.receipt !== 'removed')};
+  }
+  const unpinned = await _tourUnpinPackages(created);
+  if (typeof _tourSaveState === 'function') _tourSaveState();
+  const blocked = new Set(unpinned.map(row => row['branch-id']));
   const raw = [
-    ...await _tourDeleteCreatedBranches(created),
-    ...await _tourDeleteFns(created),      // fns first — a namespace deletes once empty
-    ...await _tourRemovePackages(created),   // unpin, then withdraw
-    ...await _tourDeleteNamespaces(created),
+    ...await _tourDeleteHttpPublications(created),
+    ...(created.some(row => row.type === 'api-token') ? await _tourDeleteTokens(created) : []),
+    ...unpinned,
+    ...await _tourDeleteCreatedBranches(created, blocked),
+    ...await _tourDeleteFns(created, options),      // fns first — a namespace deletes once empty
+    ...await _tourRemovePackages(created, options), // exact owned release, after unpin
+    ...await _tourDeleteNamespaces(created, options),
   ];
+  if (typeof window !== 'undefined' && typeof window.gdTourRestoreUIComponentPreferences === 'function') {
+    try {
+      raw.push(...await window.gdTourRestoreUIComponentPreferences(created, raw));
+    } catch (_) {
+      // Preference recovery is part of cleanup. Retain its ledger even when
+      // all graph rows are gone, so returning through Lessons can retry.
+      let marker = created.find(row => row.type === 'preference'
+        && row.creation === 'component-preference-restoration');
+      if (!marker) {
+        marker = {type: 'preference', name: 'UI component preferences',
+          creation: 'component-preference-restoration'};
+        created.push(marker);
+      }
+      raw.push(marker);
+    }
+    if (typeof _tourSaveState === 'function') _tourSaveState();
+  }
   // One row can refuse twice (an unpin AND a withdraw for the same package);
   // the reader should read its name once.
   const seen = new Set();
   const failed = raw.filter((c) => {
-    const k = c.type + '\u0000' + c.name;
+    const k = [c.type, c.name, c.id || c.version || '', c['branch-id'] || ''].join('\u0000');
     if (seen.has(k)) return false;
     seen.add(k);
     return true;

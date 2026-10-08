@@ -498,6 +498,7 @@ async function gdPrefsRefresh() {
     gdPrefApply('keymap');
     gdPrefNotify('theme');
     gdPrefNotify('keymap');
+    gdPrefNotify('components');
   } catch (_) { /* offline / signed out — the mirror stands */ }
 }
 
@@ -517,6 +518,7 @@ window.addEventListener('gd-auth-changed', () => {
   gdPrefApply('keymap');
   gdPrefNotify('theme');
   gdPrefNotify('keymap');
+  gdPrefNotify('components');
 });
 
 window.gdThemeTokens = THEME_TOKENS;

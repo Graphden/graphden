@@ -190,6 +190,11 @@
    :args {:path "/partials/queues-panel" :handler :_partial-queues-panel-handler}
    :expects-effects #{:db}}
 
+  {:name :partial-queue-message
+   :description "Read the state of one exact visible queue-message UUID. No payload, mutation or unscoped queue scan."
+   :parent :get-auth-required
+   :args {:path "/partials/queues/message" :handler :_partial-queue-message-handler}}
+
   {:name :partial-queues-requeue
    :description "POST /partials/queues/requeue?message-id=X — requeue a dead letter (`:queue-requeue`), answer with the refreshed panel. Auth-required."
    :parent :post
@@ -321,6 +326,16 @@
    :description "GET /partials/service-popover?fn-id=X — service settings popover body (header + status + sibling-warning + enabled/branch/policy form + save/delete actions). Auth-gated. Save / delete / close handlers in `editor-service-popover.js` are bound post-swap against `.service-popover-{save,delete,close}-btn` + the `data-existing-service-id` attr the partial emits."
    :parent :get-auth-required
    :args {:path "/partials/service-popover" :handler :_partial-service-popover-handler}}
+
+  {:name :partial-service-instances
+   :description "GET /partials/service-instances?service-id=X — registered copies of one exact service, read through org-scoped storage."
+   :parent :get-auth-required
+   :args {:path "/partials/service-instances" :handler :_partial-service-instances-handler}}
+
+  {:name :partial-http-host-popover
+   :description "GET /partials/http-host-popover — finite public handler publication controls."
+   :parent :get-auth-required
+   :args {:path "/partials/http-host-popover" :handler :_http-host-popover-handler}}
 
   {:name :partial-secret-create-form
    :description "GET /partials/secret-create-form — the New-secret form markup (graph-first §6-#2). editor-secrets.js mounts it into the popover and owns the lifecycle. Auth-required."
@@ -953,6 +968,9 @@
                   :api-execute
                   :api-ui-theme-evaluate
                   :api-ui-theme-create-template
+                  :api-ui-components-plan
+                  :api-ui-components-create-preview
+                  :api-ui-components-create-apply
                   :api-execution-by-id
                   :api-execution-cancel
                   :api-executions-list
@@ -1001,4 +1019,5 @@
                   ;; Explorer views (app/views — filters saved in the graph)
                   :api-views
                   :api-view-members
+                  :api-view-save
                   :auth-check]}}]}

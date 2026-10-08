@@ -187,7 +187,8 @@
    producer's COMPILE-time free-args don't represent the produced
    callable's RUNTIME signature). Pairs with the executor's
    `:produces-callable?` detection in compile/bindings.clj — same
-   `(types/fn-type? (:return info))` predicate.
+   `callable-signature` projection. A marked callable keeps its stored value
+   type; invocation carries the outer markers onto its result.
 
    Always emits the canonical 4-element form. `compute-effects` is
    total — every fn-def has a computed set, possibly `#{}` (pure) —
@@ -223,11 +224,11 @@
           ;; subset when recorded. Falls back to `:effects` for
           ;; base-fns / older raw entries without the split.
           eff (or (:call-time-effects info) (:effects info))]
-      (if (types/fn-type? ret)
+      (if-let [signature (types/callable-signature ret)]
         ;; Producer-of-callable: the inner fn-type already carries
         ;; whatever effects-constraint the slot declared. We can't
         ;; meaningfully inject the producer's own effects here.
-        ret
+        signature
         (types/make-fn-type (or (:args info) {}) ret eff)))))
 
 
@@ -1878,6 +1879,37 @@
      :value-present true}))
 
 
+(defn- own-bindings-info-for-rule
+  "A callable slot receives the checked callable value, not its evaluated
+   result. Preserve that distinction when polymorphic return rules read the
+   binding (notably const). bound-ref retains identity without re-firing the
+   referenced graph as an ordinary value during downstream narrowing."
+  [args parent-args]
+  (into {}
+        (map (fn [[arg-name b-form]]
+               (let [parent-info (get parent-args arg-name)
+                     expected (if (map? parent-info) (:type parent-info) parent-info)
+                     ref-name (any-ref-name b-form)
+                     actual (when (and (types/fn-type? expected) ref-name
+                                       (not (ref-map-override b-form)))
+                              (assemble-fn-type ref-name))]
+                 [arg-name (if actual
+                             {:type (strip-closure-captures expected actual ref-name)
+                              :value nil :bound-ref ref-name}
+                             (binding-info-entry b-form))])))
+        args))
+
+
+(defn- resolve-bindings-info
+  "Re-fire reference rules within the supplied binding context. Stored own
+   bindings use only their own context; return computation may include parents."
+  [bindings]
+  (into {}
+        (map (fn [[key info]]
+               [key (assoc info :type (effective-binding-type info bindings #{} 0))]))
+        bindings))
+
+
 (defn- bindings-info-for-rule
   "Build the `{arg-name {:type … :value … :ref ?}}` map the type-rule
    reads. Literal values pass through; refs resolve via the registry's
@@ -1899,10 +1931,7 @@
    `:update-in`'s `:m` type."
   ([args] (bindings-info-for-rule args nil))
   ([args parent-args]
-   (let [own (into {}
-                   (map (fn [[arg-name b-form]]
-                          [arg-name (binding-info-entry b-form)]))
-                   args)
+   (let [own (own-bindings-info-for-rule args parent-args)
          from-parent (into {}
                            (keep (fn [[arg-name arg-info]]
                                    (when (and arg-info
@@ -1916,11 +1945,7 @@
      ;; ref's root-rule re-fires with the merged bindings overlaid.
      ;; This is the call-site narrowing missing under purely
      ;; isolated per-fn-def type-checking.
-     (into {}
-           (map (fn [[k v]]
-                  [k (assoc v :type
-                            (effective-binding-type v merged #{} 0))]))
-           merged))))
+     (resolve-bindings-info merged))))
 
 
 ;; -----------------------------------------------------------------------------
@@ -2554,7 +2579,8 @@
                                                   effective-parent)
                 free-args (collect-free-args fn-def parent-args subst)
                 static-ret (types/resolve subst (or (:return parent-info) :any))
-                own-bindings (bindings-info-for-rule (:args fn-def))
+                own-bindings (resolve-bindings-info
+                               (own-bindings-info-for-rule (:args fn-def) effective-parent))
                 computed-return (compute-return-type fn-def primary-parent
                                                      effective-parent static-ret)
                 recorded-return (enforce-declared-return! fn-name fn-def computed-return)

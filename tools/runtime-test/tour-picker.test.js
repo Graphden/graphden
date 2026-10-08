@@ -170,6 +170,19 @@ function makeWorld(opts) {
     assert(w.ctx._tourDoneSet().size === 0, 'and the set reads back empty');
   });
 
+  await test('personal UI lesson availability is session support, not org management caps', () => {
+    const {ctx} = makeWorld({caps: []});
+    const lesson = {requires: 'personal-ui-graphs'};
+    ctx.isAuthenticated = () => true;
+    ctx.gdRenderUIComponentCatalog = () => {};
+    assert(ctx._tourRequirement(lesson).allowed, 'a signed-in cloud author without org management caps can open the lesson');
+    ctx.isAuthenticated = () => false;
+    assert(!ctx._tourRequirement(lesson).allowed, 'a signed-out reader must sign in');
+    ctx.isAuthenticated = () => true;
+    delete ctx.gdRenderUIComponentCatalog;
+    assert(!ctx._tourRequirement(lesson).allowed, 'an editor without personal component support does not advertise it');
+  });
+
   await test('the pre-edition list is still read, as edition 1, and rewritten on the next change', () => {
     const w = makeWorld({ done: ['01', '03'] });
     assert([...w.ctx._tourDoneSet()].join() === '01,03',
@@ -492,6 +505,16 @@ function makeWorld(opts) {
       'and a mark on it is still removable');
     w.row('04').children[0].click();
     assert(w.started.length === 0, 'clicking a locked row starts nothing');
+  });
+
+  await test('finite HTTP lessons depend on host availability, not a dedicated service plan', async () => {
+    const w = makeWorld({caps: []});
+    const lesson = {requires: 'temporary-http'};
+    assert(!w.ctx._tourRequirement(lesson).allowed, 'unknown hosting availability fails closed');
+    w.ctx.gdTemporaryHttpAvailable = () => true;
+    assert(w.ctx._tourRequirement(lesson).allowed, 'an ordinary account with hosting can take the lesson');
+    w.ctx.gdTemporaryHttpAvailable = () => false;
+    assert(!w.ctx._tourRequirement(lesson).allowed, 'unavailable hosting keeps the lesson disabled');
   });
 
   console.log('');

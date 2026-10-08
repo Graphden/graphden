@@ -935,7 +935,7 @@
    :args {:tag {:value "div"}
           :attrs {:value {:data-assets-panel "1" :class "gd-assets-panel"}}
           :children [{:value [:p {:class "gd-asset-hint"}
-                              "Per-branch DB overrides shadowing the shipped editor files. Saving rolls every asset URL's ?v= — reload the page to run the edited code."]}
+                              "Advanced source-file overrides for this self-hosted deployment. For personal theme, menu and picker graphs, use Settings → Appearance → UI graphs. Saving a source override rolls every asset URL's ?v= — reload to run the code."]}
                      {:parent :hiccup
                       :args {:tag {:value "div"}
                              :attrs {:value {:class "gd-asset-list"}}

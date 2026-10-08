@@ -24,13 +24,13 @@ Resolves a social sign-in to an existing identity, links it to an account with t
 :PROPERTIES:
 :CUSTOM_ID: accounts/mint-session!
 :FILE: src/graphden/accounts/core.clj
-:LINE: 221
-:MINS: 1.7
+:LINE: 228
+:MINS: 1.9
 :END:
 
 Creates a stored session whose raw token is returned once; storage keeps its SHA-256 hash. Session kinds also distinguish verification links and pending second-factor steps, which must not authenticate as ordinary API sessions.
 
-- source :: [[file:../../../src/graphden/accounts/core.clj::(defn mint-session!][src/graphden/accounts/core.clj:221]]
+- source :: [[file:../../../src/graphden/accounts/core.clj::(defn mint-session!][src/graphden/accounts/core.clj:228]]
 - same file :: [[file:accounts.org::#accounts/resolve-social-identity!][resolve-social-identity!]]
 
 * 3. accounts-provider

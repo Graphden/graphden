@@ -56,6 +56,11 @@ The heading says **field versions**. Restore is disabled when the fields
 it would write already match the current branch, even on an older row.
 Hover over the button for its scope; argument bindings are separate.
 
+This timeline does not reconstruct an entire earlier composition on the
+canvas. Parent identities, argument bindings and list items have different
+storage rules; restoring a fn's fields does not restore those rows. Use
+branch comparison to inspect the composition available on another branch.
+
 Click a row to expand it: the executions recorded against that exact
 version load underneath (lesson 15's history, sliced by version rather
 than by fn). That is how you answer "did this break when I renamed it /

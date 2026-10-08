@@ -60,6 +60,11 @@ async function openExecutePopoverForCard(page, fnId) {
       '.execute-popover.visible .execute-trace-checkbox'),
     null,
     {timeout: 15000, polling: 100});
+  const options = page.locator('.execute-popover.visible .execute-options');
+  assert(!(await options.evaluate(element => element.open)), 'Run options start collapsed');
+  await options.locator('summary').focus();
+  await page.keyboard.press('Enter');
+  assert(await options.evaluate(element => element.open), 'native keyboard disclosure opens Run options');
 }
 
 
@@ -305,7 +310,7 @@ async function openExecutePopoverForCard(page, fnId) {
       await api(page, 'PUT', '/api/entities/binding/' + leafBinding.id,
         'value=' + encodeURIComponent(JSON.stringify(value)));
       const run = await api(page, 'POST', '/api/execute', {
-        'fn-id': probeWrap.id, args: {}, 'trace?': true, 'capture-values?': true,
+        'fn-id': probeWrap.id, args: {}, 'persist?': true, 'trace?': true, 'capture-values?': true,
       });
       assert(run.status === 'succeeded' && run['path-trace'], 'long value captured');
       await page.evaluate((trace) => showExecutionPathView(trace), run['path-trace']);
@@ -331,11 +336,67 @@ async function openExecutePopoverForCard(page, fnId) {
       await page.keyboard.press('ArrowRight');
       assert(await valueBody.evaluate((element) => document.activeElement === element
         && element.tabIndex === 0), 'captured value can receive keyboard scrolling');
-      await page.keyboard.press('Escape');
+      await page.click('.path-value-popover [data-gd-pop-x]');
+      assert(await badge.evaluate(element => document.activeElement === element), 'visible Close restores badge focus');
       await page.keyboard.press('Escape');
       assert(await page.locator('.path-view-panel').count() === 0,
         'second Escape clears the path after the value popup closes');
+      await page.evaluate(id => openTraceView(id), run['execution-id']);
+      const details = page.locator('.trace-view-panel .trace-value:not([open])').first();
+      await details.waitFor();
+      await details.locator('summary').focus();
+      await page.keyboard.press('Enter');
+      assert(await details.evaluate(element => element.open), 'Enter opens native value details without row interception');
+      await page.keyboard.press('Space');
+      assert(!(await details.evaluate(element => element.open)), 'Space closes native value details');
+      await page.keyboard.press('Escape');
     }
+
+    // Capture caps cannot promise a recoverable full value.
+    await api(page, 'PUT', '/api/entities/binding/' + leafBinding.id,
+      'value=' + encodeURIComponent(JSON.stringify('x'.repeat(5000))));
+    const cappedRun = await api(page, 'POST', '/api/execute', {
+      'fn-id': probeWrap.id, args: {}, 'trace?': true, 'capture-values?': true,
+    });
+    await page.evaluate(trace => showExecutionPathView(trace), cappedRun['path-trace']);
+    const unavailable = page.locator('.node-overlay[data-original-fn-id="' + probeConst.id + '"] .path-value-badge');
+    assert(await unavailable.textContent() === '= unavailable', 'cap is labelled unavailable rather than expandable full data');
+    await unavailable.click();
+    assert(await page.locator('.path-value-popover-body').count() === 0, 'cap explanation does not expose an earlier captured value');
+    assert((await page.locator('.path-value-popover-note').textContent()).includes('not captured'), 'cap explanation states value was not stored');
+    await page.click('.path-value-popover [data-gd-pop-x]');
+    await page.setViewportSize({width: 390, height: 240});
+    const inspectorClose = page.getByRole('button', {name: 'Close inspector', exact: true});
+    if (await inspectorClose.isVisible()) await inspectorClose.click();
+    await page.evaluate(async id => {
+      toggleCollapsed(true);
+      for (let frame = 0; frame < 2; frame++) await new Promise(requestAnimationFrame);
+      const badge = document.querySelector('.node-overlay[data-original-fn-id="' + id + '"] .path-value-badge');
+      const rect = badge.getBoundingClientRect();
+      const surface = document.getElementById('graph-surface').getBoundingClientRect();
+      setViewportPan(viewport.pan.x + surface.left + surface.width / 2 - rect.left,
+        viewport.pan.y + surface.top + surface.height / 3 - rect.top);
+      for (let frame = 0; frame < 2; frame++) await new Promise(requestAnimationFrame);
+    }, probeConst.id);
+    for (const dark of [false, true]) {
+      await page.evaluate(value => document.body.classList.toggle('theme-dark', value), dark);
+      await unavailable.focus();
+      await page.keyboard.press('Enter');
+      const popup = page.getByRole('dialog', {name: 'Captured value', exact: true});
+      await popup.waitFor();
+      const bounds = await popup.boundingBox();
+      assert(bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= 390
+        && bounds.y + bounds.height <= 240, 'narrow captured-value popup stays within viewport');
+      assert(await popup.getByRole('button', {name: 'Close captured value', exact: true}).isVisible(),
+        'visible Close remains available in both themes');
+      await page.keyboard.press('Tab');
+      assert(await popup.evaluate(element => element.contains(document.activeElement)), 'Tab stays in the owned value dialog');
+      await page.screenshot({path: '/tmp/graphden-trace-value-' + (dark ? 'dark' : 'light') + '.png'});
+      await page.keyboard.press('Escape');
+      assert(await unavailable.evaluate(element => document.activeElement === element), 'Escape restores the value badge after narrow disclosure');
+    }
+    await page.evaluate(() => document.body.classList.remove('theme-dark'));
+    await page.keyboard.press('Escape');
 
     console.log('PASS');
   } catch (e) {

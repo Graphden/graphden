@@ -11,7 +11,7 @@ const events = new Map();
 let reply;
 let created = 0;
 const ctx = vm.createContext({
-  URLSearchParams, Map, console,
+  URLSearchParams, Map, console, AbortController,
   location: {search: '?branch=review&ui-initial=11111111-1111-1111-1111-111111111111&ui-update=22222222-2222-2222-2222-222222222222&ui-view=33333333-3333-3333-3333-333333333333'},
   document: {addEventListener() {}},
   getCurrentBranchName: () => 'review',
@@ -19,6 +19,7 @@ const ctx = vm.createContext({
   accountsAuthed: false,
 });
 ctx.window = ctx;
+ctx.gdClearGraphTheme = () => {};
 ctx.addEventListener = (name, callback) => events.set(name, callback);
 ctx.authFetch = () => new Promise((resolve) => { reply = resolve; });
 ctx.GraphdenBrowser = {keyword: (name) => name,

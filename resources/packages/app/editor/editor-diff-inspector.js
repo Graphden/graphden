@@ -113,10 +113,30 @@ function gdDiffInsideBadgeEl(nodeId, fnId, dm) {
   return badge;
 }
 
-// The "there: …" block under an arg (or on an unbound placeholder) —
-// the node-level data change drawn ON the node: value, type, position,
-// description; a replaced ref says where it points there (the ghost
-// module draws that subtree beside the card).
+// An expanded ancestor is a row inside the child's card, rather than a new
+// card with its own ring. Keep its own changes reachable on that exact row.
+function gdDiffAncestorBadgeEl(fnId) {
+  const group = gdDiffVisibleGroup(fnId);
+  if (!group) return null;
+  const badge = document.createElement('button');
+  badge.type = 'button';
+  badge.className = 'arg-diff-badge fn-diff-ancestor-badge';
+  badge.dataset.fnId = fnId;
+  badge.textContent = 'Δ';
+  badge.title = 'Differs vs "' + gdDiffModeBranch() + '": '
+    + gdDiffSummaryParts(group).join('; ') + ' — inspect this ancestor';
+  badge.setAttribute('aria-label', badge.title);
+  badge.addEventListener('mousedown', (e) => e.stopPropagation());
+  badge.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (typeof window.gdInspectorRender === 'function') window.gdInspectorRender(fnId);
+  });
+  return badge;
+}
+
+// Type, position and other field changes remain on the current node. Literal
+// replacements have a separate read-only source node and replacement link;
+// ref replacements have their source subtree in the same ghost layer.
 function gdDiffWasEl(d) {
   if (!d) return null;
   const lines = [];
@@ -128,7 +148,9 @@ function gdDiffWasEl(d) {
   for (const f of d.fields) {
     const pos = (f.position !== undefined && f.position !== null) ? '[' + f.position + '] ' : '';
     if (f.field === 'ref-fn-id') lines.push({ k: pos + '→ there', v: f.source });
-    else if (f.field === 'value') lines.push({ k: pos + 'there', v: f.source });
+    else if (f.field === 'value') {
+      if (d.change !== 'modified' || !d.entityId) lines.push({ k: pos + 'there', v: f.source });
+    }
     else if (f.field === 'item') lines.push({ k: pos + 'there', v: f.source });
     else if (f.field === 'type-override-fn-id') lines.push({ k: pos + 'type there', v: f.source });
     else if (f.field === 'description') lines.push({ k: pos + 'description', v: '~' });

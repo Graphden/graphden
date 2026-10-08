@@ -122,6 +122,7 @@
     }
   }
   window.gdApplyThemeGraphPreference = applyPreference;
+  window.gdUseThemeGraph = choose;
   window.gdThemeGraphStatus = () => status;
   window.gdCreateThemeGraph = async (anchorEl) => {
     const owner = window.gdPrefOwner;

@@ -160,6 +160,18 @@
    :args {:value {:parent :parse-uuid
                   :args {:string {:parent :query-param :args {:param-name {:value "message-id"}}}}}}}
 
+  {:name :_pq-message-state
+   :description "State of one visible message UUID, without its payload or queue contents. Absent or invisible identity returns an empty map."
+   :parent :select-keys
+   :args {:m {:parent :get-entity
+              :args {:entity-type "queue-message" :id :_pq-param-id}}
+          :ks [{:value :id} {:value :state} {:value :attempts}]}}
+
+  {:name :_partial-queue-message-handler
+   :lambda-params [:request]
+   :parent :json-ok-response
+   :args {:body {:parent :to-json-string :args {:data :_pq-message-state}}}}
+
   {:name :_pq-requeue-then-html
    :parent :do
    :args {:steps [{:parent :queue-requeue :args {:message-id :_pq-param-id}}

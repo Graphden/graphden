@@ -346,7 +346,7 @@
 
 (defn- upsert-pin!
   "Upsert the pin `(current-branch, pkg-name)` → version and return the
-   branch id. The branch is the request's VersionedStorage branch, so the
+   written row. The branch is the request's VersionedStorage branch, so the
    pin records on the request's branch (staging). One pin per (branch,
    package). A NEW pin is an install and bumps the
    package's global install counter; moving an existing pin (update /
@@ -362,14 +362,13 @@
     (if existing
       (sp/update-entity storage :package-install (:id existing)
                         {:version version :installed-at installed-at})
-      (do
-        (sp/create-entity storage :package-install
-                          {:branch-id branch-id
-                           :package-name pkg-name
-                           :version version
-                           :installed-at installed-at})
-        (bump-install-stat! ctx pkg-name)))
-    branch-id))
+      (let [pin (sp/create-entity storage :package-install
+                                  {:branch-id branch-id
+                                   :package-name pkg-name
+                                   :version version
+                                   :installed-at installed-at})]
+        (bump-install-stat! ctx pkg-name)
+        pin))))
 
 
 (defbase semver-pick
@@ -464,14 +463,29 @@
 ;; fns ONCE under `<ns-root>@<version>` + delta-invalidate — coupled
 ;; write+invalidation pair (§3.3). Resolve / guards / envelopes are graph
 ;; composition in fns.edn (`:materialize-package-version`).
-(defbase materialize-package-fns
-  [ns-root version fns]
-  (cr/record-effect! :db)
+(defn- materialize-package-receipt!
+  "The coupled materialize/publication unit shared by the count and receipt
+   primitives. Namespace ownership comes from actual creates inside sync's
+   transaction; reading a namespace by name afterwards cannot prove creation."
+  [ctx ns-root version fns]
   (recheck/call-with-ctx-slices
     ctx
     #(let [mat-ids (materialize-fns! (request/require-storage ctx) ns-root version fns)]
        (complete-bundle-sync! ctx mat-ids)
-       (count mat-ids))))
+       {:materialized (count mat-ids)
+        :created-namespaces (vec (:created-namespaces (meta mat-ids)))})))
+
+
+(defbase materialize-package-fns
+  [ns-root version fns]
+  (cr/record-effect! :db)
+  (:materialized (materialize-package-receipt! ctx ns-root version fns)))
+
+
+(defbase materialize-package-receipt
+  [ns-root version fns]
+  (cr/record-effect! :db)
+  (materialize-package-receipt! ctx ns-root version fns))
 
 
 (defbase version-qualified-ns-fn
@@ -705,7 +719,15 @@
   [pkg-name pkg-version]
   (cr/record-effect! :db)
   (cr/record-effect! :time)
-  (str (upsert-pin! ctx (request/require-storage ctx) pkg-name pkg-version)))
+  (str (:branch-id (upsert-pin! ctx (request/require-storage ctx) pkg-name pkg-version))))
+
+
+(defbase package-pin-receipt
+  [pkg-name pkg-version]
+  (cr/record-effect! :db)
+  (cr/record-effect! :time)
+  (select-keys (upsert-pin! ctx (request/require-storage ctx) pkg-name pkg-version)
+               [:id :package-name :version :branch-id]))
 
 
 ;; `:list-installed-packages` / `:remove-package-pin` are pure graph
@@ -750,8 +772,10 @@
    :version-qualified-ns version-qualified-ns-fn
    :fork-package-fns {:impl fork-package-fns :taint-propagate? true}
    :materialize-package-fns {:impl materialize-package-fns :taint-propagate? true}
+   :materialize-package-receipt {:impl materialize-package-receipt :taint-propagate? true}
    :rewrite-refs-to-version {:impl rewrite-refs-to-version :taint-propagate? true}
    :package-upsert-pin package-upsert-pin
+   :package-pin-receipt {:impl package-pin-receipt :taint-propagate? true}
    ;; taint-propagate: echoes the caller's pkg-name / version.
    :mirror-store-package-version! {:impl mirror-store-package-version! :taint-propagate? true}
    :remote-auth-value remote-auth-value

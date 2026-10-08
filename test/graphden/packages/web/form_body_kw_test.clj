@@ -11,16 +11,16 @@
    this test does."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.storage.protocol.postgres-test-helpers :as pth]
+    [graphden.executor.registry.core :as registry]
+    [graphden.test-infra.golden-app :as ga]
     [graphden.test-infra.graph-harness :as gh]))
 
 
-(def ^:dynamic *container* nil)
-
-
 (use-fixtures :once
-  (pth/create-container-fixture #'*container*)
-  (gh/graph-fixture (str (ns-name *ns*))))
+  (ga/fixture (str (ns-name *ns*)))
+  (fn [t]
+    (binding [gh/*graph* ga/*bootstrap*]
+      (t))))
 
 
 (defn- form-req
@@ -30,6 +30,11 @@
 
 
 (deftest parse-form-body-kw-produces-keyword-keys-test
+  (testing "the callback accepts decoded text keys and returns a non-null keyword"
+    (let [rt (registry/rich-type-of-id
+               (get (:all-name->id gh/*graph*) :_form-body-kw-callback))]
+      (is (= {:value :text} (:args rt)))
+      (is (= :keyword (:return rt)))))
   (testing "urlencoded body → KEYWORD-keyed map (so `:get {:key {:value :field}}` reads it)"
     (is (= {:subject "alice" :capability "read"}
            (gh/exec-name :parse-form-body-kw

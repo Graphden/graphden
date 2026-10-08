@@ -610,14 +610,22 @@ async function populateReviewStatus(popover) {
         API.api_branches_ref_approvals(branchRefFrom(btn, name)));
       if (!resp.ok) continue;
       const st = await resp.json();
-      // The reviewer's own approval makes ✅ a toggle — like 📤 propose /
-      // withdraw — so a "wait, not yet" needs no curl.
-      if (st.mine) {
+      // A stale recorded approval must offer re-approval. Current author
+      // approvals still offer withdrawal even if policy does not count them.
+      const currentMine = Object.hasOwn(st, 'mine-current')
+        ? st['mine-current'] : st.mine;
+      if (currentMine) {
         btn.classList.add('on');
         btn.setAttribute('aria-pressed', 'true');
         btn.setAttribute('data-approved', '1');
         btn.title = 'You approved this — click to withdraw your approval';
         btn.setAttribute('data-tip', 'Withdraw approval');
+      } else {
+        btn.classList.remove('on');
+        btn.setAttribute('aria-pressed', 'false');
+        btn.removeAttribute('data-approved');
+        btn.title = 'Approve the current proposal';
+        btn.setAttribute('data-tip', 'Approve');
       }
       const req = st.required ?? 0;
       if (req <= 0) continue; // no approvals required → nothing to show
@@ -645,15 +653,18 @@ async function createBranchFromInput(parentName) {
   const policySel = document.getElementById('branch-create-policy');
   const policy = policySel && policySel.value !== 'open' ? policySel.value : null;
   try {
+    const receipt = await window.gdTourBeginBranchCreation?.(name, parentName);
     const resp = await window.authFetch(API.api_branches, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(Object.assign(
-        { name, 'base-branch-id': parentName },
+        { name, 'base-branch-id': receipt?.baseBranchId || parentName },
+        receipt ? {id: receipt.branchId} : {},
         policy ? { 'write-policy': policy } : {}
       )),
     });
     const body = await resp.json();
+    window.gdTourRejectBranchCreation?.(receipt, resp, body);
     if (resp.status === 401) {
       err.textContent = 'Sign in to create branches';
       err.classList.remove('hidden');
@@ -666,6 +677,8 @@ async function createBranchFromInput(parentName) {
     }
     // Switch immediately — the user just created this; almost certainly
     // they want to start working on it.
+    if (receipt) window.gdTourRecordBranchReceipt?.(receipt, body.branch);
+    else window.gdTourRecordBranchCreation?.(body.branch);
     switchToBranch(name);
   } catch (e) {
     err.textContent = e?.message || 'Create failed';

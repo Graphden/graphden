@@ -1,0 +1,39 @@
+{:namespace "app.ui-components"
+ :description "Personal editor components: ordinary identity bindings select bounded graph templates."
+ :fns
+ [{:name :_ui-components-identities
+   :type {:menu-initial :uuid :menu-update :uuid :menu-view :uuid :picker-view :uuid}}
+  {:name :ui-components
+   :description "A personal editor UI configuration. Bind component entry functions by identity; selecting this configuration changes only your editor preference. The host retains callbacks and validates each component's bounded DOM and style contract."
+   :args {:menu-initial {:type :fn-ref}
+          :menu-update {:type :fn-ref}
+          :menu-view {:type :fn-ref}
+          :picker-view {:type :fn-ref}}
+   :return-type :_ui-components-identities}
+  {:name :_ui-components-plan
+   :description "Export one selected personal UI component as an authorized bounded JSON plan. Never evaluates user code or exports the whole graph."
+   :args {:input {:type :jsonb}}
+   :return-type :keyword-map
+   :effects #{:db}}
+  {:name :_ui-components-plan-handler :parent :json-envelope-response
+   :lambda-params [:request]
+   :args {:envelope {:parent :_ui-components-plan :args {:input :parse-json-body}}}}
+  {:name :api-ui-components-plan :parent :app.routes.auth/post
+   :description "Authenticated personal menu/picker plan in the selected organization and branch."
+   :args {:path "/ui/components/plan" :handler :_ui-components-plan-handler}}
+  {:name :_ui-components-create-preview
+   :description "Reserve a create-only fixed-template manifest for exact recovery. This does not create graph rows."
+   :args {:input {:type :jsonb}} :return-type :keyword-map :effects #{:db}}
+  {:name :_ui-components-create-apply
+   :description "Atomically create the unchanged authorized fixed-template manifest. Never revives an existing identity."
+   :args {:input {:type :jsonb}} :return-type :keyword-map :effects #{:db}}
+  {:name :_ui-components-create-preview-handler :parent :json-envelope-response
+   :lambda-params [:request]
+   :args {:envelope {:parent :_ui-components-create-preview :args {:input :parse-json-body}}}}
+  {:name :_ui-components-create-apply-handler :parent :json-envelope-response
+   :lambda-params [:request]
+   :args {:envelope {:parent :_ui-components-create-apply :args {:input :parse-json-body}}}}
+  {:name :api-ui-components-create-preview :parent :app.routes.auth/post
+   :args {:path "/ui/components/create/preview" :handler :_ui-components-create-preview-handler}}
+  {:name :api-ui-components-create-apply :parent :app.routes.auth/post
+   :args {:path "/ui/components/create/apply" :handler :_ui-components-create-apply-handler}}]}

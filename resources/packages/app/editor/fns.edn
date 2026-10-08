@@ -63,6 +63,7 @@
                   "packages/app/editor/editor-marketplace.js"
                   "packages/app/editor/editor-theme.js"
                   "packages/app/editor/editor-theme-graph.js"
+                  "packages/app/editor/editor-ui-component-catalog.js"
                   "packages/app/editor/editor-keymap.js"
                   ;; Feedback ("Report a problem") — early so its uncaught-
                   ;; error ring buffer sees everything after boot; the shell
@@ -77,6 +78,7 @@
                   "packages/app/ui-preview/graph-styles.js"
                   "packages/app/ui-preview/graph-renderer.js"
                   "packages/app/ui-preview/builtin-plans.js"
+                  "packages/app/editor/editor-ui-components.js"
                   "packages/app/editor/editor-shell-menu-graph.js"
                   "packages/app/editor/editor-fn-picker-graph.js"
                   "packages/app/editor/editor-shell-menu.js"
@@ -165,6 +167,7 @@
                   "packages/app/editor/editor-fn-peek.js"
                   "packages/app/editor/editor-recents.js"
                   "packages/app/editor/editor-service-popover.js"
+                  "packages/app/editor/editor-http-host.js"
                   "packages/app/editor/editor-mismatch-explainer.js"
                   "packages/app/editor/editor-effect-explainer.js"
                   ;; Structural type-interpretation half of the inline
@@ -249,10 +252,15 @@
                   ;; hook (maybeStartTutorial) exists for main's
                   ;; DOMContentLoaded, and in the same lexical scope as
                   ;; graphData/lookups (its checks read them bare).
+                  "packages/app/editor/editor-tour-ui-components.js"
                   "packages/app/editor/editor-tour-checks.js"
                   "packages/app/editor/editor-tour-cleanup.js"
                   "packages/app/editor/editor-tour.js"
                   "packages/app/editor/editor-tour-session.js"
+                  "packages/app/editor/editor-tour-receipts.js"
+                  "packages/app/editor/editor-tour-app-receipts.js"
+                  "packages/app/editor/editor-tour-tokens.js"
+                  "packages/app/editor/editor-tour-services.js"
                   ;; Spotlight geometry + the end-of-lesson dialogs — the
                   ;; engine's two halves that grew past it.
                   "packages/app/editor/editor-tour-spot.js"
@@ -664,7 +672,22 @@
                  [:button {:id "gd-set-compact" :type "button" :class "gd-set-btn"} "—"]]
                 ;; Custom themes — tokens / fonts / size, saved + shared through
                 ;; the marketplace (editor-theme.js renders into this root).
-                [:div {:id "gd-theme-root" :class "gd-theme-root"}]]
+                [:div {:id "gd-theme-root" :class "gd-theme-root"}]
+                [:div {:id "gd-ui-components-root"}
+                 [:h3 {:class "gd-set-label"} "UI graphs"]
+                 [:p {:class "gd-set-hint"} "Personal theme, menu state and events, and picker view. Search, navigation and account actions stay native."]
+                 [:p {:id "gd-ui-components-label" :class "gd-set-hint"} "Built-in components"]
+                 [:div {:class "gd-theme-actions gd-ui-components-actions"}
+                  [:button {:id "gd-ui-components-create" :type "button" :class "gd-set-btn"} "Create personal graphs"]
+                  [:button {:id "gd-ui-components-choose" :type "button" :class "gd-set-btn"} "Choose configuration"]
+                  [:button {:id "gd-ui-components-reset" :type "button" :class "gd-set-btn"} "Use built-in components"]]
+                 [:div {:class "gd-theme-actions gd-ui-components-actions"}
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-graph "configuration-id"} "Configuration"]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-graph "theme-id"} "Theme"]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-graph "menu-update-id"} "Menu behavior"]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-graph "menu-id"} "Menu view"]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-graph "picker-id"} "Picker view"]]
+                 [:p {:id "gd-ui-components-status" :class "gd-set-hint" :role "status"}]]]
                ;; KEYBOARD — every registered shortcut with a Change control;
                ;; layouts save + share through the marketplace (editor-keymap.js).
                [:section {:class "gd-op-card gd-set-pane gd-set-pane-wide" :data-section "keyboard" :hidden "hidden"}

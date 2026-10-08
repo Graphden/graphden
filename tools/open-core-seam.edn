@@ -22,7 +22,9 @@
 {
  graphden.accounts.core
  [account-of create-account! mint-preview-token! mint-session! normalize-email
-  parse-scopes preview-grant-by-token]
+  parse-scopes preview-grant-by-token authenticate-token preview-token-ttl-ms]
+ graphden.http-host.core
+ [validate-handler!]
  graphden.accounts.crypto
  [fixed-window-limiter per-key-fixed-window-limiter sha256-hex]
  graphden.accounts.provider
@@ -36,7 +38,7 @@
  graphden.crud.fn-execution
  [query-param]
  graphden.crud.fn-execution.persist
- [current-execution-pool]
+ [acquire-execution-slot! current-execution-pool]
  graphden.crud.request
  [parse-uuid-or-clear read-json-body]
  graphden.crud.type-check
@@ -67,6 +69,8 @@
  [rebuild-window-api!]
  graphden.system.branch-router
  [ctx-for current-router extract-branch-ref resolve-branch-id]
+ graphden.system.branch-router.recheck
+ [call-with-ctx-slices]
  graphden.system.route-collection
  [install-router! remove-router!]
  graphden.versioning.storage.core

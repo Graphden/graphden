@@ -201,26 +201,27 @@ A concrete arithmetic [[file:glossary.org::#term/base-function][base function]]:
 :CUSTOM_ID: packages/sync-namespaces!
 :FILE: src/graphden/packages/loader.clj
 :LINE: 732
-:MINS: 4.3
+:MINS: 4.8
 :END:
 
-Creates the stored namespace hierarchy, such as ~core~ and ~core.arithmetic~, and returns a map from namespace paths to IDs. Function synchronization uses these IDs to place each definition in its namespace.
+Creates the stored namespace hierarchy, such as ~core~ and ~core.arithmetic~, and returns a map from namespace paths to IDs. Function synchronization uses these IDs to place each definition in its namespace. Metadata also records only namespace IDs actually created by this synchronization. Package installation returns those IDs alongside the pin and version identities, so lesson cleanup can remove its own resources without claiming pre-existing namespaces by name.
 
 - source :: [[file:../../../src/graphden/packages/loader.clj::(defn sync-namespaces!][src/graphden/packages/loader.clj:732]]
 - see also :: [[file:executor.org::#executor/sync-fns-to-storage!][sync-fns-to-storage!]]
 - same file :: [[file:packages.org::#packages/load-packages][load-packages]], [[file:packages.org::#packages/resolve-dependencies][resolve-dependencies]], [[file:packages.org::#packages/validate-dep-constraints!][validate-dep-constraints!]], [[file:packages.org::#packages/load-single-package][load-single-package]], [[file:packages.org::#packages/process-module][process-module]], [[file:packages.org::#packages/base-fn?][base-fn?]], [[file:packages.org::#packages/load-module-fns][load-module-fns]], [[file:packages.org::#packages/load-impls-via-eval][load-impls-via-eval]], [[file:packages.org::#packages/fn-def->base-fn-def][fn-def->base-fn-def]]
+- referenced from :: [[file:editor.org::#editor/gdTourRecordPackageInstall][gdTourRecordPackageInstall]]
 
 * 16. sync-fn-entities-from-packages!
 :PROPERTIES:
 :CUSTOM_ID: packages/sync-fn-entities-from-packages!
 :FILE: src/graphden/packages/sync.clj
-:LINE: 1089
+:LINE: 1091
 :MINS: 10.9
 :END:
 
 Synchronizes packaged definitions into storage, repairs moved identities, removes unused retired definitions, and checks types in [[file:glossary.org::#term/topological-order][dependency order]]. Packages on disk describe the desired state. Test bootstraps may skip the full type sweep; production boot and ~bb type-sweep~ run it explicitly.
 
-- source :: [[file:../../../src/graphden/packages/sync.clj::(defn sync-fn-entities-from-packages!][src/graphden/packages/sync.clj:1089]]
+- source :: [[file:../../../src/graphden/packages/sync.clj::(defn sync-fn-entities-from-packages!][src/graphden/packages/sync.clj:1091]]
 - see also :: [[file:types.org::#types/check-all-defs!][check-all-defs!]], [[file:versioning.org::#versioning/repoint-refs!][repoint-refs!]]
 - same file :: [[file:packages.org::#packages/adopt-bundle-identities!][adopt-bundle-identities!]], [[file:packages.org::#packages/reconcile-bundle-scope!][reconcile-bundle-scope!]]
 - referenced from :: [[file:boot.org::#boot/packages][packages]]
@@ -307,7 +308,7 @@ Stores a published bundle as an immutable ~:package-version~ row identified by v
 :CUSTOM_ID: packages/upsert-pin!
 :FILE: resources/packages/registry/registry/impls.clj
 :LINE: 347
-:MINS: 2.3
+:MINS: 2.2
 :END:
 
 Creates or updates an [[file:glossary.org::#term/semver][installation pin]]. Only a new installation increments the global package statistic, using an atomic database upsert; moving an existing [[file:glossary.org::#term/semver][pin]] to another version does not. See [[file:../../../docs/MARKETPLACE.md][marketplace]].
@@ -356,26 +357,26 @@ Seeds starter themes, keymaps, and examples from ~starter-catalogue.edn~ at boot
 :PROPERTIES:
 :CUSTOM_ID: packages/adopt-bundle-identities!
 :FILE: src/graphden/packages/sync.clj
-:LINE: 589
+:LINE: 591
 :MINS: 3.2
 :END:
 
 During bundle import, aligns editor-created same-name identities with deterministic IDs and redirects their references. The surrounding graph pipeline chooses the target branch, excludes package-owned definitions, synchronizes the bundle, and optionally removes missing definitions. This identity-level repair is specific to import, not ordinary [[file:glossary.org::#term/mcp][MCP]] upsert.
 
-- source :: [[file:../../../src/graphden/packages/sync.clj::(defn adopt-bundle-identities!][src/graphden/packages/sync.clj:589]]
+- source :: [[file:../../../src/graphden/packages/sync.clj::(defn adopt-bundle-identities!][src/graphden/packages/sync.clj:591]]
 - same file :: [[file:packages.org::#packages/sync-fn-entities-from-packages!][sync-fn-entities-from-packages!]], [[file:packages.org::#packages/reconcile-bundle-scope!][reconcile-bundle-scope!]]
 
 * 28. reconcile-bundle-scope!
 :PROPERTIES:
 :CUSTOM_ID: packages/reconcile-bundle-scope!
 :FILE: src/graphden/packages/sync.clj
-:LINE: 632
+:LINE: 634
 :MINS: 4.4
 :END:
 
 Implements ~?prune=true~ within the bundle's namespaces. Definitions absent from the snapshot receive branch-specific [[file:glossary.org::#term/tombstone][tombstones]], including inherited definitions. It does not physically purge shared identities; referenced removals are retained and reported.
 
-- source :: [[file:../../../src/graphden/packages/sync.clj::(defn reconcile-bundle-scope!][src/graphden/packages/sync.clj:632]]
+- source :: [[file:../../../src/graphden/packages/sync.clj::(defn reconcile-bundle-scope!][src/graphden/packages/sync.clj:634]]
 - same file :: [[file:packages.org::#packages/sync-fn-entities-from-packages!][sync-fn-entities-from-packages!]], [[file:packages.org::#packages/adopt-bundle-identities!][adopt-bundle-identities!]]
 
 * 29. bundle->files

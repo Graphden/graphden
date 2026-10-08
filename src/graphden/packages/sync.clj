@@ -536,10 +536,12 @@
                                             (if prepared
                                               (fn-core/write-records! storage (:records prepared) ns-id-map)
                                               (fn-composition/sync-fns-to-storage! storage fn-defs ns-id-map)))]
-                             (into (mapv #(records/fn-id (:namespace %) (:name %)) fn-defs)
-                                   (comp (remove (set (map #(records/fn-id (:namespace %) (:name %)) fn-defs)))
-                                         (distinct))
-                                   (vals name->id))))))))
+                             (with-meta
+                               (into (mapv #(records/fn-id (:namespace %) (:name %)) fn-defs)
+                                     (comp (remove (set (map #(records/fn-id (:namespace %) (:name %)) fn-defs)))
+                                           (distinct))
+                                     (vals name->id))
+                               (select-keys (meta ns-id-map) [:created-namespaces]))))))))
 
 
 (defn- ns-path-index

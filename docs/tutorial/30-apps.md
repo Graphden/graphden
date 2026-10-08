@@ -37,6 +37,8 @@ picks a handler by path, exactly like the editor itself does.
 On a cloud deployment (the tenancy addon is active) publishing
 starts **from the fn**, the same way declaring a service does: the
 **⋯** menu on a selected fn's root row has an **Apps** entry (▣).
+Creating and removing routes requires **manage-apps** access; an organization
+owner holds it implicitly.
 Its popover lists the hosts this fn already serves — each a live
 link, with a **×** to remove it — and a form to add a new one.
 
@@ -50,6 +52,22 @@ under the sidebar search (Lesson 20) narrows the tree to just
 those fns — that chip is the org-wide overview of everything
 published. The chip shows a count and appears only when the
 deployment has app routing at all.
+
+The interactive lesson needs an account browser session and an isolated apps
+domain as well as **manage-apps** access. It extends `html-ok-response`, binds
+`:body` to `<h1>Hello from my app</h1>` and records the exact newly created app
+UUID. Open **⋯ → HTTP → Preview HTML handler → Open HTML preview** to read
+that page from the lesson's captured scratch branch, as in lesson 14.
+**Finish** offers to keep the app and branch or remove the exact app before
+its handler and branch. An unavailable or changed route keeps the cleanup
+journal for retry.
+
+Ordinary app requests resolve the organization's main graph. To publish the
+reviewed handler there, use the existing branch merge controls from lesson 23,
+then open the ordinary app host. This later publication is deliberate: a merge
+into real main retains source history, while the lesson's preview and cleanup
+stay reversible. Creating an app label alone does not publish scratch-branch
+versions into main.
 
 ## Creating an app
 

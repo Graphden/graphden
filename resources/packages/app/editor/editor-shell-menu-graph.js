@@ -13,9 +13,11 @@
   let theme = null;
   let mounted = null;
   let requestGeneration = 0;
+  let pending = null;
   let ready = false;
 
   function report(error) {
+    if (!review) window.gdUIComponentFailed?.('account-menu');
     closeMounted();
     window.gdClearGraphTheme();
     runtime = null;
@@ -197,8 +199,17 @@
     refreshTheme,
     async reload() {
       const generation = ++requestGeneration;
+      pending?.abort();
+      // Reauthorization never keeps an older personal plan mounted.
+      closeMounted();
+      window.gdClearGraphTheme();
+      runtime = null;
+      integration.ready = false;
+      const controller = new AbortController();
+      pending = controller;
       try {
         let plan;
+        let loadedRuntime;
         if (review) {
           if (names.some((name) => !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(params.get(name) || ''))
             || !params.get('branch') || params.get('branch') === 'main') throw new Error('Choose an explicit review branch and three entry functions');
@@ -209,17 +220,19 @@
           if (!response.ok || plan.ok === false) throw new Error(plan.reason || 'Graph export refused');
         } else {
           plan = window.GraphdenBuiltinPlans.plans.accountMenu;
+          loadedRuntime = await window.gdLoadUIComponentRuntime('account-menu', plan, {}, controller.signal);
         }
         if (generation !== requestGeneration) return;
         if (mounted) closeMounted();
-        runtime = api.createRuntime(plan);
+        runtime = loadedRuntime || api.createRuntime(plan);
         state = runtime.run('initial');
         theme = new Map(Object.entries(window.gdGraphThemeBase()).map(([name, value]) => [key(name), value]));
         validate(view());
         integration.ready = true;
         ready = true;
         refreshTheme();
-      } catch (error) { if (generation === requestGeneration) report(error); }
+      } catch (error) { if (generation === requestGeneration && error.name !== 'AbortError') report(error); }
+      finally { if (pending === controller) pending = null; }
     },
     get state() { return state; },
     get runtime() { return runtime; },
@@ -229,6 +242,7 @@
   document.addEventListener('DOMContentLoaded', () => { if (!review || isAuthenticated() || accountsAuthed) void integration.reload(); }, {once: true});
   window.addEventListener('gd-auth-changed', () => {
     requestGeneration++;
+    pending?.abort();
     if (ready || runtime) { closeMounted(); window.gdClearGraphTheme(); runtime = null; integration.ready = false; }
     if (!review || isAuthenticated() || accountsAuthed) void integration.reload();
   });

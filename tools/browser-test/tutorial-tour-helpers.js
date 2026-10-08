@@ -57,7 +57,7 @@ async function hardCleanup(page) {
                      'one-plus-one', 'tutorial-sum',
                      'tutorial-b', 'tutorial-a', 'add-10-text', 'add-10',
                      'tutorial-json',
-                     'tutorial-typed', 'tutorial-map', 'branch-demo',
+                     'tutorial-typed', 'tutorial-map', 'branch-added', 'branch-demo',
                      'two-plus-two', 'tutorial-bump', 'tutorial-cell',
                      'tutorial-card', 'tutorial-button', 'tutorial-script',
                      'tutorial-renamed', 'tutorial-point', 'tutorial-daemon',
@@ -68,6 +68,7 @@ async function hardCleanup(page) {
                      // lesson 38's consumer, then its listener, then the
                      // response the listener hands out (the fn-ref edge is no
                      // dependency, but delete the pointer first).
+                     'tutorial-http-address', 'tutorial-contract-answer', 'tutorial-http-answer',
                      'tutorial-endpoint', 'tutorial-fetch', 'tutorial-server',
                      'tutorial-hello',
                      // lessons 06 / 07 — children before parents.
@@ -258,7 +259,7 @@ async function installSpotlightAudit(page) {
     state.records.push(rec);
     if (process.env.GRAPHDEN_TOUR_AUDIT_SHOTS) {
       try {
-        await page.screenshot({path: path.join(dir,
+        await page.screenshot({mask: [page.locator('.gd-acct-secret, input[type="password"]')], path: path.join(dir,
           String(state.n).padStart(3, '0') + '-' + String(rec.lesson || '').replace(/\W+/g, '')
           + '-' + String(rec.step || 0) + '.png')});
       } catch (_) { /* mid-navigation */ }
@@ -272,9 +273,11 @@ async function installSpotlightAudit(page) {
       const owner = el.closest('.node-overlay');
       const within = el.closest('.row-actions-popover, .arg-value-edit-popover, .free-arg-bind-chooser, .fn-picker-popover, .execute-popover, .fn-peek-panel, .trace-view-panel, #gd-inspector, #side-menu');
       const cls = el.className && el.className.baseVal !== undefined ? el.className.baseVal : (el.className || '');
+      const secret = el.matches('.gd-acct-secret, input[type="password"]')
+        || !!el.querySelector('.gd-acct-secret, input[type="password"]');
       return {
         tag: el.tagName.toLowerCase(), id: el.id || null, cls: String(cls).slice(0, 80),
-        text: (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 60),
+        text: secret ? '[redacted secret]' : (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 60),
         card: owner ? (owner.dataset.fnName || owner.textContent.trim().replace(/\s+/g, ' ').slice(0, 40)) : null,
         within: within ? (within.id ? '#' + within.id : '.' + String(within.className).split(' ')[0]) : null,
       };
@@ -679,7 +682,9 @@ async function createBranchViaChip(page, name) {
   // dispatch, not page.click: the tour popover re-positions on a tick, and
   // Playwright's actionability wait can race it forever even though the chip
   // IS hittable (waitClickable above already asserted that).
-  await page.evaluate(() => document.getElementById('branch-chip-btn').click());
+  if (!await page.locator('#branch-create-input').isVisible().catch(() => false)) {
+    await page.evaluate(() => document.getElementById('branch-chip-btn').click());
+  }
   await page.waitForSelector('#branch-create-input', {timeout: 15000});
   await page.fill('#branch-create-input', name);
   await page.evaluate(() => document.getElementById('branch-create-btn').click());
@@ -689,12 +694,64 @@ async function createBranchViaChip(page, name) {
 }
 
 
+
+
+// Failure cleanup for branch-owning lessons. Preserve dependency order and
+// refuse an identity whose name/base no longer match the successful response.
+async function cleanupRecordedTutorialBranches(page, recorded = []) {
+  const saved = await page.evaluate(() => _tourState?.created
+    || JSON.parse(localStorage.getItem('graphden.tour') || 'null')?.created || []);
+  const owned = [...new Map([...recorded, ...saved].filter(item => item.type === 'branch' && item.id)
+    .map(item => [item.id, item])).values()].reverse();
+  if (!owned.length) return;
+  await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002') + '/');
+  const response = await api(page, 'GET', '/api/branches');
+  const branches = Array.isArray(response) ? response : response.branches;
+  for (const item of owned) {
+    const row = branches.find(branch => branch.id === item.id);
+    if (!row) continue;
+    assert(row.name === item.name && row['base-branch-id'] === item['base-branch-id'],
+      'cleanup identity unchanged: ' + item.id);
+    const result = await api(page, 'DELETE', '/api/branches/' + item.id);
+    assert(result.ok === true || result.reason === 'not-found', 'owned cleanup: ' + item.name);
+  }
+}
+
+
+async function compareBranchViaChip(page, source) {
+  if (!await page.locator('#branch-create-input').isVisible().catch(() => false)) {
+    await waitClickable(page, '#branch-chip-btn');
+    await page.evaluate(() => document.getElementById('branch-chip-btn').click());
+  }
+  await page.locator('.branch-row-diff[data-diff-source="' + source + '"]').click();
+  await page.waitForSelector('#gd-diff-chip', {timeout: 60000});
+}
+
+async function exitBranchCompare(page) {
+  await page.evaluate(() => document.querySelector('.gd-diff-chip-off').click());
+  await page.waitForFunction(() => !document.getElementById('gd-diff-chip'),
+    null, {timeout: 15000});
+}
+
+async function mergeBranchViaChip(page, source) {
+  await waitClickable(page, '#branch-chip-btn');
+  await page.evaluate(() => document.getElementById('branch-chip-btn').click());
+  await Promise.all([
+    page.waitForNavigation({timeout: 60000}),
+    page.locator('.branch-row-merge[data-merge-source="' + source + '"]').click(),
+  ]);
+  await page.waitForSelector('#branch-chip-btn', {timeout: 60000});
+}
+
+
 async function switchBranchViaChip(page, name, {expectClipped = false, clickBlankActions = false} = {}) {
   await waitClickable(page, '#branch-chip-btn');
   // dispatch, not page.click: the tour popover re-positions on a tick, and
   // Playwright's actionability wait can race it forever even though the chip
   // IS hittable (waitClickable above already asserted that).
-  await page.evaluate(() => document.getElementById('branch-chip-btn').click());
+  if (!await page.locator('#branch-create-input').isVisible().catch(() => false)) {
+    await page.evaluate(() => document.getElementById('branch-chip-btn').click());
+  }
   await page.waitForSelector('.branch-row[data-branch-name]', {timeout: 15000});
   const rowSelector = await page.evaluate((n) =>
     '.branch-row[data-branch-name="' + CSS.escape(n) + '"]', name);
@@ -1655,14 +1712,168 @@ async function openMarkerFormViaPlaceholder(page, argName, marker) {
   return label;
 }
 
+// Saved description edits create fn field versions; verify the selected UUID.
+async function setFnDescription(page, fnName, text) {
+  const fnId = await page.evaluate((name) => {
+    const fn = lookups.fnMap.get(selectedFnId);
+    return fn?.name === name ? fn.id : null;
+  }, fnName);
+  assert(fnId, 'description edit targets the selected ' + fnName + ' UUID');
+  // ⋯ → i TOGGLES a pinned description tooltip, and only a pinned one grows
+  // the ✎ Edit button — so this is a sequence with state, not three
+  // independent clicks. Drive it as one attempt and retry the whole thing:
+  // a half-open tooltip left by the previous attempt is exactly what makes
+  // the save fire against a null entity id ("Save failed — check that
+  // you're signed in", on a session that is signed in).
+  for (let attempt = 0; attempt < 4; attempt++) {
+    // Reset: close whatever is open, unpin, drop the row-actions popover.
+    // The pinned/editing flags are module-scope `let`s in
+    // editor-tooltips.js — not window properties, so poking
+    // `window.descriptionTooltipSticky` never touched them: after the
+    // FIRST save the tooltip stayed pinned, the next ⋯ → i UNPINNED it
+    // (the action toggles), no Edit button grew, and all three attempts
+    // fell through in seconds. The tooltip's own × button is the one
+    // public path that resets both flags — use it.
+    await page.evaluate(() => {
+      // Edit mode renders no × — leave it through Cancel first (clears the
+      // editing flag and re-renders read mode, × included), then unpin.
+      const cancel = Array.from(document.querySelectorAll('.description-tooltip-btn'))
+        .find((b) => b.textContent.trim() === 'Cancel');
+      if (cancel) cancel.click();
+      const close = document.querySelector('.description-tooltip-close');
+      if (close) close.click();
+    });
+    await page.keyboard.press('Escape').catch(() => {});
+    // KEEP THE SLEEP. Escape is asynchronous in its EFFECT — the editor's
+    // keydown handler unpins and closes on a later tick — and there is no
+    // single observable that says "Escape has been processed": waiting for
+    // the row-actions popover to be gone is not it (tried, two gate runs,
+    // `setDescription` failed 5/5 both times). Until the editor exposes
+    // that state, this is a settle by measurement, not by hope.
+    await page.waitForTimeout(400);
+
+    // THIS fn's ⋯, not the first in the document: right after the extend the
+    // canvas can still be the parent's card alone, and its ⋯ → i → Save is a
+    // PUT on package-owned `const` — 400, and a "first draft" that never
+    // existed (one 2026-09-05 gate).
+    await openRowActionsFor(page, fnName, 30000, {root: true});
+    await page.waitForSelector('.row-actions-popover [data-action="description"]',
+                               {timeout: 15000});
+    await page.evaluate(() => {
+      document.querySelector('.row-actions-popover [data-action="description"]')
+        .dispatchEvent(new MouseEvent('click', {bubbles: true}));
+    });
+
+    const opened = await page.waitForFunction(
+      () => Array.from(document.querySelectorAll('.description-tooltip-btn'))
+        .some((b) => /Edit/.test(b.textContent)),
+      null, {timeout: 10000, polling: 200}).then(() => true).catch(() => false);
+    if (!opened) {
+      console.log('  attempt ' + (attempt + 1) + ': the pinned tooltip never grew its Edit button');
+      continue;
+    }
+
+    await page.evaluate(() => {
+      Array.from(document.querySelectorAll('.description-tooltip-btn'))
+        .find((b) => /Edit/.test(b.textContent)).click();
+    });
+    const editing = await page.waitForSelector('.description-tooltip-textarea',
+                                               {timeout: 10000})
+      .then(() => true).catch(() => false);
+    if (!editing) {
+      console.log('  attempt ' + (attempt + 1) + ': Edit did not open the textarea');
+      continue;
+    }
+
+    const editorColors = await page.evaluate(() => {
+      const ta = document.querySelector('.description-tooltip-textarea');
+      return {
+        dark: document.body.classList.contains('theme-dark'),
+        editor: getComputedStyle(ta).backgroundColor,
+        page: getComputedStyle(document.body).backgroundColor,
+      };
+    });
+    assert(editorColors.dark && editorColors.editor === editorColors.page,
+      'description editor uses the dark form surface: ' + JSON.stringify(editorColors));
+
+    await page.evaluate((v) => {
+      const ta = document.querySelector('.description-tooltip-textarea');
+      ta.value = v;
+      ta.dispatchEvent(new Event('input', {bubbles: true}));
+      Array.from(document.querySelectorAll('.description-tooltip-btn'))
+        .find((b) => b.textContent.trim() === 'Save').click();
+    }, text);
+
+    // Confirm against the SERVER, not `window.graphData`: the editor's graph
+    // state is a script-scope binding the modules share, and what a page
+    // evaluate sees under `window.graphData` is not reliably the same object
+    // the description patch wrote into.
+    // Pin the check to THE fn this lesson created: a same-named leftover
+    // from an earlier run (cleanup is best-effort) once satisfied a
+    // name-only match while this fn's own save was still out, and the
+    // helper moved on with one version fewer than the lesson expects.
+    // `waitUntil` (a Node-side poll over `page.evaluate`), NOT
+    // `waitForFunction` with an async predicate: Playwright does not await
+    // the predicate's Promise, and a pending Promise is truthy — so the old
+    // form returned on its first tick, "landed" was always true, and the
+    // check above this comment was decorative for as long as it existed.
+    const landed = await waitUntil(page, async ([v, id, name]) => {
+      const r = await fetch('/api/graph/entities?scope=subtree&root-id=' + encodeURIComponent(id));
+      const j = await r.json();
+      return (j.fns || []).some((f) => f.id === id && f.name === name && f.description === v);
+    }, [text, fnId, fnName], 20000);
+    if (landed) {
+      // The server has the value; the CLIENT leaves edit mode when its own
+      // save request returns (the textarea gives way to read mode). Wait
+      // for that — showDescriptionTooltip is a no-op while editing, so the
+      // next call's ⋯ → i would otherwise open nothing.
+      const left = await page.waitForFunction(
+        () => !document.querySelector('.description-tooltip-textarea'),
+        null, {timeout: 30000, polling: 100}).then(() => true).catch(() => false);
+      if (!left) {
+        // The value is on the server; the client's own save round-trip is
+        // still out under load — Cancel clears the editing flag without
+        // touching what landed.
+        console.log('  save landed but the tooltip is still in edit mode — cancelling the stale editor');
+        await page.evaluate(() => {
+          Array.from(document.querySelectorAll('.description-tooltip-btn'))
+            .find((b) => b.textContent.trim() === 'Cancel')?.click();
+        });
+      }
+      // Leave the tooltip closed and unpinned for the next call.
+      await page.evaluate(() => {
+        const close = document.querySelector('.description-tooltip-close');
+        if (close) close.click();
+      });
+      return fnId;
+    }
+    // Why it did not land. The editor puts the reason in the tooltip's
+    // error line — a refusal the server explained, a missing id, a real
+    // auth problem. Before this, three silent retries and a bare "did not
+    // land" was all a failing gate reported, and diagnosing it meant
+    // reproducing a load-dependent flake by hand.
+    const why = await page.evaluate(() => {
+      const err = document.querySelector('.description-tooltip-error');
+      return {
+        error: err && err.style.display !== 'none' ? err.textContent.trim() : null,
+        editing: !!document.querySelector('.description-tooltip-textarea'),
+        tooltipOpen: !!document.querySelector('.description-tooltip'),
+      };
+    }).catch(() => null);
+    console.log('  attempt ' + (attempt + 1) + ' did not land: ' + JSON.stringify(why));
+  }
+  throw new Error('setDescription("' + text + '") did not land after 4 attempts');
+}
+
+
 module.exports = {
   NS_NAME, FN_NAME,
   retryingDelete, hardCleanup, tourTitle, tourWhere, waitTourTitle, settleTourRing, clickTourButton,
   waitUntil, tourProgress, clickTourAdvance,
   installSpotlightAudit,
-  filterAndSelect, openRowActionsFor, extendViaRowActions, bindFirstPlaceholder,
+  filterAndSelect, openRowActionsFor, extendViaRowActions, bindFirstPlaceholder, setFnDescription,
   pickIncompatFnRef, pickAnyway, removeUseSiteBinding, waitClickable,
-  createBranchViaChip, switchBranchViaChip, editBoundValue, runViaRowActions, runFromOpenPane,
+  createBranchViaChip, cleanupRecordedTutorialBranches, compareBranchViaChip, exitBranchCompare, mergeBranchViaChip, switchBranchViaChip, editBoundValue, runViaRowActions, runFromOpenPane,
   appendSeqItemViaEdge,
   bindSeqAnchorPlaceholder,
   createRootNamespace, createFnInNamespace, setParentViaStrip,

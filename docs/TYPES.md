@@ -567,6 +567,11 @@ The shipped refinement-narrowers live in `core/refinements` (parent
 returns `:positive-int`: at runtime it throws `:refinement/violated` when
 the value is `<= 0`; for the type system it narrows `:int → :positive-int`.
 
+`ensure-non-blank-text` accepts `:text`, validates that it contains a
+non-whitespace character, and returns the original spelling as
+`:non-blank-text`. Use it for required text assembled at runtime, such as
+form fields; blank or whitespace-only text throws `:refinement/violated`.
+
 ```edn
 {:name :sqrt-safe
  :parent :sqrt

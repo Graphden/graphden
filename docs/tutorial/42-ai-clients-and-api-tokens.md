@@ -16,6 +16,19 @@ run under *your* rights — the same rights a browser session has, or a
 narrower set if the token says so. There is no second permission
 system to learn.
 
+The interactive tour covers the account token loop on deployments with the
+tenancy addon and a signed-in account (`api-tokens`): select a readable function,
+create `tutorial-token` with only **Edit graph & branches** and a **7 days**
+lifetime, verify that the token authenticates but Execute returns `token-scope`,
+then **Revoke** it and verify that it no longer authenticates. The masked
+listing supplies the token's UUID, scopes and expiry; the bearer appears only
+in the normal one-time reveal and is never saved in Lessons. Leave the reveal
+open until revocation so the final check can use that same bearer. After a
+reload, cleanup can still revoke the saved exact UUID; repeat the lesson for
+the full authentication check. A lost creation reply retains the proposed
+create-only UUID for cleanup, without adopting an existing token by label.
+External MCP client setup remains the written exercise below.
+
 ## The endpoint
 
 One route: `POST /mcp`, JSON-RPC 2.0, stateless — every call carries an

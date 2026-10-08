@@ -40,6 +40,25 @@
   *current-org*)
 
 
+(defonce list-tenant-app-routes-fn
+  ;; Ownership of the existing addon callback lives in core so graph views
+  ;; and the Apps panel can read the same authorized org-scoped registry.
+  ;; The private addon installs `(fn [org] rows)` and clears it on halt.
+  (atom nil))
+
+
+(defn tenant-app-routes
+  "The installed addon's app routes for `org`, or an empty collection on
+   selfhost. Callers pass the trusted request org, never a submitted filter.
+   Routes are not versioned; graph readers intersect their handler ids with
+   the functions visible on the current branch. Authorization stays in the
+   installed callback, whose existing one-argument contract is unchanged."
+  [org]
+  (if-let [read-routes @list-tenant-app-routes-fn]
+    (or (read-routes org) [])
+    []))
+
+
 (defn platform-tier?
   "Is `org` the shared platform tier (the `public` org, or an unbound/nil
    org that normalises to it)? Today this ALSO means \"trusted / operator\":
@@ -193,6 +212,29 @@
    tenancy addon is wired."
   [graph]
   ((seam :graph-read-filter-fn) graph))
+
+
+(defn install-browser-source-policy!
+  "Install `(fn [snapshot-storage] (fn [fn-row & [permissions]] ...))`.
+   Pass true for the selected configuration's execute permission, or a fixed
+   `{:write? true}` for the template destination's fresh write authorization.
+   These extra permissions never relax read/source visibility. The policy
+   must authorize source disclosure before the reader loads bindings/literals.
+   Its grant reads belong to the same immutable database snapshot."
+  [f]
+  (swap! (seams-atom) assoc :browser-source-policy-fn f))
+
+
+(defn browser-source-policy
+  "A request/snapshot-local source-disclosure guard. An active tenancy addon
+   without this policy fails closed; addon-less installations permit source."
+  [storage]
+  (if-let [factory (seam :browser-source-policy-fn)]
+    (factory storage)
+    (if (seam :org-cap-installed?)
+      (throw (ex-info "Browser source is unavailable"
+                      {:type :authz/forbidden}))
+      (constantly nil))))
 
 
 ;; Notification SEAM. Core raises a few domain EVENTS whose delivery is a

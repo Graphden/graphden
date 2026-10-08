@@ -20,6 +20,7 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.entities :as entities]
     [graphden.crud.entities.list :as entity-list]
+    [graphden.crud.entities.views :as views]
     [graphden.crud.validation :as validation]
     [graphden.executor.context :as ctx]
     [graphden.executor.interface :as exec]
@@ -599,7 +600,7 @@
         target (java.util.UUID/randomUUID)]
     (sp/create-entity storage :ns {:id ns-a :name "alpha"})
     (sp/create-entity storage :fn {:id target :name "the-target" :namespace-id ns-a :parent-ids []})
-    (let [base (setup/create-base-fn! storage entity-list/explorer-view-base-name)
+    (let [base (setup/create-base-fn! storage views/explorer-view-base-name)
           s-name (setup/create-slot! storage "name" :text)
           s-uses (setup/create-slot! storage "uses" :fn-ref)
           s-ns (setup/create-slot! storage "namespaces" :sequence)

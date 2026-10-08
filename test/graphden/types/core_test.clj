@@ -1154,3 +1154,19 @@
                             (:failed (t/register-type-aliases-batch
                                        [[:empty-map {:hijacked :int} nil]])))})
                    :empty-map))))
+
+
+(deftest marked-callable-invocation-keeps-information-flow-and-effects
+  (let [plain [:fn {:request :text} :int #{:db :network}]
+        marked [:secret plain]
+        signature (t/callable-signature marked)]
+    (is (= plain (t/callable-signature plain)))
+    (is (= [:fn {:request :text} [:secret :int] #{:db :network}] signature))
+    (is (not (t/subtype? marked plain)) "The value's outer marker is never stripped")
+    (is (not (t/subtype? signature plain)) "Invocation cannot claim a public result")
+    (is (not (t/subtype? signature [:fn {:request :text} [:secret :int] #{}]))
+        "Calling the closure retains its effect requirements")
+    (is (nil? (t/callable-signature [:secret :int])))
+    (is (nil? (t/callable-signature :int)))
+    (is (= signature (t/callable-signature [:secret signature]))
+        "The same marker is not multiplied on the result")))

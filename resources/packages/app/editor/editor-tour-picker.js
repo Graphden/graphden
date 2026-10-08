@@ -185,6 +185,31 @@ async function gdTourNews() {
 window.gdTourNews = gdTourNews;
 
 const REQUIRE_SIGNALS = {
+  'api-tokens': {
+    test: () => !!window.gdAccount?.id && typeof window.graphdenTenancyActive === 'function'
+      && window.graphdenTenancyActive(),
+    phrase: 'a signed-in account with API token support',
+    short: 'account and API tokens',
+  },
+  'package-lifecycle': {
+    test: () => !!(window.API?.api_packages_publish && window.API?.api_packages_installed
+      && window.API?.api_packages_panel_install && window.API?.api_packages_panel_update
+      && window.API?.api_branches && typeof window.graphdenHasCap === 'function'
+      && window.graphdenHasCap('publish-packages')),
+    phrase: 'the package registry, branches and publish-packages capability',
+    short: 'registry and publish access',
+  },
+  'handler-preview': {
+    test: () => typeof window.gdHandlerPreviewAvailable === 'function' && window.gdHandlerPreviewAvailable()
+      && typeof window.graphdenHasCap === 'function' && window.graphdenHasCap('manage-apps'),
+    phrase: 'an account browser session, an isolated apps domain and manage-apps access',
+    short: 'isolated HTML preview and Apps access',
+  },
+  'temporary-http': {
+    test: () => typeof window.gdTemporaryHttpAvailable === 'function' && window.gdTemporaryHttpAvailable(),
+    phrase: 'an authenticated owner (accounts or a static token) and a configured public HTTP host',
+    short: 'authenticated HTTP publication',
+  },
   // The dedicated tier (or a platform / single-tenant instance) — services run
   // on an executor the org owns, which lower plans don't get.
   services: {
@@ -201,6 +226,15 @@ const REQUIRE_SIGNALS = {
                   && window.graphdenTenancyActive()),
     phrase: 'a single-tenant instance (your own deployment)',
     short: 'your own instance',
+  },
+  // This is interface/session availability, not an org-wide write grant.
+  // Namespace read/view-impl/write/execute and quota checks remain authoritative
+  // in creation preview/apply; the signed-in reader chooses a writable target.
+  'personal-ui-graphs': {
+    test: () => typeof window.isAuthenticated === 'function' && window.isAuthenticated()
+      && typeof window.gdRenderUIComponentCatalog === 'function',
+    phrase: 'a signed-in editor with personal UI graph support',
+    short: 'signed-in UI graphs',
   },
   // Anything that only exists once there ARE organizations: the org chip, the
   // per-org editor address, membership.

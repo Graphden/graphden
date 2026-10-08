@@ -39,6 +39,7 @@
                   :partial-stats
                   :partial-assets-panel
                   :partial-asset-edit
+                  :partial-queue-message
                   :partial-queues-panel
                   :partial-queues-requeue
                   :partial-queues-delete
@@ -67,6 +68,8 @@
                   :partial-execute-result-inline
                   :partial-branch-popover
                   :partial-service-popover
+                  :partial-service-instances
+                  :partial-http-host-popover
                   :partial-secret-create-form
                   :partial-secret-rotate-form
                   :partial-row-actions

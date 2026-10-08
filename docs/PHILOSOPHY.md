@@ -582,13 +582,16 @@ server parses. We reject both:
   they live in the browser's prefs (`graphden.explorer.filters` /
   `.views`), exactly like the branch choice.
 - **A shared view is an fn-def** extending the `:explorer-view`
-  base-fn, its axes bound as slots — `uses` a `:fn-ref` (identity, so a
-  rename never empties it and the edge is not a dependency), `also`
-  other views to intersect with. Versioned, branch-scoped, runnable
+  base-fn, its axes bound as slots. `uses` and `also` preserve the original
+  scalar identity slots; `uses-all` and `also-all` hold additional identities
+  through ordinary `const` compositions with `fn-ref` value bindings.
+  References survive renames and do not execute their targets. The `problems`
+  slot stores selected predicates, evaluated against the current branch.
+  Versioned, branch-scoped, runnable
   (▶ = the member list), listed back by `GET /api/views`. Zero schema
   change, no DSL: the graph IS the rule.
 - **One fn in many views** = it satisfies many filter sets — membership
-  is computed on read (`crud.entities.list/view-members`), never
+  is computed on read (`crud.entities.views/view-members`), never
   maintained by hand.
 - **What this loses**: nothing a namespace hierarchy would have given
   — a namespace filter still picks roots, and the ⊘ on a row is the

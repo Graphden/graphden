@@ -157,8 +157,7 @@ function buildEdgeLabelOverlay(edge, container, label, overlayId) {
   // Compare mode: a ref / list arg whose binding differs on the compared
   // branch marks its edge label (the value nodes carry their own marks;
   // a ref bound here has only this label and the ghost beside the card).
-  if (editArg?.['fn-id'] && editArg.name && typeof gdDiffSlotDetails === 'function'
-      && gdDiffSlotDetails(editArg['fn-id'])?.[editArg.name]) {
+  if (typeof gdDiffArgDetails === 'function' && gdDiffArgDetails(editArg)) {
     overlay.classList.add('edge-label-diff');
     overlay.title = 'Differs vs the compared branch — see the digest in the Explorer';
   }

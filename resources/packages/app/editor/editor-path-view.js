@@ -71,6 +71,10 @@ function aggregatePathTrace(entries) {
       const ms = typeof e['duration-ms'] === 'number' ? e['duration-ms'] : 0;
       agg.totalMs += ms;
       if (ms > agg.maxMs) agg.maxMs = ms;
+      // The latest fresh invocation owns the value, including an unavailable one.
+      agg.hasValue = false;
+      agg.lastValue = undefined;
+      agg.valueTruncated = false;
       if ('value' in e) {
         agg.hasValue = true;
         agg.lastValue = e.value;
@@ -112,11 +116,11 @@ function pathBadgeTitle(agg) {
 // run's values can be read straight off the cards, hop by hop, which is
 // the point of capturing them (a chip that only said "= value" made the
 // reader click every node to see nothing had changed). Anything longer
-// keeps the generic label; the popover below is the full view either way.
+// ends in an ellipsis; the popover below is the full captured view.
 const PATH_INLINE_VALUE_MAX_CHARS = 24;
 
 function pathValueChipText(agg) {
-  if (!agg.hasValue) return '= 4KB+';
+  if (!agg.hasValue) return '= unavailable';
   let text;
   try { text = JSON.stringify(agg.lastValue); } catch (_) { text = undefined; }
   if (text === undefined) text = 'null';
@@ -136,15 +140,24 @@ function pathValueChipText(agg) {
 
 let _pathValuePopoverEl = null;
 let _pathValuePopoverAnchor = null;
+let _stopPathValueObservation = null;
+let _pathValueDisconnectObserver = null;
 
 
 function _hidePathValuePopover() {
+  _stopPathValueObservation?.();
+  _stopPathValueObservation = null;
+  _pathValueDisconnectObserver?.disconnect();
+  _pathValueDisconnectObserver = null;
+  const back = _pathValuePopoverEl?.contains(document.activeElement) ? _pathValuePopoverAnchor : null;
   if (_pathValuePopoverEl) _pathValuePopoverEl.style.display = 'none';
   _pathValuePopoverAnchor = null;
+  if (back) returnFocusTo(back);
 }
 
 
 function _showPathValuePopover(anchorEl, fnName, agg) {
+  _hidePathValuePopover();
   if (!_pathValuePopoverEl) {
     const el = document.createElement('div');
     el.className = 'path-value-popover';
@@ -159,10 +172,12 @@ function _showPathValuePopover(anchorEl, fnName, agg) {
                        && _pathValuePopoverEl.style.display !== 'none',
       onDismiss: _hidePathValuePopover,
       getReturnFocus: () => _pathValuePopoverAnchor,
+      trapFocus: true,
     });
   }
   const el = _pathValuePopoverEl;
   el.textContent = '';
+  ensurePopoverClose(el, _hidePathValuePopover, 'Close captured value', {prepend: true});
   const head = document.createElement('div');
   head.className = 'path-value-popover-head';
   head.textContent = fnName ? fnName + ' — captured value' : 'Captured value';
@@ -191,8 +206,33 @@ function _showPathValuePopover(anchorEl, fnName, agg) {
     el.appendChild(note);
   }
   el.style.display = '';
-  anchorBelowClamped(el, anchorEl, { fallbackW: 320, fallbackH: 160 });
   _pathValuePopoverAnchor = anchorEl;
+  const place = () => {
+    const rect = anchorEl.getBoundingClientRect();
+    const viewport = window.visualViewport;
+    const left = viewport?.offsetLeft || 0;
+    const top = viewport?.offsetTop || 0;
+    const width = viewport?.width || window.innerWidth;
+    const height = viewport?.height || window.innerHeight;
+    if (!anchorEl.isConnected || rect.width === 0 || rect.height === 0
+        || rect.right < left || rect.bottom < top || rect.left > left + width || rect.top > top + height) {
+      _hidePathValuePopover();
+      return;
+    }
+    el.style.maxWidth = Math.max(0, Math.min(420, width - 16)) + 'px';
+    anchorBelowClamped(el, anchorEl, {fallbackW: 320, fallbackH: 160, constrainHeight: true, viewport});
+  };
+  _stopPathValueObservation = observePopoverAnchor(el, anchorEl, place,
+    typeof onViewportChanged === 'function' ? onViewportChanged : undefined);
+  if (typeof MutationObserver === 'function' && anchorEl.parentNode) {
+    _pathValueDisconnectObserver = new MutationObserver(() => {
+      if (!anchorEl.isConnected) _hidePathValuePopover();
+    });
+    _pathValueDisconnectObserver.observe(anchorEl.closest('.node-overlay')?.parentNode || anchorEl.parentNode,
+      {childList: true, subtree: true});
+  }
+  place();
+  if (el.style.display !== 'none') focusIntoDialog(el);
 }
 
 
@@ -318,7 +358,8 @@ function showExecutionPathView(pathTrace) {
         ? 'Show this fn\'s captured return value'
         : 'Value not captured — over the 4 KB per-value cap';
       valBadge.setAttribute('aria-label',
-        'Show captured value for ' + (_pathViewOffCanvasLabel(fnId) || 'fn'));
+        (agg.hasValue ? 'Show captured value for ' : 'Explain unavailable value for ')
+        + (_pathViewOffCanvasLabel(fnId) || 'fn'));
       valBadge.setAttribute('aria-haspopup', 'dialog');
       valBadge.addEventListener('pointerdown', (e) => e.stopPropagation());
       valBadge.addEventListener('click', (e) => {
@@ -354,7 +395,7 @@ function showExecutionPathView(pathTrace) {
 
 // --- Result-pane affordance -----------------------------------------------
 
-function appendPathViewAffordance(hostEl, pathTrace) {
+function appendPathViewAffordance(hostEl, pathTrace, fnId) {
   if (!hostEl || !Array.isArray(pathTrace?.entries)
       || pathTrace.entries.length === 0) return;
   const row = document.createElement('div');
@@ -363,6 +404,8 @@ function appendPathViewAffordance(hostEl, pathTrace) {
   btn.type = 'button';
   btn.className = 'execute-show-path-btn';
   btn.textContent = 'Show path on canvas';
+  btn.gdPathTrace = pathTrace;
+  btn.gdExecutionFnId = fnId;
   btn.title = 'Highlight the fns this run traversed, with per-fn timing badges';
   btn.addEventListener('click', (e) => {
     e.stopPropagation();

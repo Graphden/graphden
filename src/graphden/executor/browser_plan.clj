@@ -336,7 +336,9 @@
   "Export entry roots from one stored graph snapshot. opts MUST supply
    :allow-fn? (id -> boolean), normally true only for the branch's :plain
    trace-capture-class. Missing/unknown visibility fails closed. The caller
-   must authenticate, reject tenancy, and capture graph + types consistently.
+   must authenticate, authorize source disclosure for the complete closure,
+   and capture graph + types consistently. General preview callers reject
+   tenancy; the personal-component boundary supplies its snapshot ACL policy.
    Bind registry/*rich-types-override* to an isolated snapshot registry: the
    shared binding classifier reads this registry for callable/lazy metadata.
    No literal values or graph snapshots are included in exception data."

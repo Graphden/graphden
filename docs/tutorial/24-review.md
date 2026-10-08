@@ -45,7 +45,9 @@ like GitHub dismissing stale reviews on a new push.
 - **✅ Approve** records your approval; the row's badge shows `n/N`
   and turns green when the requirement is met. Both buttons toggle:
   📤 on a proposed branch **withdraws the proposal**, and a pressed
-  ✅ (your approval is on record) **withdraws your approval**.
+  ✅ (your approval applies to the current proposal) **withdraws your approval**.
+  After the source changes, the old approval remains recorded but the button
+  is unpressed: click it to approve the changed content.
 - **⇢ Merge** now lands. Before the requirement is met it answers
   409 with the shortfall.
 - The Review dialog opens with **Verified on <branch>** — the
@@ -74,21 +76,23 @@ like GitHub dismissing stale reviews on a new push.
 
 ## Try it
 
-1. Make something to change: extend `const` into `review-demo` and
-   bind its `:value` to `1`.
-2. Create a branch `tutorial-release` (from `main`) — it will play
-   the protected trunk, without touching your real one.
-3. In the branch popover, open `⋯` on the `tutorial-release` row,
-   choose **⚙ Protection…** and set **Required approvals** to `1`.
-4. Create `tutorial-feature` — it forks from the branch you are on,
-   `tutorial-release`, so that is where its proposal aims.
-5. Change `review-demo`'s value to `2` there, then switch back to
-   `tutorial-release`.
-6. Click `⇢` on the `tutorial-feature` row. Refused: *"requires 1
-   approval(s)…"* — the rule holds even against the branch's author.
-7. In the row's `⋯` menu click **📤 Propose for review**, then click
-   `✅` on the row (approve). The badge reads `1/1`.
-8. `⇢` would now land the merge.
+1. Create `tutorial-release` from `main` first. Extend `const` into
+   `review-demo` on that owned branch and bind its `:value` to `1`.
+2. In its branch-popover `⋯` menu choose **⚙ Protection…** and set
+   **Required approvals** to `1`.
+3. Create `tutorial-feature` from the release branch. Change the value
+   to `2`, return to the release and try **⇢**. The target refuses the
+   unreviewed merge.
+4. Choose **📤 Propose for review**, then **Δ** to read the change.
+   In the Inspector, open the function's **💬** thread, save a comment,
+   then save an answer in the same thread. A draft is not a saved reply.
+5. Exit comparison and approve: the badge reads `1/1`.
+6. Return to the feature and change the value to `3`. On the release,
+   the earlier approval is stale and the badge reads `0/1`.
+7. Compare again, read the changed value and the preserved conversation,
+   then approve the current content. The badge returns to `1/1`.
+8. **⇢** would now land the reviewed value. Finish this guided lesson
+   without merging, return to `main` and delete its owned child branches.
 
 ## Why the tour stops before the merge
 
@@ -101,6 +105,9 @@ the target's merged-in content — the server refuses). In real work
 that permanence is the point: merged branches *are* the record, like
 merged commits. In a tutorial sandbox it means the guided tour stops
 one click short of `⇢`, so its cleanup can still remove both branches.
+Lesson 23 performs an actual merge and remerge between sibling sandbox
+branches: removing the target releases its merge reference before the
+source and common base are deleted.
 
 ## Where this shows up next
 

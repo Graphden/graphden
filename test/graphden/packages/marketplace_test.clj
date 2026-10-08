@@ -8,11 +8,13 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
+    [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
     [graphden.packages.loaded :as loaded]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.deploy-config :as deploy-config]
     [graphden.tenancy.context :as tc]
+    [graphden.test-infra.golden-app :as ga]
     [graphden.test-infra.seams :as ts]))
 
 
@@ -21,9 +23,9 @@
 
 (use-fixtures :once
   ts/isolated-seams-fixture
+  (ga/fixture (str (ns-name *ns*)) ["core" "web" "app" "registry" "mcp"])
   (fn [t]
-    (binding [*bootstrap* (setup/bootstrap-crud-graph-from-golden!
-                            "marketplace-test" ["core" "web" "app" "registry" "mcp"])]
+    (binding [*bootstrap* ga/*bootstrap*]
       (t))))
 
 
@@ -243,6 +245,11 @@
 
 
 (deftest cards-reviews-and-filters
+  (testing "review grouping preserves the schema's required text package name"
+    (let [rt (registry/rich-type-of-id
+               (get (:all-name->id *bootstrap*) :_mkv-package-name))]
+      (is (= {:item {:package-name :text}} (:args rt)))
+      (is (= :text (:return rt)))))
   (doseq [v ["1.0.0" "1.2.0" "1.10.0"]]
     (sp/create-entity (storage) :package-version
                       {:name "cards.pkg" :version v :ns-root "cards.pkg" :fns [{:name :c}]

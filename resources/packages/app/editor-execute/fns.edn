@@ -209,41 +209,47 @@
   ;; only while "Trace path" is checked, and checking it opens an
   ;; explicit confirm dialog with an estimated cost line (PHILOSOPHY
   ;; § Debugging constraint 3) before it sticks.
-  {:name :_xp-options
+  {:name :_xp-effects-ack
    :parent :if
    :args {:test :_xp-has-effects?
-          :then {:value [:div {:class "execute-options-row"}
-                         [:label {:class "execute-option-label execute-confirm-label"}
-                          [:input {:type "checkbox" :class "execute-confirm-checkbox"}]
-                          [:span " I understand this will produce side effects"]]
-                         [:label {:class "execute-option-label execute-option-label-locked"
-                                  :title "Automatically saved — runs that produce side effects are always persisted for audit trail."}
-                          [:input {:type "checkbox" :class "execute-persist-checkbox"
-                                   :checked "checked" :disabled "disabled"}]
-                          [:span " Save to history"]]
-                         [:label {:class "execute-option-label"
-                                  :title "Record which fns this run traverses (with per-call durations and cache hits). Off by default — tracing adds a small capture cost to the run."}
-                          [:input {:type "checkbox" :class "execute-trace-checkbox"}]
-                          [:span " Trace path"]]
-                         [:label {:class "execute-option-label execute-capture-values-label"
-                                  :title "Also record each traversed fn's return value (up to 4 KB per value; secret-touching fns stay hidden). Requires Trace path and an explicit confirmation — value capture is the expensive mode."}
-                          [:input {:type "checkbox" :class "execute-capture-values-checkbox"
-                                   :disabled "disabled"}]
-                          [:span " + capture values"]]]}
-          :else {:value [:div {:class "execute-options-row"}
-                         [:label {:class "execute-option-label"
-                                  :title "When checked, this run is saved to fn-execution storage. Pure fast runs are NOT saved by default — tick this for runs you want to keep."}
-                          [:input {:type "checkbox" :class "execute-persist-checkbox"}]
-                          [:span " Save to history"]]
-                         [:label {:class "execute-option-label"
-                                  :title "Record which fns this run traverses (with per-call durations and cache hits). Off by default — tracing adds a small capture cost to the run."}
-                          [:input {:type "checkbox" :class "execute-trace-checkbox"}]
-                          [:span " Trace path"]]
-                         [:label {:class "execute-option-label execute-capture-values-label"
-                                  :title "Also record each traversed fn's return value (up to 4 KB per value; secret-touching fns stay hidden). Requires Trace path and an explicit confirmation — value capture is the expensive mode."}
-                          [:input {:type "checkbox" :class "execute-capture-values-checkbox"
-                                   :disabled "disabled"}]
-                          [:span " + capture values"]]]}}}
+          :then {:value [:label {:class "execute-option-label execute-confirm-label"}
+                         [:input {:type "checkbox" :class "execute-confirm-checkbox"}]
+                         [:span " I understand this will produce side effects"]]}
+          :else nil}}
+
+  {:name :_xp-persist-option
+   :parent :if
+   :args {:test :_xp-has-effects?
+          :then {:value [:label {:class "execute-option-label execute-option-label-locked"
+                                 :title "Automatically saved — runs that produce side effects are always persisted for audit trail."}
+                         [:input {:type "checkbox" :class "execute-persist-checkbox"
+                                  :checked "checked" :disabled "disabled"}]
+                         [:span " Save to history"]]}
+          :else {:value [:label {:class "execute-option-label"
+                                 :title "Save this run to history. Pure fast runs are not saved by default."}
+                         [:input {:type "checkbox" :class "execute-persist-checkbox"}]
+                         [:span " Save to history"]]}}}
+
+  {:name :_xp-trace-options
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-options-row"}}
+          :children [:_xp-persist-option
+                     {:value [:label {:class "execute-option-label"
+                                      :title "Record calls, durations and cache hits. Tracing adds capture cost."}
+                              [:input {:type "checkbox" :class "execute-trace-checkbox"}]
+                              [:span " Trace path"]]}
+                     {:value [:label {:class "execute-option-label execute-capture-values-label"
+                                      :title "Record return values up to 4 KB each. Secret values stay hidden. Requires Trace path and explicit confirmation."}
+                              [:input {:type "checkbox" :class "execute-capture-values-checkbox"
+                                       :disabled "disabled"}]
+                              [:span " + capture values"]]}]}}
+
+  {:name :_xp-options
+   :parent :hiccup
+   :args {:tag {:value "details"}
+          :attrs {:value {:class "execute-options"}}
+          :children [{:value [:summary "Run options"]} :_xp-trace-options]}}
 
   {:name :_xp-actions
    :parent :if
@@ -266,6 +272,7 @@
           :children [:_xp-header
                      :_xp-effects-banner
                      :_xp-body
+                     :_xp-effects-ack
                      :_xp-options
                      :_xp-actions
                      {:value [:div {:class "execute-result-host"}]}]}}

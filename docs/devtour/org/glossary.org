@@ -42,7 +42,7 @@ A callable function that retains values from the environment in which it was cre
 :CUSTOM_ID: term/slot
 :END:
 
-The identity of a graph argument, with a declaring function, type, and public name. Renaming may create a view linked through source-slot-id. Slot identity is different from its displayed name and from a [[file:glossary.org::#term/concurrency-permit][concurrency permit]].
+The identity of a named, typed graph argument. Functions expose slots through ~fn-slot~ links; the same slot identity can be shared by several functions. Renaming may create a view linked through source-slot-id. Slot identity is different from its displayed name and from a [[file:glossary.org::#term/concurrency-permit][concurrency permit]].
 
 * Binding
 :PROPERTIES:

@@ -96,7 +96,7 @@ function makeWorld(opts) {
       if (url === '/api/branches' && !init?.method) {
         const names = o.availableBranches || [o.branch, o.state?.sandboxBranch,
           o.state?.branch, o.saved?.sandboxBranch, o.saved?.branch, o.saved?.activeBranch];
-        return {ok: true, json: async () => names.filter(Boolean).map((name) => ({name}))};
+        return {ok: true, json: async () => o.branchRows || names.filter(Boolean).map((name) => ({name}))};
       }
       return { ok: true, json: async () => ({ ok: !o.branchFailure }) };
     },
@@ -105,7 +105,8 @@ function makeWorld(opts) {
     gdToast: (m) => calls.push('toast ' + m),
     // The cleanup module is NOT loaded — these are its seams, recorded.
     _tourSurvivors: async (created) => (o.survivors || created),
-    _tourDeleteCreated: async (created) => {
+    _tourDeleteCreated: async (created, options) => {
+      ctx.__cleanupOptions = options;
       calls.push('deleteCreated ' + created.map((c) => c.name).join(','));
       return { failed: o.failedItems || [] };
     },
@@ -359,6 +360,30 @@ const finishedOn = (id, extra) => Object.assign(
     assert(w.saved().phase === 'cleanup', 'the cleanup intent crosses the branch reload');
   });
 
+  await test('an in-place sibling tutorial resumes cleanup on main after cancel and reload', async () => {
+    const created = [
+      {type: 'branch', name: 'tutorial-sandbox', id: 'base-id', 'base-branch-id': 'main-id'},
+      {type: 'branch', name: 'tutorial-branch', id: 'source-id', 'base-branch-id': 'base-id'},
+      {type: 'branch', name: 'tutorial-merge-target', id: 'target-id', 'base-branch-id': 'base-id'},
+    ];
+    const saved = {lessonId: '01', step: 1, activeBranch: 'tutorial-merge-target',
+      cleanupBranch: 'main', created};
+    const w = makeWorld({state: saved, branch: 'tutorial-merge-target'});
+    await w.ctx._tourEnd();
+    assert(w.calls.includes('switchToBranch main'), 'Escape first returns to the explicit cleanup root');
+    assert(w.saved().phase === 'cleanup', 'cleanup intent survives the branch reload');
+    assert(JSON.stringify(w.saved().created) === JSON.stringify(created), 'all exact UUID ownership survives');
+    assert(w.pop() === null, 'nothing is deleted while still on the merged target');
+    const reloaded = makeWorld({state: null, saved: w.saved(), branch: 'main'});
+    await reloaded.ctx.maybeStartTutorial();
+    assert(reloaded.title() === 'Clean up tutorial items?', 'reload offers the unfinished lesson cleanup');
+    assert(!reloaded.next(), 'cancel does not mark the lesson finished');
+    reloaded.btn('Delete them').click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert(reloaded.calls.includes('deleteCreated tutorial-sandbox,tutorial-branch,tutorial-merge-target'),
+      'cleanup receives the persisted complete ledger');
+  });
+
   await test('Cancel in Lessons preserves a session stored on another branch', async () => {
     const saved = {lessonId: '01', step: 1, activeBranch: 'work', created: []};
     const w = makeWorld({state: null, saved, branch: 'main'});
@@ -532,6 +557,83 @@ const finishedOn = (id, extra) => Object.assign(
       assert(!w.calls.some((c) => /^deleteCreated/.test(c)), 'no mutation occurs after failed account confirmation');
     });
   }
+
+  await test('scratch rollback keeps the whole ledger when its app removal is unconfirmed', async () => {
+    const app = {type: 'app-route', name: 'handler', id: 'app-id', receipt: 'pending'};
+    const w = makeWorld({branch: 'tutorial-owned',
+      state: finishedOn('01', {sandboxBranch: 'tutorial-owned', created: [app]})});
+    w.ctx._tourDeleteAppRoutes = async () => [app];
+    await w.ctx._tourEnd();
+    w.btn('Delete branch & return').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert(!w.calls.some(call => call.startsWith('DELETE /api/branches/')), 'unconfirmed app removal keeps the sandbox');
+    assert(w.saved().created[0].id === 'app-id', 'exact app receipt survives retry');
+    assert(w.btn('Delete branch & return'), 'the app cleanup failure remains retryable');
+  });
+
+  await test('scratch rollback removes its app before deleting the captured branch', async () => {
+    const app = {type: 'app-route', name: 'handler', id: 'app-id', receipt: 'created'};
+    const w = makeWorld({branch: 'tutorial-owned',
+      branchRows: [{id: 'sandbox-id', name: 'tutorial-owned', 'base-branch-id': 'main-id'}],
+      state: finishedOn('01', {sandboxBranch: 'tutorial-owned', sandboxBranchId: 'sandbox-id',
+        sandboxBaseBranchId: 'main-id', created: [app]})});
+    w.ctx._tourDeleteAppRoutes = async () => {
+      w.calls.push('remove-app app-id');
+      app.receipt = 'removed';
+      return [];
+    };
+    await w.ctx._tourEnd();
+    w.btn('Delete branch & return').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const appIndex = w.calls.indexOf('remove-app app-id');
+    const branchIndex = w.calls.indexOf('DELETE /api/branches/sandbox-id');
+    assert(appIndex >= 0 && branchIndex > appIndex, 'exact app removal precedes branch deletion');
+  });
+
+  await test('scratch rollback waits for exact service stop before deleting branches', async () => {
+    const service = {type: 'service', name: 'worker', id: 'service-id', receipt: 'created'};
+    const w = makeWorld({branch: 'tutorial-owned',
+      state: finishedOn('01', {sandboxBranch: 'tutorial-owned', created: [service]})});
+    w.ctx._tourCleanupServices = async () => [service];
+    await w.ctx._tourEnd();
+    w.btn('Delete branch & return').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert(!w.calls.some(call => call.startsWith('DELETE /api/branches/')), 'unconfirmed stop keeps the sandbox');
+    assert(w.saved().created[0].id === 'service-id', 'exact service receipt survives retry');
+    assert(w.btn('Delete branch & return'), 'cleanup can be retried after reconciler stops');
+  });
+
+  await test('scratch cleanup unpins before deletion and retains unknown pins for retry', async () => {
+    const pin = {type: 'package-install', name: 'own-package', receipt: 'pending', 'branch-id': 'sandbox-id'};
+    const w = makeWorld({branch: 'tutorial-owned',
+      state: finishedOn('01', {sandboxBranch: 'tutorial-owned', created: [pin]})});
+    await w.ctx._tourEnd();
+    w.btn('Delete branch & return').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert(!w.calls.some(call => call.startsWith('DELETE /api/branches/')), 'unknown pin keeps its branch available');
+    assert(w.saved().created[0].receipt === 'pending', 'the original ambiguous pin remains in saved cleanup');
+    assert(w.btn('Delete branch & return'), 'the retry action stays available');
+  });
+
+  await test('registry cleanup after exact sandbox deletion routes through main and survives reload', async () => {
+    const release = {type: 'package-version', id: 'release-id', name: 'owned', version: '1.0.0', receipt: 'created'};
+    const w = makeWorld({branch: 'tutorial-owned', failedItems: [release],
+      branchRows: [{id: 'sandbox-id', name: 'tutorial-owned', 'base-branch-id': 'main-id'}],
+      state: finishedOn('01', {sandboxBranch: 'tutorial-owned', sandboxBranchId: 'sandbox-id',
+        sandboxBaseBranchId: 'main-id', created: [release]})});
+    await w.ctx._tourEnd();
+    w.btn('Delete branch & return').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert(w.calls.includes('DELETE /api/branches/sandbox-id'), 'delete the captured UUID, not a mutable name');
+    assert(w.ctx.__cleanupOptions.headers['X-Graphden-Branch'] === 'main', 'remaining artifacts use a live route');
+    const saved = w.saved();
+    assert(saved.sandboxBranch === null && saved.cleanupBranch === 'main' && saved.phase === 'cleanup',
+      'the deleted sandbox is no longer used for recovery');
+    assert(saved.created[0].id === 'release-id', 'failed exact release cleanup remains owned');
+    const resumed = makeWorld({state: null, saved, branch: 'main', failedItems: [release]});
+    await resumed.ctx.maybeStartTutorial();
+    assert(resumed.title() === 'Clean up tutorial items?', 'Lessons restores the remaining cleanup on main');
+  });
 
   console.log('');
   console.log(failures ? '✗ ' + failures + ' failed, ' + passes + ' passed'

@@ -282,3 +282,19 @@
     (testing "revocation kills the capsule"
       (accounts/revoke-token! (storage) token)
       (is (nil? (accounts/preview-grant-by-token (storage) token))))))
+
+
+(deftest ^:integration handler-capsule-is-distinct-and-never-authenticates
+  (let [account (accounts/create-account! (storage) {:display-name "Handler preview"})
+        fn-id (random-uuid)
+        branch-id (random-uuid)
+        token (accounts/mint-preview-token! (storage) (str (:id account)) "acme" fn-id branch-id :handler)
+        grant (accounts/preview-grant-by-token (storage) token)]
+    (is (= :handler (:mode grant)))
+    (is (= (str fn-id) (:fn-id grant)))
+    (is (= (str branch-id) (:branch-id grant)))
+    (is (nil? (accounts/authenticate-token (storage) token)))
+    (is (thrown? clojure.lang.ExceptionInfo
+          (accounts/mint-preview-token! (storage) (str (:id account)) "acme" fn-id branch-id :unknown)))
+    (accounts/revoke-token! (storage) token)
+    (is (nil? (accounts/preview-grant-by-token (storage) token)))))

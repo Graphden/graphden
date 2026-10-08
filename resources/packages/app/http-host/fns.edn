@@ -1,0 +1,30 @@
+{:namespace "app.http-host"
+ :description "Finite public HTTP publication controls. Markup belongs to the graph; transport and focus lifecycle belong to the editor."
+ :fns
+ [{:name :_http-host-popover-html
+   :parent :render-hiccup
+   :args {:hiccup {:value
+                   [:div {:class "http-host-content"}
+                    [:div {:class "service-popover-header"}
+                     [:strong "Publish HTTP"]]
+                    [:p {:data-http-host-name "true"}]
+                    [:p {:class "service-popover-note"}
+                     "A public URL for 30 minutes. Each request runs this response handler once; no background service starts."]
+                    [:p {:class "service-popover-note"}
+                     "Bind the handler's inputs except request. Return plain text or JSON. Anyone with the URL can call it."]
+                    [:p [:a {:data-http-host-url "true" :target "_blank" :rel "noopener noreferrer" :hidden true}
+                         "Open public URL"]]
+                    [:p {:data-http-host-expiry "true"}]
+                    [:div {:class "service-popover-actions"}
+                     [:button {:type "button" :data-http-host-publish "true"} "Publish for 30 minutes"]
+                     [:button {:type "button" :data-http-host-stop "true" :disabled true} "Stop publication"]]
+                    [:section {:data-handler-preview "true" :hidden true}
+                     [:p {:class "service-popover-note"}
+                      "HTML preview runs on your isolated app domain for two minutes. Use relative fragment URLs and assets/htmx.min.js. It cannot read editor cookies."]
+                     [:button {:type "button" :data-handler-preview-mint "true"} "Preview HTML handler"]
+                     [:p [:a {:data-handler-preview-url "true" :target "_blank" :rel "noopener noreferrer" :hidden true}
+                          "Open HTML preview"]]]
+                    [:p {:data-http-host-status "true" :role "status" :aria-live "polite"}]]}}}
+  {:name :_http-host-popover-handler
+   :parent :html-ok-response
+   :args {:body :_http-host-popover-html}}]}

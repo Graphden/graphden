@@ -431,6 +431,7 @@ function _tourTrackInheritanceVariation(preview) {
   _tourSaveState();
 }
 
+
 // Reparenting removes the original source from the new canvas closure. Read
 // it by canonical UUID without polluting the editor cache; this lesson proof
 // belongs only to its creation and branch, and disappears with the tour state.
@@ -642,6 +643,9 @@ function _tourCount(event, lessonId, step) {
 
 async function _tourFetchLessons() {
   if (window.gdAccountsReady) await window.gdAccountsReady;
+  if (typeof httpHostPublications === 'function' && window.gdHttpHostAvailable === null) {
+    try { await httpHostPublications(); } catch (_) { window.gdHttpHostAvailable = false; }
+  }
   if (_tourLessons) return _tourLessons;
   if (!(window.API && API.api_tour)) return null;
   try {
@@ -679,6 +683,8 @@ async function startTutorial(lessonId, resumeStep, resumeCreated, session) {
     step: Math.min(resumeStep || 0, lesson.steps.length - 1),
     created: resumeCreated || [],
     activeBranch: _tourSessionBranch(),
+    cleanupBranch: session ? session.cleanupBranch
+      : (lesson['cleanup-branch'] === 'main' ? 'main' : null),
     // Do not manufacture provenance when resuming an older saved session.
     principal: session ? session.principal : _tourSessionPrincipal(),
   };
@@ -720,7 +726,8 @@ async function maybeStartTutorial() {
   }
   const saved = _tourLoadState();
   if (saved?.lessonId) {
-    const branch = saved.activeBranch || saved.sandboxBranch || saved.branch || 'main';
+    const branch = saved.phase === 'cleanup' ? _tourCleanupBranch(saved)
+      : saved.activeBranch || saved.sandboxBranch || saved.branch || 'main';
     if (branch !== _tourSessionBranch()) {
       // Branch lessons explicitly ask for a reload onto another branch.
       await _tourFetchLessons();
@@ -731,57 +738,3 @@ async function maybeStartTutorial() {
   }
   return false;
 }
-
-// Org-mode entry: run the lesson on its OWN branch — create
-// tutorial-<lesson>-<suffix> off main, switch (the reload resumes the
-// saved tour state on the branch), and the end-of-tour dialog offers
-// branch deletion = full rollback. Falls back to a plain in-place tour
-// when branch creation is unavailable (401/403/older deploys).
-async function startTutorialIsolated(lessonId) {
-  const lessons = await _tourFetchLessons();
-  if (!lessons) {
-    if (typeof gdToast === 'function') gdToast('Tutorial unavailable on this deployment');
-    return false;
-  }
-  const canBranch = window.API && API.api_branches
-    && typeof switchToBranch === 'function';
-  const onMain = canBranch && _tourSessionBranch() === 'main';
-  // A lesson that MANAGES branches itself (lesson 23) opts out of the
-  // scratch-branch isolation — double-wrapping broke its own "main
-  // never saw it" beat and leaked the scratch branch.
-  const lesson = (lessons.lessons || []).find((l) => l.id === lessonId);
-  if (lesson?.['in-place']) return startTutorial(lessonId);
-  if (!canBranch || !onMain) return startTutorial(lessonId);
-  const branch = 'tutorial-' + lessonId + '-'
-    + Math.random().toString(36).slice(2, 6);
-  try {
-    const r = await authFetch(API.api_branches, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: branch, 'base-branch-id': 'main' }),
-    });
-    const bodyJson = await r.json().catch(() => ({}));
-    if (!r.ok || bodyJson.ok === false) throw new Error('branch create failed');
-  } catch (_) {
-    if (typeof gdToast === 'function') gdToast('Starting in place (no branch)');
-    return startTutorial(lessonId);
-  }
-  _tourState = { lessonId, step: 0, created: [], sandboxBranch: branch,
-    activeBranch: branch, principal: _tourSessionPrincipal() };
-  _tourSaveState();
-  // switchToBranch preserves the hash — drop a surface deep link
-  // (#@organization etc.) so the reload resumes the tour on Build,
-  // not buried under the previous surface.
-  if (/^#@/.test(location.hash)) {
-    try {
-      history.replaceState(null, '', location.pathname + location.search);
-    } catch (_) { /* keep the hash */ }
-  }
-  switchToBranch(branch); // reload; maybeStartTutorial resumes on the branch
-  return true;
-}
-
-
-window.startTutorial = startTutorial;
-window.startTutorialIsolated = startTutorialIsolated;
-window.maybeStartTutorial = maybeStartTutorial;

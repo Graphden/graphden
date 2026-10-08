@@ -66,8 +66,9 @@
            this tour, graph reachability is called the [reachable graph](#term/reachable-graph); it
            must not be confused with a callable closure."}
   {:id "slot" :title "Argument slot"
-   :say "The identity of a graph argument, with a declaring function, type, and public name.
-           Renaming may create a view linked through source-slot-id. Slot identity is different from
+   :say "The identity of a named, typed graph argument. Functions expose slots through `fn-slot`
+           links; the same slot identity can be shared by several functions. Renaming may create a
+           view linked through source-slot-id. Slot identity is different from
            its displayed name and from a [concurrency permit](#term/concurrency-permit)."}
   {:id "binding" :title "Binding"
    :say "Stored information specifying a graph argument: a literal value, a reference, sequence
@@ -402,6 +403,23 @@
            vector [captures](#term/capture) every [free argument](#term/free-argument). Otherwise an
            unambiguous structural function type supplies the parameter names. See [closure
            capture](../../docs/CLOSURE_CAPTURE.md)."}
+    {:ns graphden.executor.compile.bindings :defn ref-produces-callable?
+     :say "Distinguishes a callback from a constructor that returns a callback. A reference whose
+           registered return type is a function type is evaluated to obtain the callable value.
+           Other references in function-typed slots are wrapped without executing their bodies.
+           The decision follows types and inherited return declarations, never function names.
+           A marked callable keeps its marker in the stored type; invocation propagates that
+           marker to its result and retains the callable's effect requirements.
+           The [query constructor example](../../docs/tutorial/09-higher-order-functions.md)
+           uses this distinction to capture connection parameters in an ordinary graph."
+     :see [[:executor "hof-lambda-params"]]}
+    {:ns graphden.executor.compile-eager :defn hof-wrap
+     :say "Prepares an ordinary referenced function as a callable. The wrapper captures the
+           current input values and execution context; its declared callback parameters receive
+           values at each invocation. This is the runtime counterpart of `:lambda-params`,
+           with no separate environment object in the stored graph. Callable constructors take
+           the evaluation path described by `ref-produces-callable?` instead."
+     :see [[:executor "hof-lambda-params"] [:executor "ref-produces-callable?"]]}
     {:ns graphden.executor.compile.renames :defn build-ref-renames
      :say "Builds the name translation at a reference call. If a caller exposes an argument under a
            new name but the referenced function still uses its original name, the translation supplies
@@ -495,6 +513,13 @@
            limit, then loads related entity rows in batches and assembles the result. Batching keeps
            database round trips independent of the number of visited functions."
      :see [[:storage "->execution-graph"]]}
+    {:ns graphden.storage.bounded-query :defn candidate-ids
+     :say "Loads a limited set of identity IDs before reading their values. The optional
+           `StorageBoundedQuery` [protocol](#term/protocol) supports owner queries for function slots, bindings, and
+           list items. Ownership can change in version rows, so candidate discovery considers every
+           stored version; ordinary branch resolution then selects the visible rows. Exceeding the
+           candidate limit or using an unsupported backend rejects the operation rather than
+           returning an incomplete component graph. UI component export uses this path."}
     {:ns graphden.storage.postgres.notify :defn make-emitter
      :say "Creates the write-notification sender. After a write, it sends `pg_notify` through the
            pooled DataSource so other processes can refresh their state promptly. Notification failure
@@ -864,11 +889,21 @@
            namespace trees, function lists, searches, subtrees, or a full graph listing.
            Server-assigned roles distinguish types from functions. This is the shared data source
            behind editor list refreshes."}
-    {:ns graphden.crud.entities.list :defn view-members
+    {:ns graphden.crud.entities.views :defn view-members
      :say "Evaluates graph filters for the Explorer and saved graph views. Filter dimensions are
            combined with AND; `:uses` follows reverse dependencies by function ID, and `:views`
            intersects other views with a cycle check. Ad-hoc filtering and the saved `:explorer-view`
-           function use this same evaluator."}]}
+           function use this same evaluator. Problems come from current-branch diagnostics,
+           failures and lint; apps use the installed org-scoped route reader. Intersections run
+           before the final result limit, so a nested view never loses later matches."}
+    {:ns graphden.crud.views :defn save!
+     :say "Saves a complete filter set as an ordinary explorer-view function and bindings.
+           The owned writer transaction repeats authorization and validation before applying
+           every row. Existing scalar identity slots remain valid; additional references are
+           lists of const compositions with fn-ref bindings, so targets are named without being
+           executed. Unrepresentable inherited or computed clauses reject the whole write.
+           Cache invalidation and notifications happen after commit, and a publication failure
+           is reported as committed rather than pretending the database rolled back."}]}
 
   {:id :packages
    :title "Packages — loading and distribution"
@@ -943,7 +978,10 @@
     {:ns graphden.packages.loader :defn sync-namespaces!
      :say "Creates the stored namespace hierarchy, such as `core` and `core.arithmetic`, and returns a
            map from namespace paths to IDs. Function synchronization uses these IDs to place each
-           definition in its namespace."
+           definition in its namespace. Metadata also records only namespace IDs actually created
+           by this synchronization. Package installation returns those IDs alongside the pin and
+           version identities, so lesson cleanup can remove its own resources without claiming
+           pre-existing namespaces by name."
      :see [[:executor "sync-fns-to-storage!"]]}
 
     {:ns graphden.packages.sync :defn sync-fn-entities-from-packages!
@@ -1306,6 +1344,14 @@
            for adding a parent is recalculated against current client lookups rather than trusted from
            stale HTML. See [row actions](../../docs/EDITOR_ROW_ACTIONS.md)."}
 
+    {:file "resources/packages/app/editor/editor-http-host.js" :defn publishHttpHost
+     :say "Stages a create-only publication UUID before sending the request. The graph partial owns
+           dialog markup; this client operation preserves exact cleanup after a lost response and
+           displays a public URL only after the server confirms publication."}
+    {:file "resources/packages/app/editor/editor-tour-session.js" :defn _tourTrackHttpPublication
+     :say "Records the exact lease, handler, namespace, branch, lesson session, and principal before
+           publication. Cleanup can revoke that lease after its lesson branches disappear without
+           guessing identity from a name or deleting another account's publication."}
     {:file "resources/packages/app/editor/editor-inheritance-api.js" :defn applyInheritancePreview
      :say "Inheritance changes use an authoritative preview followed by one atomic apply.
            The browser confirms the exact orphan binding IDs and echoes the snapshot digest;
@@ -1325,9 +1371,10 @@
      :say "The ordinary account menu and function picker use bundled graph plans for their local
            state or markup. This exporter resolves inheritance, bindings, and renames on the server
            and emits an ID-based plan for supported primitives; the browser does not resolve graph
-           names itself. Shipped plans are generated during development. Exporting an editable
-           graph instead requires an authenticated, consistently checked snapshot and is unavailable
-           under tenancy. See the [graph-backed UI contract](../../resources/packages/app/ui-preview/README.md)."
+           names itself. Shipped plans are generated during development. The generic editable-graph export takes
+           a whole snapshot and remains unavailable under tenancy. Personal components instead use
+           `graphden.editor.components/export-current`, which authorizes every source dependency
+           and exports only a bounded component plan. See the [graph-backed UI contract](../../resources/packages/app/ui-preview/README.md)."
      :see [[:executor "build-lookups"] [:editor "createRuntime"]]}
 
     {:file "resources/packages/app/ui-preview/browser-runtime.js" :defn createRuntime
@@ -1375,6 +1422,29 @@
            data; comparison-only functions appear as additional display rows. Reads and edits still
            target the current branch. The comparison menu provides review and merge actions."}
 
+    {:file "resources/packages/app/editor/editor-execute.js" :defn submitExecution
+     :say "The selected card's Run button delegates to the existing Inspector Run owner; it does
+           not create another execution form. That form resolves typed inputs, keeps [effect
+           acknowledgement](#term/effect) visible, and submits through this shared function.
+           History, Trace path and Capture values are independent request options. Capture values
+           requires tracing and explicit cost consent; cancelling consent clears that option.
+           The submitted function UUID and generation identify this run. A new submission stops
+           the previous poll, clears its result identity and ignores late replies; changing selection
+           cannot relabel an earlier run. Pending runs use the same result host and cancellation
+           path. Server execution checks remain authoritative."
+     :see [[:crud "apply-execute"] [:executor "record-effect!"] [:editor "aggregatePathTrace"]]}
+    {:file "resources/packages/app/editor/editor-path-view.js" :defn aggregatePathTrace
+     :say "Groups a trace's invocations by function UUID, keeping call counts, cache hits and
+           timings. Trace path without Capture values records execution without return values.
+           With capture enabled, the latest fresh invocation owns the displayed value, including
+           null or false. A later invocation without a value clears an earlier capture; when its
+           capture exceeded the budget, the badge explains that the value is unavailable. It never
+           substitutes an older result or promises to recover data that was not captured.
+           A shortened inline preview of an available value opens the complete captured value
+           with keyboard access. The shared popover lifecycle provides Close, bounded placement,
+           focus return and cleanup when its anchor disappears. Secret entries carry no value."
+     :see [[:editor "submitExecution"] [:executor "record-effect!"]]}
+
     {:file "resources/packages/app/editor/editor-prefs.js" :defn gdApplyThemePayload
      :say "Applies a validated theme payload as inline CSS custom properties on the body. The
            sanitizer permits known tokens and supported color values, rejecting injected declarations
@@ -1391,6 +1461,35 @@
            independent of the bundled local menu and picker plans. `editor-theme-graph.js` applies
            successful results and keeps saved colors when evaluation is unavailable."
      :see [[:crud "apply-execute"] [:executor "record-effect!"] [:editor "gdApplyThemePayload"]]}
+    {:ns graphden.editor.component-templates :defn definitions
+     :say "Copies fixed shipped theme, menu and picker definitions into a fresh named namespace.
+           Four configuration [bindings](#term/binding) select menu initial state, event handler,
+           menu view and picker view by function ID. The picker graph authors presentation; native
+           browser code retains search and navigation. Shared menu colors reference the copied theme leaves; menu hover owns a local
+           literal. Color wrappers retain the canonical color type and ordinary editor form."}
+    {:ns graphden.editor.component-creation :defn apply!
+     :say "Rebuilds the manifest, the fixed list of proposed objects and UUIDs, while holding the
+           graph writer lock. It rejects a changed user, branch, source snapshot or existing identity.
+           One transaction through the existing [storage decorators](#term/protocol) creates all
+           rows with ordinary access checks. Cache-publication warnings preserve a successful commit
+           and its identities. An internal preview lets lesson cleanup record exact new UUIDs before
+           sending APPLY, so a lost network reply does not leave untracked objects."
+     :see [[:versioning "call-with-write"]]}
+    {:ns graphden.executor.browser-source :defn collect-closure
+     :say "Collects only the selected [reachable graph](#term/reachable-graph) and its type dependencies,
+           limiting function and row counts. Each function's [source authorization](#term/auth) precedes its binding and literal reads. The caller supplies a
+           snapshot-local policy; generic whole-graph preview remains unavailable to cloud tenants.
+           Narrow exceptions for fixed shipped primitive/type interfaces verify identity and
+           installed origin; a matching name is insufficient."}
+    {:ns graphden.editor.components :defn export-current
+     :say "Reads the current user's authoritative configuration preference and exports a bounded
+           JSON plan for one component. It never evaluates selected code to discover entry UUIDs.
+           Source and policy use one snapshot; fresh checking cannot erase cached secret metadata.
+           The editor host still owns callbacks, search, navigation and the validated DOM contract."}
+    {:file "resources/packages/app/editor/editor-tour-ui-components.js" :defn gdTourRestoreUIComponentPreferences
+     :say "Restores Appearance preferences only after the lesson's exact selected graph UUID was
+           deleted. Unrelated selections survive. Failed persistence stays in the lesson ledger
+           and retries even when the preference owner's optimistic local value already changed."}
     {:file "resources/packages/app/editor/editor-shortcuts.js" :defn gdApplyKeymap
      :say "Applies user key overrides by stable shortcut ID. The registry keeps defaults for reset and
            applies overrides when late shortcuts register too. Settings and shortcut help read the
@@ -1404,10 +1503,32 @@
      :say "Evaluates the current interactive lesson step against editor state. Lesson data comes from
            `app.tour/_tour-lessons`; this engine ensures required panels and targets are visible,
            checks the declared completion condition, and advances when it succeeds."}
+    {:file "resources/packages/app/editor/editor-tour-receipts.js" :defn gdTourBeginBranchCreation
+     :say "Records a proposed branch UUID, its actual base branch UUID, and the current signed-in
+           user before sending the create request. A lost response does not prove creation failed:
+           cleanup checks these exact identities rather than deleting similarly named branches.
+           A definite rejection clears the attempt; a transport failure keeps it for reconciliation."
+     :see [[:editor "authFetch"]]}
+    {:file "resources/packages/app/editor/editor-tour-receipts.js" :defn gdTourRecordPackageInstall
+     :say "Records a successful lesson installation using the returned pin, branch, package-version,
+           content hash, and newly created namespace identities. Cleanup removes only resources
+           attributed to this lesson. Existing namespaces and installations remain untouched; a
+           missing or mismatched response cannot establish ownership."
+     :see [[:packages "sync-namespaces!"] [:editor "gdTourBeginBranchCreation"]]}
+    {:file "resources/packages/app/editor/editor-tour-app-receipts.js" :defn gdTourRecordAppCreation
+     :say "An Apps form is an ordinary server mutation, not a tutorial-only endpoint. Before the
+           request, the lesson saves a proposed create-only UUID and the exact handler and label.
+           The returned receipt must match that UUID and the current organization's authoritative
+           app list before the step completes. A missing response stays pending; a definite
+           rejection grants no ownership. Both cleanup paths remove this exact route before its
+           handler or branch, and retain the entire journal if removal cannot be confirmed."
+     :see [[:editor "gdTourBeginBranchCreation"] [:editor "authFetch"]]}
     {:file "resources/packages/app/editor/editor-tour-spot.js" :defn _tourStartPositioning
      :say "Follows the lesson's current DOM target independently of the 600 ms completion poll.
            DOM, size, scroll and viewport changes coalesce into one requestAnimationFrame update;
-           short finite CSS motion keeps updates running only while it moves. The observer excludes
+           short finite CSS motion and native Web Animations reported by their owners keep updates
+           running while active. Native motion must affect a declared step target; pause, cancellation
+           or detachment ends frame following. The observer excludes
            the tour's own overlay writes, so a stationary lesson performs no geometry scans.
            Pause, Lessons, lesson end and teardown call `_tourStopFollowing` to release observers,
            event handlers, the viewport subscription and any queued frame."
@@ -1417,7 +1538,7 @@
    :title "Services — instances and placement"
    :status :toured
    :summary "Reconciliation, service discovery, tracing, and executor placement."
-   :paths ["src/graphden/services/" "src/graphden/fleet/"]
+   :paths ["src/graphden/services/" "src/graphden/http_host/" "src/graphden/fleet/"]
    :after [:executor]
    :steps
    [{:ns graphden.schema.services.schema :defn extend-builder
@@ -1460,9 +1581,22 @@
            [heartbeats](#term/fleet)."}
     {:ns graphden.services.endpoint :defn resolve-endpoint
      :say "Resolves a service identity to an active endpoint on the caller's branch, preferring a live
-           local instance. It may fall back to an addon-provided resolver; otherwise it reports
+           local instance, then a finite HTTP publication and an addon resolver; otherwise it reports
            `:service/not-running`. The `:fn-ref` argument passes identity without executing the named
            function."}
+    {:ns graphden.http-host.core :defn publish!
+     :say "Authorizes a typed request handler on an exact branch without invoking it. The existing
+           graph writer and branch guards precede the publication capacity lock; the session lease
+           and optional isolated app route commit together. The client supplies a create-only UUID
+           so lost-response cleanup can revoke the exact publication."}
+    {:ns graphden.http-host.core :defn serve
+     :say "Checks deadline, branch existence, current owner and execute grants before each public
+           request. A bounded shared-pool invocation receives sanitized request fields and returns
+           only bounded text or JSON. It starts no persistent service or tenant listener."}
+    {:ns graphden.http-host.lease :defn call-with-capacity-lock
+     :say "Serializes finite publication admission and cleanup across all pods using a short
+           PostgreSQL advisory transaction lock. Callbacks must not acquire graph or branch locks;
+           this preserves graph → branch → capacity lock ordering during branch deletion."}
     {:ns graphden.crud.fn-execution.trace :defn run-traced!
      :say "Connects traced service calls across HTTP using `X-Graphden-Trace`. The handler execution
            receives its own execution ID and stores its result linked to the caller's trace. Requests

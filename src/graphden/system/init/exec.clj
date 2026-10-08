@@ -14,6 +14,7 @@
     [graphden.executor.interface :as exec]
     [graphden.fleet.command :as fleet-command]
     [graphden.fleet.router :as fleet-router]
+    [graphden.http-host.lifecycle :as http-host]
     [graphden.packages.loaded :as loaded]
     [graphden.packages.starter-catalogue :as starter]
     [graphden.storage.postgres.notify :as pg-notify]
@@ -135,7 +136,7 @@
 (defmethod ig/init-key :exec/context
   [_ {:keys [storage vault-client pg-storage base-fns auth-provider request-scope
              execute-guard app-router verify-domain user-ops
-             my-tokens executor-orgs byo-executor? executor-id notify-listener]}]
+             my-tokens executor-orgs byo-executor? executor-id notify-listener http-host-limits]}]
   (log/info "Creating executor context...")
   (warn-if-auth-off! auth-provider)
   ;; `assoc` (not the constructor's named opts) — the ExecutionContext
@@ -188,6 +189,7 @@
                    ;; App-router seam (§3.4 FaaS) — serves a tenant's subdomain
                    ;; via that org's handler fn. Addon-only.
                    app-router (assoc :app-router app-router)
+                   http-host-limits (assoc :http-host-limits http-host-limits)
                    ;; Self-serve DNS-verify seam (§3.4 #2) — addon-only.
                    verify-domain (assoc :verify-domain verify-domain)
                    ;; User-model seam — create-user / login. Addon-only.
@@ -273,10 +275,11 @@
                                                       "_mcp-ring-response"]}
                    max-size (assoc :max-size max-size)))]
     (br/set-active-router! router)
-    router))
+    (assoc router :http-host-lifecycle (http-host/start! router))))
 
 
-(defmethod ig/halt-key! :exec/branch-router [_ _router]
+(defmethod ig/halt-key! :exec/branch-router [_ router]
+  (http-host/stop! (:http-host-lifecycle router))
   (br/clear-active-router!))
 
 

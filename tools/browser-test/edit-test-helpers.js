@@ -17,6 +17,12 @@ function deepEqual(a, b) {
 }
 
 const AUTH = process.env.AUTH_TOKEN || 'test123';
+const SESSION_COOKIE = process.env.GRAPHDEN_SESSION_COOKIE;
+
+function requestAuthHeaders() {
+  return SESSION_COOKIE ? {Cookie: 'gd_session=' + SESSION_COOKIE}
+    : {Authorization: 'Bearer ' + AUTH};
+}
 const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
 
 
@@ -45,7 +51,7 @@ async function waitForServerHealthy(deadlineMs = 60000) {
       const h = await fetch(BASE + '/health', {signal: AbortSignal.timeout(2000)});
       if (h.ok) {
         const api = await fetch(BASE + '/api/graph/entities?scope=index', {
-          headers: {Authorization: 'Bearer ' + AUTH},
+          headers: requestAuthHeaders(),
           signal: AbortSignal.timeout(5000),
         });
         if (api.ok) return;
@@ -57,7 +63,8 @@ async function waitForServerHealthy(deadlineMs = 60000) {
 }
 
 
-// Standard browser+context setup with auth pre-seeded into localStorage.
+// Standard browser/context setup: account cookie when supplied, otherwise
+// the legacy single-tenant bearer pre-seeded into localStorage.
 //
 // Renderer-heap hardening:
 // - `--js-flags=--max-old-space-size=1024` caps V8's per-renderer
@@ -97,6 +104,7 @@ async function newContext(chromium, opts = {}) {
       // own process — keeps Cytoscape responsive.
       '--no-zygote',
       '--in-process-gpu',
+      ...(opts.launchArgs || []),
     ],
   });
   // A guard can run the SAME lesson walk at a phone viewport:
@@ -109,16 +117,20 @@ async function newContext(chromium, opts = {}) {
     viewport: { width: vp[0] || 1400, height: vp[1] || 900 },
     hasTouch: !!process.env.GRAPHDEN_VIEWPORT,
     isMobile: false,
+    ignoreHTTPSErrors: opts.ignoreHTTPSErrors === true,
   });
-  if (process.env.GRAPHDEN_SESSION_COOKIE) {
-    await ctx.addCookies([{name: 'gd_session', value: process.env.GRAPHDEN_SESSION_COOKIE,
+  if (SESSION_COOKIE) {
+    await ctx.addCookies([{name: 'gd_session', value: SESSION_COOKIE,
       url: BASE, httpOnly: true, secure: BASE.startsWith('https:')}]);
   }
   await ctx.addInitScript(({auth, compactPass}) => {
     // about:blank has no origin → localStorage access throws. The
     // navigation to localhost runs the init script again on a real
     // origin, so just swallow the failure here.
-    try { localStorage.setItem('graphden.auth.password', auth); } catch (_) {}
+    try {
+      if (auth === null) localStorage.removeItem('graphden.auth.password');
+      else localStorage.setItem('graphden.auth.password', auth);
+    } catch (_) {}
     // Redesign 2026-08: cards default to compact (metadata strips hidden).
     // Tests assert on / interact with those strips, so opt into full cards.
     // `GRAPHDEN_CARDS_COMPACT=1` keeps the reader's default instead — a
@@ -126,7 +138,7 @@ async function newContext(chromium, opts = {}) {
     if (!compactPass) {
       try { localStorage.setItem('graphden.cards.compact', '0'); } catch (_) {}
     }
-  }, {auth: AUTH, compactPass: !!process.env.GRAPHDEN_CARDS_COMPACT});
+  }, {auth: SESSION_COOKIE ? null : AUTH, compactPass: !!process.env.GRAPHDEN_CARDS_COMPACT});
   const page = await ctx.newPage();
   // JS-coverage snapshot (Chromium block coverage). Opt-in via
   // GRAPHDEN_JS_COVERAGE=<dir>: V8 precise coverage runs for the page's
@@ -657,7 +669,7 @@ async function nodeApi(method, path, body, extraHeaders) {
   // no OOM cascade.
   // `extraHeaders` carries `X-Graphden-Branch` for a test that works on a
   // throwaway branch — the same header the editor's branch-aware fetch sends.
-  const headers = { 'Authorization': 'Bearer ' + AUTH, 'Connection': 'close',
+  const headers = { ...requestAuthHeaders(), 'Connection': 'close',
                     ...(extraHeaders || {}) };
   let payload;
   if (body !== undefined) {

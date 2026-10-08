@@ -5,6 +5,7 @@
   (:require
     [clojure.string :as str]
     [clojure.tools.logging :as log]
+    [graphden.accounts.session-schema :as session-schema]
     [graphden.schema.executions.schema :as es]
     [graphden.schema.graph.schema :as gds]
     [graphden.schema.malli.core :as mds]
@@ -54,12 +55,19 @@
                  ;; Fleet placement map `(org, entry-fn-id) → executor-id`
                  ;; (docs/FLEET_RFC.md §6.1). Refs :fn (logical). Non-versioned —
                  ;; control-plane routing state that mutates in place.
-                 (placement/extend-builder))]
-    ;; Addon schema-extension seam (docs/TENANCY_SEAM.md § Storage & schema
-    ;; seams): each `extensions`
-    ;; entry is a `(builder → builder)` fn — the tenancy addon adds its
-    ;; `:grant` entity here without editing core. Absent → core schema.
-    (ds/build (reduce (fn [b extension] (extension b)) base (or extensions [])))))
+                 (placement/extend-builder))
+        ;; Addon schema-extension seam (docs/TENANCY_SEAM.md § Storage & schema
+        ;; seams): each `extensions`
+        ;; entry is a `(builder → builder)` fn — the tenancy addon adds its
+        ;; `:grant` entity here without editing core. Absent → core schema.
+        extended (reduce (fn [b extension] (extension b)) base (or extensions []))
+        schema (ds/build extended)]
+    ;; Finite HTTP publication uses a non-authenticating session kind even
+    ;; without accounts. Apply AFTER extensions: an accounts addon already
+    ;; registered the exact same entity, fields and unique constraint.
+    (if (some #{:session} (ds/entities schema))
+      schema
+      (ds/build (session-schema/extend-builder extended)))))
 
 
 ;; =============================================================================

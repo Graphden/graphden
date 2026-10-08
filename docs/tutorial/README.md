@@ -50,7 +50,7 @@ of order.
 | 11 | [The `:custom-script` escape hatch](11-custom-script-escape-hatch.md) | ✅ written · ▶ interactive |
 | 12 | [State — cells, swap, and a graph-native cache](12-state-cells-and-caches.md) | ✅ written · ▶ interactive |
 | 13 | [Recursion: loops without cycles](13-recursion.md) | ✅ written · ▶ interactive |
-| 14 | [Live fragments: htmx from the graph](14-htmx-fragments.md) | ✅ written |
+| 14 | [Live fragments: htmx from the graph](14-htmx-fragments.md) | ✅ interactive + written |
 
 ### Running it
 
@@ -86,14 +86,14 @@ of order.
 | 32 | [Distributing packages — publish, install, update, fork](32-distributing-packages.md) | ✅ written · ▶ interactive |
 | 33 | [Working across organizations](33-working-across-orgs.md) | ✅ written · ▶ interactive |
 | 34 | [Working offline: a local instance, git snapshots, push/pull](34-offline-and-push.md) | ✅ written |
-| 35 | [Services — long-running fns supervised by graphden](35-services.md) | ✅ written · ▶ interactive |
+| 35 | [HTTP handlers and persistent services](35-services.md) | ✅ written · ▶ interactive |
 | 36 | [Signing up & signing in: your account](36-signing-up-and-in.md) | ✅ written · ▶ interactive |
 | 37 | [Plans & tiers — what the cloud grants each account](37-plans-and-tiers.md) | ✅ written · ▶ interactive |
-| 38 | [Services talking to services — the contract lives in the graph](38-services-talking-to-services.md) | ✅ written · ▶ interactive |
-| 39 | [Queues — asynchronous work between services](39-queues.md) | ✅ written |
+| 38 | [HTTP calls by function identity](38-services-talking-to-services.md) | ✅ written · ▶ interactive |
+| 39 | [Queues — asynchronous work between services](39-queues.md) | ▶ interactive + ✅ written |
 | 40 | [The Marketplace: themes, keyboard layouts, and what others published](40-marketplace-themes-keymaps.md) | ✅ written · ▶ interactive |
-| 41 | [The package lifecycle — both sides of a version](41-package-lifecycle.md) | ✅ written |
-| 42 | [AI clients and API tokens: the graph over `/mcp`](42-ai-clients-and-api-tokens.md) | ✅ written |
+| 41 | [The package lifecycle — both sides of a version](41-package-lifecycle.md) | ▶ interactive + written |
+| 42 | [AI clients and API tokens: the graph over `/mcp`](42-ai-clients-and-api-tokens.md) | ✅ written · ▶ interactive |
 
 ▶ interactive — the lesson also exists as a guided in-editor tour:
 open the editor with `?tutorial=NN` (the landing demo link does this for
@@ -150,35 +150,35 @@ walk. The link target is `https://graphden.dev/tutorial/` plus the
 lesson's file name; a deployment serving its own copy of the lessons (a
 translation, an intranet mirror) sets `GRAPHDEN_TUTORIAL_BASE` to it.
 
-Six lessons have no tour: **31** is about files on disk and
-`bb rebuild`, which the editor cannot show; **14** is about MOUNTING a
-route (`:all` and a rebuild, or publishing as an app — lesson 30) and
-watching a page refresh itself, neither of which one editor session can
-demonstrate (the component preview cannot fetch a fragment); **34** is
-about running a second, local instance — something one editor session
-cannot demonstrate; **39** needs a second service running while the
-tour would hold the page; **41** is a two-role loop that a tour cannot
-play from one seat without inventing the other person; and **42** is
-mostly set-up in a terminal and an AI client, outside the editor. All
-six sit in the chapter their subject belongs to, which is why the ▶
+Two lessons have no tour: **31** works with package files on disk and startup
+sync; **34** requires a second instance and external deployment tools.
+**14** practices live fragment updates through an isolated HTML handler preview;
+**39** practices queue retries and recovery when persistent services are available.
+**41** practices author and consumer on two
+owned branches; **42** practices account token creation, scopes and revocation,
+while external registry and MCP client setup remain in their written lessons.
+Both text-only lessons sit in the chapter their subject belongs to, which is why the ▶
 column is worth reading.
 
-The organization tours drive surfaces not every session has, so they
-declare what they need (`:requires`) — a capability (`manage-users`,
-`publish-packages`, …), or a named condition: the services tour needs the
-**dedicated plan** (services run on an executor the org owns — the
-services-talking-to-services tour builds the listener it then calls, so
-it needs nothing more), the cross-org tour needs organizations to exist at all,
-and the asset-override tour needs a single-tenant instance. Anywhere the condition
-fails — the public demo, a free-plan org, a self-hosted instance with no
-tenancy addon — the picker still lists the lesson, disabled, with the
-reason on the row.
+The organization tours declare what they need (`:requires`): a capability such
+as `manage-users` or `publish-packages`, or a named deployment condition. Lessons
+35 and 38 require an authenticated temporary HTTP host; ordinary cloud accounts
+can publish finite handlers without a dedicated executor or service quota.
+Lesson 14 also needs an account browser session, an isolated apps domain and
+`manage-apps` access: it creates its own app host and removes that exact route
+before its lesson graph and branch. Lesson 30 needs those same prerequisites;
+it creates an Apps route, serves typed HTML through the branch preview, and
+explains ordinary publication after a reviewed merge into main.
+Persistent services still require the existing self-hosted/dedicated capability.
+The cross-org tour needs organizations, and asset overrides need a single-tenant
+instance. A missing condition leaves the lesson visible but disabled with a
+reason on its row.
 
-Lesson 25 is written **self-host-only** and its tour declares that
-(`:requires "assets"`): the Assets panel is hidden under the cloud
-tenancy addon and its writes are platform-only, because an editable
-shared frontend would be a stored-XSS surface across tenants. On a
-single-tenant instance both halves apply as written.
+Lesson 25 edits personal UI graphs on both cloud and self-hosted installations
+(`:requires "personal-ui-graphs"`). Appearance selects the current user's
+components; creating and editing their graphs requires a writable namespace.
+The separate Source files panel edits shared frontend assets and remains
+self-hosted/platform-only because those writes affect every user of the instance.
 
 New lessons are added as features ship. If a lesson would document
 a feature that doesn't yet exist or behaves differently from how

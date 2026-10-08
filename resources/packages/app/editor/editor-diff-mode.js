@@ -54,9 +54,18 @@ function gdDiffSetLens(patch) {
   gdDiffModeDecorateSidebar();
   gdDiffModeRenderChip();
   gdDiffModeAnnounceLens();
-  // Re-ring the open graph under the new lens.
-  if (typeof selectFn === 'function' && typeof selectedFnId !== 'undefined'
-      && selectedFnId) selectFn(selectedFnId);
+  gdDiffRenderCurrentSurfaces();
+}
+
+// Rebuild annotations over the existing graph. Keep its expansion, viewport
+// and the Inspector's selected child and tab; selecting the navigation root
+// again would replace that context. Refresh only the Inspector's diff section.
+function gdDiffRenderCurrentSurfaces() {
+  if (typeof createNodeOverlays === 'function') createNodeOverlays();
+  const inspector = document.getElementById('gd-inspector');
+  if (inspector && typeof gdDiffRenderInspectorSection === 'function') {
+    gdDiffRenderInspectorSection(inspector, inspector.dataset.fnId || null);
+  }
 }
 
 function gdDiffModeAnnounceLens() {
@@ -117,7 +126,7 @@ function gdDiffModeGroup(fnId) {
 }
 
 // Changed-slot summaries for one fn — the canvas ring hand-off.
-// {slotName: "value: 1 here · 2 there"} — "here" is the branch on
+// {slotId: "value: 1 here · 2 there"} — "here" is the branch on
 // screen (the diff TARGET), "there" the compared one. Spelled out
 // instead of a bare arrow: the modal's old → new reads in the
 // review direction, and reusing an arrow here with the opposite
@@ -127,21 +136,21 @@ function gdDiffSlotsForFn(fnId) {
   if (!g) return null;
   const slots = Object.create(null);   // slot named "toString" must not vanish
   for (const e of (g.entries || [])) {
-    const slot = e['slot-name'];
+    const slot = e['slot-id'];
     if (!slot || slots[slot] !== undefined) continue;
     if (_gdDiffLens.substantiveOnly && gdDiffEntryCosmetic(e)) continue;
-    let summary;
-    if (Array.isArray(e.fields) && e.fields.length) {
-      summary = e.fields
-        .map((f) => f.field + ': ' + (f.target ?? '∅') + ' here · '
-                    + (f.source ?? '∅') + ' there')
-        .join('; ');
-    } else {
-      summary = e.preview || 'differs';
-    }
-    slots[slot] = summary;
+    slots[slot] = gdDiffDetailSummary(e);
   }
   return Object.keys(slots).length ? slots : null;
+}
+
+function gdDiffDetailSummary(detail) {
+  if (!detail.fields?.length) return detail.preview || 'differs';
+  return detail.fields.map((field) => {
+    const position = field.position == null ? '' : '[' + field.position + '] ';
+    return position + field.field + ': ' + (field.target ?? '∅') + ' here · '
+      + (field.source ?? '∅') + ' there';
+  }).join('; ');
 }
 
 // Changed INSIDE — this fn's own rows are equal on both branches, but
@@ -174,7 +183,7 @@ function gdDiffEntryVisible(e) {
 
 // Per-slot detail for one fn — what the canvas draws ON the arg (the
 // "there" line, the added ring) and what the ghost module needs (the
-// compared branch's ref id). `{slotName: {change, fields, sourceRef,
+// compared branch's ref id). `{slotId: {change, fields, sourceRef,
 // targetRef, preview, items}}`; `fields` are `{field, source, target}`
 // with source = THERE (the compared branch), target = HERE.
 function gdDiffSlotDetails(fnId) {
@@ -182,15 +191,17 @@ function gdDiffSlotDetails(fnId) {
   if (!g) return null;
   const out = Object.create(null);
   for (const e of (g.entries || [])) {
-    const slot = e['slot-name'];
+    const slot = e['slot-id'];
     if (!slot || !gdDiffEntryVisible(e)) continue;
     if (!out[slot]) {
       out[slot] = { change: null, fields: [], sourceRef: null, targetRef: null,
-                    preview: null, items: 0, slotRow: null };
+                    preview: null, items: 0, slotRow: null, itemDetails: Object.create(null) };
     }
     const d = out[slot];
     const en = e['entity-name'];
     if (en === 'binding') {
+      d.entityId = e['entity-id'];
+      d.bindingId = e['binding-id'] || e['entity-id'];
       d.change = e.change;
       d.sourceRef = e['source-ref'] || null;
       d.targetRef = e['target-ref'] || null;
@@ -199,25 +210,34 @@ function gdDiffSlotDetails(fnId) {
     } else if (en === 'binding-list-item') {
       d.items += 1;
       if (!d.change) d.change = 'modified';
-      if (e['source-ref'] && e['source-ref'] !== (e['target-ref'] || null)
-          && !d.sourceRef) {
-        d.sourceRef = e['source-ref'];
-        d.targetRef = e['target-ref'] || null;
-        d.itemPosition = e.position;
-      }
-      for (const f of (e.fields || [])) {
-        d.fields.push(Object.assign({ position: e.position }, f));
-      }
-      if (!e.fields && e.preview) {
-        d.fields.push({ field: 'item', position: e.position,
-                        source: e.change === 'added-in-source' ? e.preview : '∅',
-                        target: e.change === 'added-in-target' ? e.preview : '∅' });
-      }
+      const fields = (e.fields || []).map((f) => Object.assign({ position: e.position }, f));
+      if (!fields.length && e.preview) fields.push({ field: 'item', position: e.position,
+        source: e.change === 'added-in-source' ? e.preview : '∅',
+        target: e.change === 'added-in-target' ? e.preview : '∅' });
+      d.fields.push(...fields);
+      d.itemDetails[e['item-id']] = { change: e.change, fields, preview: e.preview || null,
+        entityId: e['item-id'], bindingId: e['binding-id'], itemId: e['item-id'],
+        sourceRef: e['source-ref'] || null, targetRef: e['target-ref'] || null,
+        slotRow: null, position: e.position };
     } else if (en === 'fn-slot') {
       d.slotRow = e.change;
     }
   }
   return Object.keys(out).length ? out : null;
+}
+
+// A list item is its own comparison use-site. Do not annotate every item
+// with the first replacement found elsewhere in the same slot.
+function gdDiffArgDetails(arg) {
+  const d = arg && gdDiffSlotDetails(arg['fn-id'])?.[arg['slot-id']];
+  return arg?.['item-id'] ? d?.itemDetails[arg['item-id']] || null : d || null;
+}
+
+// The display projection is truncated and a literal string can itself be ∅.
+// The ghost renderer confirms the exact source row before drawing this field.
+function gdDiffLiteralChange(detail) {
+  return detail?.change === 'modified' && detail.entityId && !detail.sourceRef
+    ? detail.fields.find(field => field.field === 'value') || null : null;
 }
 
 // The fn's OWN row change (rename, description, …), if any.
@@ -390,7 +410,10 @@ async function gdDiffModeLoadEffects(mode) {
   gdDiffModeDecorateSidebar();
   // The chip's visible/total under an effectsOnly lens can only be
   // computed once the effect deltas landed — refresh it.
-  if (_gdDiffMode === mode) gdDiffModeRenderChip();
+  if (_gdDiffMode === mode) {
+    gdDiffModeRenderChip();
+    gdDiffRenderCurrentSurfaces();
+  }
 }
 
 // --- classification helpers -------------------------------------------------
@@ -523,13 +546,7 @@ async function gdEnterDiffMode(otherBranch) {
     gdDiffModeRenderChip();
     gdDiffModeDecorateSidebar();
     gdDiffModeObserve();
-    // Re-ring the currently displayed graph — overlays are (re)built on
-    // render, so re-selecting the current fn is the cheapest correct
-    // refresh.
-    if (typeof selectFn === 'function' && typeof selectedFnId !== 'undefined'
-        && selectedFnId) {
-      selectFn(selectedFnId);
-    }
+    gdDiffRenderCurrentSurfaces();
     if (typeof gdAnnounce === 'function') {
       gdAnnounce('Compare mode on — differences vs ' + otherBranch + ' are marked');
     }
@@ -560,12 +577,13 @@ async function gdDiffModeRefresh() {
     // resurrect a mode with no chip and no way out.
     if (_gdDiffMode === prev) {
       _gdDiffMode = fresh;
-      // The compared branch may have moved: next render re-reads its
-      // subtrees (the drawn clusters stay until then).
-      if (typeof gdDiffGhostsDropCache === 'function') gdDiffGhostsDropCache();
+      // Invalidate pending subtree reads as well as drawn clusters. A slow
+      // ghost from the previous comparison must never repaint this model.
+      if (typeof gdDiffGhostsReset === 'function') gdDiffGhostsReset();
       gdDiffModeLoadEffects(fresh);
       gdDiffModeDecorateSidebar();
       gdDiffModeRenderChip();
+      gdDiffRenderCurrentSurfaces();
     }
   } catch (_) { /* keep the stale annotations */ }
   _gdDiffModeFetching = false;
@@ -602,6 +620,10 @@ function gdExitDiffMode() {
   document.querySelectorAll('.arg-overlay-diff-added, .edge-label-diff')
     .forEach((el) => { el.classList.remove('arg-overlay-diff-added', 'edge-label-diff'); });
   if (typeof gdDiffGhostsReset === 'function') gdDiffGhostsReset();
+  const inspector = document.getElementById('gd-inspector');
+  if (inspector && typeof gdDiffRenderInspectorSection === 'function') {
+    gdDiffRenderInspectorSection(inspector, inspector.dataset.fnId || null);
+  }
   if (typeof gdAnnounce === 'function') gdAnnounce('Compare mode off');
 }
 
@@ -639,6 +661,7 @@ window.gdDiffSlotsForFn = gdDiffSlotsForFn;
 window.gdEnterDiffMode = gdEnterDiffMode;
 window.gdDiffAffectedInfo = gdDiffAffectedInfo;
 window.gdDiffSlotDetails = gdDiffSlotDetails;
+window.gdDiffArgDetails = gdDiffArgDetails;
 window.gdDiffSummaryParts = gdDiffSummaryParts;
 window.gdExitDiffMode = gdExitDiffMode;
 window.gdDiffVisibleGroup = gdDiffVisibleGroup;

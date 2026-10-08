@@ -1,168 +1,88 @@
-# Lesson 35 — Services: long-running fns supervised by graphden
+# Lesson 35 — HTTP handlers and persistent services
 
-**Goal**: by the end of this lesson you can mark a fn as a
-service, see graphden start it automatically, run two versions
-side-by-side on different branches, and reason about the
-restart-policy + branch scoping.
+**Goal:** publish a typed response handler at a real public URL, read its
+response over HTTP, and revoke the URL. Then distinguish this finite handler
+from a persistent service on a self-hosted or dedicated executor.
 
-**Concepts introduced**: `service`, `reconciler`, `restart-
-policy`, `:enabled?`, `:process` effect, `:service.branch-id`,
-`:service.cardinality`, service vs `execute`, and — on a
-multi-tenant deployment — services as the **dedicated tier**
-(own cgroup-limited pod, effect-sandboxed, `/api/orgs/services*`).
+The interactive lesson needs an authenticated owner and a configured public
+HTTP origin. It is available to ordinary cloud users; it does not require a
+service allowance. A self-hosted installation without authentication must
+configure accounts or a static token before publishing.
 
-## Service vs execute
+## Three different lifetimes
 
-Two ways to call a fn in graphden:
-
-| Action | Lifetime | Where it happens |
+| Action | Lifetime | Execution |
 |---|---|---|
-| **execute** (`▶` button, `/api/execute`) | One-shot. Returns a result and stops. | The HTTP request thread, with cancellation + TTL. |
-| **service** (`⚙` button, `/api/entities/service`) | Forever. Restarted by graphden if it crashes. | A daemon thread managed by the reconciler. |
+| **Run** | One call with temporary arguments | Returns one result. |
+| **Publish HTTP** | Public URL for 30 minutes | Each request invokes the handler once. |
+| **Service settings** | Desired state until disabled/deleted | The reconciler starts and supervises a persistent listener or job. |
 
-A service is a desired-state row that says "keep THIS fn
-running". The fn must have zero free arguments (every slot
-bound) — services don't pass per-call inputs. Anything you'd
-normally pass as an argument has to be hard-coded as a binding
-on a derived fn-def first.
+Publication does not run the graph at creation time or start a background
+thread. The platform serves its existing HTTPS origin, or an isolated apps
+domain, so you choose no port and install no certificate for the lesson.
 
-## What makes a fn service-eligible
+## Try it: publish, request, stop
 
-The fn must declare the `:process` effect somewhere in its
-ancestor chain. `:process` means "spawns supervised background
-work". The seeded base-fns that declare it:
+1. Find `text-ok-response` in `web.response`. Use **⋯ → Extend** to create
+   `tutorial-http-answer`.
+2. On the child, bind `:body` to the text `hello HTTP`. The status and
+   `text/plain` header are already inherited.
+3. Choose **⋯ → HTTP**, then **Publish for 30 minutes**. The handler may have
+   an unbound `request`; its other inputs must be bound. Publication checks
+   the handler's types without invoking it.
+4. Choose **Open public URL**. Read `hello HTTP` in the new browser tab. This
+   is an actual HTTP request, and the URL is public: anyone you give it to may
+   invoke this handler until it expires or you stop it.
+5. Return to the editor and choose **⋯ → HTTP → Stop publication** on the same
+   function. Reload the public tab; the publication is now unavailable.
+6. Finish the lesson and remove its created items. Cleanup records the proposed
+   publication UUID before sending the create request, so a lost response does
+   not force it to guess a name. Deleting the published branch revokes its leases.
 
-| Base-fn | What `:process` work |
-|---|---|
-| `:http-server` | Owns a network listener until stopped |
-| `:schedule` | Runs a cron loop until interrupted |
-| `:future` | Spawns a daemon thread (used by both above) |
+The finite host accepts plain text or JSON, not HTML or streaming responses.
+It removes cookies and bearer credentials from the incoming request and controls
+response headers. Default capacity is 64 publications per installation, two per
+organization, and two per owner. A full capacity message asks you to stop an
+existing publication or wait for a deadline; these are separate from service
+quotas. Execution still follows plan effects, concurrency and network limits.
+See [Temporary HTTP handlers](../TEMPORARY_HTTP.md) for the complete contract.
 
-Time in the graph is epoch milliseconds — `:current-time-ms` now, and
-the `:instant-parse` / `:instant-format` / `:instant-plus` trio to read
-an ISO date, print one in a zone, or move by a day or a month. A cron
-expression is the only other clock vocabulary a service needs.
+## Persistent services: self-hosted or dedicated executors
 
-If you try to create a service for a fn whose ancestor chain
-doesn't have `:process`, the create-guard rejects it: *Cannot make a
-:service for fn "current-time-ms" — neither it nor any ancestor
-declares the :process effect. :service is reserved for fns that spawn
-supervised background work (long-running listeners, scheduled loops,
-etc.) …* — and goes on to suggest wrapping a one-shot fn in
-`:schedule`.
+A persistent service is a stored desired-state row: keep this function running.
+It requires the deployment's service capability. Shared cloud executors do not
+acquire that capability merely by publishing a finite handler. **Service
+settings** remains the existing control for deployments that support it.
 
-## Try it: one service
+For an actual listener on an executor you control:
 
-The in-editor tour builds the same two fns, so the names match it.
+1. Keep a fully bound response such as `tutorial-http-answer` above.
+2. Extend `http-server` as `tutorial-daemon`. Bind its callable `:handler` to
+   that response, and bind `:port` to an available port on your executor.
+3. Choose **⋯ → ⚙ Service settings**, select its branch, keep **Enabled**
+   checked, and create/reconcile the service. Confirm a running instance is
+   reported. This starts a real listener; its address and exposure depend on
+   your deployment. Configure its external routing and TLS when needed.
+4. Delete the service row to stop the listener. Delete the lesson functions
+   separately when no longer needed.
 
-1. Type `future` in the Explorer filter, click the `future` row, then
-   `⋯` → **Extend**; name it `tutorial-daemon`, **Save**. On its card
-   click the `+` on the `:body` slot — a callable slot, so the picker
-   opens straight away — type `const` and pick the `const` row. Its
-   card appears under yours, wired into `:body`.
-2. `⋯` → **+ Extend** on the `const` card; name it `tutorial-tick`,
-   **Save**. The child takes `const`'s place in `:body` and you stay
-   on the daemon's canvas (extend in place, lesson 03). The card's
-   `:value` edge runs on to a dashed `+` — a callable's open input is
-   supplied by its caller, so this binding is written on the daemon
-   (lesson 09). Click it, **Bind literal**, and type `tick` — the
-   slot is `:any`, so a bare word is stored as text (`42`, `true` or
-   `[…]` would land as a number, a boolean, a list; the **as** chooser
-   above the field says so explicitly and narrows the slot to that
-   type). This is the work the
-   service will keep doing: the smallest
-   stand-in for a listener or a cron loop. `tutorial-daemon` now has
-   no free arguments AND carries `:process`: the two conditions for a
-   service.
-3. `⋯` → `⚙` on `tutorial-daemon`. The popover reads "Make service:
-   :tutorial-daemon" and shows:
-   - **Branch** picker (default = your current branch)
-   - **Enabled** checkbox (default = on)
-   - **Restart policy**: `:always` / `:on-failure` / `:never`
-4. **Untick Enabled**, leave the policy on `:always`, click
-   `Create & reconcile`. The row is written and the popover closes;
-   the badge reads `disabled`. "This exists but should not be
-   running" is a desired state worth writing on purpose — and where
-   the tour stops, so it never spawns a daemon on your instance.
-5. `⋯` → `⚙` again: the popover now reads "Service: :tutorial-daemon"
-   with the row's state. Tick **Enabled**, `Save & reconcile`. The
-   reconciler starts a daemon thread that calls `:tutorial-tick` once
-   and exits; under `:always` it respawns, with a growing delay
-   because each copy lived under a minute (badge `backoff` between
-   attempts). Switch the policy to `:never`, save: it runs once and
-   the badge flips to `exited`.
-6. `⚙` once more → **Delete service**. Deleting the row is how you
-   stop a service for good; the fn itself is untouched.
-
-The reconciler runs on a NOTIFY callback — every `:service`
-write fires `service:write:<id>` on the `graphden_events`
-channel, the in-process callback diffs enabled-rows vs the
-running-atom, starts the missing ones, stops the deleted ones.
-
-## What you just built, as fn-defs
-
-The two fns above are the smallest possible service-eligible
-fn-def — a future-parented thunk that just spawns a no-op
-daemon thread. Useful as a sanity probe; the structure
-generalises to real services (an HTTP server, a cron loop, a
-pg-listen consumer) by swapping the bound body. In a package's
-`fns.edn` they are two fn-defs, one parent each:
+The corresponding ordinary function definitions are:
 
 ```edn
-;; Step 1 — a thunk. :const returns its bound :value as-is;
-;; with :value bound, the thunk has zero free args and
-;; statically returns :text.
-{:name :tutorial-tick
- :parent :const
- :args  {:value "tick"}}
+{:name :tutorial-http-answer :parent :text-ok-response
+ :args {:body "hello HTTP"}}
 
-;; Step 2 — a service-eligible probe. :future's :body slot is
-;; [:fn {} :any] — a 0-arg callable returning anything. Binding
-;; it to :tutorial-tick is accepted by the type-checker because the
-;; ref's static signature [:fn {} :text] is a subtype of the
-;; slot (covariant return: :text ⊆ :any). The runtime hof-wraps
-;; :tutorial-tick as the daemon's body.
-{:name :tutorial-daemon
- :parent :future
- :args  {:body :tutorial-tick}}
+{:name :tutorial-daemon :parent :http-server
+ :args {:port 9101 :handler :tutorial-http-answer}}
 ```
 
-`:tutorial-daemon` has zero free args (every slot in the chain is
-bound) AND the `:process` effect (inherited from `:future`) — which
-is why its `⚙` was enabled. The reconciler starts a daemon thread
-that calls `:tutorial-tick` once and exits; with `:restart-policy
-:always` it respawns, with `:never` it runs once and the badge flips
-to `exited`.
+Use a port that is free on **your** executor; this is not a way to open a port
+on a shared cloud pod. `http-server` carries `:process` and the inherited
+branch-local protection for listener configuration. Services need all inputs
+bound. Other persistent templates include `schedule` and `interval`.
+A `future` of a constant ends immediately; it is not a long-lived daemon.
 
-This is the minimum reproducible service. Real services swap
-the body for a long-lived loop — `:loop-until-interrupted`
-binds `:body` to its own step fn that runs forever until the
-parent `:future`'s stopper interrupts.
-
-### Common bind-failures
-
-The type-checker enforces the `[:fn {} :any]` slot shape on
-`:body`. Two binds that look reasonable but trip you up:
-
-- **Bind to a base-fn directly**:
-  `{:args {:body :current-time-ms}}` — also accepted (`:int`
-  ⊆ `:any` via covariant return), but `:current-time-ms` has
-  the `:time` effect and bare `:future` doesn't expect to
-  capture it. The probe becomes a one-shot clock read in a
-  daemon — fine for a smoke test, surprising for a service.
-
-- **Bind to a literal**:
-  `{:args {:body "tick"}}` — a type error. A literal text isn't
-  a callable; you can't invoke `"tick"` as a thunk. In the
-  editor the SAVE still lands (type errors record a diagnostic
-  instead of blocking — Lesson 04): the fn gets the ⚠ badge,
-  the Inspector's Bindings tab shows the hint under the argument ("bind
-  a fn-ref or an inline `{:parent …}`"), and executing it is
-  refused until fixed. In a package's `fns.edn` the same
-  mistake still hard-fails the sync. Either way the fix is the
-  `:tutorial-tick` indirection or an inline
-  `{:parent :const :args {:value "tick"}}` directly inside
-  `:body`.
+The remaining sections describe persistent services, not temporary publications.
 
 ### Restart policy
 

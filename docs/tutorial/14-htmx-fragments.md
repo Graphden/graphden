@@ -24,6 +24,47 @@ just a fn returning hiccup, served by `:fragment-route` as
 Each request executes the fragment's graph afresh, so whatever
 the graph computes — a query, a counter, a clock — is live.
 
+## Try it in an isolated HTML preview
+
+The interactive lesson needs an account browser session, **manage-apps**
+access and a deployment with an isolated apps domain. Extend
+`web.response/html-ok-response` and bind its `:body` to the HTML string below.
+Open **⋯ → Apps**, choose a unique subdomain label and click **+ Add app**.
+This ordinary app route provides the organization's isolated host; the lesson
+records its exact UUID for cleanup. Then close Apps and choose **⋯ → HTTP →
+Preview HTML handler → Open HTML preview**. The preview captures the exact
+current branch and starts no background service. **Finish** removes the
+lesson's app route before removing its handler and branch.
+
+```html
+<!doctype html><html><head><meta name="htmx-config" content='{"selfRequestsOnly":false,"withCredentials":false,"allowEval":false}'><script src="assets/htmx.min.js"></script></head><body><button hx-get="fragment" hx-select="#fragment" hx-target="#out">Refresh</button><div id="out"><p id="fragment">First fragment</p></div></body></html>
+```
+
+Keep the preview tab open. Edit only `First fragment` to `Second fragment`
+in the graph's saved body. In the preview tab click **Refresh**: htmx makes
+an HTTPS request to `fragment`, selects `#fragment` from the response and
+replaces `#out`, without a page reload. The full page remains in the response
+so opening a fresh preview still gives you the same working button. A handler
+can instead branch on `request.uri` and return just the requested fragment;
+the regular route example below shows that separation.
+
+The preview link expires after **two minutes**. If it is denied, return to
+the same graph's **HTTP** popover, click **Preview HTML handler** again and
+open the new link. Close the expired tab and continue with the new one;
+you do not need to recreate the graph. Treat the URL as a temporary
+capability: do not share or log it. Deleting its captured branch denies
+requests; it never falls back to main.
+
+The sandbox has an opaque origin and cannot read editor or app cookies.
+Only the relative vendored `assets/htmx.min.js` script is available. The
+explicit htmx configuration permits its cross-origin sandbox request without
+credentials or evaluated expressions. Requests stay inside that capsule;
+external scripts, redirects, response cookies and streaming responses are
+not allowed. Existing app routes below support the wider page/stream
+examples on a configured app origin. On a self-hosted installation without
+an isolated apps domain, use such an independently configured origin; the
+temporary text/JSON host never serves HTML on the editor origin.
+
 ## Try it: a server clock
 
 Three fn-defs. First the fragment — the current server time,

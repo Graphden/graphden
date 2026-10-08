@@ -11,128 +11,122 @@ message's shape as a contract in the graph.
 as swappable backend slots, visibility timeout, retry, dead letter,
 the `NOTIFY` wake.
 
-**You need**: lesson 35 (services) and lesson 38 (two services
-talking over HTTP) — this lesson is the asynchronous counterpart.
+**You need:** permission to manage persistent services, a self-hosted or dedicated
+executor, and an available service slot. A shared cloud plan can publish queue
+messages but cannot start this consumer. Lesson 35's temporary HTTP publication
+does not grant background-process permission or service quota.
 
 ## Why a queue, and why Postgres
 
-In lesson 38 the consumer *called* the producer and waited. That is
-right for a question that needs an answer now. For "an order was
-placed, ship it eventually" it is wrong: if shipping is slow or down,
-ordering should not fail. A queue decouples the two — the producer
-drops a message and moves on; the consumer takes it when it can.
+An HTTP caller waits for a response. A queue lets a producer hand work to a
+consumer that runs independently. Graphden stores messages in PostgreSQL:
+`FOR UPDATE SKIP LOCKED` claims a due row, a visibility deadline releases the
+claim if its worker dies, and failed handling retries before reaching the
+`dead` state. A `NOTIFY` wakes an idle consumer. There is no separate broker.
 
-Graphden's queue is a Postgres table, not a broker. It has the shape
-every Postgres job queue converges on: a message is *claimed* with
-`FOR UPDATE SKIP LOCKED` (two workers never take the same row), the
-claim holds a **visibility timeout** (a worker that dies mid-way
-loses its claim and the message comes back), a failed handler
-**retries** after a delay, and after a bounded number of attempts the
-message is parked as **dead** with the error kept. A `NOTIFY` wakes an
-idle consumer the moment something is published, so nothing polls
-hot. No second service to install, and on the cloud a tenant sees only
-its own messages like any other row.
+Message delivery is at least once. Make effects idempotent: a worker can perform
+an effect and die before acknowledging the message.
 
-## Try it
+## Try it: publish, fail, requeue, repair, acknowledge
 
-1. **A producer.** Add:
+Choose a fresh queue name such as `tutorial-39-<fresh UUID>` and use that exact
+text in both definitions below. Queue messages and service rows are not
+versioned graph data; deleting the lesson branch does not remove them.
 
-   ```edn
-   {:name :order-placed :parent :queue-publish
-    :args {:queue "orders" :delay-ms 0}}
-   ```
+1. Extend `queue-publish` as `tutorial-queue-publish`. Bind `:queue` to the new
+   queue name and `:delay-ms` to `0`. Leave `:payload` free.
+2. **Run** it with payload `"sample"`, with **Save to history** enabled. Record
+   the execution ID and the returned message UUID. Operate → Queues now shows
+   one pending message on this queue. Publishing alone does not run a consumer.
+3. Extend `parse-json` as `tutorial-queue-handler`. Bind `:string` to the text
+   `not JSON` and leave the inherited `:keywordize` default unchanged. This deliberately failing handler has
+   no free arguments; it ignores the supplied message and demonstrates failure
+   and acknowledgement without an external side effect.
+4. Extend `pg-queue-consumer` as `tutorial-queue-worker`. Bind `:queue` to the
+   same unique name, and bind its callable `:handler` slot to
+   `tutorial-queue-handler`.
+5. Open **⋯ → Service settings** on the worker. Select the lesson's exact branch,
+   keep **Enabled** on and use **singleton**. Choose **Create & reconcile**.
+   Record this service's UUID. Verify that its running instance appears; a
+   saved desired-state row alone is not proof that the worker started.
+6. Reopen Operate → Queues as it works. Each failed claim increments attempts.
+   With the production defaults, retries wait five seconds; after five attempts
+   the exact message is **dead** with its error recorded. This can take longer
+   on a busy executor. Do not republish while waiting.
+7. Disable this worker through its Service settings and **Save & reconcile**.
+   Verify its running instance disappears before continuing.
+8. In Operate → Queues, find this unique queue's dead message and choose
+   **Requeue**. The same UUID becomes pending, with attempts reset to zero and
+   the error cleared. It remains pending while the consumer is stopped.
+9. Edit `tutorial-queue-handler`'s own `:string` literal to `{}`. Enable the
+   existing worker again on the same branch. The corrected graph returns
+   successfully, so the consumer ACKs the message: that exact message row
+   disappears. Inspect its handling execution to distinguish success from a
+   manual deletion.
+10. Disable the recorded service UUID and verify that no registered running
+    instance remains, then **Delete service**. Remove any remaining message by its recorded UUID. Only
+    then delete the lesson functions or branch.
 
-   `:payload` stays free. ▶ on `:order-placed`, enter
-   `{"sku": "A-1", "qty": 2}` as the payload, run. The result is the
-   message id. `GET /api/entities/queue-message` lists one row:
-   `queue: orders`, `state: pending`, `attempts: 0`.
+The ordinary graph for this exercise is:
 
-2. **A handler and a consumer.** The handler here forwards the order
-   to a second queue — a second service would take it from there:
+```edn
+{:name :tutorial-queue-publish :parent :queue-publish
+ :args {:queue "tutorial-39-<fresh UUID>" :delay-ms 0}}
 
-   ```edn
-   {:name :_order-payload :parent :get
-    :args {:coll {:as :message} :key {:value :payload} :default nil}}
+{:name :tutorial-queue-handler :parent :parse-json
+ :args {:string "not JSON"}}
 
-   {:name :ship-order :parent :queue-publish
-    :args {:queue "shipping" :payload :_order-payload :delay-ms 0}}
+{:name :tutorial-queue-worker :parent :pg-queue-consumer
+ :args {:queue "tutorial-39-<fresh UUID>" :handler :tutorial-queue-handler}}
+```
 
-   {:name :orders-worker :parent :pg-queue-consumer
-    :args {:queue "orders" :handler :ship-order}}
-   ```
+The handler's literal is an own binding, so editing it does not change a shared
+ancestor. The worker's callable reference stays fixed through repair. A real
+handler can instead expose a `:message` input receiving
+`{id, queue, payload, attempts, trace-id, parent-execution-id}` and read its
+payload through ordinary graph composition.
 
-   A handler is any fn with a `message` free arg; it receives
-   `{id, queue, payload, attempts}`. `:orders-worker` has no free args
-   and inherits `:process` from `:future`, so it is service-eligible.
+If a publish response is lost, do not blindly run it again: it may already have
+queued a message. Stop the known worker before recovery. A known persisted
+execution ID can recover its result and exact message UUID. An unidentified
+attempt remains unresolved; neither a matching function name nor the latest
+queue row proves which message it created. Do not delete messages or services
+by a shared name, and do not claim branch deletion cleans up either kind.
 
-3. **Run the consumer.** `⚙` on `:orders-worker` → "Make service" →
-   *Create & reconcile* (lesson 35). Within a second the pending
-   order is gone from `orders` and a row appeared on `shipping` with
-   the same payload — the worker took the message, ran the handler,
-   and acked it (an ack deletes the row).
-
-4. **Publish while it runs.** ▶ `:order-placed` again. The worker was
-   waiting on the `NOTIFY` bus; the message is handled at once, not on
-   the next poll.
-
-5. **Break the handler.** Add a consumer whose handler throws on the
-   payload — parsing a non-JSON string does:
-
-   ```edn
-   {:name :_raw-payload :parent :to-str :args {:value :_order-payload}}
-
-   {:name :parse-order :parent :parse-json
-    :args {:string :_raw-payload :keywordize true}}
-
-   {:name :strict-worker :parent :pg-queue-consumer
-    :args {:queue "strict" :handler :parse-order}}
-   ```
-
-   Make `:strict-worker` a service, then publish `"not json"` on
-   `strict` (a derived `:queue-publish` with `:queue "strict"`, or
-   `:order-placed` with the queue rebound). Watch the row: `attempts`
-   climbs by one every five seconds (the default retry delay) and
-   `error` carries the parser's message; after the fifth attempt
-   `state` is `dead` and the worker leaves it alone. Fix the handler,
-   then open **Organization → Queues**: every queue with its pending /
-   in-flight / dead counts, and the dead letter with its error — *Requeue* puts it back
-   (`:queue-requeue`: pending, attempts 0, error cleared) and it is
-   handled; *Delete* drops it.
-
-6. **Follow a message across the queue.** Run `:order-placed` from the
-   Run pane (a persisted run has an identity — lesson 38) and open the
-   run: under *Downstream calls* sits the worker's handling of that
-   very message — a child execution of your run, with the message as
-   its argument. `:queue-publish` stamps the publisher's trace on the
-   row, and the consumer runs its handler through `:call-traced`, so
-   the call tree continues past the queue exactly as it does past a
-   socket.
-
-7. Delete both services and the queue rows when you are done.
+The consumer records traced handling executions. A message published by a
+persisted Run carries that run's trace identity, so its successful or failed
+handling appears under **Downstream calls**. This is an actual background
+worker, unlike lesson 35's finite request handler.
 
 ## The knobs, and the backend
 
-The defaults live on three private fn-defs: `:_pg-queue-take` (batches
-of 10, a 30 s visibility timeout, a 5 s wait on an empty queue),
-`:_pg-queue-nack` (retry after 5 s, dead after 5 attempts) and
-`:_pg-queue-extend` (renews the 30 s claim; the consumer beats it every
-`:lease-every-ms` = 10 s while your handler runs, so a slow handler
-keeps its message). To change them, derive your own and bind them on
-your consumer:
+`pg-queue-consumer` binds its backend references to private definitions:
+batches of 10, a 30-second visibility timeout, a five-second empty wait,
+a five-second retry delay, and five attempts. Its ancestor `queue-consumer`
+also sets a ten-second heartbeat period.
+
+Those inherited bound references cannot be replaced by adding a binding on an
+intermediate child. To choose different backend parameters, derive the earlier
+`queue-consumer` ancestor, where `:take`, `:ack`, `:nack`, and `:extend` remain
+open, and supply ordinary configured callables:
 
 ```edn
-{:name :_fast-nack :parent :queue-nack :args {:retry-ms 500 :max-attempts 3}}
+{:name :orders-take :parent :queue-take
+ :args {:queue "orders" :batch 10 :visibility-ms 30000 :wait-ms 5000}}
+{:name :orders-nack :parent :queue-nack
+ :args {:retry-ms 500 :max-attempts 3}}
+{:name :orders-extend :parent :queue-extend
+ :args {:visibility-ms 30000}}
 
-{:name :orders-worker :parent :pg-queue-consumer
- :args {:queue "orders" :handler :ship-order :nack :_fast-nack}}
+{:name :orders-worker :parent :queue-consumer
+ :args {:take :orders-take :ack :queue-ack :nack :orders-nack
+        :extend :orders-extend :handler :ship-order}}
 ```
 
-That works because `:take`, `:ack`, `:nack` and `:extend` are
-*fn-typed slots* of `:queue-consumer` — the loop, the try/ack/nack,
-the lease heartbeat and the handler call are graph composition that
-does not know what a queue is. A broker package (Kafka, NATS) would
-bind its own primitives to the same slots; your consumers, handlers
-and contracts would not change.
+The loop, try/ack/nack, heartbeat, and handler call are graph composition. A
+broker package can supply different backend primitives to those same open
+callable slots. A backend without leases derives `queue-consumer-leaseless`,
+which supplies its existing no-op extension callable.
 
 ## The contract lives in the graph
 
@@ -152,8 +146,9 @@ sides reference:
  :args {:coll {:as :message} :key {:value :payload} :default nil}}
 ```
 
-Change `:order-shape` and the type-checker reports the side that no
-longer fits at write time.
+After changing `:order-shape`, inspect the affected compositions' type
+diagnostics. Shared types expose incompatible producer or consumer shapes;
+this does not promise that every editing endpoint rejects an incomplete graph.
 
 ## What we glossed over
 

@@ -444,6 +444,11 @@ async function clickTourAdvance(page, label, timeoutMs) {
 
 
 async function filterAndSelect(page, filterText, fnName) {
+  const branch = new URL(page.url()).searchParams.get('branch');
+  await page.waitForFunction(expected => typeof graphData !== 'undefined'
+    && Array.isArray(graphData?.fns)
+    && (new URL(location.href).searchParams.get('branch') || null) === expected,
+  branch, {timeout: 30000, polling: 100});
   await page.fill('input[placeholder="Filter..."]', filterText);
   // The filter is debounced and server-side; wait for the row to actually
   // be in the tree rather than for a fixed slice of time. Same observable

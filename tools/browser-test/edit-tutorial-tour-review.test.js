@@ -124,6 +124,9 @@ const {
     await page.fill(thread + ' .branch-comment-input', 'Please keep this value explicit.');
     await page.click(thread + ' .branch-comment-send');
     await waitTourTitle(page, 'Answer in the same thread', 150000);
+    // Posting reloads the thread without its composer; reopen it through
+    // the same function's ordinary comment action before answering.
+    await page.click('#gd-diff-insp .gd-diff-insp-head .branch-diff-comment-btn');
     await page.fill(thread + ' .branch-comment-input', 'It stays at 2 in this proposal.');
     await page.click(thread + ' .branch-comment-send');
     await waitTourTitle(page, 'Return to approval', 150000);

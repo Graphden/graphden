@@ -133,15 +133,22 @@
    sibling's `:fn` write may have moved a `:branch-local?` flag or a
    parent edge, which this pod's per-storage `effective-branch-local?`
    cache would otherwise keep — dropped on every event (a lazy re-walk)."
-  [ctx id branch-id]
+  [ctx id branch-id own-event?]
   (some-> (:storage ctx) vs/unwrap bl/invalidate!)
   (let [seeds (when-not (str/blank? id) [(java.util.UUID/fromString id)])
         router (br/current-router)
         branch-uuid (when-not (str/blank? branch-id)
                       (java.util.UUID/fromString branch-id))]
     (if (and router branch-uuid)
-      (do (br/invalidate-cached-branch! router branch-uuid seeds)
-          (br/invalidate-affected-ctxs! router branch-uuid seeds))
+      (do
+        ;; Both CRUD and merge invalidate the written branch before emitting.
+        ;; LISTEN may deliver that echo during a later execution: invalidating
+        ;; the same current snapshot again would spuriously veto its result.
+        ;; Keep descendant propagation: merge relies on this notification to
+        ;; reach cached inheriting branches. Unscoped events still fail closed.
+        (when-not own-event?
+          (br/invalidate-cached-branch! router branch-uuid seeds))
+        (br/invalidate-affected-ctxs! router branch-uuid seeds))
       (if seeds
         (exec-ctx/invalidate-graph-cache! ctx seeds)
         (exec-ctx/invalidate-graph-cache! ctx)))))
@@ -201,7 +208,8 @@
         ;; other reconcile trigger) — the periodic tick reconverges instead.
         :service   (reconcile! ctx recon/running {:max-retries 0 :backoff-ms 0})
         :fn        (when (= op :invalidate)
-                     (invalidate-from-notify! ctx id branch-id)
+                     (invalidate-from-notify! ctx id branch-id
+                                              (pg-notify/own-event? (:notify-emitter ctx) event))
                      ;; Dropping the ctx cache does NOT rebuild an already-
                      ;; running cron/loop closure — restart the services that
                      ;; depend on the changed fn on this pod (mirrors the local

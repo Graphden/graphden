@@ -6,16 +6,21 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.crud.entities :as entities]
+    [graphden.crud.fn-execution :as execution]
     [graphden.editor.theme :as theme]
     [graphden.executor.compile-runtime :as runtime]
+    [graphden.executor.context :as context]
     [graphden.packages.records :as records]
     [graphden.packages.sync :as pkg-sync]
+    [graphden.storage.postgres.notify :as notify]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as router]
+    [graphden.system.init.services]
     [graphden.test-infra.golden-app :as ga]
     [graphden.test-infra.impls :as impls]
     [graphden.types.diagnostics :as diagnostics]
-    [graphden.versioning.storage.core :as vs]))
+    [graphden.versioning.storage.core :as vs]
+    [integrant.core :as ig]))
 
 
 (use-fixtures :once
@@ -206,3 +211,72 @@
       (is (every? nil? (map #(sp/read-entity storage :fn %) @own-ids)))
       (is (= @concurrent (sp/read-entity storage :fn (:id @concurrent))))
       (is (some? (sp/read-entity storage :ns (:namespace-id @concurrent)))))))
+
+
+(deftest delayed-write-notifications-preserve-theme-snapshot-guard
+  (binding [router/*active-router-override* (atom nil)
+            diagnostics/*diagnostics-override* (atom {})]
+    (let [events (atom [])
+          emitter-meta (meta (notify/make-emitter nil))
+          emitter (with-meta
+                    (fn [event]
+                      (swap! events conj
+                             (notify/parse-payload
+                               (notify/format-payload
+                                 (assoc event :emitter (::notify/emitter-id emitter-meta))))))
+                    emitter-meta)
+          ctx (assoc (:ctx ga/*bootstrap*) :notify-emitter emitter)
+          active (router/create-router ctx "_ui-theme-evaluate-handler")
+          listener {:callbacks (atom #{})}
+          component (ig/init-key :exec/service-reconciler
+                                 {:context ctx :packages {:seeded-services []}
+                                  :notify-listener listener
+                                  :reconcile-fn (fn [& _] nil)
+                                  :stop-all-fn (fn [& _] nil)})
+          handle (:notify-callback component)
+          apply-execute execution/apply-execute]
+      (router/set-active-router! active)
+      (try
+        (binding [ga/*bootstrap* (assoc ga/*bootstrap* :ctx ctx)]
+          (let [created (create-theme {:namespace-id nil :owner "anonymous"})
+                id (records/fn-id (get-in created [:body :namespace]) :theme)
+                input {:fn-id (str id) :org "public" :owner "anonymous"}]
+            (is (= 200 (:status created)))
+            ;; A real CRUD mutation performs local invalidation before its
+            ;; event enters the delayed transport. Replaying that event must
+            ;; not invalidate a later, already-current theme evaluation.
+            (entities/update-entity "fn" id {:description "updated theme"} ctx)
+            (let [event (last @events)
+                  child (vs/create-branch! (:storage ctx) "theme-notify-child")
+                  child-ctx (router/ctx-for active (:id child))
+                  child-before (context/invalidation-epoch child-ctx)
+                  before (context/invalidation-epoch ctx)]
+              (is (notify/own-event? emitter event))
+              (with-redefs [execution/apply-execute
+                            (fn [& args]
+                              (let [result (apply apply-execute args)]
+                                (handle event)
+                                result))]
+                (is (:ok (theme/evaluate ctx input))))
+              (is (= before (context/invalidation-epoch ctx)))
+              (is (< child-before (context/invalidation-epoch child-ctx))
+                  "own echoes still propagate to cached inheriting branches")
+              ;; Foreign and older emitters still invalidate the result.
+              (doseq [external [(assoc event :emitter (str (random-uuid)))
+                                (dissoc event :emitter)]]
+                (with-redefs [execution/apply-execute
+                              (fn [& args]
+                                (let [result (apply apply-execute args)]
+                                  (handle external)
+                                  result))]
+                  (is (= "graph-changed" (:code (theme/evaluate ctx input)))))))
+            ;; A genuine local mutation after execution still discards the
+            ;; result even though its future notification is an own echo.
+            (with-redefs [execution/apply-execute
+                          (fn [& args]
+                            (let [result (apply apply-execute args)]
+                              (entities/update-entity "fn" id {:description "later write"} ctx)
+                              result))]
+              (is (= "graph-changed" (:code (theme/evaluate ctx input)))))))
+        (finally
+          (ig/halt-key! :exec/service-reconciler component))))))

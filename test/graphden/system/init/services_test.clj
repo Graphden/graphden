@@ -97,3 +97,39 @@
                   (fn [_ctx _running seeds _branch] (swap! calls conj [:depending seeds]))]
       (inval/invalidate! {} ::storage :binding {:id (random-uuid)})
       (is (= [[:on-branch b]] @calls)))))
+
+
+(deftest own-notify-skips-only-the-written-cached-branch-test
+  (let [calls (atom [])
+        mine (pg-notify/make-emitter nil)
+        branch (random-uuid)
+        event {:kind :fn :op :invalidate :id (str (random-uuid))
+               :branch-id (str branch)
+               :emitter (-> mine meta ::pg-notify/emitter-id)}
+        handle (on-notify {:notify-emitter mine} (fn [& _] nil))]
+    (with-redefs [br/current-router (constantly ::router)
+                  br/invalidate-cached-branch!
+                  (fn [_ id _] (swap! calls conj [:target id]))
+                  br/invalidate-affected-ctxs!
+                  (fn [_ id _] (swap! calls conj [:descendants id]))
+                  exec-ctx/invalidate-graph-cache!
+                  (fn [& _] (swap! calls conj :fallback))
+                  recon/restart-services-depending-on! (fn [& _] nil)]
+      (testing "an own event retains the descendant fanout"
+        (handle event)
+        (is (= [[:descendants branch]] @calls)))
+      (testing "a foreign or unstamped event still invalidates its target"
+        (doseq [external [(assoc event :emitter (str (random-uuid)))
+                          (dissoc event :emitter)]]
+          (reset! calls [])
+          (handle external)
+          (is (= [[:target branch] [:descendants branch]] @calls))))
+      (testing "an own event without a branch remains conservative"
+        (reset! calls [])
+        (handle (dissoc event :branch-id))
+        (is (= [:fallback] @calls)))
+      (testing "an own event without a router remains conservative"
+        (reset! calls [])
+        (with-redefs [br/current-router (constantly nil)]
+          (handle event))
+        (is (= [:fallback] @calls))))))

@@ -100,12 +100,16 @@ function _tourCheckPasses(check) {
       }
       case 'fn-sibling-variation': {
         const target = _tourFindFn(check.name);
-        const source = _tourFindFn(check.source);
         const parentIds = target?.['parent-ids'] || [];
-        if (!source || parentIds.length !== 1 || parentIds[0] === source.id) return false;
+        if (parentIds.length !== 1) return false;
         const copy = lookups?.fnMap?.get(parentIds[0]);
         const created = typeof _tourState !== 'undefined'
           && _tourState?.created?.find(row => row.id === parentIds[0]);
+        const verified = created?.['verified-source'];
+        const source = _tourFindFn(check.source) || (verified?.id === created?.['source-fn-id']
+          && verified?.name === check.source
+          && created?.['verified-source-branch'] === _tourSessionBranch() ? verified : null);
+        if (!source || parentIds[0] === source.id) return false;
         return !!copy && !!created && copy.name === check.variation
           && copy['namespace-id'] === target['namespace-id']
           && created['namespace-id'] === copy['namespace-id']

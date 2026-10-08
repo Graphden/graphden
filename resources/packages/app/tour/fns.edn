@@ -725,7 +725,7 @@
               {:title "Go to the source"
                :body "On the tutorial-cut ancestor row, click [[⋯]], [[Inheritance…]], then [[Go to source]]. This opens the exact source function — the seal is lifted where it was set."
                :target ".node-overlay[data-fn-name=\"tutorial-cut-more\"] .ancestor-line[data-level=\"1\"] button.more-actions-trigger"
-               :targets [".row-actions-popover [data-action=\"inheritance-intent\"]" ".inheritance-intent-popover [data-action=\"inheritance-source\"]"]
+               :targets [".node-overlay[data-fn-name=\"tutorial-cut-more\"] .ancestor-line[data-level=\"1\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"inheritance-intent\"]" ".inheritance-intent-popover [data-action=\"inheritance-source\"]"]
                :check {:kind "selected" :name "tutorial-cut"}}
               {:title "Require it instead"
                :body "Click the [[🔒]] after end: untick [[Seal against descendants]], tick [[Require it here]], then [[Save]]. From tutorial-cut down, :end must be supplied — a one-way ratchet no descendant can loosen."
@@ -743,7 +743,7 @@
               {:title "Seal the source again"
                :body "On the tutorial-cut ancestor row: [[⋯]] → [[Inheritance…]] → [[Go to source]]. Tick [[Seal against descendants]] for :end and [[Save]]. Keep [[Require it here]] unchanged. This time we will preserve the source."
                :target ".node-overlay[data-fn-name=\"tutorial-cut-more\"] .ancestor-line[data-level=\"1\"] button.more-actions-trigger"
-               :targets [".row-actions-popover [data-action=\"inheritance-intent\"]" ".inheritance-intent-popover [data-action=\"inheritance-source\"]" ".edge-label-overlay[data-arg-name=\"end\"] .seal-badge" ".arg-value-edit-popover"]
+               :targets [".node-overlay[data-fn-name=\"tutorial-cut-more\"] .ancestor-line[data-level=\"1\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"inheritance-intent\"]" ".inheritance-intent-popover [data-action=\"inheritance-source\"]" ".edge-label-overlay[data-arg-name=\"end\"] .seal-badge" ".arg-value-edit-popover"]
                :check {:kind "binding-flag" :name "tutorial-cut" :slot "end" :field "terminal" :value true}}
               {:title "Return to the child"
                :body "Open `tutorial-cut-more`. :end is locked again, because its parent remains sealed."
@@ -752,7 +752,7 @@
               {:title "Create a variation for the child"
                :body "On the tutorial-cut ancestor row: [[⋯]] → [[Inheritance…]]. Set [[Variation name]] to `_tutorial-cut-local`, then [[Create variation for tutorial-cut-more]]. This changes tutorial-cut-more for all its consumers in this branch; tutorial-cut and its other children stay unchanged. The new source opens."
                :target ".node-overlay[data-fn-name=\"tutorial-cut-more\"] .ancestor-line[data-level=\"1\"] button.more-actions-trigger"
-               :targets [".row-actions-popover [data-action=\"inheritance-intent\"]" ".inheritance-intent-popover"]
+               :targets [".node-overlay[data-fn-name=\"tutorial-cut-more\"] .ancestor-line[data-level=\"1\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"inheritance-intent\"]" ".inheritance-intent-popover"]
                :check {:kind "fn-sibling-variation" :name "tutorial-cut-more" :source "tutorial-cut" :variation "_tutorial-cut-local"}
                :creates {:type "fn" :name "_tutorial-cut-local"}}
               {:title "Lift only the copied seal"

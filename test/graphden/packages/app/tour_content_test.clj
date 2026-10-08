@@ -26,7 +26,7 @@
   "Every `:check :kind` `_tourCheckPasses` implements. `manual` is the
    reader's own Next button — no predicate."
   #{"manual" "fn-exists" "fn-parent" "ns-exists" "binding-bound" "binding-value"
-    "bindings-count" "list-items" "selected" "on-branch" "arg-named" "expanded"
+    "binding-flag" "fn-sibling-variation" "bindings-count" "list-items" "selected" "on-branch" "arg-named" "expanded"
     "dom" "dom-absent" "input-value" "result-value" "binding-absent" "list-first" "list-values" "fn-field"})
 
 
@@ -141,6 +141,14 @@
         "fn-parent"
         (is (and (some? (get-in s [:check :name])) (some? (get-in s [:check :parent])))
             (str "lesson " (:id l) " / “" (:title s) "”: fn-parent needs :name + :parent"))
+        "fn-sibling-variation"
+        (is (every? #(not (str/blank? (get-in s [:check %]))) [:name :source :variation])
+            (str "lesson " (:id l) " / “" (:title s) "”: fn-sibling-variation needs :name + :source + :variation"))
+        "binding-flag"
+        (is (and (some? (get-in s [:check :name])) (some? (get-in s [:check :slot]))
+                 (contains? #{"terminal" "list-closed" "required" "list-append"} (get-in s [:check :field]))
+                 (boolean? (get-in s [:check :value])))
+            (str "lesson " (:id l) " / “" (:title s) "”: binding-flag needs :name + :slot + supported :field + boolean :value"))
         ("binding-bound" "binding-value")
         (is (and (some? (get-in s [:check :name])) (some? (get-in s [:check :slot])))
             (str "lesson " (:id l) " / “" (:title s) "”: " kind " needs :name + :slot"))

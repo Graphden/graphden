@@ -44,9 +44,9 @@
    :why
    "A WARM full clear: a compiled registry was dropped because a write could not say what it changed, and the next request pays a whole-graph compile (~5 s at 6.5k fns; 49.8 s measured in 2026-07). Since 2026-09-10 the counter is warm-only (the cold no-ops are :registry/invalidate-cold, reported as trend) and every event carries an attribution note (frames + write shape, perf/runs/unit.edn). The unit suite's product path — crud.entities/invalidate! — produces ZERO; the 5 are tests calling the 1-arity on purpose (entities-test, fn-execution-test, compile-runtime-test) plus the shared-container fixture. A sixth is a write whose affected-fn-ids answered nil on a warm ctx — read the note, name the shape in affected-fn-ids."},
   :registry/delta-read-graph
-  {:max 39,
+  {:max 41,
    :why
-   "A delta recompile, type-registry refresh, or first dependent-diagnostic refresh in a cold context reading the WHOLE graph out of Postgres instead of using an in-memory snapshot. This run observed 34 after 12 additional cold-context fallback reads; max 39 leaves five counts of headroom. Warm contexts must not add reads: an unsharded cold read primes the graph cache, and warmed writes use the compile dependency index. Sharded (:executor-orgs) contexts read only their scoped graph. On the cloud, an unprimed graph read was 1.7 s of a 1.85 s merge and ran on EVERY write (2026-09-03)."}},
+   "A delta recompile, type-registry refresh, or first dependent-diagnostic refresh in a cold context reading the WHOLE graph out of Postgres instead of using an in-memory snapshot. The prior suite observed 37; registry-receipts-test adds two cold sibling-context fills across its repeated lifecycle, and view-save-test adds two fresh-context fills (focused counts: 2 each). Max 41 accounts for those four additional test contexts, not extra reads on warm writes. The Save view test pins one first-save read, including four new identity adapters, and zero further reads for update and legacy upgrade. Warm contexts must not add reads: an unsharded cold read primes the graph cache, and warmed writes use the compile dependency index. Sharded (:executor-orgs) contexts read only their scoped graph. On the cloud, an unprimed graph read was 1.7 s of a 1.85 s merge and ran on EVERY write (2026-09-03)."}},
  :perf
  {:sidebar/tree-kinds-computed
   {:max 1,

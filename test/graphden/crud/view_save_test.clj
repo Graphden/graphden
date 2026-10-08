@@ -15,6 +15,7 @@
     [graphden.storage.graph-writer :as writer]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.tx :as tx]
+    [graphden.util.counters :as counters]
     [graphden.versioning.storage.core :as vs]
     [next.jdbc :as jdbc]))
 
@@ -132,10 +133,15 @@
             _ (setup/bind-value! storage (:id view-b) (:name slots) "save")
             filters {:uses [(:id a) (:id b)] :views [(:id view-a) (:id view-b)]
                      :problems ["type-errors" "failed"]}
+            before-cold-save (counters/snapshot)
             result (save! ctx {:name "saved-view" :filters filters})
+            after-cold-save (counters/snapshot)
             saved-id (get-in result [:view :id])
             helpers (adapters storage)]
         (is (true? (:committed result)))
+        ;; Publishing a view and its four adapters fills this new context's
+        ;; graph cache once. Later writes must reuse and splice that snapshot.
+        (is (= 1 (get (counters/delta-since before-cold-save) :registry/delta-read-graph 0)))
         (is (= 4 (count helpers)))
         (is (= (read-views/normalise-filters filters)
                (read-views/normalise-filters (get-in result [:view :filters]))))
@@ -154,7 +160,9 @@
           (is (= #{(:id a) (:id b)} (set (get-in upgraded [:view :filters :uses]))))
           (is (nil? (sp/read-entity storage :binding (:id old-binding))))
           (is (= (:fn-ref setup/primitive-fn-ids)
-                 (:type-fn-id (sp/read-entity storage :slot (:uses slots))))))))))
+                 (:type-fn-id (sp/read-entity storage :slot (:uses slots))))))
+        (is (zero? (get (counters/delta-since after-cold-save) :registry/delta-read-graph 0))
+            "Updating and upgrading views reuse the warm graph snapshot")))))
 
 
 (deftest a-late-list-item-failure-rolls-back-the-whole-view-and-history

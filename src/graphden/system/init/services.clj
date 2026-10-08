@@ -133,7 +133,7 @@
    sibling's `:fn` write may have moved a `:branch-local?` flag or a
    parent edge, which this pod's per-storage `effective-branch-local?`
    cache would otherwise keep — dropped on every event (a lazy re-walk)."
-  [ctx id branch-id own-event?]
+  [ctx id branch-id applied-locally?]
   (some-> (:storage ctx) vs/unwrap bl/invalidate!)
   (let [seeds (when-not (str/blank? id) [(java.util.UUID/fromString id)])
         router (br/current-router)
@@ -141,12 +141,13 @@
                       (java.util.UUID/fromString branch-id))]
     (if (and router branch-uuid)
       (do
-        ;; Both CRUD and merge invalidate the written branch before emitting.
+        ;; Successful CRUD and merge publication invalidate before emitting.
+        ;; Failed publication explicitly asks the echo to repair the origin.
         ;; LISTEN may deliver that echo during a later execution: invalidating
         ;; the same current snapshot again would spuriously veto its result.
         ;; Keep descendant propagation: merge relies on this notification to
         ;; reach cached inheriting branches. Unscoped events still fail closed.
-        (when-not own-event?
+        (when-not applied-locally?
           (br/invalidate-cached-branch! router branch-uuid seeds))
         (br/invalidate-affected-ctxs! router branch-uuid seeds))
       (if seeds
@@ -200,38 +201,40 @@
      the one running it. Every pod gets the event; at most one owns the
      future, the rest no-op."
   [ctx reconcile!]
-  (fn [{:keys [kind op id branch-id epochs] :as event}]
-    (try
-      (case kind
-        ;; Retry-free: a start failure isn't retried inline (which would sleep
-        ;; under `reconcile-monitor` and block the listener thread + every
-        ;; other reconcile trigger) — the periodic tick reconverges instead.
-        :service   (reconcile! ctx recon/running {:max-retries 0 :backoff-ms 0})
-        :fn        (when (= op :invalidate)
-                     (invalidate-from-notify! ctx id branch-id
-                                              (pg-notify/own-event? (:notify-emitter ctx) event))
-                     ;; Dropping the ctx cache does NOT rebuild an already-
-                     ;; running cron/loop closure — restart the services that
-                     ;; depend on the changed fn on this pod (mirrors the local
-                     ;; write hook, which only fired on the writer pod). NOT for
-                     ;; this pod's own echoed event: the local hook already
-                     ;; restarted them, and the echo bounced every affected
-                     ;; service a second time (once more per seed event).
-                     (when-not (pg-notify/own-event? (:notify-emitter ctx) event)
-                       (restart-notified-services! ctx id branch-id))
-                     ;; Delta applied — mark the writer's exact bump
-                     ;; values COVERED so the lazy epoch validation
-                     ;; doesn't heal over what this event just did.
-                     ;; Old-format events without epochs mark nothing:
-                     ;; the gap stays visible and costs one coarse
-                     ;; heal — safe, never wrong.
-                     (when (seq epochs)
-                       (br-epoch/note-graph-epoch-covered! (:storage ctx) epochs)))
-        :execution (when (and (= op :cancel) (not (str/blank? id)))
-                     (persist/cancel-local! (java.util.UUID/fromString id)))
-        nil)
-      (catch Exception e
-        (log/error e "NOTIFY dispatch threw" {:event event})))))
+  (fn [{:keys [kind op id branch-id epochs invalidate-origin?] :as event}]
+    (let [applied-locally? (and (pg-notify/own-event? (:notify-emitter ctx) event)
+                                (not invalidate-origin?))]
+      (try
+        (case kind
+          ;; Retry-free: a start failure isn't retried inline (which would sleep
+          ;; under `reconcile-monitor` and block the listener thread + every
+          ;; other reconcile trigger) — the periodic tick reconverges instead.
+          :service   (reconcile! ctx recon/running {:max-retries 0 :backoff-ms 0})
+          :fn        (when (= op :invalidate)
+                       (invalidate-from-notify! ctx id branch-id
+                                                applied-locally?)
+                       ;; Dropping the ctx cache does NOT rebuild an already-
+                       ;; running cron/loop closure — restart the services that
+                       ;; depend on the changed fn on this pod (mirrors the local
+                       ;; write hook, which only fired on the writer pod). NOT for
+                       ;; an already-applied own event: the local hook already
+                       ;; restarted them, and the echo bounced every affected
+                       ;; service a second time (once more per seed event).
+                       (when-not applied-locally?
+                         (restart-notified-services! ctx id branch-id))
+                       ;; Delta applied — mark the writer's exact bump
+                       ;; values COVERED so the lazy epoch validation
+                       ;; doesn't heal over what this event just did.
+                       ;; Old-format events without epochs mark nothing:
+                       ;; the gap stays visible and costs one coarse
+                       ;; heal — safe, never wrong.
+                       (when (seq epochs)
+                         (br-epoch/note-graph-epoch-covered! (:storage ctx) epochs)))
+          :execution (when (and (= op :cancel) (not (str/blank? id)))
+                       (persist/cancel-local! (java.util.UUID/fromString id)))
+          nil)
+        (catch Exception e
+          (log/error e "NOTIFY dispatch threw" {:event event}))))))
 
 
 (defn- start-reconcile-ticker!

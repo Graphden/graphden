@@ -36,7 +36,8 @@
    Further optional `|`-slots: `<org>` (SSE fan-out), `<epochs>` (graph-epoch
    coverage) and `<emitter>` — the id of the emitter that sent it
    (`make-emitter`), so a pod can recognise its OWN events: LISTEN delivers a
-   pod's notifications back to itself.
+   pod's notifications back to itself. A sixth slot, `1`, requests origin
+   invalidation too when the write committed but local publication failed.
 
    Callbacks pattern-match on `:kind` to opt in."
   (:require
@@ -75,7 +76,7 @@
   (when (string? payload)
     (let [parts (str/split payload #":" 3)]
       (when (= 3 (count parts))
-        (let [[id branch-id org-id epochs emitter] (str/split (nth parts 2) #"\|" 5)]
+        (let [[id branch-id org-id epochs emitter invalidate-origin] (str/split (nth parts 2) #"\|" 6)]
           (cond-> {:kind (keyword (nth parts 0))
                    :op (keyword (nth parts 1))
                    :id (or id "")}
@@ -92,16 +93,22 @@
                                              (catch NumberFormatException _ nil)))
                                  (str/split epochs #",")))
             ;; 5th slot: the sending emitter's id (`make-emitter`).
-            (not (str/blank? emitter)) (assoc :emitter emitter)))))))
+            (not (str/blank? emitter)) (assoc :emitter emitter)
+            ;; A publication failure still emits to repair the origin. Older
+            ;; readers include this suffix in the emitter id, conservatively
+            ;; treating the event as foreign and applying it there too.
+            (not (str/blank? invalidate-origin)) (assoc :invalidate-origin? true)))))))
 
 
 (defn format-payload
   "Inverse of `parse-payload`. Later slots force earlier (possibly
    empty) ones to be present so the positions line up."
-  [{:keys [kind op id branch-id org-id epochs emitter]}]
+  [{:keys [kind op id branch-id org-id epochs emitter invalidate-origin?]}]
   (let [ep (when (seq epochs) (str/join "," epochs))]
     (str (name kind) ":" (name op) ":" (or id "")
          (cond
+           invalidate-origin? (str "|" (or branch-id "") "|" (or org-id "") "|" (or ep "")
+                                   "|" (or emitter "") "|1")
            emitter (str "|" (or branch-id "") "|" (or org-id "") "|" (or ep "") "|" emitter)
            ep (str "|" (or branch-id "") "|" (or org-id "") "|" ep)
            org-id (str "|" (or branch-id "") "|" org-id)

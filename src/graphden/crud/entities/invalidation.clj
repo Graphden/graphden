@@ -236,6 +236,9 @@
    before, invalidate only its base ctx and leave every cached branch
    serving stale closures.
 
+   Data carrying `:invalidate-origin? true` requests repair on the writer
+   too: its local invalidation failed after the transaction committed.
+
    Cheap on the write path: one `pg_notify` SQL against the main
    pool, per emitted event. Becomes a no-op when the ctx has no
    `:notify-emitter` (tests without PG)."
@@ -266,7 +269,8 @@
                     (cond-> {:kind :fn :op :invalidate :id id}
                       branch-id (assoc :branch-id branch-id)
                       org-id (assoc :org-id org-id)
-                      epochs (assoc :epochs epochs)))]
+                      epochs (assoc :epochs epochs)
+                      (:invalidate-origin? data) (assoc :invalidate-origin? true)))]
         ;; The same three-way answer the local path takes, because a pod receives
         ;; its OWN notify: an empty-id event means "full clear" to the listener,
         ;; so emitting one for a write that changed no closure would undo the

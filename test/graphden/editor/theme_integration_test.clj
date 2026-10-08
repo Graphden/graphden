@@ -6,7 +6,9 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.crud.entities :as entities]
+    [graphden.crud.entities.invalidation :as invalidation]
     [graphden.crud.fn-execution :as execution]
+    [graphden.crud.inheritance :as inheritance]
     [graphden.editor.theme :as theme]
     [graphden.executor.compile-runtime :as runtime]
     [graphden.executor.context :as context]
@@ -213,18 +215,24 @@
       (is (some? (sp/read-entity storage :ns (:namespace-id @concurrent)))))))
 
 
+(defn- buffered-emitter
+  "Capture the transport envelope so tests can deliver an echo after a write."
+  [events]
+  (let [emitter-meta (meta (notify/make-emitter nil))]
+    (with-meta
+      (fn [event]
+        (swap! events conj
+               (notify/parse-payload
+                 (notify/format-payload
+                   (assoc event :emitter (::notify/emitter-id emitter-meta))))))
+      emitter-meta)))
+
+
 (deftest delayed-write-notifications-preserve-theme-snapshot-guard
   (binding [router/*active-router-override* (atom nil)
             diagnostics/*diagnostics-override* (atom {})]
     (let [events (atom [])
-          emitter-meta (meta (notify/make-emitter nil))
-          emitter (with-meta
-                    (fn [event]
-                      (swap! events conj
-                             (notify/parse-payload
-                               (notify/format-payload
-                                 (assoc event :emitter (::notify/emitter-id emitter-meta))))))
-                    emitter-meta)
+          emitter (buffered-emitter events)
           ctx (assoc (:ctx ga/*bootstrap*) :notify-emitter emitter)
           active (router/create-router ctx "_ui-theme-evaluate-handler")
           listener {:callbacks (atom #{})}
@@ -278,5 +286,57 @@
                               (entities/update-entity "fn" id {:description "later write"} ctx)
                               result))]
               (is (= "graph-changed" (:code (theme/evaluate ctx input)))))))
+        (finally
+          (ig/halt-key! :exec/service-reconciler component))))))
+
+
+(deftest failed-inheritance-publication-is-repaired-by-its-own-echo
+  (binding [router/*active-router-override* (atom nil)
+            diagnostics/*diagnostics-override* (atom {})]
+    (let [events (atom [])
+          emitter (buffered-emitter events)
+          ctx (assoc (:ctx ga/*bootstrap*) :notify-emitter emitter)
+          active (router/create-router ctx "_ui-theme-evaluate-handler")
+          component (ig/init-key :exec/service-reconciler
+                                 {:context ctx :packages {:seeded-services []}
+                                  :notify-listener {:callbacks (atom #{})}
+                                  :reconcile-fn (fn [& _] nil)
+                                  :stop-all-fn (fn [& _] nil)})]
+      (router/set-active-router! active)
+      (try
+        (binding [ga/*bootstrap* (assoc ga/*bootstrap* :ctx ctx)]
+          (let [created (create-theme {:namespace-id nil :owner "anonymous"})
+                path (get-in created [:body :namespace])
+                accent (records/fn-id path :theme-accent-color)
+                canvas (records/fn-id path :theme-canvas-color)
+                namespace-id (:namespace-id (sp/read-entity (:storage ctx) :fn accent))
+                target (entities/create-entity "fn" {:name "notification-repair-target"
+                                                     :namespace-id namespace-id
+                                                     :parent-ids [accent]} ctx)
+                id (:id target)
+                preview (inheritance/preview ctx {:action "reparent" :kind "parent-edge"
+                                                  :target-fn-id id :parent-ids [canvas]})
+                command (assoc (:request preview) :expected-state (:expected-state preview)
+                               :accepted-orphan-binding-ids (:orphan-binding-ids preview))]
+            (is (= 200 (:status created)))
+            (is (:allowed preview))
+            (is (= "#2563eb" (runtime/execute ctx id {})))
+            (reset! events [])
+            ;; SQL commits, but the local publication fails before touching
+            ;; the compiled context. The delayed event must repair that exact
+            ;; target despite being stamped with this pod's own emitter id.
+            (let [result (with-redefs [invalidation/invalidate!
+                                       (fn [& _] (throw (ex-info "Local publication failed" {})))]
+                           (inheritance/apply! ctx command))
+                  event (first @events)]
+              (is (true? (:committed result)))
+              (is (= [:invalidate] (mapv :stage (:publication-warnings result))))
+              (is (= [canvas] (:parent-ids (sp/read-entity (:storage ctx) :fn id))))
+              (is (= "#2563eb" (runtime/execute ctx id {})))
+              (is (= 1 (count @events)))
+              (is (notify/own-event? emitter event))
+              (is (true? (:invalidate-origin? event)))
+              ((:notify-callback component) event)
+              (is (= "#f8fafc" (runtime/execute ctx id {}))))))
         (finally
           (ig/halt-key! :exec/service-reconciler component))))))

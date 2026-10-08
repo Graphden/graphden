@@ -107,6 +107,19 @@
         "the SQLException is swallowed, emit returns nil")))
 
 
+(deftest origin-repair-flag-roundtrips-and-older-readers-invalidate
+  (let [emitter (pg-notify/make-emitter nil)
+        event {:kind :fn :op :invalidate :id "fn-1" :branch-id "branch-1"
+               :emitter (-> emitter meta ::pg-notify/emitter-id)
+               :epochs [12 13] :invalidate-origin? true}
+        payload (pg-notify/format-payload event)
+        ;; The prior parser's fifth field consumed the rest of the payload.
+        legacy-emitter (nth (str/split (nth (str/split payload #":" 3) 2) #"\|" 5) 4)]
+    (is (= event (pg-notify/parse-payload payload)))
+    (is (= (str (:emitter event) "|1") legacy-emitter))
+    (is (false? (pg-notify/own-event? emitter (assoc event :emitter legacy-emitter))))))
+
+
 (deftest own-event-recognises-only-its-own-emitter
   (let [a (pg-notify/make-emitter nil)
         b (pg-notify/make-emitter nil)

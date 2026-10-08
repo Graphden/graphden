@@ -134,7 +134,7 @@ Reconstructs and checks the changed function, updating branch-specific diagnosti
 :CUSTOM_ID: crud/notify-after-write!
 :FILE: src/graphden/crud/entities/invalidation.clj
 :LINE: 219
-:MINS: 4.8
+:MINS: 5.0
 :END:
 
 Invalidates affected caches after a stored change and emits a PostgreSQL notification for other processes. The notification carries update information so their compiled functions can refresh.

@@ -140,9 +140,17 @@
         (doseq [row publication-rows]
           (publication-step! warnings :invalidate (:id row)
                              #(inval/invalidate! ctx storage :fn row)))
-        (doseq [row publication-rows]
-          (publication-step! warnings :notify (:id row)
-                             #(inval/notify-after-write! ctx storage :fn :write row)))
+        (let [failed-ids (into #{} (keep #(when (= :invalidate (:stage %)) (:fn-id %))) @warnings)]
+          (doseq [row publication-rows]
+            ;; A failed local publication must be repaired by its echo too.
+            ;; Another row can cover this request's bumps, so the epoch heal
+            ;; alone cannot replace this explicit retry on the origin.
+            (publication-step! warnings :notify (:id row)
+                               #(inval/notify-after-write!
+                                  ctx storage :fn :write
+                                  (cond-> row
+                                    (contains? failed-ids (:id row))
+                                    (assoc :invalidate-origin? true))))))
         (let [type-warnings (into []
                                   (keep (fn [row]
                                           (some-> (publication-step!

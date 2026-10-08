@@ -3,7 +3,7 @@
  :fns
  [{:name :parse-inheritance-command
    :description "Validate the wire action and exact UUID use-site; preserve action/kind strings for the editor graph."
-   :args {:body {:type :keyword-map :description "JSON command with UUID identities."}}
+   :args {:body {:type :jsonb :description "Wire JSON; command parsing validates the map and UUID identities."}}
    :return-type :keyword-map}
 
   {:name :preview-inheritance

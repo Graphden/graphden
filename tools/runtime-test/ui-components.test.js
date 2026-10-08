@@ -28,7 +28,7 @@ function fixture() {
       calls.push({entry, args}); return args;
     }}; }},
   };
-  vm.runInNewContext(source, {window, document: {addEventListener() {}}, graphdenCurrentOrg: 'org-a',
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../resources/packages/app/editor/editor-ui-policy.js'), 'utf8') + '\n' + source, {window, document: {addEventListener() {}}, graphdenCurrentOrg: 'org-a',
     Event, DOMException,
     setTimeout(callback, delay) { const id = ++timerId; timers.set(id, {callback, delay}); return id; },
     clearTimeout(id) { timers.delete(id); }});

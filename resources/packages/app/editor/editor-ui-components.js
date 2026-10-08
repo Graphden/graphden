@@ -32,20 +32,6 @@
       return evaluator.run(entry, argumentsForGraph);
     }};
   }
-  function waitForPolicy(signal) {
-    if (signal?.aborted) return Promise.reject(new DOMException('Selection changed', 'AbortError'));
-    return new Promise((resolve, reject) => {
-      const finish = aborted => {
-        clearTimeout(timer);
-        signal?.removeEventListener('abort', abort);
-        if (aborted) reject(new DOMException('Selection changed', 'AbortError'));
-        else resolve();
-      };
-      const abort = () => finish(true);
-      const timer = setTimeout(() => finish(false), 1000);
-      signal?.addEventListener('abort', abort, {once: true});
-    });
-  }
   async function loadPlan(component, chosen, started, signal) {
     for (let attempt = 0; attempt < 3; attempt++) {
       if (started !== stamp() || signal?.aborted) throw new DOMException('Selection changed', 'AbortError');
@@ -58,7 +44,7 @@
       if (started !== stamp() || signal?.aborted) throw new DOMException('Selection changed', 'AbortError');
       if (attempt < 2 && response.status === 422 && !response.ok && result.ok === false
         && result.code === 'policy-refresh-required' && result.retryable === true) {
-        await waitForPolicy(signal);
+        await window.gdWaitForGraphPolicy(signal);
         continue;
       }
       return {response, result};

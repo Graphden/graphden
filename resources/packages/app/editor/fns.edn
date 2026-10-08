@@ -62,6 +62,7 @@
                   ;; shortcut registry (the keymap pane re-registers keys).
                   "packages/app/editor/editor-marketplace.js"
                   "packages/app/editor/editor-theme.js"
+                  "packages/app/editor/editor-ui-policy.js"
                   "packages/app/editor/editor-theme-graph.js"
                   "packages/app/editor/editor-ui-component-catalog.js"
                   "packages/app/editor/editor-keymap.js"

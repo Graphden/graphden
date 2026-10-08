@@ -12,6 +12,8 @@ function fixture() {
   const requests = [];
   const applied = [];
   const writes = [];
+  const timers = new Map();
+  let timerId = 0;
   const window = {
     API: {api_ui_theme_evaluate: '/api/ui/theme/evaluate', api_ui_theme_create: '/api/ui/theme/create'},
     gdPrefsReady: true,
@@ -28,18 +30,138 @@ function fixture() {
     dispatchEvent() {},
     authFetch: (url, options) => new Promise((resolve) => requests.push({url, options, resolve})),
   };
-  const ctx = vm.createContext({window, Event, AbortController, setTimeout, clearTimeout,
+  const ctx = vm.createContext({window, Event, AbortController, DOMException,
+    setTimeout(callback, delay) { const id = ++timerId; timers.set(id, {callback, delay}); return id; },
+    clearTimeout(id) { timers.delete(id); },
     graphdenCurrentOrg: 'org-a', graphData: {namespaces: []},
     getCurrentBranchName: () => 'main', loadGraphData: async () => {}, isAuthenticated: () => false, accountsAuthed: false,
     openNamespacePicker: (options) => { window.namespacePicker = options; }});
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../../resources/packages/app/editor/editor-ui-policy.js'), 'utf8'), ctx);
   vm.runInContext(source, ctx);
   const selection = {graph: {'fn-id': '11111111-1111-1111-1111-111111111111', org: 'org-a', branch: 'theme'},
     payload: {tokens: {'--bg': '#111111'}}};
   const finish = (request, payload) => request.resolve({ok: true, json: async () => ({ok: true, payload})});
-  return {ctx, window, events, requests, applied, writes, selection, finish};
+  return {ctx, window, events, requests, applied, writes, selection, finish, timers,
+    refuse(index, body, status = 422) { requests[index].resolve({ok: false, status, json: async () => body}); },
+    async advance() {
+      assert.equal(timers.size, 1);
+      const [id, timer] = timers.entries().next().value;
+      assert.equal(timer.delay, 1000);
+      timers.delete(id); timer.callback();
+      await new Promise(setImmediate);
+    }};
 }
 
 (async () => {
+  const transient = {ok: false, reason: 'result-unavailable', code: 'graph-changed', retryable: true};
+  const settle = () => new Promise(setImmediate);
+  const fn = f => ({id: f.selection.graph['fn-id'], name: 'theme'});
+  {
+    const f = fixture();
+    const applying = f.window.gdApplyThemeGraphPreference(f.selection);
+    f.refuse(0, transient);
+    await settle();
+    assert.equal(f.applied.at(-1), f.selection.payload, 'reloading preserves saved colors during policy refresh');
+    assert.equal(f.writes.length, 0);
+    await f.advance();
+    const payload = {tokens: {'--bg': '#abcdef'}};
+    f.finish(f.requests[1], payload);
+    await applying;
+    assert.equal(f.applied.at(-1), payload);
+    assert.equal(f.writes.length, 1, 'only a recovered validated result updates saved colors');
+    assert.equal(f.requests.length, 2, 'saving the checked result does not re-evaluate');
+  }
+  {
+    const f = fixture();
+    const choosing = f.window.gdUseThemeGraph(fn(f));
+    f.refuse(0, transient);
+    await settle();
+    assert.equal(f.writes.length, 0, 'a rejected snapshot never becomes a preference');
+    assert.equal(f.applied.length, 0, 'choosing preserves previous colors while waiting');
+    assert.equal(f.requests.length, 1);
+    await f.advance();
+    const payload = {tokens: {'--bg': '#abcdef'}};
+    f.finish(f.requests[1], payload);
+    assert.ok(await choosing);
+    assert.equal(f.writes.length, 1);
+    assert.equal(f.writes[0].value.payload, payload);
+    assert.equal(f.timers.size, 0);
+  }
+  {
+    const f = fixture();
+    const choosing = f.window.gdUseThemeGraph(fn(f));
+    for (let attempt = 0; attempt < 3; attempt++) {
+      f.refuse(attempt, transient);
+      await settle();
+      if (attempt < 2) await f.advance();
+    }
+    await choosing;
+    assert.equal(f.requests.length, 3, 'three total attempts bound repeated invalidation');
+    assert.equal(f.writes.length, 0);
+    assert.equal(f.applied.length, 0);
+    assert.equal(f.timers.size, 0);
+  }
+  for (const [body, status] of [[transient, 403], [transient, 500],
+    [{...transient, code: 'tainted-result'}, 422], [{...transient, code: 'runtime-effects'}, 422],
+    [{...transient, reason: 'not-plain-pure'}, 422], [{...transient, retryable: false}, 422],
+    [{ok: false, reason: 'result-unavailable'}, 422]]) {
+    const f = fixture();
+    const choosing = f.window.gdUseThemeGraph(fn(f));
+    f.refuse(0, body, status);
+    await choosing;
+    assert.equal(f.requests.length, 1, 'permission, purity and unknown refusals are permanent');
+    assert.equal(f.timers.size, 0);
+    assert.equal(f.writes.length, 0, 'a refusal cannot replace the old preference');
+  }
+  for (const invalidate of [
+    f => { f.window.gdPrefOwner = 'owner-b'; },
+    f => { f.ctx.graphdenCurrentOrg = 'org-b'; },
+    f => { f.ctx.getCurrentBranchName = () => 'other'; },
+  ]) {
+    const f = fixture();
+    const choosing = f.window.gdUseThemeGraph(fn(f));
+    f.refuse(0, transient);
+    await settle();
+    invalidate(f);
+    await f.advance();
+    await choosing;
+    assert.equal(f.requests.length, 1, 'a retry never crosses its original account, organization or branch');
+    assert.equal(f.writes.length, 0);
+    assert.equal(f.applied.length, 0);
+  }
+  {
+    const f = fixture();
+    const first = f.window.gdUseThemeGraph(fn(f));
+    f.refuse(0, transient);
+    await settle();
+    const secondFn = {...fn(f), id: '22222222-2222-2222-2222-222222222222'};
+    const second = f.window.gdUseThemeGraph(secondFn);
+    await first;
+    assert.equal(f.timers.size, 0, 'a new selection cancels the old queued wait immediately');
+    assert.equal(f.requests[0].options.signal.aborted, true);
+    f.finish(f.requests[1], {tokens: {'--bg': '#222222'}});
+    await second;
+    assert.equal(f.writes.length, 1);
+    assert.equal(f.writes[0].value.graph['fn-id'], secondFn.id);
+  }
+  {
+    const f = fixture();
+    const choosing = f.window.gdUseThemeGraph(fn(f));
+    f.refuse(0, transient);
+    await settle();
+    f.events.get('gd-auth-changed')();
+    await choosing;
+    assert.equal(f.timers.size, 0, 'account disposal removes the pending retry');
+    assert.equal(f.writes.length, 0);
+  }
+  {
+    const f = fixture();
+    const choosing = f.window.gdUseThemeGraph(fn(f));
+    f.window.gdSanitizeThemePayload = () => null;
+    f.finish(f.requests[0], {tokens: {'--bg': 'invalid'}});
+    await choosing;
+    assert.equal(f.writes.length, 0, 'a successful transport still requires a valid theme payload');
+  }
   {
     const f = fixture();
     let release;

@@ -98,8 +98,6 @@
     (fn [{:keys [ctx input outcome]}]
       (doseq [result [{:status :pending :execution-id "private-execution"}
                       {:status :failed :error "private-error" :error-data {:secret "private-data"}}
-                      {:status :succeeded :result payload :tainted? true}
-                      {:status :succeeded :result payload :runtime-effects ["network"]}
                       {:status :rejected :http-status 429 :diagnostics ["private-diagnostic"]}]]
         (reset! outcome result)
         (let [response (theme/evaluate ctx input)]
@@ -109,12 +107,52 @@
       (is (= 429 (:http-status (theme/evaluate ctx input)))))))
 
 
-(deftest changed-graph-and-late-visibility-veto-the-result
-  (fixture
-    (fn [{:keys [ctx input epoch visibility]}]
-      (doseq [change [#(swap! epoch inc) #(reset! visibility :secret-output)]]
-        (with-redefs [execution/apply-execute (fn [& _] (change) {:status :succeeded :result payload})]
-          (is (= "result-unavailable" (:reason (theme/evaluate ctx input)))))))))
+(deftest result-refusals-only-classify-an-epoch-only-change-as-retryable
+  ;; All nonempty combinations: an epoch change must never mask another veto.
+  (doseq [[flags code retryable]
+          [[#{:epoch} "graph-changed" true]
+           [#{:late} "not-plain-pure" false]
+           [#{:late :epoch} "not-plain-pure" false]
+           [#{:effect} "runtime-effects" false]
+           [#{:effect :epoch} "runtime-effects" false]
+           [#{:effect :late} "runtime-effects" false]
+           [#{:effect :late :epoch} "runtime-effects" false]
+           [#{:taint} "tainted-result" false]
+           [#{:taint :epoch} "tainted-result" false]
+           [#{:taint :late} "tainted-result" false]
+           [#{:taint :late :epoch} "tainted-result" false]
+           [#{:taint :effect} "tainted-result" false]
+           [#{:taint :effect :epoch} "tainted-result" false]
+           [#{:taint :effect :late} "tainted-result" false]
+           [#{:taint :effect :late :epoch} "tainted-result" false]]]
+    (fixture
+      (fn [{:keys [ctx input epoch visibility]}]
+        (with-redefs [execution/apply-execute
+                      (fn [& _]
+                        (when (flags :epoch) (swap! epoch inc))
+                        (when (flags :late) (reset! visibility :secret-output))
+                        (cond-> {:status :succeeded :result {:private "withheld"}
+                                 :execution-id "private-execution"}
+                          (flags :taint) (assoc :tainted? true)
+                          (flags :effect) (assoc :runtime-effects ["private-effect"])))]
+          (is (= {:ok false :reason "result-unavailable" :http-status 422
+                  :code code :retryable retryable}
+                 (theme/evaluate ctx input))
+              (pr-str flags)))))))
+
+
+(deftest late-unknown-and-effectful-signatures-are-not-retryable
+  (doseq [late-signature [nil {:return :map} {:return :map :effects #{:db}}]]
+    (fixture
+      (fn [{:keys [ctx input epoch signature]}]
+        (with-redefs [execution/apply-execute
+                      (fn [& _]
+                        (swap! epoch inc)
+                        (reset! signature late-signature)
+                        {:status :succeeded :result payload})]
+          (is (= {:ok false :reason "result-unavailable" :http-status 422
+                  :code "not-plain-pure" :retryable false}
+                 (theme/evaluate ctx input))))))))
 
 
 (deftest named-data-inputs-do-not-widen-the-execution-surface

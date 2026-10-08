@@ -145,6 +145,19 @@
     row))
 
 
+(defn- result-refusal
+  "Static categories only. A changed graph permits a fresh evaluation only
+   when no secret, effect or late classification veto also applies."
+  [ctx id epoch result]
+  (when-let [code (cond
+                    (:tainted? result) "tainted-result"
+                    (seq (:runtime-effects result)) "runtime-effects"
+                    (not (plain-pure? id)) "not-plain-pure"
+                    (not= epoch (context/invalidation-epoch ctx)) "graph-changed")]
+    {:ok false :reason "result-unavailable" :http-status 422
+     :code code :retryable (= code "graph-changed")}))
+
+
 (defn- evaluate-in-scope
   [ctx {:keys [id args]}]
   (let [row (authorized-row ctx id)
@@ -162,11 +175,8 @@
       (when-not (= :succeeded (:status result))
         (reject! (if (= :pending (:status result)) "timeout" "evaluation-failed")
                  (if (contains? #{429 503} (:http-status result)) (:http-status result) 422)))
-      (when (or (:tainted? result) (seq (:runtime-effects result))
-                (not= epoch (context/invalidation-epoch ctx))
-                (not (plain-pure? id)))
-        (reject! "result-unavailable" 422))
-      {:ok true :payload (validate-payload (:result result))})))
+      (or (result-refusal ctx id epoch result)
+          {:ok true :payload (validate-payload (:result result))}))))
 
 
 (defn evaluate

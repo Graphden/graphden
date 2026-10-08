@@ -323,10 +323,10 @@ Evaluates graph filters for the Explorer and saved graph views. Filter dimension
 :PROPERTIES:
 :CUSTOM_ID: crud/save!
 :FILE: src/graphden/crud/views.clj
-:LINE: 47
+:LINE: 53
 :MINS: 2.0
 :END:
 
 Saves a complete filter set as an ordinary explorer-view function and bindings. The owned writer transaction repeats authorization and validation before applying every row. Existing scalar identity slots remain valid; additional references are lists of const compositions with fn-ref bindings, so targets are named without being executed. Unrepresentable inherited or computed clauses reject the whole write. Cache invalidation and notifications happen after commit, and a publication failure is reported as committed rather than pretending the database rolled back.
 
-- source :: [[file:../../../src/graphden/crud/views.clj::(defn save!][src/graphden/crud/views.clj:47]]
+- source :: [[file:../../../src/graphden/crud/views.clj::(defn save!][src/graphden/crud/views.clj:53]]

@@ -194,8 +194,8 @@ const REQUIRE_SIGNALS = {
   'package-lifecycle': {
     test: () => !!(window.API?.api_packages_publish && window.API?.api_packages_installed
       && window.API?.api_packages_panel_install && window.API?.api_packages_panel_update
-      && window.API?.api_branches && typeof window.graphdenHasCap === 'function'
-      && window.graphdenHasCap('publish-packages')),
+      && window.API?.api_branches && typeof canPublishPackages === 'function'
+      && canPublishPackages()),
     phrase: 'the package registry, branches and publish-packages capability',
     short: 'registry and publish access',
   },

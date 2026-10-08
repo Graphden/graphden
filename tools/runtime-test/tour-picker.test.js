@@ -38,6 +38,10 @@ const source = fs.readFileSync(
             'editor-tour-picker.js'),
   'utf8');
 
+const createSource = fs.readFileSync(
+  path.join(__dirname, '..', '..', 'resources', 'packages', 'app', 'editor',
+            'editor-create.js'), 'utf8');
+
 let failures = 0;
 let passes = 0;
 
@@ -122,7 +126,10 @@ function makeWorld(opts) {
   };
   ctx.window = ctx;
   ctx.window.graphdenHasCap = (cap) => o.caps.includes(cap);
+  ctx.window.graphdenTenancyActive = () => o.tenancy === true;
+  ctx.window.API = o.api || {};
   vm.createContext(ctx);
+  vm.runInContext(createSource, ctx);
   vm.runInContext(source, ctx);
   return {
     ctx, pop, said, started, toasts,
@@ -168,6 +175,25 @@ function makeWorld(opts) {
       'an empty history REMOVES the key — a browser that cleared reads like one'
       + ' that never took the tour (got: ' + JSON.stringify(w.stored()) + ')');
     assert(w.ctx._tourDoneSet().size === 0, 'and the set reads back empty');
+  });
+
+  await test('the package lesson follows the actual Publish policy and required registry routes', () => {
+    const lesson = {requires: 'package-lifecycle'};
+    const api = {api_packages_publish: '/publish', api_packages_installed: '/installed',
+      api_packages_panel_install: '/install', api_packages_panel_update: '/update', api_branches: '/branches'};
+    const selfhost = makeWorld({api}).ctx;
+    assert(selfhost._tourRequirement(lesson).allowed,
+      'self-host publishing is available without organization capability headers');
+    assert(!makeWorld({api, tenancy: true}).ctx._tourRequirement(lesson).allowed,
+      'a tenant without publish-packages remains unavailable');
+    assert(makeWorld({api, tenancy: true, caps: ['publish-packages']}).ctx._tourRequirement(lesson).allowed,
+      'a tenant with actual publish access can start the lesson');
+    for (const key of Object.keys(api)) {
+      const missing = {...api};
+      delete missing[key];
+      assert(!makeWorld({api: missing}).ctx._tourRequirement(lesson).allowed,
+        'the package lesson remains unavailable without ' + key);
+    }
   });
 
   await test('personal UI lesson availability is session support, not org management caps', () => {

@@ -3659,7 +3659,8 @@ textarea.value-form-hiccup {
   line-height: 1.4;
   padding: 6px 10px;
   border-radius: 4px;
-  max-width: 360px;
+  max-width: min(360px, calc(100vw - 24px));
+  box-sizing: border-box;
   pointer-events: none;
   box-shadow: var(--shadow-md);
   display: none;

@@ -23,6 +23,7 @@ let descriptionTooltipPosition = null;
 // While editing, neither hover-out NOR document-level outside-click
 // should dismiss the tooltip — the user is mid-typing.
 let descriptionTooltipEditing = false;
+let stopDescriptionViewportObservation = null;
 
 function ensureDescriptionTooltip() {
   if (descriptionTooltipEl) return descriptionTooltipEl;
@@ -112,7 +113,32 @@ function renderDescriptionTooltip() {
     el.appendChild(editRow);
   }
   el.style.display = 'block';
+  observeDescriptionViewport();
   repositionDescriptionTooltip();
+}
+
+// This tooltip is invoked at a pointer position, rather than a DOM anchor.
+// Keep that position, but re-clamp when the viewport or soft keyboard changes.
+function observeDescriptionViewport() {
+  if (stopDescriptionViewportObservation) return;
+  const controller = new AbortController();
+  let frame = null;
+  const schedule = () => {
+    if (frame !== null) return;
+    frame = requestAnimationFrame(() => {
+      frame = null;
+      repositionDescriptionTooltip();
+    });
+  };
+  const options = {signal: controller.signal, passive: true};
+  window.addEventListener('resize', schedule, options);
+  window.visualViewport?.addEventListener('resize', schedule, options);
+  window.visualViewport?.addEventListener('scroll', schedule, options);
+  stopDescriptionViewportObservation = () => {
+    controller.abort();
+    if (frame !== null) cancelAnimationFrame(frame);
+    stopDescriptionViewportObservation = null;
+  };
 }
 
 function repositionDescriptionTooltip() {
@@ -158,6 +184,16 @@ document.addEventListener('keydown', (e) => {
 
 function positionDescriptionTooltipAt(el, clientX, clientY) {
   const margin = 12;
+  const viewport = window.visualViewport;
+  const viewportLeft = viewport?.offsetLeft || 0;
+  const viewportTop = viewport?.offsetTop || 0;
+  const viewportWidth = viewport?.width || window.innerWidth;
+  const viewportHeight = viewport?.height || window.innerHeight;
+  // Measure from a neutral position: an old offscreen left would otherwise
+  // shrink an auto-width read tooltip before its new position is calculated.
+  el.style.left = viewportLeft + margin + 'px';
+  el.style.top = viewportTop + margin + 'px';
+  el.style.maxWidth = Math.max(0, Math.min(360, viewportWidth - margin * 2)) + 'px';
   // A keyboard activation / synthetic click carries (0,0) — the tooltip
   // rendered in the viewport corner, detached from its card (tutorial
   // finding, lesson 26). The caller passes an anchor-derived
@@ -167,10 +203,10 @@ function positionDescriptionTooltipAt(el, clientX, clientY) {
     clientX = window.innerWidth / 2;
     clientY = window.innerHeight / 3;
   }
-  const x = Math.min(clientX + margin, window.innerWidth - el.offsetWidth - margin);
-  const y = Math.min(clientY + margin, window.innerHeight - el.offsetHeight - margin);
-  el.style.left = Math.max(margin, x) + 'px';
-  el.style.top = Math.max(margin, y) + 'px';
+  const x = Math.min(clientX + margin, viewportLeft + viewportWidth - el.offsetWidth - margin);
+  const y = Math.min(clientY + margin, viewportTop + viewportHeight - el.offsetHeight - margin);
+  el.style.left = Math.max(viewportLeft + margin, x) + 'px';
+  el.style.top = Math.max(viewportTop + margin, y) + 'px';
 }
 
 // EDIT MODE — body becomes a textarea + Save/Cancel. PUT to
@@ -372,6 +408,7 @@ function patchEntityDescriptionInState(entityType, entityId, description) {
 function hideDescriptionTooltip(force) {
   if (descriptionTooltipEditing) return;
   if (descriptionTooltipSticky && !force) return;
+  stopDescriptionViewportObservation?.();
   if (descriptionTooltipEl) descriptionTooltipEl.style.display = 'none';
 }
 

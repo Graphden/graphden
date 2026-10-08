@@ -77,7 +77,7 @@ The ordinary graph for this exercise is:
  :args {:queue "tutorial-39-<fresh UUID>" :delay-ms 0}}
 
 {:name :tutorial-queue-handler :parent :parse-json
- :args {:string "not JSON"}}
+ :args {:string "not JSON" :keywordize true}}
 
 {:name :tutorial-queue-worker :parent :pg-queue-consumer
  :args {:queue "tutorial-39-<fresh UUID>" :handler :tutorial-queue-handler}}

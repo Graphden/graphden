@@ -39,9 +39,12 @@ versioned graph data; deleting the lesson branch does not remove them.
    the execution ID and the returned message UUID. Operate → Queues now shows
    one pending message on this queue. Publishing alone does not run a consumer.
 3. Extend `parse-json` as `tutorial-queue-handler`. Bind `:string` to the text
-   `not JSON` and leave the inherited `:keywordize` default unchanged. This deliberately failing handler has
-   no free arguments; it ignores the supplied message and demonstrates failure
-   and acknowledgement without an external side effect.
+   `not JSON`. On `:keywordize`, choose **Bind literal**, check the checkbox
+   and **Save** an own `true` binding. The inherited default still leaves an
+   optional callable argument; this explicit binding closes it. This
+   deliberately failing handler now has no free arguments; it ignores the
+   supplied message and demonstrates failure and acknowledgement without an
+   external side effect.
 4. Extend `pg-queue-consumer` as `tutorial-queue-worker`. Bind `:queue` to the
    same unique name, and bind its callable `:handler` slot to
    `tutorial-queue-handler`.

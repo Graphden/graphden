@@ -2689,7 +2689,7 @@
             {:id "39"
              :slug "queues"
              :chapter "Your organization"
-             :version 1
+             :version 2
              :requires "services"
              :title "Queues — publish, retry, requeue and ACK"
              :reads "adds typed message contracts, the open consumer template, exact-message recovery, and background-worker lifecycle."
@@ -2731,10 +2731,13 @@
                               :name "tutorial-queue-handler"
                               :slot "string"
                               :value "not JSON"}}
-                     {:title "Leave the message input unused"
-                      :body "This deliberately broken handler parses its own text. It does not inspect the queued payload yet. The written guide shows typed message contracts. Leave the inherited keywordize default unchanged."
-                      :target nil
-                      :check {:kind "manual"}}
+                     {:title "Bind :keywordize"
+                      :body "On :keywordize choose [[Bind literal]], check the checkbox and [[Save]]. This creates an own `true` binding and closes the last free argument. The handler now ignores the supplied message and parses its own deliberately invalid text."
+                      :target ".placeholder-binder[data-fn-name=\"tutorial-queue-handler\"][data-arg-name=\"keywordize\"]"
+                      :check {:kind "binding-value"
+                              :name "tutorial-queue-handler"
+                              :slot "keywordize"
+                              :value true}}
                      {:title "Open pg-queue-consumer"
                       :body "Find `pg-queue-consumer` in the Explorer and select it."
                       :target "input[placeholder=\"Filter...\"]"

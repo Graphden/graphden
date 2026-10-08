@@ -136,8 +136,8 @@ async function cleanup(page, finish) {
     await filterAndSelect(page, 'tutorial-queue-handler', 'tutorial-queue-handler');
     await waitTourTitle(page, 'Bind :string');
     await bindNamedPlaceholder(page, 'string', 'literal', 'not JSON');
-    await waitTourTitle(page, 'Leave the message input unused');
-    assert(await clickTourButton(page, 'Next'), 'retain the inherited parser default');
+    await waitTourTitle(page, 'Bind :keywordize');
+    await bindNamedPlaceholder(page, 'keywordize', 'literal', 'true');
 
     await waitTourTitle(page, 'Open pg-queue-consumer');
     await filterAndSelect(page, 'pg-queue-consumer', 'pg-queue-consumer');

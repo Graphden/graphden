@@ -260,6 +260,17 @@ test('binding-value compares as TEXT — jsonb round-trips change the type', () 
          'a different value does not match');
 });
 
+test('explicit boolean binding check rejects an inherited default', () => {
+  const s = withFn();
+  const check = {kind: 'binding-value', name: FN.name, slot: SLOT.name, value: true};
+  s.lookups.bindingsByFn = new Map([['fn-parent', [{id: 'default', 'slot-id': SLOT.id, value: true}]]]);
+  assert(checkIn(s, check) === false, 'an inherited true default does not close the child callable argument');
+  s.lookups.bindingsByFn.set(FN.id, [{id: 'own', 'slot-id': SLOT.id, value: false}]);
+  assert(checkIn(s, check) === false, 'an unchecked own checkbox does not satisfy the required true value');
+  s.lookups.bindingsByFn.set(FN.id, [{id: 'own', 'slot-id': SLOT.id, value: true}]);
+  assert(checkIn(s, check) === true, 'an own true binding satisfies the lesson');
+});
+
 test('bindings-count counts BOUND slots, order-independent', () => {
   const s = withFn();
   s.lookups.bindingsByFn = new Map([[FN.id, [

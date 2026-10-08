@@ -1348,7 +1348,7 @@ async function bindNamedPlaceholder(page, argName, kind, text) {
     const lr = label.getBoundingClientRect();
     const ly = lr.top + lr.height / 2;
     let best = null;
-    let bestD = Infinity;
+    let bestD = Number.POSITIVE_INFINITY;
     for (const b of document.querySelectorAll('.placeholder-binder')) {
       const r = b.getBoundingClientRect();
       if (r.left < lr.left) continue;
@@ -1408,7 +1408,8 @@ async function bindNamedPlaceholder(page, argName, kind, text) {
     const pop = pops[pops.length - 1];
     const field = pop.querySelector('.arg-value-edit-input')
       || pop.querySelector('[data-form-field]');
-    field.value = t;
+    if (field.type === 'checkbox') field.checked = t === 'true';
+    else field.value = t;
     field.dispatchEvent(new Event('input', {bubbles: true}));
     field.dispatchEvent(new Event('change', {bubbles: true}));
     Array.from(pop.querySelectorAll('.arg-value-edit-btn'))

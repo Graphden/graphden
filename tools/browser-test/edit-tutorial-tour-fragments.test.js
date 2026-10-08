@@ -9,11 +9,12 @@ const {handlerPreviewTestOptions} = require('./handler-preview-test-options');
 const {
   waitTourTitle, clickTourButton, filterAndSelect, extendViaRowActions,
   bindPlaceholderOn, bindSeqAnchorPlaceholder, appendFnRefViaChip,
-  editBoundValue, finishAndDelete,
+  bindOptionalArgChip, editBoundValue, finishAndDelete,
 } = require('./tutorial-tour-helpers');
 
 const handler = 'tutorial-fragment-handler';
 const clockBody = 'tutorial-fragment-clock-body';
+const clockText = 'tutorial-fragment-clock-text';
 const clockHandler = 'tutorial-fragment-clock-handler';
 const prefix = '<!doctype html><html><head><meta name="htmx-config" content=\'{"selfRequestsOnly":false,"withCredentials":false,"allowEval":false}\'><script src="assets/htmx.min.js"></script></head><body><button hx-get="fragment" hx-select="#fragment" hx-target="#out">Refresh</button><div id="out"><p id="fragment">';
 const suffix = '</p></div></body></html>';
@@ -117,12 +118,21 @@ const {walkLesson30} = require('./tutorial-app-helpers');
     await closePopover(page);
 
     stage = 'server clock composition';
+    // The written lesson converts the clock to text before composing HTML.
+    await filterAndSelect(page, 'to-str', 'to-str');
+    await extendViaRowActions(page, clockText, 'to-str');
+    await filterAndSelect(page, clockText, clockText);
+    createdIds.push(await selectedIdentity(page));
+    await bindPlaceholderOn(page, clockText, 'value', 'fn-ref', 'current-time-ms');
     await filterAndSelect(page, 'str-join', 'str-join');
     await extendViaRowActions(page, clockBody, 'str-join');
     await filterAndSelect(page, clockBody, clockBody);
     createdIds.push(await selectedIdentity(page));
+    // An HTTP response graph may leave only :request free, even when
+    // another slot has an optional default in ordinary execution.
+    await bindOptionalArgChip(page, 'separator', '');
     await bindSeqAnchorPlaceholder(page, prefix);
-    await appendFnRefViaChip(page, 'coll', 'current-time-ms');
+    await appendFnRefViaChip(page, 'coll', clockText);
     await bindSeqAnchorPlaceholder(page, suffix);
     await filterAndSelect(page, 'html-ok-response', 'html-ok-response');
     await extendViaRowActions(page, clockHandler, 'html-ok-response');

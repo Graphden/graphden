@@ -27,7 +27,19 @@ async function binding(page, fnId, slotId, fields) {
 }
 
 async function openIntent(page, fnName, depth = 1) {
-  await page.click('.node-overlay[data-fn-name="' + fnName + '"] .ancestor-line[data-level="' + depth + '"] button.more-actions-trigger');
+  const trigger = page.locator('.node-overlay[data-fn-name="' + fnName
+    + '"] .ancestor-line[data-level="' + depth + '"] button.more-actions-trigger');
+  if (page.viewportSize().width <= 400) {
+    await trigger.hover();
+    await page.locator('.row-actions-popover').waitFor({state: 'visible'});
+    const anchor = await trigger.boundingBox();
+    const menu = await page.locator('.row-actions-popover').boundingBox();
+    assert(menu.y + menu.height <= anchor.y || menu.y >= anchor.y + anchor.height,
+      'narrow hover menu leaves its trigger reachable for the pending pointer click');
+    assert(menu.y >= 0 && menu.y + menu.height <= page.viewportSize().height,
+      'narrow row menu stays vertically bounded');
+  }
+  await trigger.click();
   await page.click('.row-actions-popover [data-action="inheritance-intent"]');
   await page.waitForSelector('.inheritance-intent-popover [data-preview]');
 }

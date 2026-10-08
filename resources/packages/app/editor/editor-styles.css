@@ -8581,7 +8581,7 @@ button.lambda-params-chip:focus-visible { outline: 1px solid var(--accent); }
   max-height: calc(100vh - 16px);
   box-sizing: border-box;
   overflow: auto;
-  padding: 0.75rem;
+  padding: 2rem 0.75rem 0.75rem;
   border: 1px solid var(--card-border);
   border-radius: 4px;
   background: var(--card-bg);

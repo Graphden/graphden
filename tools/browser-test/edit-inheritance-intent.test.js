@@ -67,6 +67,29 @@ async function openIntent(page, fnName, depth = 1) {
     assert(true, 'Go to source navigates by source UUID');
     await page.evaluate(id => navigateInheritanceSource(id), F.id);
     await openIntent(page, names.F);
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('.inheritance-intent-popover', { state: 'detached' });
+    assert(await page.evaluate(() => document.activeElement?.classList.contains('more-actions-trigger')),
+      'Escape restores the row trigger focus');
+
+    await page.route('**/partials/inheritance-intent?*', route => route.fulfill({
+      status: 503, contentType: 'text/plain', body: 'Preview temporarily unavailable.',
+    }));
+    await page.click('.node-overlay[data-fn-name="' + names.F + '"] .ancestor-line[data-level="1"] button.more-actions-trigger');
+    await page.click('.row-actions-popover [data-action="inheritance-intent"]');
+    await page.waitForFunction(() => document.querySelector('.inheritance-intent-popover')
+      ?.textContent.includes('Preview temporarily unavailable.'));
+    await page.click('.inheritance-intent-popover [aria-label="Close inheritance actions"]');
+    await page.waitForSelector('.inheritance-intent-popover', { state: 'detached' });
+    await page.unroute('**/partials/inheritance-intent?*');
+    assert(true, 'failed preview retains a visible working Close control');
+
+    await openIntent(page, names.F);
+    await page.evaluate(() => inheritanceIntentAnchor.remove());
+    await page.waitForSelector('.inheritance-intent-popover', { state: 'detached' });
+    assert(true, 'removing the anchor dismisses the owned popup');
+    await page.evaluate(() => initGraph());
+    await openIntent(page, names.F);
     await page.setViewportSize({ width: 390, height: 240 });
     const bounds = await page.locator('.inheritance-intent-popover').boundingBox();
     assert(bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= 390

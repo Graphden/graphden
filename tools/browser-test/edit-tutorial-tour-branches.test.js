@@ -51,6 +51,9 @@ const {
     await waitTourTitle(page, 'Add a child on the source', 150000);
     await extendViaRowActions(page, 'branch-added', 'branch-demo');
     await waitTourTitle(page, 'Go back to the sandbox', 150000);
+    const addedId = await page.evaluate(() => _tourState.created.find(
+      row => row.type === 'fn' && row.name === 'branch-added')?.id);
+    assert(addedId, 'source child has an exact created UUID receipt');
     await switchBranchViaChip(page, 'tutorial-sandbox');
     await filterAndSelect(page, 'branch-demo', 'branch-demo');
     await waitTourTitle(page, 'Fork the sibling target', 150000);
@@ -62,9 +65,15 @@ const {
     const changes = await page.locator('#gd-diff-insp').innerText();
     assert(changes.includes('source draft') && changes.includes('branch version')
       && changes.includes('base version'), 'same visible UUID shows its field and binding replacement');
-    await filterAndSelect(page, 'branch-added', 'branch-added');
-    assert(await page.locator('#gd-diff-insp .gd-diff-insp-head .branch-diff-marker.bd-added').count() === 1,
-      'source child is an addition, separately from the existing fn edit');
+    // Source-only ghosts deliberately do not participate in text filtering.
+    // Read the exact child's comparison row without switching to its branch.
+    await page.fill('#search-input', '');
+    const rootGroup = page.locator('.ns-header-pseudo');
+    if (await rootGroup.getAttribute('aria-expanded') !== 'true') await rootGroup.click();
+    const ghost = page.locator('.gd-diff-ghost[data-ghost-fn-id="' + addedId + '"]');
+    await ghost.waitFor({state: 'visible', timeout: 30000});
+    assert(await page.evaluate(id => _gdDiffMode?.byFnId.get(id)?.__kind === 'missing', addedId),
+      'exact source child is absent on the target, separately from the common UUID edit');
     await exitBranchCompare(page);
     await waitTourTitle(page, 'Merge into the sibling target', 150000);
     await mergeBranchViaChip(page, 'tutorial-branch');

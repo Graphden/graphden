@@ -306,7 +306,11 @@ function cancelDescriptionEditMode() {
   const hadFocus = descriptionTooltipEl?.contains(document.activeElement);
   descriptionTooltipEditing = false;
   renderDescriptionTooltip();
-  if (hadFocus) focusSafely(descriptionTooltipEl?.querySelector('.description-tooltip-btn'));
+  if (hadFocus && focusSafely(descriptionTooltipEl?.querySelector('.description-tooltip-btn'))) {
+    // Read mode puts Edit last. Reveal it in this popup's own scroll area;
+    // focusSafely deliberately avoids scrolling the surrounding document.
+    descriptionTooltipEl.scrollTop = descriptionTooltipEl.scrollHeight;
+  }
 }
 
 // Posts the new description as a form-encoded PUT. The backend's

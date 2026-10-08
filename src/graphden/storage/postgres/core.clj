@@ -11,6 +11,7 @@
    - migration.clj - Schema migration logic
    - crud.clj - CRUD operations"
   (:require
+    [graphden.storage.graph-writer :as writer]
     [graphden.storage.postgres.crud :as crud]
     [graphden.storage.postgres.graph :as graph]
     [graphden.storage.postgres.graph-epoch :as graph-epoch]
@@ -103,6 +104,11 @@
 (defrecord PostgresStorage
   [pool metadata-cache lock slot-row-cache]
 
+  writer/GraphWriteAuthorization
+
+  (authorize-graph-write! [_ _entity-name _data _id] nil)
+
+
   sp/Storage
 
   (initialize
@@ -171,12 +177,19 @@
     (get-cached-metadata pool metadata-cache lock))
 
 
+  writer/GraphCreationAuthorization
+
+  (authorize-graph-creation! [_ _fn-data _branch-id] nil)
+
+
   sp/StorageCRUD
 
   (create-entity
-    [_this entity-name data]
-    (crud/create-entity pool entity-name data
-                        (get-entity-fields pool metadata-cache lock entity-name)))
+    [this entity-name data]
+    (writer/with-write [this entity-name]
+                       (let [pool (:pool this)]
+                         (crud/create-entity pool entity-name data
+                                             (get-entity-fields pool metadata-cache lock entity-name)))))
 
 
   (read-entity
@@ -200,18 +213,22 @@
 
 
   (update-entity
-    [_this entity-name id data]
-    ;; No live code path mutates :slot; the eviction is insurance so a
-    ;; future mutation path cannot silently serve a stale cached row.
-    (when (= :slot entity-name) (swap! slot-row-cache dissoc id))
-    (crud/update-entity pool entity-name id data
-                        (get-entity-fields pool metadata-cache lock entity-name)))
+    [this entity-name id data]
+    (writer/with-write [this entity-name]
+                       (let [pool (:pool this)]
+                         ;; No live code path mutates :slot; the eviction is insurance so a
+                         ;; future mutation path cannot silently serve a stale cached row.
+                         (when (= :slot entity-name) (swap! slot-row-cache dissoc id))
+                         (crud/update-entity pool entity-name id data
+                                             (get-entity-fields pool metadata-cache lock entity-name)))))
 
 
   (delete-entity
-    [_this entity-name id]
-    (when (= :slot entity-name) (swap! slot-row-cache dissoc id))
-    (crud/delete-entity pool entity-name id))
+    [this entity-name id]
+    (writer/with-write [this entity-name]
+                       (let [pool (:pool this)]
+                         (when (= :slot entity-name) (swap! slot-row-cache dissoc id))
+                         (crud/delete-entity pool entity-name id))))
 
 
   (query-entities
@@ -236,9 +253,11 @@
   sp/StorageBatchCRUD
 
   (create-entities
-    [_this entity-name data-seq]
-    (crud/create-entities pool entity-name data-seq
-                          (get-entity-fields pool metadata-cache lock entity-name)))
+    [this entity-name data-seq]
+    (writer/with-write [this entity-name]
+                       (let [pool (:pool this)]
+                         (crud/create-entities pool entity-name data-seq
+                                               (get-entity-fields pool metadata-cache lock entity-name)))))
 
 
   (read-entities
@@ -248,20 +267,26 @@
 
 
   (update-entities
-    [_this entity-name data-seq]
-    (crud/update-entities pool entity-name data-seq
-                          (get-entity-fields pool metadata-cache lock entity-name)))
+    [this entity-name data-seq]
+    (writer/with-write [this entity-name]
+                       (let [pool (:pool this)]
+                         (crud/update-entities pool entity-name data-seq
+                                               (get-entity-fields pool metadata-cache lock entity-name)))))
 
 
   (upsert-entities
-    [_this entity-name data-seq]
-    (crud/upsert-entities pool entity-name data-seq
-                          (get-entity-fields pool metadata-cache lock entity-name)))
+    [this entity-name data-seq]
+    (writer/with-write [this entity-name]
+                       (let [pool (:pool this)]
+                         (crud/upsert-entities pool entity-name data-seq
+                                               (get-entity-fields pool metadata-cache lock entity-name)))))
 
 
   (delete-entities
-    [_this entity-name ids]
-    (crud/delete-entities pool entity-name ids))
+    [this entity-name ids]
+    (writer/with-write [this entity-name]
+                       (let [pool (:pool this)]
+                         (crud/delete-entities pool entity-name ids))))
 
 
   (query-ref-many-owners

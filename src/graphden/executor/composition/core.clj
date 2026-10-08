@@ -20,7 +20,9 @@
     [graphden.packages.export :as export]
     [graphden.packages.records :as records]
     [graphden.packages.records.slot-resolution :as slot-res]
+    [graphden.storage.graph-writer :as writer]
     [graphden.storage.protocol.core :as sp]
+    [graphden.versioning.storage.resolution :as res]
     [graphden.tenancy.context :as tc]))
 
 
@@ -230,7 +232,10 @@
    `records/parse-module` or `records/boot-primitive-records`).
    Returns `{fn-name → fn-id}` for named fn rows."
   [storage records ns-id-map]
-  (let [records (remap-anonymous-ids records (org-anonymous-rows-by-hash storage records))
+  (writer/with-write [storage :graph]
+    (res/call-with-fresh-memos
+      (fn []
+        (let [records (remap-anonymous-ids records (org-anonymous-rows-by-hash storage records))
         _ (when-let [guard *before-write*] (guard storage records))
         {fns       :fn
          slots     :slot
@@ -262,7 +267,7 @@
           (keep (fn [fr]
                   (when-let [n (:name fr)]
                     [(keyword n) (:id fr)])))
-          fns)))
+          fns))))))
 
 
 ;; =============================================================================

@@ -26,6 +26,22 @@
      denied ownership, namespace or branch policy; never mutates rows."))
 
 
+(defprotocol GraphCreationAuthorization
+
+  (authorize-graph-creation!
+    [storage fn-data branch-id]
+    "Authorize a proposed fn identity before it exists: target namespace,
+     branch policy and identity references. Actual creates remain decorated."))
+
+
+(defn assert-creation-authorized!
+  [storage fn-data branch-id]
+  (if (satisfies? GraphCreationAuthorization storage)
+    (authorize-graph-creation! storage fn-data branch-id)
+    (throw (ex-info "This storage cannot authorize graph creation"
+                    {:type :authz/forbidden}))))
+
+
 (def ^:private semantic-entities
   #{:fn :fn-slot :slot :binding :binding-list-item
     :fn-version :fn-slot-version :binding-version :binding-list-item-version

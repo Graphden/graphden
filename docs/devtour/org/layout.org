@@ -40,13 +40,13 @@ Derives each function's visible argument rows from inherited [[file:glossary.org
 :PROPERTIES:
 :CUSTOM_ID: layout/build-graph-elements
 :FILE: src/graphden/layout/graph.clj
-:LINE: 993
-:MINS: 5.6
+:LINE: 994
+:MINS: 5.5
 :END:
 
 Walks the requested node expansions with cycle protection and collects graph elements. Post-processing adds optional-argument and [[file:glossary.org::#term/hof][HOF]] badges, adjusts captured-argument edges, removes duplicate overlays, and attaches display facts. The result supplies the client's node and edge lists.
 
-- source :: [[file:../../../src/graphden/layout/graph.clj::(defn build-graph-elements][src/graphden/layout/graph.clj:993]]
+- source :: [[file:../../../src/graphden/layout/graph.clj::(defn build-graph-elements][src/graphden/layout/graph.clj:994]]
 - referenced from :: [[file:editor.org::#editor/fetchBackendLayout][fetchBackendLayout]]
 
 * 4. emit-root-deep-frees!

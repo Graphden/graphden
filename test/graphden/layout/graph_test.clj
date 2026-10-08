@@ -509,8 +509,8 @@
   ;; F3 regression: ANONYMOUS fns (name=nil) auto-expand, and process-fn's
   ;; call-site-scoped cycle key grows each hop so it never repeats — an
   ;; anonymous A↔B ref cycle recursed to a StackOverflow (a 500 on the
-  ;; editor read path). The depth cap in process-any-fn truncates the
-  ;; pathological subtree instead of crashing.
+  ;; editor read path). Path-local identity tracking must stop at the FIRST
+  ;; repeated identity, independent of JIT frame size or the depth fallback.
   (testing "an anonymous ref cycle does not StackOverflow — layout returns"
     (let [storage (setup/create-test-storage)]
       (try
@@ -524,8 +524,10 @@
               _    (setup/bind-ref! storage (:id a) (:id slot) (:id b))
               _    (setup/bind-ref! storage (:id b) (:id slot) (:id a))
               result (layout storage (:id a))]
-          (is (seq (:nodes result))
-              "the anonymous ref cycle layouts (truncated) rather than crashing"))
+          (is (= 3 (count (fn-nodes result))) "A -> B -> leaf A, with no repeated unfolding")
+          (is (= 2 (count (:edges result))))
+          (is (= 2 (count (filter #(= (str (:id a)) (get-in % [:data :originalFnId]))
+                                  (fn-nodes result))))))
         (finally (sp/close storage))))))
 
 
@@ -545,6 +547,52 @@
     (lg/ensure-synth-args
       (merge {:fns [] :slots [] :fn-slots [] :bindings [] :list-items []}
              ge))))
+
+
+(defn- anonymous-chain
+  "Literal anonymous call chain; each identity has the same inherited slot."
+  [length]
+  (let [int-id (random-uuid)
+        base (random-uuid)
+        slot (random-uuid)
+        chain (vec (repeatedly length random-uuid))]
+    {:chain chain :slot slot
+     :entities {:fns (into [{:id int-id :name "int" :parent-ids []}
+                            {:id base :name "chain-base" :parent-ids [] :return-type-fn-id int-id}]
+                           (map #(hash-map :id % :name nil :parent-ids [base])) chain)
+                :slots [{:id slot :name "next" :type-fn-id int-id}]
+                :fn-slots [{:id (random-uuid) :fn-id base :slot-id slot :position 0}]
+                :bindings (mapv (fn [[source target]]
+                                  {:id (random-uuid) :fn-id source :slot-id slot :ref-fn-id target})
+                                (partition 2 1 chain))}}))
+
+
+(deftest long-acyclic-layout-keeps-a-connected-boundary-leaf
+  (let [{:keys [chain entities]} (anonymous-chain 100)
+        result (lg/build-graph-elements (first chain) {} (pure-lookups entities))
+        nodes (fn-nodes result)
+        boundary (last nodes)
+        boundary-id (get-in boundary [:data :id])]
+    (is (= 65 (count nodes)))
+    (is (= (str (nth chain 64)) (get-in boundary [:data :originalFnId])))
+    (is (= 64 (count (:edges result))))
+    (is (= 1 (count (filter #(= boundary-id (get-in % [:data :target])) (:edges result)))))
+    (is (not-any? #(= boundary-id (get-in % [:data :source])) (:edges result)))))
+
+
+(deftest sibling-anonymous-subgraphs-unfold-independently
+  (let [{:keys [chain entities]} (anonymous-chain 3)
+        root (first chain)
+        second-slot (random-uuid)
+        entities (-> entities
+                     (update :slots conj {:id second-slot :name "again" :type-fn-id (:type-fn-id (first (:slots entities)))})
+                     (update :fn-slots conj {:id (random-uuid) :fn-id root :slot-id second-slot :position 1})
+                     (update :bindings conj {:id (random-uuid) :fn-id root :slot-id second-slot :ref-fn-id (second chain)}))
+        result (lg/build-graph-elements root {} (pure-lookups entities))
+        nodes (fn-nodes result)]
+    (is (= 2 (count (filter #(= (str (second chain)) (get-in % [:data :originalFnId])) nodes))))
+    (is (= 2 (count (filter #(= (str (last chain)) (get-in % [:data :originalFnId])) nodes))))
+    (is (= (count nodes) (count (set (map #(get-in % [:data :id]) nodes)))))))
 
 
 (deftest build-elements-call-site-tree-test

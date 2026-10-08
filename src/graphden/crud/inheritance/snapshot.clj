@@ -1,14 +1,17 @@
 (ns graphden.crud.inheritance.snapshot
-  (:require [graphden.accounts.crypto :as crypto]
-            [graphden.storage.protocol.core :as sp]
-            [graphden.util.ns-path :as ns-path]
-            [graphden.versioning.storage.core :as vs]
-            [graphden.versioning.storage.resolution :as res]))
+  (:require
+    [graphden.accounts.crypto :as crypto]
+    [graphden.storage.protocol.core :as sp]
+    [graphden.util.ns-path :as ns-path]
+    [graphden.versioning.storage.core :as vs]
+    [graphden.versioning.storage.resolution :as res]))
+
 
 (defn required-fn
   [storage id]
   (or (sp/read-entity storage :fn id)
       (throw (ex-info "Function is not available" {:type :not-found}))))
+
 
 (defn closure
   "Bounded ancestry, rejecting incomplete or inaccessible parent identities."
@@ -21,6 +24,7 @@
                             {:type :inheritance/incomplete-source})))
           (let [all (merge seen rows)]
             (recur all (into #{} (comp (mapcat :parent-ids) (remove #(contains? all %))) (vals rows))))))))
+
 
 (defn graph-rows
   [storage fn-rows]
@@ -36,6 +40,7 @@
     {:fn (vals fn-rows) :fn-slot fn-slots :binding bindings :slot (vals slots)
      :binding-list-item items}))
 
+
 (defn own-rows
   [rows id]
   (let [bindings (filterv #(= id (:fn-id %)) (:binding rows))
@@ -43,6 +48,7 @@
     {:fn-slot (filterv #(= id (:fn-id %)) (:fn-slot rows))
      :binding bindings
      :binding-list-item (filterv #(contains? bids (:binding-id %)) (:binding-list-item rows))}))
+
 
 (defn descriptors
   [storage fn-rows]
@@ -54,13 +60,15 @@
                                         (if-let [path (get paths (:namespace-id row))]
                                           (str path "/" (:name row)) (:name row))))])) fn-rows)))
 
+
 (defn- canonical
   [value]
   (cond (map? value) (into (sorted-map-by #(compare (pr-str %1) (pr-str %2)))
-                          (map (fn [[key v]] [key (canonical v)])) value)
+                           (map (fn [[key v]] [key (canonical v)])) value)
         (set? value) (sort-by pr-str (map canonical value))
         (sequential? value) (mapv canonical value)
         :else value))
+
 
 (defn fingerprint
   "Rows and latest versions in all branches; a foreign version can alter the

@@ -1,9 +1,11 @@
 (ns graphden.crud.inheritance.check
   "Check a projected graph without publishing derived types or diagnostics."
-  (:require [graphden.crud.type-check :as tc]
-            [graphden.executor.registry.core :as registry]
-            [graphden.types.check :as types-check]
-            [graphden.types.diagnostics :as diag]))
+  (:require
+    [graphden.crud.type-check :as tc]
+    [graphden.executor.registry.core :as registry]
+    [graphden.types.check :as types-check]
+    [graphden.types.diagnostics :as diag]))
+
 
 (defn projected-diagnostics
   [storage fn-ids]

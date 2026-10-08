@@ -33,13 +33,18 @@ async function openIntent(page, fnName, depth = 1) {
 }
 
 async function revealTrigger(page, fnName) {
+  const inspectorClose = page.getByRole('button', {name: 'Close inspector', exact: true});
+  if (await inspectorClose.isVisible()) await inspectorClose.click();
   await page.evaluate(async name => {
     toggleCollapsed(true);
     for (let i = 0; i < 2; i++) await new Promise(requestAnimationFrame);
     const trigger = document.querySelector('.node-overlay[data-fn-name="' + name
       + '"] .ancestor-line[data-level="1"] button.more-actions-trigger');
     const rect = trigger.getBoundingClientRect();
-    setViewportPan(viewport.pan.x + 175 - rect.left, viewport.pan.y + 90 - rect.top);
+    const surface = document.getElementById('graph-surface').getBoundingClientRect();
+    const x = surface.left + surface.width / 2;
+    const y = surface.top + surface.height / 3;
+    setViewportPan(viewport.pan.x + x - rect.left, viewport.pan.y + y - rect.top);
     for (let i = 0; i < 2; i++) await new Promise(requestAnimationFrame);
   }, fnName);
 }

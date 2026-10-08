@@ -99,13 +99,13 @@ Reads stored graph rows, builds lookup indexes, and compiles functions. It then 
 :PROPERTIES:
 :CUSTOM_ID: executor/sync-fns-to-storage!
 :FILE: src/graphden/executor/composition/core.clj
-:LINE: 393
+:LINE: 394
 :MINS: 1.5
 :END:
 
 Synchronizes authored function definitions into function, [[file:glossary.org::#term/slot][slot]], and [[file:glossary.org::#term/binding][binding]] rows. This writes the persisted graph later read by ~rebuild!~. Package declarations and runtime compilation therefore share the same stored graph model.
 
-- source :: [[file:../../../src/graphden/executor/composition/core.clj::(defn sync-fns-to-storage!][src/graphden/executor/composition/core.clj:393]]
+- source :: [[file:../../../src/graphden/executor/composition/core.clj::(defn sync-fns-to-storage!][src/graphden/executor/composition/core.clj:394]]
 - referenced from :: [[file:packages.org::#packages/sync-namespaces!][sync-namespaces!]], [[file:web.org::#web/sync-fn-defs-branch!][sync-fn-defs-branch!]]
 
 * 8. build-lookups

@@ -22,7 +22,7 @@ const {assert, api, getEntities, newContext, deleteFnByName} =
 
 const RUN_ID = '-' + process.pid + '-' + Date.now().toString(36);
 const PROBE_FN = 'row-actions-pin-probe' + RUN_ID;
-const PROBE_DESC = 'Description text long enough to wrap across several lines. '.repeat(3).trim();
+const PROBE_DESC = 'Description text long enough to wrap across several lines. '.repeat(24).trim();
 
 
 async function cleanup(page) {
@@ -166,7 +166,8 @@ async function popoverVisible(page) {
     await edit.focus();
     await edit.press('Enter');
     await page.fill('.description-tooltip-textarea', 'draft to discard');
-    await page.setViewportSize({width: 390, height: 844});
+    await page.locator('.description-tooltip-textarea').evaluate((el) => { el.style.height = '400px'; });
+    await page.setViewportSize({width: 390, height: 240});
     const tooltipInViewport = () => {
       const r = document.querySelector('.description-tooltip').getBoundingClientRect();
       return r.left >= 11 && r.right <= innerWidth - 11
@@ -174,7 +175,12 @@ async function popoverVisible(page) {
     };
     await page.waitForFunction(tooltipInViewport);
     assert(await page.evaluate(tooltipInViewport),
-           'resizing to 390px keeps the description editor inside the viewport');
+           'resizing to 390x240 keeps the tall description editor inside the viewport');
+    await page.locator('.description-tooltip-btn-secondary').focus();
+    assert(await page.locator('.description-tooltip-btn-secondary').evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return r.top >= 12 && r.bottom <= innerHeight - 12;
+    }), 'Cancel remains reachable through the short editor\'s scroll area');
     await page.setViewportSize({width: 1400, height: 900});
     await page.waitForFunction(() => document.querySelector(
       '.description-tooltip').getBoundingClientRect().left > 390);
@@ -209,7 +215,7 @@ async function popoverVisible(page) {
     await page.waitForFunction(() => !document.querySelector(
       '.description-tooltip-btn-secondary').disabled);
     await page.unroute('**/api/entities/fn/*');
-    await page.setViewportSize({width: 390, height: 844});
+    await page.setViewportSize({width: 390, height: 240});
     await page.waitForFunction(tooltipInViewport);
     await page.keyboard.press('Escape');
     assert(await page.locator('.description-tooltip-textarea').count() === 0,
@@ -219,7 +225,11 @@ async function popoverVisible(page) {
     assert(await edit.evaluate((el) => el === document.activeElement),
            'Escape returns focus to Edit after replacing the textarea');
     assert(await page.evaluate(tooltipInViewport),
-           'read mode after cancellation retains viewport margins at 390px');
+           'long read mode after cancellation retains viewport margins at 390x240');
+    assert(await edit.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return r.top >= 12 && r.bottom <= innerHeight - 12;
+    }), 'Edit remains visible after focus scrolls the long read surface');
     assert(await popoverVisible(page), 'description Escape leaves its parent row menu open');
     assert(await page.locator('#gd-tour-pop .gd-tour-title').textContent() === tourTitle,
            'cancelling the draft leaves the running tour on the same step');

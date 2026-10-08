@@ -21,6 +21,78 @@
 // ABOVE them (a `:targets` chain rings items INSIDE an open menu, and a
 // ring under the menu's own panel would be invisible).
 const TOUR_SVG_NS = 'http://www.w3.org/2000/svg';
+let _tourStopPositioning = null;
+
+// Checks poll at lesson speed; geometry follows actual layout changes. Nothing
+// scans the graph while idle, and the observer never consumes its own writes.
+function _tourStartPositioning() {
+  if (_tourStopPositioning || !_tourEls || !_tourState) return;
+  const controller = new AbortController();
+  let frame = null;
+  let watched = [];
+  const motions = new Map();
+  const ownLayer = (node) => node === _tourEls?.dim || node === _tourEls?.spot
+    || node === _tourEls?.pop || !!node.parentElement?.closest('#gd-tour-dim, #gd-tour-spot, #gd-tour-pop');
+  const resize = typeof ResizeObserver === 'function' ? new ResizeObserver(() => schedule()) : null;
+  const schedule = () => {
+    if (frame !== null || controller.signal.aborted) return;
+    frame = requestAnimationFrame(() => {
+      frame = null;
+      if (!_tourEls || !_tourState) return;
+      _tourPosition();
+      const sel = _tourEffTarget(_tourStep());
+      const target = sel ? document.querySelector(sel) : null;
+      const next = [target, target?.closest('#side-menu, #gd-operate-panels, #gd-shell-surface, #gd-inspector'), _tourEls.pop].filter(Boolean);
+      if (next.length !== watched.length || next.some((el, i) => el !== watched[i])) {
+        resize?.disconnect();
+        for (const el of next) resize?.observe(el);
+        watched = next;
+      }
+      for (const [animation, deadline] of motions) {
+        if ((!animation.pending && animation.playState !== 'running')
+            || !animation.effect?.target?.isConnected || performance.now() >= deadline) motions.delete(animation);
+      }
+      if (motions.size) schedule();
+    });
+  };
+  const mutation = new MutationObserver((records) => {
+    if (records.some((record) => !ownLayer(record.target))) schedule();
+  });
+  mutation.observe(document.body, {subtree: true, childList: true, attributes: true, characterData: true});
+  const options = {signal: controller.signal, passive: true};
+  window.addEventListener('resize', schedule, options);
+  document.addEventListener('scroll', schedule, {...options, capture: true});
+  window.visualViewport?.addEventListener('resize', schedule, options);
+  window.visualViewport?.addEventListener('scroll', schedule, options);
+  // Transform-only CSS movement produces no resize/mutation between frames.
+  // Follow finite, short motion only; decorative infinite spinners stay idle.
+  const followMotion = (event) => {
+    if (ownLayer(event.target)) return;
+    for (const animation of event.target.getAnimations?.() || []) {
+      const timing = animation.effect?.getComputedTiming();
+      if (timing && Number.isFinite(timing.endTime) && timing.endTime <= 2000) motions.set(animation, performance.now() + 2000);
+    }
+    schedule();
+  };
+  document.addEventListener('transitionrun', followMotion, {...options, capture: true});
+  document.addEventListener('animationstart', followMotion, {...options, capture: true});
+  const stopViewport = typeof onViewportChanged === 'function' ? onViewportChanged(schedule) : null;
+  _tourStopPositioning = () => {
+    controller.abort();
+    mutation.disconnect();
+    resize?.disconnect();
+    stopViewport?.();
+    if (frame !== null) cancelAnimationFrame(frame);
+    motions.clear();
+    _tourStopPositioning = null;
+  };
+  schedule();
+}
+
+function _tourStopFollowing() {
+  _tourStopPositioning?.();
+}
+
 function _tourEnsureEls() {
   if (_tourEls) return _tourEls;
   const dim = document.createElementNS(TOUR_SVG_NS, 'svg');
@@ -111,11 +183,12 @@ function _tourNarrow() {
 function _tourReserveForSheet(px) {
   const root = document.documentElement;
   if (px > 0) {
-    root.style.setProperty('--gd-tour-sheet-h', px + 'px');
-    document.body.classList.add('gd-tour-sheet-open');
+    const height = px + 'px';
+    if (root.style.getPropertyValue('--gd-tour-sheet-h') !== height) root.style.setProperty('--gd-tour-sheet-h', height);
+    if (!document.body.classList.contains('gd-tour-sheet-open')) document.body.classList.add('gd-tour-sheet-open');
   } else {
-    root.style.removeProperty('--gd-tour-sheet-h');
-    document.body.classList.remove('gd-tour-sheet-open');
+    if (root.style.getPropertyValue('--gd-tour-sheet-h')) root.style.removeProperty('--gd-tour-sheet-h');
+    if (document.body.classList.contains('gd-tour-sheet-open')) document.body.classList.remove('gd-tour-sheet-open');
   }
 }
 
@@ -157,7 +230,8 @@ function _tourPosition() {
   const target = effSel ? document.querySelector(effSel) : null;
   const rect = target ? target.getBoundingClientRect() : null;
   const visible = rect && rect.width > 0 && rect.height > 0
-    && rect.bottom > 0 && rect.top < window.innerHeight;
+    && rect.bottom > 0 && rect.top < window.innerHeight
+    && rect.right > 0 && rect.left < window.innerWidth;
   // Second half of the search-step fix (see _tourWantedRowSel): while the
   // ring still sits on the filter input — the wanted row not rendered yet —
   // the lit hole covers the input TOGETHER with the result list below it.
@@ -201,8 +275,8 @@ function _tourPosition() {
     // (menus, popovers a step just told the reader to open), the
     // canvas cards AND the panel itself — the winner is the first
     // that covers nothing, else the least-covering one. Re-run every
-    // tick, so a menu opening mid-step pushes the popover away within
-    // ~600ms.
+    // layout change, so a menu opening mid-step moves the popover on the
+    // next frame rather than waiting for the lesson's completion poll.
     const panelOnRight = panel && panel.left > window.innerWidth / 2;
     const primary = panelOnRight
       ? { left: panel.left - pw - 16, top: spotRect.top }

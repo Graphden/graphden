@@ -281,7 +281,7 @@ Sends authenticated editor requests and handles 401 by clearing the stored crede
 :CUSTOM_ID: editor/_tourTick
 :FILE: resources/packages/app/editor/editor-tour.js
 :LINE: 309
-:MINS: 3.8
+:MINS: 3.7
 :END:
 
 Evaluates the current interactive lesson step against editor state. Lesson data comes from ~app.tour/_tour-lessons~; this engine ensures required panels and targets are visible, checks the declared completion condition, and advances when it succeeds.

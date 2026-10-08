@@ -102,6 +102,7 @@ function makeWorld(opts) {
       /\{(\w+)\}/g, (_match, key) => String(vars[key] ?? '')),
     _tourEnsureEls: () => ({ pop }),
     _tourSpotHide: () => {},
+    _tourStopFollowing: () => {},
     _tourNarrow: () => false,
     // editor-tour-spot.js's centring helper — the catalogue calls it instead
     // of clearing the step's inline position itself (2026-09-17).

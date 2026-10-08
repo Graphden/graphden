@@ -270,6 +270,7 @@ async function openTutorialMenu() {
     return;
   }
   const { pop } = _tourEnsureEls();
+  _tourStopFollowing();
   if (typeof _tourTimer !== 'undefined' && _tourTimer) {
     clearInterval(_tourTimer);
     _tourTimer = null;

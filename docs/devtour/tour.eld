@@ -4,7 +4,7 @@
 ;; (:file + :head) rather than baked source, so emacs shows live code.
 (:title "Graphden — developer tour"
  :definition-return "Return to the tour"
- :mins 754.7
+ :mins 754.6
  :glossary ((:id "graph-function" :title "Graph function" :say "A stored definition of a computation, identified by a function ID. It can declare arguments or specialize parent functions by [inheritance](#term/inheritance) and [bindings](#term/binding). A function ID identifies the definition; its name is a label within a namespace.")
  (:id "base-function" :title "Base function" :say "A [graph function](#term/graph-function) with a registered host-language implementation. Composed functions obtain the implementation through their parents and supply arguments through graph [bindings](#term/binding). A base function is distinct from the base branch used in version resolution.")
  (:id "context" :title "Execution context" :say "The runtime value carrying storage, implementations, caches, and execution policy. It determines the data and branch visible to a call. A branch-specific context may resolve the same function ID differently from another context.")
@@ -425,7 +425,7 @@ The executor compiles this description into a callable Clojure function. Referen
      :say "Assigns graph elements to grid columns and rows and reports layout validation results. The browser later measures actual card sizes and converts the grid into pixel coordinates. This separates graph ordering from DOM-dependent geometry.")
     (:key "layout/annotate" :n 6 :gi 176 :defn "annotate" :ns "graphden.layout.strip-facts" :file "src/graphden/layout/strip_facts.clj" :line 85 :lang "clj" :mins 2.3 :head "(defn annotate" :see (("versioning/effective-branch-local?" . "effective-branch-local?")) :refs nil :siblings nil
      :say "Attaches computed facts to function nodes: the inherited return-type alias, the [base function](#term/base-function) owning a return-type rule, and the ancestor responsible for [branch-local](#term/branch-local) behavior. The editor displays these server-computed facts instead of repeating the same traversals in JavaScript.")))
-  (:id "editor" :title "Editor — browser behavior" :status "toured" :mins 86.1 :summary "Loading, graph-backed controls, actions, forms, and preferences."
+  (:id "editor" :title "Editor — browser behavior" :status "toured" :mins 86.0 :summary "Loading, graph-backed controls, actions, forms, and preferences."
    :steps
    ((:key "editor/initGraph" :n 1 :gi 177 :defn "initGraph" :ns "resources/packages/app/editor/editor-main.js" :file "resources/packages/app/editor/editor-main.js" :line 318 :lang "js" :mins 4.3 :head "async function initGraph() {" :see (("editor/authFetch" . "authFetch")) :refs nil :siblings nil
      :say "Initializes the editor's plain JavaScript modules, concatenated in a fixed order. It first requests the namespace tree to determine [authentication](#term/auth) state, then starts secondary loads; function details load on demand. A 401 opens sign-in. See the [module map](../../docs/EDITOR_MODULES.md).")
@@ -467,7 +467,7 @@ The executor compiles this description into a callable Clojure function. Referen
      :say "Applies user key overrides by stable shortcut ID. The registry keeps defaults for reset and applies overrides when late shortcuts register too. Settings and shortcut help read the same registry so they display the effective keys.")
     (:key "editor/authFetch" :n 20 :gi 196 :defn "authFetch" :ns "resources/packages/app/editor/editor-auth.js" :file "resources/packages/app/editor/editor-auth.js" :line 114 :lang "js" :mins 1.2 :head "async function authFetch(url, opts = {}) {" :see nil :refs (("editor/initGraph" . "initGraph")) :siblings nil
      :say "Sends authenticated editor requests and handles 401 by clearing the stored credential and opening sign-in. HTTP 4xx responses still resolve normally: callers must inspect the response status. A `try/catch` alone detects network exceptions, not rejected HTTP writes.")
-    (:key "editor/_tourTick" :n 21 :gi 197 :defn "_tourTick" :ns "resources/packages/app/editor/editor-tour.js" :file "resources/packages/app/editor/editor-tour.js" :line 309 :lang "js" :mins 3.8 :head "function _tourTick() {" :see nil :refs nil :siblings nil
+    (:key "editor/_tourTick" :n 21 :gi 197 :defn "_tourTick" :ns "resources/packages/app/editor/editor-tour.js" :file "resources/packages/app/editor/editor-tour.js" :line 309 :lang "js" :mins 3.7 :head "function _tourTick() {" :see nil :refs nil :siblings nil
      :say "Evaluates the current interactive lesson step against editor state. Lesson data comes from `app.tour/_tour-lessons`; this engine ensures required panels and targets are visible, checks the declared completion condition, and advances when it succeeds.")))
   (:id "services" :title "Services — instances and placement" :status "toured" :mins 49.9 :summary "Reconciliation, service discovery, tracing, and executor placement."
    :steps

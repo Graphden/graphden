@@ -51,6 +51,7 @@ async function _tourEnd(nextLessonId = null) {
   // them" deleted NOTHING and still reported "Tutorial items deleted".
   // (Reproduced on the stack: 600ms poll vs a ~1.5s survivors read.)
   if (_tourTimer) { clearInterval(_tourTimer); _tourTimer = null; }
+  _tourStopFollowing();
   // Namespace versions must be cleaned in the owned sandbox, even when a
   // lesson or the reader switched away from it before ending the session.
   const ownedBranch = _tourOwnedBranch(_tourState);

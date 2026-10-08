@@ -361,7 +361,6 @@ function _tourTick() {
       }
     }
   }
-  _tourPosition();
   const now = (typeof performance !== 'undefined' && performance.now)
               ? performance.now() : Date.now();
   const dwellOk = now - (_tourState._shownAt || 0) >= 900;
@@ -431,6 +430,7 @@ function _tourBack() {
 // reader reached by pausing and then dismissing the catalogue.
 function _tourArm() {
   if (!_tourTimer) _tourTimer = setInterval(_tourTick, TOUR_TICK_MS);
+  _tourStartPositioning();
   document.removeEventListener('keydown', _tourOnKey);
   document.addEventListener('keydown', _tourOnKey);
 }
@@ -451,6 +451,7 @@ function _tourResume() {
 // next load, and the catalogue offers "Continue …" right away.
 function _tourPause() {
   const lesson = _tourLesson();
+  _tourStopFollowing();
   if (_tourTimer) { clearInterval(_tourTimer); _tourTimer = null; }
   if (_tourEls) {
     _tourSpotHide();
@@ -511,6 +512,7 @@ function _tourCopy(key, fallback, vars) {
 
 
 function _tourTeardown(keepSaved = false) {
+  _tourStopFollowing();
   _tourState = null;
   _tourReserveForSheet(0);
   if (!keepSaved) _tourSaveState();

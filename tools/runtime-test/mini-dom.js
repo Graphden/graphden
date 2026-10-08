@@ -74,10 +74,12 @@ class MiniElement {
     this.children = [];
     this.parentNode = null;
     this.attributes = {};
-    // A plain bag, plus the two CSS-variable methods the editor uses on
+    // A plain bag, plus the CSS-variable methods the editor uses on
     // `documentElement`. They are non-enumerable so `style` still reads as
     // "just the properties that were set".
     this.style = {};
+    Object.defineProperty(this.style, 'getPropertyValue',
+      {value: (key) => this.style[key] || ''});
     Object.defineProperty(this.style, 'setProperty',
       { value(k, v) { this[k] = v; }, enumerable: false });
     Object.defineProperty(this.style, 'removeProperty',

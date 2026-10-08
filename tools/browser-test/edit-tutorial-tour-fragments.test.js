@@ -131,8 +131,13 @@ const {walkLesson30} = require('./tutorial-app-helpers');
     // An HTTP response graph may leave only :request free, even when
     // another slot has an optional default in ordinary execution.
     await bindOptionalArgChip(page, 'separator', '');
+    await filterAndSelect(page, clockBody, clockBody);
     await bindSeqAnchorPlaceholder(page, prefix);
+    // Every append reloads the selected subgraph asynchronously. Resolve
+    // that same owned body again before opening its next list-tail picker.
+    await filterAndSelect(page, clockBody, clockBody);
     await appendFnRefViaChip(page, 'coll', clockText);
+    await filterAndSelect(page, clockBody, clockBody);
     await bindSeqAnchorPlaceholder(page, suffix);
     await filterAndSelect(page, 'html-ok-response', 'html-ok-response');
     await extendViaRowActions(page, clockHandler, 'html-ok-response');

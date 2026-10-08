@@ -47,6 +47,9 @@ async function editOwnValue(page, fnId, slot, value, position) {
   await page.locator(selector).click();
   const popover = page.locator('.arg-value-edit-popover');
   const input = popover.locator('[data-form-field], .arg-value-edit-input').first();
+  // The popover appears before its asynchronous typed form arrives.
+  // Wait for the value control before checking which widget was rendered.
+  await input.waitFor({state: 'visible', timeout: 60000});
   if (value.startsWith('#')) assert(await popover.locator('input[type="color"]').count() === 1,
     'the copied canonical color type retains its native color widget');
   await input.fill(value);
@@ -134,4 +137,4 @@ async function walkUIComponentsLesson(page) {
   }
   return manifest;
 }
-module.exports = {walkUIComponentsLesson, selectCreatedLeaf};
+module.exports = {walkUIComponentsLesson, selectCreatedLeaf, editOwnValue};

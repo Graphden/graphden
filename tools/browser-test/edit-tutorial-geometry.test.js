@@ -99,6 +99,48 @@ const {assert, newContext} = require('./edit-test-helpers');
     });
     assert(motion.intermediate > 0 && motion.maxExcess <= 2 && await aligned('#geometry-fixture') <= 1,
       'delayed CSS transition follows within one observed frame (excess ' + motion.maxExcess.toFixed(1) + 'px)');
+    // Native WAAPI has no transitionrun/animationstart and writes no style
+    // attributes between frames. Move an ancestor to cover the menu's case.
+    const native = await page.evaluate(async () => {
+      const target = document.getElementById('geometry-fixture');
+      const owner = document.createElement('div');
+      owner.id = 'geometry-native-owner';
+      owner.style.cssText = 'position:fixed;left:0;top:0;width:100%;height:100%;pointer-events:none';
+      document.body.appendChild(owner);
+      owner.appendChild(target);
+      const animation = animateWithGeometry(owner,
+        [{transform: 'translateY(0px)'}, {transform: 'translateY(90px)'}],
+        {duration: 300, fill: 'forwards'});
+      const samples = [];
+      const deadline = performance.now() + 5000;
+      while ((animation.pending || animation.playState === 'running') && performance.now() < deadline) {
+        await new Promise(requestAnimationFrame);
+        const t = target.getBoundingClientRect();
+        const r = document.getElementById('gd-tour-spot').getBoundingClientRect();
+        samples.push({y: t.top, error: Math.abs(r.top - t.top + 6)});
+      }
+      return {intermediate: samples.filter(sample => sample.y > 221 && sample.y < 309).length,
+        maxExcess: Math.max(...samples.slice(3).map((sample, i) =>
+          sample.error - Math.abs(sample.y - samples[i + 2].y)))};
+    });
+    await frames();
+    assert(native.intermediate > 0 && native.maxExcess <= 2 && await aligned('#geometry-fixture') <= 1,
+      'native ancestor motion follows within one observed frame (excess ' + native.maxExcess.toFixed(1) + 'px)');
+    await page.evaluate(async () => {
+      const owner = document.getElementById('geometry-native-owner');
+      const animation = animateWithGeometry(owner,
+        [{transform: 'translateY(90px)'}, {transform: 'translateY(180px)'}], {duration: 500});
+      await new Promise(requestAnimationFrame);
+      animation.cancel();
+    });
+    await frames();
+    assert(await aligned('#geometry-fixture') <= 1, 'cancelled native motion follows the reverted final geometry');
+    await page.evaluate(() => {
+      const owner = document.getElementById('geometry-native-owner');
+      owner.getAnimations().forEach(animation => animation.cancel());
+      document.body.appendChild(document.getElementById('geometry-fixture'));
+      owner.remove();
+    });
     await page.emulateMedia({reducedMotion: 'reduce'});
     await page.evaluate(() => { document.getElementById('geometry-fixture').style.transform = 'translateX(40px)'; });
     await frames();
@@ -190,11 +232,18 @@ const {assert, newContext} = require('./edit-test-helpers');
     assert(await aligned('.node-overlay') <= 1, 'actual graph viewport pan updates the spotlight');
     await page.evaluate(() => { window.geometryBaselineListeners = _viewportListeners.length - 1; });
     await page.screenshot({path: '/tmp/graphden-tour-geometry.png'});
-    await page.evaluate(() => _tourPause());
+    await page.evaluate(() => {
+      window.geometryPausedAnimation = animateWithGeometry(document.getElementById('geometry-fixture'),
+        [{transform: 'translateX(40px)'}, {transform: 'translateX(80px)'}], {duration: 300});
+      _tourPause();
+    });
     await frames();
     const paused = await page.evaluate(async () => {
       const before = window.geometryCalls;
       document.getElementById('geometry-fixture').style.transform = 'translateX(80px)';
+      window.geometryPausedAnimation.cancel();
+      animateWithGeometry(document.getElementById('geometry-fixture'),
+        [{opacity: 0.5}, {opacity: 1}], {duration: 100});
       window.dispatchEvent(new Event('resize'));
       await new Promise((resolve) => setTimeout(resolve, 100));
       return {calls: window.geometryCalls - before, stopped: _tourStopPositioning === null,

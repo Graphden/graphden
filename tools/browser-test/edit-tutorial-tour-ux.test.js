@@ -12,7 +12,8 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext, api} = require('./edit-test-helpers');
+const fs = require('node:fs');
+const {assert, newContext, api, nodeApi} = require('./edit-test-helpers');
 const {
   hardCleanup, waitTourTitle, clickTourButton, filterAndSelect,
   runViaRowActions, tourWhere, extendViaRowActions, bindFirstPlaceholder,
@@ -27,6 +28,8 @@ const {
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
   console.log('edit-tutorial-tour-ux — lessons 15 / 20 / 21 / 22 / 12 / 18');
   let failed = false;
+  let createdViewReceipt = null;
+  const viewReceiptPath = '/tmp/graphden-native22-receipt-' + process.pid + '-' + Date.now() + '.json';
   try {
     await hardCleanup(page);
     const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
@@ -280,7 +283,26 @@ const {
     await page.keyboard.press('Escape');
     await page.click('#gd-ws-chip');
     await page.fill('#gd-ws-pop .gd-views-input', 'tutorial-function-view');
+    const viewContext = await page.evaluate(async () => {
+      const response = await authFetch(API.api_branches);
+      if (!response.ok) throw new Error('View branch receipt unavailable');
+      const body = await response.json();
+      const rows = Array.isArray(body) ? body : body.branches;
+      const branch = rows.find(row => row.name === _tourSessionBranch());
+      if (!branch?.id) throw new Error('View branch identity unavailable');
+      return {branchId: branch.id, branchName: branch.name};
+    });
+    const saveResponse = page.waitForResponse(response => response.request().method() === 'POST'
+      && new URL(response.url()).pathname === '/api/views/save', {timeout: 30000});
     await page.getByRole('button', {name: 'Save in graph', exact: true}).click();
+    const savedResponse = await saveResponse;
+    const command = savedResponse.request().postDataJSON();
+    const savedBody = await savedResponse.json();
+    assert(savedResponse.status() === 200 && savedBody.ok === true && savedBody.committed === true
+      && savedBody.view?.id === command['create-id'], 'Save returns the exact preassigned fresh UUID');
+    createdViewReceipt = {...viewContext, id: savedBody.view.id, name: savedBody.view.name};
+    fs.writeFileSync(viewReceiptPath, JSON.stringify(createdViewReceipt), {mode: 0o600});
+    console.log('  exact view receipt: ' + viewReceiptPath);
     await waitTourTitle(page, 'Edit the same view', 150000);
     const viewId = await page.evaluate(() => gdActiveViewId());
     assert(viewId, 'graph Save retains the preassigned identity');
@@ -618,6 +640,29 @@ const {
       console.error('  screenshot: /tmp/edit-tutorial-tour-ux-fail.png');
     } catch (_) { /* page may be gone */ }
   } finally {
+    if (createdViewReceipt) {
+      try {
+        const receipt = createdViewReceipt;
+        const branches = await api(page, 'GET', '/api/branches');
+        const rows = Array.isArray(branches) ? branches : branches.branches;
+        assert(rows?.some(row => row.id === receipt.branchId && row.name === receipt.branchName),
+          'exact saved view branch identity retained');
+        const headers = {'X-Graphden-Branch': receipt.branchId};
+        const views = await api(page, 'GET', '/api/views', undefined, headers);
+        const view = views.find(row => row.id === receipt.id);
+        if (view) {
+          const deleted = await nodeApi('DELETE', '/api/entities/fn/' + receipt.id, undefined, headers);
+          const body = await deleted.json().catch(() => null);
+          assert(deleted.ok && body?.ok !== false && !body?.error, 'exact saved view UUID removed');
+        }
+        const remaining = await api(page, 'GET', '/api/views', undefined, headers);
+        assert(!remaining.some(row => row.id === receipt.id), 'exact saved view UUID absent');
+        fs.unlinkSync(viewReceiptPath);
+      } catch (_) {
+        failed = true;
+        console.error('Exact saved view cleanup incomplete; retained receipt: ' + viewReceiptPath);
+      }
+    }
     await hardCleanup(page);
     await browser.close();
   }

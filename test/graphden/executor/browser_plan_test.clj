@@ -125,15 +125,22 @@
 
 (deftest literal-nil-is-not-a-free-argument-test
   (let [fixture (graph-of [{:name :nil-value :parent :const :args {:value {:value nil}}}
-                           {:name :free-value :parent :const :args {:value {:as :state}}}])
+                           {:name :free-value :parent :const :args {:value {:as :state}}}
+                           {:name :renamed-nil :parent :free-value :args {:state {:value nil}}}])
         nil-plan (export-fixture fixture :nil-value)
-        free-plan (export-fixture fixture :free-value)]
+        free-plan (export-fixture fixture :free-value)
+        renamed-nil-plan (export-fixture fixture :renamed-nil)]
     (is (= {:kind "literal" :value ["nil"]}
            (get-in (last (:functions nil-plan)) [:args 0 :expr])))
     (is (= "read" (get-in (last (:functions free-plan)) [:args 0 :expr :kind])))
     (is (= ["state"] (get-in free-plan [:inputs (str (get-in fixture [:ids :free-value])) :accepted])))
-    ;; A rename-view slot is optional in the existing public compiler surface.
-    (is (= [] (get-in free-plan [:inputs (str (get-in fixture [:ids :free-value])) :required])))))
+    ;; A rename retains its source's requirement until an actual binding closes
+    ;; it. Explicit nil is a supplied literal, both directly and through a rename.
+    (is (= ["state"] (get-in free-plan [:inputs (str (get-in fixture [:ids :free-value])) :required])))
+    (doseq [[plan name] [[nil-plan :nil-value] [renamed-nil-plan :renamed-nil]]]
+      (is (= {:accepted [] :required []}
+             (select-keys (get-in plan [:inputs (str (get-in fixture [:ids name]))])
+                          [:accepted :required]))))))
 
 
 (deftest renamed-reader-and-public-argument-targets-use-slot-identities-test

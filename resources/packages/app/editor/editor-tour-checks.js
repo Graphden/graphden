@@ -274,14 +274,21 @@ function _tourCheckPasses(check) {
         // includes "is still in the DOM but hidden".
         return !_tourDomVisible(check.selector);
       case 'result-value': {
-        // Inspect the current Run pane's raw JSON, not its item count or
-        // presentation labels. Submitting clears the result host, so an
+        // Inspect the current Run pane's value, using raw JSON for shaped
+        // results and rendered text for scalars. Submitting clears the host, so an
         // earlier result cannot complete a step while the new run is pending.
         if (!_tourDomVisible('.execute-popover.visible .execute-result-pane')) return false;
         const raw = document.querySelector(
           '.execute-popover.visible .execute-result-host .execute-result-raw pre');
-        if (!raw || !Object.hasOwn(check, 'value')) return false;
-        return JSON.stringify(JSON.parse(raw.textContent)) === JSON.stringify(check.value);
+        if (!Object.hasOwn(check, 'value')) return false;
+        if (raw) return JSON.stringify(JSON.parse(raw.textContent)) === JSON.stringify(check.value);
+        // The production scalar pane has no Raw details; it renders the
+        // primitive directly. This proves the displayed value, not its type:
+        // numeric 2 and text "2" share that markup. Shaped results use raw JSON.
+        if (!['number', 'string', 'boolean'].includes(typeof check.value)) return false;
+        const scalar = document.querySelector(
+          '.execute-popover.visible .execute-result-host .execute-result-scalar');
+        return !!scalar && scalar.textContent === String(check.value);
       }
       case 'input-value': {
         // A form control's CURRENT value — what `dom` cannot see, because a

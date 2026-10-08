@@ -356,6 +356,18 @@ test('successful Run checks reject errors and wrong deterministic results', () =
   }
 });
 
+test('result-value accepts production scalar panes without Raw details', () => {
+  const pane = '.execute-popover.visible .execute-result-pane';
+  const scalar = '.execute-popover.visible .execute-result-host .execute-result-scalar';
+  for (const value of [2, 10, 'ALPHA', 'BETA', '{"a":1}', 6, 'den']) {
+    const state = {dom: {[pane]: true, [scalar]: {textContent: String(value)}}};
+    assert(checkIn(state, {kind: 'result-value', value}), 'plain scalar ' + JSON.stringify(value));
+    assert(!checkIn(state, {kind: 'result-value', value: 'wrong'}), 'wrong scalar rejected');
+  }
+  const nilPane = {dom: {[pane]: true, [scalar]: {textContent: 'nil'}}};
+  assert(!checkIn(nilPane, {kind: 'result-value', value: ['nil']}), 'lists require Raw JSON');
+});
+
 test('review completion is scoped to the requested approved branch', () => {
   const selector = '.branch-row-approve[data-approve-branch="tutorial-feature"][data-approved="1"] + .branch-appr-count.ok';
   const check = {kind: 'dom', selector};

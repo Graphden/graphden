@@ -1716,6 +1716,29 @@ async function openMarkerFormViaPlaceholder(page, argName, marker) {
 }
 
 // Saved description edits create fn field versions; verify the selected UUID.
+// Escape belongs to the tutorial when no editing popup is open. In touch
+// layouts there is no incidental hover tooltip to consume it.
+async function resetDescriptionTransient(page) {
+  await page.evaluate(() => {
+    const cancel = Array.from(document.querySelectorAll('.description-tooltip-btn'))
+      .find((button) => button.textContent.trim() === 'Cancel');
+    if (cancel) cancel.click();
+    document.querySelector('.description-tooltip-close')?.click();
+  });
+  const open = await page.evaluate(() => Array.from(document.querySelectorAll(
+    '.row-actions-popover, .fn-picker-popover, .arg-value-edit-popover, .execute-popover.visible',
+  )).some(element => {
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }));
+  if (open) {
+    await page.keyboard.press('Escape');
+    // Popup dismissal finishes asynchronously; retain the measured settle
+    // only when a real dismissal was requested.
+    await page.waitForTimeout(400);
+  }
+}
+
 async function setFnDescription(page, fnName, text) {
   const fnId = await page.evaluate((name) => {
     const fn = lookups.fnMap.get(selectedFnId);
@@ -1737,23 +1760,7 @@ async function setFnDescription(page, fnName, text) {
     // (the action toggles), no Edit button grew, and all three attempts
     // fell through in seconds. The tooltip's own × button is the one
     // public path that resets both flags — use it.
-    await page.evaluate(() => {
-      // Edit mode renders no × — leave it through Cancel first (clears the
-      // editing flag and re-renders read mode, × included), then unpin.
-      const cancel = Array.from(document.querySelectorAll('.description-tooltip-btn'))
-        .find((b) => b.textContent.trim() === 'Cancel');
-      if (cancel) cancel.click();
-      const close = document.querySelector('.description-tooltip-close');
-      if (close) close.click();
-    });
-    await page.keyboard.press('Escape').catch(() => {});
-    // KEEP THE SLEEP. Escape is asynchronous in its EFFECT — the editor's
-    // keydown handler unpins and closes on a later tick — and there is no
-    // single observable that says "Escape has been processed": waiting for
-    // the row-actions popover to be gone is not it (tried, two gate runs,
-    // `setDescription` failed 5/5 both times). Until the editor exposes
-    // that state, this is a settle by measurement, not by hope.
-    await page.waitForTimeout(400);
+    await resetDescriptionTransient(page);
 
     // THIS fn's ⋯, not the first in the document: right after the extend the
     // canvas can still be the parent's card alone, and its ⋯ → i → Save is a
@@ -1874,7 +1881,7 @@ module.exports = {
   retryingDelete, hardCleanup, tourTitle, tourWhere, waitTourTitle, settleTourRing, clickTourButton,
   waitUntil, tourProgress, clickTourAdvance,
   installSpotlightAudit,
-  filterAndSelect, openRowActionsFor, extendViaRowActions, bindFirstPlaceholder, setFnDescription,
+  filterAndSelect, openRowActionsFor, extendViaRowActions, bindFirstPlaceholder, setFnDescription, resetDescriptionTransient,
   pickIncompatFnRef, pickAnyway, removeUseSiteBinding, waitClickable,
   createBranchViaChip, cleanupRecordedTutorialBranches, compareBranchViaChip, exitBranchCompare, mergeBranchViaChip, switchBranchViaChip, editBoundValue, runViaRowActions, runFromOpenPane,
   appendSeqItemViaEdge,

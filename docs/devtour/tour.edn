@@ -537,6 +537,13 @@
            chain around a transaction connection. Each write still passes through its existing
            [decorators](#term/protocol). Transaction-scoped [advisory locks](#term/advisory-lock) used
            by uniqueness checks remain held until the transaction ends."}
+    {:ns graphden.storage.graph-writer :defn call-with-write
+     :say "Keeps decisive graph reads, validation and all related writes in one database
+           transaction. Its advisory locks serialize edits of the same organization while private
+           writes in separate organizations can proceed together. A write to a public identity takes
+           the shared graph's exclusive lock, including a version-only edit by a private actor.
+           Ownership is checked again after waiting. Cache invalidation, notifications and type
+           diagnostics are published after commit, with compilation outside the writer lock."}
     {:ns graphden.versioning.storage.resolution :defn entity-config
      :say "Lists the versioned entities: `:fn`, `:fn-slot`, `:binding`, `:binding-list-item`, and
            `:resource-override`. For each entity it distinguishes identity fields in the base table
@@ -769,18 +776,19 @@
            validation."}
     {:ns graphden.crud.entities.record-type :defn apply-create-record-type-body
      :say "Creates the function row, [slot](#term/slot) rows, and function-slot links for a record
-           type. Each successful write is appended to a journal. The journal supports compensating
-           cleanup if a later write fails; this sequence is not a database transaction."}
+           type under the semantic writer guard in one database transaction. Cache invalidation runs
+           after commit; a failed transaction clears the legacy compensation journal."}
     {:ns graphden.crud.entities.record-type :defn apply-create-rollback
      :say "On failure, traverses the creation journal backward and attempts to delete each created
-           row. This is best-effort compensation, not transactional atomicity: cleanup can itself
-           fail, in which case the code logs the need for manual cleanup."}
+           row for storage implementations without database transactions. PostgreSQL failures have
+           already rolled back and cleared the journal, so replay cannot damage restored rows."}
     {:ns graphden.crud.entities :defn apply-create-core
-     :say "Creates a row, checks the resulting function's types, and applies rename-slot updates.
-           Ordinary type errors leave the edit stored and return `:type-warnings`.
-           [Secret-flow](#term/secret) violations instead delete the new row and return an error,
-           keeping the security rejection independent of the diagnostics store. See
-           [secrets](../../docs/SECRETS.md)."}
+     :say "Repeats structural validation under the semantic writer guard, then creates the row,
+           optional rename view, and checks the resulting function in one SQL transaction.
+           Ordinary type errors keep the edit and return `:type-warnings`; an optional rename
+           failure rolls back its savepoint without losing the binding. [Secret-flow](#term/secret)
+           rejection rolls back the whole SQL change, independently of the diagnostics store.
+           See [secrets](../../docs/SECRETS.md)."}
     {:ns graphden.crud.type-check :defn type-check-fn-after-mutation!
      :say "Reconstructs and checks the changed function, updating branch-specific diagnostics.
            `:reject-secret?` marks secret-related failures for the caller to reject instead of storing
@@ -834,10 +842,11 @@
            Sanitized request and response data are stored as an execution so the existing call-tree
            interface can display the handler run. See [debugging](../../docs/EXECUTION.md)."}
     {:ns graphden.crud.secrets :defn apply-create-secret-body
-     :say "Creates graph rows containing a secret path, then stores the value and metadata in OpenBao.
-           The value never enters the graph rows. A journal supports compensating rollback if a later
-           operation fails. Request parsing and validation are composed in `app/secrets/fns.edn`; this
-           function performs the coordinated writes. See [secrets](../../docs/SECRETS.md)."
+     :say "Claims the secret path and creates its graph rows in one guarded SQL transaction.
+           After commit, stores the value and metadata in OpenBao without holding the graph writer.
+           The value never enters graph rows. SQL failures roll back and clear their journal entries;
+           later Vault failures use compensation for the already committed rows. Request parsing
+           remains composed in `app/secrets/fns.edn`. See [secrets](../../docs/SECRETS.md)."
      :see [[:types "taint-with-secret-if-tainted"]]}
     {:ns graphden.crud.test-runs :defn run-tests!
      :say "Runs functions from `tests` namespaces through the ordinary execution API with empty

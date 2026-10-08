@@ -20,6 +20,7 @@ shape, self-hosted included.
 | `:constraint-violation/fn-name-collision` | 409 |
 | `:constraint-violation/position-collision` | 409 |
 | `:constraint-violation/unique` | 409 |
+| `:constraint-violation/stale-bundle` | 409 |
 | `:merge-conflict` (POST /api/branches/:ref/merge) | 409 |
 | `:merge-protection-violation` (POST /api/branches/:ref/merge — protected-binding transfer OR the target branch's `:forbid-invalid?` policy over recorded type diagnostics) | 409 |
 | `:branch/merge-required` (a DIRECT write to a branch whose `require-merge?` is on — push-only-via-merge; merge into it instead) | 409 |
@@ -39,6 +40,7 @@ shape, self-hosted included.
 | package-owned target of POST /api/secret-bindings, PUT /api/types/record | 403 (envelope `:http-status`) |
 | `validation-error/*`, `constraint-violation/*` (other), `type-check/*`, `packages/*`, `refinement/*`, `execution-error/*`, `graph-error/*`, `secrets/*`, `sequence-op/*`, execute rejected (other) | 400 |
 | `branch-router/*` | 404 |
+| `inheritance/*`, `graph-write/*` | 409 |
 | unknown / internal | 500 (opaque `:ref`) |
 
 Deliberate exceptions: the MCP route is JSON-RPC (spec-mandated
@@ -540,3 +542,9 @@ A `POST /api/sequence/append/:fn-id` (or insert) body carried neither
 by-name form: a bare name can live in several namespaces.) Nothing is
 written: the body is parsed before the host `:list-append` binding is
 materialised.
+
+### `:constraint-violation/stale-bundle`
+
+A graph bundle was parsed from a snapshot that changed before apply acquired
+its writer lock. Prepare it again against the current graph. No namespace or
+graph rows from the refused bundle are committed.

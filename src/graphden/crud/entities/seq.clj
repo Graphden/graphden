@@ -19,7 +19,10 @@
     [graphden.crud.type-check :as tc]
     [graphden.crud.types-api :as types-api]
     [graphden.crud.validation :as validation]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.graph-writer :as writer]
+    [graphden.storage.protocol.core :as sp]
+    [graphden.storage.tx :as tx]
+    [graphden.versioning.storage.resolution :as resolution]))
 
 
 (defn- post-write-rej
@@ -186,7 +189,7 @@
       :else {:error "Optional :position must be a non-negative integer"})))
 
 
-(defn apply-seq-append-core
+(defn- append-sequence!
   "§3.3 atomic core of sequence-append: materialise synthetic binding
    if needed, compute the position, run pre-write validation, write
    the binding-list-item row. An optional body `:position` turns the
@@ -342,7 +345,7 @@
   (sp/update-entity storage :binding-list-item (:id a) {:position (:position b)}))
 
 
-(defn apply-seq-move-core
+(defn- move-sequence!
   "§3.3 atomic core of sequence-move: swap `item` with its up/down
    neighbour in position order (three writes through a free temp
    position — each individual write passes the position-uniqueness
@@ -394,7 +397,7 @@
                   rej (assoc :type-warnings [(:diagnostic rej)]))))))))))
 
 
-(defn apply-seq-update-core
+(defn- update-sequence!
   "§3.3 atomic core of sequence-update: resolve body payload, run
    pre-write validation, write the binding-list-item row. Returns
    `{:updated <item-id>}` on success (plus `:type-warnings` — the
@@ -436,3 +439,88 @@
                   {:error (:reason rej)})
               (cond-> {:updated item-id}
                 rej (assoc :type-warnings [(:diagnostic rej)]))))))))
+
+
+(defn- reachable-slot?
+  "Check the selected slot against the live inheritance closure under the
+   writer guard. Names and a cached sequence placeholder cannot prove this."
+  [storage fn-id slot-id]
+  (loop [frontier [fn-id], seen #{}]
+    (when (seq frontier)
+      (let [fns (sp/query-entities storage :fn {:id frontier})
+            ids (mapv :id fns)
+            seen (into seen ids)]
+        (or (and (seq ids)
+                 (seq (sp/query-entities storage :fn-slot
+                                         {:fn-id ids :slot-id slot-id})))
+            (recur (into [] (comp (mapcat :parent-ids) (remove seen) (distinct)) fns)
+                   seen))))))
+
+
+(defn- refresh-append-binding
+  [storage fn-id previous]
+  (when (and (= fn-id (:fn-id previous))
+             (reachable-slot? storage fn-id (:slot-id previous)))
+    (let [current (first (sp/query-entities storage :binding
+                                            {:fn-id fn-id :slot-id (:slot-id previous)}))]
+      (if (:synthetic previous)
+        (or current previous)
+        (when (= (:id current) (:id previous)) current)))))
+
+
+(defn- apply-sequence-write
+  "The guard covers fresh reads, validation and the complete mutation.
+   Error envelopes abort the SQL transaction, including compensating writes."
+  [ctx mutation apply!]
+  (let [storage (request/require-storage ctx)
+        pooled? (some? (tx/datasource storage))]
+    (when pooled? (tx/assert-owns-commit! storage))
+    (let [result (try
+                   (writer/call-with-write
+                     storage mutation
+                     (fn [bound]
+                       (resolution/call-with-fresh-memos
+                         (fn []
+                           (let [result (apply! bound (assoc ctx :storage bound))]
+                             (if (and pooled? (:error result))
+                               (throw (ex-info "Sequence write rejected" {::rejection result}))
+                               result))))))
+                   (catch clojure.lang.ExceptionInfo e
+                     (if-let [result (::rejection (ex-data e))] result (throw e))))]
+      (resolution/forget-read-memos!)
+      result)))
+
+
+(defn apply-seq-append-core
+  "Append/insert using a live binding and slot closure, in one transaction."
+  [parsed seq-binding ctx]
+  (apply-sequence-write
+    ctx {:entity :fn :ids [(:fn-id parsed)]}
+    (fn [storage bound-ctx]
+      (if-let [current (refresh-append-binding storage (:fn-id parsed) seq-binding)]
+        (append-sequence! parsed current bound-ctx)
+        {:error "Sequence binding or inherited slot changed; refresh and retry"
+         :http-status 409}))))
+
+
+(defn apply-seq-move-core
+  "Read the current item/neighbours and swap atomically. A stale graph row
+   cannot move an item in its former binding or resurrect a deleted item."
+  [parsed _item ctx]
+  (apply-sequence-write
+    ctx {:entity :binding-list-item :ids [(:item-id parsed)]}
+    (fn [storage bound-ctx]
+      (if-let [current (sp/read-entity storage :binding-list-item (:item-id parsed))]
+        (move-sequence! parsed current bound-ctx)
+        {:error "Sequence item no longer exists" :http-status 404}))))
+
+
+(defn apply-seq-update-core
+  "Re-read the item under the guard before validation, update and rollback."
+  [parsed _item ctx]
+  (apply-sequence-write
+    ctx {:entity :binding-list-item :ids [(:item-id parsed)]}
+    (fn [storage bound-ctx]
+      (if-let [current (sp/read-entity storage :binding-list-item (:item-id parsed))]
+        (update-sequence! parsed current bound-ctx)
+        {:error "Sequence item no longer exists" :http-status 404}))))

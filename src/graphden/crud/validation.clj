@@ -582,7 +582,7 @@
                               " is not legal on base type :" (name base-name))}))))))))
 
 
-(defn- reparent-cross-branch-rej
+(defn reparent-cross-branch-rej
   "Guard the parent-set/binding desync: `:parent-ids` lives on the
    IDENTITY row (a junction — visible to every branch instantly), while
    the re-parent cascade's binding migration writes VERSION rows on the

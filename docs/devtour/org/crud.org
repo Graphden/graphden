@@ -7,7 +7,7 @@ Request validation, stored edits, execution results, and views.
 
 after: storage, types
 
-[[file:index.org][index]] · ~68 min
+[[file:index.org][index]] · ~63 min
 
 * 1. extract-entity-params
 :PROPERTIES:
@@ -52,13 +52,13 @@ Resolves the requested branch by UUID or name before writing. The resulting bran
 :PROPERTIES:
 :CUSTOM_ID: crud/create-entity
 :FILE: src/graphden/crud/entities.clj
-:LINE: 171
+:LINE: 187
 :MINS: 0.8
 :END:
 
 Creates one row through the generic write API. It checks the caller's [[file:glossary.org::#term/auth][capability]], validates the proposed change with ~write-rej~, writes through ~sp/create-entity~, then invalidates caches and sends notifications.
 
-- source :: [[file:../../../src/graphden/crud/entities.clj::(defn create-entity][src/graphden/crud/entities.clj:171]]
+- source :: [[file:../../../src/graphden/crud/entities.clj::(defn create-entity][src/graphden/crud/entities.clj:187]]
 - same file :: [[file:crud.org::#crud/apply-create-core][apply-create-core]]
 - referenced from :: [[file:constellation.org::#constellation/every-addon-facing-var-still-resolves-test][every-addon-facing-var-still-resolves-test]]
 
@@ -79,39 +79,39 @@ Checks whether a proposed mutation must be rejected before storage is changed. C
 :PROPERTIES:
 :CUSTOM_ID: crud/apply-create-record-type-body
 :FILE: src/graphden/crud/entities/record_type.clj
-:LINE: 94
-:MINS: 1.7
+:LINE: 439
+:MINS: 0.9
 :END:
 
-Creates the function row, [[file:glossary.org::#term/slot][slot]] rows, and function-slot links for a record type. Each successful write is appended to a journal. The journal supports compensating cleanup if a later write fails; this sequence is not a database transaction.
+Creates the function row, [[file:glossary.org::#term/slot][slot]] rows, and function-slot links for a record type under the semantic writer guard in one database transaction. Cache invalidation runs after commit; a failed transaction clears the legacy compensation journal.
 
-- source :: [[file:../../../src/graphden/crud/entities/record_type.clj::(defn apply-create-record-type-body][src/graphden/crud/entities/record_type.clj:94]]
+- source :: [[file:../../../src/graphden/crud/entities/record_type.clj::(defn apply-create-record-type-body][src/graphden/crud/entities/record_type.clj:439]]
 - same file :: [[file:crud.org::#crud/apply-create-rollback][apply-create-rollback]]
 
 * 7. apply-create-rollback
 :PROPERTIES:
 :CUSTOM_ID: crud/apply-create-rollback
 :FILE: src/graphden/crud/entities/record_type.clj
-:LINE: 114
+:LINE: 118
 :MINS: 1.8
 :END:
 
-On failure, traverses the creation journal backward and attempts to delete each created row. This is best-effort compensation, not transactional atomicity: cleanup can itself fail, in which case the code logs the need for manual cleanup.
+On failure, traverses the creation journal backward and attempts to delete each created row for storage implementations without database transactions. PostgreSQL failures have already rolled back and cleared the journal, so replay cannot damage restored rows.
 
-- source :: [[file:../../../src/graphden/crud/entities/record_type.clj::(defn apply-create-rollback][src/graphden/crud/entities/record_type.clj:114]]
+- source :: [[file:../../../src/graphden/crud/entities/record_type.clj::(defn apply-create-rollback][src/graphden/crud/entities/record_type.clj:118]]
 - same file :: [[file:crud.org::#crud/apply-create-record-type-body][apply-create-record-type-body]]
 
 * 8. apply-create-core
 :PROPERTIES:
 :CUSTOM_ID: crud/apply-create-core
 :FILE: src/graphden/crud/entities.clj
-:LINE: 624
-:MINS: 4.9
+:LINE: 846
+:MINS: 1.1
 :END:
 
-Creates a row, checks the resulting function's types, and applies rename-slot updates. Ordinary type errors leave the edit stored and return ~:type-warnings~. [[file:glossary.org::#term/secret][Secret-flow]] violations instead delete the new row and return an error, keeping the security rejection independent of the diagnostics store. See [[file:../../../docs/SECRETS.md][secrets]].
+Repeats structural validation under the semantic writer guard, then creates the row, optional rename view, and checks the resulting function in one SQL transaction. Ordinary type errors keep the edit and return ~:type-warnings~; an optional rename failure rolls back its savepoint without losing the binding. [[file:glossary.org::#term/secret][Secret-flow]] rejection rolls back the whole SQL change, independently of the diagnostics store. See [[file:../../../docs/SECRETS.md][secrets]].
 
-- source :: [[file:../../../src/graphden/crud/entities.clj::(defn apply-create-core][src/graphden/crud/entities.clj:624]]
+- source :: [[file:../../../src/graphden/crud/entities.clj::(defn apply-create-core][src/graphden/crud/entities.clj:846]]
 - same file :: [[file:crud.org::#crud/create-entity][create-entity]]
 - referenced from :: [[file:web.org::#web/write-rej][write-rej]]
 
@@ -262,13 +262,13 @@ Runs the next matching HTTP request with tracing when a one-shot debugger interc
 :PROPERTIES:
 :CUSTOM_ID: crud/apply-create-secret-body
 :FILE: src/graphden/crud/secrets.clj
-:LINE: 197
-:MINS: 4.4
+:LINE: 227
+:MINS: 4.2
 :END:
 
-Creates graph rows containing a secret path, then stores the value and metadata in OpenBao. The value never enters the graph rows. A journal supports compensating rollback if a later operation fails. Request parsing and validation are composed in ~app/secrets/fns.edn~; this function performs the coordinated writes. See [[file:../../../docs/SECRETS.md][secrets]].
+Claims the secret path and creates its graph rows in one guarded SQL transaction. After commit, stores the value and metadata in OpenBao without holding the graph writer. The value never enters graph rows. SQL failures roll back and clear their journal entries; later Vault failures use compensation for the already committed rows. Request parsing remains composed in ~app/secrets/fns.edn~. See [[file:../../../docs/SECRETS.md][secrets]].
 
-- source :: [[file:../../../src/graphden/crud/secrets.clj::(defn apply-create-secret-body][src/graphden/crud/secrets.clj:197]]
+- source :: [[file:../../../src/graphden/crud/secrets.clj::(defn apply-create-secret-body][src/graphden/crud/secrets.clj:227]]
 - see also :: [[file:types.org::#types/taint-with-secret-if-tainted][taint-with-secret-if-tainted]]
 
 * 21. run-tests!

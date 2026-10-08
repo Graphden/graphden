@@ -39,6 +39,7 @@
    :constraint-violation/fn-name-collision 409
    :constraint-violation/position-collision 409
    :constraint-violation/unique 409
+   :constraint-violation/stale-bundle 409
    :merge-conflict 409
    :merge-protection-violation 409
    ;; push-only-via-merge: the write is well-formed, the branch's
@@ -92,6 +93,8 @@
    ;; client's append/insert body, rejected with a message that says how
    ;; to fix it. Unmapped, it reads as 500 "Internal error — see server
    ;; log" and the caller never sees that message.
+   "inheritance" 409
+   "graph-write" 409
    "sequence-op" 400
    "branch-router" 404})
 
@@ -101,7 +104,7 @@
    verbatim (the sync/boot layer's actionable texts). Anything else is
    replaced by an opaque reference id — the message may carry SQL,
    internal ids, or stack context."
-  #{"validation-error" "constraint-violation" "type-check" "packages"
+  #{"validation-error" "constraint-violation" "type-check" "packages" "inheritance" "graph-write"
     "refinement" "capability" "execution" "execution-error"
     "graph-error" "secrets" "authz" "user" "grant" "domain"
     "merge-conflict" "merge-protection-violation" "not-found" "vault"

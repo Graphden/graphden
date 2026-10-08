@@ -33,6 +33,7 @@
    It is independently usable: VersionedStorage(BaseStorage) works without any cache.
    CachedStorage(VersionedStorage(BaseStorage)) works via simple stacking."
   (:require
+    [graphden.storage.graph-writer :as writer]
     [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.generic-constraints :as gc]
@@ -768,6 +769,35 @@
 (defrecord VersionedStorage
   [base-storage branch-id]
 
+  writer/GraphWriterScope
+
+  (writer-scope
+    [_]
+    (when (satisfies? writer/GraphWriterScope base-storage)
+      (writer/writer-scope base-storage)))
+
+
+  writer/GraphWriterAdmission
+
+  (writer-scope-for
+    [_ mutation]
+    (when (satisfies? writer/GraphWriterAdmission base-storage)
+      (writer/writer-scope-for base-storage mutation)))
+
+
+  writer/GraphWriteAuthorization
+
+  (authorize-graph-write!
+    [_ entity-name data id]
+    (assert-not-merge-protected! base-storage branch-id entity-name)
+    (writer/assert-write-authorized! base-storage entity-name data id)
+    (when-let [{:keys [version-entity version-id-field]}
+               (when id (get res/entity-config entity-name))]
+      (writer/assert-write-authorized!
+        base-storage version-entity
+        (assoc data version-id-field id :branch-id branch-id) nil)))
+
+
   sp/Storage
 
   (initialize
@@ -807,16 +837,29 @@
     (sp/schema-metadata base-storage))
 
 
+  writer/GraphCreationAuthorization
+
+  (authorize-graph-creation!
+    [_ fn-data requested-branch-id]
+    (when-not (= branch-id requested-branch-id)
+      (throw (ex-info "Creation branch does not match the storage"
+                      {:type :authz/forbidden})))
+    (assert-not-merge-protected! base-storage branch-id :fn)
+    (writer/assert-creation-authorized! base-storage fn-data branch-id))
+
+
   sp/StorageCRUD
 
   (create-entity
-    [_ entity-name data]
-    (assert-not-merge-protected! base-storage branch-id entity-name)
-    (with-write* base-storage entity-name
-      (fn []
-        (if-not (res/versioned-entity? entity-name)
-          (sp/create-entity base-storage entity-name data)
-          (create-entity-versioned! base-storage branch-id entity-name data)))))
+    [this entity-name data]
+    (writer/with-write [this {:entity entity-name :rows [data]}]
+                       (let [base-storage (:base-storage this)]
+                         (assert-not-merge-protected! base-storage branch-id entity-name)
+                         (with-write* base-storage entity-name
+                           (fn []
+                             (if-not (res/versioned-entity? entity-name)
+                               (sp/create-entity base-storage entity-name data)
+                               (create-entity-versioned! base-storage branch-id entity-name data)))))))
 
 
   (read-entity
@@ -827,34 +870,38 @@
 
 
   (update-entity
-    [_ entity-name id data]
-    (assert-not-merge-protected! base-storage branch-id entity-name)
-    (with-write* base-storage entity-name
-      (fn []
-        (if-not (res/versioned-entity? entity-name)
-          (sp/update-entity base-storage entity-name id data)
-          (update-entity-versioned! base-storage branch-id entity-name id data)))))
+    [this entity-name id data]
+    (writer/with-write [this {:entity entity-name :ids [id] :rows [(assoc data :id id)]}]
+                       (let [base-storage (:base-storage this)]
+                         (assert-not-merge-protected! base-storage branch-id entity-name)
+                         (with-write* base-storage entity-name
+                           (fn []
+                             (if-not (res/versioned-entity? entity-name)
+                               (sp/update-entity base-storage entity-name id data)
+                               (update-entity-versioned! base-storage branch-id entity-name id data)))))))
 
 
   (delete-entity
-    [_ entity-name id]
-    (assert-not-merge-protected! base-storage branch-id entity-name)
-    (with-write* base-storage entity-name
-      (fn []
-        (cond
-          (not (res/versioned-entity? entity-name))
-          (sp/delete-entity base-storage entity-name id)
+    [this entity-name id]
+    (writer/with-write [this {:entity entity-name :ids [id]}]
+                       (let [base-storage (:base-storage this)]
+                         (assert-not-merge-protected! base-storage branch-id entity-name)
+                         (with-write* base-storage entity-name
+                           (fn []
+                             (cond
+                               (not (res/versioned-entity? entity-name))
+                               (sp/delete-entity base-storage entity-name id)
 
-          ;; User-facing delete: tombstone so an inherited entity is hidden too.
-          *tombstone-delete?*
-          (tombstone-version! base-storage entity-name id branch-id)
+                               ;; User-facing delete: tombstone so an inherited entity is hidden too.
+                               *tombstone-delete?*
+                               (tombstone-version! base-storage entity-name id branch-id)
 
-          ;; Hard delete (sync / rollback): drop this branch's own version
-          ;; rows, and — when no other branch retains a version — the
-          ;; identity row too, so no versionless ghost survives to swallow
-          ;; a later re-mint of the same deterministic id.
-          :else
-          (hard-delete-entity! base-storage branch-id entity-name id)))))
+                               ;; Hard delete (sync / rollback): drop this branch's own version
+                               ;; rows, and — when no other branch retains a version — the
+                               ;; identity row too, so no versionless ghost survives to swallow
+                               ;; a later re-mint of the same deterministic id.
+                               :else
+                               (hard-delete-entity! base-storage branch-id entity-name id)))))))
 
 
   (query-entities
@@ -903,13 +950,15 @@
   sp/StorageBatchCRUD
 
   (create-entities
-    [_ entity-name data-seq]
-    (assert-not-merge-protected! base-storage branch-id entity-name)
-    (with-write* base-storage entity-name
-      (fn []
-        (if-not (res/versioned-entity? entity-name)
-          (sp/create-entities base-storage entity-name data-seq)
-          (create-entities-versioned! base-storage branch-id entity-name data-seq)))))
+    [this entity-name data-seq]
+    (writer/with-write [this {:entity entity-name :rows data-seq}]
+                       (let [base-storage (:base-storage this)]
+                         (assert-not-merge-protected! base-storage branch-id entity-name)
+                         (with-write* base-storage entity-name
+                           (fn []
+                             (if-not (res/versioned-entity? entity-name)
+                               (sp/create-entities base-storage entity-name data-seq)
+                               (create-entities-versioned! base-storage branch-id entity-name data-seq)))))))
 
 
   (read-entities
@@ -922,55 +971,61 @@
 
 
   (update-entities
-    [_ entity-name data-seq]
-    (assert-not-merge-protected! base-storage branch-id entity-name)
-    (with-write* base-storage entity-name
-      (fn []
-        (if-not (res/versioned-entity? entity-name)
-          (sp/update-entities base-storage entity-name data-seq)
-          (update-entities-versioned! base-storage branch-id entity-name data-seq)))))
+    [this entity-name data-seq]
+    (writer/with-write [this {:entity entity-name :ids (mapv :id data-seq) :rows data-seq}]
+                       (let [base-storage (:base-storage this)]
+                         (assert-not-merge-protected! base-storage branch-id entity-name)
+                         (with-write* base-storage entity-name
+                           (fn []
+                             (if-not (res/versioned-entity? entity-name)
+                               (sp/update-entities base-storage entity-name data-seq)
+                               (update-entities-versioned! base-storage branch-id entity-name data-seq)))))))
 
 
   (upsert-entities
     [this entity-name data-seq]
-    (assert-not-merge-protected! base-storage branch-id entity-name)
-    (if-not (res/versioned-entity? entity-name)
-      (sp/upsert-entities base-storage entity-name data-seq)
-      ;; For versioned: batch check existence in BASE storage (no version
-      ;; resolution), then create/update accordingly. The identity probe is
-      ;; deliberately the cheap one — boot syncs thousands of fn-defs through
-      ;; here, and resolving every id's version chain up front turned the
-      ;; O(n) read into O(n × versions) and stalled startup.
-      (let [ids (keep :id data-seq)
-            existing-ids (if (seq ids)
-                           (set (keys (sp/read-entities base-storage entity-name (vec ids))))
-                           #{})
-            {to-update true to-create false}
-            (group-by #(contains? existing-ids (:id %)) data-seq)]
-        ;; Batch create new records
-        (when (seq to-create)
-          (sp/create-entities this entity-name to-create))
-        ;; Batch update existing records
-        (when (seq to-update)
-          (revive-or-update! this entity-name to-update))
-        ;; Return all records
-        (vec data-seq))))
+    (writer/with-write [this {:entity entity-name :rows data-seq}]
+                       (let [base-storage (:base-storage this)]
+                         (assert-not-merge-protected! base-storage branch-id entity-name)
+                         (if-not (res/versioned-entity? entity-name)
+                           (sp/upsert-entities base-storage entity-name data-seq)
+                           ;; For versioned: batch check existence in BASE storage (no version
+                           ;; resolution), then create/update accordingly. The identity probe is
+                           ;; deliberately the cheap one — boot syncs thousands of fn-defs through
+                           ;; here, and resolving every id's version chain up front turned the
+                           ;; O(n) read into O(n × versions) and stalled startup.
+                           (let [ids (keep :id data-seq)
+                                 existing-ids (if (seq ids)
+                                                (set (keys (sp/read-entities base-storage entity-name (vec ids))))
+                                                #{})
+                                 {to-update true to-create false}
+                                 (group-by #(contains? existing-ids (:id %)) data-seq)]
+                             ;; Batch create new records
+                             (when (seq to-create)
+                               (sp/create-entities this entity-name to-create))
+                             ;; Batch update existing records
+                             (when (seq to-update)
+                               (revive-or-update! this entity-name to-update))
+                             ;; Return all records
+                             (vec data-seq))))))
 
 
   (delete-entities
-    [_ entity-name ids]
-    (assert-not-merge-protected! base-storage branch-id entity-name)
-    (with-write* base-storage entity-name
-      (fn []
-        (cond
-          (not (res/versioned-entity? entity-name))
-          (sp/delete-entities base-storage entity-name ids)
+    [this entity-name ids]
+    (writer/with-write [this {:entity entity-name :ids ids}]
+                       (let [base-storage (:base-storage this)]
+                         (assert-not-merge-protected! base-storage branch-id entity-name)
+                         (with-write* base-storage entity-name
+                           (fn []
+                             (cond
+                               (not (res/versioned-entity? entity-name))
+                               (sp/delete-entities base-storage entity-name ids)
 
-          *tombstone-delete?*
-          (count (filterv #(tombstone-version! base-storage entity-name % branch-id) ids))
+                               *tombstone-delete?*
+                               (count (filterv #(tombstone-version! base-storage entity-name % branch-id) ids))
 
-          :else
-          (hard-delete-entities! base-storage branch-id entity-name ids)))))
+                               :else
+                               (hard-delete-entities! base-storage branch-id entity-name ids)))))))
 
 
   (query-ref-many-owners
@@ -1073,8 +1128,8 @@
          ;; on the branch it removes — re-read the parent: a delete that
          ;; committed first is seen (no child planted under a missing
          ;; parent), a delete that comes second sees this child and refuses.
-         (tx/in-transaction
-           base
+         (writer/call-with-write
+           base {:entity :branch :rows [{}]}
            (fn [st]
              (mrg/lock-branches! st parent-id)
              (when-not (sp/read-entity st :branch parent-id)
@@ -1413,7 +1468,7 @@
      ;; harmless over-invalidation, a committed delete is always preceded
      ;; by a visible bump.
      (let [binding-versions (with-bump* base :branch
-                              (fn [] (tx/in-transaction base #(delete-branch-rows! % branch-id))))]
+                              (fn [] (writer/call-with-write base {:entity :branch :ids [branch-id]} #(delete-branch-rows! % branch-id))))]
        ;; Drop any cached chain that referenced this branch as an
        ;; ancestor — globals survive across CRUD calls and would
        ;; otherwise still hand back the pre-delete chain.
@@ -1463,16 +1518,16 @@
   [storage entity-name id]
   (let [base (unwrap storage)
         branch-id (current-branch-id storage)]
-    (assert-not-merge-protected! base branch-id entity-name)
     (with-write* base entity-name
       (fn []
         ;; A revival is a create in all but id: same transaction, same
         ;; locks, same three resolved-view checks — an fn's name, an
         ;; override's path and a list item's position may all have been
         ;; taken by a live row since the delete.
-        (tx/in-transaction
-          base
+        (writer/call-with-write
+          base {:entity entity-name :ids [id]}
           (fn [st]
+            (assert-not-merge-protected! st branch-id entity-name)
             (uniq/xact-lock! (tx/datasource st) (uniq/row-lock-keys branch-id entity-name [id]))
             (if-let [tomb (res/resolve-tombstone st entity-name id branch-id)]
               (let [{:keys [version-id-field]} (get res/entity-config entity-name)

@@ -24,7 +24,17 @@
    the request thread."
   (:require
     [next.jdbc :as jdbc]
-    [next.jdbc.transaction :as jdbc-tx]))
+    [next.jdbc.transaction :as jdbc-tx])
+  (:import
+    (java.sql
+      Connection)))
+
+
+(def ^:dynamic *transaction-context*
+  "Internal root-transaction lifetime. Nested storage transactions share its
+   physical connection and writer scope; it becomes inactive after commit or
+   rollback. Never populated from request data or storage map fields."
+  nil)
 
 
 (defn- map-backend
@@ -57,7 +67,50 @@
    kept, so writes still run through each decorator. `storage` unchanged when
    it has no pooled backend."
   [storage conn]
-  (or (map-backend storage #(assoc % :pool conn)) storage))
+  (or (map-backend
+        storage
+        (fn [backend]
+          (let [context (::writer-context (meta backend))]
+            (cond-> (assoc backend :pool conn)
+              (and context (not (identical? conn (:connection context))))
+              (vary-meta dissoc ::writer-context)))))
+      storage))
+
+
+(defn writer-context
+  "Internal delegation token on a transaction-bound backend, if any. A
+   consumer must verify context and connection identity and active lifetime."
+  [storage]
+  (cond
+    (not (map? storage)) nil
+    (contains? storage :pool) (::writer-context (meta storage))
+    :else (some-> (or (:base storage) (:base-storage storage)) writer-context)))
+
+
+(defn with-writer-context
+  "Mark physical delegation through the current guarded storage stack. This
+   token only permits joining its lock; all storage decorators stay present."
+  [storage]
+  (or (map-backend storage #(vary-meta % assoc ::writer-context *transaction-context*))
+      storage))
+
+
+(defn external-transaction?
+  "Whether storage already holds a JDBC transaction whose commit is owned by
+   a caller outside `in-transaction`."
+  [storage]
+  (let [ds (datasource storage)]
+    (and (instance? Connection ds) (not (Connection/.getAutoCommit ^Connection ds)))))
+
+
+(defn assert-owns-commit!
+  "Require a pooled root operation with a known commit boundary. Compound
+   graph operations publish only after their own transaction has committed."
+  [storage]
+  (when (or *transaction-context* (external-transaction? storage)
+            (nil? (datasource storage)))
+    (throw (ex-info "Compound graph writes require their own database transaction"
+                    {:type :graph-write/commit-boundary-required}))))
 
 
 (defn without-connection
@@ -77,7 +130,25 @@
    pooled backend runs `(f storage)` as is."
   [storage f]
   (if-let [ds (datasource storage)]
-    (binding [jdbc-tx/*nested-tx* :ignore]
-      (jdbc/with-transaction [tx ds]
-                             (f (with-connection storage tx))))
+    (if (and *transaction-context*
+             (identical? ds (:connection *transaction-context*)))
+      (f storage)
+      (do
+        (when (and *transaction-context*
+                   (some? @(:writer-scope *transaction-context*)))
+          (throw (ex-info "A graph writer cannot open another transaction"
+                          {:type :graph-write/transaction-mismatch})))
+        (let [context (volatile! nil)
+              owned? (not (external-transaction? storage))]
+          (try
+            (binding [jdbc-tx/*nested-tx* :ignore]
+              (jdbc/with-transaction [conn ds]
+                                     (let [root {:connection conn :active? (atom true)
+                                                 :owned? owned? :writer-scope (atom nil)}]
+                                       (vreset! context root)
+                                       (binding [*transaction-context* root]
+                                         (f (with-connection storage conn))))))
+            (finally
+              (when-let [root @context]
+                (reset! (:active? root) false)))))))
     (f storage)))

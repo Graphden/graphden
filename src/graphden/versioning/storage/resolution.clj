@@ -913,6 +913,23 @@
   nil)
 
 
+(defn call-with-fresh-memos
+  "Run `f` with new resolution memos after waiting for a semantic writer lock
+   or after commit. An enclosing request's pre-write snapshot is not reused."
+  [f]
+  (binding [*merges-memo* (atom {})
+            *graph-load-memo* (atom {})]
+    (f)))
+
+
+(defn forget-read-memos!
+  "Discard the enclosing scope's resolved snapshots after a committed write."
+  []
+  (forget-merges-memo!)
+  (some-> *graph-load-memo* (reset! {}))
+  nil)
+
+
 (defn call-with-graph-load-memo
   "Run `f` under a whole-branch load memo — a fresh one, or the
    enclosing scope's when already bound (a test run's memo is not

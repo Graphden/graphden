@@ -35,6 +35,7 @@
     [graphden.packages.records.parse :as records-parse]
     [graphden.packages.records.slot-resolution :as slot-res]
     [graphden.services.port-check :as port-check]
+    [graphden.storage.graph-writer :as writer]
     [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.config :as sp-config]
     [graphden.storage.protocol.core :as sp]
@@ -46,6 +47,7 @@
     [graphden.util.ns-path :as ns-path]
     [graphden.versioning.identity-repair :as idrepair]
     [graphden.versioning.storage.core :as vs]
+    [graphden.versioning.storage.resolution :as res]
     [graphden.web.route-shape :as route-shape]))
 
 
@@ -522,13 +524,22 @@
    package sync does not come through here: a package is its author's
    own tree."
   [storage fn-defs]
-  (let [ns-id-map (pkg/sync-namespaces! storage (into #{} (keep :namespace) fn-defs))
-        name->id (binding [fn-core/*before-write* refuse-bundle-rej!]
-                   (fn-composition/sync-fns-to-storage! storage fn-defs ns-id-map))]
-    (into (mapv #(records/fn-id (:namespace %) (:name %)) fn-defs)
-          (comp (remove (set (map #(records/fn-id (:namespace %) (:name %)) fn-defs)))
-                (distinct))
-          (vals name->id))))
+  (let [prepared (when-not fn-composition/*sync-fns-override*
+                   (fn-core/prepare-sync storage fn-defs))]
+    (writer/with-write [storage :graph]
+                       (res/call-with-fresh-memos
+                         (fn []
+                           ;; Assert before namespace writes: a refused stale bundle is a no-op.
+                           (when prepared (fn-core/assert-prepared-current! storage prepared))
+                           (let [ns-id-map (pkg/sync-namespaces! storage (into #{} (keep :namespace) fn-defs))
+                                 name->id (binding [fn-core/*before-write* refuse-bundle-rej!]
+                                            (if prepared
+                                              (fn-core/write-records! storage (:records prepared) ns-id-map)
+                                              (fn-composition/sync-fns-to-storage! storage fn-defs ns-id-map)))]
+                             (into (mapv #(records/fn-id (:namespace %) (:name %)) fn-defs)
+                                   (comp (remove (set (map #(records/fn-id (:namespace %) (:name %)) fn-defs)))
+                                         (distinct))
+                                   (vals name->id))))))))
 
 
 (defn- ns-path-index
@@ -1129,20 +1140,24 @@
          ;; the graph to an unrelated fn).
          ;; Skipped when the reconciler itself is seam-mocked (unit
          ;; tests hand a keyword mock-storage that can't answer reads).
-         preexisting-fn-ids (when-not *reconcile-moved-override*
-                              (into #{} (map :id)
-                                    (sp/query-entities
-                                      (idrepair/base-of storage) :fn {})))
-         fns (binding [sp-config/*max-batch-size*
-                       (max sp-config/*max-batch-size* 100000)]
-               (fn-composition/sync-fns-to-storage! storage fn-defs ns-id-map
-                                                    extra-name->id extra-defs))
-         ;; ROOT FIX (audit-4): heal namespace-moved package
-         ;; identities at the moment of the move — see the fn
-         ;; docstring. Before the seed/sweep so registry + compile
-         ;; only ever see the healed graph.
-         _ (reconcile-moved-identities! storage packages fns
-                                        {:preexisting-fn-ids preexisting-fn-ids})]
+         parsed-records (when-not fn-composition/*sync-fns-override*
+                          (fn-core/fn-defs->records fn-defs extra-name->id extra-defs))
+         fns (writer/with-write [storage :graph]
+                                (res/call-with-fresh-memos
+                                  (fn []
+                                    (let [preexisting-fn-ids (when-not *reconcile-moved-override*
+                                                               (into #{} (map :id)
+                                                                     (sp/query-entities (idrepair/base-of storage) :fn {})))
+                                          fns (binding [sp-config/*max-batch-size*
+                                                        (max sp-config/*max-batch-size* 100000)]
+                                                (if parsed-records
+                                                  (fn-core/write-records! storage parsed-records ns-id-map)
+                                                  (fn-composition/sync-fns-to-storage! storage fn-defs ns-id-map
+                                                                                       extra-name->id extra-defs)))]
+                                      (reconcile-moved-identities! storage packages fns
+                                                                   {:preexisting-fn-ids preexisting-fn-ids})
+                                      fns))))]
+
      ;; Snapshot composed fn-defs into the in-memory rich-type registry
      ;; so the editor's `:effects` strip and arg-type hints can resolve
      ;; their declared shape. Two passes:

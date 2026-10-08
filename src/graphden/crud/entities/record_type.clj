@@ -2,8 +2,8 @@
   "Compound type-row create / update — the journalled multi-row writes
    behind `POST /api/types/record` and friends. A record type is a fn
    row plus one slot + fn-slot pair per field, so each apply is a
-   sequence of writes with a rollback journal rather than a single
-   entity write.
+   sequence of writes in one guarded transaction. A rollback journal remains
+   for non-transactional storage implementations.
 
    Split out of `crud.entities`: it is the largest self-contained topic
    in that tree, and its only tie back is the shared
@@ -14,7 +14,12 @@
     [graphden.crud.entities.invalidation :as inval]
     [graphden.crud.request :as request]
     [graphden.crud.type-check :as tc]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.graph-writer :as writer]
+    [graphden.storage.protocol.core :as sp]
+    [graphden.storage.tx :as tx]
+    [graphden.versioning.branch-local :as branch-local]
+    [graphden.versioning.storage.core :as versioned]
+    [graphden.versioning.storage.resolution :as resolution]))
 
 
 ;; === Compound type-row create / update ======================================
@@ -91,7 +96,7 @@
       (swap! journal conj [:fn-slot fn-slot-id]))))
 
 
-(defn apply-create-record-type-body
+(defn- create-record-type!
   "Phases 1-3 of create-record-type's atomic write — fn-row + N
    slot-rows + N fn-slot junctions + cache-invalidate. Mutates
    `journal` (shared atom-of-vector) on each successful storage
@@ -107,7 +112,6 @@
         {nm :name ns-id :ns-id desc :description fields :fields} parsed
         own-id (create-record-type-fn-row! storage journal nm ns-id desc)]
     (create-record-type-fields! storage journal own-id fields)
-    (inval/invalidate! ctx storage :fn {:id own-id})
     {:ok true :id (str own-id) :name nm}))
 
 
@@ -138,7 +142,7 @@
 ;; `apply-create-rollback`, composed by the graph `:try`.
 
 
-(defn apply-create-list-type-body
+(defn- create-list-type!
   "Phases 1-3 of create-list-type's atomic write — fn-row with
    `:element-fn-id` + synthesised `items` slot + fn-slot junction +
    cache-invalidate. Mutates `journal` (shared atom) for rollback.
@@ -176,7 +180,6 @@
                        :slot-id slot-id
                        :position 0})
     (swap! journal conj [:fn-slot fn-slot-id])
-    (inval/invalidate! ctx storage :fn {:id own-id})
     {:ok true :id (str own-id) :name nm}))
 
 
@@ -211,6 +214,9 @@
    → fn-slot` index that drives the reuse-vs-mint decision."
   [storage fn-id]
   (let [existing-fn (first (sp/query-entities storage :fn {:id fn-id}))
+        _ (when-not existing-fn
+            (throw (ex-info "Record type no longer exists"
+                            {:type :not-found :id fn-id})))
         current-fss (sp/query-entities storage :fn-slot {:fn-id fn-id})
         current-slot-ids (mapv :slot-id current-fss)
         current-slots (when (seq current-slot-ids)
@@ -343,12 +349,12 @@
       (sp/update-entity storage :fn fn-id patch))))
 
 
-(defn apply-update-record-type-body
+(defn- update-record-type!
   "Body of `:_update-record-type-apply`'s `:try`. Performs phases 2-5
    of the diff-and-apply (create new slots / delete unused fn-slots /
    rewire positions / optional rename), appending rollback hints to
-   `journal` along the way, then invalidates caches and returns the
-   success response. Throws on any storage failure or bad-type-resolve
+   `journal` along the way, then returns the success response. The public wrapper publishes
+   invalidation after commit. Throws on any storage failure or bad-type-resolve
    — caught by `:try`, which hands control to `-rollback`.
 
    Body itself is the orchestration; each phase lives in a small
@@ -368,12 +374,6 @@
     (delete-unused-fn-slots! storage journal current-fss kept-fs-ids)
     (rewire-fn-slot-positions! storage journal fn-id current-fss assignments)
     (apply-fn-row-patch! storage existing-fn fn-id nm has-description? desc)
-    ;; The compound write happened through `sp/*-entity` —
-    ;; bypassing the defbase wrappers that normally call
-    ;; `invalidate!`. Without this nudge the next read of
-    ;; `/api/graph/entities` would return the cached pre-
-    ;; update graph and the editor would see no change.
-    (inval/invalidate! ctx storage :fn-slot {:fn-id fn-id})
     {:ok true :id (str fn-id) :name (or nm (:name existing-fn))}))
 
 
@@ -399,3 +399,58 @@
     (cond-> {:ok false :error (str (Throwable/.getMessage exception))}
       (instance? clojure.lang.ExceptionInfo exception)
       (assoc :data (ex-data exception)))))
+
+
+(defn- apply-type-write
+  "Guard the state read and all rows together. Pooled rollback replaces the
+   journal replay; retain the legacy journal for non-transactional test storage."
+  [parsed journal ctx apply! entity-type]
+  (let [storage (request/require-storage ctx)
+        pooled? (some? (tx/datasource storage))
+        _ (when pooled? (tx/assert-owns-commit! storage))
+        result (try
+                 (writer/call-with-write
+                   storage (if-let [id (:fn-id parsed)]
+                             {:entity :fn :ids [id]}
+                             {:entity :fn :rows [{}]})
+                   (fn [bound]
+                     (resolution/call-with-fresh-memos
+                       (fn []
+                         (apply! parsed journal (assoc ctx :storage bound))))))
+                 (catch Exception e
+                   ;; The graph's on-throw still runs. Replaying deletes/creates
+                   ;; after SQL rollback would corrupt the restored pre-image.
+                   (when pooled? (reset! journal []))
+                   (throw e)))
+        fn-id (java.util.UUID/fromString (:id result))
+        seed (if (= entity-type :fn-slot) {:fn-id fn-id} {:id fn-id})]
+    ;; Once SQL committed, an invalidation failure must not replay writes.
+    (when pooled? (reset! journal []))
+    (resolution/forget-read-memos!)
+    (branch-local/invalidate! (versioned/unwrap storage))
+    (resolution/call-with-fresh-memos
+      (fn []
+        (let [seed (assoc seed :org-id (:org-id (sp/read-entity storage :fn fn-id)))]
+          (inval/invalidate! ctx storage entity-type seed)
+          (inval/notify-after-write! ctx storage entity-type :write seed))))
+    result))
+
+
+(defn apply-create-record-type-body
+  "Create the record fn, slots and junctions in one guarded transaction,
+   then publish invalidation after commit. Journal supports nonpooled storage."
+  [parsed journal ctx]
+  (apply-type-write parsed journal ctx create-record-type! :fn))
+
+
+(defn apply-create-list-type-body
+  "Create the list type and its items slot atomically, then invalidate."
+  [parsed journal ctx]
+  (apply-type-write parsed journal ctx create-list-type! :fn))
+
+
+(defn apply-update-record-type-body
+  "Read and replace the record's fields in one guarded transaction; publish
+   only after commit so concurrent reparent sees a complete slot closure."
+  [parsed journal ctx]
+  (apply-type-write parsed journal ctx update-record-type! :fn-slot))

@@ -9,7 +9,9 @@
  :hooks
  {:analyze-call {graphden.executor.registry.macros/defbase hooks.defbase/defbase
                  graphden.executor.defbase/defbase hooks.defbase/defbase
-                 graphden.executor.test-setup/fn-impl hooks.fn-impl/fn-impl}}
+                 graphden.executor.test-setup/fn-impl hooks.fn-impl/fn-impl
+                 graphden.storage.graph-writer/with-write hooks.graph-writer/with-write}}
+
 
  ;; resources/packages/<pkg>/<module>/impls.clj files are loaded via
  ;; `load-file`, not via classpath. Their `(ns graphden.packages.…impls)`

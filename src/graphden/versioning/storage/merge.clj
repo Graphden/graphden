@@ -16,6 +16,7 @@
    resource-override)."
   (:require
     [clojure.set :as set]
+    [graphden.storage.graph-writer :as writer]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.tx :as tx]
     [graphden.tenancy.context :as tenancy-context]
@@ -871,7 +872,8 @@
                (assert-merge-preserves-uniqueness! storage source-branch-id
                                                    target-branch-id)
                merge-record)))]
-     (tx/in-transaction base-storage write!))))
+     (writer/call-with-write base-storage :branch-merge
+                             #(res/call-with-fresh-memos (fn [] (write! %)))))))
 
 
 (defn skipped-as-branch-local

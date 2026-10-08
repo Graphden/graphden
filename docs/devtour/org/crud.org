@@ -79,13 +79,13 @@ Checks whether a proposed mutation must be rejected before storage is changed. C
 :PROPERTIES:
 :CUSTOM_ID: crud/apply-create-record-type-body
 :FILE: src/graphden/crud/entities/record_type.clj
-:LINE: 437
+:LINE: 439
 :MINS: 0.9
 :END:
 
 Creates the function row, [[file:glossary.org::#term/slot][slot]] rows, and function-slot links for a record type under the semantic writer guard in one database transaction. Cache invalidation runs after commit; a failed transaction clears the legacy compensation journal.
 
-- source :: [[file:../../../src/graphden/crud/entities/record_type.clj::(defn apply-create-record-type-body][src/graphden/crud/entities/record_type.clj:437]]
+- source :: [[file:../../../src/graphden/crud/entities/record_type.clj::(defn apply-create-record-type-body][src/graphden/crud/entities/record_type.clj:439]]
 - same file :: [[file:crud.org::#crud/apply-create-rollback][apply-create-rollback]]
 
 * 7. apply-create-rollback
@@ -105,13 +105,13 @@ On failure, traverses the creation journal backward and attempts to delete each 
 :PROPERTIES:
 :CUSTOM_ID: crud/apply-create-core
 :FILE: src/graphden/crud/entities.clj
-:LINE: 844
+:LINE: 846
 :MINS: 1.1
 :END:
 
 Repeats structural validation under the semantic writer guard, then creates the row, optional rename view, and checks the resulting function in one SQL transaction. Ordinary type errors keep the edit and return ~:type-warnings~; an optional rename failure rolls back its savepoint without losing the binding. [[file:glossary.org::#term/secret][Secret-flow]] rejection rolls back the whole SQL change, independently of the diagnostics store. See [[file:../../../docs/SECRETS.md][secrets]].
 
-- source :: [[file:../../../src/graphden/crud/entities.clj::(defn apply-create-core][src/graphden/crud/entities.clj:844]]
+- source :: [[file:../../../src/graphden/crud/entities.clj::(defn apply-create-core][src/graphden/crud/entities.clj:846]]
 - same file :: [[file:crud.org::#crud/create-entity][create-entity]]
 - referenced from :: [[file:web.org::#web/write-rej][write-rej]]
 

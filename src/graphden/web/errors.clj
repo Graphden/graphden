@@ -39,6 +39,7 @@
    :constraint-violation/fn-name-collision 409
    :constraint-violation/position-collision 409
    :constraint-violation/unique 409
+   :constraint-violation/stale-bundle 409
    :merge-conflict 409
    :merge-protection-violation 409
    ;; push-only-via-merge: the write is well-formed, the branch's

@@ -22,8 +22,8 @@
     [graphden.packages.records.slot-resolution :as slot-res]
     [graphden.storage.graph-writer :as writer]
     [graphden.storage.protocol.core :as sp]
-    [graphden.versioning.storage.resolution :as res]
-    [graphden.tenancy.context :as tc]))
+    [graphden.tenancy.context :as tc]
+    [graphden.versioning.storage.resolution :as res]))
 
 
 ;; =============================================================================
@@ -233,41 +233,41 @@
    Returns `{fn-name → fn-id}` for named fn rows."
   [storage records ns-id-map]
   (writer/with-write [storage :graph]
-    (res/call-with-fresh-memos
-      (fn []
-        (let [records (remap-anonymous-ids records (org-anonymous-rows-by-hash storage records))
-        _ (when-let [guard *before-write*] (guard storage records))
-        {fns       :fn
-         slots     :slot
-         fn-slots  :fn-slot
-         bindings  :binding
-         items     :binding-list-item} (group-records-by-kind records)]
-    ;; Order matters because of FK constraints:
-    ;; fn → slot (slot.type-fn-id FK)
-    ;;    → fn-slot (FKs to fn + slot)
-    ;;    → binding (FKs to fn + slot)
-    ;;       → binding-list-item (FK to binding)
-    (when (seq fns)
-      (sp/upsert-entities storage :fn (prep-fn-rows fns ns-id-map)))
-    (when (seq slots)
-      (sp/upsert-entities storage :slot (strip-kind slots)))
-    (when (seq fn-slots)
-      (sp/upsert-entities storage :fn-slot (strip-kind fn-slots)))
-    (when (seq bindings)
-      (sp/upsert-entities storage :binding (strip-kind bindings)))
-    (when (seq items)
-      (sp/upsert-entities storage :binding-list-item (strip-kind items)))
-    ;; The upserts above are additive; this makes the sync declarative
-    ;; — body rows a fn no longer declares are dropped.
-    (reconcile-fn-bodies! storage
-                          (into #{} (keep :id) fns)
-                          fn-slots bindings items)
-    ;; Build the name→id return map.
-    (into {}
-          (keep (fn [fr]
-                  (when-let [n (:name fr)]
-                    [(keyword n) (:id fr)])))
-          fns))))))
+                     (res/call-with-fresh-memos
+                       (fn []
+                         (let [records (remap-anonymous-ids records (org-anonymous-rows-by-hash storage records))
+                               _ (when-let [guard *before-write*] (guard storage records))
+                               {fns       :fn
+                                slots     :slot
+                                fn-slots  :fn-slot
+                                bindings  :binding
+                                items     :binding-list-item} (group-records-by-kind records)]
+                           ;; Order matters because of FK constraints:
+                           ;; fn → slot (slot.type-fn-id FK)
+                           ;;    → fn-slot (FKs to fn + slot)
+                           ;;    → binding (FKs to fn + slot)
+                           ;;       → binding-list-item (FK to binding)
+                           (when (seq fns)
+                             (sp/upsert-entities storage :fn (prep-fn-rows fns ns-id-map)))
+                           (when (seq slots)
+                             (sp/upsert-entities storage :slot (strip-kind slots)))
+                           (when (seq fn-slots)
+                             (sp/upsert-entities storage :fn-slot (strip-kind fn-slots)))
+                           (when (seq bindings)
+                             (sp/upsert-entities storage :binding (strip-kind bindings)))
+                           (when (seq items)
+                             (sp/upsert-entities storage :binding-list-item (strip-kind items)))
+                           ;; The upserts above are additive; this makes the sync declarative
+                           ;; — body rows a fn no longer declares are dropped.
+                           (reconcile-fn-bodies! storage
+                                                 (into #{} (keep :id) fns)
+                                                 fn-slots bindings items)
+                           ;; Build the name→id return map.
+                           (into {}
+                                 (keep (fn [fr]
+                                         (when-let [n (:name fr)]
+                                           [(keyword n) (:id fr)])))
+                                 fns))))))
 
 
 ;; =============================================================================
@@ -335,22 +335,13 @@
     (export/records->fn-defs records)))
 
 
-(defn- discover-existing-state
-  "One-shot read of what the convenience arities of `sync-fns-to-storage!`
-   need — a single `graph->records` pass reused for both the name→id map
-   and the faithful (exporter-derived) `defs-by-name`."
+(defn- existing-state
   [storage]
   (let [records (export/graph->records storage)]
-    {:name->id (name->id-from-fns (filter #(= :fn (:kind %)) records))
+    {:basis {:records (into {} (map (juxt (juxt :kind :id) identity)) records)
+             :namespaces (into {} (map (juxt :id identity)) (sp/query-entities storage :ns {}))}
+     :name->id (name->id-from-fns (filter #(= :fn (:kind %)) records))
      :defs-by-name (faithful-defs-by-name records)}))
-
-
-(defn- existing-defs-by-name
-  "Faithful `{fn-name → fn-def}` for every fn already in storage, so the
-   records-parser's slot resolver reaches ANY ancestor's slots (base-fn
-   args, renames, ref-based free-args) exactly as the boot sync does."
-  [storage]
-  (faithful-defs-by-name (export/graph->records storage)))
 
 
 (defn fn-defs->records
@@ -371,26 +362,46 @@
     (records/parse-module sorted extra-name->id extra-defs-by-name)))
 
 
-(defn sync-fns-to-storage!
-  "Top-level sync for a list of fn-defs. See arity-5 for full
-   signature; convenience arities auto-discover `extra-name->id` from
-   the existing `:fn` table.
+(defn prepare-sync
+  "Capture coherent existing names/slots, then parse outside the writer lock.
+   Apply must compare the captured basis after acquiring its own write lock."
+  ([storage fn-defs] (prepare-sync storage fn-defs nil))
+  ([storage fn-defs extra-name->id]
+   (let [{:keys [basis name->id defs-by-name]}
+         (writer/with-write [storage :graph]
+                            (res/call-with-fresh-memos #(existing-state storage)))]
+     {:basis basis
+      :records (fn-defs->records fn-defs (or extra-name->id name->id) defs-by-name)})))
 
-   `extra-defs-by-name` (5-arity) carries fn-def shapes from a prior
-   sync (base-fns, type-rows declared inline) so the records-parser's
-   slot resolver can find their slots. Without it, a composed fn
-   binding `:m` on a slot owned by a base-fn synced earlier won't
-   resolve."
+
+(defn assert-prepared-current!
+  [storage prepared]
+  (when-not (= (:basis prepared) (:basis (existing-state storage)))
+    (throw (ex-info "The graph changed while this bundle was parsed; prepare it again"
+                    {:type :constraint-violation/stale-bundle}))))
+
+
+(defn- apply-prepared!
+  [storage prepared ns-id-map]
+  (writer/with-write [storage :graph]
+                     (res/call-with-fresh-memos
+                       (fn []
+                         (assert-prepared-current! storage prepared)
+                         (write-records! storage (:records prepared) ns-id-map)))))
+
+
+(defn sync-fns-to-storage!
+  "Parse outside locks, then apply a coherent record bundle. Convenience
+   arities that discover existing definitions reject a changed parser basis."
   ([storage fn-defs]
-   (let [{:keys [name->id defs-by-name]} (discover-existing-state storage)]
-     (sync-fns-to-storage! storage fn-defs {} name->id defs-by-name)))
+   (sync-fns-to-storage! storage fn-defs {}))
   ([storage fn-defs ns-id-map]
-   (let [{:keys [name->id defs-by-name]} (discover-existing-state storage)]
-     (sync-fns-to-storage! storage fn-defs ns-id-map name->id defs-by-name)))
+   (apply-prepared! storage (prepare-sync storage fn-defs) ns-id-map))
   ([storage fn-defs ns-id-map extra-name->id]
-   (sync-fns-to-storage! storage fn-defs ns-id-map extra-name->id
-                         (existing-defs-by-name storage)))
+   (apply-prepared! storage (prepare-sync storage fn-defs extra-name->id) ns-id-map))
   ([storage fn-defs ns-id-map extra-name->id extra-defs-by-name]
+   ;; The complete corpus/base definitions are supplied by bootstrap itself.
+   ;; Pure parsing happens before write-records! takes its writer transaction.
    (write-records! storage
                    (fn-defs->records fn-defs extra-name->id extra-defs-by-name)
                    ns-id-map)))

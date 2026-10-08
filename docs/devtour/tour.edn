@@ -537,6 +537,13 @@
            chain around a transaction connection. Each write still passes through its existing
            [decorators](#term/protocol). Transaction-scoped [advisory locks](#term/advisory-lock) used
            by uniqueness checks remain held until the transaction ends."}
+    {:ns graphden.storage.graph-writer :defn call-with-write
+     :say "Keeps decisive graph reads, validation and all related writes in one database
+           transaction. Its advisory locks serialize edits of the same organization while private
+           writes in separate organizations can proceed together. A write to a public identity takes
+           the shared graph's exclusive lock, including a version-only edit by a private actor.
+           Ownership is checked again after waiting. Cache invalidation, notifications and type
+           diagnostics are published after commit, with compilation outside the writer lock."}
     {:ns graphden.versioning.storage.resolution :defn entity-config
      :say "Lists the versioned entities: `:fn`, `:fn-slot`, `:binding`, `:binding-list-item`, and
            `:resource-override`. For each entity it distinguishes identity fields in the base table

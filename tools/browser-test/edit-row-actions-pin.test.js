@@ -145,6 +145,78 @@ async function popoverVisible(page) {
     assert(ariaD === 'false',
            'trigger aria-expanded="false" after Escape: ' + ariaD);
 
+    // Description owns Escape before its parent row menu and the active tour.
+    await page.evaluate(() => startTutorial('26'));
+    await page.waitForSelector('#gd-tour-pop', {state: 'visible'});
+    const tourTitle = await page.locator('#gd-tour-pop .gd-tour-title').textContent();
+    await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
+    const description = page.locator('.row-actions-popover [data-action="description"]');
+    await description.click();
+    await page.waitForSelector('.description-tooltip-close', {state: 'visible'});
+    await description.click();
+    assert(await page.locator('.description-tooltip').isHidden(),
+           'second Description activation hides the pinned tooltip');
+
+    await description.click();
+    const edit = page.locator('.description-tooltip-btn').filter({hasText: 'Edit'});
+    // Keyboard activation retains the parent menu; clicking outside it would
+    // independently dismiss it through its pointer handler.
+    await edit.focus();
+    await edit.press('Enter');
+    await page.fill('.description-tooltip-textarea', 'draft to discard');
+    await description.click();
+    assert(await page.locator('.description-tooltip-textarea').inputValue() === 'draft to discard',
+           'activating Description while editing retains the pinned draft');
+    // Hold the actual save request: Escape must obey disabled Cancel until
+    // the server responds, rather than pretending to cancel an ongoing write.
+    let pendingSaveRoute;
+    let signalSave;
+    const saveRequested = new Promise((resolve) => { signalSave = resolve; });
+    await page.route('**/api/entities/fn/*', (route) => {
+      if (route.request().method() !== 'PUT') return route.continue();
+      pendingSaveRoute = route;
+      signalSave();
+    });
+    const save = page.locator('.description-tooltip-btn').filter({hasText: /^Save$/});
+    await save.focus();
+    await save.press('Enter');
+    await saveRequested;
+    await page.locator('.description-tooltip-textarea').focus();
+    await page.keyboard.press('Escape');
+    assert(await page.locator('.description-tooltip-textarea').inputValue() === 'draft to discard',
+           'Escape retains the draft while its save is pending');
+    assert(await page.locator('.description-tooltip-btn-secondary').isDisabled(),
+           'pending save keeps Cancel disabled');
+    assert(await popoverVisible(page), 'pending-save Escape leaves the parent menu open');
+    assert(await page.locator('#gd-tour-pop .gd-tour-title').textContent() === tourTitle,
+           'pending-save Escape leaves the tour on the same step');
+    await pendingSaveRoute.fulfill({status: 403, contentType: 'text/html',
+      body: '<p class="error">Controlled save refusal</p>'});
+    await page.waitForFunction(() => !document.querySelector(
+      '.description-tooltip-btn-secondary').disabled);
+    await page.unroute('**/api/entities/fn/*');
+    await page.keyboard.press('Escape');
+    assert(await page.locator('.description-tooltip-textarea').count() === 0,
+           'first Escape discards the description draft');
+    assert(await page.locator('.description-tooltip-body').textContent() === '(no description)',
+           'Escape restores the saved description');
+    assert(await edit.evaluate((el) => el === document.activeElement),
+           'Escape returns focus to Edit after replacing the textarea');
+    assert(await popoverVisible(page), 'description Escape leaves its parent row menu open');
+    assert(await page.locator('#gd-tour-pop .gd-tour-title').textContent() === tourTitle,
+           'cancelling the draft leaves the running tour on the same step');
+
+    await page.keyboard.press('Escape');
+    assert(await page.locator('.description-tooltip').isHidden(),
+           'second Escape closes the pinned description');
+    assert(await popoverVisible(page), 'second Escape belongs only to the description');
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => getComputedStyle(
+      document.querySelector('.row-actions-popover')).display === 'none');
+    assert(await page.locator('#gd-tour-pop .gd-tour-title').textContent() === tourTitle,
+           'closing the remaining row menu still leaves the tour running');
+    await page.evaluate(() => _tourTeardown());
+
     console.log('✓ row-actions pin verified — toggle / outside / Escape');
   } catch (e) {
     process.exitCode = 1;

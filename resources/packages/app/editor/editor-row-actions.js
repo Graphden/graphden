@@ -278,7 +278,7 @@ function ensureRowActionsDismissHandler() {
     fadeOutPopover();
   }, true);
   document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape') return;
+    if (e.key !== 'Escape' || e.defaultPrevented) return;
     if (!rowActionsPopoverEl || rowActionsPopoverEl.style.display === 'none') return;
     e.stopPropagation();
     e.preventDefault();   // consumed — see graphden-popover.js

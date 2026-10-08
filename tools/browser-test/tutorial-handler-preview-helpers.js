@@ -57,22 +57,50 @@ async function remintWithPendingCheck(page, oldUrl) {
   // Both capsule mint and every app request still hit the compiled server.
   let release;
   const waiting = new Promise(resolve => { release = resolve; });
-  const pause = async route => { await waiting; await route.continue(); };
+  let entered = false;
+  let complete;
+  const forwarded = new Promise(resolve => { complete = resolve; });
+  const pause = async route => {
+    entered = true;
+    try {
+      await waiting;
+      await route.continue();
+      complete({ok: true});
+    } catch (error) {
+      // Deliver forwarding failures to the caller, rather than leaving an
+      // independently rejected Playwright route callback unobserved.
+      complete({error});
+    }
+  };
   await page.route('**/api/preview-token', pause);
   const reached = page.waitForRequest(request =>
     new URL(request.url()).pathname === '/api/preview-token', {timeout: 30000});
   const pending = mint(page);
-  try {
-    await reached;
-    assert(await page.locator(linkSelector).getAttribute('href') === null
-      && !await page.locator(linkSelector).isVisible(),
-    'pending remint clears the previous clickable capability');
-    assert(await page.locator(mintSelector).isDisabled(), 'pending mint prevents duplicate submission');
-  } finally {
-    release();
-    await page.unroute('**/api/preview-token', pause);
-  }
-  const fresh = await pending;
+  const checking = (async () => {
+    let requestReached = false;
+    try {
+      await reached;
+      requestReached = true;
+      assert(await page.locator(linkSelector).getAttribute('href') === null
+        && !await page.locator(linkSelector).isVisible(),
+      'pending remint clears the previous clickable capability');
+      assert(await page.locator(mintSelector).isDisabled(), 'pending mint prevents duplicate submission');
+    } finally {
+      release();
+      try {
+        if (requestReached || entered) {
+          const result = await forwarded;
+          if (result.error) throw result.error;
+        }
+      } finally { await page.unroute('**/api/preview-token', pause); }
+    }
+  })();
+  // Observe mint rejection immediately, even while the request is paused.
+  const results = await Promise.allSettled([checking, pending]);
+  const errors = results.filter(result => result.status === 'rejected').map(result => result.reason);
+  if (errors.length === 1) throw errors[0];
+  if (errors.length > 1) throw new AggregateError(errors, 'Preview remint checks failed');
+  const fresh = results[1].value;
   assert(fresh.url !== oldUrl, 'successful remint exposes a new capability');
   return fresh;
 }

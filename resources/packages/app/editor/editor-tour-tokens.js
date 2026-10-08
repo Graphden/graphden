@@ -8,6 +8,12 @@ function _tourTokenScopes(value) {
 
 const _tourTokenListings = new WeakMap();
 
+function _tourTokenExpiry(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : Number.NaN;
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T/.test(value)) return Number.NaN;
+  return Date.parse(value);
+}
+
 function gdTourBeginTokenCreation(label, scopes, ttl) {
   const ticket = _tourReceiptTicket('api-token', label, {
     id: window.crypto.randomUUID(), scopes: _tourTokenScopes(scopes), 'ttl-days': String(ttl || ''),
@@ -18,7 +24,8 @@ function gdTourBeginTokenCreation(label, scopes, ttl) {
 function gdTourRecordTokenCreation(ticket, body) {
   const entry = _tourReceiptEntry(ticket);
   if (!entry || body?.id !== entry.id || body.label !== entry.name
-      || _tourTokenScopes(body.scopes) !== entry.scopes || !body['expires-at']) return false;
+      || _tourTokenScopes(body.scopes) !== entry.scopes
+      || !Number.isFinite(_tourTokenExpiry(body['expires-at']))) return false;
   Object.assign(entry, {'expires-at': body['expires-at'], receipt: 'created'});
   _tourSaveState();
   return true;
@@ -46,10 +53,11 @@ async function _tourReadTokens() {
 }
 
 function _tourTokenMatches(entry, row) {
-  const expires = Date.parse(row?.['expires-at']);
+  const expires = _tourTokenExpiry(row?.['expires-at']);
+  const pending = entry.receipt === 'pending' && !Object.hasOwn(entry, 'expires-at');
   return row?.id === entry.id && row.label === entry.name
     && _tourTokenScopes(row.scopes) === entry.scopes && Number.isFinite(expires)
-    && (!entry['expires-at'] || expires === Date.parse(entry['expires-at']))
+    && (pending || expires === _tourTokenExpiry(entry['expires-at']))
     && !Object.hasOwn(row, 'token') && !Object.hasOwn(row, 'token-hash');
 }
 

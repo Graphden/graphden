@@ -31,6 +31,27 @@ const receipt = {id: 'new-token-id', label: 'tutorial-token', scopes: 'write',
   {
     const {ctx, saved} = context();
     const ticket = ctx.gdTourBeginTokenCreation('tutorial-token', 'write', '7');
+    const milliseconds = Date.parse(receipt['expires-at']);
+    assert.equal(ctx.gdTourRecordTokenCreation(ticket, {...receipt, 'expires-at': milliseconds,
+      token: 'actual-one-time-bearer'}), true, 'the real epoch-ms API response records creation');
+    const entry = ctx._tourState.created[0];
+    assert.equal(ctx._tourTokenMatches(entry, receipt), true, 'ISO list and numeric receipt identify the same expiry');
+    assert.equal(ctx._tourTokenMatches({...entry, 'expires-at': receipt['expires-at']},
+      {...receipt, 'expires-at': milliseconds}), true, 'numeric list and ISO receipt also agree');
+    assert.equal(ctx._tourTokenMatches(entry, {...receipt, 'expires-at': milliseconds + 1}), false,
+      'a changed expiry cannot authorize cleanup');
+    assert.ok(!saved.some(value => value.includes('actual-one-time-bearer')));
+    for (const invalid of [null, undefined, '', 'bad', '0', NaN, Infinity, {}, false]) {
+      assert.equal(Number.isFinite(ctx._tourTokenExpiry(invalid)), false);
+      assert.equal(ctx._tourTokenMatches(entry, {...receipt, 'expires-at': invalid}), false);
+      assert.equal(ctx._tourTokenMatches({...entry, 'expires-at': invalid}, receipt), false);
+      assert.equal(ctx.gdTourRecordTokenCreation(ticket, {...receipt, 'expires-at': invalid}), false,
+        'invalid expiration cannot advance the creation gate');
+    }
+  }
+  {
+    const {ctx, saved} = context();
+    const ticket = ctx.gdTourBeginTokenCreation('tutorial-token', 'write', '7');
     assert.equal(ctx._tourState.created[0].id, 'new-token-id');
     assert.ok(saved.length, 'persist the exact ID before the POST, including an ambiguous reply');
     ctx.gdTourRejectTokenCreation(ticket, 500);

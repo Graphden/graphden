@@ -67,8 +67,10 @@ async function tokens(page) {
       await waitTourTitle(page, 'Verify restricted access');
       const entry = await page.evaluate(() => {
         const row = _tourState.created.find(item => item.type === 'api-token');
+        const revealed = document.querySelector('#gd-acct-tok-reveal code')?.textContent;
         return row && {id: row.id, name: row.name, scopes: row.scopes,
-          expires: row['expires-at'], hasSecret: Object.hasOwn(row, 'token') || Object.hasOwn(row, 'token-hash')};
+          expires: row['expires-at'], hasSecret: !revealed || JSON.stringify(row).includes(revealed)
+            || Object.hasOwn(row, 'token-hash')};
       });
       assert(entry?.id && !baselineIds.includes(entry.id), 'exact newly created token UUID');
       assert(!entry.hasSecret && entry.scopes === 'write' && entry.expires, 'masked bounded receipt');

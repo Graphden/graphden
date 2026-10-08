@@ -7,7 +7,7 @@ Loading, graph-backed controls, actions, forms, and preferences.
 
 after: web, layout
 
-[[file:index.org][index]] · ~92 min
+[[file:index.org][index]] · ~93 min
 
 * 1. initGraph
 :PROPERTIES:
@@ -120,13 +120,13 @@ Loads a [[file:glossary.org::#term/htmx][server-rendered HTML fragment]] into a 
 :PROPERTIES:
 :CUSTOM_ID: editor/loadRowActionsContent
 :FILE: resources/packages/app/editor/editor-row-actions.js
-:LINE: 411
+:LINE: 421
 :MINS: 3.8
 :END:
 
 Loads the row-action menu as a server fragment, caching HTML by request URL. Compatibility for adding a parent is recalculated against current client lookups rather than trusted from stale HTML. See [[file:../../../docs/EDITOR_ROW_ACTIONS.md][row actions]].
 
-- source :: [[file:../../../resources/packages/app/editor/editor-row-actions.js::async function loadRowActionsContent(host, fnId, context, opts) {][resources/packages/app/editor/editor-row-actions.js:411]]
+- source :: [[file:../../../resources/packages/app/editor/editor-row-actions.js::async function loadRowActionsContent(host, fnId, context, opts) {][resources/packages/app/editor/editor-row-actions.js:421]]
 
 * 10. applyInheritancePreview
 :PROPERTIES:
@@ -306,7 +306,7 @@ Evaluates the current interactive lesson step against editor state. Lesson data 
 :CUSTOM_ID: editor/_tourStartPositioning
 :FILE: resources/packages/app/editor/editor-tour-spot.js
 :LINE: 28
-:MINS: 4.0
+:MINS: 4.9
 :END:
 
 Follows the lesson's current DOM target independently of the 600 ms completion poll. DOM, size, scroll and viewport changes coalesce into one requestAnimationFrame update; short finite CSS motion keeps updates running only while it moves. The observer excludes the tour's own overlay writes, so a stationary lesson performs no geometry scans. Pause, Lessons, lesson end and teardown call ~_tourStopFollowing~ to release observers, event handlers, the viewport subscription and any queued frame.

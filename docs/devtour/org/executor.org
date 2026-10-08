@@ -294,13 +294,13 @@ Implements explicit recursion. Direct cycles through ~ref-fn-id~ are rejected du
 :PROPERTIES:
 :CUSTOM_ID: executor/hof-lambda-params
 :FILE: src/graphden/executor/compile/renames.clj
-:LINE: 995
+:LINE: 992
 :MINS: 7.2
 :END:
 
 Determines which [[file:glossary.org::#term/free-argument][free arguments]] are callback parameters and which are captured from the caller. An explicit ~:lambda-params~ takes precedence; an empty vector [[file:glossary.org::#term/capture][captures]] every [[file:glossary.org::#term/free-argument][free argument]]. Otherwise an unambiguous structural function type supplies the parameter names. See [[file:../../../docs/CLOSURE_CAPTURE.md][closure capture]].
 
-- source :: [[file:../../../src/graphden/executor/compile/renames.clj::(defn hof-lambda-params][src/graphden/executor/compile/renames.clj:995]]
+- source :: [[file:../../../src/graphden/executor/compile/renames.clj::(defn hof-lambda-params][src/graphden/executor/compile/renames.clj:992]]
 - same file :: [[file:executor.org::#executor/build-ref-renames][build-ref-renames]], [[file:executor.org::#executor/compute-rename-aliases][compute-rename-aliases]]
 - referenced from :: [[file:executor.org::#executor/ref-produces-callable?][ref-produces-callable?]], [[file:executor.org::#executor/hof-wrap][hof-wrap]]
 
@@ -337,13 +337,13 @@ Prepares an ordinary referenced function as a callable. The wrapper captures the
 :PROPERTIES:
 :CUSTOM_ID: executor/build-ref-renames
 :FILE: src/graphden/executor/compile/renames.clj
-:LINE: 1104
+:LINE: 1101
 :MINS: 3.9
 :END:
 
 Builds the name translation at a reference call. If a caller exposes an argument under a new name but the referenced function still uses its original name, the translation supplies the value under the referenced function's name. See the [[file:../../../docs/adr/ADR-inherited-rename-surface.md][inherited rename design]].
 
-- source :: [[file:../../../src/graphden/executor/compile/renames.clj::(defn build-ref-renames][src/graphden/executor/compile/renames.clj:1104]]
+- source :: [[file:../../../src/graphden/executor/compile/renames.clj::(defn build-ref-renames][src/graphden/executor/compile/renames.clj:1101]]
 - see also :: [[file:crud.org::#crud/public-free-entries][public-free-entries]]
 - same file :: [[file:executor.org::#executor/hof-lambda-params][hof-lambda-params]], [[file:executor.org::#executor/compute-rename-aliases][compute-rename-aliases]]
 - referenced from :: [[file:packages.org::#packages/build-rename-slot-records][build-rename-slot-records]]
@@ -352,11 +352,11 @@ Builds the name translation at a reference call. If a caller exposes an argument
 :PROPERTIES:
 :CUSTOM_ID: executor/compute-rename-aliases
 :FILE: src/graphden/executor/compile/renames.clj
-:LINE: 1188
+:LINE: 1185
 :MINS: 2.6
 :END:
 
 Computes aliases for inherited rename chains that reach outside the root's own [[file:glossary.org::#term/slot][slot]] set. For example, an internal reader of ~:branch-row~ can receive input exposed publicly as ~:item~. The aliases are prepared at compile time and copied into the input map at runtime; the docstring contains a worked example.
 
-- source :: [[file:../../../src/graphden/executor/compile/renames.clj::(defn compute-rename-aliases][src/graphden/executor/compile/renames.clj:1188]]
+- source :: [[file:../../../src/graphden/executor/compile/renames.clj::(defn compute-rename-aliases][src/graphden/executor/compile/renames.clj:1185]]
 - same file :: [[file:executor.org::#executor/hof-lambda-params][hof-lambda-params]], [[file:executor.org::#executor/build-ref-renames][build-ref-renames]]

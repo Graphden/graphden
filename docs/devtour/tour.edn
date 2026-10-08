@@ -776,11 +776,12 @@
            row for storage implementations without database transactions. PostgreSQL failures have
            already rolled back and cleared the journal, so replay cannot damage restored rows."}
     {:ns graphden.crud.entities :defn apply-create-core
-     :say "Creates a row, checks the resulting function's types, and applies rename-slot updates.
-           Ordinary type errors leave the edit stored and return `:type-warnings`.
-           [Secret-flow](#term/secret) violations instead delete the new row and return an error,
-           keeping the security rejection independent of the diagnostics store. See
-           [secrets](../../docs/SECRETS.md)."}
+     :say "Repeats structural validation under the semantic writer guard, then creates the row,
+           optional rename view, and checks the resulting function in one SQL transaction.
+           Ordinary type errors keep the edit and return `:type-warnings`; an optional rename
+           failure rolls back its savepoint without losing the binding. [Secret-flow](#term/secret)
+           rejection rolls back the whole SQL change, independently of the diagnostics store.
+           See [secrets](../../docs/SECRETS.md)."}
     {:ns graphden.crud.type-check :defn type-check-fn-after-mutation!
      :say "Reconstructs and checks the changed function, updating branch-specific diagnostics.
            `:reject-secret?` marks secret-related failures for the caller to reject instead of storing
@@ -834,10 +835,11 @@
            Sanitized request and response data are stored as an execution so the existing call-tree
            interface can display the handler run. See [debugging](../../docs/EXECUTION.md)."}
     {:ns graphden.crud.secrets :defn apply-create-secret-body
-     :say "Creates graph rows containing a secret path, then stores the value and metadata in OpenBao.
-           The value never enters the graph rows. A journal supports compensating rollback if a later
-           operation fails. Request parsing and validation are composed in `app/secrets/fns.edn`; this
-           function performs the coordinated writes. See [secrets](../../docs/SECRETS.md)."
+     :say "Claims the secret path and creates its graph rows in one guarded SQL transaction.
+           After commit, stores the value and metadata in OpenBao without holding the graph writer.
+           The value never enters graph rows. SQL failures roll back and clear their journal entries;
+           later Vault failures use compensation for the already committed rows. Request parsing
+           remains composed in `app/secrets/fns.edn`. See [secrets](../../docs/SECRETS.md)."
      :see [[:types "taint-with-secret-if-tainted"]]}
     {:ns graphden.crud.test-runs :defn run-tests!
      :say "Runs functions from `tests` namespaces through the ordinary execution API with empty

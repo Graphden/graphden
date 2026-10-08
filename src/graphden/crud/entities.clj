@@ -36,11 +36,16 @@
     [graphden.packages.records :as records]
     [graphden.storage.graph-writer :as writer]
     [graphden.storage.protocol.core :as sp]
-    [graphden.versioning.storage.resolution :as res]
+    [graphden.storage.tx :as tx]
     [graphden.types.diagnostics :as diag]
     [graphden.util.abort-shield :as shield]
+    [graphden.versioning.branch-local :as branch-local]
     [graphden.versioning.storage.core :as vcore]
-    [graphden.web.errors :as web-errors]))
+    [graphden.versioning.storage.resolution :as res]
+    [graphden.web.errors :as web-errors])
+  (:import
+    (java.sql
+      Connection)))
 
 
 (defn html-error-response
@@ -133,7 +138,31 @@
   (when-let [rej (or (when (= entity-type :fn)
                        (secret-leaf-capability-rej storage data))
                      (validation/write-rej storage entity-type data))]
-    (throw (ex-info (:reason rej) (assoc rej :entity-type entity-type)))))
+    (throw (ex-info (:reason rej)
+                    (cond-> (assoc rej :entity-type entity-type)
+                      (:id data) (assoc :id (:id data)))))))
+
+
+(defn publish-write!
+  "Publish a committed generic write on the original storage. Compound SQL
+   callers own this step: nested create/update calls only change rows."
+  [ctx storage entity-type row]
+  (res/forget-read-memos!)
+  (branch-local/invalidate! (vcore/unwrap storage))
+  (res/call-with-fresh-memos
+    (fn []
+      (inval/invalidate! ctx storage entity-type row)
+      (inval/notify-after-write! ctx storage entity-type :write row))))
+
+
+(defn- owns-publication?
+  [storage]
+  (if tx/*transaction-context*
+    (do (when-not (:owned? tx/*transaction-context*)
+          (tx/assert-owns-commit! storage))
+        false)
+    (do (when (tx/datasource storage) (tx/assert-owns-commit! storage))
+        true)))
 
 
 (defn- create-entity-impl
@@ -142,17 +171,16 @@
     (fn []
       (let [storage (request/require-storage ctx)
             et (keyword entity-type)
+            publish? (owns-publication? storage)
             data (cond-> data
                    (and (= et :fn) (nil? (:id data))) (assoc :id (random-uuid)))
             _ (reject-generic-audit-write! et)
             result (writer/with-write [storage et]
-                     (res/call-with-fresh-memos
-                       (fn []
-                         (assert-write-valid! storage et data)
-                         (sp/create-entity storage et (dissoc data :_admin-secret-create)))))]
-        (res/forget-read-memos!)
-        (inval/invalidate! ctx storage et result)
-        (inval/notify-after-write! ctx storage et :write result)
+                                      (res/call-with-fresh-memos
+                                        (fn []
+                                          (assert-write-valid! storage et data)
+                                          (sp/create-entity storage et (dissoc data :_admin-secret-create)))))]
+        (when publish? (publish-write! ctx storage et result))
         result))))
 
 
@@ -177,19 +205,18 @@
     (fn []
       (let [storage (request/require-storage ctx)
             et (keyword entity-type)
+            publish? (owns-publication? storage)
             _ (reject-generic-audit-write! et)
             result (writer/with-write [storage et]
-                     (res/call-with-fresh-memos
-                       (fn []
-                         (let [check-data (if-let [ks (owner-identity-fields et)]
-                                            (merge (select-keys (sp/read-entity storage et id) ks)
-                                                   (assoc data :id id))
-                                            (assoc data :id id))]
-                           (assert-write-valid! storage et check-data)
-                           (sp/update-entity storage et id data)))))]
-        (res/forget-read-memos!)
-        (inval/invalidate! ctx storage et result)
-        (inval/notify-after-write! ctx storage et :write (assoc result :id id))
+                                      (res/call-with-fresh-memos
+                                        (fn []
+                                          (let [check-data (if-let [ks (owner-identity-fields et)]
+                                                             (merge (select-keys (sp/read-entity storage et id) ks)
+                                                                    (assoc data :id id))
+                                                             (assoc data :id id))]
+                                            (assert-write-valid! storage et check-data)
+                                            (sp/update-entity storage et id data)))))]
+        (when publish? (publish-write! ctx storage et (assoc result :id id)))
         result))))
 
 
@@ -524,19 +551,37 @@
     entity-data))
 
 
+(defn- try-rename!
+  "An optional rename may fail without rejecting its binding. A savepoint
+   prevents a SQL error or half-created view from poisoning the outer write."
+  [storage f]
+  (let [connection (tx/datasource storage)
+        savepoint (when (instance? Connection connection)
+                    (Connection/.setSavepoint connection))]
+    (try
+      (f)
+      (catch Exception e
+        (when savepoint (Connection/.rollback connection savepoint))
+        (res/forget-read-memos!)
+        (branch-local/invalidate! (vcore/unwrap storage))
+        (log/error e "ensure-rename-slot! failed")
+        nil)
+      (finally
+        (when savepoint (Connection/.releaseSavepoint connection savepoint))))))
+
+
 (defn- forward-rename-slot!
   "Phase 6c — forward a form `:rename-to` to the dedicated renamed-view
    slot. A failure here is logged, not fatal — the binding is still
    useful without the rename slot. Returns `ensure-rename-slot!`'s
    `{:created …}` (nil on failure) so the caller can roll it back."
   [storage form-data entity-data]
-  (try (ensure-rename-slot! storage
-                            (:fn-id entity-data)
-                            (:slot-id entity-data)
-                            (when-not (str/blank? (:rename-to form-data))
-                              (str (:rename-to form-data))))
-       (catch Exception e
-         (log/error e "ensure-rename-slot! failed"))))
+  (try-rename! storage
+               #(ensure-rename-slot! storage
+                                     (:fn-id entity-data)
+                                     (:slot-id entity-data)
+                                     (when-not (str/blank? (:rename-to form-data))
+                                       (str (:rename-to form-data))))))
 
 
 (defn- post-write-type-check-fn-id
@@ -590,7 +635,7 @@
                                         {:reject-secret? true}))))
 
 
-(defn apply-create-core
+(defn- apply-create!
   "§3.3 atomic core of the create-apply flow: capability gate +
    `sp/create-entity` (with unique-violation humanisation) + Phase-6c
    rename-slot side-effect + post-create whole-fn type-check.
@@ -605,9 +650,8 @@
      `{:error <human-msg>}` on a write failure (capability rejection,
        storage constraint violation, …)
    so the outer graph can dispatch on the shape and run invalidate /
-   notify / response uniformly. Structural gates (cycles, name
-   collisions, terminal / list-closed, MI) still reject BEFORE this
-   fn runs — only the TYPE check became non-blocking. SECURITY
+   notify / response uniformly. Structural gates repeat under the writer
+   after the graph's early preflight — only the TYPE check is non-blocking. SECURITY
    CARVE-OUT: a SECRET-flow type failure (laundering a `[:secret …]`
    value into a plain slot) keeps the pre-Phase-2 behaviour — the
    just-created row is deleted and the diagnostic message comes back
@@ -617,9 +661,11 @@
   (let [storage (request/require-storage ctx)
         entity-data (normalize-binding-slot storage entity-type entity-data)
         pkg-reason (pkg-guard/write-rejection storage entity-type entity-data)
-        create-result (if pkg-reason
-                        {:error pkg-reason :http-status 403}
-                        (try-create-or-error storage entity-type entity-data type-str))]
+        rej (validation/write-rej storage entity-type entity-data)
+        create-result (cond
+                        pkg-reason {:error pkg-reason :http-status 403}
+                        rej {:error (:reason rej) :http-status 400}
+                        :else (try-create-or-error storage entity-type entity-data type-str))]
     (if (:created create-result)
       ;; The renamed-view slot lands BEFORE the type check. The checker
       ;; reconstructs the fn-def from storage, and a rename it cannot see
@@ -664,16 +710,13 @@
    minted nothing or failed — logged, never escalated: the binding is
    still useful without its rename view)."
   [storage id-uuid form-data]
-  (try
-    (when-let [existing (sp/read-entity storage :binding id-uuid)]
-      (ensure-rename-slot! storage
-                           (:fn-id existing)
-                           (:slot-id existing)
-                           (when-not (str/blank? (:rename-to form-data))
-                             (str (:rename-to form-data)))))
-    (catch Exception e
-      (log/error e "ensure-rename-slot! failed")
-      nil)))
+  (try-rename! storage
+               #(when-let [existing (sp/read-entity storage :binding id-uuid)]
+                  (ensure-rename-slot! storage
+                                       (:fn-id existing)
+                                       (:slot-id existing)
+                                       (when-not (str/blank? (:rename-to form-data))
+                                         (str (:rename-to form-data)))))))
 
 
 (defn- restore-pre-image!
@@ -691,7 +734,7 @@
               {:entity-type entity-type :id id-uuid})))
 
 
-(defn apply-update-core
+(defn- apply-update!
   "§3.1 atomic core of the update-apply flow: `sp/update-entity` +
    Phase-6c rename-slot side-effect (binding writes only) + post-write
    whole-fn type-check for binding-shaped updates. Returns a uniform
@@ -718,20 +761,21 @@
         entity-data (normalize-binding-slot storage entity-type entity-data)
         error-msg (volatile! nil)
         error-status (volatile! nil)
-        ;; Pre-image for the secret carve-out rollback (binding family)
-        ;; and for the package-owner write guard (adds fn-slot, and slot —
-        ;; its `:required` / `:description` belong to the declaring fn).
-        pre-row (when (and id-uuid (#{"binding" "binding-list-item" "fn-slot" "slot"} type-str))
-                  (sp/read-entity storage entity-type id-uuid))
+        ;; Rebuild the same merged view the graph preflight checked, from
+        ;; current storage rather than the parser's pre-lock snapshot.
+        pre-row (when id-uuid (sp/read-entity storage entity-type id-uuid))
         ;; A `:fn` update (rename / description / ns-move) targets the row
-        ;; identified by `id-uuid` itself — no pre-image read needed, and
-        ;; the guard refuses it on a package-synced fn (the next boot's
-        ;; sync would revert it, and a rename breaks every bare ref).
+        ;; identified by `id-uuid` itself. The guard refuses a package-synced
+        ;; fn: sync would revert the edit, and a rename breaks bare refs.
         pkg-reason (if (and id-uuid (= "fn" type-str))
                      (pkg-guard/write-rejection storage entity-type {:id id-uuid})
                      (when pre-row
                        (pkg-guard/write-rejection storage entity-type pre-row)))
-        updated (when-not pkg-reason
+        check-data (merge pre-row entity-data {:id id-uuid})
+        rej (or (when (= entity-type :fn)
+                  (secret-leaf-capability-rej storage entity-data))
+                (when entity-data (validation/write-rej storage entity-type check-data)))
+        updated (when-not (or pkg-reason rej)
                   (try (sp/update-entity storage entity-type id-uuid entity-data)
                        (catch Exception e
                          (log-write-failure! e "update-entity" entity-type id-uuid entity-data)
@@ -747,8 +791,11 @@
                                   (web-errors/status-for-ex-data (ex-data e)))
                          nil)))]
     (if-not updated
-      {:error (or pkg-reason @error-msg "Failed to update entity")
-       :http-status (if pkg-reason 403 @error-status)}
+      {:error (or pkg-reason (:reason rej) @error-msg "Failed to update entity")
+       :http-status (cond
+                      (or pkg-reason (= :capability/secret-leaf-restricted (:type rej))) 403
+                      rej 400
+                      :else @error-status)}
       (let [;; Renamed-view slot BEFORE the type check — same reason as in
             ;; `apply-create-core`: the checker must see the rename it is
             ;; about to record.
@@ -767,6 +814,47 @@
             (:diagnostic rej) (assoc :type-warnings [(:diagnostic rej)])
             (pos? (or (:dependent-type-warning-count rej) 0))
             (assoc :dependent-type-warning-count (:dependent-type-warning-count rej))))))))
+
+
+(defn- apply-form-write
+  "Repeat decisive reads under the writer, rolling error envelopes back before
+   the graph renders them. Outer graph nodes publish only committed results."
+  [apply! parsed ctx]
+  (let [storage (request/require-storage ctx)
+        pooled? (some? (tx/datasource storage))]
+    (when pooled? (tx/assert-owns-commit! storage))
+    (try
+      (writer/call-with-write
+        storage (:entity-type parsed)
+        (fn [bound]
+          (res/call-with-fresh-memos
+            (fn []
+              (reject-generic-audit-write! (:entity-type parsed))
+              (let [result (apply! parsed (assoc ctx :storage bound))]
+                (if (and pooled? (:error result))
+                  (throw (ex-info "Form write rejected" {::rejection result}))
+                  result))))))
+      (catch clojure.lang.ExceptionInfo e
+        (if-let [result (::rejection (ex-data e))] result (throw e)))
+      (finally
+        (res/forget-read-memos!)
+        (branch-local/invalidate! (vcore/unwrap storage))))))
+
+
+(defn apply-create-core
+  "Create a form entity and optional rename rows atomically. Revalidate the
+   current structure under the writer; keep ordinary type warnings, roll back
+   secret-flow failures. Returns the existing created/error envelope."
+  [parsed ctx]
+  (apply-form-write apply-create! parsed ctx))
+
+
+(defn apply-update-core
+  "Update a form entity and optional rename rows atomically. Partial PUTs
+   recover owner fields under the writer; secret rejection restores all SQL
+   history. Ordinary type errors still warn and persist."
+  [parsed ctx]
+  (apply-form-write apply-update! parsed ctx))
 
 
 ;; === Re-exports from sub-namespaces ==========================================

@@ -24,9 +24,13 @@
     [graphden.crud.package-guard :as pkg-guard]
     [graphden.crud.request :as request]
     [graphden.crud.type-check :as tc]
+    [graphden.storage.graph-writer :as writer]
     [graphden.storage.protocol.core :as sp]
+    [graphden.storage.tx :as tx]
     [graphden.tenancy.context :as tctx]
-    [graphden.versioning.storage.core :as vcore])
+    [graphden.versioning.branch-local :as branch-local]
+    [graphden.versioning.storage.core :as vcore]
+    [graphden.versioning.storage.resolution :as res])
   (:import
     (java.util
       UUID)))
@@ -194,10 +198,36 @@
        :error (or (ex-message exception) (str exception))})))
 
 
+(defn- reserve-secret-rows!
+  "Claim the path and create graph rows in one guarded SQL phase. Vault I/O
+   follows its commit. Failed SQL clears only this phase's compensation
+   entries; committed rows retain them for a later Vault failure."
+  [ctx journal reserve!]
+  (let [storage (request/require-storage ctx)
+        pooled? (some? (tx/datasource storage))
+        before @journal]
+    (when pooled? (tx/assert-owns-commit! storage))
+    (let [result (try
+                   (writer/call-with-write
+                     storage :graph
+                     (fn [bound]
+                       (res/call-with-fresh-memos
+                         #(reserve! (assoc ctx :storage bound)))))
+                   (catch Exception e
+                     (when pooled? (reset! journal before))
+                     (throw e))
+                   (finally
+                     (res/forget-read-memos!)
+                     (branch-local/invalidate! (vcore/unwrap storage))))]
+      (doseq [[entity-type row] (:rows result)]
+        (crud-entities/publish-write! ctx storage entity-type row))
+      result)))
+
+
 (defn apply-create-secret-body
-  "Body of the create-secret `:try`: vault-put + vault-put-metadata
-   (optional) + storage create-fn + storage create-binding +
-   post-create whole-fn type-check. Records rollback entries on the
+  "Body of the create-secret `:try`: guarded SQL path claim + fn/binding
+   creation, then Vault put + optional metadata outside the writer lock,
+   and post-create whole-fn type-check. Records rollback entries on the
    shared `journal` atom (`[:vault-delete path]`, `[:storage-delete
    :fn fn-id]`, `[:storage-delete :binding binding-id]`). Throws on
    any failure (caught by `:try`)."
@@ -205,34 +235,30 @@
   (let [storage (request/require-storage ctx)
         vault-client (require-vault! ctx)
         {:keys [nm ns-id value description custom-metadata]} parsed
-        path (claim-path! storage (:path parsed))
-        path-slot-id (find-path-slot-id storage leaf-id)
         fn-id (UUID/randomUUID)
-        binding-id (UUID/randomUUID)]
-    ;; Storage FIRST, vault AFTER (mirrors the delete path). The `:fn` create
-    ;; carries the `UNIQUE(name, namespace-id)` constraint, so a concurrent
-    ;; duplicate-name create loses HERE — before touching vault. Were vault
-    ;; put first, the loser's rollback would `vault-delete` the shared path
-    ;; that the WINNER's row points at, silently breaking the winner's secret.
-    (crud-entities/create-entity
-      :fn
-      (cond-> {:id fn-id
-               :name nm
-               :parent-ids [leaf-id]
-               :_admin-secret-create true}
-        ns-id (assoc :namespace-id ns-id)
-        (and description (seq description)) (assoc :description description))
-      ctx)
-    (swap! journal conj [:storage-delete :fn fn-id])
-    (crud-entities/create-entity
-      :binding
-      {:id binding-id
-       :fn-id fn-id
-       :slot-id path-slot-id
-       :value path
-       :resolver-fn-id (vault-get-fn-id ctx)}
-      ctx)
-    (swap! journal conj [:storage-delete :binding binding-id])
+        binding-id (UUID/randomUUID)
+        {:keys [path]}
+        (reserve-secret-rows!
+          ctx journal
+          (fn [bound-ctx]
+            (let [bound (request/require-storage bound-ctx)
+                  path (claim-path! bound (:path parsed))
+                  path-slot-id (find-path-slot-id bound leaf-id)
+                  fn-row (crud-entities/create-entity
+                           :fn
+                           (cond-> {:id fn-id :name nm :parent-ids [leaf-id]
+                                    :_admin-secret-create true}
+                             ns-id (assoc :namespace-id ns-id)
+                             (seq description) (assoc :description description))
+                           bound-ctx)
+                  _ (swap! journal conj [:storage-delete :fn fn-id])
+                  binding-row (crud-entities/create-entity
+                                :binding
+                                {:id binding-id :fn-id fn-id :slot-id path-slot-id
+                                 :value path :resolver-fn-id (vault-get-fn-id bound-ctx)}
+                                bound-ctx)]
+              (swap! journal conj [:storage-delete :binding binding-id])
+              {:path path :rows [[:fn fn-row] [:binding binding-row]]})))]
     ;; Vault only after the row exists (loser never reaches here).
     (vault/put-secret vault-client path value)
     (swap! journal conj [:vault-delete path])
@@ -261,21 +287,23 @@
    the shared `journal` atom; throws on storage / vault failure (caught by
    `:try`)."
   [parsed journal ctx]
-  (let [storage (request/require-storage ctx)
-        vault-client (require-vault! ctx)
+  (let [vault-client (require-vault! ctx)
         {:keys [fn-id slot-id value]} parsed
-        _ (refuse-package-owner! storage fn-id)
-        path (claim-path! storage (:path parsed))
-        binding-id (UUID/randomUUID)]
-    (crud-entities/create-entity
-      :binding
-      {:id binding-id
-       :fn-id fn-id
-       :slot-id slot-id
-       :value path
-       :resolver-fn-id (vault-get-fn-id ctx)}
-      ctx)
-    (swap! journal conj [:storage-delete :binding binding-id])
+        binding-id (UUID/randomUUID)
+        {:keys [path]}
+        (reserve-secret-rows!
+          ctx journal
+          (fn [bound-ctx]
+            (let [storage (request/require-storage bound-ctx)
+                  _ (refuse-package-owner! storage fn-id)
+                  path (claim-path! storage (:path parsed))
+                  row (crud-entities/create-entity
+                        :binding
+                        {:id binding-id :fn-id fn-id :slot-id slot-id
+                         :value path :resolver-fn-id (vault-get-fn-id bound-ctx)}
+                        bound-ctx)]
+              (swap! journal conj [:storage-delete :binding binding-id])
+              {:path path :rows [[:binding row]]})))]
     ;; Vault only after the row exists — the rollback's `:vault-delete`
     ;; then only ever removes a path THIS request claimed.
     (vault/put-secret vault-client path value)

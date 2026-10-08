@@ -17,6 +17,15 @@ async function inheritanceRequest(stage, command) {
       : result?.reason || result?.error || 'Inheritance request failed (HTTP ' + response.status + ').';
     throw new Error(message);
   }
+  if (stage === 'apply' && typeof gdToast === 'function') {
+    if (result['publication-warnings']?.length) {
+      gdToast('Change saved. Refresh the editor to reload derived state.');
+    } else if (result['type-warnings']?.length) {
+      const detail = typeof safeTypeWarningSummary === 'function'
+        ? safeTypeWarningSummary(result['type-warnings'][0]) : '';
+      gdToast('Change saved with type warnings.' + (detail ? ' ' + detail : ''));
+    }
+  }
   return result;
 }
 

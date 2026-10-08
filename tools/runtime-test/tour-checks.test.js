@@ -129,6 +129,25 @@ test('fn-parent resolves either client source and waits for unknown ids', () => 
          'an unknown MI parent cannot prove a second parent');
 });
 
+test('binding-flag waits for the actual own row and intended mutation', () => {
+  const state = withFn();
+  const check = { kind: 'binding-flag', name: FN.name, slot: SLOT.name, field: 'terminal', value: true };
+  assert(!checkIn(state, check), 'unknown bindings do not prove a seal');
+  state.lookups.bindingsByFn.set(FN.id, []);
+  assert(!checkIn(state, { ...check, value: false }), 'absence is not the copied own row');
+  const own = { id: 'seal', 'fn-id': FN.id, 'slot-id': SLOT.id, terminal: false, required: true };
+  state.lookups.bindingsByFn.set(FN.id, [own]);
+  assert(!checkIn(state, check), 'before reseal the lesson stays on this step');
+  own.terminal = true;
+  assert(checkIn(state, check), 'reseal completed in actual binding state');
+  assert(!checkIn(state, { ...check, value: false }), 'copied seal must actually be removed');
+  own.terminal = false;
+  assert(checkIn(state, { ...check, value: false }), 'copy own seal removed');
+  assert(checkIn(state, { ...check, field: 'required' }), 'requiredness remained true');
+  own['fn-id'] = PARENT.id;
+  assert(!checkIn(state, { ...check, value: false }), 'an inherited row is not an own binding');
+});
+
 test('list-values rejects append, wrong value and wrong order', () => {
   const state = withFn();
   state.lookups.bindingsByFn.set(FN.id, [{ id: 'seq', 'slot-id': SLOT.id }]);

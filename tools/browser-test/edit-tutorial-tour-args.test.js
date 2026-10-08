@@ -280,12 +280,24 @@ const {
       'the + is back and solid — required since the parent (got: ' + JSON.stringify(ratchet) + ')');
     assert(await clickTourButton(page, 'Next'), 'lesson 07 ratchet Next');
     await waitTourTitle(page, 'Seal the source again', 150000);
-    await filterAndSelect(page, 'tutorial-cut', 'tutorial-cut');
+    await page.click('.node-overlay[data-fn-name="tutorial-cut-more"] .ancestor-line[data-level="1"] button.more-actions-trigger');
+    await page.click('.row-actions-popover [data-action="inheritance-intent"]');
+    await page.waitForSelector('.inheritance-intent-popover [data-action="inheritance-source"]');
+    await page.click('.inheritance-intent-popover [data-action="inheritance-source"]');
+    await page.waitForSelector('.node-overlay[data-fn-name="tutorial-cut"]');
     await setSealsViaBadge(page, 'end', {terminal: true}, 'tutorial-cut');
-    assert(await clickTourButton(page, 'Next'), 'lesson 07 source reseal Next');
     await waitTourTitle(page, 'Return to the child', 150000);
     await filterAndSelect(page, 'tutorial-cut-more', 'tutorial-cut-more');
     await waitTourTitle(page, 'Create a variation for the child', 150000);
+    const sealBeforeVariation = await page.evaluate(() => {
+      const fn = _tourFindFn('tutorial-cut');
+      const own = (lookups.bindingsByFn.get(fn.id) || []).find(binding =>
+        lookups.slotMap.get(binding['slot-id'])?.name === 'end');
+      return { terminal: own?.terminal, required: own?.required,
+        slot: lookups.slotMap.get(own?.['slot-id']) };
+    });
+    assert(sealBeforeVariation.terminal === true && sealBeforeVariation.required === true,
+      'original source actually resealed while requiredness remains true');
     await page.click('.node-overlay[data-fn-name="tutorial-cut-more"] .ancestor-line[data-level="1"] button.more-actions-trigger');
     await page.click('.row-actions-popover [data-action="inheritance-intent"]');
     await page.waitForSelector('.inheritance-intent-popover [data-variation-name]');
@@ -294,8 +306,17 @@ const {
     await waitTourTitle(page, 'Lift only the copied seal', 150000);
     await page.waitForSelector('.node-overlay[data-fn-name="_tutorial-cut-local"]');
     await setSealsViaBadge(page, 'end', {terminal: false}, '_tutorial-cut-local');
-    assert(await clickTourButton(page, 'Next'), 'lesson 07 copy unseal Next');
     await waitTourTitle(page, 'Read the changed child', 150000);
+    const liftedCopy = await page.evaluate(() => {
+      const copy = _tourFindFn('_tutorial-cut-local');
+      const own = (lookups.bindingsByFn.get(copy.id) || []).find(binding =>
+        lookups.slotMap.get(binding['slot-id'])?.name === 'end');
+      return { terminal: own?.terminal, required: own?.required,
+        slot: lookups.slotMap.get(own?.['slot-id']) };
+    });
+    assert(!liftedCopy.terminal && liftedCopy.required === sealBeforeVariation.required
+      && JSON.stringify(liftedCopy.slot) === JSON.stringify(sealBeforeVariation.slot),
+    'copy own seal is off; binding requiredness and shared slot declaration are unchanged');
     await filterAndSelect(page, 'tutorial-cut-more', 'tutorial-cut-more');
     await waitTourTitle(page, 'Inspect ancestor choices', 150000);
     await page.waitForSelector('.placeholder-binder[data-fn-name="tutorial-cut-more"][data-arg-name="end"]');

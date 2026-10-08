@@ -201,8 +201,7 @@ async function removeParentInline(fn, parentIdToRemove) {
        ? getQualifiedFnName(removed) : (removed.name || '(anonymous)'))
     : '(unknown)';
   const tail = next.length === 0
-    ? '\n\nThis was the last parent — the fn will become a base-fn '
-      + '(no inheritance).'
+    ? '\n\nThis was the last parent — the fn will have no inheritance.'
     : '';
   if (!confirm('Remove parent "' + removedName + '"?'
                + tail)) return;

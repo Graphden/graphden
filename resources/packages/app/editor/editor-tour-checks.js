@@ -129,6 +129,19 @@ function _tourCheckPasses(check) {
           return items.length > 0;
         });
       }
+      case 'binding-flag': {
+        if (typeof check.value !== 'boolean'
+            || !['terminal', 'list-closed', 'required', 'list-append'].includes(check.field)) return false;
+        const created = typeof _tourState !== 'undefined'
+          && _tourState?.created?.find(row => row.id && row.name === check.name);
+        const fn = created ? lookups?.fnMap?.get(created.id) : _tourFindFn(check.name);
+        if (!fn || !lookups?.bindingsByFn?.has(fn.id)) return false;
+        return lookups.bindingsByFn.get(fn.id).some(binding => {
+          const slot = lookups.slotMap?.get(binding['slot-id']);
+          return binding['fn-id'] === fn.id && slot?.name === check.slot
+            && Boolean(binding[check.field]) === check.value;
+        });
+      }
       case 'selected': {
         if (typeof selectedFnId === 'undefined' || !selectedFnId) return false;
         const sel = lookups?.fnMap ? lookups.fnMap.get(selectedFnId) : null;

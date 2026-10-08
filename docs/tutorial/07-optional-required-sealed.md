@@ -149,8 +149,8 @@ Run a fn without its optional input, seal a slot, then require it:
 9. Open `tutorial-cut-more` once more: the `+` on `end` is back, and
    no longer dimmed — from `tutorial-cut` down, `end` must be
    supplied.
-10. Open `tutorial-cut` again. Seal `end` once more and leave requiredness
-    unchanged. Return to `tutorial-cut-more`: its inherited `end` is locked.
+10. On the `tutorial-cut` ancestor row: `⋯` → **Inheritance…** →
+    **Go to source**. Seal `end` once more and leave requiredness unchanged. Return to `tutorial-cut-more`: its inherited `end` is locked.
 11. On its `tutorial-cut` ancestor row: `⋯` → **Inheritance…**. Set
     **Variation name** to `_tutorial-cut-local`, then click
     **Create variation for tutorial-cut-more**. The new source opens.

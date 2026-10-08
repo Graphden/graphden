@@ -12,7 +12,7 @@ const name = 'created-' + suffix;
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   try {
-    await api(page, 'POST', '/api/entities/namespace', 'name=' + nsName);
+    await api(page, 'POST', '/api/entities/ns', 'name=' + nsName);
     const tree = await api(page, 'GET', '/api/graph/entities?scope=tree');
     nsId = tree.namespaces.find(row => row.name === nsName && !row['parent-id'])?.id;
     assert(nsId, 'owned fixture namespace exists');
@@ -48,7 +48,7 @@ const name = 'created-' + suffix;
     await page.screenshot({path: '/tmp/graphden-tutorial-selected-cleanup.png'});
   } finally {
     await deleteFnByName(page, name);
-    if (nsId) assert((await nodeApi('DELETE', '/api/entities/namespace/' + nsId)).ok,
+    if (nsId) assert((await nodeApi('DELETE', '/api/entities/ns/' + nsId)).ok,
       'fixture namespace cleaned');
     await browser.close();
   }

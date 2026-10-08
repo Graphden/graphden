@@ -57,10 +57,10 @@ async function editOwnValue(page, fnId, slot, value, position) {
   await popover.waitFor({state: 'detached'});
 }
 
-async function waitForPersonalMenuValue(page, fnId, configuration, value) {
+async function waitForPersonalMenuValue(page, fnId, configuration, value, token = '--gd-account-menu-hover') {
   // Saving detaches the form before graph data and its authorized personal
   // plan finish reloading. Opening earlier is closed by that reload.
-  await page.waitForFunction(({fnId, configuration, value}) => {
+  await page.waitForFunction(({fnId, configuration, value, token}) => {
     const shell = window.gdShellMenuGraph;
     if (!shell?.ready || !shell.runtime || window.gdUIComponentRuntimeIdentity?.('account-menu') !== configuration
       || !(graphData.bindings || []).some(row => row['fn-id'] === fnId && row.value === value
@@ -68,8 +68,27 @@ async function waitForPersonalMenuValue(page, fnId, configuration, value) {
     const key = window.GraphdenBrowser.keyword;
     const theme = new Map(Object.entries(window.gdGraphThemeBase()).map(([name, token]) => [key(name), token]));
     const view = shell.runtime.run('view', {state: shell.state, theme});
-    return view.get(key('menu-tokens'))?.get('--gd-account-menu-hover') === value;
-  }, {fnId, configuration, value}, {timeout: 60000});
+    return view.get(key(token === '--bg' ? 'theme-tokens' : 'menu-tokens'))?.get(token) === value;
+  }, {fnId, configuration, value, token}, {timeout: 60000});
+}
+
+async function waitForPersonalMenuHome(page, fnId, configuration) {
+  await page.waitForFunction(({fnId, configuration}) => {
+    const shell = window.gdShellMenuGraph;
+    if (!shell?.ready || !shell.runtime || window.gdUIComponentRuntimeIdentity?.('account-menu') !== configuration) return false;
+    const binding = (graphData.bindings || []).find(row => row['fn-id'] === fnId
+      && lookups.slotMap.get(row['slot-id'])?.name === 'vals');
+    if (!(graphData['list-items'] || []).some(row => row['binding-id'] === binding?.id
+      && row.position === 2 && row.value === 'last')) return false;
+    // Inspect the pure update result without changing mounted state. The
+    // real Home key below still proves focus and active-index behavior.
+    const key = window.GraphdenBrowser.keyword;
+    const context = new Map([[key('items'), ['first', 'middle', 'last']]]);
+    const update = (state, kind, pressed = '') => shell.runtime.run('update', {state, context,
+      event: new Map([[key('kind'), kind], [key('key'), pressed], [key('index'), -1]])});
+    const opened = update(shell.runtime.run('initial'), 'open');
+    return update(opened, 'keydown', 'Home').get(key('active')) === 2;
+  }, {fnId, configuration}, {timeout: 60000});
 }
 
 async function walkUIComponentsLesson(page) {
@@ -126,6 +145,7 @@ async function walkUIComponentsLesson(page) {
   const canvas = await selectCreatedLeaf(page, manifest, 'theme', 'theme-canvas-color');
   await editOwnValue(page, canvas, 'value', '#fff7ed');
   await waitTourTitle(page, 'Open the menu view', 60000);
+  await waitForPersonalMenuValue(page, canvas, manifest.roots['configuration-id'], '#fff7ed', '--bg');
   await openGroup(page, 'menu-id');
   await waitTourTitle(page, 'A local menu value');
   const hover = await selectCreatedLeaf(page, manifest, 'menu', 'account-menu-hover');
@@ -137,6 +157,7 @@ async function walkUIComponentsLesson(page) {
   await waitTourTitle(page, 'Change a keyboard decision');
   const keymap = await selectCreatedLeaf(page, manifest, 'menu', 'account-menu-key-map');
   await editOwnValue(page, keymap, 'vals', 'last', 2);
+  await waitForPersonalMenuHome(page, keymap, manifest.roots['configuration-id']);
   await page.locator('.auth-avatar:visible, #auth-lock-btn:visible').first().click();
   await page.locator('.auth-menu [role="menuitem"]').first().focus();
   await page.keyboard.press('Home');
@@ -153,4 +174,4 @@ async function walkUIComponentsLesson(page) {
   }
   return manifest;
 }
-module.exports = {walkUIComponentsLesson, selectCreatedLeaf, editOwnValue, waitForPersonalMenuValue};
+module.exports = {walkUIComponentsLesson, selectCreatedLeaf, editOwnValue, waitForPersonalMenuValue, waitForPersonalMenuHome};

@@ -2,7 +2,7 @@
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
-const {selectCreatedLeaf, editOwnValue, waitForPersonalMenuValue} = require('../browser-test/tutorial-ui-components-helpers');
+const {selectCreatedLeaf, editOwnValue, waitForPersonalMenuValue, waitForPersonalMenuHome} = require('../browser-test/tutorial-ui-components-helpers');
 
 test('leaf selection clicks one visible exact identity despite duplicate search and tree rows', async () => {
   const own = '11111111-1111-1111-1111-111111111111';
@@ -103,4 +103,34 @@ test('color assertions wait for the asynchronous typed control before editing', 
   assert.deepEqual(events, ['await-form', 'check-widget', 'edit']);
   assert.equal(edited, '#fff7ed');
   assert.equal(saved, true);
+});
+
+test('Home waits for both its exact persisted list item and the reloaded update decision', async () => {
+  let fresh = false;
+  const data = {bindings: [{'fn-id': 'own-map', 'slot-id': 'own-slot', id: 'own-binding'}], 'list-items': []};
+  const state = new Map([['active', 0]]);
+  const context = vm.createContext({Map, args: null, graphData: data,
+    lookups: {slotMap: new Map([['own-slot', {name: 'vals'}]])},
+    window: {
+      gdUIComponentRuntimeIdentity: () => 'own-configuration',
+      GraphdenBrowser: {keyword: value => value},
+      gdShellMenuGraph: {ready: true, state, runtime: {run(entry, args) {
+        if (entry === 'initial') return state;
+        assert.equal(entry, 'update');
+        assert.equal(args.context.get('items').length, 3);
+        const home = args.event.get('kind') === 'keydown' && args.event.get('key') === 'Home';
+        return new Map([['active', home && fresh ? 2 : 0]]);
+      }}},
+    },
+  });
+  await waitForPersonalMenuHome({waitForFunction: async (predicate, args) => {
+    context.args = args;
+    const check = () => vm.runInContext('(' + predicate.toString() + ')(args)', context);
+    assert.equal(check(), false, 'the current DOM cannot substitute for a persisted item');
+    data['list-items'].push({'binding-id': 'own-binding', position: 2, value: 'last'});
+    assert.equal(check(), false, 'the old ready update plan still maps Home to first');
+    fresh = true;
+    assert.equal(check(), true);
+    assert.equal(state.get('active'), 0, 'readiness inspection never changes mounted state');
+  }}, 'own-map', 'own-configuration');
 });

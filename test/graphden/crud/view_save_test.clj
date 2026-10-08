@@ -8,9 +8,11 @@
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.crud.entities :as entities]
     [graphden.crud.entities.views :as read-views]
+    [graphden.crud.type-check :as type-check]
     [graphden.crud.views :as views]
     [graphden.executor.context :as context]
     [graphden.executor.interface :as exec]
+    [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.graph-writer :as writer]
     [graphden.storage.protocol.core :as sp]
@@ -286,6 +288,36 @@
         (is (true? (:committed result)))
         (is (= 1 (count (:publication-warnings result))))
         (is (= "committed-view" (:name (sp/read-entity storage :fn (get-in result [:view :id])))))))))
+
+
+(deftest saved-view-publishes-its-inherited-effect-signature
+  (with-storage
+    (fn [storage ctx base]
+      (registry/record-rich-types-raw!
+        (:id base) :explorer-view
+        {:return :keyword-map :args {:name :text :kinds :sequence} :effects #{:db}})
+      (let [created (save! ctx {:name "effect-view" :filters {:name "member" :kinds ["fn"]}})
+            id (get-in created [:view :id])]
+        (is (true? (:ok created)))
+        (is (= #{:db} (:effects (registry/rich-type-of-id id))))
+        (is (= :keyword-map (:return (registry/rich-type-of-id id))))
+        (let [edited (save! ctx {:id id :name "edited-effect-view" :filters {:name "changed" :kinds ["fn"]}})]
+          (is (= id (get-in edited [:view :id])))
+          (is (= #{:db} (:effects (registry/rich-type-of-id id))))
+          (is (= "edited-effect-view" (get-in edited [:view :name]))))))))
+
+
+(deftest postcommit-type-refresh-failure-does-not-report-a-rollback
+  (with-storage
+    (fn [storage ctx _]
+      (let [result (with-redefs [type-check/type-check-fn-and-dependents!
+                                 (fn [& _] (throw (ex-info "type refresh failed" {})))]
+                     (save! ctx {:name "committed-type-refresh-view" :filters {:name "member"}}))]
+        (is (true? (:ok result)))
+        (is (true? (:committed result)))
+        (is (= 1 (count (:publication-warnings result))))
+        (is (= "committed-type-refresh-view"
+               (:name (sp/read-entity storage :fn (get-in result [:view :id])))))))))
 
 
 (deftest protected-branch-rejects-save-without-any-graph-write

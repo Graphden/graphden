@@ -5,6 +5,7 @@
     [clojure.tools.logging :as log]
     [graphden.crud.entities :as entities]
     [graphden.crud.request :as request]
+    [graphden.crud.type-check :as type-check]
     [graphden.crud.views.command :as command]
     [graphden.crud.views.write :as write]
     [graphden.storage.graph-writer :as writer]
@@ -34,11 +35,16 @@
   [ctx storage {:keys [view publication-rows]}]
   (let [warnings (into []
                        (keep (fn [row]
-                               (try (entities/publish-write! ctx storage :fn row)
-                                    nil
-                                    (catch Exception error
-                                      (log/warn error "View saved; derived state needs refresh" {:fn-id (:id row)})
-                                      {:fn-id (:id row) :reason "The view committed; refresh to reload derived state"}))))
+                               (try
+                                 ;; Compound writes bypass the form's type
+                                 ;; check. Refresh the final signature before
+                                 ;; publishing caches or serving Run forms.
+                                 (type-check/type-check-fn-and-dependents! ctx storage (:id row))
+                                 (entities/publish-write! ctx storage :fn row)
+                                 nil
+                                 (catch Exception error
+                                   (log/warn error "View saved; derived state needs refresh" {:fn-id (:id row)})
+                                   {:fn-id (:id row) :reason "The view committed; refresh to reload derived state"}))))
                        publication-rows)]
     (cond-> {:ok true :committed true :view view}
       (seq warnings) (assoc :publication-warnings warnings))))

@@ -1,13 +1,42 @@
 // Lesson 23: existing fn edits, additions, sibling merge/remerge, exact cleanup.
 // Own file keeps the real reload/merge sequence within the runner's file cap.
 const {chromium} = require('playwright');
-const {assert, newContext, api} = require('./edit-test-helpers');
+const {assert, newContext, api, openBranchPopover} = require('./edit-test-helpers');
 const {
   hardCleanup, waitTourTitle, clickTourButton, filterAndSelect, extendViaRowActions,
   bindFirstPlaceholder, editBoundValue, createBranchViaChip, switchBranchViaChip,
-  compareBranchViaChip, exitBranchCompare, mergeBranchViaChip, setBranchLocalViaStrip,
-  setFnDescription, finishAndDelete, tourWhere, cleanupRecordedTutorialBranches,
+  compareBranchViaChip, setBranchLocalViaStrip,
+  setFnDescription, tourWhere, cleanupRecordedTutorialBranches,
 } = require('./tutorial-tour-helpers');
+
+async function ownedBranchRow(page, branch) {
+  await openBranchPopover(page);
+  const row = page.locator('.branch-row[data-branch-id="' + branch.id + '"]');
+  await row.waitFor({state: 'visible', timeout: 30000});
+  assert(await row.getAttribute('data-branch-name') === branch.name, 'branch control retains its exact owned UUID/name');
+  return row;
+}
+
+async function mergeOwnedSource(page, source, target) {
+  assert(new URL(page.url()).searchParams.get('branch') === target.name, 'merge stays on the owned sibling target');
+  const row = await ownedBranchRow(page, source);
+  const [, response] = await Promise.all([
+    page.waitForNavigation({waitUntil: 'load', timeout: 60000}),
+    page.waitForResponse(r => r.request().method() === 'POST'
+      && new URL(r.url()).pathname === '/api/branches/' + target.id + '/merge', {timeout: 60000}),
+    row.locator('.branch-row-merge').click(),
+  ]);
+  assert(response.ok() && (await response.json()).ok === true, 'exact sibling target merge committed');
+}
+
+async function switchToOwnedBranch(page, branch) {
+  const row = await ownedBranchRow(page, branch);
+  await Promise.all([
+    page.waitForURL(url => url.searchParams.get('branch') === branch.name,
+      {waitUntil: 'load', timeout: 60000}),
+    row.locator('.branch-row-name').click(),
+  ]);
+}
 
 (async () => {
   const {browser, page} = await newContext(chromium, {boot: false});
@@ -59,6 +88,12 @@ const {
     await waitTourTitle(page, 'Fork the sibling target', 150000);
     await createBranchViaChip(page, 'tutorial-merge-target');
     await waitTourTitle(page, 'Compare the branches', 150000);
+    const branchReceipts = await page.evaluate(() => _tourState.created.filter(row => row.type === 'branch'));
+    const sourceBranch = branchReceipts.find(row => row.name === 'tutorial-branch');
+    const targetBranch = branchReceipts.find(row => row.name === 'tutorial-merge-target');
+    assert(sourceBranch?.id && targetBranch?.id && sourceBranch['base-branch-id']
+      && sourceBranch['base-branch-id'] === targetBranch['base-branch-id'], 'owned source and target share the exact base UUID');
+    const targetHeaders = {'X-Graphden-Branch': targetBranch.id};
     await filterAndSelect(page, 'branch-demo', 'branch-demo');
     await compareBranchViaChip(page, 'tutorial-branch');
     await waitTourTitle(page, 'Read it, then exit', 150000);
@@ -74,32 +109,48 @@ const {
     await ghost.waitFor({state: 'visible', timeout: 30000});
     assert(await page.evaluate(id => _gdDiffMode?.byFnId.get(id)?.__kind === 'missing', addedId),
       'exact source child is absent on the target, separately from the common UUID edit');
-    await exitBranchCompare(page);
+    await page.locator('.gd-diff-chip-off').click();
+    await page.waitForSelector('#gd-diff-chip', {state: 'detached', timeout: 15000});
     await waitTourTitle(page, 'Merge into the sibling target', 150000);
-    await mergeBranchViaChip(page, 'tutorial-branch');
+    await mergeOwnedSource(page, sourceBranch, targetBranch);
     await filterAndSelect(page, 'branch-demo', 'branch-demo');
     await waitTourTitle(page, 'Return to the source', 150000);
-    const merged = await api(page, 'GET', '/api/graph/entities?scope=subtree&root-id=' + fnId);
+    const merged = await api(page, 'GET', '/api/graph/entities?scope=subtree&root-id=' + fnId, undefined, targetHeaders);
     assert(merged.fns.some(fn => fn.id === fnId && fn.description === 'source draft'),
       'merge transfers fields on the common-base identity');
-    await switchBranchViaChip(page, 'tutorial-branch');
+    const added = await api(page, 'GET', '/api/graph/entities?scope=subtree&root-id=' + addedId, undefined, targetHeaders);
+    assert(added.fns.some(fn => fn.id === addedId && fn['parent-ids']?.includes(fnId)),
+      'merge transfers the exact source child and its common-base parent');
+    await switchToOwnedBranch(page, sourceBranch);
     await filterAndSelect(page, 'branch-demo', 'branch-demo');
     await waitTourTitle(page, 'Make a later edit', 150000);
-    await editBoundValue(page, 'second branch version');
+    await page.locator('.node-overlay[data-fn-name="branch-demo"] .arg-value-editable').click();
+    const editor = page.locator('.arg-value-edit-popover').last();
+    await editor.locator('[data-form-field], .arg-value-edit-input').first().fill('second branch version');
+    await editor.getByRole('button', {name: 'Save', exact: true}).click();
+    await editor.waitFor({state: 'detached', timeout: 30000});
     await waitTourTitle(page, 'Back to the merge target', 150000);
-    await switchBranchViaChip(page, 'tutorial-merge-target');
+    await switchToOwnedBranch(page, targetBranch);
     await filterAndSelect(page, 'branch-demo', 'branch-demo');
     await waitTourTitle(page, 'Merge the later edit', 150000);
-    await mergeBranchViaChip(page, 'tutorial-branch');
+    await mergeOwnedSource(page, sourceBranch, targetBranch);
     await filterAndSelect(page, 'branch-demo', 'branch-demo');
     await waitTourTitle(page, "That's branching", 150000);
+    const remerged = await api(page, 'GET', '/api/graph/entities?scope=subtree&root-id=' + fnId, undefined, targetHeaders);
+    assert(remerged.bindings.some(binding => binding['fn-id'] === fnId && binding.value === 'second branch version'),
+      'remerge transfers the later literal on the exact sibling target');
     // Reload before finishing: ownership and cleanup destination must survive.
     owned.push(...await page.evaluate(() => _tourState.created.filter(item => item.type === 'branch')));
     assert(owned.length === 3 && owned.every(item => item.id && item['base-branch-id']),
       'all branch ownership comes from actual API UUID responses');
     await page.reload();
     await waitTourTitle(page, "That's branching", 150000);
-    await finishAndDelete(page);
+    await page.getByRole('button', {name: 'Finish', exact: true}).click();
+    const remove = page.locator('#gd-tour-pop .gd-tour-btn').filter({hasText: /^(Delete them|Delete branch & return)$/});
+    await remove.waitFor({state: 'visible', timeout: 120000});
+    await remove.click();
+    await page.waitForURL(url => !url.searchParams.has('branch'), {waitUntil: 'load', timeout: 60000});
+    await page.waitForSelector('#gd-tour-pop', {state: 'detached', timeout: 60000});
     assert(!new URLSearchParams(new URL(page.url()).search).get('branch'), 'cleanup returns to main');
     const result = await api(page, 'GET', '/api/branches');
     const rows = Array.isArray(result) ? result : result.branches;
@@ -112,7 +163,6 @@ const {
   } finally {
     try { await cleanupRecordedTutorialBranches(page, owned); }
     catch (error) { failed = true; console.error('Owned cleanup failed:', error.message); }
-    await hardCleanup(page);
     await browser.close();
   }
   process.exit(failed ? 1 : 0);

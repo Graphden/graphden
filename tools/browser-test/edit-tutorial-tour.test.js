@@ -116,6 +116,11 @@ const {
     await page.click('.execute-popover.visible .execute-run-btn');
     // The look-at-it beat: the result stays on screen until the reader
     // says Next — and it had better say 2.
+    await page.waitForFunction(() =>
+      document.querySelector('.execute-popover.visible .execute-result-scalar')?.textContent === '2',
+    null, {timeout: 60000});
+    assert(await page.evaluate(() => _tourCheckPasses({kind: 'result-value', value: 2})),
+      'the real scalar result DOM completes the exact-value predicate');
     await waitTourTitle(page, 'Two', 150000);
     const two = await page.waitForFunction(() => {
       const t = document.querySelector('.execute-result-host')?.textContent || '';

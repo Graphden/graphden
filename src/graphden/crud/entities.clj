@@ -34,7 +34,9 @@
     [graphden.crud.validation :as validation]
     [graphden.executor.registry.core :as registry]
     [graphden.packages.records :as records]
+    [graphden.storage.graph-writer :as writer]
     [graphden.storage.protocol.core :as sp]
+    [graphden.versioning.storage.resolution :as res]
     [graphden.types.diagnostics :as diag]
     [graphden.util.abort-shield :as shield]
     [graphden.versioning.storage.core :as vcore]
@@ -126,46 +128,32 @@
                     {:type :authz/forbidden :entity-type entity-type}))))
 
 
+(defn- assert-write-valid!
+  [storage entity-type data]
+  (when-let [rej (or (when (= entity-type :fn)
+                       (secret-leaf-capability-rej storage data))
+                     (validation/write-rej storage entity-type data))]
+    (throw (ex-info (:reason rej) (assoc rej :entity-type entity-type)))))
+
+
 (defn- create-entity-impl
   [entity-type data ctx]
-  ;; Abort-shielded: the whole bump->write->invalidate->note pipeline
-  ;; completes even if the client disconnects mid-request (see
-  ;; util.abort-shield) - un-noted epochs made every abort cost a
-  ;; background recompile via the graph-epoch heal.
   (shield/run!
     (fn []
       (let [storage (request/require-storage ctx)
             et (keyword entity-type)
-            ;; For :fn create the row may not have an `:id` yet; the
-            ;; cycle check still wants it (parent / FK targets need to
-            ;; know who's "owner"). Synthesize one so the check sees a
-            ;; stable owner — `sp/create-entity` honours a pre-supplied
-            ;; `:id` so the synthesized value is what lands in storage.
-            ;; `:binding` :value-present normalisation lives in
-            ;; `storage/protocol/core/standard-crud-normalize-data`
-            ;; (called from every postgres CRUD entry) so direct
-            ;; `sp/create-entity` users (tests, sync) pick it up too.
-            data' (cond-> data
-                    (and (= et :fn) (nil? (:id data))) (assoc :id (random-uuid)))]
-        (reject-generic-audit-write! et)
-        ;; Capability gate: secret-shaped fn-defs are admin-only — see
-        ;; `secret-leaf-capability-rej` for the rationale. The marker is
-        ;; an in-memory contract between `crud.secrets` and this fn; it
-        ;; never reaches storage.
-        (when (= et :fn)
-          (when-let [rej (secret-leaf-capability-rej storage data')]
-            (throw (ex-info (:reason rej)
-                            {:type (:type rej)
-                             :entity-type et
-                             :data (dissoc data' :_admin-secret-create)}))))
-        (when-let [rej (validation/write-rej storage et data')]
-          (throw (ex-info (:reason rej)
-                          {:type (:type rej)
-                           :entity-type et :data data'})))
-        (let [result (sp/create-entity storage et (dissoc data' :_admin-secret-create))]
-          (inval/invalidate! ctx storage et result)
-          (inval/notify-after-write! ctx storage et :write result)
-          result)))))
+            data (cond-> data
+                   (and (= et :fn) (nil? (:id data))) (assoc :id (random-uuid)))
+            _ (reject-generic-audit-write! et)
+            result (writer/with-write [storage et]
+                     (res/call-with-fresh-memos
+                       (fn []
+                         (assert-write-valid! storage et data)
+                         (sp/create-entity storage et (dissoc data :_admin-secret-create)))))]
+        (res/forget-read-memos!)
+        (inval/invalidate! ctx storage et result)
+        (inval/notify-after-write! ctx storage et :write result)
+        result))))
 
 
 (defn create-entity
@@ -185,43 +173,24 @@
 
 (defn update-entity
   [entity-type id data ctx]
-  ;; Abort-shielded: the whole bump->write->invalidate->note pipeline
-  ;; completes even if the client disconnects mid-request (see
-  ;; util.abort-shield) - un-noted epochs made every abort cost a
-  ;; background recompile via the graph-epoch heal.
   (shield/run!
     (fn []
       (let [storage (request/require-storage ctx)
             et (keyword entity-type)
-            ;; A PUT carries only the changed fields — a bare `ref-fn-id`
-            ;; re-point used to reach the cycle check with no owner (a
-            ;; binding's `fn-id`, an item's `binding-id`) and pass
-            ;; unchecked. Those identity fields are immutable, so fill
-            ;; them from the stored row.
-            check-data (if-let [ks (owner-identity-fields et)]
-                         (merge (select-keys (sp/read-entity storage et id) ks)
-                                (assoc data :id id))
-                         (assoc data :id id))]
-        (reject-generic-audit-write! et)
-        ;; Capability gate on the UPDATE path too (F2): the create path
-        ;; already runs secret-leaf-capability-rej, but a tenant could
-        ;; create a plain fn then PUT :parent-ids pointing at an
-        ;; admin-only vault base-fn, landing a secret-shaped fn outside
-        ;; the audited /api/secrets flow. Only checked when the payload
-        ;; actually re-parents (:parent-ids present replaces the value).
-        (when (and (= et :fn) (contains? data :parent-ids))
-          (when-let [rej (secret-leaf-capability-rej storage check-data)]
-            (throw (ex-info (:reason rej)
-                            {:type (:type rej)
-                             :entity-type et :id id :data data}))))
-        (when-let [rej (validation/write-rej storage et check-data)]
-          (throw (ex-info (:reason rej)
-                          {:type (:type rej)
-                           :entity-type et :id id :data data})))
-        (let [result (sp/update-entity storage et id data)]
-          (inval/invalidate! ctx storage et result)
-          (inval/notify-after-write! ctx storage et :write (assoc result :id id))
-          result)))))
+            _ (reject-generic-audit-write! et)
+            result (writer/with-write [storage et]
+                     (res/call-with-fresh-memos
+                       (fn []
+                         (let [check-data (if-let [ks (owner-identity-fields et)]
+                                            (merge (select-keys (sp/read-entity storage et id) ks)
+                                                   (assoc data :id id))
+                                            (assoc data :id id))]
+                           (assert-write-valid! storage et check-data)
+                           (sp/update-entity storage et id data)))))]
+        (res/forget-read-memos!)
+        (inval/invalidate! ctx storage et result)
+        (inval/notify-after-write! ctx storage et :write (assoc result :id id))
+        result))))
 
 
 (defn revive-entity

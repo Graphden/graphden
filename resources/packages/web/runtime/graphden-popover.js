@@ -26,18 +26,32 @@ function gdEscapeHtml(s) {
 // Place `el` below `anchorEl`, flipping above when there is no room and
 // clamping horizontally into the viewport. `el` must already be in the DOM; it
 // is rendered off-screen first so offsetWidth/Height can be measured before the
-// final placement is written.
+// final placement is written. `constrainHeight` keeps the body outside the
+// trigger and scrolls it in the larger vertical gap; `scale` budgets CSS zoom.
 function anchorBelowClamped(el, anchorEl, opts) {
   const margin = opts?.margin || 8;
   el.style.display = 'block';
   el.style.left = '0px';
   el.style.top = '-9999px';
-  const w = el.offsetWidth || opts?.fallbackW || 280;
-  const h = el.offsetHeight || opts?.fallbackH || 120;
+  const scale = opts?.scale || 1;
+  const w = (el.offsetWidth || opts?.fallbackW || 280) * scale;
+  let h = (el.offsetHeight || opts?.fallbackH || 120) * scale;
   const r = anchorEl.getBoundingClientRect();
   let left = r.left;
   let top = r.bottom + margin;
-  if (top + h + margin > window.innerHeight) {
+  if (opts?.constrainHeight) {
+    // Keep a hover-open surface outside its trigger even when neither side
+    // has room for the full body. Border-box includes the popup's chrome.
+    const below = Math.max(0, window.innerHeight - r.bottom - 2 * margin);
+    const above = Math.max(0, r.top - 2 * margin);
+    const useBelow = below >= h || below >= above;
+    const available = useBelow ? below : above;
+    el.style.boxSizing = 'border-box';
+    el.style.maxHeight = available / scale + 'px';
+    el.style.overflowY = 'auto';
+    h = Math.min(h, available);
+    top = useBelow ? r.bottom + margin : r.top - h - margin;
+  } else if (top + h + margin > window.innerHeight) {
     top = Math.max(margin, r.top - h - margin);
   }
   if (left + w + margin > window.innerWidth) {

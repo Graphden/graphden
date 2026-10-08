@@ -188,7 +188,7 @@ async function cleanup(page, finish) {
       && new URL(response.url()).pathname === '/partials/queues/requeue'
       && new URL(response.url()).searchParams.get('message-id') === message.id,
     {timeout: 30000});
-    await exact.dispatchEvent('click');
+    await exact.click();
     assert((await requeue).status() === 200, 'the ordinary Requeue control returned an exact POST receipt');
     const pending = await messageState(page, message.id);
     assert(pending.id === message.id && pending.state.replace(/^:/, '') === 'pending' && pending.attempts === 0,

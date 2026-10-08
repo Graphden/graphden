@@ -194,6 +194,7 @@ function positionDescriptionTooltipAt(el, clientX, clientY) {
   el.style.left = viewportLeft + margin + 'px';
   el.style.top = viewportTop + margin + 'px';
   el.style.maxWidth = Math.max(0, Math.min(360, viewportWidth - margin * 2)) + 'px';
+  el.style.maxHeight = Math.max(0, viewportHeight - margin * 2) + 'px';
   // A keyboard activation / synthetic click carries (0,0) — the tooltip
   // rendered in the viewport corner, detached from its card (tutorial
   // finding, lesson 26). The caller passes an anchor-derived

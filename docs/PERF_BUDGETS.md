@@ -68,6 +68,39 @@ legitimate, run `bb perf-update` and say why in the commit message. `perf-update
 prints every budget it **raises**, because lowering one is a win being recorded
 and raising one is a regression being accepted, and those must not look alike.
 
+### Semantic writer transactions
+
+The 2026-10-08 writer guards add a bounded correctness cost to two scenarios.
+Package sync captures the parser's existing graph under a writer lock, parses
+outside the transaction, and revalidates the same basis after acquiring the
+apply lock. A concurrent edit makes the prepared bundle fail before namespace
+or function writes. The second snapshot is necessary: raw storage and direct
+version-table writes do not all advance the compiled graph's epoch, so an epoch
+comparison cannot replace this validation.
+
+The first measurement was 72 SQL statements. Each snapshot read namespaces
+twice; reusing that snapshot's namespace rows reduced it to 70. The scenario now
+measures steady-state bundles of both 40 and 80 functions and asserts equal
+statement counts. Existing collision and row-lock assertions remain in place.
+The snapshot reads a fixed set of entity types in batches; its returned row
+volume still grows with the existing graph.
+
+| SQL family | Package sync | Fork merge |
+|------------|--------------|------------|
+| Global semantic writer lock | 2 | 2 |
+| Transaction `BEGIN` | 2 | 2 |
+| Transaction isolation read | 2 | 2 |
+| Batched row / identity / collision locks | 3 | 1 branch-pair lock |
+| Namespace reads | 3: namespace sync, prepare, revalidate | 0 |
+| Total statements | 70 for both 40 and 80 functions | 40 |
+
+The merge and its best-effort source review-state clear keep separate commits:
+the caller may merge into the target while lacking permission to change the
+source. Combining them would change that authorization behavior. Each write
+now holds a semantic writer lock and validates its state inside the transaction.
+These two measured ceilings were updated individually; trend baselines and all
+other budgets were retained.
+
 ## What belongs in a budget
 
 Only counters that are **invariant to how many tests exist**.

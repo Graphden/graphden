@@ -629,9 +629,12 @@
   "Read the live graph from `storage` into the flat, `:kind`-tagged
    record shape `records->fn-defs` consumes. Reverses each fn-row's
    `namespace-id` UUID to its dotted path so re-parse re-derives the same
-   deterministic fn-ids."
-  [storage]
-  (rows->records (read-graph storage) (ns-id->path-map storage)))
+   deterministic fn-ids. A caller already holding the namespace rows for
+   the same snapshot can supply them instead of reading them again."
+  ([storage]
+   (rows->records (read-graph storage) (ns-id->path-map storage)))
+  ([storage namespaces]
+   (rows->records (read-graph storage) (ns-path/path-map namespaces))))
 
 
 (defn- without-concealed-fns

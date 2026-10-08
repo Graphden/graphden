@@ -319,6 +319,9 @@
                       storage defs (pkg/sync-namespaces! storage #{"perf.bundle"})))]
       (is (<= bundle-size (count result)) "every def of the bundle was synced")
       (is (pos? queries))
+      (is (= 3 (reduce + 0 (map :calls (filter #(= "SELECT * FROM \"ns\"" (:query %))
+                                               statements))))
+          "namespace sync, parser snapshot and apply revalidation each read namespaces once")
       ;; The SHAPE guard, as in list-secrets: the collision guard's own
       ;; statements — the advisory lock and the version-by-name probe — run
       ;; once per written BATCH, never once per synced fn. (Other per-fn
@@ -329,7 +332,25 @@
         (is (seq guard) "the collision guard ran")
         (is (every? #(< (:calls %) 5) guard)
             (str "the collision guard is querying per row again: "
-                 (pr-str (mapv (juxt :calls :query) guard))))))))
+                 (pr-str (mapv (juxt :calls :query) guard)))))
+      ;; The same guarded prepare/revalidate/apply pipeline must cost the
+      ;; same number of statements when the written bundle doubles. Warm
+      ;; the larger bundle before measuring, as record! does above; record
+      ;; only the original size so the budget counter is not accumulated.
+      (let [larger-defs (into defs
+                              (map (fn [i]
+                                     {:name (keyword (str "perf-sync-" i))
+                                      :namespace "perf.bundle"
+                                      :parent :const
+                                      :args {:value i}}))
+                              (range bundle-size (* 2 bundle-size)))
+            larger (psql/measure
+                     (datasource-of storage)
+                     #(fn-composition/sync-fns-to-storage!
+                        storage larger-defs (pkg/sync-namespaces! storage #{"perf.bundle"})))]
+        (is (= queries (:queries larger))
+            (str "doubling the bundle must not add writer queries: "
+                 queries " -> " (:queries larger)))))))
 
 
 (deftest ^:perf merge-fork-sql-cost

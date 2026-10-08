@@ -337,9 +337,10 @@
 
 (defn- existing-state
   [storage]
-  (let [records (export/graph->records storage)]
+  (let [namespaces (vec (sp/query-entities storage :ns {}))
+        records (export/graph->records storage namespaces)]
     {:basis {:records (into {} (map (juxt (juxt :kind :id) identity)) records)
-             :namespaces (into {} (map (juxt :id identity)) (sp/query-entities storage :ns {}))}
+             :namespaces (into {} (map (juxt :id identity)) namespaces)}
      :name->id (name->id-from-fns (filter #(= :fn (:kind %)) records))
      :defs-by-name (faithful-defs-by-name records)}))
 

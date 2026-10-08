@@ -1,15 +1,19 @@
 (ns graphden.crud.inheritance.command
-  (:require [clojure.string :as str]))
+  (:require
+    [clojure.string :as str]))
+
 
 (defn- malformed!
   [reason]
   (throw (ex-info reason {:type :validation-error/inheritance-command :reason reason})))
+
 
 (defn- uuid-value
   [value key]
   (or (when (uuid? value) value)
       (when (string? value) (parse-uuid value))
       (malformed! (str key " must be a UUID"))))
+
 
 (defn- uuid-vector
   [value key]
@@ -19,6 +23,7 @@
     (when-not (= (count ids) (count (set ids)))
       (malformed! (str key " contains duplicate UUIDs")))
     ids))
+
 
 (defn parse-command
   "Normalize the wire command. Action/kind remain strings for graph rendering.
@@ -44,9 +49,9 @@
       (= action "reparent") (assoc :parent-ids (uuid-vector (:parent-ids body) :parent-ids))
       (:proposed-fn-id body) (assoc :proposed-fn-id (uuid-value (:proposed-fn-id body) :proposed-fn-id))
       (contains? body :namespace-id) (assoc :namespace-id (when (:namespace-id body)
-                                                          (uuid-value (:namespace-id body) :namespace-id)))
+                                                            (uuid-value (:namespace-id body) :namespace-id)))
       (contains? body :proposed-name) (assoc :proposed-name (:proposed-name body))
       (contains? body :expected-state) (assoc :expected-state (:expected-state body))
       (contains? body :accepted-orphan-binding-ids)
       (assoc :accepted-orphan-binding-ids (uuid-vector (:accepted-orphan-binding-ids body)
-                                                      :accepted-orphan-binding-ids)))))
+                                                       :accepted-orphan-binding-ids)))))

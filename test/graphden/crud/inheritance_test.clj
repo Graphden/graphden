@@ -253,7 +253,19 @@
 
   sp/StorageIntrospection
 
+  (current-entities [_] (sp/current-entities base))
+
+
   (current-fields [_ entity] (sp/current-fields base entity))
+
+
+  (current-enums [_] (sp/current-enums base))
+
+
+  (current-enum-values [_ enum] (sp/current-enum-values base enum))
+
+
+  (schema-metadata [_] (sp/schema-metadata base))
 
 
   sp/StorageCRUD
@@ -284,7 +296,22 @@
 
   sp/StorageBatchCRUD
 
-  (read-entities [_ entity ids] (sp/read-entities base entity ids)))
+  (create-entities [_ entity rows] (sp/create-entities base entity rows))
+
+
+  (read-entities [_ entity ids] (sp/read-entities base entity ids))
+
+
+  (update-entities [_ entity rows] (sp/update-entities base entity rows))
+
+
+  (upsert-entities [_ entity rows] (sp/upsert-entities base entity rows))
+
+
+  (delete-entities [_ entity ids] (sp/delete-entities base entity ids))
+
+
+  (query-ref-many-owners [_ entity field target] (sp/query-ref-many-owners base entity field target)))
 
 
 (deftest a-decorated-noop-on-the-last-replacement-rolls-back-the-clone

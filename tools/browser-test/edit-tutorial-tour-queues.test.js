@@ -183,11 +183,27 @@ async function cleanup(page, finish) {
     const exact = page.locator('.gd-queues-panel button[hx-post="/partials/queues/requeue?message-id=' + message.id + '"]');
     await exact.waitFor({state: 'visible', timeout: 30000});
     assert((await exact.locator('xpath=ancestor::tr').textContent()).includes(queue), 'dead-letter control belongs to this fresh queue');
+    const requeue = page.waitForResponse(response => response.request().method() === 'POST'
+      && new URL(response.url()).pathname === '/partials/queues/requeue'
+      && new URL(response.url()).searchParams.get('message-id') === message.id,
+    {timeout: 30000});
     await exact.dispatchEvent('click');
-    await waitTourTitle(page, 'Open tutorial-queue-handler');
+    assert((await requeue).status() === 200, 'the ordinary Requeue control returned an exact POST receipt');
     const pending = await messageState(page, message.id);
     assert(pending.id === message.id && pending.state.replace(/^:/, '') === 'pending' && pending.attempts === 0,
       'Requeue retains the same identity and resets attempts while the worker is stopped');
+    try {
+      await waitTourTitle(page, 'Open tutorial-queue-handler');
+    } catch (error) {
+      console.error('Exact pending gate flags: ' + JSON.stringify(await page.evaluate(id => {
+        const entry = _tourState?.created.find(row => row.type === 'queue-message' && row.id === id);
+        return {observedDead: !!entry?.observedDead, observedRequeue: !!entry?.observedRequeue,
+          principalMatches: !!_tourState && _tourPrincipalMatches(_tourState),
+          probePending: !!_tourServiceProbe?.pending, probePassed: !!_tourServiceProbe?.passed,
+          probeOwnState: _tourServiceProbe?.state === _tourState, step: _tourState?.step};
+      }, message.id)));
+      throw error;
+    }
     await backToGraph(page);
     await filterAndSelect(page, 'tutorial-queue-handler', 'tutorial-queue-handler');
     await waitTourTitle(page, 'Repair the handler');

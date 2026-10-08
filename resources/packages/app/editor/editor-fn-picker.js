@@ -288,7 +288,7 @@ function openFnPicker(opts) {
     const label = (name) => typeof displayLabel === 'function' ? displayLabel(name) : name;
     const fit = !fixedCandidates && compatible === true && typeof pickerTierOf === 'function' ? pickerTierOf(expected, c) : 'exact';
     return {label: bareName ? label(c.name) : lastDot >= 0 ? c.qualified.slice(0, lastDot + 1) + label(c.qualified.slice(lastDot + 1)) : label(c.qualified),
-      compatible, ...(fixedCandidates ? { title: c.reason || '' } : {}), fit, 'fit-label': !fixedCandidates && typeof pickerTierLabel === 'function' ? pickerTierLabel(expected, fit) : fit,
+      compatible, ...(fixedCandidates ? { title: c.reason || '', disabled: c.compatible === false } : {}), fit, 'fit-label': !fixedCandidates && typeof pickerTierLabel === 'function' ? pickerTierLabel(expected, fit) : fit,
       'fit-title': !fixedCandidates && typeof pickerTierTitle === 'function' ? pickerTierTitle(expected, fit) : '', kind: c.kind || '',
       'return-label': compactTypeChipText(c.richReturn, c.flatReturn) || '',
       effects: (c.effects || []).map((code) => ({code: String(code), label: String(code).toUpperCase()}))};
@@ -465,6 +465,7 @@ function openFnPicker(opts) {
     row.setAttribute('role', 'option');
     row.id = 'fn-picker-opt-' + idx;
     row.setAttribute('aria-selected', 'false');
+    if (fixedCandidates && compat === false) row.setAttribute('aria-disabled', 'true');
     // Stable hook for the tutorial spotlight (and tests): which fn this row is.
     row.dataset.fnName = c.qualified;
 

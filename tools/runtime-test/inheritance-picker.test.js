@@ -65,9 +65,11 @@ async function exercise(graph) {
     assert.equal(graphRows[0].model.fit, 'exact');
     assert.equal(graphRows[0].model['fit-title'], '');
     assert.equal(graphRows[1].model.title, 'Would remove a sealed slot.');
+    assert.equal(graphRows[1].model.disabled, true);
   } else {
     assert.equal(doc.querySelectorAll('.fn-picker-row-fit').length, 0);
     assert.equal(doc.querySelectorAll('.fn-picker-row')[1].title, 'Would remove a sealed slot.');
+    assert.equal(doc.querySelectorAll('.fn-picker-row')[1].getAttribute('aria-disabled'), 'true');
   }
   const input = doc.querySelector('input');
   input.dispatchEvent({ type: 'keydown', key: 'ArrowDown', preventDefault() {} });

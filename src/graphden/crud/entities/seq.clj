@@ -189,50 +189,43 @@
       :else {:error "Optional :position must be a non-negative integer"})))
 
 
-(defn- append-sequence!
-  "§3.3 atomic core of sequence-append: materialise synthetic binding
-   if needed, compute the position, run pre-write validation, write
-   the binding-list-item row. An optional body `:position` turns the
-   append into an INSERT — every existing item at that position or
-   later shifts +1 first (descending write order, so the per-write
-   position-uniqueness check can't collide), then the new row takes
-   the freed position. Returns `{:created <item-id> :position
-   <int> :fn-id <fn-id> :binding-id <binding-id>}` on success (plus `:type-warnings
-   [<diagnostic> …]` when the item landed but the owning fn now fails
-   the aggregate type-check — error-tolerance Phase 3) or `{:error
-   <reason>}` on pre-write validation rejection OR on a secret-flow
-   type failure (hard reject: item + shifts + synthetic binding rolled
-   back — the security carve-out). The graph composition
-   around this primitive dispatches on the returned shape and runs
-   invalidate + response.
-
-   The synthetic-binding materialise + position-compute + pre-rej
-   triplet share a binding-id that can't be split across graph nodes
-   without race risk — hence §3.3."
-  [parsed seq-binding ctx]
-  (let [storage (request/require-storage ctx)
-        fn-id (:fn-id parsed)
-        body  (:body parsed)
-        req-pos (requested-insert-pos body)
+(defn- sequence-append-preflight
+  "Validate the requested position, synthetic host and package ownership
+   against the guarded storage before any append writes."
+  [storage parsed seq-binding]
+  (let [req-pos (requested-insert-pos (:body parsed))
         synthetic? (:synthetic seq-binding)
         synth-data (when synthetic?
                      {:fn-id (:fn-id seq-binding)
                       :slot-id (:slot-id seq-binding)
                       :list-append true})
-        ;; The synthetic `:list-append` binding used to be created with a
-        ;; DIRECT `sp/create-entity`, bypassing `write-rej` (list-closed /
-        ;; terminal guards). Validate it FIRST so an append onto a sealed
-        ;; slot is rejected before anything is written.
+        ;; A synthetic host must respect list-closed and terminal seals.
         synth-rej (when synthetic? (validation/write-rej storage :binding synth-data))
-        ;; Appending onto a PACKAGE-SYNCED fn's own chain mutates every
-        ;; descendant in the installation and is reverted by the next
-        ;; sync — refuse it here, whichever fn the "+" click landed on.
-        pkg-reason (pkg-guard/write-rejection storage :binding {:fn-id fn-id})]
-    (cond
-      pkg-reason {:error pkg-reason :http-status 403}
-      (:error req-pos) req-pos
-      synth-rej {:error (:reason synth-rej)}
-      :else
+        pkg-reason (pkg-guard/write-rejection storage :binding {:fn-id (:fn-id parsed)})]
+    {:req-pos req-pos
+     :synthetic? synthetic?
+     :synth-data synth-data
+     :rejection (cond
+                  pkg-reason {:error pkg-reason :http-status 403}
+                  (:error req-pos) req-pos
+                  synth-rej {:error (:reason synth-rej)})}))
+
+
+(defn- append-sequence!
+  "Materialise the host, insert an item and validate the resulting fn inside
+   one writer transaction. Optional :position inserts before existing items,
+   shifting them in descending order to avoid position collisions.
+   Ordinary type failures keep the item and return :type-warnings; secret-flow
+   failures undo the item, shifts and synthetic host. The surrounding graph
+   invalidates and responds after the transaction commits."
+  [parsed seq-binding ctx]
+  (let [storage (request/require-storage ctx)
+        fn-id (:fn-id parsed)
+        body (:body parsed)
+        {:keys [req-pos synthetic? synth-data rejection]}
+        (sequence-append-preflight storage parsed seq-binding)]
+    (if rejection
+      rejection
       ;; Parse the BODY before writing anything. It used to be parsed after
       ;; the synthetic host binding was created, so a malformed body threw
       ;; past the rollback and left an empty `:list-append` binding on the

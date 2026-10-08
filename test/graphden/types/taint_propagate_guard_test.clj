@@ -34,6 +34,8 @@
    content?\" — if yes it needs `:taint-propagate?` and a `golden-tainted`
    entry; a REMOVED name just leaves both sets."
   #{:_fn-branch-local-seed :_fn-slot-seals
+    ;; Inheritance commands and their outcomes retain caller-selected content.
+    :parse-inheritance-command :preview-inheritance :apply-inheritance
     ;; Returns caller entry identities and their selected graph content;
     ;; the exporter is not a declassification boundary.
     :_ui-preview-export :_ui-preview-export-ids
@@ -206,6 +208,9 @@
    pass/transform caller content? then it needs `:taint-propagate?`\"; for each
    REMOVED name confirm it genuinely no longer handles content."
   #{:fork-package-fns :materialize-package-fns :rewrite-refs-to-version
+    ;; Parsing echoes command fields; preview/apply derive descriptors and
+    ;; outcomes from those fields. None is a declassification boundary.
+    :parse-inheritance-command :preview-inheritance :apply-inheritance
     ;; Entry identities select the exported content and also appear in it.
     :_ui-preview-export :_ui-preview-export-ids
     ;; Selected ordinary theme graph and args determine the validated payload.
@@ -296,3 +301,23 @@
       (is (= :uuid (check/rule-return :fn-def-id {:fn-def {:type :keyword-map}} :uuid)))
       (is (= [:secret :uuid]
              (check/rule-return :fn-def-id {:fn-def {:type [:secret :keyword-map]}} :uuid))))))
+
+
+(deftest inheritance-intents-preserve-argument-taint
+  (let [definitions (:base-fn-defs (loader/load-packages ["app"]))]
+    (doseq [[primitive plain]
+            [[:parse-inheritance-command {:body {:type :jsonb}}]
+             [:preview-inheritance {:command {:type :keyword-map}
+                                    :request {:type :ring-request-shape}}]
+             [:apply-inheritance {:command {:type :keyword-map}
+                                  :request {:type :ring-request-shape}}]]]
+      (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
+                registry/*per-org-rich-override* (atom {})]
+        (registry/record-rich-types! primitive (get definitions primitive))
+        (is (= :keyword-map (check/rule-return primitive plain :keyword-map)))
+        (doseq [[slot {:keys [type]}] plain]
+          (is (= [:secret :keyword-map]
+                 (check/rule-return primitive
+                                    (assoc-in plain [slot :type] [:secret type])
+                                    :keyword-map))
+              (str primitive " must preserve secret " slot " taint")))))))

@@ -7,7 +7,7 @@ Loading, graph-backed controls, actions, forms, and preferences.
 
 after: web, layout
 
-[[file:index.org][index]] · ~86 min
+[[file:index.org][index]] · ~90 min
 
 * 1. initGraph
 :PROPERTIES:
@@ -287,3 +287,17 @@ Sends authenticated editor requests and handles 401 by clearing the stored crede
 Evaluates the current interactive lesson step against editor state. Lesson data comes from ~app.tour/_tour-lessons~; this engine ensures required panels and targets are visible, checks the declared completion condition, and advances when it succeeds.
 
 - source :: [[file:../../../resources/packages/app/editor/editor-tour.js::function _tourTick() {][resources/packages/app/editor/editor-tour.js:309]]
+- referenced from :: [[file:editor.org::#editor/_tourStartPositioning][_tourStartPositioning]]
+
+* 22. _tourStartPositioning
+:PROPERTIES:
+:CUSTOM_ID: editor/_tourStartPositioning
+:FILE: resources/packages/app/editor/editor-tour-spot.js
+:LINE: 28
+:MINS: 4.0
+:END:
+
+Follows the lesson's current DOM target independently of the 600 ms completion poll. DOM, size, scroll and viewport changes coalesce into one requestAnimationFrame update; short finite CSS motion keeps updates running only while it moves. The observer excludes the tour's own overlay writes, so a stationary lesson performs no geometry scans. Pause, Lessons, lesson end and teardown call ~_tourStopFollowing~ to release observers, event handlers, the viewport subscription and any queued frame.
+
+- source :: [[file:../../../resources/packages/app/editor/editor-tour-spot.js::function _tourStartPositioning() {][resources/packages/app/editor/editor-tour-spot.js:28]]
+- see also :: [[file:editor.org::#editor/_tourTick][_tourTick]]

@@ -1385,7 +1385,15 @@
     {:file "resources/packages/app/editor/editor-tour.js" :defn _tourTick
      :say "Evaluates the current interactive lesson step against editor state. Lesson data comes from
            `app.tour/_tour-lessons`; this engine ensures required panels and targets are visible,
-           checks the declared completion condition, and advances when it succeeds."}]}
+           checks the declared completion condition, and advances when it succeeds."}
+    {:file "resources/packages/app/editor/editor-tour-spot.js" :defn _tourStartPositioning
+     :say "Follows the lesson's current DOM target independently of the 600 ms completion poll.
+           DOM, size, scroll and viewport changes coalesce into one requestAnimationFrame update;
+           short finite CSS motion keeps updates running only while it moves. The observer excludes
+           the tour's own overlay writes, so a stationary lesson performs no geometry scans.
+           Pause, Lessons, lesson end and teardown call `_tourStopFollowing` to release observers,
+           event handlers, the viewport subscription and any queued frame."
+     :see [[:editor "_tourTick"]]}]}
 
   {:id :services
    :title "Services — instances and placement"

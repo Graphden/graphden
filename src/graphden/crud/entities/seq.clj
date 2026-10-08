@@ -208,7 +208,8 @@
      :rejection (cond
                   pkg-reason {:error pkg-reason :http-status 403}
                   (:error req-pos) req-pos
-                  synth-rej {:error (:reason synth-rej)})}))
+                  synth-rej {:error (:reason synth-rej)}
+                  :else nil)}))
 
 
 (defn- append-sequence!
@@ -224,86 +225,85 @@
         body (:body parsed)
         {:keys [req-pos synthetic? synth-data rejection]}
         (sequence-append-preflight storage parsed seq-binding)]
-    (if rejection
-      rejection
-      ;; Parse the BODY before writing anything. It used to be parsed after
-      ;; the synthetic host binding was created, so a malformed body threw
-      ;; past the rollback and left an empty `:list-append` binding on the
-      ;; slot — and the next (well-formed) append then collided with it,
-      ;; failing forever until the process restarted.
-      (let [payload (resolve-sequence-payload storage body)
-            seq-binding (if synthetic?
-                          (materialize-synthetic-binding! storage synth-data)
-                          seq-binding)
-            binding-id (:id seq-binding)
-            existing (sp/query-entities storage :binding-list-item
-                                        {:binding-id binding-id})
-            used-pos (map :position existing)
-            end-pos (inc (apply max -1 used-pos))
-            new-pos (if req-pos (min (:pos req-pos) end-pos) end-pos)
-            ;; Items the insert displaces — empty for a plain append.
-            displaced (filterv #(>= (:position %) new-pos) existing)
-            new-item (merge {:id (random-uuid)
-                             :binding-id binding-id
-                             :position new-pos}
-                            payload)
-            ;; Pre-rej is position-independent (list-closed + ref-cycle)
-            ;; — run it BEFORE shifting so a rejected insert writes
-            ;; nothing at all.
-            pre-rej (validation/write-rej storage :binding-list-item new-item)]
-        (if pre-rej
-          (do
-            ;; Roll back the synthetic binding created just to host the item
-            ;; — otherwise a rejected append leaves an orphan `:list-append`
-            ;; binding on the slot.
-            (when synthetic?
-              (try (sp/delete-entity storage :binding binding-id)
-                   (catch Exception e
-                     (log/warn e "seq-append: synthetic-binding rollback failed"
-                               {:binding-id binding-id}))))
-            {:error (:reason pre-rej)})
-          (do (shift-items! storage displaced 1)
-              (sp/create-entity storage :binding-list-item new-item)
-              ;; Post-write whole-fn type-check (Phase 3, Gap A) — the
-              ;; item is KEPT on an ordinary failure (recorded in the
-              ;; per-branch diagnostics store, surfaced additively).
-              ;; SECURITY CARVE-OUT: a secret-flow failure rolls the
-              ;; item (and the synthetic host binding) back and hard-
-              ;; rejects — see docs/SECRETS.md.
-              (let [rej (post-write-rej
-                          ctx storage (or (:fn-id seq-binding) fn-id))]
-                (if (:secret? rej)
-                  (do (try (sp/delete-entity storage :binding-list-item
-                                             (:id new-item))
-                           (catch Exception e
-                             (log/warn e "seq-append: item rollback failed after secret-flow rejection"
-                                       {:item-id (:id new-item)})))
-                      ;; Un-shift the displaced items (they sit at old+1
-                      ;; now — hand shift-items! their CURRENT positions).
-                      (try (shift-items! storage
-                                         (map #(update % :position inc)
-                                              displaced)
-                                         -1)
-                           (catch Exception e
-                             (log/warn e "seq-append: shift rollback failed after secret-flow rejection"
-                                       {:binding-id binding-id})))
-                      (when synthetic?
-                        (try (sp/delete-entity storage :binding binding-id)
+    (or rejection
+        ;; Parse the BODY before writing anything. It used to be parsed after
+        ;; the synthetic host binding was created, so a malformed body threw
+        ;; past the rollback and left an empty `:list-append` binding on the
+        ;; slot — and the next (well-formed) append then collided with it,
+        ;; failing forever until the process restarted.
+        (let [payload (resolve-sequence-payload storage body)
+              seq-binding (if synthetic?
+                            (materialize-synthetic-binding! storage synth-data)
+                            seq-binding)
+              binding-id (:id seq-binding)
+              existing (sp/query-entities storage :binding-list-item
+                                          {:binding-id binding-id})
+              used-pos (map :position existing)
+              end-pos (inc (apply max -1 used-pos))
+              new-pos (if req-pos (min (:pos req-pos) end-pos) end-pos)
+              ;; Items the insert displaces — empty for a plain append.
+              displaced (filterv #(>= (:position %) new-pos) existing)
+              new-item (merge {:id (random-uuid)
+                               :binding-id binding-id
+                               :position new-pos}
+                              payload)
+              ;; Pre-rej is position-independent (list-closed + ref-cycle)
+              ;; — run it BEFORE shifting so a rejected insert writes
+              ;; nothing at all.
+              pre-rej (validation/write-rej storage :binding-list-item new-item)]
+          (if pre-rej
+            (do
+              ;; Roll back the synthetic binding created just to host the item
+              ;; — otherwise a rejected append leaves an orphan `:list-append`
+              ;; binding on the slot.
+              (when synthetic?
+                (try (sp/delete-entity storage :binding binding-id)
+                     (catch Exception e
+                       (log/warn e "seq-append: synthetic-binding rollback failed"
+                                 {:binding-id binding-id}))))
+              {:error (:reason pre-rej)})
+            (do (shift-items! storage displaced 1)
+                (sp/create-entity storage :binding-list-item new-item)
+                ;; Post-write whole-fn type-check (Phase 3, Gap A) — the
+                ;; item is KEPT on an ordinary failure (recorded in the
+                ;; per-branch diagnostics store, surfaced additively).
+                ;; SECURITY CARVE-OUT: a secret-flow failure rolls the
+                ;; item (and the synthetic host binding) back and hard-
+                ;; rejects — see docs/SECRETS.md.
+                (let [rej (post-write-rej
+                            ctx storage (or (:fn-id seq-binding) fn-id))]
+                  (if (:secret? rej)
+                    (do (try (sp/delete-entity storage :binding-list-item
+                                               (:id new-item))
                              (catch Exception e
-                               (log/warn e "seq-append: synthetic-binding rollback failed"
-                                         {:binding-id binding-id}))))
-                      {:error (:reason rej)})
-                  (cond-> {:created (:id new-item)
-                           :position new-pos
-                           :fn-id fn-id
-                           ;; The owning binding — so the append success path can
-                           ;; go through `invalidate!` (`:invalidate-after-write`)
-                           ;; like update/move/remove, which restarts cron/loop
-                           ;; services holding the pre-append closure. A bare
-                           ;; graph-cache invalidate (the old append path) left
-                           ;; them firing the stale sequence.
-                           :binding-id binding-id}
-                    rej (assoc :type-warnings [(:diagnostic rej)]))))))))))
+                               (log/warn e "seq-append: item rollback failed after secret-flow rejection"
+                                         {:item-id (:id new-item)})))
+                        ;; Un-shift the displaced items (they sit at old+1
+                        ;; now — hand shift-items! their CURRENT positions).
+                        (try (shift-items! storage
+                                           (map #(update % :position inc)
+                                                displaced)
+                                           -1)
+                             (catch Exception e
+                               (log/warn e "seq-append: shift rollback failed after secret-flow rejection"
+                                         {:binding-id binding-id})))
+                        (when synthetic?
+                          (try (sp/delete-entity storage :binding binding-id)
+                               (catch Exception e
+                                 (log/warn e "seq-append: synthetic-binding rollback failed"
+                                           {:binding-id binding-id}))))
+                        {:error (:reason rej)})
+                    (cond-> {:created (:id new-item)
+                             :position new-pos
+                             :fn-id fn-id
+                             ;; The owning binding — so the append success path can
+                             ;; go through `invalidate!` (`:invalidate-after-write`)
+                             ;; like update/move/remove, which restarts cron/loop
+                             ;; services holding the pre-append closure. A bare
+                             ;; graph-cache invalidate (the old append path) left
+                             ;; them firing the stale sequence.
+                             :binding-id binding-id}
+                      rej (assoc :type-warnings [(:diagnostic rej)]))))))))))
 
 
 (defn load-seq-remove-item

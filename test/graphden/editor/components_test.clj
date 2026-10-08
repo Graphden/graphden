@@ -2,6 +2,7 @@
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.editor.components :as components]
+    [graphden.executor.browser-source :as source]
     [graphden.storage.postgres.graph-epoch :as graph-epoch]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router.epoch :as router-epoch]
@@ -72,3 +73,49 @@
         (with-redefs [graph-epoch/current (constantly epoch)]
           (is (thrown? clojure.lang.ExceptionInfo
                 (components/assert-current-policy! {}))))))))
+
+
+(def ^:private unavailable
+  {:ok false :reason "Personal UI graph is unavailable. Using built-in components."
+   :http-status 422})
+
+
+(deftest export-refusals-disclose-only-the-exact-retryable-category
+  (testing "invalid requests keep the existing opaque refusal and never read source"
+    (with-redefs [source/with-snapshot (fn [& _] (throw (AssertionError. "Unexpected source read")))]
+      (doseq [input [nil {} {:component "unknown"} {:component "fn-picker" :fn-id fn-id}]]
+        (is (= unavailable (components/export-current {:storage {}} input))))))
+  (testing "ACL, invalid source and unknown failures cannot opt into retry by reason alone"
+    (doseq [[error status]
+            [[(ex-info "private ACL details" {:type :authz/forbidden
+                                              :reason :policy-refresh-required :fn-id fn-id}) 403]
+             [(ex-info "private source value" {:type :browser-plan/unsupported
+                                               :reason :invalid-configuration :source {:value "secret"}}) 422]
+             [(ex-info "private implementation details" {:type :unknown/failure
+                                                         :reason :policy-refresh-required}) 422]
+             [(ex-info "text is not a trusted category" {:type :browser-plan/unsupported
+                                                         :reason "policy-refresh-required"}) 422]
+             [(IllegalStateException. "private runtime value") 422]]]
+      (with-redefs [source/with-snapshot (fn [& _] (throw error))]
+        (is (= (assoc unavailable :http-status status)
+               (components/export-current {:storage {}} {:component "fn-picker"})))))))
+
+
+(deftest stale-policy-has-a-bounded-opaque-retry-envelope
+  (let [epoch (atom 13)
+        watermark (atom 12)]
+    (with-redefs [graph-epoch/epoch-handle identity
+                  graph-epoch/current (fn [_] @epoch)
+                  router-epoch/validated-watermark (fn [] @watermark)
+                  source/with-snapshot (fn [storage _]
+                                         (components/assert-current-policy! storage)
+                                         {:ok true})]
+      (is (= (assoc unavailable :code "policy-refresh-required" :retryable true :retry-after 1)
+             (components/export-current {:storage {}} {:component "fn-picker"})))
+      (is (= 12 @watermark) "Export never advances policy validation to make itself succeed")
+      (reset! watermark 13)
+      (is (= {:ok true}
+             (components/export-current {:storage {}} {:component "fn-picker"})))
+      (reset! epoch nil)
+      (is (= (assoc unavailable :code "policy-refresh-required" :retryable true :retry-after 1)
+             (components/export-current {:storage {}} {:component "fn-picker"}))))))

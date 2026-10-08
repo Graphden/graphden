@@ -102,5 +102,10 @@
       (source/with-snapshot (request/require-storage ctx)
                             #(export-in-snapshot ctx component %1 %2)))
     (catch Exception error
-      {:ok false :reason "Personal UI graph is unavailable. Using built-in components."
-       :http-status (if (= :authz/forbidden (:type (ex-data error))) 403 422)})))
+      (let [{:keys [type reason]} (ex-data error)]
+        (cond-> {:ok false :reason "Personal UI graph is unavailable. Using built-in components."
+                 :http-status (if (= :authz/forbidden type) 403 422)}
+          ;; Only this trusted freshness refusal permits a bounded retry.
+          ;; Never copy exception messages, source identities or other data.
+          (and (= :browser-plan/unsupported type) (= :policy-refresh-required reason))
+          (assoc :code "policy-refresh-required" :retryable true :retry-after 1))))))

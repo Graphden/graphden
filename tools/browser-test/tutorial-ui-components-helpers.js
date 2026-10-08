@@ -57,6 +57,21 @@ async function editOwnValue(page, fnId, slot, value, position) {
   await popover.waitFor({state: 'detached'});
 }
 
+async function waitForPersonalMenuValue(page, fnId, configuration, value) {
+  // Saving detaches the form before graph data and its authorized personal
+  // plan finish reloading. Opening earlier is closed by that reload.
+  await page.waitForFunction(({fnId, configuration, value}) => {
+    const shell = window.gdShellMenuGraph;
+    if (!shell?.ready || !shell.runtime || window.gdUIComponentRuntimeIdentity?.('account-menu') !== configuration
+      || !(graphData.bindings || []).some(row => row['fn-id'] === fnId && row.value === value
+        && lookups.slotMap.get(row['slot-id'])?.name === 'value')) return false;
+    const key = window.GraphdenBrowser.keyword;
+    const theme = new Map(Object.entries(window.gdGraphThemeBase()).map(([name, token]) => [key(name), token]));
+    const view = shell.runtime.run('view', {state: shell.state, theme});
+    return view.get(key('menu-tokens'))?.get('--gd-account-menu-hover') === value;
+  }, {fnId, configuration, value}, {timeout: 60000});
+}
+
 async function walkUIComponentsLesson(page) {
   await page.goto(BASE + '/?tutorial=25');
   await waitTourTitle(page, 'Personal graphs, real editor components', 150000);
@@ -115,6 +130,7 @@ async function walkUIComponentsLesson(page) {
   await waitTourTitle(page, 'A local menu value');
   const hover = await selectCreatedLeaf(page, manifest, 'menu', 'account-menu-hover');
   await editOwnValue(page, hover, 'value', '#fed7aa');
+  await waitForPersonalMenuValue(page, hover, manifest.roots['configuration-id'], '#fed7aa');
   await page.locator('.auth-avatar:visible, #auth-lock-btn:visible').first().click();
   await waitTourTitle(page, 'Open the menu behavior', 60000);
   await openGroup(page, 'menu-update-id');
@@ -137,4 +153,4 @@ async function walkUIComponentsLesson(page) {
   }
   return manifest;
 }
-module.exports = {walkUIComponentsLesson, selectCreatedLeaf, editOwnValue};
+module.exports = {walkUIComponentsLesson, selectCreatedLeaf, editOwnValue, waitForPersonalMenuValue};

@@ -1,7 +1,8 @@
 'use strict';
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const {selectCreatedLeaf, editOwnValue} = require('../browser-test/tutorial-ui-components-helpers');
+const vm = require('node:vm');
+const {selectCreatedLeaf, editOwnValue, waitForPersonalMenuValue} = require('../browser-test/tutorial-ui-components-helpers');
 
 test('leaf selection clicks one visible exact identity despite duplicate search and tree rows', async () => {
   const own = '11111111-1111-1111-1111-111111111111';
@@ -42,6 +43,33 @@ test('leaf selection clicks one visible exact identity despite duplicate search 
   assert.equal(await selectCreatedLeaf(page, manifest, 'theme', name), own);
   assert.equal(selected, own);
   assert.equal(opened, true);
+});
+
+test('a saved menu value waits for the authorized plan rather than the old ready runtime', async () => {
+  let hover = '#old';
+  let persisted = '#fed7aa';
+  const context = vm.createContext({Map, args: null,
+    graphData: {bindings: [{'fn-id': 'own-hover', 'slot-id': 'own-slot', get value() { return persisted; }}]},
+    lookups: {slotMap: new Map([['own-slot', {name: 'value'}]])},
+    window: {
+      gdUIComponentRuntimeIdentity: () => 'own-configuration',
+      GraphdenBrowser: {keyword: value => value},
+      gdGraphThemeBase: () => ({'--bg': '#fff7ed'}),
+      gdShellMenuGraph: {ready: true, state: new Map(), runtime: {
+        run: () => new Map([['menu-tokens', new Map([['--gd-account-menu-hover', hover]])]]),
+      }},
+    },
+  });
+  await waitForPersonalMenuValue({waitForFunction: async (predicate, args) => {
+    context.args = args;
+    const check = () => vm.runInContext('(' + predicate.toString() + ')(args)', context);
+    assert.equal(check(), false, 'persisted binding plus old ready plan is insufficient');
+    hover = '#fed7aa';
+    persisted = '#old';
+    assert.equal(check(), false, 'a matching plan still requires the exact saved binding');
+    persisted = '#fed7aa';
+    assert.equal(check(), true, 'opening can follow the current authorized plan');
+  }}, 'own-hover', 'own-configuration', '#fed7aa');
 });
 
 test('color assertions wait for the asynchronous typed control before editing', async () => {

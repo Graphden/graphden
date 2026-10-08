@@ -14,6 +14,7 @@
     [graphden.executor.defbase :refer [defbase]]
     [graphden.lint.graph :as graph-lint]
     [graphden.services.reconciler :as recon]
+    [graphden.storage.graph-writer :as writer]
     [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.postgres.util :as pg-util]
     [graphden.storage.protocol.core :as sp]
@@ -711,27 +712,25 @@
    id recorded."
   [source-branch-id]
   (cr/record-effect! :db)
-  (let [base-storage (branches/base-storage ctx)
-        source-row (sp/read-entity base-storage :branch source-branch-id)
-        target-id (:base-branch-id source-row)
-        target-row (when target-id (sp/read-entity base-storage :branch target-id))
-        uid (:user-id tc/*current-principal*)]
-    (when-not (may-approve? target-row uid)
-      (throw (ex-info "You are not allowed to approve merges into this branch."
-                      {:type :authz/forbidden :capability :approve-merge})))
-    (let [approver (or uid "anonymous")]
-      (sp/create-entity base-storage :branch-approval
-                        {:source-branch-id source-branch-id
-                         ;; Bind the approval to the branch it was AUTHORIZED
-                         ;; for. The merge gate counts it only when this equals
-                         ;; the actual merge target, so approvals gathered for
-                         ;; one branch can't satisfy a merge into another.
-                         :target-branch-id target-id
-                         :approver-id approver
-                         :content-stamp (merge-policy/branch-content-stamp
-                                          base-storage source-branch-id)
-                         :created-at (java.time.Instant/now)})
-      approver)))
+  (let [base-storage (branches/base-storage ctx)]
+    (writer/with-write [base-storage {:entity :branch :ids [source-branch-id]}]
+                       (let [source-row (sp/read-entity base-storage :branch source-branch-id)
+                             target-id (:base-branch-id source-row)
+                             target-row (when target-id (sp/read-entity base-storage :branch target-id))
+                             uid (:user-id tc/*current-principal*)]
+                         (when-not (may-approve? target-row uid)
+                           (throw (ex-info "You are not allowed to approve merges into this branch."
+                                           {:type :authz/forbidden :capability :approve-merge})))
+                         (let [approver (or uid "anonymous")]
+                           (sp/create-entity base-storage :branch-approval
+                                             {:source-branch-id source-branch-id
+                                              ;; Bind approval to the target authorized under this lock.
+                                              :target-branch-id target-id
+                                              :approver-id approver
+                                              :content-stamp (merge-policy/branch-content-stamp
+                                                               base-storage source-branch-id)
+                                              :created-at (java.time.Instant/now)})
+                           approver)))))
 
 
 (defbase dismiss-my-approval!

@@ -615,6 +615,23 @@
                                           [fid bnd-slot-id])
                      lookup-id (or (:id own-rename-slot) bnd-slot-id)]
                  (get outer-renames lookup-id)))
+             (walk-hof
+               [fid bnd covered-names hof-depth]
+               (when (and into-hofs?
+                          (not (and skip-root-hofs? (= fid fn-id))))
+                 (when-let [lambda
+                            (try
+                              (or (declared-lambda-params (:ref-id bnd) lookups)
+                                  ;; Legacy bare-fn slots have no per-call shape.
+                                  (if (nil? (slot-structural-call-site-args
+                                              (:slot-id bnd) bnd fid lookups))
+                                    []
+                                    (hof-lambda-params
+                                      (:ref-id bnd) (:slot-id bnd) bnd fid lookups)))
+                              (catch clojure.lang.ExceptionInfo _ nil))]
+                   (walk (:ref-id bnd) #{} {}
+                         (into covered-names (map keyword) lambda)
+                         (inc hof-depth) (:ref-id bnd)))))
              (walk
                ;; `hof-root` — the innermost HOF target whose closure the
                ;; walk is inside (nil at the surface): a capture names it as
@@ -694,27 +711,7 @@
                                ;; renames do not cross the boundary (another
                                ;; fn's slots); name coverage does. An
                                ;; ambiguous lambda resolution skips the target.
-                               (when (and into-hofs?
-                                          (not (and skip-root-hofs? (= fid fn-id))))
-                                 (when-let [lambda (try (or (declared-lambda-params (:ref-id bnd) lookups)
-                                                            ;; A bare `:fn` slot has no call-site
-                                                            ;; shape: every free of the target is
-                                                            ;; a capture (the crud / type-checker
-                                                            ;; rule) — the runtime's alpha guess
-                                                            ;; for such a slot is a test surface.
-                                                            (if (nil? (slot-structural-call-site-args
-                                                                        (:slot-id bnd) bnd fid lookups))
-                                                              []
-                                                              (hof-lambda-params
-                                                                (:ref-id bnd) (:slot-id bnd)
-                                                                bnd fid lookups)))
-                                                        (catch clojure.lang.ExceptionInfo _ nil))]
-                                   (walk (:ref-id bnd) #{} {}
-                                         (into next-covered-names (map keyword) lambda)
-                                         (inc hof-depth)
-                                         ;; The INNERMOST target: the closest
-                                         ;; boundary the capture is read behind.
-                                         (:ref-id bnd))))
+                               (walk-hof fid bnd next-covered-names hof-depth)
                                (walk (:ref-id bnd) next-covered next-renames
                                      next-covered-names hof-depth hof-root))
                        :seq  (doseq [item (:items bnd)]
@@ -761,18 +758,18 @@
                        ;; Identity edge — covered, not walked (see the
                        ;; name-keyed walker above).
                        :fn-ref nil))
-                   ;; Env-binding ref-walk mirrors
-                   ;; `deep-free-ext-names*` — synthetic shared
-                   ;; computations still propagate free args of their
-                   ;; ref-targets, except where a same-named direct
-                   ;; HOF binding already consumes the slot.
+                   ;; Env references are evaluated or wrapped just like direct
+                   ;; bindings. A configured callback (e.g. a queue's take)
+                   ;; still captures its own unbound inputs; only its lambda
+                   ;; parameters and values supplied by the outer scope close.
                    (doseq [env-bnd env-bindings]
                      (when (and (= :ref (:kind env-bnd))
-                                (not (:is-fn env-bnd))
                                 (:ref-id env-bnd)
                                 (not (own-primary-slots (:slot-id env-bnd))))
-                       (walk (:ref-id env-bnd) next-covered next-renames
-                             next-covered-names hof-depth hof-root))))))]
+                       (if (:is-fn env-bnd)
+                         (walk-hof fid env-bnd next-covered-names hof-depth)
+                         (walk (:ref-id env-bnd) next-covered next-renames
+                               next-covered-names hof-depth hof-root)))))))]
        (walk fn-id #{} {} #{} 0 nil))
      @result)))
 

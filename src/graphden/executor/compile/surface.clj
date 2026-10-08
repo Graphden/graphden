@@ -151,5 +151,9 @@
                         (let [slot (get slot-map slot-id)]
                           (assoc e :optional?
                                  (and (some? slot)
-                                      (not (b/effective-required? slot (or via fn-id) lookups))))))))
+                                      ;; A rename's synthetic slot may be optional,
+                                      ;; but it cannot relax its required source.
+                                      (not-any? #(b/effective-required?
+                                                   (get slot-map %) (or via fn-id) lookups)
+                                                (r/chain-source-slot-ids slot-id slot-map))))))))
            (into surface (map #(select-keys % [:ext-name :slot-id :captured? :via])) captures)))))

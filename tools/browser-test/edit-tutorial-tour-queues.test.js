@@ -272,6 +272,11 @@ async function cleanup(page, finish) {
       'worker instances are gone before cleanup removes its graph');
     const branch = await receipt(page, 'branch');
     await cleanup(page, true);
+    // Branch cleanup restores the main document asynchronously. Do not
+    // read its service/branch lists from the document being replaced.
+    await page.waitForURL(url => !url.searchParams.has('branch'),
+      {waitUntil: 'domcontentloaded', timeout: 60000});
+    await page.waitForSelector('#search-input', {timeout: 30000});
     const remaining = await page.evaluate(async ({serviceId, branchId}) => {
       const cache = await fetchServices();
       const response = await authFetch(API.api_branches);

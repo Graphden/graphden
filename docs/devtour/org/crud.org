@@ -171,13 +171,13 @@ Computes public [[file:glossary.org::#term/free-argument][free arguments]] for e
 :PROPERTIES:
 :CUSTOM_ID: crud/apply-execute
 :FILE: src/graphden/crud/fn_execution.clj
-:LINE: 123
-:MINS: 2.0
+:LINE: 140
+:MINS: 2.1
 :END:
 
 Coordinates ~/api/execute~: resolves the function, version, and [[file:glossary.org::#term/free-argument][free arguments]]; acquires a [[file:glossary.org::#term/concurrency-permit][concurrency permit]]; submits execution to a future; then handles pending, successful, or failed results. This is a request-management layer around the executor from the first block.
 
-- source :: [[file:../../../src/graphden/crud/fn_execution.clj::(defn apply-execute][src/graphden/crud/fn_execution.clj:123]]
+- source :: [[file:../../../src/graphden/crud/fn_execution.clj::(defn apply-execute][src/graphden/crud/fn_execution.clj:140]]
 - referenced from :: [[file:editor.org::#editor/submitExecution][submitExecution]], [[file:editor.org::#editor/evaluate][evaluate]]
 
 * 14. create-pending-with-args!

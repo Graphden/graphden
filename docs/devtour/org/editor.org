@@ -305,13 +305,13 @@ Applies a validated theme payload as inline CSS custom properties on the body. T
 :PROPERTIES:
 :CUSTOM_ID: editor/evaluate
 :FILE: src/graphden/editor/theme.clj
-:LINE: 172
+:LINE: 182
 :MINS: 1.7
 :END:
 
 Evaluates a selected personal theme graph in the request's existing organisation and branch. It uses the normal execution access checks, requires a non-secret pure graph, permits no effects, and limits execution to 750 ms. Only a validated theme payload reaches CSS; source graphs and execution traces are not returned. This server path is independent of the bundled local menu and picker plans. ~editor-theme-graph.js~ applies successful results and keeps saved colors when evaluation is unavailable.
 
-- source :: [[file:../../../src/graphden/editor/theme.clj::(defn evaluate][src/graphden/editor/theme.clj:172]]
+- source :: [[file:../../../src/graphden/editor/theme.clj::(defn evaluate][src/graphden/editor/theme.clj:182]]
 - see also :: [[file:crud.org::#crud/apply-execute][apply-execute]], [[file:executor.org::#executor/record-effect!][record-effect!]], [[file:editor.org::#editor/gdApplyThemePayload][gdApplyThemePayload]]
 - referenced from :: [[file:executor.org::#executor/record-effect!][record-effect!]], [[file:editor.org::#editor/gdApplyThemePayload][gdApplyThemePayload]]
 

@@ -137,7 +137,7 @@
       const generation = own.generation;
       own.animation?.cancel();
       const target = {opacity: checked.opacity, transform: 'translateY(' + checked.offset + 'px)'};
-      own.animation = menu.animate([from, target], {duration: matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : checked.duration, easing: 'ease-out', fill: 'forwards'});
+      own.animation = animateWithGeometry(menu, [from, target], {duration: matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : checked.duration, easing: 'ease-out', fill: 'forwards'});
       own.animation.finished.then(() => {
         if (mounted !== own || generation !== own.generation) return;
         const next = dispatch('animation-finished');

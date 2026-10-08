@@ -48,6 +48,15 @@ function anchorBelowClamped(el, anchorEl, opts) {
   el.style.top = top + 'px';
 }
 
+// Native animations emit no CSS animation/transition events. Owners publish
+// their cancellable Animation so geometry observers can follow without polling
+// the document or patching Element.prototype. Timing remains the owner's choice.
+function animateWithGeometry(el, keyframes, options) {
+  const animation = el.animate(keyframes, options);
+  el.dispatchEvent(new CustomEvent('gd-geometry-animation', {bubbles: true, detail: animation}));
+  return animation;
+}
+
 // Follow a mounted popup's anchor, coalescing layout changes into one frame.
 // The owner must stop observation before hiding or removing its popup.
 function observePopoverAnchor(el, anchor, place, subscribePositionChange) {

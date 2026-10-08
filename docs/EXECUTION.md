@@ -106,9 +106,17 @@ machinery would record meaningless one-step trails — not in
 
 ## HTTP API
 
-All endpoints require bearer-token auth (`auth-required-middleware`).
+When authentication is enabled, these endpoints require an authenticated
+session or bearer token (`auth-required-middleware`).
 
 ### `POST /api/execute`
+
+The selected function receives its own execution authorization check before
+submission. Permission to run the HTTP handler does not authorize that
+function. An API token without the execute scope receives HTTP 403 with
+`error: "token-scope"`; a namespace permission refusal returns HTTP 403 with
+`error: "forbidden"`. Neither refusal creates an execution row or future.
+The worker also checks the selected root using the submitting principal.
 
 **Request:**
 

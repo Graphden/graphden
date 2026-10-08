@@ -122,12 +122,13 @@ function reloadLiveSections(hostId, builders) {
   });
 }
 
-// Operate's only live panel left is Assets (override rows change as the user
-// saves) — the code diagnostics are Explorer lenses + Inspector sections.
+// Assets and Queues change while the reader works elsewhere. Refresh them
+// when Organization opens so cached panels show current overrides/dead letters.
 // Exposed for editor-shell.js's gdRenderOperate.
 function reloadDynamicOpsSections() {
   reloadLiveSections('gd-operate-panels', {
     assets: typeof buildAssetsSection === 'function' ? buildAssetsSection : null,
+    queues: typeof buildQueuesSection === 'function' ? buildQueuesSection : null,
   });
 }
 window.reloadDynamicOpsSections = reloadDynamicOpsSections;

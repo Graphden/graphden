@@ -1,7 +1,7 @@
 'use strict';
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const {handlerPreviewTestOptions} = require('./handler-preview-test-options');
+const {handlerPreviewTestOptions} = require('../browser-test/handler-preview-test-options');
 
 test('ordinary browsers retain certificate checks and native DNS', () => {
   assert.deepEqual(handlerPreviewTestOptions({}), {});

@@ -133,8 +133,9 @@ const {
     await exitBranchCompare(page);
     await waitTourTitle(page, 'Approve it', 150000);
     await page.click('#branch-chip-btn');
-    await page.evaluate(() => document.querySelector(
-      '.branch-row-approve[data-approve-branch="tutorial-feature"]').click());
+    const approve = page.locator('.branch-row-approve[data-approve-branch="tutorial-feature"]');
+    await approve.waitFor({state: 'visible', timeout: 30000});
+    await approve.click();
     await page.waitForSelector('.branch-row-approve[data-approve-branch="tutorial-feature"][data-approved="1"] + .branch-appr-count.ok', {timeout: 30000});
     await waitTourTitle(page, 'Edit after approval', 150000);
     await switchBranchViaChip(page, 'tutorial-feature');

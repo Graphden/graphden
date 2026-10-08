@@ -209,6 +209,37 @@ const tests = [
            'and it is deleted even though the client never held it');
   }),
 
+  test('successful deletion clears only the selected created UUID', async () => {
+    const {ctx} = makeCtx({fns: [FN('selected')]});
+    ctx.selectedFnId = 'id-selected';
+    let clears = 0;
+    ctx.gdClearSelection = () => {clears++; ctx.selectedFnId = null;};
+    const result = await ctx._tourDeleteCreated([{type: 'fn', name: 'selected'}]);
+    assert(result.failed.length === 0 && clears === 1 && ctx.selectedFnId === null,
+      'authoritative success uses the shared empty-canvas/inspector mechanism');
+    for (const refusal of [true, 403, 'throw']) {
+      const rejected = makeCtx({fns: [FN('selected')], refuse: (method) => method === 'DELETE' && refusal});
+      rejected.ctx.selectedFnId = 'id-selected';
+      let rejectedClears = 0;
+      rejected.ctx.gdClearSelection = () => {rejectedClears++;};
+      const failed = await rejected.ctx._tourDeleteCreated([{type: 'fn', name: 'selected'}]);
+      assert(failed.failed.length === 1 && rejected.ctx.selectedFnId === 'id-selected' && rejectedClears === 0,
+        'failed/inaccessible deletion preserves selection: ' + refusal);
+    }
+    const surviving = makeCtx({fns: [FN('created'), FN('survivor')]});
+    surviving.ctx.selectedFnId = 'id-survivor';
+    let survivingClears = 0;
+    surviving.ctx.gdClearSelection = () => {survivingClears++;};
+    assert((await surviving.ctx._tourDeleteCreated([{type: 'fn', name: 'created'}])).failed.length === 0
+      && surviving.ctx.selectedFnId === 'id-survivor' && survivingClears === 0, 'other surviving selection stays selected');
+    const missing = makeCtx({refuse: () => 403});
+    missing.ctx.selectedFnId = 'id-selected';
+    let missingClears = 0;
+    missing.ctx.gdClearSelection = () => {missingClears++;};
+    await missing.ctx._tourDeleteCreated([{type: 'fn', name: 'selected'}]);
+    assert(missing.ctx.selectedFnId === 'id-selected' && missingClears === 0, 'inaccessible lookup cannot clear selection');
+  }),
+
   test('the PIN goes before the namespace holding the materialised copy', async () => {
     const created = [{type: 'ns', name: 'mycorp'},
                      {type: 'package-version', name: 'mycorp-hello'},

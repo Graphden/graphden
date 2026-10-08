@@ -251,6 +251,32 @@ test('binding-bound accepts a value, a ref, or list items — and nothing else',
          'a binding on a different slot does not satisfy this one');
 });
 
+test('binding-value resolves the renamed body source identity and rejects wrong, missing or cyclic slots', () => {
+  const state = withFn();
+  const source = {id: 'text-source', name: 'value'};
+  const middle = {id: 'middle-body', name: 'content', 'source-slot-id': source.id};
+  const body = {id: 'body-view', name: 'body', 'source-slot-id': middle.id};
+  state.lookups.slotMap = new Map([source, middle, body].map(slot => [slot.id, slot]));
+  const binding = {id: 'own-body', 'slot-id': source.id, value: '<h1>Hello</h1>'};
+  state.lookups.bindingsByFn = new Map([[FN.id, [binding]]]);
+  const check = {kind: 'binding-value', name: 'greet', slot: 'body', value: '<h1>Hello</h1>'};
+  assert(checkIn(state, check), 'stored canonical literal satisfies the visible inherited body');
+  binding.value = 'different';
+  assert(!checkIn(state, check), 'a different literal cannot complete the step');
+  binding.value = check.value;
+  state.lookups.slotMap.set('wrong', {id: 'wrong', name: 'value'});
+  binding['slot-id'] = 'wrong';
+  assert(!checkIn(state, check), 'an unrelated slot with the same source name is rejected');
+  binding['slot-id'] = source.id;
+  middle['source-slot-id'] = body.id;
+  assert(!checkIn(state, check), 'a cyclic rename is rejected');
+  middle['source-slot-id'] = 'missing';
+  assert(!checkIn(state, check), 'an unavailable source is rejected');
+  middle['source-slot-id'] = source.id;
+  state.lookups.bindingsByFn = new Map([['another-fn', [binding]]]);
+  assert(!checkIn(state, check), 'another fn cannot supply the checked literal');
+});
+
 test('binding-bound follows rename identities and rejects unrelated or cyclic slots', () => {
   const state = withFn();
   const sourceSlot = {id: 'source-func', name: 'func'};

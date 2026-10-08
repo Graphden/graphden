@@ -47,6 +47,31 @@ function _tourFnForCheck(check) {
   return created && typeof lookups !== 'undefined' ? lookups?.fnMap?.get(created.id) : null;
 }
 
+// Rename views and their persisted source bindings share an identity even
+// when their names differ. Missing or cyclic source chains fail closed.
+function _tourCanonicalSlotId(id) {
+  const seen = new Set();
+  while (id && !seen.has(id)) {
+    seen.add(id);
+    const slot = lookups.slotMap?.get(id);
+    if (!slot) return null;
+    if (!slot['source-slot-id']) return id;
+    id = slot['source-slot-id'];
+  }
+  return null;
+}
+
+function _tourSlotIdentities(name) {
+  const targets = new Set();
+  for (const slot of lookups.slotMap?.values() || []) {
+    if (slot.name === name) {
+      const id = _tourCanonicalSlotId(slot.id);
+      if (id) targets.add(id);
+    }
+  }
+  return targets;
+}
+
 // A `dom` check asks whether the reader can SEE the thing, not whether it is
 // in the document: the editor keeps whole surfaces mounted and hidden (the
 // Organization panels exist from boot), so `querySelector` alone completed
@@ -184,27 +209,10 @@ function _tourCheckPasses(check) {
         // CRUD stores a renamed-view binding on its canonical source slot.
         // Compare slot identities, including chained renames, rather than
         // expecting the stored source name to retain the visible label.
-        const canonical = (id) => {
-          const seen = new Set();
-          while (id && !seen.has(id)) {
-            seen.add(id);
-            const slot = lookups.slotMap?.get(id);
-            if (!slot) return null;
-            if (!slot['source-slot-id']) return id;
-            id = slot['source-slot-id'];
-          }
-          return null;
-        };
-        const targets = new Set();
-        for (const slot of lookups.slotMap?.values() || []) {
-          if (slot.name === check.slot) {
-            const id = canonical(slot.id);
-            if (id) targets.add(id);
-          }
-        }
+        const targets = _tourSlotIdentities(check.slot);
         const list = (lookups.bindingsByFn?.get(fn.id)) || [];
         return list.some((b) => {
-          if (!targets.has(canonical(b['slot-id']))) return false;
+          if (!targets.has(_tourCanonicalSlotId(b['slot-id']))) return false;
           if (b.value != null || b['ref-fn-id']) return true;
           // Sequence slots: the binding row itself carries no value —
           // the content lives in binding-list-item rows.
@@ -286,10 +294,10 @@ function _tourCheckPasses(check) {
         // back as a number or a string depending on the slot's type.
         const fn = _tourFnForCheck(check);
         if (!fn || typeof lookups === 'undefined' || !lookups) return false;
+        const targets = _tourSlotIdentities(check.slot);
         const list = (lookups.bindingsByFn?.get(fn.id)) || [];
         return list.some((b) => {
-          const s = lookups.slotMap?.get(b['slot-id']);
-          return !!(s && s.name === check.slot
+          return !!(targets.has(_tourCanonicalSlotId(b['slot-id']))
                     && b.value != null
                     && String(b.value) === String(check.value));
         });

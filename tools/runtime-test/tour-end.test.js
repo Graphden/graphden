@@ -405,6 +405,29 @@ const finishedOn = (id, extra) => Object.assign(
     assert(w.calls.includes('resume lesson-branch'), 'the new active branch is passed to the engine');
   });
 
+  await test('created-branch reload resumes only the exact successful receipt and principal', async () => {
+    const receipt = {type: 'branch', name: 'lesson-branch', id: 'owned-id',
+      'base-branch-id': 'main-id', receipt: 'created'};
+    for (const variation of ['valid', 'wrong-id', 'wrong-base', 'wrong-account', 'pending']) {
+      const saved = {lessonId: '01', step: 1, activeBranch: 'main', created: [{...receipt,
+        receipt: variation === 'pending' ? 'pending' : 'created'}]};
+      const w = makeWorld({state: null, saved, branch: 'lesson-branch', branchRows: [{
+        id: variation === 'wrong-id' ? 'replacement-id' : receipt.id, name: receipt.name,
+        'base-branch-id': variation === 'wrong-base' ? 'another-base' : receipt['base-branch-id'],
+      }]});
+      vm.runInContext('_tourLessons.lessons[0].steps[1].check = {kind: "created-branch", name: "lesson-branch"};', w.ctx);
+      w.ctx._tourConfirmPrincipal = async () => variation !== 'wrong-account';
+      w.ctx._tourPrincipalMatches = () => variation !== 'wrong-account';
+      w.ctx.startTutorial = async (_id, _step, _created, session) => {
+        w.calls.push('resume ' + session.activeBranch);
+        return true;
+      };
+      assert(await w.ctx.maybeStartTutorial() === (variation === 'valid'), variation + ' restore result');
+      assert(w.calls.includes('resume lesson-branch') === (variation === 'valid'),
+        variation + ' resumes only the owned creation before a Next click');
+    }
+  });
+
   await test('a tutorial-prefixed retained branch grants no rollback ownership', async () => {
     const w = makeWorld({state: null, branch: 'tutorial-kept'});
     w.ctx._tourRenderStep = () => {};

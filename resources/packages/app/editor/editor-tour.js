@@ -731,7 +731,7 @@ async function maybeStartTutorial() {
     if (branch !== _tourSessionBranch()) {
       // Branch lessons explicitly ask for a reload onto another branch.
       await _tourFetchLessons();
-      if (_tourExpectedBranch(saved) !== _tourSessionBranch()) return false;
+      if (await _tourExpectedBranch(saved) !== _tourSessionBranch()) return false;
       saved.activeBranch = _tourSessionBranch();
     }
     return _tourRestoreSession(saved);

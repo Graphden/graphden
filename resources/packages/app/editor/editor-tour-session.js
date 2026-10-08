@@ -42,10 +42,23 @@ function _tourRejectGraphViewCreation(command) {
   _tourSaveState();
 }
 
-function _tourExpectedBranch(saved) {
+async function _tourExpectedBranch(saved) {
   const lesson = (_tourLessons?.lessons || []).find((l) => l.id === saved.lessonId);
   const check = lesson?.steps?.[saved.step]?.check;
-  return check?.kind === 'on-branch' ? check.name : null;
+  if (check?.kind === 'on-branch') return check.name;
+  if (check?.kind !== 'created-branch') return null;
+  const receipt = saved.created?.find(row => row.type === 'branch'
+    && row.name === check.name && row.receipt === 'created' && row.id && row['base-branch-id']);
+  if (!receipt || !await _tourConfirmPrincipal(saved)) return null;
+  try {
+    const response = await authFetch(API.api_branches);
+    if (!response.ok) return null;
+    const body = await response.json();
+    const rows = Array.isArray(body) ? body : body?.branches;
+    return _tourPrincipalMatches(saved) && rows?.some(row => row.id === receipt.id
+      && row.name === receipt.name && row['base-branch-id'] === receipt['base-branch-id'])
+      ? receipt.name : null;
+  } catch (_) { return null; }
 }
 
 function _tourOwnedBranch(saved) {

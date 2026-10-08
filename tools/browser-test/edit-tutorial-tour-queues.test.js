@@ -44,8 +44,17 @@ async function serviceSettings(page, enabled, existingId) {
   if (!existingId) {
     const branch = await receipt(page, 'branch');
     assert(UUID.test(branch?.id || '') && branch.receipt === 'created', 'lesson owns an exact scratch branch');
-    const selector = page.locator('.service-popover.visible .service-popover-branch-select');
-    if (await selector.count()) await selector.selectOption(branch.id);
+    const dialogBranch = await page.evaluate(() => {
+      const pop = document.querySelector('.service-popover.visible');
+      const selector = pop.querySelector('.service-popover-branch-select');
+      const note = [...pop.querySelectorAll('.service-popover-note')]
+        .find(row => row.textContent.trim().startsWith('Branch: '));
+      return {id: selector?.value, name: selector ? selector.selectedOptions[0]?.textContent.trim()
+        : note?.textContent.trim().slice('Branch: '.length), readonly: !selector && !!note};
+    });
+    assert(dialogBranch.name === branch.name, 'service dialog retains the exact scratch branch label');
+    assert(dialogBranch.readonly || dialogBranch.id === branch.id,
+      'service dialog retains its captured branch UUID');
   }
   const toggle = page.locator('.service-popover.visible .service-popover-enabled');
   if (enabled) await toggle.check(); else await toggle.uncheck();
@@ -69,6 +78,7 @@ async function backToGraph(page) {
 async function cleanup(page, finish) {
   if (finish) assert(await clickTourButton(page, 'Finish'), 'finish the queue lesson');
   else await page.evaluate(async () => { if (_tourState) await _tourEnd(); });
+  if (!finish && await page.evaluate(() => !_tourState)) return;
   await page.waitForSelector('#gd-tour-pop .gd-tour-btn', {timeout: 30000});
   const remove = page.locator('#gd-tour-pop .gd-tour-btn')
     .filter({hasText: /^(Delete them|Delete branch & return)$/});
@@ -97,11 +107,13 @@ async function cleanup(page, finish) {
       console.log('SKIP lesson 39: shared-cloud plan has no persistent worker');
       return;
     }
-    await page.goto(BASE + '/?tutorial=39');
+    await page.goto(BASE + '/');
+    await page.evaluate(() => window.openTutorialMenu());
+    await page.locator('[data-lesson-id="39"] .gd-tour-btn-primary').dispatchEvent('click');
     await waitTourTitle(page, 'A real background worker', 120000);
     assert(await clickTourButton(page, 'Next'), 'queue lesson introduction');
     await waitTourTitle(page, 'Open random-uuid');
-    await filterAndSelect(page, 'core.random-uuid', 'random-uuid');
+    await filterAndSelect(page, 'core.system.random-uuid', 'random-uuid');
     await waitTourTitle(page, 'Choose an unused queue name');
     await openRun(page, 'random-uuid', false);
     const raw = '.execute-popover.visible .execute-result-raw pre';

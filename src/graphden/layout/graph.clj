@@ -70,6 +70,8 @@
 ;;   :inverse-source-map :parent-bound-terminals  precomputed read helpers
 ;;   :expansion-bindings atom — per-expanded-fn binding bookkeeping
 ;;   :expansions         the user-supplied expansion spec map
+;;   :active-fn-ids      identities on this path (siblings have independent sets)
+;;   :depth              nested calls unfolded on this path
 ;; =============================================================================
 
 (declare process-fn process-expanded-fn process-expanded-fn-impl process-any-fn)
@@ -555,16 +557,12 @@
 
 
 (def ^:private max-layout-depth
-  "Hard recursion bound for the walker. Named fns are leaf boundaries so
-   a normal graph nests only a handful; ANONYMOUS fns auto-expand and
-   their `process-fn` cycle-key (`node-id`-`hash bindings`) grows one
-   call-site tag per hop, so an anonymous ref cycle (A↔B, name=nil)
-   never repeats the key and recurses to a StackOverflow — which, on a
-   read path serving every editor render, is a 500. Write-time
-   GraphConstraints make this unreachable via normal authoring, but
-   imported / corrupt data must degrade to a truncated layout, not
-   crash the editor. The cap is far above any legit nesting."
-  512)
+  "Maximum nested calls unfolded in one layout. Cycles stop by identity on
+   the active path; this separate bound handles long acyclic imported graphs.
+   Each level consumes several mutually recursive JVM frames, so 512 can
+   overflow before reaching the guard on an unoptimised stack. The next fn
+   stays visible as a leaf and can be opened as a new graph root."
+  64)
 
 
 (defn- process-any-fn
@@ -572,17 +570,20 @@
   ;; Named fns (with name in DB) are "boundaries" — their implementation
   ;; is hidden by default. Only the root fn and anonymous (name=nil) fns
   ;; are expanded automatically.
-  ;; Depth-bound the mutual recursion (F3): every recursive step funnels
-  ;; through here, so incrementing per level and stopping past the cap
-  ;; truncates a pathological (cyclic-anon) subtree instead of blowing
-  ;; the stack. `ctx` carries `:depth`; the incremented ctx flows to
-  ;; every child call below.
-  (let [depth (inc (long (:depth ctx 0)))]
-    (if (> depth max-layout-depth)
-      (do (log/warn "layout: recursion depth cap hit — truncating a subtree (cyclic refs?)"
-                    {:fn-id fn-id :depth depth})
-          nil)
-      (let [ctx (assoc ctx :depth depth)
+  ;; Call-site node ids grow on every hop, so their processing keys cannot
+  ;; detect A -> B -> A. Identity membership belongs to this immutable PATH,
+  ;; not shared state: sibling uses of the same fn must still unfold twice.
+  (let [depth (inc (long (:depth ctx 0)))
+        active-path (:active-fn-ids ctx #{})]
+    (if (or (contains? active-path fn-id) (> depth max-layout-depth))
+      (let [{:keys [state lookups]} ctx
+            node-id (bh/add-fn-node state lookups fn-id is-root source-node-id source-arg-id)]
+        (when (> depth max-layout-depth)
+          (log/warn "layout: nesting limit reached; keeping the next function as a leaf"
+                    {:fn-id fn-id :depth depth}))
+        (bh/add-ref-edge! state lookups source-node-id node-id source-arg-id edge-arg-name source-expanded-fns)
+        node-id)
+      (let [ctx (assoc ctx :depth depth :active-fn-ids (conj active-path fn-id))
             {:keys [state lookups fn-map arg-map args-by-fn
                     inverse-source-map parent-bound-terminals expansions]} ctx
             fn-entity (get fn-map fn-id)
@@ -1003,8 +1004,7 @@
         ;;   :nodes / :edges                  — accumulated graph elements
         ;;   :added-node-ids                  — set of emitted node-ids (dedup)
         ;;   :processed-arg-targets           — arg-target keys already wired
-        ;;   :processed-fn-nodes              — fn-process keys already done
-        ;;                                       (cycle guard for shared-fn graphs)
+        ;;   :processed-fn-nodes              — call-site/context keys already done
         ;;   :in-progress-expansions          — expansion keys currently active
         ;;                                       (cycle guard for self-referential refs)
         ;;   :captured-edge-migrations        — caller arg-id → inside consumer

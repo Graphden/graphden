@@ -30,6 +30,13 @@ depth-first tree walk (below) and why there is no shared-node path
 analysis or column-offset alignment: those concepts have no referent
 when nothing is shared.
 
+**Bounded unfolding.** A reference to a function already on the current
+traversal path is drawn as a leaf with its incoming edge. Sibling uses of the
+same function still unfold separately. One layout unfolds at most 64 nested
+function calls; the next function also remains a leaf and can be opened as a
+new graph root. This bounds the rendering of cyclic or unusually deep imported
+graphs without changing their stored definitions or execution semantics.
+
 ## Pipeline Stages
 
 ```text

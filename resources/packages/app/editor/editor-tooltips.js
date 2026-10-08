@@ -147,8 +147,11 @@ function buildCloseButton() {
 // the tour's own and be invisible to it.
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape' || !descriptionTooltipSticky || e.defaultPrevented) return;
-  if (descriptionTooltipEditing) return;   // the textarea's own Cancel handles it
   e.preventDefault();
+  if (descriptionTooltipEditing) {
+    cancelDescriptionEditMode();
+    return;
+  }
   descriptionTooltipSticky = false;
   hideDescriptionTooltip(true);
 });
@@ -216,8 +219,7 @@ function enterDescriptionEditMode() {
   cancel.addEventListener('click', (e) => {
     e.stopPropagation();
     e.preventDefault();
-    descriptionTooltipEditing = false;
-    renderDescriptionTooltip();
+    cancelDescriptionEditMode();
   });
   const save = document.createElement('button');
   save.type = 'button';
@@ -256,6 +258,18 @@ function enterDescriptionEditMode() {
   // Both dimensions change between read/edit mode. Clamp the new size
   // against the original invocation point, including after Save/Cancel.
   repositionDescriptionTooltip();
+}
+
+// Cancel and Escape discard the draft but keep the pinned description open.
+// Capture focus before the textarea/button is removed by the read-mode render.
+function cancelDescriptionEditMode() {
+  // Save disables Cancel until its request settles; Escape follows that same
+  // rule because an in-flight write cannot be cancelled by discarding the DOM.
+  if (descriptionTooltipEl?.querySelector('.description-tooltip-btn-secondary')?.disabled) return;
+  const hadFocus = descriptionTooltipEl?.contains(document.activeElement);
+  descriptionTooltipEditing = false;
+  renderDescriptionTooltip();
+  if (hadFocus) focusSafely(descriptionTooltipEl?.querySelector('.description-tooltip-btn'));
 }
 
 // Posts the new description as a form-encoded PUT. The backend's

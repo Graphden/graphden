@@ -84,8 +84,13 @@ registerActionHandler('description', (btn, e, _host) => {
   // Click toggles sticky — match the legacy badge behaviour.
   e.preventDefault();
   e.stopPropagation();
+  if (descriptionTooltipEditing) return;
   if (typeof descriptionTooltipSticky !== 'undefined') {
     descriptionTooltipSticky = !descriptionTooltipSticky;
+    if (!descriptionTooltipSticky) {
+      hideDescriptionTooltip(true);
+      return;
+    }
   }
   if (typeof showDescriptionTooltip === 'function') {
     // Keyboard / synthetic clicks carry (0,0) — anchor at the button

@@ -142,6 +142,10 @@ a fixed glyph lane so labels align. Consequences:
   query is ever added, it must match the client check exactly.
 - **Auth gating per button**: the partial checks request auth state inside
   the render (not just route-level 401).
+- **Placement**: prefer the right or left of the card. When neither side fits,
+  use the shared `anchorBelowClamped` helper above/below the trigger in the larger
+  vertical gap, with a scrollable height budget including borders and padding.
+  Hover must leave the trigger reachable for its pending pointer click.
 - **Re-anchor**: the popover re-positions on zoom/pan; post-swap binding must
   not break that flow.
 - **Fetch-per-open is gone — `_rowActionsHtmlCache`**: the first hover

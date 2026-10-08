@@ -144,6 +144,8 @@ function positionRowActionsPopover(el, anchor) {
   const zoom = Math.max(0.9, Math.min(1.1, rawZoom));
   // Reset transform so offsetWidth measures the un-scaled size.
   el.style.transform = '';
+  el.style.maxHeight = '';
+  el.style.overflowY = '';
   el.style.transformOrigin = 'top left';
   el.style.display = 'inline-block';
   el.style.left = '-9999px';
@@ -160,7 +162,15 @@ function positionRowActionsPopover(el, anchor) {
   let left = cr.right + margin;
   if (left + pw > window.innerWidth - 8) {
     // Not enough room on the right of the card — open to the left.
-    left = Math.max(8, cr.left - margin - pw);
+    left = cr.left - margin - pw;
+    if (left < 8) {
+      // Neither card side fits. Hover must not put the menu under the
+      // pointer's pending click on the trigger; use the common vertical
+      // popup placement and scroll the body within the available space.
+      anchorBelowClamped(el, anchor, {margin, scale: zoom, constrainHeight: true});
+      el.style.transform = 'scale(' + zoom + ')';
+      return;
+    }
   }
   // Vertical: align centre-to-centre with the (scaled) trigger so the
   // user sees the popover next to the row whose actions it shows.

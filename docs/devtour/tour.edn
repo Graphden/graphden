@@ -810,6 +810,10 @@
     {:ns graphden.crud.entities :defn apply-create-core
      :say "Repeats structural validation under the semantic writer guard, then creates the row,
            optional rename view, and checks the resulting function in one SQL transaction.
+           Binding writes follow rename views only within the edited function's inheritance.
+           A view belonging to a separately captured call retains its slot UUID and argument name;
+           following it into that call would bind a different argument. See the
+           [inherited rename design](../../docs/adr/ADR-inherited-rename-surface.md).
            Ordinary type errors keep the edit and return `:type-warnings`; an optional rename
            failure rolls back its savepoint without losing the binding. [Secret-flow](#term/secret)
            rejection rolls back the whole SQL change, independently of the diagnostics store.

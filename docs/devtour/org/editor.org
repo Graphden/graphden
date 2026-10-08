@@ -144,13 +144,13 @@ Stages a create-only publication UUID before sending the request. The graph part
 :PROPERTIES:
 :CUSTOM_ID: editor/_tourTrackHttpPublication
 :FILE: resources/packages/app/editor/editor-tour-session.js
-:LINE: 277
+:LINE: 290
 :MINS: 1.1
 :END:
 
 Records the exact lease, handler, namespace, branch, lesson session, and principal before publication. Cleanup can revoke that lease after its lesson branches disappear without guessing identity from a name or deleting another account's publication.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-tour-session.js::function _tourTrackHttpPublication(id, fn) {][resources/packages/app/editor/editor-tour-session.js:277]]
+- source :: [[file:../../../resources/packages/app/editor/editor-tour-session.js::function _tourTrackHttpPublication(id, fn) {][resources/packages/app/editor/editor-tour-session.js:290]]
 
 * 12. applyInheritancePreview
 :PROPERTIES:
@@ -331,13 +331,13 @@ Copies fixed shipped theme, menu and picker definitions into a fresh named names
 :PROPERTIES:
 :CUSTOM_ID: editor/apply!
 :FILE: src/graphden/editor/component_creation.clj
-:LINE: 208
+:LINE: 210
 :MINS: 2.0
 :END:
 
 Rebuilds the manifest, the fixed list of proposed objects and UUIDs, while holding the graph writer lock. It rejects a changed user, branch, source snapshot or existing identity. One transaction through the existing [[file:glossary.org::#term/protocol][storage decorators]] creates all rows with ordinary access checks. Cache-publication warnings preserve a successful commit and its identities. An internal preview lets lesson cleanup record exact new UUIDs before sending APPLY, so a lost network reply does not leave untracked objects.
 
-- source :: [[file:../../../src/graphden/editor/component_creation.clj::(defn apply!][src/graphden/editor/component_creation.clj:208]]
+- source :: [[file:../../../src/graphden/editor/component_creation.clj::(defn apply!][src/graphden/editor/component_creation.clj:210]]
 - see also :: [[file:versioning.org::#versioning/call-with-write][call-with-write]]
 
 * 26. collect-closure
@@ -368,13 +368,13 @@ Reads the current user's authoritative configuration preference and exports a bo
 :PROPERTIES:
 :CUSTOM_ID: editor/gdTourRestoreUIComponentPreferences
 :FILE: resources/packages/app/editor/editor-tour-ui-components.js
-:LINE: 54
+:LINE: 55
 :MINS: 2.6
 :END:
 
 Restores Appearance preferences only after the lesson's exact selected graph UUID was deleted. Unrelated selections survive. Failed persistence stays in the lesson ledger and retries even when the preference owner's optimistic local value already changed.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-tour-ui-components.js::async function gdTourRestoreUIComponentPreferences(created, failed) {][resources/packages/app/editor/editor-tour-ui-components.js:54]]
+- source :: [[file:../../../resources/packages/app/editor/editor-tour-ui-components.js::async function gdTourRestoreUIComponentPreferences(created, failed) {][resources/packages/app/editor/editor-tour-ui-components.js:55]]
 
 * 29. gdApplyKeymap
 :PROPERTIES:

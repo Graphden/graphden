@@ -7,7 +7,7 @@ Request validation, stored edits, execution results, and views.
 
 after: storage, types
 
-[[file:index.org][index]] · ~67 min
+[[file:index.org][index]] · ~68 min
 
 * 1. extract-entity-params
 :PROPERTIES:
@@ -52,13 +52,13 @@ Resolves the requested branch by UUID or name before writing. The resulting bran
 :PROPERTIES:
 :CUSTOM_ID: crud/create-entity
 :FILE: src/graphden/crud/entities.clj
-:LINE: 188
+:LINE: 189
 :MINS: 0.8
 :END:
 
 Creates one row through the generic write API. It checks the caller's [[file:glossary.org::#term/auth][capability]], validates the proposed change with ~write-rej~, writes through ~sp/create-entity~, then invalidates caches and sends notifications.
 
-- source :: [[file:../../../src/graphden/crud/entities.clj::(defn create-entity][src/graphden/crud/entities.clj:188]]
+- source :: [[file:../../../src/graphden/crud/entities.clj::(defn create-entity][src/graphden/crud/entities.clj:189]]
 - same file :: [[file:crud.org::#crud/apply-create-core][apply-create-core]]
 - referenced from :: [[file:constellation.org::#constellation/every-addon-facing-var-still-resolves-test][every-addon-facing-var-still-resolves-test]]
 
@@ -105,13 +105,13 @@ On failure, traverses the creation journal backward and attempts to delete each 
 :PROPERTIES:
 :CUSTOM_ID: crud/apply-create-core
 :FILE: src/graphden/crud/entities.clj
-:LINE: 847
-:MINS: 1.1
+:LINE: 850
+:MINS: 1.4
 :END:
 
-Repeats structural validation under the semantic writer guard, then creates the row, optional rename view, and checks the resulting function in one SQL transaction. Ordinary type errors keep the edit and return ~:type-warnings~; an optional rename failure rolls back its savepoint without losing the binding. [[file:glossary.org::#term/secret][Secret-flow]] rejection rolls back the whole SQL change, independently of the diagnostics store. See [[file:../../../docs/SECRETS.md][secrets]].
+Repeats structural validation under the semantic writer guard, then creates the row, optional rename view, and checks the resulting function in one SQL transaction. Binding writes follow rename views only within the edited function's inheritance. A view belonging to a separately captured call retains its slot UUID and argument name; following it into that call would bind a different argument. See the [[file:../../../docs/adr/ADR-inherited-rename-surface.md][inherited rename design]]. Ordinary type errors keep the edit and return ~:type-warnings~; an optional rename failure rolls back its savepoint without losing the binding. [[file:glossary.org::#term/secret][Secret-flow]] rejection rolls back the whole SQL change, independently of the diagnostics store. See [[file:../../../docs/SECRETS.md][secrets]].
 
-- source :: [[file:../../../src/graphden/crud/entities.clj::(defn apply-create-core][src/graphden/crud/entities.clj:847]]
+- source :: [[file:../../../src/graphden/crud/entities.clj::(defn apply-create-core][src/graphden/crud/entities.clj:850]]
 - same file :: [[file:crud.org::#crud/create-entity][create-entity]]
 - referenced from :: [[file:web.org::#web/write-rej][write-rej]]
 

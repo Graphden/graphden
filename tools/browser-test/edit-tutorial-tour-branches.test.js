@@ -24,10 +24,13 @@ async function mergeOwnedSource(page, source, target) {
     page.waitForNavigation({waitUntil: 'load', timeout: 60000}),
     page.waitForResponse(r => r.request().method() === 'POST'
       && new URL(r.url()).pathname === '/api/branches/' + target.id + '/merge', {timeout: 60000})
-      .then(async response => ({ok: response.ok(), committed: (await response.json()).ok === true})),
+      // The editor consumes JSON and navigates immediately; CDP can lose the
+      // response body even inside this callback. Verify stored target content
+      // below after navigation instead of reading that body a second time.
+      .then(response => ({ok: response.ok(), status: response.status()})),
     row.locator('.branch-row-merge').click(),
   ]);
-  assert(receipt.ok && receipt.committed, 'exact sibling target merge committed');
+  assert(receipt.ok && receipt.status === 200, 'exact sibling target merge returned 200');
 }
 
 async function switchToOwnedBranch(page, branch) {

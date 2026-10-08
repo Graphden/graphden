@@ -39,6 +39,8 @@ async function tokens(page) {
     }), body?.account?.id || null).catch(() => ({accountMatches: false, selectedReadable: false}));
     console.log(JSON.stringify({diagnostic: 'token-access-probe',
       stage: path === '/auth/me' ? 'authenticate' : 'execute', status: response.status(),
+      executionStatus: ['succeeded', 'failed', 'pending', 'validation-error'].includes(body?.status) ? body.status : 'other',
+      ok: body?.ok === true,
       error: body?.error === 'unauthenticated' ? 'unauthenticated'
         : body?.error === 'token-scope' ? 'token-scope' : 'other', ...verdict}));
   });

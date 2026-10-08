@@ -27,7 +27,6 @@ async function closePopover(page) {
 async function mint(page, name) {
   if (name) await rootAction(page, name, 'http-host');
   await page.waitForSelector(mintSelector + ':not([disabled])');
-  const started = Date.now();
   const replyPromise = page.waitForResponse(response =>
     new URL(response.url()).pathname === '/api/preview-token'
     && response.request().method() === 'POST');
@@ -37,6 +36,10 @@ async function mint(page, name) {
   assert(response.ok() && body.ok === true && body.mode === 'handler',
     'real handler preview minted');
   assert(body['expires-in-ms'] === 120000, 'server reports the two-minute lifetime');
+  // The server mints during this request, after authorization/compilation.
+  // Measuring from click time can underwait TTL by the request latency.
+  // Receipt time is conservative: the token already exists by this point.
+  const started = Date.now();
   const branch = await page.evaluate(() => getCurrentBranchName());
   assert(branch !== 'main' && await response.request().headerValue('X-Graphden-Branch') === branch,
     'mint request explicitly captures the current lesson branch');

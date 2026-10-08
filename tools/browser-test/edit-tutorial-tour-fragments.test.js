@@ -105,7 +105,9 @@ const {walkLesson30} = require('./tutorial-app-helpers');
       console.log('Waiting for real server capsule expiry');
     }
     const denied = await external.reload();
-    assert([403, 404, 410].includes(denied.status()), 'expired capsule is denied by the real server');
+    const expiryStatus = denied?.status() || 0;
+    console.log('Expired capsule navigation status: ' + expiryStatus);
+    assert([403, 404, 410].includes(expiryStatus), 'expired capsule is denied by the real server');
     const renewed = await mint(page, handler);
     assert(renewed.url !== first.url, 'remint replaces the expired capability');
     await remintWithPendingCheck(page, renewed.url);

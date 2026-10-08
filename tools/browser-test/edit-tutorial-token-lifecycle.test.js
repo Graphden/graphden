@@ -31,6 +31,7 @@ async function tokens(page) {
   page.on('dialog', dialog => { void dialog.accept(); });
   let finished = false;
   try {
+    await page.goto(BASE + '/');
     if (REQUIRED) {
       await page.waitForFunction(() => !!window.gdAccount?.id
         && typeof window.graphdenTenancyActive === 'function'

@@ -32,8 +32,10 @@ async function authMode(env) {
 async function tokenGate(env) {
   const logs = [];
   let opened = false;
+  let navigated = false;
   const page = {removeAllListeners() {}, on() {}, context: () => ({tracing: {stop: async () => {}}}),
-    waitForFunction: async () => {}, evaluate: async () => null,
+    goto: async url => { assert.equal(url, 'http://fixture/'); navigated = true; },
+    waitForFunction: async () => { assert.equal(navigated, true); }, evaluate: async () => null,
     getByRole: () => ({isVisible: async () => false})};
   const sandbox = vm.createContext({process: {env}, console: {
     log: message => logs.push(message), error: message => logs.push(message)},
@@ -48,7 +50,7 @@ async function tokenGate(env) {
     },
   });
   await vm.runInContext(source('edit-tutorial-token-lifecycle.test.js'), sandbox);
-  return {opened, logs, exitCode: sandbox.process.exitCode};
+  return {opened, navigated, logs, exitCode: sandbox.process.exitCode};
 }
 
 (async () => {
@@ -76,9 +78,11 @@ async function tokenGate(env) {
   assert.equal(absent.opened, false, 'required cloud gate never falls back to a static token');
   assert.equal(absent.exitCode, 1);
   const unsupported = await tokenGate({GRAPHDEN_REQUIRE_TOKENS: '1', GRAPHDEN_SESSION_COOKIE: 'session-fixture'});
+  assert.equal(unsupported.navigated, true, 'capability checks run on the editor origin');
   assert.equal(unsupported.exitCode, 1, 'missing required token listing fails');
   assert.ok(!unsupported.logs.some(line => line.includes('SKIP')));
   const optional = await tokenGate({});
+  assert.equal(optional.navigated, true);
   assert.equal(optional.exitCode, undefined);
   assert.ok(optional.logs.some(line => line.includes('SKIP')));
   console.log('PASS browser account-cookie auth and required token gate');

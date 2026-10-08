@@ -181,10 +181,30 @@ function _tourCheckPasses(check) {
         // (which is keyed by the slot-OWNING fn).
         const fn = _tourFnForCheck(check);
         if (!fn || typeof lookups === 'undefined' || !lookups) return false;
+        // CRUD stores a renamed-view binding on its canonical source slot.
+        // Compare slot identities, including chained renames, rather than
+        // expecting the stored source name to retain the visible label.
+        const canonical = (id) => {
+          const seen = new Set();
+          while (id && !seen.has(id)) {
+            seen.add(id);
+            const slot = lookups.slotMap?.get(id);
+            if (!slot) return null;
+            if (!slot['source-slot-id']) return id;
+            id = slot['source-slot-id'];
+          }
+          return null;
+        };
+        const targets = new Set();
+        for (const slot of lookups.slotMap?.values() || []) {
+          if (slot.name === check.slot) {
+            const id = canonical(slot.id);
+            if (id) targets.add(id);
+          }
+        }
         const list = (lookups.bindingsByFn?.get(fn.id)) || [];
         return list.some((b) => {
-          const s = lookups.slotMap?.get(b['slot-id']);
-          if (!s || s.name !== check.slot) return false;
+          if (!targets.has(canonical(b['slot-id']))) return false;
           if (b.value != null || b['ref-fn-id']) return true;
           // Sequence slots: the binding row itself carries no value —
           // the content lives in binding-list-item rows.

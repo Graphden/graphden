@@ -251,6 +251,34 @@ test('binding-bound accepts a value, a ref, or list items — and nothing else',
          'a binding on a different slot does not satisfy this one');
 });
 
+test('binding-bound follows rename identities and rejects unrelated or cyclic slots', () => {
+  const state = withFn();
+  const sourceSlot = {id: 'source-func', name: 'func'};
+  const rename = {id: 'handler-view', name: 'handler', 'source-slot-id': 'handler-middle'};
+  const middle = {id: 'handler-middle', name: 'callback', 'source-slot-id': sourceSlot.id};
+  state.lookups.slotMap = new Map([sourceSlot, rename, middle].map(slot => [slot.id, slot]));
+  const binding = {id: 'handler-binding', 'slot-id': sourceSlot.id, 'ref-fn-id': 'handler-fn'};
+  state.lookups.bindingsByFn = new Map([[FN.id, [binding]]]);
+  const check = {kind: 'binding-bound', name: 'greet', slot: 'handler'};
+  assert(checkIn(state, check), 'canonical source reference satisfies its chained visible rename');
+  binding['slot-id'] = rename.id;
+  assert(checkIn(state, check), 'reference stored on the view also satisfies the rename');
+  binding['ref-fn-id'] = null;
+  assert(!checkIn(state, check), 'a rename without a reference or literal is not bound');
+  binding['ref-fn-id'] = 'handler-fn';
+  state.lookups.slotMap.set('other-func', {id: 'other-func', name: 'func'});
+  binding['slot-id'] = 'other-func';
+  assert(!checkIn(state, check), 'the same source name with another UUID is not the target');
+  binding['slot-id'] = sourceSlot.id;
+  state.lookups.bindingsByFn = new Map([['other-fn', [binding]]]);
+  assert(!checkIn(state, check), 'another function owning the binding cannot complete this step');
+  state.lookups.bindingsByFn = new Map([[FN.id, [binding]]]);
+  middle['source-slot-id'] = rename.id;
+  assert(!checkIn(state, check), 'cyclic rename identity fails closed');
+  middle['source-slot-id'] = 'missing-source';
+  assert(!checkIn(state, check), 'an unavailable source identity fails closed');
+});
+
 test('binding-value compares as TEXT — jsonb round-trips change the type', () => {
   const s = withFn();
   s.lookups.bindingsByFn = new Map([[FN.id, [{ id: 'b', 'slot-id': SLOT.id, value: 42 }]]]);

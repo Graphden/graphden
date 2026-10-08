@@ -28,6 +28,7 @@
     [graphden.crud.entities.seq :as seq-ops]
     [graphden.crud.entities.tighten :as tighten]
     [graphden.crud.entities.views :as views]
+    [graphden.crud.inheritance.snapshot :as inheritance]
     [graphden.crud.package-guard :as pkg-guard]
     [graphden.crud.request :as request]
     [graphden.crud.secret-shape :as secret-shape]
@@ -524,32 +525,33 @@
 
 
 (defn- rename-root-slot-id
-  "Follow `slot.source-slot-id` to the slot that DECLARED the arg.
-
-   A `{:as :new-name}` rename mints a VIEW slot whose `:source-slot-id`
-   points at the declared one, so the new name resolves for descendants.
-   Bindings, though, always target the DECLARED slot — that is what the
-   package parser writes (`packages.records.slot-resolution` walks the
-   rename chain to the declaring ancestor) and what the executor reads.
-   A binding written on the view slot lands, shows on the card, and is
-   then invisible at run time: the value silently never arrives."
-  [storage slot-id]
-  (loop [id slot-id
-         seen #{}]
-    (if (or (nil? id) (contains? seen id))
-      id
-      (if-let [src (:source-slot-id (sp/read-entity storage :slot id))]
-        (recur src (conj seen id))
-        id))))
+  "Normalize inherited rename views within the binding owner's scope.
+   A referenced function's view is a distinct captured reader: following
+   its source would turn `handler` into `func`, or collapse independent
+   calls' renamed inputs onto one primitive slot. Stop at that boundary."
+  [storage fn-id slot-id]
+  (let [slot (sp/read-entity storage :slot slot-id)]
+    (if-not (and fn-id (:source-slot-id slot))
+      slot-id
+      (let [ancestor-ids (vec (keys (inheritance/closure storage [fn-id])))
+            own-slots (into #{} (map :slot-id)
+                            (sp/query-entities storage :fn-slot {:fn-id ancestor-ids}))]
+        (loop [id slot-id row slot seen #{}]
+          (let [src (:source-slot-id row)]
+            (if (and src (contains? own-slots id) (not (contains? seen src)))
+              (recur src (sp/read-entity storage :slot src) (conj seen id))
+              id)))))))
 
 
 (defn- normalize-binding-slot
-  "Rewrite a binding write's `:slot-id` to its rename root, so every
-   client — editor, MCP, raw API — writes the slot the executor reads."
-  [storage entity-type entity-data]
-  (if (and (= entity-type :binding) (:slot-id entity-data))
-    (update entity-data :slot-id #(rename-root-slot-id storage %))
-    entity-data))
+  "Rewrite inherited binding views to their source within the owner's
+   scope, preserving the identities of referenced functions' readers."
+  ([storage entity-type entity-data]
+   (normalize-binding-slot storage entity-type entity-data (:fn-id entity-data)))
+  ([storage entity-type entity-data fn-id]
+   (if (and (= entity-type :binding) (:slot-id entity-data))
+     (update entity-data :slot-id #(rename-root-slot-id storage fn-id %))
+     entity-data)))
 
 
 (defn- try-rename!
@@ -757,14 +759,15 @@
    ordinary type errors only (docs/SECRETS.md)."
   [{:keys [entity-type type-str id-uuid form-data entity-data]} ctx]
   (let [storage (request/require-storage ctx)
-        ;; An update rarely carries `:slot-id`, but when it does the same
-        ;; rename-root rule applies as on create.
-        entity-data (normalize-binding-slot storage entity-type entity-data)
-        error-msg (volatile! nil)
-        error-status (volatile! nil)
         ;; Rebuild the same merged view the graph preflight checked, from
         ;; current storage rather than the parser's pre-lock snapshot.
         pre-row (when id-uuid (sp/read-entity storage entity-type id-uuid))
+        ;; An update rarely carries `:slot-id`, but when it does the same
+        ;; rename-root rule applies as on create.
+        entity-data (normalize-binding-slot storage entity-type entity-data
+                                            (or (:fn-id entity-data) (:fn-id pre-row)))
+        error-msg (volatile! nil)
+        error-status (volatile! nil)
         ;; A `:fn` update (rename / description / ns-move) targets the row
         ;; identified by `id-uuid` itself. The guard refuses a package-synced
         ;; fn: sync would revert the edit, and a rename breaks bare refs.

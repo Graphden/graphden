@@ -213,11 +213,9 @@
 
 
 (deftest binding-on-a-renamed-view-slot-targets-the-declared-slot-test
-  ;; A `{:as :new-name}` rename mints a VIEW slot so the new name resolves
-  ;; for descendants — but a BINDING must target the DECLARED slot, which is
-  ;; what the package parser writes and what the executor reads. Written on
-  ;; the view slot it lands, shows on the card, and is then invisible at run
-  ;; time: the value silently never arrives. So the write normalises.
+  ;; Within the owner's inheritance chain a renamed view and its declared
+  ;; source are the same reader. Normalize that inherited alias, while
+  ;; preserving views of separate referenced calls (queue lifecycle tests).
   (let [storage (:storage *graph*)
         base  (setup/create-base-fn! storage (uniq "rv-base"))
         slot  (setup/create-slot! storage "content" :text)
@@ -242,7 +240,15 @@
     (let [rows (sp/query-entities storage :binding {:fn-id (:id child)})]
       (is (= 1 (count rows)))
       (is (= (:id slot) (:slot-id (first rows)))
-          "the binding was normalised onto the DECLARED slot, not the view"))))
+          "the binding was normalised onto the DECLARED slot, not the view")
+      (let [binding-id (:id (first rows))
+            updated (via-update
+                      (form-req (str "/api/entities/binding/" binding-id)
+                                (str "slot-id=" (:id view) "&value=%22updated%22") :put))]
+        (is (= 200 (:status updated)))
+        (is (= {:slot-id (:id slot) :value "updated"}
+               (select-keys (sp/read-entity storage :binding binding-id) [:slot-id :value]))
+            "A slot update uses the stored owner when the form omits fn-id")))))
 
 
 ;; ============================================================================

@@ -3138,7 +3138,7 @@
              :reads "adds external MCP client setup, branch-scoped tools, and the agent edit/test/review cycle."
              :steps
              [{:title "Select a readable function"
-               :body "Find [[core.const]] in the Explorer and select it. We will make a real Execute request for this function with a token that has no Execute scope. The request must be refused before the function runs."
+               :body "Find [[core.logic.const]] in the Explorer and select it. We will make a real Execute request for this function with a token that has no Execute scope. The request must be refused before the function runs."
                :target "#fn-filter"
                :targets ["#fn-filter" "#entity-list .entity-item[data-name=\"const\"]"]
                :check {:kind "selected" :name "const"}}

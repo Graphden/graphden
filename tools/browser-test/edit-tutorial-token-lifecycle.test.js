@@ -48,7 +48,7 @@ async function tokens(page) {
     for (let cycle = 0; cycle < 2; cycle++) {
       await page.goto(BASE + '/?tutorial=42');
       await waitTourTitle(page, 'Select a readable function', 120000);
-      await filterAndSelect(page, 'core.const', 'const');
+      await filterAndSelect(page, 'core.logic.const', 'const');
       await waitTourTitle(page, 'Open Account');
       await openAccountSettings(page);
       await waitTourTitle(page, 'Open the creation form');

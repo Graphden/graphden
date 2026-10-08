@@ -131,12 +131,26 @@ const {assert, newContext} = require('./edit-test-helpers');
       }
       return now - window.geometryIdleSince >= 200;
     }, null, {timeout: 10000});
-    const idleStart = await page.evaluate(() => ({calls: window.geometryCalls, ticks: window.geometryTicks}));
+    const idleStart = await page.evaluate(() => {
+      window.geometryIdleRecords = [];
+      window.geometryIdleObserver = new MutationObserver((records) => {
+        for (const record of records) {
+          if (record.target.closest?.('#gd-tour-pop, #gd-tour-spot, #gd-tour-dim')
+            || record.target.parentElement?.closest('#gd-tour-pop, #gd-tour-spot, #gd-tour-dim')) continue;
+          window.geometryIdleRecords.push({type: record.type, name: record.attributeName,
+            target: record.target.outerHTML?.slice(0, 180)});
+        }
+      });
+      window.geometryIdleObserver.observe(document.body, {subtree: true, attributes: true, childList: true, characterData: true});
+      return {calls: window.geometryCalls, ticks: window.geometryTicks};
+    });
     await page.waitForFunction((ticks) => window.geometryTicks >= ticks + 2,
       idleStart.ticks, {timeout: 10000, polling: 50});
-    const idle = await page.evaluate((before) => ({
-      calls: window.geometryCalls - before.calls, ticks: window.geometryTicks - before.ticks,
-    }), idleStart);
+    const idle = await page.evaluate((before) => {
+      window.geometryIdleObserver.disconnect();
+      return {calls: window.geometryCalls - before.calls, ticks: window.geometryTicks - before.ticks,
+        mutations: window.geometryIdleRecords};
+    }, idleStart);
     assert(idle.calls === 0 && idle.ticks >= 2, 'completion polling remains live without idle geometry scans: ' + JSON.stringify(idle));
     await page.evaluate(() => selectFnByName('const'));
     await page.waitForSelector('.node-overlay', {timeout: 60000});

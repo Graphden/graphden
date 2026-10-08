@@ -101,7 +101,7 @@ TARGET="${WTQ_TARGET:-develop}"
 main_worktree() {
   git worktree list --porcelain | awk -v tgt="refs/heads/$TARGET" '
     /^worktree /  { wt=$2 }
-    $0 == "branch " tgt { print wt; exit }'
+    $0 == "branch " tgt && !found { print wt; found=1 }'
 }
 MAIN_WT="$(main_worktree)"
 REPO_PARENT="$(dirname "${MAIN_WT:-$(git rev-parse --show-toplevel)}")"

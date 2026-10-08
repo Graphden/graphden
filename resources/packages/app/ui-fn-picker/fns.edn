@@ -52,10 +52,15 @@
    :args {:test :_picker-row-active :then "true" :else "false"}}
   {:name :_picker-row-mismatch-title :parent :if
    :args {:test :_picker-row-compatible :then "" :else "Not a subtype of the expected type — click to see why (and pick anyway)"}}
-  {:name :_picker-row-title :parent :if
+  {:name :_picker-row-default-title :parent :if
    :args {:test :_picker-row-unknown :then "" :else :_picker-row-mismatch-title}}
+  {:name :_picker-row-title :parent :get
+   :args {:coll {:as :row} :key {:value :title} :default :_picker-row-default-title}}
+  {:name :_picker-row-disabled :parent :if
+   :args {:test {:parent :get :args {:coll {:as :row} :key {:value :disabled} :default false}}
+          :then "true" :else "false"}}
   {:name :_picker-row-attrs :parent :zipmap
-   :args {:keys [{:value :key} {:value :id} {:value :class} {:value :role} {:value :aria-selected} {:value :data-picker-key} {:value :data-fn-name} {:value :title}] :vals [:_picker-row-key :_picker-row-option-id :_picker-row-class "option" :_picker-row-selected :_picker-row-key :_picker-row-qualified-name :_picker-row-title]}}
+   :args {:keys [{:value :key} {:value :id} {:value :class} {:value :role} {:value :aria-selected} {:value :aria-disabled} {:value :data-picker-key} {:value :data-fn-name} {:value :title}] :vals [:_picker-row-key :_picker-row-option-id :_picker-row-class "option" :_picker-row-selected :_picker-row-disabled :_picker-row-key :_picker-row-qualified-name :_picker-row-title]}}
   {:name :_picker-row-label-node :parent :hiccup
    :args {:tag "span" :attrs {:value {:class "fn-picker-row-main"}} :children [:_picker-row-label]}}
   {:name :picker-fit-classes :parent :zipmap

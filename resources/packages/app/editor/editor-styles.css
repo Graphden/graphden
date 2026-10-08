@@ -8574,6 +8574,55 @@ button.lambda-params-chip:focus-visible { outline: 1px solid var(--accent); }
   min-width: 0;
 }
 
+.inheritance-intent-popover {
+  position: fixed;
+  z-index: 9700;
+  width: min(22rem, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  box-sizing: border-box;
+  overflow: auto;
+  padding: 2rem 0.75rem 0.75rem;
+  border: 1px solid var(--card-border);
+  border-radius: 4px;
+  background: var(--card-bg);
+  color: var(--card-fg);
+  box-shadow: var(--shadow-md);
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+
+.inheritance-intent-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.inheritance-intent-actions input,
+.inheritance-intent-actions button {
+  padding: 0.375rem 0.5rem;
+  border: 1px solid var(--input-border);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+}
+
+.inheritance-intent-actions button:disabled {
+  color: var(--muted-fg);
+  cursor: default;
+}
+
+.inheritance-intent-scope,
+.inheritance-intent-reason {
+  margin: 0.5rem 0 0;
+  color: var(--muted-fg);
+}
+
+.inheritance-intent-reason:empty {
+  display: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   /* Near-zero rather than `none`: keeps transitionend firing for any
      future listener while being imperceptible. */

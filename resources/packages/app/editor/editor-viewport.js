@@ -29,6 +29,7 @@ const viewport = {
 
 const _viewportListeners = [];
 let _viewportInputInstalled = false;
+let _viewportAnimation = null;
 
 /** Register a handler for pan/zoom. Handlers must stay O(1) — these fire hot. */
 function onViewportChanged(cb) {
@@ -53,7 +54,14 @@ function viewportScreenToGraph(sx, sy) {
           y: (sy - viewport.pan.y) / viewport.zoom};
 }
 
+function _cancelViewportAnimation() {
+  if (!_viewportAnimation) return;
+  cancelAnimationFrame(_viewportAnimation.frame);
+  _viewportAnimation = null;
+}
+
 function setViewportPan(x, y) {
+  _cancelViewportAnimation();
   viewport.pan.x = x;
   viewport.pan.y = y;
   _notifyViewportChanged();
@@ -61,6 +69,7 @@ function setViewportPan(x, y) {
 
 /** Set both at once, without an anchor point. Used by fit-to-content. */
 function setViewportTransform(zoom, panX, panY) {
+  _cancelViewportAnimation();
   viewport.zoom = clampZoom(zoom);
   viewport.pan.x = panX;
   viewport.pan.y = panY;
@@ -81,6 +90,7 @@ function _startsOnGraphLayer(e) {
  * the cursor rather than to the corner.
  */
 function setViewportZoom(level, screenPoint) {
+  _cancelViewportAnimation();
   const next = clampZoom(level);
   const anchor = screenPoint || viewportCentreScreen();
   const g = viewportScreenToGraph(anchor.x, anchor.y);
@@ -164,6 +174,7 @@ function installViewportInput() {
     // an edge belongs to that element — cytoscape drew those on its canvas, so
     // its own hit-test kept them apart; ours is the DOM tree.
     if (e.button !== 0 || !viewport.userPanningEnabled || _startsOnGraphLayer(e)) return;
+    _cancelViewportAnimation();
     panning = true;
     lastX = e.clientX;
     lastY = e.clientY;
@@ -195,10 +206,12 @@ function installViewportInput() {
     // drag on a card belongs to the card.
     if (e.touches.length === 1 && _startsOnGraphLayer(e)) return;
     if (e.touches.length === 1) {
+      _cancelViewportAnimation();
       panning = true;
       lastX = e.touches[0].clientX;
       lastY = e.touches[0].clientY;
     } else if (e.touches.length === 2) {
+      _cancelViewportAnimation();
       panning = false;
       pinchDistance = _touchDistance(e.touches);
       pinchZoom = viewport.zoom;
@@ -234,19 +247,34 @@ function installViewportInput() {
  * "go to root"; cytoscape's `cy.animate({center})` did this.
  */
 function animateViewportTo(graphPoint, durationMs) {
+  _cancelViewportAnimation();
+  const centre = viewportCentreScreen();
   const target = {
-    x: viewportCentreScreen().x - graphPoint.x * viewport.zoom,
-    y: viewportCentreScreen().y - graphPoint.y * viewport.zoom,
+    x: centre.x - graphPoint.x * viewport.zoom,
+    y: centre.y - graphPoint.y * viewport.zoom,
   };
+  const reducedMotion = typeof matchMedia === 'function'
+    && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reducedMotion || !Number.isFinite(durationMs) || durationMs <= 0) {
+    setViewportPan(target.x, target.y);
+    return;
+  }
   const from = {x: viewport.pan.x, y: viewport.pan.y};
   const start = performance.now();
+  const motion = {frame: null};
+  _viewportAnimation = motion;
   const step = (now) => {
-    const t = Math.min(1, (now - start) / durationMs);
-    // ease-out, matching the node animations
+    if (_viewportAnimation !== motion) return;
+    const t = Math.min(1, Math.max(0, (now - start) / durationMs));
+    // Internal frame writes keep this motion alive; public setters cancel it.
     const k = 1 - (1 - t) ** 3;
-    setViewportPan(from.x + (target.x - from.x) * k,
-                   from.y + (target.y - from.y) * k);
-    if (t < 1) requestAnimationFrame(step);
+    viewport.pan.x = from.x + (target.x - from.x) * k;
+    viewport.pan.y = from.y + (target.y - from.y) * k;
+    _notifyViewportChanged();
+    // A listener may have started another motion or handled a user gesture.
+    if (_viewportAnimation !== motion) return;
+    if (t < 1) motion.frame = requestAnimationFrame(step);
+    else _viewportAnimation = null;
   };
-  requestAnimationFrame(step);
+  motion.frame = requestAnimationFrame(step);
 }

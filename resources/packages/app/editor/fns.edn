@@ -146,6 +146,8 @@
                   "packages/app/editor/editor-edit-modes-flags.js"
                   "packages/app/editor/editor-edit-modes-wrap.js"
                   "packages/app/editor/editor-edit-modes-type.js"
+                  "packages/app/editor/editor-inheritance-api.js"
+                  "packages/app/editor/editor-inheritance-intent.js"
                   "packages/app/editor/editor-edit-reparent.js"
                   "packages/app/editor/editor-execute-result.js"
                   ;; Canvas path-highlight for traced runs (Debug P2) —

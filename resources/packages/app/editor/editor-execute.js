@@ -459,12 +459,14 @@ async function gdMountRunPane(fnId) {
   el.className = 'execute-popover gd-insp-run';
   el.setAttribute('role', 'form');
   el.setAttribute('aria-label', 'Run function');
-  // Keyboard: Enter (outside a textarea, where it inserts a newline)
-  // triggers Run when the button is enabled. The pane is rebuilt per
+  // Keyboard: Enter in a text/number input triggers Run when enabled.
+  // Other controls keep their native keyboard activation. The pane is rebuilt per
   // mount, so binding here cannot stack stale listeners.
   el.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter') return;
-    if (e.target?.tagName === 'TEXTAREA' || e.target?.closest?.('summary')) return;
+    if (e.target?.tagName !== 'INPUT') return;
+    const type = e.target.type || e.target.getAttribute('type') || 'text';
+    if (!['text', 'number', 'password', 'email', 'search', 'tel', 'url'].includes(type)) return;
     const runBtn = el.querySelector('.execute-run-btn');
     if (!runBtn || runBtn.disabled) return;
     e.preventDefault();

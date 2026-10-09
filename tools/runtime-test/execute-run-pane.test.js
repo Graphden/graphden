@@ -150,12 +150,18 @@ function boot({ effects = false } = {}) {
     const child = t.doc.createElement('span');
     summary.appendChild(child);
     pane.appendChild(summary);
-    for (const target of [summary, child]) {
+    const nativeControls = ['button', 'a', 'select', 'textarea'].map(tag => t.doc.createElement(tag));
+    for (const type of ['checkbox', 'radio', 'color', 'range']) {
+      const control = t.doc.createElement('input');
+      control.setAttribute('type', type);
+      nativeControls.push(control);
+    }
+    for (const target of [summary, child, ...nativeControls]) {
       let prevented = false;
       pane.dispatch('keydown', {key: 'Enter', target, preventDefault() { prevented = true; }});
       await t.flush();
-      assert(!prevented, 'summary Enter preserves browser default');
-      assert(t.posts.length === 0, 'summary Enter never submits a run');
+      assert(!prevented, 'native control Enter preserves browser default');
+      assert(t.posts.length === 0, 'native control Enter never submits a run');
     }
     const input = t.doc.createElement('input');
     pane.appendChild(input);

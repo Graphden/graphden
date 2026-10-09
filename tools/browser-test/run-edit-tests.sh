@@ -263,7 +263,10 @@ SUITE_START=$SECONDS
 #
 # Prints "<fns> <namespaces> <branches>"; "-1 -1 -1" when any read failed.
 SAMPLE_DIR="$(mktemp -d /tmp/e2e-sample.XXXXXX)"
-trap 'rm -rf "$SAMPLE_DIR"' EXIT
+COUNTER_SAMPLER_PID=""
+trap 'stop_counter_sampler; rm -rf "$SAMPLE_DIR"' EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
 graph_counts() {
   if curl -fsS --max-time 30 -H "Authorization: Bearer ${AUTH_TOKEN:-}" \
           -o "$SAMPLE_DIR/index.json" "$URL/api/graph/entities?scope=index" 2>/dev/null \
@@ -294,9 +297,9 @@ print(len(d.get("fns") or []), len(d.get("namespaces") or []), len(live))
 #
 # /metrics carries `counters` now. Sample it around each file and print the
 # delta, so a full-clear sitting next to a failure becomes a fact instead of a
-# theory. Costs one HTTP GET per file.
+# theory. During an attempt, sample every 10 seconds with bounded GETs.
 executor_counters() {
-  curl -fsS -H "Authorization: Bearer ${AUTH_TOKEN:-}" "$URL/metrics" 2>/dev/null \
+  curl -fsS --max-time 5 -H "Authorization: Bearer ${AUTH_TOKEN:-}" "$URL/metrics" 2>/dev/null \
     | python3 -c 'import sys,json; print(json.dumps((json.load(sys.stdin) or {}).get("counters") or {}, sort_keys=True))' \
        2>/dev/null || echo '{}'
 }
@@ -335,15 +338,48 @@ print(1 if any(k in a and a[k] < b[k] for k in b) else 0)
 # one executor event known to stall a request long enough to time a wait out
 # (a full-clear makes the next request recompile the whole graph — 49.8 s at
 # 4137 fns); delta recompiles are routine and small. Prints `1` or `0`.
+# FULL rebuilds explain a failure only when observed near that failure.
+# An early fixture compilation must not forgive a later cleanup/UI defect.
 counters_full_rebuild() {
   python3 -c '
 import sys, json
-b = json.loads(sys.argv[1] or "{}")
-a = json.loads(sys.argv[2] or "{}")
+samples = [json.loads(line) for line in open(sys.argv[1])]
+cutoff = float(sys.argv[2]) - 60
 keys = ("registry/invalidate-full", "registry/rebuild", "registry/delta-fell-back-to-rebuild")
-restarted = any(k in a and a[k] < b[k] for k in b)
-print(1 if restarted or any(a.get(k, 0) > b.get(k, 0) for k in keys) else 0)
+print(1 if any(b[0] >= cutoff and b[1] and a[1] and any(a[1].get(k, 0) > b[1].get(k, 0) for k in keys)
+               for b, a in zip(samples, samples[1:])) else 0)
 ' "$1" "$2" 2>/dev/null || echo 0
+}
+
+counter_sample() {
+  COUNTER_SAMPLE_COUNTERS="$(executor_counters)"
+  printf '[%s,%s]\n' "$(date +%s)" "$COUNTER_SAMPLE_COUNTERS" >> "$COUNTER_TRACE"
+}
+
+start_counter_sampler() {
+  COUNTER_TRACE="$SAMPLE_DIR/attempt-counters.jsonl"
+  printf '[%s,%s]\n' "$(date +%s)" "$CTR_ATTEMPT" > "$COUNTER_TRACE"
+  chmod 600 "$COUNTER_TRACE"
+  (
+    trap - EXIT
+    pause_pid=""
+    trap '[ -z "$pause_pid" ] || kill "$pause_pid" 2>/dev/null; exit 0' TERM INT
+    while :; do
+      sleep 10 & pause_pid=$!
+      wait "$pause_pid" || exit 0
+      pause_pid=""
+      counter_sample
+    done
+  ) &
+  COUNTER_SAMPLER_PID=$!
+}
+
+stop_counter_sampler() {
+  if [ -n "$COUNTER_SAMPLER_PID" ]; then
+    kill "$COUNTER_SAMPLER_PID" 2>/dev/null || true
+    wait "$COUNTER_SAMPLER_PID" 2>/dev/null || true
+    COUNTER_SAMPLER_PID=""
+  fi
 }
 
 # Is the HOST starving the stack right now? Empty when not; otherwise what it
@@ -534,9 +570,11 @@ for f in $FILES; do
     attempt_out="$(mktemp)"
     GRAPHDEN_TOUR_AUDIT="$AUDIT_ROOT/${f%.test.js}.attempt$attempt"
     export GRAPHDEN_TOUR_AUDIT
+    start_counter_sampler
     ATTEMPT_START=$SECONDS
     if timeout -k 5 "${PER_TEST_TIMEOUT:-300}" node "$f" >"$attempt_out" 2>&1; then
       judged_secs=$((SECONDS - ATTEMPT_START))
+      stop_counter_sampler
       cat "$attempt_out"; rm -f "$attempt_out"
       passed=1
       [ -d "$GRAPHDEN_TOUR_AUDIT" ] && AUDIT_DIRS="$AUDIT_DIRS $GRAPHDEN_TOUR_AUDIT"
@@ -547,14 +585,18 @@ for f in $FILES; do
       # with no else, masking a real 124/137 timeout.
       rc=$?
       a_secs=$((SECONDS - ATTEMPT_START))
+      stop_counter_sampler
+      counter_sample
+      CTR_FAILURE="$COUNTER_SAMPLE_COUNTERS"
       if [ -z "$judged_secs" ] || [ "$a_secs" -lt "$judged_secs" ]; then judged_secs=$a_secs; fi
       cat "$attempt_out"
       if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then is_timeout=1; fi
-      # Strict-flake TRIAGE. Three environment signatures, probed at the
+      # Strict-flake TRIAGE. Environment signatures, probed at the
       # moment of failure; anything else is a REAL flake candidate:
       #   - compiled-path probe DEAD → unavailability window (a request-
       #     path recompile parks the worker pool while /health stays 200);
-      #   - the registry did a FULL rebuild during this attempt → a request
+      #   - executor counters reset during this attempt → server restart;
+      #   - the registry did a FULL rebuild near this failure → a request
       #     queued behind the recompile (reads serve — the probe passes —
       #     while a write waits on the compile permit; measured: the same
       #     publish is >60s in-sweep and 4-5s solo, 8/8);
@@ -572,7 +614,9 @@ for f in $FILES; do
       starved="$(host_starved)"
       if ! probe_compiled_path; then
         echo "  (probe: compiled path DEAD at failure time — SERVER WINDOW, not counted strict)" >&2
-      elif [ "$(counters_full_rebuild "$CTR_ATTEMPT" "$(executor_counters)")" = 1 ]; then
+      elif [ "$(counters_restarted "$CTR_ATTEMPT" "$CTR_FAILURE")" = 1 ]; then
+        echo "  (executor counters reset during this attempt — SERVER RESTART, not counted strict)" >&2
+      elif [ "$(counters_full_rebuild "$COUNTER_TRACE" "$(date +%s)")" = 1 ]; then
         echo "  ($shape-shaped failure during a FULL registry rebuild — stalled behind the recompile, not counted strict)" >&2
       elif [ -n "$starved" ]; then
         echo "  ($shape-shaped failure on a starved host ($starved) — not counted strict)" >&2

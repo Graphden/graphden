@@ -43,6 +43,9 @@ step="\${plan[$((n-1))]:-\${plan[\${#plan[@]}-1]}}"
 case "$step" in
   pass) echo "  ✓ ok"; exit 0 ;;
   fail:*) echo "  ✗ \${step#fail:}" >&2; exit 1 ;;
+  rebuildfail:*) echo 1 > "$STUB_STATE/rebuilds"; echo 300 > "$STUB_STATE/clock"; echo "  ✗ late cleanup" >&2; exit 1 ;;
+  recentfail:*) echo 1 > "$STUB_STATE/rebuilds"; echo 140 > "$STUB_STATE/clock"; echo "  ✗ compilation window" >&2; exit 1 ;;
+  restartfail:*) echo 0 > "$STUB_STATE/rebuilds"; echo "  ✗ server restart" >&2; exit 1 ;;
   envfail:*) touch "$STUB_STATE/probe-dead-once"; echo "  ✗ \${step#envfail:}" >&2; exit 1 ;;
 esac
 `;
@@ -59,7 +62,9 @@ function runSuite(tests, env = {}) {
   for (const [name, plan] of Object.entries(tests)) stubTest(dir, name, plan);
   const stub = (n, body) => fs.writeFileSync(path.join(bin, n), '#!/usr/bin/env bash\n' + body, { mode: 0o755 });
   stub('node', 'exec bash "$@"\n');
-  stub('sleep', 'exit 0\n');
+  stub('sleep', '/bin/sleep 0.05\n');
+  stub('date', 'cat "$STUB_STATE/clock" 2>/dev/null || echo 100\n');
+  if (env.STUB_RESTART) fs.writeFileSync(path.join(state, 'rebuilds'), '2');
   stub('docker', 'exit 1\n');
   // The probe is the `-o /dev/null --max-time 5 …scope=index` call; a stub
   // test failing with `envfail` kills it for exactly one call.
@@ -70,7 +75,7 @@ if [ "$probe" = 1 ] && [ -e "$STUB_STATE/probe-dead-once" ]; then rm -f "$STUB_S
 case "$url" in
   *scope=index*) body='{"fns":[],"namespaces":[]}' ;;
   */api/branches) body='{"branches":[]}' ;;
-  */metrics) body='{"counters":{}}' ;;
+  */metrics) body="{\\"counters\\":{\\"registry/rebuild\\":$(cat "$STUB_STATE/rebuilds" 2>/dev/null || echo 0)}}" ;;
   *) body='{}' ;;
 esac
 if [ -n "$out" ]; then [ "$out" = /dev/null ] || printf '%s' "$body" > "$out"; else printf '%s' "$body"; fi
@@ -181,6 +186,50 @@ console.log(' environment-signed retries and already proven thrash retain their 
   const degraded = runSuite({'edit-a.test.js': ['envfail:window', 'pass'], 'edit-b.test.js': ['envfail:window', 'pass'],
     'edit-c.test.js': ['fail:race', 'pass'], 'edit-d.test.js': ['pass']}, {WTQ_FAIL_FAST: '1'});
   assert(degraded.code === 0 && degraded.attempts('edit-d.test.js') === 1, 'already proven degraded run preserves report-only flake', degraded.out);
+}
+
+console.log(' early rebuild cannot forgive a late failure; recent rebuild and restart remain signed');
+{
+  const late = runSuite({'edit-a.test.js': ['rebuildfail:late', 'pass']});
+  assert(late.code !== 0 && /flaked-passed-on-retry/.test(late.out), 'late cleanup remains a strict real flake', late.out);
+  assert(!/during a FULL registry rebuild/.test(late.out), 'old rebuild is not an environment signature', late.out);
+  const recent = runSuite({'edit-a.test.js': ['recentfail:window', 'pass']});
+  assert(recent.code === 0 && /during a FULL registry rebuild/.test(recent.out), 'recent rebuild remains signed', recent.out);
+  const restart = runSuite({'edit-a.test.js': ['restartfail:restart', 'pass']}, {STUB_RESTART: '1'});
+  assert(restart.code === 0 && /SERVER RESTART/.test(restart.out), 'counter reset remains signed', restart.out);
+}
+console.log(' rebuild window ignores stale samples and unreadable sampling fails closed');
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rebuild-window-'));
+  const trace = path.join(dir, 'trace');
+  const classify = (samples) => {
+    fs.writeFileSync(trace, samples.map((sample) => JSON.stringify(sample)).join('\n'));
+    return spawnSync('bash', ['-c', `eval "$(sed -n '/^counters_full_rebuild() {/,/^}/p' "$1")"; counters_full_rebuild "$2" 300`, 'bash', RUNNER, trace], {encoding: 'utf8'}).stdout.trim();
+  };
+  const c = (n) => ({'registry/rebuild': n});
+  assert(classify([[0,c(0)],[17,c(2)],[58,c(2)],[293,c(2)],[300,c(2)]]) === '0', 'actual early compile / late cleanup chronology stays strict');
+  assert(classify([[240,c(2)],[290,c(3)],[300,c(3)]]) === '1', 'observed increase within the window is signed');
+  assert(classify([[0,c(2)],[300,c(3)]]) === '0', 'a sampling gap cannot establish recent compilation');
+  assert(classify([[250,{}],[300,c(3)]]) === '0', 'unavailable metrics cannot create a rebuild signature');
+  assert(classify([]) === '0', 'missing samples cannot forgive failure');
+  fs.rmSync(dir, {recursive: true, force: true});
+}
+
+console.log(' owned counter sampler is stopped on parent termination');
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sampler-lifecycle-'));
+  const r = spawnSync('bash', ['-c', `
+    eval "$(sed -n '/^counter_sample() {/,/^}/p; /^start_counter_sampler() {/,/^}/p; /^stop_counter_sampler() {/,/^}/p; /^trap /p' "$1")"
+    SAMPLE_DIR="$2" CTR_ATTEMPT='{"registry/rebuild":0}' COUNTER_SAMPLER_PID=""
+    executor_counters() { echo '{"registry/rebuild":0}'; }
+    start_counter_sampler
+    echo "$COUNTER_SAMPLER_PID"
+    kill -TERM "$$"`, 'bash', RUNNER, dir], {encoding: 'utf8', timeout: 2000});
+  const pid = Number(r.stdout.trim());
+  let alive = false;
+  try { process.kill(pid, 0); alive = true; } catch {}
+  assert(r.status === 143 && pid > 0 && !alive && !fs.existsSync(dir), 'TERM tears down owned sampler and private traces');
+  fs.rmSync(dir, {recursive: true, force: true});
 }
 
 console.log(' slow_limit stays under the per-attempt hard timeout');

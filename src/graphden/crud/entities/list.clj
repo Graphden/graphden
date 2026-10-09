@@ -763,7 +763,7 @@
 
 (defn- list-scope-subtree
   "Only the fns transitively reachable from `root-id` via inheritance +
-   binding refs + type overrides + list-item refs + own-slot
+   binding refs + binding resolvers + type overrides + list-item refs + own-slot
    type-fn-ids, plus the rows they own — annotated with whole-graph
    reverse-ref counts (the graph-view delete/edit gate reads them off
    the fn row) and `:type-error-count` where diagnostics exist."

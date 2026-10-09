@@ -1543,16 +1543,21 @@
 
 
 (deftest subtree-resolver-only-chain-respects-viewer
-  (let [[root resolver dependency unrelated] (repeatedly 4 random-uuid)
-        graph {:fns (mapv (fn [id] {:id id :parent-ids []})
-                          [root resolver dependency unrelated])
-               :bindings [{:id :root-binding :fn-id root :resolver-fn-id resolver}
-                          {:id :resolver-binding :fn-id resolver :ref-fn-id dependency}]
-               :list-items [] :fn-slots [] :slots []}
-        subtree (fn [] (#'entity-list/visible-subtree graph root))
+  (let [storage (setup/create-test-storage)
+        c (test-ctx storage)
+        [root resolver dependency unrelated] (repeatedly 4 random-uuid)
+        subtree (fn [] (entities/graph-subtree c root))
         ids (fn [g] (set (map :id (:fns g))))
         previous @entity-list/view-impl-filter]
     (try
+      (doseq [[id name] [[root "resolver-root"] [resolver "resolver-reader"]
+                         [dependency "resolver-dependency"] [unrelated "resolver-unrelated"]]]
+        (sp/create-entity storage :fn {:id id :name name :parent-ids []}))
+      (let [slot (setup/create-slot! storage "resolver-input" :int)]
+        (sp/create-entity storage :binding
+                          {:fn-id root :slot-id (:id slot) :resolver-fn-id resolver})
+        (sp/create-entity storage :binding
+                          {:fn-id resolver :slot-id (:id slot) :ref-fn-id dependency}))
       (reset! entity-list/view-impl-filter nil)
       (is (= #{root resolver dependency} (ids (subtree)))
           "resolver-only wiring reaches its dependencies, excluding unrelated fns")
@@ -1563,4 +1568,6 @@
             "re-walk removes the concealed resolver's dependency")
         (is (= [root] (mapv :fn-id (:bindings visible)))
             "the concealed resolver's wiring stays private"))
-      (finally (reset! entity-list/view-impl-filter previous)))))
+      (finally
+        (reset! entity-list/view-impl-filter previous)
+        (sp/close storage)))))

@@ -102,6 +102,42 @@
    :parent :json-handler
    :args {:data :value-kinds}}
 
+  {:name :_entity-identity-id
+   :parent :parse-uuid
+   :args {:string {:parent :get
+                   :args {:coll :extract-entity-params :key {:value :id-str} :default nil}}}}
+
+  {:name :_entity-identity-row
+   :description "Read one current-branch function through the request's decorated storage. Other entity types and malformed UUIDs never reach storage."
+   :parent :if
+   :args {:test {:parent :and
+                 :args {:values [{:parent :some? :args {:value :_entity-identity-id}}
+                                 {:parent :equal?
+                                  :args {:a {:parent :get
+                                             :args {:coll :extract-entity-params :key {:value :type-str} :default nil}}
+                                         :b "fn"}}]}}
+          :then {:parent :first
+                 :args {:coll {:parent :query-entities
+                               :args {:entity-type "fn"
+                                      :where {:parent :zipmap
+                                              :args {:keys [{:value :id}]
+                                                     :vals [:_entity-identity-id]}}}}}}
+          :else nil}}
+
+  {:name :entity-identity-handler
+   :lambda-params [:request]
+   :description "GET /api/entities/fn/:id — fresh visible function identity only. Returns 404 for absent, deleted, off-branch or unsupported identities; never exports implementation or secret fields."
+   :parent :if
+   :args {:test :_entity-identity-row
+          :then {:parent :json-handler
+                 :args {:data {:parent :select-keys
+                               :args {:m :_entity-identity-row
+                                      :ks [{:value :id} {:value :name} {:value :namespace-id}]}}}}
+          :else {:parent :ring-response
+                 :args {:status {:value 404}
+                        :body "{\"error\":\"function-not-found\"}"
+                        :headers {:value {"Content-Type" "application/json"}}}}}}
+
   ;; --- type-API handlers — parse → validate → branch graphs. `:if`
   ;; over the validation result: the rejection IS the `{:ok false
   ;; :error}` payload (so `:then` reuses the validation ref), the clean

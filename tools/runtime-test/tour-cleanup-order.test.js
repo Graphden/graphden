@@ -55,12 +55,31 @@ test('one owned scoped read changes order but every DELETE retains fresh receipt
   {type: 'fn', id: 'root', name: 'root', 'namespace-id': 'ns',
     creation: 'create-only-manifest', 'cleanup-order-root-id': 'root'}];
   const ctx = fixture({API: {api_graph_entities: '/graph', api_entities_type_id: (_type, id) => '/fn/' + id},
-    authFetch: async url => {
+    authFetch: async (url, options) => {
       reads.push(url);
+      if (url.startsWith('/fn/')) assert.equal(options.cache, 'no-store');
+      if (url.startsWith('/fn/')) return {ok: true, json: async () => entries.find(x => x.id === url.slice(4))};
       return {ok: true, json: async () => ({fns: entries.map(x => ({...x, 'parent-ids': x.id === 'root' ? ['dependency'] : []})), bindings: [], 'list-items': []})};
     }, authMutate: async (_method, url) => { deletes.push(url); return {ok: true}; }});
   assert.equal((await ctx._tourDeleteFns(entries)).length, 0);
   assert.deepEqual(deletes, ['/fn/root', '/fn/dependency']);
   assert.equal(reads.length, 3, 'one ordering read plus each ordinary identity read');
-  assert(reads.every(x => x.startsWith('/graph?scope=subtree&root-id=')));
+  assert.deepEqual(reads, ['/graph?scope=subtree&root-id=root', '/fn/root', '/fn/dependency']);
+});
+
+test('identity read fails closed on denied, mismatched and malformed responses; only 404 means absent', async () => {
+  const entry = {id: 'owned', name: 'same-name', 'namespace-id': null};
+  for (const response of [
+    {ok: false, status: 403},
+    {ok: false, status: 404, json: async () => ({error: 'branch-not-found'})},
+    {ok: true, json: async () => ({...entry, id: 'replacement'})},
+    {ok: true, json: async () => ({...entry, name: 'renamed'})},
+    {ok: true, json: async () => ({...entry, 'namespace-id': 'moved'})},
+    {ok: true, json: async () => null},
+  ]) {
+    const ctx = fixture({API: {api_entities_type_id: () => '/identity'}, authFetch: async () => response});
+    await assert.rejects(ctx._tourFnIdForCreation(entry));
+  }
+  const ctx = fixture({API: {api_entities_type_id: () => '/identity'}, authFetch: async () => ({ok: false, status: 404, json: async () => ({error: 'function-not-found'})})});
+  assert.equal(await ctx._tourFnIdForCreation(entry), null);
 });

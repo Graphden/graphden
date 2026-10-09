@@ -156,3 +156,10 @@ resolved form type. Compact canvas literal previews are server-selected and
 sanitized through the graph-held `_value-inline-repr-registry`; the overlay
 renders the shared 12px slot beside its existing literal label.
 | `editor-tour-services.js` | Exact service creation and persisted queue-publish receipts, live service/message checks, and stop-before-graph cleanup. Lost publish replies remain unresolved; cleanup never sweeps a queue by name. |
+
+## Function identity reads for cleanup
+
+Tutorial cleanup uses the [function identity HTTP API](FUNCTION_IDENTITY_API.md)
+for its fresh UUID/name/namespace receipt check before each ordinary DELETE.
+The separate subtree read used to order dependencies remains an ordering hint
+and cannot authorize deletion of additional identities.

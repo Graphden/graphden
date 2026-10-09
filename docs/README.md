@@ -44,6 +44,7 @@ records — ADRs, RFCs, perf notes, migration ledgers.)
 | Tests (`tests` namespace convention) | [TESTS.md](TESTS.md) |
 | Frontend coverage snapshot (what the e2e suite reaches) | [TESTS_JS_COVERAGE.md](TESTS_JS_COVERAGE.md) |
 | Executing a fn (HTTP API) | [EXECUTION.md](EXECUTION.md) |
+| Reading function identity (HTTP API) | [FUNCTION_IDENTITY_API.md](FUNCTION_IDENTITY_API.md) |
 | Graph constraints | [CONSTRAINTS.md](CONSTRAINTS.md) |
 | Distributing packages | [PACKAGE_DISTRIBUTION.md](PACKAGE_DISTRIBUTION.md) |
 | Marketplace — listings, reviews, themes, keymaps | [MARKETPLACE.md](MARKETPLACE.md) |

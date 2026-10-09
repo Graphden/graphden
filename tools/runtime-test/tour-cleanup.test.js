@@ -57,7 +57,7 @@ function makeCtx(world) {
     calls.push(method + ' ' + url);
     const refusal = w.refuse(method, url, calls);
     if (refusal === 'throw') throw new Error('network down');
-    const status = refusal ? (refusal === true ? 409 : refusal) : 200;
+    let status = refusal ? (refusal === true ? 409 : refusal) : 200;
     let payload = {};
     if (url.startsWith('/api/http-host/')) {
       payload = {ok: !w.publicationFailure};
@@ -67,6 +67,9 @@ function makeCtx(world) {
       payload = w.branches;
     } else if (url === '/api/packages/installed') {
       payload = w.installed;
+    } else if (method === 'GET' && url.startsWith('/api/entities/fn/')) {
+      payload = w.fns.find(fn => fn.id === url.split('/').at(-1));
+      if (!payload && !refusal) { status = 404; payload = {error: 'function-not-found'}; }
     } else if (url.includes('scope=search')) {
       const q = decodeURIComponent(url.split('q=')[1] || '');
       payload = {fns: w.fns.filter((f) => f.name === q)};

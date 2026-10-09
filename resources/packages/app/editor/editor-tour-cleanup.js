@@ -181,13 +181,15 @@ async function _tourFnIdByName(name, options) {
 
 async function _tourFnIdForCreation(created, options) {
   if (!created.id) return _tourFnIdByName(created.name, options);
-  const response = await authFetch(API.api_graph_entities
-    + '?scope=subtree&root-id=' + encodeURIComponent(created.id), options);
+  const response = await authFetch(API.api_entities_type_id('fn', created.id), {...options, cache: 'no-store'});
+  if (response.status === 404) {
+    const failure = await response.json().catch(() => null);
+    if (failure?.error === 'function-not-found') return null;
+    throw new Error('Function lookup failed');
+  }
   if (!response.ok) throw new Error('Function lookup failed');
-  const payload = await response.json();
-  if (!Array.isArray(payload.fns)) throw new Error('Invalid function lookup response');
-  const fn = payload.fns.find(row => row.id === created.id);
-  if (!fn) return null;
+  const fn = await response.json();
+  if (!fn || fn.id !== created.id) throw new Error('Invalid function identity response');
   if (fn.name !== created.name || fn['namespace-id'] !== created['namespace-id']) {
     throw new Error('Created function identity changed; keep it for manual review.');
   }

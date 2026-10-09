@@ -21,6 +21,7 @@
    already wired through `:get-auth-required`, doesn't take query
    params, and renders quickly off `:_list-branches-rows`."
   (:require
+    [cheshire.core :as json]
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.auth.provider :as auth]
@@ -30,7 +31,8 @@
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
-    [graphden.test-infra.shared-bootstrap :as sb]))
+    [graphden.test-infra.shared-bootstrap :as sb]
+    [graphden.versioning.storage.core :as vs]))
 
 
 (def ^:dynamic *router* nil)
@@ -212,3 +214,56 @@
                                  {"authorization" (str "Bearer " test-auth-token)})]
       (is (= 200 (:status resp))
           (str "authed graph dump returns 200; got status=" (:status resp))))))
+
+
+(deftest function-identity-route-preserves-auth-and-narrow-response-test
+  (let [storage (:storage *ctx*)
+        ns-row (sp/create-entity storage :ns {:name (str "identity-" (random-uuid))})
+        row (sp/create-entity storage :fn {:name "same-identity-name"
+                                           :namespace-id (:id ns-row)
+                                           :description "synthetic-private-description"})
+        other (sp/create-entity storage :fn {:name "same-identity-name"})
+        path (str "/api/entities/fn/" (:id row))
+        headers {"authorization" (str "Bearer " test-auth-token)}
+        read-body #(json/parse-string (str (:body (get-with-headers % headers))) true)]
+    (testing "the real HTTP route rejects unauthenticated callers"
+      (is (= 401 (:status (get-with-headers path {}))))
+      (is (= 401 (:status (get-with-headers path {"authorization" "Bearer wrong"})))))
+    (testing "the response names exactly one identity, never its implementation"
+      (is (= (select-keys row [:id :name :namespace-id])
+             (-> (read-body path)
+                 (update :id parse-uuid)
+                 (update :namespace-id parse-uuid))))
+      (is (= (str (:id other)) (:id (read-body (str "/api/entities/fn/" (:id other)))))))
+    (testing "fresh metadata reflects rename and namespace moves"
+      (sp/update-entity storage :fn (:id row) {:name "renamed-identity" :namespace-id nil})
+      (is (= {:id (str (:id row)) :name "renamed-identity" :namespace-id nil} (read-body path))))
+    (testing "unknown, malformed, and non-function identities expose no row"
+      (doseq [uri [(str "/api/entities/fn/" (random-uuid))
+                   "/api/entities/fn/not-a-uuid"
+                   (str "/api/entities/ns/" (:id ns-row))
+                   (str "/api/entities/binding/" (:id row))]]
+        (let [response (get-with-headers uri headers)]
+          (is (= 404 (:status response)))
+          (is (= {:error "function-not-found"}
+                 (json/parse-string (str (:body response)) true))))))
+    (testing "a missing branch cannot be mistaken for a missing function"
+      (let [response (get-with-headers path (assoc headers "x-graphden-branch" (str (random-uuid))))]
+        (is (= 400 (:status response)))
+        (is (not= {:error "function-not-found"}
+                  (json/parse-string (str (:body response)) true)))))
+    (sp/delete-entity storage :fn (:id row))
+    (is (= 404 (:status (get-with-headers path headers))))))
+
+
+(deftest function-identity-route-is-branch-visible-test
+  (let [storage (:storage *ctx*)
+        branch (vs/create-branch! storage (str "identity-branch-" (random-uuid)))
+        branch-storage (vs/switch-branch storage (:id branch))
+        row (sp/create-entity branch-storage :fn {:name "branch-only-identity" :branch-local? true})
+        path (str "/api/entities/fn/" (:id row))
+        headers {"authorization" (str "Bearer " test-auth-token)}]
+    (is (= 404 (:status (get-with-headers path headers))))
+    (let [response (get-with-headers path (assoc headers "x-graphden-branch" (:name branch)))]
+      (is (= 200 (:status response)))
+      (is (= (str (:id row)) (:id (json/parse-string (str (:body response)) true)))))))

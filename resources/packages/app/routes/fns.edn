@@ -364,8 +364,15 @@
    :parent :post
    :args {:path "/:type" :handler :create-entity-handler}}
 
-  ;; PUT and DELETE both target /:type/:id — combine their method-maps
+  ;; GET, PUT and DELETE target /:type/:id — combine their method-maps
   ;; into one reitit entry so the path is declared exactly once.
+
+  {:name :entity-identity
+   :description "Auth-required GET on /api/entities/:type/:id. Only fn identity metadata is exposed."
+   :parent :_method-map-with-middleware
+   :args {:method "get"
+          :handler :entity-identity-handler
+          :middleware :_middleware-list}}
 
   {:name :entity-update
    :description "Method-data for PUT on `/api/entities/:type/:id` — updates an entity from a form-encoded body. Combined with `:entity-delete` into `:entity-by-id`. Auth-required."
@@ -382,12 +389,12 @@
           :middleware :_middleware-list}}
 
   {:name :_entity-by-id-methods
-   :description "Merged method-data — `{:put {…} :delete {…}}` — for `/api/entities/:type/:id`."
+   :description "Merged method-data — `{:get {…} :put {…} :delete {…}}` — for `/api/entities/:type/:id`."
    :parent :merge
-   :args {:maps [:entity-update :entity-delete]}}
+   :args {:maps [:entity-identity :entity-update :entity-delete]}}
 
   {:name :entity-by-id
-   :description "Multi-method route entry `[\"/:type/:id\" {:put … :delete …}]`. Sits inside `:entity-routes`."
+   :description "Multi-method route entry `[\"/:type/:id\" {:get … :put … :delete …}]`. Sits inside `:entity-routes`."
    :parent :list
    :args {:items ["/:type/:id" :_entity-by-id-methods]}}
 
@@ -397,7 +404,7 @@
    :args {:path "/:type/:id/revive" :handler :revive-entity-handler}}
 
   {:name :entity-routes
-   :description "/api/entities/* sub-group — POST `/:type` (create) and PUT/DELETE `/:type/:id` (update/delete). New methods on /:type/:id go into `:_entity-by-id-methods`; new sub-paths get listed here directly."
+   :description "/api/entities/* sub-group — POST `/:type` (create) and GET/PUT/DELETE `/:type/:id` (identity/update/delete). New methods on /:type/:id go into `:_entity-by-id-methods`; new sub-paths get listed here directly."
    :parent :list
    :args {:items ["/entities" :entity-create :entity-by-id :entity-revive]}}
 
@@ -446,7 +453,7 @@
           :middleware :_middleware-list}}
 
   {:name :_sequence-item-methods
-   :description "Merged method-data — `{:put {…} :delete {…}}` — for `/api/sequence/item/:item-id`."
+   :description "Merged method-data — `{:get {…} :put {…} :delete {…}}` — for `/api/sequence/item/:item-id`."
    :parent :merge
    :args {:maps [:sequence-item-update :sequence-item-remove]}}
 

@@ -17,10 +17,15 @@ const ctx = vm.createContext({
   _tourSessionBranch: () => 'review-inheritance',
   authFetch: async url => {
     calls.push(url);
-    return { ok: responseStatus < 400, status: responseStatus,
-      json: async () => malformed ? {} : ({ fns: rows }) };
+    const identity = url.startsWith('/api/entities/fn/');
+    const row = rows.find(row => row.id === url.split('/').at(-1));
+    const status = identity && !row && responseStatus === 200 ? 404 : responseStatus;
+    return {ok: status < 400, status,
+      json: async () => malformed ? {} : identity
+        ? (status === 404 && responseStatus === 200 ? {error: 'function-not-found'} : row)
+        : {fns: rows}};
   },
-  API: { api_graph_entities: '/api/graph/entities' },
+  API: {api_graph_entities: '/api/graph/entities', api_entities_type_id: (type, id) => '/api/entities/' + type + '/' + id},
 });
 vm.runInContext(read('editor-tour.js'), ctx);
 vm.runInContext(read('editor-tour-checks.js'), ctx);
@@ -50,7 +55,7 @@ assert.equal(saved[0].activeBranch, 'review-inheritance');
   await assert.rejects(ctx._tourFnIdForCreation(created), /identity changed/);
   rows = [{ ...created }];
   assert.equal(await ctx._tourFnIdForCreation(created), created.id);
-  assert(calls.every(url => url.endsWith('scope=subtree&root-id=new-identity')));
+  assert(calls.every(url => url === '/api/entities/fn/new-identity'));
   responseStatus = 403;
   await assert.rejects(ctx._tourFnIdForCreation(created), /lookup failed/);
   assert.equal((await ctx._tourSurvivors([created])).length, 1, 'an inaccessible identity stays in manual review');
@@ -58,7 +63,7 @@ assert.equal(saved[0].activeBranch, 'review-inheritance');
   await assert.rejects(ctx._tourFnIdForCreation(created), /lookup failed/, 'missing branch is not missing function');
   responseStatus = 200;
   malformed = true;
-  await assert.rejects(ctx._tourFnIdForCreation(created), /Invalid function lookup/);
+  await assert.rejects(ctx._tourFnIdForCreation(created), /Invalid function identity/);
   malformed = false;
 
   ctx.lookups = { fnMap: new Map([

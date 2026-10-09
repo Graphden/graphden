@@ -342,13 +342,23 @@ async function openExecutePopoverForCard(page, fnId) {
       assert(await page.locator('.path-view-panel').count() === 0,
         'second Escape clears the path after the value popup closes');
       await page.evaluate(id => openTraceView(id), run['execution-id']);
-      const details = page.locator('.trace-view-panel .trace-value:not([open])').first();
+      const details = page.locator('.trace-view-panel .trace-row[data-fn-id="' + probeConst.id
+        + '"] .trace-value').first();
+      const initiallyOpen = JSON.stringify(value, null, 2).length <= 80;
+      // Native disclosure regression: both server initial states are valid.
       await details.waitFor();
+      assert(await details.evaluate(element => element.open) === initiallyOpen,
+        'short captured values start open; long values start collapsed');
       await details.locator('summary').focus();
+      if (initiallyOpen) {
+        await page.keyboard.press('Space');
+        assert(!(await details.evaluate(element => element.open)), 'Space closes initially open value details');
+      }
       await page.keyboard.press('Enter');
       assert(await details.evaluate(element => element.open), 'Enter opens native value details without row interception');
       await page.keyboard.press('Space');
       assert(!(await details.evaluate(element => element.open)), 'Space closes native value details');
+      // End native disclosure regression.
       await page.keyboard.press('Escape');
     }
 

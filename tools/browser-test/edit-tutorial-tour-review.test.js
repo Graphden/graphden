@@ -12,7 +12,7 @@
 const {chromium} = require('playwright');
 const {assert, newContext, api} = require('./edit-test-helpers');
 const {
-  NS_NAME, FN_NAME, hardCleanup, waitTourTitle, clickTourButton,
+  NS_NAME, FN_NAME, hardCleanup, waitTourTitle, settleTourRing, clickTourButton,
   filterAndSelect, extendViaRowActions, bindFirstPlaceholder,
   pickIncompatFnRef, pickAnyway, removeUseSiteBinding, waitClickable,
   createBranchViaChip, switchBranchViaChip, editBoundValue, runViaRowActions,
@@ -128,6 +128,9 @@ const {
     // the same function's ordinary comment action before answering.
     await page.click('#gd-diff-insp .gd-diff-insp-head .branch-diff-comment-btn');
     await page.fill(thread + ' .branch-comment-input', 'It stays at 2 in this proposal.');
+    // The composer appears after the title; let the real ring be recorded
+    // before posting reloads the thread and removes its target again.
+    await settleTourRing(page, 20000);
     await page.click(thread + ' .branch-comment-send');
     await waitTourTitle(page, 'Return to approval', 150000);
     await exitBranchCompare(page);

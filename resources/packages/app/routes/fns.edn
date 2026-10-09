@@ -453,7 +453,7 @@
           :middleware :_middleware-list}}
 
   {:name :_sequence-item-methods
-   :description "Merged method-data — `{:get {…} :put {…} :delete {…}}` — for `/api/sequence/item/:item-id`."
+   :description "Merged method-data — `{:put {…} :delete {…}}` — for `/api/sequence/item/:item-id`."
    :parent :merge
    :args {:maps [:sequence-item-update :sequence-item-remove]}}
 

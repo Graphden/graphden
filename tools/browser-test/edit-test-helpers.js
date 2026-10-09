@@ -644,6 +644,7 @@ function coreHttpRequest(method, url, headers, body, signal) {
         resolve({
           ok: res.statusCode >= 200 && res.statusCode < 300,
           status: res.statusCode,
+          headers: new Headers(res.headers),
           text: async () => txt,
           json: async () => JSON.parse(txt),
         });

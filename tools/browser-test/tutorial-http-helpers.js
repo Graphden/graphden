@@ -6,23 +6,40 @@ const {
   bindPlaceholderOn, openRowActionsFor,
 } = require('./tutorial-tour-helpers');
 
-function trackPublications(page) {
-  const ids = new Set();
+function trackPublications(page, {requestFactory = options => require('playwright').request.newContext(options)} = {}) {
+  const receipts = new Map();
+  const allowedHeaders = new Set(['authorization', 'cookie', 'x-graphden-org',
+    'x-graphden-branch', 'x-csrf-token']);
   const record = request => {
-    if (request.method() !== 'POST' || new URL(request.url()).pathname !== '/api/http-host') return;
+    const url = new URL(request.url());
+    if (request.method() !== 'POST' || url.pathname !== '/api/http-host') return;
     const id = request.postDataJSON()?.['create-id'];
-    if (id) ids.add(id);
+    if (!id || receipts.has(id)) return;
+    // Capture the actual creation principal/route before any return navigation.
+    // Keep credentials only in memory; an isolated transport cannot inherit a
+    // later browser account's cookies or depend on its transient JS realm.
+    receipts.set(id, request.allHeaders().then(all => ({id, origin: url.origin,
+      headers: Object.fromEntries(Object.entries(all).filter(([name]) => allowedHeaders.has(name.toLowerCase())))
+    })));
   };
   page.on('request', record);
   return async () => {
     page.off('request', record);
-    for (const id of ids) {
-      const removed = await page.evaluate(async exactId => {
-        const r = await window.authFetch('/api/http-host/' + encodeURIComponent(exactId), {method: 'DELETE'});
-        const body = await r.json();
-        return r.ok && body.ok === true;
-      }, id);
-      assert(removed, 'exact publication cleanup succeeded: ' + id);
+    for (const pending of receipts.values()) {
+      const {id, origin, headers} = await pending;
+      assert(headers.authorization || headers.cookie, 'publication cleanup retains its creation authentication');
+      const {ignoreHTTPSErrors} = require('./handler-preview-test-options').handlerPreviewTestOptions();
+      const transport = await requestFactory({extraHTTPHeaders: headers,
+        storageState: {cookies: [], origins: []}, ignoreHTTPSErrors: !!ignoreHTTPSErrors});
+      try {
+        const removed = await transport.delete(origin + '/api/http-host/' + encodeURIComponent(id));
+        const body = await removed.json();
+        assert(removed.ok() && body.ok === true, 'exact publication cleanup succeeded: ' + id);
+        const response = await transport.get(origin + '/api/http-host');
+        const after = await response.json();
+        assert(response.ok() && after.ok === true && Array.isArray(after.publications)
+          && !after.publications.some(row => row.id === id), 'exact publication absence confirmed: ' + id);
+      } finally { await transport.dispose(); }
     }
   };
 }

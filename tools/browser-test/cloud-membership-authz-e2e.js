@@ -11,6 +11,7 @@
 const {chromium} = require('playwright');
 const {execFileSync} = require('node:child_process');
 const fs = require('node:fs');
+const {reportFailure, errorKind, status} = require('./safe-diagnostics');
 
 const BASE = process.env.GRAPHDEN_URL || '';
 const OWNER_EMAIL = process.env.GRAPHDEN_ORG_EMAIL || '';
@@ -34,7 +35,7 @@ function assert(condition, message) {
 
 function assertStatus(result, expected, label) {
   assert(result.status === expected,
-    label + ' → HTTP ' + result.status + (result.text ? ': ' + result.text.slice(0, 120) : ''));
+    label + ' → HTTP ' + status(result.status));
 }
 
 function form(values) {
@@ -69,7 +70,7 @@ async function jsonRequest(page, method, path, body) {
 async function login(page, email, password) {
   await page.goto(BASE + '/login', {waitUntil: 'domcontentloaded'});
   const result = await jsonRequest(page, 'POST', '/auth/login', {email, password});
-  assertStatus(result, 200, 'browser session login for ' + email);
+  assertStatus(result, 200, 'browser session login');
 }
 
 async function createEntity(page, type, values) {
@@ -345,11 +346,8 @@ async function runUi(page, fnId, fnName) {
     // unique fn/ns/grant fixture rows created above; account rows are
     // intentionally retained on the local gdcloud volume for auditability.
     await memberContext.close().catch(() => {});
-    await cleanup(ownerPage, fixture).catch((error) => console.log('  cleanup note:', error.message));
+    await cleanup(ownerPage, fixture).catch((error) => console.log('  cleanup note:', errorKind(error)));
     await ownerContext.close().catch(() => {});
     await browser.close().catch(() => {});
   }
-})().catch((error) => {
-  console.error(error && error.stack ? error.stack : String(error));
-  process.exitCode = 1;
-});
+})().catch(reportFailure);

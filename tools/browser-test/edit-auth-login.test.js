@@ -22,6 +22,7 @@
 
 const {chromium} = require('playwright');
 const {assert, AUTH, BASE} = require('./edit-test-helpers');
+const {installDiagnostics, reportFailure} = require('./safe-diagnostics');
 
 
 async function freshContext() {
@@ -31,7 +32,7 @@ async function freshContext() {
   const ctx = await browser.newContext({viewport: {width: 1400, height: 900}});
   // NO password seeded — we want the locked initial state.
   const page = await ctx.newPage();
-  page.on('pageerror', (e) => console.log('  [pageerror]', e.message));
+  installDiagnostics(page);
   await page.goto(BASE + '/#const');
   await page.waitForSelector('#auth-lock-btn', {timeout: 10000});
   // Wait for the BOOT to settle before normalizing state: on an auth-active
@@ -70,7 +71,7 @@ async function freshContext() {
   }
   const {browser, page} = await freshContext();
   page.on('dialog', (d) => {
-    console.log('  [dialog]:', d.message().slice(0, 200));
+    console.log('  [dialog] accepted');
     d.accept();
   });
   console.log('edit-auth-login — lock click / submit / reject / sign-out');
@@ -235,9 +236,8 @@ async function freshContext() {
 
     console.log('✓ auth login flow verified — lock/popover/reject/unlock/sign-out');
   } catch (e) {
-    process.exitCode = 1;
-    console.error('✗ test failed:', e.message);
+    reportFailure(e);
   } finally {
     await browser.close();
   }
-})();
+})().catch(reportFailure);

@@ -39,8 +39,8 @@
    credentials, network or Docker. Never includes arbitrary source strings."
   [{:keys [base-url send-http getenv dotenv-exists? revision]}]
   (let [uri (try (java.net.URI. base-url) (catch Exception _ nil))]
-    (when-not (and uri (#{"http" "https"} (.getScheme uri)) (.getHost uri)
-                   (nil? (.getUserInfo uri)) (nil? (.getQuery uri)) (nil? (.getFragment uri)))
+    (when-not (and uri (#{"http" "https"} (java.net.URI/.getScheme uri)) (java.net.URI/.getHost uri)
+                   (nil? (java.net.URI/.getUserInfo uri)) (nil? (java.net.URI/.getQuery uri)) (nil? (java.net.URI/.getFragment uri)))
       (throw (ex-info "Support URL requires HTTP(S) without credentials, query or fragment" {})))
     (let [base (str/replace base-url #"/$" "")]
       {:format 1

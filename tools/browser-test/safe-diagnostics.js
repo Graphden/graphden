@@ -26,6 +26,10 @@ function httpFailure(verb, url, code, kind = 'Error') {
   return new Error(method(verb) + ' ' + route(url) + ': HTTP ' + status(code)
     + ' (' + errorKind({name: kind}) + ')');
 }
+function reportFailure(error) {
+  console.error('✗ test failed:', errorKind(error));
+  process.exitCode = 1;
+}
 function installDiagnostics(page) {
   const counts = {pageErrors: 0, crashes: 0, consoleErrors: 0, consoleWarnings: 0, requestFailures: 0, httpFailures: 0};
   page.on('pageerror', e => { counts.pageErrors++; console.log('  [pageerror]', errorKind(e)); });
@@ -162,4 +166,4 @@ function installDiagnostics(page) {
   });
   return counts;
 }
-module.exports = {installDiagnostics, httpFailure, errorKind, networkKind, route, method, status};
+module.exports = {reportFailure, installDiagnostics, httpFailure, errorKind, networkKind, route, method, status};

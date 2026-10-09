@@ -128,7 +128,16 @@ async function switchToOwnedBranch(page, branch) {
     await switchToOwnedBranch(page, sourceBranch);
     await filterAndSelect(page, 'branch-demo', 'branch-demo');
     await waitTourTitle(page, 'Make a later edit', 150000);
-    await page.locator('.node-overlay[data-fn-name="branch-demo"] .arg-value-editable').click();
+    // Exact argument overlays are siblings of their function card.
+    const valueHandle = await page.waitForFunction(({id, branch}) => {
+      if (selectedFnId !== id || getCurrentBranchName() !== branch.name) return null;
+      return [...document.querySelectorAll('.arg-value-editable')].find(element => {
+        const overlay = element.closest('.node-overlay');
+        const node = graph.nodes.get(overlay?.dataset.nodeId);
+        return argRowFromNode(node?.data)?.['fn-id'] === id;
+      });
+    }, {id: fnId, branch: sourceBranch}, {timeout: 45000});
+    await valueHandle.asElement().click();
     const editor = page.locator('.arg-value-edit-popover').last();
     await editor.locator('[data-form-field], .arg-value-edit-input').first().fill('second branch version');
     await editor.getByRole('button', {name: 'Save', exact: true}).click();

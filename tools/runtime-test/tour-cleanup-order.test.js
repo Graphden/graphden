@@ -27,6 +27,27 @@ test('cycles and missing data retain exact entries for ordinary retry/refusal', 
     {id: 'b', 'parent-ids': ['a']}], bindings: [], 'list-items': []});
   assert.deepEqual(Array.from(ordered, x => x.id), ['a', 'b']);
 });
+test('saved views and fn-ref adapters share one exact dependent-first cleanup order', () => {
+  const ctx = fixture();
+  const entries = ['second', 'first', 'composed', 'adapter-first', 'adapter-second'].map(id => ({id}));
+  const graph = {fns: entries, bindings: [
+    {id: 'list', 'fn-id': 'composed'},
+    {id: 'first-ref', 'fn-id': 'adapter-first', 'ref-fn-id': 'first', 'type-override-fn-id': 'fn-ref-type'},
+    {id: 'second-ref', 'fn-id': 'adapter-second', 'ref-fn-id': 'second', 'type-override-fn-id': 'fn-ref-type'},
+    {id: 'direct', 'fn-id': 'second', 'ref-fn-id': 'first'},
+    {id: 'unrelated-literal', 'fn-id': 'first', value: 'composed'},
+  ], 'list-items': [
+    {'binding-id': 'list', 'ref-fn-id': 'adapter-first'},
+    {'binding-id': 'list', 'ref-fn-id': 'adapter-second'},
+  ]};
+  const ordered = Array.from(ctx._tourOrderFnDeletes(entries, graph), entry => entry.id);
+  for (const [consumer, target] of [['composed', 'adapter-first'], ['composed', 'adapter-second'],
+    ['adapter-first', 'first'], ['adapter-second', 'second'], ['second', 'first']]) {
+    assert(ordered.indexOf(consumer) < ordered.indexOf(target));
+  }
+  assert.deepEqual(new Set(ordered), new Set(entries.map(entry => entry.id)));
+  assert.equal(ordered[0], 'composed', 'an arbitrary matching literal is not a fn-ref edge');
+});
 test('one owned scoped read changes order but every DELETE retains fresh receipt identity guards', async () => {
   const reads = [], deletes = [];
   const entries = [{type: 'fn', id: 'dependency', name: 'dependency', 'namespace-id': 'ns',

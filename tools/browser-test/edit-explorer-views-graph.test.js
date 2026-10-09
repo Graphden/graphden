@@ -278,14 +278,27 @@ const VIEW_D = VIEW_C + '-computed';
     await page.screenshot({path: '/tmp/edit-explorer-views-graph-fail.png'}).catch(() => {});
   } finally {
     for (const n of ['e2e-uses-const-probe']) await deleteFnByName(page, n).catch(() => {});
-    for (const id of [...ownedViews].reverse()) {
-      const result = await api(page, 'DELETE', '/api/entities/fn/' + id).catch(error => ({error: error.message}));
-      if (result?.ok === false || result?.error || (result?.status >= 400 && result.status !== 404)) { failed = true; console.log('FAIL: exact owned view cleanup failed'); }
-    }
-    for (const id of ownedAdapters) {
-      const result = await api(page, 'DELETE', '/api/entities/fn/' + id).catch(error => ({error: error.message}));
-      if (result?.ok === false || result?.error || (result?.status >= 400 && result.status !== 404)) { failed = true; console.log('FAIL: owned view adapter cleanup failed'); }
-    }
+    try {
+      const entries = [...new Set([...ownedViews, ...ownedAdapters])].map(id => ({id}));
+      const graphs = await Promise.all([...ownedViews].map(id => api(page, 'GET',
+        '/api/graph/entities?scope=subtree&root-id=' + encodeURIComponent(id))));
+      assert(graphs.every(graph => Array.isArray(graph.fns) && Array.isArray(graph.bindings)
+        && Array.isArray(graph['list-items'])), 'owned cleanup dependency reads succeeded');
+      const graph = Object.fromEntries(['fns', 'bindings', 'list-items']
+        .map(key => [key, graphs.flatMap(part => part[key])]));
+      // Views consume adapters, and those adapters explicitly ref other views.
+      // Ordering hints cannot add an identity to the captured ownership set.
+      const ordered = await page.evaluate(({entries, graph}) =>
+        _tourOrderFnDeletes(entries, graph), {entries, graph});
+      assert(ordered.length === entries.length && ordered.every(row => entries.some(entry => entry.id === row.id)),
+        'cleanup retains only exact owned view and adapter receipts');
+      for (const {id} of ordered) {
+        const result = await api(page, 'DELETE', '/api/entities/fn/' + id).catch(error => ({error: error.message}));
+        if (result?.ok === false || result?.error || (result?.status >= 400 && result.status !== 404)) {
+          failed = true; console.log('FAIL: exact owned view/adapter cleanup failed');
+        }
+      }
+    } catch (_) { failed = true; console.log('FAIL: exact owned view cleanup ordering failed'); }
     await page.evaluate(name => gdDeleteView(name), VIEW_C).catch(() => {});
     await page.close().catch(() => {});
     await browser.close();

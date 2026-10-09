@@ -45,7 +45,7 @@ const {
       && created.branch['base-branch-id'], 'fresh fixture branch has a canonical successful POST receipt');
     ownedBranch = created.branch;
     ownedBranches.push({...ownedBranch, type: 'branch'});
-    const lessonUrl = id => BASE + '/?branch=' + encodeURIComponent(ownedBranch.id) + '&tutorial=' + id;
+    const lessonUrl = id => BASE + '/?branch=' + encodeURIComponent(ownedBranch.name) + '&tutorial=' + id;
     // ---------- Lesson 05 — free arguments ----------
     await page.goto(lessonUrl('05'));
     await waitTourTitle(page, 'Free args: the template mechanism', 150000);

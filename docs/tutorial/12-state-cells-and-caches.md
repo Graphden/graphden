@@ -181,5 +181,7 @@ falls back to `:atom` behaviour — fresh each call.
 > (no sign-up), or pick “Interactive tutorial” in the editor's
 > account menu. The tour builds a lighter variant — a list cell plus
 > `:swap-conj`, under its own names — rather than the counter above,
-> and runs it TWICE: one row after the first run, two after the
+> and runs it TWICE. In the Run pane, enter `tick` in the required
+> `value` field, acknowledge the side effects, then click Run again
+> with the same value: one row after the first run, two after the
 > second, with nothing in the graph changed in between.

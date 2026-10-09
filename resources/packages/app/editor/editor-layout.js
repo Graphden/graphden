@@ -204,6 +204,26 @@ function typographyScale() {
   }
 }
 
+// Resolve the same CSS length tokens the overlay uses, including coarse-pointer
+// max() rules. Cache by token value and root typography, not viewport pixels.
+const _overlayCssWidths = new Map();
+function overlayCssWidth(token, fallback) {
+  if (typeof getComputedStyle !== 'function' || !document?.body) return fallback;
+  const root = getComputedStyle(document.documentElement);
+  const raw = root.getPropertyValue(token);
+  const key = [token, raw, root.fontSize].join('|');
+  if (_overlayCssWidths.has(key)) return _overlayCssWidths.get(key);
+  const probe = document.createElement('span');
+  probe.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none';
+  probe.style.width = 'var(' + token + ')';
+  document.body.appendChild(probe);
+  const width = Number.parseFloat(getComputedStyle(probe).width);
+  probe.remove();
+  const measured = Number.isFinite(width) ? width : fallback;
+  _overlayCssWidths.set(key, measured);
+  return measured;
+}
+
 function calculateNodeSize(nodeData) {
   const label = nodeData.label || '';
   const type = nodeData.type;
@@ -240,7 +260,7 @@ function calculateNodeSize(nodeData) {
       ? Math.max(...chipLines.map(line => measureCanvasText(line.text,
         (line.fontSize * argScale) + 'px "SF Mono", Monaco, monospace'))) + 8 + 2 + 4
       : 0;
-    const linkW = Array.isArray(nodeData.sourceChain) && nodeData.sourceChain.length ? 15 * argScale + 4 : 0;
+    const linkW = Array.isArray(nodeData.sourceChain) && nodeData.sourceChain.length ? overlayCssWidth('--icon-size', 15 * argScale) + 4 : 0;
     // The ✎ hover glyph is a `::after` that always takes its width (only
     // its opacity changes) — measure it too, or the closing quote is what
     // the ellipsis eats. 16 = the text's own 8px side padding.

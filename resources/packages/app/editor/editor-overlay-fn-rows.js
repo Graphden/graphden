@@ -343,7 +343,9 @@ function fnRowChrome(isRoot, entity) {
   const run = !!(isRoot && entity && typeof isAuthenticated === 'function' && isAuthenticated());
   const runLabel = '▶ Run';
   const runWidth = run ? Math.ceil(measureCanvasText(runLabel, '11px "SF Mono", Monaco, monospace')) + 12 : 0;
-  return {run, runLabel, rightPadding: 24 + runWidth};
+  const icon = typeof overlayCssWidth === 'function' ? overlayCssWidth('--icon-size', 15) : 15;
+  const pin = typeof overlayCssWidth === 'function' ? overlayCssWidth('--icon-pin-r-1', 6) : 6;
+  return {run, runLabel, rightPadding: icon + pin + 3 + runWidth};
 }
 
 function renderSingleFnRow(line, levelInfo, ctx) {

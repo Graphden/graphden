@@ -3526,7 +3526,7 @@ textarea.value-form-hiccup {
 /* Selected root Run delegates to the Inspector's existing run pane. */
 .fn-run-trigger {
   position: absolute;
-  right: 25px; top: 2px;
+  right: calc(var(--icon-size) + var(--icon-pin-r-1) + 4px); top: 2px;
   padding: 1px 5px;
   font: inherit;
   color: var(--card-fg); background: var(--card-bg);

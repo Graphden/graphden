@@ -73,9 +73,10 @@ console.log('overlay fn Run trigger: MI rendering and selected-root dispatch pas
   f.context.document.body = {classList: {contains: () => false}};
   f.context.DRAG_HANDLE_HEIGHT = 6;
   f.context.expansionState = new Set();
-  f.context.getComputedStyle = () => ({fontSize: '16px'});
+  f.context.getComputedStyle = () => ({fontSize: '16px', getPropertyValue: () => ''});
   vm.runInContext(fs.readFileSync(path.join(__dirname,
     '../../resources/packages/app/editor/editor-layout.js'), 'utf8'), f.context);
+  f.context.overlayCssWidth = (_token, fallback) => fallback;
   const data = {id: 'root', originalFnId: 'root', label: 'web-server', type: 'fn', isRoot: true};
   const withRun = f.context.calculateNodeSize(data).width;
   f.context.isAuthenticated = () => false;
@@ -107,6 +108,9 @@ console.log('overlay fn Run trigger: MI rendering and selected-root dispatch pas
   context.refinementConstraintText = () => null;
   const plain = context.calculateNodeSize(data).width;
   assert(constrained > plain, 'sizing includes the wider rendered refinement line');
+  context.overlayCssWidth = () => 32;
+  assert(context.calculateNodeSize({...data, sourceChain: [{}]}).width >= plain + 36,
+    'touch source-link reserves its actual CSS icon size');
   context.getTypeNarrowingInfo = () => ({baseTypeName: 'long-underlying-type'});
   assert(context.calculateNodeSize(data).width > plain, 'sizing also includes the narrowed base line');
 }

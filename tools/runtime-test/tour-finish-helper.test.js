@@ -7,16 +7,23 @@ const source = fs.readFileSync(require.resolve('../browser-test/tutorial-tour-he
 const body = source.slice(source.indexOf('async function finishAndDelete('), source.indexOf('// Bind the currently-shown placeholder', source.indexOf('async function finishAndDelete(')));
 for (const title of ['Clean up tutorial items?', 'Delete the tutorial branch?']) {
   test('Finish accepts exact cleanup title: ' + title, async () => {
+    const label = title === 'Delete the tutorial branch?' ? 'Delete branch & return' : 'Delete them';
     const events = [];
     let closed = false;
-    const sandbox = {assert: assert.ok, clickTourButton: async (_page, label) => { events.push(label); if (label === 'Delete them') closed = true; return true; }, document: {
+    const sandbox = {assert: assert.ok, clickTourButton: async (_page, label) => { events.push(label); if (label !== 'Finish') closed = true; return true; }, document: {
       querySelector: selector => selector.endsWith('.gd-tour-title') ? {textContent: title} : closed ? null : {},
-      querySelectorAll: () => [{textContent: title.startsWith('Delete') ? 'Delete branch & return' : 'Delete them'}],
+      querySelectorAll: () => [{textContent: label}],
     }};
     const finish = vm.runInNewContext(body + '\nfinishAndDelete', sandbox);
-    await finish({waitForFunction: async fn => assert.equal(fn(), true)});
-    assert.deepEqual(events, ['Finish', 'Delete them']);
+    let closureChecked = false;
+    const page = {evaluate: async fn => fn(), waitForFunction: async fn => {
+      assert.equal(fn(), true);
+      if (closed) closureChecked = true;
+    }};
+    await finish(page);
+    assert.deepEqual(events, ['Finish', label]);
+    assert.equal(closureChecked, true, 'cleanup requires the dialog to close');
     sandbox.document.querySelector = () => ({textContent: 'Lesson finished'});
-    await assert.rejects(finish({waitForFunction: async fn => assert.equal(fn(), true)}));
+    await assert.rejects(finish(page));
   });
 }

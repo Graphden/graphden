@@ -64,6 +64,7 @@
             (push! (:element-fn-id fn-row))
             (doseq [b (get bindings-by-fn fid)]
               (push! (:ref-fn-id b))
+              (push! (:resolver-fn-id b))
               (push! (:type-override-fn-id b))
               (doseq [it (get items-by-binding (:id b))]
                 (push! (:ref-fn-id it))))

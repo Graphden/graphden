@@ -1540,3 +1540,27 @@
     (testing "a dump with no :fns (tree / namespace scope) is a graceful no-op"
       (is (= {:namespaces [] :counts {}}
              (entities/strip-impl-of {:namespaces [] :counts {}} #{"A"}))))))
+
+
+(deftest subtree-resolver-only-chain-respects-viewer
+  (let [[root resolver dependency unrelated] (repeatedly 4 random-uuid)
+        graph {:fns (mapv (fn [id] {:id id :parent-ids []})
+                          [root resolver dependency unrelated])
+               :bindings [{:id :root-binding :fn-id root :resolver-fn-id resolver}
+                          {:id :resolver-binding :fn-id resolver :ref-fn-id dependency}]
+               :list-items [] :fn-slots [] :slots []}
+        subtree (fn [] (#'entity-list/visible-subtree graph root))
+        ids (fn [g] (set (map :id (:fns g))))
+        previous @entity-list/view-impl-filter]
+    (try
+      (reset! entity-list/view-impl-filter nil)
+      (is (= #{root resolver dependency} (ids (subtree)))
+          "resolver-only wiring reaches its dependencies, excluding unrelated fns")
+      (reset! entity-list/view-impl-filter
+              (fn [g] (entities/strip-impl-of g #{resolver})))
+      (let [visible (subtree)]
+        (is (= #{root resolver} (ids visible))
+            "re-walk removes the concealed resolver's dependency")
+        (is (= [root] (mapv :fn-id (:bindings visible)))
+            "the concealed resolver's wiring stays private"))
+      (finally (reset! entity-list/view-impl-filter previous)))))

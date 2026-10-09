@@ -187,7 +187,8 @@ const {
     const drawn = await page.evaluate(() => ({
       rows: Array.from(document.querySelectorAll(
         '.node-overlay[data-fn-name="health"] .ancestor-line[data-level]'))
-        .map((l) => l.textContent.replace(/⋯/g, '').trim()),
+        .map((l) => [...l.childNodes].filter(node => node.nodeType === Node.TEXT_NODE)
+          .map(node => node.textContent).join('').trim()),
       handlerCard: !!document.querySelector('.node-overlay[data-fn-name="_health-handler"]'),
       edges: Array.from(document.querySelectorAll('.edge-label-overlay'))
         .map((e) => e.dataset.argName),

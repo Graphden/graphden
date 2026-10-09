@@ -64,6 +64,7 @@ let _viewTotal = null;          // the server's count before the 500 cap (null =
 let _viewMissing = null;        // {uses:[ids], views:[ids]} — chips naming a deleted fn / view
 let _viewSeq = 0;
 let _sharedViews = null;        // GET /api/views cache: [{id,name,filters}] | null
+let _viewApplySeq = 0;
 
 function _normFilters(raw) {
   const f = gdEmptyFilters();
@@ -335,13 +336,32 @@ function gdClearFilters() {
 }
 
 // Apply a saved filter set (a personal or graph view) as the active set.
+async function _hydrateViewReferenceLabels(filters) {
+  const refs = [...filters.uses, ...filters.views].filter(ref => ref.name === ref.id);
+  if (!refs.length || typeof authFetch !== 'function' || !API.api_graph_entities) return;
+  const names = new Map();
+  await Promise.all([...new Set(refs.map(ref => ref.id))].map(async id => {
+    try {
+      const response = await authFetch(API.api_graph_entities + '?scope=subtree&root-id=' + encodeURIComponent(id));
+      if (!response.ok) return;
+      const rows = await response.json();
+      const fn = rows.fns?.find(row => row.id === id);
+      if (fn) names.set(id, typeof getQualifiedFnName === 'function' ? getQualifiedFnName(fn) : fn.name);
+    } catch (_) { /* Keep the UUID label when its identity cannot be read. */ }
+  }));
+  for (const ref of refs) if (names.get(ref.id)) ref.name = names.get(ref.id);
+}
+
 async function gdApplyView(view) {
   if (view.shared && view.unsupported?.length) {
     if (typeof gdToast === 'function') gdToast('This view has computed filters. Edit its graph to change them.');
     return false;
   }
+  const applySeq = ++_viewApplySeq;
+  const revision = _filterRevision;
   _editingGraphView = null;
   const f = _normFilters(view.filters);
+  await _hydrateViewReferenceLabels(f);
   // A view migrated from a text rule may carry `uses` by NAME — resolve
   // once against the graph and persist the id.
   if (f.uses.some((u) => !u.id) && typeof searchFns === 'function') {
@@ -362,6 +382,7 @@ async function gdApplyView(view) {
       gdWriteViews(gdReadViews().map((v) => (v.name === view.name ? { name: v.name, filters: f } : v)));
     }
   }
+  if (applySeq !== _viewApplySeq || revision !== _filterRevision) return false;
   _filters = f;
   _viewName = view.name;
   _viewId = view.shared ? view.id : null;

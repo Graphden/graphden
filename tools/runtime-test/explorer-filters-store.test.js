@@ -178,6 +178,42 @@ const tick = () => new Promise((r) => setTimeout(r, 5));
     assert(ctx.gdFilterCount() === 3, 'counted: ' + ctx.gdFilterCount());
   });
 
+  await test('graph view UUID labels hydrate outside the lazy fn cache without adopting another identity', async () => {
+    const {ctx, chips} = filtersCtx();
+    const reads = [];
+    ctx.getQualifiedFnName = fn => 'core.logic.' + fn.name;
+    ctx.authFetch = async url => {
+      reads.push(url);
+      const id = new URL(url, 'http://localhost').searchParams.get('root-id');
+      return {ok: true, json: async () => ({fns: id === 'const-id'
+        ? [{id, name: 'const'}] : [{id: 'unrelated-id', name: 'const'}]})};
+    };
+    await ctx.gdApplyView({id: 'view-id', name: 'saved', shared: true, filters: {
+      uses: [{id: 'const-id', name: 'const-id'}, {id: 'missing-id', name: 'missing-id'}],
+      views: [{id: 'const-id', name: 'const-id'}],
+    }});
+    assert(ctx.gdFilters().uses[0].name === 'core.logic.const', 'exact UUID receives its qualified label');
+    assert(ctx.gdFilters().uses[1].name === 'missing-id', 'a different UUID with the same name cannot supply the label');
+    assert(ctx.gdFilters().views[0].name === 'core.logic.const', 'same identity labels both axes');
+    assert(reads.filter(url => url.includes('scope=subtree')).length === 2,
+      'one read per unresolved identity, deduplicated across axes');
+    const labels = chips.children.map(c => c.children.find(x => String(x.className).includes('kind-label')).textContent);
+    assert(labels.includes('uses core.logic.const'), 'reopened graph view displays the readable chip');
+  });
+
+  await test('late reference hydration cannot replace a newer filter draft', async () => {
+    const {ctx} = filtersCtx();
+    let release;
+    ctx.authFetch = async () => ({ok: true, json: () => new Promise(resolve => { release = resolve; })});
+    const applying = ctx.gdApplyView({name: 'old-view', filters: {uses: [{id: 'old-id', name: 'old-id'}]}});
+    await tick();
+    ctx.gdToggleNamespace('new-draft');
+    release({fns: [{id: 'old-id', name: 'old'}]});
+    assert(!(await applying), 'superseded apply is rejected');
+    assert(ctx.gdFilters().namespaces.join() === 'new-draft' && ctx.gdFilters().uses.length === 0,
+      'newer draft remains active');
+  });
+
   await test('a chip naming a deleted fn is marked ⚠ and its accessible name says so', async () => {
     const { ctx, chips } = filtersCtx();
     ctx.gdAddUses({ id: 'gone-1', name: 'old-fn' });

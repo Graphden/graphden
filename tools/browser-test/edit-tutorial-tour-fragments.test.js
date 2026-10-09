@@ -1,4 +1,4 @@
-// Lesson 14 uses real cookie authentication, isolated HTTPS and server expiry.
+// Lessons14/30: actual selfhost availability or real cloud HTTPS walkthrough.
 // No HAR/video/screenshots: capsule addresses are short-lived credentials.
 'use strict';
 const {chromium} = require('playwright');
@@ -23,8 +23,6 @@ const {rootAction, apps, closePopover, mint, remintWithPendingCheck, openPreview
 const {walkLesson30} = require('./tutorial-app-helpers');
 
 (async () => {
-  assert(!!process.env.GRAPHDEN_SESSION_COOKIE, 'native cloud walk requires a real account cookie');
-  assert(!process.env.GRAPHDEN_JS_COVERAGE, 'capsule walk does not record request-bearing artifacts');
   const {browser, page} = await newContext(chromium,
     {...handlerPreviewTestOptions(), boot: false});
   page.on('dialog', dialog => dialog.accept().catch(() => {}));
@@ -38,6 +36,36 @@ const {walkLesson30} = require('./tutorial-app-helpers');
   let failed = false;
   const createdIds = [];
   try {
+    await page.goto(BASE + '/?branch=main');
+    await page.waitForFunction(() => typeof window.openTutorialMenu === 'function'
+      && typeof window.graphdenTenancyActive === 'function');
+    await page.evaluate(async () => { await window.gdAccountsReady; });
+    const profile = await page.evaluate(() => ({
+      tenancy: window.graphdenTenancyActive(), account: !!window.gdAccount?.id,
+    }));
+    if (!profile.tenancy) {
+      stage = 'selfhost lesson availability';
+      await page.evaluate(() => window.openTutorialMenu());
+      for (const id of ['14', '30']) {
+        const row = page.locator('[data-lesson-id="' + id + '"]');
+        await row.waitFor();
+        const start = row.locator('.gd-tour-btn-primary');
+        assert(await start.isVisible(), 'selfhost lesson ' + id + ' remains discoverable');
+        assert(await start.isDisabled(), 'selfhost lesson ' + id + ' cannot start without isolated Apps');
+        const reason = await start.getAttribute('title');
+        assert(/account browser session/.test(reason || '') && /isolated apps domain/.test(reason || '')
+          && /manage-apps/.test(reason || ''), 'selfhost lesson ' + id + ' explains its actual hosting requirements');
+      }
+      assert(errors.length === 0, 'selfhost availability has no uncaught browser errors');
+      // Ordinary selfhost HTTP graph behavior remains covered by native
+      // lesson38 in edit-tutorial-tour-services.test.js. HTML preview/HTMX
+      // execution requires the real account/isolated-origin profile below.
+      console.log('PASS: selfhost lessons14/30 visible, locked and explicit about isolated Apps requirements');
+      return;
+    }
+    assert(profile.account && !!process.env.GRAPHDEN_SESSION_COOKIE,
+      'native cloud walk requires the actual account and real account cookie');
+    assert(!process.env.GRAPHDEN_JS_COVERAGE, 'capsule walk does not record request-bearing artifacts');
     // The Lessons chooser owns sandbox creation; the direct tutorial URL
     // starts in place and cannot prove the branch ownership below.
     await page.goto(BASE + '/?branch=main');

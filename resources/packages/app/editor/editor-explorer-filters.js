@@ -339,17 +339,19 @@ function gdClearFilters() {
 async function _hydrateViewReferenceLabels(filters) {
   const refs = [...filters.uses, ...filters.views].filter(ref => ref.name === ref.id);
   if (!refs.length || typeof authFetch !== 'function' || !API.api_graph_entities) return;
-  const names = new Map();
-  await Promise.all([...new Set(refs.map(ref => ref.id))].map(async id => {
-    try {
-      const response = await authFetch(API.api_graph_entities + '?scope=subtree&root-id=' + encodeURIComponent(id));
-      if (!response.ok) return;
-      const rows = await response.json();
-      const fn = rows.fns?.find(row => row.id === id);
-      if (fn) names.set(id, typeof getQualifiedFnName === 'function' ? getQualifiedFnName(fn) : fn.name);
-    } catch (_) { /* Keep the UUID label when its identity cannot be read. */ }
-  }));
-  for (const ref of refs) if (names.get(ref.id)) ref.name = names.get(ref.id);
+  try {
+    // One light index read supplies all labels; subtree reads would also load
+    // every referenced function's composition, once per unresolved identity.
+    const response = await authFetch(API.api_graph_entities + '?scope=index');
+    if (!response.ok) return;
+    const rows = await response.json();
+    const byId = new Map((rows.fns || []).map(fn => [fn.id, fn]));
+    for (const ref of refs) {
+      const fn = byId.get(ref.id);
+      const name = fn && (typeof getQualifiedFnName === 'function' ? getQualifiedFnName(fn) : fn.name);
+      if (name) ref.name = name;
+    }
+  } catch (_) { /* Keep UUID labels when their identities cannot be read. */ }
 }
 
 async function gdApplyView(view) {

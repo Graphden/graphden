@@ -184,9 +184,9 @@ const tick = () => new Promise((r) => setTimeout(r, 5));
     ctx.getQualifiedFnName = fn => 'core.logic.' + fn.name;
     ctx.authFetch = async url => {
       reads.push(url);
-      const id = new URL(url, 'http://localhost').searchParams.get('root-id');
-      return {ok: true, json: async () => ({fns: id === 'const-id'
-        ? [{id, name: 'const'}] : [{id: 'unrelated-id', name: 'const'}]})};
+      return {ok: true, json: async () => ({fns: [
+        {id: 'const-id', name: 'const'}, {id: 'unrelated-id', name: 'const'},
+      ]})};
     };
     await ctx.gdApplyView({id: 'view-id', name: 'saved', shared: true, filters: {
       uses: [{id: 'const-id', name: 'const-id'}, {id: 'missing-id', name: 'missing-id'}],
@@ -195,8 +195,9 @@ const tick = () => new Promise((r) => setTimeout(r, 5));
     assert(ctx.gdFilters().uses[0].name === 'core.logic.const', 'exact UUID receives its qualified label');
     assert(ctx.gdFilters().uses[1].name === 'missing-id', 'a different UUID with the same name cannot supply the label');
     assert(ctx.gdFilters().views[0].name === 'core.logic.const', 'same identity labels both axes');
-    assert(reads.filter(url => url.includes('scope=subtree')).length === 2,
-      'one read per unresolved identity, deduplicated across axes');
+    assert(reads.filter(url => url.includes('scope=index')).length === 1
+      && !reads.some(url => url.includes('scope=subtree')),
+    'one light index read supplies all axes without subtree composition reads');
     const labels = chips.children.map(c => c.children.find(x => String(x.className).includes('kind-label')).textContent);
     assert(labels.includes('uses core.logic.const'), 'reopened graph view displays the readable chip');
   });

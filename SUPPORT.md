@@ -24,11 +24,23 @@ For organisations running Graphden on their own infrastructure:
 | Response | next business day, by email or a private channel |
 | Scope | upgrades and migrations, incident diagnosis, configuration review, a monthly check-in |
 | Time | up to 4 hours per month; extra hours at the published hourly rate |
-| Diagnosis material | `bb support-bundle` — versions, configuration with secrets stripped, recent errors |
+| Diagnosis material | `bb support-bundle` — validated build hashes, health status, git revision and configuration presence |
 
 Pricing is on [graphden.dev](https://graphden.dev/#pricing). Ask at
 `support@graphden.dev` with your `GET /version` output and a sentence on
 what you run.
+
+The bundle records whether known configuration variables and `.env` exist; it
+does not collect their contents, raw logs, request URLs or exception messages.
+Provide reproduction steps separately.
+
+The shared browser-test diagnostics preserve failure counts, HTTP status,
+method, route templates and timing while omitting response bodies, URL
+parameters and arbitrary error/console text. This protects the shared listeners
+and HTTP cleanup helpers, not every test-specific assertion or console call.
+Spotlight artifacts mask marked account/secret regions; ordinary graph text is
+still diagnostic content. Do not paste credentials into graph labels or attach
+unreviewed screenshots or bespoke test logs to a support request.
 
 ## Implementation work
 

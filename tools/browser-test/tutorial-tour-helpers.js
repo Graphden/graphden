@@ -235,6 +235,8 @@ async function tourWhere(page) {
 // on the wrong card — the e2e walk drives by selector and never notices
 // where the ring is; a person cannot miss it. run-edit-tests.sh sets the
 // directory for every file it runs, so the gate audits every lesson walk.
+// Stable secret regions remain sensitive when a password is revealed as text.
+const TOUR_SECRET_REGIONS = '.gd-acct-secret, #auth-popover, .secrets-popover, input[type="password"], [autocomplete="current-password"], [autocomplete="new-password"]';
 const _tourAuditState = new WeakMap();
 let _tourAuditPages = 0;
 
@@ -259,26 +261,25 @@ async function installSpotlightAudit(page) {
     state.records.push(rec);
     if (process.env.GRAPHDEN_TOUR_AUDIT_SHOTS) {
       try {
-        await page.screenshot({mask: [page.locator('.gd-acct-secret, input[type="password"]')], path: path.join(dir,
+        await page.screenshot({mask: [page.locator(TOUR_SECRET_REGIONS)], path: path.join(dir,
           String(state.n).padStart(3, '0') + '-' + String(rec.lesson || '').replace(/\W+/g, '')
           + '-' + String(rec.step || 0) + '.png')});
       } catch (_) { /* mid-navigation */ }
     }
     flush();
   });
-  const sampler = () => {
+  const sampler = (secretRegions) => {
     if (window.__gdTourAuditTimer) return;
     const desc = (el) => {
       if (!el) return null;
       const owner = el.closest('.node-overlay');
       const within = el.closest('.row-actions-popover, .arg-value-edit-popover, .free-arg-bind-chooser, .fn-picker-popover, .execute-popover, .fn-peek-panel, .trace-view-panel, #gd-inspector, #side-menu');
       const cls = el.className && el.className.baseVal !== undefined ? el.className.baseVal : (el.className || '');
-      const secret = el.matches('.gd-acct-secret, input[type="password"]')
-        || !!el.querySelector('.gd-acct-secret, input[type="password"]');
+      const secret = !!el.closest(secretRegions) || !!el.querySelector(secretRegions);
       return {
         tag: el.tagName.toLowerCase(), id: el.id || null, cls: String(cls).slice(0, 80),
         text: secret ? '[redacted secret]' : (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 60),
-        card: owner ? (owner.dataset.fnName || owner.textContent.trim().replace(/\s+/g, ' ').slice(0, 40)) : null,
+        card: secret ? '[redacted secret]' : (owner ? (owner.dataset.fnName || null) : null),
         within: within ? (within.id ? '#' + within.id : '.' + String(within.className).split(' ')[0]) : null,
       };
     };
@@ -331,8 +332,8 @@ async function installSpotlightAudit(page) {
       } catch (_) { /* keep sampling */ }
     }, 250);
   };
-  await page.addInitScript(sampler);
-  try { await page.evaluate(sampler); } catch (_) { /* no document yet */ }
+  await page.addInitScript(sampler, TOUR_SECRET_REGIONS);
+  try { await page.evaluate(sampler, TOUR_SECRET_REGIONS); } catch (_) { /* no document yet */ }
 }
 
 async function waitTourTitle(page, title, timeoutMs) {

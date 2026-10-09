@@ -72,6 +72,8 @@
   :relevant ["^dev/wtq/"]}
  ;; The scoping mechanism guards itself: selector partition semantics +
  ;; checks.edn shape/regex validity + the canonical path→check drift table.
+ {:name "support-bundle-test" :bb "support-bundle-test" :timeout 30000 :group :infra
+  :relevant ["^scripts/support_bundle" "^bb\\.edn$"]}
  {:name "ci-selftest"   :bb "ci-test"       :timeout  60000 :group :infra
   :relevant ["^scripts/ci" "^scripts/checks\\.edn$" "^bb\\.edn$"]}
  {:name "markdownlint"  :bb "markdownlint"  :timeout  60000 :group :docs

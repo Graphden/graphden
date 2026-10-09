@@ -308,3 +308,18 @@
                    "_fresh-with-maybe-store (the only consumer of "
                    ":base-handler inside the inlined response-cache-"
                    "wrap body). sources=" (pr-str sources-orig))))))))
+
+
+(deftest text-ok-response-keeps-its-body-binder
+  (let [root (fn-id "text-ok-response")
+        result (layout root)
+        holes (->> (:edges result) (map :data) (filter :isUnset))
+        body (first (filter #(= "body" (:argName %)) holes))
+        node (some #(when (= (:target body) (:id (:data %))) (:data %))
+                   (:nodes result))]
+    (is (some? root))
+    (is (= ["body"] (mapv :argName holes))
+        "bound status and headers must not close the independent body reader")
+    (is (:isPlaceholder node))
+    (is (= (str root) (:fnId node)) "the body binder writes on the selected response")
+    (is (nil? (:bindingId node)) "binding body creates a new binding")))

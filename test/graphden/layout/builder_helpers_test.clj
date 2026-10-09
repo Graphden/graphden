@@ -7,7 +7,8 @@
    synthetic-lookups cases to be provably exercised."
   (:require
     [clojure.test :refer [deftest is testing]]
-    [graphden.layout.builder-helpers :as bh]))
+    [graphden.layout.builder-helpers :as bh]
+    [graphden.layout.data :as data]))
 
 
 (def arg-id (random-uuid))
@@ -260,3 +261,45 @@
       (is (nil? (bh/resolve-type-ref by-name {:namespace-id (random-uuid)} :shape))))
     (testing "nested forms are skipped"
       (is (nil? (bh/resolve-type-ref by-name owner [:list :int]))))))
+
+
+(deftest deep-free-readers-do-not-collapse-independent-renames
+  ;; body and status both rename a primitive's value slot, but status is
+  ;; captured from a separate call: binding it must not close body.
+  (let [base (random-uuid) response (random-uuid) status-fn (random-uuid)
+        child (random-uuid) value-slot (random-uuid)
+        body-slot (random-uuid) status-slot (random-uuid)
+        graph {:fns [{:id base :name "base" :parent-ids []
+                      :return-type-fn-id (random-uuid)}
+                     {:id response :name "response" :parent-ids [base]}
+                     {:id status-fn :name "status" :parent-ids [base]}
+                     {:id child :name "child" :parent-ids [response]}]
+               :slots [{:id value-slot :name "value"}
+                       {:id body-slot :name "body" :source-slot-id value-slot}
+                       {:id status-slot :name "status" :source-slot-id value-slot}]
+               :fn-slots [{:fn-id base :slot-id value-slot :position 0}
+                          {:fn-id response :slot-id body-slot :position 0}
+                          {:fn-id status-fn :slot-id status-slot :position 0}]
+               :bindings [{:id (random-uuid) :fn-id child :slot-id status-slot
+                           :value 200 :value-present true}]
+               :list-items []}
+        emit (fn [graph shown-slot]
+               (let [lk (data/build-lookups (data/ensure-synth-args graph))
+                     state (atom {:nodes (if shown-slot
+                                           [{:data {:isPlaceholder true :slotId (str shown-slot)}}]
+                                           [])
+                                  :edges [] :added-node-ids #{}})]
+                 (bh/emit-root-deep-frees! state lk child (str "fn-" child))
+                 (:edges @state)))]
+    (testing "a bound or already displayed sibling reader leaves body open"
+      (doseq [shown [nil status-slot]]
+        (let [edges (emit graph shown)]
+          (is (= ["body"] (mapv #(get-in % [:data :argName]) edges)))
+          (is (true? (get-in (first edges) [:data :isUnset]))))))
+    (testing "the inherited source and its body view are the same reader"
+      (is (empty? (emit graph value-slot)))
+      (is (empty? (emit graph body-slot))))
+    (testing "binding body closes it without closing an unrelated reader"
+      (is (empty? (emit (update graph :bindings conj
+                                {:id (random-uuid) :fn-id child :slot-id body-slot
+                                 :value "ok" :value-present true}) nil))))))

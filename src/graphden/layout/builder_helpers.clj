@@ -25,6 +25,7 @@
   (:require
     [clojure.string :as str]
     [graphden.executor.compile.bindings :as cb]
+    [graphden.executor.compile.lookups :as clook]
     [graphden.executor.compile.renames :as renames]
     [graphden.executor.compile.surface :as surface]
     [graphden.layout.bindings :as bnd]
@@ -1148,34 +1149,19 @@
    arg row (`edge-*-fields`)."
   [state lookups root-fn-id root-node-id]
   (let [arg-map (:arg-map lookups)
-        slot-map (:slot-map lookups)
         args-by-slot (group-by (comp :slot-id val) arg-map)
-        ;; One hole per slot IDENTITY: a rename-view slot and its source
-        ;; share a root (`:source-slot-id` chain) — a binding on either
-        ;; closes both, and a placeholder for either shows the one hole.
-        root-of (fn [sid]
-                  (loop [sid sid seen #{}]
-                    (let [src (some-> (get slot-map sid) :source-slot-id)]
-                      (if (and src (not (seen src)))
-                        (recur src (conj seen sid))
-                        sid))))
+        ;; Match the public surface's scoped reader identity: independent
+        ;; calls may rename the same primitive slot to different inputs.
+        reader-of #(clook/effective-reader-slot-id root-fn-id % lookups)
         shown (into #{}
                     (keep (fn [n]
                             (when (get-in n [:data :isPlaceholder])
-                              (some-> (get-in n [:data :slotId]) parse-uuid root-of))))
+                              (some-> (get-in n [:data :slotId]) parse-uuid reader-of))))
                     (:nodes @state))
-        root-chain (set (data/get-inheritance-chain* root-fn-id lookups))
-        chain-bound (into #{}
-                          (comp (mapcat #(get (:bindings-by-fn lookups) %))
-                                (filter #(or (true? (:value-present %))
-                                             (some? (:ref-fn-id %))
-                                             (true? (:list-append %))))
-                                (map (comp root-of :slot-id)))
-                          root-chain)]
+        root-chain (set (data/get-inheritance-chain* root-fn-id lookups))]
+    ;; The public surface already excludes bound readers.
     (doseq [{:keys [ext-name slot-id captured? optional?]} (surface/public-free-entries root-fn-id lookups)
-            :when (and slot-id
-                       (not (contains? shown (root-of slot-id)))
-                       (not (contains? chain-bound (root-of slot-id))))
+            :when (and slot-id (not (contains? shown (reader-of slot-id))))
             :let [[arg-id arg-rec] (deep-free-arg-row (get args-by-slot slot-id) root-chain)
                   ;; The surface's own `:optional?` (the executor's
                   ;; effective-required at the slot's owner), so the card

@@ -7,7 +7,7 @@ From graph rows and expansion state to nodes, edges, and a grid.
 
 after: web
 
-[[file:index.org][index]] · ~22 min
+[[file:index.org][index]] · ~21 min
 
 * 1. load-graph-entities-uncached
 :PROPERTIES:
@@ -53,13 +53,13 @@ Walks the requested node expansions with cycle protection and collects graph ele
 :PROPERTIES:
 :CUSTOM_ID: layout/emit-root-deep-frees!
 :FILE: src/graphden/layout/builder_helpers.clj
-:LINE: 1130
-:MINS: 6.7
+:LINE: 1131
+:MINS: 5.7
 :END:
 
 Adds placeholders for required public inputs reached through bound references, including required [[file:glossary.org::#term/hof][HOF]] [[file:glossary.org::#term/capture][captures]] reported by ~surface/public-free-entries~. Optional [[file:glossary.org::#term/capture][captures]] do not create required holes. The placeholder keeps the inner [[file:glossary.org::#term/slot][slot]] identity while targeting the root function so [[file:glossary.org::#term/binding][binding]] an input matches the Run form's public argument model.
 
-- source :: [[file:../../../src/graphden/layout/builder_helpers.clj::(defn emit-root-deep-frees!][src/graphden/layout/builder_helpers.clj:1130]]
+- source :: [[file:../../../src/graphden/layout/builder_helpers.clj::(defn emit-root-deep-frees!][src/graphden/layout/builder_helpers.clj:1131]]
 
 * 5. compute-layout-matrix
 :PROPERTIES:

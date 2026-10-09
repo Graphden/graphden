@@ -3,7 +3,7 @@
 const {chromium} = require('playwright');
 const {assert, newContext, api, openBranchPopover} = require('./edit-test-helpers');
 const {
-  hardCleanup, waitTourTitle, clickTourButton, filterAndSelect, extendViaRowActions,
+  waitTourTitle, clickTourButton, filterAndSelect, extendViaRowActions,
   bindFirstPlaceholder, editBoundValue, createBranchViaChip, switchBranchViaChip,
   compareBranchViaChip, setBranchLocalViaStrip,
   setFnDescription, tourWhere, cleanupRecordedTutorialBranches,
@@ -48,7 +48,6 @@ async function switchToOwnedBranch(page, branch) {
   let failed = false;
   const owned = [];
   try {
-    await hardCleanup(page);
     const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
     // Seed the description's dark-theme regression before the tutorial
     // sheet exists, so Settings remains reachable by an ordinary click.

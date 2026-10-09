@@ -219,79 +219,80 @@
    ;; without the lock falls through with no synchronization (no
    ;; concurrency to worry about anyway).
    (let [body (fn []
-                ;; Monotonic token for stale-while-revalidate: every real
-                ;; invalidation (delta or full) bumps it, so a background full
-                ;; rebuild can tell whether a newer write landed mid-compile and
-                ;; skip its swap rather than clobber a delta patch. (The `#{}`
-                ;; no-op skip below never runs `body`, so it doesn't bump.)
-                (when-let [ic (:invalidation-count ctx)] (swap! ic inc))
-                ;; Splice when we know what changed; drop wholesale only when we
-                ;; don't. The full drop is what made every write cost the next
-                ;; reader a complete graph reload from Postgres.
-                (when-not (splice-graph-cache! ctx changed-fn-ids)
-                  (when-let [c (:graph-cache ctx)]
-                    (reset! c nil)))
-                ;; The per-execute free-arg-slot-map memo is a pure
-                ;; function of graph state; any mutation may change a
-                ;; fn's free-arg surface, so drop it here. Full drop
-                ;; (not delta) — the recompute lands only on the first
-                ;; post-edit execute of each fn.
-                (free-arg-cache/clear!)
-                (cond
-                  ;; Storage isn't wired (stripped test ctx) — nothing
-                  ;; to refresh.
-                  (or (nil? (:storage ctx))
-                      (nil? (:compiled-registry ctx)))
-                  (when-let [c (:compiled-registry ctx)]
-                    (reset! c nil))
+                (let [prior-graph (some-> (:graph-cache ctx) deref)]
+                  ;; Monotonic token for stale-while-revalidate: every real
+                  ;; invalidation (delta or full) bumps it, so a background full
+                  ;; rebuild can tell whether a newer write landed mid-compile and
+                  ;; skip its swap rather than clobber a delta patch. (The `#{}`
+                  ;; no-op skip below never runs `body`, so it doesn't bump.)
+                  (when-let [ic (:invalidation-count ctx)] (swap! ic inc))
+                  ;; Splice when we know what changed; drop wholesale only when we
+                  ;; don't. The full drop is what made every write cost the next
+                  ;; reader a complete graph reload from Postgres.
+                  (when-not (splice-graph-cache! ctx changed-fn-ids)
+                    (when-let [c (:graph-cache ctx)]
+                      (reset! c nil)))
+                  ;; The per-execute free-arg-slot-map memo is a pure
+                  ;; function of graph state; any mutation may change a
+                  ;; fn's free-arg surface, so drop it here. Full drop
+                  ;; (not delta) — the recompute lands only on the first
+                  ;; post-edit execute of each fn.
+                  (free-arg-cache/clear!)
+                  (cond
+                    ;; Storage isn't wired (stripped test ctx) — nothing
+                    ;; to refresh.
+                    (or (nil? (:storage ctx))
+                        (nil? (:compiled-registry ctx)))
+                    (when-let [c (:compiled-registry ctx)]
+                      (reset! c nil))
 
-                  ;; Delta path — caller named the changed fns AND we
-                  ;; have a reverse-deps index from a prior compile.
-                  (and (seq changed-fn-ids)
-                       (some-> (:compile-deps ctx) deref some?)
-                       (some-> (:compiled-registry ctx) deref some?))
-                  (cr/delta-recompile! ctx changed-fn-ids)
+                    ;; Delta path — caller named the changed fns AND we
+                    ;; have a reverse-deps index from a prior compile.
+                    (and (seq changed-fn-ids)
+                         (some-> (:compile-deps ctx) deref some?)
+                         (some-> (:compiled-registry ctx) deref some?))
+                    (cr/delta-recompile! ctx changed-fn-ids prior-graph)
 
-                  :else
-                  (do
-                    ;; The write said nothing about what it changed, so the whole
-                    ;; registry is now stale. The rebuild is NOT counted here — it
-                    ;; lands later, in the background, driven by the next request
-                    ;; through `compile-runtime/registry`. Two full-clears before
-                    ;; one read cost one rebuild, so these two counters answer
-                    ;; different questions and must not be compared to each other.
-                    ;; Warm = a compiled registry was dropped and the next
-                    ;; request pays a whole-graph compile — the count that
-                    ;; costs money. Cold = nothing was compiled yet (a fresh
-                    ;; ctx, or one already cleared), so the clear costs
-                    ;; nothing; counted apart so the budget gates the real
-                    ;; thing. Seeded = the caller named its fns but no index /
-                    ;; registry was there to patch, not a write of unknown
-                    ;; shape. The attribution of the unit suite's
-                    ;; "17 full clears" found every CRUD-path one cold+seeded
-                    ;; (docs/PERF_NOTES.md).
-                    (let [h (:compiled-registry ctx)
-                          warm? (boolean (and h (some? @h)))]
-                      (counters/count! (if warm? :registry/invalidate-full :registry/invalidate-cold))
-                      (note-full-clear-caller!
-                        {:warm? warm?
-                         :seeded? (boolean (seq changed-fn-ids))
-                         :write reason}))
-                    (when-let [fc (:full-clear-count ctx)] (swap! fc inc))
-                    (let [holder (:compiled-registry ctx)
-                          stale? (:registry-stale? ctx)]
-                      (if (and holder stale? (some? @holder))
-                        ;; WARM: keep serving the stale registry, flag it for
-                        ;; revalidation. The gate rebuilds it in the background
-                        ;; (`rebuild-optimistic!`) — no request ever blocks behind
-                        ;; a cold compile on this ctx (~5 s today; 49.8 s in 2026-07). See the ctx-atom
-                        ;; comment in `make-execution-context`.
-                        (reset! stale? true)
-                        ;; COLD (never compiled, e.g. boot / cold branch) or a
-                        ;; stripped test ctx without the machinery — nothing to
-                        ;; serve stale, so clear and let the gate compile once.
-                        (when holder (reset! holder nil))))
-                    (cr/refresh-type-registries-from-storage! ctx))))]
+                    :else
+                    (do
+                      ;; The write said nothing about what it changed, so the whole
+                      ;; registry is now stale. The rebuild is NOT counted here — it
+                      ;; lands later, in the background, driven by the next request
+                      ;; through `compile-runtime/registry`. Two full-clears before
+                      ;; one read cost one rebuild, so these two counters answer
+                      ;; different questions and must not be compared to each other.
+                      ;; Warm = a compiled registry was dropped and the next
+                      ;; request pays a whole-graph compile — the count that
+                      ;; costs money. Cold = nothing was compiled yet (a fresh
+                      ;; ctx, or one already cleared), so the clear costs
+                      ;; nothing; counted apart so the budget gates the real
+                      ;; thing. Seeded = the caller named its fns but no index /
+                      ;; registry was there to patch, not a write of unknown
+                      ;; shape. The attribution of the unit suite's
+                      ;; "17 full clears" found every CRUD-path one cold+seeded
+                      ;; (docs/PERF_NOTES.md).
+                      (let [h (:compiled-registry ctx)
+                            warm? (boolean (and h (some? @h)))]
+                        (counters/count! (if warm? :registry/invalidate-full :registry/invalidate-cold))
+                        (note-full-clear-caller!
+                          {:warm? warm?
+                           :seeded? (boolean (seq changed-fn-ids))
+                           :write reason}))
+                      (when-let [fc (:full-clear-count ctx)] (swap! fc inc))
+                      (let [holder (:compiled-registry ctx)
+                            stale? (:registry-stale? ctx)]
+                        (if (and holder stale? (some? @holder))
+                          ;; WARM: keep serving the stale registry, flag it for
+                          ;; revalidation. The gate rebuilds it in the background
+                          ;; (`rebuild-optimistic!`) — no request ever blocks behind
+                          ;; a cold compile on this ctx (~5 s today; 49.8 s in 2026-07). See the ctx-atom
+                          ;; comment in `make-execution-context`.
+                          (reset! stale? true)
+                          ;; COLD (never compiled, e.g. boot / cold branch) or a
+                          ;; stripped test ctx without the machinery — nothing to
+                          ;; serve stale, so clear and let the gate compile once.
+                          (when holder (reset! holder nil))))
+                      (cr/refresh-type-registries-from-storage! ctx)))))]
      ;; An EMPTY (but non-nil) seed set is an ANSWER, not a shrug: the caller
      ;; knows this write cannot have changed any compiled closure — a `:slot`
      ;; nothing exposes yet, a `:ns` no closure can reach (see

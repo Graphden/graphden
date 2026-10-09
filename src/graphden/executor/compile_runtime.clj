@@ -836,6 +836,25 @@
     src-registry))
 
 
+(defn- deleted-composed-leaves?
+  "Conservative deletion-only gate, using this locked ctx's pre/post graphs.
+   Composed user fns declare no DB aliases; other roles and package rows keep
+   the ordinary preparation path. A live dependent or sibling override does too."
+  [prior-graph graph changed-fn-ids blast]
+  (when (and prior-graph graph)
+    (let [old-rows (into {} (comp (filter #(contains? changed-fn-ids (:id %)))
+                                  (map (juxt :id identity)))
+                         (:fns prior-graph))
+          live-ids (into #{} (map :id) (:fns graph))]
+      (and (= blast (set changed-fn-ids))
+           (every? #(not (contains? live-ids %)) blast)
+           (every? (fn [id]
+                     (when-let [row (get old-rows id)]
+                       (and (not (owned/owned-fn-id? id))
+                            (= :composed (record-types/type-row-role row false)))))
+                   changed-fn-ids)))))
+
+
 (defn delta-recompile!
   "Recompile only the fns whose closures depend on `changed-fn-ids` —
    the inverse-closure under the reverse-deps index built by
@@ -848,60 +867,73 @@
    caller asked for invalidation but didn't say what changed, so the
    safe move is to drop everything.
 
-   Type-aliases are always re-registered (cheap, global), and
-   entries for deleted fn-ids are dissoc'd from the registry so a
-   stale closure can't outlive its row."
-  [ctx changed-fn-ids]
-  (let [holder (:compiled-registry ctx)
-        deps-state (some-> (:compile-deps ctx) deref)
-        reverse-deps (:reverse-deps deps-state)]
-    (cond
-      (or (nil? holder) (nil? @holder) (nil? reverse-deps) (empty? changed-fn-ids))
-      ;; Counted apart from `:registry/rebuild` because this is a delta that
-      ;; WASN'T one. The caller named its changed fns and still paid for the
-      ;; whole graph; nothing in the return value says so, and no timing can
-      ;; distinguish it from a cold cache. Without this counter, a budget on
-      ;; "deltas stay deltas" would be satisfied by the fallback silently.
-      (do
-        (counters/count! :registry/delta-fell-back-to-rebuild)
-        (rebuild! ctx))
+   The normal path re-registers type-aliases and prunes deleted fn-ids.
+   With this locked context's pre-splice graph, deletion of non-package
+   composed leaves with no dependents skips whole-graph preparation: those
+   rows declare no aliases and cannot change any surviving closure."
+  ([ctx changed-fn-ids] (delta-recompile! ctx changed-fn-ids nil))
+  ([ctx changed-fn-ids prior-graph]
+   (let [holder (:compiled-registry ctx)
+         deps-state (some-> (:compile-deps ctx) deref)
+         reverse-deps (:reverse-deps deps-state)]
+     (cond
+       (or (nil? holder) (nil? @holder) (nil? reverse-deps) (empty? changed-fn-ids))
+       ;; Counted apart from `:registry/rebuild` because this is a delta that
+       ;; WASN'T one. The caller named its changed fns and still paid for the
+       ;; whole graph; nothing in the return value says so, and no timing can
+       ;; distinguish it from a cold cache. Without this counter, a budget on
+       ;; "deltas stay deltas" would be satisfied by the fallback silently.
+       (do
+         (counters/count! :registry/delta-fell-back-to-rebuild)
+         (rebuild! ctx))
 
-      :else
-      (let [_ (counters/count! :registry/delta-recompile)
-            storage (compile-storage ctx)
-            {:keys [graph fns-map lookups]}
-            (prep-compile-inputs ctx (graph-in-hand ctx storage))
-            blast (deps/transitive-blast reverse-deps changed-fn-ids)]
-        ;; How much of the graph a "delta" actually recompiles. The event
-        ;; counter above says a delta HAPPENED; these two say what it cost,
-        ;; and their ratio is the only thing that distinguishes a real delta
-        ;; from a full rebuild wearing its name. A write that seeds 1 fn and
-        ;; blasts 400 is not a delta — it is the whole graph reached through
-        ;; a shared ancestor, and nothing in the timing tells you which one
-        ;; you got.
-        ;;
-        ;; Counts, not timings: `n` fns compiled is `n` on any box.
-        (counters/count! :registry/delta-seed-fns (count changed-fn-ids))
-        (counters/count! :registry/delta-recompiled-fns (count blast))
-        ;; CRUD impls invoke `invalidate-graph-cache!` directly on
-        ;; the http-kit worker thread (see `crud/entities.clj`), so
-        ;; two concurrent client requests can land here against the
-        ;; same `holder` atom. Read-modify-write through `swap!`
-        ;; CAS-retries so a sibling's recompile isn't silently
-        ;; dropped.
-        (swap! holder
-               (fn [current]
-                 (let [pruned (into {}
-                                    (filter (fn [[k _]] (contains? fns-map k)))
-                                    current)]
-                   (ce/compile-subset lookups pruned blast))))
-        (prime-graph-cache! ctx graph)
-        ;; Pass changed-fn-ids so prime-compile-deps takes the
-        ;; incremental delta path, and the lookups just built for the
-        ;; compile so it walks their indexes instead of re-indexing the
-        ;; whole graph on every write.
-        (prime-compile-deps! ctx lookups changed-fn-ids)
-        @holder))))
+       :else
+       (let [_ (counters/count! :registry/delta-recompile)
+             storage (compile-storage ctx)
+             graph (graph-in-hand ctx storage)
+             blast (deps/transitive-blast reverse-deps changed-fn-ids)]
+         (if (deleted-composed-leaves? prior-graph graph changed-fn-ids blast)
+           (do
+             (counters/count! :registry/delta-seed-fns (count changed-fn-ids))
+             (counters/count! :registry/delta-delete-only)
+             ;; No surviving closure changes. Keep the current graph; don't build
+             ;; whole-graph lookups merely to remove these exact entries.
+             (swap! holder #(apply dissoc % changed-fn-ids))
+             (prime-compile-deps! ctx {:fn-map {}} changed-fn-ids)
+             ;; always-fresh is a process-wide MONOTONE union: removing these ids
+             ;; would break a sibling branch where the same fn still exists.
+             @holder)
+           (let [{:keys [fns-map lookups]} (prep-compile-inputs ctx graph)]
+             ;; How much of the graph a "delta" actually recompiles. The event
+             ;; counter above says a delta HAPPENED; these two say what it cost,
+             ;; and their ratio is the only thing that distinguishes a real delta
+             ;; from a full rebuild wearing its name. A write that seeds 1 fn and
+             ;; blasts 400 is not a delta — it is the whole graph reached through
+             ;; a shared ancestor, and nothing in the timing tells you which one
+             ;; you got.
+             ;;
+             ;; Counts, not timings: `n` fns compiled is `n` on any box.
+             (counters/count! :registry/delta-seed-fns (count changed-fn-ids))
+             (counters/count! :registry/delta-recompiled-fns (count blast))
+             ;; CRUD impls invoke `invalidate-graph-cache!` directly on
+             ;; the http-kit worker thread (see `crud/entities.clj`), so
+             ;; two concurrent client requests can land here against the
+             ;; same `holder` atom. Read-modify-write through `swap!`
+             ;; CAS-retries so a sibling's recompile isn't silently
+             ;; dropped.
+             (swap! holder
+                    (fn [current]
+                      (let [pruned (into {}
+                                         (filter (fn [[k _]] (contains? fns-map k)))
+                                         current)]
+                        (ce/compile-subset lookups pruned blast))))
+             (prime-graph-cache! ctx graph)
+             ;; Pass changed-fn-ids so prime-compile-deps takes the
+             ;; incremental delta path, and the lookups just built for the
+             ;; compile so it walks their indexes instead of re-indexing the
+             ;; whole graph on every write.
+             (prime-compile-deps! ctx lookups changed-fn-ids)
+             @holder)))))))
 
 
 (defn- ctx-forward-deps

@@ -44,8 +44,20 @@ const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
     console.log('  lesson 35: real public response + Stop + exact cleanup');
 
     // ---------- lesson 32 — publish / install / uninstall ----------
-    await page.goto(BASE + '/?tutorial=32');
+    await page.goto(BASE + '/?branch=main');
+    await page.evaluate(() => window.openTutorialMenu());
+    await page.locator('[data-lesson-id="32"] .gd-tour-btn-primary').click();
     await waitTourTitle(page, 'Sharing more than one fn', 150000);
+    const packageBranch = await page.evaluate(() => {
+      const state = _tourState;
+      const branch = state.created.find(row => row.type === 'branch'
+        && row.id === state.sandboxBranchId && row.name === state.sandboxBranch
+        && row.receipt === 'created');
+      return branch && _tourPrincipalMatches(state) ? {id: branch.id, name: branch.name,
+        active: _tourSessionBranch() === branch.name} : null;
+    });
+    assert(packageBranch?.id && packageBranch.active,
+      'lesson 32 chooser created its exact owned active sandbox');
     assert(await clickTourButton(page, 'Next'), 'lesson 32 Next');
     await waitTourTitle(page, 'A namespace to publish');
     await createRootNamespace(page, 'mycorp');
@@ -144,7 +156,8 @@ const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
         panels: document.querySelectorAll('[data-packages-panel]').length,
         text: (document.querySelector('[data-packages-panel]')?.innerText || '').replace(/\s+/g, ' ').slice(0, 240),
       }));
-      const pins = await api(page, 'GET', '/api/packages/installed');
+      const pins = await api(page, 'GET', '/api/packages/installed', undefined,
+        {'X-Graphden-Branch': packageBranch.id});
       console.log('  INSTALL DIAG response=' + JSON.stringify(installResp)
         + ' clicked=' + JSON.stringify(clicked)
         + ' requests=' + JSON.stringify(pkgRequests)

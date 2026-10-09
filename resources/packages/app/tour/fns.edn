@@ -2688,7 +2688,7 @@
             {:id "39"
              :slug "queues"
              :chapter "Your organization"
-             :version 2
+             :version 3
              :requires "services"
              :title "Queues — publish, retry, requeue and ACK"
              :reads "adds typed message contracts, the open consumer template, exact-message recovery, and background-worker lifecycle."
@@ -2807,7 +2807,7 @@
                               :slot "payload"}}
                      {:title "Publish once and observe dead letter"
                       :body "Run with [[Persist]] enabled. Do not run again: each Run publishes another message. After about 25 seconds, the exact message returned by this persisted run reaches five failed attempts and dead state. Open [[Operate]] → [[Queues]] to inspect its error. If the request outcome is unknown, stop the known worker and use manual recovery; the lesson never guesses from a latest run or a queue name."
-                      :target ".execute-trigger"
+                      :target ".node-overlay[data-fn-name=\"tutorial-queue-publish\"] .ancestor-line[data-level=\"0\"] .fn-run-trigger"
                       :check {:kind "queue-state"
                               :name "tutorial-queue-publish"
                               :state "dead"}

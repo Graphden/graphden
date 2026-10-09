@@ -20,8 +20,8 @@ async function receipt(page, type) {
 }
 
 async function openRun(page, name, persist) {
-  await openRowActionsFor(page, name, 30000, {root: true});
-  await page.locator('.row-actions-popover [data-action="run-fn"]').dispatchEvent('click');
+  await page.locator('.node-overlay[data-fn-name="' + name
+    + '"] .ancestor-line[data-level="0"] .fn-run-trigger').click();
   await page.waitForSelector('.execute-popover.visible .execute-run-btn', {timeout: 30000});
   await page.evaluate(saved => {
     const pop = document.querySelector('.execute-popover.visible');

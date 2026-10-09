@@ -16,7 +16,7 @@ function fixture({signedIn = true, isNavRoot = true, depth = 0, known = true} = 
   const context = vm.createContext({document: {createElement: element},
     lookups: {fnMap: new Map(known ? [['root', entity]] : [])},
     implementationFnIds: new Set(['root']), isAuthenticated: () => signedIn,
-    displayLabel: name => name, bindFullNameHover() {}, onPreviewLeave() {},
+    measureCanvasText: text => text.length * 7, displayLabel: name => name, bindFullNameHover() {}, onPreviewLeave() {},
     clearPreview() {}, attachPreviewHandlers() {}, _singleEditableIncomingArg: () => null,
     createMoreActionsTrigger(options) {
       const trigger = element('button'); trigger.buildContent = options.buildContent; return trigger;
@@ -66,3 +66,47 @@ for (const options of [{}, {signedIn: false}, {isNavRoot: false}, {depth: 1}, {k
   }
 }
 console.log('overlay fn Run trigger: MI rendering and selected-root dispatch passed');
+
+// The sizing contract must reserve the same actual chrome as the rendered row.
+{
+  const f = fixture();
+  f.context.document.body = {classList: {contains: () => false}};
+  f.context.DRAG_HANDLE_HEIGHT = 6;
+  f.context.expansionState = new Set();
+  f.context.getComputedStyle = () => ({fontSize: '16px'});
+  vm.runInContext(fs.readFileSync(path.join(__dirname,
+    '../../resources/packages/app/editor/editor-layout.js'), 'utf8'), f.context);
+  const data = {id: 'root', originalFnId: 'root', label: 'web-server', type: 'fn', isRoot: true};
+  const withRun = f.context.calculateNodeSize(data).width;
+  f.context.isAuthenticated = () => false;
+  const withoutRun = f.context.calculateNodeSize(data).width;
+  assert(withRun > withoutRun, 'Run reserves width only when actually rendered');
+  f.context.isAuthenticated = () => true;
+  const line = element();
+  f.context.renderSingleFnRow(line, f.level, f.ctx);
+  assert(withRun >= data.label.length * 7 + parseFloat(line.style.padding.split(' ')[1]) + 8,
+    'selected root fits its name and the rendered Run/actions padding');
+}
+
+{
+  const {createDocument} = require('./mini-dom');
+  const context = vm.createContext({document: createDocument(),
+    DRAG_HANDLE_HEIGHT: 6, lookups: {fnMap: new Map()}, expansionState: new Set()});
+  vm.runInContext(fs.readFileSync(path.join(__dirname,
+    '../../resources/packages/app/editor/editor-overlay-arg.js'), 'utf8'), context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname,
+    '../../resources/packages/app/editor/editor-layout.js'), 'utf8'), context);
+  Object.assign(context, {resolveArgType: () => 'port', expectedSlotType: () => ['refine', 'int', 'range'],
+    namedRefinementPin: () => null, compactTypeChipText: () => 'port',
+    refinementConstraintText: () => '1…65535', argRowFromNode: () => ({type: 'port'}),
+    displayLiteralLabel: text => ({text}), truncateLabel: text => text});
+  const chip = context.createTypeChip({type: 'port'});
+  assert.equal(chip.children[1].textContent, '1…65535', 'real chip renders its range line');
+  const data = {type: 'arg', label: '8080', argType: 'port'};
+  const constrained = context.calculateNodeSize(data).width;
+  context.refinementConstraintText = () => null;
+  const plain = context.calculateNodeSize(data).width;
+  assert(constrained > plain, 'sizing includes the wider rendered refinement line');
+  context.getTypeNarrowingInfo = () => ({baseTypeName: 'long-underlying-type'});
+  assert(context.calculateNodeSize(data).width > plain, 'sizing also includes the narrowed base line');
+}

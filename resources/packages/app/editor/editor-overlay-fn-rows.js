@@ -339,6 +339,13 @@ function renderMiRow(line, levelInfo, idx, ctx) {
 // Single-fn ancestor row — non-MI line whose whole rectangle is the
 // click target. Cascades expansion to `groupMaxDepth` so empty grouped
 // followers expand together.
+function fnRowChrome(isRoot, entity) {
+  const run = !!(isRoot && entity && typeof isAuthenticated === 'function' && isAuthenticated());
+  const runLabel = '▶ Run';
+  const runWidth = run ? Math.ceil(measureCanvasText(runLabel, '11px "SF Mono", Monaco, monospace')) + 12 : 0;
+  return {run, runLabel, rightPadding: 24 + runWidth};
+}
+
 function renderSingleFnRow(line, levelInfo, ctx) {
   const { nodeId, isNavRoot, fullDepth, partialFns,
           paint: { ROOT_BG, ROOT_FG, HIGHLIGHT_BG, DEFAULT_BG,
@@ -384,7 +391,9 @@ function renderSingleFnRow(line, levelInfo, ctx) {
   // root, the visible Run button. Other per-row affordances live in the popover
   // it opens, OUTSIDE the card silhouette. Left padding is just the
   // small breathing room around the name.
-  const rightPad = rootAffordancesVisible ? 76 : 24;
+  const lineFnEntity = lookups?.fnMap?.get(lineFn.fnId) || null;
+  const chrome = fnRowChrome(lineIsRoot, lineFnEntity);
+  const rightPad = chrome.rightPadding;
   const leftPad = 8;
   line.style.padding = '4px ' + rightPad + 'px 4px ' + leftPad + 'px';
   line.style.textAlign = 'left';
@@ -401,14 +410,13 @@ function renderSingleFnRow(line, levelInfo, ctx) {
     if (badge) line.appendChild(badge);
   }
   const lineClearPreview = () => { onPreviewLeave(); clearPreview(nodeId); restoreStyles(); };
-  const lineFnEntity = lookups?.fnMap?.get(lineFn.fnId) || null;
-  if (rootAffordancesVisible && lineFnEntity) {
+  if (chrome.run) {
     // graph-first-exception: selected canvas controls attach to in-page overlay identity.
     // Delegate to the single Inspector Run owner.
     const run = document.createElement('button');
     run.type = 'button';
     run.className = 'fn-run-trigger';
-    run.textContent = '▶ Run';
+    run.textContent = chrome.runLabel;
     run.setAttribute('aria-label', 'Run ' + (lineFnEntity.name || 'this function'));
     run.addEventListener('pointerdown', event => event.stopPropagation());
     run.addEventListener('click', event => {

@@ -517,9 +517,7 @@ function createProvenanceBadge(narrowingInfo, arg) {
 //
 // Named refinement pins show their nominal label. Short anonymous
 // constraints may use a second line; full constraints stay in the tooltip.
-function createTypeChip(arg, options) {
-  const readOnly = !!(options?.readOnly)
-                || typeof enterArgTypeEditMode !== 'function';
+function typeChipPresentation(arg) {
   const flatType = resolveArgType(arg) || 'any';
   // Rich-types is indexed by (fn-name, slot-name) and doesn't yet honor
   // binding-level `type-override-fn-id`. When a binding narrows the slot
@@ -533,6 +531,25 @@ function createTypeChip(arg, options) {
                    : effectiveRich;
   const alias = namedRefinementPin(arg);
   const display = alias || compactTypeChipText(richType, flatType);
+  const refineStruct = Array.isArray(richType) && richType[0] === 'refine'
+    ? richType
+    : resolveRefinementAlias(richType);
+  const refineConstraint = refinementConstraintText(refineStruct);
+  const narrow = !refineConstraint && typeof getTypeNarrowingInfo === 'function'
+    ? getTypeNarrowingInfo(arg) : null;
+  const lines = [{text: display, fontSize: 9}];
+  if (refineConstraint && !alias && refineConstraint.length <= 24) {
+    lines.push({text: refineConstraint, fontSize: 8});
+  } else if (narrow?.baseTypeName && narrow.baseTypeName !== display) {
+    lines.push({text: '< :' + narrow.baseTypeName, fontSize: 8});
+  }
+  return {display, flatType, richType, alias, refineStruct, refineConstraint, narrow, lines};
+}
+
+function createTypeChip(arg, options) {
+  const readOnly = !!(options?.readOnly)
+                || typeof enterArgTypeEditMode !== 'function';
+  const {display, flatType, richType, alias, refineStruct, refineConstraint, narrow} = typeChipPresentation(arg);
   const chip = document.createElement('span');
   chip.className = 'arg-type-chip' + (readOnly ? ' arg-type-chip-readonly' : '');
   // Refinement stacking — two paths reach here:
@@ -543,10 +560,6 @@ function createTypeChip(arg, options) {
   //      up the alias gives us the constraint to surface; the chip's
   //      top line stays the alias name (more informative than the
   //      base type).
-  const refineStruct = Array.isArray(richType) && richType[0] === 'refine'
-    ? richType
-    : resolveRefinementAlias(richType);
-  const refineConstraint = refinementConstraintText(refineStruct);
   if (refineConstraint && !alias && refineConstraint.length <= 24) {
     chip.classList.add('arg-type-chip-refine');
     const base = document.createElement('span');
@@ -591,7 +604,6 @@ function createTypeChip(arg, options) {
   // the base equals the displayed text, and when the narrowing
   // info isn't available (read-only arg-overlay without binding).
   if (!refineConstraint && typeof getTypeNarrowingInfo === 'function') {
-    const narrow = getTypeNarrowingInfo(arg);
     if (narrow?.baseTypeName && narrow.baseTypeName !== display) {
       chip.classList.add('arg-type-chip-narrowed');
       const subOf = document.createElement('span');

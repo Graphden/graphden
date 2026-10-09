@@ -232,9 +232,13 @@ function calculateNodeSize(nodeData) {
     const textW = measureCanvasText(shown, (10 * argScale) + 'px "SF Mono", Monaco, monospace');
     // The chip shows the slot's short type label; a hidden chip still
     // takes its width (it fades in on hover). Its font is 0.5625rem.
-    const chipLabel = nodeData.argType ? String(nodeData.argType).replace(/^:/, '') : '';
-    const chipW = chipLabel
-      ? measureCanvasText(chipLabel, (9 * argScale) + 'px "SF Mono", Monaco, monospace') + 8 + 2 + 4
+    const arg = typeof argRowFromNode === 'function' ? argRowFromNode(nodeData) : null;
+    const chipLines = arg && typeof typeChipPresentation === 'function'
+      ? typeChipPresentation(arg).lines
+      : nodeData.argType ? [{text: String(nodeData.argType).replace(/^:/, ''), fontSize: 9}] : [];
+    const chipW = chipLines.length
+      ? Math.max(...chipLines.map(line => measureCanvasText(line.text,
+        (line.fontSize * argScale) + 'px "SF Mono", Monaco, monospace'))) + 8 + 2 + 4
       : 0;
     const linkW = Array.isArray(nodeData.sourceChain) && nodeData.sourceChain.length ? 15 * argScale + 4 : 0;
     // The ✎ hover glyph is a `::after` that always takes its width (only
@@ -265,12 +269,11 @@ function calculateNodeSize(nodeData) {
       if (!l.includes(', ')) return 0;
       return l.split(', ').length * MIN_MI_CELL;
     }));
-    // Per-row affordances now live in a popover OUTSIDE the card
-    // (see editor-row-actions.js). The only chrome inside the card
-    // is the `⋯` more-actions trigger pinned at slot r-1 (≈18 px) +
-    // the row's symmetric breathing room (8 + 8 ≈ 16 px). 36 covers
-    // it with a few pixels of slack so names hug the trigger.
-    const iconBudget = 36;
+    // Share the single-row renderer's chrome budget: selected roots also
+    // carry Run; MI cells retain their own actions without that button.
+    const rootEntity = typeof lookups !== 'undefined' ? lookups?.fnMap?.get(nodeData.originalFnId) : null;
+    const chrome = typeof fnRowChrome === 'function' ? fnRowChrome(nodeData.isRoot && !lines[0].includes(', '), rootEntity) : {rightPadding: 24};
+    const iconBudget = chrome.rightPadding + 12;
     const width = Math.max(80, maxLen * 7 + iconBudget, widthFromMI);
     // `appendUseSiteHeader` prepends one extra row to non-nav-root
     // overlays whose fn has a global name (it skips local / anonymous

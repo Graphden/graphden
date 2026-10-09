@@ -446,6 +446,15 @@ test('input-value reads a control\'s LIVE value — what no selector can match',
          'no such control — never passes, rather than passing on an accident');
 });
 
+test('required lesson item gate waits for exact visible value and tick', () => {
+  const selector = '.execute-popover.visible .execute-arg-form[data-slot-name="value"] [data-form-field]';
+  const check = {kind: 'input-value', selector, value: 'tick'};
+  assert(checkIn({}, check) === false, 'missing required value field cannot pass');
+  assert(checkIn({dom: {[selector]: {value: ''}}}, check) === false, 'empty value cannot pass');
+  assert(checkIn({dom: {[selector]: {value: 'wrong'}}}, check) === false, 'wrong item cannot pass');
+  assert(checkIn({dom: {[selector]: {value: 'tick'}}}, check) === true, 'required tick item passes');
+});
+
 test('result-value verifies the current result, including the values in its rows', () => {
   const pane = '.execute-popover.visible .execute-result-pane';
   const raw = '.execute-popover.visible .execute-result-host .execute-result-raw pre';

@@ -405,8 +405,7 @@ const {
     await openRowActionsFor(page, 'tutorial-bump', 30000);
     await page.click('.row-actions-popover [data-action="run-fn"]');
     await waitTourTitle(page, 'Choose the item', 150000);
-    await page.click('.execute-optional-summary');
-    const itemField = '.execute-arg-form[data-slot-name="value"] .cm-content';
+    const itemField = '.execute-popover.visible .execute-arg-form[data-slot-name="value"] .cm-content';
     await page.waitForSelector(itemField, {timeout: 30000});
     await page.fill(itemField, 'wrong');
     // Observe at least two completion ticks: entering a different value

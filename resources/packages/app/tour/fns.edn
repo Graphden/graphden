@@ -1078,7 +1078,7 @@
             {:id "12"
              :slug "state-cells-and-caches"
              :chapter "Composing"
-             :version 4
+             :version 5
              :title "State: cells"
              :reads "covers :swap vs :reset and cache patterns."
              :steps
@@ -1123,10 +1123,9 @@
                :targets [".node-overlay[data-fn-name=\"tutorial-bump\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-effects-warning"]
                :check {:kind "dom" :selector ".execute-confirm-checkbox"}}
               {:title "Choose the item"
-               :body "In the Run pane, expand [[1 optional]], then enter `tick` in the value field. This is the item swap-conj will append to your cell. Plain text is accepted; do not run with an empty field."
-               :target ".execute-optional-summary"
-               :targets [".execute-optional-summary" ".execute-arg-form[data-slot-name=\"value\"]"]
-               :check {:kind "input-value" :selector ".execute-arg-form[data-slot-name=\"value\"] [data-form-field]" :value "tick"}}
+               :body "In the Run pane, enter `tick` in the required value field. This is the item swap-conj will append to your cell. Plain text is accepted; do not run with an empty field."
+               :target ".execute-popover.visible .execute-arg-form[data-slot-name=\"value\"]"
+               :check {:kind "input-value" :selector ".execute-popover.visible .execute-arg-form[data-slot-name=\"value\"] [data-form-field]" :value "tick"}}
               {:title "Acknowledge, then run"
                :body "Tick [[I understand this will produce side effects]], then click [[Run]]. The result must contain one item: tick."
                :target ".execute-confirm-checkbox"

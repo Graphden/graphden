@@ -16,18 +16,21 @@
 'use strict';
 
 const {chromium} = require('playwright');
-const {assert, newContext, api, deleteFnByName, BASE} = require('./edit-test-helpers');
+const {assert, newContext, api, BASE} = require('./edit-test-helpers');
 
-const VIEW_A = 'e2e-app-on-const';
-const VIEW_B = 'e2e-app-on-const-handlers';
-const VIEW_C = 'e2e-full-view-' + process.pid + '-' + Date.now().toString(36);
+const RUN_ID = process.pid + '-' + Date.now().toString(36);
+const VIEW_A = 'e2e-app-on-const-' + RUN_ID;
+const VIEW_B = 'e2e-app-on-const-handlers-' + RUN_ID;
+const VIEW_C = 'e2e-full-view-' + RUN_ID;
 const VIEW_D = VIEW_C + '-computed';
+const PROBE_FN = 'e2e-uses-const-probe-' + RUN_ID;
 
 (async () => {
   const {browser, page} = await newContext(chromium);
   let failed = false;
   const ownedViews = new Set();
   const ownedAdapters = new Set();
+  let ownedProbeId = null;
   page.on('request', request => {
     if (request.method() !== 'POST' || new URL(request.url()).pathname !== '/api/views/save') return;
     const command = request.postDataJSON();
@@ -42,7 +45,6 @@ const VIEW_D = VIEW_C + '-computed';
     for (const row of data.fns || []) if (refs.has(row.id) && /^_view-(uses|views)-/.test(row.name || '')) ownedAdapters.add(row.id);
   }
   try {
-    for (const n of [VIEW_B, VIEW_A]) await deleteFnByName(page, n).catch(() => {});
     await page.goto(BASE + '/');
     await page.waitForFunction(() => typeof graphData !== 'undefined' && graphData
       && document.querySelector('#entity-list [role="treeitem"]'), null, {timeout: 90000});
@@ -228,25 +230,34 @@ const VIEW_D = VIEW_C + '-computed';
     // A child of a network-effect fn that itself uses const: extend one of
     // the current members, so the new fn inherits both the use and the effect.
     const memberId = await page.evaluate(() => gdViewMembers()[0].id);
-    await api(page, 'POST', '/api/entities/fn', 'name=e2e-uses-const-probe&parent-ids=' + memberId + '&namespace-id=' + appNsId);
+    const probeSearch = '/api/graph/entities?scope=search&q=' + encodeURIComponent(PROBE_FN);
+    assert(!(await api(page, 'GET', probeSearch)).fns.some(row => row.name === PROBE_FN), 'fresh probe absent before creation');
+    const createdProbe = await api(page, 'POST', '/api/entities/fn',
+      new URLSearchParams({name: PROBE_FN, 'parent-ids': memberId, 'namespace-id': appNsId}).toString());
+    assert(JSON.stringify(createdProbe).includes('created successfully'), 'fresh probe create succeeded');
+    const probeRows = (await api(page, 'GET', probeSearch)).fns.filter(row => row.name === PROBE_FN
+      && row['namespace-id'] === appNsId && row['parent-ids']?.includes(memberId));
+    assert(probeRows.length === 1, 'one exact UUID receipt after fresh probe create');
+    ownedProbeId = probeRows[0].id;
     await page.evaluate(async () => { await initGraph(); });
     await page.waitForFunction((n) => Array.isArray(gdViewMembers()) && gdViewMembers().length === n + 1,
       n0, {timeout: 30000, polling: 200});
     const blanked = await page.evaluate(() => !!document.querySelector('#entity-list .loading'));
     assert(!blanked, 'the member list re-evaluated after the write without blanking (' + n0 + ' → ' + (n0 + 1) + ')');
-    await deleteFnByName(page, 'e2e-uses-const-probe').catch(() => {});
+    const deletedProbeId = ownedProbeId;
+    const removedProbe = await api(page, 'DELETE', '/api/entities/fn/' + ownedProbeId);
+    assert(!(removedProbe.status >= 400) && removedProbe.ok !== false, 'exact owned probe deleted');
 
     // A saved view naming a fn that was deleted since: the chip stays (it
     // is what the reader saved) but is MARKED, and the set is empty with a
     // reason — not a silent nothing. Point a personal view's `uses` at the
     // probe fn's id (gone now), apply it.
-    const probeIdGone = await page.evaluate(async () => {
-      const r = await authFetch(API.api_graph_entities + '?scope=search&q=e2e-uses-const-probe');
-      return (await r.json()).fns.some((f) => f.name === 'e2e-uses-const-probe');
-    });
+    const probeIdGone = (await api(page, 'GET', probeSearch)).fns.some(fn => fn.id === deletedProbeId);
+    if (!probeIdGone) ownedProbeId = null;
     assert(!probeIdGone, 'the probe fn is gone');
     await page.evaluate(() => gdClearFilters());
-    await page.evaluate((id) => gdApplyView({name: 'e2e-dangling', filters: {uses: [{id, name: 'e2e-uses-const-probe'}]}}), '00000000-0000-4000-8000-000000000001');
+    await page.evaluate(({id, name}) => gdApplyView({name: 'e2e-dangling', filters: {uses: [{id, name}]}}),
+      {id: deletedProbeId, name: PROBE_FN});
     await page.waitForFunction(() => Array.isArray(gdViewMembers()), null, {timeout: 30000, polling: 200});
     const dangling = await page.evaluate(() => {
       const chip = document.querySelector('#gd-filter-chips .gd-filter-chip');
@@ -277,7 +288,12 @@ const VIEW_D = VIEW_C + '-computed';
     console.log('FAIL: ' + (err && err.message || err));
     await page.screenshot({path: '/tmp/edit-explorer-views-graph-fail.png'}).catch(() => {});
   } finally {
-    for (const n of ['e2e-uses-const-probe']) await deleteFnByName(page, n).catch(() => {});
+    if (ownedProbeId) {
+      const result = await api(page, 'DELETE', '/api/entities/fn/' + ownedProbeId).catch(() => ({error: true}));
+      if (result?.ok === false || result?.error || (result?.status >= 400 && result.status !== 404)) {
+        failed = true; console.log('FAIL: exact owned probe cleanup failed');
+      }
+    }
     try {
       const entries = [...new Set([...ownedViews, ...ownedAdapters])].map(id => ({id}));
       const graphs = await Promise.all([...ownedViews].map(id => api(page, 'GET',

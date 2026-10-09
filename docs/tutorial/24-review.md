@@ -85,7 +85,8 @@ like GitHub dismissing stale reviews on a new push.
    unreviewed merge.
 4. Choose **📤 Propose for review**, then **Δ** to read the change.
    In the Inspector, open the function's **💬** thread, save a comment,
-   then save an answer in the same thread. A draft is not a saved reply.
+   then click **💬** again to reopen its answer field and save an answer
+   in the same thread. A draft is not a saved reply.
 5. Exit comparison and approve: the badge reads `1/1`.
 6. Return to the feature and change the value to `3`. On the release,
    the earlier approval is stale and the badge reads `0/1`.

@@ -123,10 +123,11 @@ const {
     const thread = '#gd-diff-insp .branch-diff-anchor-thread';
     await page.fill(thread + ' .branch-comment-input', 'Please keep this value explicit.');
     await page.click(thread + ' .branch-comment-send');
-    await waitTourTitle(page, 'Answer in the same thread', 150000);
+    await waitTourTitle(page, 'Reopen the same thread', 150000);
     // Posting reloads the thread without its composer; reopen it through
     // the same function's ordinary comment action before answering.
     await page.click('#gd-diff-insp .gd-diff-insp-head .branch-diff-comment-btn');
+    await waitTourTitle(page, 'Answer in the same thread', 150000);
     await page.fill(thread + ' .branch-comment-input', 'It stays at 2 in this proposal.');
     // The composer appears after the title; let the real ring be recorded
     // before posting reloads the thread and removes its target again.

@@ -1893,7 +1893,7 @@
             {:id "24"
              :slug "review"
              :chapter "The editor"
-             :version 4
+             :version 5
              :title "Review: propose and approve"
              :reads "covers the review flow in full, and the push-only rule from lesson 23."
              ;; Like lesson 23 this lesson MANAGES branches itself — a
@@ -1975,6 +1975,10 @@
                :target "#gd-diff-insp .gd-diff-insp-head .branch-diff-comment-btn"
                :targets ["#gd-diff-insp .gd-diff-insp-head .branch-diff-comment-btn" "#gd-diff-insp .branch-diff-anchor-thread .branch-comment-input"]
                :check {:kind "review-comment" :name "review-demo" :text "Please keep this value explicit."}}
+              {:title "Reopen the same thread"
+               :body "Click [[💬]] beside the Inspector's comparison heading again. Saving a comment reloads the thread; this opens its answer field on the same function."
+               :target "#gd-diff-insp .gd-diff-insp-head .branch-diff-comment-btn"
+               :check {:kind "dom" :selector "#gd-diff-insp .branch-diff-anchor-thread .branch-comment-input"}}
               {:title "Answer in the same thread"
                :body "In the same thread type `It stays at 2 in this proposal.` and click [[Comment]]. Both messages belong to this function's review thread; a typed draft does not count as a saved answer."
                :target "#gd-diff-insp .branch-diff-anchor-thread .branch-comment-input"

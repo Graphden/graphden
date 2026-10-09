@@ -52,13 +52,13 @@ Stores nodes, edges, adjacency indexes, and animation state without a graph-rend
 :PROPERTIES:
 :CUSTOM_ID: editor/fetchBackendLayout
 :FILE: resources/packages/app/editor/editor-layout.js
-:LINE: 307
+:LINE: 330
 :MINS: 10.2
 :END:
 
 Requests grid layout from ~/api/graph/layout~ using the selected root and expansion state. The browser then measures cards and edge labels to calculate column widths and gaps. The server determines graph order; the browser fits that order to actual pixel sizes.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-layout.js::async function fetchBackendLayout() {][resources/packages/app/editor/editor-layout.js:307]]
+- source :: [[file:../../../resources/packages/app/editor/editor-layout.js::async function fetchBackendLayout() {][resources/packages/app/editor/editor-layout.js:330]]
 - see also :: [[file:layout.org::#layout/build-graph-elements][build-graph-elements]], [[file:layout.org::#layout/compute-layout-matrix][compute-layout-matrix]]
 - referenced from :: [[file:editor.org::#editor/writeBindingFields][writeBindingFields]]
 

@@ -19,8 +19,48 @@ const {waitTourTitle, clickTourButton, finishAndDelete, tourWhere} = require('./
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
   console.log('edit-tutorial-tour-market — lesson 40 walked end-to-end');
   let failed = false;
+  let ownedPackage = null;
+  let reviewCreated = false;
+  let preferencesChanged = false;
+  const requests = new Map();
+  const knownRoute = request => {
+    const path = new URL(request.url()).pathname;
+    return ['/api/packages', '/api/packages/withdraw', '/api/graph/layout',
+      '/api/marketplace/publish', '/api/marketplace/review'].includes(path) ? path : null;
+  };
+  page.on('request', request => {
+    const route = knownRoute(request);
+    if (route) requests.set(request, {route, status: 'pending'});
+  });
+  page.on('response', response => {
+    const row = requests.get(response.request());
+    if (row) row.status = response.status();
+  });
+  page.on('requestfailed', request => {
+    const row = requests.get(request);
+    if (row) row.status = 'transport-failed';
+  });
+  const cleanupDiagnostics = async stage => {
+    const flags = await page.evaluate(() => {
+      const rows = typeof _tourState === 'object' ? _tourState?.created || [] : [];
+      const entry = rows.find(row => row.type === 'package-version' && row.name === 'my-board');
+      const text = document.querySelector('.gd-toast, #gd-toast')?.textContent || '';
+      return {receipt: entry?.receipt || 'absent', expectedId: !!entry?.id,
+        hash: !!entry?.['content-hash'], version: !!entry?.version,
+        failureToast: /refused|kept|failed/i.test(text) ? 'cleanup-refused'
+          : /deleted/i.test(text) ? 'deleted' : 'none-or-other'};
+    }).catch(() => ({unavailable: true}));
+    console.log('  cleanup diagnostic:', JSON.stringify({stage, ...flags,
+      requests: [...requests.values()].slice(-16)}));
+  };
   const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
   try {
+    const index = await nodeApi('GET', '/api/packages');
+    assert(index.ok, 'registry readable before owned publication');
+    const indexBody = await index.json();
+    const versions = Array.isArray(indexBody) ? indexBody : indexBody.packages;
+    assert(Array.isArray(versions) && !versions.some(row => row.name === 'my-board'),
+      'fixture package absent before publication; no adoption');
     await page.goto(BASE + '/?tutorial=40');
     await waitTourTitle(page, 'Make it yours, then share it', 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 40 Next');
@@ -34,6 +74,7 @@ const {waitTourTitle, clickTourButton, finishAndDelete, tourWhere} = require('./
     console.log('  step 2: theme editor open');
 
     // --- Pick a paper: drive the colour input the way a picker would.
+    preferencesChanged = true;
     await page.evaluate(() => {
       const sw = document.querySelector('#gd-theme-editor .gd-theme-swatch[data-token="--gd-paper"]');
       sw.value = '#223344';
@@ -61,6 +102,14 @@ const {waitTourTitle, clickTourButton, finishAndDelete, tourWhere} = require('./
     });
     await page.waitForSelector('#gd-mkpub-result.packages-fork-ok', {timeout: 60000});
     await waitTourTitle(page, 'Roll back is a version', 60000);
+    ownedPackage = await page.evaluate(() => {
+      const entry = _tourState.created.find(row => row.type === 'package-version'
+        && row.name === 'my-board' && row.receipt === 'created');
+      return entry ? {id: entry.id, name: entry.name, version: entry.version,
+        'content-hash': entry['content-hash']} : null;
+    });
+    assert(ownedPackage?.id && ownedPackage.version && ownedPackage['content-hash'],
+      'successful publication has exact canonical cleanup receipt');
     console.log('  step 4: my-board saved');
     // The dialog stays open on success (the reader sees the outcome) — close it.
     await page.evaluate(() => document.getElementById('gd-mkpub-cancel').click());
@@ -98,6 +147,10 @@ const {waitTourTitle, clickTourButton, finishAndDelete, tourWhere} = require('./
     await page.waitForSelector('#gd-market-root .mk-review-submit', {timeout: 30000});
     await waitTourTitle(page, 'Review it', 60000);
     await page.waitForFunction(() => !!document.querySelector('#gd-market-root .mk-review-form')?.['htmx-internal-data'], null, {timeout: 15000, polling: 100});
+    const reviewResponse = page.waitForResponse(response =>
+      new URL(response.url()).pathname === '/api/marketplace/review'
+      && response.request().method() === 'POST'
+      && new URLSearchParams(response.request().postData() || '').get('name') === ownedPackage.name);
     await page.evaluate(() => {
       const sel = document.querySelector('#gd-market-root .mk-review-form select[name="rating"]');
       sel.value = '5';
@@ -105,22 +158,52 @@ const {waitTourTitle, clickTourButton, finishAndDelete, tourWhere} = require('./
       ta.value = 'Lesson 40 says hello.';
       document.querySelector('#gd-market-root .mk-review-submit').click();
     });
+    const reviewResult = await reviewResponse;
+    assert(reviewResult.status() === 200, 'owned package review creation succeeded');
+    reviewCreated = true;
     await waitTourTitle(page, "That's the Marketplace", 60000);
     console.log('  step 8: review posted');
 
+    await cleanupDiagnostics('before-finish');
     await finishAndDelete(page);
     console.log('  lesson 40: walked + cleaned (theme version withdrawn)');
   } catch (e) {
     failed = true;
-    console.error('FAIL edit-tutorial-tour-market:', e);
+    await cleanupDiagnostics('failure-before-finally');
+    console.error('FAIL edit-tutorial-tour-market:', {name: e.name});
     console.error('  tour at failure:', await tourWhere(page));
   } finally {
-    await browser.close();
-    await nodeApi('PUT', '/api/prefs/theme', {value: null}).catch(() => {});
-    await nodeApi('PUT', '/api/prefs/keymap', {value: null}).catch(() => {});
-    await nodeApi('DELETE', '/api/marketplace/unreview?name=my-board').catch(() => {});
-    for (const v of ['1.0.0', '1.0.1']) {
-      await nodeApi('DELETE', '/api/packages/withdraw?name=my-board&version=' + v).catch(() => {});
+    try {
+      if (reviewCreated && ownedPackage) {
+        const response = await nodeApi('DELETE', '/api/marketplace/unreview?name='
+          + encodeURIComponent(ownedPackage.name));
+        assert(response.ok, 'delete only review successfully created on owned package');
+      }
+      if (ownedPackage) {
+        const response = await nodeApi('GET', '/api/packages');
+        assert(response.ok, 'read exact owned publication before cleanup');
+        const body = await response.json();
+        const rows = Array.isArray(body) ? body : body.packages;
+        assert(Array.isArray(rows), 'valid publication cleanup index');
+        const row = rows.find(candidate => candidate.id === ownedPackage.id);
+        if (row) {
+          assert(row.name === ownedPackage.name && row.version === ownedPackage.version
+            && row['content-hash'] === ownedPackage['content-hash'], 'owned publication identity unchanged');
+          const removed = await nodeApi('DELETE', '/api/packages/withdraw?name='
+            + encodeURIComponent(ownedPackage.name) + '&version=' + encodeURIComponent(ownedPackage.version)
+            + '&expected-id=' + encodeURIComponent(ownedPackage.id));
+          assert(removed.ok, 'exact owned publication cleanup succeeded');
+        }
+      }
+      if (preferencesChanged) {
+        assert((await nodeApi('PUT', '/api/prefs/theme', {value: null})).ok, 'restore fixture theme');
+        assert((await nodeApi('PUT', '/api/prefs/keymap', {value: null})).ok, 'restore fixture keymap');
+      }
+    } catch (error) {
+      failed = true;
+      console.error('FAIL exact market cleanup:', {name: error.name});
+    } finally {
+      await browser.close();
     }
   }
   if (failed) process.exit(1);

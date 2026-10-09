@@ -240,6 +240,28 @@ test('Space activates a focused control instead of opening the menu', () => {
 });
 
 
+test('native summary Space keeps disclosure and does not arm the leader', () => {
+  const { ctx, press, focusOn } = makeCtx();
+  let ran = 0;
+  ctx.window.registerShortcut({ id: 't-summary-leader', keys: 'b', group: 'T',
+    description: 'probe', run: () => { ran += 1; } });
+  const summary = el('summary');
+  const child = el('span');
+  child.closest = selector => selector === 'summary' ? summary : null;
+  for (const target of [summary, child]) {
+    focusOn(target);
+    assert(!press(' ').defaultPrevented, 'summary/descendant Space keeps native default');
+    press('b');
+    assert(ran === 0, 'native Space never arms a leader sequence');
+    assert(press('Escape', {defaultPrevented: true}).defaultPrevented,
+      'consumed native Escape stays consumed');
+  }
+  focusOn(el('div'));
+  assert(press(' ').defaultPrevented, 'canvas Space still opens the leader');
+  press('b');
+  assert(ran === 1, 'ordinary leader binding still runs');
+});
+
 test('a `when` predicate makes a binding inert', () => {
   const { ctx, press, focusOn } = makeCtx();
   let ran = 0;

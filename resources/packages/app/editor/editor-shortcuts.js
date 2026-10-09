@@ -145,6 +145,7 @@ function isTyping(el) {
 function spaceIsActivation(el) {
   const target = el || document.activeElement;
   if (!target?.tagName) return false;
+  if (target.tagName === 'SUMMARY' || target.closest?.('summary')) return true;
   if (target.tagName === 'BUTTON') return true;
   if (target.tagName === 'A' && target.hasAttribute('href')) return true;
   const role = target.getAttribute?.('role');

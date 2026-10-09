@@ -171,14 +171,15 @@ async function openServicePopover(page) {
     // ===================================================================
     // Phase A: open the popover via the actual ⚙ gear button.
     // ===================================================================
-    const currentBranchName = await page.evaluate(() => getCurrentBranchName() || 'main');
+    // boot:false leaves about:blank until this helper loads the editor.
+    let opened = await openServicePopover(page);
+    assert(opened, '⚙ button enabled + popover opens (service-eligible)');
+    const currentBranchName = await page.evaluate(() => window.getCurrentBranchName());
     const visibleBranches = await api(page, 'GET', '/api/branches');
     const currentBranch = (Array.isArray(visibleBranches) ? visibleBranches : visibleBranches.branches)
       ?.find(row => row.name === currentBranchName);
     assert(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(currentBranch?.id || ''),
            'current branch resolves to its exact visible identity');
-    let opened = await openServicePopover(page);
-    assert(opened, '⚙ button enabled + popover opens (service-eligible)');
 
     const createState = await page.evaluate(() => {
       const p = document.querySelector('.service-popover.visible');

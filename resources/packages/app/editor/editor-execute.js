@@ -464,7 +464,7 @@ async function gdMountRunPane(fnId) {
   // mount, so binding here cannot stack stale listeners.
   el.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter') return;
-    if (e.target?.tagName === 'TEXTAREA') return;
+    if (e.target?.tagName === 'TEXTAREA' || e.target?.closest?.('summary')) return;
     const runBtn = el.querySelector('.execute-run-btn');
     if (!runBtn || runBtn.disabled) return;
     e.preventDefault();

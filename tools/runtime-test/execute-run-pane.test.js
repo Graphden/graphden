@@ -138,6 +138,35 @@ function boot({ effects = false } = {}) {
 }
 
 (async () => {
+  console.log(' summary Enter keeps native disclosure; text input Enter still submits');
+  {
+    const t = boot();
+    const p = t.ctx.gdMountRunPane('A');
+    await t.flush();
+    t.resolveForm('A', 'a-val');
+    await p;
+    const pane = t.doc.querySelector('.execute-popover');
+    const summary = t.doc.createElement('summary');
+    const child = t.doc.createElement('span');
+    summary.appendChild(child);
+    pane.appendChild(summary);
+    for (const target of [summary, child]) {
+      let prevented = false;
+      pane.dispatch('keydown', {key: 'Enter', target, preventDefault() { prevented = true; }});
+      await t.flush();
+      assert(!prevented, 'summary Enter preserves browser default');
+      assert(t.posts.length === 0, 'summary Enter never submits a run');
+    }
+    const input = t.doc.createElement('input');
+    pane.appendChild(input);
+    let prevented = false;
+    pane.dispatch('keydown', {key: 'Enter', target: input, preventDefault() { prevented = true; }});
+    await t.flush();
+    assert(prevented && t.posts.length === 1, 'text input Enter still submits once');
+    t.ctx.__releasePost();
+    await t.flush();
+  }
+
   console.log(' double click on Run submits once; Run comes back after');
   {
     const t = boot();

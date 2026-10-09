@@ -842,11 +842,12 @@
    the ordinary preparation path. A live dependent or sibling override does too."
   [prior-graph graph changed-fn-ids blast]
   (when (and prior-graph graph)
-    (let [old-rows (into {} (comp (filter #(contains? changed-fn-ids (:id %)))
+    (let [changed-fn-ids (set changed-fn-ids)
+          old-rows (into {} (comp (filter #(contains? changed-fn-ids (:id %)))
                                   (map (juxt :id identity)))
                          (:fns prior-graph))
           live-ids (into #{} (map :id) (:fns graph))]
-      (and (= blast (set changed-fn-ids))
+      (and (= blast changed-fn-ids)
            (every? #(not (contains? live-ids %)) blast)
            (every? (fn [id]
                      (when-let [row (get old-rows id)]
@@ -892,7 +893,8 @@
              storage (compile-storage ctx)
              graph (graph-in-hand ctx storage)
              blast (deps/transitive-blast reverse-deps changed-fn-ids)]
-         (if (deleted-composed-leaves? prior-graph graph changed-fn-ids blast)
+         (if (and (map? (:forward-deps deps-state))
+                  (deleted-composed-leaves? prior-graph graph changed-fn-ids blast))
            (do
              (counters/count! :registry/delta-seed-fns (count changed-fn-ids))
              (counters/count! :registry/delta-delete-only)

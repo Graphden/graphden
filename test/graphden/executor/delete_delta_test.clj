@@ -91,3 +91,32 @@
                                (reset! observed [seeds prior @(:graph-cache c)]))}
       #(ctx/invalidate-graph-cache! context #{:gone}))
     (is (= [#{:gone} before after] @observed))))
+
+
+(deftest sequential-seeds-use-the-deletion-fast-path
+  (doseq [seeds [[:gone] (list :gone)]]
+    (let [before (graph [{:id :gone :parent-ids [:base]} {:id :stay}])
+          {:keys [context]} (fixture before (graph [{:id :stay}]))]
+      (with-redefs-fn
+        {#'cr/prep-compile-inputs (fn [& _] (throw (ex-info "unexpected full preparation" {})))}
+        #(cr/delta-recompile! context seeds before))
+      (is (= #{:stay} (set (keys @(:compiled-registry context)))))
+      (is (= 42 ((get @(:compiled-registry context) :stay)))))))
+
+
+(deftest partial-dependency-index-keeps-the-normal-path
+  (let [before (graph [{:id :gone :parent-ids [:base]} {:id :stay :parent-ids [:base]}])
+        after (graph [{:id :stay :parent-ids [:base]}])
+        {:keys [context]} (fixture before after)
+        prepared (atom 0)]
+    (swap! (:compile-deps context) dissoc :forward-deps)
+    (with-redefs-fn
+      {#'cr/prep-compile-inputs (fn [_ g]
+                                  (swap! prepared inc)
+                                  {:graph g :fns-map (into {} (map (juxt :id identity)) (:fns g))
+                                   :lookups {:fn-map (into {} (map (juxt :id identity)) (:fns g))}})
+       #'ce/compile-subset (fn [_ registry _] registry)}
+      #(cr/delta-recompile! context #{:gone} before))
+    (is (= 1 @prepared))
+    (is (= {:stay #{:base}} (:forward-deps @(:compile-deps context))))
+    (is (= {:base #{:stay}} (:reverse-deps @(:compile-deps context))))))

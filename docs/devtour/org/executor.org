@@ -28,13 +28,13 @@ The executor compiles this description into a callable Clojure function. Referen
 :PROPERTIES:
 :CUSTOM_ID: executor/execute~2
 :FILE: src/graphden/executor/compile_runtime.clj
-:LINE: 1619
+:LINE: 1621
 :MINS: 4.0
 :END:
 
 Runs a previously compiled [[file:glossary.org::#term/graph-function][graph function]]. It first checks cancellation and any configured execution-permission guard, then binds the [[file:glossary.org::#term/effect][allowed effects]] for the call. The [[file:glossary.org::#term/compiled-registry][compiled registry]] maps function IDs to [[file:glossary.org::#term/closure][closures]]: callable Clojure functions retaining their prepared dependencies. ~execute~ looks up the [[file:glossary.org::#term/closure][closure]], translates named input into slot-ID and name keys, and calls ~(closure translated ctx)~.
 
-- source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn execute][src/graphden/executor/compile_runtime.clj:1619]]
+- source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn execute][src/graphden/executor/compile_runtime.clj:1621]]
 - see also :: [[file:executor.org::#executor/registry][registry]]
 - same file :: [[file:executor.org::#executor/registry][registry]], [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:executor.org::#executor/record-effect!][record-effect!]], [[file:platform.org::#platform/cloud-forbidden-effects][cloud-forbidden-effects]]
 
@@ -69,13 +69,13 @@ Loads the graph cache while protecting concurrent writes. Before reading storage
 :PROPERTIES:
 :CUSTOM_ID: executor/registry
 :FILE: src/graphden/executor/compile_runtime.clj
-:LINE: 1047
+:LINE: 1049
 :MINS: 2.8
 :END:
 
 Returns the [[file:glossary.org::#term/compiled-registry][compiled registry]], a map from function IDs to Clojure [[file:glossary.org::#term/closure][closures]]. An existing registry can be served while a background rebuild refreshes it. If no registry exists yet, compilation runs under the [[file:glossary.org::#term/invalidation][invalidation]] lock; a second check prevents concurrent callers from compiling the same context twice. Later writes can invalidate or update this registry.
 
-- source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn registry][src/graphden/executor/compile_runtime.clj:1047]]
+- source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn registry][src/graphden/executor/compile_runtime.clj:1049]]
 - see also :: [[file:executor.org::#executor/rebuild!][rebuild!]]
 - same file :: [[file:executor.org::#executor/execute~2][execute]], [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:executor.org::#executor/record-effect!][record-effect!]], [[file:platform.org::#platform/cloud-forbidden-effects][cloud-forbidden-effects]]
 - referenced from :: [[file:executor.org::#executor/execute~2][execute]], [[file:boot.org::#boot/compiled-registry][compiled-registry]]
@@ -241,13 +241,13 @@ Reads one argument: evaluates a [[file:glossary.org::#term/thunk][thunk]] when n
 :PROPERTIES:
 :CUSTOM_ID: executor/record-effect!
 :FILE: src/graphden/executor/compile_runtime.clj
-:LINE: 1561
+:LINE: 1563
 :MINS: 2.1
 :END:
 
 An effectful primitive calls this before touching external state. It rejects an operation outside the execution's allowed effect set, then records the effect for tracing. Declaring effects for type inference is a separate responsibility; this runtime check enforces the current policy. An empty allowed set rejects every recorded effect, while nil means unrestricted execution.
 
-- source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn record-effect!][src/graphden/executor/compile_runtime.clj:1561]]
+- source :: [[file:../../../src/graphden/executor/compile_runtime.clj::(defn record-effect!][src/graphden/executor/compile_runtime.clj:1563]]
 - see also :: [[file:platform.org::#platform/cloud-forbidden-effects][cloud-forbidden-effects]], [[file:editor.org::#editor/evaluate][evaluate]]
 - same file :: [[file:executor.org::#executor/execute~2][execute]], [[file:executor.org::#executor/registry][registry]], [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:platform.org::#platform/cloud-forbidden-effects][cloud-forbidden-effects]]
 - referenced from :: [[file:editor.org::#editor/submitExecution][submitExecution]], [[file:editor.org::#editor/aggregatePathTrace][aggregatePathTrace]], [[file:editor.org::#editor/evaluate][evaluate]]

@@ -108,6 +108,9 @@
       (is (true? (:ok body)) (pr-str body))
       (is (= "theme" (:kind body)))
       (let [row (first (sp/query-entities (storage) :package-version {:name "night-ink"}))]
+        (is (= (str (:id row)) (:id body)) "publication receipt identifies the exact created row")
+        (is (seq (:content-hash body)) "publication receipt includes its immutable content hash")
+        (is (= (:content-hash row) (:content-hash body)) "receipt hash comes from that same created row")
         (is (= "theme" (:kind row)))
         (is (= "A dark drafting board" (:description row)))
         (is (= "dark" (:category row)))

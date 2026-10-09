@@ -10,9 +10,9 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext, api} = require('./edit-test-helpers');
+const {assert, newContext, api: nodeApi} = require('./edit-test-helpers');
 const {
-  NS_NAME, FN_NAME, hardCleanup, waitTourTitle, clickTourButton,
+  NS_NAME, FN_NAME, cleanupRecordedTutorialBranches, waitTourTitle, clickTourButton,
   filterAndSelect, extendViaRowActions, bindFirstPlaceholder,
   renameArgViaEdgeLabel,
   pickIncompatFnRef, pickAnyway, removeUseSiteBinding,
@@ -31,12 +31,23 @@ const {
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
   console.log('edit-tutorial-tour-args — lessons 05 / 06 / 07');
   let failed = false;
+  const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
+  const ownedBranches = [];
+  let ownedBranch;
+  const api = (page, method, path, body, headers) => {
+    assert(ownedBranch?.id, 'Node API uses the exact owned fixture branch');
+    return nodeApi(page, method, path, body, {...headers, 'X-Graphden-Branch': ownedBranch.id});
+  };
   try {
-    await hardCleanup(page); // a previous failed run must not pre-pass checks
-
-    const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
+    const name = 'tutorial-args-' + process.pid + '-' + Date.now().toString(36);
+    const created = await nodeApi(page, 'POST', '/api/branches', {name, 'base-branch-id': 'main'});
+    assert(created.ok === true && created.branch?.id && created.branch.name === name
+      && created.branch['base-branch-id'], 'fresh fixture branch has a canonical successful POST receipt');
+    ownedBranch = created.branch;
+    ownedBranches.push({...ownedBranch, type: 'branch'});
+    const lessonUrl = id => BASE + '/?branch=' + encodeURIComponent(ownedBranch.id) + '&tutorial=' + id;
     // ---------- Lesson 05 — free arguments ----------
-    await page.goto(BASE + '/?tutorial=05');
+    await page.goto(lessonUrl('05'));
     await waitTourTitle(page, 'Free args: the template mechanism', 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 05 Next');
     await waitTourTitle(page, 'Find to-json-string');
@@ -92,7 +103,7 @@ const {
     console.log('  lesson 05: walked + cleaned');
 
     // ---------- Lesson 06 — lists: seed, append, close ----------
-    await page.goto(BASE + '/?tutorial=06');
+    await page.goto(lessonUrl('06'));
     await waitTourTitle(page, 'Lists on the card', 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 06 Next');
     await waitTourTitle(page, 'Find add');
@@ -206,7 +217,7 @@ const {
     console.log('  lesson 06: walked + cleaned (seed, reorder, insert, append from the child, close)');
 
     // ---------- Lesson 07 — optional, required and sealed ----------
-    await page.goto(BASE + '/?tutorial=07');
+    await page.goto(lessonUrl('07'));
     await waitTourTitle(page, 'Three decisions beside a value', 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 07 Next');
     await waitTourTitle(page, 'Find subs');
@@ -289,16 +300,16 @@ const {
     await waitTourTitle(page, 'Return to the child', 150000);
     await filterAndSelect(page, 'tutorial-cut-more', 'tutorial-cut-more');
     await waitTourTitle(page, 'Create a variation for the child', 150000);
-    const sealBeforeVariation = await page.evaluate(() => {
+    const sealBeforeVariation = await page.evaluate(fixtureBranch => {
       const fn = _tourFindFn('tutorial-cut');
       const own = (lookups.bindingsByFn.get(fn.id) || []).find(binding =>
         lookups.slotMap.get(binding['slot-id'])?.name === 'end');
       const branchName = new URL(location.href).searchParams.get('branch');
-      const branchId = _tourState.created.find(row => row.type === 'branch' && row.name === branchName)?.id;
+      const branchId = [fixtureBranch.id, fixtureBranch.name].includes(branchName) ? fixtureBranch.id : null;
       return { fnId: fn.id, bindingId: own?.id, branchName, branchId,
         terminal: own?.terminal, required: own?.required,
         slot: lookups.slotMap.get(own?.['slot-id']) };
-    });
+    }, ownedBranch);
     assert(sealBeforeVariation.terminal === true && sealBeforeVariation.required === true,
       'original source actually resealed while requiredness remains true');
     await page.click('.node-overlay[data-fn-name="tutorial-cut-more"] .ancestor-line[data-level="1"] button.more-actions-trigger');
@@ -362,7 +373,8 @@ const {
       console.error('  screenshot: /tmp/edit-tutorial-tour-fail.png');
     } catch (_) { /* page may be gone */ }
   } finally {
-    await hardCleanup(page);
+    try { await cleanupRecordedTutorialBranches(page, ownedBranches); }
+    catch (_) { failed = true; console.error('FAIL: exact owned args branch cleanup refused'); }
     await browser.close();
   }
   process.exit(failed ? 1 : 0);

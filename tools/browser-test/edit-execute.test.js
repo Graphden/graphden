@@ -195,10 +195,9 @@ async function readResult(page) {
            'Repeat re-filled the form with the prior run\'s args (got '
            + JSON.stringify(refilled) + ')');
 
-    // === Phase D: Enter key triggers Run (when not inside textarea) ===
-    // Move focus to the popover container so Enter doesn't land in
-    // the textarea (where Enter inserts a newline — that path is
-    // intentionally NOT intercepted).
+    // === Phase D: native Enter activation on the Run button ===
+    // Textareas keep newline behaviour; a container has no native action.
+    // Focus the real Run button and let the browser activate it.
     await fillNumsAndRun(page, '[100, 200]', false);   // baseline result via click
     // Wait for baseline result (300) so we can detect the flip to 15.
     await page.waitForFunction(
@@ -210,23 +209,16 @@ async function readResult(page) {
       null,
       {timeout: 10000, polling: 100});
     await page.evaluate(() => {
-      // Tab focus off the textarea — focus the popover root so the
-      // keydown handler's "tag !== TEXTAREA" gate lets Enter through.
       const ta = document.querySelector(
         '.execute-popover.visible textarea[data-form-field]');
-      ta?.blur();
-      const popover = document.querySelector('.execute-popover.visible');
-      popover?.focus?.();
-      // Refill textarea with a distinct value, then dispatch Enter on
-      // the popover (not the textarea).
       if (ta) {
         ta.value = '[7, 8]';
         ta.dispatchEvent(new Event('input', { bubbles: true }));
-        ta.blur();
+        ta.dispatchEvent(new Event('change', { bubbles: true }));
       }
-      popover?.dispatchEvent(new KeyboardEvent('keydown',
-        { key: 'Enter', bubbles: true }));
     });
+    await page.locator('.execute-popover.visible .execute-run-btn').focus();
+    await page.keyboard.press('Enter');
     // Wait for the scalar to flip from baseline 300 to 15.
     await page.waitForFunction(
       () => {

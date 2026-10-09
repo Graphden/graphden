@@ -1,4 +1,5 @@
-// Lessons 35, 32, 25 — finite HTTP, package distribution, personal UI graphs.
+// Lessons 35, 32 — finite HTTP and package distribution.
+// Lesson25 has its own native file: edit-ui-components.test.js.
 //
 // Part of the interactive-tutorial drift guard: walks every step of its
 // lessons by doing the real UI actions, so a renamed class or a changed
@@ -6,7 +7,7 @@
 // because the runner caps one file at 5 minutes — see
 // tutorial-tour-helpers.js.
 //
-// These three are the tours that CARRY a `:requires` yet still run on this
+// These are the tours that CARRY a `:requires` yet still run on this
 // stack: it has an authenticated HTTP host, an open registry, and writable
 // graph namespaces. The org tours (27-30, 33, 36, 37) need
 // a tenancy addon and can only be checked as LOCKED — that assertion lives
@@ -26,13 +27,11 @@ const {
 
 const {trackPublications, walkLesson35} = require('./tutorial-http-helpers');
 
-const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
-
 (async () => {
   const {browser, page} = await newContext(chromium, {...handlerPreviewTestOptions(), boot: false});
   // Uninstall and revert both confirm natively.
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
-  console.log('edit-tutorial-tour-platform — lessons 35 / 32 / 25');
+  console.log('edit-tutorial-tour-platform — lessons 35 / 32');
   const cleanupPublications = trackPublications(page);
   let failed = false;
   const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
@@ -179,11 +178,6 @@ const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
     await waitTourTitle(page, "That's distribution", 150000);
     await finishAndDelete(page);
     console.log('  lesson 32: walked + cleaned (published, pinned, unpinned)');
-
-    // Lesson 25 uses the same native Appearance/graph walkthrough as its
-    // dedicated cloud-compatible regression. Source overrides keep their
-    // independent edit-asset-override coverage.
-    await walkUIComponentsLesson(page);
 
     console.log('PASS');
   } catch (err) {

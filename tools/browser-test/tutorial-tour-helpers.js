@@ -458,7 +458,20 @@ async function filterAndSelect(page, filterText, fnName) {
       .find((e) => e.querySelector('.name')?.textContent.trim() === name);
     return row && !row.hasAttribute('hidden');
   }, fnName, {timeout: 30000, polling: 100});
-  await page.evaluate(async (name) => { await selectFnByName(name); }, fnName);
+  const selectedId = await page.evaluate(async name => {
+    const row = Array.from(document.querySelectorAll('#entity-list .entity-item'))
+      .find(el => el.querySelector('.name')?.textContent.trim() === name && !el.hasAttribute('hidden'));
+    const id = row?.dataset.fnId;
+    if (!id) throw new Error('Visible selection row has no function identity');
+    await selectFnByName('fn:' + id);
+    return id;
+  }, fnName);
+  await page.waitForFunction(({id, branch}) => selectedFnId === id
+    && (new URL(location.href).searchParams.get('branch') || null) === branch
+    && graphData?.fns?.some(fn => fn.id === id)
+    && !!document.querySelector('.node-overlay[data-node-id="fn-' + id
+      + '"][data-original-fn-id="' + id + '"]'),
+  {id: selectedId, branch}, {timeout: 30000, polling: 100});
 }
 
 
@@ -1030,7 +1043,21 @@ async function finishAndDelete(page, cleanupTimeout = 20000) {
   const cleanupLabel = await page.evaluate(() =>
     document.querySelector('#gd-tour-pop .gd-tour-title')?.textContent.trim()
       === 'Delete the tutorial branch?' ? 'Delete branch & return' : 'Delete them');
-  assert(await clickTourButton(page, cleanupLabel), cleanupLabel + ' button');
+  if (cleanupLabel === 'Delete branch & return') {
+    // Register navigation before the mutation: dialog teardown precedes the
+    // actual return document, so absence alone is not a ready editor receipt.
+    await Promise.all([
+      page.waitForNavigation({waitUntil: 'domcontentloaded', timeout: cleanupTimeout}),
+      (async () => { assert(await clickTourButton(page, cleanupLabel), cleanupLabel + ' button'); })(),
+    ]);
+    await page.waitForFunction(() => typeof getCurrentBranchName === 'function'
+      && getCurrentBranchName() === 'main' && typeof graphData !== 'undefined'
+      && Array.isArray(graphData?.fns) && typeof selectedFnId !== 'undefined'
+      && selectedFnId === null && typeof graph !== 'undefined' && graph.nodes.size === 0,
+    null, {timeout: cleanupTimeout, polling: 100});
+  } else {
+    assert(await clickTourButton(page, cleanupLabel), cleanupLabel + ' button');
+  }
   await page.waitForFunction(() => !document.querySelector('#gd-tour-pop'),
     null, {timeout: cleanupTimeout, polling: 200});
 }

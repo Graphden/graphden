@@ -15,18 +15,49 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext, api, getEntities, deleteFnByName} =
+const {assert, newContext, api, getEntities, nodeApi} =
   require('./edit-test-helpers');
 
-const CONST_FN = 'pt-trace-const';
-const WRAP_FN = 'pt-trace-wrap';
-
+const RUN_ID = process.pid + '-' + Date.now().toString(36);
+const CONST_FN = 'pt-trace-const-' + RUN_ID;
+const WRAP_FN = 'pt-trace-wrap-' + RUN_ID;
+const owned = [];
+const receiptFile = '/tmp/graphden-trace-owned-' + RUN_ID + '.json';
+const headers = {'X-Graphden-Branch': 'main'};
+const saveOwned = () => require('node:fs').writeFileSync(receiptFile, JSON.stringify(owned), {mode: 0o600});
 
 async function cleanup(page) {
-  await deleteFnByName(page, WRAP_FN);
-  await deleteFnByName(page, CONST_FN);
+  for (const receipt of [...owned].reverse()) {
+    if (receipt.removed) continue;
+    assert(receipt.confirmed, 'unconfirmed creation receipt retained');
+    const data = await getEntities(page, receipt.id);
+    const row = data.fns.find(fn => fn.id === receipt.id);
+    if (!row) { receipt.removed = true; saveOwned(); continue; }
+    assert(row.name === receipt.name && row['namespace-id'] === receipt['namespace-id'],
+      'exact cleanup identity unchanged');
+    const response = await nodeApi('DELETE', '/api/entities/fn/' + receipt.id, undefined, headers);
+    assert(response.ok, 'exact owned function delete succeeded');
+    assert(!(await getEntities(page, receipt.id)).fns.some(fn => fn.id === receipt.id),
+      'exact owned function absent');
+    receipt.removed = true;
+    saveOwned();
+  }
 }
 
+async function createProbe(page, name, parentId) {
+  const response = await nodeApi('POST', '/api/entities/fn',
+    new URLSearchParams({name, 'parent-ids': parentId}).toString(), headers);
+  const id = response.headers.get('X-Graphden-Created-Id');
+  assert(response.ok && /^[a-f0-9-]{36}$/.test(id || ''), 'canonical creation UUID receipt');
+  const receipt = {id, name, confirmed: false};
+  owned.push(receipt);
+  saveOwned();
+  const row = (await getEntities(page, id)).fns.find(fn => fn.id === id);
+  assert(row && row.name === name, 'canonical created function identity');
+  Object.assign(receipt, {'namespace-id': row['namespace-id'], confirmed: true});
+  saveOwned();
+  return row;
+}
 
 // Open the ▶ execute popover from the fn card whose data-original-fn-id
 // matches (NOT the first `⋯` in the DOM — the ref target's card also
@@ -85,7 +116,6 @@ async function openExecutePopoverForCard(page, fnId) {
   });
 
   try {
-    await cleanup(page);
 
     // ===================================================================
     // Seed via API: const-parented leaf (value=41) + const-parented
@@ -105,14 +135,8 @@ async function openExecutePopoverForCard(page, fnId) {
     })();
     assert(valueSlotId, ':const `value` slot resolved');
 
-    await api(page, 'POST', '/api/entities/fn',
-              'name=' + CONST_FN + '&parent-ids=' + constFn.id);
-    await api(page, 'POST', '/api/entities/fn',
-              'name=' + WRAP_FN + '&parent-ids=' + constFn.id);
-    const probeConst = (await getEntities(page, CONST_FN)).fns
-      .find((f) => f.name === CONST_FN);
-    const probeWrap = (await getEntities(page, WRAP_FN)).fns
-      .find((f) => f.name === WRAP_FN);
+    const probeConst = await createProbe(page, CONST_FN, constFn.id);
+    const probeWrap = await createProbe(page, WRAP_FN, constFn.id);
     assert(probeConst && probeWrap, 'probe chain fns created');
     await api(page, 'POST', '/api/entities/binding',
               'fn-id=' + probeConst.id + '&slot-id=' + valueSlotId + '&value=41');
@@ -414,7 +438,7 @@ async function openExecutePopoverForCard(page, fnId) {
     process.exitCode = 1;
   } finally {
     try { await page.close(); } catch (_) {}
-    try { await cleanup(null); } catch (_) {}
+    try { await cleanup(null); } catch (_) { console.error('FAIL: exact trace fixture cleanup refused'); process.exitCode = 1; }
     await browser.close();
   }
 })();

@@ -7,7 +7,8 @@
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.compile.deps :as deps]
     [graphden.executor.context :as ctx]
-    [graphden.packages.owned :as owned]))
+    [graphden.packages.owned :as owned]
+    [graphden.util.counters :as counters]))
 
 
 (defn- graph
@@ -73,10 +74,13 @@
 
 (deftest cold-deletion-keeps-rebuild-fallback
   (let [rebuilt (atom 0)
-        context {:compiled-registry (atom nil) :compile-deps (atom nil)}]
+        context {:compiled-registry (atom nil) :compile-deps (atom nil)}
+        before (counters/snapshot)]
     (with-redefs [cr/rebuild! (fn [_] (swap! rebuilt inc) {:rebuilt true})]
       (is (= {:rebuilt true} (cr/delta-recompile! context #{:gone} (graph []))))
-      (is (= 1 @rebuilt)))))
+      (is (= 1 @rebuilt))
+      (is (= 1 (get (counters/delta-since before) :registry/delta-fell-back-to-rebuild 0))
+          "The sanctioned cold regression contributes exactly one fallback; CRUD must contribute zero."))))
 
 
 (deftest invalidation-passes-this-contexts-pre-splice-graph

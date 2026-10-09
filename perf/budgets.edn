@@ -36,9 +36,9 @@
    :why
    "The topological type-check sweep is ~40 s, the single most expensive fixture step there is. The unit suite has never needed one. If this fires, a namespace started bootstrapping with :skip-type-check? false — that is what 6840f542 removed."},
   :registry/delta-fell-back-to-rebuild
-  {:max 0,
+  {:max 1,
    :why
-   "A caller named its changed fn-ids and STILL paid for a full graph recompile: delta-recompile! hit a cold reverse-deps index and silently called rebuild!. Nothing in the return value says so and no timing distinguishes it from a cold cache — this counter is the only evidence. It is the exact failure 9d66adc0 and 0b74f1dc were about; measured at 4137 fns, the rebuild it hides costs 49.8 s."},
+   "Exactly ONE is sanctioned: delete-delta-test/cold-deletion-keeps-rebuild-fallback deliberately invokes delta-recompile! on a cold context and asserts the actual counter delta is exactly one (counter recording remains real; only the rebuild implementation is mocked). Product CRUD must still contribute ZERO; any second event fails this budget. A caller named its changed fn-ids and STILL paid for a full graph recompile: delta-recompile! hit a cold reverse-deps index and silently called rebuild!. Nothing in the return value says so and no timing distinguishes it from a cold cache — this counter is the only evidence. It is the exact failure 9d66adc0 and 0b74f1dc were about; measured at 4137 fns, the rebuild it hides costs 49.8 s."},
   :registry/invalidate-full
   {:max 5,
    :why

@@ -1027,7 +1027,10 @@ async function finishAndDelete(page, cleanupTimeout = 20000) {
     document.querySelectorAll('#gd-tour-pop .gd-tour-btn'))
     .some((b) => /^(Delete them|Delete branch & return)$/.test(b.textContent.trim())),
   null, {timeout: 120000, polling: 150});
-  assert(await clickTourButton(page, 'Delete them'), 'Delete them button');
+  const cleanupLabel = await page.evaluate(() =>
+    document.querySelector('#gd-tour-pop .gd-tour-title')?.textContent.trim()
+      === 'Delete the tutorial branch?' ? 'Delete branch & return' : 'Delete them');
+  assert(await clickTourButton(page, cleanupLabel), cleanupLabel + ' button');
   await page.waitForFunction(() => !document.querySelector('#gd-tour-pop'),
     null, {timeout: cleanupTimeout, polling: 200});
 }

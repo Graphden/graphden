@@ -299,13 +299,13 @@ Finds tests affected by a write through reverse dependencies. It selects tests w
 :PROPERTIES:
 :CUSTOM_ID: crud/graph-list-env
 :FILE: src/graphden/crud/entities/list.clj
-:LINE: 496
+:LINE: 497
 :MINS: 3.3
 :END:
 
 Builds a shared lazy read environment over the graph cache. Separate projections produce namespace trees, function lists, searches, subtrees, or a full graph listing. Server-assigned roles distinguish types from functions. This is the shared data source behind editor list refreshes.
 
-- source :: [[file:../../../src/graphden/crud/entities/list.clj::(defn- graph-list-env][src/graphden/crud/entities/list.clj:496]]
+- source :: [[file:../../../src/graphden/crud/entities/list.clj::(defn- graph-list-env][src/graphden/crud/entities/list.clj:497]]
 
 * 24. view-members
 :PROPERTIES:

@@ -293,7 +293,10 @@ const {
       const fn = _tourFindFn('tutorial-cut');
       const own = (lookups.bindingsByFn.get(fn.id) || []).find(binding =>
         lookups.slotMap.get(binding['slot-id'])?.name === 'end');
-      return { terminal: own?.terminal, required: own?.required,
+      const branchName = new URL(location.href).searchParams.get('branch');
+      const branchId = _tourState.created.find(row => row.type === 'branch' && row.name === branchName)?.id;
+      return { fnId: fn.id, bindingId: own?.id, branchName, branchId,
+        terminal: own?.terminal, required: own?.required,
         slot: lookups.slotMap.get(own?.['slot-id']) };
     });
     assert(sealBeforeVariation.terminal === true && sealBeforeVariation.required === true,
@@ -317,6 +320,15 @@ const {
     assert(!liftedCopy.terminal && liftedCopy.required === sealBeforeVariation.required
       && JSON.stringify(liftedCopy.slot) === JSON.stringify(sealBeforeVariation.slot),
     'copy own seal is off; binding requiredness and shared slot declaration are unchanged');
+    assert(sealBeforeVariation.bindingId && (!sealBeforeVariation.branchName || sealBeforeVariation.branchId),
+      'original source has exact binding and branch identity receipts');
+    const preservedSource = await api(page, 'GET', '/api/graph/entities?scope=subtree&root-id='
+      + encodeURIComponent(sealBeforeVariation.fnId), undefined, sealBeforeVariation.branchId
+      ? {'X-Graphden-Branch': sealBeforeVariation.branchId} : undefined);
+    const preservedSeal = preservedSource.bindings?.find(binding => binding.id === sealBeforeVariation.bindingId
+      && binding['fn-id'] === sealBeforeVariation.fnId);
+    assert(preservedSeal?.terminal === true && preservedSeal.required === sealBeforeVariation.required,
+      'fresh exact original source binding retains its own seal and requiredness');
     await filterAndSelect(page, 'tutorial-cut-more', 'tutorial-cut-more');
     await waitTourTitle(page, 'Inspect ancestor choices', 150000);
     await page.waitForSelector('.placeholder-binder[data-fn-name="tutorial-cut-more"][data-arg-name="end"]');
@@ -330,6 +342,11 @@ const {
     await waitTourTitle(page, 'The original stays sealed', 150000);
     await filterAndSelect(page, 'tutorial-cut', 'tutorial-cut');
     await waitTourTitle(page, 'Optional, required, sealed', 150000);
+    // Selection advances the tour before its asynchronous layout paints.
+    await page.waitForFunction(id => selectedFnId === id && !graph.animating
+      && document.querySelector('.node-overlay[data-fn-name="tutorial-cut"]')
+      && document.querySelector('.edge-label-overlay[data-arg-name="end"] .seal-badge[data-seal~="terminal"]'),
+    sealBeforeVariation.fnId, {timeout: 30000, polling: 100});
     assert(await page.$('.edge-label-overlay[data-arg-name="end"] .seal-badge[data-seal~="terminal"]'),
       'original source own seal is preserved');
     await finishAndDelete(page);

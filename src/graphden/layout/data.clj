@@ -408,87 +408,19 @@
      :binding-by-fn-slot :items-by-binding`) — used by helpers that
      have been ported off the source-id chain idiom in favour of
      walking `parent-ids` directly."
-  [{:keys [fns args slots fn-slots bindings list-items]}]
-  (let [fn-map (into {} (map (fn [f] [(:id f) f]) fns))
-        arg-map (into {} (map (fn [a] [(:id a) a]) args))
-        args-by-fn (reduce (fn [m a]
-                             (if-let [fn-id (:fn-id a)]
-                               (update m fn-id (fnil conj []) a)
-                               m))
-                           {} args)
-        slot-map (into {} (map (juxt :id identity)) slots)
-        fn-slots-by-fn (reduce (fn [m fs]
-                                 (if-let [fid (:fn-id fs)]
-                                   (update m fid (fnil conj []) fs)
-                                   m))
-                               {} fn-slots)
-        binding-by-fn-slot (into {}
-                                 (map (fn [b] [[(:fn-id b) (:slot-id b)] b]))
-                                 bindings)
-        ;; Phase 6c — index renamed-view slots by (fn-id, source-slot-id)
-        ;; so layout helpers can answer "the displayed name of this
-        ;; binding's slot" via FK lookup instead of the legacy
-        ;; `binding.rename_to` text.
-        slot-by-fn-source-slot (into {}
-                                     (keep (fn [fs]
-                                             (when-let [s (get slot-map (:slot-id fs))]
-                                               (when-let [src (:source-slot-id s)]
-                                                 [[(:fn-id fs) src] s]))))
-                                     fn-slots)
-        bindings-by-fn (reduce (fn [m b]
-                                 (if-let [fid (:fn-id b)]
-                                   (update m fid (fnil conj []) b)
-                                   m))
-                               {} bindings)
-        items-by-binding (->> list-items
-                              (sort-by :position)
-                              (reduce (fn [m it]
-                                        (if-let [bid (:binding-id it)]
-                                          (update m bid (fnil conj []) it)
-                                          m))
-                                      {}))
-        ;; slot-id → fn-id of the fn that DECLARES the slot (i.e. has
-        ;; a fn-slot junction row for it). One owner per slot — slot
-        ;; identities are derived from `(owner-fn-id, slot-name)`.
-        slot-owner (into {} (map (fn [fs] [(:slot-id fs) (:fn-id fs)])) fn-slots)
-        ;; `[fn-id slot-name] → slot` — the executor's `compile.lookups`
-        ;; index the deep-free walkers (`compile.renames`) resolve a
-        ;; positional `{:as :name}` rename through. Without it the root's
-        ;; deep-free pass (`emit-root-deep-frees!`) lost every renamed
-        ;; hole (`path`, `headers`) while keeping the plain slots.
-        slot-by-fn-name (into {}
-                              (keep (fn [fs]
-                                      (when-let [s (get slot-map (:slot-id fs))]
-                                        [[(:fn-id fs) (keyword (:name s))] s])))
-                              fn-slots)
-        ;; bare name (keyword) → EVERY fn-row carrying it. Lets type-row
-        ;; internals resolve `:int` / `:null` / `:text` etc. in
-        ;; `:constraint` payloads without walking `fn-map` linearly — all
-        ;; rows, because a name may live in several namespaces
-        ;; (`builder-helpers/resolve-type-ref` picks among them).
-        fns-by-name (group-by #(keyword (:name %)) (filter :name fns))]
-    {:fn-map fn-map
-     :fns-by-name fns-by-name
-     :arg-map arg-map
-     :args-by-fn args-by-fn
-     :slot-map slot-map
-     :fn-slots-by-fn fn-slots-by-fn
-     :slot-by-fn-source-slot slot-by-fn-source-slot
-     :binding-by-fn-slot binding-by-fn-slot
-     :bindings-by-fn bindings-by-fn
-     :items-by-binding items-by-binding
-     :slot-owner slot-owner
-     :slot-by-fn-name slot-by-fn-name
-     ;; `{parent-id → #{child-id …}}` — the index the executor's descendant
-     ;; walks (`renames/inheritance-descendants`) read off these lookups;
-     ;; without it every such call rebuilt it from `fn-map`. Built once
-     ;; per snapshot (`cached-build-lookups`).
-     :children-by-fn (compile.lookups/children-by-fn fn-map)
-     ;; Per-request inheritance-chain memo. `build-graph-elements`
-     ;; hits get-inheritance-chain dozens of times for the same
-     ;; fn-ids; cache the BFS walk for the lifetime of one layout
-     ;; request via this atom.
-     :chain-cache (atom {})}))
+  [{:keys [fns args fn-slots] :as graph}]
+  ;; Deep-free/HOF analysis uses the compiler's indices and per-fn caches.
+  ;; Keep their construction shared so layout never falls back to rescanning
+  ;; the whole graph for every visited binding.
+  (assoc (compile.lookups/build-lookups graph)
+         :arg-map (into {} (map (juxt :id identity)) args)
+         :args-by-fn (reduce (fn [m a]
+                               (if-let [fn-id (:fn-id a)]
+                                 (update m fn-id (fnil conj []) a)
+                                 m))
+                             {} args)
+         :slot-owner (into {} (map (juxt :slot-id :fn-id)) fn-slots)
+         :fns-by-name (group-by #(keyword (:name %)) (filter :name fns))))
 
 
 (def ^:private cached-build-lookups-max-size 16)

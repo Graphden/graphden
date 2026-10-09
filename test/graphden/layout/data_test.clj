@@ -1,7 +1,9 @@
-(ns graphden.layout.data-test
+(ns ^:serial graphden.layout.data-test
   "The derived arg rows a card is drawn from (`derive-fn-slot-views`)."
   (:require
     [clojure.test :refer [deftest is testing]]
+    [graphden.executor.compile.bindings :as bindings]
+    [graphden.executor.compile.lookups :as lookups]
     [graphden.layout.data :as data]))
 
 
@@ -67,3 +69,35 @@
                                       {:id :c2 :parent-ids [:p :c1]}]
                                 :slots [] :fn-slots [] :bindings [] :list-items []})]
     (is (= {:p #{:c1 :c2} :c1 #{:c2}} (:children-by-fn lk)))))
+
+
+(deftest hof-analysis-is-reused-only-within-its-snapshot
+  (let [root-id (random-uuid)
+        type-id (random-uuid)
+        slot-id (random-uuid)
+        graph {:fns [{:id root-id :name "root" :parent-ids []
+                      :return-type-fn-id type-id}
+                     {:id type-id :constraint [:fn {} :any]}]
+               :slots [{:id slot-id :name "handler" :type-fn-id type-id}]
+               :fn-slots [{:fn-id root-id :slot-id slot-id :position 0}]
+               :bindings [] :list-items []}
+        scans (atom 0)
+        compute lookups/compute-fn-typed-fn-ids]
+    (with-redefs [lookups/compute-fn-typed-fn-ids
+                  (fn [lk] (swap! scans inc) (compute lk))]
+      (let [lk (data/cached-build-lookups graph)
+            free (bindings/collect-bindings root-id lk)]
+        (is (= {:kind :free :is-fn true}
+               (select-keys (first free) [:kind :is-fn])))
+        (dotimes [_ 10]
+          (is (identical? free (bindings/collect-bindings
+                                 root-id (data/cached-build-lookups graph)))))
+        (is (= 1 @scans) "HOF classification scans the graph once per snapshot")
+        (let [changed (assoc graph :bindings
+                             [{:id (random-uuid) :fn-id root-id :slot-id slot-id
+                               :value false :value-present true}])
+              bound (bindings/collect-bindings root-id (data/cached-build-lookups changed))]
+          (is (= {:kind :value :value false}
+                 (select-keys (first bound) [:kind :value])))
+          (is (= 2 @scans))
+          (is (= :free (:kind (first (bindings/collect-bindings root-id lk))))))))))

@@ -191,6 +191,11 @@ const REQUIRE_SIGNALS = {
     phrase: 'a signed-in account with API token support',
     short: 'account and API tokens',
   },
+  'publish-packages': {
+    test: () => typeof canPublishPackages === 'function' && canPublishPackages(),
+    phrase: 'the publish-packages capability',
+    short: 'publish access',
+  },
   'package-lifecycle': {
     test: () => !!(window.API?.api_packages_publish && window.API?.api_packages_installed
       && window.API?.api_packages_panel_install && window.API?.api_packages_panel_update

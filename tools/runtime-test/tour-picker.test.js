@@ -179,6 +179,13 @@ function makeWorld(opts) {
 
   await test('the package lesson follows the actual Publish policy and required registry routes', () => {
     const lesson = {requires: 'package-lifecycle'};
+    const distribution = {requires: 'publish-packages'};
+    assert(makeWorld().ctx._tourRequirement(distribution).allowed,
+      'single-tenant distribution follows the available Publish control');
+    assert(!makeWorld({tenancy: true}).ctx._tourRequirement(distribution).allowed,
+      'tenant distribution without publish capability remains locked');
+    assert(makeWorld({tenancy: true, caps: ['publish-packages']}).ctx._tourRequirement(distribution).allowed,
+      'tenant distribution with publish capability is available');
     const api = {api_packages_publish: '/publish', api_packages_installed: '/installed',
       api_packages_panel_install: '/install', api_packages_panel_update: '/update', api_branches: '/branches'};
     const selfhost = makeWorld({api}).ctx;

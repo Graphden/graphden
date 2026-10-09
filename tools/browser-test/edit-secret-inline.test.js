@@ -148,7 +148,7 @@ async function cleanup(page) {
     await browser.close();
     process.exit(0);
   } catch (e) {
-    console.error('FAIL', e && e.stack || e);
+    console.error('FAIL — inline secret lifecycle assertion or transport failed');
     try { await cleanup(page); } catch (_) { console.error('exact owned cleanup failed; confirmation retained'); }
     await browser.close();
     process.exit(1);

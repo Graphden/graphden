@@ -2,13 +2,15 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const {createRequire} = require('node:module');
+const helperRequire = createRequire(require.resolve('../browser-test/edit-test-helpers.js'));
 const source = name => fs.readFileSync(path.join(__dirname, '../browser-test', name), 'utf8');
 
 async function authMode(env) {
   const probes = [];
   const storage = new Map([['graphden.auth.password', 'old-static-fixture']]);
   const sandbox = vm.createContext({module: {exports: {}}, process: {env}, console,
-    URL, Buffer, AbortSignal, AbortController, setTimeout, clearTimeout, require,
+    URL, Buffer, AbortSignal, AbortController, setTimeout, clearTimeout, require: helperRequire,
     localStorage: {setItem: (k, v) => storage.set(k, v), removeItem: k => storage.delete(k)},
     fetch: async (url, options) => { probes.push({url, options}); return {ok: true}; },
   });

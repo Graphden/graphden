@@ -598,19 +598,25 @@ async function cleanup(page) {
     // (4) a replaced ref: the compared branch's side hangs beside the
     //     card as a ghost subtree; the edge label marks the differing arg.
     await page.evaluate(async (nm) => { await selectFnByName(nm); }, REF_FN);
-    await page.waitForSelector('.gd-ghost-cluster', {timeout: 20000});
-    const ghost = await page.evaluate(() => ({
-      head: document.querySelector('.gd-ghost-head')?.textContent || '',
-      cards: document.querySelectorAll('.gd-ghost-card').length,
+    const referenceGhost = '.gd-ghost-cluster[data-ghost-root="' + timeFn.id + '"]';
+    // Selection starts an asynchronous layout/ghost render. A prior literal
+    // counterpart shares gd-ghost-cluster but has no reference cards/head.
+    await page.waitForFunction(({id, selector}) => selectedFnId === id
+      && !!document.querySelector(selector + ' .gd-ghost-head')
+      && !!document.querySelector(selector + ' .gd-ghost-card'),
+    {id: refId, selector: referenceGhost}, {timeout: 20000});
+    const ghost = await page.evaluate(selector => ({
+      head: document.querySelector(selector + ' .gd-ghost-head')?.textContent || '',
+      cards: document.querySelectorAll(selector + ' .gd-ghost-card').length,
       links: document.querySelectorAll('.gd-ghost-link').length,
       edge: document.querySelectorAll('.edge-label-diff').length,
-    }));
+    }), referenceGhost);
     assert(/value there → :current-time-ms/.test(ghost.head) && ghost.cards >= 1 && ghost.links === 1,
            'ghost subtree of the there-ref beside the card: ' + JSON.stringify(ghost));
     assert(ghost.edge >= 1, 'the differing ref arg marks its edge label');
-    await page.evaluate(() => document.querySelector('.gd-ghost-head').click());
-    const folded = await page.evaluate(
-      () => document.querySelector('.gd-ghost-cluster')?.classList.contains('gd-ghost-folded'));
+    await page.locator(referenceGhost + ' .gd-ghost-head').click();
+    const folded = await page.evaluate(selector =>
+      document.querySelector(selector)?.classList.contains('gd-ghost-folded'), referenceGhost);
     assert(folded === true, 'ghost head click folds the cluster');
     // (5) the `inside` lens turns the ∿ marks off — and back on.
     await page.evaluate(() => window.gdDiffSetLens({inside: false}));

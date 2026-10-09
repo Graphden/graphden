@@ -321,13 +321,17 @@ async function cleanup(page) {
       assert(chainParent, 'long chain identity resolved: ' + name);
     }
     const chainTopId = chainParent;
-    const add = allEnts.fns.find((fn) => fn.name === 'add');
-    assert(add, ':add resolved for two independent composition branches');
-    await writeEntity(page, 'fn', {name: PAIR_FN, 'parent-ids': add.id});
+    // equal? has two scalar inputs; add takes one list input (:nums).
+    // This fixture tests independent composition branches, not arithmetic.
+    const core = allEnts.namespaces.find(ns => ns.name === 'core' && !ns['parent-id']);
+    const logic = allEnts.namespaces.find(ns => ns.name === 'logic' && ns['parent-id'] === core?.id);
+    const pairParent = allEnts.fns.find(fn => fn.name === 'equal?' && fn['namespace-id'] === logic?.id);
+    assert(core && logic && pairParent, 'core.logic.equal? resolved for two independent composition branches');
+    await writeEntity(page, 'fn', {name: PAIR_FN, 'parent-ids': pairParent.id});
     const pairEntities = await api(page, 'GET', '/api/graph/entities');
     const pairId = pairEntities.fns.find((fn) => fn.name === PAIR_FN)?.id;
     for (const [name, ref] of [['a', chainTopId], ['b', refId]]) {
-      const slotId = pairEntities['fn-slots'].filter((row) => row['fn-id'] === add.id)
+      const slotId = pairEntities['fn-slots'].filter((row) => row['fn-id'] === pairParent.id)
         .map((row) => pairEntities.slots.find((slot) => slot.id === row['slot-id']))
         .find((slot) => slot.name === name)?.id;
       assert(slotId, 'composition slot resolved: ' + name);

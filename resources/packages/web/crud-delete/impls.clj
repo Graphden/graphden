@@ -69,5 +69,5 @@
 (def impls
   {:query-param {:impl query-param :taint-propagate? true}
    :parse-fn-delete-receipts {:impl parse-fn-delete-receipts :taint-propagate? true}
-   :delete-fn-receipts delete-fn-receipts
+   :delete-fn-receipts {:impl delete-fn-receipts :taint-propagate? true}
    :extract-entity-params {:impl extract-entity-params :taint-propagate? true}})

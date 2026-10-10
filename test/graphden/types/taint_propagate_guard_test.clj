@@ -36,6 +36,8 @@
    content?\" — if yes it needs `:taint-propagate?` and a `golden-tainted`
    entry; a REMOVED name just leaves both sets."
   #{:_fn-branch-local-seed :_fn-slot-seals
+    ;; Parsing retains caller fields; deletion returns caller receipt IDs.
+    :parse-fn-delete-receipts :delete-fn-receipts
     ;; Inheritance commands and their outcomes retain caller-selected content.
     :parse-inheritance-command :preview-inheritance :apply-inheritance
     ;; Returns caller entry identities and their selected graph content;
@@ -217,6 +219,8 @@
    pass/transform caller content? then it needs `:taint-propagate?`\"; for each
    REMOVED name confirm it genuinely no longer handles content."
   #{:fork-package-fns :materialize-package-fns :materialize-package-receipt
+    ;; Exact identity validation is not a declassification boundary.
+    :parse-fn-delete-receipts :delete-fn-receipts
     :package-pin-receipt :rewrite-refs-to-version
     ;; Parsing echoes command fields; preview/apply derive descriptors and
     ;; outcomes from those fields. None is a declassification boundary.
@@ -274,6 +278,21 @@
              ". No-longer-tainted (a content-passing fn that LOST the flag is a "
              "leak): " (sort (set/difference golden-tainted tainted))
              ". See docs/SECRETS.md § T3, then update the golden set."))))
+
+
+(deftest exact-deletion-receipts-preserve-argument-taint
+  (let [definitions (:base-fn-defs (loader/load-packages ["web"]))]
+    (doseq [[primitive slot input-type]
+            [[:parse-fn-delete-receipts :input :jsonb]
+             [:delete-fn-receipts :receipts [:list {:id :uuid :name :text :namespace-id :uuid}]]]]
+      (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
+                registry/*per-org-rich-override* (atom {})]
+        (let [definition (get definitions primitive)
+              result (:return-type definition)]
+          (registry/record-rich-types! primitive definition)
+          (is (= result (check/rule-return primitive {slot {:type input-type}} result)))
+          (is (= [:secret result]
+                 (check/rule-return primitive {slot {:type [:secret input-type]}} result))))))))
 
 
 (deftest preview-export-preserves-argument-taint

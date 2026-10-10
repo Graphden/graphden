@@ -1224,6 +1224,26 @@
     (is (= :int (:return (registry/rich-type-of :always-42))))))
 
 
+(deftest identity-const-can-declare-a-uuid-without-calling-its-target
+  (registry/record-rich-types! :identity-target
+                               {:args {:secret-input {:type :text}}
+                                :return-type [:secret :text] :effects #{:db}})
+  (check/check-fn-def! {:name :identity-uuid :parent :const
+                        :return-type :uuid
+                        :args {:value {:ref :identity-target :type :fn-ref}}})
+  (let [info (registry/rich-type-of :identity-uuid)]
+    (is (= :uuid (:return info)))
+    (is (empty? (:args info)))
+    (is (empty? (:effects info))))
+  (check/check-fn-def! {:name :identity-descriptor :parent :zipmap
+                        :return-type {:fn-id :uuid}
+                        :args {:keys [{:value :fn-id}] :vals [:identity-uuid]}})
+  (check/check-fn-def! {:name :identity-manifest :parent :list
+                        :return-type [:list {:fn-id :uuid}]
+                        :args {:items [:identity-descriptor]}})
+  (is (= [:list {:fn-id :uuid}] (:return (registry/rich-type-of :identity-manifest)))))
+
+
 (deftest passthrough-pins-return-to-fn-ref-return
   (testing "binding :value to a fn-ref propagates the ref's return-type up"
     (registry/record-rich-types! :passthrough
@@ -2203,6 +2223,29 @@
       (catch clojure.lang.ExceptionInfo e
         (is (= :types/fn-ref-slot-needs-ref (:type (ex-data e))))
         (is (= :service (:arg-name (ex-data e))))))))
+
+
+(deftest uuid-literal-cannot-become-an-identity-slot-binding
+  (registry/record-rich-types! :identity-endpoint
+                               {:args {:service :fn-ref} :return-type :uuid})
+  (try
+    (check/check-fn-def! {:name :literal-identity :parent :identity-endpoint
+                          :args {:service {:value (random-uuid)}}})
+    (is false "A UUID value does not supply an identity edge")
+    (catch clojure.lang.ExceptionInfo error
+      (is (= :types/fn-ref-slot-needs-ref (:type (ex-data error)))))))
+
+
+(deftest value-and-ref-mixture-cannot-bypass-type-override-checks
+  (registry/record-rich-types! :mixed-secret-target
+                               {:args {} :return-type [:secret :text]})
+  (try
+    (check/check-fn-def! {:name :mixed-identity :parent :const
+                          :return-type :uuid
+                          :args {:value {:value "secret" :ref :mixed-secret-target :type :fn-ref}}})
+    (is false "A value binding does not select the identity branch")
+    (catch clojure.lang.ExceptionInfo error
+      (is (= :bindings/type-override-strips-marker (:type (ex-data error)))))))
 
 
 (deftest the-checker-reads-a-flagged-list-binding-as-its-items

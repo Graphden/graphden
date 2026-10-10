@@ -987,6 +987,13 @@
             ;; value-binding → check against classified value type.
             [actual-src actual]
             (cond
+              ;; This exact top-level override selects an identity edge,
+              ;; whose value is the UUID. It never evaluates target return.
+              ;; Value/ref mixtures and sequence items retain normal guards.
+              (and (not (vector? b-form0))
+                   (= :ref-map (binding-shape b-form))
+                   (= :fn-ref (:type b-form)))
+              nil
               (contains? b-form :ref)
               [:ref-return
                (some-> (registry/rich-type-of (:ref b-form))

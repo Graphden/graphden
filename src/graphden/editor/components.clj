@@ -63,7 +63,7 @@
 
 
 (defn- export-in-snapshot
-  [ctx component storage authorize!]
+  [ctx component storage authorize! policy epoch]
   (let [id (selected-id storage)
         row (sp/read-entity storage :fn id)]
     (when-not row (reject! :source-missing))
@@ -72,14 +72,11 @@
     (let [graph (source/collect-manifest storage id authorize!)
           configuration (config/configuration graph id)
           entries (get configuration component)
-          captured {:graph graph :namespaces (source/collect-namespaces storage graph)}
-          epoch (context/invalidation-epoch ctx)]
-      ;; Authorization above precedes visibility/registry reads. A fresh check
-      ;; must never reinterpret an erased secret annotation as public data.
+          captured {:graph graph :namespaces (source/collect-namespaces storage graph)}]
+      ;; The original policy was frozen before opening this transaction.
+      ;; A fresh check may veto it, never relax erased secret annotations.
       (assert-current-policy! storage)
-      (let [policy (snapshot/capture-policy
-                     @(or (:rich-types-atom ctx) (registry/active-rich-types-atom)))
-            _ (snapshot/validate-source! captured id policy)
+      (let [_ (snapshot/validate-source! captured id policy)
             _ (when-not entries (reject! :component-missing))
             body (source/collect-closure storage (vals entries) authorize!)
             body-snapshot {:graph body :namespaces (source/collect-namespaces storage body)}
@@ -106,8 +103,11 @@
       (reject! :invalid-request))
     (let [component (get component-keys (:component input))]
       (when-not component (reject! :invalid-request))
-      (source/with-snapshot (request/require-storage ctx)
-                            #(export-in-snapshot ctx component %1 %2)))
+      (let [epoch (context/invalidation-epoch ctx)
+            policy (snapshot/capture-policy
+                     @(or (:rich-types-atom ctx) (registry/active-rich-types-atom)))]
+        (source/with-snapshot (request/require-storage ctx)
+                              #(export-in-snapshot ctx component %1 %2 policy epoch))))
     (catch Exception error
       (let [{:keys [type reason]} (ex-data error)]
         (cond-> {:ok false :reason "Personal UI graph is unavailable. Using built-in components."

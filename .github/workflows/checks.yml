@@ -1,4 +1,5 @@
 name: CI
+run-name: ${{ github.event_name == 'workflow_dispatch' && format('Core release proof {0}', inputs.request_id) || format('CI {0}', github.sha) }}
 
 # Least privilege for the job token: every job here only reads the
 # checkout (the security job talks to the Advisory DB with the same
@@ -16,12 +17,36 @@ on:
   # from a feature branch before landing — and a CI job whose first execution
   # is on main is a job nobody has tested.
   workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Full commit SHA to verify
+        required: true
+        type: string
+      request_id:
+        description: Unique UUID identifying this proof
+        required: true
+        type: string
 
 env:
   JAVA_VERSION: '21'
 
 jobs:
+  release-proof-guard:
+    name: release proof guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Test dispatch identity guard
+        run: bash scripts/test-ci-release-guard.sh
+      - name: Verify dispatch identity
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          REQUEST_ID: ${{ inputs.request_id }}
+        run: bash scripts/ci-release-guard.sh
+
   kondo:
+    needs: release-proof-guard
     name: clj-kondo
     runs-on: ubuntu-latest
     steps:
@@ -45,6 +70,7 @@ jobs:
         run: bb kondo
 
   splint:
+    needs: release-proof-guard
     name: splint
     runs-on: ubuntu-latest
     steps:
@@ -73,6 +99,7 @@ jobs:
         run: bb splint
 
   cljstyle:
+    needs: release-proof-guard
     name: cljstyle
     runs-on: ubuntu-latest
     steps:
@@ -86,6 +113,7 @@ jobs:
         run: bb cljstyle
 
   test:
+    needs: release-proof-guard
     name: tests
     runs-on: ubuntu-latest
     steps:
@@ -118,6 +146,7 @@ jobs:
         run: bb test-unit
 
   integration:
+    needs: release-proof-guard
     name: integration (testcontainers)
     # The 2026-08-22 test audit found ~24% of the suite — 71 namespaces,
     # including EVERY HTTP-level accounts test (login, logout, OAuth,
@@ -186,6 +215,7 @@ jobs:
         run: bb test-integration
 
   helm-lint:
+    needs: release-proof-guard
     name: helm lint (deploy/helm/graphden)
     runs-on: ubuntu-latest
     steps:
@@ -208,6 +238,7 @@ jobs:
             --set sse.enabled=true >/dev/null
 
   fleet-e2e:
+    needs: release-proof-guard
     name: fleet e2e (two real containers)
     # `bb test-fleet-e2e` boots the executor image TWICE over a shared
     # Postgres and drives the token-gated /internal/fleet/* control plane —
@@ -254,10 +285,10 @@ jobs:
         run: bb test-fleet-e2e
 
   coverage:
+    needs: release-proof-guard
     name: coverage
-    # Instrumented run ~doubles the unit suite — main-only by design;
-    # develop landings are gated by the local wtq gate's plain suite.
-    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
+    # A release dispatch includes instrumentation before deployment.
+    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -302,6 +333,7 @@ jobs:
           bb coverage-floor
 
   security:
+    needs: release-proof-guard
     name: security scan
     runs-on: ubuntu-latest
     steps:
@@ -341,6 +373,7 @@ jobs:
   # Advisory, exactly like its `:info` group in scripts/checks.edn: antq exits
   # non-zero merely because an upgrade EXISTS, which is news, not a defect.
   outdated:
+    needs: release-proof-guard
     name: outdated deps
     runs-on: ubuntu-latest
     continue-on-error: true
@@ -370,6 +403,7 @@ jobs:
         run: bb outdated
 
   biome:
+    needs: release-proof-guard
     name: biome (JS)
     runs-on: ubuntu-latest
     steps:
@@ -387,6 +421,7 @@ jobs:
         run: npx biome check resources/packages/app/editor
 
   stylelint:
+    needs: release-proof-guard
     name: stylelint (CSS)
     runs-on: ubuntu-latest
     steps:
@@ -416,6 +451,7 @@ jobs:
   # population. Jobs run in parallel, so this costs compute minutes, not wall
   # time.
   perf:
+    needs: release-proof-guard
     name: perf (structural budgets)
     runs-on: ubuntu-latest
     steps:
@@ -451,6 +487,7 @@ jobs:
   # renderer over tools/runtime-test/mini-dom.js. No browser, no server — so no
   # chromium install here.
   tests-js:
+    needs: release-proof-guard
     name: tests-js (no-stack JS)
     runs-on: ubuntu-latest
     steps:
@@ -468,6 +505,7 @@ jobs:
         run: bb test-js
 
   shellcheck:
+    needs: release-proof-guard
     name: shellcheck (.sh)
     runs-on: ubuntu-latest
     steps:
@@ -481,6 +519,7 @@ jobs:
             dev/wtq/wt $(git ls-files '*.sh')
 
   registry-selftest:
+    needs: release-proof-guard
     name: ci-selftest + devtour
     runs-on: ubuntu-latest
     steps:
@@ -497,6 +536,7 @@ jobs:
         run: bb devtour-check
 
   hadolint:
+    needs: release-proof-guard
     name: hadolint (Dockerfile)
     runs-on: ubuntu-latest
     # The image comes from GHCR, not Docker Hub: two consecutive main
@@ -516,6 +556,7 @@ jobs:
         run: docker run --rm -i ghcr.io/hadolint/hadolint:v2.12.0-debian < Dockerfile.crac
 
   gitleaks:
+    needs: release-proof-guard
     name: gitleaks (secrets)
     runs-on: ubuntu-latest
     steps:
@@ -531,6 +572,7 @@ jobs:
             detect --no-banner
 
   typos:
+    needs: release-proof-guard
     name: typos (spelling)
     runs-on: ubuntu-latest
     steps:
@@ -539,6 +581,7 @@ jobs:
       - uses: crate-ci/typos@v1.50.2
 
   markdownlint:
+    needs: release-proof-guard
     name: markdownlint (.md)
     runs-on: ubuntu-latest
     steps:
@@ -555,6 +598,7 @@ jobs:
         run: npx markdownlint-cli2
 
   actionlint:
+    needs: release-proof-guard
     name: actionlint (workflows)
     runs-on: ubuntu-latest
     steps:
@@ -564,6 +608,7 @@ jobs:
         run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7 -color
 
   lychee:
+    needs: release-proof-guard
     name: lychee (link check)
     runs-on: ubuntu-latest
     steps:
@@ -593,6 +638,7 @@ jobs:
           fail: true
 
   trivy:
+    needs: release-proof-guard
     name: trivy (CVE + misconfig)
     runs-on: ubuntu-latest
     steps:
@@ -628,6 +674,7 @@ jobs:
           trivyignores: .trivyignore.yaml
 
   license-check:
+    needs: release-proof-guard
     name: license-check (npm)
     runs-on: ubuntu-latest
     steps:
@@ -653,6 +700,7 @@ jobs:
         run: bb license-check
 
   commitlint:
+    needs: release-proof-guard
     name: commitlint (PR commits)
     runs-on: ubuntu-latest
     # Only meaningful for PRs — `push` events don't have a base ref

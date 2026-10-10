@@ -4,7 +4,8 @@
 
 - Source: <https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js>
 - Version: 2.0.4
-- License: BSD Zero Clause (0BSD) — <https://github.com/bigskysoftware/htmx/blob/master/LICENSE>
+- License: BSD Zero Clause (0BSD) — [the matching vendored license](htmx.LICENSE).
+  The JavaScript and license come from the same `htmx.org@2.0.4` npm archive.
 - Served at `GET /assets/htmx.min.js` (1-year immutable cache,
   hash-busted via `?v=<frontend-build-hash>`); consumed by the editor
   page's `<head>` and by tenant pages via `:with-htmx` (app.page).

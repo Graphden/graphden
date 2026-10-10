@@ -6,11 +6,11 @@ const path = require('node:path');
 const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '../../resources/packages/app/editor/editor-ui-component-catalog.js'), 'utf8');
 const id = n => String(n).padStart(8, '0') + '-1111-1111-1111-111111111111';
-function fixture() {
+function fixture(component = 'recents', save = true) {
   const buttons = new Map();
   for (const name of ['create', 'choose', 'reset', 'label', 'status']) buttons.set('#gd-ui-components-' + name,
     {dataset: {}, isConnected: true, addEventListener(_name, callback) { this.click = callback; }});
-  const group = {dataset: {uiComponent: 'recents', uiLabel: 'recent functions'}, isConnected: true,
+  const group = {dataset: {uiComponent: component, uiLabel: 'recent functions'}, isConnected: true,
     addEventListener(_name, callback) { this.click = callback; }};
   const root = {dataset: {}, querySelector: key => buttons.get(key), querySelectorAll: key =>
     key === '[data-ui-component]' ? [group] : key === 'button' ? [...buttons.values(), group] : []};
@@ -19,15 +19,18 @@ function fixture() {
   let selectCount = 0;
   let applyResolve;
   const requests = [], writes = [], themes = [];
-  const manifest = {component: 'recents', 'expected-preference': {present: false, value: null},
+  const manifest = {component, 'expected-preference': {present: false, value: null},
     namespaces: [{id: id(1), name: 'personal', path: 'personal', 'parent-id': null}],
     functions: ['ui', 'initial', 'update', 'view'].map((name, index) => ({id: id(index + 2), name, 'namespace-id': id(1)})),
     roots: {'configuration-id': id(2), 'recents-initial-id': id(3), 'recents-update-id': id(4), 'recents-id': id(5)}};
-  const request = {owner: 'alice', org: 'public', 'branch-id': id(9), component: 'recents'};
+  const viewKey = {'account-menu': 'menu-id', 'fn-picker': 'picker-id', recents: 'recents-id'}[component];
+  manifest.roots[viewKey] = id(5);
+  if (component === 'account-menu') Object.assign(manifest.roots, {'menu-initial-id': id(3), 'menu-update-id': id(4)});
+  const request = {owner: 'alice', org: 'public', 'branch-id': id(9), component};
   const window = {gdPrefOwner: 'alice', gdPrefsReady: true, API: {api_ui_components_create_preview: '/preview', api_ui_components_create_apply: '/apply'},
     gdPrefRead: () => preference, gdUIComponentsSelection: () => preference, gdUIComponentsRoots: () => roots,
     gdUIComponentsStatus: () => '', gdPrefOnChange() {}, addEventListener() {}, gdShellSurface() {},
-    gdPrefWrite: async (...args) => { writes.push(args); preference = args[1]; roots = preference.roots; return true; },
+    gdPrefWrite: async (...args) => { writes.push(args); if (save) { preference = args[1]; roots = preference.roots; } return save; },
     gdUseThemeGraph: async theme => themes.push(theme),
     authFetch: async (route, options) => {
       requests.push({route, body: JSON.parse(options.body)});
@@ -78,4 +81,26 @@ test('an existing personal group opens its own identity instead of creating anot
   await until(() => f.selections() === 1);
   assert.equal(f.requests.length, 0);
   assert.equal(f.group.textContent, 'Open recent functions');
+});
+
+for (const component of ['account-menu', 'fn-picker']) {
+  test(component + ' uses its selected template without activating a theme', async () => {
+    const f = fixture(component); f.group.click();
+    await until(() => f.requests.length === 2); f.apply();
+    await until(() => f.writes.length === 1);
+    assert.equal(f.requests[0].body.component, component);
+    assert.equal(Object.hasOwn(f.requests[0].body, 'roots'), false, 'client roots are not selection authority');
+    assert.deepEqual(JSON.parse(JSON.stringify(f.requests[1].body)),
+      {owner: 'alice', org: 'public', 'branch-id': id(9), component});
+    assert.equal(f.themes.length, 0);
+  });
+}
+
+test('a rejected conditional activation leaves the created graphs available and reports the conflict', async () => {
+  const f = fixture('recents', false); f.group.click();
+  await until(() => f.requests.length === 2); f.apply();
+  await until(() => f.status().includes('were created'));
+  assert.equal(f.writes.length, 1);
+  assert.equal(f.themes.length, 0);
+  assert.match(f.status(), /selection changed or could not be saved/);
 });

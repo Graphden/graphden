@@ -350,7 +350,11 @@ function initDiffConversation(container, sourceName, sourceRef, opts) {
           body: JSON.stringify(payload),
         });
         const d = await r.json().catch(() => ({}));
-        if (d.ok) { input.value = ''; await reload(); }
+        if (d.ok) {
+          input.value = '';
+          if (anchorName && anchorId) form.remove();
+          await reload();
+        }
         else alert(d.message || d.error || ('Could not post: HTTP ' + r.status));
       } catch (e2) {
         alert('Could not post comment: ' + (e2?.message || 'network error'));
@@ -384,9 +388,16 @@ function initDiffConversation(container, sourceName, sourceRef, opts) {
 
   const render = () => {
     if (!container.isConnected) return;
-    // Wipe the previous render (threads + general wrap + count badges).
-    container.querySelectorAll('.branch-diff-anchor-thread, .branch-comments')
-      .forEach((n) => { n.remove(); });
+    // Server reads replace saved comments, never an active local draft.
+    // Keep the exact composer nodes so focus, selection and pending POSTs
+    // survive an initial read that finishes after the reader starts typing.
+    container.querySelectorAll('.branch-diff-anchor-thread').forEach((thread) => {
+      if (!thread.querySelector('.branch-diff-anchor-compose')) { thread.remove(); return; }
+      thread.querySelectorAll('.branch-comment').forEach((row) => { row.remove(); });
+    });
+    const generalForm = container.querySelector('.branch-comments .branch-comment-form');
+    const generalFocus = generalForm?.contains(document.activeElement) ? document.activeElement : null;
+    container.querySelectorAll('.branch-comments').forEach((wrap) => { wrap.remove(); });
     container.querySelectorAll('.branch-diff-comment-btn .bd-comment-count')
       .forEach((n) => { n.remove(); });
     container.querySelectorAll('.branch-diff-comment-btn.has-comments')
@@ -409,7 +420,13 @@ function initDiffConversation(container, sourceName, sourceRef, opts) {
       const id = k.slice(k.indexOf(':') + 1);
       const el = container.querySelector('[data-anchor-id="' + CSS.escape(id) + '"]');
       if (!el) { orphans.push([k, cs]); continue; }
-      mountThread(el, cs, false);
+      const thread = Array.from(container.querySelectorAll('.branch-diff-anchor-thread'))
+        .find((candidate) => candidate.dataset.anchorId === id
+          && candidate.dataset.anchorName === k.slice(0, k.indexOf(':')));
+      if (thread) {
+        const form = thread.querySelector('.branch-diff-anchor-compose');
+        cs.forEach((c) => { thread.insertBefore(commentRow(c), form); });
+      } else mountThread(el, cs, false);
       const btn = el.classList.contains('branch-diff-entry')
         ? el.querySelector('.branch-diff-comment-btn')
         : el.querySelector('.branch-diff-row-head .branch-diff-comment-btn');
@@ -446,10 +463,11 @@ function initDiffConversation(container, sourceName, sourceRef, opts) {
       empty.textContent = 'No comments yet.';
       list.appendChild(empty);
     }
-    const form = composer(null, null);
+    const form = generalForm || composer(null, null);
     form.classList.add('branch-comment-form');
     wrap.appendChild(form);
     container.appendChild(wrap);
+    generalFocus?.focus();
   };
 
   reload = async () => {

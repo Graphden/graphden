@@ -29,6 +29,7 @@ const {
   console.log('edit-tutorial-tour-review — lesson 24');
   let failed = false;
   const scrollBranches = [];
+  let releaseComments;
   try {
     await hardCleanup(page);
     const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
@@ -117,11 +118,42 @@ const {
       {timeout: 30000, state: 'attached'});   // inside the closed ⋯ menu
     await waitTourTitle(page, 'Read the proposal', 150000);
     await filterAndSelect(page, 'review-demo', 'review-demo');
+    const holdInitialComments = process.env.GRAPHDEN_COMMENT_RELOAD_PROOF === '1';
+    const heldComments = [];
+    let commentReads = 0;
+    const commentsGate = new Promise((resolve) => { releaseComments = resolve; });
+    if (holdInitialComments) {
+      await page.route('**/api/branches/*/comments', async (route) => {
+        if (route.request().method() !== 'GET'
+          || ++commentReads === 1) { await route.continue(); return; }
+        console.log('[composer trace] holding comments read', commentReads);
+        const response = await route.fetch();
+        const completion = commentsGate.then(() => route.fulfill({response}));
+        heldComments.push(completion);
+        await completion;
+      });
+    }
     await compareBranchViaChip(page, 'tutorial-feature');
     await waitTourTitle(page, 'Comment on this function', 150000);
     await page.click('#gd-diff-insp .gd-diff-insp-head .branch-diff-comment-btn');
+    if (holdInitialComments) console.log('[composer trace] opened', await page.locator('#gd-diff-insp textarea').count(), 'reads', commentReads);
     const thread = '#gd-diff-insp .branch-diff-anchor-thread';
     await page.fill(thread + ' .branch-comment-input', 'Please keep this value explicit.');
+    if (holdInitialComments) {
+      assert(heldComments.length > 0, 'initial comments response held while composer is active');
+      const textarea = await page.locator(thread + ' .branch-comment-input').elementHandle();
+      releaseComments();
+      await Promise.all(heldComments);
+      await page.unroute('**/api/branches/*/comments');
+      await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+      const draftState = await textarea.evaluate((input) => ({
+        connected: input.isConnected, draft: input.value === 'Please keep this value explicit.',
+        focused: document.activeElement === input,
+      }));
+      console.log('[composer trace] after real responses', JSON.stringify(draftState));
+      assert(draftState.connected && draftState.draft && draftState.focused,
+        'late real comments response retains the focused draft');
+    }
     await page.click(thread + ' .branch-comment-send');
     await waitTourTitle(page, 'Reopen the same thread', 150000);
     // Posting reloads the thread without its composer; reopen it through
@@ -190,6 +222,8 @@ const {
       console.error('  screenshot: /tmp/edit-tutorial-tour-fail.png');
     } catch (_) { /* page may be gone */ }
   } finally {
+    releaseComments?.();
+    await page.unroute('**/api/branches/*/comments');
     try { await cleanupRecordedTutorialBranches(page); }
     catch (error) { failed = true; console.error('Owned cleanup failed:', error.message); }
     for (const name of scrollBranches.reverse()) {

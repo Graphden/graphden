@@ -31,7 +31,10 @@
         old-id (ids/fn-id old-root :ui)
         alias (keyword new-root (str "_retained-target-" old-id))
         added (bundle/parse new-root :recents alias nil {alias old-id})
-        interfaces (templates/interface-definitions)
+        interfaces (filter #(contains? #{[:const "core.logic"] [:list "core.collections"]
+                                         [:zipmap "core.collections"] [:concat "core.collections"]}
+                                       [(:name %) (:namespace %)])
+                           (templates/interface-definitions))
         records (concat (ids/boot-primitive-records)
                         (mapcat #(parse/parse-fn-def % {}) interfaces)
                         (map #(cond-> % (= old-id (:id %)) (assoc :name nil)) (:records old)) (:records added))

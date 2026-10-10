@@ -5,10 +5,12 @@
     [clojure.set :as set]
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.editor.component-config :as config]
+    [graphden.editor.component-creation :as creation]
     [graphden.editor.components :as components]
     [graphden.editor.preference-write :as preferences]
     [graphden.executor.browser-snapshot :as snapshot]
     [graphden.executor.browser-source :as source]
+    [graphden.executor.context :as context]
     [graphden.packages.records.ids :as records]
     [graphden.storage.postgres.crud :as pg-crud]
     [graphden.storage.protocol.core :as sp]
@@ -40,11 +42,19 @@
 
 (defn- submit
   [handler input]
-  (let [response (ga/exec-handler handler
-                                  {:request-method :post :uri "/api/ui/components/create"
-                                   :headers {"content-type" "application/json"}
-                                   :body (json/generate-string input)})]
-    {:status (:status response) :body (json/parse-string (:body response) true)}))
+  (let [diagnostics (atom [])
+        classify creation/failure-response
+        response (with-redefs [creation/failure-response
+                               (fn [error]
+                                 (swap! diagnostics conj
+                                        (select-keys (ex-data error) [:type :reason :fn-id :http-status]))
+                                 (classify error))]
+                   (ga/exec-handler handler
+                                    {:request-method :post :uri "/api/ui/components/create"
+                                     :headers {"content-type" "application/json"}
+                                     :body (json/generate-string input)}))]
+    (cond-> {:status (:status response) :body (json/parse-string (:body response) true)}
+      (seq @diagnostics) (assoc :diagnostics @diagnostics))))
 
 
 (defn- preview
@@ -57,7 +67,10 @@
 
 (defn- apply-preview
   [reserved]
-  (submit :_ui-components-create-apply-handler (get-in reserved [:body :request])))
+  ;; Preserve the first refusal instead of masking it with an apply(nil) 400.
+  (if (= 200 (:status reserved))
+    (submit :_ui-components-create-apply-handler (get-in reserved [:body :request]))
+    reserved))
 
 
 (defn- ids
@@ -296,10 +309,12 @@
     ;; A selected graph is identified by UUID, including an anonymous root.
     ;; Recheck the authored edit rather than retaining a stale certificate.
     (sp/update-entity storage :fn (java.util.UUID/fromString first-config) {:name nil})
-    (recheck/record-imported-fn-types! ctx (vs/current-branch-id storage)
-                                       [(java.util.UUID/fromString first-config)])
     (sp/update-entity storage :binding (:id binding) {:value "#fed7aa" :value-present true})
+    (let [changed [(java.util.UUID/fromString first-config) (java.util.UUID/fromString (:id leaf))]]
+      (context/invalidate-graph-cache! ctx changed)
+      (recheck/record-imported-fn-types! ctx (vs/current-branch-id storage) changed))
     (epoch/seed-watermark! storage)
+    (epoch/note-graph-epoch-validated! storage)
     (let [created (with-redefs [sp/query-bounded-entities
                                 (fn [storage entity where limit]
                                   (swap! queries conj [entity where])
@@ -317,7 +332,7 @@
       (is (= "#fed7aa" (:value (sp/read-entity storage :binding (:id binding)))))
       (is (= theme-before (sp/query-entities storage :ui-pref {:owner-id "anonymous" :key "theme"})))
       (let [{:keys [result] :as diagnosed} (export-diagnosed ctx "recents")]
-        (is (:ok result) (pr-str diagnosed))
+        (is (:ok result) (pr-str (assoc diagnosed :retained-configuration-id first-config)))
         (is (= picker-id (get-in result [:roots :picker-id])))
         (is (not= first-config (:selection-id result))))
       (let [before (graph-identities storage)

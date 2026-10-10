@@ -74,6 +74,7 @@
 (declare ^:private hof-lambda-params)
 (declare ^:private declared-lambda-params)
 (declare ^:private slot-structural-call-site-args)
+(declare compute-rename-aliases apply-rename-aliases)
 
 
 (defn deep-free-ext-names
@@ -644,7 +645,20 @@
                        captured? (pos? hof-depth)
                        ;; Env-bindings write `fa[env-name]` — inside a HOF
                        ;; target the name reads from that same fa.
-                       next-covered-names (into covered-names
+                       ;; The executor copies a provided renamed input to its
+                       ;; deep source names before evaluating this fn's refs.
+                       ;; Independent readers of that source name can have
+                       ;; different UUIDs; only the runtime alias, supplied in
+                       ;; this scope, closes them. An unprovided rename remains
+                       ;; a capture rather than hiding its source readers.
+                       aliased-names
+                       (set (keys (apply-rename-aliases
+                                    (zipmap covered-names (repeat true))
+                                    (compute-rename-aliases fid lookups))))
+                       ;; Runtime aliases the incoming fa before adding local
+                       ;; env bindings; a locally supplied rename cannot
+                       ;; retroactively supply its source names.
+                       next-covered-names (into aliased-names
                                                 (keep #(some-> (:env-name %) keyword))
                                                 env-bindings)
                        emit-entry! (fn [e]

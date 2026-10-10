@@ -1796,7 +1796,8 @@
    :description "One `run-tests!` over the selected fn (nil timeout = the runner's default)."
    :parent :_tests-run-apply
    :args {:fn-ids {:parent :vec :args {:coll [:_insp-lint-id-str]}}
-          :timeout-ms {:value nil}}}
+          :timeout-ms {:value nil}
+          :platform? {:value nil}}}
   {:name :_insp-test-run-result-row
    :description "The run's own result for the fn — `{:fn-id :fn-name :status :error …}`, status as a keyword."
    :parent :first

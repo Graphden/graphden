@@ -113,3 +113,29 @@
     (is (not= (:slot-id entry)
               (:id (get (:slot-by-fn-name lookup) [(:get ids) :coll]))))
     (is (= [] (surface/public-free-entries (:renamed-bound ids) lookup)))))
+
+
+(deftest renamed-composed-callback-parameters-are-not-captures
+  (let [{:keys [ids lookup]}
+        (parsed-fixture
+          [{:name :capture-get :args {:coll {:type :any} :key {:type :text}} :return-type :any}
+           {:name :capture-wrap :args {:value {:type :any}} :return-type :any}
+           {:name :capture-zip :args {:vals {:type [:list :any]}} :return-type :any}
+           {:name :capture-spawn :args {:body {:type [:fn {} :any]}} :return-type :any}
+           {:name :capture-map :args {:func {:type [:fn {:item :any} :any]} :coll {:type [:list :any]}} :return-type [:list :any]}
+           {:name :capture-field :parent :capture-get :args {:coll {:as :row} :key "id"}}
+           {:name :capture-other-field :parent :capture-get :args {:coll {:as :row} :key "name"}}
+           {:name :capture-outside :parent :capture-get :args {:coll {:as :outside} :key "id"}}
+           {:name :capture-wrapped :parent :capture-wrap :args {:value :capture-other-field}}
+           {:name :capture-shape :parent :capture-zip :args {:vals [:capture-field :capture-wrapped :capture-outside]}}
+           {:name :capture-item :parent :capture-shape :args {:row {:as :item}}}
+           {:name :capture-root :parent :capture-map :args {:func :capture-item :coll []}}
+           {:name :capture-unprovided :parent :capture-spawn :args {:body :capture-item}}
+           {:name :capture-item-local :parent :capture-item :args {:item "local"}}
+           {:name :capture-local-env :parent :capture-spawn :args {:body :capture-item-local}}])]
+    (is (= #{:outside}
+           (set (map :ext-name (surface/public-free-entries (:capture-root ids) lookup))))
+        "The supplied item closes every row reader, while a separately renamed input remains a capture")
+    (doseq [root [:capture-unprovided :capture-local-env]]
+      (is (contains? (set (map :ext-name (surface/public-free-entries (ids root) lookup))) :row)
+          "An absent incoming item cannot supply row, even if item is added by a local env binding"))))

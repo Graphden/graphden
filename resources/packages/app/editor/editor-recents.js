@@ -192,4 +192,8 @@ window.gdRecentsGraph = {
   },
 };
 window.addEventListener('pagehide', () => window.gdRecentsGraph.dispose());
+window.addEventListener('gd-auth-changed', () => {
+  window.gdRecentsGraph.dispose();
+  renderRecentFns();
+});
 window.addEventListener('storage', event => { if (event.key === RECENT_FNS_KEY || event.key === PINNED_FNS_KEY) renderRecentFns(); });

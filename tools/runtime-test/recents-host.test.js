@@ -74,12 +74,25 @@ vm.runInContext(fs.readFileSync('resources/packages/app/editor/editor-recents.js
   resolveLoad({run: () => new Map()});
   await badLoad;
   assert.equal(rejected, 1, 'incompatible personal runtime falls back with current state');
+  const previousIdentityLoad = ctx.gdRecentsGraph.reload();
+  const previousIdentitySignal = loadingSignal;
+  const resolvePreviousIdentity = resolveLoad;
+  ctx.gdLoadUIComponentRuntime = () => Promise.resolve(graph.createRuntime(artifact.plans.recents, {operationLimit: 1000000}));
+  listeners.get('gd-auth-changed')();
+  assert.equal(previousIdentitySignal.aborted, true, 'identity change cancels the previous personal plan');
+  resolvePreviousIdentity({run() { throw new Error('previous identity candidate must not execute'); }});
+  await previousIdentityLoad;
+  assert.equal(mounted, 2, 'identity change remounts only a fresh built-in component');
+  ctx.gdLoadUIComponentRuntime = (_component, _builtin, _options, signal) => {
+    loadingSignal = signal;
+    return new Promise(resolve => { resolveLoad = resolve; });
+  };
   const late = ctx.gdRecentsGraph.reload();
   listeners.get('pagehide')();
   assert.equal(loadingSignal.aborted, true);
   resolveLoad({run() { throw new Error('late candidate must not execute'); }});
   await late;
-  assert.equal(disposed, 1);
+  assert.equal(disposed, 2);
   assert.equal(callbacks.size, 0, 'dispose releases delegated events');
   assert(renderCount > 2);
   console.log('PASS recents persistence, navigation, visibility and cleanup');

@@ -7,11 +7,16 @@ const {assert, newContext} = require('./edit-test-helpers');
 (async () => {
   const {browser, page} = await newContext(chromium);
   const errors = [];
+  let stage = 'load';
   page.on('pageerror', () => errors.push('pageerror'));
   try {
     await page.waitForFunction(() => typeof lookups !== 'undefined' && lookups?.fnMap?.size
       && typeof gdLoadRecents === 'function');
-    const entries = await page.evaluate(() => {
+    stage = 'fixtures';
+    const entries = await page.evaluate(async () => {
+      const namespace = [...lookups.nsPathMap].find(([, path]) => path === 'core.arithmetic');
+      if (!namespace) throw new Error('Missing shipped navigation namespace');
+      await loadNamespaceFns(namespace[0]);
       const rows = [...lookups.fnMap.values()].filter(fn => fn.name && !fn.name.startsWith('_')
         && getQualifiedFnName(fn).startsWith('core.arithmetic.')).slice(0, 3);
       if (rows.length !== 3) throw new Error('Missing shipped navigation fixtures');
@@ -21,6 +26,7 @@ const {assert, newContext} = require('./edit-test-helpers');
       renderRecentFns();
       return entries;
     });
+    stage = 'render';
     const host = page.locator('#gd-recent-fns');
     await host.waitFor({state: 'visible'});
     assert(await host.locator('.gd-recent-row').count() === 3, 'shipped graph renders recent destinations');
@@ -43,8 +49,9 @@ const {assert, newContext} = require('./edit-test-helpers');
     await page.screenshot({path: '/tmp/graphden-recents-editor.png'});
     assert(errors.length === 0, 'no browser execution errors');
     console.log('PASS graph-backed recents in the editor');
-  } catch (_) {
-    console.error('FAIL graph-backed editor recents; details withheld to avoid DOM dumps');
+  } catch (error) {
+    console.error(JSON.stringify({failure: 'editor-recents', stage, kind: error.name}));
+    await page.screenshot({path: '/tmp/graphden-recents-editor-failure.png'}).catch(() => {});
     process.exitCode = 1;
   } finally {
     await browser.close();

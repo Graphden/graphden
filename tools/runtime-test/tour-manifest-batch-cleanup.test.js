@@ -25,6 +25,19 @@ function fixture(rows, body, status = 200) {
   vm.runInContext(source, ctx);
   return {ctx, calls, effects, run: options => ctx._tourDeleteFns(rows, options)};
 }
+test('manifest cleanup offer retains unresolved receipts without per-function presence reads', async () => {
+  const rows = receipts(352);
+  rows[0].receipt = 'removed';
+  const f = fixture(rows, {});
+  let reads = 0;
+  f.ctx._tourFnIdForCreation = async () => { reads++; throw new Error('Unexpected presence read'); };
+  const offered = await f.ctx._tourSurvivors(rows);
+  assert.equal(offered.length, 351);
+  assert.deepEqual(Array.from(offered, row => row.id), rows.slice(1).map(row => row.id));
+  assert.equal(f.calls.length, 0);
+  assert.equal(reads, 0);
+  assert(rows.slice(1).every(row => row.receipt === 'created'));
+});
 test('352 exact receipts use one branch-scoped request and retire only after a complete reply', async () => {
   const rows = receipts(352);
   const f = fixture(rows, {deleted: rows.map(row => row.id), 'already-absent': []});

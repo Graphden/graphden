@@ -41,6 +41,10 @@ async function _tourSurvivors(created) {
   for (const c of (created || [])) {
     if (c.receipt === 'removed') continue;
     if (c.receipt === 'pending') { out.push(c); continue; }
+    // A create-only manifest is an outstanding cleanup receipt. The batch
+    // resolves current presence atomically; do not preflight each object
+    // merely to offer the same idempotent cleanup action.
+    if (c.type === 'fn' && c.creation === 'create-only-manifest') { out.push(c); continue; }
     switch (c.type) {
       case 'branch':
         // Not a graph row — a routing context. Offer it unconditionally;

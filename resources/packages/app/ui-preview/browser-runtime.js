@@ -110,6 +110,12 @@
     if (Array.isArray(collection) && Number.isInteger(key) && key >= 0 && key < collection.length) return collection[key];
     return fallback;
   }
+  function scalarString(value) {
+    if (value === null) return '';
+    if (value instanceof Keyword) return ':' + (value.namespace ? value.namespace + '/' : '') + value.name;
+    if (typeof value === 'string' || typeof value === 'boolean' || Number.isSafeInteger(value)) return String(value);
+    throw new Error('Browser str requires scalar parts');
+  }
   const operations = {
     const: (arg) => arg('value'),
     list: (arg) => arg('items'),
@@ -125,6 +131,56 @@
       // JVM map is doall(map ...): eager callbacks, but a seq rather than a
       // vector. Preserve get/equality/Hiccup semantics until result encoding.
       return new LazySequence(values);
+    },
+    filter: (arg, tick) => {
+      const pred = arg('pred');
+      if (!(pred instanceof GraphClosure)) throw new Error('Browser filter requires a graph callback');
+      const values = [];
+      let count = 0;
+      for (const item of sequence(arg('coll'))) {
+        tick();
+        if (++count > 50000) throw new Error('Browser graph sequence limit exceeded');
+        if (truth(pred.invoke(item))) values.push(item);
+      }
+      // JVM filter realizes predicates inside the execution scope and returns a seq.
+      return new LazySequence(values);
+    },
+    take: (arg, tick) => {
+      const count = integer(arg('count'));
+      const values = [];
+      const source = sequence(arg('coll'))[Symbol.iterator]();
+      for (let index = 0; index < count; index++) {
+        tick();
+        const next = source.next();
+        if (next.done) break;
+        if (values.length >= 50000) throw new Error('Browser graph sequence limit exceeded');
+        values.push(next.value);
+      }
+      return values;
+    },
+    concat: (arg, tick) => {
+      const values = [];
+      for (const coll of sequence(arg('colls'))) {
+        tick();
+        for (const item of sequence(coll)) {
+          tick();
+          if (values.length >= 50000) throw new Error('Browser graph sequence limit exceeded');
+          values.push(item);
+        }
+      }
+      return values;
+    },
+    str: (arg, tick) => {
+      let result = '';
+      for (const part of sequence(arg('parts'))) {
+        tick();
+        result = checkedString(result + scalarString(part));
+      }
+      return result;
+    },
+    'str-starts-with?': (arg) => {
+      const value = arg('string');
+      return value === null ? false : checkedString(value).startsWith(checkedString(arg('prefix')));
     },
     get: (arg) => lookup(arg('coll'), arg('key'), arg('default')),
     assoc: (arg) => {

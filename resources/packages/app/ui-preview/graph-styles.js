@@ -6,13 +6,13 @@
     return Object.fromEntries([...value].map(([key, item]) => [key instanceof api.Keyword ? (key.namespace ? key.namespace + '/' : '') + key.name : key, item]));
   };
   const properties = new Set([
-    'display', 'flex-direction', 'align-items', 'justify-content', 'gap',
+    'display', 'flex', 'flex-direction', 'align-items', 'justify-content', 'gap',
     'padding', 'padding-inline', 'padding-block', 'margin', 'margin-inline',
     'margin-block', 'width', 'min-width', 'max-width', 'height', 'max-height',
     'overflow', 'overflow-x', 'overflow-y', 'color', 'background-color',
     'border', 'border-color', 'border-width', 'border-style', 'border-radius',
     'outline', 'outline-color', 'outline-offset', 'font-size', 'font-weight',
-    'line-height', 'text-align', 'white-space', 'text-overflow', 'cursor',
+    'line-height', 'font-family', 'letter-spacing', 'text-transform', 'text-align', 'white-space', 'text-overflow', 'cursor',
     'opacity', 'box-shadow',
   ]);
   const hasControl = (value) => [...value].some((char) => char.charCodeAt(0) < 32);

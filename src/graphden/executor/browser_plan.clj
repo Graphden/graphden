@@ -148,9 +148,10 @@
 (def ^:private primitive-ops
   (into {}
         (for [[ns-path names] [["core.logic" [:const :if :equal?]]
-                               ["core.collections" [:list :get :assoc :zipmap :count]]
+                               ["core.collections" [:list :get :assoc :zipmap :count :take :concat]]
                                ["core.arithmetic" [:add :mod]]
-                               ["core.hof" [:map]]
+                               ["core.hof" [:map :filter]]
+                               ["core.strings" [:str :str-starts-with?]]
                                ["web.html" [:hiccup]]]
               n names]
           [(ids/fn-id ns-path n) (name n)])))
@@ -207,11 +208,12 @@
 
 
 (defn- closure-expr
-  "Only map's statically bound callback is supported. Reuse the JVM's
+  "Only map/filter statically bound callbacks are supported. Reuse the JVM's
    parameter/capture decisions; callable producers and env HOFs stay closed."
   [{:keys [kind slot-id ref-id] :as binding} fid lookups context]
   (when-not (and (= :ref kind)
-                 (= slot-id (ids/slot-id (ids/fn-id "core.hof" :map) :func))
+                 (contains? #{(ids/slot-id (ids/fn-id "core.hof" :map) :func)
+                              (ids/slot-id (ids/fn-id "core.hof" :filter) :pred)} slot-id)
                  (not (:env-binding? context)))
     (reject! :callable-binding context))
   (let [params (r/hof-lambda-params ref-id slot-id binding fid lookups)

@@ -26,6 +26,12 @@
          interfaces (templates/interface-definitions)
          fixed-names (merge (ids/primitive-fn-ids)
                             (indexed-interfaces interfaces #(ids/fn-id (:namespace %) (:name %))))
+         ;; The module parser normalizes qualified refs to bare names before
+         ;; parsing list items. Dual-key these fresh UUID aliases just like
+         ;; shipped interfaces; neither spelling is a persisted function.
+         retained-names (into retained-names
+                              (map (fn [[reference id]] [(keyword (name reference)) id]))
+                              retained-names)
          _ (doseq [[reference id] retained-names]
              (when (and (contains? fixed-names reference) (not= id (get fixed-names reference)))
                (throw (ex-info "Retained component metadata conflicts with the installed interface"

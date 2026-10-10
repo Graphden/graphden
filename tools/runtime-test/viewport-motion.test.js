@@ -77,3 +77,47 @@ for (const duration of ['0', '-1', 'NaN', 'Infinity', 'undefined']) {
   assert.equal(view.frames.size, 0);
 }
 console.log('PASS viewport motion: replacement, interruption, reduced motion and immediate durations');
+
+// A bottom-sheet Inspector covers the canvas; its animation must not make
+// the fitted area transiently larger. Desktop grid panels are already excluded.
+{
+  const classes = new Set(['gd-insp-open']);
+  const surface = {clientWidth: 744, clientHeight: 724,
+    getBoundingClientRect: () => ({top: 44})};
+  const inspector = {offsetHeight: 314};
+  const context = vm.createContext({window: {innerHeight: 768},
+    document: {body: {classList: {contains: name => classes.has(name)}},
+      getElementById: id => id === 'graph-container' ? surface
+        : id === 'gd-inspector' ? inspector
+        : id === 'app' ? {classList: {contains: () => true}} : null},
+    getComputedStyle: () => ({position: 'fixed'})});
+  vm.runInContext(source, context);
+  context.viewportContainer = () => surface;
+  assert.equal(context.visibleGraphRect().bottom, 410, 'sheet consumes its final height even during entrance');
+  classes.clear();
+  assert.equal(context.visibleGraphRect().bottom, 724, 'closed sheet does not consume canvas');
+  classes.add('gd-insp-open');
+  context.getComputedStyle = () => ({position: 'static'});
+  assert.equal(context.visibleGraphRect().bottom, 724, 'desktop Inspector is already outside the canvas');
+  context.getComputedStyle = () => ({position: 'fixed'});
+  context.graphBoundingBox = () => ({x1: 0, y1: 0, x2: 400, y2: 200, w: 400, h: 200});
+  context.clampZoom = z => z;
+  let fitted;
+  context.setViewportTransform = (zoom, x, y) => { fitted = {zoom, x, y}; };
+  vm.runInContext(fs.readFileSync(path.join(__dirname,
+    '../../resources/packages/app/editor/editor-render.js'), 'utf8'), context);
+  context.fitInVisibleArea(50);
+  assert(fitted.y + 200 * fitted.zoom <= 410 - 50, 'fitted graph ends above the sheet with padding');
+  inspector.offsetHeight = 768;
+  fitted = null;
+  context.fitInVisibleArea(50);
+  assert.equal(fitted, null, 'a fully covered canvas does not fit into fabricated space');
+  inspector.offsetHeight = 314;
+  const originalLookup = context.document.getElementById;
+  context.document.getElementById = id => id === 'side-menu'
+    ? {getBoundingClientRect: () => ({width: 280})}
+    : id === 'app' ? {classList: {contains: () => false}} : originalLookup(id);
+  assert.equal(context.visibleGraphRect().left, 280, 'legacy sidebar is counted exactly once');
+  context.document.getElementById = originalLookup;
+  assert.equal(context.visibleGraphRect().left, 0, 'redesign grid already excludes sidebar width');
+}

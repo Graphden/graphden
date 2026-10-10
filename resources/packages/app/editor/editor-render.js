@@ -11,12 +11,8 @@
 let _viewportBound = false;
 
 
-/**
- * The surface is not the visible area: its leftmost slice sits behind the
- * sidebar. So fit to the bounding box that fits in
- * (surfaceWidth − sidebarWidth − 2*padding), then pan so the box's centre lands
- * at the centre of what the user can actually see.
- */
+/** Fit the graph inside the same visible canvas rectangle used by overflow
+ * checks, excluding an active bottom-sheet Inspector and any legacy sidebar. */
 // `box` (optional) — fit THIS bounding box instead of the whole graph's
 // (the path view fits the lit cards).
 function fitInVisibleArea(padding, box) {
@@ -25,26 +21,21 @@ function fitInVisibleArea(padding, box) {
   const surface = viewportContainer();
   if (!surface) return;
 
-  const surfaceW = surface.clientWidth;
-  const surfaceH = surface.clientHeight;
-  const sidebar = document.getElementById('side-menu');
-  const collapsed = document.body.classList.contains('sidebar-collapsed');
-  // Redesign 2026-08: the sidebar is its own grid column, not an overlay over
-  // the canvas, so `surface` already excludes it — don't compensate again or
-  // the graph pans off-centre to the right.
-  const redesign = document.getElementById('app')?.classList.contains('gd-redesign');
-  const sidebarW = (!redesign && sidebar && !collapsed) ? sidebar.getBoundingClientRect().width : 0;
-  const visibleW = Math.max(surfaceW - sidebarW, 100);
+  const visible = visibleGraphRect();
+  if (!visible) return;
+  const visibleW = visible.right - visible.left;
+  const visibleH = visible.bottom - visible.top;
+  if (visibleW <= 0 || visibleH <= 0) return;
 
   const z = clampZoom(Math.min(
     (visibleW - 2 * padding) / bb.w,
-    (surfaceH - 2 * padding) / bb.h
+    (visibleH - 2 * padding) / bb.h
   ));
   const bbCx = (bb.x1 + bb.x2) / 2;
   const bbCy = (bb.y1 + bb.y2) / 2;
   setViewportTransform(z,
-                       sidebarW + visibleW / 2 - bbCx * z,
-                       surfaceH / 2 - bbCy * z);
+                       visible.left + visibleW / 2 - bbCx * z,
+                       visible.top + visibleH / 2 - bbCy * z);
 }
 
 

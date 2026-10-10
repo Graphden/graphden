@@ -104,6 +104,27 @@ function viewportContainer() {
   return document.getElementById('graph-surface');
 }
 
+// Surface-local area available to the graph. Desktop panels occupy grid
+// columns; the narrow Inspector instead covers the canvas as a bottom sheet.
+function visibleGraphRect() {
+  const surface = viewportContainer();
+  if (!surface) return null;
+  const sidebar = document.getElementById('side-menu');
+  const redesign = document.getElementById('app')?.classList.contains('gd-redesign');
+  const sidebarWidth = !redesign && sidebar && !document.body.classList.contains('sidebar-collapsed')
+    ? sidebar.getBoundingClientRect().width : 0;
+  let bottom = surface.clientHeight;
+  const inspector = document.getElementById('gd-inspector');
+  if (inspector && document.body.classList.contains('gd-insp-open')
+      && getComputedStyle(inspector).position === 'fixed') {
+    // Its translateY entrance must not change the fitting rectangle: use the
+    // final bottom-anchored height, independent of the current animation frame.
+    const sheetTop = window.innerHeight - inspector.offsetHeight;
+    bottom = Math.max(0, Math.min(bottom, sheetTop - surface.getBoundingClientRect().top));
+  }
+  return {left: sidebarWidth, top: 0, right: surface.clientWidth, bottom};
+}
+
 function viewportWidth() {
   return viewportContainer()?.clientWidth || 0;
 }

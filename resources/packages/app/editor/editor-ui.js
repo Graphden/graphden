@@ -300,10 +300,12 @@ function fitGraphIfOverflowing() {
   const y1 = bb.y1 * z + viewport.pan.y;
   const x2 = bb.x2 * z + viewport.pan.x;
   const y2 = bb.y2 * z + viewport.pan.y;
+  const visible = visibleGraphRect();
+  if (!visible) return;
   const m = 8; // px tolerance — don't refit over a sliver
-  const fits = x1 >= -m && y1 >= -m
-            && x2 <= surface.clientWidth + m
-            && y2 <= surface.clientHeight + m;
+  const fits = x1 >= visible.left - m && y1 >= visible.top - m
+            && x2 <= visible.right + m
+            && y2 <= visible.bottom + m;
   if (!fits) navResetZoom();
 }
 

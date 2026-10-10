@@ -1,4 +1,7 @@
-(ns graphden.packages.core.strings-test
+;; Cache identity assertions need exclusive ownership of module lifetime:
+;; parallel package loads replace its cache Var root; bounded cache eviction
+;; by other consumers is also legitimate. Serial NSs run before that pool.
+(ns ^:serial graphden.packages.core.strings-test
   "Unit tests for `core.strings` base-fn impls — currently the regex
    primitives. Mirrors `system_test` / `logic_test`: the package's
    impls.clj is slurp+eval'd via the loader's `load-module-impls`."
@@ -130,3 +133,23 @@
     (testing "the length cap still applies to a pattern already cached"
       (binding [sp-config/*max-regex-length* 3]
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"too long" (run pattern)))))))
+
+
+(deftest cache-snapshot-follows-module-load-lifetime
+  (let [cache-var (ns-resolve 'graphden.packages.core.strings.impls 'regex-cache)
+        before @cache-var
+        retained-impl (impls/impl-of :re-find?)
+        pattern (str "cache-lifetime-" (random-uuid))
+        reload! (requiring-resolve 'graphden.packages.loader/load-module-impls)]
+    (reload! "core" "strings")
+    (let [after @cache-var
+          reused? (= "true" (System/getProperty "graphden.impls.reuse-loaded"))]
+      (is (= reused? (identical? before after))
+          "coverage preserves instrumented Vars; ordinary module loads replace cache roots")
+      (is (false? (retained-impl {:string (delay "input") :pattern (delay pattern)} nil)))
+      (is (instance? java.util.regex.Pattern
+                     (java.util.concurrent.ConcurrentHashMap/.get after pattern))
+          "a retained implementation uses the current module cache")
+      (when-not reused?
+        (is (nil? (java.util.concurrent.ConcurrentHashMap/.get before pattern))
+            "a stale cache snapshot cannot observe subsequent writes")))))

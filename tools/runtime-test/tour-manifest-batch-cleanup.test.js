@@ -14,7 +14,7 @@ function receipts(count = 2) {
 }
 function fixture(rows, body, status = 200) {
   const calls = [], effects = {saved: 0, cleared: 0};
-  const ctx = vm.createContext({API: {api_entities_fn_delete_batch: '/api/entities/fn/delete-batch'},
+  const ctx = vm.createContext({API: {api_functions_delete_batch: '/api/functions/delete-batch'},
     selectedFnId: rows[0].id, getCurrentBranchName: () => 'main',
     _tourSaveState: () => effects.saved++, gdClearSelection: () => effects.cleared++,
     authFetch: async (url, options) => {
@@ -31,7 +31,7 @@ test('352 exact receipts use one branch-scoped request and retire only after a c
   assert.equal((await f.run()).length, 0);
   assert.equal(f.calls.length, 1);
   const {url, options} = f.calls[0];
-  assert.equal(url, '/api/entities/fn/delete-batch');
+  assert.equal(url, '/api/functions/delete-batch');
   assert.equal(options.method, 'POST');
   assert.equal(options.headers['X-Graphden-Branch'], branch);
   assert.equal(options.headers['Content-Type'], 'application/json');

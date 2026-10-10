@@ -244,7 +244,7 @@ is added to the legacy interface.
 
 ## Exact creation cleanup
 
-Tutorial UI manifests use `POST /api/entities/fn/delete-batch` with an explicit
+Tutorial UI manifests use `POST /api/functions/delete-batch` with an explicit
 branch header and exact `{id, name, namespace-id}` tuples. The server repeats
 identity, write-access and external-dependency checks inside one writer
 transaction. A stale tuple or prohibited reference rejects the whole set;

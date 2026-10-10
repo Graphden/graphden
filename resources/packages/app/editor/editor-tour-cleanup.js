@@ -300,7 +300,7 @@ async function _tourDeleteFns(created, options) {
 async function _tourDeleteManifestFns(entries, options) {
   const uuid = value => typeof value === 'string'
     && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
-  if (!entries.length || entries.length > 1000 || typeof API.api_entities_fn_delete_batch !== 'string') return null;
+  if (!entries.length || entries.length > 1000 || typeof API.api_functions_delete_batch !== 'string') return null;
   const first = entries[0];
   if (!uuid(first['branch-id']) || !first['manifest-root-id']) return null;
   if (entries.some(row => row.creation !== 'create-only-manifest'
@@ -314,7 +314,7 @@ async function _tourDeleteManifestFns(entries, options) {
   // rows through main. Never redirect that cleanup back to the removed branch.
   if (routedBranch && ![first['branch-id'], first['branch-name']].includes(routedBranch)) return null;
   try {
-    const response = await authFetch(API.api_entities_fn_delete_batch, {...options, method: 'POST',
+    const response = await authFetch(API.api_functions_delete_batch, {...options, method: 'POST',
       headers: {...options?.headers, 'Content-Type': 'application/json', 'X-Graphden-Branch': first['branch-id']},
       body: JSON.stringify({functions: entries.map(row => ({id: row.id, name: row.name, 'namespace-id': row['namespace-id']}))})});
     if (!response.ok) return entries;

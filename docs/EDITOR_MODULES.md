@@ -165,7 +165,7 @@ for its fresh UUID/name/namespace receipt check before each ordinary DELETE.
 The separate subtree read used to order dependencies remains an ordering hint
 and cannot authorize deletion of additional identities.
 
-Exact UI creation manifests use `POST /api/entities/fn/delete-batch` instead:
+Exact UI creation manifests use `POST /api/functions/delete-batch` instead:
 the server verifies the receipt tuples and external dependencies under one
 writer transaction. The client accepts only a complete, disjoint partition of
 the requested UUIDs into `deleted` and `already-absent`. A conflict or ambiguous

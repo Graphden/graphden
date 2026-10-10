@@ -24,7 +24,7 @@ const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
   const themeReasons = new Set(['not-plain-pure', 'evaluation-failed', 'result-unavailable', 'timeout', 'unavailable']);
   const refusalCodes = new Set(['policy-refresh-required', 'tainted-result', 'runtime-effects', 'not-plain-pure', 'graph-changed']);
   page.on('request', request => {
-    if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/entities/fn/delete-batch') {
+    if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/functions/delete-batch') {
       try { batches.push(JSON.parse(request.postData()).functions.map(row => row.id)); }
       catch (_) { batches.push(null); }
     }

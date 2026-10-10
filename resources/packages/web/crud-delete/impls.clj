@@ -8,6 +8,7 @@
    dispatchers, sequence ops and the type-API bodies — lives in those
    `src/` namespaces so each base-fn impl stays a minimal primitive."
   (:require
+    [graphden.crud.entities.delete-batch :as delete-batch]
     [graphden.crud.fn-execution :as fn-exec]
     [graphden.crud.request :as request]
     [graphden.executor.defbase :refer [defbase]]))
@@ -51,8 +52,22 @@
     (request/schema-entity-types (:storage ctx))))
 
 
+(defbase parse-fn-delete-receipts
+  "Validate the bounded exact-identity request without reading storage."
+  [input]
+  (delete-batch/parse-receipts input))
+
+
+(defbase delete-fn-receipts
+  "Indivisible guarded transaction and post-commit publication."
+  [receipts]
+  (delete-batch/delete-receipts! ctx receipts))
+
+
 ;; The package loader pairs each base-fn declared in this module's
 ;; `fns.edn` with its impl by looking up this map (keyword name -> impl).
 (def impls
   {:query-param {:impl query-param :taint-propagate? true}
+   :parse-fn-delete-receipts {:impl parse-fn-delete-receipts :taint-propagate? true}
+   :delete-fn-receipts delete-fn-receipts
    :extract-entity-params {:impl extract-entity-params :taint-propagate? true}})

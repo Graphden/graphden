@@ -596,9 +596,9 @@
 
 
 (defn- dependent-recheck-plan
-  [reverse-deps fn-id]
+  [reverse-deps fn-ids]
   (deps/dependency-order
-    reverse-deps (disj (deps/transitive-blast reverse-deps [fn-id]) fn-id)))
+    reverse-deps (reduce disj (deps/transitive-blast reverse-deps fn-ids) fn-ids)))
 
 
 (defn direct-dependents
@@ -639,16 +639,16 @@
    removes edges (a `:fn` delete): `deps/incremental-update` drops a
    deleted fn's reverse entry, and its callers are exactly who must be
    re-derived (their ref now dangles)."
-  [ctx storage fn-id]
+  [ctx storage fn-ids]
   (let [reverse-deps (when ctx (cr/ctx-reverse-deps ctx))
         {:keys [ordered cyclic]} (when reverse-deps
-                                   (dependent-recheck-plan reverse-deps fn-id))]
+                                   (dependent-recheck-plan reverse-deps fn-ids))]
     (when (seq cyclic)
       (log/warn "cycle in cached dependency index while refreshing type diagnostics; checking cyclic fns in stable order"
-                {:fn-id fn-id :cycle-fn-ids cyclic}))
+                {:fn-ids fn-ids :cycle-fn-ids cyclic}))
     (when (> (count ordered) large-dependent-recheck)
       (log/info "refreshing type diagnostics for large dependent closure"
-                {:fn-id fn-id :count (count ordered)}))
+                {:fn-ids fn-ids :count (count ordered)}))
     (let [warning-count
           (reduce (fn [n id]
                     (try
@@ -656,7 +656,7 @@
                         (inc n)
                         n)
                       (catch Exception e
-                        (log/debug e "dependent re-check failed" {:fn-id id :of fn-id})
+                        (log/debug e "dependent re-check failed" {:fn-id id :of fn-ids})
                         n)))
                   0
                   ordered)]
@@ -668,7 +668,14 @@
    Returns the set of ids re-checked; see `recheck-dependent-summary!`
    for the internal warning summary used by mutation responses."
   [ctx storage fn-id]
-  (:ids (recheck-dependent-summary! ctx storage fn-id)))
+  (:ids (recheck-dependent-summary! ctx storage [fn-id])))
+
+
+(defn recheck-deleted-fns!
+  "After a compound deletion, check surviving transitive dependents once in
+   dependency order. Call before invalidation drops the old reverse edges."
+  [ctx storage fn-ids]
+  (:ids (recheck-dependent-summary! ctx storage fn-ids)))
 
 
 (defn type-check-fn-and-dependents!
@@ -686,6 +693,6 @@
    (let [rej (type-check-fn-after-mutation! storage fn-id opts)]
      (if (and reject-secret? (:secret? rej))
        rej
-       (let [{:keys [warning-count]} (recheck-dependent-summary! ctx storage fn-id)]
+       (let [{:keys [warning-count]} (recheck-dependent-summary! ctx storage [fn-id])]
          (cond-> rej
            (pos? warning-count) (assoc :dependent-type-warning-count warning-count)))))))

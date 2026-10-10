@@ -10,6 +10,7 @@
    (`prefs/fns.edn`)."
   (:require
     [graphden.crud.request :as request]
+    [graphden.editor.preference-write :as preference-write]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.storage.protocol.core :as sp]
@@ -41,25 +42,23 @@
   [pref-key pref-value]
   (cr/record-effect! :db)
   (cr/record-effect! :time)
-  (let [storage (request/require-storage ctx)
-        owner (tc/current-user-id)
-        existing (first (sp/query-entities storage :ui-pref
-                                           {:owner-id owner :key (str pref-key)}))
-        now (java.time.Instant/now)]
-    (if existing
-      (sp/update-entity storage :ui-pref (:id existing)
-                        {:value pref-value :updated-at now})
-      (sp/create-entity storage :ui-pref
-                        {:owner-id owner
-                         :key (str pref-key)
-                         :value pref-value
-                         :org-id (tc/current-org)
-                         :updated-at now}))
-    pref-value))
+  (preference-write/write! (request/require-storage ctx) pref-key pref-value false nil)
+  pref-value)
+
+
+(defbase ui-pref-compare-write!
+  "Atomically compare presence/value and write the current owner's preference.
+   Returns a finite status; never returns the current document."
+  [pref-key pref-value expected]
+  (cr/record-effect! :db)
+  (cr/record-effect! :time)
+  (name (preference-write/write! (request/require-storage ctx) pref-key pref-value true expected)))
 
 
 (def impls
   {:current-user-id current-user-id
    :ui-prefs-read ui-prefs-read
    ;; taint-propagate: returns the caller's own document back
-   :ui-pref-write! {:impl ui-pref-write! :taint-propagate? true}})
+   :ui-pref-write! {:impl ui-pref-write! :taint-propagate? true}
+   ;; The comparison status depends on caller-selected content.
+   :ui-pref-compare-write! {:impl ui-pref-compare-write! :taint-propagate? true}})

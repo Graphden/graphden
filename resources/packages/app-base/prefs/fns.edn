@@ -31,6 +31,13 @@
    :return-type :jsonb
    :effects #{:db :time}}
 
+  {:name :ui-pref-compare-write!
+   :description "Atomically compare row presence/value and write the current owner's preference; status is saved, stale, invalid, or unsupported."
+   :args {:pref-key {:type :text} :pref-value {:type :jsonb}
+          :expected {:type :jsonb}}
+   :return-type :text
+   :effects #{:db :time}}
+
   {:name :pref-keys
    :description "The preference keys the editor knows — the vocabulary PUT /api/prefs/:key accepts. `theme` = the active editor theme, `keymap` = the active keyboard layout, `components` = personal menu/picker graph identities."
    :parent :const
@@ -121,11 +128,54 @@
           :vals [{:value true} :_pref-put-key
                  {:parent :ui-pref-write! :args {:pref-key :_pref-put-key :pref-value :_pref-put-value}}]}}
 
+  {:name :_pref-put-conditional?
+   :parent :contains? :args {:coll :parse-json-body :key {:value :expected}}}
+
+  {:name :_pref-put-expected
+   :parent :get :args {:coll :parse-json-body :key {:value :expected} :default nil}}
+
+  {:name :_pref-put-expected-too-large?
+   :parent :gt
+   :args {:nums [{:parent :byte-len
+                  :args {:string {:parent :to-json-string
+                                  :args {:data {:parent :get :args {:coll :_pref-put-expected :key {:value :value} :default nil}}}}}}
+                 {:value 65536}]}}
+
+  {:name :_pref-put-err-stale
+   :parent :_pref-put-err
+   :args {:vals [{:value false} {:value "stale-preference"} :_pref-put-key {:value 409}]}}
+
+  {:name :_pref-put-conditional-ok
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :key} {:value :value}]
+          :vals [{:value true} :_pref-put-key :_pref-put-value]}}
+
+  {:name :_pref-put-write-status
+   :parent :ui-pref-compare-write!
+   :args {:pref-key :_pref-put-key :pref-value :_pref-put-value :expected :_pref-put-expected}}
+
+  {:name :_pref-put-err-expected
+   :parent :_pref-put-err
+   :args {:vals [{:value false} {:value "invalid-expected"} :_pref-put-key {:value 400}]}}
+
+  {:name :_pref-put-err-conditional-storage
+   :parent :_pref-put-err
+   :args {:vals [{:value false} {:value "conditional-unsupported"} :_pref-put-key {:value 422}]}}
+
+  {:name :_pref-put-conditional-result
+   :parent :cond
+   :args {:clauses [:_pref-put-expected-too-large? :_pref-put-err-size
+                    {:parent :equal? :args {:a :_pref-put-write-status :b "saved"}} :_pref-put-conditional-ok
+                    {:parent :equal? :args {:a :_pref-put-write-status :b "invalid"}} :_pref-put-err-expected
+                    {:parent :equal? :args {:a :_pref-put-write-status :b "unsupported"}} :_pref-put-err-conditional-storage
+                    {:value true} :_pref-put-err-stale]}}
+
   {:name :_pref-put-result
    :parent :cond
    :args {:clauses [:_pref-put-wrong-owner? :_pref-put-err-owner
                     :_pref-put-unknown? :_pref-put-err-key
                     :_pref-put-too-large? :_pref-put-err-size
+                    :_pref-put-conditional? :_pref-put-conditional-result
                     {:value true} :_pref-put-ok]}}
 
   {:name :_pref-put-handler

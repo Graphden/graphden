@@ -274,7 +274,10 @@ async function _tourFnDeleteOrder(entries, options) {
 }
 
 async function _tourDeleteFns(created, options) {
-  let pending = await _tourFnDeleteOrder(created.filter((c) => c.type === 'fn').reverse(), options);
+  const entries = created.filter(c => c.type === 'fn' && c.receipt !== 'removed').reverse();
+  const batch = await _tourDeleteManifestFns(entries, options);
+  if (batch !== null) return batch;
+  let pending = await _tourFnDeleteOrder(entries, options);
   for (let pass = 0; pending.length; pass++) {
     const failed = [];
     for (const c of pending) {
@@ -289,6 +292,45 @@ async function _tourDeleteFns(created, options) {
     pending = failed;
   }
   return [];
+}
+
+// The server repeats identity, ACL and dependency checks for the whole set
+// under one writer transaction. Only exact create-only receipts use this path;
+// an uncertain response retains every receipt rather than trying single DELETEs.
+async function _tourDeleteManifestFns(entries, options) {
+  const uuid = value => typeof value === 'string'
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+  if (!entries.length || entries.length > 1000 || typeof API.api_entities_fn_delete_batch !== 'string') return null;
+  const first = entries[0];
+  if (!uuid(first['branch-id']) || !first['manifest-root-id']) return null;
+  if (entries.some(row => row.creation !== 'create-only-manifest'
+    || !['pending', 'created'].includes(row.receipt) || !uuid(row.id) || !uuid(row['namespace-id'])
+    || typeof row.name !== 'string' || !row.name || row['manifest-root-id'] !== first['manifest-root-id']
+    || row['branch-id'] !== first['branch-id'] || row['branch-name'] !== first['branch-name'])) return null;
+  const ids = new Set(entries.map(row => row.id));
+  if (ids.size !== entries.length) return entries;
+  const routedBranch = options?.headers?.['X-Graphden-Branch'];
+  // After an owned sandbox was removed, ordinary cleanup reconciles missing
+  // rows through main. Never redirect that cleanup back to the removed branch.
+  if (routedBranch && ![first['branch-id'], first['branch-name']].includes(routedBranch)) return null;
+  try {
+    const response = await authFetch(API.api_entities_fn_delete_batch, {...options, method: 'POST',
+      headers: {...options?.headers, 'Content-Type': 'application/json', 'X-Graphden-Branch': first['branch-id']},
+      body: JSON.stringify({functions: entries.map(row => ({id: row.id, name: row.name, 'namespace-id': row['namespace-id']}))})});
+    if (!response.ok) return entries;
+    const result = await response.json();
+    if (!Array.isArray(result?.deleted) || !Array.isArray(result['already-absent'])) return entries;
+    const acknowledged = [...result.deleted, ...result['already-absent']];
+    if (acknowledged.length !== ids.size || new Set(acknowledged).size !== ids.size
+      || acknowledged.some(id => !ids.has(id))) return entries;
+    for (const row of entries) row.receipt = 'removed';
+    if (typeof _tourSaveState === 'function') _tourSaveState();
+    const branch = typeof getCurrentBranchName === 'function' ? getCurrentBranchName() : null;
+    if ([first['branch-id'], first['branch-name']].includes(branch)
+      && typeof selectedFnId !== 'undefined' && ids.has(selectedFnId)
+      && typeof gdClearSelection === 'function') gdClearSelection();
+    return [];
+  } catch (_) { return entries; }
 }
 
 // Pins survive branch deletion in the schema. Remove only the receipt's exact

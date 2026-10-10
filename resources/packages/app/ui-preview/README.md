@@ -232,10 +232,26 @@ does not grant access to the discriminator's implementation. Ordinary body
 collection still requires the original source grants. A component missing from
 an otherwise valid manifest returns `ok: false`, `code: "component-missing"`,
 and `fallback: "builtin"`; unknown descriptors do not become executable plans.
-The host retains its installed component on refusal.
+The classified missing-component response selects the built-in component and
+releases the previous override without a warning. Other refusals retain an
+explicit diagnostic.
 
 Legacy configurations inheriting `app.ui-components/ui-components` continue to
 use the exact four identity slots (`menu-initial`, `menu-update`, `menu-view`,
 `picker-view`). They remain selectable and exportable; Recents uses the built-in
 component when that old configuration has no Recents descriptor. No fifth slot
 is added to the legacy interface.
+
+## Exact creation cleanup
+
+Tutorial UI manifests use `POST /api/entities/fn/delete-batch` with an explicit
+branch header and exact `{id, name, namespace-id}` tuples. The server repeats
+identity, write-access and external-dependency checks inside one writer
+transaction. A stale tuple or prohibited reference rejects the whole set;
+the creation receipt does not grant additional access.
+
+The response partitions only the requested UUIDs into `deleted` and
+`already-absent`. The client retires receipts only after validating this entire
+partition. Lost, partial or refused replies keep the ledger available for
+retry. Ordinary lesson creations retain their existing individual cleanup path,
+and namespaces are removed only after confirmed function cleanup.

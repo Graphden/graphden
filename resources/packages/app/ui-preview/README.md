@@ -133,8 +133,8 @@ The Explorer trail uses `app.ui-recents` ordinary initial/update/model/view func
 The graph owns named selection dedupe, the six-entry persisted trail, pin toggles,
 selected/pinned filtering, visibility, row Hiccup and scoped styles. Its host owns
 localStorage validation and persistence, namespace lookup, delegated navigation and
-renderer cleanup. These shipped definitions do not yet have a personal component
-selection slot.
+renderer cleanup. A personal component selection loads candidate entry functions; a rejected
+candidate retains valid state through the built-in fallback.
 
 The bounded primitive subset also includes `filter`, `take`, `concat`, `str` and
 `str-starts-with?`. Filtering returns an eager sequence; take/concat return vectors,
@@ -147,3 +147,30 @@ ownership registry. The legacy `bindActionDispatch` skips those targets before
 reading action attributes. Component host callbacks still handle their own
 controls; native sibling actions retain the legacy dispatcher. Disposal releases
 ownership. Author-supplied DOM attributes cannot claim or bypass ownership.
+
+`GraphdenComponent` owns a component's state and serial event queue independently
+of its DOM mount. Its entry contract is `initial(inputs) -> state`,
+`update(state,event,inputs) -> {state,requests}`, and `view(state,inputs) -> view`.
+Before committing a transition it validates the next state, complete view markup
+and styles, and every bounded request against fixed host descriptors. Rendering
+must succeed before state commit and effects. Initial loading and runtime
+replacement perform no requests; a rejected candidate preserves the active state
+and runtime. Disposal and successful replacement cancel pending effects and
+ignore their late completions. Reentrant events run after the current commit.
+
+Recents requests are `persist-trail`, `persist-pins` (each contains only entries),
+and `navigate-fn` (only function ID and qualified name). The host fixes storage
+keys and navigation callbacks and validates UUID identities. A storage snapshot
+change produces an explicit `sync` event without persistence requests. Removing
+the DOM host disposes only the renderer; controller state survives a remount.
+
+Validation failure prevents a transition's render, state commit and all effects.
+A host effect failure happens after a successful state commit: previously run
+effects are not rolled back, later requests in that batch are skipped, and queued
+events are cleared. The recents adapter reports storage failures while retaining
+the visible committed state; it does not claim the change was saved.
+
+Recents accepts up to 1000 pinned identities and six recent entries. Its local
+runtime budget is 1,000,000 operations and the renderer budget is 10,000 nodes;
+the upper-bound fixture executes initial/view/update and validates the complete
+tree within both limits.

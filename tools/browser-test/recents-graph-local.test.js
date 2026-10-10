@@ -13,11 +13,11 @@ const {chromium} = require('playwright');
     await page.addStyleTag({path: path.resolve('resources/packages/app/editor/editor-styles.css')});
     await page.evaluate(() => {
       window.searchFilter = '';
-      window.selectedFnId = 'a';
+      window.selectedFnId = '11111111-1111-4111-8111-111111111111';
       window.gdNavigateToFn = (id, qname) => { window.destination = [id, qname]; };
-      localStorage.setItem('graphden.recentFns', JSON.stringify([{id: 'a', name: 'add', qname: 'core.add'}, {id: 'b', name: 'map', qname: 'core.map'}]));
+      localStorage.setItem('graphden.recentFns', JSON.stringify([{id: '11111111-1111-4111-8111-111111111111', name: 'add', qname: 'core.add'}, {id: '22222222-2222-4222-8222-222222222222', name: 'map', qname: 'core.map'}]));
     });
-    for (const file of ['web/vendor/preact.min.js', 'app/ui-preview/browser-runtime.js', 'app/ui-preview/graph-styles.js', 'app/ui-preview/graph-renderer.js', 'app/ui-preview/builtin-plans.js', 'app/editor/editor-recents.js']) {
+    for (const file of ['web/vendor/preact.min.js', 'app/ui-preview/browser-runtime.js', 'app/ui-preview/graph-styles.js', 'app/ui-preview/graph-renderer.js', 'app/ui-preview/graph-component.js', 'app/ui-preview/builtin-plans.js', 'app/editor/editor-recents.js']) {
       await page.addScriptTag({path: path.resolve('resources/packages', file)});
     }
     await page.evaluate(() => renderRecentFns());
@@ -28,7 +28,7 @@ const {chromium} = require('playwright');
     assert.equal(await page.locator('.gd-recent-row').textContent(), '★ map');
     assert.equal(await page.evaluate(() => focusedPin === document.activeElement), true, 'keyed pin survives moving from recent to pinned');
     await page.locator('.gd-recent-row').click();
-    assert.deepEqual(await page.evaluate(() => destination), ['b', 'core.map']);
+    assert.deepEqual(await page.evaluate(() => destination), ['22222222-2222-4222-8222-222222222222', 'core.map']);
     assert.equal(await pin.getAttribute('aria-label'), 'Unpin core.map');
     assert.equal(await pin.evaluate(node => getComputedStyle(node).opacity), '1');
     await page.screenshot({path: '/tmp/recents-graph-local.png'});

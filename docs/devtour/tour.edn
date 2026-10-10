@@ -1390,9 +1390,17 @@
            authorized actions, and focus."
      :see [[:editor "mount"] [:editor "pickerArrange"]]}
 
+    {:file "resources/packages/app/ui-preview/graph-component.js" :defn create
+     :say "Owns component state and serializes events independently of the DOM renderer.
+           Initial, update and view remain ordinary graph functions. Every transition validates
+           the next state, complete Hiccup/styles and all fixed host requests before rendering,
+           committing state and running effects. Runtime replacement preserves validated state;
+           cancellation discards late effect completions after replacement or disposal."
+     :see [[:editor "mount"] [:editor "renderRecentFns"]]}
+
     {:file "resources/packages/app/editor/editor-recents.js" :defn renderRecentFns
      :say "The Explorer trail executes the shipped `app.ui-recents` initial and view graphs.
-           Its update graph deduplicates selections, limits the trail and toggles pins; the view
+           Its update graph returns state and fixed persistence/navigation requests, deduplicates selections, limits the trail and toggles pins; the view
            excludes the selected function and pinned duplicates and hides during searches or filters.
            Ordinary row functions produce Hiccup and scoped styles. The host persists localStorage,
            resolves namespace paths and delegates navigation; keyed rendering preserves focused pin buttons."

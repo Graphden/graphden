@@ -478,8 +478,8 @@ function initDiffConversation(container, sourceName, sourceRef, opts) {
     } catch (_) { /* best-effort */ }
   };
 
-  // 💬 → open (or focus) an inline composer under the clicked row/entry.
-  container.querySelectorAll('.branch-diff-comment-btn').forEach((btn) => {
+  // Fresh annotation nodes need their own click wiring after a remount.
+  const wireButtons = () => container.querySelectorAll('.branch-diff-comment-btn').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const anchorEl = btn.closest('[data-anchor-id]');
@@ -504,7 +504,33 @@ function initDiffConversation(container, sourceName, sourceRef, opts) {
     });
   });
 
+  let focusedDraft = null;
+  const captureFocus = () => {
+    if (container.isConnected) focusedDraft = container.contains(document.activeElement) ? document.activeElement : null;
+  };
+  const mount = (nextContainer) => {
+    if (!focusedDraft) captureFocus();
+    const drafts = [...container.querySelectorAll('.branch-diff-anchor-thread')]
+      .filter(thread => thread.querySelector('.branch-diff-anchor-compose'));
+    const general = container.querySelector('.branch-comments');
+    container = nextContainer;
+    for (const thread of drafts) {
+      const anchor = container.querySelector('[data-anchor-id="' + CSS.escape(thread.dataset.anchorId)
+        + '"][data-anchor-name="' + CSS.escape(thread.dataset.anchorName) + '"]');
+      if (!anchor) container.appendChild(thread); // Keep a local draft whose row just disappeared.
+      else if (anchor.classList.contains('branch-diff-entry')) anchor.insertAdjacentElement('afterend', thread);
+      else (anchor.querySelector('.branch-diff-row-head') || anchor).insertAdjacentElement('afterend', thread);
+    }
+    if (general) container.appendChild(general);
+    render();
+    wireButtons();
+    focusedDraft?.focus();
+    focusedDraft = null;
+    reload();
+  };
+  wireButtons();
   reload();
+  return {captureFocus, mount};
 }
 
 // ============================================================================

@@ -34,10 +34,10 @@ function fixture(anchoredOnly = true) {
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname,
     '../../resources/packages/app/editor/editor-branch-diff.js'), 'utf8'), context);
-  context.gdDiffAttachThreads(root, 'source', 'source', {anchoredOnly});
+  const controller = context.gdDiffAttachThreads(root, 'source', 'source', {anchoredOnly});
   button.click();
   const input = root.querySelector('textarea'); input.value = 'Keep my draft';
-  return {root, button, input, pending, document};
+  return {root, button, input, pending, document, controller};
 }
 const drain = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -94,4 +94,56 @@ test('late read retains the disabled composer while its POST is pending', async 
   send.click(); assert.equal(pending.length, 2, 'refresh cannot enable a duplicate POST');
   pending[1].complete({ok: false, message: 'Refused'}); await drain();
   assert.equal(input.value, 'Keep my draft'); assert.equal(send.disabled, false);
+});
+
+function replaceAnnotationRoot(f) {
+  const root = f.document.createElement('div');
+  f.document.body.appendChild(root);
+  const anchor = f.document.createElement('div');
+  anchor.className = 'branch-diff-entry';
+  anchor.dataset.anchorName = 'fn'; anchor.dataset.anchorId = 'fixture';
+  root.appendChild(anchor);
+  anchor.insertAdjacentElement = (_position, element) => {
+    const index = root.children.indexOf(anchor);
+    root.insertBefore(element, root.children[index + 1] || null);
+  };
+  Object.defineProperty(anchor, 'nextElementSibling', {get: () =>
+    root.children[root.children.indexOf(anchor) + 1] || null});
+  const button = f.document.createElement('button'); button.className = 'branch-diff-comment-btn';
+  anchor.appendChild(button);
+  f.controller.captureFocus();
+  f.root.remove(); f.document.activeElement = f.document.body;
+  f.controller.mount(root);
+  return {root, button};
+}
+
+test('annotation root replacement preserves exact controls, focus and the late initial read', async () => {
+  const f = fixture();
+  const send = f.root.querySelector('.branch-comment-send');
+  const {root, button} = replaceAnnotationRoot(f);
+  assert.equal(root.querySelector('textarea'), f.input);
+  assert.equal(root.querySelector('.branch-comment-send'), send);
+  assert.equal(f.document.activeElement, f.input);
+  f.pending[0].complete({ok: true, comments: [{body: 'Previously saved',
+    'entity-name': 'fn', 'entity-id': 'fixture'}]}); await drain();
+  assert.equal(root.querySelector('.branch-comment-body').textContent, 'Previously saved');
+  button.click();
+  assert.equal(root.querySelectorAll('textarea').length, 1);
+  assert.equal(f.input.value, 'Keep my draft');
+});
+
+test('a pending POST finishes in its remounted conversation without a second submission', async () => {
+  const f = fixture();
+  f.pending[0].complete({ok: true, comments: []}); await drain();
+  const send = f.root.querySelector('.branch-comment-send'); send.click();
+  const {root} = replaceAnnotationRoot(f);
+  assert.equal(root.querySelector('.branch-comment-send'), send);
+  assert.equal(send.disabled, true);
+  send.click();
+  assert.equal(f.pending.filter(request => request.options?.method === 'POST').length, 1);
+  f.pending[1].complete({ok: true}); await drain();
+  assert.equal(root.querySelector('textarea'), null);
+  f.pending[3].complete({ok: true, comments: [{body: 'Keep my draft',
+    'entity-name': 'fn', 'entity-id': 'fixture'}]}); await drain();
+  assert.equal(root.querySelector('.branch-comment-body').textContent, 'Keep my draft');
 });

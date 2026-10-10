@@ -154,6 +154,19 @@ const {
       assert(draftState.connected && draftState.draft && draftState.focused,
         'late real comments response retains the focused draft');
     }
+    if (process.env.GRAPHDEN_COMMENT_REDRAW_PROOF === '1') {
+      const textarea = await page.locator(thread + ' .branch-comment-input').elementHandle();
+      const send = await page.locator(thread + ' .branch-comment-send').elementHandle();
+      await page.evaluate(async () => {
+        await gdDiffModeRefresh();
+        window.gdInspectorRender(selectedFnId);
+      });
+      const retained = await textarea.evaluate(input => ({connected: input.isConnected,
+        draft: input.value === 'Please keep this value explicit.', focused: document.activeElement === input}));
+      console.log('[composer redraw]', JSON.stringify(retained));
+      assert(retained.connected && retained.draft && retained.focused && await send.evaluate(button => button.isConnected),
+        'comparison refresh and Inspector rebuild retain exact composer controls and focused draft');
+    }
     await page.click(thread + ' .branch-comment-send');
     await waitTourTitle(page, 'Reopen the same thread', 150000);
     // Posting reloads the thread without its composer; reopen it through

@@ -68,6 +68,7 @@
     // lexical global directly rather than `window.lookups` (which is undefined).
     const lk = (typeof lookups !== 'undefined') ? lookups : null;
     const fn = (fnId && lk?.fnMap) ? lk.fnMap.get(fnId) : null;
+    if (typeof gdDiffCaptureInspectorFocus === 'function') gdDiffCaptureInspectorFocus(el, fn?.id || null);
     el.dataset.fnId = fn?.id || '';
     // Every path below replaces the whole column — tear down the outgoing
     // tab body's CodeMirror views (the Run pane's code-typed args) first.

@@ -9,6 +9,15 @@
 // `gdDiffAppendFnStrip` draw the "there" values on the node itself
 // (`.arg-diff-was`, `.fn-diff-was`) — the diff as a GRAPH (UX-v4).
 
+// The conversation belongs to a branch pair and selected function, rather
+// than the replaceable annotation DOM. Auth changes must not reuse its drafts.
+const _gdDiffInspectorConversations = new WeakMap();
+function gdDiffCaptureInspectorFocus(inspectorEl, nextFnId) {
+  const previous = _gdDiffInspectorConversations.get(inspectorEl);
+  if (nextFnId !== undefined && previous?.fnId !== nextFnId) _gdDiffInspectorConversations.delete(inspectorEl);
+  else previous?.controller?.captureFocus();
+}
+
 // --- the inspector diff panel ----------------------------------------------
 
 // Injected by editor-shell.js right after the inspector head whenever
@@ -17,9 +26,10 @@
 // branch-local marker) + the ANCHORED comment threads, exactly where
 // the user is already looking at the selected node.
 function gdDiffRenderInspectorSection(inspectorEl, fnId) {
+  gdDiffCaptureInspectorFocus(inspectorEl);
   inspectorEl.querySelector('#gd-diff-insp')?.remove();
   const g = fnId ? gdDiffVisibleGroup(fnId) : null;
-  if (!g || !_gdDiffMode) return;
+  if (!g || !_gdDiffMode) { _gdDiffInspectorConversations.delete(inspectorEl); return; }
   const panel = document.createElement('div');
   panel.id = 'gd-diff-insp';
   panel.className = 'gd-diff-insp';
@@ -57,9 +67,12 @@ function gdDiffRenderInspectorSection(inspectorEl, fnId) {
   // vs main anchors notes on the FEATURE's thread. No review context
   // (two roots) → no threads here.
   if (typeof gdDiffAttachThreads === 'function' && _gdDiffMode.proposalRef) {
-    gdDiffAttachThreads(panel, _gdDiffMode.branch, _gdDiffMode.proposalRef,
-                        { anchoredOnly: true });
-  }
+    const key = JSON.stringify([_gdDiffMode.currentId, _gdDiffMode.proposalRef, fnId, window.gdPrefOwner || null]);
+    const previous = _gdDiffInspectorConversations.get(inspectorEl);
+    if (previous?.key === key) previous.controller.mount(panel);
+    else _gdDiffInspectorConversations.set(inspectorEl, {key, fnId,
+      controller: gdDiffAttachThreads(panel, _gdDiffMode.branch, _gdDiffMode.proposalRef, {anchoredOnly: true})});
+  } else _gdDiffInspectorConversations.delete(inspectorEl);
 }
 
 // Card-level mark for `editor-overlay-fn.js` — ring the whole fn card

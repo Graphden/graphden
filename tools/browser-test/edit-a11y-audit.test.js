@@ -176,6 +176,7 @@ const CONTRAST = (opts) => {
     await page.goto(BASE + '/#' + PROBE_FN);
     await page.waitForFunction(() => graphReady() && !graph.animating,
                                null, {timeout: 20000, polling: 100});
+    await page.waitForFunction(() => window.gdPrefsReady && window.gdShellMenuGraph?.ready);
 
     // ── State 0: the rules can still fail ───────────────────────────────
     //
@@ -278,7 +279,7 @@ const CONTRAST = (opts) => {
 
     const wasDark = await page.evaluate(() => {
       const dark = document.body.classList.contains('theme-dark');
-      document.body.classList.toggle('theme-dark');
+      applyTheme(!dark);
       return dark;
     });
     await page.waitForTimeout(300);
@@ -288,7 +289,7 @@ const CONTRAST = (opts) => {
            + ' theme, reaches AAA:\n    ' + aaaOther.join('\n    '));
 
     await page.evaluate((dark) => {
-      document.body.classList.toggle('theme-dark', dark);
+      applyTheme(dark);
     }, wasDark);
     await page.emulateMedia({contrast: null});
 

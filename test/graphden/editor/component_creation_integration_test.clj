@@ -14,14 +14,15 @@
     [graphden.executor.context :as context]
     [graphden.packages.records.ids :as records]
     [graphden.storage.postgres.crud :as pg-crud]
-    [graphden.storage.postgres.util :as pg]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router.epoch :as epoch]
     [graphden.system.branch-router.recheck :as recheck]
     [graphden.test-infra.golden-app :as ga]
     [graphden.test-infra.impls :as impls]
     [graphden.types.check :as check]
-    [graphden.versioning.storage.core :as vs]))
+    [graphden.versioning.storage.core :as vs]
+    [graphden.versioning.storage.resolution :as resolution]
+    [next.jdbc :as jdbc]))
 
 
 (def ^:dynamic *destination-id* nil)
@@ -304,6 +305,19 @@
       result)))
 
 
+(defn- guarded-jdbc-reader
+  [original bodies configuration-id queries]
+  (fn [connection sql & opts]
+    (when (re-find #"(?i)\bSELECT\b" (first sql))
+      (let [targets? (boolean (some #(contains? bodies (str %)) (rest sql)))
+            body? (boolean (re-find #"(?i)\b(?:FROM|JOIN)\s+\"(?:binding|fn_slot)(?:_version)?\"" (first sql)))]
+        (swap! queries conj {:retained-root? (boolean (some #(= configuration-id (str %)) (rest sql)))
+                             :retained-target? targets? :body? body?})
+        (when (and targets? body?)
+          (throw (ex-info "Retained body must not be read" {:type :test/forbidden-body-read})))))
+    (apply original connection sql opts)))
+
+
 (deftest selective-copy-retains-edited-components-without-reading-their-bodies-or-changing-theme
   (let [ctx (:ctx ga/*bootstrap*)
         storage (:storage ctx)
@@ -316,7 +330,7 @@
         bodies (into #{} (map :id) (filter #(= picker-ns (:namespace-id %)) (:functions first-copy)))
         leaf (first (filter #(= "picker-active-background" (:name %)) (:functions first-copy)))
         binding (first (sp/query-entities storage :binding {:fn-id (java.util.UUID/fromString (:id leaf))}))
-        original-query pg/exec!
+        original-query jdbc/execute!
         queries (atom [])]
     (is (= #{"picker"} (set (map :name (rest (:namespaces first-copy))))))
     (is (= :saved (activate-selected storage first-copy)))
@@ -329,20 +343,23 @@
       (recheck/record-imported-fn-types! ctx (vs/current-branch-id storage) changed))
     (epoch/seed-watermark! storage)
     (epoch/note-graph-epoch-validated! storage)
-    (let [created (binding [pg/*jdbc-override*
-                            {:execute! (fn [connection sql opts]
-                                         (when (re-find #"(?i)\bSELECT\b" (first sql))
-                                           (swap! queries conj :read)
-                                           (when (and (re-find #"(?i)\b(?:FROM|JOIN)\s+\"(?:binding|fn_slot)\"" (first sql))
-                                                      (some #(contains? bodies (str %)) (rest sql)))
-                                             (throw (ex-info "Retained body must not be read"
-                                                             {:type :test/forbidden-body-read}))))
-                                         (binding [pg/*jdbc-override* nil]
-                                           (original-query connection sql opts)))}]
+    (let [reader (guarded-jdbc-reader original-query bodies first-config queries)
+          _ (with-redefs [jdbc/execute! reader]
+              ;; Positive control: prove this observer rejects an actual old
+              ;; body query on the same decorated graph storage.
+              (is (thrown? Exception
+                    (resolution/call-with-fresh-memos
+                      #(sp/query-entities storage :binding
+                                          {:fn-id (java.util.UUID/fromString (:id leaf))}))))
+              (is (some #(and (:body? %) (:retained-target? %)) @queries)))
+          _ (reset! queries [])
+          created (with-redefs [jdbc/execute! reader]
                     (apply-preview (preview "recents")))
           added (get-in created [:body :manifest])]
       (is (= 200 (:status created)) (pr-str created))
-      (is (seq @queries))
+      (is (some :retained-root? @queries) "actual selected root metadata was read")
+      (is (some :retained-target? @queries) "retained entry metadata was read")
+      (is (not-any? #(and (:body? %) (:retained-target? %)) @queries))
       (is (= #{"recents"} (set (map :name (rest (:namespaces added))))))
       (is (empty? (set/intersection (set (map :id (:functions first-copy))) (set (map :id (:functions added))))))
       (is (= :saved (activate-selected storage added)))

@@ -71,6 +71,14 @@
     return visit(tree, 0);
   }
 
+  // Ownership is private state, never an author-supplied data attribute.
+  function ownsTarget(target) {
+    for (let node = target; node; node = node.parentElement) {
+      if (owners.has(node)) return true;
+    }
+    return false;
+  }
+
   function mount(host, {idPrefix = null, nodeLimit = 5000} = {}) {
     if (!Number.isSafeInteger(nodeLimit) || nodeLimit < 1 || nodeLimit > 10000) throw new Error('Invalid graph element budget');
     if (idPrefix !== null && (typeof idPrefix !== 'string' || !/^gd-[a-z0-9_-]{1,100}$/.test(idPrefix))) throw new Error('Invalid graph component ID prefix');
@@ -110,5 +118,5 @@
       },
     };
   }
-  window.GraphdenRenderer = {vnode, mount};
+  window.GraphdenRenderer = {vnode, mount, ownsTarget};
 })();

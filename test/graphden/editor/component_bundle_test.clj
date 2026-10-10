@@ -24,6 +24,16 @@
       (is (= (count definitions) (count (filter #(= :fn (:kind %)) records)))))))
 
 
+(defn- manifest-operation-records
+  []
+  (concat (ids/boot-primitive-records)
+          (mapcat #(parse/parse-fn-def % {})
+                  (filter #(contains? #{[:const "core.logic"] [:list "core.collections"]
+                                        [:zipmap "core.collections"] [:concat "core.collections"]}
+                                      [(:name %) (:namespace %)])
+                          (templates/interface-definitions)))))
+
+
 (deftest immutable-extension-keeps-the-authored-manifest-reference
   (let [old-root "personal.retained-picker"
         new-root "personal.added-recents"
@@ -31,12 +41,7 @@
         old-id (ids/fn-id old-root :ui)
         alias (keyword new-root (str "_retained-target-" old-id))
         added (bundle/parse new-root :recents alias nil {alias old-id})
-        interfaces (filter #(contains? #{[:const "core.logic"] [:list "core.collections"]
-                                         [:zipmap "core.collections"] [:concat "core.collections"]}
-                                       [(:name %) (:namespace %)])
-                           (templates/interface-definitions))
-        records (concat (ids/boot-primitive-records)
-                        (mapcat #(parse/parse-fn-def % {}) interfaces)
+        records (concat (manifest-operation-records)
                         (map #(cond-> % (= old-id (:id %)) (assoc :name nil)) (:records old)) (:records added))
         grouped (group-by :kind records)
         graph {:fns (:fn grouped) :slots (:slot grouped) :fn-slots (:fn-slot grouped)
@@ -48,6 +53,22 @@
            (config/configuration graph (ids/fn-id new-root :ui))))
     (is (some #(= old-id (:ref-fn-id %)) (:records added)))
     (is (not-any? #(= old-id (:id %)) (:records added)) "retained identities are never part of the create-only receipt")))
+
+
+(deftest legacy-adapter-keeps-original-entry-identities-through-fixed-descriptors
+  (let [root "personal.legacy-addition"
+        retained {:account-menu {:initial (random-uuid) :update (random-uuid) :view (random-uuid)}
+                  :fn-picker {:view (random-uuid)}}
+        reference #(keyword root (str "_retained-target-" %))
+        legacy (update-vals retained #(update-vals % reference))
+        names (into {} (mapcat #(map (fn [id] [(reference id) id]) (vals %))) (vals retained))
+        added (bundle/parse root :recents nil legacy names)
+        graph (bundle/graph (concat (manifest-operation-records) (:records added)))
+        actual (config/configuration graph (ids/fn-id root :ui))]
+    (is (= retained (select-keys actual [:account-menu :fn-picker])))
+    (is (= (ids/fn-id (str root ".recents") :recents-view) (get-in actual [:recents :view])))
+    (doseq [[_ {:keys [id reference]}] config/component-contracts]
+      (is (= id (ids/fn-id (namespace reference) (keyword (name reference))))))))
 
 
 (deftest template-identity-targets-never-hide-an-ordinary-reference

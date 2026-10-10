@@ -165,7 +165,7 @@
                         :args {:items [(keyword root (str "_" prefix "-descriptor"))]})
         legacy-defs (mapcat (fn [[component roles]]
                               (component-definitions root (str "retained-" (get groups component))
-                                                     (:id (get config/component-contracts component))
+                                                     (:reference (get config/component-contracts component))
                                                      roles)) legacy)
         legacy-list {:name :_retained-components :namespace root :parent :core.collections/list
                      :return-type :app.ui-components/ui-component-manifest

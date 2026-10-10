@@ -52,9 +52,12 @@
   "Shipped view identities are the stable component discriminators. No names
    supplied by a client participate in dispatch."
   {:account-menu {:id (ids/fn-id "app.ui-account-menu" :account-menu-view)
+                  :reference :app.ui-account-menu/account-menu-view
                   :roles #{:initial :update :view}}
-   :fn-picker {:id (ids/fn-id "app.ui-fn-picker" :picker-view) :roles #{:view}}
+   :fn-picker {:id (ids/fn-id "app.ui-fn-picker" :picker-view)
+               :reference :app.ui-fn-picker/picker-view :roles #{:view}}
    :recents {:id (ids/fn-id "app.ui-recents" :recents-view)
+             :reference :app.ui-recents/recents-view
              :roles #{:initial :update :view}}})
 
 

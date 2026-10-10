@@ -37,10 +37,11 @@
   }
   function validManifest(manifest) {
     if (!manifest || !Array.isArray(manifest.namespaces) || !Array.isArray(manifest.functions)
-      || manifest.namespaces.length !== 4 || !manifest.functions.length || manifest.functions.length > 256) return false;
+      || !manifest.namespaces.length || manifest.namespaces.length > 16
+      || !manifest.functions.length || manifest.functions.length > 512) return false;
     const namespaces = new Set(manifest.namespaces.map(row => row.id));
     const identities = new Set([...namespaces, ...manifest.functions.map(row => row.id)]);
-    if (identities.size !== 4 + manifest.functions.length) return false;
+    if (identities.size !== manifest.namespaces.length + manifest.functions.length) return false;
     if (manifest.namespaces.some(row => !uuid.test(row.id) || typeof row.name !== 'string'
       || !(row['parent-id'] === null || uuid.test(row['parent-id'])))) return false;
     if (manifest.functions.some(row => !uuid.test(row.id) || typeof row.name !== 'string'
@@ -145,7 +146,9 @@
     root.querySelector('#gd-ui-components-choose').addEventListener('click', event => {
       const started = context();
       openFnPicker({anchorEl: event.currentTarget,
-        expectedType: {'menu-initial': 'uuid', 'menu-update': 'uuid', 'menu-view': 'uuid', 'picker-view': 'uuid'},
+        expectedType: ['union',
+          {'menu-initial': 'uuid', 'menu-update': 'uuid', 'menu-view': 'uuid', 'picker-view': 'uuid'},
+          ['list', {'component-id': 'uuid', entries: ['list', {role: 'keyword', 'fn-id': 'uuid'}]}]],
         onPick(fn) {
           if (started !== context()) return;
           void choose(fn, started);

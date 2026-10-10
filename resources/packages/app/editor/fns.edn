@@ -676,7 +676,7 @@
                 [:div {:id "gd-theme-root" :class "gd-theme-root"}]
                 [:div {:id "gd-ui-components-root"}
                  [:h3 {:class "gd-set-label"} "UI graphs"]
-                 [:p {:class "gd-set-hint"} "Personal theme, menu state and events, and picker view. Search, navigation and account actions stay native."]
+                 [:p {:class "gd-set-hint"} "Personal theme, menu, picker, and recent functions. Graphs define their state and appearance; the editor performs permitted actions."]
                  [:p {:id "gd-ui-components-label" :class "gd-set-hint"} "Built-in components"]
                  [:div {:class "gd-theme-actions gd-ui-components-actions"}
                   [:button {:id "gd-ui-components-create" :type "button" :class "gd-set-btn"} "Create personal graphs"]
@@ -687,7 +687,9 @@
                   [:button {:type "button" :class "gd-set-btn" :data-ui-graph "theme-id"} "Theme"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-graph "menu-update-id"} "Menu behavior"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-graph "menu-id"} "Menu view"]
-                  [:button {:type "button" :class "gd-set-btn" :data-ui-graph "picker-id"} "Picker view"]]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-graph "picker-id"} "Picker view"]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-graph "recents-update-id"} "Recent behavior"]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-graph "recents-id"} "Recent view"]]
                  [:p {:id "gd-ui-components-status" :class "gd-set-hint" :role "status"}]]]
                ;; KEYBOARD — every registered shortcut with a Change control;
                ;; layouts save + share through the marketplace (editor-keymap.js).

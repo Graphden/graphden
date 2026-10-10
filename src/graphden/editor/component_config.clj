@@ -72,7 +72,7 @@
 
 
 (defn manifest-entries
-  "Project a finite const/list/zipmap composition without invoking graph code.
+  "Project a finite const/list/zipmap/concat composition without invoking graph code.
    UUIDs originate exclusively in compiler-classified const value fn-ref
    bindings. Identity tags survive composition until descriptor validation."
   [graph fn-id]
@@ -82,7 +82,8 @@
         budget (atom 0)
         const-id (ids/fn-id "core.logic" :const)
         list-id (ids/fn-id "core.collections" :list)
-        zipmap-id (ids/fn-id "core.collections" :zipmap)]
+        zipmap-id (ids/fn-id "core.collections" :zipmap)
+        concat-id (ids/fn-id "core.collections" :concat)]
     (letfn [(item
               [row]
               (cond
@@ -110,7 +111,7 @@
                         chain (lookups/inheritance-chain* id index)]
                     (when (some :resolver-fn-id
                                 (mapcat #(get-in index [:bindings-by-fn %]) chain)) (reject!))
-                    (when-not (and (contains? #{const-id list-id zipmap-id} root-id)
+                    (when-not (and (contains? #{const-id list-id zipmap-id concat-id} root-id)
                                    (empty? (bindings/collect-env-bindings id index))) (reject!))
                     (swap! visiting conj id)
                     (let [args (into {} (map (fn [binding]
@@ -118,6 +119,11 @@
                           result (cond
                                    (= root-id const-id) (get args :value)
                                    (= root-id list-id) (get args :items)
+                                   (= root-id concat-id)
+                                   (let [colls (:colls args)]
+                                     (when-not (and (vector? colls) (every? vector? colls)
+                                                    (<= (reduce + 0 (map count colls)) 64)) (reject!))
+                                     (into [] cat colls))
                                    :else (let [ks (:keys args) vs (:vals args)]
                                            (when-not (and (vector? ks) (vector? vs)
                                                           (= (count ks) (count vs))

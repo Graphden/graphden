@@ -5,10 +5,14 @@
     [graphden.crud.entities.invalidation :as invalidation]
     [graphden.crud.request :as request]
     [graphden.editor.component-bundle :as bundle]
+    [graphden.editor.component-config :as config]
+    [graphden.editor.component-selection :as selection]
     [graphden.editor.component-templates :as templates]
     [graphden.executor.browser-contracts :as contracts]
+    [graphden.executor.browser-snapshot :as snapshot]
     [graphden.executor.browser-source :as source]
     [graphden.executor.context :as context]
+    [graphden.executor.registry.core :as registry]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.sync :as sync]
     [graphden.storage.graph-writer :as writer]
@@ -59,20 +63,27 @@
 
 (defn- parse-command
   [storage input preview?]
+  (when-not (map? input) (refuse! :invalid-request 400))
   (let [current (scope storage)
-        allowed (if preview? #{:owner :namespace-id}
-                    #{:owner :org :branch-id :namespace-id :root-id :expected-state})
+        allowed (cond-> (if preview? #{:owner :namespace-id}
+                            #{:owner :org :branch-id :namespace-id :root-id :expected-state})
+                  (contains? input :component) (conj :component))
         parent (request/parse-uuid-or-clear (:namespace-id input))
         root-id (if preview? (random-uuid) (request/parse-uuid-or-clear (:root-id input)))]
     (when-not (and (map? input) (= allowed (set (keys input))) root-id
                    (or (nil? (:namespace-id input)) parent))
+      (refuse! :invalid-request 400))
+    (when (and (contains? input :component)
+               (not (and (string? (:component input))
+                         (contains? templates/groups (keyword (:component input))))))
       (refuse! :invalid-request 400))
     (when-not (and (= (:owner input) (:owner current))
                    (or preview? (= current (select-keys input [:owner :org :branch-id]))))
       (refuse! :changed-session 403))
     (when (and (not preview?) (not (string? (:expected-state input))))
       (refuse! :invalid-request 400))
-    (assoc current :namespace-id parent :root-id root-id)))
+    (cond-> (assoc current :namespace-id parent :root-id root-id)
+      (contains? input :component) (assoc :component (:component input)))))
 
 
 (defn- plan-namespaces
@@ -88,7 +99,10 @@
         children (mapv (fn [name]
                          {:id (ids/uuid-v5 (:root-id command) (str "namespace:" name))
                           :name name :parent-id (:root-id command) :path (str root "." name)})
-                       templates/namespace-suffixes)]
+                       (if-let [component (:component command)]
+                         (cond-> [(get templates/groups (keyword component))]
+                           (= component "account-menu") (conj "theme"))
+                         templates/namespace-suffixes))]
     (writer/assert-write-authorized! storage :ns (dissoc root-row :path) nil)
     {:root root :rows (into [root-row] children) :parent-rows rows}))
 
@@ -105,25 +119,49 @@
 
 
 (defn- plan
-  [storage command]
+  [storage command policy]
   (let [authorize! (tenancy/browser-source-policy storage)
         {:keys [root rows parent-rows]} (plan-namespaces storage command authorize!)
-        parsed (bundle/parse root)
+        group (some-> (:component command) keyword)
+        selected (when group (selection/capture storage group authorize! policy root))
+        parsed (if group (bundle/parse root group (:retained selected) (:legacy selected) (:names selected))
+                   (bundle/parse root))
         ns-ids (into {} (map (juxt :path :id)) rows)
         records (mapv (fn [row]
                         (cond-> row (= :fn (:kind row))
                                 (assoc :namespace-id (get ns-ids (:namespace-id row))))) (:records parsed))
         external-ids (bundle/external-identities records)
-        discriminator-ids (filter #(contains? contracts/component-identities %) external-ids)
+        retained-ids (cond-> (into #{} (filter (bundle/identity-targets records)) (vals (:names selected)))
+                       (:retained selected) (conj (:id selected)))
+        external-ids (remove retained-ids external-ids)
+        discriminator-ids (set (filter #(and (contains? contracts/component-identities %)
+                                             (contains? (bundle/identity-targets records) %)) external-ids))
         metadata (source/collect-component-identities storage discriminator-ids authorize!)
         external (-> (source/collect-closure storage
-                                             (remove #(contains? contracts/component-identities %) external-ids)
+                                             (remove discriminator-ids external-ids)
                                              authorize!)
                      (update :fns into metadata))
+        ;; Refuse an extension that would overflow descriptor/depth/visit
+        ;; bounds before CREATE, rather than leaving an unusable new selection.
+        _ (when group
+            (config/configuration
+              (merge-with into (bundle/graph records)
+                          (select-keys external [:fns :slots :fn-slots :bindings :list-items])
+                          (select-keys (:graph selected) [:fns :slots :fn-slots :bindings :list-items]))
+              (ids/fn-id root :ui)))
         functions (mapv #(select-keys % [:id :name :namespace-id])
                         (identity-order (filter #(= :fn (:kind %)) records)))
-        manifest {:namespaces rows :functions functions :roots (templates/descriptor root)}
+        all-roots (templates/descriptor root)
+        owned (set (map (comp str :id) functions))
+        manifest (cond-> {:namespaces rows :functions functions
+                          :roots (if group (into {} (filter #(contains? owned (val %))) all-roots) all-roots)}
+                   group (assoc :component (:component command) :expected-preference (:expected selected)))
         expected (digest {:command command :manifest manifest :records (identity-order records)
+                          :selection (when selected
+                                       (-> selected
+                                           (update :graph #(when % (update-vals % (fn [rows]
+                                                                                    (if (vector? rows) (identity-order rows) rows)))))
+                                           (update :namespaces identity-order)))
                           :parent-rows (identity-order parent-rows)
                           :external (update-vals external identity-order)})]
     ;; The namespace does not exist yet. Its parent's write grant is proven
@@ -172,10 +210,14 @@
   [ctx input]
   (try
     (let [storage (request/require-storage ctx)
+          epoch (context/invalidation-epoch ctx)
+          policy (snapshot/capture-policy @(or (:rich-types-atom ctx) (registry/active-rich-types-atom)))
           command (parse-command storage input true)]
       (writer/with-write [storage :graph]
                          (resolution/call-with-fresh-memos
-                           #(let [prepared (plan storage command)]
+                           #(let [prepared (plan storage command policy)]
+                              (when-not (= epoch (context/invalidation-epoch ctx))
+                                (refuse! :policy-refresh-required 409))
                               {:ok true :request (-> command (update :namespace-id (fn [id] (some-> id str)))
                                                      (update :root-id str) (assoc :expected-state (:expected-state prepared)))
                                :manifest (wire-manifest (:manifest prepared))}))))
@@ -219,12 +261,16 @@
   (shield/run!
     (fn []
       (let [storage (request/require-storage ctx)
+            epoch (context/invalidation-epoch ctx)
+            policy (snapshot/capture-policy @(or (:rich-types-atom ctx) (registry/active-rich-types-atom)))
             result (try
                      (tx/assert-owns-commit! storage)
                      (let [command (parse-command storage input false)]
                        (writer/with-write [storage :graph]
                                           (resolution/call-with-fresh-memos
-                                            #(let [prepared (plan storage command)]
+                                            #(let [prepared (plan storage command policy)]
+                                               (when-not (= epoch (context/invalidation-epoch ctx))
+                                                 (refuse! :policy-refresh-required 409))
                                                (when-not (= (:expected-state input) (:expected-state prepared))
                                                  (refuse! :stale-preview 409))
                                                (create! storage prepared)))))

@@ -35,14 +35,11 @@
   (get document key (get document (name key))))
 
 
-(defn selected-id
-  "Resolve this user's authoritative selection inside the request snapshot.
-   Client mirrors cannot select another owner, organization or branch."
-  [storage]
-  (let [rows (sp/query-entities storage :ui-pref
-                                {:owner-id (tenancy/current-user-id) :key "components"}
-                                {:limit 2})
-        selection (:value (first rows))
+(defn selected-id-from-rows
+  "Validate the one authoritative owner preference read by the caller. Reusing
+   its rows keeps a captured comparison and its selected manifest coherent."
+  [storage rows]
+  (let [selection (:value (first rows))
         id (when (map? selection) (request/parse-uuid-or-clear (field selection :fn-id)))
         branch-id (when (map? selection) (request/parse-uuid-or-clear (field selection :branch-id)))]
     (when-not (and (= 1 (count rows)) id branch-id
@@ -50,6 +47,16 @@
                    (= branch-id (versioned/current-branch-id storage)))
       (reject! :invalid-selection))
     id))
+
+
+(defn selected-id
+  "Resolve this user's authoritative selection inside the request snapshot.
+   Client mirrors cannot select another owner, organization or branch."
+  [storage]
+  (selected-id-from-rows storage
+                         (sp/query-entities storage :ui-pref
+                                            {:owner-id (tenancy/current-user-id) :key "components"}
+                                            {:limit 2})))
 
 
 (defn assert-current-policy!

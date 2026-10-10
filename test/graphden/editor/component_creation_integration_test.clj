@@ -6,12 +6,14 @@
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.editor.component-config :as config]
     [graphden.editor.components :as components]
+    [graphden.editor.preference-write :as preferences]
     [graphden.executor.browser-snapshot :as snapshot]
     [graphden.executor.browser-source :as source]
     [graphden.packages.records.ids :as records]
     [graphden.storage.postgres.crud :as pg-crud]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router.epoch :as epoch]
+    [graphden.system.branch-router.recheck :as recheck]
     [graphden.test-infra.golden-app :as ga]
     [graphden.test-infra.impls :as impls]
     [graphden.types.check :as check]
@@ -46,8 +48,11 @@
 
 
 (defn- preview
-  []
-  (submit :_ui-components-create-preview-handler {:owner "anonymous" :namespace-id (str *destination-id*)}))
+  ([] (preview nil))
+  ([component]
+   (submit :_ui-components-create-preview-handler
+           (cond-> {:owner "anonymous" :namespace-id (str *destination-id*)}
+             component (assoc :component component)))))
 
 
 (defn- apply-preview
@@ -263,3 +268,99 @@
       (is (:ok (components/export-current ctx {:component component}))))
     (is (= "component-missing" (:code (components/export-current ctx {:component "recents"}))))
     (is (= "builtin" (:fallback (components/export-current ctx {:component "recents"}))))))
+
+
+(defn- activate-selected
+  [storage manifest]
+  (let [preference {:fn-id (get-in manifest [:roots :configuration-id])
+                    :branch-id (str (vs/current-branch-id storage)) :org "public"}]
+    (preferences/write! storage "components" preference true (:expected-preference manifest))))
+
+
+(deftest selective-copy-retains-edited-components-without-reading-their-bodies-or-changing-theme
+  (let [ctx (:ctx ga/*bootstrap*)
+        storage (:storage ctx)
+        _ (preferences/write! storage "components" nil false nil)
+        theme-before (sp/query-entities storage :ui-pref {:owner-id "anonymous" :key "theme"})
+        first-copy (get-in (apply-preview (preview "fn-picker")) [:body :manifest])
+        first-config (get-in first-copy [:roots :configuration-id])
+        picker-id (get-in first-copy [:roots :picker-id])
+        picker-ns (:id (first (filter #(= "picker" (:name %)) (:namespaces first-copy))))
+        bodies (into #{} (map :id) (filter #(= picker-ns (:namespace-id %)) (:functions first-copy)))
+        leaf (first (filter #(= "picker-active-background" (:name %)) (:functions first-copy)))
+        binding (first (sp/query-entities storage :binding {:fn-id (java.util.UUID/fromString (:id leaf))}))
+        original-query sp/query-bounded-entities
+        queries (atom [])]
+    (is (= #{"picker"} (set (map :name (rest (:namespaces first-copy))))))
+    (is (= :saved (activate-selected storage first-copy)))
+    ;; A selected graph is identified by UUID, including an anonymous root.
+    ;; Recheck the authored edit rather than retaining a stale certificate.
+    (sp/update-entity storage :fn (java.util.UUID/fromString first-config) {:name nil})
+    (recheck/record-imported-fn-types! ctx (vs/current-branch-id storage)
+                                       [(java.util.UUID/fromString first-config)])
+    (sp/update-entity storage :binding (:id binding) {:value "#fed7aa" :value-present true})
+    (epoch/seed-watermark! storage)
+    (let [created (with-redefs [sp/query-bounded-entities
+                                (fn [storage entity where limit]
+                                  (swap! queries conj [entity where])
+                                  (when (and (contains? #{:binding :fn-slot} entity)
+                                             (some bodies (map str (:fn-id where))))
+                                    (throw (ex-info "Retained body must not be read" {:type :test/forbidden-body-read})))
+                                  (original-query storage entity where limit))]
+                    (apply-preview (preview "recents")))
+          added (get-in created [:body :manifest])]
+      (is (= 200 (:status created)) (pr-str created))
+      (is (seq @queries))
+      (is (= #{"recents"} (set (map :name (rest (:namespaces added))))))
+      (is (empty? (set/intersection (set (map :id (:functions first-copy))) (set (map :id (:functions added))))))
+      (is (= :saved (activate-selected storage added)))
+      (is (= "#fed7aa" (:value (sp/read-entity storage :binding (:id binding)))))
+      (is (= theme-before (sp/query-entities storage :ui-pref {:owner-id "anonymous" :key "theme"})))
+      (let [{:keys [result] :as diagnosed} (export-diagnosed ctx "recents")]
+        (is (:ok result) (pr-str diagnosed))
+        (is (= picker-id (get-in result [:roots :picker-id])))
+        (is (not= first-config (:selection-id result))))
+      (let [before (graph-identities storage)
+            duplicate (preview "fn-picker")]
+        (is (= 409 (:status duplicate)))
+        (is (= before (graph-identities storage)))))))
+
+
+(deftest selective-apply-rejects-a-changed-server-preference-before-any-create
+  (let [storage (:storage ga/*bootstrap*)
+        _ (preferences/write! storage "components" nil false nil)
+        reserved (preview "recents")
+        other (get-in (apply-preview (preview "fn-picker")) [:body :manifest])]
+    (is (= :saved (activate-selected storage other)))
+    (let [before (graph-identities storage)
+          stale (apply-preview reserved)]
+      (is (= 409 (:status stale)))
+      (is (= before (graph-identities storage))))))
+
+
+(deftest legacy-selection-addition-adapts-original-identities-without-copying-old-groups
+  (let [ctx (:ctx ga/*bootstrap*)
+        storage (:storage ctx)
+        _ (preferences/write! storage "components" nil false nil)
+        full (get-in (apply-preview (preview)) [:body :manifest])
+        root (:path (first (:namespaces full)))
+        legacy-id (records/fn-id root :legacy-addition)
+        definition {:name :legacy-addition :namespace root :parent :app.ui-components/ui-components
+                    :args {:menu-initial (keyword (str root ".menu") "account-menu-initial")
+                           :menu-update (keyword (str root ".menu") "account-menu-update")
+                           :menu-view (keyword (str root ".menu") "account-menu-view")
+                           :picker-view (keyword (str root ".picker") "picker-view")}}]
+    ((impls/impl-of :sync-fn-defs-branch!) {:branch-id (vs/current-branch-id storage) :fn-defs [definition]} ctx)
+    (preferences/write! storage "components"
+                        {:fn-id (str legacy-id) :branch-id (str (vs/current-branch-id storage)) :org "public"} false nil)
+    (epoch/seed-watermark! storage)
+    (let [created (apply-preview (preview "recents"))
+          added (get-in created [:body :manifest])]
+      (is (= 200 (:status created)) (pr-str created))
+      (is (= #{"recents"} (set (map :name (rest (:namespaces added))))))
+      (is (empty? (set/intersection (set (map :id (:functions full))) (set (map :id (:functions added))))))
+      (is (= :saved (activate-selected storage added)))
+      (let [{:keys [result] :as diagnosed} (export-diagnosed ctx "recents")]
+        (is (:ok result) (pr-str diagnosed))
+        (is (= (get-in full [:roots :menu-id]) (get-in result [:roots :menu-id])))
+        (is (= (get-in full [:roots :picker-id]) (get-in result [:roots :picker-id])))))))

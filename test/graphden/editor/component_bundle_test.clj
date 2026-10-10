@@ -2,11 +2,59 @@
   (:require
     [clojure.test :refer [deftest is]]
     [graphden.editor.component-bundle :as bundle]
+    [graphden.editor.component-config :as config]
     [graphden.editor.component-templates :as templates]
     [graphden.executor.compile-runtime :as runtime]
     [graphden.packages.records.ids :as ids]
+    [graphden.packages.records.parse :as parse]
     [graphden.tenancy.context :as tenancy]
     [graphden.types.core :as types]))
+
+
+(deftest selected-copies-contain-only-the-required-owned-closure
+  (doseq [[group child] templates/groups]
+    (let [root (str "personal.selected-" (name group))
+          {:keys [definitions records]} (bundle/parse root group nil nil {})
+          paths (set (map :namespace definitions))
+          names (set (map :name definitions))]
+      (is (= (cond-> #{root (str root "." child)}
+               (= group :account-menu) (conj (str root ".theme"))) paths))
+      (is (contains? names :ui))
+      (is (not (contains? names :theme)) "a selected component never copies the theme entry")
+      (is (= (count definitions) (count (filter #(= :fn (:kind %)) records)))))))
+
+
+(deftest immutable-extension-keeps-the-authored-manifest-reference
+  (let [old-root "personal.retained-picker"
+        new-root "personal.added-recents"
+        old (bundle/parse old-root :fn-picker nil nil {})
+        old-id (ids/fn-id old-root :ui)
+        alias (keyword new-root (str "_retained-target-" old-id))
+        added (bundle/parse new-root :recents alias nil {alias old-id})
+        interfaces (templates/interface-definitions)
+        records (concat (ids/boot-primitive-records)
+                        (mapcat #(parse/parse-fn-def % {}) interfaces)
+                        (map #(cond-> % (= old-id (:id %)) (assoc :name nil)) (:records old)) (:records added))
+        grouped (group-by :kind records)
+        graph {:fns (:fn grouped) :slots (:slot grouped) :fn-slots (:fn-slot grouped)
+               :bindings (:binding grouped) :list-items (:binding-list-item grouped)}]
+    (is (= {:fn-picker {:view (ids/fn-id (str old-root ".picker") :picker-view)}
+            :recents {:initial (ids/fn-id (str new-root ".recents") :recents-initial)
+                      :update (ids/fn-id (str new-root ".recents") :recents-update)
+                      :view (ids/fn-id (str new-root ".recents") :recents-view)}}
+           (config/configuration graph (ids/fn-id new-root :ui))))
+    (is (some #(= old-id (:ref-fn-id %)) (:records added)))
+    (is (not-any? #(= old-id (:id %)) (:records added)) "retained identities are never part of the create-only receipt")))
+
+
+(deftest template-identity-targets-never-hide-an-ordinary-reference
+  (let [target (random-uuid)
+        identity {:kind :binding :id (random-uuid) :fn-id (random-uuid)
+                  :slot-id (ids/slot-id (ids/fn-id "core.logic" :const) :value)
+                  :type-override-fn-id ids/fn-ref-type-id :ref-fn-id target :value-present false}]
+    (is (= #{target} (bundle/identity-targets [identity])))
+    (is (= #{} (bundle/identity-targets [identity {:kind :binding-list-item :ref-fn-id target}])))
+    (is (= #{} (bundle/identity-targets [(assoc identity :value-present true :value "mixed")])))))
 
 
 (deftest real-parser-keeps-every-copy-named-and-color-form-compatible

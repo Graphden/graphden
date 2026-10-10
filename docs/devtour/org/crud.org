@@ -133,13 +133,13 @@ Reconstructs and checks the changed function, updating branch-specific diagnosti
 :PROPERTIES:
 :CUSTOM_ID: crud/notify-after-write!
 :FILE: src/graphden/crud/entities/invalidation.clj
-:LINE: 219
+:LINE: 223
 :MINS: 5.0
 :END:
 
 Invalidates affected caches after a stored change and emits a PostgreSQL notification for other processes. The notification carries update information so their compiled functions can refresh.
 
-- source :: [[file:../../../src/graphden/crud/entities/invalidation.clj::(defn notify-after-write!][src/graphden/crud/entities/invalidation.clj:219]]
+- source :: [[file:../../../src/graphden/crud/entities/invalidation.clj::(defn notify-after-write!][src/graphden/crud/entities/invalidation.clj:223]]
 - referenced from :: [[file:storage.org::#storage/make-emitter][make-emitter]], [[file:editor.org::#editor/writeBindingFields][writeBindingFields]]
 
 * 11. resolve-fn

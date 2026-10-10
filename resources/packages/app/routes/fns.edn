@@ -403,10 +403,15 @@
    :parent :post
    :args {:path "/:type/:id/revive" :handler :revive-entity-handler}}
 
+  {:name :entity-fn-delete-batch
+   :description "Authenticated atomic deletion of exact function receipts on the request branch."
+   :parent :post
+   :args {:path "/fn/delete-batch" :handler :delete-fn-batch-handler}}
+
   {:name :entity-routes
    :description "/api/entities/* sub-group — POST `/:type` (create) and GET/PUT/DELETE `/:type/:id` (identity/update/delete). New methods on /:type/:id go into `:_entity-by-id-methods`; new sub-paths get listed here directly."
    :parent :list
-   :args {:items ["/entities" :entity-create :entity-by-id :entity-revive]}}
+   :args {:items ["/entities" :entity-create :entity-by-id :entity-revive :entity-fn-delete-batch]}}
 
   ;; --- /api/assets — frontend-asset overrides (UI Step 1) ---
 

@@ -1027,6 +1027,31 @@
                     {:value true}             :_revive-apply]
           :parsed :_delete-parsed}}
 
+  {:name :parse-fn-delete-receipts
+   :description "Validate 1–1000 distinct exact function receipts before a compound delete. No storage reads."
+   :args {:input {:type :jsonb}}
+   :return-type [:list {:id :uuid :name :text :namespace-id :uuid}]}
+
+  {:name :delete-fn-receipts
+   :description "Atomically validate fresh identities, write authorization and external usages, then tombstone the exact set. Publishes one local delta after commit. Receipt names never select identities."
+   :args {:receipts {:type [:list {:id :uuid :name :text :namespace-id :uuid}]}}
+   :return-type {:deleted [:list :uuid] :already-absent [:list :uuid]}
+   :effects #{:db}}
+
+  {:name :_delete-batch-receipts
+   :parent :parse-fn-delete-receipts
+   :args {:input :parse-json-body}}
+
+  {:name :_delete-batch-result
+   :parent :delete-fn-receipts
+   :args {:receipts :_delete-batch-receipts}}
+
+  {:name :delete-fn-batch-handler
+   :description "POST exact-receipt cleanup. Parsing, atomic mutation and JSON rendering are ordinary graph composition."
+   :parent :json-envelope-response
+   :lambda-params [:request]
+   :args {:envelope :_delete-batch-result}}
+
   {:name :process-delete-entity
    :description "DELETE /api/entities/:type/:id — flat `:cond` of `[invalid-request? → 400, secret-fn? → 409, pkg-owned? → 403, fn-in-use? → 409, ns-non-empty? → 409, true → apply]`. `:cond` is lazy, so the delete + invalidate (and the secret-shape DB lookup) only run when every guard up to that point passes. `parsed`, `pkg-guard-reason`, `fn-in-use-reason`, `ns-non-empty-reason` are shared sub-results bound once at the `:cond` fn-def — the dynamic-reason error builders consume the same reason their predicate observed."
    :parent :cond

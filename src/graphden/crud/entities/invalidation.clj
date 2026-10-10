@@ -57,7 +57,11 @@
   [storage entity-type entity-data]
   (case entity-type
     :fn
-    (when-let [id (:id entity-data)] #{id})
+    ;; Compound writes publish their complete, already-authorized identity set
+    ;; once. This is internal mutation data, never a client-selected closure.
+    (if (contains? entity-data :ids)
+      (set (:ids entity-data))
+      (when-let [id (:id entity-data)] #{id}))
 
     (:fn-slot :binding)
     (when-let [fid (:fn-id entity-data)] #{fid})

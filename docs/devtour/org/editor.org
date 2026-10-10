@@ -7,7 +7,7 @@ Loading, graph-backed controls, actions, forms, and preferences.
 
 after: web, layout
 
-[[file:index.org][index]] · ~132 min
+[[file:index.org][index]] · ~131 min
 
 * 1. initGraph
 :PROPERTIES:
@@ -346,50 +346,50 @@ Evaluates a selected personal theme graph in the request's existing organisation
 :PROPERTIES:
 :CUSTOM_ID: editor/definitions
 :FILE: src/graphden/editor/component_templates.clj
-:LINE: 62
-:MINS: 3.2
+:LINE: 68
+:MINS: 5.5
 :END:
 
 Copies fixed shipped theme, menu and picker definitions into a fresh named namespace. Four configuration [[file:glossary.org::#term/binding][bindings]] select menu initial state, event handler, menu view and picker view by function ID. The picker graph authors presentation; native browser code retains search and navigation. Shared menu colors reference the copied theme leaves; menu hover owns a local literal. Color wrappers retain the canonical color type and ordinary editor form.
 
-- source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn definitions][src/graphden/editor/component_templates.clj:62]]
+- source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn definitions][src/graphden/editor/component_templates.clj:68]]
 
 * 27. apply!
 :PROPERTIES:
 :CUSTOM_ID: editor/apply!
 :FILE: src/graphden/editor/component_creation.clj
-:LINE: 210
+:LINE: 217
 :MINS: 2.0
 :END:
 
 Rebuilds the manifest, the fixed list of proposed objects and UUIDs, while holding the graph writer lock. It rejects a changed user, branch, source snapshot or existing identity. One transaction through the existing [[file:glossary.org::#term/protocol][storage decorators]] creates all rows with ordinary access checks. Cache-publication warnings preserve a successful commit and its identities. An internal preview lets lesson cleanup record exact new UUIDs before sending APPLY, so a lost network reply does not leave untracked objects.
 
-- source :: [[file:../../../src/graphden/editor/component_creation.clj::(defn apply!][src/graphden/editor/component_creation.clj:210]]
+- source :: [[file:../../../src/graphden/editor/component_creation.clj::(defn apply!][src/graphden/editor/component_creation.clj:217]]
 - see also :: [[file:versioning.org::#versioning/call-with-write][call-with-write]]
 
 * 28. collect-closure
 :PROPERTIES:
 :CUSTOM_ID: editor/collect-closure
 :FILE: src/graphden/executor/browser_source.clj
-:LINE: 64
-:MINS: 4.2
+:LINE: 152
+:MINS: 1.0
 :END:
 
 Collects only the selected [[file:glossary.org::#term/reachable-graph][reachable graph]] and its type dependencies, limiting function and row counts. Each function's [[file:glossary.org::#term/auth][source authorization]] precedes its binding and literal reads. The caller supplies a snapshot-local policy; generic whole-graph preview remains unavailable to cloud tenants. Narrow exceptions for fixed shipped primitive/type interfaces verify identity and installed origin; a matching name is insufficient.
 
-- source :: [[file:../../../src/graphden/executor/browser_source.clj::(defn collect-closure][src/graphden/executor/browser_source.clj:64]]
+- source :: [[file:../../../src/graphden/executor/browser_source.clj::(defn collect-closure][src/graphden/executor/browser_source.clj:152]]
 
 * 29. export-current
 :PROPERTIES:
 :CUSTOM_ID: editor/export-current
 :FILE: src/graphden/editor/components.clj
-:LINE: 93
-:MINS: 1.9
+:LINE: 100
+:MINS: 2.1
 :END:
 
 Reads the current user's authoritative configuration preference and exports a bounded JSON plan for one component. It never evaluates selected code to discover entry UUIDs. Source and policy use one snapshot; fresh checking cannot erase cached secret metadata. The editor host still owns callbacks, search, navigation and the validated DOM contract.
 
-- source :: [[file:../../../src/graphden/editor/components.clj::(defn export-current][src/graphden/editor/components.clj:93]]
+- source :: [[file:../../../src/graphden/editor/components.clj::(defn export-current][src/graphden/editor/components.clj:100]]
 
 * 30. gdTourRestoreUIComponentPreferences
 :PROPERTIES:

@@ -119,13 +119,13 @@ Repeats structural validation under the semantic writer guard, then creates the 
 :PROPERTIES:
 :CUSTOM_ID: crud/type-check-fn-after-mutation!
 :FILE: src/graphden/crud/type_check.clj
-:LINE: 514
+:LINE: 518
 :MINS: 4.8
 :END:
 
 Reconstructs and checks the changed function, updating branch-specific diagnostics. ~:reject-secret?~ marks secret-related failures for the caller to reject instead of storing them as ordinary warnings. The following ~type-check-fn-and-dependents!~ also checks direct callers using the compiler's reverse dependency index.
 
-- source :: [[file:../../../src/graphden/crud/type_check.clj::(defn type-check-fn-after-mutation!][src/graphden/crud/type_check.clj:514]]
+- source :: [[file:../../../src/graphden/crud/type_check.clj::(defn type-check-fn-after-mutation!][src/graphden/crud/type_check.clj:518]]
 - see also :: [[file:types.org::#types/check-fn-def!][check-fn-def!]]
 - referenced from :: [[file:editor.org::#editor/writeBindingFields][writeBindingFields]]
 

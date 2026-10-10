@@ -184,39 +184,39 @@ Checks assignment direction after [[file:glossary.org::#term/unification][unific
 :PROPERTIES:
 :CUSTOM_ID: types/signature-return
 :FILE: src/graphden/types/check.clj
-:LINE: 2159
+:LINE: 2190
 :MINS: 3.9
 :END:
 
 Infers a return type from a [[file:glossary.org::#term/unification][polymorphic signature]] when there is no custom ~:return-type-rule~. It unifies declared argument types with actual types and substitutes the resulting variable values into the declared return type. Custom rules remain necessary when inference depends on literal values or registry data.
 
-- source :: [[file:../../../src/graphden/types/check.clj::(defn signature-return][src/graphden/types/check.clj:2159]]
+- source :: [[file:../../../src/graphden/types/check.clj::(defn signature-return][src/graphden/types/check.clj:2190]]
 - same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/rule-return][rule-return]], [[file:types.org::#types/check-fn-def!][check-fn-def!]], [[file:types.org::#types/check-all-defs!][check-all-defs!]]
 
 * 15. rule-return
 :PROPERTIES:
 :CUSTOM_ID: types/rule-return
 :FILE: src/graphden/types/check.clj
-:LINE: 2212
+:LINE: 2243
 :MINS: 2.5
 :END:
 
 Chooses return-type inference for the root [[file:glossary.org::#term/base-function][base function]]: custom rule first, declared signature next, then static return type. If the root propagates [[file:glossary.org::#term/secret][secret markings]] and an input is secret, the result is wrapped accordingly.
 
-- source :: [[file:../../../src/graphden/types/check.clj::(defn rule-return][src/graphden/types/check.clj:2212]]
+- source :: [[file:../../../src/graphden/types/check.clj::(defn rule-return][src/graphden/types/check.clj:2243]]
 - same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/check-fn-def!][check-fn-def!]], [[file:types.org::#types/check-all-defs!][check-all-defs!]]
 
 * 16. check-fn-def!
 :PROPERTIES:
 :CUSTOM_ID: types/check-fn-def!
 :FILE: src/graphden/types/check.clj
-:LINE: 2485
+:LINE: 2516
 :MINS: 8.8
 :END:
 
 Checks one function definition against its parents and inherited [[file:glossary.org::#term/slot][slots]]. It validates argument changes and [[file:glossary.org::#term/effect][effects]], checks [[file:glossary.org::#term/binding][bindings]], computes the return type, and records detailed type information for later dependent functions.
 
-- source :: [[file:../../../src/graphden/types/check.clj::(defn check-fn-def!][src/graphden/types/check.clj:2485]]
+- source :: [[file:../../../src/graphden/types/check.clj::(defn check-fn-def!][src/graphden/types/check.clj:2516]]
 - same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/rule-return][rule-return]], [[file:types.org::#types/check-all-defs!][check-all-defs!]]
 - referenced from :: [[file:crud.org::#crud/type-check-fn-after-mutation!][type-check-fn-after-mutation!]]
 
@@ -224,13 +224,13 @@ Checks one function definition against its parents and inherited [[file:glossary
 :PROPERTIES:
 :CUSTOM_ID: types/check-all-defs!
 :FILE: src/graphden/types/check.clj
-:LINE: 2613
+:LINE: 2644
 :MINS: 1.9
 :END:
 
 Checks definitions in [[file:glossary.org::#term/topological-order][dependency order]], registering each result before dependent definitions need it. This performs the full graph type sweep using the same single-definition checker.
 
-- source :: [[file:../../../src/graphden/types/check.clj::(defn check-all-defs!][src/graphden/types/check.clj:2613]]
+- source :: [[file:../../../src/graphden/types/check.clj::(defn check-all-defs!][src/graphden/types/check.clj:2644]]
 - same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/rule-return][rule-return]], [[file:types.org::#types/check-fn-def!][check-fn-def!]]
 - referenced from :: [[file:packages.org::#packages/sync-fn-entities-from-packages!][sync-fn-entities-from-packages!]]
 

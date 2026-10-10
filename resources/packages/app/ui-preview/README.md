@@ -196,7 +196,7 @@ The subtypes are `ui-component-entry`, `ui-component-entries`, and
 `ui-component-descriptor` in `app.ui-components`.
 
 The configuration graph constructs descriptors through ordinary `const`,
-`list`, and `zipmap` dependencies. It is projected with the compiler's binding
+`list`, `zipmap`, and bounded `concat` dependencies. It is projected with the compiler's binding
 and inheritance rules; no user graph is executed to discover identities.
 UUIDs must originate in a `const` value binding narrowed to `:fn-ref`:
 
@@ -239,3 +239,41 @@ use the exact four identity slots (`menu-initial`, `menu-update`, `menu-view`,
 `picker-view`). They remain selectable and exportable; Recents uses the built-in
 component when that old configuration has no Recents descriptor. No fifth slot
 is added to the legacy interface.
+
+
+## Selective personal copies
+
+Appearance offers **Personalize account menu**, **Personalize function picker**,
+and **Personalize recent functions**. Once that group is present, its action opens
+its existing view instead. Creation copies only the selected shipped component
+and its necessary owned dependencies. Recents and picker copy no theme graphs;
+the menu copies its shared color leaves without selecting a different theme.
+**Create personal graphs** retains the complete bundle used by Lesson 25.
+
+The existing preview/apply endpoints accept an optional `component` field with
+one of `account-menu`, `fn-picker`, or `recents`. Preview resolves the current
+owner/org/branch selection on the server and validates its manifest source under
+policy frozen before reads. Apply repeats that proof and rejects a stale preview
+or an already-present group. Client roots are never source authorization.
+
+An addition creates an ordinary `concat` manifest referencing the existing
+manifest and a new descriptor list. Earlier graph identities, authored composition,
+unknown descriptors and edits remain intact. A legacy four-slot configuration is
+adapted once into descriptors referencing its original entries. No existing
+component body is copied or rewritten. The create-only receipt lists only newly
+created functions and namespaces; retained references are never cleanup-owned.
+
+The receipt's `expected-preference` is an owner-authoritative row presence/value
+comparison. `PUT /api/prefs/:key` optionally accepts
+`{"value": document, "expected": {"present": true, "value": previousDocument}}`.
+For an absent row use `{"present": false, "value": null}`; an existing row storing
+null has `present: true`. Old PUT callers keep their original contract. Both
+writers acquire the same owner/key transaction lock, and conditional conflicts
+return 409 `stale-preference` without the current value. Invalid comparisons
+return 400; storage without transactional support refuses conditional writes.
+
+Graph creation and preference activation are separate commits. A selection
+change during creation, including in another tab, leaves the new graphs available
+without replacing the newer preference. Tutorial cleanup restores the earlier
+selection only while the current preference still selects its deleted config;
+it never deletes retained component identities or changes an unrelated theme.

@@ -7,6 +7,8 @@
   let message = '';
   const organization = () => typeof graphdenCurrentOrg === 'string' && graphdenCurrentOrg ? graphdenCurrentOrg : 'public';
   const context = () => JSON.stringify([window.gdPrefOwner, organization(), getCurrentBranchName()]);
+  const groups = { 'account-menu': 'menu-id', 'fn-picker': 'picker-id', recents: 'recents-id' };
+  const selectionStamp = () => JSON.stringify(window.gdPrefRead('components') ?? null);
   const selected = () => window.gdUIComponentsSelection();
   function render() {
     const root = document.getElementById('gd-ui-components-root');
@@ -20,6 +22,10 @@
       const kind = button.dataset.uiGraph;
       const id = window.gdUIComponentsRoots()[kind];
       button.disabled = !!pending || !uuid.test(id || '');
+    }
+    for (const button of root.querySelectorAll('[data-ui-component]')) {
+      const present = uuid.test(window.gdUIComponentsRoots()[groups[button.dataset.uiComponent]] || '');
+      button.textContent = (present ? 'Open ' : 'Personalize ') + button.dataset.uiLabel;
     }
     root.querySelector('#gd-ui-components-status').textContent = message || window.gdUIComponentsStatus();
   }
@@ -46,10 +52,19 @@
       || !(row['parent-id'] === null || uuid.test(row['parent-id'])))) return false;
     if (manifest.functions.some(row => !uuid.test(row.id) || typeof row.name !== 'string'
       || !namespaces.has(row['namespace-id']))) return false;
-    return ['configuration-id', 'theme-id', 'menu-id', 'menu-update-id', 'picker-id'].every(key =>
+    const required = manifest.component
+      ? ['configuration-id', groups[manifest.component], ...(manifest.component === 'account-menu' ? ['menu-update-id']
+        : manifest.component === 'recents' ? ['recents-initial-id', 'recents-update-id'] : [])]
+      : ['configuration-id', 'theme-id', 'menu-id', 'menu-update-id', 'picker-id'];
+    if (manifest.component) {
+      const expected = manifest['expected-preference'];
+      if (!Object.hasOwn(groups, manifest.component) || !expected || typeof expected.present !== 'boolean'
+        || !Object.hasOwn(expected, 'value') || (!expected.present && expected.value !== null)) return false;
+    }
+    return required.every(key =>
       manifest.functions.some(row => row.id === manifest.roots?.[key]));
   }
-  async function create(namespace, started, branch) {
+  async function create(namespace, started, branch, component, stamp) {
     const own = ++generation;
     const controller = new AbortController();
     pending = controller;
@@ -58,9 +73,9 @@
     notify('Creating personal UI graphs…');
     try {
       const preview = await json(window.API.api_ui_components_create_preview,
-        {owner: window.gdPrefOwner, 'namespace-id': namespace?.id || null}, controller.signal);
+        {owner: window.gdPrefOwner, 'namespace-id': namespace?.id || null, ...(component ? {component} : {})}, controller.signal);
       if (!current()) return;
-      if (!validManifest(preview.manifest) || preview.request?.owner !== window.gdPrefOwner
+      if (!validManifest(preview.manifest) || (component && preview.manifest.component !== component) || preview.request?.owner !== window.gdPrefOwner
         || preview.request?.org !== organization() || !uuid.test(preview.request?.['branch-id'] || '')) throw new Error('Creation manifest is unavailable.');
       // The tour ledger stages exact server-proposed identities before APPLY;
       // ambiguous transport outcomes retain them for guarded reconciliation.
@@ -73,27 +88,36 @@
       const root = result.manifest.namespaces[0];
       const preference = {'fn-id': roots['configuration-id'], 'branch-id': preview.request['branch-id'],
         branch, org: organization(), label: root.path, roots};
-      const saved = await window.gdPrefWrite('components', preference);
+      if (stamp !== selectionStamp()) {
+        await loadGraphData();
+        notify('UI graphs were created. Your configuration selection changed; the new graphs remain available.');
+        return;
+      }
+      const options = component ? {expected: result.manifest['expected-preference']} : undefined;
+      const saved = await window.gdPrefWrite('components', preference, options);
       if (!current()) return;
       await loadGraphData();
       if (!current()) return;
-      await ensureSubtreeFor(roots['theme-id']);
-      if (!current()) return;
-      const theme = lookups.fnMap.get(roots['theme-id']);
-      if (theme) await window.gdUseThemeGraph(theme);
+      if (!component && saved) {
+        await ensureSubtreeFor(roots['theme-id']);
+        if (!current()) return;
+        const theme = lookups.fnMap.get(roots['theme-id']);
+        if (theme) await window.gdUseThemeGraph(theme);
+      }
       if (!current()) return;
       notify(!receiptConfirmed ? 'UI graphs were created; the tutorial receipt needs review before cleanup.'
         : result['publication-warnings']?.length ? result['publication-warnings'][0].reason
         : saved ? 'Personal UI graphs are active. Open a group to edit its dependencies.'
-          : 'UI graphs were created. Saving their selection failed; choose the configuration again.');
+          : 'UI graphs were created. Their selection changed or could not be saved; choose the new configuration to activate it.');
     } catch (error) {
       if (current() && ticket && error.status >= 400 && error.status < 500 && error.body?.committed === false) window.gdTourRejectUIComponentsManifest?.(ticket);
       if (current() && error.name !== 'AbortError') notify(error.message);
     } finally { if (pending === controller) { pending = null; render(); } }
   }
-  async function beginCreate(anchor) {
+  async function beginCreate(anchor, component) {
     const started = context();
     const branch = getCurrentBranchName();
+    const stamp = selectionStamp();
     if (!window.gdPrefsReady || !window.gdPrefOwner || pending || !anchor?.isConnected || anchor.disabled) return;
     if (!Array.isArray(graphData?.namespaces)) {
       anchor.disabled = true;
@@ -103,7 +127,7 @@
     }
     if (started !== context() || !anchor.isConnected || !Array.isArray(graphData?.namespaces)) return;
     openNamespacePicker({anchorEl: anchor, onPick(namespace) {
-      if (started === context() && anchor.isConnected && !pending) void create(namespace, started, branch);
+      if (started === context() && stamp === selectionStamp() && anchor.isConnected && !pending) void create(namespace, started, branch, component, stamp);
     }});
   }
   async function open(kind) {
@@ -143,6 +167,13 @@
     if (!root || root.dataset.wired) { render(); return; }
     root.dataset.wired = '1';
     root.querySelector('#gd-ui-components-create').addEventListener('click', event => { void beginCreate(event.currentTarget); });
+    for (const button of root.querySelectorAll('[data-ui-component]')) button.addEventListener('click', () => {
+      const component = button.dataset.uiComponent;
+      const kind = groups[component];
+      if (!kind) return;
+      if (uuid.test(window.gdUIComponentsRoots()[kind] || '')) void open(kind);
+      else void beginCreate(button, component);
+    });
     root.querySelector('#gd-ui-components-choose').addEventListener('click', event => {
       const started = context();
       openFnPicker({anchorEl: event.currentTarget,

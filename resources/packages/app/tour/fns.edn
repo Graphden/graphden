@@ -2037,14 +2037,14 @@
             {:id "25"
              :slug "asset-overrides"
              :chapter "The editor"
-             :version 2
+             :version 3
              :in-place true
              :requires "personal-ui-graphs"
              :title "Editing the editor"
-             :reads "covers personal graph components, the fixed host boundary, and advanced self-hosted source files."
+             :reads "covers personal theme, menu, picker and recent-function graphs, their fixed host boundary, and advanced self-hosted source files."
              :steps
              [{:title "Personal graphs, real editor components"
-               :body "The menu's state, events and view, the picker view, and theme values are ordinary named graphs. You can create your own copies on cloud or self-hosted deployments. They affect your editor preference; account actions, search and navigation keep their native owners."
+               :body "The menu's state, events and view, the picker view, recent functions and pins, and theme values are ordinary named graphs. You can create your own copies on cloud or self-hosted deployments. They affect your editor preference. Graphs decide the next state and request permitted actions; the editor owns account actions, search, navigation and browser storage."
                :target nil
                :check {:kind "manual"}}
               {:title "Open UI graphs"
@@ -2053,7 +2053,7 @@
                :targets ["#auth-lock-btn, .auth-avatar" ".auth-menu-item[data-item=\"Settings\"]" "#gd-ui-components-root"]
                :check {:kind "dom" :selector "#gd-ui-components-root"}}
               {:title "Create personal graphs"
-               :body "Click [[Create personal graphs]] and choose an existing namespace where you have write, read, view-impl and execute access. The editor creates a fresh child containing Theme, Menu and Picker groups plus a configuration. Both components load those graphs; your previous Appearance selections are saved for cleanup."
+               :body "Click [[Create personal graphs]] and choose an existing namespace where you have write, read, view-impl and execute access. The editor creates a fresh child containing Theme, Menu, Picker and Recents groups plus a configuration. All three components load their graphs; your previous Appearance selections are saved for cleanup."
                :target "#gd-ui-components-create"
                :targets ["#gd-ui-components-create" ".fn-picker-popover"]
                :check {:kind "ui-component" :action "created"}}

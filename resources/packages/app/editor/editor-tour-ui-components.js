@@ -112,7 +112,9 @@ function gdTourUIComponentCheck(check) {
   if (!receipt || !lookups) return false;
   if (check.action === 'created') return window.gdShellMenuGraph?.ready && window.gdFnPickerGraph?.ready
     && window.gdUIComponentRuntimeIdentity?.('account-menu') === receipt.manifest.roots['configuration-id']
-    && window.gdUIComponentRuntimeIdentity?.('fn-picker') === receipt.manifest.roots['configuration-id'];
+    && window.gdUIComponentRuntimeIdentity?.('fn-picker') === receipt.manifest.roots['configuration-id']
+    && (!receipt.manifest.roots['recents-id']
+      || window.gdUIComponentRuntimeIdentity?.('recents') === receipt.manifest.roots['configuration-id']);
   if (check.action === 'open') return selectedFnId === receipt.manifest.roots[check.root];
   const fn = _tourUIComponentFn(receipt, check.group, check.name);
   if (!fn) return false;

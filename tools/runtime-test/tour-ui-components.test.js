@@ -73,6 +73,8 @@ function fixture() {
     const f = fixture();
     f.manifest.namespaces.push({id: 'theme-ns', name: 'theme', 'parent-id': 'root-id'});
     f.manifest.functions.push({id: 'canvas-id', name: 'theme-canvas-color', 'namespace-id': 'theme-ns'});
+    f.manifest.functions.push({id: 'recents-id', name: 'recents-view', 'namespace-id': 'root-id'});
+    f.manifest.roots['recents-id'] = 'recents-id';
     const ticket = f.ctx.gdTourStageUIComponentsManifest(f.request, f.manifest);
     f.ctx.gdTourConfirmUIComponentsManifest(ticket, f.manifest);
     f.ctx.gdUIComponentsSelection = () => ({'fn-id': 'config-id'});
@@ -96,6 +98,8 @@ function fixture() {
     assert.equal(f.ctx.gdTourUIComponentCheck({action: 'created'}), false, 'one stale mounted component does not prove the created configuration is active');
     f.ctx.gdUIComponentRuntimeIdentity = () => 'config-id';
     assert.equal(f.ctx.gdTourUIComponentCheck({action: 'created'}), true);
+    f.ctx.gdUIComponentRuntimeIdentity = kind => kind === 'recents' ? 'stale-config' : 'config-id';
+    assert.equal(f.ctx.gdTourUIComponentCheck({action: 'created'}), false, 'the new manifest waits for its personal recent-function graph');
   }
   console.log('PASS exact UI manifest recovery, selected preference restore and failed persistence retry');
 })().catch(error => { console.error(error); process.exitCode = 1; });

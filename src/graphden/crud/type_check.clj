@@ -259,6 +259,10 @@
                 :else nil))
             items)
 
+      ;; An identity narrowing changes evaluation semantics. Preserve it in
+      ;; the checker input rather than reconstructing an ordinary value call.
+      (and ref-name (= ids/fn-ref-type-id (:type-override-fn-id b)))
+      {:ref ref-name :type :fn-ref}
       ref-name ref-name
       ;; `:value-present` flag (intent), not `(some? :value)` —
       ;; `{:value nil}` is a legitimate pinned-nil binding that must

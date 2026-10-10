@@ -174,3 +174,64 @@ Recents accepts up to 1000 pinned identities and six recent entries. Its local
 runtime budget is 1,000,000 operations and the renderer budget is 10,000 nodes;
 the upper-bound fixture executes initial/view/update and validates the complete
 tree within both limits.
+
+## Personal component manifests
+
+New Appearance copies include account-menu, function-picker and Recents graphs.
+Their `ui` entry is an ordinary `core.collections/list` returning the named
+`app.ui-components/ui-component-manifest` type. Each item has this shape:
+
+```clojure
+{:component-id uuid
+ :entries [{:role :initial :fn-id uuid}
+           {:role :update :fn-id uuid}
+           {:role :view :fn-id uuid}]}
+```
+
+The component discriminator is the UUID of the shipped view:
+`app.ui-account-menu/account-menu-view`, `app.ui-fn-picker/picker-view`, or
+`app.ui-recents/recents-view`. Menu and Recents require all three roles; the
+picker requires only `:view`. Entry UUIDs select personal graph functions.
+The subtypes are `ui-component-entry`, `ui-component-entries`, and
+`ui-component-descriptor` in `app.ui-components`.
+
+The configuration graph constructs descriptors through ordinary `const`,
+`list`, and `zipmap` dependencies. It is projected with the compiler's binding
+and inheritance rules; no user graph is executed to discover identities.
+UUIDs must originate in a `const` value binding narrowed to `:fn-ref`:
+
+```clojure
+{:name :_recents-view-id :parent :const :return-type :uuid
+ :args {:value {:ref :my-ui.recents/recents-view :type :fn-ref}}}
+```
+
+A literal UUID, computed identifier, resolver, arbitrary operation, duplicate
+component/role, or malformed descriptor refuses the personal plan. Projection
+is finite: at most 64 descriptors, three entries per descriptor, 64 nested
+calls, and 4096 projection visits, in addition to the source collection bounds.
+Field names and roles are finite keyword literals. Component bodies retain the
+normal bounded browser ABI rather than the narrower manifest projection ABI.
+
+`POST /api/ui/components/plan` accepts exactly
+`{"component":"account-menu"}`, `{"component":"fn-picker"}`, or
+`{"component":"recents"}`. The existing owner/org/branch-scoped `components`
+preference selects the configuration. Each request authorizes manifest source,
+checks its original secret classification and snapshot provenance, then reads
+and exports only that component's body closure. Other entry targets provide
+authorized identity metadata without loading their bindings. The response
+contains the bounded selected plan and navigation roots, never the source
+manifest or other component plans.
+
+Fixed shipped discriminator metadata uses the explicit `:identity-only?`
+source permission. The server owns its UUID/namespace allowlist; this permission
+does not grant access to the discriminator's implementation. Ordinary body
+collection still requires the original source grants. A component missing from
+an otherwise valid manifest returns `ok: false`, `code: "component-missing"`,
+and `fallback: "builtin"`; unknown descriptors do not become executable plans.
+The host retains its installed component on refusal.
+
+Legacy configurations inheriting `app.ui-components/ui-components` continue to
+use the exact four identity slots (`menu-initial`, `menu-update`, `menu-view`,
+`picker-view`). They remain selectable and exportable; Recents uses the built-in
+component when that old configuration has no Recents descriptor. No fifth slot
+is added to the legacy interface.

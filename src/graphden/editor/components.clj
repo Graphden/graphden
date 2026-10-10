@@ -17,7 +17,7 @@
 
 
 (def ^:private component-keys
-  {"account-menu" :account-menu "fn-picker" :fn-picker})
+  {"account-menu" :account-menu "fn-picker" :fn-picker "recents" :recents})
 
 
 (defn- reject!
@@ -69,8 +69,8 @@
     (when-not row (reject! :source-missing))
     ;; This selected root is distinct from the HTTP handler's own identity.
     (authorize! row true)
-    (let [graph (source/collect-closure storage [id] authorize!)
-          configuration (config/entries graph id)
+    (let [graph (source/collect-manifest storage id authorize!)
+          configuration (config/configuration graph id)
           entries (get configuration component)
           captured {:graph graph :namespaces (source/collect-namespaces storage graph)}
           epoch (context/invalidation-epoch ctx)]
@@ -79,7 +79,11 @@
       (assert-current-policy! storage)
       (let [policy (snapshot/capture-policy
                      @(or (:rich-types-atom ctx) (registry/active-rich-types-atom)))
-            plan (snapshot/export-snapshot captured (:base-fns ctx) entries policy)]
+            _ (snapshot/validate-source! captured id policy)
+            _ (when-not entries (reject! :component-missing))
+            body (source/collect-closure storage (vals entries) authorize!)
+            body-snapshot {:graph body :namespaces (source/collect-namespaces storage body)}
+            plan (snapshot/export-snapshot body-snapshot (:base-fns ctx) entries policy)]
         (assert-current-policy! storage)
         (when-not (= epoch (context/invalidation-epoch ctx))
           (reject! :policy-refresh-required))
@@ -87,7 +91,10 @@
          :roots {:configuration-id (str id)
                  :menu-id (str (get-in configuration [:account-menu :view]))
                  :menu-update-id (str (get-in configuration [:account-menu :update]))
-                 :picker-id (str (get-in configuration [:fn-picker :view]))}}))))
+                 :picker-id (str (get-in configuration [:fn-picker :view]))
+                 :recents-id (some-> (get-in configuration [:recents :view]) str)
+                 :recents-initial-id (some-> (get-in configuration [:recents :initial]) str)
+                 :recents-update-id (some-> (get-in configuration [:recents :update]) str)}}))))
 
 
 (defn export-current
@@ -105,6 +112,8 @@
       (let [{:keys [type reason]} (ex-data error)]
         (cond-> {:ok false :reason "Personal UI graph is unavailable. Using built-in components."
                  :http-status (if (= :authz/forbidden type) 403 422)}
+          (and (= :browser-plan/unsupported type) (= :component-missing reason))
+          (assoc :code "component-missing" :fallback "builtin")
           ;; Only this trusted freshness refusal permits a bounded retry.
           ;; Never copy exception messages, source identities or other data.
           (and (= :browser-plan/unsupported type) (= :policy-refresh-required reason))

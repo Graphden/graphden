@@ -25,8 +25,10 @@
         "The local hover leaf has its own literal; shared canvas edits do not replace it")
     (is (= :core.collections/zipmap
            (get-in by-name [[menu :account-menu-key-map] :parent])))
-    (is (= #{:menu-initial :menu-update :menu-view :picker-view}
-           (set (keys (:args (get by-name [root :ui]))))))))
+    (is (= :core.collections/list (:parent (get by-name [root :ui]))))
+    (is (= 3 (count (get-in by-name [[root :ui] :args :items]))))
+    (is (= {:ref (keyword (str root ".recents") "recents-view") :type :fn-ref}
+           (get-in by-name [[root :_recents-view-id] :args :value])))))
 
 
 (deftest fixed-abi-qualification-leaves-literal-reference-shaped-data-intact

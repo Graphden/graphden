@@ -11,9 +11,10 @@
 (def ^:private abi-names
   (into {}
         (for [[path names] [["core.logic" [:const :if :equal?]]
-                            ["core.collections" [:list :get :assoc :zipmap :count]]
+                            ["core.collections" [:list :get :assoc :zipmap :count :take :concat]]
                             ["core.arithmetic" [:add :mod]]
-                            ["core.hof" [:map]]
+                            ["core.hof" [:map :filter]]
+                            ["core.strings" [:str :str-starts-with?]]
                             ["web.html" [:hiccup]]]
               name names]
           [name (keyword path (clojure.core/name name))])))
@@ -35,12 +36,17 @@
    installed dependency under source authorization before writing anything."
   []
   (let [modules {"core/logic" ["core.logic" #{:const :if :equal?}]
-                 "core/collections" ["core.collections" #{:list :get :assoc :zipmap :count}]
+                 "core/collections" ["core.collections" #{:list :get :assoc :zipmap :count :take :concat}]
                  "core/arithmetic" ["core.arithmetic" #{:add :mod}]
-                 "core/hof" ["core.hof" #{:map}]
+                 "core/hof" ["core.hof" #{:map :filter}]
+                 "core/strings" ["core.strings" #{:str :str-starts-with?}]
                  "web/html" ["web.html" #{:hiccup :hiccup-node}]
                  "core/refinements" ["core.refinements" (set (keys public-type-names))]
-                 "app/ui-components" ["app.ui-components" #{:ui-components :_ui-components-identities}]}]
+                 "app/ui-account-menu" ["app.ui-account-menu" #{:account-menu-view}]
+                 "app/ui-fn-picker" ["app.ui-fn-picker" #{:picker-view}]
+                 "app/ui-recents" ["app.ui-recents" #{:recents-view}]
+                 "app/ui-components" ["app.ui-components" #{:ui-components :_ui-components-identities :ui-component-entry :ui-component-entries
+                                                          :ui-component-descriptor :ui-component-manifest}]}]
     (into []
           (mapcat (fn [[module [path names]]]
                     (map #(assoc % :namespace path)
@@ -85,16 +91,51 @@
                                      :account-menu-hover (assoc definition :args {:value "#f8fafc"})
                                      definition)))
                                (copy-module "app/ui-account-menu" menu))
-        configuration {:name :ui :namespace root :parent :app.ui-components/ui-components
-                       :description "Your editor UI graphs. Entry identities select the menu and picker; callbacks and navigation remain host-owned."
-                       :args {:menu-initial (keyword menu "account-menu-initial")
-                              :menu-update (keyword menu "account-menu-update")
-                              :menu-view (keyword menu "account-menu-view")
-                              :picker-view (keyword picker "picker-view")}}]
+        recents (str root ".recents")
+        component-definitions
+        (fn [prefix shipped roles]
+          (let [local (fn [suffix] (keyword (str "_" prefix "-" suffix)))
+                reference (fn [suffix] (keyword root (name (local suffix))))
+                definition (fn [suffix parent args]
+                             (cond-> {:name (local suffix) :namespace root :parent parent :args args}
+                               (= parent :core.logic/const) (assoc :return-type :uuid)
+                               (= suffix "entries") (assoc :return-type :app.ui-components/ui-component-entries)
+                               (= suffix "descriptor") (assoc :return-type :app.ui-components/ui-component-descriptor)
+                               (.endsWith ^String suffix "-entry") (assoc :return-type :app.ui-components/ui-component-entry)))]
+            (into [(definition "component-id" :core.logic/const
+                               {:value {:ref shipped :type :fn-ref}})
+                   (definition "entries" :core.collections/list
+                               {:items (mapv #(reference (str (name (first %)) "-entry")) roles)})
+                   (definition "descriptor" :core.collections/zipmap
+                               {:keys [{:value :component-id} {:value :entries}]
+                                :vals [(reference "component-id") (reference "entries")]})]
+                  (mapcat (fn [[role target]]
+                            [(definition (str (name role) "-id") :core.logic/const
+                                         {:value {:ref target :type :fn-ref}})
+                             (definition (str (name role) "-entry") :core.collections/zipmap
+                                         {:keys [{:value :role} {:value :fn-id}]
+                                          :vals [{:value role} (reference (str (name role) "-id"))]})]) roles))))
+        descriptors (concat (component-definitions "menu" :app.ui-account-menu/account-menu-view
+                                                  [[:initial (keyword menu "account-menu-initial")]
+                                                   [:update (keyword menu "account-menu-update")]
+                                                   [:view (keyword menu "account-menu-view")]])
+                            (component-definitions "picker" :app.ui-fn-picker/picker-view
+                                                   [[:view (keyword picker "picker-view")]])
+                            (component-definitions "recents" :app.ui-recents/recents-view
+                                                   [[:initial (keyword recents "recents-initial")]
+                                                    [:update (keyword recents "recents-update")]
+                                                    [:view (keyword recents "recents-view")]]))
+        configuration {:name :ui :namespace root :parent :core.collections/list
+                       :return-type :app.ui-components/ui-component-manifest
+                       :description "Your ordinary component manifest. Each descriptor selects entry identities; browser effects remain host-owned."
+                       :args {:items [(keyword root "_menu-descriptor")
+                                      (keyword root "_picker-descriptor")
+                                      (keyword root "_recents-descriptor")]}}]
     (when-not color-const
       (throw (ex-info "Installed UI templates are unavailable" {:type :browser-plan/unsupported})))
     (into [(assoc color-const :namespace theme) configuration]
-          (concat theme-definitions menu-definitions (copy-module "app/ui-fn-picker" picker)))))
+          (concat descriptors theme-definitions menu-definitions (copy-module "app/ui-fn-picker" picker)
+                  (copy-module "app/ui-recents" recents)))))
 
 
 (defn descriptor
@@ -104,4 +145,7 @@
    :theme-id (str (ids/fn-id (str root ".theme") :theme))
    :menu-id (str (ids/fn-id (str root ".menu") :account-menu-view))
    :menu-update-id (str (ids/fn-id (str root ".menu") :account-menu-update))
-   :picker-id (str (ids/fn-id (str root ".picker") :picker-view))})
+   :picker-id (str (ids/fn-id (str root ".picker") :picker-view))
+   :recents-id (str (ids/fn-id (str root ".recents") :recents-view))
+   :recents-initial-id (str (ids/fn-id (str root ".recents") :recents-initial))
+   :recents-update-id (str (ids/fn-id (str root ".recents") :recents-update))})

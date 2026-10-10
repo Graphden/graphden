@@ -6,6 +6,7 @@
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.editor.component-config :as config]
     [graphden.editor.components :as components]
+    [graphden.packages.records.ids :as records]
     [graphden.storage.postgres.crud :as pg-crud]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router.epoch :as epoch]
@@ -70,7 +71,7 @@
     (is (= 200 (:status reserved)) (pr-str reserved))
     (is (true? (get-in reserved [:body :ok])))
     (is (= before (graph-identities storage)))
-    (is (= 4 (count (get-in reserved [:body :manifest :namespaces]))))
+    (is (= 5 (count (get-in reserved [:body :manifest :namespaces]))))
     (let [created (apply-preview reserved)
           manifest (get-in created [:body :manifest])]
       (is (= 200 (:status created)) (pr-str created))
@@ -161,8 +162,32 @@
         ;; Publication updated this ctx's graph/type slices. No concurrent
         ;; writer exists in this serial fixture; certify that exact basis.
         (epoch/seed-watermark! storage)
-        (doseq [component ["account-menu" "fn-picker"]]
-          (let [result (components/export-current ctx {:component component})]
+        (doseq [component ["account-menu" "fn-picker" "recents"]]
+          (let [queries (atom [])
+                original-query sp/query-bounded-entities
+                result (with-redefs [sp/query-bounded-entities
+                                    (fn [s entity where maximum]
+                                      (swap! queries conj [entity where])
+                                      (original-query s entity where maximum))]
+                         (components/export-current ctx {:component component}))
+                body-ids (into #{} (map parse-uuid)
+                               (case component
+                                 "account-menu" [(get-in manifest [:roots :picker-id])
+                                                 (get-in manifest [:roots :recents-id])
+                                                 (get-in manifest [:roots :recents-initial-id])
+                                                 (get-in manifest [:roots :recents-update-id])]
+                                 "fn-picker" [(get-in manifest [:roots :menu-id])
+                                              (get-in manifest [:roots :menu-update-id])
+                                              (get-in manifest [:roots :recents-id])
+                                              (get-in manifest [:roots :recents-initial-id])
+                                              (get-in manifest [:roots :recents-update-id])]
+                                 "recents" [(get-in manifest [:roots :menu-id])
+                                            (get-in manifest [:roots :menu-update-id])
+                                            (get-in manifest [:roots :picker-id])]))]
+            (is (not-any? (fn [[entity where]]
+                            (and (contains? #{:binding :fn-slot} entity)
+                                 (seq (set/intersection body-ids (set (:fn-id where)))))) @queries)
+                "nonselected component identities never cause body reads")
             (is (:ok result) (pr-str result))
             (is (= (str id) (:selection-id result)))
             (is (= (str id) (get-in result [:roots :configuration-id])))
@@ -170,3 +195,28 @@
                           (into #{} (map :id) (get-in result [:plan :functions]))
                           (into #{} (mapcat #(map :id (:functions %)))
                                 (remove #{manifest} manifests)))))))))))
+
+
+(deftest legacy-four-slot-preferences-remain-functional-and-missing-components-fallback
+  (let [ctx (:ctx ga/*bootstrap*)
+        storage (:storage ctx)
+        manifest (get-in (apply-preview (preview)) [:body :manifest])
+        root (:path (first (:namespaces manifest)))
+        id (records/fn-id root :legacy-ui)
+        definition {:name :legacy-ui :namespace root :parent :app.ui-components/ui-components
+                    :args {:menu-initial (keyword (str root ".menu") "account-menu-initial")
+                           :menu-update (keyword (str root ".menu") "account-menu-update")
+                           :menu-view (keyword (str root ".menu") "account-menu-view")
+                           :picker-view (keyword (str root ".picker") "picker-view")}}
+        preference {:fn-id (str id) :branch-id (str (vs/current-branch-id storage)) :org "public"}]
+    ((impls/impl-of :sync-fn-defs-branch!)
+     {:branch-id (vs/current-branch-id storage) :fn-defs [definition]} ctx)
+    (if-let [prior (first (sp/query-entities storage :ui-pref {:owner-id "anonymous" :key "components"}))]
+      (sp/update-entity storage :ui-pref (:id prior) {:value preference})
+      (sp/create-entity storage :ui-pref {:owner-id "anonymous" :key "components" :value preference
+                                        :org-id "public" :updated-at (java.time.Instant/now)}))
+    (epoch/seed-watermark! storage)
+    (doseq [component ["account-menu" "fn-picker"]]
+      (is (:ok (components/export-current ctx {:component component}))))
+    (is (= "component-missing" (:code (components/export-current ctx {:component "recents"}))))
+    (is (= "builtin" (:fallback (components/export-current ctx {:component "recents"}))))))

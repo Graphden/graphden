@@ -3,6 +3,7 @@
   (:require
     [cheshire.core :as json]
     [clojure.set :as set]
+    [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.editor.component-config :as config]
     [graphden.editor.component-creation :as creation]
@@ -13,6 +14,7 @@
     [graphden.executor.context :as context]
     [graphden.packages.records.ids :as records]
     [graphden.storage.postgres.crud :as pg-crud]
+    [graphden.storage.postgres.util :as pg]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router.epoch :as epoch]
     [graphden.system.branch-router.recheck :as recheck]
@@ -47,7 +49,15 @@
         response (with-redefs [creation/failure-response
                                (fn [error]
                                  (swap! diagnostics conj
-                                        (select-keys (ex-data error) [:type :reason :fn-id :http-status]))
+                                        (assoc (select-keys (ex-data error) [:type :reason :fn-id :http-status])
+                                               :exception-class (.getName (class error))
+                                               :frames (into [] (comp (filter #(str/starts-with?
+                                                                                 (.getClassName ^StackTraceElement %) "graphden."))
+                                                                      (take 6)
+                                                                      (map #(vector (.getClassName ^StackTraceElement %)
+                                                                                    (.getMethodName ^StackTraceElement %)
+                                                                                    (.getLineNumber ^StackTraceElement %))))
+                                                             (.getStackTrace error))))
                                  (classify error))]
                    (ga/exec-handler handler
                                     {:request-method :post :uri "/api/ui/components/create"
@@ -287,7 +297,11 @@
   [storage manifest]
   (let [preference {:fn-id (get-in manifest [:roots :configuration-id])
                     :branch-id (str (vs/current-branch-id storage)) :org "public"}]
-    (preferences/write! storage "components" preference true (:expected-preference manifest))))
+    (let [result (preferences/write! storage "components" preference true (:expected-preference manifest))]
+      ;; These fixtures call handlers directly, without the production router
+      ;; that advances the policy watermark after the completed graph writes.
+      (when (= :saved result) (epoch/seed-watermark! storage))
+      result)))
 
 
 (deftest selective-copy-retains-edited-components-without-reading-their-bodies-or-changing-theme
@@ -302,7 +316,7 @@
         bodies (into #{} (map :id) (filter #(= picker-ns (:namespace-id %)) (:functions first-copy)))
         leaf (first (filter #(= "picker-active-background" (:name %)) (:functions first-copy)))
         binding (first (sp/query-entities storage :binding {:fn-id (java.util.UUID/fromString (:id leaf))}))
-        original-query sp/query-bounded-entities
+        original-query pg/exec!
         queries (atom [])]
     (is (= #{"picker"} (set (map :name (rest (:namespaces first-copy))))))
     (is (= :saved (activate-selected storage first-copy)))
@@ -315,13 +329,16 @@
       (recheck/record-imported-fn-types! ctx (vs/current-branch-id storage) changed))
     (epoch/seed-watermark! storage)
     (epoch/note-graph-epoch-validated! storage)
-    (let [created (with-redefs [sp/query-bounded-entities
-                                (fn [storage entity where limit]
-                                  (swap! queries conj [entity where])
-                                  (when (and (contains? #{:binding :fn-slot} entity)
-                                             (some bodies (map str (:fn-id where))))
-                                    (throw (ex-info "Retained body must not be read" {:type :test/forbidden-body-read})))
-                                  (original-query storage entity where limit))]
+    (let [created (binding [pg/*jdbc-override*
+                            {:execute! (fn [connection sql opts]
+                                         (when (re-find #"(?i)\bSELECT\b" (first sql))
+                                           (swap! queries conj :read)
+                                           (when (and (re-find #"(?i)\b(?:FROM|JOIN)\s+\"(?:binding|fn_slot)\"" (first sql))
+                                                      (some #(contains? bodies (str %)) (rest sql)))
+                                             (throw (ex-info "Retained body must not be read"
+                                                             {:type :test/forbidden-body-read}))))
+                                         (binding [pg/*jdbc-override* nil]
+                                           (original-query connection sql opts)))}]
                     (apply-preview (preview "recents")))
           added (get-in created [:body :manifest])]
       (is (= 200 (:status created)) (pr-str created))

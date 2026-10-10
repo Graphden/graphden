@@ -52,6 +52,10 @@
                         (registry/record-rich-types-raw! id nil {:return :text :args {:value :text}}))
       (tenancy/with-org "anonymous-reference-tenant"
                         (registry/record-rich-types-raw! id nil {:return :int :args {:value :int}})
+                        ;; Tenant writes also seed the global registry. Restore a distinct
+                        ;; public entry to exercise precedence, like existing registry tests.
+                        (tenancy/with-org tenancy/public-org
+                                          (registry/record-rich-types-raw! id nil {:return :text :args {:value :text}}))
                         (is (= (registry/rich-type-of-id id) (registry/rich-type-of id)))
                         (is (= :int (registry/rich-type-of id :value))))
       (tenancy/with-org tenancy/public-org

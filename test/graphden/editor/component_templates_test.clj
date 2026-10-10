@@ -49,3 +49,10 @@
                     definition #(get {:list :core.collections/list :map :core.hof/map} % %))]
     (is (= :core.collections/list (:parent qualified)))
     (is (= [:list [:map :text :text]] (:return-type qualified)))))
+
+
+(deftest every-template-body-has-a-reserved-owned-namespace
+  (let [root "users.alice.ui-test"
+        reserved (into #{root} (map #(str root "." %)) templates/namespace-suffixes)]
+    (is (= reserved (set (map :namespace (templates/definitions root)))))
+    (is (= 5 (count reserved)))))

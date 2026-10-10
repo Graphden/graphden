@@ -6,12 +6,15 @@
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.editor.component-config :as config]
     [graphden.editor.components :as components]
+    [graphden.executor.browser-snapshot :as snapshot]
+    [graphden.executor.browser-source :as source]
     [graphden.packages.records.ids :as records]
     [graphden.storage.postgres.crud :as pg-crud]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router.epoch :as epoch]
     [graphden.test-infra.golden-app :as ga]
     [graphden.test-infra.impls :as impls]
+    [graphden.types.check :as check]
     [graphden.versioning.storage.core :as vs]))
 
 
@@ -55,6 +58,46 @@
 (defn- ids
   [storage entity]
   (set (map :id (sp/query-entities storage entity {}))))
+
+
+(defn- export-diagnosed
+  "Keep diagnostic type shapes in test assertions, never endpoint responses."
+  [ctx component]
+  (let [diagnostics (atom [])
+        watched [#'source/collect-manifest #'config/configuration
+                 #'snapshot/validate-source! #'snapshot/export-snapshot #'check/check-fn-def!]
+        wrappers (into {} (map (fn [v]
+                                 [v (let [original @v]
+                                      (fn [& args]
+                                        (try (apply original args)
+                                             (catch Exception error
+                                               (swap! diagnostics conj
+                                                      {:stage (:name (meta v))
+                                                       :error (select-keys (ex-data error)
+                                                                           [:type :reason :fn-id :fn-name :arg-name
+                                                                            :expected :actual :declared :computed])})
+                                               (throw error)))))])) watched)]
+    {:result (with-redefs-fn wrappers #(components/export-current ctx {:component component}))
+     :component component :diagnostics @diagnostics}))
+
+
+(deftest created-manifest-exports-its-recents-controller
+  (let [ctx (:ctx ga/*bootstrap*)
+        storage (:storage ctx)
+        created (apply-preview (preview))
+        manifest (get-in created [:body :manifest])
+        id (get-in manifest [:roots :configuration-id])]
+    (is (:ok (:body created)) (pr-str created))
+    (if-let [prior (first (sp/query-entities storage :ui-pref {:owner-id "anonymous" :key "components"}))]
+      (sp/update-entity storage :ui-pref (:id prior)
+                        {:value {:fn-id id :branch-id (str (vs/current-branch-id storage)) :org "public"}})
+      (sp/create-entity storage :ui-pref
+                        {:owner-id "anonymous" :key "components" :org-id "public"
+                         :value {:fn-id id :branch-id (str (vs/current-branch-id storage)) :org "public"}
+                         :updated-at (java.time.Instant/now)}))
+    (epoch/seed-watermark! storage)
+    (let [{:keys [result] :as diagnosed} (export-diagnosed ctx "recents")]
+      (is (:ok result) (pr-str diagnosed)))))
 
 
 (defn- graph-identities
@@ -165,11 +208,11 @@
         (doseq [component ["account-menu" "fn-picker" "recents"]]
           (let [queries (atom [])
                 original-query sp/query-bounded-entities
-                result (with-redefs [sp/query-bounded-entities
-                                    (fn [s entity where maximum]
-                                      (swap! queries conj [entity where])
-                                      (original-query s entity where maximum))]
-                         (components/export-current ctx {:component component}))
+                {:keys [result] :as diagnosed} (with-redefs [sp/query-bounded-entities
+                                                             (fn [s entity where maximum]
+                                                               (swap! queries conj [entity where])
+                                                               (original-query s entity where maximum))]
+                                                 (export-diagnosed ctx component))
                 body-ids (into #{} (map parse-uuid)
                                (case component
                                  "account-menu" [(get-in manifest [:roots :picker-id])
@@ -188,7 +231,7 @@
                             (and (contains? #{:binding :fn-slot} entity)
                                  (seq (set/intersection body-ids (set (:fn-id where)))))) @queries)
                 "nonselected component identities never cause body reads")
-            (is (:ok result) (pr-str result))
+            (is (:ok result) (pr-str diagnosed))
             (is (= (str id) (:selection-id result)))
             (is (= (str id) (get-in result [:roots :configuration-id])))
             (is (empty? (set/intersection
@@ -214,7 +257,7 @@
     (if-let [prior (first (sp/query-entities storage :ui-pref {:owner-id "anonymous" :key "components"}))]
       (sp/update-entity storage :ui-pref (:id prior) {:value preference})
       (sp/create-entity storage :ui-pref {:owner-id "anonymous" :key "components" :value preference
-                                        :org-id "public" :updated-at (java.time.Instant/now)}))
+                                          :org-id "public" :updated-at (java.time.Instant/now)}))
     (epoch/seed-watermark! storage)
     (doseq [component ["account-menu" "fn-picker"]]
       (is (:ok (components/export-current ctx {:component component}))))

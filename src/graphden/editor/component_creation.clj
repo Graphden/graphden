@@ -6,8 +6,8 @@
     [graphden.crud.request :as request]
     [graphden.editor.component-bundle :as bundle]
     [graphden.editor.component-templates :as templates]
-    [graphden.executor.browser-source :as source]
     [graphden.executor.browser-contracts :as contracts]
+    [graphden.executor.browser-source :as source]
     [graphden.executor.context :as context]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.sync :as sync]
@@ -88,7 +88,7 @@
         children (mapv (fn [name]
                          {:id (ids/uuid-v5 (:root-id command) (str "namespace:" name))
                           :name name :parent-id (:root-id command) :path (str root "." name)})
-                       ["theme" "menu" "picker"])]
+                       templates/namespace-suffixes)]
     (writer/assert-write-authorized! storage :ns (dissoc root-row :path) nil)
     {:root root :rows (into [root-row] children) :parent-rows rows}))
 
@@ -117,8 +117,8 @@
         discriminator-ids (filter #(contains? contracts/component-identities %) external-ids)
         metadata (source/collect-component-identities storage discriminator-ids authorize!)
         external (-> (source/collect-closure storage
-                                            (remove #(contains? contracts/component-identities %) external-ids)
-                                            authorize!)
+                                             (remove #(contains? contracts/component-identities %) external-ids)
+                                             authorize!)
                      (update :fns into metadata))
         functions (mapv #(select-keys % [:id :name :namespace-id])
                         (identity-order (filter #(= :fn (:kind %)) records)))

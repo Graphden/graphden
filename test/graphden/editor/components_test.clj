@@ -1,8 +1,11 @@
-(ns graphden.editor.components-test
+(ns ^:serial graphden.editor.components-test
   (:require
     [clojure.test :refer [deftest is testing]]
+    [graphden.editor.component-config :as config]
     [graphden.editor.components :as components]
+    [graphden.executor.browser-snapshot :as snapshot]
     [graphden.executor.browser-source :as source]
+    [graphden.executor.context :as context]
     [graphden.storage.postgres.graph-epoch :as graph-epoch]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router.epoch :as router-epoch]
@@ -119,3 +122,32 @@
       (reset! epoch nil)
       (is (= (assoc unavailable :code "policy-refresh-required" :retryable true :retry-after 1)
              (components/export-current {:storage {}} {:component "fn-picker"}))))))
+
+
+(deftest original-policy-and-epoch-are-frozen-before-any-snapshot-read
+  (let [events (atom [])
+        rich (atom {:original :secret})
+        ctx {:storage {} :rich-types-atom rich}
+        policy {:captured :secret}
+        selected (random-uuid)]
+    (with-redefs [context/invalidation-epoch (fn [_] (swap! events conj :epoch) 7)
+                  snapshot/capture-policy (fn [basis]
+                                            (swap! events conj [:capture basis]) policy)
+                  source/with-snapshot (fn [storage f]
+                                         (swap! events conj :snapshot)
+                                         (reset! rich {:replacement :plain})
+                                         (f storage (constantly nil)))
+                  components/selected-id (constantly selected)
+                  sp/read-entity (fn [& _] {:id selected})
+                  source/collect-manifest (constantly {})
+                  source/collect-namespaces (constantly [])
+                  config/configuration (constantly {:fn-picker {:view fn-id}})
+                  components/assert-current-policy! (constantly nil)
+                  snapshot/validate-source! (fn [_ _ frozen]
+                                              (swap! events conj [:manifest frozen]))
+                  source/collect-closure (constantly {})
+                  snapshot/export-snapshot (fn [_ _ _ frozen]
+                                             (swap! events conj [:component frozen]) {:valid true})]
+      (is (:ok (components/export-current ctx {:component "fn-picker"})))
+      (is (= [:epoch [:capture {:original :secret}] :snapshot
+              [:manifest policy] [:component policy] :epoch] @events)))))

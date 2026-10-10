@@ -46,7 +46,7 @@
                  "app/ui-fn-picker" ["app.ui-fn-picker" #{:picker-view}]
                  "app/ui-recents" ["app.ui-recents" #{:recents-view}]
                  "app/ui-components" ["app.ui-components" #{:ui-components :_ui-components-identities :ui-component-entry :ui-component-entries
-                                                          :ui-component-descriptor :ui-component-manifest}]}]
+                                                            :ui-component-descriptor :ui-component-manifest}]}]
     (into []
           (mapcat (fn [[module [path names]]]
                     (map #(assoc % :namespace path)
@@ -103,22 +103,22 @@
                                (= suffix "descriptor") (assoc :return-type :app.ui-components/ui-component-descriptor)
                                (.endsWith ^String suffix "-entry") (assoc :return-type :app.ui-components/ui-component-entry)))]
             (into [(definition "component-id" :core.logic/const
-                               {:value {:ref shipped :type :fn-ref}})
+                     {:value {:ref shipped :type :fn-ref}})
                    (definition "entries" :core.collections/list
-                               {:items (mapv #(reference (str (name (first %)) "-entry")) roles)})
+                     {:items (mapv #(reference (str (name (first %)) "-entry")) roles)})
                    (definition "descriptor" :core.collections/zipmap
-                               {:keys [{:value :component-id} {:value :entries}]
-                                :vals [(reference "component-id") (reference "entries")]})]
+                     {:keys [{:value :component-id} {:value :entries}]
+                      :vals [(reference "component-id") (reference "entries")]})]
                   (mapcat (fn [[role target]]
                             [(definition (str (name role) "-id") :core.logic/const
-                                         {:value {:ref target :type :fn-ref}})
+                               {:value {:ref target :type :fn-ref}})
                              (definition (str (name role) "-entry") :core.collections/zipmap
-                                         {:keys [{:value :role} {:value :fn-id}]
-                                          :vals [{:value role} (reference (str (name role) "-id"))]})]) roles))))
+                               {:keys [{:value :role} {:value :fn-id}]
+                                :vals [{:value role} (reference (str (name role) "-id"))]})]) roles))))
         descriptors (concat (component-definitions "menu" :app.ui-account-menu/account-menu-view
-                                                  [[:initial (keyword menu "account-menu-initial")]
-                                                   [:update (keyword menu "account-menu-update")]
-                                                   [:view (keyword menu "account-menu-view")]])
+                                                   [[:initial (keyword menu "account-menu-initial")]
+                                                    [:update (keyword menu "account-menu-update")]
+                                                    [:view (keyword menu "account-menu-view")]])
                             (component-definitions "picker" :app.ui-fn-picker/picker-view
                                                    [[:view (keyword picker "picker-view")]])
                             (component-definitions "recents" :app.ui-recents/recents-view
@@ -136,6 +136,11 @@
     (into [(assoc color-const :namespace theme) configuration]
           (concat descriptors theme-definitions menu-definitions (copy-module "app/ui-fn-picker" picker)
                   (copy-module "app/ui-recents" recents)))))
+
+
+(def namespace-suffixes
+  "Owned child namespaces reserved for the installed personal template bundle."
+  ["theme" "menu" "picker" "recents"])
 
 
 (defn descriptor

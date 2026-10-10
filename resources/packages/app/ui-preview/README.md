@@ -205,6 +205,10 @@ UUIDs must originate in a `const` value binding narrowed to `:fn-ref`:
  :args {:value {:ref :my-ui.recents/recents-view :type :fn-ref}}}
 ```
 
+An identity edge produces a UUID, so `:fn-ref` is a subtype of `:uuid`.
+The reverse relation is false: a UUID literal cannot bind an identity slot.
+The identity edge reads neither the target's result nor its effects.
+
 A literal UUID, computed identifier, resolver, arbitrary operation, duplicate
 component/role, or malformed descriptor refuses the personal plan. Projection
 is finite: at most 64 descriptors, three entries per descriptor, 64 nested

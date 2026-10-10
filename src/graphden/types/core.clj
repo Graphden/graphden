@@ -1066,12 +1066,14 @@
 ;;   :int     ⊆ :numeric  ⊆ :jsonb  ⊆ :any
 ;;   :float   ⊆ :numeric
 ;;   :decimal ⊆ :numeric
+;;   :fn-ref  ⊆ :uuid (an identity edge produces the referenced UUID)
 ;; (`:numeric` is the doc's wider numeric supertype — runtime
 ;; arbitrary-precision values, plus integers, floats and decimals.)
 (def ^:private primitive-supers
   {:int     #{:numeric}
    :float   #{:numeric}
-   :decimal #{:numeric}})
+   :decimal #{:numeric}
+   :fn-ref  #{:uuid}})
 
 
 (defn- primitive-subtype?

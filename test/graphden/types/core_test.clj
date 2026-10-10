@@ -75,6 +75,12 @@
   (is (not (t/subtype? :int :text))))
 
 
+(deftest identity-values-are-uuids-without-losing-identity-or-secret-constraints
+  (is (t/subtype? :fn-ref :uuid))
+  (is (not (t/subtype? :uuid :fn-ref)))
+  (is (not (t/subtype? [:secret :fn-ref] :uuid))))
+
+
 (deftest primitive-numeric-hierarchy-test
   (testing ":int and :float are subtypes of :numeric"
     (is (t/subtype? :int :numeric))

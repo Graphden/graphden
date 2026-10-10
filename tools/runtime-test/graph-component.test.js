@@ -1,6 +1,7 @@
 'use strict';
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const path = require('node:path');
 const vm = require('node:vm');
 const graph = require('../../resources/packages/app/ui-preview/browser-runtime.js');
 const fields = value => new Map(Object.entries(value).map(([key, item]) => [graph.keyword(key), item]));
@@ -10,7 +11,7 @@ ctx.window = ctx;
 ctx.GraphdenBrowser = graph;
 ctx.GraphdenRenderer = {vnode(tree) { if (tree === 'bad') throw new Error('bad markup'); }};
 ctx.GraphdenStyles = {normalize(styles) { if (styles === 'bad') throw new Error('bad styles'); }};
-vm.runInContext(fs.readFileSync('resources/packages/app/ui-preview/graph-component.js', 'utf8'), ctx);
+vm.runInContext(fs.readFileSync(path.join(__dirname, '../../resources/packages/app/ui-preview/graph-component.js'), 'utf8'), ctx);
 function fixture() {
   const paints = [];
   const effects = [];

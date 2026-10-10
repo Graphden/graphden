@@ -2,9 +2,10 @@
 // A valid maximal state must fit both installed runtime and renderer budgets.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const path = require('node:path');
 const vm = require('node:vm');
 const graph = require('../../resources/packages/app/ui-preview/browser-runtime.js');
-const artifact = JSON.parse(fs.readFileSync('resources/packages/app/ui-preview/builtin-plans.json', 'utf8'));
+const artifact = JSON.parse(fs.readFileSync(path.join(__dirname, '../../resources/packages/app/ui-preview/builtin-plans.json'), 'utf8'));
 const value = item => Array.isArray(item) ? item.map(value)
   : item && typeof item === 'object' ? new Map(Object.entries(item).map(([key, field]) => [graph.keyword(key), value(field)])) : item;
 const entries = (count, prefix) => Array.from({length: count}, (_, index) => ({
@@ -26,7 +27,7 @@ ctx.window = ctx;
 ctx.GraphdenBrowser = graph;
 ctx.GraphdenStyles = {};
 for (const file of ['web/vendor/preact.min.js', 'app/ui-preview/graph-renderer.js']) {
-  vm.runInContext(fs.readFileSync('resources/packages/' + file, 'utf8'), ctx);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../../resources/packages', file), 'utf8'), ctx);
 }
 ctx.GraphdenRenderer.vnode(view.get(graph.keyword('tree')), null, 10000);
 console.log('PASS recents 1000 pins + 6 trail: initial/view/update and 10000-node renderer budget');

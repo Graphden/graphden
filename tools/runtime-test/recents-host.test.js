@@ -1,9 +1,10 @@
 'use strict';
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const path = require('node:path');
 const vm = require('node:vm');
 const graph = require('../../resources/packages/app/ui-preview/browser-runtime.js');
-const artifact = JSON.parse(fs.readFileSync('resources/packages/app/ui-preview/builtin-plans.json', 'utf8'));
+const artifact = JSON.parse(fs.readFileSync(path.join(__dirname, '../../resources/packages/app/ui-preview/builtin-plans.json'), 'utf8'));
 const saved = new Map();
 let mounted = 0;
 let disposed = 0;
@@ -27,8 +28,8 @@ ctx.GraphdenBuiltinPlans = artifact;
 ctx.addEventListener = (kind, fn) => listeners.set(kind, fn);
 ctx.GraphdenStyles = {normalize() {}};
 ctx.GraphdenRenderer = {vnode() {}, mount() { mounted++; return {render() { renderCount++; }, dispose() { disposed++; }}; }};
-vm.runInContext(fs.readFileSync('resources/packages/app/ui-preview/graph-component.js', 'utf8'), ctx);
-vm.runInContext(fs.readFileSync('resources/packages/app/editor/editor-recents.js', 'utf8'), ctx);
+vm.runInContext(fs.readFileSync(path.join(__dirname, '../../resources/packages/app/ui-preview/graph-component.js'), 'utf8'), ctx);
+vm.runInContext(fs.readFileSync(path.join(__dirname, '../../resources/packages/app/editor/editor-recents.js'), 'utf8'), ctx);
 (async () => {
   saved.set('graphden.pinnedFns', JSON.stringify([null, {id: '22222222-2222-4222-8222-222222222222', name: 'map', qname: 'map'}, {id: '22222222-2222-4222-8222-222222222222', name: 'duplicate', qname: 'dup'}, {id: 42, name: 'bad', qname: 'bad'}]));
   assert.equal(ctx.gdReadPinnedFns().length, 1, 'storage boundary rejects malformed entries and duplicate identities');

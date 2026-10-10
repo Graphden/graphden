@@ -59,11 +59,17 @@ const branch = 'account-menu-' + process.pid + '-' + Date.now().toString(36);
     await picker.locator('.fn-picker-search').press('ArrowDown');
     assert(await stableRow.evaluate((node) => node.isConnected),
       'keyboard selection retains the keyed candidate DOM');
+    const pickerStyleId = await picker.locator('[data-gd-ui-style]').getAttribute('data-gd-ui-style');
+    const pickerSheet = await page.evaluateHandle(id =>
+      [...document.querySelectorAll('style[data-gd-ui-styles]')].find(node => node.dataset.gdUiStyles === id), pickerStyleId);
+    assert(await pickerSheet.evaluate(node => !!node?.isConnected),
+      'the open picker owns a live graph stylesheet');
     await picker.locator('.fn-picker-search').press('Escape');
     assert(await page.locator('.fn-picker-popover').count() === 0,
       'Escape disposes the managed picker');
-    assert(await page.locator('style[data-gd-ui-styles]').count() === 0,
+    assert(await pickerSheet.evaluate(node => !node.isConnected),
       'closing the picker releases its graph stylesheet');
+    await pickerSheet.dispose();
     await page.waitForSelector('.node-overlay button.more-actions-trigger');
     const anchorBaseline = await page.evaluate(() => _viewportListeners.length);
     await page.evaluate(() => openFnPicker({

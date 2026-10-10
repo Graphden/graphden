@@ -1214,6 +1214,64 @@
 ;; Passthrough polymorphism — :value carries 'a all the way to return-type.
 ;; Covers `:constantly` / `:const` / `:identity` after the type-var fix.
 
+(deftest shared-input-typevar-accepts-compatible-numeric-bindings-in-both-orders
+  (registry/record-rich-types! :numeric-count-total
+                               {:args {} :return-type :numeric})
+  (doseq [args [(array-map :a :numeric-count-total :b 0)
+                (array-map :b 0 :a :numeric-count-total)
+                (array-map :a 0 :b :numeric-count-total)
+                (array-map :b :numeric-count-total :a 0)]]
+    (let [definition {:name :numeric-zero-equality :parent :equal? :args args}]
+      (is (some? (check/check-fn-def! definition)) (pr-str (vec (keys args))))
+      (is (= :bool (:return (registry/rich-type-of :numeric-zero-equality)))))))
+
+
+(deftest shared-input-typevar-rejects-incompatible-bindings-in-both-orders
+  (registry/record-rich-types! :text-count-total
+                               {:args {} :return-type :text})
+  (doseq [args [(array-map :a :text-count-total :b 0)
+                (array-map :b 0 :a :text-count-total)]]
+    (try
+      (check/check-fn-def! {:name :text-zero-equality :parent :equal? :args args})
+      (is false "The shared type variable must not accept incompatible inputs")
+      (catch clojure.lang.ExceptionInfo error
+        (is (= :types/check-failed (:type (ex-data error))))))))
+
+
+(deftest shared-input-typevar-accepts-identity-and-uuid-values-in-both-orders
+  (registry/record-rich-types! :identity-scalar-input {:args {} :return-type :fn-ref})
+  (registry/record-rich-types! :uuid-scalar-input {:args {} :return-type :uuid})
+  (doseq [args [(array-map :a :identity-scalar-input :b :uuid-scalar-input)
+                (array-map :b :uuid-scalar-input :a :identity-scalar-input)]]
+    (check/check-fn-def! {:name :identity-value-equality :parent :equal? :args args})
+    (is (= :bool (:return (registry/rich-type-of :identity-value-equality))))))
+
+
+(deftest shared-numeric-input-inference-preserves-authored-and-concrete-pins
+  (registry/record-rich-types! :numeric-pinned-input {:args {} :return-type :numeric})
+  (registry/record-rich-types! :shared-pinned-input
+                               {:args {:a {:type 'a} :b {:type 'a}} :return-type 'a})
+  (registry/record-rich-types! :concrete-int-input
+                               {:args {:a {:type :int} :b {:type :int}} :return-type :int})
+  (doseq [args [(array-map :a :numeric-pinned-input :b 0)
+                (array-map :b 0 :a :numeric-pinned-input)]
+          definition [{:name :declared-int-input :parent :shared-pinned-input :return-type :int :args args}
+                      {:name :concrete-int-input-child :parent :concrete-int-input :args args}]]
+    (is (thrown? clojure.lang.ExceptionInfo (check/check-fn-def! definition)))))
+
+
+(deftest shared-numeric-input-inference-does-not-launder-secret-inputs
+  (registry/record-rich-types! :secret-numeric-input
+                               {:args {} :return-type [:secret :numeric]})
+  (registry/record-rich-types! :plain-numeric-input
+                               {:args {:a {:type :numeric} :b {:type :numeric}} :return-type :numeric})
+  (doseq [args [(array-map :a :secret-numeric-input :b 0)
+                (array-map :b 0 :a :secret-numeric-input)]]
+    (is (thrown? clojure.lang.ExceptionInfo
+          (check/check-fn-def! {:name :plain-numeric-output :parent :plain-numeric-input
+                                :args args})))))
+
+
 (deftest passthrough-pins-return-to-bound-literal
   (testing "binding :value to an int literal narrows the child's return-type to :int"
     (registry/record-rich-types! :passthrough

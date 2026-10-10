@@ -297,6 +297,14 @@ When an arg is bound via `ref-id`, the system checks that the referenced fn's re
 
 Type variables on base-fns are unified when arguments are bound:
 
+When several inputs share a bare type variable, concrete unmarked scalar
+inputs are inferred together. If one input type accepts every participant,
+that type is selected before checking each binding: `:numeric` with `:int`
+selects `:numeric`, and `:fn-ref` with `:uuid` selects `:uuid`, independently
+of argument order. This does not invent a union or common ancestor. Explicit
+return-type pins remain strict; markers, refinements, structural types and
+callables retain their existing checking rules.
+
 ```edn
 ;; map :: {:func {:fn [:a :b]}, :coll [:list :a]} → [:list :b]
 

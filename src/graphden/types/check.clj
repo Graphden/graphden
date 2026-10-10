@@ -1505,6 +1505,37 @@
       :else subst)))
 
 
+(defn- ordinary-input-type
+  "Static input type without executing refs or interpreting author overrides."
+  [b-form]
+  (when-not (and (map? b-form) (contains? b-form :type))
+    (cond
+      (literal-binding? b-form) (some-> (lit/classify-literal (literal-binding-value b-form)) types/resolve-alias)
+      (any-ref-binding? b-form) (some-> (ref-return-narrowed (any-ref-name b-form)) types/resolve-alias))))
+
+
+(defn- shared-scalar-input-subst
+  "Infer an unpinned repeated bare variable jointly from concrete scalar
+   inputs. Choose an input's existing supertype, never synthesize a union or
+   erase markers. Normal directional checks still validate every binding."
+  [args parent-args init-subst]
+  (let [groups (reduce-kv (fn [acc arg-name b-form]
+                            (let [expected (get parent-args arg-name)]
+                              (if (and (types/type-var? expected)
+                                       (not (contains? init-subst expected)))
+                                (update acc expected (fnil conj []) (ordinary-input-type b-form))
+                                acc))) {} args)
+        scalar-types #{:null :uuid :text :int :bool :numeric :timestamptz
+                       :bytes :float :keyword :decimal :fn-ref}]
+    (reduce-kv (fn [subst variable actuals]
+                 (if (and (> (count actuals) 1) (every? scalar-types actuals))
+                   (if-let [upper (some (fn [candidate]
+                                          (when (every? #(types/subtype? % candidate) actuals) candidate)) actuals)]
+                     (assoc subst variable upper)
+                     subst)
+                   subst)) init-subst groups)))
+
+
 (defn- type-check-bindings
   "Reduce over the fn-def's args; for each, type-check the binding
    against the parent's expected type. Returns the final substitution.
@@ -1517,7 +1548,7 @@
   (reduce-kv (fn [subst arg-name b-form]
                (check-one-binding primary-parent (:name fn-def)
                                   parent-args subst arg-name b-form))
-             (or init-subst {})
+             (shared-scalar-input-subst (:args fn-def) parent-args (or init-subst {}))
              (:args fn-def)))
 
 

@@ -66,13 +66,13 @@ Requests grid layout from ~/api/graph/layout~ using the selected root and expans
 :PROPERTIES:
 :CUSTOM_ID: editor/renderGraph
 :FILE: resources/packages/app/editor/editor-render.js
-:LINE: 105
+:LINE: 96
 :MINS: 9.9
 :END:
 
 Coordinates one asynchronous render. A generation counter prevents an older render from replacing a newer one; a remembered anchor preserves the user's position while data loads. After applying layout changes, it measures [[file:glossary.org::#term/hiccup][DOM]] cards and adjusts positions to their actual sizes.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-render.js::async function renderGraph(shouldFit = true) {][resources/packages/app/editor/editor-render.js:105]]
+- source :: [[file:../../../resources/packages/app/editor/editor-render.js::async function renderGraph(shouldFit = true) {][resources/packages/app/editor/editor-render.js:96]]
 
 * 6. createFnOverlay
 :PROPERTIES:

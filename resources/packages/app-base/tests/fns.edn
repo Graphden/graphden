@@ -88,11 +88,11 @@
           :expected false}}
 
   ;; --- prefs vocabulary ---
-  {:name :pref-keys-are-theme-and-keymap
-   :description "The editor's preference vocabulary is exactly `theme` and `keymap`, in that order."
+  {:name :pref-keys-are-theme-keymap-and-components
+   :description "The editor's preference vocabulary is exactly `theme`, `keymap`, and `components`, in that order."
    :parent :assert-eq
    :args {:actual :pref-keys
-          :expected ["theme" "keymap"]}}
+          :expected ["theme" "keymap" "components"]}}
 
   {:name :pref-key-known-accepts-theme
    :description "`theme` is a known preference key."
@@ -103,6 +103,11 @@
    :description "`keymap` is a known preference key."
    :parent :assert
    :args {:value {:parent :pref-key-known? :args {:pref-key "keymap"}}}}
+
+  {:name :pref-key-known-accepts-components
+   :description "`components` persists personal menu/picker graph identities and is a known preference key."
+   :parent :assert
+   :args {:value {:parent :pref-key-known? :args {:pref-key "components"}}}}
 
   {:name :pref-key-known-rejects-unknown-key
    :description "A key outside the vocabulary is rejected."

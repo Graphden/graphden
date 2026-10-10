@@ -4,6 +4,7 @@
   (:require
     [clojure.edn :as edn]
     [clojure.java.io :as io]
+    [clojure.string :as str]
     [graphden.packages.rebase :as rebase]
     [graphden.packages.records.ids :as ids]))
 
@@ -101,7 +102,7 @@
                                (= parent :core.logic/const) (assoc :return-type :uuid)
                                (= suffix "entries") (assoc :return-type :app.ui-components/ui-component-entries)
                                (= suffix "descriptor") (assoc :return-type :app.ui-components/ui-component-descriptor)
-                               (.endsWith ^String suffix "-entry") (assoc :return-type :app.ui-components/ui-component-entry)))]
+                               (str/ends-with? suffix "-entry") (assoc :return-type :app.ui-components/ui-component-entry)))]
             (into [(definition "component-id" :core.logic/const
                      {:value {:ref shipped :type :fn-ref}})
                    (definition "entries" :core.collections/list

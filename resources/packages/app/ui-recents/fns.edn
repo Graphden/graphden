@@ -103,5 +103,4 @@
   {:name :_navigation-requests :parent :if :args {:test :_navigate-event :then :_navigate-requests :else :_no-requests}}
   {:name :_selection-requests :parent :if :args {:test :_push-event :then :_push-requests :else :_navigation-requests}}
   {:name :_requests :parent :if :args {:test :_toggle-event :then :_pins-requests :else :_selection-requests}}
-  {:name :recents-update :parent :zipmap :return-type :_recents-transition :args {:keys [{:value :state} {:value :requests}] :vals [:_next-state :_requests]}}
-]}
+  {:name :recents-update :parent :zipmap :return-type :_recents-transition :args {:keys [{:value :state} {:value :requests}] :vals [:_next-state :_requests]}}]}

@@ -5,7 +5,6 @@
     [graphden.executor.browser-contracts :as contracts]
     [graphden.executor.compile.bindings :as bindings]
     [graphden.executor.compile.lookups :as lookups]
-    [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.tx :as tx]
     [graphden.tenancy.context :as tenancy]
@@ -88,7 +87,7 @@
               ;; another binding names it by identity.
               ordinary (into #{} (keep #(when (= :ref (:kind %)) (:ref-id %))) classified)
               remaining (remove seen (concat ordinary (keep :ref-fn-id (:list-items graph))
-                                            (remove terminal refs)))]
+                                             (remove terminal refs)))]
           (if (seq remaining)
             (recur (set remaining) seen graph)
             (let [targets (set (remove seen terminal))

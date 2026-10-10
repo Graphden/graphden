@@ -1,8 +1,8 @@
 (ns graphden.executor.browser-source-test
   (:require
     [clojure.test :refer [deftest is]]
-    [graphden.executor.browser-source :as source]
     [graphden.executor.browser-contracts :as contracts]
+    [graphden.executor.browser-source :as source]
     [graphden.packages.records.ids :as ids]
     [graphden.storage.bounded-query :as bounded]
     [graphden.storage.protocol.core :as sp]))
@@ -167,17 +167,17 @@
         calls (atom [])
         authorized (atom #{})
         tables {:fn (keyed [{:id root :parent-ids [parent]}
-                           {:id parent :parent-ids [const-id]}
-                           {:id const-id :return-type-fn-id any-id :parent-ids []}
-                           {:id any-id :parent-ids []}
-                           {:id ids/fn-ref-type-id :parent-ids []}
-                           {:id target :parent-ids [(random-uuid)]}])
+                            {:id parent :parent-ids [const-id]}
+                            {:id const-id :return-type-fn-id any-id :parent-ids []}
+                            {:id any-id :parent-ids []}
+                            {:id ids/fn-ref-type-id :parent-ids []}
+                            {:id target :parent-ids [(random-uuid)]}])
                 :slot {slot-id {:id slot-id :name "value" :type-fn-id any-id}}
                 :fn-slot (keyed [{:id (random-uuid) :fn-id const-id :slot-id slot-id :position 0}])
                 :binding (keyed [{:id (random-uuid) :fn-id parent :slot-id slot-id
-                                 :type-override-fn-id ids/fn-ref-type-id}
-                                {:id (random-uuid) :fn-id root :slot-id slot-id :ref-fn-id target}
-                                {:id (random-uuid) :fn-id target :value-present true :value "private body"}])}
+                                  :type-override-fn-id ids/fn-ref-type-id}
+                                 {:id (random-uuid) :fn-id root :slot-id slot-id :ref-fn-id target}
+                                 {:id (random-uuid) :fn-id target :value-present true :value "private body"}])}
         storage (fixture-storage tables calls)
         graph (source/collect-manifest storage root #(swap! authorized conj (:id %)))]
     (is (contains? @authorized target))

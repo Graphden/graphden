@@ -2,13 +2,13 @@
   "Read and check one immutable graph for the bounded self-hosted backend.
    Cached policy must match the checked source and pass a fresh snapshot check."
   (:require
-    [graphden.crud.type-check :as type-check]
     [clojure.set :as set]
-    [graphden.packages.records.ids :as ids]
+    [graphden.crud.type-check :as type-check]
     [graphden.executor.browser-plan :as plan]
     [graphden.executor.compile-runtime :as runtime]
     [graphden.executor.compile.deps :as deps]
     [graphden.executor.registry.core :as registry]
+    [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.remote.core :as remote]
     [graphden.storage.tx :as tx]
@@ -157,13 +157,13 @@
                                            (ids/fn-id "app.ui-components" :ui-components))))
       (check-closure! snapshot entries rich)
       (consume
-                        {:allow-fn?
-                         (fn [id]
-                           (and (= :plain (registry/trace-capture-class id nil))
-                                ;; Storage intentionally erases inline marker
-                                ;; annotations. A fresh check is only a veto:
-                                ;; it must never relax the original policy.
-                                (= :plain (get classes id))))})
+        {:allow-fn?
+         (fn [id]
+           (and (= :plain (registry/trace-capture-class id nil))
+                ;; Storage intentionally erases inline marker
+                ;; annotations. A fresh check is only a veto:
+                ;; it must never relax the original policy.
+                (= :plain (get classes id))))})
       (catch Exception error
         (if (= :browser-plan/unsupported (:type (ex-data error)))
           (throw error)

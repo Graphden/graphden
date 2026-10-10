@@ -4,8 +4,8 @@
   (:require
     [clojure.edn :as edn]
     [clojure.java.io :as io]
-    [graphden.packages.records.parse :as parse]
     [graphden.packages.records.ids :as ids]
+    [graphden.packages.records.parse :as parse]
     [graphden.packages.records.types :as record-types]
     [graphden.tenancy.context :as tenancy]))
 
@@ -26,7 +26,7 @@
   [module names]
   (let [{:keys [fns] fn-namespace :namespace} (shipped-module module)
         names-to-ids (into {} (map (fn [definition]
-                                    [(:name definition) (ids/fn-id fn-namespace (:name definition))])) fns)]
+                                     [(:name definition) (ids/fn-id fn-namespace (:name definition))])) fns)]
     (mapcat #(parse/parse-fn-def (assoc % :namespace fn-namespace) names-to-ids)
             (filter #(contains? names (:name %)) fns))))
 

@@ -346,13 +346,13 @@ Evaluates a selected personal theme graph in the request's existing organisation
 :PROPERTIES:
 :CUSTOM_ID: editor/definitions
 :FILE: src/graphden/editor/component_templates.clj
-:LINE: 68
+:LINE: 69
 :MINS: 5.5
 :END:
 
 Copies fixed shipped theme, menu and picker definitions into a fresh named namespace. Four configuration [[file:glossary.org::#term/binding][bindings]] select menu initial state, event handler, menu view and picker view by function ID. The picker graph authors presentation; native browser code retains search and navigation. Shared menu colors reference the copied theme leaves; menu hover owns a local literal. Color wrappers retain the canonical color type and ordinary editor form.
 
-- source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn definitions][src/graphden/editor/component_templates.clj:68]]
+- source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn definitions][src/graphden/editor/component_templates.clj:69]]
 
 * 27. apply!
 :PROPERTIES:
@@ -371,13 +371,13 @@ Rebuilds the manifest, the fixed list of proposed objects and UUIDs, while holdi
 :PROPERTIES:
 :CUSTOM_ID: editor/collect-closure
 :FILE: src/graphden/executor/browser_source.clj
-:LINE: 152
+:LINE: 151
 :MINS: 1.0
 :END:
 
 Collects only the selected [[file:glossary.org::#term/reachable-graph][reachable graph]] and its type dependencies, limiting function and row counts. Each function's [[file:glossary.org::#term/auth][source authorization]] precedes its binding and literal reads. The caller supplies a snapshot-local policy; generic whole-graph preview remains unavailable to cloud tenants. Narrow exceptions for fixed shipped primitive/type interfaces verify identity and installed origin; a matching name is insufficient.
 
-- source :: [[file:../../../src/graphden/executor/browser_source.clj::(defn collect-closure][src/graphden/executor/browser_source.clj:152]]
+- source :: [[file:../../../src/graphden/executor/browser_source.clj::(defn collect-closure][src/graphden/executor/browser_source.clj:151]]
 
 * 29. export-current
 :PROPERTIES:

@@ -58,7 +58,8 @@
              :roles #{:initial :update :view}}})
 
 
-(defrecord Identity [id])
+(defrecord Identity
+  [id])
 
 
 (defn- literal
@@ -82,12 +83,14 @@
         const-id (ids/fn-id "core.logic" :const)
         list-id (ids/fn-id "core.collections" :list)
         zipmap-id (ids/fn-id "core.collections" :zipmap)]
-    (letfn [(item [row]
+    (letfn [(item
+              [row]
               (cond
                 (:ref-fn-id row) (project (:ref-fn-id row))
                 (contains? row :value) (literal (:value row))
                 :else (reject!)))
-            (argument [{:keys [kind value ref-id items slot-id]} root]
+            (argument
+              [{:keys [kind value ref-id items slot-id]} root]
               (case kind
                 :value (literal value)
                 :ref (project ref-id)
@@ -97,7 +100,8 @@
                                  (uuid? ref-id))
                           (->Identity ref-id) (reject!))
                 (reject!)))
-            (project [id]
+            (project
+              [id]
               (when (or (> (swap! budget inc) 4096) (contains? @visiting id) (>= (count @visiting) 64)) (reject!))
               (if (contains? @cache id) (get @cache id)
                   (let [root (lookups/root-fn id (:fn-map index) index)
@@ -110,7 +114,7 @@
                                    (empty? (bindings/collect-env-bindings id index))) (reject!))
                     (swap! visiting conj id)
                     (let [args (into {} (map (fn [binding]
-                                              [(:base-name binding) (argument binding root-id)])) classified)
+                                               [(:base-name binding) (argument binding root-id)])) classified)
                           result (cond
                                    (= root-id const-id) (get args :value)
                                    (= root-id list-id) (get args :items)

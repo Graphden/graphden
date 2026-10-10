@@ -1,14 +1,14 @@
 (ns graphden.editor.component-config-test
   (:require
     [clojure.test :refer [deftest is]]
-    [graphden.editor.component-config :as config]
-    [graphden.editor.component-bundle :as bundle]
     [graphden.crud.type-check :as type-check]
-    [graphden.storage.remote.core :as remote]
-    [graphden.types.check.provenance :as provenance]
+    [graphden.editor.component-bundle :as bundle]
+    [graphden.editor.component-config :as config]
+    [graphden.editor.component-templates :as templates]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
-    [graphden.editor.component-templates :as templates]))
+    [graphden.storage.remote.core :as remote]
+    [graphden.types.check.provenance :as provenance]))
 
 
 (def ^:private slot-names
@@ -69,7 +69,7 @@
   []
   (let [root "users.alice.manifest-test"
         interfaces (filter #(contains? #{[:const "core.logic"] [:list "core.collections"]
-                                       [:zipmap "core.collections"]} [(:name %) (:namespace %)])
+                                         [:zipmap "core.collections"]} [(:name %) (:namespace %)])
                            (templates/interface-definitions))
         records (concat (ids/boot-primitive-records)
                         (mapcat #(parse/parse-fn-def % {}) interfaces)
@@ -85,8 +85,8 @@
 (deftest ordinary-manifest-projects-only-terminal-identity-values
   (let [{:keys [id root graph]} (parsed-configuration)]
     (is (= {:account-menu {:initial (ids/fn-id (str root ".menu") :account-menu-initial)
-                          :update (ids/fn-id (str root ".menu") :account-menu-update)
-                          :view (ids/fn-id (str root ".menu") :account-menu-view)}
+                           :update (ids/fn-id (str root ".menu") :account-menu-update)
+                           :view (ids/fn-id (str root ".menu") :account-menu-view)}
             :fn-picker {:view (ids/fn-id (str root ".picker") :picker-view)}
             :recents {:initial (ids/fn-id (str root ".recents") :recents-initial)
                       :update (ids/fn-id (str root ".recents") :recents-update)
@@ -97,8 +97,9 @@
 (deftest uuid-literals-and-ordinary-evaluation-cannot-select-component-identities
   (let [{:keys [id root graph]} (parsed-configuration)
         identity-id (ids/fn-id root :_menu-view-id)
-        change (fn [f] (update graph :bindings
-                              #(mapv (fn [row] (if (= identity-id (:fn-id row)) (f row) row)) %)))
+        change (fn [f]
+                 (update graph :bindings
+                         #(mapv (fn [row] (if (= identity-id (:fn-id row)) (f row) row)) %)))
         reason (fn [changed]
                  (try (config/configuration changed id)
                       (catch clojure.lang.ExceptionInfo error (:reason (ex-data error)))))]
@@ -134,8 +135,8 @@
         deep (-> graph
                  (update :fns into (mapv #(hash-map :id % :parent-ids [const-id]) wrappers))
                  (update :bindings into (mapv (fn [fid ref]
-                                               {:id (random-uuid) :fn-id fid :slot-id value-slot
-                                                :ref-fn-id ref}) wrappers (cons id wrappers))))
+                                                {:id (random-uuid) :fn-id fid :slot-id value-slot
+                                                 :ref-fn-id ref}) wrappers (cons id wrappers))))
         first-item (first (filter #(= (ids/fn-id root :_menu-descriptor) (:ref-fn-id %))
                                   (:list-items graph)))
         duplicate (update graph :list-items conj (assoc first-item :id (random-uuid) :position 4))

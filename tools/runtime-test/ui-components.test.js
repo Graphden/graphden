@@ -49,6 +49,32 @@ function fixture() {
   const settle = () => new Promise(resolve => setImmediate(resolve));
   {
     const f = fixture();
+    const personal = f.window.gdLoadUIComponentRuntime('recents', plan);
+    f.finish(f.requests[0], {ok: true, 'selection-id': first, plan});
+    await personal;
+    assert.equal(f.window.gdUIComponentRuntimeIdentity('recents'), first);
+    const missing = f.window.gdLoadUIComponentRuntime('recents', plan);
+    f.finish(f.requests[1], {ok: false, code: 'component-missing', fallback: 'builtin'}, false);
+    const builtin = await missing;
+    builtin.run('view', {state: 42});
+    assert.equal(f.calls[0].args.state, 42);
+    assert.equal(f.window.gdUIComponentRuntimeIdentity('recents'), null, 'removed override releases the old identity');
+    assert.equal(f.window.gdUIComponentsStatus(), '', 'an absent override is normal, not a broken graph');
+  }
+  for (const [body, status] of [
+    [{ok: false, code: 'component-missing', fallback: 'builtin'}, 403],
+    [{ok: false, code: 'component-missing', fallback: 'builtin'}, 500],
+    [{ok: false, code: 'component-missing'}, 422],
+    [{ok: false, code: 'invalid-selection', fallback: 'builtin'}, 422],
+  ]) {
+    const f = fixture();
+    const loading = f.window.gdLoadUIComponentRuntime('recents', plan);
+    f.finish(f.requests[0], body, false, status);
+    await loading;
+    assert.match(f.window.gdUIComponentsStatus(), /unavailable/, 'only the classified missing-component response is silent');
+  }
+  {
+    const f = fixture();
     const loading = f.window.gdLoadUIComponentRuntime('account-menu', plan);
     f.finish(f.requests[0], waiting, false);
     await settle();

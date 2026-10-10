@@ -61,6 +61,13 @@
     const started = stamp();
     try {
       const {response, result} = await loadPlan(component, chosen, started, signal);
+      // A partial personal manifest deliberately leaves other components built in.
+      if (response.status === 422 && !response.ok && result.ok === false
+        && result.code === 'component-missing' && result.fallback === 'builtin') {
+        runtimeIdentities.delete(component);
+        status(component, '');
+        return runtime(builtin, options);
+      }
       if (!response.ok || !result.ok || result['selection-id'] !== chosen['fn-id']) throw new Error('unavailable');
       const checked = runtime(result.plan, options);
       runtimeIdentities.set(component, {stamp: started, id: chosen['fn-id']});

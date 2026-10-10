@@ -3,7 +3,6 @@
    rollback of partial graph writes, including their version rows. Serial
    because failure injection temporarily replaces the publication function."
   (:require
-    [cheshire.core :as json]
     [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.crud.entities :as entities]
@@ -330,40 +329,3 @@
             (is (false? (:committed result)))
             (is (= 409 (:http-status result)))
             (is (= before (counts storage)))))))))
-
-
-(deftest http-save-and-run-use-the-same-complete-filter-set
-  (let [{:keys [storage ctx all-name->id] :as graph} (setup/bootstrap-crud-graph-from-golden!)
-        post! (fn [body]
-                (let [response (setup/via-graph
-                                 graph :api-view-save-handler
-                                 {:uri "/api/views/save" :request-method :post
-                                  :headers {"content-type" "application/json"}
-                                  :body (json/generate-string body)})]
-                  (is (= 200 (:status response)))
-                  (json/parse-string (:body response) true)))]
-    (try
-      (let [const-id (get all-name->id :const)
-            get-id (get all-name->id :get)
-            value-slot (:slot-id (first (sp/query-entities storage :fn-slot {:fn-id const-id})))
-            candidate (entities/create-entity :fn {:name "match-http-view" :parent-ids [const-id]} ctx)
-            _ (entities/create-entity :binding
-                                      {:fn-id (:id candidate) :slot-id value-slot :ref-fn-id get-id
-                                       :type-override-fn-id (:fn-ref setup/primitive-fn-ids)} ctx)
-            first-view (post! {:name "http-first-view" :filters {:name "match"}})
-            second-view (post! {:name "http-second-view" :filters {:name "http"}})
-            result (post! {:name "http-combined-view"
-                           :filters {:uses [const-id get-id]
-                                     :views [(get-in first-view [:view :id]) (get-in second-view [:view :id])]
-                                     :name "match-http-view"}})
-            saved-id (some-> (get-in result [:view :id]) parse-uuid)]
-        (is (true? (:committed result)))
-        (is (= 2 (count (get-in result [:view :filters :uses]))))
-        (is (= 2 (count (get-in result [:view :filters :also]))))
-        (let [stored (entities/view-members ctx (get-in result [:view :filters]))
-              direct (entities/view-members ctx {:uses [const-id get-id] :name "match-http-view"})
-              run (setup/exec-with-storage ctx storage saved-id {})]
-          (is (= #{(:id candidate)} (into #{} (map :id) (:fns direct))) (pr-str direct))
-          (is (= #{(:id candidate)} (into #{} (map :id) (:fns stored))) (pr-str stored))
-          (is (= #{(:id candidate)} (into #{} (map :id) (:fns run))) (pr-str run))))
-      (finally (sp/close storage)))))

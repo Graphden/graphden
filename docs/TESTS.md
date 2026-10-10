@@ -183,6 +183,19 @@ copying the EDN into the module (CLAUDE.md § Live graph verification).
 
 ## Coverage of the fn-def and package layers
 
+Tests that load the shipped app and exercise HTTP handlers through the graph
+belong in `^:integration` graph-test namespaces, using the shared `golden-app`
+fixture. Keep direct small-graph mutation checks in the unit coverage suite.
+For example, `view-save-graph-test` checks HTTP Save through saved-function Run;
+`view-save-test` covers filter persistence, authorization, rollback and type
+publication under instrumentation. Both suites retain the normal abort-shield
+deadline; `abort-shield-test` also checks its timeout and interrupt contracts.
+
+The local worktree landing gate runs plain unit tests. For release proof,
+dispatch CI on `develop` with `expected_sha` (all 40 hex characters) and a fresh
+`request_id` UUID; this run includes coverage. The guard rejects a moved ref,
+and release tooling waits for that exact successful run before changing pins.
+
 Three different things are measured, and they answer different
 questions (`bb coverage` docstring + `feedback_coverage_measurement`):
 

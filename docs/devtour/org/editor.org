@@ -7,7 +7,7 @@ Loading, graph-backed controls, actions, forms, and preferences.
 
 after: web, layout
 
-[[file:index.org][index]] · ~126 min
+[[file:index.org][index]] · ~132 min
 
 * 1. initGraph
 :PROPERTIES:
@@ -92,7 +92,7 @@ Builds an absolutely positioned HTML function card; edges are separate SVG eleme
 :CUSTOM_ID: editor/bindActionDispatch
 :FILE: resources/packages/web/runtime/graphden-runtime.js
 :LINE: 78
-:MINS: 2.1
+:MINS: 2.2
 :END:
 
 Registers one delegated event listener on a host and resolves ~data-action~ through the action-handler registry. Newly inserted server fragments become interactive without individual listener registration. Registering the listener once prevents repeated openings of a reused popover from executing the same action multiple times.
@@ -106,13 +106,13 @@ Registers one delegated event listener on a host and resolves ~data-action~ thro
 :PROPERTIES:
 :CUSTOM_ID: editor/loadPartial
 :FILE: resources/packages/web/runtime/graphden-runtime.js
-:LINE: 139
+:LINE: 141
 :MINS: 1.9
 :END:
 
 Loads a [[file:glossary.org::#term/htmx][server-rendered HTML fragment]] into a host and attaches action dispatch. A request token ensures that a later request wins even if an earlier response arrives last. See the [[file:../../../docs/PARTIALS.md][partial-fragment contract]].
 
-- source :: [[file:../../../resources/packages/web/runtime/graphden-runtime.js::async function loadPartial(host, url, opts) {][resources/packages/web/runtime/graphden-runtime.js:139]]
+- source :: [[file:../../../resources/packages/web/runtime/graphden-runtime.js::async function loadPartial(host, url, opts) {][resources/packages/web/runtime/graphden-runtime.js:141]]
 - same file :: [[file:editor.org::#editor/bindActionDispatch][bindActionDispatch]]
 - referenced from :: [[file:web.org::#web/hiccup-element][hiccup-element]]
 
@@ -204,34 +204,48 @@ Creates the bounded browser interpreter for that plan. Each entry invocation has
 - see also :: [[file:editor.org::#editor/mount][mount]], [[file:editor.org::#editor/pickerArrange][pickerArrange]]
 - referenced from :: [[file:editor.org::#editor/export-plan][export-plan]], [[file:editor.org::#editor/renderRecentFns][renderRecentFns]], [[file:editor.org::#editor/mount][mount]]
 
-* 16. renderRecentFns
+* 16. create
+:PROPERTIES:
+:CUSTOM_ID: editor/create
+:FILE: resources/packages/app/ui-preview/graph-component.js
+:LINE: 5
+:MINS: 5.9
+:END:
+
+Owns component state and serializes events independently of the DOM renderer. Initial, update and view remain ordinary graph functions. Every transition validates the next state, complete Hiccup/styles and all fixed host requests before rendering, committing state and running effects. Runtime replacement preserves validated state; cancellation discards late effect completions after replacement or disposal.
+
+- source :: [[file:../../../resources/packages/app/ui-preview/graph-component.js::  function create(runtime, {inputs, validateState, validateView, requests, render = null, onError = error => { throw error; }, rendererOptions = {}}) {][resources/packages/app/ui-preview/graph-component.js:5]]
+- see also :: [[file:editor.org::#editor/mount][mount]], [[file:editor.org::#editor/renderRecentFns][renderRecentFns]]
+
+* 17. renderRecentFns
 :PROPERTIES:
 :CUSTOM_ID: editor/renderRecentFns
 :FILE: resources/packages/app/editor/editor-recents.js
-:LINE: 77
-:MINS: 1.5
+:LINE: 164
+:MINS: 1.6
 :END:
 
-The Explorer trail executes the shipped ~app.ui-recents~ initial and view graphs. Its update graph deduplicates selections, limits the trail and toggles pins; the view excludes the selected function and pinned duplicates and hides during searches or filters. Ordinary row functions produce Hiccup and scoped styles. The host persists localStorage, resolves namespace paths and delegates navigation; keyed rendering preserves focused pin buttons.
+The Explorer trail executes the shipped ~app.ui-recents~ initial and view graphs. Its update graph returns state and fixed persistence/navigation requests, deduplicates selections, limits the trail and toggles pins; the view excludes the selected function and pinned duplicates and hides during searches or filters. Ordinary row functions produce Hiccup and scoped styles. The host persists localStorage, resolves namespace paths and delegates navigation; keyed rendering preserves focused pin buttons.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-recents.js::function renderRecentFns() {][resources/packages/app/editor/editor-recents.js:77]]
+- source :: [[file:../../../resources/packages/app/editor/editor-recents.js::function renderRecentFns() {][resources/packages/app/editor/editor-recents.js:164]]
 - see also :: [[file:editor.org::#editor/mount][mount]], [[file:editor.org::#editor/createRuntime][createRuntime]]
+- referenced from :: [[file:editor.org::#editor/create][create]]
 
-* 17. mount
+* 18. mount
 :PROPERTIES:
 :CUSTOM_ID: editor/mount
 :FILE: resources/packages/app/ui-preview/graph-renderer.js
-:LINE: 74
+:LINE: 82
 :MINS: 2.7
 :END:
 
 Gives a graph component its own empty DOM host. ~render~ validates live Hiccup and scoped style rules before applying them, preserving keyed elements across updates. ~dispose~ removes the subtree and releases its stylesheet. The renderer consumes values rather than executing graph functions; host code still owns the control's events and authorized callbacks. Follow this lifecycle when changing a graph-backed menu or picker.
 
-- source :: [[file:../../../resources/packages/app/ui-preview/graph-renderer.js::  function mount(host, {idPrefix = null, nodeLimit = 5000} = {}) {][resources/packages/app/ui-preview/graph-renderer.js:74]]
+- source :: [[file:../../../resources/packages/app/ui-preview/graph-renderer.js::  function mount(host, {idPrefix = null, nodeLimit = 5000} = {}) {][resources/packages/app/ui-preview/graph-renderer.js:82]]
 - see also :: [[file:editor.org::#editor/createRuntime][createRuntime]], [[file:web.org::#web/hiccup-element][hiccup-element]]
-- referenced from :: [[file:editor.org::#editor/createRuntime][createRuntime]], [[file:editor.org::#editor/renderRecentFns][renderRecentFns]]
+- referenced from :: [[file:editor.org::#editor/createRuntime][createRuntime]], [[file:editor.org::#editor/create][create]], [[file:editor.org::#editor/renderRecentFns][renderRecentFns]]
 
-* 18. enterArgValueEditMode
+* 19. enterArgValueEditMode
 :PROPERTIES:
 :CUSTOM_ID: editor/enterArgValueEditMode
 :FILE: resources/packages/app/editor/editor-edit-modes.js
@@ -245,7 +259,7 @@ Asks ~/api/value-form~ for a widget appropriate to the [[file:glossary.org::#ter
 - see also :: [[file:crud.org::#crud/resolve-form][resolve-form]], [[file:editor.org::#editor/writeBindingFields][writeBindingFields]]
 - same file :: [[file:editor.org::#editor/writeBindingFields][writeBindingFields]]
 
-* 19. writeBindingFields
+* 20. writeBindingFields
 :PROPERTIES:
 :CUSTOM_ID: editor/writeBindingFields
 :FILE: resources/packages/app/editor/editor-edit-modes.js
@@ -260,7 +274,7 @@ Follow a user saving a literal input: this writer targets its function and slot,
 - same file :: [[file:editor.org::#editor/enterArgValueEditMode][enterArgValueEditMode]]
 - referenced from :: [[file:editor.org::#editor/enterArgValueEditMode][enterArgValueEditMode]]
 
-* 20. gdEnterDiffMode
+* 21. gdEnterDiffMode
 :PROPERTIES:
 :CUSTOM_ID: editor/gdEnterDiffMode
 :FILE: resources/packages/app/editor/editor-diff-mode.js
@@ -272,7 +286,7 @@ Loads grouped differences for a selected comparison branch. Explorer badges, can
 
 - source :: [[file:../../../resources/packages/app/editor/editor-diff-mode.js::async function gdEnterDiffMode(otherBranch) {][resources/packages/app/editor/editor-diff-mode.js:532]]
 
-* 21. submitExecution
+* 22. submitExecution
 :PROPERTIES:
 :CUSTOM_ID: editor/submitExecution
 :FILE: resources/packages/app/editor/editor-execute.js
@@ -286,7 +300,7 @@ The selected card's Run button delegates to the existing Inspector Run owner; it
 - see also :: [[file:crud.org::#crud/apply-execute][apply-execute]], [[file:executor.org::#executor/record-effect!][record-effect!]], [[file:editor.org::#editor/aggregatePathTrace][aggregatePathTrace]]
 - referenced from :: [[file:editor.org::#editor/aggregatePathTrace][aggregatePathTrace]]
 
-* 22. aggregatePathTrace
+* 23. aggregatePathTrace
 :PROPERTIES:
 :CUSTOM_ID: editor/aggregatePathTrace
 :FILE: resources/packages/app/editor/editor-path-view.js
@@ -300,7 +314,7 @@ Groups a trace's invocations by function UUID, keeping call counts, cache hits a
 - see also :: [[file:editor.org::#editor/submitExecution][submitExecution]], [[file:executor.org::#executor/record-effect!][record-effect!]]
 - referenced from :: [[file:editor.org::#editor/submitExecution][submitExecution]]
 
-* 23. gdApplyThemePayload
+* 24. gdApplyThemePayload
 :PROPERTIES:
 :CUSTOM_ID: editor/gdApplyThemePayload
 :FILE: resources/packages/app/editor/editor-prefs.js
@@ -314,7 +328,7 @@ Applies a validated theme payload as inline CSS custom properties on the body. T
 - see also :: [[file:editor.org::#editor/evaluate][evaluate]]
 - referenced from :: [[file:editor.org::#editor/evaluate][evaluate]]
 
-* 24. evaluate
+* 25. evaluate
 :PROPERTIES:
 :CUSTOM_ID: editor/evaluate
 :FILE: src/graphden/editor/theme.clj
@@ -328,7 +342,7 @@ Evaluates a selected personal theme graph in the request's existing organisation
 - see also :: [[file:crud.org::#crud/apply-execute][apply-execute]], [[file:executor.org::#executor/record-effect!][record-effect!]], [[file:editor.org::#editor/gdApplyThemePayload][gdApplyThemePayload]]
 - referenced from :: [[file:executor.org::#executor/record-effect!][record-effect!]], [[file:editor.org::#editor/gdApplyThemePayload][gdApplyThemePayload]]
 
-* 25. definitions
+* 26. definitions
 :PROPERTIES:
 :CUSTOM_ID: editor/definitions
 :FILE: src/graphden/editor/component_templates.clj
@@ -340,7 +354,7 @@ Copies fixed shipped theme, menu and picker definitions into a fresh named names
 
 - source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn definitions][src/graphden/editor/component_templates.clj:62]]
 
-* 26. apply!
+* 27. apply!
 :PROPERTIES:
 :CUSTOM_ID: editor/apply!
 :FILE: src/graphden/editor/component_creation.clj
@@ -353,7 +367,7 @@ Rebuilds the manifest, the fixed list of proposed objects and UUIDs, while holdi
 - source :: [[file:../../../src/graphden/editor/component_creation.clj::(defn apply!][src/graphden/editor/component_creation.clj:210]]
 - see also :: [[file:versioning.org::#versioning/call-with-write][call-with-write]]
 
-* 27. collect-closure
+* 28. collect-closure
 :PROPERTIES:
 :CUSTOM_ID: editor/collect-closure
 :FILE: src/graphden/executor/browser_source.clj
@@ -365,7 +379,7 @@ Collects only the selected [[file:glossary.org::#term/reachable-graph][reachable
 
 - source :: [[file:../../../src/graphden/executor/browser_source.clj::(defn collect-closure][src/graphden/executor/browser_source.clj:64]]
 
-* 28. export-current
+* 29. export-current
 :PROPERTIES:
 :CUSTOM_ID: editor/export-current
 :FILE: src/graphden/editor/components.clj
@@ -377,7 +391,7 @@ Reads the current user's authoritative configuration preference and exports a bo
 
 - source :: [[file:../../../src/graphden/editor/components.clj::(defn export-current][src/graphden/editor/components.clj:93]]
 
-* 29. gdTourRestoreUIComponentPreferences
+* 30. gdTourRestoreUIComponentPreferences
 :PROPERTIES:
 :CUSTOM_ID: editor/gdTourRestoreUIComponentPreferences
 :FILE: resources/packages/app/editor/editor-tour-ui-components.js
@@ -389,7 +403,7 @@ Restores Appearance preferences only after the lesson's exact selected graph UUI
 
 - source :: [[file:../../../resources/packages/app/editor/editor-tour-ui-components.js::async function gdTourRestoreUIComponentPreferences(created, failed) {][resources/packages/app/editor/editor-tour-ui-components.js:55]]
 
-* 30. gdApplyKeymap
+* 31. gdApplyKeymap
 :PROPERTIES:
 :CUSTOM_ID: editor/gdApplyKeymap
 :FILE: resources/packages/app/editor/editor-shortcuts.js
@@ -401,7 +415,7 @@ Applies user key overrides by stable shortcut ID. The registry keeps defaults fo
 
 - source :: [[file:../../../resources/packages/app/editor/editor-shortcuts.js::function gdApplyKeymap(bindings) {][resources/packages/app/editor/editor-shortcuts.js:81]]
 
-* 31. authFetch
+* 32. authFetch
 :PROPERTIES:
 :CUSTOM_ID: editor/authFetch
 :FILE: resources/packages/app/editor/editor-auth.js
@@ -414,7 +428,7 @@ Sends authenticated editor requests and handles 401 by clearing the stored crede
 - source :: [[file:../../../resources/packages/app/editor/editor-auth.js::async function authFetch(url, opts = {}) {][resources/packages/app/editor/editor-auth.js:114]]
 - referenced from :: [[file:editor.org::#editor/initGraph][initGraph]], [[file:editor.org::#editor/gdTourBeginBranchCreation][gdTourBeginBranchCreation]], [[file:editor.org::#editor/gdTourRecordAppCreation][gdTourRecordAppCreation]]
 
-* 32. _tourTick
+* 33. _tourTick
 :PROPERTIES:
 :CUSTOM_ID: editor/_tourTick
 :FILE: resources/packages/app/editor/editor-tour.js
@@ -427,7 +441,7 @@ Evaluates the current interactive lesson step against editor state. Lesson data 
 - source :: [[file:../../../resources/packages/app/editor/editor-tour.js::function _tourTick() {][resources/packages/app/editor/editor-tour.js:309]]
 - referenced from :: [[file:editor.org::#editor/_tourStartPositioning][_tourStartPositioning]]
 
-* 33. gdTourBeginBranchCreation
+* 34. gdTourBeginBranchCreation
 :PROPERTIES:
 :CUSTOM_ID: editor/gdTourBeginBranchCreation
 :FILE: resources/packages/app/editor/editor-tour-receipts.js
@@ -442,7 +456,7 @@ Records a proposed branch UUID, its actual base branch UUID, and the current sig
 - same file :: [[file:editor.org::#editor/gdTourRecordPackageInstall][gdTourRecordPackageInstall]]
 - referenced from :: [[file:editor.org::#editor/gdTourRecordPackageInstall][gdTourRecordPackageInstall]], [[file:editor.org::#editor/gdTourRecordAppCreation][gdTourRecordAppCreation]]
 
-* 34. gdTourRecordPackageInstall
+* 35. gdTourRecordPackageInstall
 :PROPERTIES:
 :CUSTOM_ID: editor/gdTourRecordPackageInstall
 :FILE: resources/packages/app/editor/editor-tour-receipts.js
@@ -456,7 +470,7 @@ Records a successful lesson installation using the returned pin, branch, package
 - see also :: [[file:packages.org::#packages/sync-namespaces!][sync-namespaces!]], [[file:editor.org::#editor/gdTourBeginBranchCreation][gdTourBeginBranchCreation]]
 - same file :: [[file:editor.org::#editor/gdTourBeginBranchCreation][gdTourBeginBranchCreation]]
 
-* 35. gdTourRecordAppCreation
+* 36. gdTourRecordAppCreation
 :PROPERTIES:
 :CUSTOM_ID: editor/gdTourRecordAppCreation
 :FILE: resources/packages/app/editor/editor-tour-app-receipts.js
@@ -469,7 +483,7 @@ An Apps form is an ordinary server mutation, not a tutorial-only endpoint. Befor
 - source :: [[file:../../../resources/packages/app/editor/editor-tour-app-receipts.js::async function gdTourRecordAppCreation(ticket, xhr) {][resources/packages/app/editor/editor-tour-app-receipts.js:38]]
 - see also :: [[file:editor.org::#editor/gdTourBeginBranchCreation][gdTourBeginBranchCreation]], [[file:editor.org::#editor/authFetch][authFetch]]
 
-* 36. _tourStartPositioning
+* 37. _tourStartPositioning
 :PROPERTIES:
 :CUSTOM_ID: editor/_tourStartPositioning
 :FILE: resources/packages/app/editor/editor-tour-spot.js

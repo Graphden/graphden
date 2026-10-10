@@ -8,9 +8,9 @@
 (def state {:pins [b] :trail [a b c a]})
 
 
-(def cases
-  [{:entry :recents-initial :inputs {:context state} :expected state}
-   {:entry :recents-initial :inputs {:context {}} :expected {:pins [] :trail []}}
+(def state-cases
+  [{:entry :recents-initial :inputs {:inputs state} :expected state}
+   {:entry :recents-initial :inputs {:inputs {}} :expected {:pins [] :trail []}}
    {:entry :recents-update :inputs {:state state :event {:kind "push" :entry a}}
     :expected {:pins [b] :trail [a b c]}}
    {:entry :recents-update :inputs {:state state :event {:kind "toggle-pin" :entry b}}
@@ -26,9 +26,33 @@
              :event {:kind "push" :entry a}}
     :expected {:pins [] :trail (into [a] (map #(assoc c :id (str %)) (range 5)))}}
    {:entry :recents-update :inputs {:state state :event {:kind "unknown"}} :expected state}
-   {:entry :recents-model :inputs {:state state :context {:selected "a"}} :expected {:trail [c] :hidden false}}
-   {:entry :recents-model :inputs {:state {:pins [] :trail (vec (repeat 8 c))} :context {:selected nil}}
+   {:entry :recents-model :inputs {:state state :inputs {:selected "a"}} :expected {:trail [c] :hidden false}}
+   {:entry :recents-model :inputs {:state {:pins [] :trail (vec (repeat 8 c))} :inputs {:selected nil}}
     :expected {:trail (vec (repeat 5 c)) :hidden false}}
-   {:entry :recents-hidden :inputs {:state state :context {:searching true}} :expected true}
-   {:entry :recents-hidden :inputs {:state {:pins [] :trail []} :context {}} :expected true}
-   {:entry :recents-hidden :inputs {:state state :context {}} :expected false}])
+   {:entry :recents-hidden :inputs {:state state :inputs {:searching true}} :expected true}
+   {:entry :recents-hidden :inputs {:state {:pins [] :trail []} :inputs {}} :expected true}
+   {:entry :recents-hidden :inputs {:state state :inputs {}} :expected false}])
+
+
+(defn transition-case
+  [{:keys [entry inputs expected] :as test-case}]
+  (if (= entry :recents-update)
+    (let [{:keys [kind]} (:event inputs)
+          requests (case kind
+                     "toggle-pin" [{:kind "persist-pins" :entries (:pins expected)}]
+                     "push" (if (= expected (:state inputs)) [] [{:kind "persist-trail" :entries (:trail expected)}])
+                     [])]
+      (-> test-case
+          (update :inputs #(assoc % :inputs {}))
+          (assoc :expected {:state expected :requests requests})))
+    test-case))
+
+
+(def cases
+  (conj (mapv transition-case state-cases)
+        {:entry :recents-update
+         :inputs {:state state :event {:kind "navigate" :entry b} :inputs {}}
+         :expected {:state state :requests [{:kind "navigate-fn" :fn-id "b" :qname "core.map"}]}}
+        {:entry :recents-update
+         :inputs {:state state :event {:kind "sync" :entry a} :inputs {:pins [] :trail [c]}}
+         :expected {:state {:pins [] :trail [c]} :requests []}}))

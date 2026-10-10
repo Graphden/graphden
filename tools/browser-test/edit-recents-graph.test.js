@@ -40,6 +40,8 @@ const {assert, newContext} = require('./edit-test-helpers');
     assert(persisted[0]?.id === entries[0].id && persisted[0]?.name === entries[0].name, 'graph values persist with their fields');
     await host.locator('.gd-recent-row').nth(1).click();
     await page.waitForFunction(id => selectedFnId === id, entries[1].id);
+    await page.waitForFunction(id => [...document.querySelectorAll('.node-overlay')]
+      .some(el => el.dataset.originalFnId === id && el.getBoundingClientRect().width > 0), entries[1].id);
     await page.waitForFunction(id => !document.querySelector('#gd-recent-fns .gd-recent-row[data-fn-id="' + id + '"]'), entries[1].id);
     assert(await host.locator('.gd-recent-row').count() === 2, 'navigation excludes the current unpinned function');
     await page.evaluate(() => { searchFilter = 'trail-test'; renderRecentFns(); });

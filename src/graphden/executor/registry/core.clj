@@ -768,11 +768,13 @@
   ;; goes name → id → entry; callers that already hold the id should use
   ;; `rich-type-of-id` directly.
   ([fn-name]
-   (or (when-let [org (current-tenant-org)]
-         (let [slice (get @(target-per-org-rich-atom) org)]
-           (get-in slice [:by-id (get-in slice [:by-name fn-name])])))
-       (let [v (rich-types-view)]
-         (get-in v [:by-id (get-in v [:by-name fn-name])]))))
+   (if (uuid? fn-name)
+     (rich-type-of-id fn-name)
+     (or (when-let [org (current-tenant-org)]
+           (let [slice (get @(target-per-org-rich-atom) org)]
+             (get-in slice [:by-id (get-in slice [:by-name fn-name])])))
+         (let [v (rich-types-view)]
+           (get-in v [:by-id (get-in v [:by-name fn-name])])))))
   ([fn-name arg-name]
    (get-in (rich-type-of fn-name) [:args arg-name])))
 

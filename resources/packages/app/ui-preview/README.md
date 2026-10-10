@@ -177,8 +177,9 @@ tree within both limits.
 
 ## Personal component manifests
 
-New Appearance copies include account-menu, function-picker and Recents graphs.
-Their `ui` entry is an ordinary `core.collections/list` returning the named
+Appearance can copy account-menu, function-picker and Recents independently,
+or create a complete copy. Its `ui` entry is an ordinary list or a composition
+of retained and new lists through `concat`, returning the named
 `app.ui-components/ui-component-manifest` type. Each item has this shape:
 
 ```clojure
@@ -196,8 +197,8 @@ The subtypes are `ui-component-entry`, `ui-component-entries`, and
 `ui-component-descriptor` in `app.ui-components`.
 
 The configuration graph constructs descriptors through ordinary `const`,
-`list`, `zipmap`, and bounded `concat` dependencies. It is projected with the compiler's binding
-and inheritance rules; no user graph is executed to discover identities.
+`list`, `zipmap`, and bounded `concat` dependencies. It is projected with the
+compiler's binding and inheritance rules; no user graph is executed to discover identities.
 UUIDs must originate in a `const` value binding narrowed to `:fn-ref`:
 
 ```clojure

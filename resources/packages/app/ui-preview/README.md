@@ -1,7 +1,7 @@
 # Graph-backed editor account menu
 
 The ordinary editor uses bundled graph plans for the account menu and function
-picker by default, including when tenancy is active. These plans contain only
+picker and Explorer navigation trail by default, including when tenancy is active. These plans contain only
 shipped package definitions; enabling them does not export tenant graphs or
 change another user's preferences. Regenerate the checked-in artifacts with
 `clojure -M:dev tools/ui_preview/generate_builtin_plans.clj` after changing their
@@ -128,3 +128,16 @@ review artifact. Its existing browser/JVM tests remain separate from real-editor
 coverage. Actual account-menu review must exercise graph editing, native actions,
 light/dark/custom themes, keyboard/focus, accessibility and intermediate animation
 frames in the editor itself.
+
+The Explorer trail uses `app.ui-recents` ordinary initial/update/model/view functions.
+The graph owns named selection dedupe, the six-entry persisted trail, pin toggles,
+selected/pinned filtering, visibility, row Hiccup and scoped styles. Its host owns
+localStorage validation and persistence, namespace lookup, delegated navigation and
+renderer cleanup. These shipped definitions do not yet have a personal component
+selection slot.
+
+The bounded primitive subset also includes `filter`, `take`, `concat`, `str` and
+`str-starts-with?`. Filtering returns an eager sequence; take/concat return vectors,
+matching the JVM primitives. `str` accepts scalar parts (nil, text, keywords,
+booleans and safe integers); collections are rejected because their JVM printed
+representation is outside this browser subset.

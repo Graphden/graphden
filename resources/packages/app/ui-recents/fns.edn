@@ -35,19 +35,22 @@
   {:name :recents-update :parent :if  :args {:test :_toggle-event :then :recents-toggle-pin :else :_update-push}}
   {:name :_selected :parent :get  :args {:coll {:as :context} :key {:value :selected} :default nil}}
   {:name :_searching :parent :get  :args {:coll {:as :context} :key {:value :searching} :default false}}
-  {:name :_pin-id :parent :get  :args {:coll {:as :pin} :key {:value :id} :default ""}}
-  {:name :_matching-pin :parent :equal? :lambda-params [:pin] :args {:a :_pin-id :b :_item-id}}
-  {:name :_matching-pins :parent :filter  :args {:pred :_matching-pin :coll :recents-pins}}
-  {:name :_matching-pin-count :parent :count  :args {:coll :_matching-pins}}
-  {:name :_item-unpinned :parent :equal?  :args {:a :_matching-pin-count :b 0}}
+  {:name :_pin-key :parent :get :lambda-params [:pin] :args {:coll {:as :pin} :key {:value :id} :default ""}}
+  {:name :_pin-keys :parent :map :args {:func :_pin-key :coll :recents-pins}}
+  {:name :_pin-index :parent :zipmap :args {:keys :_pin-keys :vals :_pin-keys}}
+  {:name :_item-pinned :parent :get :args {:coll :_pin-index :key :_item-id :default false}}
+  {:name :_item-unpinned :parent :if :args {:test :_item-pinned :then false :else true}}
   {:name :_item-selected :parent :equal?  :args {:a :_item-id :b :_selected}}
   {:name :_visible-item :parent :if :lambda-params [:item] :args {:test :_item-selected :then false :else :_item-unpinned}}
   {:name :_visible-trail :parent :filter  :args {:pred :_visible-item :coll :recents-trail}}
-  {:name :recents-visible-trail :parent :take  :args {:count 5 :coll :_visible-trail}}
-  {:name :_visible-count :parent :count  :args {:coll :recents-visible-trail}}
+  {:name :_recents-visible-trail :parent :take  :args {:count 5 :coll :_visible-trail}}
+  {:name :_visible-count :parent :count  :args {:coll :_recents-visible-trail}}
   {:name :_total-count :parent :add  :args {:nums [:_visible-count :_pin-count]}}
   {:name :_empty :parent :equal?  :args {:a :_total-count :b 0}}
   {:name :recents-hidden :parent :if  :args {:test :_searching :then true :else :_empty}}
+  {:name :recents-model :parent :zipmap :args {:keys [{:value :trail} {:value :hidden}] :vals [:_recents-visible-trail :recents-hidden]}}
+  {:name :_model-trail :parent :get :args {:coll :recents-model :key {:value :trail} :default {:value []}}}
+  {:name :_model-hidden :parent :get :args {:coll :recents-model :key {:value :hidden} :default true}}
   {:name :_no-pins :parent :equal?  :args {:a :_pin-count :b 0}}
   {:name :_caption :parent :if  :args {:test :_no-pins :then "Recent" :else "Pinned · Recent"}}
   {:name :_caption-node :parent :hiccup  :args {:tag "div" :attrs {:value {:class "gd-recent-cap"}} :children [:_caption]}}
@@ -69,8 +72,8 @@
   {:name :recents-row :parent :hiccup :lambda-params [:row] :args {:tag "div" :attrs :_line-attrs :children [:_navigate-node :_pin-node]}}
   {:name :_pinned-entry :parent :assoc :lambda-params [:item] :args {:map {:as :item} :key {:value :pinned} :value true}}
   {:name :_pinned-entries :parent :map  :args {:func :_pinned-entry :coll :recents-pins}}
-  {:name :_row-entries :parent :concat  :args {:colls [:_pinned-entries :recents-visible-trail]}}
+  {:name :_row-entries :parent :concat  :args {:colls [:_pinned-entries :_model-trail]}}
   {:name :_row-nodes :parent :map  :args {:func :recents-row :coll :_row-entries}}
   {:name :_tree :parent :hiccup  :args {:tag "div" :attrs {:value {:class "gd-recents"}} :children [:_caption-node :_row-nodes]}}
   {:name :recents-styles :parent :list  :args {:items [{:value {:selector "&" :declarations {"padding" "4px 8px 2px"}}} {:value {:selector "& .gd-recent-cap" :declarations {"font-size" "0.625rem" "font-weight" "600" "letter-spacing" "0.06em" "text-transform" "uppercase" "color" "var(--gd-ink-3)" "padding" "2px 4px"}}} {:value {:selector "& .gd-recent-row" :declarations {"display" "block" "width" "100%" "border" "0" "border-radius" "4px" "margin" "0" "padding" "2px 6px" "background-color" "transparent" "color" "var(--fg)" "text-align" "left" "cursor" "pointer" "font-family" "var(--gd-mono)" "font-size" "0.75rem" "overflow" "hidden" "text-overflow" "ellipsis" "white-space" "nowrap" "flex" "1" "min-width" "0"}}} {:value {:selector "& .gd-recent-line" :declarations {"display" "flex" "align-items" "center"}}} {:value {:selector "& .gd-recent-pin" :declarations {"flex" "none" "border" "0" "background-color" "transparent" "color" "var(--muted-fg)" "cursor" "pointer" "padding" "2px 6px" "border-radius" "4px" "font-size" "0.75rem" "opacity" "0"}}} {:value {:selector "& .gd-recent-line:hover .gd-recent-pin" :declarations {"opacity" "1"}}} {:value {:selector "& .gd-recent-line:focus-within .gd-recent-pin" :declarations {"opacity" "1"}}} {:value {:selector "& .gd-recent-pin:hover" :declarations {"color" "var(--fg)" "background-color" "var(--hover-bg)"}}} {:value {:selector "& .gd-recent-pin:focus-visible" :declarations {"outline" "2px solid var(--accent)" "outline-offset" "1px" "opacity" "1"}}} {:value {:selector "& .gd-recent-row:hover" :declarations {"background-color" "var(--hover-bg)"}}} {:value {:selector "& .gd-recent-row:focus-visible" :declarations {"outline" "2px solid var(--accent)" "outline-offset" "1px"}}}]}}
-  {:name :recents-view :parent :zipmap  :args {:keys [{:value :tree} {:value :styles} {:value :hidden}] :vals [:_tree :recents-styles :recents-hidden]}}]}
+  {:name :recents-view :parent :zipmap  :args {:keys [{:value :tree} {:value :styles} {:value :hidden}] :vals [:_tree :recents-styles :_model-hidden]}}]}

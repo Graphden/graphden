@@ -1,10 +1,12 @@
 (ns graphden.test-infra.browser-recents-cases
   "Navigation trail cases shared by JVM and bounded browser evaluation.")
 
+
 (def a {:id "a" :name "add" :qname "core.add"})
 (def b {:id "b" :name "map" :qname "core.map"})
 (def c {:id "c" :name "get" :qname "core.get"})
 (def state {:pins [b] :trail [a b c a]})
+
 
 (def cases
   [{:entry :recents-initial :inputs {:context state} :expected state}
@@ -24,9 +26,9 @@
              :event {:kind "push" :entry a}}
     :expected {:pins [] :trail (into [a] (map #(assoc c :id (str %)) (range 5)))}}
    {:entry :recents-update :inputs {:state state :event {:kind "unknown"}} :expected state}
-   {:entry :recents-visible-trail :inputs {:state state :context {:selected "a"}} :expected [c]}
-   {:entry :recents-visible-trail :inputs {:state {:pins [] :trail (vec (repeat 8 c))} :context {:selected nil}}
-    :expected (vec (repeat 5 c))}
+   {:entry :recents-model :inputs {:state state :context {:selected "a"}} :expected {:trail [c] :hidden false}}
+   {:entry :recents-model :inputs {:state {:pins [] :trail (vec (repeat 8 c))} :context {:selected nil}}
+    :expected {:trail (vec (repeat 5 c)) :hidden false}}
    {:entry :recents-hidden :inputs {:state state :context {:searching true}} :expected true}
    {:entry :recents-hidden :inputs {:state {:pins [] :trail []} :context {}} :expected true}
    {:entry :recents-hidden :inputs {:state state :context {}} :expected false}])

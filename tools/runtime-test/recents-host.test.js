@@ -28,6 +28,9 @@ ctx.addEventListener = (kind, fn) => listeners.set(kind, fn);
 ctx.GraphdenRenderer = {mount() { mounted++; return {render() { renderCount++; }, dispose() { disposed++; }}; }};
 vm.runInContext(fs.readFileSync('resources/packages/app/editor/editor-recents.js', 'utf8'), ctx);
 (async () => {
+  saved.set('graphden.pinnedFns', JSON.stringify([null, {id: 'b', name: 'map', qname: 'map'}, {id: 'b', name: 'duplicate', qname: 'dup'}, {id: 42, name: 'bad', qname: 'bad'}]));
+  assert.equal(ctx.gdReadPinnedFns().length, 1, 'storage boundary rejects malformed entries and duplicate identities');
+  saved.delete('graphden.pinnedFns');
   ctx.gdLoadRecents();
   ctx.renderRecentFns();
   ctx.gdPushRecentFn('a');

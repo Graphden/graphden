@@ -181,26 +181,26 @@ Orders function-picker candidates without accessing the [[file:glossary.org::#te
 :PROPERTIES:
 :CUSTOM_ID: editor/export-plan
 :FILE: src/graphden/executor/browser_plan.clj
-:LINE: 335
+:LINE: 337
 :MINS: 2.7
 :END:
 
 The ordinary account menu, function picker and Explorer navigation trail use bundled graph plans for their local state or markup. This exporter resolves inheritance, bindings, and renames on the server and emits an ID-based plan for supported primitives; the browser does not resolve graph names itself. Shipped plans are generated during development. The generic editable-graph export takes a whole snapshot and remains unavailable under tenancy. Personal components instead use ~graphden.editor.components/export-current~, which authorizes every source dependency and exports only a bounded component plan. See the [[file:../../../resources/packages/app/ui-preview/README.md][graph-backed UI contract]].
 
-- source :: [[file:../../../src/graphden/executor/browser_plan.clj::(defn export-plan][src/graphden/executor/browser_plan.clj:335]]
+- source :: [[file:../../../src/graphden/executor/browser_plan.clj::(defn export-plan][src/graphden/executor/browser_plan.clj:337]]
 - see also :: [[file:executor.org::#executor/build-lookups][build-lookups]], [[file:editor.org::#editor/createRuntime][createRuntime]]
 
 * 15. createRuntime
 :PROPERTIES:
 :CUSTOM_ID: editor/createRuntime
 :FILE: resources/packages/app/ui-preview/browser-runtime.js
-:LINE: 170
+:LINE: 226
 :MINS: 5.1
 :END:
 
 Creates the bounded browser interpreter for that plan. Each entry invocation has lazy argument reads, memoized calls, and an operation limit; unsupported primitives fail. This backend supports a small part of the graph vocabulary, separate from the JVM executor. ~editor-shell-menu-graph.js~ and ~editor-fn-picker-graph.js~ connect shipped plans to real controls; native host code retains authentication, search, type verdicts, authorized actions, and focus.
 
-- source :: [[file:../../../resources/packages/app/ui-preview/browser-runtime.js::  function createRuntime(plan, {operationLimit = 10000} = {}) {][resources/packages/app/ui-preview/browser-runtime.js:170]]
+- source :: [[file:../../../resources/packages/app/ui-preview/browser-runtime.js::  function createRuntime(plan, {operationLimit = 10000} = {}) {][resources/packages/app/ui-preview/browser-runtime.js:226]]
 - see also :: [[file:editor.org::#editor/mount][mount]], [[file:editor.org::#editor/pickerArrange][pickerArrange]]
 - referenced from :: [[file:editor.org::#editor/export-plan][export-plan]], [[file:editor.org::#editor/renderRecentFns][renderRecentFns]], [[file:editor.org::#editor/mount][mount]]
 

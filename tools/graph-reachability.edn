@@ -107,6 +107,9 @@
  :vocabulary
  {
   :ensure-color "docs/TYPES.md — explicit text-to-color boundary for graph-built HEX values"
+  :recents-initial "app.ui-recents shipped browser entry: tools/ui_preview/builtin_plans.clj exports by UUID; editor-recents.js supplies persisted lists, resources/packages/app/ui-preview/README.md"
+  :recents-update "app.ui-recents shipped browser entry: editor-recents.js executes by UUID for selections and pin toggles, resources/packages/app/ui-preview/README.md"
+  :recents-view "app.ui-recents shipped browser entry: editor-recents.js renders its bounded output by UUID, resources/packages/app/ui-preview/README.md"
   :picker-view "app.ui-fn-picker review entry: tools/ui_preview/prepare.clj imports an editable copy; editor-fn-picker-graph.js executes its UUID, resources/packages/app/ui-preview/README.md"
   :account-menu-initial "app.ui-account-menu review entry: tools/ui_preview/prepare.clj imports an editable copy; editor-shell-menu-graph.js runs it by UUID, resources/packages/app/ui-preview/README.md"
   :account-menu-update "app.ui-account-menu review entry: imported by tools/ui_preview/prepare.clj and executed by UUID in the browser runtime, resources/packages/app/ui-preview/README.md"

@@ -386,7 +386,7 @@
   ([definitions]
    (let [loaded (loader/load-packages ["web"])
          base-defs (select-keys (:base-fn-defs loaded)
-                                [:const :if :list :mod :get :equal? :count :map :filter :take :concat :str :str-starts-with? :hiccup :zipmap])
+                                [:const :if :list :mod :get :equal? :count :map :filter :take :concat :str :str-starts-with? :hiccup :zipmap :assoc :add])
          type-defs (remove #(or (:parent %) (:parents %)) (:fn-defs loaded))
          primitives (into (vec type-defs) (map (fn [[n d]] (assoc d :name n))) base-defs)]
      (assoc (graph-of primitives definitions)

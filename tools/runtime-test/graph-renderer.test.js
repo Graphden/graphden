@@ -37,6 +37,9 @@ for (const unsafe of [
 assert.throws(() => ctx.GraphdenRenderer.vnode([k('other/div'), 'namespaced tag']));
 const rule = (selector, declarations) => attrs({selector, declarations: new Map(Object.entries(declarations))});
 assert.equal(ctx.GraphdenStyles.normalize([rule('& .row:hover', {'background-color': 'var(--hover-bg)'})]).length, 1);
+assert.equal(ctx.GraphdenStyles.normalize([rule('& .row:focus-within .pin', {
+  flex: 'none', 'font-family': 'var(--gd-mono)', 'letter-spacing': '0.06em', 'text-transform': 'uppercase',
+})]).length, 1);
 for (const unsafe of [
   rule('body', {color: 'red'}),
   rule('& + .neighbor', {color: 'red'}),

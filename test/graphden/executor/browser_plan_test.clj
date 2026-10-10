@@ -386,7 +386,7 @@
   ([definitions]
    (let [loaded (loader/load-packages ["web"])
          base-defs (select-keys (:base-fn-defs loaded)
-                                [:const :if :list :mod :get :equal? :count :map :hiccup :zipmap])
+                                [:const :if :list :mod :get :equal? :count :map :filter :take :concat :str :str-starts-with? :hiccup :zipmap])
          type-defs (remove #(or (:parent %) (:parents %)) (:fn-defs loaded))
          primitives (into (vec type-defs) (map (fn [[n d]] (assoc d :name n))) base-defs)]
      (assoc (graph-of primitives definitions)
@@ -396,6 +396,43 @@
 (deftest browser-map-matches-jvm-for-ordinary-views-and-captures
   (let [{:keys [graph impls ids]} (map-fixture)]
     (assert-differential! graph impls ids browser-map/cases)))
+
+
+(deftest browser-list-and-text-operations-match-jvm
+  (let [definitions [{:name :item-id :parent :get :args {:coll {:as :item} :key {:value :id}}}
+                     {:name :matches :parent :equal? :lambda-params [:item]
+                      :args {:a :item-id :b {:as :selected}}}
+                     {:name :filtered :parent :filter :args {:pred :matches :coll {:as :rows}}}
+                     {:name :filter-view :parent :list :args {:items [{:as :selected} :filtered]}}
+                     {:name :take-view :parent :take :args {:count {:as :limit} :coll {:as :rows}}}
+                     {:name :concat-view :parent :concat :args {:colls {:as :items}}}
+                     {:name :str-view :parent :str :args {:parts {:as :items}}}
+                     {:name :prefix-view :parent :str-starts-with?
+                      :args {:string {:as :text} :prefix {:as :prefix}}}
+                     {:name :throw-predicate :parent :mod :lambda-params [:item]
+                      :args {:dividend 1 :divisor {:as :item}}}
+                     {:name :throw-filter :parent :filter :args {:pred :throw-predicate :coll {:as :rows}}}
+                     {:name :get-filter :parent :get :args {:coll :throw-filter :key 0 :default "hidden"}}]
+        {:keys [graph impls ids]} (map-fixture definitions)]
+    (assert-differential!
+      graph impls ids
+      [{:entry :filter-view :inputs {:selected "a" :rows [{:id "a"} {:id "b"} {:id "a"}]}
+        :expected ["a" [{:id "a"} {:id "a"}]]}
+       {:entry :filter-view :inputs {:selected nil :rows nil} :expected [nil []]}
+       {:entry :take-view :inputs {:limit 0 :rows [1 2]} :expected [] :sequence false}
+       {:entry :take-view :inputs {:limit 1 :rows [nil false 3]} :expected [nil] :sequence false}
+       {:entry :take-view :inputs {:limit 5 :rows [1 2]} :expected [1 2]}
+       {:entry :concat-view :inputs {:items [[1 nil] nil [] [false 2]]} :expected [1 nil false 2] :sequence false}
+       {:entry :str-view :inputs {:items ["Back to " :user/item nil false 23 "🙂"]}
+        :expected "Back to :user/itemfalse23🙂"}
+       {:entry :prefix-view :inputs {:text nil :prefix "_anon-"} :expected false}
+       {:entry :prefix-view :inputs {:text "_anon-ab" :prefix "_anon-"} :expected true}
+       {:entry :prefix-view :inputs {:text "name" :prefix "_anon-"} :expected false}
+       {:entry :get-filter :inputs {:rows [1 0]} :error true}])
+    (let [plan (browser/export-plan graph impls {:view (get ids :concat-view)} {:allow-fn? (constantly true)})]
+      (is (= "Browser graph operation limit exceeded"
+             (:error (first (browser-results plan [{:entry :view :inputs {:items (vec (repeat 100 []))}
+                                                    :operation-limit 20}]))))))))
 
 
 (defn- full-picker-case

@@ -26,7 +26,7 @@ The same source generates this standalone page, the Emacs data, and the Org read
 - [[file:boot.org][Boot — starting the system]] (12 · ~21 min) :: Configuration, component dependencies, startup, and shutdown.
 - [[file:web.org][Web — HTTP handlers and rendering]] (19 · ~28 min) :: Requests, routing, markup, and graph-backed APIs.
 - [[file:layout.org][Layout — graph structure and coordinates]] (6 · ~21 min) :: From graph rows and expansion state to nodes, edges, and a grid.
-- [[file:editor.org][Editor — browser behavior]] (35 · ~124 min) :: Loading, graph-backed controls, actions, forms, and preferences.
+- [[file:editor.org][Editor — browser behavior]] (36 · ~126 min) :: Loading, graph-backed controls, actions, forms, and preferences.
 - [[file:services.org][Services — instances and placement]] (22 · ~57 min) :: Reconciliation, service discovery, tracing, and executor placement.
 - [[file:platform.org][Platform — extension interfaces and isolation]] (11 · ~27 min) :: Access policy, safe rendering, monitoring, and remote executors.
 - [[file:accounts.org][Accounts — identity and sessions]] (5 · ~16 min) :: Sign-in, account linking, tokens, and second-factor validation.

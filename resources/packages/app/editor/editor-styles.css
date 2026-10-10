@@ -6859,38 +6859,6 @@ button.gd-views-row:focus-visible { outline: 2px solid var(--accent); outline-of
 .gd-views-input:focus-visible,
 .gd-views-save:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-/* ---- Recent fns (editor-sidebar.js): the navigation trail above
- *      the tree — last selected named fns, rows navigate back. ---- */
-#gd-recent-fns { padding: 4px 8px 2px; }
-.gd-recent-cap {
-  font-size: 0.625rem; font-weight: 600; letter-spacing: 0.06em;
-  text-transform: uppercase; color: var(--gd-ink-3);
-  padding: 2px 4px;
-}
-.gd-recent-row {
-  display: block; width: 100%;
-  border: 0; border-radius: 4px; margin: 0; padding: 2px 6px;
-  background: transparent; color: var(--fg);
-  text-align: left; cursor: pointer;
-  font-family: var(--gd-mono); font-size: 0.75rem;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.gd-recent-line { display: flex; align-items: center; }
-.gd-recent-line .gd-recent-row { flex: 1; min-width: 0; }
-.gd-recent-pin {
-  flex: none;
-  border: 0; background: transparent; color: var(--muted-fg);
-  cursor: pointer; padding: 2px 6px; border-radius: 4px;
-  font-size: 0.75rem;
-  opacity: 0;
-}
-.gd-recent-line:hover .gd-recent-pin,
-.gd-recent-line:focus-within .gd-recent-pin { opacity: 1; }
-.gd-recent-pin:hover { color: var(--fg); background: var(--hover-bg); }
-.gd-recent-pin:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; opacity: 1; }
-.gd-recent-row:hover { background: var(--hover-bg); }
-.gd-recent-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-
 /* ---- Inspector "Used by" (editor-fn-usages.js): who extends /
  *      references the selected fn, grouped by kind, rows navigate. ---- */
 .gd-insp-usages { margin-top: 18px; }

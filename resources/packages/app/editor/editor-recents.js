@@ -1,122 +1,93 @@
-// Editor Recents — the Explorer's navigation trail (extracted from
-// editor-sidebar.js before it grew another surface).
-//
-// Deep reading is a chain of jumps (a named ref is a leaf — you re-root
-// to read it); the last few selected NAMED fns render as rows above the
-// tree, each navigating back via gdNavigateToFn (by id when loaded, by
-// qualified name when not). localStorage-persisted like every other
-// view pref. `renderRecentFns` is called by updateEntityList on every
-// tree paint; the list hides while a search or any filter owns the tree.
-
+// Explorer navigation trail: persistence/navigation belong to the host;
+// ordering, pin transitions, visibility, markup and styles are ordinary graphs.
 const RECENT_FNS_KEY = 'graphden.recentFns';
-const RECENT_FNS_MAX = 6;
-// Pinned fns — the trail's permanent half. A recent is one selection
-// from eviction; a ★ keeps it at the top until unpinned.
 const PINNED_FNS_KEY = 'graphden.pinnedFns';
+let gdRecentsRuntime = null;
+let gdRecentsMount = null;
+let gdRecentsHost = null;
 
-function gdReadPinnedFns() {
+function gdReadFnTrail(key) {
   try {
-    const raw = localStorage.getItem(PINNED_FNS_KEY);
-    const arr = raw ? JSON.parse(raw) : [];
-    return Array.isArray(arr) ? arr : [];
+    const raw = localStorage.getItem(key);
+    const entries = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(entries)) return [];
+    const seen = new Set();
+    return entries.filter(entry => {
+      if (!entry || ['id', 'name', 'qname'].some(key => typeof entry[key] !== 'string' || !entry[key] || entry[key].length > 4096) || seen.has(entry.id)) return false;
+      seen.add(entry.id);
+      return true;
+    });
   } catch (_) { return []; }
 }
-
+function gdReadPinnedFns() { return gdReadFnTrail(PINNED_FNS_KEY); }
+function gdReadRecentFns() { return gdReadFnTrail(RECENT_FNS_KEY); }
+function gdRecentsValue(value) {
+  const api = window.GraphdenBrowser;
+  return Array.isArray(value) ? value.map(gdRecentsValue)
+    : value && typeof value === 'object'
+      ? new Map(Object.entries(value).map(([key, item]) => [api.keyword(key), gdRecentsValue(item)])) : value;
+}
+function gdRecentsField(value, key) { return value.get(window.GraphdenBrowser.keyword(key)); }
+function gdRecentsNative(value) {
+  const api = window.GraphdenBrowser;
+  if (value instanceof Map) return Object.fromEntries([...value].map(([key, item]) => [key.name, gdRecentsNative(item)]));
+  if (Array.isArray(value) || api.isSequence(value)) return [...value].map(gdRecentsNative);
+  return value;
+}
+function gdRecentsState() {
+  return gdRecentsRuntime.run('initial', {context: gdRecentsValue({pins: gdReadPinnedFns(), trail: gdReadRecentFns()})});
+}
+function gdRecentsWrite(kind, entry, key, field) {
+  const state = gdRecentsRuntime.run('update', {state: gdRecentsState(), event: gdRecentsValue({kind, entry})});
+  try { localStorage.setItem(key, JSON.stringify(gdRecentsNative(gdRecentsField(state, field)))); } catch (_) { /* private mode */ }
+}
 function gdTogglePinnedFn(entry) {
-  const pins = gdReadPinnedFns();
-  const without = pins.filter((p) => p.id !== entry.id);
-  try {
-    localStorage.setItem(PINNED_FNS_KEY,
-      JSON.stringify(without.length === pins.length
-        ? [entry].concat(pins)
-        : without));
-  } catch (_) { /* private mode */ }
+  if (!gdRecentsRuntime) return;
+  gdRecentsWrite('toggle-pin', entry, PINNED_FNS_KEY, 'pins');
   renderRecentFns();
 }
-
-function gdReadRecentFns() {
-  try {
-    const raw = localStorage.getItem(RECENT_FNS_KEY);
-    const arr = raw ? JSON.parse(raw) : [];
-    return Array.isArray(arr) ? arr : [];
-  } catch (_) { return []; }
-}
-
 function gdPushRecentFn(fnId) {
+  if (!gdRecentsRuntime) gdLoadRecents();
   const fn = (typeof lookups !== 'undefined') ? lookups?.fnMap?.get(fnId) : null;
-  // Anonymous / auto-named rows have no recognisable identity to return
-  // to — the trail keeps named fns only.
-  if (!fn?.name || fn.name.startsWith('_anon-')) return;
-  const nsPath = (fn['namespace-id'] && lookups?.nsPathMap)
-    ? (lookups.nsPathMap.get(fn['namespace-id']) || '') : '';
-  const entry = { id: fnId, name: fn.name,
-                  qname: nsPath ? nsPath + '.' + fn.name : fn.name };
-  const rest = gdReadRecentFns().filter((r) => r.id !== fnId);
-  try {
-    localStorage.setItem(RECENT_FNS_KEY,
-      JSON.stringify([entry].concat(rest).slice(0, RECENT_FNS_MAX)));
-  } catch (_) { /* private mode — the trail just doesn't persist */ }
+  if (!fn) return;
+  const path = fn['namespace-id'] ? lookups?.nsPathMap?.get(fn['namespace-id']) || '' : '';
+  const entry = {id: fnId, name: fn.name || '', qname: path ? path + '.' + fn.name : fn.name || ''};
+  gdRecentsWrite('push', entry, RECENT_FNS_KEY, 'trail');
 }
-
-// One row: name navigates, the trailing ★/☆ pins or unpins. The pin
-// control is a sibling (not nested — a button inside a button is
-// invalid and unreachable), visible on hover/focus like tree actions.
-function gdRecentRow(entry, pinned) {
-  const row = document.createElement('div');
-  row.className = 'gd-recent-line';
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = 'gd-recent-row';
-  btn.title = entry.qname;
-  btn.setAttribute('aria-label', 'Back to ' + entry.qname);
-  btn.textContent = (pinned ? '★ ' : '') + entry.name;
-  btn.addEventListener('click', () => {
-    if (typeof gdNavigateToFn === 'function') gdNavigateToFn(entry.id, entry.qname);
-  });
-  const pin = document.createElement('button');
-  pin.type = 'button';
-  pin.className = 'gd-recent-pin';
-  pin.textContent = pinned ? '×' : '☆';
-  pin.title = pinned ? 'Unpin' : 'Pin — keep above the trail';
-  pin.setAttribute('aria-label',
-    (pinned ? 'Unpin ' : 'Pin ') + entry.qname);
-  pin.addEventListener('click', (e) => {
-    e.stopPropagation();
-    gdTogglePinnedFn(entry);
-  });
-  row.appendChild(btn);
-  row.appendChild(pin);
-  return row;
+function gdDisposeRecents() {
+  gdRecentsHost?.removeEventListener('click', gdRecentsClick);
+  gdRecentsMount?.dispose();
+  gdRecentsMount = null;
+  gdRecentsHost = null;
 }
-
+function gdRecentsClick(event) {
+  const button = event.target.closest?.('button[data-action]');
+  if (!button || !gdRecentsHost?.contains(button)) return;
+  if (button.dataset.action === 'toggle-pin') {
+    event.stopPropagation();
+    gdTogglePinnedFn({id: button.dataset.fnId, name: button.dataset.name, qname: button.dataset.qname});
+  } else if (button.dataset.action === 'navigate' && typeof gdNavigateToFn === 'function') {
+    gdNavigateToFn(button.dataset.fnId, button.dataset.qname);
+  }
+}
+function gdLoadRecents() {
+  if (!gdRecentsRuntime) gdRecentsRuntime = window.GraphdenBrowser.createRuntime(window.GraphdenBuiltinPlans.plans.recents, {operationLimit: 150000});
+  return gdRecentsRuntime;
+}
 function renderRecentFns() {
   const host = document.getElementById('gd-recent-fns');
+  if (host !== gdRecentsHost) gdDisposeRecents();
   if (!host) return;
-  const selected = (typeof selectedFnId !== 'undefined') ? selectedFnId : null;
-  const pins = gdReadPinnedFns();
-  const pinnedIds = new Set(pins.map((p) => p.id));
-  // The current selection heads the list by construction — showing it
-  // as "recent" is noise, so the trail starts at the previous stop.
-  // Pinned fns render above and never repeat in the trail half.
-  const rows = gdReadRecentFns()
-    .filter((r) => r.id !== selected && !pinnedIds.has(r.id))
-    .slice(0, RECENT_FNS_MAX - 1);
-  // A search or any active filter owns the tree — each narrows it to a
-  // match list the reader is scanning, and the trail above it only pushes
-  // that list down (lesson 19 reads the ✕ failed filter right under the
-  // chips).
-  const searching = !!searchFilter
-    || ((typeof gdFiltersActive === 'function') && gdFiltersActive());
-  host.replaceChildren();
-  if ((!rows.length && !pins.length) || searching) {
-    host.hidden = true;
-    return;
+  if (!gdRecentsRuntime) gdLoadRecents();
+  if (!gdRecentsMount) {
+    gdRecentsHost = host;
+    gdRecentsMount = window.GraphdenRenderer.mount(host);
+    host.addEventListener('click', gdRecentsClick);
   }
-  host.hidden = false;
-  const cap = document.createElement('div');
-  cap.className = 'gd-recent-cap';
-  cap.textContent = pins.length ? 'Pinned · Recent' : 'Recent';
-  host.appendChild(cap);
-  for (const p of pins) host.appendChild(gdRecentRow(p, true));
-  for (const r of rows) host.appendChild(gdRecentRow(r, false));
+  const selected = (typeof selectedFnId !== 'undefined') ? selectedFnId : null;
+  const searching = !!searchFilter || (typeof gdFiltersActive === 'function' && gdFiltersActive());
+  const output = gdRecentsRuntime.run('view', {state: gdRecentsState(), context: gdRecentsValue({selected, searching})});
+  host.hidden = gdRecentsField(output, 'hidden');
+  gdRecentsMount.render(gdRecentsField(output, 'tree'), gdRecentsField(output, 'styles'));
 }
+window.addEventListener('pagehide', gdDisposeRecents);

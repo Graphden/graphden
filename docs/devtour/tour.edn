@@ -1372,7 +1372,7 @@
            the Web block supplies fit metadata without changing type admissibility."}
 
     {:ns graphden.executor.browser-plan :defn export-plan
-     :say "The ordinary account menu and function picker use bundled graph plans for their local
+     :say "The ordinary account menu, function picker and Explorer navigation trail use bundled graph plans for their local
            state or markup. This exporter resolves inheritance, bindings, and renames on the server
            and emits an ID-based plan for supported primitives; the browser does not resolve graph
            names itself. Shipped plans are generated during development. The generic editable-graph export takes
@@ -1389,6 +1389,14 @@
            plans to real controls; native host code retains authentication, search, type verdicts,
            authorized actions, and focus."
      :see [[:editor "mount"] [:editor "pickerArrange"]]}
+
+    {:file "resources/packages/app/editor/editor-recents.js" :defn renderRecentFns
+     :say "The Explorer trail executes the shipped `app.ui-recents` initial and view graphs.
+           Its update graph deduplicates selections, limits the trail and toggles pins; the view
+           excludes the selected function and pinned duplicates and hides during searches or filters.
+           Ordinary row functions produce Hiccup and scoped styles. The host persists localStorage,
+           resolves namespace paths and delegates navigation; keyed rendering preserves focused pin buttons."
+     :see [[:editor "mount"] [:editor "createRuntime"]]}
 
     {:file "resources/packages/app/ui-preview/graph-renderer.js" :defn mount
      :say "Gives a graph component its own empty DOM host. `render` validates live Hiccup and scoped

@@ -20,7 +20,8 @@
     [graphden.storage.postgres.codec :as codec]
     [graphden.test-infra.account-menu-cases :as account-menu]
     [graphden.test-infra.browser-map-cases :as browser-map]
-    [graphden.test-infra.browser-picker-cases :as browser-picker]))
+    [graphden.test-infra.browser-picker-cases :as browser-picker]
+    [graphden.test-infra.browser-recents-cases :as recents]))
 
 
 (use-fixtures :each
@@ -580,3 +581,9 @@
     (is (= (:state ids) (:fn-id (ex-data thrown))))
     (is (nil? (ex-cause thrown)))
     (is (not (str/includes? (str thrown (ex-data thrown)) "private-value")))))
+
+
+(deftest real-recents-matches-jvm-for-selection-dedupe-and-pin-transitions
+  (let [definitions (:fns (edn/read-string (slurp "resources/packages/app/ui-recents/fns.edn")))
+        {:keys [graph impls ids]} (map-fixture definitions)]
+    (assert-differential! graph impls ids recents/cases)))

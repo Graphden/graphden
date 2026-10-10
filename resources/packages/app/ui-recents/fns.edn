@@ -1,0 +1,76 @@
+{:namespace "app.ui-recents"
+ :fns
+ [{:name :recents-pins :parent :get  :args {:coll {:as :state} :key {:value :pins} :default {:value []}}}
+  {:name :recents-trail :parent :get  :args {:coll {:as :state} :key {:value :trail} :default {:value []}}}
+  {:name :_initial-pins :parent :get :args {:coll {:as :context} :key {:value :pins} :default {:value []}}}
+  {:name :_initial-trail :parent :get :args {:coll {:as :context} :key {:value :trail} :default {:value []}}}
+  {:name :recents-initial :parent :zipmap  :args {:keys [{:value :pins} {:value :trail}] :vals [:_initial-pins :_initial-trail]}}
+  {:name :_event-kind :parent :get  :args {:coll {:as :event} :key {:value :kind} :default ""}}
+  {:name :_entry :parent :get  :args {:coll {:as :event} :key {:value :entry} :default {:value {}}}}
+  {:name :_entry-id :parent :get  :args {:coll :_entry :key {:value :id} :default ""}}
+  {:name :_entry-name :parent :get  :args {:coll :_entry :key {:value :name} :default ""}}
+  {:name :_item-id :parent :get  :args {:coll {:as :item} :key {:value :id} :default ""}}
+  {:name :_same-entry :parent :equal?  :args {:a :_item-id :b :_entry-id}}
+  {:name :_keep-entry :parent :if :lambda-params [:item] :args {:test :_same-entry :then false :else true}}
+  {:name :_other-pins :parent :filter  :args {:pred :_keep-entry :coll :recents-pins}}
+  {:name :_other-trail :parent :filter  :args {:pred :_keep-entry :coll :recents-trail}}
+  {:name :_pin-count :parent :count  :args {:coll :recents-pins}}
+  {:name :_other-pin-count :parent :count  :args {:coll :_other-pins}}
+  {:name :_not-pinned :parent :equal?  :args {:a :_pin-count :b :_other-pin-count}}
+  {:name :_entry-list :parent :list :args {:items [:_entry]}}
+  {:name :_prepend-pin :parent :concat  :args {:colls [:_entry-list :recents-pins]}}
+  {:name :_toggled-pins :parent :if  :args {:test :_not-pinned :then :_prepend-pin :else :_other-pins}}
+  {:name :recents-toggle-pin :parent :assoc  :args {:map {:as :state} :key {:value :pins} :value :_toggled-pins}}
+  {:name :_prepend-trail :parent :concat  :args {:colls [:_entry-list :_other-trail]}}
+  {:name :_limited-trail :parent :take  :args {:count 6 :coll :_prepend-trail}}
+  {:name :_push-trail :parent :assoc  :args {:map {:as :state} :key {:value :trail} :value :_limited-trail}}
+  {:name :_anonymous-name :parent :str-starts-with?  :args {:string :_entry-name :prefix "_anon-"}}
+  {:name :_empty-name :parent :equal?  :args {:a :_entry-name :b ""}}
+  {:name :_unchanged-state :parent :const :args {:value {:as :state}}}
+  {:name :_named-push :parent :if  :args {:test :_anonymous-name :then :_unchanged-state :else :_push-trail}}
+  {:name :recents-push :parent :if  :args {:test :_empty-name :then :_unchanged-state :else :_named-push}}
+  {:name :_push-event :parent :equal?  :args {:a :_event-kind :b "push"}}
+  {:name :_toggle-event :parent :equal?  :args {:a :_event-kind :b "toggle-pin"}}
+  {:name :_update-push :parent :if  :args {:test :_push-event :then :recents-push :else :_unchanged-state}}
+  {:name :recents-update :parent :if  :args {:test :_toggle-event :then :recents-toggle-pin :else :_update-push}}
+  {:name :_selected :parent :get  :args {:coll {:as :context} :key {:value :selected} :default nil}}
+  {:name :_searching :parent :get  :args {:coll {:as :context} :key {:value :searching} :default false}}
+  {:name :_pin-id :parent :get  :args {:coll {:as :pin} :key {:value :id} :default ""}}
+  {:name :_matching-pin :parent :equal? :lambda-params [:pin] :args {:a :_pin-id :b :_item-id}}
+  {:name :_matching-pins :parent :filter  :args {:pred :_matching-pin :coll :recents-pins}}
+  {:name :_matching-pin-count :parent :count  :args {:coll :_matching-pins}}
+  {:name :_item-unpinned :parent :equal?  :args {:a :_matching-pin-count :b 0}}
+  {:name :_item-selected :parent :equal?  :args {:a :_item-id :b :_selected}}
+  {:name :_visible-item :parent :if :lambda-params [:item] :args {:test :_item-selected :then false :else :_item-unpinned}}
+  {:name :_visible-trail :parent :filter  :args {:pred :_visible-item :coll :recents-trail}}
+  {:name :recents-visible-trail :parent :take  :args {:count 5 :coll :_visible-trail}}
+  {:name :_visible-count :parent :count  :args {:coll :recents-visible-trail}}
+  {:name :_total-count :parent :add  :args {:nums [:_visible-count :_pin-count]}}
+  {:name :_empty :parent :equal?  :args {:a :_total-count :b 0}}
+  {:name :recents-hidden :parent :if  :args {:test :_searching :then true :else :_empty}}
+  {:name :_no-pins :parent :equal?  :args {:a :_pin-count :b 0}}
+  {:name :_caption :parent :if  :args {:test :_no-pins :then "Recent" :else "Pinned · Recent"}}
+  {:name :_caption-node :parent :hiccup  :args {:tag "div" :attrs {:value {:class "gd-recent-cap"}} :children [:_caption]}}
+  {:name :_row-name :parent :get  :args {:coll {:as :row} :key {:value :name} :default ""}}
+  {:name :_row-qname :parent :get  :args {:coll {:as :row} :key {:value :qname} :default ""}}
+  {:name :_row-id :parent :get  :args {:coll {:as :row} :key {:value :id} :default ""}}
+  {:name :_row-pinned :parent :get  :args {:coll {:as :row} :key {:value :pinned} :default false}}
+  {:name :_back-label :parent :str  :args {:parts ["Back to " :_row-qname]}}
+  {:name :_pin-prefix :parent :if  :args {:test :_row-pinned :then "Unpin " :else "Pin "}}
+  {:name :_pin-label :parent :str  :args {:parts [:_pin-prefix :_row-qname]}}
+  {:name :_pin-title :parent :if  :args {:test :_row-pinned :then "Unpin" :else "Pin — keep above the trail"}}
+  {:name :_pin-text :parent :if  :args {:test :_row-pinned :then "×" :else "☆"}}
+  {:name :_name-prefix :parent :if  :args {:test :_row-pinned :then "★ " :else ""}}
+  {:name :_navigate-attrs :parent :zipmap  :args {:keys [{:value :type} {:value :class} {:value :title} {:value :aria-label} {:value :data-action} {:value :data-fn-id} {:value :data-qname}] :vals ["button" "gd-recent-row" :_row-qname :_back-label "navigate" :_row-id :_row-qname]}}
+  {:name :_pin-attrs :parent :zipmap  :args {:keys [{:value :type} {:value :class} {:value :title} {:value :aria-label} {:value :data-action} {:value :data-fn-id} {:value :data-qname} {:value :data-name}] :vals ["button" "gd-recent-pin" :_pin-title :_pin-label "toggle-pin" :_row-id :_row-qname :_row-name]}}
+  {:name :_navigate-node :parent :hiccup  :args {:tag "button" :attrs :_navigate-attrs :children [:_name-prefix :_row-name]}}
+  {:name :_pin-node :parent :hiccup  :args {:tag "button" :attrs :_pin-attrs :children [:_pin-text]}}
+  {:name :_line-attrs :parent :zipmap  :args {:keys [{:value :class} {:value :key}] :vals ["gd-recent-line" :_row-id]}}
+  {:name :recents-row :parent :hiccup :lambda-params [:row] :args {:tag "div" :attrs :_line-attrs :children [:_navigate-node :_pin-node]}}
+  {:name :_pinned-entry :parent :assoc :lambda-params [:item] :args {:map {:as :item} :key {:value :pinned} :value true}}
+  {:name :_pinned-entries :parent :map  :args {:func :_pinned-entry :coll :recents-pins}}
+  {:name :_row-entries :parent :concat  :args {:colls [:_pinned-entries :recents-visible-trail]}}
+  {:name :_row-nodes :parent :map  :args {:func :recents-row :coll :_row-entries}}
+  {:name :_tree :parent :hiccup  :args {:tag "div" :attrs {:value {:class "gd-recents"}} :children [:_caption-node :_row-nodes]}}
+  {:name :recents-styles :parent :list  :args {:items [{:value {:selector "&" :declarations {"padding" "4px 8px 2px"}}} {:value {:selector "& .gd-recent-cap" :declarations {"font-size" "0.625rem" "font-weight" "600" "letter-spacing" "0.06em" "text-transform" "uppercase" "color" "var(--gd-ink-3)" "padding" "2px 4px"}}} {:value {:selector "& .gd-recent-row" :declarations {"display" "block" "width" "100%" "border" "0" "border-radius" "4px" "margin" "0" "padding" "2px 6px" "background-color" "transparent" "color" "var(--fg)" "text-align" "left" "cursor" "pointer" "font-family" "var(--gd-mono)" "font-size" "0.75rem" "overflow" "hidden" "text-overflow" "ellipsis" "white-space" "nowrap" "flex" "1" "min-width" "0"}}} {:value {:selector "& .gd-recent-line" :declarations {"display" "flex" "align-items" "center"}}} {:value {:selector "& .gd-recent-pin" :declarations {"flex" "none" "border" "0" "background-color" "transparent" "color" "var(--muted-fg)" "cursor" "pointer" "padding" "2px 6px" "border-radius" "4px" "font-size" "0.75rem" "opacity" "0"}}} {:value {:selector "& .gd-recent-line:hover .gd-recent-pin" :declarations {"opacity" "1"}}} {:value {:selector "& .gd-recent-line:focus-within .gd-recent-pin" :declarations {"opacity" "1"}}} {:value {:selector "& .gd-recent-pin:hover" :declarations {"color" "var(--fg)" "background-color" "var(--hover-bg)"}}} {:value {:selector "& .gd-recent-pin:focus-visible" :declarations {"outline" "2px solid var(--accent)" "outline-offset" "1px" "opacity" "1"}}} {:value {:selector "& .gd-recent-row:hover" :declarations {"background-color" "var(--hover-bg)"}}} {:value {:selector "& .gd-recent-row:focus-visible" :declarations {"outline" "2px solid var(--accent)" "outline-offset" "1px"}}}]}}
+  {:name :recents-view :parent :zipmap  :args {:keys [{:value :tree} {:value :styles} {:value :hidden}] :vals [:_tree :recents-styles :recents-hidden]}}]}

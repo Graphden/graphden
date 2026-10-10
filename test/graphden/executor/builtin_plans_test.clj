@@ -80,7 +80,7 @@
         (is (= (mapv #(assoc % :namespace "__GRAPHDEN_THEME_NAMESPACE__")
                      (:fns (edn/read-string (slurp "resources/packages/app/ui-theme-template/fns.edn"))))
                (:fns (edn/read-string (get-in artifact [:themeTemplate :edn])))))
-        (is (= #{:accountMenu :fnPicker} (set (keys (:plans artifact)))))
+        (is (= #{:accountMenu :fnPicker :recents} (set (keys (:plans artifact)))))
         (doseq [[_ compiled] (:plans artifact)]
           (is (= 1 (:format compiled) (:primitiveAbi compiled)))
           (is (= #{"initial" "update" "view"} (set (keys (:entries compiled)))))))

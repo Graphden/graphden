@@ -2,6 +2,7 @@
   "Exact-receipt batch deletion through the shipped graph and real PostgreSQL."
   (:require
     [cheshire.core :as json]
+    [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
     [clojure.tools.logging.test :refer [logged? with-log]]
     [graphden.crud.entities.delete-batch :as batch]
@@ -9,9 +10,12 @@
     [graphden.crud.test-autorun :as autorun]
     [graphden.executor.context :as context]
     [graphden.executor.registry.core :as registry]
+    [graphden.executor.test-setup :as setup]
     [graphden.storage.graph-writer :as writer]
     [graphden.storage.postgres.crud :as pg-crud]
     [graphden.storage.protocol.core :as sp]
+    [graphden.system.api-routes-js :as api-js]
+    [graphden.system.api-url-drift :as drift]
     [graphden.test-infra.golden-app :as ga]
     [graphden.versioning.storage.core :as versioned]))
 
@@ -116,12 +120,22 @@
     (is (= #{(:id a) (:id b)} (set (keys (sp/read-entities storage :fn [(:id a) (:id b)])))))))
 
 
+(deftest full-app-router-includes-conflict-free-batch-route-test
+  (let [{:keys [ctx storage]} ga/*bootstrap*
+        router (setup/exec-with-storage ctx storage (ga/fn-id :_router) {})
+        paths (set (drift/router-paths router))]
+    (is (contains? paths "/api/functions/delete-batch"))
+    (is (contains? paths "/api/entities/:type/:id"))
+    (is (str/includes? (api-js/routes->js-bundle (vec paths))
+                       "api_functions_delete_batch: \"/api/functions/delete-batch\""))))
+
+
 (deftest graph-handler-deletes-internal-dependencies-and-retries-test
   (let [storage (:storage ga/*bootstrap*)
         target (fresh-fn)
         caller (fresh-fn {:parent-ids [(:id target)]})
         _ (bind-ref! caller {:ref-fn-id (:id target)})
-        request {:request-method :post :uri "/api/entities/fn/delete-batch"
+        request {:request-method :post :uri "/api/functions/delete-batch"
                  :headers {"content-type" "application/json"}
                  :body (json/generate-string {:functions (mapv receipt [target caller])})}
         invalidations (atom [])

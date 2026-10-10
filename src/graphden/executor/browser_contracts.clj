@@ -5,6 +5,7 @@
     [clojure.edn :as edn]
     [clojure.java.io :as io]
     [graphden.packages.records.parse :as parse]
+    [graphden.packages.records.ids :as ids]
     [graphden.packages.records.types :as record-types]
     [graphden.tenancy.context :as tenancy]))
 
@@ -12,7 +13,8 @@
 (def ^:private declarations
   {"core/refinements" #{:color :non-negative-int :text-map :keyword-map :text-keyed-map :keyword-or-text}
    "web/html" #{:hiccup-node}
-   "app/ui-components" #{:_ui-components-identities}})
+   "app/ui-components" #{:_ui-components-identities :ui-component-entry :ui-component-entries
+                         :ui-component-descriptor :ui-component-manifest}})
 
 
 (defn- shipped-module
@@ -22,8 +24,10 @@
 
 (defn- type-records
   [module names]
-  (let [{:keys [fns] fn-namespace :namespace} (shipped-module module)]
-    (mapcat #(parse/parse-fn-def (assoc % :namespace fn-namespace) {})
+  (let [{:keys [fns] fn-namespace :namespace} (shipped-module module)
+        names-to-ids (into {} (map (fn [definition]
+                                    [(:name definition) (ids/fn-id fn-namespace (:name definition))])) fns)]
+    (mapcat #(parse/parse-fn-def (assoc % :namespace fn-namespace) names-to-ids)
             (filter #(contains? names (:name %)) fns))))
 
 
@@ -86,3 +90,11 @@
             (set (map #(select-keys % slot-fields) slots)))
          (= (set (map #(select-keys % junction-fields) expected-junctions))
             (set (map #(select-keys % junction-fields) junctions))))))
+
+
+(def component-identities
+  "Metadata-only public discriminators. This grants no component body access;
+   source policy may recognize these solely with :identity-only? permission."
+  {(ids/fn-id "app.ui-account-menu" :account-menu-view) "app.ui-account-menu"
+   (ids/fn-id "app.ui-fn-picker" :picker-view) "app.ui-fn-picker"
+   (ids/fn-id "app.ui-recents" :recents-view) "app.ui-recents"})

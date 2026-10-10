@@ -5,9 +5,9 @@
     [graphden.crud.entities.invalidation :as invalidation]
     [graphden.crud.request :as request]
     [graphden.editor.component-bundle :as bundle]
-    [graphden.editor.component-config :as config]
     [graphden.editor.component-templates :as templates]
     [graphden.executor.browser-source :as source]
+    [graphden.executor.browser-contracts :as contracts]
     [graphden.executor.context :as context]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.sync :as sync]
@@ -113,7 +113,13 @@
         records (mapv (fn [row]
                         (cond-> row (= :fn (:kind row))
                                 (assoc :namespace-id (get ns-ids (:namespace-id row))))) (:records parsed))
-        external (source/collect-closure storage (bundle/external-identities records) authorize!)
+        external-ids (bundle/external-identities records)
+        discriminator-ids (filter #(contains? contracts/component-identities %) external-ids)
+        metadata (source/collect-component-identities storage discriminator-ids authorize!)
+        external (-> (source/collect-closure storage
+                                            (remove #(contains? contracts/component-identities %) external-ids)
+                                            authorize!)
+                     (update :fns into metadata))
         functions (mapv #(select-keys % [:id :name :namespace-id])
                         (identity-order (filter #(= :fn (:kind %)) records)))
         manifest {:namespaces rows :functions functions :roots (templates/descriptor root)}
@@ -124,8 +130,9 @@
     ;; freshly above; this equivalent existing destination also proves branch
     ;; admission before a preview can stage any identities.
     (writer/assert-creation-authorized!
-      storage {:id (ids/fn-id root :ui) :name "ui" :namespace-id (:namespace-id command)
-               :parent-ids [config/configuration-id]}
+      storage (assoc (first (filter #(and (= :fn (:kind %))
+                                          (= (ids/fn-id root :ui) (:id %))) records))
+                     :namespace-id (:namespace-id command))
       (versioned/current-branch-id storage))
     (existing-identities! storage records rows)
     {:records records :manifest manifest :expected-state expected :command command}))

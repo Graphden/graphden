@@ -3,6 +3,9 @@
    before bindings are read; every database read uses one decorated snapshot."
   (:require
     [graphden.executor.browser-contracts :as contracts]
+    [graphden.executor.compile.bindings :as bindings]
+    [graphden.executor.compile.lookups :as lookups]
+    [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.tx :as tx]
     [graphden.tenancy.context :as tenancy]
@@ -61,12 +64,12 @@
                 (map :ref-fn-id items))))
 
 
-(defn collect-closure
+(defn- collect-source
   "Collect only requested roots and their source/type dependencies. `authorize!`
    receives each fn row BEFORE any of its binding/item values are loaded.
    Callers must supply an immutable storage/policy pair; HTTP code uses
    `with-snapshot`, not a live context's whole-graph cache."
-  [storage roots authorize!]
+  [storage roots authorize! manifest?]
   (let [budget (atom 0)]
     (loop [pending (set roots)
            seen #{}
@@ -74,7 +77,35 @@
       (when (> (+ (count pending) (count seen)) max-functions)
         (reject! :source-function-limit))
       (if (empty? pending)
-        (update graph :slots #(vec (vals (into {} (map (juxt :id identity)) %))))
+        (let [index (lookups/build-lookups graph)
+              classified (when manifest?
+                           (mapcat #(bindings/collect-bindings (:id %) index) (:fns graph)))
+              terminal (into #{} (keep #(when (= :fn-ref (:kind %)) (:ref-id %))) classified)
+              refs (when manifest?
+                     (set (concat (keep :ref-fn-id (:bindings graph))
+                                  (keep :ref-fn-id (:list-items graph)))))
+              ;; An id used by an ordinary call must still be loaded even if
+              ;; another binding names it by identity.
+              ordinary (into #{} (keep #(when (= :ref (:kind %)) (:ref-id %))) classified)
+              remaining (remove seen (concat ordinary (keep :ref-fn-id (:list-items graph))
+                                            (remove terminal refs)))]
+          (if (seq remaining)
+            (recur (set remaining) seen graph)
+            (let [targets (set (remove seen terminal))
+                  _ (when (> (+ (count seen) (count targets)) max-functions)
+                      (reject! :source-function-limit))
+                  rows (vec (read-rows storage :fn targets))]
+              (when-not (= targets (set (map :id rows))) (reject! :source-missing))
+              ;; Identity targets provide only authorized names for checker
+              ;; reconstruction. Never read their slots, bindings or literals.
+              (doseq [row rows]
+                (if (contains? contracts/component-identities (:id row))
+                  (authorize! row {:identity-only? true})
+                  (authorize! row)))
+              (-> graph
+                  (update :fns into rows)
+                  (cond-> manifest? (assoc :identity-target-ids targets))
+                  (update :slots #(vec (vals (into {} (map (juxt :id identity)) %))))))))
         (let [ids (set (take batch-size pending))
               fns (vec (read-rows storage :fn ids))]
           (when-not (= ids (set (map :id fns))) (reject! :source-missing))
@@ -89,7 +120,9 @@
                 slot-ids (set (map :slot-id fn-slots))
                 slots (if (seq slot-ids) (vec (read-rows storage :slot slot-ids)) [])
                 seen (into seen ids)
-                refs (related-ids fns slots bindings items)]
+                refs (related-ids fns slots
+                                  (if manifest? (map #(dissoc % :ref-fn-id) bindings) bindings)
+                                  (if manifest? [] items))]
             (when (or (some #(contains? bare-types (:fn-id %)) fn-slots)
                       (some #(contains? bare-types (:fn-id %)) bindings)
                       (some #(and (contains? bare-types (:id %))
@@ -114,6 +147,34 @@
                        (update :fn-slots into fn-slots)
                        (update :bindings into bindings)
                        (update :list-items into items)))))))))
+
+
+(defn collect-closure
+  "Collect the full authorized source closure. Identity targets are included
+   in this general-purpose mode, preserving the existing export boundary."
+  [storage roots authorize!]
+  (collect-source storage roots authorize! false))
+
+
+(defn collect-component-identities
+  "Read only server-allowlisted shipped component discriminator metadata.
+   An identity-only grant never authorizes binding or implementation reads."
+  [storage targets authorize!]
+  (let [targets (set targets)]
+    (when-not (every? #(contains? contracts/component-identities %) targets)
+      (reject! :invalid-component-identities))
+    (let [rows (vec (read-rows storage :fn targets))]
+      (when-not (= targets (set (map :id rows))) (reject! :source-missing))
+      (doseq [row rows] (authorize! row {:identity-only? true}))
+      rows)))
+
+
+(defn collect-manifest
+  "Collect manifest source with compiler-classified fn-ref edges terminal.
+   Only identity metadata is read for those targets; all other dependencies
+   retain the normal bounded ACL-before-values collection."
+  [storage root authorize!]
+  (collect-source storage [root] authorize! true))
 
 
 (defn with-snapshot

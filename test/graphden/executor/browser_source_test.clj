@@ -2,6 +2,8 @@
   (:require
     [clojure.test :refer [deftest is]]
     [graphden.executor.browser-source :as source]
+    [graphden.executor.browser-contracts :as contracts]
+    [graphden.packages.records.ids :as ids]
     [graphden.storage.bounded-query :as bounded]
     [graphden.storage.protocol.core :as sp]))
 
@@ -153,3 +155,59 @@
                 (catch clojure.lang.ExceptionInfo error (:reason (ex-data error))))))
     (is (not-any? #(= [:query :binding-list-item] (take 2 %)) @calls)
         "Only candidate projections were read before overflow")))
+
+
+(deftest manifest-identity-targets-are-authorized-without-body-reads
+  (let [root (random-uuid)
+        parent (random-uuid)
+        target (random-uuid)
+        const-id (ids/fn-id "core.logic" :const)
+        slot-id (ids/slot-id const-id :value)
+        any-id (ids/primitive-fn-id :any)
+        calls (atom [])
+        authorized (atom #{})
+        tables {:fn (keyed [{:id root :parent-ids [parent]}
+                           {:id parent :parent-ids [const-id]}
+                           {:id const-id :return-type-fn-id any-id :parent-ids []}
+                           {:id any-id :parent-ids []}
+                           {:id ids/fn-ref-type-id :parent-ids []}
+                           {:id target :parent-ids [(random-uuid)]}])
+                :slot {slot-id {:id slot-id :name "value" :type-fn-id any-id}}
+                :fn-slot (keyed [{:id (random-uuid) :fn-id const-id :slot-id slot-id :position 0}])
+                :binding (keyed [{:id (random-uuid) :fn-id parent :slot-id slot-id
+                                 :type-override-fn-id ids/fn-ref-type-id}
+                                {:id (random-uuid) :fn-id root :slot-id slot-id :ref-fn-id target}
+                                {:id (random-uuid) :fn-id target :value-present true :value "private body"}])}
+        storage (fixture-storage tables calls)
+        graph (source/collect-manifest storage root #(swap! authorized conj (:id %)))]
+    (is (contains? @authorized target))
+    (is (contains? (set (map :id (:fns graph))) target))
+    (is (not-any? #(= target (:fn-id %)) (:bindings graph)))
+    (is (not-any? (fn [[operation entity where]]
+                    (and (= operation :query) (contains? #{:binding :fn-slot} entity)
+                         (some #{target} (:fn-id where)))) @calls))
+    (reset! calls [])
+    (is (= :source-missing
+           (try (source/collect-closure storage [root] (constantly nil))
+                (catch clojure.lang.ExceptionInfo error (:reason (ex-data error))))))
+    (is (some (fn [[operation entity where]]
+                (and (= operation :query) (= entity :binding)
+                     (some #{target} (:fn-id where)))) @calls))))
+
+
+(deftest shipped-discriminator-permission-is-explicitly-metadata-only
+  (let [id (first (keys contracts/component-identities))
+        calls (atom [])
+        permissions (atom [])
+        row {:id id :name "shipped-view" :parent-ids [(random-uuid)]}
+        storage (fixture-storage {:fn {id row}
+                                  :binding {(random-uuid) {:fn-id id :value "never read"}}} calls)]
+    (is (= [row] (source/collect-component-identities
+                   storage [id] (fn [actual permission]
+                                  (swap! permissions conj [(:id actual) permission])))))
+    (is (= [[id {:identity-only? true}]] @permissions))
+    (is (= [[:read :fn id]] @calls))
+    (is (= :invalid-component-identities
+           (try (source/collect-component-identities storage [(random-uuid)] (constantly nil))
+                (catch clojure.lang.ExceptionInfo error (:reason (ex-data error))))))
+    (is (= [[:read :fn id]] @calls))))

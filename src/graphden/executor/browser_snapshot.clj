@@ -3,6 +3,8 @@
    Cached policy must match the checked source and pass a fresh snapshot check."
   (:require
     [graphden.crud.type-check :as type-check]
+    [clojure.set :as set]
+    [graphden.packages.records.ids :as ids]
     [graphden.executor.browser-plan :as plan]
     [graphden.executor.compile-runtime :as runtime]
     [graphden.executor.compile.deps :as deps]
@@ -116,7 +118,8 @@
   [snapshot entries original-rich]
   (let [graph (:graph snapshot)
         {:keys [forward-deps reverse-deps]} (deps/build-deps-state graph)
-        reachable (deps/forward-closure forward-deps (vals entries))
+        reachable (set/difference (deps/forward-closure forward-deps (vals entries))
+                                  (:identity-target-ids graph #{}))
         storage (snapshot-storage snapshot)
         {:keys [ordered cyclic]} (deps/dependency-order reverse-deps reachable)]
     (when (> (count reachable) 2048) (reject! :type-closure-limit {}))
@@ -136,10 +139,10 @@
             (reject! :type-check-failed {:fn-id id})))))))
 
 
-(defn export-snapshot
+(defn- checked-source
   "Derive a fresh policy and plan from the SAME immutable rows. No writes to
    the executor's rich types, aliases, markers, diagnostics, or storage."
-  [snapshot base-fns entries {:keys [rich classes]}]
+  [snapshot entries {:keys [rich classes]} consume]
   (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
             registry/*per-org-rich-override* (atom {})
             types/*type-aliases-override* (atom {})
@@ -149,9 +152,11 @@
     (try
       (runtime/register-type-aliases-from-db! (:graph snapshot) ::snapshot
                                               (ns-path/path-map (:namespaces snapshot)))
-      (seed-primitives! (select-keys (:by-id rich) (plan/supported-primitive-ids)))
+      (seed-primitives! (select-keys (:by-id rich)
+                                     (conj (plan/supported-primitive-ids)
+                                           (ids/fn-id "app.ui-components" :ui-components))))
       (check-closure! snapshot entries rich)
-      (plan/export-plan (:graph snapshot) base-fns entries
+      (consume
                         {:allow-fn?
                          (fn [id]
                            (and (= :plain (registry/trace-capture-class id nil))
@@ -163,3 +168,27 @@
         (if (= :browser-plan/unsupported (:type (ex-data error)))
           (throw error)
           (reject! :snapshot-check-failed {}))))))
+
+
+(defn validate-source!
+  "Validate a manifest source under the same isolated provenance/type policy
+   as component plans. No manifest graph is evaluated or returned to clients."
+  [snapshot root policy]
+  (checked-source snapshot {:manifest root} policy
+                  (fn [{:keys [allow-fn?]}]
+                    (let [forward (:forward-deps (deps/build-deps-state (:graph snapshot)))
+                          reachable (set/difference (deps/forward-closure forward [root])
+                                                    (get-in snapshot [:graph :identity-target-ids] #{}))
+                          rows (into {} (map (juxt :id identity)) (get-in snapshot [:graph :fns]))]
+                      (doseq [id reachable]
+                        (when (and (or (seq (:parent-ids (get rows id)))
+                                       (:return-type-fn-id (get rows id)))
+                                   (not (allow-fn? id)))
+                          (reject! :visibility-denied {:fn-id id})))))))
+
+
+(defn export-snapshot
+  "Derive a fresh policy and plan from the same immutable authorized rows."
+  [snapshot base-fns entries policy]
+  (checked-source snapshot entries policy
+                  #(plan/export-plan (:graph snapshot) base-fns entries %)))

@@ -1,7 +1,13 @@
 {:namespace "app.ui-components"
  :description "Personal editor components: ordinary identity bindings select bounded graph templates."
  :fns
- [{:name :_ui-components-identities
+ [{:name :ui-component-entry
+   :type {:role :keyword :fn-id :uuid}}
+  {:name :ui-component-entries :list :ui-component-entry}
+  {:name :ui-component-descriptor
+   :type {:component-id :uuid :entries :ui-component-entries}}
+  {:name :ui-component-manifest :list :ui-component-descriptor}
+  {:name :_ui-components-identities
    :type {:menu-initial :uuid :menu-update :uuid :menu-view :uuid :picker-view :uuid}}
   {:name :ui-components
    :description "A personal editor UI configuration. Bind component entry functions by identity; selecting this configuration changes only your editor preference. The host retains callbacks and validates each component's bounded DOM and style contract."

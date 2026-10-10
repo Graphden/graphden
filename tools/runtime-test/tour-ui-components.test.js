@@ -26,6 +26,22 @@ function fixture() {
 (async () => {
   {
     const f = fixture();
+    f.manifest.component = 'recents';
+    f.manifest.functions = f.manifest.functions.filter(row => row.id !== 'theme-id');
+    delete f.manifest.roots['theme-id'];
+    const ticket = f.ctx.gdTourStageUIComponentsManifest(f.request, f.manifest);
+    assert.equal(f.state.created.length, 2, 'a selective receipt owns only its new config and namespace');
+    f.ctx.gdTourConfirmUIComponentsManifest(ticket, f.manifest);
+    f.prefs.components = {'fn-id': 'config-id'};
+    f.prefs.theme = {graph: {'fn-id': 'unrelated-active-theme'}};
+    await f.ctx.gdTourRestoreUIComponentPreferences([...f.state.created], []);
+    assert.deepEqual(f.writes.map(row => row.key), ['components'], 'selective cleanup never restores an unrelated theme');
+    assert.equal(JSON.stringify(f.prefs.components), JSON.stringify({old: 'components'}));
+    assert.equal(f.prefs.theme.graph['fn-id'], 'unrelated-active-theme');
+  }
+
+  {
+    const f = fixture();
     const ticket = f.ctx.gdTourStageUIComponentsManifest(f.request, f.manifest);
     assert.equal(f.state.created.length, 3);
     assert(f.state.created.every(row => row.receipt === 'pending' && row.creation === 'create-only-manifest'));

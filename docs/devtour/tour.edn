@@ -1482,18 +1482,23 @@
            successful results and keeps saved colors when evaluation is unavailable."
      :see [[:crud "apply-execute"] [:executor "record-effect!"] [:editor "gdApplyThemePayload"]]}
     {:ns graphden.editor.component-templates :defn definitions
-     :say "Copies fixed shipped theme, menu and picker definitions into a fresh named namespace.
-           Four configuration [bindings](#term/binding) select menu initial state, event handler,
-           menu view and picker view by function ID. The picker graph authors presentation; native
-           browser code retains search and navigation. Shared menu colors reference the copied theme leaves; menu hover owns a local
-           literal. Color wrappers retain the canonical color type and ordinary editor form."}
+     :say "Copies the fixed shipped theme, menu, picker and Recents definitions into a fresh named namespace.
+           An ordinary descriptor list selects component entry identities. Shared menu colors reference
+           copied theme leaves; menu hover owns a local literal. Color wrappers retain the canonical
+           color type and ordinary editor form. The full bundle remains the Lesson 25 creation path."}
+    {:ns graphden.editor.component-templates :defn selected-definitions
+     :say "Keeps only the chosen component and its owned reference closure. A new ordinary concat manifest
+           references the previous authored manifest and the new descriptor list, preserving existing
+           identities and edits. Legacy slots are adapted to descriptors without copying their bodies.
+           Retained identities are outside the create-only receipt; group creation does not activate a theme."}
     {:ns graphden.editor.component-creation :defn apply!
      :say "Rebuilds the manifest, the fixed list of proposed objects and UUIDs, while holding the
            graph writer lock. It rejects a changed user, branch, source snapshot or existing identity.
            One transaction through the existing [storage decorators](#term/protocol) creates all
            rows with ordinary access checks. Cache-publication warnings preserve a successful commit
            and its identities. An internal preview lets lesson cleanup record exact new UUIDs before
-           sending APPLY, so a lost network reply does not leave untracked objects."
+           sending APPLY, so a lost network reply does not leave untracked objects. Preference activation
+           is a separate owner/key compare-write transaction; a conflict leaves the new graphs available."
      :see [[:versioning "call-with-write"]]}
     {:ns graphden.executor.browser-source :defn collect-closure
      :say "Collects only the selected [reachable graph](#term/reachable-graph) and its type dependencies,

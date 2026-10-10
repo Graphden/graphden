@@ -225,6 +225,14 @@
     (some-> (:name row) keyword)))
 
 
+(defn- row->ref
+  "Named refs keep their existing spelling. Anonymous refs retain the row's
+   actual identity for checker lookup, without inventing a registry alias."
+  [row]
+  (or (row->kw row)
+      (when (uuid? (:id row)) {:ref (:id row)})))
+
+
 (defn binding-shape-for-edn
   "Convert one DB binding row + its list-items into the EDN-shape value
    `check-fn-def!` expects:
@@ -247,7 +255,7 @@
         ;; sibling in the EDN `{:as :name :type T}` shape).
         renamed-view (get renamed-view-by-source (:slot-id b))
         ref-id (:ref-fn-id b)
-        ref-name (when ref-id (some-> (get fn-by-id ref-id) row->kw))]
+        ref-shape (when ref-id (some-> (get fn-by-id ref-id) row->ref))]
     (cond
       (some? items)
       (mapv (fn [it]
@@ -255,15 +263,15 @@
                 (some? (:value it)) {:value (:value it)
                                      :literal? (true? (:literal it))}
                 (:ref-fn-id it) (some-> (get fn-by-id (:ref-fn-id it))
-                                        row->kw)
+                                        row->ref)
                 :else nil))
             items)
 
       ;; An identity narrowing changes evaluation semantics. Preserve it in
       ;; the checker input rather than reconstructing an ordinary value call.
-      (and ref-name (= ids/fn-ref-type-id (:type-override-fn-id b)))
-      {:ref ref-name :type :fn-ref}
-      ref-name ref-name
+      (and ref-shape (= ids/fn-ref-type-id (:type-override-fn-id b)))
+      (assoc (if (map? ref-shape) ref-shape {:ref ref-shape}) :type :fn-ref)
+      ref-shape ref-shape
       ;; `:value-present` flag (intent), not `(some? :value)` —
       ;; `{:value nil}` is a legitimate pinned-nil binding that must
       ;; round-trip through reconstruct → type-check, otherwise it

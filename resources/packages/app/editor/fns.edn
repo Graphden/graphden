@@ -684,6 +684,10 @@
                   [:button {:id "gd-ui-components-choose" :type "button" :class "gd-set-btn"} "Choose configuration"]
                   [:button {:id "gd-ui-components-reset" :type "button" :class "gd-set-btn"} "Use built-in components"]]
                  [:div {:class "gd-theme-actions gd-ui-components-actions"}
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-component "account-menu" :data-ui-label "account menu"} "Personalize account menu"]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-component "fn-picker" :data-ui-label "function picker"} "Personalize function picker"]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-component "recents" :data-ui-label "recent functions"} "Personalize recent functions"]]
+                 [:div {:class "gd-theme-actions gd-ui-components-actions"}
                   [:button {:type "button" :class "gd-set-btn" :data-ui-graph "configuration-id"} "Configuration"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-graph "theme-id"} "Theme"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-graph "menu-update-id"} "Menu behavior"]

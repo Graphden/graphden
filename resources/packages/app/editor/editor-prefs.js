@@ -441,9 +441,10 @@ function gdPrefNotify(key) {
 
 // Component plans resolve the server's selection, so publish that preference
 // only after persistence. Other preferences retain their immediate tab effect.
-async function gdPrefWrite(key, value) {
+async function gdPrefWrite(key, value, options) {
   const identity = _prefsIdentityGen;
   const owner = window.gdPrefOwner;
+  const conditional = !!options && Object.hasOwn(options, 'expected');
   _prefsGen += 1;
   const generation = _prefsGen;
   _prefWrittenGen[key] = generation;
@@ -453,7 +454,7 @@ async function gdPrefWrite(key, value) {
     gdPrefApply(key);
     gdPrefNotify(key);
   };
-  if (key !== 'components') publish();
+  if (key !== 'components' && !conditional) publish();
   if (identity !== _prefsIdentityGen) return false;
   const api = window.API;
   if (!api || typeof api.api_prefs_key !== 'function') return false;
@@ -461,11 +462,18 @@ async function gdPrefWrite(key, value) {
     const f = window.authFetch || fetch;
     const r = await f(api.api_prefs_key(key), {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({value, ...(owner ? {owner} : {})}),
+      body: JSON.stringify({value, ...(owner ? {owner} : {}),
+        ...(options && Object.hasOwn(options, 'expected') ? {expected: options.expected} : {})}),
     });
     const saved = identity === _prefsIdentityGen && r.ok;
-    if (key !== 'components') return saved;
-    if (!saved || _prefWrittenGen[key] !== generation) return false;
+    if (key !== 'components' && !conditional) return saved;
+    if (!saved || _prefWrittenGen[key] !== generation) {
+      if (r.status === 409 && identity === _prefsIdentityGen && _prefWrittenGen[key] === generation) {
+        delete _prefWrittenGen[key];
+        await gdPrefsRefresh();
+      }
+      return false;
+    }
     publish();
     return true;
   } catch (_) { return false; }

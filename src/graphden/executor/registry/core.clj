@@ -342,8 +342,20 @@
    path reconstructs qualified names, so precise resolution always
    has the qualified key available."
   [fn-name ns-path]
-  (cond-> [fn-name]
-    ns-path (conj (keyword ns-path (name fn-name)))))
+  (if (nil? fn-name)
+    []
+    (cond-> [fn-name]
+      ns-path (conj (keyword ns-path (name fn-name))))))
+
+
+(defn- remove-anonymous-name-keys
+  "An authored rename to anonymous keeps identity but relinquishes names.
+   Other identities that have since claimed a name remain untouched."
+  [registry fn-id fn-name]
+  (if (and (nil? fn-name) (some? (get-in registry [:by-id fn-id :name])))
+    (update registry :by-name
+            #(into {} (remove (fn [[_ target]] (= fn-id target))) %))
+    registry))
 
 
 (defn fn-def-registry-id
@@ -571,7 +583,7 @@
                                     (:effects existing)
                                     raw-effects)]
                 (reduce (fn [r k] (assoc-in r [:by-name k] fn-id))
-                        (assoc-in reg [:by-id fn-id]
+                        (assoc-in (remove-anonymous-name-keys reg fn-id fn-name) [:by-id fn-id]
                                   (cond-> (assoc (build final-effects)
                                                  :fn-id fn-id :name fn-name)
                                     (:namespace fn-def)
@@ -616,7 +628,7 @@
                                 carry-bl? (or (true? (:branch-local? rich-type-map))
                                               (true? (:branch-local? existing)))]
                             (reduce (fn [r k] (assoc-in r [:by-name k] fn-id))
-                                    (assoc-in reg [:by-id fn-id]
+                                    (assoc-in (remove-anonymous-name-keys reg fn-id fn-name) [:by-id fn-id]
                                               (cond-> (-> rich-type-map
                                                           (update :effects #(or % #{}))
                                                           (assoc :fn-id fn-id :name fn-name))
@@ -635,7 +647,7 @@
                 ;; tenant's per-ns duplicate names on the qualified
                 ;; lookup path.
                 (reduce (fn [acc k] (assoc-in acc [org :by-name k] fn-id))
-                        (assoc-in m [org :by-id fn-id]
+                        (assoc-in (update m org remove-anonymous-name-keys fn-id fn-name) [org :by-id fn-id]
                                   (get-in new-reg [:by-id fn-id]))
                         (index-keys-for fn-name (:namespace rich-type-map))))))
      nil)))
@@ -756,11 +768,13 @@
   ;; goes name → id → entry; callers that already hold the id should use
   ;; `rich-type-of-id` directly.
   ([fn-name]
-   (or (when-let [org (current-tenant-org)]
-         (let [slice (get @(target-per-org-rich-atom) org)]
-           (get-in slice [:by-id (get-in slice [:by-name fn-name])])))
-       (let [v (rich-types-view)]
-         (get-in v [:by-id (get-in v [:by-name fn-name])]))))
+   (if (uuid? fn-name)
+     (rich-type-of-id fn-name)
+     (or (when-let [org (current-tenant-org)]
+           (let [slice (get @(target-per-org-rich-atom) org)]
+             (get-in slice [:by-id (get-in slice [:by-name fn-name])])))
+         (let [v (rich-types-view)]
+           (get-in v [:by-id (get-in v [:by-name fn-name])])))))
   ([fn-name arg-name]
    (get-in (rich-type-of fn-name) [:args arg-name])))
 

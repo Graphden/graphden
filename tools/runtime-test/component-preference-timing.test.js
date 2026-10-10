@@ -12,12 +12,13 @@ function fixture(initial = null) {
   let server = initial;
   let mirror = JSON.stringify({components: initial});
   const writes = [], plans = [], events = new Map(), loaded = [];
-  const window = {API: {api_prefs_key: key => '/prefs/' + key, api_ui_components_plan: '/plan'},
+  const window = {API: {api_prefs: '/prefs', api_prefs_key: key => '/prefs/' + key, api_ui_components_plan: '/plan'},
     addEventListener: (name, fn) => events.set(name, fn), dispatchEvent() {},
     gdApplyThemeGraphPreference() {},
     GraphdenBrowser: {createRuntime: () => ({run() {}})},
     authFetch(route, options) {
-      if (route.startsWith('/prefs/')) return new Promise((resolve, reject) => writes.push({resolve, reject, value: JSON.parse(options.body).value}));
+      if (route.startsWith('/prefs/')) return new Promise((resolve, reject) => writes.push({resolve, reject, value: JSON.parse(options.body).value, body: JSON.parse(options.body)}));
+      if (route === '/prefs') return Promise.resolve({ok: true, headers: {get: () => 'owner-a'}, json: async () => ({components: server})});
       plans.push(server);
       return Promise.resolve({ok: !!server, json: async () => server
         ? {ok: true, 'selection-id': server['fn-id'], plan} : {ok: false}});
@@ -35,7 +36,8 @@ function fixture(initial = null) {
       loaded.push(window.gdLoadUIComponentRuntime(component, plan));
   });
   return {window, writes, plans, loaded, events, mirror: () => JSON.parse(mirror),
-    complete(index, ok = true) { if (ok) server = writes[index].value; writes[index].resolve({ok}); }};
+    changeServer(value) { server = value; },
+    complete(index, ok = true, status = ok ? 200 : 500) { if (ok) server = writes[index].value; writes[index].resolve({ok, status}); }};
 }
 (async () => {
   {
@@ -86,6 +88,33 @@ function fixture(initial = null) {
     assert.notEqual(f.window.gdPrefRead('keymap'), null, 'ordinary tab preferences remain immediate');
     f.complete(0);
     assert.equal(await writing, true);
+  }
+  {
+    const f = fixture(first);
+    const writing = f.window.gdPrefWrite('components', second, {expected: {present: true, value: first}});
+    assert.deepEqual(f.writes[0].body.expected, {present: true, value: first});
+    f.changeServer(second);
+    f.complete(0, false, 409);
+    assert.equal(await writing, false);
+    assert.equal(f.window.gdPrefRead('components')['fn-id'], second['fn-id'], 'conflict reloads the authoritative external choice');
+  }
+  {
+    const f = fixture(first);
+    const older = f.window.gdPrefWrite('components', second, {expected: {present: true, value: first}});
+    const newer = f.window.gdPrefWrite('components', second);
+    f.complete(0, false, 409);
+    assert.equal(await older, false);
+    f.complete(1);
+    assert.equal(await newer, true, 'an older conflict cannot delete the newer publisher generation');
+    assert.equal(f.window.gdPrefRead('components')['fn-id'], second['fn-id']);
+  }
+  {
+    const f = fixture();
+    const writing = f.window.gdPrefWrite('keymap', {payload: {}}, {expected: {present: false, value: null}});
+    assert.equal(f.window.gdPrefRead('keymap'), null, 'conditional writes publish only after confirmed commit');
+    f.complete(0, false, 409);
+    assert.equal(await writing, false);
+    assert.equal(f.window.gdPrefRead('keymap'), null);
   }
   console.log('PASS component preference timing: pending plan isolation, commit activation, rejection, supersession, account change');
 })().catch(error => { console.error(error); process.exitCode = 1; });

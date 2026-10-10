@@ -12,10 +12,16 @@ and execute permissions and the current quota on the server.
 
 Open **Settings → Appearance → UI graphs**, then **Create personal graphs**.
 Choose an existing namespace where you can write and inspect the source. The
-editor creates a fresh child with Theme, Menu and Picker groups and a `ui`
-configuration. Its four function references select the menu's initial state,
-update and view, and the picker view. Selecting it changes your own editor
+editor creates a fresh child with Theme, Menu, Picker and Recents groups and a
+`ui` configuration. Its descriptor list selects each component's entry identities. Selecting it changes your own editor
 preference; it does not select it for other users.
+
+For a smaller personal copy, use **Personalize account menu**, **Personalize
+function picker**, or **Personalize recent functions**. These actions create only
+that component and its dependencies, keep existing personal identities and edits,
+and leave the active theme unchanged. An existing group opens for editing instead
+of being replaced. This lesson uses the complete **Create personal graphs** bundle
+so its shared theme exercises have all their dependencies.
 
 The group buttons open exact function identities. **Configuration** shows the
 entry bindings, **Theme** the shared named values, **Menu behavior** the event

@@ -3,19 +3,26 @@
   (:require
     [cheshire.core :as json]
     [clojure.set :as set]
+    [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.editor.component-config :as config]
+    [graphden.editor.component-creation :as creation]
     [graphden.editor.components :as components]
+    [graphden.editor.preference-write :as preferences]
     [graphden.executor.browser-snapshot :as snapshot]
     [graphden.executor.browser-source :as source]
+    [graphden.executor.context :as context]
     [graphden.packages.records.ids :as records]
     [graphden.storage.postgres.crud :as pg-crud]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router.epoch :as epoch]
+    [graphden.system.branch-router.recheck :as recheck]
     [graphden.test-infra.golden-app :as ga]
     [graphden.test-infra.impls :as impls]
     [graphden.types.check :as check]
-    [graphden.versioning.storage.core :as vs]))
+    [graphden.versioning.storage.core :as vs]
+    [graphden.versioning.storage.resolution :as resolution]
+    [next.jdbc :as jdbc]))
 
 
 (def ^:dynamic *destination-id* nil)
@@ -38,21 +45,43 @@
 
 (defn- submit
   [handler input]
-  (let [response (ga/exec-handler handler
-                                  {:request-method :post :uri "/api/ui/components/create"
-                                   :headers {"content-type" "application/json"}
-                                   :body (json/generate-string input)})]
-    {:status (:status response) :body (json/parse-string (:body response) true)}))
+  (let [diagnostics (atom [])
+        classify creation/failure-response
+        response (with-redefs [creation/failure-response
+                               (fn [error]
+                                 (swap! diagnostics conj
+                                        (assoc (select-keys (ex-data error) [:type :reason :fn-id :http-status])
+                                               :exception-class (.getName (class error))
+                                               :frames (into [] (comp (filter #(str/starts-with?
+                                                                                 (.getClassName ^StackTraceElement %) "graphden."))
+                                                                      (take 6)
+                                                                      (map #(vector (.getClassName ^StackTraceElement %)
+                                                                                    (.getMethodName ^StackTraceElement %)
+                                                                                    (.getLineNumber ^StackTraceElement %))))
+                                                             (.getStackTrace error))))
+                                 (classify error))]
+                   (ga/exec-handler handler
+                                    {:request-method :post :uri "/api/ui/components/create"
+                                     :headers {"content-type" "application/json"}
+                                     :body (json/generate-string input)}))]
+    (cond-> {:status (:status response) :body (json/parse-string (:body response) true)}
+      (seq @diagnostics) (assoc :diagnostics @diagnostics))))
 
 
 (defn- preview
-  []
-  (submit :_ui-components-create-preview-handler {:owner "anonymous" :namespace-id (str *destination-id*)}))
+  ([] (preview nil))
+  ([component]
+   (submit :_ui-components-create-preview-handler
+           (cond-> {:owner "anonymous" :namespace-id (str *destination-id*)}
+             component (assoc :component component)))))
 
 
 (defn- apply-preview
   [reserved]
-  (submit :_ui-components-create-apply-handler (get-in reserved [:body :request])))
+  ;; Preserve the first refusal instead of masking it with an apply(nil) 400.
+  (if (= 200 (:status reserved))
+    (submit :_ui-components-create-apply-handler (get-in reserved [:body :request]))
+    reserved))
 
 
 (defn- ids
@@ -263,3 +292,124 @@
       (is (:ok (components/export-current ctx {:component component}))))
     (is (= "component-missing" (:code (components/export-current ctx {:component "recents"}))))
     (is (= "builtin" (:fallback (components/export-current ctx {:component "recents"}))))))
+
+
+(defn- activate-selected
+  [storage manifest]
+  (let [preference {:fn-id (get-in manifest [:roots :configuration-id])
+                    :branch-id (str (vs/current-branch-id storage)) :org "public"}]
+    (let [result (preferences/write! storage "components" preference true (:expected-preference manifest))]
+      ;; These fixtures call handlers directly, without the production router
+      ;; that advances the policy watermark after the completed graph writes.
+      (when (= :saved result) (epoch/seed-watermark! storage))
+      result)))
+
+
+(defn- guarded-jdbc-reader
+  [original bodies configuration-id queries]
+  (fn [connection sql & opts]
+    (when (re-find #"(?i)\bSELECT\b" (first sql))
+      (let [targets? (boolean (some #(contains? bodies (str %)) (rest sql)))
+            body? (boolean (re-find #"(?i)\b(?:FROM|JOIN)\s+\"(?:binding|fn_slot)(?:_version)?\"" (first sql)))]
+        (swap! queries conj {:retained-root? (boolean (some #(= configuration-id (str %)) (rest sql)))
+                             :retained-target? targets? :body? body?})
+        (when (and targets? body?)
+          (throw (ex-info "Retained body must not be read" {:type :test/forbidden-body-read})))))
+    (apply original connection sql opts)))
+
+
+(deftest selective-copy-retains-edited-components-without-reading-their-bodies-or-changing-theme
+  (let [ctx (:ctx ga/*bootstrap*)
+        storage (:storage ctx)
+        _ (preferences/write! storage "components" nil false nil)
+        theme-before (sp/query-entities storage :ui-pref {:owner-id "anonymous" :key "theme"})
+        first-copy (get-in (apply-preview (preview "fn-picker")) [:body :manifest])
+        first-config (get-in first-copy [:roots :configuration-id])
+        picker-id (get-in first-copy [:roots :picker-id])
+        picker-ns (:id (first (filter #(= "picker" (:name %)) (:namespaces first-copy))))
+        bodies (into #{} (map :id) (filter #(= picker-ns (:namespace-id %)) (:functions first-copy)))
+        leaf (first (filter #(= "picker-active-background" (:name %)) (:functions first-copy)))
+        binding (first (sp/query-entities storage :binding {:fn-id (java.util.UUID/fromString (:id leaf))}))
+        original-query jdbc/execute!
+        queries (atom [])]
+    (is (= #{"picker"} (set (map :name (rest (:namespaces first-copy))))))
+    (is (= :saved (activate-selected storage first-copy)))
+    ;; A selected graph is identified by UUID, including an anonymous root.
+    ;; Recheck the authored edit rather than retaining a stale certificate.
+    (sp/update-entity storage :fn (java.util.UUID/fromString first-config) {:name nil})
+    (sp/update-entity storage :binding (:id binding) {:value "#fed7aa" :value-present true})
+    (let [changed [(java.util.UUID/fromString first-config) (java.util.UUID/fromString (:id leaf))]]
+      (context/invalidate-graph-cache! ctx changed)
+      (recheck/record-imported-fn-types! ctx (vs/current-branch-id storage) changed))
+    (epoch/seed-watermark! storage)
+    (epoch/note-graph-epoch-validated! storage)
+    (let [reader (guarded-jdbc-reader original-query bodies first-config queries)
+          _ (with-redefs [jdbc/execute! reader]
+              ;; Positive control: prove this observer rejects an actual old
+              ;; body query on the same decorated graph storage.
+              (is (thrown? Exception
+                    (resolution/call-with-fresh-memos
+                      #(sp/query-entities storage :binding
+                                          {:fn-id (java.util.UUID/fromString (:id leaf))}))))
+              (is (some #(and (:body? %) (:retained-target? %)) @queries)))
+          _ (reset! queries [])
+          created (with-redefs [jdbc/execute! reader]
+                    (apply-preview (preview "recents")))
+          added (get-in created [:body :manifest])]
+      (is (= 200 (:status created)) (pr-str created))
+      (is (some :retained-root? @queries) "actual selected root metadata was read")
+      (is (some :retained-target? @queries) "retained entry metadata was read")
+      (is (not-any? #(and (:body? %) (:retained-target? %)) @queries))
+      (is (= #{"recents"} (set (map :name (rest (:namespaces added))))))
+      (is (empty? (set/intersection (set (map :id (:functions first-copy))) (set (map :id (:functions added))))))
+      (is (= :saved (activate-selected storage added)))
+      (is (= "#fed7aa" (:value (sp/read-entity storage :binding (:id binding)))))
+      (is (= theme-before (sp/query-entities storage :ui-pref {:owner-id "anonymous" :key "theme"})))
+      (let [{:keys [result] :as diagnosed} (export-diagnosed ctx "recents")]
+        (is (:ok result) (pr-str (assoc diagnosed :retained-configuration-id first-config)))
+        (is (= picker-id (get-in result [:roots :picker-id])))
+        (is (not= first-config (:selection-id result))))
+      (let [before (graph-identities storage)
+            duplicate (preview "fn-picker")]
+        (is (= 409 (:status duplicate)))
+        (is (= before (graph-identities storage)))))))
+
+
+(deftest selective-apply-rejects-a-changed-server-preference-before-any-create
+  (let [storage (:storage ga/*bootstrap*)
+        _ (preferences/write! storage "components" nil false nil)
+        reserved (preview "recents")
+        other (get-in (apply-preview (preview "fn-picker")) [:body :manifest])]
+    (is (= :saved (activate-selected storage other)))
+    (let [before (graph-identities storage)
+          stale (apply-preview reserved)]
+      (is (= 409 (:status stale)))
+      (is (= before (graph-identities storage))))))
+
+
+(deftest legacy-selection-addition-adapts-original-identities-without-copying-old-groups
+  (let [ctx (:ctx ga/*bootstrap*)
+        storage (:storage ctx)
+        _ (preferences/write! storage "components" nil false nil)
+        full (get-in (apply-preview (preview)) [:body :manifest])
+        root (:path (first (:namespaces full)))
+        legacy-id (records/fn-id root :legacy-addition)
+        definition {:name :legacy-addition :namespace root :parent :app.ui-components/ui-components
+                    :args {:menu-initial (keyword (str root ".menu") "account-menu-initial")
+                           :menu-update (keyword (str root ".menu") "account-menu-update")
+                           :menu-view (keyword (str root ".menu") "account-menu-view")
+                           :picker-view (keyword (str root ".picker") "picker-view")}}]
+    ((impls/impl-of :sync-fn-defs-branch!) {:branch-id (vs/current-branch-id storage) :fn-defs [definition]} ctx)
+    (preferences/write! storage "components"
+                        {:fn-id (str legacy-id) :branch-id (str (vs/current-branch-id storage)) :org "public"} false nil)
+    (epoch/seed-watermark! storage)
+    (let [created (apply-preview (preview "recents"))
+          added (get-in created [:body :manifest])]
+      (is (= 200 (:status created)) (pr-str created))
+      (is (= #{"recents"} (set (map :name (rest (:namespaces added))))))
+      (is (empty? (set/intersection (set (map :id (:functions full))) (set (map :id (:functions added))))))
+      (is (= :saved (activate-selected storage added)))
+      (let [{:keys [result] :as diagnosed} (export-diagnosed ctx "recents")]
+        (is (:ok result) (pr-str diagnosed))
+        (is (= (get-in full [:roots :menu-id]) (get-in result [:roots :menu-id])))
+        (is (= (get-in full [:roots :picker-id]) (get-in result [:roots :picker-id])))))))

@@ -173,7 +173,7 @@
 (defn- hof-closure-captures
   "Helper for `cache-projection-frees`. Walks F's non-HOF tree (same
    shape as `deep-free-ext-names*`'s walk over `:ref :is-fn false`
-   bindings + seq item refs) and at every `:is-fn :ref` binding
+   bindings + env-binding refs + seq item refs) and at every `:is-fn :ref` binding
    encountered, computes the HOF's closure-captured contribution:
    `cache-projection-frees(target) \\ hof-lambda-params(...)`.
 
@@ -187,7 +187,12 @@
               [fid]
               (when-not (contains? @visited fid)
                 (swap! visited conj fid)
-                (doseq [bnd (b/collect-bindings fid lookups)]
+                ;; Env refs are evaluated by compile-fn too. A collection
+                ;; computation bound through an intermediate count can live
+                ;; here; skipping it loses its callback's outer captures from
+                ;; the intermediate result's cache key.
+                (doseq [bnd (concat (b/collect-bindings fid lookups)
+                                    (b/collect-env-bindings fid lookups))]
                   (case (:kind bnd)
                     :ref (if (:is-fn bnd)
                            (let [target (:ref-id bnd)

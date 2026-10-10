@@ -9,6 +9,7 @@
     [graphden.executor.browser-plan :as browser]
     [graphden.executor.compile-eager :as eager]
     [graphden.executor.compile-runtime :as runtime]
+    [graphden.executor.compile.bindings :as bindings]
     [graphden.executor.compile.lookups :as lookups]
     [graphden.executor.compile.surface :as surface]
     [graphden.executor.registry.core :as registry]
@@ -396,6 +397,60 @@
 (deftest browser-map-matches-jvm-for-ordinary-views-and-captures
   (let [{:keys [graph impls ids]} (map-fixture)]
     (assert-differential! graph impls ids browser-map/cases)))
+
+
+(deftest nested-filter-captures-survive-an-intermediate-count-test
+  (let [definitions
+        [{:name :pins :parent :get
+          :args {:coll {:as :state} :key {:value :pins} :default {:value []}}}
+         {:name :trail :parent :get
+          :args {:coll {:as :state} :key {:value :trail} :default {:value []}}}
+         {:name :item-id :parent :get
+          :args {:coll {:as :item} :key {:value :id} :default ""}}
+         {:name :selected :parent :get
+          :args {:coll {:as :context} :key {:value :selected} :default nil}}
+         {:name :pin-id :parent :get
+          :args {:coll {:as :pin} :key {:value :id} :default ""}}
+         {:name :matching-pin :parent :equal? :lambda-params [:pin]
+          :args {:a :pin-id :b :item-id}}
+         {:name :matching-pins :parent :filter
+          :args {:pred :matching-pin :coll :pins}}
+         {:name :matching-pin-count :parent :count
+          :args {:coll :matching-pins}}
+         {:name :item-unpinned :parent :equal?
+          :args {:a :matching-pin-count :b 0}}
+         {:name :item-selected :parent :equal?
+          :args {:a :item-id :b :selected}}
+         {:name :visible-item :parent :if :lambda-params [:item]
+          :args {:test :item-selected :then false :else :item-unpinned}}
+         {:name :visible-trail :parent :filter
+          :args {:pred :visible-item :coll :trail}}
+         {:name :view :parent :list :args {:items [:selected :visible-trail]}}]
+        {:keys [graph impls ids]} (map-fixture definitions)
+        lookup (lookups/build-lookups graph)
+        count-env-refs (->> (bindings/collect-env-bindings (:matching-pin-count ids) lookup)
+                            (filter #(= :ref (:kind %)))
+                            (mapv :ref-id))]
+    ;; The parser puts this computation in count's environment. A direct
+    ;; filter call would miss the regression: its cache already saw :item.
+    (is (= [(:matching-pins ids)] count-env-refs))
+    (assert-differential!
+      graph impls ids
+      [{:entry :view
+        :inputs {:state {:pins [{:id "b"}]
+                         :trail [{:id "a"} {:id "b"} {:id "c"}]}
+                 :context {:selected "a"}}
+        :expected ["a" [{:id "c"}]]}
+       {:entry :view
+        :inputs {:state {:pins [{:id "b"}]
+                         :trail [{:id "a"} {:id "b"} {:id "c"} {:id "d"}]}
+                 :context {:selected "a"}}
+        :expected ["a" [{:id "c"} {:id "d"}]]}
+       {:entry :view
+        :inputs {:state {:pins [{:id "b"}]
+                         :trail [{:id "d"} {:id "c"} {:id "b"} {:id "a"}]}
+                 :context {:selected "a"}}
+        :expected ["a" [{:id "d"} {:id "c"}]]}])))
 
 
 (deftest browser-list-and-text-operations-match-jvm

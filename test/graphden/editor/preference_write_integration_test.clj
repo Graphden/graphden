@@ -88,11 +88,11 @@
                                  (deref release 10000 ::timeout)))
                              result))}]
       (let [old (future (preferences/write! storage key {:choice "old-writer"} false nil))]
-        (is (= true (deref acquired 10000 ::timeout)))
+        (is (true? (deref acquired 10000 ::timeout)))
         (reset! conditional (future (deliver waiting true)
                                     (preferences/write! storage key {:choice "conditional"} true
                                                         {:present true :value {:choice "before"}})))
-        (is (= true (deref waiting 10000 ::timeout)))
+        (is (true? (deref waiting 10000 ::timeout)))
         (deliver release true)
         (is (= :saved (deref old 10000 ::timeout)))
         (is (= :stale (deref @conditional 10000 ::timeout)))

@@ -51,14 +51,14 @@
                                (fn [error]
                                  (swap! diagnostics conj
                                         (assoc (select-keys (ex-data error) [:type :reason :fn-id :http-status])
-                                               :exception-class (.getName (class error))
+                                               :exception-class (Class/.getName (class error))
                                                :frames (into [] (comp (filter #(str/starts-with?
-                                                                                 (.getClassName ^StackTraceElement %) "graphden."))
+                                                                                 (StackTraceElement/.getClassName %) "graphden."))
                                                                       (take 6)
-                                                                      (map #(vector (.getClassName ^StackTraceElement %)
-                                                                                    (.getMethodName ^StackTraceElement %)
-                                                                                    (.getLineNumber ^StackTraceElement %))))
-                                                             (.getStackTrace error))))
+                                                                      (map #(vector (StackTraceElement/.getClassName %)
+                                                                                    (StackTraceElement/.getMethodName %)
+                                                                                    (StackTraceElement/.getLineNumber %))))
+                                                             (Throwable/.getStackTrace error))))
                                  (classify error))]
                    (ga/exec-handler handler
                                     {:request-method :post :uri "/api/ui/components/create"
@@ -297,12 +297,12 @@
 (defn- activate-selected
   [storage manifest]
   (let [preference {:fn-id (get-in manifest [:roots :configuration-id])
-                    :branch-id (str (vs/current-branch-id storage)) :org "public"}]
-    (let [result (preferences/write! storage "components" preference true (:expected-preference manifest))]
-      ;; These fixtures call handlers directly, without the production router
-      ;; that advances the policy watermark after the completed graph writes.
-      (when (= :saved result) (epoch/seed-watermark! storage))
-      result)))
+                    :branch-id (str (vs/current-branch-id storage)) :org "public"}
+        result (preferences/write! storage "components" preference true (:expected-preference manifest))]
+    ;; These fixtures call handlers directly, without the production router
+    ;; that advances the policy watermark after the completed graph writes.
+    (when (= :saved result) (epoch/seed-watermark! storage))
+    result))
 
 
 (defn- guarded-jdbc-reader

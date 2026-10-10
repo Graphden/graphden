@@ -39,8 +39,8 @@
         new-root "personal.added-recents"
         old (bundle/parse old-root :fn-picker nil nil {})
         old-id (ids/fn-id old-root :ui)
-        alias (keyword new-root (str "_retained-target-" old-id))
-        added (bundle/parse new-root :recents alias nil {alias old-id})
+        retained-ref (keyword new-root (str "_retained-target-" old-id))
+        added (bundle/parse new-root :recents retained-ref nil {retained-ref old-id})
         records (concat (manifest-operation-records)
                         (map #(cond-> % (= old-id (:id %)) (assoc :name nil)) (:records old)) (:records added))
         grouped (group-by :kind records)
@@ -73,12 +73,12 @@
 
 (deftest template-identity-targets-never-hide-an-ordinary-reference
   (let [target (random-uuid)
-        identity {:kind :binding :id (random-uuid) :fn-id (random-uuid)
-                  :slot-id (ids/slot-id (ids/fn-id "core.logic" :const) :value)
-                  :type-override-fn-id ids/fn-ref-type-id :ref-fn-id target :value-present false}]
-    (is (= #{target} (bundle/identity-targets [identity])))
-    (is (= #{} (bundle/identity-targets [identity {:kind :binding-list-item :ref-fn-id target}])))
-    (is (= #{} (bundle/identity-targets [(assoc identity :value-present true :value "mixed")])))))
+        identity-binding {:kind :binding :id (random-uuid) :fn-id (random-uuid)
+                          :slot-id (ids/slot-id (ids/fn-id "core.logic" :const) :value)
+                          :type-override-fn-id ids/fn-ref-type-id :ref-fn-id target :value-present false}]
+    (is (= #{target} (bundle/identity-targets [identity-binding])))
+    (is (= #{} (bundle/identity-targets [identity-binding {:kind :binding-list-item :ref-fn-id target}])))
+    (is (= #{} (bundle/identity-targets [(assoc identity-binding :value-present true :value "mixed")])))))
 
 
 (deftest real-parser-keeps-every-copy-named-and-color-form-compatible

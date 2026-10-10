@@ -122,10 +122,13 @@
    :parent :_pref-put-err
    :args {:vals [{:value false} {:value "wrong-user"} :_pref-put-key {:value 403}]}}
 
-  {:name :_pref-put-ok
+  {:name :_pref-put-success
    :parent :zipmap
-   :args {:keys [{:value :ok} {:value :key} {:value :value}]
-          :vals [{:value true} :_pref-put-key
+   :args {:keys [{:value :ok} {:value :key} {:value :value}]}}
+
+  {:name :_pref-put-ok
+   :parent :_pref-put-success
+   :args {:vals [{:value true} :_pref-put-key
                  {:parent :ui-pref-write! :args {:pref-key :_pref-put-key :pref-value :_pref-put-value}}]}}
 
   {:name :_pref-put-conditional?
@@ -146,9 +149,8 @@
    :args {:vals [{:value false} {:value "stale-preference"} :_pref-put-key {:value 409}]}}
 
   {:name :_pref-put-conditional-ok
-   :parent :zipmap
-   :args {:keys [{:value :ok} {:value :key} {:value :value}]
-          :vals [{:value true} :_pref-put-key :_pref-put-value]}}
+   :parent :_pref-put-success
+   :args {:vals [{:value true} :_pref-put-key :_pref-put-value]}}
 
   {:name :_pref-put-write-status
    :parent :ui-pref-compare-write!

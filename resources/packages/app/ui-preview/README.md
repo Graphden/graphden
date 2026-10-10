@@ -141,3 +141,9 @@ The bounded primitive subset also includes `filter`, `take`, `concat`, `str` and
 matching the JVM primitives. `str` accepts scalar parts (nil, text, keywords,
 booleans and safe integers); collections are rejected because their JVM printed
 representation is outside this browser subset.
+
+Managed graph hosts own their event targets through the renderer's private DOM
+ownership registry. The legacy `bindActionDispatch` skips those targets before
+reading action attributes. Component host callbacks still handle their own
+controls; native sibling actions retain the legacy dispatcher. Disposal releases
+ownership. Author-supplied DOM attributes cannot claim or bypass ownership.

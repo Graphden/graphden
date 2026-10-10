@@ -89,6 +89,8 @@ function bindActionDispatch(host) {
   if (host.dataset.gdDispatchBound) return;
   host.dataset.gdDispatchBound = '1';
   host.addEventListener('click', (e) => {
+    // Graph controls belong to their component's explicit host callbacks.
+    if (typeof window !== 'undefined' && window.GraphdenRenderer?.ownsTarget(e.target)) return;
     const btn = e.target.closest('[data-action]');
     if (!btn || !host.contains(btn)) return;
     if (btn.getAttribute('aria-disabled') === 'true') {

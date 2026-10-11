@@ -16,9 +16,19 @@ let phase = 'boot';
   });
   page.on('console', message => { if (message.type() === 'error') errors.push('console-error'); });
   try {
+    const emptyUsages = page.waitForResponse(response => response.request().method() === 'POST'
+      && new URL(response.url()).pathname === '/api/fns/usages');
     await page.goto(BASE + '/#web-server');
     await page.waitForFunction(() => typeof lookups !== 'undefined' && lookups?.fnMap?.size > 1
       && typeof graphReady === 'function' && graphReady() && !graph.animating);
+    const emptyPayload = await (await emptyUsages).json();
+    assert(emptyPayload.usages.length === 0, 'the real selected app root has no authorized callers');
+    await page.waitForFunction(() => document.querySelector('.gd-insp-usages[hidden]'));
+    assert(await page.evaluate(() => {
+      const host = document.querySelector('[data-gd-usages-host]');
+      return host.getBoundingClientRect().height === 0
+        && getComputedStyle(host).marginTop === '0px';
+    }), 'an empty Used-by renderer contributes no height or margin to the Inspector');
     phase = 'authorized-data';
     const selection = await page.evaluate(async () => {
       const priorities = ['const', 'get', 'if', 'list', 'str', 'zipmap'];

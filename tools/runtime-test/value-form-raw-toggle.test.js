@@ -193,6 +193,24 @@ test('a string that parses as JSON round-trips QUOTED through raw mode', () => {
      'smart-parse returns the original string, not an object');
 });
 
+test('explicit autofocus false preserves CodeMirror enhancement without focus', () => {
+  const host = document.createElement('div'); document.body.appendChild(host);
+  const query = host.querySelector.bind(host);
+  host.querySelector = selector => selector.includes('input:not') ? query('textarea') : query(selector);
+  let enhanced = 0; let focused = 0;
+  ctx.window.gdCode = {
+    enhanceWithin(root) { enhanced++; root.querySelector('textarea').dataset.cmEnhanced = '1'; },
+    viewOf() { return {focus() { focused++; }}; },
+  };
+  const payload = {ok: true, value: 'draft', form: ['div', {'data-form-root': ''}, ['textarea', {'data-form-field': '', 'data-field-kind': 'any'}]]};
+  ctx.renderValueForm(host, payload, {autofocus: false});
+  eq(enhanced, 1, 'Run form still receives CodeMirror enhancement');
+  eq(focused, 0, 'suppressed autofocus never focuses its CodeMirror view');
+  ctx.renderValueForm(host, payload, {});
+  eq(focused, 1, 'ordinary value editors keep their default autofocus');
+  ctx.window.gdCode = undefined;
+});
+
 console.log('');
 if (failures) {
   console.error('FAIL — ' + failures + ' failed, ' + passes + ' passed');

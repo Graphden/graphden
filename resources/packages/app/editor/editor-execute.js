@@ -71,17 +71,18 @@ function stopPolling() {
 
 // Mount one arg's form into a server-rendered host. Returns a
 // `read()` closure that collectFormValue's the current input.
-async function mountArgFormHost(fnEntity, host) {
+async function mountArgFormHost(fnEntity, host, isCurrent = () => true) {
   const slotId = host.dataset.slotId;
   const slotName = host.dataset.slotName;
   const payload = await fetchValueForm({ 'fn-id': fnEntity.id,
                                          'slot-id': slotId });
+  if (!host.isConnected || !isCurrent()) return () => undefined;
   host.textContent = '';
   if (!payload || payload.ok === false) {
     host.textContent = payload?.error || 'Could not load form for ' + slotName;
     host.classList.add('execute-arg-form-error');
   } else {
-    renderValueForm(host, payload, {});
+    renderValueForm(host, payload, {autofocus: false});
     // A widget with NO input at all (fn-typed slots and other
     // non-enterable kinds) used to render as a silent empty bar —
     // indistinguishable from "broken". Say what it is instead.
@@ -436,7 +437,7 @@ function showExecutePopover(fnEntity, _anchorEl) {
 // Mount the run pane (form + result host + history) into the Runs
 // tab's hosts. Called by the inspector's tab renderer — every mount
 // is a fresh build, so per-mount state resets here.
-async function gdMountRunPane(fnId, {autofocus = true, isCurrent = () => true, canFocus = () => true} = {}) {
+async function gdMountRunPane(fnId, {autofocus = true, isCurrent = () => true, canFocus = () => true, captureRead} = {}) {
   const host = document.getElementById('gd-insp-run-host');
   const runsHost = document.getElementById('gd-insp-runs');
   if (!host) return;
@@ -533,7 +534,7 @@ async function gdMountRunPane(fnId, {autofocus = true, isCurrent = () => true, c
   // would serialise the N HTTP roundtrips.
   const hosts = Array.from(el.querySelectorAll('.execute-arg-form[data-slot-id]'));
   const readers = await Promise.all(
-    hosts.map((host) => mountArgFormHost(fnEntity, host)),
+    hosts.map((host) => mountArgFormHost(fnEntity, host, isCurrent)),
   );
   // Built locally and published only while this pane is still the live
   // one: two overlapping mounts (A then B selected fast) used to push into
@@ -587,14 +588,23 @@ async function gdMountRunPane(fnId, {autofocus = true, isCurrent = () => true, c
   // Runs tab IS the history surface; the former in-form toggle is
   // gone). buildHistoryPanel binds Repeat / path / tree / row-expand
   // against this pane's resultHost.
+  let historyGeneration = 0;
   async function mountHistory() {
-    if (!runsHost) return;
+    if (!runsHost || !isCurrent()) return;
+    const generation = ++historyGeneration;
+    const read = captureRead?.(runsHost, mountHistory);
+    if (read && !read.start) return;
     runsHost.textContent = '';
     runsHost.appendChild(renderSubmitSpinner('Loading runs…'));
-    const panel = await buildHistoryPanel(fnEntity, resultHost);
+    const panel = await buildHistoryPanel(fnEntity, resultHost, {
+      signal: read?.signal,
+      isCurrent: () => isCurrent() && generation === historyGeneration && (!read || read.current()),
+    });
     // A slow fetch may resolve after the tab re-rendered — only land
     // in the CURRENT runs host.
-    if (!isCurrent() || document.getElementById('gd-insp-runs') !== runsHost) return;
+    const current = isCurrent() && generation === historyGeneration && (!read || read.current());
+    read?.finish();
+    if (!current || document.getElementById('gd-insp-runs') !== runsHost) return;
     runsHost.textContent = '';
     runsHost.appendChild(panel);
   }

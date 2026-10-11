@@ -2,25 +2,57 @@
 // Run forms and comparison conversations own independent sibling hosts.
 (() => {
   let currentFn = null;
-  let requestGeneration = 0;
-  let pending = null;
+  let bodyGeneration = 0;
+  let focusGeneration = 0;
+  let paused = false;
+  const reads = new Map();
   function fnLabel(fn) { return fn?.name || '(anonymous)'; }
   function invalidate() {
-    requestGeneration++;
-    pending?.abort();
-    pending = null;
+    bodyGeneration++;
+    focusGeneration++;
+    for (const read of reads.values()) read.controller.abort();
+    reads.clear();
+    paused = false;
+  }
+  function pauseReads() {
+    focusGeneration++;
+    paused = true;
+    for (const read of reads.values()) {
+      read.interrupted = true;
+      read.controller.abort();
+    }
+  }
+  function resumeReads() {
+    paused = false;
+    for (const read of [...reads.values()]) {
+      if (read.interrupted && read.owns()) read.retry();
+    }
   }
   function clearBody(body) {
     invalidate();
     window.gdCode?.destroyWithin?.(body);
     body.replaceChildren();
   }
-  function requestHost(id) {
+  function bodyOwner(body) {
+    const generation = bodyGeneration;
+    return () => generation === bodyGeneration && body.isConnected
+      && document.getElementById('gd-insp-tabbody') === body;
+  }
+  function captureRead(host, retry, owns) {
+    const previous = reads.get(host);
+    previous?.controller.abort();
+    const read = {host, retry, owns, controller: new AbortController(), interrupted: paused};
+    reads.set(host, read);
+    return {host, signal: read.controller.signal, start: !paused && owns(),
+      current: () => reads.get(host) === read && owns() && !read.controller.signal.aborted,
+      finish() { if (reads.get(host) === read && !read.interrupted) reads.delete(host); }};
+  }
+  function requestHost(id, retry) {
     const host = document.getElementById(id);
-    const generation = requestGeneration;
-    const signal = pending?.signal;
-    return {host, signal, current: () => generation === requestGeneration && host?.isConnected
-      && document.getElementById(id) === host && !signal?.aborted};
+    const body = document.getElementById('gd-insp-tabbody');
+    const ownsBody = bodyOwner(body);
+    return captureRead(host, retry, () => ownsBody() && host?.isConnected
+      && document.getElementById(id) === host);
   }
   function gdInspectorRender(fnId) {
     const el = document.getElementById('gd-inspector');
@@ -57,7 +89,8 @@
       parents: Array.isArray(fn?.['parent-ids']) ? fn['parent-ids'] : [], 'has-return': !!fn?.['return-type-fn-id'],
     }, {panel: body,
       load(tab, intent) { if (currentFn) renderInspTab(currentFn.id, currentFn, tab, intent); },
-      close() { invalidate(); },
+      close: pauseReads,
+      resume: resumeReads,
     });
     if (typeof gdDiffRenderInspectorSection === 'function') gdDiffRenderInspectorSection(el, fn?.id || null);
   }
@@ -72,7 +105,8 @@
   // — the parent-chip ancestor walk, type formatting and effects chips render
   // where the reasoning lives; the client only mounts and post-formats.
   function gdLoadInspectorOverview(fnId) {
-    const request = requestHost('gd-insp-overview');
+    const request = requestHost('gd-insp-overview', () => gdLoadInspectorOverview(fnId));
+    if (!request.start) return;
     const url = '/partials/inspector-overview?fn-id=' + encodeURIComponent(fnId);
     fetch(url, {signal: request.signal})
       .then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
@@ -103,7 +137,7 @@
         if (!request.current()) return;
         const host = request.host;
         if (host) host.innerHTML = '<div class="gd-insp-sec-empty">Could not load overview.</div>';
-      });
+      }).finally(request.finish);
   }
 
   function renderInspTab(fnId, fn, tab, intent = {}) {
@@ -113,7 +147,6 @@
     // Run pane's CodeMirror views hold document observers until destroyed,
     // and once the body is swapped nothing can reach them any more.
     clearBody(body);
-    pending = new AbortController();
     if (tab === 'overview') {
       body.innerHTML = '<div id="gd-insp-overview" class="gd-insp-overview-host">'
         + '<div class="gd-insp-runs-loading">Loading overview…</div></div>';
@@ -139,9 +172,12 @@
         + '<div class="gd-insp-runs-loading">Loading runs…</div></div>';
       const authed = (typeof isAuthenticated === 'function') && isAuthenticated();
       if (authed && typeof window.gdMountRunPane === 'function') {
-        const generation = requestGeneration;
-        window.gdMountRunPane(fnId, {autofocus: !intent.keyboard, canFocus: () => !body.closest('[inert]'),
-          isCurrent: () => generation === requestGeneration && body.isConnected && window.gdInspectorGraph.isOpen()});
+        const owns = bodyOwner(body);
+        const focus = focusGeneration;
+        window.gdMountRunPane(fnId, {autofocus: !intent.keyboard,
+          canFocus: () => owns() && focus === focusGeneration && window.gdInspectorGraph.isOpen() && !body.closest('[inert]'),
+          isCurrent: owns,
+          captureRead: (host, retry) => captureRead(host, retry, () => owns() && host.isConnected && body.contains(host))});
       } else {
         gdLoadInspectorRuns(fnId);
       }
@@ -159,7 +195,8 @@
   // so it renders signed-out too. Token-guarded against a stale response landing
   // after the selection moved on.
   function gdLoadInspectorDetail(fnId) {
-    const request = requestHost('gd-insp-detail');
+    const request = requestHost('gd-insp-detail', () => gdLoadInspectorDetail(fnId));
+    if (!request.start) return;
     const url = '/partials/inspector-detail?fn-id=' + encodeURIComponent(fnId);
     fetch(url, {signal: request.signal})
       .then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
@@ -186,7 +223,7 @@
         if (host) {
           host.innerHTML = '<div class="gd-insp-sec-empty">Bindings unavailable.</div>';
         }
-      });
+      }).finally(request.finish);
   }
 
   // Per-fn runs + 7-day stats: reuse the existing server partial
@@ -195,7 +232,8 @@
   // branch/auth-wrapped (editor-branches.js). A token guards against a stale
   // response landing after the user has already selected another fn.
   function gdLoadInspectorRuns(fnId) {
-    const request = requestHost('gd-insp-runs');
+    const request = requestHost('gd-insp-runs', () => gdLoadInspectorRuns(fnId));
+    if (!request.start) return;
     const url = '/partials/execute-history?fn-id=' + encodeURIComponent(fnId);
     fetch(url, {signal: request.signal})
       .then((r) => (r.ok ? r.text() : Promise.reject(r.status)))
@@ -213,7 +251,7 @@
           host.innerHTML = '<div class="gd-insp-runs-loading">'
             + 'Sign in to see this function’s runs.</div>';
         }
-      });
+      }).finally(request.finish);
   }
 
   // History tab: this fn's version timeline via the existing
@@ -221,7 +259,8 @@
   // same data as the ⌛ popover). Rows use HTMX to lazy-load per-version
   // executions, so htmx.process the swapped-in fragment.
   function gdLoadInspectorHistory(fnId, fn) {
-    const request = requestHost('gd-insp-history');
+    const request = requestHost('gd-insp-history', () => gdLoadInspectorHistory(fnId, fn));
+    if (!request.start) return;
     const branch = (typeof getCurrentBranchName === 'function') ? getCurrentBranchName() : 'main';
     const url = '/partials/fn-versions?fn-id=' + encodeURIComponent(fnId)
       + '&current-branch=' + encodeURIComponent(branch)
@@ -241,7 +280,7 @@
           host.innerHTML = '<div class="gd-insp-runs-loading">'
             + 'Sign in to see version history.</div>';
         }
-      });
+      }).finally(request.finish);
   }
 
   window.gdInspectorRender = gdInspectorRender;

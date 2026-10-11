@@ -68,7 +68,10 @@ function installHtmlParser(doc) {
       for (const match of String(html).matchAll(/<(\/?)([a-zA-Z][\w-]*)([^>]*)>/g)) {
         if (match[1]) { stack.pop(); continue; }
         const element = doc.createElement(match[2]);
-        for (const attr of match[3].matchAll(/([\w-]+)="([^"]*)"/g)) element.setAttribute(attr[1], attr[2]);
+        for (const attr of match[3].matchAll(/([\w-]+)="([^"]*)"/g)) {
+          if (attr[1] === 'class') element.className = attr[2];
+          else element.setAttribute(attr[1], attr[2]);
+        }
         stack[stack.length - 1].appendChild(element); stack.push(element);
       }
     },

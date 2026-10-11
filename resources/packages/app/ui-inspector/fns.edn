@@ -22,6 +22,7 @@
        {:name :_inspector-is-tab :parent :equal? :args {:a :_inspector-event-kind :b {:value "tab"}}}
        {:name :_inspector-is-keydown :parent :equal? :args {:a :_inspector-event-kind :b {:value "keydown"}}}
        {:name :_inspector-is-preset :parent :equal? :args {:a :_inspector-event-kind :b {:value "preset"}}}
+       {:name :_inspector-is-viewport :parent :equal? :args {:a :_inspector-event-kind :b {:value "viewport"}}}
        {:name :_inspector-is-close :parent :equal? :args {:a :_inspector-event-kind :b {:value "close"}}}
        {:name :_inspector-tab-ids :parent :const :args {:value {:value ["overview" "bindings" "stats" "history"]}} :return-type [:list :text]}
        {:name :_inspector-tab-index :parent :get :args {:coll {:value {"overview" 0 "bindings" 1 "stats" 2 "history" 3}} :key :_inspector-state-tab :default 0}}
@@ -58,7 +59,12 @@
        {:name :_inspector-key-requests :parent :if :args {:test :_inspector-handled :then :_inspector-keyboard-requests :else :_inspector-no-requests}}
        {:name :_inspector-tab-requests :parent :if :args {:test :_inspector-is-tab :then :_inspector-load-requests :else :_inspector-key-requests}}
        {:name :_inspector-selection-requests :parent :if :args {:test :_inspector-input-selected :then :_inspector-load-requests :else :_inspector-no-requests}}
-       {:name :_inspector-open-requests :parent :if :args {:test :_inspector-is-selection :then :_inspector-selection-requests :else :_inspector-tab-requests}}
+       {:name :_inspector-resume-request :parent :zipmap :args {:keys [{:value :kind} {:value :tab}] :vals ["resume-tab" :_inspector-next-tab]} :return-type :_inspector-request}
+       {:name :_inspector-resume-requests :parent :list :args {:items [:_inspector-resume-request]}}
+       {:name :_inspector-wide-requests :parent :if :args {:test :_inspector-input-narrow :then :_inspector-no-requests :else :_inspector-resume-requests}}
+       {:name :_inspector-viewport-requests :parent :if :args {:test :_inspector-input-selected :then :_inspector-wide-requests :else :_inspector-no-requests}}
+       {:name :_inspector-other-requests :parent :if :args {:test :_inspector-is-viewport :then :_inspector-viewport-requests :else :_inspector-tab-requests}}
+       {:name :_inspector-open-requests :parent :if :args {:test :_inspector-is-selection :then :_inspector-selection-requests :else :_inspector-other-requests}}
        {:name :_inspector-close-request :parent :zipmap :return-type :_inspector-request :args {:keys [{:value :kind} {:value :tab}] :vals ["close-sheet" :_inspector-next-tab]}}
        {:name :_inspector-close-requests :parent :list :args {:items [:_inspector-close-request]}}
        {:name :_inspector-requests :parent :if :args {:test :_inspector-is-close :then :_inspector-close-requests :else :_inspector-open-requests}}

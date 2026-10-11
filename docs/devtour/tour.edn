@@ -1486,8 +1486,10 @@
            ARIA tabs and structured styles. Finite requests delegate panel loading, roving focus and close
            to native hosts. Chrome painting never replaces the sibling diff conversation or tab body."}
     {:file "resources/packages/app/editor/editor-inspector.js" :defn requestHost
-     :say "Each server partial captures a unique request generation and exact native host. Tab changes,
-           selection, closing and account changes invalidate old responses, including A-to-B-to-A.
+     :say "Each server partial captures a latest-wins read token and exact native host. Tab changes,
+           selection and account changes invalidate body ownership, including A-to-B-to-A. Closing
+           interrupts reads without replacing Run controls; a wide viewport resumes their captured hosts.
+           Initial Run forms may finish hidden, but a separate focus epoch blocks old autofocus.
            CodeMirror is disposed before actual body replacement; graph chrome refreshes retain controls."}
     {:ns graphden.editor.component-templates :defn definitions
      :say "Copies the fixed shipped theme, menu, picker, Recents and Inspector definitions into a fresh named namespace.

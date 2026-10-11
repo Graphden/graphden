@@ -261,7 +261,7 @@ and namespaces are removed only after confirmed function cleanup.
 ## Selective personal copies
 
 Appearance offers **Personalize account menu**, **Personalize function picker**,
-and **Personalize recent functions**. Once that group is present, its action opens
+**Personalize recent functions**, and **Personalize Inspector**. Once that group is present, its action opens
 its existing view instead. Creation copies only the selected shipped component
 and its necessary owned dependencies. Recents and picker copy no theme graphs;
 the menu copies its shared color leaves without selecting a different theme.
@@ -297,10 +297,14 @@ it never deletes retained component identities or changes an unrelated theme.
 
 The Inspector component owns its header, kind label, ARIA tabs and scoped style
 rules through ordinary typed `initial/update/view` graphs. The host validates
-four fixed tab identities and finite load/focus/close requests. Only those four
+four fixed tab identities and finite load/focus/close/resume requests. Only those four
 tab IDs may appear in graph chrome, once each; native host IDs cannot be shadowed. Native server
 panels and diff conversations are sibling hosts; chrome updates never replace
 Run controls or discussion drafts. The open state controls the narrow sheet;
-the wide native column remains available after a sheet closes. Request generations and abort signals guard
-all tab responses, including repeated selections. CodeMirror disposal precedes
-native body replacement, and keyboard tab navigation suppresses Run autofocus.
+the wide native column remains available after a sheet closes. Body ownership lasts
+until selection, tab or account replacement. Each read has its own latest-wins
+token and abort signal; closing interrupts reads, and a wide viewport resumes
+only those interrupted reads in their original native hosts. Initial Run forms
+may finish while hidden. A separate focus epoch prevents their old autofocus
+from firing after close, while keyboard tab navigation suppresses autofocus.
+CodeMirror disposal precedes actual native body replacement.

@@ -204,7 +204,8 @@ async function buildHistoryPanel(fnEntity, resultHostEl, opts) {
     const r = await authFetch('/partials/execute-history?fn-id='
                               + encodeURIComponent(fnEntity.id)
                               + (secrets ? '&secrets=1' : '')
-                              + (graphHash ? '&graph-hash=' + encodeURIComponent(graphHash) : ''));
+                              + (graphHash ? '&graph-hash=' + encodeURIComponent(graphHash) : ''), {signal: opts?.signal});
+    if (opts?.isCurrent && !opts.isCurrent()) return wrap;
     if (!r.ok) {
       const err = document.createElement('div');
       err.className = 'execute-history-error';
@@ -214,7 +215,9 @@ async function buildHistoryPanel(fnEntity, resultHostEl, opts) {
       wrap.appendChild(err);
       return wrap;
     }
-    wrap.innerHTML = await r.text();
+    const html = await r.text();
+    if (opts?.isCurrent && !opts.isCurrent()) return wrap;
+    wrap.innerHTML = html;
     if (window.htmx?.process) window.htmx.process(wrap);
     bindHistoryActions(wrap, fnEntity, resultHostEl);
     // A service fn's panel carries the «catch next request» block —
@@ -223,6 +226,7 @@ async function buildHistoryPanel(fnEntity, resultHostEl, opts) {
       gdDebugTrapMounted();
     }
   } catch (e) {
+    if (opts?.isCurrent && !opts.isCurrent()) return wrap;
     const err = document.createElement('div');
     err.className = 'execute-history-error';
     err.textContent = 'Failed: ' + (e?.message || 'network error');

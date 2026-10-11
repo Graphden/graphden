@@ -246,7 +246,8 @@ function renderValueForm(hostEl, payload, opts) {
     if (window.gdCode) window.gdCode.enhanceWithin(root);
     // Skip hidden inputs — a widget owns a hidden `[data-form-field]`
     // that is never a sensible focus target.
-    const first = hostEl.querySelector('input:not([type=hidden]), textarea, select');
+    const first = options.autofocus === false ? null
+      : hostEl.querySelector('input:not([type=hidden]), textarea, select');
     if (first?.dataset?.cmEnhanced) {
       try { window.gdCode.viewOf(first).focus(); } catch (_) {}
     } else if (first) { try { first.focus(); } catch (_) {} }

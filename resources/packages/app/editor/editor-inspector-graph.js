@@ -92,6 +92,10 @@
         'focus-tab': {validate: request, execute(tab) {
           if (host?.isConnected && visible()) focusSafely(host.querySelector('#gd-insp-tab-' + tab));
         }},
+        'resume-tab': {validate: request, execute(tab) {
+          if (field(output, 'tab') !== tab) throw new Error('Inspector request does not match its view');
+          if (visible()) handlers?.resume();
+        }},
         'close-sheet': {validate: request, execute() { handlers?.close(); }},
       },
     });
@@ -167,7 +171,7 @@
     isOpen: visible,
     reload, dispose,
   };
-  narrow.addEventListener('change', () => controller?.refresh());
+  narrow.addEventListener('change', () => { if (controller) dispatch('viewport'); });
   window.addEventListener('pagehide', dispose);
   window.addEventListener('gd-auth-changed', () => { dispose(); window.gdInspectorContextChanged?.(); });
 })();

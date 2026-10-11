@@ -712,4 +712,12 @@
        (transition (assoc initial :tab "history") {:kind "keydown" :tab "" :key "Home"}
                    {:tab "overview" :open false :handled true}
                    [{:kind "load-tab" :tab "overview"} {:kind "focus-tab" :tab "overview"}])
-       (transition initial {:kind "keydown" :tab "" :key "x"} initial [])])))
+       (transition initial {:kind "keydown" :tab "" :key "x"} initial [])
+       (transition initial {:kind "viewport" :tab "" :key ""} initial
+                   [{:kind "resume-tab" :tab "overview"}])
+       {:entry :inspector-update
+        :inputs {:state initial :inputs (assoc inputs :narrow true) :event {:kind "viewport" :tab "" :key ""}}
+        :expected {:state initial :requests []}}
+       {:entry :inspector-update
+        :inputs {:state initial :inputs (assoc inputs :selected false) :event {:kind "viewport" :tab "" :key ""}}
+        :expected {:state initial :requests []}}])))

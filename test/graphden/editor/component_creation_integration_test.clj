@@ -143,7 +143,7 @@
     (is (= 200 (:status reserved)) (pr-str reserved))
     (is (true? (get-in reserved [:body :ok])))
     (is (= before (graph-identities storage)))
-    (is (= 5 (count (get-in reserved [:body :manifest :namespaces]))))
+    (is (= 6 (count (get-in reserved [:body :manifest :namespaces]))))
     (let [created (apply-preview reserved)
           manifest (get-in created [:body :manifest])]
       (is (= 200 (:status created)) (pr-str created))

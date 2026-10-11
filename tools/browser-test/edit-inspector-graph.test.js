@@ -73,8 +73,20 @@ let phase = 'boot';
     await page.locator('#gd-insp-overview .gd-insp-runs-loading').waitFor({state: 'detached'});
     const current = await page.locator('#gd-insp-overview').innerHTML();
     held[0].release(); held[1].release();
-    await page.unroute(routePath);
     assert(await page.locator('#gd-insp-overview').innerHTML() === current, 'late A/B responses preserve the newest A host');
+    phase = 'interrupted-overview-resume';
+    await page.setViewportSize({width: 1000, height: 850});
+    await page.evaluate(id => gdInspectorRender(id), ids[0]);
+    assert(await waitFor(() => held.length >= 4, 30000), 'interruptible Overview reached the response boundary');
+    await page.evaluate(() => { window.inspectorInterruptedHost = document.getElementById('gd-insp-overview'); gdInspectorGraph.close(); });
+    await page.setViewportSize({width: 1400, height: 900});
+    assert(await waitFor(() => held.length >= 5, 30000), 'wide viewport starts a fresh read without selecting a tab');
+    held[4].release();
+    await page.locator('#gd-insp-overview .gd-insp-runs-loading').waitFor({state: 'detached'});
+    assert(await page.evaluate(() => window.inspectorInterruptedHost === document.getElementById('gd-insp-overview')),
+      'interrupted Overview resumes in the exact existing native host');
+    held[3].release();
+    await page.unroute(routePath);
     phase = 'responsive';
     await page.setViewportSize({width: 1000, height: 850});
     await page.locator('.gd-insp-close').waitFor({state: 'visible'});
@@ -92,6 +104,73 @@ let phase = 'boot';
     await page.locator('#gd-insp-run-host .gd-insp-run.visible').waitFor();
     assert(await page.locator('[data-insp-tab="stats"]').evaluate(el => el === document.activeElement),
       'wide Runs works after closing the narrow sheet without selecting again');
+    phase = 'hidden-initial-run';
+    let shellRelease;
+    const shellPath = '**/partials/execute-popover?*';
+    await page.route(shellPath, async route => {
+      const response = await route.fetch();
+      await new Promise(resolve => { shellRelease = resolve; });
+      await route.fulfill({response}).catch(() => {});
+    });
+    await page.evaluate(id => gdInspectorShowRuns(id), ids[0]);
+    assert(await waitFor(() => typeof shellRelease === 'function', 30000), 'initial Run shell reached its controlled boundary');
+    await page.setViewportSize({width: 1000, height: 850});
+    await page.evaluate(() => {
+      window.inspectorHiddenRun = document.querySelector('#gd-insp-run-host .gd-insp-run');
+      gdInspectorGraph.close();
+    });
+    shellRelease();
+    await page.waitForFunction(() => window.inspectorHiddenRun.classList.contains('visible'));
+    assert(await page.evaluate(() => window.inspectorHiddenRun.isConnected && !window.inspectorHiddenRun.contains(document.activeElement)),
+      'initial Run form completes hidden without stealing focus');
+    await page.unroute(shellPath);
+    await page.setViewportSize({width: 1400, height: 900});
+    await page.waitForFunction(() => document.querySelector('#gd-insp-runs .execute-history-host-wrap'));
+    assert(await page.evaluate(() => window.inspectorHiddenRun === document.querySelector('#gd-insp-run-host .gd-insp-run')),
+      'wide resume retains the hidden initial Run form');
+    phase = 'retained-run-history';
+    await page.evaluate(() => {
+      const pane = document.querySelector('#gd-insp-run-host .gd-insp-run');
+      const textarea = document.createElement('textarea'); textarea.dataset.lang = 'clojure';
+      textarea.value = 'retained Inspector draft'; pane.appendChild(textarea);
+      window.inspectorRetainedControls = {pane, textarea, view: gdCode.enhance(textarea)};
+    });
+    assert(await page.evaluate(() => !!window.inspectorRetainedControls.view), 'real CodeMirror control mounted in native Run owner');
+    const historyReads = [];
+    const historyPath = '**/partials/execute-history?*';
+    await page.route(historyPath, async route => {
+      const response = await route.fetch();
+      let release; const ready = new Promise(resolve => { release = resolve; });
+      const index = historyReads.length;
+      historyReads.push({release}); await ready;
+      const html = await response.text();
+      await route.fulfill({response, body: html + '<div data-gd-read-proof="' + index + '"></div>'}).catch(() => {});
+    });
+    await page.evaluate(() => document.getElementById('gd-insp-runs').dispatchEvent(new Event('gd-refresh-runs')));
+    assert(await waitFor(() => historyReads.length === 1, 30000), 'loaded Runs begins its held history refresh');
+    await page.setViewportSize({width: 1000, height: 850});
+    await page.evaluate(() => gdInspectorGraph.close());
+    await page.setViewportSize({width: 1400, height: 900});
+    assert(await waitFor(() => historyReads.length === 2, 30000), 'retained Run owner resumes interrupted history');
+    historyReads[1].release();
+    await page.locator('#gd-insp-runs [data-gd-read-proof="1"]').waitFor();
+    historyReads[0].release();
+    await page.evaluate(() => {
+      const host = document.getElementById('gd-insp-runs');
+      host.dispatchEvent(new Event('gd-refresh-runs')); host.dispatchEvent(new Event('gd-refresh-runs'));
+    });
+    assert(await waitFor(() => historyReads.length === 4, 30000), 'two concurrent visible history reads reached controlled boundaries');
+    historyReads[3].release();
+    await page.locator('#gd-insp-runs [data-gd-read-proof="3"]').waitFor();
+    historyReads[2].release();
+    await page.unroute(historyPath);
+    assert(await page.locator('#gd-insp-runs [data-gd-read-proof="3"]').count() === 1,
+      'late history responses cannot replace the newest same-owner read');
+    assert(await page.evaluate(() => {
+      const saved = window.inspectorRetainedControls;
+      return saved.pane === document.querySelector('#gd-insp-run-host .gd-insp-run') && saved.textarea.isConnected
+        && gdCode.viewOf(saved.textarea) === saved.view && gdCode.get(saved.textarea) === 'retained Inspector draft';
+    }), 'close/resume/history preserves exact native controls, CodeMirror view and draft');
     await page.setViewportSize({width: 1000, height: 850});
     await page.evaluate(id => gdInspectorRender(id), ids[0]);
     await page.locator('.gd-insp-close').waitFor({state: 'visible'});

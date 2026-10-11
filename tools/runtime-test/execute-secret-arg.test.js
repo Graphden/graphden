@@ -8,6 +8,7 @@ const vm = require('node:vm');
 async function noteFor(widget) {
   const notes = [];
   const host = {
+    isConnected: true,
     dataset: { slotId: 'slot', slotName: 'token' },
     classList: { add() {} },
     appendChild(node) { notes.push(node.textContent); },

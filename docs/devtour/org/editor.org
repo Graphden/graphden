@@ -290,13 +290,13 @@ Loads grouped differences for a selected comparison branch. Explorer badges, can
 :PROPERTIES:
 :CUSTOM_ID: editor/submitExecution
 :FILE: resources/packages/app/editor/editor-execute.js
-:LINE: 291
+:LINE: 292
 :MINS: 6.5
 :END:
 
 The selected card's Run button delegates to the existing Inspector Run owner; it does not create another execution form. That form resolves typed inputs, keeps [[file:glossary.org::#term/effect][effect acknowledgement]] visible, and submits through this shared function. History, Trace path and Capture values are independent request options. Capture values requires tracing and explicit cost consent; cancelling consent clears that option. The submitted function UUID and generation identify this run. A new submission stops the previous poll, clears its result identity and ignores late replies; changing selection cannot relabel an earlier run. Pending runs use the same result host and cancellation path. Server execution checks remain authoritative.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-execute.js::async function submitExecution(fnEntity, args, persist, trace, captureValues,][resources/packages/app/editor/editor-execute.js:291]]
+- source :: [[file:../../../resources/packages/app/editor/editor-execute.js::async function submitExecution(fnEntity, args, persist, trace, captureValues,][resources/packages/app/editor/editor-execute.js:292]]
 - see also :: [[file:crud.org::#crud/apply-execute][apply-execute]], [[file:executor.org::#executor/record-effect!][record-effect!]], [[file:editor.org::#editor/aggregatePathTrace][aggregatePathTrace]]
 - referenced from :: [[file:editor.org::#editor/aggregatePathTrace][aggregatePathTrace]]
 
@@ -358,13 +358,13 @@ The ordinary app.ui-inspector initial/update/view graphs own the header, kind cl
 :PROPERTIES:
 :CUSTOM_ID: editor/requestHost
 :FILE: resources/packages/app/editor/editor-inspector.js
-:LINE: 18
-:MINS: 0.9
+:LINE: 50
+:MINS: 1.1
 :END:
 
-Each server partial captures a unique request generation and exact native host. Tab changes, selection, closing and account changes invalidate old responses, including A-to-B-to-A. CodeMirror is disposed before actual body replacement; graph chrome refreshes retain controls.
+Each server partial captures a latest-wins read token and exact native host. Tab changes, selection and account changes invalidate body ownership, including A-to-B-to-A. Closing interrupts reads without replacing Run controls; a wide viewport resumes their captured hosts. Initial Run forms may finish hidden, but a separate focus epoch blocks old autofocus. CodeMirror is disposed before actual body replacement; graph chrome refreshes retain controls.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-inspector.js::  function requestHost(id) {][resources/packages/app/editor/editor-inspector.js:18]]
+- source :: [[file:../../../resources/packages/app/editor/editor-inspector.js::  function requestHost(id, retry) {][resources/packages/app/editor/editor-inspector.js:50]]
 
 * 28. definitions
 :PROPERTIES:

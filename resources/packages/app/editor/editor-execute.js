@@ -436,7 +436,7 @@ function showExecutePopover(fnEntity, _anchorEl) {
 // Mount the run pane (form + result host + history) into the Runs
 // tab's hosts. Called by the inspector's tab renderer — every mount
 // is a fresh build, so per-mount state resets here.
-async function gdMountRunPane(fnId) {
+async function gdMountRunPane(fnId, {autofocus = true, isCurrent = () => true, canFocus = () => true} = {}) {
   const host = document.getElementById('gd-insp-run-host');
   const runsHost = document.getElementById('gd-insp-runs');
   if (!host) return;
@@ -486,18 +486,20 @@ async function gdMountRunPane(fnId) {
   try {
     const r = await authFetch('/partials/execute-popover?fn-id='
                               + encodeURIComponent(fnEntity.id));
+    if (!el.isConnected || !isCurrent()) return;
     if (!r.ok) {
       el.textContent = 'Could not load the run form (HTTP ' + r.status + ').';
       return;
     }
     html = await r.text();
   } catch (e) {
+    if (!el.isConnected || !isCurrent()) return;
     el.textContent = 'Could not load the run form: ' + e.message;
     return;
   }
   // A newer mount (another fn selected, the tab re-rendered) replaced
   // this pane while the shell was in flight — wire nothing.
-  if (!el.isConnected) return;
+  if (!el.isConnected || !isCurrent()) return;
   el.innerHTML = html;
 
   // --- post-swap wiring ---
@@ -536,7 +538,7 @@ async function gdMountRunPane(fnId) {
   // Built locally and published only while this pane is still the live
   // one: two overlapping mounts (A then B selected fast) used to push into
   // the one global list, so B's Run could send A's values.
-  if (!el.isConnected) return;
+  if (!el.isConnected || !isCurrent()) return;
   const formHosts = hosts.map((h, i) => ({ slotName: h.dataset.slotName,
                                            slotId: h.dataset.slotId,
                                            hostEl: h,
@@ -592,7 +594,7 @@ async function gdMountRunPane(fnId) {
     const panel = await buildHistoryPanel(fnEntity, resultHost);
     // A slow fetch may resolve after the tab re-rendered — only land
     // in the CURRENT runs host.
-    if (document.getElementById('gd-insp-runs') !== runsHost) return;
+    if (!isCurrent() || document.getElementById('gd-insp-runs') !== runsHost) return;
     runsHost.textContent = '';
     runsHost.appendChild(panel);
   }
@@ -644,7 +646,7 @@ async function gdMountRunPane(fnId) {
   requestAnimationFrame(() => {
     const first = el.querySelector(
       '.execute-popover-body textarea, .execute-popover-body input:not([type=checkbox])');
-    if (!first) return;
+    if (!autofocus || !isCurrent() || !canFocus() || !el.isConnected || !first) return;
     // A code field is CodeMirror-enhanced (editor-code.js) — the
     // textarea is hidden, focus its view instead.
     if (first.dataset?.cmEnhanced && window.gdCode) {

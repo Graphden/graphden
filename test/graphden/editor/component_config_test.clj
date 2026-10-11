@@ -90,7 +90,10 @@
             :fn-picker {:view (ids/fn-id (str root ".picker") :picker-view)}
             :recents {:initial (ids/fn-id (str root ".recents") :recents-initial)
                       :update (ids/fn-id (str root ".recents") :recents-update)
-                      :view (ids/fn-id (str root ".recents") :recents-view)}}
+                      :view (ids/fn-id (str root ".recents") :recents-view)}
+            :inspector {:initial (ids/fn-id (str root ".inspector") :inspector-initial)
+                        :update (ids/fn-id (str root ".inspector") :inspector-update)
+                        :view (ids/fn-id (str root ".inspector") :inspector-view)}}
            (config/configuration graph id)))))
 
 

@@ -102,6 +102,17 @@ async function cleanup(page, receipts) {
     assert(await page.evaluate(value => JSON.stringify(gdPrefRead('theme')) === JSON.stringify(value), previous.theme),
       'selective copies do not activate a theme');
 
+    const inspector = await copy(page, 'inspector', receipts);
+    await page.waitForFunction(id => gdUIComponentRuntimeIdentity('inspector') === id, inspector.roots['configuration-id']);
+    assert(await page.evaluate(id => gdUIComponentsRoots()['picker-id'] === id, picker.roots['picker-id']),
+      'adding Inspector retains the authored picker identity');
+    assert(await page.evaluate(id => graphData.bindings.some(row => row['fn-id'] === id && row.value === 'rgb(254, 215, 170)'), leaf),
+      'adding Inspector preserves the edited picker leaf');
+    const retained = new Set([...picker.functions, ...recents.functions].map(row => row.id));
+    assert(inspector.functions.every(row => !retained.has(row.id)), 'Inspector receipt excludes both retained component closures');
+    assert(await page.evaluate(value => JSON.stringify(gdPrefRead('theme')) === JSON.stringify(value), previous.theme),
+      'Inspector copy leaves the active theme unchanged');
+
     const prefPath = await page.evaluate(() => new URL(API.api_prefs_key('components'), location.href).pathname);
     const preferenceRoute = url => url.pathname === prefPath;
     await page.route(preferenceRoute, async route => {
@@ -133,8 +144,8 @@ async function cleanup(page, receipts) {
     await cleanup(page, [receipts.pop()]);
     const remaining = await api(page, 'GET', '/api/graph/entities?scope=index');
     const remainingIds = new Set(remaining.fns.map(row => row.id));
-    assert([...picker.functions, ...recents.functions].every(row => remainingIds.has(row.id)),
-      'cleaning the new receipt preserves both previously authored copies');
+    assert([...picker.functions, ...recents.functions, ...inspector.functions].every(row => remainingIds.has(row.id)),
+      'cleaning the new receipt preserves all previously authored copies');
     await Promise.all(pendingReplies);
     assert(unexpectedSelectiveCopyErrors(failures, replies, true).length === 0, 'no unclassified browser errors');
     console.log('PASS selective UI choices, authored retention, builtin fallback, real CAS conflict, exact cleanup');

@@ -26,7 +26,11 @@
     (is (= :core.collections/zipmap
            (get-in by-name [[menu :account-menu-key-map] :parent])))
     (is (= :core.collections/list (:parent (get by-name [root :ui]))))
-    (is (= 3 (count (get-in by-name [[root :ui] :args :items]))))
+    (is (= [(keyword root "_menu-descriptor")
+            (keyword root "_picker-descriptor")
+            (keyword root "_recents-descriptor")
+            (keyword root "_inspector-descriptor")]
+           (get-in by-name [[root :ui] :args :items])))
     (is (= {:ref (keyword (str root ".recents") "recents-view") :type :fn-ref}
            (get-in by-name [[root :_recents-view-id] :args :value])))))
 
@@ -55,4 +59,4 @@
   (let [root "users.alice.ui-test"
         reserved (into #{root} (map #(str root "." %)) templates/namespace-suffixes)]
     (is (= reserved (set (map :namespace (templates/definitions root)))))
-    (is (= 5 (count reserved)))))
+    (is (= 6 (count reserved)))))

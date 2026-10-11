@@ -12,12 +12,12 @@ and execute permissions and the current quota on the server.
 
 Open **Settings → Appearance → UI graphs**, then **Create personal graphs**.
 Choose an existing namespace where you can write and inspect the source. The
-editor creates a fresh child with Theme, Menu, Picker and Recents groups and a
+editor creates a fresh child with Theme, Menu, Picker, Recents and Inspector groups and a
 `ui` configuration. Its descriptor list selects each component's entry identities. Selecting it changes your own editor
 preference; it does not select it for other users.
 
 For a smaller personal copy, use **Personalize account menu**, **Personalize
-function picker**, or **Personalize recent functions**. These actions create only
+function picker**, **Personalize recent functions**, or **Personalize Inspector**. These actions create only
 that component and its dependencies, keep existing personal identities and edits,
 and leave the active theme unchanged. An existing group opens for editing instead
 of being replaced. This lesson uses the complete **Create personal graphs** bundle
@@ -28,6 +28,12 @@ entry bindings, **Theme** the shared named values, **Menu behavior** the event
 and state decisions, **Menu view** the rendered component and styles, and
 **Picker view** the candidate presentation. Existing graph controls edit their
 dependencies; a rename does not redirect a saved identity to another function.
+
+The Inspector's header, kind label, four tabs, keyboard state and scoped styles
+are ordinary `initial`, `update` and `view` graphs. Their finite requests ask the
+editor to load a tab, focus its button or close the narrow sheet. Server-rendered
+tab bodies, Run forms, comparison discussions and CodeMirror retain their native
+owners; changing graph chrome does not replace those controls.
 
 1. Open **Theme** and follow its values to `theme-canvas-color`. Set its own
    `value` to `#fff7ed`. The copied color wrapper inherits the canonical color

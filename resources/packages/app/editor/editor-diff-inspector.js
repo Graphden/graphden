@@ -58,8 +58,9 @@ function gdDiffRenderInspectorSection(inspectorEl, fnId) {
   head.setAttribute('data-anchor-id', g['fn-id']);
   panel.appendChild(head);
   panel.appendChild(gdDiffRenderGroup(g, { entriesOnly: true }));
-  const inspHead = inspectorEl.querySelector('.gd-insp-head');
-  (inspHead || inspectorEl).insertAdjacentElement('afterend', panel);
+  const nativeHost = inspectorEl.querySelector('[data-gd-inspector-diff-host]');
+  if (nativeHost) nativeHost.appendChild(panel);
+  else inspectorEl.appendChild(panel);
   // Anchored threads (fn + entries) with composers; no general thread
   // here — that lives in the review dialog.
   // Threads read/post the PAIR's one review thread (proposalRef) —

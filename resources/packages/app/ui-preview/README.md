@@ -177,8 +177,8 @@ tree within both limits.
 
 ## Personal component manifests
 
-Appearance can copy account-menu, function-picker and Recents independently,
-or create a complete copy. Its `ui` entry is an ordinary list or a composition
+Appearance can copy account-menu, function-picker, Recents and Inspector
+independently, or create a complete copy. Its `ui` entry is an ordinary list or a composition
 of retained and new lists through `concat`, returning the named
 `app.ui-components/ui-component-manifest` type. Each item has this shape:
 
@@ -190,8 +190,9 @@ of retained and new lists through `concat`, returning the named
 ```
 
 The component discriminator is the UUID of the shipped view:
-`app.ui-account-menu/account-menu-view`, `app.ui-fn-picker/picker-view`, or
-`app.ui-recents/recents-view`. Menu and Recents require all three roles; the
+`app.ui-account-menu/account-menu-view`, `app.ui-fn-picker/picker-view`,
+`app.ui-recents/recents-view`, or `app.ui-inspector/inspector-view`.
+Menu, Recents and Inspector require all three roles; the
 picker requires only `:view`. Entry UUIDs select personal graph functions.
 The subtypes are `ui-component-entry`, `ui-component-entries`, and
 `ui-component-descriptor` in `app.ui-components`.
@@ -218,8 +219,8 @@ Field names and roles are finite keyword literals. Component bodies retain the
 normal bounded browser ABI rather than the narrower manifest projection ABI.
 
 `POST /api/ui/components/plan` accepts exactly
-`{"component":"account-menu"}`, `{"component":"fn-picker"}`, or
-`{"component":"recents"}`. The existing owner/org/branch-scoped `components`
+`{"component":"account-menu"}`, `{"component":"fn-picker"}`,
+`{"component":"recents"}`, or `{"component":"inspector"}`. The existing owner/org/branch-scoped `components`
 preference selects the configuration. Each request authorizes manifest source,
 checks its original secret classification and snapshot provenance, then reads
 and exports only that component's body closure. Other entry targets provide
@@ -293,3 +294,13 @@ change during creation, including in another tab, leaves the new graphs availabl
 without replacing the newer preference. Tutorial cleanup restores the earlier
 selection only while the current preference still selects its deleted config;
 it never deletes retained component identities or changes an unrelated theme.
+
+The Inspector component owns its header, kind label, ARIA tabs and scoped style
+rules through ordinary typed `initial/update/view` graphs. The host validates
+four fixed tab identities and finite load/focus/close requests. Only those four
+tab IDs may appear in graph chrome, once each; native host IDs cannot be shadowed. Native server
+panels and diff conversations are sibling hosts; chrome updates never replace
+Run controls or discussion drafts. The open state controls the narrow sheet;
+the wide native column remains available after a sheet closes. Request generations and abort signals guard
+all tab responses, including repeated selections. CodeMirror disposal precedes
+native body replacement, and keyboard tab navigation suppresses Run autofocus.

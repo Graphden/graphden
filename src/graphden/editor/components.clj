@@ -17,7 +17,7 @@
 
 
 (def ^:private component-keys
-  {"account-menu" :account-menu "fn-picker" :fn-picker "recents" :recents})
+  {"account-menu" :account-menu "fn-picker" :fn-picker "recents" :recents "inspector" :inspector})
 
 
 (defn- reject!
@@ -96,6 +96,9 @@
                  :menu-id (str (get-in configuration [:account-menu :view]))
                  :menu-update-id (str (get-in configuration [:account-menu :update]))
                  :picker-id (str (get-in configuration [:fn-picker :view]))
+                 :inspector-id (some-> (get-in configuration [:inspector :view]) str)
+                 :inspector-initial-id (some-> (get-in configuration [:inspector :initial]) str)
+                 :inspector-update-id (some-> (get-in configuration [:inspector :update]) str)
                  :recents-id (some-> (get-in configuration [:recents :view]) str)
                  :recents-initial-id (some-> (get-in configuration [:recents :initial]) str)
                  :recents-update-id (some-> (get-in configuration [:recents :update]) str)}}))))

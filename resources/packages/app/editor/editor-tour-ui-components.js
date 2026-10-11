@@ -114,7 +114,9 @@ function gdTourUIComponentCheck(check) {
     && window.gdUIComponentRuntimeIdentity?.('account-menu') === receipt.manifest.roots['configuration-id']
     && window.gdUIComponentRuntimeIdentity?.('fn-picker') === receipt.manifest.roots['configuration-id']
     && (!receipt.manifest.roots['recents-id']
-      || window.gdUIComponentRuntimeIdentity?.('recents') === receipt.manifest.roots['configuration-id']);
+      || window.gdUIComponentRuntimeIdentity?.('recents') === receipt.manifest.roots['configuration-id'])
+    && (!receipt.manifest.roots['inspector-id']
+      || window.gdUIComponentRuntimeIdentity?.('inspector') === receipt.manifest.roots['configuration-id']);
   if (check.action === 'open') return selectedFnId === receipt.manifest.roots[check.root];
   const fn = _tourUIComponentFn(receipt, check.group, check.name);
   if (!fn) return false;

@@ -89,6 +89,7 @@
       void window.gdShellMenuGraph?.reload();
       void window.gdFnPickerGraph?.reload();
       void window.gdRecentsGraph?.reload();
+      void window.gdInspectorGraph?.reload();
     }, 0);
   }
   window.gdPrefOnChange((key) => { if (key === 'components') refresh(); });

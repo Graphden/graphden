@@ -40,12 +40,16 @@ assert.equal(ctx.GraphdenStyles.normalize([rule('& .row:hover', {'background-col
 assert.equal(ctx.GraphdenStyles.normalize([rule('& .row:focus-within .pin', {
   flex: 'none', 'font-family': 'var(--gd-mono)', 'letter-spacing': '0.06em', 'text-transform': 'uppercase',
 })]).length, 1);
+assert.equal(ctx.GraphdenStyles.normalize([rule('& .header', {
+  position: 'relative', 'border-bottom': '1px solid var(--gd-line)',
+}), rule('& .close', {position: 'absolute', top: '8px', right: '10px'})]).length, 2);
 for (const unsafe of [
   rule('body', {color: 'red'}),
   rule('& + .neighbor', {color: 'red'}),
   rule('&', {'background-color': 'url(https://example.com/private)'}),
   rule('&', {color: 'red;display:none'}),
   rule('&', {position: 'fixed'}),
+  rule('&', {position: 'sticky'}),
   rule('&', {cursor: String.raw`\75rl(https://example.com/private), pointer`}),
 ]) assert.throws(() => ctx.GraphdenStyles.normalize([unsafe]));
 console.log('PASS graph renderer markup and scoped-style boundary');

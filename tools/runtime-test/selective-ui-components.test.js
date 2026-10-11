@@ -23,8 +23,9 @@ function fixture(component = 'recents', save = true) {
     namespaces: [{id: id(1), name: 'personal', path: 'personal', 'parent-id': null}],
     functions: ['ui', 'initial', 'update', 'view'].map((name, index) => ({id: id(index + 2), name, 'namespace-id': id(1)})),
     roots: {'configuration-id': id(2), 'recents-initial-id': id(3), 'recents-update-id': id(4), 'recents-id': id(5)}};
-  const viewKey = {'account-menu': 'menu-id', 'fn-picker': 'picker-id', recents: 'recents-id'}[component];
+  const viewKey = {'account-menu': 'menu-id', 'fn-picker': 'picker-id', recents: 'recents-id', inspector: 'inspector-id'}[component];
   manifest.roots[viewKey] = id(5);
+  if (component === 'inspector') Object.assign(manifest.roots, {'inspector-initial-id': id(3), 'inspector-update-id': id(4)});
   if (component === 'account-menu') Object.assign(manifest.roots, {'menu-initial-id': id(3), 'menu-update-id': id(4)});
   const request = {owner: 'alice', org: 'public', 'branch-id': id(9), component};
   const window = {gdPrefOwner: 'alice', gdPrefsReady: true, API: {api_ui_components_create_preview: '/preview', api_ui_components_create_apply: '/apply'},
@@ -83,7 +84,7 @@ test('an existing personal group opens its own identity instead of creating anot
   assert.equal(f.group.textContent, 'Open recent functions');
 });
 
-for (const component of ['account-menu', 'fn-picker']) {
+for (const component of ['account-menu', 'fn-picker', 'inspector']) {
   test(component + ' uses its selected template without activating a theme', async () => {
     const f = fixture(component); f.group.click();
     await until(() => f.requests.length === 2); f.apply();
@@ -103,4 +104,12 @@ test('a rejected conditional activation leaves the created graphs available and 
   assert.equal(f.writes.length, 1);
   assert.equal(f.themes.length, 0);
   assert.match(f.status(), /selection changed or could not be saved/);
+});
+
+test('an existing Inspector opens its retained view without issuing creation or preference writes', async () => {
+  const f = fixture('inspector'); f.change({'fn-id': id(2), branch: 'develop', roots: {'inspector-id': id(5)}});
+  f.window.gdRenderUIComponentCatalog(); f.group.click();
+  await until(() => f.selections() === 1);
+  assert.equal(f.requests.length, 0);
+  assert.equal(f.writes.length, 0);
 });

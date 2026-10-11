@@ -29,11 +29,14 @@
 (def script-path "resources/packages/app/ui-preview/builtin-plans.js")
 
 
-(def ^:private modules ["ui-account-menu" "ui-fn-picker" "ui-recents"])
+(def ^:private modules ["ui-account-menu" "ui-fn-picker" "ui-recents" "ui-inspector"])
 
 
 (def ^:private entries
-  {:accountMenu {:initial (ids/fn-id "app.ui-account-menu" :account-menu-initial)
+  {:inspector {:initial (ids/fn-id "app.ui-inspector" :inspector-initial)
+               :update (ids/fn-id "app.ui-inspector" :inspector-update)
+               :view (ids/fn-id "app.ui-inspector" :inspector-view)}
+   :accountMenu {:initial (ids/fn-id "app.ui-account-menu" :account-menu-initial)
                  :update (ids/fn-id "app.ui-account-menu" :account-menu-update)
                  :view (ids/fn-id "app.ui-account-menu" :account-menu-view)}
    :recents {:initial (ids/fn-id "app.ui-recents" :recents-initial)

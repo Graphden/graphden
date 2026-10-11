@@ -679,3 +679,37 @@
   (let [definitions (:fns (edn/read-string (slurp "resources/packages/app/ui-recents/fns.edn")))
         {:keys [graph impls ids]} (map-fixture definitions)]
     (assert-differential! graph impls ids recents/cases)))
+
+
+(deftest inspector-transitions-match-jvm-and-browser
+  (let [definitions (:fns (edn/read-string (slurp "resources/packages/app/ui-inspector/fns.edn")))
+        {:keys [graph impls ids]} (map-fixture definitions)
+        inputs {:selected true :name "add" :namespace "core" :description ""
+                :parents [] :has-return false :narrow false}
+        initial {:tab "overview" :open false :handled false}
+        transition (fn [state event expected requests]
+                     {:entry :inspector-update
+                      :inputs {:state state :inputs inputs :event event}
+                      :expected {:state expected :requests requests}})]
+    (assert-differential!
+      graph impls ids
+      [{:entry :inspector-initial :inputs {:inputs (assoc inputs :selected false)} :expected initial}
+       (transition initial {:kind "selection" :tab "" :key ""}
+                   (assoc initial :open true) [{:kind "load-tab" :tab "overview"}])
+       (transition initial {:kind "preset" :tab "stats" :key ""}
+                   (assoc initial :tab "stats") [])
+       (transition (assoc initial :open true) {:kind "close" :tab "" :key ""}
+                   initial [{:kind "close-sheet" :tab "overview"}])
+       (transition initial {:kind "keydown" :tab "" :key "ArrowLeft"}
+                   {:tab "history" :open false :handled true}
+                   [{:kind "load-tab" :tab "history"} {:kind "focus-tab" :tab "history"}])
+       (transition (assoc initial :tab "history") {:kind "keydown" :tab "" :key "ArrowRight"}
+                   {:tab "overview" :open false :handled true}
+                   [{:kind "load-tab" :tab "overview"} {:kind "focus-tab" :tab "overview"}])
+       (transition initial {:kind "keydown" :tab "" :key "End"}
+                   {:tab "history" :open false :handled true}
+                   [{:kind "load-tab" :tab "history"} {:kind "focus-tab" :tab "history"}])
+       (transition (assoc initial :tab "history") {:kind "keydown" :tab "" :key "Home"}
+                   {:tab "overview" :open false :handled true}
+                   [{:kind "load-tab" :tab "overview"} {:kind "focus-tab" :tab "overview"}])
+       (transition initial {:kind "keydown" :tab "" :key "x"} initial [])])))

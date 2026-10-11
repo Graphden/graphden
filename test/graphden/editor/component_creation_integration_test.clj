@@ -217,6 +217,19 @@
         (is (= before (graph-identities storage)))))))
 
 
+(defn- guarded-jdbc-reader
+  [original bodies configuration-id queries]
+  (fn [connection sql & opts]
+    (when (re-find #"(?i)\bSELECT\b" (first sql))
+      (let [targets? (boolean (some #(contains? bodies (str %)) (rest sql)))
+            body? (boolean (re-find #"(?i)\b(?:FROM|JOIN)\s+\"(?:binding|fn_slot)(?:_version)?\"" (first sql)))]
+        (swap! queries conj {:retained-root? (boolean (some #(= configuration-id (str %)) (rest sql)))
+                             :retained-target? targets? :body? body?})
+        (when (and targets? body?)
+          (throw (ex-info "Retained body must not be read" {:type :test/forbidden-body-read})))))
+    (apply original connection sql opts)))
+
+
 (deftest two-independent-copies-export-only-the-selected-component
   (let [ctx (:ctx ga/*bootstrap*)
         storage (:storage ctx)
@@ -234,31 +247,25 @@
         ;; Publication updated this ctx's graph/type slices. No concurrent
         ;; writer exists in this serial fixture; certify that exact basis.
         (epoch/seed-watermark! storage)
-        (doseq [component ["account-menu" "fn-picker" "recents"]]
+        (doseq [component ["account-menu" "fn-picker" "recents" "inspector"]]
           (let [queries (atom [])
-                original-query sp/query-bounded-entities
-                {:keys [result] :as diagnosed} (with-redefs [sp/query-bounded-entities
-                                                             (fn [s entity where maximum]
-                                                               (swap! queries conj [entity where])
-                                                               (original-query s entity where maximum))]
-                                                 (export-diagnosed ctx component))
-                body-ids (into #{} (map parse-uuid)
-                               (case component
-                                 "account-menu" [(get-in manifest [:roots :picker-id])
-                                                 (get-in manifest [:roots :recents-id])
-                                                 (get-in manifest [:roots :recents-initial-id])
-                                                 (get-in manifest [:roots :recents-update-id])]
-                                 "fn-picker" [(get-in manifest [:roots :menu-id])
-                                              (get-in manifest [:roots :menu-update-id])
-                                              (get-in manifest [:roots :recents-id])
-                                              (get-in manifest [:roots :recents-initial-id])
-                                              (get-in manifest [:roots :recents-update-id])]
-                                 "recents" [(get-in manifest [:roots :menu-id])
-                                            (get-in manifest [:roots :menu-update-id])
-                                            (get-in manifest [:roots :picker-id])]))]
-            (is (not-any? (fn [[entity where]]
-                            (and (contains? #{:binding :fn-slot} entity)
-                                 (seq (set/intersection body-ids (set (:fn-id where)))))) @queries)
+                component-roots {"account-menu" [:menu-id :menu-update-id]
+                                 "fn-picker" [:picker-id]
+                                 "recents" [:recents-id :recents-initial-id :recents-update-id]
+                                 "inspector" [:inspector-id :inspector-initial-id :inspector-update-id]}
+                body-ids (into #{} (map #(get-in manifest [:roots %]))
+                               (mapcat val (dissoc component-roots component)))
+                reader (guarded-jdbc-reader jdbc/execute! body-ids (str id) queries)
+                _ (with-redefs [jdbc/execute! reader]
+                    (is (thrown? Exception
+                          (resolution/call-with-fresh-memos
+                            #(sp/query-entities storage :binding {:fn-id (parse-uuid (first body-ids))}))))
+                    (is (some #(and (:body? %) (:retained-target? %)) @queries)))
+                _ (reset! queries [])
+                {:keys [result] :as diagnosed} (with-redefs [jdbc/execute! reader]
+                                                 (export-diagnosed ctx component))]
+            (is (some :retained-root? @queries) "actual selected root metadata was read")
+            (is (not-any? #(and (:body? %) (:retained-target? %)) @queries)
                 "nonselected component identities never cause body reads")
             (is (:ok result) (pr-str diagnosed))
             (is (= (str id) (:selection-id result)))
@@ -305,20 +312,8 @@
     result))
 
 
-(defn- guarded-jdbc-reader
-  [original bodies configuration-id queries]
-  (fn [connection sql & opts]
-    (when (re-find #"(?i)\bSELECT\b" (first sql))
-      (let [targets? (boolean (some #(contains? bodies (str %)) (rest sql)))
-            body? (boolean (re-find #"(?i)\b(?:FROM|JOIN)\s+\"(?:binding|fn_slot)(?:_version)?\"" (first sql)))]
-        (swap! queries conj {:retained-root? (boolean (some #(= configuration-id (str %)) (rest sql)))
-                             :retained-target? targets? :body? body?})
-        (when (and targets? body?)
-          (throw (ex-info "Retained body must not be read" {:type :test/forbidden-body-read})))))
-    (apply original connection sql opts)))
-
-
-(deftest selective-copy-retains-edited-components-without-reading-their-bodies-or-changing-theme
+(defn- selective-retention-proof
+  [component]
   (let [ctx (:ctx ga/*bootstrap*)
         storage (:storage ctx)
         _ (preferences/write! storage "components" nil false nil)
@@ -354,18 +349,18 @@
               (is (some #(and (:body? %) (:retained-target? %)) @queries)))
           _ (reset! queries [])
           created (with-redefs [jdbc/execute! reader]
-                    (apply-preview (preview "recents")))
+                    (apply-preview (preview component)))
           added (get-in created [:body :manifest])]
       (is (= 200 (:status created)) (pr-str created))
       (is (some :retained-root? @queries) "actual selected root metadata was read")
       (is (some :retained-target? @queries) "retained entry metadata was read")
       (is (not-any? #(and (:body? %) (:retained-target? %)) @queries))
-      (is (= #{"recents"} (set (map :name (rest (:namespaces added))))))
+      (is (= #{component} (set (map :name (rest (:namespaces added))))))
       (is (empty? (set/intersection (set (map :id (:functions first-copy))) (set (map :id (:functions added))))))
       (is (= :saved (activate-selected storage added)))
       (is (= "#fed7aa" (:value (sp/read-entity storage :binding (:id binding)))))
       (is (= theme-before (sp/query-entities storage :ui-pref {:owner-id "anonymous" :key "theme"})))
-      (let [{:keys [result] :as diagnosed} (export-diagnosed ctx "recents")]
+      (let [{:keys [result] :as diagnosed} (export-diagnosed ctx component)]
         (is (:ok result) (pr-str (assoc diagnosed :retained-configuration-id first-config)))
         (is (= picker-id (get-in result [:roots :picker-id])))
         (is (not= first-config (:selection-id result))))
@@ -373,6 +368,14 @@
             duplicate (preview "fn-picker")]
         (is (= 409 (:status duplicate)))
         (is (= before (graph-identities storage)))))))
+
+
+(deftest selective-copy-retains-edited-components-without-reading-their-bodies-or-changing-theme
+  (selective-retention-proof "recents"))
+
+
+(deftest selective-inspector-retains-anonymous-manifest-and-edited-picker-without-body-reads
+  (selective-retention-proof "inspector"))
 
 
 (deftest selective-apply-rejects-a-changed-server-preference-before-any-create

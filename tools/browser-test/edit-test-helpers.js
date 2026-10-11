@@ -778,7 +778,18 @@ async function submitInlineRow(page, text) {
   await page.locator(sel).first().press('Enter');
 }
 
-module.exports = { assert, deepEqual, newContext, api, getEntities, clickWhenHtmxReady,
+// Responsive graph painting can follow a viewport change. A stale visibility
+// probe is not permission to click the narrow-only close button on a wide page.
+async function closeInspectorSheet(page) {
+  const open = await page.evaluate(() => matchMedia('(max-width: 1100px)').matches
+    && document.body.classList.contains('gd-insp-open'));
+  if (!open) return false;
+  await page.getByRole('button', {name: 'Close inspector', exact: true}).click();
+  await page.waitForFunction(() => !document.body.classList.contains('gd-insp-open'));
+  return true;
+}
+
+module.exports = { assert, deepEqual, newContext, api, getEntities, clickWhenHtmxReady, closeInspectorSheet,
                    nodeApi, nodeApiJson, openBranchPopover, openOperate,
                    synthArgs, waitFor, waitForServerHealthy,
                    deleteFnByName, deleteBranches, submitInlineRow, AUTH, BASE };

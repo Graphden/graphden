@@ -1,7 +1,7 @@
 // Real editor intent menu + atomic API: preserve own composition and source,
 // UUID navigation, both variation kinds, all-consumer semantics and cleanup.
 const { chromium } = require('playwright');
-const { assert, newContext, api, getEntities, nodeApi, deleteFnByName } = require('./edit-test-helpers');
+const { assert, newContext, api, getEntities, nodeApi, deleteFnByName, closeInspectorSheet } = require('./edit-test-helpers');
 
 const suffix = '-' + process.pid + '-' + Date.now().toString(36);
 const nsName = 'intent' + suffix;
@@ -45,8 +45,7 @@ async function openIntent(page, fnName, depth = 1) {
 }
 
 async function revealTrigger(page, fnName) {
-  const inspectorClose = page.getByRole('button', {name: 'Close inspector', exact: true});
-  if (await inspectorClose.isVisible()) await inspectorClose.click();
+  await closeInspectorSheet(page);
   await page.evaluate(async name => {
     toggleCollapsed(true);
     for (let i = 0; i < 2; i++) await new Promise(requestAnimationFrame);

@@ -15,7 +15,7 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext, api, getEntities, nodeApi} =
+const {assert, newContext, api, getEntities, nodeApi, closeInspectorSheet} =
   require('./edit-test-helpers');
 
 const RUN_ID = process.pid + '-' + Date.now().toString(36);
@@ -400,8 +400,7 @@ async function openExecutePopoverForCard(page, fnId) {
     assert((await page.locator('.path-value-popover-note').textContent()).includes('not captured'), 'cap explanation states value was not stored');
     await page.click('.path-value-popover [data-gd-pop-x]');
     await page.setViewportSize({width: 390, height: 240});
-    const inspectorClose = page.getByRole('button', {name: 'Close inspector', exact: true});
-    if (await inspectorClose.isVisible()) await inspectorClose.click();
+    await closeInspectorSheet(page);
     await page.evaluate(async id => {
       toggleCollapsed(true);
       for (let frame = 0; frame < 2; frame++) await new Promise(requestAnimationFrame);

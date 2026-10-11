@@ -20,8 +20,10 @@
   let generation = 0;
   let pending = null;
   let presetOnly = false;
+  let sharedRuntime = null;
+  const runtimeListeners = new Set();
   function visible() { return !!output && metadata.selected && (!narrow.matches || field(output, 'open')); }
-  function inputs() { return value({...metadata, narrow: narrow.matches}); }
+  function inputs() { return value({...metadata, narrow: narrow.matches, surface: 'chrome', usages: value({rows: [], count: 0, truncated: false})}); }
   function validateState(state) {
     fields(state, ['tab', 'open', 'handled']);
     if (!tabs.includes(field(state, 'tab')) || typeof field(state, 'open') !== 'boolean' || typeof field(state, 'handled') !== 'boolean') throw new Error('Invalid Inspector state');
@@ -78,11 +80,16 @@
     if (!tabs.includes(tab)) throw new Error('Invalid Inspector request');
     return tab;
   }
-  function builtin() { return api.createRuntime(window.GraphdenBuiltinPlans.plans.inspector); }
+  function builtin() { return api.createRuntime(window.GraphdenBuiltinPlans.plans.inspector, {operationLimit: 150000}); }
+  function publishRuntime(runtime) {
+    sharedRuntime = runtime;
+    for (const listener of runtimeListeners) listener(runtime);
+  }
   function create() {
     if (controller) return controller;
     owner = window.gdPrefOwner || null;
-    controller = window.GraphdenComponent.create(builtin(), {
+    const initialRuntime = builtin();
+    controller = window.GraphdenComponent.create(initialRuntime, {
       inputs, validateState, validateView, render: paint, rendererOptions: {idPrefix: 'gd-insp', nodeLimit: 128},
       requests: {
         'load-tab': {validate: request, execute(tab) {
@@ -99,6 +106,7 @@
         'close-sheet': {validate: request, execute() { handlers?.close(); }},
       },
     });
+    publishRuntime(initialRuntime);
     Promise.resolve().then(() => { if (controller) void reload(); });
     return controller;
   }
@@ -107,7 +115,9 @@
     try { active.dispatch(value({kind, tab, key: pressed})); }
     catch (_) {
       window.gdUIComponentFailed?.('inspector');
-      active.replaceRuntime(builtin());
+      const fallback = builtin();
+      active.replaceRuntime(fallback);
+      publishRuntime(fallback);
       active.dispatch(value({kind, tab, key: pressed}));
     }
   }
@@ -119,13 +129,16 @@
     const loading = new AbortController();
     pending = loading;
     try {
-      const candidate = await window.gdLoadUIComponentRuntime('inspector', window.GraphdenBuiltinPlans.plans.inspector, {}, loading.signal);
+      const candidate = await window.gdLoadUIComponentRuntime('inspector', window.GraphdenBuiltinPlans.plans.inspector, {operationLimit: 150000}, loading.signal);
       if (loading.signal.aborted || own !== generation || active !== controller || owner !== (window.gdPrefOwner || null)) return;
       active.replaceRuntime(candidate);
+      publishRuntime(candidate);
     } catch (error) {
       if (loading.signal.aborted || own !== generation || active !== controller || error.name === 'AbortError') return;
       window.gdUIComponentFailed?.('inspector');
-      active.replaceRuntime(builtin());
+      const fallback = builtin();
+      active.replaceRuntime(fallback);
+      publishRuntime(fallback);
     } finally { if (pending === loading) pending = null; }
   }
   function click(event) {
@@ -147,8 +160,14 @@
     mounted?.dispose(); mounted = null;
     controller?.dispose(); controller = null;
     host = null; handlers = null; output = null;
+    sharedRuntime = null;
   }
   window.gdInspectorGraph = {
+    subscribeRuntime(listener) {
+      runtimeListeners.add(listener);
+      listener(sharedRuntime || builtin());
+      return () => runtimeListeners.delete(listener);
+    },
     render(nextHost, nextMetadata, nextHandlers) {
       metadata = nextMetadata;
       if (host !== nextHost) {

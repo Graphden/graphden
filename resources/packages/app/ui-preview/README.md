@@ -295,8 +295,19 @@ without replacing the newer preference. Tutorial cleanup restores the earlier
 selection only while the current preference still selects its deleted config;
 it never deletes retained component identities or changes an unrelated theme.
 
-The Inspector component owns its header, kind label, ARIA tabs and scoped style
-rules through ordinary typed `initial/update/view` graphs. The host validates
+The Inspector component owns its header, kind label, ARIA tabs, Overview's
+Used-by section and scoped style rules through ordinary typed
+`initial/update/view` graphs. The same three entries select the `chrome` or
+`usages` surface from typed inputs; each surface retains its own state and
+empty renderer host. Used-by graphs deduplicate `(kind, fn, slot)`, group and
+sort callers, fold anonymous rows, cap each group at 20 named rows and filter
+the rendered rows when more than 30 usages are present. Public names sort
+before private names, with case-insensitive name order and stable identity ties. The
+server still authorizes the usages API; the browser receives only its visible
+metadata and validates navigation against that response. A legacy personal
+Inspector that provides only chrome keeps its customized header and tabs;
+Used-by uses the bundled section and marks this local compatibility fallback.
+The host validates
 four fixed tab identities and finite load/focus/close/resume requests. Only those four
 tab IDs may appear in graph chrome, once each; native host IDs cannot be shadowed. Native server
 panels and diff conversations are sibling hosts; chrome updates never replace
@@ -307,4 +318,9 @@ token and abort signal; closing interrupts reads, and a wide viewport resumes
 only those interrupted reads in their original native hosts. Initial Run forms
 may finish while hidden. A separate focus epoch prevents their old autofocus
 from firing after close, while keyboard tab navigation suppresses autofocus.
-CodeMirror disposal precedes actual native body replacement.
+CodeMirror disposal precedes actual native body replacement. Used-by reads
+share the same body owner and latest-wins/resume lifecycle; replacing their
+data retains the graph's filter text and keyed input without replacing the
+server Overview subtree. Inspector plans use the existing bounded browser
+budget of 150,000 operations and 10,000 renderer nodes for this section, including
+the server's maximum 400-row usages response.

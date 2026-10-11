@@ -47,6 +47,22 @@
     (is (= :core.logic/const (get-in qualified [:refine :base])))))
 
 
+(deftest selected-inspector-copies-usages-composition-and-its-fixed-interfaces
+  (let [root "users.alice.ui-usages"
+        definitions (templates/selected-definitions root :inspector nil nil)
+        parents (set (map :parent definitions))
+        interfaces (set (map #(keyword (:namespace %) (name (:name %)))
+                             (templates/interface-definitions)))
+        operations #{:core.collections/vals :core.hof/group-by :core.hof/sort-by
+                     :core.strings/str-lower :core.strings/str-trim :core.strings/str-contains?}]
+    (doseq [operation operations]
+      (is (contains? parents operation) (str operation " is qualified in the copied graph"))
+      (is (contains? interfaces operation) (str operation " has its shipped parse-time interface")))
+    (is (some #(= :_usages-view (:name %)) definitions))
+    (is (every? #(contains? #{root (str root ".inspector")} (:namespace %)) definitions)
+        "The section remains part of the Inspector component, without a theme or another personal group")))
+
+
 (deftest type-constructors-are-not-operation-references
   (let [definition {:parent :list :return-type [:list [:map :text :text]]}
         qualified (rebase/rewrite-references

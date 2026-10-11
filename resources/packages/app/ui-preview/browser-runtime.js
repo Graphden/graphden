@@ -116,6 +116,31 @@
     if (typeof value === 'string' || typeof value === 'boolean' || Number.isSafeInteger(value)) return String(value);
     throw new Error('Browser str requires scalar parts');
   }
+  // Clojure compares vectors by length, then their elements. Maps and lazy
+  // sequences are not Comparable; accepting them would invent JVM semantics.
+  function compareValues(left, right, tick, depth = 0) {
+    tick();
+    if (depth > 64) throw new Error('Browser graph comparison depth exceeded');
+    if (left === right) return 0;
+    if (left === null) return -1;
+    if (right === null) return 1;
+    if (Array.isArray(left) && Array.isArray(right)) {
+      if (left.length !== right.length) return left.length < right.length ? -1 : 1;
+      for (let index = 0; index < left.length; index++) {
+        const compared = compareValues(left[index], right[index], tick, depth + 1);
+        if (compared) return compared;
+      }
+      return 0;
+    }
+    if (left instanceof Keyword && right instanceof Keyword) {
+      return compareValues(left.namespace, right.namespace, tick, depth + 1)
+        || compareValues(left.name, right.name, tick, depth + 1);
+    }
+    if (typeof left === typeof right && ['string', 'number', 'boolean'].includes(typeof left)) {
+      return left < right ? -1 : left > right ? 1 : 0;
+    }
+    throw new Error('Browser graph requires comparable sort keys');
+  }
   const operations = {
     const: (arg) => arg('value'),
     list: (arg) => arg('items'),
@@ -144,6 +169,42 @@
       }
       // JVM filter realizes predicates inside the execution scope and returns a seq.
       return new LazySequence(values);
+    },
+    'group-by': (arg, tick) => {
+      const callback = arg('key-fn');
+      if (!(callback instanceof GraphClosure)) throw new Error('Browser group-by requires a graph callback');
+      const groups = new Map();
+      let count = 0;
+      for (const item of sequence(arg('coll'))) {
+        tick();
+        if (++count > 50000) throw new Error('Browser graph sequence limit exceeded');
+        const group = mapKey(callback.invoke(item));
+        if (!groups.has(group)) groups.set(group, []);
+        groups.get(group).push(item);
+      }
+      return groups;
+    },
+    'sort-by': (arg, tick) => {
+      const callback = arg('key-fn');
+      if (!(callback instanceof GraphClosure)) throw new Error('Browser sort-by requires a graph callback');
+      const rows = [];
+      for (const item of sequence(arg('coll'))) {
+        tick();
+        if (rows.length >= 50000) throw new Error('Browser graph sequence limit exceeded');
+        rows.push({item, key: callback.invoke(item)});
+      }
+      // Exported key callbacks are pure. Evaluate once per row rather than
+      // recompute a composition for every comparison; stable ties keep order.
+      rows.sort((left, right) => compareValues(left.key, right.key, tick));
+      return rows.map(row => row.item);
+    },
+    vals: (arg, tick) => {
+      const collection = arg('map');
+      if (collection === null) return [];
+      if (!(collection instanceof Map)) throw new Error('Browser vals requires a map');
+      const values = [];
+      for (const item of collection.values()) { tick(); values.push(item); }
+      return values;
     },
     take: (arg, tick) => {
       const count = integer(arg('count'));
@@ -181,6 +242,21 @@
     'str-starts-with?': (arg) => {
       const value = arg('string');
       return value === null ? false : checkedString(value).startsWith(checkedString(arg('prefix')));
+    },
+    'str-lower': (arg) => checkedString(arg('string')).toLowerCase(),
+    // java.lang.String.trim, used by clojure.string/trim, removes code units
+    // <= U+0020. JavaScript trim also removes NBSP and would change semantics.
+    'str-trim': (arg) => {
+      const string = checkedString(arg('string'));
+      let start = 0;
+      let end = string.length;
+      while (start < end && string.charCodeAt(start) <= 32) start++;
+      while (end > start && string.charCodeAt(end - 1) <= 32) end--;
+      return string.slice(start, end);
+    },
+    'str-contains?': (arg) => {
+      const string = arg('string');
+      return string === null ? false : checkedString(string).includes(checkedString(arg('substring')));
     },
     get: (arg) => lookup(arg('coll'), arg('key'), arg('default')),
     assoc: (arg) => {

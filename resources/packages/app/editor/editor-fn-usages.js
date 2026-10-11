@@ -1,190 +1,128 @@
-// Editor Fn Usages — the inspector's "Used by" section: every fn that
-// USES the selected one, grouped by HOW (extended / referenced /
-// resolver / the type-plane kinds), each row a navigation.
-//
-// The data always existed — `used-as-parent-count` / `used-as-ref-count`
-// gate edits with "In use — detach those first" — but the editor never
-// showed WHICH fns those were, so the reader was told to detach callers
-// it could not find. `POST /api/fns/usages` (same walk as
-// /api/types/usages) returns the list; this module renders it.
-//
-// `buildFnUsagesSection` is pure DOM construction from the payload —
-// covered by tools/runtime-test/fn-usages-section.test.js under
-// mini-dom; keep it free of editor globals.
-
-// Group order + labels. Composition plane first (the inspector's main
-// question), type plane after (shown when the selected row doubles as
-// a type).
-const FN_USAGE_GROUPS = [
-  ['parent-of', 'Extended by'],
-  ['ref-of', 'Referenced by'],
-  ['resolver-of', 'Resolver in'],
-  ['slot-of', 'Slot type in'],
-  ['binding-of', 'Type override in'],
-  ['base-of', 'Narrowed by'],
-  ['element-of', 'List element of'],
-  ['return-of', 'Return type of'],
-  ['union-branch', 'Union branch of'],
-  ['variant-branch', 'Variant branch of'],
-  ['fn-type-arg-or-return', 'Fn-type mention in'],
-  ['other', 'Mentioned in'],
-];
-
-// Named rows shown per group before folding into "… and N more".
-// `:const` alone has hundreds of children — an uncapped list would
-// bury the rest of the Overview tab.
-const FN_USAGE_GROUP_CAP = 20;
-
-function buildFnUsagesSection(payload, opts) {
-  const usages = payload?.usages || [];
-  const onNavigate = opts?.onNavigate;
-  // One row per (kind, fn, slot): a binding ref AND a list-item ref on
-  // the same slot answer the same "where is it used" question.
-  const seen = new Set();
-  const byKind = new Map();
-  for (const u of usages) {
-    const key = u.kind + '|' + u['fn-id'] + '|' + (u['slot-name'] || '');
-    if (seen.has(key)) continue;
-    seen.add(key);
-    if (!byKind.has(u.kind)) byKind.set(u.kind, []);
-    byKind.get(u.kind).push(u);
+// Used-by data remains server-authorized. Ordinary Inspector graphs own its
+// grouping, rows, filter state and styles in an empty sibling host.
+(() => {
+  const api = window.GraphdenBrowser;
+  const key = api.keyword;
+  const field = (record, name) => record instanceof Map ? record.get(key(name)) : undefined;
+  const value = object => new Map(Object.entries(object).map(([name, item]) => [key(name), item]));
+  const mounted = new WeakMap();
+  const rendererOptions = {idPrefix: 'gd-insp-usages', nodeLimit: 10000};
+  function fields(record, names) {
+    if (!(record instanceof Map) || record.size !== names.length || names.some(name => !record.has(key(name)))) throw new Error('Invalid Used-by record');
   }
-  if (!seen.size) return null;
-
-  const section = document.createElement('div');
-  section.className = 'gd-insp-usages';
-  const head = document.createElement('div');
-  head.className = 'gd-insp-usages-head';
-  head.textContent = 'Used by';
-  const count = document.createElement('span');
-  count.className = 'gd-insp-usages-count';
-  count.textContent = String(payload.count || seen.size);
-  head.appendChild(count);
-  section.appendChild(head);
-  // A :const-scale list is unreadable without a filter — offer one as
-  // soon as the list outgrows a glance. Filtering hides rows in place
-  // (name OR namespace substring); group labels keep the full counts.
-  if (seen.size > 30) {
-    const filter = document.createElement('input');
-    filter.type = 'search';   // native ✕ — a filter without a clear is a trap
-    filter.className = 'gd-insp-usage-filter';
-    filter.placeholder = 'Filter usages…';
-    filter.setAttribute('aria-label', 'Filter the Used-by list');
-    // Escape: clear, then leave — two stages like the Explorer filter; the
-    // key is consumed either way so a running tour is not ended by it.
-    filter.addEventListener('keydown', (e) => {
-      if (e.key !== 'Escape') return;
-      e.preventDefault();
-      e.stopPropagation();
-      if (filter.value) { filter.value = ''; filter.dispatchEvent(new Event('input')); }
-      else filter.blur();
+  function normalize(payload) {
+    if (!payload || payload.ok === false || !Array.isArray(payload.usages) || payload.usages.length > 400
+      || !Number.isSafeInteger(payload.count) || payload.count < 0 || typeof payload['truncated?'] !== 'boolean') throw new Error('Invalid Used-by data');
+    const rows = payload.usages.map(row => {
+      if (typeof row.kind !== 'string' || typeof row['fn-id'] !== 'string' || row.anonymous != null && typeof row.anonymous !== 'boolean') throw new Error('Invalid Used-by row');
+      const result = {kind: row.kind, 'fn-id': row['fn-id'], anonymous: row.anonymous === true};
+      for (const name of ['fn-name', 'fn-namespace', 'slot-name']) {
+        if (row[name] != null && typeof row[name] !== 'string') throw new Error('Invalid Used-by metadata');
+        result[name] = row[name] || '';
+      }
+      return value(result);
     });
-    filter.addEventListener('input', () => {
-      const needle = filter.value.trim().toLowerCase();
-      for (const row of section.querySelectorAll('.gd-insp-usage-row')) {
-        row.hidden = !!needle && !(row.textContent || '')
-          .toLowerCase().includes(needle);
-      }
+    return value({rows, count: payload.count, truncated: payload['truncated?']});
+  }
+  function builtin() { return api.createRuntime(window.GraphdenBuiltinPlans.plans.inspector, {operationLimit: 150000}); }
+  window.gdMountFnUsages = (host, fnId, {owns, captureRead}) => {
+    if (!host || !fnId || !window.API?.api_fns_usages) return;
+    mounted.get(host)?.dispose();
+    let payload = value({rows: [], count: 0, truncated: false});
+    let disposed = false;
+    let output = null;
+    const renderer = window.GraphdenRenderer.mount(host, rendererOptions);
+    const current = () => !disposed && host.isConnected && owns();
+    const inputs = () => value({surface: 'usages', usages: payload, selected: true,
+      name: '', namespace: '', description: '', parents: [], 'has-return': false, narrow: false});
+    const validateState = state => {
+      fields(state, ['query', 'handled']);
+      if (typeof field(state, 'query') !== 'string' || typeof field(state, 'handled') !== 'boolean') throw new Error('Invalid Used-by state');
+    };
+    const validateView = view => {
+      fields(view, ['tree', 'styles', 'tab', 'open', 'handled']);
+      if (field(view, 'tab') !== 'overview' || field(view, 'open') !== false || typeof field(view, 'handled') !== 'boolean') throw new Error('Missing Used-by section contract');
+      const tree = window.GraphdenRenderer.vnode(field(view, 'tree'), rendererOptions.idPrefix, rendererOptions.nodeLimit);
+      if (tree.type !== 'div' || tree.props.className !== 'gd-insp-usages') throw new Error('Missing Used-by section contract');
+    };
+    const request = entry => {
+      fields(entry, ['kind', 'tab']);
+      if (typeof field(entry, 'tab') !== 'string') throw new Error('Invalid Used-by request');
+      return field(entry, 'tab');
+    };
+    const controller = window.GraphdenComponent.create(builtin(), {
+      inputs, validateState, validateView, rendererOptions,
+      render(view) { if (current()) renderer.render(field(view, 'tree'), field(view, 'styles')); output = view; },
+      requests: {
+        navigate: {validate(entry) {
+          const id = request(entry);
+          const row = field(payload, 'rows').find(item => field(item, 'fn-id') === id && !field(item, 'anonymous'));
+          if (!row) throw new Error('Invalid Used-by navigation');
+          return row;
+        }, execute(row) {
+          if (!current()) return;
+          const namespace = field(row, 'fn-namespace');
+          const name = field(row, 'fn-name');
+          window.gdNavigateToFn?.(field(row, 'fn-id'), namespace ? namespace + '.' + name : name);
+        }},
+        'blur-filter': {validate(entry) { if (request(entry) !== '') throw new Error('Invalid Used-by focus request'); },
+          execute() { if (current()) host.querySelector('.gd-insp-usage-filter')?.blur(); }},
+      },
     });
-    section.appendChild(filter);
-  }
-  if (payload['truncated?']) {
-    const note = document.createElement('div');
-    note.className = 'gd-insp-usage-more';
-    note.textContent = 'Showing the first '
-      + usages.length + ' of ' + (payload.count || '?') + ' usages.';
-    section.appendChild(note);
-  }
-
-  for (const [kind, label] of FN_USAGE_GROUPS) {
-    const group = byKind.get(kind);
-    if (!group?.length) continue;
-    // Anonymous users (inline `{:parent :X …}` forms) fold into a
-    // count — they have no navigable identity a reader would
-    // recognise; the NAMED callers are the answer to "who uses this".
-    const named = group.filter((u) => !u.anonymous);
-    const anonCount = group.length - named.length;
-    // Public names first, `_`-privates after — same order the sidebar
-    // teaches; alphabetical within each half.
-    const privRank = (u) => (String(u['fn-name']).startsWith('_') ? 1 : 0);
-    named.sort((a, b) => (privRank(a) - privRank(b))
-      || String(a['fn-name']).localeCompare(String(b['fn-name'])));
-    const glabel = document.createElement('div');
-    glabel.className = 'gd-insp-usage-glabel';
-    glabel.textContent = label + ' ' + group.length;
-    section.appendChild(glabel);
-    const list = document.createElement('div');
-    list.className = 'gd-insp-usage-list';
-    for (const u of named.slice(0, FN_USAGE_GROUP_CAP)) {
-      const row = document.createElement('button');
-      row.type = 'button';
-      row.className = 'gd-insp-usage-row';
-      row.setAttribute('aria-label',
-        label + ': ' + u['fn-name']
-        + (u['fn-namespace'] ? ' in ' + u['fn-namespace'] : '')
-        + (u['slot-name'] ? ' (slot ' + u['slot-name'] + ')' : ''));
-      const nameEl = document.createElement('span');
-      nameEl.className = 'gd-insp-usage-name';
-      nameEl.textContent = u['fn-name'];
-      row.appendChild(nameEl);
-      if (u['slot-name']) {
-        const slotEl = document.createElement('span');
-        slotEl.className = 'gd-insp-usage-slot';
-        slotEl.textContent = ':' + u['slot-name'];
-        row.appendChild(slotEl);
-      }
-      if (u['fn-namespace']) {
-        const nsEl = document.createElement('span');
-        nsEl.className = 'gd-insp-usage-ns';
-        nsEl.textContent = u['fn-namespace'];
-        row.appendChild(nsEl);
-      }
-      row.addEventListener('click', (e) => {
-        e.preventDefault();
-        if (typeof onNavigate === 'function' && u['fn-id']) onNavigate(u);
-      });
-      list.appendChild(row);
+    function fallback() {
+      host.dataset.gdUiFallback = 'missing-usages-contract';
+      controller.replaceRuntime(builtin());
     }
-    const dropped = Math.max(0, named.length - FN_USAGE_GROUP_CAP);
-    if (dropped || anonCount) {
-      const more = document.createElement('div');
-      more.className = 'gd-insp-usage-more';
-      const parts = [];
-      if (dropped) parts.push('and ' + dropped + ' more');
-      if (anonCount) parts.push(anonCount + ' anonymous');
-      more.textContent = '… ' + parts.join(' + ');
-      list.appendChild(more);
+    const unsubscribe = window.gdInspectorGraph.subscribeRuntime(runtime => {
+      if (!current()) return;
+      try { controller.replaceRuntime(runtime); delete host.dataset.gdUiFallback; }
+      catch (_) { fallback(); }
+    });
+    function dispatch(kind, tab = '', pressed = '') {
+      if (!current()) return;
+      try { controller.dispatch(value({kind, tab, key: pressed})); }
+      catch (_) { fallback(); controller.dispatch(value({kind, tab, key: pressed})); }
     }
-    section.appendChild(list);
-  }
-  return section;
-}
-
-// Navigate to a usage row's fn — the shared by-id-else-by-qualified-name
-// jump (gdNavigateToFn, editor-ui.js).
-function gdNavigateToUsage(u) {
-  const qname = u['fn-namespace']
-    ? u['fn-namespace'] + '.' + u['fn-name']
-    : u['fn-name'];
-  if (typeof gdNavigateToFn === 'function') gdNavigateToFn(u['fn-id'], qname);
-}
-
-// Fetch + append into the Overview host. The host node is the staleness
-// token: a newer selection re-renders the tab body, disconnecting this
-// host, so a late response appends nowhere visible.
-function gdAppendFnUsages(host, fnId) {
-  if (!host || !fnId || !(window.API && API.api_fns_usages)) return;
-  const doFetch = (typeof authFetch === 'function') ? authFetch : fetch;
-  doFetch(API.api_fns_usages, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ 'fn-id': fnId }),
-  })
-    .then((r) => (r.ok ? r.json() : null))
-    .then((payload) => {
-      if (!payload || payload.ok === false || !host.isConnected) return;
-      const section = buildFnUsagesSection(payload, { onNavigate: gdNavigateToUsage });
-      if (section) host.appendChild(section);
-    })
-    .catch(() => { /* usages are supplementary — the overview stands without them */ });
-}
+    function input(event) {
+      if (event.target.matches('.gd-insp-usage-filter')) dispatch('filter', event.target.value);
+    }
+    function click(event) {
+      const row = event.target.closest('[data-usage-id]');
+      if (!row || !host.contains(row)) return;
+      if (!field(payload, 'rows').some(item => field(item, 'fn-id') === row.dataset.usageId && !field(item, 'anonymous'))) return;
+      event.preventDefault(); dispatch('navigate', row.dataset.usageId);
+    }
+    function keydown(event) {
+      if (!event.target.matches('.gd-insp-usage-filter') || event.key !== 'Escape') return;
+      dispatch('keydown', '', event.key);
+      if (field(output, 'handled')) { event.preventDefault(); event.stopPropagation(); }
+    }
+    host.addEventListener('input', input);
+    host.addEventListener('click', click);
+    host.addEventListener('keydown', keydown);
+    function load() {
+      const read = captureRead(host, load);
+      if (!read.start) return;
+      const doFetch = typeof authFetch === 'function' ? authFetch : fetch;
+      doFetch(API.api_fns_usages, {method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({'fn-id': fnId}), signal: read.signal})
+        .then(response => response.ok ? response.json() : null)
+        .then(data => {
+          if (!read.current() || !data || data.ok === false) return;
+          payload = normalize(data);
+          try { controller.refresh(); } catch (_) { fallback(); }
+        }).catch(() => { /* Supplementary data may be unavailable; keep the Overview. */ }).finally(read.finish);
+    }
+    const lifecycle = {dispose() {
+      disposed = true;
+      unsubscribe(); controller.dispose(); renderer.dispose();
+      host.removeEventListener('input', input); host.removeEventListener('click', click); host.removeEventListener('keydown', keydown);
+      mounted.delete(host);
+    }};
+    mounted.set(host, lifecycle);
+    load();
+  };
+  window.gdDisposeFnUsages = body => {
+    for (const host of body.querySelectorAll('[data-gd-usages-host]')) mounted.get(host)?.dispose();
+  };
+})();

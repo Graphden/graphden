@@ -387,7 +387,9 @@
   ([definitions]
    (let [loaded (loader/load-packages ["web"])
          base-defs (select-keys (:base-fn-defs loaded)
-                                [:const :if :list :mod :get :equal? :count :map :filter :take :concat :str :str-starts-with? :hiccup :zipmap :assoc :add])
+                                [:const :if :list :mod :get :equal? :count :map :filter :take :concat
+                                 :vals :group-by :sort-by :str :str-starts-with? :str-lower :str-trim
+                                 :str-contains? :hiccup :zipmap :assoc :add])
          type-defs (remove #(or (:parent %) (:parents %)) (:fn-defs loaded))
          primitives (into (vec type-defs) (map (fn [[n d]] (assoc d :name n))) base-defs)]
      (assoc (graph-of primitives definitions)
@@ -679,6 +681,100 @@
   (let [definitions (:fns (edn/read-string (slurp "resources/packages/app/ui-recents/fns.edn")))
         {:keys [graph impls ids]} (map-fixture definitions)]
     (assert-differential! graph impls ids recents/cases)))
+
+
+(deftest browser-grouping-sorting-and-search-match-jvm
+  (let [definitions [{:name :kind :parent :get :lambda-params [:item]
+                      :args {:coll {:as :item} :key {:value :kind}}}
+                     {:name :prefixed-kind :parent :str :lambda-params [:item]
+                      :args {:parts [{:as :prefix} :kind]}}
+                     {:name :grouped :parent :group-by
+                      :args {:key-fn :prefixed-kind :coll {:as :rows}}}
+                     {:name :group-view :parent :list
+                      :args {:items [{:as :prefix} :grouped]}}
+                     {:name :key :parent :get :lambda-params [:item]
+                      :args {:coll {:as :item} :key {:value :key}}}
+                     {:name :sorted :parent :sort-by :args {:key-fn :key :coll {:as :rows}}}
+                     {:name :values :parent :vals :args {:map {:as :rows}}}
+                     {:name :lower :parent :str-lower :args {:string {:as :text}}}
+                     {:name :trimmed :parent :str-trim :args {:string {:as :text}}}
+                     {:name :contains :parent :str-contains?
+                      :args {:string {:as :text} :substring {:as :needle}}}]
+        {:keys [graph impls ids]} (map-fixture definitions)]
+    (assert-differential!
+      graph impls ids
+      [{:entry :group-view :inputs {:prefix "g:" :rows [{:kind "a"} {:kind "b"} {:kind "a"}]}
+        :expected ["g:" {"g:a" [{:kind "a"} {:kind "a"}] "g:b" [{:kind "b"}]}]}
+       {:entry :group-view :inputs {:prefix "g:" :rows []} :expected ["g:" {}]}
+       {:entry :sorted :inputs {:rows [{:key [1 "a"]} {:key [0 "z"]} {:key [0 "a"]}]}
+        :expected [{:key [0 "a"]} {:key [0 "z"]} {:key [1 "a"]}]}
+       {:entry :sorted :inputs {:rows [{:key [0 0]} {:key [9]} {:key []}]}
+        :expected [{:key []} {:key [9]} {:key [0 0]}]}
+       {:entry :sorted :inputs {:rows [{:key 2 :id "first"} {:key 1} {:key 2 :id "second"}]}
+        :expected [{:key 1} {:key 2 :id "first"} {:key 2 :id "second"}]}
+       {:entry :sorted :inputs {:rows [{:key nil} {:key :a} {:key :z/a}]}
+        :expected [{:key nil} {:key :a} {:key :z/a}]}
+       {:entry :sorted :inputs {:rows [{:key "a"} {:key 1}]} :error true}
+       {:entry :values :inputs {:rows {"one" [1]}} :expected [[1]] :sequence false}
+       {:entry :lower :inputs {:text "Alpha Σ🙂"} :expected "alpha σ🙂"}
+       {:entry :trimmed :inputs {:text "\t hello\n"} :expected "hello"}
+       {:entry :trimmed :inputs {:text "\u00a0hello\u00a0"} :expected "\u00a0hello\u00a0"}
+       {:entry :contains :inputs {:text nil :needle "x"} :expected false}
+       {:entry :contains :inputs {:text "hello🙂" :needle "🙂"} :expected true}
+       {:entry :contains :inputs {:text "hello" :needle "x"} :expected false}])
+    (let [plan (browser/export-plan graph impls {:view (get ids :sorted)} {:allow-fn? (constantly true)})]
+      (is (= "Browser graph operation limit exceeded"
+             (:error (first (browser-results plan [{:entry :view :inputs {:rows (vec (repeat 100 {:key 1}))}
+                                                    :operation-limit 20}]))))))))
+
+
+(deftest inspector-usages-transitions-match-jvm-and-browser
+  (let [definitions (:fns (edn/read-string (slurp "resources/packages/app/ui-inspector/fns.edn")))
+        {:keys [graph impls ids]} (map-fixture definitions)
+        inputs {:surface "usages" :usages {:rows [] :count 0 :truncated false}}
+        state {:query "" :handled false}
+        transition (fn [current event next-state requests]
+                     {:entry :inspector-update
+                      :inputs {:inputs inputs :state current :event event}
+                      :expected {:state next-state :requests requests}})]
+    (assert-differential!
+      graph impls ids
+      [{:entry :inspector-initial :inputs {:inputs inputs} :expected state}
+       (transition state {:kind "filter" :tab "  ABC " :key ""}
+                   {:query "  ABC " :handled false} [])
+       (transition {:query "abc" :handled false} {:kind "keydown" :tab "" :key "Escape"}
+                   {:query "" :handled true} [])
+       (transition {:query "  " :handled false} {:kind "keydown" :tab "" :key "Escape"}
+                   {:query "" :handled true} [])
+       (transition state {:kind "keydown" :tab "" :key "Escape"}
+                   {:query "" :handled true} [{:kind "blur-filter" :tab ""}])
+       (transition state {:kind "navigate" :tab "caller-id" :key ""}
+                   state [{:kind "navigate" :tab "caller-id"}])
+       (transition state {:kind "keydown" :tab "" :key "ArrowLeft"} state [])])))
+
+
+(deftest inspector-usages-presentation-matches-jvm-and-browser
+  (let [definitions (:fns (edn/read-string (slurp "resources/packages/app/ui-inspector/fns.edn")))
+        {:keys [graph impls ids]} (map-fixture definitions)
+        row (fn [id name] {:kind "ref-of" :fn-id id :fn-name name :fn-namespace "app" :slot-name "arg" :anonymous false})
+        rows [(row "a" "alpha") (row "a" "alpha") (row "z" "_a") (row "b" "Beta")]
+        inputs {:surface "usages" :usages {:rows rows :count 4 :truncated false}}
+        grouped {:groups {"ref-of" (vec (concat rows (repeat 2 (assoc (row "anon" "(anonymous)") :anonymous true))))}
+                 :group {:kind "ref-of" :label "Referenced by"}}
+        many (mapv #(row (str %) (format "caller-%02d" %)) (range 35))]
+    (assert-differential!
+      graph impls ids
+      [{:entry :_usages-unique-count :inputs {:inputs inputs} :expected 3}
+       {:entry :_usages-display-count :inputs {:inputs inputs} :expected 4}
+       {:entry :_usages-show-filter :inputs {:inputs inputs} :expected false}
+       {:entry :_usages-show-filter :inputs {:inputs (assoc-in inputs [:usages :rows] (vec (take 30 many)))} :expected false}
+       {:entry :_usages-show-filter :inputs {:inputs (assoc-in inputs [:usages :rows] (vec (take 31 many)))} :expected true}
+       {:entry :_usage-group-visible :inputs grouped :expected [(row "a" "alpha") (row "a" "alpha") (row "b" "Beta") (row "z" "_a")]}
+       {:entry :_usage-tail-text :inputs grouped :expected "… 2 anonymous"}
+       {:entry :_usage-group-visible :inputs (assoc grouped :groups {"ref-of" many}) :expected (vec (take 20 many))}
+       {:entry :_usage-tail-text :inputs (assoc grouped :groups {"ref-of" many}) :expected "… and 15 more"}
+       {:entry :_usage-hidden :inputs {:item (row "a" "alpha") :state {:query " APP " :handled false}} :expected false}
+       {:entry :_usage-hidden :inputs {:item (row "a" "alpha") :state {:query "missing" :handled false}} :expected true}])))
 
 
 (deftest inspector-transitions-match-jvm-and-browser

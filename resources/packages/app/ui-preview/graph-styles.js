@@ -6,14 +6,14 @@
     return Object.fromEntries([...value].map(([key, item]) => [key instanceof api.Keyword ? (key.namespace ? key.namespace + '/' : '') + key.name : key, item]));
   };
   const properties = new Set([
-    'position', 'top', 'right', 'appearance', 'flex-wrap', 'margin-top', 'margin-bottom', 'border-bottom', 'border-bottom-color',
+    'position', 'top', 'right', 'appearance', 'flex-wrap', 'margin-top', 'margin-bottom', 'margin-left', 'padding-left', 'border-bottom', 'border-bottom-color',
     'display', 'flex', 'flex-direction', 'align-items', 'justify-content', 'gap',
     'padding', 'padding-inline', 'padding-block', 'margin', 'margin-inline',
     'margin-block', 'width', 'min-width', 'max-width', 'height', 'max-height',
     'overflow', 'overflow-x', 'overflow-y', 'color', 'background-color',
     'border', 'border-color', 'border-width', 'border-style', 'border-radius',
     'outline', 'outline-color', 'outline-offset', 'font-size', 'font-weight',
-    'line-height', 'font-family', 'letter-spacing', 'text-transform', 'text-align', 'white-space', 'text-overflow', 'cursor',
+    'line-height', 'font-family', 'font-style', 'letter-spacing', 'text-transform', 'text-align', 'white-space', 'text-overflow', 'overflow-wrap', 'cursor',
     'opacity', 'box-shadow',
   ]);
   const hasControl = (value) => [...value].some((char) => char.charCodeAt(0) < 32);

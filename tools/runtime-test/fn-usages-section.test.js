@@ -1,185 +1,150 @@
-// `buildFnUsagesSection` (editor-fn-usages.js) — the inspector's
-// "Used by" block: who extends / references the selected fn, grouped
-// by kind, one row per (kind, fn, slot), capped per group, rows
-// navigating via the injected callback.
-//
-// Pure DOM construction from the `/api/fns/usages` payload — mini-dom
-// supplies the element APIs, so this runs under plain `node`.
-//
-// Run:  node tools/runtime-test/fn-usages-section.test.js
-// Exit: 0 on pass, 1 on failure.
-
 'use strict';
-
+// Actual ordinary Inspector graph and host adapter; server/DOM insertion are
+// controlled boundaries. Browser tests additionally prove stable DOM identity.
+const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { createDocument } = require('./mini-dom');
-
-const EDITOR = path.join(__dirname, '..', '..', 'resources', 'packages', 'app', 'editor');
-
-let failures = 0;
-let passes = 0;
-
-function assert(cond, msg) {
-  if (cond) { passes += 1; return; }
-  failures += 1;
-  console.error('  ✗ ' + msg);
-}
-
-function test(name, fn) {
-  console.log(' ' + name);
-  try { fn(); } catch (e) { failures += 1; console.error('  ✗ threw: ' + e.message); }
-}
-
-function usagesCtx() {
+const {createDocument, MiniElement} = require('./mini-dom');
+const {installInspectorGraph} = require('./inspector-graph-fixture');
+const source = path.join(__dirname, '../../resources/packages/app/editor/editor-fn-usages.js');
+const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
+const row = (id, name, extra = {}) => ({kind: 'ref-of', 'fn-id': id, 'fn-name': name, ...extra});
+function fixture() {
   const document = createDocument();
-  const ctx = vm.createContext({ console, document, window: {} });
-  vm.runInContext(
-    fs.readFileSync(path.join(EDITOR, 'editor-fn-usages.js'), 'utf8'),
-    ctx, { filename: 'editor-fn-usages.js' });
-  return { ctx, document };
-}
-
-function walk(el, out) {
-  out.push(el);
-  for (const c of (el.children || [])) {
-    if (c.tagName !== undefined) walk(c, out);
+  const requests = [];
+  const navigations = [];
+  let owned = true;
+  let activeRead = null;
+  let blurs = 0;
+  const context = vm.createContext({console, document, Map, Set, WeakMap, Promise, AbortController,
+    API: {api_fns_usages: '/api/fns/usages'},
+    fetch(url, options) { return new Promise(resolve => requests.push({url, options, resolve})); },
+    gdNavigateToFn(...args) { navigations.push(args); },
+  });
+  context.window = context;
+  installInspectorGraph(context, document);
+  MiniElement.prototype.matches = function(selector) { return this.className.split(' ').includes(selector.slice(1)); };
+  MiniElement.prototype.blur = function() { blurs++; if (document.activeElement === this) document.activeElement = null; };
+  const body = document.createElement('div'); document.body.appendChild(body);
+  const host = document.createElement('div'); host.dataset.gdUsagesHost = ''; body.appendChild(host);
+  vm.runInContext(fs.readFileSync(source, 'utf8'), context);
+  const owns = () => owned;
+  const captureRead = (target, retry) => {
+    activeRead?.controller.abort();
+    const read = {target, retry, controller: new AbortController()}; activeRead = read;
+    return {start: owned, signal: read.controller.signal,
+      current: () => owned && target.isConnected && activeRead === read && !read.controller.signal.aborted,
+      finish() {}};
+  };
+  context.gdMountFnUsages(host, 'selected', {owns, captureRead});
+  async function reply(payload, request = requests.at(-1)) {
+    request.resolve({ok: true, json: async () => ({ok: true, count: payload.usages.length, 'truncated?': false, ...payload})});
+    await flush();
   }
-  return out;
+  return {context, document, body, host, requests, navigations, reply,
+    blurs: () => blurs, rows: () => host.querySelectorAll('.gd-insp-usage-row'),
+    refresh() { activeRead.retry(); },
+    stop() { owned = false; context.gdDisposeFnUsages(body); }};
 }
-
-function byClass(root, cls) {
-  return walk(root, []).filter((e) => String(e.className || '').includes(cls));
-}
-
-function texts(root, cls) {
-  return byClass(root, cls).map((e) => e.textContent);
-}
-
-test('groups by kind with labels, one row per fn, slot shown for refs', () => {
-  const { ctx } = usagesCtx();
-  const payload = {
-    ok: true,
-    usages: [
-      { 'fn-id': 'a', 'fn-name': 'add-10', kind: 'parent-of' },
-      { 'fn-id': 'b', 'fn-name': 'caller', kind: 'ref-of', 'slot-name': 'handler' },
-      { 'fn-id': 'c', 'fn-name': 'other', kind: 'ref-of', 'slot-name': 'body' },
-    ],
-  };
-  const sec = ctx.buildFnUsagesSection(payload, {});
-  assert(sec, 'section built');
-  const glabels = texts(sec, 'gd-insp-usage-glabel');
-  assert(glabels[0] === 'Extended by 1', 'parent-of group first, counted (got: ' + glabels[0] + ')');
-  assert(glabels[1] === 'Referenced by 2', 'ref-of group second (got: ' + glabels[1] + ')');
-  const rows = byClass(sec, 'gd-insp-usage-row');
-  assert(rows.length === 3, 'three rows (got ' + rows.length + ')');
-  const slots = texts(sec, 'gd-insp-usage-slot');
-  assert(slots.includes(':handler') && slots.includes(':body'),
-    'ref rows carry their slot names');
-  const head = byClass(sec, 'gd-insp-usages-count')[0];
-  assert(head && head.textContent === '3', 'head count is deduped total');
-});
-
-test('dedupes (kind, fn, slot) — a binding ref + list-item ref is one row', () => {
-  const { ctx } = usagesCtx();
-  const payload = {
-    ok: true,
-    usages: [
-      { 'fn-id': 'b', 'fn-name': 'caller', kind: 'ref-of', 'slot-name': 'items' },
-      { 'fn-id': 'b', 'fn-name': 'caller', kind: 'ref-of', 'slot-name': 'items' },
-    ],
-  };
-  const sec = ctx.buildFnUsagesSection(payload, {});
-  assert(byClass(sec, 'gd-insp-usage-row').length === 1, 'duplicate collapsed');
-});
-
-test('empty payload → null (section absent, not an empty box)', () => {
-  const { ctx } = usagesCtx();
-  assert(ctx.buildFnUsagesSection({ ok: true, usages: [] }, {}) === null, 'null for no usages');
-  assert(ctx.buildFnUsagesSection(null, {}) === null, 'null for no payload');
-});
-
-test('row click navigates with the whole usage row', () => {
-  const { ctx } = usagesCtx();
-  const seen = [];
-  const payload = {
-    ok: true,
-    usages: [{ 'fn-id': 'nav-1', 'fn-name': 'child', 'fn-namespace': 'app.web', kind: 'parent-of' }],
-  };
-  const sec = ctx.buildFnUsagesSection(payload, { onNavigate: (u) => seen.push(u) });
-  const row = byClass(sec, 'gd-insp-usage-row')[0];
-  row.click();
-  assert(seen.length === 1 && seen[0]['fn-id'] === 'nav-1',
-    'click → onNavigate(usage) carrying fn-id');
-  const ns = texts(sec, 'gd-insp-usage-ns');
-  assert(ns.length === 1 && ns[0] === 'app.web', 'row shows the namespace path');
-});
-
-test('anonymous users fold into a count line, named rows stay clickable', () => {
-  const { ctx } = usagesCtx();
-  const payload = {
-    ok: true,
-    usages: [
-      { 'fn-id': 'n1', 'fn-name': 'real-caller', kind: 'parent-of' },
-      { 'fn-id': 'a1', 'fn-name': '(anonymous)', kind: 'parent-of', anonymous: true },
-      { 'fn-id': 'a2', 'fn-name': '(anonymous)', kind: 'parent-of', anonymous: true },
-    ],
-  };
-  const sec = ctx.buildFnUsagesSection(payload, {});
-  assert(byClass(sec, 'gd-insp-usage-row').length === 1, 'only the named row renders');
-  const glabel = texts(sec, 'gd-insp-usage-glabel')[0];
-  assert(glabel === 'Extended by 3', 'group count includes the anons (got ' + glabel + ')');
-  const more = texts(sec, 'gd-insp-usage-more')[0];
-  assert(more === '… 2 anonymous', 'anons folded into the tail line (got ' + more + ')');
-});
-
-test('a big list grows a filter that hides rows in place', () => {
-  const { ctx } = usagesCtx();
-  const usages = [];
-  for (let i = 0; i < 35; i++) {
-    usages.push({ 'fn-id': 'f' + i, 'fn-name': (i < 5 ? 'match-' : 'other-') + i,
-                  kind: 'ref-of', 'slot-name': 's' + i });
+(async () => {
+  {
+    const f = fixture();
+    await f.reply({usages: [row('a', 'add-10', {kind: 'parent-of'}), row('b', 'caller', {'slot-name': 'handler'}), row('c', 'other', {'slot-name': 'body'})]});
+    assert.deepEqual(f.host.querySelectorAll('.gd-insp-usage-glabel').map(el => el.textContent), ['Extended by 1', 'Referenced by 2']);
+    assert.equal(f.rows().length, 3);
+    assert.equal(f.rows()[1].getAttribute('aria-label'), 'Referenced by: caller (slot handler)');
+    f.host.dispatch('click', {target: f.rows()[1]});
+    assert.deepEqual(f.navigations, [['b', 'caller']]);
+    f.rows()[1].dataset.usageId = 'not-in-authorized-response';
+    f.host.dispatch('click', {target: f.rows()[1]});
+    assert.deepEqual(f.navigations, [['b', 'caller']], 'a forged DOM identity cannot navigate outside the authorized payload');
+    assert.equal(f.requests[0].url, '/api/fns/usages');
+    assert.equal(f.requests[0].options.body, '{"fn-id":"selected"}');
   }
-  const sec = ctx.buildFnUsagesSection({ ok: true, usages }, {});
-  const filter = byClass(sec, 'gd-insp-usage-filter')[0];
-  assert(filter, 'filter input renders for >30 rows');
-  filter.value = 'match-';
-  filter.dispatch('input', {});
-  const rows = byClass(sec, 'gd-insp-usage-row');
-  const visible = rows.filter((r) => !r.hidden);
-  assert(visible.length === 5,
-    'only matching rows stay visible (got ' + visible.length + ')');
-  assert(visible.every((r) => r.textContent.includes('match-')),
-    'the visible rows are the matches');
-});
-
-test('a truncated payload says so and keeps the full count in the head', () => {
-  const { ctx } = usagesCtx();
-  const payload = { ok: true, count: 999, 'truncated?': true,
-    usages: [{ 'fn-id': 'a', 'fn-name': 'one', kind: 'parent-of' }] };
-  const sec = ctx.buildFnUsagesSection(payload, {});
-  assert(byClass(sec, 'gd-insp-usages-count')[0].textContent === '999',
-    'head shows the FULL count');
-  const notes = texts(sec, 'gd-insp-usage-more');
-  assert(notes.some((t) => /Showing the first 1 of 999/.test(t)),
-    'truncation note present (got ' + JSON.stringify(notes) + ')');
-});
-
-test('a group over the cap folds into a "more" line', () => {
-  const { ctx } = usagesCtx();
-  const usages = [];
-  for (let i = 0; i < 25; i++) {
-    usages.push({ 'fn-id': 'c' + i, 'fn-name': 'child-' + String(i).padStart(2, '0'), kind: 'parent-of' });
+  {
+    const f = fixture();
+    await f.reply({usages: [row('a', 'a', {'slot-name': 'x'}), row('a', 'a', {'slot-name': 'x'}), row('a', 'a', {'slot-name': 'y'}), row('anon', '(anonymous)', {anonymous: true})]});
+    assert.equal(f.rows().length, 2, 'same fn in another slot remains visible');
+    assert.equal(f.host.querySelector('.gd-insp-usage-glabel').textContent, 'Referenced by 3');
+    assert.equal(f.host.querySelector('.gd-insp-usage-more').textContent, '… 1 anonymous');
   }
-  const sec = ctx.buildFnUsagesSection({ ok: true, usages }, {});
-  assert(byClass(sec, 'gd-insp-usage-row').length === 20, 'capped at 20 rows');
-  const more = texts(sec, 'gd-insp-usage-more');
-  assert(more.length === 1 && more[0] === '… and 5 more', 'fold line says how many were dropped');
-});
-
-if (failures) {
-  console.error('FAIL: ' + failures + ' failed, ' + passes + ' passed');
-  process.exit(1);
-}
-console.log('PASS: ' + passes + ' assertions');
+  {
+    const f = fixture(); await f.reply({usages: []});
+    assert.equal(f.rows().length, 0);
+    assert.equal(f.host.querySelector('.gd-insp-usages').getAttribute('hidden'), 'true');
+  }
+  {
+    const f = fixture();
+    const usages = Array.from({length: 35}, (_, i) => row('id-' + i, 'caller-' + String(i).padStart(2, '0'), {'fn-namespace': 'app.logic'}));
+    await f.reply({usages, count: 900, 'truncated?': true});
+    assert.equal(f.rows().length, 20, 'existing cap applies before filtering');
+    assert.equal(f.host.querySelector('.gd-insp-usages-count').textContent, '900');
+    assert.deepEqual(f.host.querySelectorAll('.gd-insp-usage-more').map(el => el.textContent), ['Showing the first 35 of 900 usages.', '… and 15 more']);
+    let input = f.host.querySelector('.gd-insp-usage-filter');
+    input.value = 'CALLER-01'; f.host.dispatch('input', {target: input});
+    assert.equal(f.rows().filter(el => el.getAttribute('hidden') === 'false').length, 1);
+    input = f.host.querySelector('.gd-insp-usage-filter'); f.document.activeElement = input;
+    let prevented = 0; let stopped = 0;
+    f.host.dispatch('keydown', {target: input, key: 'Escape', preventDefault() { prevented++; }, stopPropagation() { stopped++; }});
+    assert.equal(f.host.querySelector('.gd-insp-usage-filter').getAttribute('value'), '');
+    assert.equal(prevented, 1); assert.equal(stopped, 1);
+    input = f.host.querySelector('.gd-insp-usage-filter'); f.document.activeElement = input;
+    f.host.dispatch('keydown', {target: input, key: 'Escape'});
+    assert.equal(f.blurs(), 1, 'second Escape requests native filter blur');
+    assert.equal(f.rows().length, 20);
+  }
+  {
+    const f = fixture();
+    await f.reply({usages: [row('z', '_a'), row('b', 'Beta'), row('a', 'alpha'), row('x', '_z')]});
+    assert.deepEqual(f.host.querySelectorAll('.gd-insp-usage-name').map(el => el.textContent), ['alpha', 'Beta', '_a', '_z']);
+  }
+  {
+    const f = fixture();
+    const kinds = ['parent-of', 'ref-of', 'resolver-of', 'slot-of', 'binding-of', 'base-of', 'element-of', 'return-of', 'union-branch', 'variant-branch', 'fn-type-arg-or-return', 'other'];
+    const usages = Array.from({length: 400}, (_, i) => row('id-' + i, 'caller-' + i, {kind: kinds[i % kinds.length]}));
+    await f.reply({usages, count: 1000, 'truncated?': true});
+    assert.equal(f.rows().length, 240, 'existing 400-row response fits fixed operation/DOM budgets');
+    assert.equal(f.host.querySelectorAll('.gd-insp-usage-glabel').length, 12);
+  }
+  {
+    const f = fixture(); const old = f.requests[0];
+    f.refresh();
+    await f.reply({usages: [row('new', 'new-context')]});
+    await f.reply({usages: [row('old', 'old-context')]}, old);
+    assert.equal(f.rows()[0].dataset.usageId, 'new', 'latest read wins on the same host');
+  }
+  {
+    const f = fixture();
+    const usages = Array.from({length: 31}, (_, i) => row('id-' + i, 'caller-' + i));
+    await f.reply({usages});
+    const input = f.host.querySelector('.gd-insp-usage-filter');
+    input.value = 'caller-1'; f.host.dispatch('input', {target: input});
+    f.refresh(); await f.reply({usages, count: 45});
+    assert.equal(f.host.querySelector('.gd-insp-usage-filter').getAttribute('value'), 'caller-1', 'same-owner data refresh preserves authored query state');
+    assert.equal(f.host.querySelector('.gd-insp-usages-count').textContent, '45');
+  }
+  {
+    const f = fixture(); const request = f.requests[0];
+    f.stop(); await f.reply({usages: [row('old', 'old-account')]}, request);
+    assert.equal(f.host.children.length, 0, 'disposed/auth-old read cannot mount');
+  }
+  {
+    const f = fixture(); await f.reply({usages: [row('a', 'alpha')]});
+    let wholeFailures = 0;
+    f.context.gdUIComponentFailed = () => { wholeFailures++; };
+    const builtin = f.context.GraphdenBrowser.createRuntime(f.context.GraphdenBuiltinPlans.plans.inspector, {operationLimit: 150000});
+    f.context.gdInspectorGraph.subscribeRuntime = listener => {
+      listener({run(entry, supplied) {
+        const k = f.context.GraphdenBrowser.keyword;
+        const inputs = new Map(supplied.inputs); inputs.set(k('surface'), 'chrome');
+        return builtin.run(entry, {...supplied, inputs});
+      }});
+      return () => {};
+    };
+    f.context.gdMountFnUsages(f.host, 'selected', {owns: () => true, captureRead: () => ({start: false})});
+    assert.equal(f.host.dataset.gdUiFallback, 'missing-usages-contract');
+    assert.equal(wholeFailures, 0, 'legacy section fallback retains custom chrome identity');
+  }
+  console.log('PASS: Used-by grouping, dedup, cap, filtering, Escape, navigation, disposal and legacy fallback');
+})().catch(error => { console.error(error.stack); process.exitCode = 1; });

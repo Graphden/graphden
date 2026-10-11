@@ -1,11 +1,21 @@
 {:namespace "app.ui-inspector"
- :fns [{:name :_inspector-state :type {:tab :text :open :bool :handled :bool}}
-       {:name :_inspector-inputs :type {:selected :bool :name :text :namespace :text :description :text :parents [:list :text] :has-return :bool :narrow :bool}}
+ :fns [{:name :_inspector-chrome-transition :type {:state :_inspector-chrome-state :requests :_inspector-request-list}}
+       {:name :_inspector-usages-transition :type {:state :_inspector-usages-state :requests :_inspector-request-list}}
+       {:name :_inspector-usage-rows :list :_inspector-usage-row}
+       {:name :_inspector-usage-group :type {:kind :text :label :text}}
+       {:name :_inspector-request-list :list :_inspector-request}
+       {:name :_inspector-text-list :list :text}
+       {:name :_inspector-chrome-state, :type {:tab :text, :open :bool, :handled :bool}}
+       {:name :_inspector-usages-state, :type {:query :text, :handled :bool}}
+       {:name :_inspector-usage-row, :type {:kind :text, :fn-id :text, :fn-name :text, :fn-namespace :text, :slot-name :text, :anonymous :bool}}
+       {:name :_inspector-usages-payload, :type {:rows [:list :_inspector-usage-row], :count :int, :truncated :bool}}
+       {:name :_inspector-state :union [:_inspector-chrome-state :_inspector-usages-state]}
+       {:name :_inspector-inputs :type {:selected :bool :name :text :namespace :text :description :text :parents [:list :text] :has-return :bool :narrow :bool :surface :text :usages :_inspector-usages-payload}}
        {:name :_inspector-event :type {:kind :text :tab :text :key :text}}
        {:name :_inspector-request :type {:kind :text :tab :text}}
-       {:name :_inspector-transition :type {:state :_inspector-state :requests [:list :_inspector-request]}}
+       {:name :_inspector-transition :union [:_inspector-chrome-transition :_inspector-usages-transition]}
        {:name :_inspector-state-fields :parent :zipmap :args {:keys [{:value :tab} {:value :open} {:value :handled}]}}
-       {:name :inspector-initial :parent :_inspector-state-fields :args {:vals [{:value "overview"} :_inspector-input-selected {:value false}]} :return-type :_inspector-state}
+       {:name :_inspector-chrome-initial :parent :_inspector-state-fields :args {:vals [{:value "overview"} :_inspector-input-selected {:value false}]} :return-type :_inspector-chrome-state}
        {:name :_inspector-input-selected :parent :get :args {:coll {:as :inputs :type :_inspector-inputs} :key {:value :selected} :default {:value false}}}
        {:name :_inspector-input-name :parent :get :args {:coll {:as :inputs :type :_inspector-inputs} :key {:value :name} :default {:value ""}}}
        {:name :_inspector-input-namespace :parent :get :args {:coll {:as :inputs :type :_inspector-inputs} :key {:value :namespace} :default {:value ""}}}
@@ -13,8 +23,8 @@
        {:name :_inspector-input-parents :parent :get :args {:coll {:as :inputs :type :_inspector-inputs} :key {:value :parents} :default {:value []}}}
        {:name :_inspector-input-has-return :parent :get :args {:coll {:as :inputs :type :_inspector-inputs} :key {:value :has-return} :default {:value false}}}
        {:name :_inspector-input-narrow :parent :get :args {:coll {:as :inputs :type :_inspector-inputs} :key {:value :narrow} :default {:value false}}}
-       {:name :_inspector-state-tab :parent :get :args {:coll {:as :state :type :_inspector-state} :key {:value :tab} :default {:value "overview"}}}
-       {:name :_inspector-state-open :parent :get :args {:coll {:as :state :type :_inspector-state} :key {:value :open} :default {:value false}}}
+       {:name :_inspector-state-tab :parent :get :args {:coll {:as :state :type :_inspector-chrome-state} :key {:value :tab} :default {:value "overview"}}}
+       {:name :_inspector-state-open :parent :get :args {:coll {:as :state :type :_inspector-chrome-state} :key {:value :open} :default {:value false}}}
        {:name :_inspector-event-kind :parent :get :args {:coll {:as :event :type :_inspector-event} :key {:value :kind} :default {:value ""}}}
        {:name :_inspector-event-tab :parent :get :args {:coll {:as :event :type :_inspector-event} :key {:value :tab} :default {:value ""}}}
        {:name :_inspector-event-key :parent :get :args {:coll {:as :event :type :_inspector-event} :key {:value :key} :default {:value ""}}}
@@ -24,7 +34,7 @@
        {:name :_inspector-is-preset :parent :equal? :args {:a :_inspector-event-kind :b {:value "preset"}}}
        {:name :_inspector-is-viewport :parent :equal? :args {:a :_inspector-event-kind :b {:value "viewport"}}}
        {:name :_inspector-is-close :parent :equal? :args {:a :_inspector-event-kind :b {:value "close"}}}
-       {:name :_inspector-tab-ids :parent :const :args {:value {:value ["overview" "bindings" "stats" "history"]}} :return-type [:list :text]}
+       {:name :_inspector-tab-ids :parent :const :args {:value {:value ["overview" "bindings" "stats" "history"]}} :return-type :_inspector-text-list}
        {:name :_inspector-tab-index :parent :get :args {:coll {:value {"overview" 0 "bindings" 1 "stats" 2 "history" 3}} :key :_inspector-state-tab :default 0}}
        {:name :_inspector-key-right :parent :equal? :args {:a :_inspector-event-key :b {:value "ArrowRight"}}}
        {:name :_inspector-key-left :parent :equal? :args {:a :_inspector-event-key :b {:value "ArrowLeft"}}}
@@ -50,26 +60,26 @@
        {:name :_inspector-left-handled :parent :if :args {:test :_inspector-key-left :then true :else :_inspector-home-handled}}
        {:name :_inspector-key-handled :parent :if :args {:test :_inspector-key-right :then true :else :_inspector-left-handled}}
        {:name :_inspector-handled :parent :if :args {:test :_inspector-is-keydown :then :_inspector-key-handled :else false}}
-       {:name :_inspector-next-state :parent :_inspector-state-fields :args {:vals [:_inspector-next-tab :_inspector-next-open :_inspector-handled]} :return-type :_inspector-state}
+       {:name :_inspector-next-state :parent :_inspector-state-fields :args {:vals [:_inspector-next-tab :_inspector-next-open :_inspector-handled]} :return-type :_inspector-chrome-state}
        {:name :_inspector-load-request :parent :zipmap :args {:keys [{:value :kind} {:value :tab}] :vals ["load-tab" :_inspector-next-tab]} :return-type :_inspector-request}
        {:name :_inspector-focus-request :parent :zipmap :args {:keys [{:value :kind} {:value :tab}] :vals ["focus-tab" :_inspector-next-tab]} :return-type :_inspector-request}
-       {:name :_inspector-load-requests :parent :list :args {:items [:_inspector-load-request]}}
-       {:name :_inspector-keyboard-requests :parent :list :args {:items [:_inspector-load-request :_inspector-focus-request]}}
-       {:name :_inspector-no-requests :parent :const :args {:value {:value []}} :return-type [:list :_inspector-request]}
-       {:name :_inspector-key-requests :parent :if :args {:test :_inspector-handled :then :_inspector-keyboard-requests :else :_inspector-no-requests}}
-       {:name :_inspector-tab-requests :parent :if :args {:test :_inspector-is-tab :then :_inspector-load-requests :else :_inspector-key-requests}}
-       {:name :_inspector-selection-requests :parent :if :args {:test :_inspector-input-selected :then :_inspector-load-requests :else :_inspector-no-requests}}
+       {:name :_inspector-load-requests :parent :list :args {:items [:_inspector-load-request]} :return-type :_inspector-request-list}
+       {:name :_inspector-keyboard-requests :parent :list :args {:items [:_inspector-load-request :_inspector-focus-request]} :return-type :_inspector-request-list}
+       {:name :_inspector-no-requests :parent :const :args {:value {:value []}} :return-type :_inspector-request-list}
+       {:name :_inspector-key-requests :parent :if :args {:test :_inspector-handled :then :_inspector-keyboard-requests :else :_inspector-no-requests} :return-type :_inspector-request-list}
+       {:name :_inspector-tab-requests :parent :if :args {:test :_inspector-is-tab :then :_inspector-load-requests :else :_inspector-key-requests} :return-type :_inspector-request-list}
+       {:name :_inspector-selection-requests :parent :if :args {:test :_inspector-input-selected :then :_inspector-load-requests :else :_inspector-no-requests} :return-type :_inspector-request-list}
        {:name :_inspector-resume-request :parent :zipmap :args {:keys [{:value :kind} {:value :tab}] :vals ["resume-tab" :_inspector-next-tab]} :return-type :_inspector-request}
-       {:name :_inspector-resume-requests :parent :list :args {:items [:_inspector-resume-request]}}
-       {:name :_inspector-wide-requests :parent :if :args {:test :_inspector-input-narrow :then :_inspector-no-requests :else :_inspector-resume-requests}}
-       {:name :_inspector-viewport-requests :parent :if :args {:test :_inspector-input-selected :then :_inspector-wide-requests :else :_inspector-no-requests}}
-       {:name :_inspector-other-requests :parent :if :args {:test :_inspector-is-viewport :then :_inspector-viewport-requests :else :_inspector-tab-requests}}
-       {:name :_inspector-open-requests :parent :if :args {:test :_inspector-is-selection :then :_inspector-selection-requests :else :_inspector-other-requests}}
+       {:name :_inspector-resume-requests :parent :list :args {:items [:_inspector-resume-request]} :return-type :_inspector-request-list}
+       {:name :_inspector-wide-requests :parent :if :args {:test :_inspector-input-narrow :then :_inspector-no-requests :else :_inspector-resume-requests} :return-type :_inspector-request-list}
+       {:name :_inspector-viewport-requests :parent :if :args {:test :_inspector-input-selected :then :_inspector-wide-requests :else :_inspector-no-requests} :return-type :_inspector-request-list}
+       {:name :_inspector-other-requests :parent :if :args {:test :_inspector-is-viewport :then :_inspector-viewport-requests :else :_inspector-tab-requests} :return-type :_inspector-request-list}
+       {:name :_inspector-open-requests :parent :if :args {:test :_inspector-is-selection :then :_inspector-selection-requests :else :_inspector-other-requests} :return-type :_inspector-request-list}
        {:name :_inspector-close-request :parent :zipmap :return-type :_inspector-request :args {:keys [{:value :kind} {:value :tab}] :vals ["close-sheet" :_inspector-next-tab]}}
-       {:name :_inspector-close-requests :parent :list :args {:items [:_inspector-close-request]}}
-       {:name :_inspector-requests :parent :if :args {:test :_inspector-is-close :then :_inspector-close-requests :else :_inspector-open-requests}}
-       {:name :inspector-update :parent :zipmap :args {:keys [{:value :state} {:value :requests}] :vals [:_inspector-next-state :_inspector-requests]} :return-type :_inspector-transition}
-       {:name :_inspector-view-handled :parent :get :args {:coll {:as :state :type :_inspector-state} :key {:value :handled} :default {:value false}}}
+       {:name :_inspector-close-requests :parent :list :args {:items [:_inspector-close-request]} :return-type :_inspector-request-list}
+       {:name :_inspector-requests :parent :if :args {:test :_inspector-is-close :then :_inspector-close-requests :else :_inspector-open-requests} :return-type :_inspector-request-list}
+       {:name :_inspector-chrome-update :parent :zipmap :args {:keys [{:value :state} {:value :requests}] :vals [:_inspector-next-state :_inspector-requests]} :return-type :_inspector-chrome-transition}
+       {:name :_inspector-view-handled :parent :get :args {:coll {:as :state :type :_inspector-chrome-state} :key {:value :handled} :default {:value false}}}
        {:name :_inspector-anonymous :parent :equal? :args {:a :_inspector-input-name :b {:value ""}}}
        {:name :_inspector-name :parent :if :args {:test :_inspector-anonymous :then "(anonymous)" :else :_inspector-input-name}}
        {:name :_inspector-parent-count :parent :count :args {:coll :_inspector-input-parents}}
@@ -112,4 +122,133 @@
        {:name :_inspector-close-rule :parent :zipmap :args {:keys [{:value :selector} {:value :declarations}] :vals ["& .gd-insp-close" :_inspector-close-declarations]}}
        {:name :_inspector-close-styles :parent :list :args {:items [:_inspector-close-rule]}}
        {:name :inspector-styles :parent :concat :args {:colls [:_inspector-base-styles :_inspector-root-styles :_inspector-close-styles]}}
-       {:name :inspector-view :parent :zipmap :args {:keys [{:value :tree} {:value :styles} {:value :tab} {:value :open} {:value :handled}] :vals [:_inspector-tree :inspector-styles :_inspector-state-tab :_inspector-state-open :_inspector-view-handled]}}]}
+       {:name :_inspector-chrome-view :parent :zipmap :args {:keys [{:value :tree} {:value :styles} {:value :tab} {:value :open} {:value :handled}] :vals [:_inspector-tree :inspector-styles :_inspector-state-tab :_inspector-state-open :_inspector-view-handled]}}
+       {:name :_inspector-surface, :parent :get, :args {:coll {:as :inputs :type :_inspector-inputs}, :key {:value :surface}, :default {:value "chrome"}}}
+       {:name :_inspector-usages-surface, :parent :equal?, :args {:a :_inspector-surface, :b "usages"}}
+       {:name :_usages-payload, :parent :get, :args {:coll {:as :inputs :type :_inspector-inputs}, :key {:value :usages}, :default {:value {:rows [], :count 0, :truncated false}}}}
+       {:name :_usages-rows, :parent :get, :args {:coll :_usages-payload, :key {:value :rows}, :default {:value []}}}
+       {:name :_usages-count, :parent :get, :args {:coll :_usages-payload, :key {:value :count}, :default {:value 0}}}
+       {:name :_usages-truncated, :parent :get, :args {:coll :_usages-payload, :key {:value :truncated}, :default {:value false}}}
+       {:name :_usages-query, :parent :get, :args {:coll {:as :state :type :_inspector-usages-state}, :key {:value :query}, :default {:value ""}}}
+       {:name :_usages-trim, :parent :str-trim, :args {:string :_usages-query}}
+       {:name :_usages-needle, :parent :str-lower, :args {:string :_usages-trim}}
+       {:name :_usages-empty-query, :parent :equal?, :args {:a :_usages-needle, :b ""}}
+       {:name :_usage-kind, :parent :get, :args {:coll {:as :item :type :_inspector-usage-row}, :key {:value :kind}, :default {:value ""}}}
+       {:name :_usage-fn-id, :parent :get, :args {:coll {:as :item :type :_inspector-usage-row}, :key {:value :fn-id}, :default {:value ""}}}
+       {:name :_usage-fn-name, :parent :get, :args {:coll {:as :item :type :_inspector-usage-row}, :key {:value :fn-name}, :default {:value ""}}}
+       {:name :_usage-fn-namespace, :parent :get, :args {:coll {:as :item :type :_inspector-usage-row}, :key {:value :fn-namespace}, :default {:value ""}}}
+       {:name :_usage-slot-name, :parent :get, :args {:coll {:as :item :type :_inspector-usage-row}, :key {:value :slot-name}, :default {:value ""}}}
+       {:name :_usage-anonymous, :parent :get, :args {:coll {:as :item :type :_inspector-usage-row}, :key {:value :anonymous}, :default {:value false}}}
+       {:name :_usage-identity, :parent :str, :args {:parts [:_usage-kind "|" :_usage-fn-id "|" :_usage-slot-name]}, :lambda-params [:item]}
+       {:name :_usages-duplicates, :parent :group-by, :args {:key-fn :_usage-identity, :coll :_usages-rows}}
+       {:name :_usages-buckets, :parent :vals, :args {:map :_usages-duplicates}}
+       {:name :_usage-first :parent :take :args {:coll {:as :item :type :_inspector-usage-rows} :count 1} :lambda-params [:item] :return-type :_inspector-usage-rows}
+       {:name :_usages-singletons :parent :map :args {:func :_usage-first :coll :_usages-buckets}}
+       {:name :_usages-unique :parent :concat :args {:colls :_usages-singletons} :return-type :_inspector-usage-rows}
+       {:name :_usage-kind-key, :parent :_usage-kind, :args {}, :lambda-params [:item]}
+       {:name :_usages-by-kind, :parent :group-by, :args {:key-fn :_usage-kind-key, :coll :_usages-unique}}
+       {:name :_usages-unique-count, :parent :count, :args {:coll :_usages-unique}}
+       {:name :_usages-none, :parent :equal?, :args {:a :_usages-unique-count, :b 0}}
+       {:name :_usages-filter-sample, :parent :take, :args {:count 31, :coll :_usages-unique}}
+       {:name :_usages-filter-count, :parent :count, :args {:coll :_usages-filter-sample}}
+       {:name :_usages-show-filter, :parent :equal?, :args {:a :_usages-filter-count, :b 31}}
+       {:name :_usages-zero-count, :parent :equal?, :args {:a :_usages-count, :b 0}}
+       {:name :_usages-display-count, :parent :if, :args {:test :_usages-zero-count, :then :_usages-unique-count, :else :_usages-count}}
+       {:name :_usage-named, :parent :equal?, :args {:a :_usage-anonymous, :b false}, :lambda-params [:item]}
+       {:name :_usage-anonymous-row, :parent :_usage-anonymous, :args {}, :lambda-params [:item]}
+       {:name :_usage-private, :parent :str-starts-with?, :args {:string :_usage-fn-name, :prefix "_"}}
+       {:name :_usage-name-lower, :parent :str-lower, :args {:string :_usage-fn-name}}
+       {:name :_usage-group-kind, :parent :get, :args {:coll {:as :group :type :_inspector-usage-group}, :key {:value :kind}, :default {:value "other"}}}
+       {:name :_usage-group-label, :parent :get, :args {:coll {:as :group :type :_inspector-usage-group}, :key {:value :label}, :default {:value "Mentioned in"}}}
+       {:name :_usage-group-rows, :parent :get, :args {:coll {:as :groups :type [:map :text [:list :_inspector-usage-row]]}, :key :_usage-group-kind, :default {:value []}}}
+       {:name :_usage-group-count, :parent :count, :args {:coll :_usage-group-rows}}
+       {:name :_usage-group-empty, :parent :equal?, :args {:a :_usage-group-count, :b 0}}
+       {:name :_usage-group-named, :parent :filter, :args {:pred :_usage-named, :coll :_usage-group-rows}}
+       {:name :_usage-group-anonymous, :parent :filter, :args {:pred :_usage-anonymous-row, :coll :_usage-group-rows}}
+       {:name :_usage-anonymous-count, :parent :count, :args {:coll :_usage-group-anonymous}}
+       {:name :_usage-named-count, :parent :count, :args {:coll :_usage-group-named}}
+       {:name :_usage-tie-key :parent :str :args {:parts [:_usage-fn-id "|" :_usage-slot-name]} :lambda-params [:item]}
+       {:name :_usage-name-key :parent :_usage-name-lower :lambda-params [:item]}
+       {:name :_usage-rank-key :parent :_usage-private :lambda-params [:item]}
+       {:name :_usage-group-by-identity :parent :sort-by :args {:key-fn :_usage-tie-key :coll :_usage-group-named}}
+       {:name :_usage-group-by-name :parent :sort-by :args {:key-fn :_usage-name-key :coll :_usage-group-by-identity}}
+       {:name :_usage-group-sorted :parent :sort-by :args {:key-fn :_usage-rank-key :coll :_usage-group-by-name}}
+       {:name :_usage-group-visible, :parent :take, :args {:count 20, :coll :_usage-group-sorted}}
+       {:name :_usage-more-sample, :parent :take, :args {:count 21, :coll :_usage-group-named}}
+       {:name :_usage-more-count, :parent :count, :args {:coll :_usage-more-sample}}
+       {:name :_usage-has-more, :parent :equal?, :args {:a :_usage-more-count, :b 21}}
+       {:name :_usage-dropped, :parent :add, :args {:nums [:_usage-named-count -20]}}
+       {:name :_usage-no-anonymous, :parent :equal?, :args {:a :_usage-anonymous-count, :b 0}}
+       {:name :_usage-more-text, :parent :str, :args {:parts ["and " :_usage-dropped " more"]}}
+       {:name :_usage-more-prefix, :parent :if, :args {:test :_usage-has-more, :then :_usage-more-text, :else ""}}
+       {:name :_usage-anonymous-separator, :parent :if, :args {:test :_usage-has-more, :then " + ", :else ""}}
+       {:name :_usage-anonymous-text, :parent :str, :args {:parts [:_usage-anonymous-separator :_usage-anonymous-count " anonymous"]}}
+       {:name :_usage-anonymous-suffix, :parent :if, :args {:test :_usage-no-anonymous, :then "", :else :_usage-anonymous-text}}
+       {:name :_usage-tail-text, :parent :str, :args {:parts ["… " :_usage-more-prefix :_usage-anonymous-suffix]}}
+       {:name :_usage-tail-node, :parent :hiccup, :args {:tag "div", :attrs {:value {:class "gd-insp-usage-more"}}, :children [:_usage-tail-text]}}
+       {:name :_usage-anonymous-tail, :parent :if, :args {:test :_usage-no-anonymous, :then nil, :else :_usage-tail-node}}
+       {:name :_usage-tail, :parent :if, :args {:test :_usage-has-more, :then :_usage-tail-node, :else :_usage-anonymous-tail}}
+       {:name :_usage-no-slot, :parent :equal?, :args {:a :_usage-slot-name, :b ""}}
+       {:name :_usage-no-namespace, :parent :equal?, :args {:a :_usage-fn-namespace, :b ""}}
+       {:name :_usage-slot-text, :parent :str, :args {:parts [":" :_usage-slot-name]}}
+       {:name :_usage-slot-node, :parent :hiccup, :args {:tag "span", :attrs {:value {:class "gd-insp-usage-slot"}}, :children [:_usage-slot-text]}}
+       {:name :_usage-slot, :parent :if, :args {:test :_usage-no-slot, :then nil, :else :_usage-slot-node}}
+       {:name :_usage-namespace-node, :parent :hiccup, :args {:tag "span", :attrs {:value {:class "gd-insp-usage-ns"}}, :children [:_usage-fn-namespace]}}
+       {:name :_usage-namespace, :parent :if, :args {:test :_usage-no-namespace, :then nil, :else :_usage-namespace-node}}
+       {:name :_usage-name-node, :parent :hiccup, :args {:tag "span", :attrs {:value {:class "gd-insp-usage-name"}}, :children [:_usage-fn-name]}}
+       {:name :_usage-slot-aria, :parent :str, :args {:parts [" (slot " :_usage-slot-name ")"]}}
+       {:name :_usage-slot-label, :parent :if, :args {:test :_usage-no-slot, :then "", :else :_usage-slot-aria}}
+       {:name :_usage-namespace-aria, :parent :str, :args {:parts [" in " :_usage-fn-namespace]}}
+       {:name :_usage-namespace-label, :parent :if, :args {:test :_usage-no-namespace, :then "", :else :_usage-namespace-aria}}
+       {:name :_usage-aria, :parent :str, :args {:parts [:_usage-group-label ": " :_usage-fn-name :_usage-namespace-label :_usage-slot-label]}}
+       {:name :_usage-search, :parent :str, :args {:parts [:_usage-fn-name :_usage-slot-text :_usage-fn-namespace]}}
+       {:name :_usage-search-lower, :parent :str-lower, :args {:string :_usage-search}}
+       {:name :_usage-matches, :parent :str-contains?, :args {:string :_usage-search-lower, :substring :_usages-needle}}
+       {:name :_usage-nonmatching, :parent :if, :args {:test :_usage-matches, :then false, :else true}}
+       {:name :_usage-hidden, :parent :if, :args {:test :_usages-empty-query, :then false, :else :_usage-nonmatching}}
+       {:name :_usage-row-attrs, :parent :zipmap, :args {:keys [{:value :type} {:value :class} {:value :aria-label} {:value :data-usage-id} {:value :key} {:value :hidden}], :vals ["button" "gd-insp-usage-row" :_usage-aria :_usage-fn-id :_usage-identity :_usage-hidden]}}
+       {:name :_usage-row, :parent :hiccup, :args {:tag "button", :attrs :_usage-row-attrs, :children [:_usage-name-node :_usage-slot :_usage-namespace]}, :lambda-params [:item]}
+       {:name :_usage-group-nodes, :parent :map, :args {:func :_usage-row, :coll :_usage-group-visible}}
+       {:name :_usage-group-list, :parent :hiccup, :args {:tag "div", :attrs {:value {:class "gd-insp-usage-list"}}, :children [:_usage-group-nodes :_usage-tail]}}
+       {:name :_usage-group-heading, :parent :str, :args {:parts [:_usage-group-label " " :_usage-group-count]}}
+       {:name :_usage-group-heading-node, :parent :hiccup, :args {:tag "div", :attrs {:value {:class "gd-insp-usage-glabel"}}, :children [:_usage-group-heading]}}
+       {:name :_usage-group-attrs, :parent :zipmap, :args {:keys [{:value :class} {:value :key}], :vals ["gd-insp-usage-group" :_usage-group-kind]}}
+       {:name :_usage-group-node, :parent :hiccup, :args {:tag "div", :attrs :_usage-group-attrs, :children [:_usage-group-heading-node :_usage-group-list]}}
+       {:name :_usage-group, :parent :if, :args {:test :_usage-group-empty, :then nil, :else :_usage-group-node}, :lambda-params [:group]}
+       {:name :_usage-groups, :parent :const, :args {:value {:value [{:kind "parent-of", :label "Extended by"} {:kind "ref-of", :label "Referenced by"} {:kind "resolver-of", :label "Resolver in"} {:kind "slot-of", :label "Slot type in"} {:kind "binding-of", :label "Type override in"} {:kind "base-of", :label "Narrowed by"} {:kind "element-of", :label "List element of"} {:kind "return-of", :label "Return type of"} {:kind "union-branch", :label "Union branch of"} {:kind "variant-branch", :label "Variant branch of"} {:kind "fn-type-arg-or-return", :label "Fn-type mention in"} {:kind "other", :label "Mentioned in"}]}}}
+       {:name :_usages-group-nodes, :parent :map, :args {:func :_usage-group, :coll :_usage-groups}}
+       {:name :_usages-count-node, :parent :hiccup, :args {:tag "span", :attrs {:value {:class "gd-insp-usages-count"}}, :children [:_usages-display-count]}}
+       {:name :_usages-heading, :parent :hiccup, :args {:tag "div", :attrs {:value {:class "gd-insp-usages-head"}}, :children ["Used by" :_usages-count-node]}}
+       {:name :_usages-filter-attrs, :parent :zipmap, :args {:keys [{:value :type} {:value :class} {:value :aria-label} {:value :key} {:value :value}], :vals ["search" "gd-insp-usage-filter" "Filter the Used-by list" "usage-filter" :_usages-query]}}
+       {:name :_usages-filter-node, :parent :hiccup, :args {:tag "input", :attrs :_usages-filter-attrs, :children []}}
+       {:name :_usages-filter, :parent :if, :args {:test :_usages-show-filter, :then :_usages-filter-node, :else nil}}
+       {:name :_usages-raw-count, :parent :count, :args {:coll :_usages-rows}}
+       {:name :_usages-truncation-text, :parent :str, :args {:parts ["Showing the first " :_usages-raw-count " of " :_usages-display-count " usages."]}}
+       {:name :_usages-truncation-node, :parent :hiccup, :args {:tag "div", :attrs {:value {:class "gd-insp-usage-more"}}, :children [:_usages-truncation-text]}}
+       {:name :_usages-truncation, :parent :if, :args {:test :_usages-truncated, :then :_usages-truncation-node, :else nil}}
+       {:name :_usages-root-attrs, :parent :zipmap, :args {:keys [{:value :class} {:value :hidden}], :vals ["gd-insp-usages" :_usages-none]}}
+       {:name :_usages-tree, :parent :hiccup, :args {:tag "div", :attrs :_usages-root-attrs, :children [:_usages-heading :_usages-filter :_usages-truncation :_usages-group-nodes]}}
+       {:name :_usages-is-filter, :parent :equal?, :args {:a :_inspector-event-kind, :b "filter"}}
+       {:name :_usages-is-navigation, :parent :equal?, :args {:a :_inspector-event-kind, :b "navigate"}}
+       {:name :_usages-is-escape, :parent :equal?, :args {:a :_inspector-event-key, :b "Escape"}}
+       {:name :_usages-escape, :parent :if, :args {:test :_inspector-is-keydown, :then :_usages-is-escape, :else false}}
+       {:name :_usages-key-query, :parent :if, :args {:test :_usages-escape, :then "", :else :_usages-query}}
+       {:name :_usages-next-query, :parent :if, :args {:test :_usages-is-filter, :then :_inspector-event-tab, :else :_usages-key-query}}
+       {:name :_usages-initial, :parent :zipmap, :args {:keys [{:value :query} {:value :handled}], :vals ["" false]}, :return-type :_inspector-usages-state}
+       {:name :_usages-next-state, :parent :zipmap, :args {:keys [{:value :query} {:value :handled}], :vals [:_usages-next-query :_usages-escape]}, :return-type :_inspector-usages-state}
+       {:name :_usages-navigate-request, :parent :zipmap, :args {:keys [{:value :kind} {:value :tab}], :vals ["navigate" :_inspector-event-tab]}, :return-type :_inspector-request}
+       {:name :_usages-blur-request, :parent :zipmap, :args {:keys [{:value :kind} {:value :tab}], :vals ["blur-filter" ""]}, :return-type :_inspector-request}
+       {:name :_usages-navigation-requests, :parent :list, :args {:items [:_usages-navigate-request]} :return-type :_inspector-request-list}
+       {:name :_usages-blur-requests, :parent :list, :args {:items [:_usages-blur-request]} :return-type :_inspector-request-list}
+       {:name :_usages-empty-raw-query :parent :equal? :args {:a :_usages-query :b ""}}
+       {:name :_usages-empty-escape, :parent :if, :args {:test :_usages-empty-raw-query, :then :_usages-blur-requests, :else :_inspector-no-requests} :return-type :_inspector-request-list}
+       {:name :_usages-escape-requests, :parent :if, :args {:test :_usages-escape, :then :_usages-empty-escape, :else :_inspector-no-requests} :return-type :_inspector-request-list}
+       {:name :_usages-requests, :parent :if, :args {:test :_usages-is-navigation, :then :_usages-navigation-requests, :else :_usages-escape-requests} :return-type :_inspector-request-list}
+       {:name :_usages-update, :parent :zipmap, :args {:keys [{:value :state} {:value :requests}], :vals [:_usages-next-state :_usages-requests]}, :return-type :_inspector-usages-transition}
+       {:name :_usages-handled, :parent :get, :args {:coll {:as :state :type :_inspector-usages-state}, :key {:value :handled}, :default {:value false}}}
+       {:name :_usages-styles, :parent :list, :args {:items [{:value {:selector "&", :declarations {"margin-top" "18px"}}} {:value {:selector "& .gd-insp-usages-head", :declarations {"gap" "6px", "text-transform" "uppercase", "align-items" "baseline", "margin-bottom" "4px", "font-weight" "600", "font-size" "0.6875rem", "letter-spacing" "0.06em", "display" "flex", "color" "var(--gd-ink-3)"}}} {:value {:selector "& .gd-insp-usages-count", :declarations {"font-weight" "400", "color" "var(--gd-ink-3)"}}} {:value {:selector "& .gd-insp-usage-filter", :declarations {"width" "100%", "font-family" "var(--gd-mono)", "margin" "4px 0 2px", "border" "1px solid var(--card-border)", "padding" "3px 6px", "font-size" "0.75rem", "background-color" "var(--card-bg)", "border-radius" "6px", "color" "var(--fg)"}}} {:value {:selector "& .gd-insp-usage-filter:focus-visible", :declarations {"outline" "2px solid var(--accent)" "outline-offset" "1px"}}} {:value {:selector "& .gd-insp-usage-glabel", :declarations {"margin" "8px 0 2px", "font-size" "0.6875rem", "color" "var(--gd-ink-3)"}}} {:value {:selector "& .gd-insp-usage-list", :declarations {"display" "flex", "flex-direction" "column"}}} {:value {:selector "& .gd-insp-usage-row", :declarations {"gap" "6px", "margin" "0", "border" "none", "align-items" "baseline", "padding" "3px 4px", "text-align" "left", "cursor" "pointer", "font-size" "0.75rem", "background-color" "transparent", "border-radius" "4px", "display" "flex"}}} {:value {:selector "& .gd-insp-usage-row[hidden]", :declarations {"display" "none"}}} {:value {:selector "& .gd-insp-usage-row:hover", :declarations {"background-color" "var(--hover-bg)"}}} {:value {:selector "& .gd-insp-usage-row:focus-visible", :declarations {"outline" "2px solid var(--accent)" "outline-offset" "1px"}}} {:value {:selector "& .gd-insp-usage-name", :declarations {"font-family" "var(--gd-mono)", "font-weight" "600", "color" "var(--gd-flow-ink)", "overflow-wrap" "anywhere"}}} {:value {:selector "& .gd-insp-usage-slot", :declarations {"font-family" "var(--gd-mono)", "color" "var(--gd-ink-3)"}}} {:value {:selector "& .gd-insp-usage-ns", :declarations {"margin-left" "auto", "padding-left" "8px", "font-size" "0.6875rem", "color" "var(--gd-ink-3)", "overflow" "hidden", "text-overflow" "ellipsis", "white-space" "nowrap", "max-width" "45%"}}} {:value {:selector "& .gd-insp-usage-more", :declarations {"padding" "3px 4px", "font-size" "0.6875rem", "font-style" "italic", "color" "var(--gd-ink-3)"}}}]}}
+       {:name :_usages-render, :parent :zipmap, :args {:keys [{:value :tree} {:value :styles} {:value :tab} {:value :open} {:value :handled}], :vals [:_usages-tree :_usages-styles "overview" false :_usages-handled]}}
+       {:name :_usages-view :parent :_usages-render :args {:groups :_usages-by-kind}}
+       {:name :inspector-initial, :parent :if, :args {:test :_inspector-usages-surface, :then :_usages-initial, :else :_inspector-chrome-initial}, :return-type :_inspector-state, :return-type-wide? true}
+       {:name :inspector-update, :parent :if, :args {:test :_inspector-usages-surface, :then :_usages-update, :else :_inspector-chrome-update} :return-type :_inspector-transition}
+       {:name :inspector-view, :parent :if, :args {:test :_inspector-usages-surface, :then :_usages-view, :else :_inspector-chrome-view}}]}

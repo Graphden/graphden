@@ -13,10 +13,10 @@
 (def ^:private abi-names
   (into {}
         (for [[path names] [["core.logic" [:const :if :equal?]]
-                            ["core.collections" [:list :get :assoc :zipmap :count :take :concat]]
+                            ["core.collections" [:list :get :assoc :zipmap :count :take :concat :vals]]
                             ["core.arithmetic" [:add :mod]]
-                            ["core.hof" [:map :filter]]
-                            ["core.strings" [:str :str-starts-with?]]
+                            ["core.hof" [:map :filter :group-by :sort-by]]
+                            ["core.strings" [:str :str-starts-with? :str-lower :str-trim :str-contains?]]
                             ["web.html" [:hiccup]]]
               name names]
           [name (keyword path (clojure.core/name name))])))
@@ -38,10 +38,10 @@
    installed dependency under source authorization before writing anything."
   []
   (let [modules {"core/logic" ["core.logic" #{:const :if :equal?}]
-                 "core/collections" ["core.collections" #{:list :get :assoc :zipmap :count :take :concat}]
+                 "core/collections" ["core.collections" #{:list :get :assoc :zipmap :count :take :concat :vals}]
                  "core/arithmetic" ["core.arithmetic" #{:add :mod}]
-                 "core/hof" ["core.hof" #{:map :filter}]
-                 "core/strings" ["core.strings" #{:str :str-starts-with?}]
+                 "core/hof" ["core.hof" #{:map :filter :group-by :sort-by}]
+                 "core/strings" ["core.strings" #{:str :str-starts-with? :str-lower :str-trim :str-contains?}]
                  "web/html" ["web.html" #{:hiccup :hiccup-node}]
                  "core/refinements" ["core.refinements" (set (keys public-type-names))]
                  "app/ui-account-menu" ["app.ui-account-menu" #{:account-menu-view}]

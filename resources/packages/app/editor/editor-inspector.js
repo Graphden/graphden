@@ -30,6 +30,7 @@
   }
   function clearBody(body) {
     invalidate();
+    window.gdDisposeFnUsages?.(body);
     window.gdCode?.destroyWithin?.(body);
     body.replaceChildren();
   }
@@ -120,12 +121,6 @@
           if (typeof formatServerTypeTexts === 'function') {
             formatServerTypeTexts(host);
           }
-          // "Used by" — who extends / references this fn, appended
-          // below the partial. A late response appends into a host a
-          // newer selection already disconnected — a no-op.
-          if (typeof gdAppendFnUsages === 'function') {
-            gdAppendFnUsages(host, fnId);
-          }
           // The Overview's λ / 📍 rows open the flag popovers on a fn the
           // reader may edit (editor-edit-modes-flags.js).
           if (typeof gdBindInspectorFlagRows === 'function') {
@@ -149,7 +144,13 @@
     clearBody(body);
     if (tab === 'overview') {
       body.innerHTML = '<div id="gd-insp-overview" class="gd-insp-overview-host">'
-        + '<div class="gd-insp-runs-loading">Loading overview…</div></div>';
+        + '<div class="gd-insp-runs-loading">Loading overview…</div></div>'
+        + '<div data-gd-usages-host=""></div>';
+      const owns = bodyOwner(body);
+      window.gdMountFnUsages?.(body.querySelector('[data-gd-usages-host]'), fnId, {
+        owns,
+        captureRead: (host, retry) => captureRead(host, retry, () => owns() && host.isConnected && body.contains(host)),
+      });
       gdLoadInspectorOverview(fnId);
       return;
     }

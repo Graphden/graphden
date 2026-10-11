@@ -47,13 +47,57 @@ function fixture(component = 'recents', save = true) {
     selectFn: () => { selectCount++; }});
   vm.runInContext(source, context);
   window.gdRenderUIComponentCatalog();
-  return {group, window, requests, writes, themes, manifest, apply: () => applyResolve(),
+  return {group, create: buttons.get('#gd-ui-components-create'), window, requests, writes, themes, manifest, apply: () => applyResolve(),
     change: value => { preference = value; roots = value?.roots || {}; }, selections: () => selectCount,
     status: () => buttons.get('#gd-ui-components-status').textContent};
 }
 async function until(predicate) {
   for (let n = 0; n < 30; n++) { if (predicate()) return; await new Promise(setImmediate); }
   assert.fail('component action did not settle');
+}
+
+for (const [component, count, accepted] of [
+  ['inspector', 512, true], ['inspector', 513, false],
+  [null, 1000, true], [null, 1001, false],
+]) {
+  test(`creation receipt boundary ${component || 'full'} ${count}`, async () => {
+    const f = fixture(component);
+    f.manifest.functions = Array.from({length: count}, (_, index) =>
+      ({id: id(index + 2), name: 'part-' + index, 'namespace-id': id(1)}));
+    if (!component) {
+      delete f.manifest.component;
+      Object.assign(f.manifest.roots, {'theme-id': id(3), 'menu-id': id(4),
+        'menu-update-id': id(5), 'picker-id': id(6)});
+    }
+    const button = component ? f.group : f.create;
+    button.click({currentTarget: button});
+    await until(() => accepted ? f.requests.length === 2 : f.status() === 'Creation manifest is unavailable.');
+    assert.equal(f.requests.length, accepted ? 2 : 1, 'rejected receipts never reach APPLY');
+    if (accepted) {
+      f.apply();
+      await until(() => f.writes.length === 1);
+    }
+  });
+}
+
+for (const [label, corrupt] of [
+  ['duplicate identity', manifest => { manifest.functions[1].id = manifest.functions[0].id; }],
+  ['foreign namespace', manifest => { manifest.functions[0]['namespace-id'] = id(999); }],
+  ['missing root', manifest => { manifest.roots['configuration-id'] = id(999); }],
+]) {
+  test('larger full receipt still rejects ' + label, async () => {
+    const f = fixture(null);
+    delete f.manifest.component;
+    f.manifest.functions = Array.from({length: 600}, (_, index) =>
+      ({id: id(index + 2), name: 'part-' + index, 'namespace-id': id(1)}));
+    Object.assign(f.manifest.roots, {'theme-id': id(3), 'menu-id': id(4),
+      'menu-update-id': id(5), 'picker-id': id(6)});
+    corrupt(f.manifest);
+    f.create.click({currentTarget: f.create});
+    await until(() => f.status() === 'Creation manifest is unavailable.');
+    assert.equal(f.requests.length, 1, 'invalid receipt never reaches APPLY');
+    assert.equal(f.writes.length, 0);
+  });
 }
 
 test('missing group copies only its chosen template and activates with the server preference comparison', async () => {

@@ -6,6 +6,7 @@ let phase = 'boot';
 (async () => {
   const {browser, page} = await newContext(chromium, {boot: false});
   const errors = [];
+  const releases = new Set();
   page.on('pageerror', error => {
     errors.push(error.name);
     console.log('[Inspector frame]', JSON.stringify(error.stack.split('\n').slice(1, 5).map(line => {
@@ -58,7 +59,7 @@ let phase = 'boot';
     await page.route(routePath, async route => {
       const response = await route.fetch();
       let release; const ready = new Promise(resolve => { release = resolve; });
-      held.push({release, ready}); await ready;
+      held.push({release, ready}); releases.add(release); await ready; releases.delete(release);
       await route.fulfill({response}).catch(() => {});
     });
     await page.evaluate(id => gdInspectorRender(id), ids[0]);
@@ -109,7 +110,8 @@ let phase = 'boot';
     const shellPath = '**/partials/execute-popover?*';
     await page.route(shellPath, async route => {
       const response = await route.fetch();
-      await new Promise(resolve => { shellRelease = resolve; });
+      await new Promise(resolve => { shellRelease = resolve; releases.add(resolve); });
+      releases.delete(shellRelease);
       await route.fulfill({response}).catch(() => {});
     });
     await page.evaluate(id => gdInspectorShowRuns(id), ids[0]);
@@ -142,7 +144,7 @@ let phase = 'boot';
       const response = await route.fetch();
       let release; const ready = new Promise(resolve => { release = resolve; });
       const index = historyReads.length;
-      historyReads.push({release}); await ready;
+      historyReads.push({release}); releases.add(release); await ready; releases.delete(release);
       const html = await response.text();
       await route.fulfill({response, body: html + '<div data-gd-read-proof="' + index + '"></div>'}).catch(() => {});
     });
@@ -153,15 +155,14 @@ let phase = 'boot';
     await page.setViewportSize({width: 1400, height: 900});
     assert(await waitFor(() => historyReads.length === 2, 30000), 'retained Run owner resumes interrupted history');
     historyReads[1].release();
-    await page.locator('#gd-insp-runs [data-gd-read-proof="1"]').waitFor();
+    await page.locator('#gd-insp-runs [data-gd-read-proof="1"]').waitFor({state: 'attached'});
     historyReads[0].release();
-    await page.evaluate(() => {
-      const host = document.getElementById('gd-insp-runs');
-      host.dispatchEvent(new Event('gd-refresh-runs')); host.dispatchEvent(new Event('gd-refresh-runs'));
-    });
-    assert(await waitFor(() => historyReads.length === 4, 30000), 'two concurrent visible history reads reached controlled boundaries');
+    await page.evaluate(() => document.getElementById('gd-insp-runs').dispatchEvent(new Event('gd-refresh-runs')));
+    assert(await waitFor(() => historyReads.length === 3, 30000), 'older visible history read reached its controlled boundary');
+    await page.evaluate(() => document.getElementById('gd-insp-runs').dispatchEvent(new Event('gd-refresh-runs')));
+    assert(await waitFor(() => historyReads.length === 4, 30000), 'newer visible history read overlaps the held older response');
     historyReads[3].release();
-    await page.locator('#gd-insp-runs [data-gd-read-proof="3"]').waitFor();
+    await page.locator('#gd-insp-runs [data-gd-read-proof="3"]').waitFor({state: 'attached'});
     historyReads[2].release();
     await page.unroute(historyPath);
     assert(await page.locator('#gd-insp-runs [data-gd-read-proof="3"]').count() === 1,
@@ -181,5 +182,18 @@ let phase = 'boot';
     assert(await page.locator('#gd-insp-tabbody').evaluate(el => el.children.length === 0), 'account change clears old native selection immediately');
     assert(errors.length === 0, 'no unclassified browser errors');
     console.log('PASS graph Inspector ownership, real partial generations, keyboard focus, responsive close and account reset');
-  } finally { await page.unrouteAll({behavior: 'wait'}); await browser.close(); }
+  } catch (error) {
+    const state = await page.evaluate(() => ({
+      selectedTab: document.querySelector('[data-insp-tab][aria-selected="true"]')?.dataset.inspTab,
+      runConnected: window.inspectorRetainedControls?.pane?.isConnected ?? null,
+      historyMarkers: [...document.querySelectorAll('[data-gd-read-proof]')].map(el => el.dataset.gdReadProof),
+      historyLoading: !!document.querySelector('#gd-insp-runs .execute-submit-spinner'),
+      historyChildren: document.getElementById('gd-insp-runs')?.children.length,
+    })).catch(() => ({unavailable: true}));
+    console.log('Inspector safe state:', JSON.stringify(state));
+    throw error;
+  } finally {
+    for (const release of releases) release();
+    await page.unrouteAll({behavior: 'wait'}); await browser.close();
+  }
 })().catch(error => {console.error('FAIL Inspector graph proof:', phase, require('./safe-diagnostics').errorKind(error)); process.exitCode = 1;});

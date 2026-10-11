@@ -211,17 +211,19 @@ User creates/modifies fn-def
 ```
 
 When a fn that others depend on is modified through the editor / CRUD API, its
-**direct** dependents are re-checked in the same write: every fn that binds a
-ref to it, inherits from it, or names it as a slot type (the compiler's reverse
-dependency index — `ctx-reverse-deps`). Each dependent's diagnostic is recorded
-(or cleared) in the per-branch store, so a caller whose callee's return type
-changed under it shows the error in the editor and is refused by the execute
-gate (`:unresolved-type-errors`) — without anyone editing the caller. The
-re-check is one level deep and bounded (`max-dependent-recheck`); a
-transitive dependent is re-checked when its own callee is next written, and a
-change wide enough to need everything re-run is the ctx-build sweep
-(`branch_router/recheck.clj`). The package sync path checks the whole corpus
-in dependency order, so it needs no dependent walk.
+cached **transitive** dependents are re-checked in the same write, in dependency
+order. The compiler's reverse dependency index (`ctx-reverse-deps`) tracks refs,
+inheritance, and slot types. Each successful check records or clears the
+per-branch diagnostic, so an affected caller can show an error in the editor
+and be refused by the execute gate (`:unresolved-type-errors`) without anyone
+editing it.
+
+This refresh is best-effort per fn: an exception during a dependent check is
+logged and does not fail the user's write. It follows the dependency index already held by the context,
+without scanning all persisted graphs; an unprimed context can have no affected
+entries. The ctx-build sweep (`branch_router/recheck.clj`) rebuilds diagnostics.
+Large affected closures are logged rather than truncated. The package sync
+path checks the whole corpus in dependency order, so it needs no dependent walk.
 
 ---
 

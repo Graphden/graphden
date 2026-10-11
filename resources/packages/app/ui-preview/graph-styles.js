@@ -6,6 +6,7 @@
     return Object.fromEntries([...value].map(([key, item]) => [key instanceof api.Keyword ? (key.namespace ? key.namespace + '/' : '') + key.name : key, item]));
   };
   const properties = new Set([
+    'position', 'top', 'right', 'appearance', 'flex-wrap', 'margin-top', 'margin-bottom', 'border-bottom', 'border-bottom-color',
     'display', 'flex', 'flex-direction', 'align-items', 'justify-content', 'gap',
     'padding', 'padding-inline', 'padding-block', 'margin', 'margin-inline',
     'margin-block', 'width', 'min-width', 'max-width', 'height', 'max-height',
@@ -34,7 +35,8 @@
     const entries = Object.entries(fields(value));
     if (entries.length > 64) throw new Error('Graph style declaration limit exceeded');
     return entries.sort(([a], [b]) => a.localeCompare(b)).map(([property, item]) => {
-      if (!properties.has(property) || typeof item !== 'string' || item.length > 256
+      if ((property === 'position' && !['static', 'relative', 'absolute'].includes(item))
+        || !properties.has(property) || typeof item !== 'string' || item.length > 256
         || /[{};\\]|url\s*\(|@/i.test(item) || hasControl(item) || !CSS.supports(property, item)) {
         throw new Error('Unsupported component declaration');
       }

@@ -3,7 +3,7 @@
 // editor-inspector.js renderInspTab / gdInspectorRender ↔ editor-execute.js
 // gdMountRunPane — the Run pane's CodeMirror views (code-typed args) keep
 // document observers alive until `gdCode.destroyWithin` tears them down. The
-// inspector replaces its tab body (and, on a fn switch, the whole column)
+// inspector replaces only its native tab body (also on a fn switch)
 // through innerHTML; if that happens BEFORE anyone destroys the views, the
 // run pane's own destroyWithin(host) only ever sees the NEW, empty host and
 // every view leaks. Pinned in the real call order, with both real modules:
@@ -14,6 +14,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { createDocument, MiniElement } = require('./mini-dom');
+const {installInspectorGraph} = require('./inspector-graph-fixture');
 
 const EDITOR = path.join(__dirname, '..', '..', 'resources', 'packages', 'app', 'editor');
 const INSPECTOR = fs.readFileSync(path.join(EDITOR, 'editor-inspector.js'), 'utf8');
@@ -80,6 +81,7 @@ function parseInto(doc, parent, html) {
   ctx.window = ctx;
   ctx.gdCode = gdCode;
   vm.runInContext(EXECUTE, ctx);
+  installInspectorGraph(ctx, doc);
   vm.runInContext(INSPECTOR, ctx);
 
   // Open A's Runs tab, then put a CodeMirror-enhanced arg field in its pane.
@@ -96,7 +98,7 @@ function parseInto(doc, parent, html) {
 
   console.log(' switching tab destroys the run pane\'s views');
   openRunsWithCodeField();
-  doc.querySelector('.gd-insp-tab[data-insp-tab="overview"]').click();
+  doc.querySelector('#gd-insp-chrome-host').dispatch('click', {target: doc.querySelector('.gd-insp-tab[data-insp-tab="overview"]')});
   assert(live.size === 0, 'views left alive after a tab switch: ' + live.size);
 
   console.log(' re-rendering the Runs tab destroys the outgoing views');

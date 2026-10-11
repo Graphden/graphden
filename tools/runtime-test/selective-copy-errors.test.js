@@ -8,6 +8,8 @@ const missing = {kind: 'plan', url, component: 'account-menu', status: 422, code
 test('verified typed missing-component fallback permits only its exact network-console occurrence', () => {
   assert.deepEqual(unexpectedSelectiveCopyErrors([error], [missing], true), []);
   assert.deepEqual(unexpectedSelectiveCopyErrors([error, error], [missing], true), [error]);
+  assert.deepEqual(unexpectedSelectiveCopyErrors([error], [{...missing, component: 'inspector'}], true), []);
+  assert.deepEqual(unexpectedSelectiveCopyErrors([error], [{...missing, component: 'inspector'}], false), [error]);
 });
 test('unknown terminal refusals, wrong URLs, page errors and unverified behavior remain fatal', () => {
   for (const reply of [{...missing, code: 'tainted-result'}, {...missing, fallback: null}, {...missing, component: 'unknown'}, {...missing, url: url + '/other'}])

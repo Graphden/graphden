@@ -56,6 +56,8 @@
                   :roles #{:initial :update :view}}
    :fn-picker {:id (ids/fn-id "app.ui-fn-picker" :picker-view)
                :reference :app.ui-fn-picker/picker-view :roles #{:view}}
+   :inspector {:id (ids/fn-id "app.ui-inspector" :inspector-view)
+               :reference :app.ui-inspector/inspector-view :roles #{:initial :update :view}}
    :recents {:id (ids/fn-id "app.ui-recents" :recents-view)
              :reference :app.ui-recents/recents-view
              :roles #{:initial :update :view}}})

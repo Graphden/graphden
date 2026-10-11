@@ -248,6 +248,7 @@
                   "packages/app/editor/editor-shell.js"
                   ;; The right-column inspector and the Workspace / Packages
                   ;; chips — wired at load, after the shell.
+                  "packages/app/editor/editor-inspector-graph.js"
                   "packages/app/editor/editor-inspector.js"
                   "packages/app/editor/editor-shell-chips.js"
                   ;; Interactive tutorial overlay — before main so the boot
@@ -592,9 +593,7 @@
             ;; (redesign 2026-08): bindings, types, effects, provenance, this
             ;; function's OWN stats/errors, versions, run. Empty until a node
             ;; is selected; editor-shell.js fills it. Replaces the popover-hell.
-            [:aside {:id "gd-inspector" :aria-label "Inspector"}
-             [:div {:class "gd-insp-empty"}
-              "Select a node to inspect its bindings, types, effects, and this function\u2019s own run history."]]
+            [:aside {:id "gd-inspector" :aria-label "Inspector"}]
             ;; Placeholder overlay for surfaces not yet rebuilt (Run / Review /
             ;; Operate / Workspaces / Settings). Hidden on the Build surface.
             [:div {:id "gd-surface-overlay" :hidden "hidden"}
@@ -677,7 +676,7 @@
                 [:div {:id "gd-theme-root" :class "gd-theme-root"}]
                 [:div {:id "gd-ui-components-root"}
                  [:h3 {:class "gd-set-label"} "UI graphs"]
-                 [:p {:class "gd-set-hint"} "Personal theme, menu, picker, and recent functions. Graphs define their state and appearance; the editor performs permitted actions."]
+                 [:p {:class "gd-set-hint"} "Personal theme, menu, picker, recent functions, and Inspector chrome. Graphs define their state and appearance; the editor performs permitted actions."]
                  [:p {:id "gd-ui-components-label" :class "gd-set-hint"} "Built-in components"]
                  [:div {:class "gd-theme-actions gd-ui-components-actions"}
                   [:button {:id "gd-ui-components-create" :type "button" :class "gd-set-btn"} "Create personal graphs"]
@@ -686,7 +685,8 @@
                  [:div {:class "gd-theme-actions gd-ui-components-actions"}
                   [:button {:type "button" :class "gd-set-btn" :data-ui-component "account-menu" :data-ui-label "account menu"} "Personalize account menu"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-component "fn-picker" :data-ui-label "function picker"} "Personalize function picker"]
-                  [:button {:type "button" :class "gd-set-btn" :data-ui-component "recents" :data-ui-label "recent functions"} "Personalize recent functions"]]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-component "recents" :data-ui-label "recent functions"} "Personalize recent functions"]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-component "inspector" :data-ui-label "Inspector"} "Personalize Inspector"]]
                  [:div {:class "gd-theme-actions gd-ui-components-actions"}
                   [:button {:type "button" :class "gd-set-btn" :data-ui-graph "configuration-id"} "Configuration"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-graph "theme-id"} "Theme"]
@@ -694,7 +694,9 @@
                   [:button {:type "button" :class "gd-set-btn" :data-ui-graph "menu-id"} "Menu view"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-graph "picker-id"} "Picker view"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-graph "recents-update-id"} "Recent behavior"]
-                  [:button {:type "button" :class "gd-set-btn" :data-ui-graph "recents-id"} "Recent view"]]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-graph "recents-id"} "Recent view"]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-graph "inspector-update-id"} "Inspector behavior"]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-graph "inspector-id"} "Inspector view"]]
                  [:p {:id "gd-ui-components-status" :class "gd-set-hint" :role "status"}]]]
                ;; KEYBOARD — every registered shortcut with a Change control;
                ;; layouts save + share through the marketplace (editor-keymap.js).

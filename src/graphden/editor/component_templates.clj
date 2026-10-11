@@ -47,6 +47,7 @@
                  "app/ui-account-menu" ["app.ui-account-menu" #{:account-menu-view}]
                  "app/ui-fn-picker" ["app.ui-fn-picker" #{:picker-view}]
                  "app/ui-recents" ["app.ui-recents" #{:recents-view}]
+                 "app/ui-inspector" ["app.ui-inspector" #{:inspector-view}]
                  "app/ui-components" ["app.ui-components" #{:ui-components :_ui-components-identities :ui-component-entry :ui-component-entries
                                                             :ui-component-descriptor :ui-component-manifest}]}]
     (into []
@@ -120,7 +121,12 @@
                                      definition)))
                                (copy-module "app/ui-account-menu" menu))
         recents (str root ".recents")
-        descriptors (concat (component-definitions root "menu" :app.ui-account-menu/account-menu-view
+        inspector (str root ".inspector")
+        descriptors (concat (component-definitions root "inspector" :app.ui-inspector/inspector-view
+                                                   [[:initial (keyword inspector "inspector-initial")]
+                                                    [:update (keyword inspector "inspector-update")]
+                                                    [:view (keyword inspector "inspector-view")]])
+                            (component-definitions root "menu" :app.ui-account-menu/account-menu-view
                                                    [[:initial (keyword menu "account-menu-initial")]
                                                     [:update (keyword menu "account-menu-update")]
                                                     [:view (keyword menu "account-menu-view")]])
@@ -135,22 +141,23 @@
                        :description "Your ordinary component manifest. Each descriptor selects entry identities; browser effects remain host-owned."
                        :args {:items [(keyword root "_menu-descriptor")
                                       (keyword root "_picker-descriptor")
-                                      (keyword root "_recents-descriptor")]}}]
+                                      (keyword root "_recents-descriptor")
+                                      (keyword root "_inspector-descriptor")]}}]
     (when-not color-const
       (throw (ex-info "Installed UI templates are unavailable" {:type :browser-plan/unsupported})))
     (into [(assoc color-const :namespace theme) configuration]
           (concat descriptors theme-definitions menu-definitions (copy-module "app/ui-fn-picker" picker)
-                  (copy-module "app/ui-recents" recents)))))
+                  (copy-module "app/ui-recents" recents) (copy-module "app/ui-inspector" inspector)))))
 
 
 (def namespace-suffixes
   "Owned child namespaces reserved for the installed personal template bundle."
-  ["theme" "menu" "picker" "recents"])
+  ["theme" "menu" "picker" "recents" "inspector"])
 
 
 (def groups
   "Fixed creation choices and their personal namespace/descriptor prefixes."
-  {:account-menu "menu" :fn-picker "picker" :recents "recents"})
+  {:account-menu "menu" :fn-picker "picker" :recents "recents" :inspector "inspector"})
 
 
 (defn selected-definitions
@@ -203,6 +210,9 @@
    :menu-id (str (ids/fn-id (str root ".menu") :account-menu-view))
    :menu-update-id (str (ids/fn-id (str root ".menu") :account-menu-update))
    :picker-id (str (ids/fn-id (str root ".picker") :picker-view))
+   :inspector-id (str (ids/fn-id (str root ".inspector") :inspector-view))
+   :inspector-initial-id (str (ids/fn-id (str root ".inspector") :inspector-initial))
+   :inspector-update-id (str (ids/fn-id (str root ".inspector") :inspector-update))
    :recents-id (str (ids/fn-id (str root ".recents") :recents-view))
    :recents-initial-id (str (ids/fn-id (str root ".recents") :recents-initial))
    :recents-update-id (str (ids/fn-id (str root ".recents") :recents-update))})

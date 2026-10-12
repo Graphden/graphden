@@ -57,10 +57,10 @@
 (defn- reconstruction-read
   [storage operation entity argument]
   (let [fetch (fn []
-               (case operation
-                 :one (sp/read-entity storage entity argument)
-                 :many (sp/read-entities storage entity argument)
-                 :query (sp/query-entities storage entity argument)))
+                (case operation
+                  :one (sp/read-entity storage entity argument)
+                  :many (sp/read-entities storage entity argument)
+                  :query (sp/query-entities storage entity argument)))
         scope *reconstruction-reads*]
     (if (and scope (identical? storage (:storage scope))
              (= (tc/current-org) (:org scope)) (#{:fn :slot :fn-slot} entity))

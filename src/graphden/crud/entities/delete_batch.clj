@@ -97,9 +97,19 @@
     (refuse! :graph-write/functions-in-use)))
 
 
-(defn- delete-locked!
+(defn delete-locked!
+  "Delete exact receipts within a caller-owned graph-writer transaction.
+   Revalidates untrusted receipts and all ordinary write/reference guards.
+   Does not publish derived state: callers must publish only after commit."
   [storage receipts]
-  (let [rows (validate-identities! storage receipts)
+  (when-not (and tx/*transaction-context*
+                 (identical? tx/*transaction-context* (tx/writer-context storage))
+                 @(:active? tx/*transaction-context*)
+                 @(:writer-scope tx/*transaction-context*)
+                 (identical? (tx/datasource storage) (:connection tx/*transaction-context*)))
+    (refuse! :graph-write/transaction-required))
+  (let [receipts (parse-receipts {:functions receipts})
+        rows (validate-identities! storage receipts)
         ids (set (keys rows))]
     (when (seq ids)
       (validate-references! storage ids)
@@ -123,8 +133,10 @@
         repair? (assoc :invalidate-origin? true)))))
 
 
-(defn- publish!
+(defn publish!
+  "Publish already committed deletions. Never call from a writer transaction."
   [ctx storage rows]
+  (tx/assert-owns-commit! storage)
   (when (seq rows)
     (let [ids (set (keys rows))]
       (try

@@ -4,7 +4,37 @@
     [graphden.crud.entities.delete-batch :as batch]
     [graphden.crud.entities.invalidation :as invalidation]
     [graphden.crud.type-check :as type-check]
-    [graphden.executor.compile-runtime :as runtime]))
+    [graphden.executor.compile-runtime :as runtime]
+    [graphden.storage.protocol.core :as sp]
+    [graphden.storage.tx :as tx]))
+
+
+(deftest transaction-local-delete-requires-live-writer-test
+  (let [connection (Object.)
+        other-connection (Object.)
+        context {:connection connection :active? (atom true) :writer-scope (atom :global)}
+        reads (atom 0)]
+    (with-redefs [sp/read-entities (fn [& _] (swap! reads inc) {})]
+      (doseq [[active token datasource]
+              [[nil nil connection]
+               [context nil connection]
+               [context context other-connection]
+               [(assoc context :active? (atom false)) context connection]
+               [(assoc context :writer-scope (atom nil)) context connection]]]
+        (binding [tx/*transaction-context* active]
+          (with-redefs [tx/datasource (constantly datasource)
+                        tx/writer-context (constantly token)]
+            (is (= :graph-write/transaction-required
+                   (try (batch/delete-locked! {} []) nil
+                        (catch clojure.lang.ExceptionInfo e (:type (ex-data e)))))))))
+      (is (zero? @reads)))))
+
+
+(deftest deletion-publication-refuses-uncommitted-transaction-test
+  (binding [tx/*transaction-context* {:connection (Object.) :active? (atom true)}]
+    (is (= :graph-write/commit-boundary-required
+           (try (batch/publish! {} nil {}) nil
+                (catch clojure.lang.ExceptionInfo e (:type (ex-data e))))))))
 
 
 (deftest parse-exact-receipts-test

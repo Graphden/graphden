@@ -12,12 +12,12 @@ and execute permissions and the current quota on the server.
 
 Open **Settings → Appearance → UI graphs**, then **Create personal graphs**.
 Choose an existing namespace where you can write and inspect the source. The
-editor creates a fresh child with Theme, Menu, Picker, Recents and Inspector groups and a
+editor creates a fresh child with Theme, Menu, Picker, Recents, Inspector and Explorer groups and a
 `ui` configuration. Its descriptor list selects each component's entry identities. Selecting it changes your own editor
 preference; it does not select it for other users.
 
 For a smaller personal copy, use **Personalize account menu**, **Personalize
-function picker**, **Personalize recent functions**, or **Personalize Inspector**. These actions create only
+function picker**, **Personalize recent functions**, **Personalize Inspector**, or **Personalize Explorer toolbar**. These actions create only
 that component and its dependencies, keep existing personal identities and edits,
 and leave the active theme unchanged. An existing group opens for editing instead
 of being replaced. This lesson uses the complete **Create personal graphs** bundle

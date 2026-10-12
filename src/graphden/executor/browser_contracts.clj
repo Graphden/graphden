@@ -98,7 +98,8 @@
 (def component-identities
   "Metadata-only public discriminators. This grants no component body access;
    source policy may recognize these solely with :identity-only? permission."
-  {(ids/fn-id "app.ui-account-menu" :account-menu-view) "app.ui-account-menu"
+  {(ids/fn-id "app.ui-explorer" :explorer-view) "app.ui-explorer"
+   (ids/fn-id "app.ui-account-menu" :account-menu-view) "app.ui-account-menu"
    (ids/fn-id "app.ui-fn-picker" :picker-view) "app.ui-fn-picker"
    (ids/fn-id "app.ui-inspector" :inspector-view) "app.ui-inspector"
    (ids/fn-id "app.ui-recents" :recents-view) "app.ui-recents"})

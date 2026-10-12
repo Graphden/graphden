@@ -324,3 +324,21 @@ data retains the graph's filter text and keyed input without replacing the
 server Overview subtree. Inspector plans use the existing bounded browser
 budget of 150,000 operations and 10,000 renderer nodes for this section, including
 the server's maximum 400-row usages response.
+
+
+The Explorer kind/status toolbar is a finite component in `app.ui-explorer`.
+Its ordinary initial/update/view functions project the existing filter model and
+authorized service/app/test/problem cache summaries into eleven toggles and count
+badges. The graph emits only finite filter/detail requests; host adapters invoke
+the existing mutation functions. It neither interprets saved view bindings nor
+limits Explorer entities. Lazy namespace rows, search/view-members results and
+their existing truncation semantics remain independent of this component.
+
+Create-secret, Dismiss-all and Run-all buttons remain native siblings because
+their pending HTTP operations own their labels and disabled state. The graph
+projects only their visibility. Hiding a pending action or refreshing counts must
+preserve the exact button and operation; account/context changes invalidate old
+personal-plan replies. Shared native chip styling still serves dynamic filter
+chips and the comparison lens. Toolbar layout/count rules are structured graph
+styles. Appearance can personalize this complete toolbar as one component while
+retaining unrelated authored descriptors and themes.

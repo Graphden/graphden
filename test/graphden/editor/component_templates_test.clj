@@ -29,7 +29,8 @@
     (is (= [(keyword root "_menu-descriptor")
             (keyword root "_picker-descriptor")
             (keyword root "_recents-descriptor")
-            (keyword root "_inspector-descriptor")]
+            (keyword root "_inspector-descriptor")
+            (keyword root "_explorer-descriptor")]
            (get-in by-name [[root :ui] :args :items])))
     (is (= {:ref (keyword (str root ".recents") "recents-view") :type :fn-ref}
            (get-in by-name [[root :_recents-view-id] :args :value])))))
@@ -75,4 +76,14 @@
   (let [root "users.alice.ui-test"
         reserved (into #{root} (map #(str root "." %)) templates/namespace-suffixes)]
     (is (= reserved (set (map :namespace (templates/definitions root)))))
-    (is (= 6 (count reserved)))))
+    (is (= 7 (count reserved)))))
+
+
+(deftest explorer-template-stays-finite-and-within-existing-receipt-bounds
+  (let [root "users.alice.ui-explorer"
+        selected (templates/selected-definitions root :explorer nil nil)
+        full (templates/definitions root)]
+    (is (< (count selected) 512))
+    (is (< (count full) 1000))
+    (is (every? #(contains? #{root (str root ".explorer")} (:namespace %)) selected))
+    (is (every? (set (map :name selected)) [:explorer-initial :explorer-update :explorer-view]))))

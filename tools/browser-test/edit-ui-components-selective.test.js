@@ -30,6 +30,36 @@ async function copy(page, component, receipts) {
   await page.waitForFunction(() => !document.querySelector('#gd-ui-components-create').disabled);
   return proposed.manifest;
 }
+async function editPickerAndSettle(page, leaf, value) {
+  // Save detaches the form before its refresh publishes graph-changed. Menu
+  // reauthorization deliberately closes an open menu; observe that actual
+  // completion before starting a new Settings gesture, rather than sleeping.
+  await page.evaluate(({leaf, value}) => {
+    const menu = gdShellMenuGraph;
+    const original = menu.reload;
+    const proof = {started: 0, finished: 0, after: null};
+    const changed = () => {
+      if (graphData.bindings.some(row => row['fn-id'] === leaf && row.value === value)) proof.after = proof.started;
+    };
+    menu.reload = async function(...args) {
+      const own = ++proof.started;
+      try { return await original.apply(this, args); }
+      finally { if (own === proof.started) proof.finished = own; }
+    };
+    addEventListener('gd-graph-changed', changed);
+    window.selectiveEditRefresh = {proof, restore() { menu.reload = original; removeEventListener('gd-graph-changed', changed); }};
+  }, {leaf, value});
+  try {
+    await editOwnValue(page, leaf, 'value', value);
+    await page.waitForFunction(() => {
+      const proof = selectiveEditRefresh.proof;
+      return proof.after !== null && proof.started > proof.after && proof.finished === proof.started && gdShellMenuGraph.ready;
+    });
+  } finally {
+    await page.evaluate(() => { selectiveEditRefresh.restore(); delete window.selectiveEditRefresh; });
+  }
+}
+
 async function cleanup(page, receipts) {
   const functions = receipts.flatMap(receipt => receipt.manifest.functions);
   if (functions.length) {
@@ -67,6 +97,7 @@ async function cleanup(page, receipts) {
   let previous;
   let conflict = null;
   let copies = 0;
+  let phase = 'boot';
   page.on('request', request => {
     requestSequences.set(request, ++sequence);
     if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/ui/components/create/preview')) copies++;
@@ -80,7 +111,9 @@ async function cleanup(page, receipts) {
       await page.locator('#gd-ui-components-reset').click();
       await page.waitForFunction(() => gdPrefRead('components') === null);
     }
+    phase = 'copy-picker';
     const picker = await copy(page, 'fn-picker', receipts);
+    phase = 'runtime-picker';
     await page.waitForFunction(id => gdUIComponentRuntimeIdentity('fn-picker') === id, picker.roots['configuration-id']);
     const firstPreference = await page.evaluate(() => gdPrefRead('components'));
     assert(await page.evaluate(() => gdUIComponentRuntimeIdentity('account-menu') === null && gdShellMenuGraph.ready),
@@ -90,8 +123,10 @@ async function cleanup(page, receipts) {
     await page.waitForFunction(id => selectedFnId === id, picker.roots['picker-id']);
     assert(copies === 1, 'existing group opens its exact identity without another copy');
     const leaf = await selectCreatedLeaf(page, picker, 'picker', 'picker-active-background');
-    await editOwnValue(page, leaf, 'value', 'rgb(254, 215, 170)');
+    await editPickerAndSettle(page, leaf, 'rgb(254, 215, 170)');
+    phase = 'copy-recents';
     const recents = await copy(page, 'recents', receipts);
+    phase = 'runtime-recents';
     await page.waitForFunction(id => gdUIComponentRuntimeIdentity('recents') === id, recents.roots['configuration-id']);
     assert(await page.evaluate(id => gdUIComponentsRoots()['picker-id'] === id, picker.roots['picker-id']),
       'adding Recents retains the authored picker view identity');
@@ -102,7 +137,9 @@ async function cleanup(page, receipts) {
     assert(await page.evaluate(value => JSON.stringify(gdPrefRead('theme')) === JSON.stringify(value), previous.theme),
       'selective copies do not activate a theme');
 
+    phase = 'copy-inspector';
     const inspector = await copy(page, 'inspector', receipts);
+    phase = 'runtime-inspector';
     await page.waitForFunction(id => gdUIComponentRuntimeIdentity('inspector') === id, inspector.roots['configuration-id']);
     assert(await page.evaluate(id => gdUIComponentsRoots()['picker-id'] === id, picker.roots['picker-id']),
       'adding Inspector retains the authored picker identity');
@@ -112,6 +149,26 @@ async function cleanup(page, receipts) {
     assert(inspector.functions.every(row => !retained.has(row.id)), 'Inspector receipt excludes both retained component closures');
     assert(await page.evaluate(value => JSON.stringify(gdPrefRead('theme')) === JSON.stringify(value), previous.theme),
       'Inspector copy leaves the active theme unchanged');
+
+    phase = 'copy-explorer';
+    const explorer = await copy(page, 'explorer', receipts);
+    phase = 'runtime-explorer';
+    await page.waitForFunction(id => gdUIComponentRuntimeIdentity('explorer') === id, explorer.roots['configuration-id']);
+    assert(await page.evaluate(id => gdUIComponentsRoots()['picker-id'] === id, picker.roots['picker-id']),
+      'adding the Explorer toolbar retains the authored picker identity');
+    assert(await page.evaluate(id => graphData.bindings.some(row => row['fn-id'] === id && row.value === 'rgb(254, 215, 170)'), leaf),
+      'adding the Explorer toolbar preserves the edited picker leaf');
+    const existing = new Set([...picker.functions, ...recents.functions, ...inspector.functions].map(row => row.id));
+    assert(explorer.functions.every(row => !existing.has(row.id)), 'Explorer receipt contains only new graph identities');
+    assert(await page.evaluate(value => JSON.stringify(gdPrefRead('theme')) === JSON.stringify(value), previous.theme),
+      'Explorer copy leaves the active theme unchanged');
+    await page.evaluate(() => gdShellSurface('build'));
+    await page.locator('#kind-filters [data-kind="types"]').waitFor({state: 'visible'});
+    await page.locator('#kind-filters [data-kind="types"]').click();
+    assert(await page.locator('#kind-filters [data-kind="types"]').getAttribute('aria-pressed') === 'true',
+      'the stored personal Explorer update executes its finite filter request');
+    await page.locator('#kind-filters [data-kind="all"]').click();
+    assert(await page.evaluate(() => !gdFiltersActive()), 'the stored personal All request preserves the native clear semantics');
 
     const prefPath = await page.evaluate(() => new URL(API.api_prefs_key('components'), location.href).pathname);
     const preferenceRoute = url => url.pathname === prefPath;
@@ -129,6 +186,7 @@ async function cleanup(page, receipts) {
         code: conflict.body.reason, noValue: !Object.hasOwn(conflict.body, 'value')});
       await route.fulfill({response});
     });
+    phase = 'copy-menu';
     const menu = await copy(page, 'account-menu', receipts);
     await page.unroute(preferenceRoute);
     assert(conflict?.status === 409 && conflict.body.reason === 'stale-preference'
@@ -144,11 +202,26 @@ async function cleanup(page, receipts) {
     await cleanup(page, [receipts.pop()]);
     const remaining = await api(page, 'GET', '/api/graph/entities?scope=index');
     const remainingIds = new Set(remaining.fns.map(row => row.id));
-    assert([...picker.functions, ...recents.functions, ...inspector.functions].every(row => remainingIds.has(row.id)),
+    assert([...picker.functions, ...recents.functions, ...inspector.functions, ...explorer.functions].every(row => remainingIds.has(row.id)),
       'cleaning the new receipt preserves all previously authored copies');
     await Promise.all(pendingReplies);
-    assert(unexpectedSelectiveCopyErrors(failures, replies, true).length === 0, 'no unclassified browser errors');
+    const unexpected = unexpectedSelectiveCopyErrors(failures, replies, true);
+    if (unexpected.length) console.error('Unclassified selective errors:', JSON.stringify({
+      errors: unexpected.map(error => ({kind: error.kind, status: Number(error.text?.match(/status of (\d+)/)?.[1]) || null,
+        path: error.url ? new URL(error.url).pathname : null})),
+      replies: replies.map(({kind, component, status, code, retryable, ok, sequence}) => ({kind, component, status, code, retryable, ok, sequence})),
+    }));
+    assert(unexpected.length === 0, 'no unclassified browser errors');
     console.log('PASS selective UI choices, authored retention, builtin fallback, real CAS conflict, exact cleanup');
+  } catch (error) {
+    const state = await page.evaluate(() => ({surface: document.body.dataset.surface,
+      catalogVisible: !!document.getElementById('gd-ui-components-root')?.getClientRects().length,
+      menuVisible: !!document.querySelector('.auth-menu-item[data-item="Settings"]')?.getClientRects().length,
+      pickerVisible: !!document.querySelector('.fn-picker-popover')?.getClientRects().length,
+      ready: !!gdPrefsReady, authenticated: isAuthenticated()})).catch(() => null);
+    console.error('Selective phase diagnostic:', JSON.stringify({phase, kind: require('./safe-diagnostics').errorKind(error), state,
+      replies: replies.map(({component, status, code, retryable, ok}) => ({component, status, code, retryable, ok}))}));
+    throw error;
   } finally {
     try {
       await page.unrouteAll({behavior: 'wait'});
@@ -158,4 +231,4 @@ async function cleanup(page, receipts) {
       await browser.close();
     }
   }
-})().catch(() => {console.error('FAIL selective UI proof; details withheld'); process.exitCode = 1;});
+})().catch(error => {console.error('FAIL selective UI proof;', require('./safe-diagnostics').errorKind(error), '; details withheld'); process.exitCode = 1;});

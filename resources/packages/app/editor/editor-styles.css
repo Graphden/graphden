@@ -513,17 +513,9 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
    empty); synced from localStorage by syncKindFilterBar. The services /
    apps chips carry a count; the apps chip is hidden (JS) when the
    deployment has no app routing. */
-#kind-filters {
-  flex: 1 1 100%;
-  /* Wrap when the chips outgrow the fixed panel width. The earlier
-     one-line-always rule (overflow → hidden-scrollbar scroll) was
-     re-evaluated when the 7th chip (tests) landed: at the standard
-     panel width the tail chips sat INVISIBLE behind a scrollbar-less
-     overflow, which reads as "the feature doesn't exist" — worse
-     than a second row. */
-  display: flex; flex-wrap: wrap; align-items: center;
-  gap: 2px 3px; padding: 2px 0;
-}
+/* Finite kind toolbar layout/count styles are ordinary ui-explorer graphs.
+   The shared native chip skin below also serves dynamic filters and diff lens. */
+#kind-filters { flex: 1 1 100%; }
 .kind-toggle {
   display: inline-flex; align-items: center; gap: 3px;
   background: transparent; border: 1px solid transparent; border-radius: 8px;
@@ -543,10 +535,6 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
   user-select: none;
 }
 .kind-label { user-select: none; }
-.kind-count { font-size: 0.625rem; opacity: 0.85; user-select: none; }
-.kind-count:empty { display: none; }
-/* the ✓ tests chip carries "N · F✗" while any test fails */
-.kind-count.kind-count-bad { color: var(--error-fg); opacity: 1; }
 /* Active chip — this kind IS the applied lens (or "All" with an empty lens).
    A distinct ACCENT treatment (accent text + border + tint + weight) so the
    applied lens is unmistakable at a glance, and never collides with :hover. */

@@ -7,7 +7,7 @@
   let message = '';
   const organization = () => typeof graphdenCurrentOrg === 'string' && graphdenCurrentOrg ? graphdenCurrentOrg : 'public';
   const context = () => JSON.stringify([window.gdPrefOwner, organization(), getCurrentBranchName()]);
-  const groups = { 'account-menu': 'menu-id', 'fn-picker': 'picker-id', recents: 'recents-id', inspector: 'inspector-id' };
+  const groups = { 'account-menu': 'menu-id', 'fn-picker': 'picker-id', recents: 'recents-id', inspector: 'inspector-id', explorer: 'explorer-id' };
   const selectionStamp = () => JSON.stringify(window.gdPrefRead('components') ?? null);
   const selected = () => window.gdUIComponentsSelection();
   function render() {
@@ -55,6 +55,7 @@
     const required = manifest.component
       ? ['configuration-id', groups[manifest.component], ...(manifest.component === 'account-menu' ? ['menu-update-id']
         : manifest.component === 'recents' ? ['recents-initial-id', 'recents-update-id']
+        : manifest.component === 'explorer' ? ['explorer-initial-id', 'explorer-update-id']
         : manifest.component === 'inspector' ? ['inspector-initial-id', 'inspector-update-id'] : [])]
       : ['configuration-id', 'theme-id', 'menu-id', 'menu-update-id', 'picker-id'];
     if (manifest.component) {

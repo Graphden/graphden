@@ -107,6 +107,9 @@
  :vocabulary
  {
   :ensure-color "docs/TYPES.md — explicit text-to-color boundary for graph-built HEX values"
+  :explorer-initial "app.ui-explorer browser entry: tools/ui_preview/builtin_plans.clj; docs/EDITOR_MODULES.md"
+  :explorer-update "app.ui-explorer finite host requests: editor-explorer-graph.js; docs/EDITOR_MODULES.md"
+  :explorer-view "app.ui-explorer toolbar projection: editor-explorer-graph.js; docs/EDITOR_MODULES.md"
   :inspector-initial "app.ui-inspector browser entry: editor-inspector-graph.js runs the UUID from tools/ui_preview/builtin_plans.clj, resources/packages/app/ui-preview/README.md"
   :inspector-update "app.ui-inspector browser entry: graph chrome dispatches tab, keyboard and close events by UUID, resources/packages/app/ui-preview/README.md"
   :inspector-view "app.ui-inspector browser entry: graph chrome renders header, tabs and structured styles by UUID, resources/packages/app/ui-preview/README.md"

@@ -220,6 +220,7 @@
                   ;; build time by the rows; then the row builders, the tree
                   ;; walk, and the Organization / Platform surface sections.
                   "packages/app/editor/editor-sidebar-lens.js"
+                  "packages/app/editor/editor-explorer-graph.js"
                   ;; The Explorer's FILTER model (kinds + namespaces + uses +
                   ;; effects + unused, saved views) — after sidebar-lens
                   ;; (mirrors kinds into `lensKinds`), before the rows.
@@ -417,85 +418,10 @@
               ;; filter — the one gesture that always brings the whole tree
               ;; back. The set is one axis of the filter model
               ;; (editor-explorer-filters.js, persisted per browser);
-              ;; syncKindFilterBar syncs aria-pressed, fills the counts and
-              ;; hides the apps chip when the deployment has no app routing.
+              ;; Ordinary app.ui-explorer graphs project pressed state, counts
+              ;; and availability into this empty renderer-owned host.
               [:div {:id "kind-filters" :role "group"
-                     :aria-label "Filter the tree by kind"}
-               [:button {:type "button" :class "kind-toggle kind-all" :data-kind "all"
-                         :aria-pressed "true" :onclick "toggleKind('all')"
-                         :title "Show everything — clears every filter"}
-                [:span {:class "kind-glyph" :aria-hidden "true"} "◍"]
-                [:span {:class "kind-label"} "all"]]
-               [:button {:type "button" :class "kind-toggle" :data-kind "fn"
-                         :aria-pressed "false" :onclick "toggleKind('fn')"
-                         :title "Only functions"}
-                [:span {:class "kind-glyph" :aria-hidden "true"} "λ"]
-                [:span {:class "kind-label"} "fn"]]
-               [:button {:type "button" :class "kind-toggle" :data-kind "types"
-                         :aria-pressed "false" :onclick "toggleKind('types')"
-                         :title "Only types"}
-                [:span {:class "kind-glyph" :aria-hidden "true"} "T"]
-                [:span {:class "kind-label"} "types"]]
-               [:button {:type "button" :class "kind-toggle" :data-kind "secrets"
-                         :aria-pressed "false" :onclick "toggleKind('secrets')"
-                         :title "Only secrets"}
-                [:span {:class "kind-glyph" :aria-hidden "true"} "🔒"]
-                [:span {:class "kind-label"} "secrets"]]
-               [:button {:type "button" :class "kind-toggle" :data-kind "services"
-                         :aria-pressed "false" :onclick "toggleKind('services')"
-                         :title "Only services (daemons kept running)"}
-                [:span {:class "kind-glyph" :aria-hidden "true"} "⚙"]
-                [:span {:class "kind-label"} "services"]
-                [:span {:class "kind-count" :aria-hidden "true"}]]
-               [:button {:type "button" :class "kind-toggle" :data-kind "apps"
-                         :aria-pressed "false" :onclick "toggleKind('apps')"
-                         :hidden "hidden"
-                         :title "Only apps (fns served at a public host)"}
-                [:span {:class "kind-glyph" :aria-hidden "true"} "▣"]
-                [:span {:class "kind-label"} "apps"]
-                [:span {:class "kind-count" :aria-hidden "true"}]]
-               [:button {:type "button" :class "kind-toggle" :data-kind "tests"
-                         :aria-pressed "false" :onclick "toggleKind('tests')"
-                         :title "Only tests (fns in a `tests` namespace)"}
-                [:span {:class "kind-glyph" :aria-hidden "true"} "✓"]
-                [:span {:class "kind-label"} "tests"]
-                [:span {:class "kind-count" :aria-hidden "true"}]]
-               ;; PROBLEM lenses — an overlay over the structural kinds
-               ;; (a failing fn is still a fn): focus the tree on what
-               ;; needs attention, with the same facts the diagnostics
-               ;; drawer lists. Counts: failed RUNS / type DIAGNOSTICS /
-               ;; lint FINDINGS (editor-problems.js).
-               [:button {:type "button" :class "kind-toggle kind-problem" :data-kind "failed"
-                         :aria-pressed "false" :onclick "toggleKind('failed')"
-                         :title "Only fns with unresolved failed runs (last 7 days)"}
-                [:span {:class "kind-glyph" :aria-hidden "true"} "✕"]
-                [:span {:class "kind-label"} "failed"]
-                [:span {:class "kind-count" :aria-hidden "true"}]]
-               [:button {:type "button" :class "kind-toggle kind-problem" :data-kind "type-errors"
-                         :aria-pressed "false" :onclick "toggleKind('type-errors')"
-                         :title "Only fns with recorded type errors on this branch"}
-                [:span {:class "kind-glyph" :aria-hidden "true"} "⚠"]
-                [:span {:class "kind-label"} "type errors"]
-                [:span {:class "kind-count" :aria-hidden "true"}]]
-               [:button {:type "button" :class "kind-toggle kind-problem" :data-kind "lint"
-                         :aria-pressed "false" :onclick "toggleKind('lint')"
-                         :title "Only fns the graph lint reports (duplicates, dead privates, restated bindings, siblings to share a parent)"}
-                [:span {:class "kind-glyph" :aria-hidden "true"} "⚐"]
-                [:span {:class "kind-label"} "lint"]
-                [:span {:class "kind-count" :aria-hidden "true"}]]
-               ;; DETAIL toggle, not a lens: marks rows instead of
-               ;; filtering them (fns whose execution carries effects
-               ;; get a small `fx`). Individually toggleable so the
-               ;; tree only carries the detail when asked for; sits in
-               ;; the same chip row but its own aria semantics say
-               ;; "show", not "focus". State: graphden.treeDetails.
-               [:button {:type "button"
-                         :class "kind-toggle tree-detail-toggle"
-                         :data-detail "fx" :aria-pressed "false"
-                         :onclick "toggleTreeDetail('fx')"
-                         :title "Mark fns whose execution has effects (io, time, …)"}
-                [:span {:class "kind-glyph" :aria-hidden "true"} "fx"]
-                [:span {:class "kind-label"} "marks"]]]]
+                     :aria-label "Filter the tree by kind"}]]
              ;; Create-a-secret action — NOT a filter, so it sits OUTSIDE the
              ;; kind-filters role-group (and the search bar). Contextual:
              ;; syncKindFilterBar reveals it only for an authed user with the
@@ -686,7 +612,8 @@
                   [:button {:type "button" :class "gd-set-btn" :data-ui-component "account-menu" :data-ui-label "account menu"} "Personalize account menu"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-component "fn-picker" :data-ui-label "function picker"} "Personalize function picker"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-component "recents" :data-ui-label "recent functions"} "Personalize recent functions"]
-                  [:button {:type "button" :class "gd-set-btn" :data-ui-component "inspector" :data-ui-label "Inspector"} "Personalize Inspector"]]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-component "inspector" :data-ui-label "Inspector"} "Personalize Inspector"]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-component "explorer" :data-ui-label "Explorer toolbar"} "Personalize Explorer toolbar"]]
                  [:div {:class "gd-theme-actions gd-ui-components-actions"}
                   [:button {:type "button" :class "gd-set-btn" :data-ui-graph "configuration-id"} "Configuration"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-graph "theme-id"} "Theme"]
@@ -696,7 +623,9 @@
                   [:button {:type "button" :class "gd-set-btn" :data-ui-graph "recents-update-id"} "Recent behavior"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-graph "recents-id"} "Recent view"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-graph "inspector-update-id"} "Inspector behavior"]
-                  [:button {:type "button" :class "gd-set-btn" :data-ui-graph "inspector-id"} "Inspector view"]]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-graph "inspector-id"} "Inspector view"]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-graph "explorer-update-id"} "Explorer behavior"]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-graph "explorer-id"} "Explorer view"]]
                  [:p {:id "gd-ui-components-status" :class "gd-set-hint" :role "status"}]]]
                ;; KEYBOARD — every registered shortcut with a Change control;
                ;; layouts save + share through the marketplace (editor-keymap.js).

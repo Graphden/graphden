@@ -9,6 +9,8 @@ test('verified typed missing-component fallback permits only its exact network-c
   assert.deepEqual(unexpectedSelectiveCopyErrors([error], [missing], true), []);
   assert.deepEqual(unexpectedSelectiveCopyErrors([error, error], [missing], true), [error]);
   assert.deepEqual(unexpectedSelectiveCopyErrors([error], [{...missing, component: 'inspector'}], true), []);
+  assert.deepEqual(unexpectedSelectiveCopyErrors([error], [{...missing, component: 'explorer'}], true), []);
+  assert.deepEqual(unexpectedSelectiveCopyErrors([error], [{...missing, component: 'unknown'}], true), [error]);
   assert.deepEqual(unexpectedSelectiveCopyErrors([error], [{...missing, component: 'inspector'}], false), [error]);
 });
 test('unknown terminal refusals, wrong URLs, page errors and unverified behavior remain fatal', () => {

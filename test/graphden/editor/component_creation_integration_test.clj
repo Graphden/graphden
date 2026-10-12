@@ -374,6 +374,10 @@
   (selective-retention-proof "recents"))
 
 
+(deftest selective-explorer-retains-anonymous-manifest-and-edited-picker-without-body-reads
+  (selective-retention-proof "explorer"))
+
+
 (deftest selective-inspector-retains-anonymous-manifest-and-edited-picker-without-body-reads
   (selective-retention-proof "inspector"))
 

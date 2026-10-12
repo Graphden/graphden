@@ -7,7 +7,7 @@
 // a chip through the model, `applyKindFilters` / `applyLensVisibility`
 // apply the set as an in-place `hidden` overlay over the already-built
 // tree (no teardown — only an active search or a server-evaluated filter
-// rebuilds), `syncKindFilterBar` mirrors the state onto the chips and the
+// rebuilds), `syncKindFilterBar` refreshes the ordinary graph toolbar, and the
 // `nodeShouldShow` / `fnKindVisible` / `nsHoldsLensKind` predicates are
 // what the tree builders in editor-sidebar-rows.js consult per row. The
 // `prime*Once` helpers warm the caches the problem kinds read (services /
@@ -451,74 +451,6 @@ function applyLensVisibility() {
 // (no tenancy API), + gate the "+ New secret" button on auth. Cheap
 // (≤7 nodes); runs on every render.
 function syncKindFilterBar() {
-  document.querySelectorAll('.tree-detail-toggle').forEach((btn) => {
-    btn.setAttribute('aria-pressed', String(!!treeDetails[btn.dataset.detail]));
-  });
-  document.querySelectorAll('#kind-filters .kind-toggle').forEach((btn) => {
-    const kind = btn.dataset.kind;
-    // The fx DETAIL toggle shares the chip row (and .kind-toggle skin)
-    // but is not a lens — its aria-pressed was set above; skip it here
-    // or this loop clobbers it back to "false" on every sync.
-    if (!kind) return;
-    const active = kind === 'all' ? lensKinds.size === 0 : lensKinds.has(kind);
-    btn.setAttribute('aria-pressed', String(active));
-    if (kind === 'apps') {
-      btn.hidden = !(window.API && API.api_orgs_apps);
-    }
-    // Deployed-thing counts — the two "how many do I have running" kinds
-    // whose caches hold the GLOBAL truth (services/app-routes lists). The
-    // structural kinds (fn/types/secrets) load lazily, so a client count
-    // would lie; they get no number.
-    const countEl = btn.querySelector('.kind-count');
-    if (countEl) {
-      let n = null;
-      if (kind === 'services' && typeof getAllServiceFnIdCount === 'function') {
-        n = getAllServiceFnIdCount();
-      } else if (kind === 'apps' && typeof getAppRouteCount === 'function') {
-        n = getAppRouteCount();
-      } else if (kind === 'tests' && typeof getTestStatusCount === 'function') {
-        n = getTestStatusCount();
-        // The failed half rides the same span, in red — the old Tests
-        // panel's "N tests · F failed" line, without the panel.
-        const failed = typeof getTestFailedCount === 'function' ? getTestFailedCount() : 0;
-        countEl.classList.toggle('kind-count-bad', (failed || 0) > 0);
-        countEl.dataset.failed = failed ? String(failed) : '';
-        btn.title = 'Only tests (fns in a `tests` namespace)'
-          + (failed ? ' — ' + failed + ' failed' : '');
-      } else if (kind === 'failed' && typeof getFailureTotal === 'function') {
-        n = getFailureTotal();
-      } else if (kind === 'type-errors' && typeof getTypeErrorTotal === 'function') {
-        n = getTypeErrorTotal();
-      } else if (kind === 'lint' && typeof getLintTotal === 'function') {
-        n = getLintTotal();
-      }
-      countEl.textContent = (n === null || n === undefined) ? '' : String(n)
-        + (countEl.dataset.failed ? ' · ' + countEl.dataset.failed + '✗' : '');
-    }
-  });
-  // "+ New secret" — a create action, not a filter. Shown only when the user is
-  // authed AND focused on secrets (the `secrets` lens active), so it appears
-  // right where a user manages secrets instead of sitting ambiguously in the
-  // filter bar. "All"/other lenses hide it; the 🔒 chip is always there to get in.
-  const addBtn = document.getElementById('secret-add-btn');
-  if (addBtn) {
-    const authed = typeof isAuthenticated === 'function' && isAuthenticated();
-    addBtn.hidden = !(authed && lensKinds.has('secrets'));
-  }
-  // "✕ Dismiss all" — the failed lens's action, same contextual rule.
-  const ackAll = document.getElementById('failed-ack-all-btn');
-  if (ackAll) {
-    const authed = typeof isAuthenticated === 'function' && isAuthenticated();
-    const any = typeof getFailureTotal === 'function' && (getFailureTotal() || 0) > 0;
-    ackAll.hidden = !(authed && lensKinds.has('failed') && any);
-  }
-  // "▶ Run all" — the tests lens's action; the lens also keeps the
-  // live status stream open while active (editor-tests.js).
-  const runAll = document.getElementById('tests-run-all-btn');
-  if (runAll) {
-    const authed = typeof isAuthenticated === 'function' && isAuthenticated();
-    const any = typeof getTestStatusCount === 'function' && (getTestStatusCount() || 0) > 0;
-    runAll.hidden = !(authed && lensKinds.has('tests') && any);
-  }
+  window.gdExplorerGraph?.refresh();
   if (typeof ensureTestsStream === 'function') ensureTestsStream();
 }

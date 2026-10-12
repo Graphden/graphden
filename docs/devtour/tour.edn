@@ -1492,7 +1492,7 @@
            Initial Run forms may finish hidden, but a separate focus epoch blocks old autofocus.
            CodeMirror is disposed before actual body replacement; graph chrome refreshes retain controls."}
     {:ns graphden.editor.component-templates :defn definitions
-     :say "Copies the fixed shipped theme, menu, picker, Recents and Inspector definitions into a fresh named namespace.
+     :say "Copies the fixed shipped theme, menu, picker, Recents, Inspector and Explorer definitions into a fresh named namespace.
            An ordinary descriptor list selects component entry identities. Shared menu colors reference
            copied theme leaves; menu hover owns a local literal. Color wrappers retain the canonical
            color type and ordinary editor form. The full bundle remains the Lesson 25 creation path."}

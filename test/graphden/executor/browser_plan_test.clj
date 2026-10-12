@@ -817,3 +817,34 @@
        {:entry :inspector-update
         :inputs {:state initial :inputs (assoc inputs :selected false) :event {:kind "viewport" :tab "" :key ""}}
         :expected {:state initial :requests []}}])))
+
+
+(deftest explorer-toolbar-transitions-and-action-projections-match-jvm
+  (let [definitions (:fns (edn/read-string (slurp "resources/packages/app/ui-explorer/fns.edn")))
+        definitions (conj definitions {:name :toolbar-actions :parent :get
+                                       :args {:coll :explorer-view :key {:value :actions}}})
+        {:keys [graph impls ids]} (map-fixture definitions)
+        state {:handled false}
+        inputs {:selected {"tests" true "failed" true "secrets" true}
+                :counts {"services" 12000 "apps" 7 "tests" 12000 "failed" 3 "lint" 9 "type-errors" 2}
+                :failed 2 :authenticated true :apps-available true :fx false}
+        transition (fn [kind value requests]
+                     {:entry :explorer-update :inputs {:state state :event {:kind kind :value value}}
+                      :expected {:state state :requests requests}})]
+    (assert-differential!
+      graph impls ids
+      [{:entry :explorer-initial :inputs {} :expected state}
+       (transition "toggle" "tests" [{:kind "toggle-filter" :value "tests"}])
+       (transition "toggle" "all" [{:kind "toggle-filter" :value "all"}])
+       (transition "toggle" "unknown" [])
+       (transition "detail" "fx" [{:kind "toggle-detail" :value "fx"}])
+       (transition "detail" "unknown" [])
+       (transition "other" "tests" [])
+       {:entry :toolbar-actions :inputs {:inputs inputs}
+        :expected {:secret true :dismiss true :run true}}
+       {:entry :toolbar-actions :inputs {:inputs (assoc inputs :authenticated false)}
+        :expected {:secret false :dismiss false :run false}}
+       {:entry :toolbar-actions :inputs {:inputs (assoc inputs :counts {"tests" 0 "failed" nil})}
+        :expected {:secret true :dismiss false :run false}}
+       {:entry :toolbar-actions :inputs {:inputs (assoc inputs :selected {})}
+        :expected {:secret false :dismiss false :run false}}])))

@@ -9,7 +9,7 @@ function unexpectedSelectiveCopyErrors(errors, replies, behaviorVerified) {
   const allowed = new Map();
   for (const reply of replies) {
     const fallback = reply.kind === 'plan' && reply.status === 422 && reply.code === 'component-missing'
-      && reply.fallback === 'builtin' && ['account-menu', 'fn-picker', 'recents', 'inspector'].includes(reply.component);
+      && reply.fallback === 'builtin' && ['account-menu', 'fn-picker', 'recents', 'inspector', 'explorer'].includes(reply.component);
     const conflict = reply.kind === 'activation' && reply.status === 409 && reply.code === 'stale-preference'
       && reply.noValue === true;
     if (fallback || conflict) {

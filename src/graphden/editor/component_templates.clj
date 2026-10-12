@@ -47,6 +47,7 @@
                  "app/ui-account-menu" ["app.ui-account-menu" #{:account-menu-view}]
                  "app/ui-fn-picker" ["app.ui-fn-picker" #{:picker-view}]
                  "app/ui-recents" ["app.ui-recents" #{:recents-view}]
+                 "app/ui-explorer" ["app.ui-explorer" #{:explorer-view}]
                  "app/ui-inspector" ["app.ui-inspector" #{:inspector-view}]
                  "app/ui-components" ["app.ui-components" #{:ui-components :_ui-components-identities :ui-component-entry :ui-component-entries
                                                             :ui-component-descriptor :ui-component-manifest}]}]
@@ -122,7 +123,12 @@
                                (copy-module "app/ui-account-menu" menu))
         recents (str root ".recents")
         inspector (str root ".inspector")
-        descriptors (concat (component-definitions root "inspector" :app.ui-inspector/inspector-view
+        explorer (str root ".explorer")
+        descriptors (concat (component-definitions root "explorer" :app.ui-explorer/explorer-view
+                                                   [[:initial (keyword explorer "explorer-initial")]
+                                                    [:update (keyword explorer "explorer-update")]
+                                                    [:view (keyword explorer "explorer-view")]])
+                            (component-definitions root "inspector" :app.ui-inspector/inspector-view
                                                    [[:initial (keyword inspector "inspector-initial")]
                                                     [:update (keyword inspector "inspector-update")]
                                                     [:view (keyword inspector "inspector-view")]])
@@ -142,22 +148,23 @@
                        :args {:items [(keyword root "_menu-descriptor")
                                       (keyword root "_picker-descriptor")
                                       (keyword root "_recents-descriptor")
-                                      (keyword root "_inspector-descriptor")]}}]
+                                      (keyword root "_inspector-descriptor")
+                                      (keyword root "_explorer-descriptor")]}}]
     (when-not color-const
       (throw (ex-info "Installed UI templates are unavailable" {:type :browser-plan/unsupported})))
     (into [(assoc color-const :namespace theme) configuration]
           (concat descriptors theme-definitions menu-definitions (copy-module "app/ui-fn-picker" picker)
-                  (copy-module "app/ui-recents" recents) (copy-module "app/ui-inspector" inspector)))))
+                  (copy-module "app/ui-recents" recents) (copy-module "app/ui-inspector" inspector) (copy-module "app/ui-explorer" explorer)))))
 
 
 (def namespace-suffixes
   "Owned child namespaces reserved for the installed personal template bundle."
-  ["theme" "menu" "picker" "recents" "inspector"])
+  ["theme" "menu" "picker" "recents" "inspector" "explorer"])
 
 
 (def groups
   "Fixed creation choices and their personal namespace/descriptor prefixes."
-  {:account-menu "menu" :fn-picker "picker" :recents "recents" :inspector "inspector"})
+  {:account-menu "menu" :fn-picker "picker" :recents "recents" :inspector "inspector" :explorer "explorer"})
 
 
 (defn selected-definitions
@@ -205,7 +212,10 @@
 (defn descriptor
   "Exact identities for catalog navigation and pre-apply cleanup registration."
   [root]
-  {:configuration-id (str (ids/fn-id root :ui))
+  {:explorer-id (str (ids/fn-id (str root ".explorer") :explorer-view))
+   :explorer-initial-id (str (ids/fn-id (str root ".explorer") :explorer-initial))
+   :explorer-update-id (str (ids/fn-id (str root ".explorer") :explorer-update))
+   :configuration-id (str (ids/fn-id root :ui))
    :theme-id (str (ids/fn-id (str root ".theme") :theme))
    :menu-id (str (ids/fn-id (str root ".menu") :account-menu-view))
    :menu-update-id (str (ids/fn-id (str root ".menu") :account-menu-update))

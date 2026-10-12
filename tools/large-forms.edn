@@ -90,7 +90,7 @@
   "linear let: builds one node's arg rows from eight indexes, each binding named"
   "graphden.layout.builder-helpers/collect-fn-args"
   "linear let: the same for the unexpanded case"
-  "graphden.crud.type-check/reconstruct-fn-def"
+  "graphden.crud.type-check/reconstruct-fn-def*"
   "linear let: rebuilds an authored fn-def from stored rows, one field per binding"
   "graphden.executor.registry.core/record-rich-types!"
   "linear let: derives one registry entry (args, return, effects, markers) and writes it"

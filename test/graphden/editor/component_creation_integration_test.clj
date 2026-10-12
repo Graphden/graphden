@@ -198,6 +198,7 @@
 (deftest imported-bundle-recheck-shares-namespace-metadata
   (let [ctx (:ctx ga/*bootstrap*)
         storage (:storage ctx)
+        _ (preferences/write! storage "components" nil false nil)
         created (apply-preview (preview "explorer"))
         fn-ids (mapv #(parse-uuid (:id %)) (get-in created [:body :manifest :functions]))
         queries (atom 0)
@@ -212,41 +213,45 @@
                             {:read-only (Connection/.isReadOnly ^Connection connection)
                              :isolation (Connection/.getTransactionIsolation ^Connection connection)})))
                  (apply original connection sql opts))]
-    (is (:ok (:body created)))
-    (is (seq fn-ids))
-    (with-redefs [jdbc/execute! reader]
-      (profile-type-publication
-        #(recheck/record-imported-fn-types! ctx (vs/current-branch-id storage) fn-ids) profile))
-    (is (pos? @queries) "observe actual decorated namespace reads")
-    (is (= 1 @queries) "a read-only import recheck shares its namespace metadata")
-    (is (= [{:read-only true :isolation Connection/TRANSACTION_REPEATABLE_READ}] @connections))
-    (is (pos? (get-in @profile [:fn :count] 0)) "observe actual function metadata reads")
-    (is (<= (reduce + (map :count (vals @profile))) (* 16 (count fn-ids)))
-        (str "publication must avoid repeated metadata/item reads: " (pr-str @profile)))
-    (with-redefs [jdbc/execute! reader]
-      (recheck/record-imported-fn-types! ctx (vs/current-branch-id storage) fn-ids))
-    (is (= 2 @queries) "a later import obtains fresh metadata instead of a global cached view")
-    (let [row (some #(let [row (sp/read-entity storage :fn %)]
-                       (when (seq (:parent-ids row)) row)) fn-ids)
-          read-name (fn []
-                      (jdbc/with-transaction [connection (tx/datasource storage)
-                                              {:isolation :repeatable-read :read-only true}]
-                                             (let [snapshot (tx/with-connection storage connection)]
-                                               (reconstruction/call-with-reconstruction-memo
-                                                 snapshot
-                                                 (fn []
-                                                   (let [first-read (reconstruction/reconstruct-fn-def snapshot (:id row))
-                                                         repeated-read (reconstruction/reconstruct-fn-def snapshot (:id row))]
-                                                     (is (= first-read repeated-read) "metadata reuse preserves reconstruction")
-                                                     (:name repeated-read)))))))]
-      (is (some? row))
-      (is (= (keyword (:name row)) (read-name)))
-      (try
-        (sp/update-entity storage :fn (:id row) {:name "metadata-freshness-proof"})
-        (is (= :metadata-freshness-proof (read-name))
-            "a later snapshot observes changed metadata for the same identity")
-        (finally
-          (sp/update-entity storage :fn (:id row) {:name (:name row)}))))))
+    (is (:ok (:body created))
+        (pr-str {:status (:status created)
+                 :diagnostics (mapv #(select-keys % [:type :reason :http-status :exception-class])
+                                    (:diagnostics created))}))
+    (when (:ok (:body created))
+      (is (seq fn-ids))
+      (with-redefs [jdbc/execute! reader]
+        (profile-type-publication
+          #(recheck/record-imported-fn-types! ctx (vs/current-branch-id storage) fn-ids) profile))
+      (is (pos? @queries) "observe actual decorated namespace reads")
+      (is (= 1 @queries) "a read-only import recheck shares its namespace metadata")
+      (is (= [{:read-only true :isolation Connection/TRANSACTION_REPEATABLE_READ}] @connections))
+      (is (pos? (get-in @profile [:fn :count] 0)) "observe actual function metadata reads")
+      (is (<= (reduce + (map :count (vals @profile))) (* 16 (count fn-ids)))
+          (str "publication must avoid repeated metadata/item reads: " (pr-str @profile)))
+      (with-redefs [jdbc/execute! reader]
+        (recheck/record-imported-fn-types! ctx (vs/current-branch-id storage) fn-ids))
+      (is (= 2 @queries) "a later import obtains fresh metadata instead of a global cached view")
+      (let [row (some #(let [row (sp/read-entity storage :fn %)]
+                         (when (seq (:parent-ids row)) row)) fn-ids)
+            read-name (fn []
+                        (jdbc/with-transaction [connection (tx/datasource storage)
+                                                {:isolation :repeatable-read :read-only true}]
+                                               (let [snapshot (tx/with-connection storage connection)]
+                                                 (reconstruction/call-with-reconstruction-memo
+                                                   snapshot
+                                                   (fn []
+                                                     (let [first-read (reconstruction/reconstruct-fn-def snapshot (:id row))
+                                                           repeated-read (reconstruction/reconstruct-fn-def snapshot (:id row))]
+                                                       (is (= first-read repeated-read) "metadata reuse preserves reconstruction")
+                                                       (:name repeated-read)))))))]
+        (is (some? row))
+        (is (= (keyword (:name row)) (read-name)))
+        (try
+          (sp/update-entity storage :fn (:id row) {:name "metadata-freshness-proof"})
+          (is (= :metadata-freshness-proof (read-name))
+              "a later snapshot observes changed metadata for the same identity")
+          (finally
+            (sp/update-entity storage :fn (:id row) {:name (:name row)})))))))
 
 
 (deftest preview-is-read-only-and-apply-is-exact-create-only

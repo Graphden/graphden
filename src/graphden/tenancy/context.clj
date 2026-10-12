@@ -92,6 +92,7 @@
          ;; addon active" fact — the server-side twin of the editor's
          ;; capability-header probe (graphdenTenancyActive).
          :org-cap-installed? false
+         :personal-namespace-fn nil
          :notify-fn nil}))
 
 
@@ -313,6 +314,27 @@
     (if (and (map? p) (:authenticated? p) (seq (str (:user-id p))))
       (str (:user-id p))
       "anonymous")))
+
+
+(defn install-personal-namespace-fn!
+  "Install a read-only authority describing the authenticated user's generic
+   home namespace. The provider that configured personal namespace rights owns
+   this mapping; it must not provision rows or infer it from arbitrary grants.
+   nil removes the provider. No caller-supplied principal is accepted."
+  [f]
+  (swap! (seams-atom) assoc :personal-namespace-fn f))
+
+
+(defn current-personal-namespace
+  "Return the configured authority's home description, or nil when the addon
+   has no personal namespace provision. Addon-less self-hosting has one shared
+   operator profile: its ordinary `personal` namespace promises no user ACL
+   isolation. Discovery creates no rows and grants no permissions."
+  []
+  (if-let [discover (seam :personal-namespace-fn)]
+    (discover)
+    (when-not (tenancy-addon-active?)
+      {:namespace-path "personal" :source :single-operator :isolated? false})))
 
 
 (defn- public-display-name

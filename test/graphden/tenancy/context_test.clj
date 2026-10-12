@@ -16,6 +16,27 @@
 (use-fixtures :each ts/isolated-seams-fixture)
 
 
+(deftest personal-namespace-discovery-follows-deployment-authority
+  (ctx/install-personal-namespace-fn! nil)
+  (ctx/install-org-cap-fn! nil)
+  (is (= {:namespace-path "personal" :source :single-operator :isolated? false}
+         (ctx/current-personal-namespace)))
+  (ctx/install-org-cap-fn! (constantly false))
+  (is (nil? (ctx/current-personal-namespace))
+      "an installed addon without personal provisioning never guesses users or a shared home")
+  (ctx/install-personal-namespace-fn!
+    #(when-not (= "anonymous" (ctx/current-user-id))
+       {:namespace-path (str "configured." (ctx/current-user-id))
+        :source :personal-namespace-authority :isolated? true}))
+  (is (nil? (ctx/current-personal-namespace)))
+  (binding [ctx/*current-principal* {:authenticated? true :user-id "stable-id"}]
+    (is (= "configured.stable-id" (:namespace-path (ctx/current-personal-namespace)))))
+  (binding [ctx/*current-principal* {:authenticated? true :user-id "another-id"}]
+    (is (= "configured.another-id" (:namespace-path (ctx/current-personal-namespace)))))
+  (ctx/install-personal-namespace-fn! nil)
+  (is (nil? (ctx/current-personal-namespace))))
+
+
 ;; =============================================================================
 ;; Org binding — defaults, with-org, principal derivation
 ;; =============================================================================

@@ -25,12 +25,55 @@
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.wire :as wire]
     [graphden.storage.protocol.core :as sp]
+    [graphden.storage.tx :as tx]
     [graphden.tenancy.context :as tc]
     [graphden.types.check :as types-check]
     [graphden.types.core :as types]
     [graphden.types.diagnostics :as diag]
     [graphden.util.ns-path :as ns-path]
-    [graphden.versioning.storage.core :as vs]))
+    [graphden.versioning.storage.core :as vs])
+  (:import
+    (java.sql
+      Connection)))
+
+
+(def ^:dynamic ^:private *reconstruction-reads* nil)
+
+
+(defn call-with-reconstruction-memo
+  "Reuse exact metadata reads only within a decorated read-only snapshot.
+   Binding/list-item rows are not cached; ordinary CRUD reads stay unchanged."
+  [storage f]
+  (let [connection (tx/datasource storage)]
+    (if (and (instance? Connection connection)
+             (Connection/.isReadOnly ^Connection connection)
+             (= Connection/TRANSACTION_REPEATABLE_READ
+                (Connection/.getTransactionIsolation ^Connection connection)))
+      (binding [*reconstruction-reads* {:storage storage :org (tc/current-org) :entries (atom {})}]
+        (f))
+      (f))))
+
+
+(defn- reconstruction-read
+  [storage operation entity argument]
+  (let [fetch (fn []
+               (case operation
+                 :one (sp/read-entity storage entity argument)
+                 :many (sp/read-entities storage entity argument)
+                 :query (sp/query-entities storage entity argument)))
+        scope *reconstruction-reads*]
+    (if (and scope (identical? storage (:storage scope))
+             (= (tc/current-org) (:org scope)) (#{:fn :slot :fn-slot} entity))
+      (let [key [operation entity argument]
+            entries (:entries scope)]
+        (if-let [hit (find @entries key)]
+          (val hit)
+          (let [result (fetch)
+                result (if (= operation :query) (vec result) result)]
+            (when (< (count @entries) 4096)
+              (swap! entries assoc key result))
+            result)))
+      (fetch))))
 
 
 (def ^:dynamic *request-alias-view?*
@@ -180,7 +223,7 @@
     (if (empty? queue)
       acc
       (let [batch (filterv #(not (contains? acc %)) queue)
-            fetched (when (seq batch) (sp/read-entities storage :fn batch))
+            fetched (when (seq batch) (reconstruction-read storage :many :fn batch))
             next-queue (into []
                              (mapcat (fn [[_ row]]
                                        (filterv some? [(:base-fn-id row)
@@ -202,7 +245,7 @@
   "Load `:binding-list-item` rows for a binding-id, ordered by position.
    Returns `[{:value … :ref-fn-id … :literal …} …]` — the raw rows."
   [storage binding-id]
-  (->> (sp/query-entities storage :binding-list-item {:binding-id binding-id})
+  (->> (reconstruction-read storage :query :binding-list-item {:binding-id binding-id})
        (sort-by :position)
        vec))
 
@@ -233,22 +276,10 @@
       (when (uuid? (:id row)) {:ref (:id row)})))
 
 
-(defn binding-shape-for-edn
-  "Convert one DB binding row + its list-items into the EDN-shape value
-   `check-fn-def!` expects:
-
-     literal value      → `{:value V}` (or bare V via classify-literal
-                          downstream — `:value` map is always safe)
-     ref-binding        → keyword (the bound fn's name)
-     rename-only        → `{:as :renamed}` (no value/ref)
-     list with items    → `[item …]` vector
-
-   Falls back to nil for incomplete bindings (no value, no ref, no
-   rename) — those don't contribute to the type-check input."
-  [storage fn-by-id _slot-by-id renamed-view-by-source b]
-  (let [items (when (or (true? (:list-append b)) (some? (:id b)))
-                (not-empty (list-items-for-binding storage (:id b))))
-        ;; Phase 6c — rename info now lives on the renamed-view slot
+(defn- binding-shape*
+  "Convert the binding and list-item rows already read for this function."
+  [fn-by-id renamed-view-by-source b items]
+  (let [;; Phase 6c — rename info now lives on the renamed-view slot
         ;; (own-slot of binding's fn-id with source-slot-id pointing
         ;; at binding's slot-id). The rename's TYPE comes from that
         ;; slot's `:type-fn-id` (parser sets it from the `:type`
@@ -284,6 +315,24 @@
       (:type-override-fn-id b)
       {:type (some-> (get fn-by-id (:type-override-fn-id b)) row->type-kw)}
       :else nil)))
+
+
+(defn binding-shape-for-edn
+  "Convert one DB binding row + its list-items into the EDN-shape value
+   `check-fn-def!` expects:
+
+     literal value      → `{:value V}` (or bare V via classify-literal
+                          downstream — `:value` map is always safe)
+     ref-binding        → keyword (the bound fn's name)
+     rename-only        → `{:as :renamed}` (no value/ref)
+     list with items    → `[item …]` vector
+
+   Falls back to nil for incomplete bindings (no value, no ref, no
+   rename) — those don't contribute to the type-check input."
+  [storage fn-by-id _slot-by-id renamed-view-by-source b]
+  (binding-shape* fn-by-id renamed-view-by-source b
+                  (when (or (true? (:list-append b)) (some? (:id b)))
+                    (not-empty (list-items-for-binding storage (:id b))))))
 
 
 (defn- declared-free-args
@@ -326,44 +375,44 @@
 (defn- reconstruct-fn-def*
   "Reconstruct against optional snapshot-local namespace metadata."
   [storage fn-id namespace-paths]
-  (when-let [own (sp/read-entity storage :fn fn-id)]
+  (when-let [own (reconstruction-read storage :one :fn fn-id)]
     (let [parent-ids (or (:parent-ids own) [])]
       (when (seq parent-ids)
         (let [parent-rows (when (seq parent-ids)
-                            (sp/read-entities storage :fn parent-ids))
+                            (reconstruction-read storage :many :fn parent-ids))
               fn-by-id (-> parent-rows
                            (assoc fn-id own)
                            (cond->
                              (:return-type-fn-id own)
                              (assoc (:return-type-fn-id own)
-                                    (sp/read-entity storage :fn
-                                                    (:return-type-fn-id own)))))
+                                    (reconstruction-read storage :one :fn
+                                                         (:return-type-fn-id own)))))
               ;; ns paths for QUALIFIED name emission — per-ns duplicate
               ;; names resolve precisely only through the qualified
               ;; registry key, and the editor world (random ids, any
               ;; namespace) is exactly where duplicates live.
               ns-paths (or namespace-paths
-                           (delay (ns-path/path-map (sp/query-entities storage :ns {}))))
+                           (delay (ns-path/path-map (reconstruction-read storage :query :ns {}))))
               fn-by-id (annotate-rows ns-paths fn-by-id)
               parent-name (fn [pid] (row->kw (get fn-by-id pid)))
-              own-bindings (sp/query-entities storage :binding {:fn-id fn-id})
+              own-bindings (reconstruction-read storage :query :binding {:fn-id fn-id})
               ;; Phase 6c — own fn-slot rows of `fn-id` carry the
               ;; renamed-view slots (the FK link replacing the legacy
               ;; `binding.rename_to` text). Pull them so
               ;; `binding-shape-for-edn` can reconstruct
               ;; `{:as :renamed :type T}` shapes from the slot side.
-              own-fn-slots (sp/query-entities storage :fn-slot {:fn-id fn-id})
+              own-fn-slots (reconstruction-read storage :query :fn-slot {:fn-id fn-id})
               ;; Batch the parent fn-slot fetch: the vector-valued
               ;; `:fn-id` filter folds into a single IN-clause instead
               ;; of one round-trip per parent (3 for a typical MI chain).
               fn-slots (if (seq parent-ids)
-                         (sp/query-entities storage :fn-slot {:fn-id (vec parent-ids)})
+                         (reconstruction-read storage :query :fn-slot {:fn-id (vec parent-ids)})
                          [])
               slot-ids (into [] (comp (mapcat (fn [b] [(:slot-id b)]))
                                       (filter some?))
                              (concat own-bindings own-fn-slots fn-slots))
               slot-rows (when (seq slot-ids)
-                          (sp/read-entities storage :slot slot-ids))
+                          (reconstruction-read storage :many :slot slot-ids))
               slot-by-id (or slot-rows {})
               ;; Map source-slot-id → renamed-view slot row, restricted
               ;; to renames owned by `fn-id` (since binding-shape-for-
@@ -397,7 +446,7 @@
                                     frontier (vec parent-ids)]
                                (if (empty? frontier)
                                  acc
-                                 (let [rows (sp/read-entities storage :fn frontier)
+                                 (let [rows (reconstruction-read storage :many :fn frontier)
                                        next-ids (into []
                                                       (comp (mapcat (fn [[_ r]] (:parent-ids r)))
                                                             (remove seen)
@@ -408,10 +457,10 @@
                                           next-ids))))
                       anc-ids (vec (apply concat levels))
                       anc-fn-slots (when (seq anc-ids)
-                                     (sp/query-entities storage :fn-slot {:fn-id anc-ids}))
+                                     (reconstruction-read storage :query :fn-slot {:fn-id anc-ids}))
                       anc-slots (when (seq anc-fn-slots)
-                                  (sp/read-entities storage :slot
-                                                    (vec (distinct (map :slot-id anc-fn-slots)))))
+                                  (reconstruction-read storage :many :slot
+                                                       (vec (distinct (map :slot-id anc-fn-slots)))))
                       slots-all (merge slot-by-id anc-slots)
                       views-by-fn (group-by :fn-id anc-fn-slots)
                       reaches? (fn [view target]
@@ -447,8 +496,9 @@
               ;; secret-returning item ref escaped the secret
               ;; carve-out's detection).
               item-rows (when (seq own-bindings)
-                          (sp/query-entities storage :binding-list-item
-                                             {:binding-id (mapv :id own-bindings)}))
+                          (reconstruction-read storage :query :binding-list-item
+                                               {:binding-id (mapv :id own-bindings)}))
+              items-by-binding (group-by :binding-id item-rows)
               ref-ids (->> (concat (keep :ref-fn-id own-bindings)
                                    (keep :ref-fn-id item-rows)
                                    (keep :type-override-fn-id own-bindings)
@@ -459,16 +509,15 @@
               fn-by-id+refs (cond-> fn-by-id
                               (seq ref-ids)
                               (merge (annotate-rows
-                                       ns-paths (sp/read-entities storage :fn ref-ids))))
+                                       ns-paths (reconstruction-read storage :many :fn ref-ids))))
               declared-args (declared-free-args own-fn-slots fn-slots own-bindings
                                                 slot-by-id fn-by-id+refs)
               args (into declared-args
                          (keep (fn [b]
                                  (when-let [slot (get slot-by-id (:slot-id b))]
-                                   (when-let [shape (binding-shape-for-edn
-                                                      storage fn-by-id+refs
-                                                      slot-by-id
-                                                      renamed-view-by-source b)]
+                                   (when-let [shape (binding-shape*
+                                                      fn-by-id+refs renamed-view-by-source b
+                                                      (not-empty (sort-by :position (get items-by-binding (:id b)))))]
                                      [(or (get public-name-by-slot (:slot-id b))
                                           (keyword (:name slot)))
                                       shape]))))

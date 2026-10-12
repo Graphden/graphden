@@ -5,6 +5,7 @@
     [clojure.set :as set]
     [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
+    [graphden.crud.type-check :as reconstruction]
     [graphden.editor.component-config :as config]
     [graphden.editor.component-creation :as creation]
     [graphden.editor.components :as components]
@@ -15,6 +16,7 @@
     [graphden.packages.records.ids :as records]
     [graphden.storage.postgres.crud :as pg-crud]
     [graphden.storage.protocol.core :as sp]
+    [graphden.storage.tx :as tx]
     [graphden.system.branch-router.epoch :as epoch]
     [graphden.system.branch-router.recheck :as recheck]
     [graphden.test-infra.golden-app :as ga]
@@ -79,6 +81,25 @@
              component (assoc :component component)))))
 
 
+(defn- profile-type-publication
+  "Count/timestamp actual SQL by finite table family, never SQL or parameters."
+  [f stats]
+  (let [original jdbc/execute!
+        reader (fn [connection sql & opts]
+                 (let [table (case (second (re-find #"(?i)\bFROM\s+\"(fn_slot|binding_list_item|binding|slot|fn|ns)(?:_version)?\"" (first sql)))
+                               "fn" :fn "fn_slot" :fn-slot "slot" :slot
+                               "binding" :binding "binding_list_item" :binding-list-item "ns" :ns :other)
+                       start (System/nanoTime)]
+                   (try (apply original connection sql opts)
+                        (finally
+                          (swap! stats update table
+                                 (fn [prior]
+                                   {:count (inc (or (:count prior) 0))
+                                    :elapsed-ms (+ (or (:elapsed-ms prior) 0)
+                                                   (/ (- (System/nanoTime) start) 1000000.0))}))))))]
+    (with-redefs [jdbc/execute! reader] (f))))
+
+
 (defn- diagnosed-apply
   "Report only finite phase names/timings if the real handler throws.
    Delegates each watched function unchanged; this serial fixture owns the spies."
@@ -90,18 +111,28 @@
                                  [v (let [original @v]
                                       (fn [& args]
                                         (let [start (System/nanoTime)
+                                              queries (atom {})
                                               index (dec (count (swap! phases conj
                                                                        {:stage (:name (meta v))
-                                                                        :complete false})))]
-                                          (try (apply original args)
+                                                                        :complete false
+                                                                        :sql-profile queries})))]
+                                          (try (if (= v #'recheck/record-imported-fn-types!)
+                                                 (profile-type-publication #(apply original args) queries)
+                                                 (apply original args))
                                                (finally
+                                                 (when (= v #'recheck/record-imported-fn-types!)
+                                                   (println "Type publication SQL profile:" (pr-str @queries)))
                                                  (swap! phases update index assoc :complete true
-                                                        :elapsed-ms (long (/ (- (System/nanoTime) start) 1000000))))))))])
+                                                        :elapsed-ms (long (/ (- (System/nanoTime) start) 1000000))
+                                                        :sql-profile @queries))))))])
                                watched))]
     (with-redefs-fn wrappers
       #(try (assoc (f) :creation-phases @phases)
             (catch Exception error
-              (println "Creation phase diagnostic:" (pr-str @phases))
+              (println "Creation phase diagnostic:"
+                       (pr-str (mapv (fn [phase]
+                                       (update phase :sql-profile
+                                               (fn [profile] (if (map? profile) profile @profile)))) @phases)))
               (throw error))))))
 
 
@@ -171,6 +202,7 @@
         fn-ids (mapv #(parse-uuid (:id %)) (get-in created [:body :manifest :functions]))
         queries (atom 0)
         connections (atom [])
+        profile (atom {})
         original jdbc/execute!
         reader (fn [connection sql & opts]
                  (when (re-find #"(?i)\bFROM\s+\"ns\"" (first sql))
@@ -183,13 +215,38 @@
     (is (:ok (:body created)))
     (is (seq fn-ids))
     (with-redefs [jdbc/execute! reader]
-      (recheck/record-imported-fn-types! ctx (vs/current-branch-id storage) fn-ids))
+      (profile-type-publication
+        #(recheck/record-imported-fn-types! ctx (vs/current-branch-id storage) fn-ids) profile))
     (is (pos? @queries) "observe actual decorated namespace reads")
     (is (= 1 @queries) "a read-only import recheck shares its namespace metadata")
     (is (= [{:read-only true :isolation Connection/TRANSACTION_REPEATABLE_READ}] @connections))
+    (is (pos? (get-in @profile [:fn :count] 0)) "observe actual function metadata reads")
+    (is (<= (reduce + (map :count (vals @profile))) (* 16 (count fn-ids)))
+        (str "publication must avoid repeated metadata/item reads: " (pr-str @profile)))
     (with-redefs [jdbc/execute! reader]
       (recheck/record-imported-fn-types! ctx (vs/current-branch-id storage) fn-ids))
-    (is (= 2 @queries) "a later import obtains fresh metadata instead of a global cached view")))
+    (is (= 2 @queries) "a later import obtains fresh metadata instead of a global cached view")
+    (let [row (some #(let [row (sp/read-entity storage :fn %)]
+                       (when (seq (:parent-ids row)) row)) fn-ids)
+          read-name (fn []
+                      (jdbc/with-transaction [connection (tx/datasource storage)
+                                              {:isolation :repeatable-read :read-only true}]
+                                             (let [snapshot (tx/with-connection storage connection)]
+                                               (reconstruction/call-with-reconstruction-memo
+                                                 snapshot
+                                                 (fn []
+                                                   (let [first-read (reconstruction/reconstruct-fn-def snapshot (:id row))
+                                                         repeated-read (reconstruction/reconstruct-fn-def snapshot (:id row))]
+                                                     (is (= first-read repeated-read) "metadata reuse preserves reconstruction")
+                                                     (:name repeated-read)))))))]
+      (is (some? row))
+      (is (= (keyword (:name row)) (read-name)))
+      (try
+        (sp/update-entity storage :fn (:id row) {:name "metadata-freshness-proof"})
+        (is (= :metadata-freshness-proof (read-name))
+            "a later snapshot observes changed metadata for the same identity")
+        (finally
+          (sp/update-entity storage :fn (:id row) {:name (:name row)}))))))
 
 
 (deftest preview-is-read-only-and-apply-is-exact-create-only

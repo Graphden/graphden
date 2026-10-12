@@ -167,7 +167,7 @@
 
 
 (defn- record-import-snapshot!
-  "Reuse namespace metadata only within one decorated, read-only snapshot.
+  "Reuse reconstruction metadata only within one decorated, read-only snapshot.
    Connection-backed and non-JDBC callers retain their existing check path."
   [branch-ctx branch-id fn-ids]
   (let [storage (:storage branch-ctx)
@@ -180,7 +180,9 @@
           #(jdbc/with-transaction [connection datasource {:isolation :repeatable-read :read-only true}]
                                   (let [snapshot (tx/with-connection storage connection)
                                         options {:namespace-paths (delay (ns-path/path-map (sp/query-entities snapshot :ns {})))}]
-                                    (record-fn-types! (assoc branch-ctx :storage snapshot) branch-id fn-ids options)))))
+                                    (type-check/call-with-reconstruction-memo
+                                      snapshot
+                                      (fn [] (record-fn-types! (assoc branch-ctx :storage snapshot) branch-id fn-ids options)))))))
       (record-fn-types! branch-ctx branch-id fn-ids))))
 
 

@@ -13,6 +13,15 @@ test('verified typed missing-component fallback permits only its exact network-c
   assert.deepEqual(unexpectedSelectiveCopyErrors([error], [{...missing, component: 'unknown'}], true), [error]);
   assert.deepEqual(unexpectedSelectiveCopyErrors([error], [{...missing, component: 'inspector'}], false), [error]);
 });
+test('restoring a partial manifest recovers a policy refusal only through its later exact component fallback', () => {
+  const retry = {kind: 'plan', url, component: missing.component, status: 422,
+    code: 'policy-refresh-required', retryable: true, sequence: 1};
+  const restored = {...missing, sequence: 2};
+  assert.deepEqual(unexpectedSelectiveCopyErrors([error, error], [retry, restored], true), []);
+  for (const changed of [{component: 'recents'}, {sequence: 0}, {url: url + '/other'}, {fallback: null}, {code: 'tainted-result'}])
+    assert.deepEqual(unexpectedSelectiveCopyErrors([error, error], [retry, {...restored, ...changed}], true), [error, error]);
+  assert.deepEqual(unexpectedSelectiveCopyErrors([error, error], [retry, restored], false), [error, error]);
+});
 test('unknown terminal refusals, wrong URLs, page errors and unverified behavior remain fatal', () => {
   for (const reply of [{...missing, code: 'tainted-result'}, {...missing, fallback: null}, {...missing, component: 'unknown'}, {...missing, url: url + '/other'}])
     assert.deepEqual(unexpectedSelectiveCopyErrors([error], [reply], true), [error]);
@@ -25,4 +34,20 @@ test('verified stale activation permits exactly the sanitized conflict response'
   const reply = {kind: 'activation', url: conflictError.url, status: 409, code: 'stale-preference', noValue: true};
   assert.deepEqual(unexpectedSelectiveCopyErrors([conflictError], [reply], true), []);
   assert.deepEqual(unexpectedSelectiveCopyErrors([conflictError], [{...reply, noValue: false}], true), [conflictError]);
+});
+test('partial-manifest fallback and recovered policy replies have separate bounded allowances', () => {
+  const retry = {kind: 'plan', url, component: 'inspector', status: 422,
+    code: 'policy-refresh-required', retryable: true, sequence: 2};
+  const success = {...retry, status: 200, ok: true, sequence: 3};
+  const replies = [missing, retry, success];
+  assert.deepEqual(unexpectedSelectiveCopyErrors([error, error], replies, true), []);
+  assert.deepEqual(unexpectedSelectiveCopyErrors([error, error, error], replies, true), [error]);
+  assert.deepEqual(unexpectedSelectiveCopyErrors([error, error], replies, false), [error, error]);
+  const pageError = {...error, kind: 'pageerror'};
+  assert.deepEqual(unexpectedSelectiveCopyErrors([error, error, pageError], replies, true), [pageError]);
+  assert.deepEqual(unexpectedSelectiveCopyErrors([error, error],
+    [missing, {...missing, code: 'tainted-result'}], true), [error, error]);
+  assert.deepEqual(unexpectedSelectiveCopyErrors([error, error],
+    [missing, {...missing, component: 'unknown'}], true), [error, error]);
+  assert.deepEqual(unexpectedSelectiveCopyErrors([error], [missing, retry], true), [error]);
 });

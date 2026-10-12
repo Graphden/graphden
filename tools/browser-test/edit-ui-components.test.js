@@ -4,15 +4,29 @@
 'use strict';
 const fs = require('node:fs');
 const assert = require('node:assert/strict');
-const {unexpectedPolicyRetryErrors} = require('./policy-retry-errors');
+const {unexpectedSelectiveCopyErrors} = require('./selective-copy-errors');
+const {unexpectedThemeRetryErrors} = require('./theme-retry-errors');
+const {preparePickerOnlySelection, restorePickerOnlySelection} = require('./partial-ui-components-fixture');
 const {unexpectedCleanupErrors} = require('./owned-cleanup-errors');
 const {chromium} = require('playwright');
 const {newContext} = require('./edit-test-helpers');
 const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
 (async () => {
   const {browser, page} = await newContext(chromium, {boot: false});
+  let priorFixture;
+  try {
+    await preparePickerOnlySelection(page, fixture => {
+      priorFixture = fixture;
+      fs.writeFileSync('/tmp/graphden-native25-prior-ledger-' + process.pid + '.json', JSON.stringify(fixture), {mode: 0o600});
+    });
+  } catch (error) {
+    try { await restorePickerOnlySelection(page, priorFixture); }
+    finally { await browser.close(); }
+    throw error;
+  }
   const errors = [];
   const planReplies = [];
+  const themeReplies = [];
   const pendingReplies = [];
   const requestSequences = new WeakMap();
   let sequence = 0;
@@ -26,8 +40,9 @@ const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
     ['/api/ui/components/create/preview', 'create-preview'],
     ['/api/ui/components/create/apply', 'create-apply'],
   ]);
+  const componentNames = new Set(['account-menu', 'fn-picker', 'recents', 'inspector', 'explorer']);
   const themeReasons = new Set(['not-plain-pure', 'evaluation-failed', 'result-unavailable', 'timeout', 'unavailable']);
-  const refusalCodes = new Set(['policy-refresh-required', 'tainted-result', 'runtime-effects', 'not-plain-pure', 'graph-changed']);
+  const refusalCodes = new Set(['policy-refresh-required', 'component-missing', 'tainted-result', 'runtime-effects', 'not-plain-pure', 'graph-changed']);
   page.on('request', request => {
     requestSequences.set(request, ++sequence);
     if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/functions/delete-batch') {
@@ -44,15 +59,28 @@ const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
     const body = await response.json().catch(() => null);
     if (stage === 'component-plan') {
       const command = response.request().postDataJSON();
-      planReplies.push({url: response.url(), component: command?.component,
+      planReplies.push({kind: 'plan', url: response.url(), component: command?.component,
         sequence: requestSequences.get(response.request()), status: response.status(),
-        code: body?.code, retryable: body?.retryable === true, ok: body?.ok === true});
+        code: body?.code, fallback: body?.fallback, retryable: body?.retryable === true, ok: body?.ok === true});
+    }
+    if (stage === 'theme-evaluate') {
+      const command = response.request().postDataJSON();
+      themeReplies.push({url: response.url(), sequence: requestSequences.get(response.request()),
+        identity: typeof command?.['fn-id'] === 'string' && typeof command?.org === 'string'
+          && typeof command?.owner === 'string' && typeof response.request().headers()['x-graphden-branch'] === 'string'
+          ? JSON.stringify([command['fn-id'], command.org, command.owner,
+            response.request().headers()['x-graphden-branch']]) : null,
+        status: response.status(), code: body?.code, reason: body?.reason,
+        retryable: body?.retryable === true, ok: body?.ok === true, payload: !!body?.payload});
     }
     if (response.status() !== 422) return;
     const code = refusalCodes.has(body?.code) ? body.code : 'unclassified';
     const reason = stage === 'theme-evaluate' && themeReasons.has(body?.reason) ? body.reason : 'unclassified';
+    const component = stage === 'component-plan' ? response.request().postDataJSON()?.component : undefined;
     console.log(JSON.stringify({diagnostic: 'ui-graph-refusal', stage, attempt, status: 422,
-      code, retryable: body?.retryable === true, reason}));
+      code, retryable: body?.retryable === true, reason,
+      component: componentNames.has(component) ? component : undefined,
+      fallback: body?.fallback === 'builtin' ? 'builtin' : undefined}));
   };
   page.on('response', response => pendingReplies.push(captureResponse(response)));
   page.on('pageerror', error => errors.push({kind: 'pageerror', text: error.message}));
@@ -92,7 +120,16 @@ const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
       assert(errors.some(error => error.kind === 'console' && error.text.includes('status of 422')),
         'the browser emitted the network-console error under test');
     }
-    if (unexpectedCleanupErrors(unexpectedPolicyRetryErrors(errors, planReplies, process.env.GRAPHDEN_COMPONENT_CLEANUP_ONLY !== '1'), deletes, ownedIds, true).length) throw new Error('Unexpected browser errors');
+    const behaviorVerified = process.env.GRAPHDEN_COMPONENT_CLEANUP_ONLY !== '1';
+    const unexpected = unexpectedCleanupErrors(unexpectedThemeRetryErrors(
+      unexpectedSelectiveCopyErrors(errors, planReplies, behaviorVerified), themeReplies, behaviorVerified), deletes, ownedIds, true);
+    if (unexpected.length) {
+      console.error(JSON.stringify({diagnostic: 'unexpected-ui-console', errors: unexpected.map(error => ({
+        kind: error.kind, stage: stages.get(new URL(error.url || 'http://unknown').pathname) || 'other',
+        networkStatus: Number(error.text?.match(/^Failed to load resource: the server responded with a status of (\d+)/)?.[1]) || null,
+      }))}));
+      throw new Error('Unexpected browser errors');
+    }
   } catch (error) {
     const frames = String(error.stack || '').split('\n').flatMap(line => {
       const match = line.match(/\/(tutorial-ui-components-helpers|edit-ui-components(?:\.test)?|tutorial-tour-helpers)\.js:(\d+):(\d+)\)?$/);
@@ -103,5 +140,8 @@ const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
     await page.screenshot({path: '/tmp/graphden-personal-ui-components-failure.png'}).catch(() => {});
     console.error('FAIL personal UI component walkthrough; error details withheld to avoid DOM dumps');
     process.exitCode = 1;
-  } finally { await browser.close(); }
-})();
+  } finally {
+    try { await restorePickerOnlySelection(page, priorFixture); }
+    finally { await browser.close(); }
+  }
+})().catch(() => { console.error('FAIL personal UI fixture; details withheld'); process.exitCode = 1; });

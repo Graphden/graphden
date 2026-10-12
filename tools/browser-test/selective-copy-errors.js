@@ -1,15 +1,28 @@
 'use strict';
 const {unexpectedPolicyRetryErrors} = require('./policy-retry-errors');
+const components = new Set(['account-menu', 'fn-picker', 'recents', 'inspector', 'explorer']);
+const builtinFallback = reply => reply.kind === 'plan' && reply.status === 422
+  && reply.code === 'component-missing' && reply.fallback === 'builtin' && components.has(reply.component);
+const fallbackRecovery = (reply, replies) => reply.kind === 'plan' && reply.status === 422
+  && reply.code === 'policy-refresh-required' && reply.retryable === true && components.has(reply.component)
+  && replies.some(success => builtinFallback(success) && success.sequence > reply.sequence
+    && success.url === reply.url && success.component === reply.component);
 
-// These refusals are successful selective-copy outcomes only after the real
-// host fallback and stale-selection preservation have both been verified.
+// These refusals are expected only after the matching real host behavior
+// has been verified: builtin fallback or stale-selection preservation.
 function unexpectedSelectiveCopyErrors(errors, replies, behaviorVerified) {
-  const remaining = unexpectedPolicyRetryErrors(errors, replies.filter(reply => reply.kind === 'plan' && (reply.status === 200 || reply.code === 'policy-refresh-required')), behaviorVerified);
+  if (replies.some(reply => reply.kind === 'plan' && reply.status === 422
+    && !builtinFallback(reply) && !fallbackRecovery(reply, replies)
+    && !(reply.code === 'policy-refresh-required' && reply.retryable === true && components.has(reply.component)
+      && replies.some(success => success.kind === 'plan' && success.sequence > reply.sequence
+        && success.url === reply.url && success.component === reply.component
+        && success.status === 200 && success.ok === true)))) return errors;
+  const remaining = unexpectedPolicyRetryErrors(errors, replies.filter(reply => reply.kind === 'plan'
+    && (reply.status === 200 || reply.code === 'policy-refresh-required') && !fallbackRecovery(reply, replies)), behaviorVerified);
   if (!behaviorVerified) return remaining;
   const allowed = new Map();
   for (const reply of replies) {
-    const fallback = reply.kind === 'plan' && reply.status === 422 && reply.code === 'component-missing'
-      && reply.fallback === 'builtin' && ['account-menu', 'fn-picker', 'recents', 'inspector', 'explorer'].includes(reply.component);
+    const fallback = builtinFallback(reply) || fallbackRecovery(reply, replies);
     const conflict = reply.kind === 'activation' && reply.status === 409 && reply.code === 'stale-preference'
       && reply.noValue === true;
     if (fallback || conflict) {

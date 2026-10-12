@@ -17,6 +17,7 @@
     [clojure.walk :as walk]
     [graphden.executor.composition.deps :as deps]
     [graphden.executor.composition.validation :as validation]
+    [graphden.executor.source-contract :as source-contract]
     [graphden.packages.export :as export]
     [graphden.packages.records :as records]
     [graphden.packages.records.slot-resolution :as slot-res]
@@ -230,7 +231,9 @@
 
    `records` is a flat vector of tagged maps (output of
    `records/parse-module` or `records/boot-primitive-records`).
-   Returns `{fn-name → fn-id}` for named fn rows."
+   Returns `{fn-name → fn-id}` for named fn rows. Private receipt metadata
+   records structural fingerprints of the exact prepared rows committed by
+   this writer; it is evidence of input, not a checker or authorization."
   [storage records ns-id-map]
   (writer/with-write [storage :graph]
                      (res/call-with-fresh-memos
@@ -241,33 +244,40 @@
                                 slots     :slot
                                 fn-slots  :fn-slot
                                 bindings  :binding
-                                items     :binding-list-item} (group-records-by-kind records)]
+                                items     :binding-list-item} (group-records-by-kind records)
+                               prepared {:fns (prep-fn-rows fns ns-id-map)
+                                         :slots (strip-kind slots)
+                                         :fn-slots (strip-kind fn-slots)
+                                         :bindings (strip-kind bindings)
+                                         :list-items (strip-kind items)}]
                            ;; Order matters because of FK constraints:
                            ;; fn → slot (slot.type-fn-id FK)
                            ;;    → fn-slot (FKs to fn + slot)
                            ;;    → binding (FKs to fn + slot)
                            ;;       → binding-list-item (FK to binding)
                            (when (seq fns)
-                             (sp/upsert-entities storage :fn (prep-fn-rows fns ns-id-map)))
+                             (sp/upsert-entities storage :fn (:fns prepared)))
                            (when (seq slots)
-                             (sp/upsert-entities storage :slot (strip-kind slots)))
+                             (sp/upsert-entities storage :slot (:slots prepared)))
                            (when (seq fn-slots)
-                             (sp/upsert-entities storage :fn-slot (strip-kind fn-slots)))
+                             (sp/upsert-entities storage :fn-slot (:fn-slots prepared)))
                            (when (seq bindings)
-                             (sp/upsert-entities storage :binding (strip-kind bindings)))
+                             (sp/upsert-entities storage :binding (:bindings prepared)))
                            (when (seq items)
-                             (sp/upsert-entities storage :binding-list-item (strip-kind items)))
+                             (sp/upsert-entities storage :binding-list-item (:list-items prepared)))
                            ;; The upserts above are additive; this makes the sync declarative
                            ;; — body rows a fn no longer declares are dropped.
                            (reconcile-fn-bodies! storage
                                                  (into #{} (keep :id) fns)
                                                  fn-slots bindings items)
                            ;; Build the name→id return map.
-                           (into {}
-                                 (keep (fn [fr]
-                                         (when-let [n (:name fr)]
-                                           [(keyword n) (:id fr)])))
-                                 fns))))))
+                           (with-meta
+                             (into {}
+                                   (keep (fn [fr]
+                                           (when-let [n (:name fr)]
+                                             [(keyword n) (:id fr)])))
+                                   fns)
+                             {::source-fingerprints (source-contract/fingerprints prepared)}))))))
 
 
 ;; =============================================================================

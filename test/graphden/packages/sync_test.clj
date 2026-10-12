@@ -7,9 +7,39 @@
    `validate-route-handler-shapes!` (the bare-route wire guard)."
   (:require
     [clojure.test :refer [deftest is testing]]
+    [graphden.executor.composition.core :as composition]
+    [graphden.executor.registry.core :as registry]
     [graphden.packages.records :as records]
     [graphden.packages.records.parse :as records-parse]
-    [graphden.packages.sync :as sync]))
+    [graphden.packages.sync :as sync]
+    [graphden.types.check.provenance :as provenance]))
+
+
+(deftest source-certification-preserves-indexes-and-skips-failed-or-superseded-checks
+  (let [definitions (mapv #(hash-map :name % :namespace "certified" :parent :const
+                                     :args {:value {:value "authored"}})
+                          [:passing :failed :superseded :missing])
+        ids (into {} (map (fn [definition]
+                            [(:name definition) (registry/fn-def-registry-id (:name definition) definition)]))
+                  definitions)
+        signature {:return [:secret :text] :args {} :effects #{:db}}
+        signatures (into {} (map (fn [definition]
+                                   [(get ids (:name definition))
+                                    (provenance/stamp signature definition)])) definitions)
+        signatures (assoc signatures (:superseded ids)
+                          (provenance/stamp signature {:name :other-input}))
+        by-name {:passing (:passing ids)}
+        rich (atom {:by-id signatures :by-name by-name})
+        receipt (with-meta {} {::composition/source-fingerprints
+                               (into {} (map #(vector (get ids %) "written"))
+                                     [:passing :failed :superseded])})]
+    (binding [registry/*rich-types-override* rich]
+      (#'sync/certify-written-source! definitions #{:failed} receipt))
+    (is (= by-name (:by-name @rich)))
+    (is (= signatures (:by-id @rich)) "certificate metadata does not alter any type values")
+    (is (provenance/matches-storage-input? (get-in @rich [:by-id (:passing ids)]) "written"))
+    (doseq [name [:failed :superseded :missing]]
+      (is (false? (provenance/matches-storage-input? (get-in @rich [:by-id (get ids name)]) "written"))))))
 
 
 (def ^:private validate!

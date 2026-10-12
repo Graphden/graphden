@@ -42,6 +42,7 @@
     [graphden.tenancy.context :as tctx]
     [graphden.types.check :as types-check]
     [graphden.types.check.narrowing :as types-narrowing]
+    [graphden.types.check.provenance :as provenance]
     [graphden.types.core :as types]
     [graphden.types.diagnostics :as diag]
     [graphden.util.ns-path :as ns-path]
@@ -787,7 +788,30 @@
     (when-not skip-allowlist-gate?
       (types-check/assert-sweep-failures-match-allowlist!
         (set (keys @failures))
-        (update-vals @failures :message)))))
+        (update-vals @failures :message)))
+    (set (keys @failures))))
+
+
+(defn- certify-written-source!
+  "Bind committed canonical writer input to final successful authored checks.
+   Updating only by-id metadata preserves all type values and name indexes."
+  [definitions failures receipt]
+  (let [fingerprints (::fn-core/source-fingerprints (meta receipt))]
+    (when (seq fingerprints)
+      (swap! (registry-core/active-rich-types-atom)
+             (fn [rich]
+               (reduce
+                 (fn [rich definition]
+                   (let [id (registry-core/fn-def-registry-id (:name definition) definition)
+                         signature (get-in rich [:by-id id])
+                         fingerprint (get fingerprints id)]
+                     (if (and signature fingerprint
+                              (not (contains? failures (:name definition))))
+                       (assoc-in rich [:by-id id]
+                                 (provenance/stamp-storage-input
+                                   signature (types-check/checker-view definition) fingerprint))
+                       rich)))
+                 rich definitions))))))
 
 
 (def ^:dynamic *reconcile-moved-override*
@@ -1231,8 +1255,9 @@
          ;; The sweep records its final failure set into the per-branch
          ;; diagnostics store — key it by the branch this sync ran on
          ;; (nil for an unversioned/base storage = default branch).
-         (run-type-check-sweep! expanded-fn-defs extra-defs skip-allowlist-gate?
-                                (vs/current-branch-id storage))
+         (let [failures (run-type-check-sweep! expanded-fn-defs extra-defs skip-allowlist-gate?
+                                               (vs/current-branch-id storage))]
+           (certify-written-source! expanded-fn-defs failures fns))
          ;; Port-collision scan — runs against the expanded fn-def
          ;; set so synthetic anons that bind `:port` get inspected
          ;; too. Logs a WARN per colliding port; doesn't fail

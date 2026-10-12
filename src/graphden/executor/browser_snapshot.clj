@@ -8,6 +8,7 @@
     [graphden.executor.compile-runtime :as runtime]
     [graphden.executor.compile.deps :as deps]
     [graphden.executor.registry.core :as registry]
+    [graphden.executor.source-contract :as source-contract]
     [graphden.executor.structural-contracts :as structural-contracts]
     [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]
@@ -122,13 +123,15 @@
         reachable (set/difference (deps/forward-closure forward-deps (vals entries))
                                   (:identity-target-ids graph #{}))
         storage (snapshot-storage snapshot)
+        source-fingerprints (source-contract/fingerprints graph)
         {:keys [ordered cyclic]} (deps/dependency-order reverse-deps reachable)]
     (when (> (count reachable) 2048) (reject! :type-closure-limit {}))
     (when (seq cyclic) (reject! :type-cycle {:fn-id (first cyclic)}))
     (doseq [id ordered]
       (when-let [definition (type-check/reconstruct-fn-def storage id)]
-        (when-not (provenance/matches? (get-in original-rich [:by-id id])
-                                       (check/checker-view definition))
+        (when-not (let [signature (get-in original-rich [:by-id id])]
+                    (or (provenance/matches? signature (check/checker-view definition))
+                        (provenance/matches-storage-input? signature (get source-fingerprints id))))
           (reject! :type-source-mismatch {:fn-id id}))
         (try
           (check/check-fn-def! definition)

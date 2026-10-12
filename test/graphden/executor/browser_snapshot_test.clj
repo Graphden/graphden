@@ -9,6 +9,7 @@
     [graphden.executor.browser-snapshot :as snapshot]
     [graphden.executor.compile-runtime :as runtime]
     [graphden.executor.registry.core :as registry]
+    [graphden.executor.source-contract :as source-contract]
     [graphden.packages.records :as records]
     [graphden.packages.records.types :as record-types]
     [graphden.storage.remote.core :as remote]
@@ -80,6 +81,29 @@
 (defn- export
   [{:keys [snapshot id policy] :as f}]
   (snapshot/export-snapshot snapshot {} {:view id} (or policy (policy-of f))))
+
+
+(deftest canonical-writer-witness-preserves-fresh-check-and-original-policy-veto
+  (let [{:keys [id snapshot] :as f} (fixture [] {})
+        authored {:name :leaf :namespace "snapshot" :parent :const
+                  :args {:value {:value "public"}}}
+        signature (get-in f [:rich :by-id id])
+        digest (get (source-contract/fingerprints (:graph snapshot)) id)
+        witnessed (-> signature
+                      (provenance/stamp authored)
+                      (provenance/stamp-storage-input authored digest))
+        certified (assoc-in f [:rich :by-id id] witnessed)]
+    (is (map? (export certified)))
+    (is (= :type-source-mismatch
+           (:reason (failure #(export (update-in certified [:snapshot :graph :bindings]
+                                                 (fn [rows]
+                                                   (mapv (fn [row]
+                                                           (if (= id (:fn-id row))
+                                                             (assoc row :terminal true)
+                                                             row)) rows))))))))
+    (is (= :visibility-denied
+           (:reason (failure #(export (assoc-in certified [:rich :by-id id :return]
+                                                [:secret :text]))))))))
 
 
 (deftest source-only-structural-interfaces-are-checked-without-browser-callability

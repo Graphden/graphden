@@ -10,9 +10,11 @@
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.composition.core :as cc]
+    [graphden.executor.source-contract :as source-contract]
     [graphden.executor.test-setup :as setup]
     [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]
+    [graphden.tenancy.context :as tenancy]
     [graphden.versioning.storage.core :as vs]))
 
 
@@ -38,6 +40,47 @@
   [fn-id slot-id position]
   {:kind :fn-slot :id (ids/fn-slot-id fn-id slot-id)
    :fn-id fn-id :slot-id slot-id :position position})
+
+
+(deftest writer-source-receipt-certifies-prepared-not-unresolved-or-duplicate-input
+  (let [storage (setup/create-test-storage)]
+    (try
+      (tenancy/with-org "receipt-org"
+                        (let [namespace-id (:id (sp/create-entity storage :ns {:name "source-receipt"}))
+                              known-id (random-uuid)
+                              preferred-id (random-uuid)
+                              id (random-uuid)
+                              slot (random-uuid)
+                              binding (random-uuid)
+                              shape-hash (str (random-uuid))
+                              _ (sp/create-entity storage :fn
+                                                  (assoc (dissoc (fn-rec known-id nil []) :kind)
+                                                         :anonymous-hash shape-hash :org-id "receipt-org"))
+                              records [(assoc (fn-rec preferred-id nil []) :anonymous-hash shape-hash :org-id "receipt-org")
+                                       (assoc (fn-rec id "written" [(get setup/primitive-fn-ids :int)])
+                                              :namespace-id "published" :return-type-fn-id preferred-id)
+                                       (assoc (fn-rec id "ignored-duplicate" []) :namespace-id "published")
+                                       (slot-rec slot "value" preferred-id)
+                                       (fn-slot-rec id slot 0)
+                                       {:kind :binding :id binding :fn-id id :slot-id slot
+                                        :value-present true :value {:role :view}}
+                                       {:kind :binding-list-item :id (random-uuid) :binding-id binding
+                                        :position 0 :ref-fn-id preferred-id}]
+                              receipt (cc/write-records! storage records {"published" namespace-id})
+                              row (sp/read-entity storage :fn id)
+                              graph {:fns [row] :slots [(sp/read-entity storage :slot slot)]
+                                     :fn-slots (sp/query-entities storage :fn-slot {:fn-id id})
+                                     :bindings (sp/query-entities storage :binding {:fn-id id})
+                                     :list-items (sp/query-entities storage :binding-list-item {:binding-id binding})}]
+                          (is (= {:written id} receipt))
+                          (is (= namespace-id (:namespace-id row)))
+                          (is (= known-id (:return-type-fn-id row)))
+                          (is (= known-id (:type-fn-id (first (:slots graph)))))
+                          (is (= known-id (:ref-fn-id (first (:list-items graph)))))
+                          (is (= {:role :view} (:value (first (:bindings graph)))))
+                          (is (= (get (::cc/source-fingerprints (meta receipt)) id)
+                                 (get (source-contract/fingerprints graph) id)))))
+      (finally (sp/close storage)))))
 
 
 ;; ============================================================================

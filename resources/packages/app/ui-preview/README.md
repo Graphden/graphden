@@ -325,7 +325,6 @@ server Overview subtree. Inspector plans use the existing bounded browser
 budget of 150,000 operations and 10,000 renderer nodes for this section, including
 the server's maximum 400-row usages response.
 
-
 The Explorer kind/status toolbar is a finite component in `app.ui-explorer`.
 Its ordinary initial/update/view functions project the existing filter model and
 authorized service/app/test/problem cache summaries into eleven toggles and count

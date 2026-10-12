@@ -5,6 +5,7 @@
     [graphden.editor.component-bundle :as bundle]
     [graphden.editor.component-config :as config]
     [graphden.editor.component-templates :as templates]
+    [graphden.executor.structural-projection :as projection]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
     [graphden.storage.remote.core :as remote]
@@ -48,6 +49,23 @@
             :fn-picker {:view (nth refs 3)}}
            (config/entries graph id))
         "entry functions need not be executable or even loaded to read an identity binding")))
+
+
+(deftest fixed-record-projection-preserves-legacy-reference-evidence
+  (let [{:keys [id refs graph]} (fixture)
+        contract {config/configuration-id
+                  {:fields (into {} (map (fn [field]
+                                           [(ids/slot-id config/configuration-id field)
+                                            {:name field :type-fn-id ids/fn-ref-type-id}])) slot-names)}}
+        result (projection/project graph id (constantly false) contract)]
+    (is (= (zipmap slot-names refs) (update-vals result :id)))
+    (is (every? projection/identity-value? (vals result)))
+    (is (= :invalid-configuration
+           (try (projection/project
+                  (update-in graph [:bindings 0]
+                             #(-> % (dissoc :ref-fn-id) (assoc :value (first refs))))
+                  id (constantly true) contract)
+                (catch clojure.lang.ExceptionInfo error (:reason (ex-data error))))))))
 
 
 (deftest incomplete-or-computed-configuration-does-not-become-a-privileged-plan
@@ -98,6 +116,28 @@
                         :update (ids/fn-id (str root ".inspector") :inspector-update)
                         :view (ids/fn-id (str root ".inspector") :inspector-view)}}
            (config/configuration graph id)))))
+
+
+(deftest ordinary-component-map-retains-validated-entry-identities
+  (let [{:keys [root graph]} (parsed-configuration)
+        map-id (random-uuid)
+        zipmap-id (ids/fn-id "core.collections" :zipmap)
+        keys-binding (random-uuid)
+        values-binding (random-uuid)
+        mapped (-> graph
+                   (update :fns conj {:id map-id :parent-ids [zipmap-id]})
+                   (update :bindings into
+                           [{:id keys-binding :fn-id map-id :slot-id (ids/slot-id zipmap-id :keys) :list-append true}
+                            {:id values-binding :fn-id map-id :slot-id (ids/slot-id zipmap-id :vals) :list-append true}])
+                   (update :list-items into
+                           [{:id (random-uuid) :binding-id keys-binding :position 0
+                             :ref-fn-id (ids/fn-id root :_menu-component-id)}
+                            {:id (random-uuid) :binding-id values-binding :position 0
+                             :ref-fn-id (ids/fn-id root :_menu-entries)}]))]
+    (is (= {:account-menu {:initial (ids/fn-id (str root ".menu") :account-menu-initial)
+                           :update (ids/fn-id (str root ".menu") :account-menu-update)
+                           :view (ids/fn-id (str root ".menu") :account-menu-view)}}
+           (config/configuration mapped map-id)))))
 
 
 (deftest uuid-literals-and-ordinary-evaluation-cannot-select-component-identities

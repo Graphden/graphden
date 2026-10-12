@@ -82,6 +82,22 @@
   (snapshot/export-snapshot snapshot {} {:view id} (or policy (policy-of f))))
 
 
+(deftest source-only-structural-interfaces-are-checked-without-browser-callability
+  (let [definition (->> (edn/read-string (slurp "resources/packages/core/collections/fns.edn"))
+                        :fns (filter #(= :into (:name %))) first)
+        f (fixture [(assoc definition :namespace "core.collections")]
+                   [] {:parent :into :args {:to {:value {}} :from {:value [[:view "public"]]}}})
+        operation (get-in f [:ids :into])
+        changed (update-in f [:snapshot :graph :fns]
+                           #(mapv (fn [row]
+                                    (if (= operation (:id row))
+                                      (assoc row :return-type-fn-id (:leaf (:ids f))) row)) %))]
+    (is (nil? (snapshot/validate-source! (:snapshot f) (:id f) (policy-of f))))
+    (is (not (contains? (plan/supported-primitive-ids) operation)))
+    (is (= :structural-operation-source-mismatch
+           (:reason (failure #(snapshot/validate-source! (:snapshot changed) (:id f) (policy-of f))))))))
+
+
 (deftest map-callback-policy-and-provenance-survive-the-hof-boundary
   (let [map-definition (-> (edn/read-string (slurp "resources/packages/core/hof/fns.edn"))
                            :fns first (assoc :namespace "core.hof"))

@@ -4,6 +4,7 @@
   (:require
     [graphden.executor.compile.bindings :as bindings]
     [graphden.executor.compile.lookups :as lookups]
+    [graphden.executor.structural-projection :as projection]
     [graphden.packages.records.ids :as ids]))
 
 
@@ -16,6 +17,17 @@
    :menu-update [:account-menu :update]
    :menu-view [:account-menu :view]
    :picker-view [:fn-picker :view]})
+
+
+(def ^:private record-contracts
+  {configuration-id
+   {:fields (into {} (map (fn [[field _]]
+                            [(ids/slot-id configuration-id field)
+                             {:name field :type-fn-id ids/fn-ref-type-id}])) entry-slots)}})
+
+
+(def ^:private literal-fields
+  (into #{:component-id :entries :role :fn-id :initial :update :view} (keys entry-slots)))
 
 
 (defn- reject!
@@ -65,101 +77,41 @@
              :roles #{:initial :update :view}}})
 
 
-(defrecord Identity
-  [id])
-
-
-(defn- literal
-  [value]
-  (when-not (or (contains? #{:component-id :entries :role :fn-id :initial :update :view} value)
-                (and (vector? value)
-                     (every? #{:component-id :entries :role :fn-id :initial :update :view} value)))
-    (reject!))
-  value)
-
-
 (defn manifest-entries
-  "Project a finite const/list/zipmap/concat composition without invoking graph code.
+  "Project finite structural composition without invoking graph code.
    UUIDs originate exclusively in compiler-classified const value fn-ref
-   bindings. Identity tags survive composition until descriptor validation."
+   bindings. A descriptor list or explicit component map carries the same
+   entries; identity tags survive get/map/into/merge until validation."
   [graph fn-id]
-  (let [index (lookups/build-lookups graph)
-        cache (atom {})
-        visiting (atom #{})
-        budget (atom 0)
-        const-id (ids/fn-id "core.logic" :const)
-        list-id (ids/fn-id "core.collections" :list)
-        zipmap-id (ids/fn-id "core.collections" :zipmap)
-        concat-id (ids/fn-id "core.collections" :concat)]
-    (letfn [(item
-              [row]
-              (cond
-                (:ref-fn-id row) (project (:ref-fn-id row))
-                (contains? row :value) (literal (:value row))
-                :else (reject!)))
-            (argument
-              [{:keys [kind value ref-id items slot-id]} root]
-              (case kind
-                :value (literal value)
-                :ref (project ref-id)
-                :seq (mapv item items)
-                :fn-ref (if (and (= root const-id)
-                                 (= slot-id (ids/slot-id const-id :value))
-                                 (uuid? ref-id))
-                          (->Identity ref-id) (reject!))
-                (reject!)))
-            (project
-              [id]
-              (when (or (> (swap! budget inc) 4096) (contains? @visiting id) (>= (count @visiting) 64)) (reject!))
-              (if (contains? @cache id) (get @cache id)
-                  (let [root (lookups/root-fn id (:fn-map index) index)
-                        root-id (:id root)
-                        classified (bindings/collect-bindings id index)
-                        chain (lookups/inheritance-chain* id index)]
-                    (when (some :resolver-fn-id
-                                (mapcat #(get-in index [:bindings-by-fn %]) chain)) (reject!))
-                    (when-not (and (contains? #{const-id list-id zipmap-id concat-id} root-id)
-                                   (empty? (bindings/collect-env-bindings id index))) (reject!))
-                    (swap! visiting conj id)
-                    (let [args (into {} (map (fn [binding]
-                                               [(:base-name binding) (argument binding root-id)])) classified)
-                          result (cond
-                                   (= root-id const-id) (get args :value)
-                                   (= root-id list-id) (get args :items)
-                                   (= root-id concat-id)
-                                   (let [colls (:colls args)]
-                                     (when-not (and (vector? colls) (every? vector? colls)
-                                                    (<= (reduce + 0 (map count colls)) 64)) (reject!))
-                                     (into [] cat colls))
-                                   :else (let [ks (:keys args) vs (:vals args)]
-                                           (when-not (and (vector? ks) (vector? vs)
-                                                          (= (count ks) (count vs))
-                                                          (= (count ks) (count (set ks)))
-                                                          (every? #{:component-id :entries :role :fn-id} ks))
-                                             (reject!))
-                                           (zipmap ks vs)))]
-                      (swap! visiting disj id)
-                      (swap! cache assoc id result)
-                      result))))]
-      (let [descriptors (project fn-id)]
-        (when-not (and (vector? descriptors) (<= (count descriptors) 64)) (reject!))
-        (reduce (fn [result descriptor]
-                  (when-not (map? descriptor) (reject!))
-                  (let [{component :component-id entry-list :entries} descriptor]
-                    (when-not (and (= #{:component-id :entries} (set (keys descriptor)))
-                                   (instance? Identity component)
-                                   (not (contains? result (:id component)))
-                                   (vector? entry-list) (<= 1 (count entry-list) 3)) (reject!))
-                    (assoc result (:id component)
-                           (reduce (fn [roles entry]
-                                     (when-not (map? entry) (reject!))
-                                     (let [{role :role target :fn-id} entry]
-                                       (when-not (and (= #{:role :fn-id} (set (keys entry)))
-                                                      (contains? #{:initial :update :view} role)
-                                                      (instance? Identity target)
-                                                      (not (contains? roles role))) (reject!))
-                                       (assoc roles role (:id target)))) {} entry-list))))
-                {} descriptors)))))
+  (let [value (projection/project graph fn-id
+                                  (fn [value]
+                                    (or (nil? value) (= {} value)
+                                        (contains? literal-fields value)
+                                        (and (vector? value)
+                                             (every? literal-fields value))))
+                                  record-contracts)
+        descriptors (cond
+                      (vector? value) value
+                      (map? value) (mapv (fn [[component entry-list]] {:component-id component :entries entry-list}) value)
+                      :else (reject!))]
+    (when-not (<= (count descriptors) 64) (reject!))
+    (reduce (fn [result descriptor]
+              (when-not (map? descriptor) (reject!))
+              (let [{component :component-id entry-list :entries} descriptor]
+                (when-not (and (= #{:component-id :entries} (set (keys descriptor)))
+                               (projection/identity-value? component)
+                               (not (contains? result (:id component)))
+                               (vector? entry-list) (<= 1 (count entry-list) 3)) (reject!))
+                (assoc result (:id component)
+                       (reduce (fn [roles entry]
+                                 (when-not (map? entry) (reject!))
+                                 (let [{role :role target :fn-id} entry]
+                                   (when-not (and (= #{:role :fn-id} (set (keys entry)))
+                                                  (contains? #{:initial :update :view} role)
+                                                  (projection/identity-value? target)
+                                                  (not (contains? roles role))) (reject!))
+                                   (assoc roles role (:id target)))) {} entry-list))))
+            {} descriptors)))
 
 
 (defn configuration

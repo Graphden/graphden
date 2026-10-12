@@ -8,6 +8,7 @@
     [graphden.executor.compile-runtime :as runtime]
     [graphden.executor.compile.deps :as deps]
     [graphden.executor.registry.core :as registry]
+    [graphden.executor.structural-contracts :as structural-contracts]
     [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.remote.core :as remote]
@@ -142,7 +143,7 @@
 (defn- checked-source
   "Derive a fresh policy and plan from the SAME immutable rows. No writes to
    the executor's rich types, aliases, markers, diagnostics, or storage."
-  [snapshot entries {:keys [rich classes]} consume]
+  [snapshot entries {:keys [rich classes]} structural? consume]
   (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
             registry/*per-org-rich-override* (atom {})
             types/*type-aliases-override* (atom {})
@@ -152,9 +153,15 @@
     (try
       (runtime/register-type-aliases-from-db! (:graph snapshot) ::snapshot
                                               (ns-path/path-map (:namespaces snapshot)))
+      (when structural?
+        (let [present (into #{} (map :id) (get-in snapshot [:graph :fns]))]
+          (doseq [id (set/intersection present (structural-contracts/operation-ids))]
+            (when-not (structural-contracts/matches? id (:graph snapshot))
+              (reject! :structural-operation-source-mismatch {:fn-id id})))))
       (seed-primitives! (select-keys (:by-id rich)
-                                     (conj (plan/supported-primitive-ids)
-                                           (ids/fn-id "app.ui-components" :ui-components))))
+                                     (cond-> (conj (plan/supported-primitive-ids)
+                                                   (ids/fn-id "app.ui-components" :ui-components))
+                                       structural? (into (structural-contracts/operation-ids)))))
       (check-closure! snapshot entries rich)
       (consume
         {:allow-fn?
@@ -174,7 +181,7 @@
   "Validate a manifest source under the same isolated provenance/type policy
    as component plans. No manifest graph is evaluated or returned to clients."
   [snapshot root policy]
-  (checked-source snapshot {:manifest root} policy
+  (checked-source snapshot {:manifest root} policy true
                   (fn [{:keys [allow-fn?]}]
                     (let [forward (:forward-deps (deps/build-deps-state (:graph snapshot)))
                           reachable (set/difference (deps/forward-closure forward [root])
@@ -190,5 +197,5 @@
 (defn export-snapshot
   "Derive a fresh policy and plan from the same immutable authorized rows."
   [snapshot base-fns entries policy]
-  (checked-source snapshot entries policy
+  (checked-source snapshot entries policy false
                   #(plan/export-plan (:graph snapshot) base-fns entries %)))

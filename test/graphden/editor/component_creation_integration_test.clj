@@ -22,7 +22,10 @@
     [graphden.types.check :as check]
     [graphden.versioning.storage.core :as vs]
     [graphden.versioning.storage.resolution :as resolution]
-    [next.jdbc :as jdbc]))
+    [next.jdbc :as jdbc])
+  (:import
+    (java.sql
+      Connection)))
 
 
 (def ^:dynamic *destination-id* nil)
@@ -76,11 +79,37 @@
              component (assoc :component component)))))
 
 
+(defn- diagnosed-apply
+  "Report only finite phase names/timings if the real handler throws.
+   Delegates each watched function unchanged; this serial fixture owns the spies."
+  [f]
+  (let [phases (atom [])
+        watched [#'creation/plan #'creation/create! #'creation/publish
+                 #'context/invalidate-graph-cache! #'recheck/record-imported-fn-types!]
+        wrappers (into {} (map (fn [v]
+                                 [v (let [original @v]
+                                      (fn [& args]
+                                        (let [start (System/nanoTime)
+                                              index (dec (count (swap! phases conj
+                                                                       {:stage (:name (meta v))
+                                                                        :complete false})))]
+                                          (try (apply original args)
+                                               (finally
+                                                 (swap! phases update index assoc :complete true
+                                                        :elapsed-ms (long (/ (- (System/nanoTime) start) 1000000))))))))])
+                               watched))]
+    (with-redefs-fn wrappers
+      #(try (assoc (f) :creation-phases @phases)
+            (catch Exception error
+              (println "Creation phase diagnostic:" (pr-str @phases))
+              (throw error))))))
+
+
 (defn- apply-preview
   [reserved]
   ;; Preserve the first refusal instead of masking it with an apply(nil) 400.
   (if (= 200 (:status reserved))
-    (submit :_ui-components-create-apply-handler (get-in reserved [:body :request]))
+    (diagnosed-apply #(submit :_ui-components-create-apply-handler (get-in reserved [:body :request])))
     reserved))
 
 
@@ -135,6 +164,34 @@
         [:ns :fn :slot :fn-slot :binding :binding-list-item]))
 
 
+(deftest imported-bundle-recheck-shares-namespace-metadata
+  (let [ctx (:ctx ga/*bootstrap*)
+        storage (:storage ctx)
+        created (apply-preview (preview "explorer"))
+        fn-ids (mapv #(parse-uuid (:id %)) (get-in created [:body :manifest :functions]))
+        queries (atom 0)
+        connections (atom [])
+        original jdbc/execute!
+        reader (fn [connection sql & opts]
+                 (when (re-find #"(?i)\bFROM\s+\"ns\"" (first sql))
+                   (swap! queries inc)
+                   (swap! connections conj
+                          (when (instance? Connection connection)
+                            {:read-only (Connection/.isReadOnly ^Connection connection)
+                             :isolation (Connection/.getTransactionIsolation ^Connection connection)})))
+                 (apply original connection sql opts))]
+    (is (:ok (:body created)))
+    (is (seq fn-ids))
+    (with-redefs [jdbc/execute! reader]
+      (recheck/record-imported-fn-types! ctx (vs/current-branch-id storage) fn-ids))
+    (is (pos? @queries) "observe actual decorated namespace reads")
+    (is (= 1 @queries) "a read-only import recheck shares its namespace metadata")
+    (is (= [{:read-only true :isolation Connection/TRANSACTION_REPEATABLE_READ}] @connections))
+    (with-redefs [jdbc/execute! reader]
+      (recheck/record-imported-fn-types! ctx (vs/current-branch-id storage) fn-ids))
+    (is (= 2 @queries) "a later import obtains fresh metadata instead of a global cached view")))
+
+
 (deftest preview-is-read-only-and-apply-is-exact-create-only
   (let [storage (:storage ga/*bootstrap*)
         before (graph-identities storage)
@@ -143,11 +200,15 @@
     (is (= 200 (:status reserved)) (pr-str reserved))
     (is (true? (get-in reserved [:body :ok])))
     (is (= before (graph-identities storage)))
-    (is (= 6 (count (get-in reserved [:body :manifest :namespaces]))))
+    (is (= 7 (count (get-in reserved [:body :manifest :namespaces]))))
     (let [created (apply-preview reserved)
           manifest (get-in created [:body :manifest])]
       (is (= 200 (:status created)) (pr-str created))
       (is (true? (get-in created [:body :committed])))
+      (is (= #{'plan 'create! 'publish 'invalidate-graph-cache! 'record-imported-fn-types!}
+             (set (map :stage (:creation-phases created))))
+          "phase probes must observe the real write and derived-state publication")
+      (is (every? :complete (:creation-phases created)))
       (is (= (get-in reserved [:body :manifest]) manifest))
       (doseq [row (:functions manifest)]
         (let [actual (sp/read-entity storage :fn (parse-uuid (:id row)))]

@@ -27,7 +27,15 @@
     [graphden.executor.registry.core :as registry-core]
     [graphden.packages.records :as records]
     [graphden.storage.protocol.core :as sp]
-    [graphden.util.ns-path :as ns-path]))
+    [graphden.storage.tx :as tx]
+    [graphden.util.ns-path :as ns-path]
+    [graphden.versioning.branch-local :as branch-local]
+    [graphden.versioning.storage.resolution :as resolution]
+    [next.jdbc :as jdbc]
+    [next.jdbc.transaction :as jdbc-tx])
+  (:import
+    (java.sql
+      Connection)))
 
 
 (def ^:dynamic *recheck-user-fns?*
@@ -139,19 +147,41 @@
   "Re-run the type-check for exactly `fn-ids`, SYNCHRONOUSLY — the caller
    binds `branch-ctx`'s slices (`call-with-ctx-slices`) and decides
    whether to run it inline or on a future. Best-effort per fn."
+  ([branch-ctx branch-id fn-ids]
+   (record-fn-types! branch-ctx branch-id fn-ids nil))
+  ([branch-ctx branch-id fn-ids options]
+   (when (seq fn-ids)
+     (let [{:keys [ordered cyclic]}
+           (deps/dependency-order (compile-runtime/ctx-reverse-deps branch-ctx) fn-ids)]
+       (when (seq cyclic)
+         (log/warn "cycle in branch type recheck; checking remaining fns in stable order"
+                   {:branch-id branch-id :cycle-fn-ids cyclic}))
+       (doseq [id ordered]
+         (try
+           (if options
+             (type-check/type-check-fn-after-mutation! (:storage branch-ctx) id options)
+             (type-check/type-check-fn-after-mutation! (:storage branch-ctx) id))
+           (catch Exception t
+             (log/debug t "slice type re-record failed for fn"
+                        {:branch-id branch-id :fn-id id}))))))))
+
+
+(defn- record-import-snapshot!
+  "Reuse namespace metadata only within one decorated, read-only snapshot.
+   Connection-backed and non-JDBC callers retain their existing check path."
   [branch-ctx branch-id fn-ids]
-  (when (seq fn-ids)
-    (let [{:keys [ordered cyclic]}
-          (deps/dependency-order (compile-runtime/ctx-reverse-deps branch-ctx) fn-ids)]
-      (when (seq cyclic)
-        (log/warn "cycle in branch type recheck; checking remaining fns in stable order"
-                  {:branch-id branch-id :cycle-fn-ids cyclic}))
-      (doseq [id ordered]
-        (try
-          (type-check/type-check-fn-after-mutation! (:storage branch-ctx) id)
-          (catch Exception t
-            (log/debug t "slice type re-record failed for fn"
-                       {:branch-id branch-id :fn-id id})))))))
+  (let [storage (:storage branch-ctx)
+        datasource (tx/datasource storage)]
+    (if (and datasource (not (instance? Connection datasource)))
+      (binding [jdbc-tx/*nested-tx* :prohibit
+                resolution/*branch-chain-cache* (atom {})
+                branch-local/*storage-caches-override* (atom {})]
+        (resolution/call-with-fresh-memos
+          #(jdbc/with-transaction [connection datasource {:isolation :repeatable-read :read-only true}]
+                                  (let [snapshot (tx/with-connection storage connection)
+                                        options {:namespace-paths (delay (ns-path/path-map (sp/query-entities snapshot :ns {})))}]
+                                    (record-fn-types! (assoc branch-ctx :storage snapshot) branch-id fn-ids options)))))
+      (record-fn-types! branch-ctx branch-id fn-ids))))
 
 
 (defn record-own-fn-types!
@@ -178,7 +208,7 @@
   (when (seq fn-ids)
     (call-with-ctx-slices
       branch-ctx
-      #(record-fn-types! branch-ctx branch-id fn-ids))))
+      #(record-import-snapshot! branch-ctx branch-id fn-ids))))
 
 
 (defn recheck-ctx-types!

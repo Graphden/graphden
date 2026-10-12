@@ -323,14 +323,9 @@
                    row))))
 
 
-(defn reconstruct-fn-def
-  "Build the EDN-shape fn-def map (the form `check-fn-def!` accepts)
-   from a fn-id by walking the DB rows. Returns nil for fn-rows that
-   aren't composed fn-defs (have no parents) — those don't need
-   `check-fn-def!`. The resulting map carries `:name`, `:parent` /
-   `:parents`, `:args` (slot-name → binding-shape), and
-   `:return-type` (when declared)."
-  [storage fn-id]
+(defn- reconstruct-fn-def*
+  "Reconstruct against optional snapshot-local namespace metadata."
+  [storage fn-id namespace-paths]
   (when-let [own (sp/read-entity storage :fn fn-id)]
     (let [parent-ids (or (:parent-ids own) [])]
       (when (seq parent-ids)
@@ -347,7 +342,8 @@
               ;; names resolve precisely only through the qualified
               ;; registry key, and the editor world (random ids, any
               ;; namespace) is exactly where duplicates live.
-              ns-paths (delay (ns-path/path-map (sp/query-entities storage :ns {})))
+              ns-paths (or namespace-paths
+                           (delay (ns-path/path-map (sp/query-entities storage :ns {}))))
               fn-by-id (annotate-rows ns-paths fn-by-id)
               parent-name (fn [pid] (row->kw (get fn-by-id pid)))
               own-bindings (sp/query-entities storage :binding {:fn-id fn-id})
@@ -502,6 +498,20 @@
             (assoc :lambda-params (mapv keyword (:lambda-params own)))))))))
 
 
+(defn reconstruct-fn-def
+  "Build the EDN-shape fn-def map (the form `check-fn-def!` accepts)
+   from a fn-id by walking the DB rows. Returns nil for fn-rows that
+   aren't composed fn-defs (have no parents) — those don't need
+   `check-fn-def!`. The resulting map carries `:name`, `:parent` /
+   `:parents`, `:args` (slot-name → binding-shape), and
+   `:return-type` (when declared). The internal batch arity accepts a
+   delayed namespace-path map read through the SAME snapshot storage."
+  ([storage fn-id]
+   (reconstruct-fn-def* storage fn-id nil))
+  ([storage fn-id namespace-paths]
+   (reconstruct-fn-def* storage fn-id namespace-paths)))
+
+
 (defn secret-diagnostic?
   "True when a structured type-check diagnostic involves the `:secret`
    information-flow marker — any of its type-carrying keys
@@ -552,13 +562,15 @@
    reads."
   ([storage fn-id]
    (type-check-fn-after-mutation! storage fn-id nil))
-  ([storage fn-id {:keys [reject-secret?]}]
+  ([storage fn-id {:keys [reject-secret? namespace-paths]}]
    (with-org-alias-view*
      storage
      (fn []
        (let [result
              (try
-               (when-let [fn-def (reconstruct-fn-def storage fn-id)]
+               (when-let [fn-def (if namespace-paths
+                                   (reconstruct-fn-def storage fn-id namespace-paths)
+                                   (reconstruct-fn-def storage fn-id))]
                  (types-check/check-fn-def! fn-def))
                nil
                (catch clojure.lang.ExceptionInfo e

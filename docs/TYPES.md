@@ -225,6 +225,12 @@ entries. The ctx-build sweep (`branch_router/recheck.clj`) rebuilds diagnostics.
 Large affected closures are logged rather than truncated. The package sync
 path checks the whole corpus in dependency order, so it needs no dependent walk.
 
+Successful imports synchronously re-check every imported ID before returning.
+On pooled PostgreSQL storage, this uses one decorated, read-only repeatable-read
+snapshot and shares namespace paths within that batch. A later import reads a
+fresh snapshot; namespace metadata is not cached across imports. Existing
+connection-backed and non-JDBC callers retain their ordinary check path.
+
 ---
 
 ## Who Writes Types

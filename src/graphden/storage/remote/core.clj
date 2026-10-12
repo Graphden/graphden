@@ -28,6 +28,7 @@
     [clojure.edn :as edn]
     [clojure.tools.logging :as log]
     [graphden.packages.records.wire :as wire]
+    [graphden.storage.bounded-query :as bounded]
     [graphden.storage.protocol.core :as sp]
     [org.httpkit.client :as http]))
 
@@ -169,6 +170,33 @@
          (vals)
          (mapv (fn [group]
                  (apply max-key #(if-let [c (:created-at %)] (inst-ms c) 0) group)))))
+
+
+  sp/StorageBoundedQuery
+
+  (query-identity-candidates
+    [_ entity where version-source max-candidates]
+    ;; The bundle is already resolved for one branch. It cannot answer a
+    ;; version-history candidate scan or silently fall back to the hub.
+    (when version-source
+      (throw (ex-info "Snapshot has no version-history candidate source"
+                      {:type :storage-error/bounded-query-unsupported :entity-name entity})))
+    (let [candidate-where (bounded/candidate-where entity where max-candidates)
+          candidates (->> (get @rows entity)
+                          (filter #(matches? candidate-where %))
+                          (take (inc max-candidates))
+                          vec)]
+      (bounded/check-candidate-count! candidates max-candidates)
+      (with-meta (mapv #(select-keys % [:id :org-id]) candidates)
+        {::sp/candidate-count (count candidates)})))
+
+
+  (query-bounded-entities
+    [this entity where max-candidates]
+    (let [candidates (sp/query-identity-candidates this entity where nil max-candidates)
+          ids (set (map :id candidates))]
+      (with-meta (filterv #(and (contains? ids (:id %)) (matches? where %)) (get @rows entity))
+        (meta candidates))))
 
 
   sp/StorageBatchCRUD

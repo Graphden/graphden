@@ -160,17 +160,32 @@ const tests = [
     }
   }),
 
-  test('preference recovery sees exact failures before dedupe and thrown recovery stays resumable', async () => {
+  test('preference restoration precedes deletes and refused restoration retains exact graph receipts', async () => {
     const left = {type: 'fn', name: 'ui', id: 'left', 'namespace-id': 'left-ns', receipt: 'created'};
     const right = {...left, id: 'right', 'namespace-id': 'right-ns'};
     const fixture = makeCtx({fns: [left, right], refuse: method => method === 'DELETE'});
     fixture.ctx.window = fixture.ctx;
     fixture.ctx.gdTourRestoreUIComponentPreferences = (_created, rawFailed) => {
-      assert(rawFailed.some(row => row.id === 'left') && rawFailed.some(row => row.id === 'right'),
-        'same-named configurations keep both exact failed UUIDs at restoration boundary');
+      assert(_created.some(row => row.id === 'left') && _created.some(row => row.id === 'right'),
+        'same-named configurations keep both exact intended UUIDs at restoration boundary');
+      assert(rawFailed.length === 0 && !fixture.calls.some(call => call.startsWith('DELETE ')),
+        'selection restoration runs while every owned source still exists');
       return [];
     };
     await fixture.ctx._tourDeleteCreated([left, right]);
+    assert(fixture.calls.some(call => call.startsWith('DELETE ')), 'confirmed restoration allows ordinary guarded deletion');
+    for (const throws of [false, true]) {
+      const refused = makeCtx({fns: [left, right]});
+      refused.ctx.window = refused.ctx;
+      refused.ctx.gdTourRestoreUIComponentPreferences = () => {
+        if (throws) throw new Error('preference write rejected');
+        return [{type: 'preference', key: 'theme'}];
+      };
+      const outcome = await refused.ctx._tourDeleteCreated([left, right]);
+      assert(outcome.failed.some(row => row.id === 'left') && outcome.failed.some(row => row.id === 'right'),
+        'refused or ambiguous preference persistence retains both exact graph identities');
+      assert(!refused.calls.some(call => call.startsWith('DELETE ')), 'no destructive request runs below a selected source');
+    }
     const empty = makeCtx({});
     empty.ctx.window = empty.ctx;
     let saved = 0;

@@ -1522,8 +1522,8 @@
            Source and policy use one snapshot; fresh checking cannot erase cached secret metadata.
            The editor host still owns callbacks, search, navigation and the validated DOM contract."}
     {:file "resources/packages/app/editor/editor-tour-ui-components.js" :defn gdTourRestoreUIComponentPreferences
-     :say "Restores Appearance preferences only after the lesson's exact selected graph UUID was
-           deleted. Unrelated selections survive. Failed persistence stays in the lesson ledger
+     :say "Restores Appearance preferences before deleting the lesson's exact selected graph UUID.
+           Unrelated selections survive. Failed persistence retains the graph and lesson ledger
            and retries even when the preference owner's optimistic local value already changed."}
     {:file "resources/packages/app/editor/editor-shortcuts.js" :defn gdApplyKeymap
      :say "Applies user key overrides by stable shortcut ID. The registry keeps defaults for reset and

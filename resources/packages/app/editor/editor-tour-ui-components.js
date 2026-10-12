@@ -60,7 +60,8 @@ async function gdTourRestoreUIComponentPreferences(created, failed) {
     && row.creation === 'create-only-manifest') && !failed.some(row => row.type === 'fn' && row.id === id);
   const rejected = [];
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-  for (const key of ['components', 'theme']) {
+  // Abort the selected theme reader before a components write can refresh it.
+  for (const key of ['theme', 'components']) {
     const identity = value => key === 'components' ? value?.['fn-id'] : value?.graph?.['fn-id'];
     const rootKey = key === 'components' ? 'configuration-id' : 'theme-id';
     const current = window.gdPrefRead(key);

@@ -455,6 +455,27 @@ async function _tourDeleteNamespaces(created, options) {
 // may have cleared turned "delete what the lesson made" into "delete nothing,
 // report success".
 async function _tourDeleteCreated(created, options) {
+  const rejected = [];
+  // Stop readers of owned UI sources before deleting those sources. A failed
+  // preference write retains the graph and its exact recovery receipt.
+  if (typeof window !== 'undefined' && typeof window.gdTourRestoreUIComponentPreferences === 'function') {
+    try {
+      rejected.push(...await window.gdTourRestoreUIComponentPreferences(created, []));
+    } catch (_) {
+      // Preference recovery is part of cleanup. Retain its ledger and
+      // selected graph rows so returning through Lessons can retry.
+      let marker = created.find(row => row.type === 'preference'
+        && row.creation === 'component-preference-restoration');
+      if (!marker) {
+        marker = {type: 'preference', name: 'UI component preferences',
+          creation: 'component-preference-restoration'};
+        created.push(marker);
+      }
+      rejected.push(marker);
+    }
+    if (typeof _tourSaveState === 'function') _tourSaveState();
+  }
+  if (rejected.length) return {failed: [...new Set([...created.filter(row => row.receipt !== 'removed'), ...rejected])]};
   const activeApps = created.some(row => row.type === 'app-route')
     ? await _tourDeleteAppRoutes(created) : [];
   if (activeApps.length) {
@@ -481,23 +502,6 @@ async function _tourDeleteCreated(created, options) {
     ...await _tourRemovePackages(created, options), // exact owned release, after unpin
     ...await _tourDeleteNamespaces(created, options),
   ];
-  if (typeof window !== 'undefined' && typeof window.gdTourRestoreUIComponentPreferences === 'function') {
-    try {
-      raw.push(...await window.gdTourRestoreUIComponentPreferences(created, raw));
-    } catch (_) {
-      // Preference recovery is part of cleanup. Retain its ledger even when
-      // all graph rows are gone, so returning through Lessons can retry.
-      let marker = created.find(row => row.type === 'preference'
-        && row.creation === 'component-preference-restoration');
-      if (!marker) {
-        marker = {type: 'preference', name: 'UI component preferences',
-          creation: 'component-preference-restoration'};
-        created.push(marker);
-      }
-      raw.push(marker);
-    }
-    if (typeof _tourSaveState === 'function') _tourSaveState();
-  }
   // One row can refuse twice (an unpin AND a withdraw for the same package);
   // the reader should read its name once.
   const seen = new Set();

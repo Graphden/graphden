@@ -62,9 +62,10 @@ No arbitrary JavaScript, HTML or source-file override is loaded by this flow.
 
 The interactive lesson records the exact server-proposed identities before
 creation. Cleanup removes only those functions and empty namespaces; it keeps
-changed or inaccessible identities for review. It restores the previous
-Appearance selections only while the current selections still point at the
-lesson's deleted graphs. **Keep & close** retains the graphs and selection.
+changed or inaccessible identities for review. Before deletion it restores
+previous Appearance selections only while they still point at the lesson's
+graphs. Failed preference persistence retains the graphs and receipt for retry.
+**Keep & close** retains the graphs and selection.
 
 ## Advanced self-hosted source files
 

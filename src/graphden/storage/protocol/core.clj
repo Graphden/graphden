@@ -169,14 +169,16 @@
 (defprotocol StorageBoundedQuery
   "Complete owner-bounded reads with an identity-candidate resource budget.
    Overflow is refused before payload/version reads; this is not pagination.
-   Only fn-slot/binding fn-id and list-item binding-id predicates
-   are supported; versioned ownership uses all matching version rows. Unknown decorators must explicitly opt in and preserve ACLs."
+   Supports exact function namespace/name, fn-slot/binding fn-id and
+   list-item binding-id predicates. Versioned mutable predicates use all
+   matching version rows. Unknown decorators must explicitly opt in and preserve ACLs."
 
   (query-identity-candidates
     [this entity-name where version-source max-candidates]
     "Returns bounded identity/ownership projections, without value data.
      Refuses overflow before visibility filtering; never returns a truncated set.
-     version-source optionally supplies :version-entity/:version-id-field.
+     version-source optionally supplies :version-entity/:version-id-field and
+     schema-derived :version-data-fields to distinguish immutable columns.
      Vector metadata ::candidate-count retains the SQL count before filtering.")
 
   (query-bounded-entities

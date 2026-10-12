@@ -40,6 +40,29 @@
      :right (sp/create-entity storage :binding {:fn-id (:id b) :slot-id (:id slot) :list-append true})}))
 
 
+(deftest bounded-function-name-query-resolves-branch-names-before-selection
+  (let [storage (setup/create-versioned-test-storage)
+        home (sp/create-entity storage :ns {:name "lookup-home"})
+        function (sp/create-entity storage :fn {:name "editor" :namespace-id (:id home)})
+        branch (vs/create-branch! storage "lookup-source")
+        feature (vs/switch-branch storage (:id branch))
+        query {:namespace-id (:id home) :name "edited-editor"}]
+    (sp/update-entity feature :fn (:id function) {:name "edited-editor"})
+    (is (= 1 (::sp/candidate-count (meta (sp/query-bounded-entities storage :fn query 1)))))
+    (is (empty? (sp/query-bounded-entities storage :fn query 1))
+        "A matching name on another branch remains only a candidate")
+    (is (= [(:id function)] (mapv :id (sp/query-bounded-entities feature :fn query 1))))
+    (is (= :storage-error/candidate-limit
+           (error-type #(sp/query-bounded-entities storage :fn query 0)))
+        "Overflow never becomes absence, even for an invisible branch version")
+    (binding [vs/*tombstone-delete?* true]
+      (sp/delete-entity feature :fn (:id function)))
+    (is (empty? (sp/query-bounded-entities feature :fn query 1)))
+    (is (= [(:id function)]
+           (mapv :id (sp/query-bounded-entities storage :fn
+                                                {:namespace-id (:id home) :name "editor"} 1))))))
+
+
 (deftest bounded-owner-query-resolves-moves-invisible-rows-tombstones-and-merges
   (let [storage (setup/create-versioned-test-storage)
         {:keys [a b left right]} (two-bindings storage)

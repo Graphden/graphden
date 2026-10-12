@@ -414,9 +414,10 @@
    complete predicate after ordinary branch/merge/tombstone resolution.
    The decorated identity scan refuses overflow before any version load."
   [base-storage entity-name branch-id where max-candidates]
-  (let [{:keys [version-entity version-id-field]} (get entity-config entity-name)
+  (let [{:keys [version-entity version-id-field version-data-fields]} (get entity-config entity-name)
         ids (bounded/candidate-ids base-storage entity-name where
-                                   {:version-entity version-entity :version-id-field version-id-field}
+                                   {:version-entity version-entity :version-id-field version-id-field
+                                    :version-data-fields version-data-fields}
                                    max-candidates)]
     (with-meta (if (seq ids)
                  (vec (resolve-all-entities* base-storage entity-name branch-id where

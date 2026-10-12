@@ -341,12 +341,15 @@
   "Cap distinct owner candidates in SQL without projecting payload data.
    For versioned reads, ANY matching version is a conservative superset;
    create-time identity owner columns do not describe branch-local moves."
-  [ds entity-name where fields {:keys [version-entity version-id-field]} max-candidates]
+  [ds entity-name where fields {:keys [version-entity version-id-field version-data-fields]} max-candidates]
   (let [where (bounded/candidate-where entity-name where max-candidates)]
     (sp/standard-query-validations! entity-name fields where)
     (let [identity-fields fields
           qualified (fn [field]
-                      (keyword (str (if (and version-entity (not= :id field)) "versions." "ident.")
+                      (keyword (str (if (and version-entity (not= :id field)
+                                             (or (nil? version-data-fields)
+                                                 (contains? version-data-fields field)))
+                                      "versions." "ident.")
                                     (name field))))
           fields (into {} (map (fn [[field definition]] [(qualified field) definition])) fields)
           where (into {} (map (fn [[field value]] [(qualified field) value])) where)

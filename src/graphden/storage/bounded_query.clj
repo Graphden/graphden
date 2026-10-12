@@ -1,6 +1,7 @@
 (ns graphden.storage.bounded-query
   "Owner predicates and conservative identity-candidate budgets."
   (:require
+    [clojure.string :as str]
     [graphden.storage.protocol.core :as sp]))
 
 
@@ -10,12 +11,19 @@
 
 (defn candidate-where
   [entity where max-candidates]
-  (let [owner (get owner-fields entity)]
-    (when-not (and owner (map? where) (some? (get where owner))
+  (let [owner (get owner-fields entity)
+        named-function? (and (= entity :fn) (map? where)
+                             (uuid? (:namespace-id where))
+                             (string? (:name where))
+                             (not (str/blank? (:name where))))]
+    (when-not (and (map? where) (or named-function? (and owner (some? (get where owner))))
                    (integer? max-candidates) (<= 0 max-candidates 2147483646))
       (throw (ex-info "Unsupported bounded owner query"
                       {:type :storage-error/bounded-query-unsupported :entity-name entity})))
-    (select-keys where [owner :id])))
+    ;; Names can differ between branches. The SQL candidate scan includes
+    ;; ANY matching version within the exact immutable namespace; resolution then
+    ;; applies the full current predicate and organization policy.
+    (select-keys where (if named-function? [:namespace-id :name :id] [owner :id]))))
 
 
 (defn check-candidate-count!

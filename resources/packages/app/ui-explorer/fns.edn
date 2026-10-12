@@ -6,7 +6,7 @@
        {:name :_explorer-toolbar-request :type {:kind :text :value :text}}
        {:name :_explorer-toolbar-requests :list :_explorer-toolbar-request}
        {:name :_explorer-toolbar-transition :type {:state :_explorer-toolbar-state :requests :_explorer-toolbar-requests}}
-       {:name :explorer-initial :parent :const :args {:value {:value {:handled false}}} :return-type :_explorer-toolbar-state}
+       {:name :explorer-toolbar-initial :parent :const :args {:value {:value {:handled false}}} :return-type :_explorer-toolbar-state}
        {:name :_explorer-input-selected :parent :get :args {:coll {:as :inputs :type :_explorer-toolbar-inputs} :key {:value :selected} :default {:value {}}}}
        {:name :_explorer-input-counts :parent :get :args {:coll {:as :inputs :type :_explorer-toolbar-inputs} :key {:value :counts} :default {:value {}}}}
        {:name :_explorer-input-failed :parent :get :args {:coll {:as :inputs :type :_explorer-toolbar-inputs} :key {:value :failed} :default {:value 0}}}
@@ -44,7 +44,7 @@
        {:name :_explorer-other-requests :parent :if :args {:test :_explorer-is-detail :then :_explorer-valid-detail :else :_explorer-no-requests}}
        {:name :_explorer-requests :parent :if :args {:test :_explorer-is-toggle :then :_explorer-valid-toggle :else :_explorer-other-requests}}
        {:name :_explorer-current-state :parent :const :args {:value {:as :state :type :_explorer-toolbar-state}} :return-type :_explorer-toolbar-state}
-       {:name :explorer-update :parent :zipmap :args {:keys [{:value :state} {:value :requests}] :vals [:_explorer-current-state :_explorer-requests]} :return-type :_explorer-toolbar-transition}
+       {:name :explorer-toolbar-update :parent :zipmap :args {:keys [{:value :state} {:value :requests}] :vals [:_explorer-current-state :_explorer-requests]} :return-type :_explorer-toolbar-transition}
        {:name :_explorer-has-failed :parent :equal? :args {:a :_explorer-input-failed :b 0}}
        {:name :_explorer-failed-title-suffix :parent :str :args {:parts [" — " :_explorer-input-failed " failed"]}}
        {:name :_explorer-test-suffix :parent :if :args {:test :_explorer-has-failed :then "" :else :_explorer-failed-title-suffix}}
@@ -153,4 +153,4 @@
        {:name :_explorer-nonzero-run :parent :if :args {:test :_explorer-zero-run :then false :else :_explorer-known-run}}
        {:name :_explorer-actions :parent :zipmap :args {:keys [{:value :secret} {:value :dismiss} {:value :run}] :vals [:_explorer-action-secret :_explorer-nonzero-dismiss :_explorer-nonzero-run]}}
        {:name :explorer-styles :parent :const :args {:value {:value [{:selector "& .gd-explorer-kinds" :declarations {"display" "flex" "flex-wrap" "wrap" "align-items" "center" "gap" "2px 3px" "padding" "2px 0"}} {:selector "& .kind-count" :declarations {"font-size" "0.625rem" "opacity" "0.85"}} {:selector "& .kind-count:empty" :declarations {"display" "none"}} {:selector "& .kind-count.kind-count-bad" :declarations {"color" "var(--error-fg)" "opacity" "1"}}]}} :return-type [:list {:selector :text :declarations [:map :text :text]}]}
-       {:name :explorer-view :parent :zipmap :args {:keys [{:value :tree} {:value :styles} {:value :actions}] :vals [:_explorer-toolbar-tree :explorer-styles :_explorer-actions]}}]}
+       {:name :explorer-toolbar-view :parent :zipmap :args {:keys [{:value :tree} {:value :styles} {:value :actions}] :vals [:_explorer-toolbar-tree :explorer-styles :_explorer-actions]}}]}

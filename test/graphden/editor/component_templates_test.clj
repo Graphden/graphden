@@ -86,4 +86,4 @@
     (is (< (count selected) 512))
     (is (< (count full) 1000))
     (is (every? #(contains? #{root (str root ".explorer")} (:namespace %)) selected))
-    (is (every? (set (map :name selected)) [:explorer-initial :explorer-update :explorer-view]))))
+    (is (every? (set (map :name selected)) [:explorer-toolbar-initial :explorer-toolbar-update :explorer-toolbar-view]))))

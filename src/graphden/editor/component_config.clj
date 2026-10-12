@@ -51,8 +51,8 @@
 (def component-contracts
   "Shipped view identities are the stable component discriminators. No names
    supplied by a client participate in dispatch."
-  {:explorer {:id (ids/fn-id "app.ui-explorer" :explorer-view)
-              :reference :app.ui-explorer/explorer-view :roles #{:initial :update :view}}
+  {:explorer {:id (ids/fn-id "app.ui-explorer" :explorer-toolbar-view)
+              :reference :app.ui-explorer/explorer-toolbar-view :roles #{:initial :update :view}}
    :account-menu {:id (ids/fn-id "app.ui-account-menu" :account-menu-view)
                   :reference :app.ui-account-menu/account-menu-view
                   :roles #{:initial :update :view}}

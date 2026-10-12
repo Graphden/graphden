@@ -822,18 +822,18 @@
 (deftest explorer-toolbar-transitions-and-action-projections-match-jvm
   (let [definitions (:fns (edn/read-string (slurp "resources/packages/app/ui-explorer/fns.edn")))
         definitions (conj definitions {:name :toolbar-actions :parent :get
-                                       :args {:coll :explorer-view :key {:value :actions}}})
+                                       :args {:coll :explorer-toolbar-view :key {:value :actions}}})
         {:keys [graph impls ids]} (map-fixture definitions)
         state {:handled false}
         inputs {:selected {"tests" true "failed" true "secrets" true}
                 :counts {"services" 12000 "apps" 7 "tests" 12000 "failed" 3 "lint" 9 "type-errors" 2}
                 :failed 2 :authenticated true :apps-available true :fx false}
         transition (fn [kind value requests]
-                     {:entry :explorer-update :inputs {:state state :event {:kind kind :value value}}
+                     {:entry :explorer-toolbar-update :inputs {:state state :event {:kind kind :value value}}
                       :expected {:state state :requests requests}})]
     (assert-differential!
       graph impls ids
-      [{:entry :explorer-initial :inputs {} :expected state}
+      [{:entry :explorer-toolbar-initial :inputs {} :expected state}
        (transition "toggle" "tests" [{:kind "toggle-filter" :value "tests"}])
        (transition "toggle" "all" [{:kind "toggle-filter" :value "all"}])
        (transition "toggle" "unknown" [])

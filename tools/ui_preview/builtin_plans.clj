@@ -33,9 +33,9 @@
 
 
 (def ^:private entries
-  {:explorer {:initial (ids/fn-id "app.ui-explorer" :explorer-initial)
-              :update (ids/fn-id "app.ui-explorer" :explorer-update)
-              :view (ids/fn-id "app.ui-explorer" :explorer-view)}
+  {:explorer {:initial (ids/fn-id "app.ui-explorer" :explorer-toolbar-initial)
+              :update (ids/fn-id "app.ui-explorer" :explorer-toolbar-update)
+              :view (ids/fn-id "app.ui-explorer" :explorer-toolbar-view)}
    :inspector {:initial (ids/fn-id "app.ui-inspector" :inspector-initial)
                :update (ids/fn-id "app.ui-inspector" :inspector-update)
                :view (ids/fn-id "app.ui-inspector" :inspector-view)}

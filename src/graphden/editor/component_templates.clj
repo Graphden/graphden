@@ -47,7 +47,7 @@
                  "app/ui-account-menu" ["app.ui-account-menu" #{:account-menu-view}]
                  "app/ui-fn-picker" ["app.ui-fn-picker" #{:picker-view}]
                  "app/ui-recents" ["app.ui-recents" #{:recents-view}]
-                 "app/ui-explorer" ["app.ui-explorer" #{:explorer-view}]
+                 "app/ui-explorer" ["app.ui-explorer" #{:explorer-toolbar-view}]
                  "app/ui-inspector" ["app.ui-inspector" #{:inspector-view}]
                  "app/ui-components" ["app.ui-components" #{:ui-components :_ui-components-identities :ui-component-entry :ui-component-entries
                                                             :ui-component-descriptor :ui-component-manifest}]}]
@@ -124,10 +124,10 @@
         recents (str root ".recents")
         inspector (str root ".inspector")
         explorer (str root ".explorer")
-        descriptors (concat (component-definitions root "explorer" :app.ui-explorer/explorer-view
-                                                   [[:initial (keyword explorer "explorer-initial")]
-                                                    [:update (keyword explorer "explorer-update")]
-                                                    [:view (keyword explorer "explorer-view")]])
+        descriptors (concat (component-definitions root "explorer" :app.ui-explorer/explorer-toolbar-view
+                                                   [[:initial (keyword explorer "explorer-toolbar-initial")]
+                                                    [:update (keyword explorer "explorer-toolbar-update")]
+                                                    [:view (keyword explorer "explorer-toolbar-view")]])
                             (component-definitions root "inspector" :app.ui-inspector/inspector-view
                                                    [[:initial (keyword inspector "inspector-initial")]
                                                     [:update (keyword inspector "inspector-update")]
@@ -212,9 +212,9 @@
 (defn descriptor
   "Exact identities for catalog navigation and pre-apply cleanup registration."
   [root]
-  {:explorer-id (str (ids/fn-id (str root ".explorer") :explorer-view))
-   :explorer-initial-id (str (ids/fn-id (str root ".explorer") :explorer-initial))
-   :explorer-update-id (str (ids/fn-id (str root ".explorer") :explorer-update))
+  {:explorer-id (str (ids/fn-id (str root ".explorer") :explorer-toolbar-view))
+   :explorer-initial-id (str (ids/fn-id (str root ".explorer") :explorer-toolbar-initial))
+   :explorer-update-id (str (ids/fn-id (str root ".explorer") :explorer-toolbar-update))
    :configuration-id (str (ids/fn-id root :ui))
    :theme-id (str (ids/fn-id (str root ".theme") :theme))
    :menu-id (str (ids/fn-id (str root ".menu") :account-menu-view))

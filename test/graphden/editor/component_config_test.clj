@@ -84,7 +84,10 @@
 
 (deftest ordinary-manifest-projects-only-terminal-identity-values
   (let [{:keys [id root graph]} (parsed-configuration)]
-    (is (= {:account-menu {:initial (ids/fn-id (str root ".menu") :account-menu-initial)
+    (is (= {:explorer {:initial (ids/fn-id (str root ".explorer") :explorer-toolbar-initial)
+                       :update (ids/fn-id (str root ".explorer") :explorer-toolbar-update)
+                       :view (ids/fn-id (str root ".explorer") :explorer-toolbar-view)}
+            :account-menu {:initial (ids/fn-id (str root ".menu") :account-menu-initial)
                            :update (ids/fn-id (str root ".menu") :account-menu-update)
                            :view (ids/fn-id (str root ".menu") :account-menu-view)}
             :fn-picker {:view (ids/fn-id (str root ".picker") :picker-view)}

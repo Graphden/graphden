@@ -1,5 +1,6 @@
 (ns ^:serial graphden.editor.components-test
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [graphden.editor.component-config :as config]
     [graphden.editor.components :as components]
@@ -16,6 +17,17 @@
 
 (def ^:private fn-id (java.util.UUID/randomUUID))
 (def ^:private branch-id (java.util.UUID/randomUUID))
+
+
+(deftest configuration-quota-refusal-retains-rate-limit-status-without-private-data
+  (let [response (components/failure-response
+                   (ex-info "PRIVATE quota detail" {:type :quota/entity-limit
+                                                    :reason "PRIVATE detail" :owner "PRIVATE owner"}))]
+    (is (= 429 (:http-status response)))
+    (is (= "graph-limit" (:code response)))
+    (is (false? (:ok response)))
+    (is (not (str/includes? (pr-str response) "PRIVATE")))
+    (is (not (contains? response :retryable)))))
 
 
 (defn- preference-storage

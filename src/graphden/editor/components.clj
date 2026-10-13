@@ -129,7 +129,10 @@
       (and (= :browser-plan/unsupported type) (= :component-missing reason))
       (assoc :code "component-missing" :fallback "builtin")
       (and (= :browser-plan/unsupported type) (= :policy-refresh-required reason))
-      (assoc :code "policy-refresh-required" :retryable true :retry-after 1))))
+      (assoc :code "policy-refresh-required" :retryable true :retry-after 1)
+      (= :quota/entity-limit type)
+      (assoc :http-status 429 :code "graph-limit"
+             :reason "Your organization has reached its graph limit. Free space or change your plan before creating more graphs."))))
 
 
 (defn- export-request

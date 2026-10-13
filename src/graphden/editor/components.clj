@@ -9,7 +9,6 @@
     [graphden.executor.browser-snapshot :as snapshot]
     [graphden.executor.browser-source :as source]
     [graphden.executor.context :as context]
-    [graphden.executor.registry.core :as registry]
     [graphden.storage.postgres.graph-epoch :as graph-epoch]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router.epoch :as router-epoch]
@@ -143,8 +142,7 @@
     (let [component (get component-keys (:component input))]
       (when-not component (reject! :invalid-request))
       (let [epoch (context/invalidation-epoch ctx)
-            policy (snapshot/capture-policy
-                     @(or (:rich-types-atom ctx) (registry/active-rich-types-atom)))]
+            policy (snapshot/capture-context-policy ctx)]
         (source/with-snapshot (request/require-storage ctx)
                               #(export-in-snapshot ctx component %1 %2 policy epoch resolved?))))
     (catch Exception error

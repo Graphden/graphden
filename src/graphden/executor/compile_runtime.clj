@@ -395,6 +395,13 @@
   (graph-in-hand ctx (compile-storage ctx)))
 
 
+(defn fresh-graph-snapshot
+  "Read one authoritative graph through the supplied storage handle without
+   using or priming a compiler cache. The caller owns snapshot consistency."
+  [storage executor-orgs]
+  (read-graph storage executor-orgs))
+
+
 (defn ctx-reverse-deps
   "The compiler's `{fn-id → #{ids that depend on it}}` index for `ctx` —
    the primed one when a compile has run, else built from `graph-snapshot`

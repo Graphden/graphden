@@ -43,6 +43,12 @@
   (or *diagnostics-override* diagnostics-store))
 
 
+(defn active-store-atom
+  "The currently bound diagnostics store, for isolated checker staging."
+  []
+  (target-atom))
+
+
 (defn snapshot-for-isolation
   "Snapshot of the active store — for fixtures that want to seed an
    override from the current state instead of `{}`."

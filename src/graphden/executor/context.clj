@@ -469,6 +469,7 @@
       ;; monitor pins its carrier (JDK 21) — see
       ;; `compile-runtime/call-with-invalidation-lock`.
       (assoc :invalidation-lock (java.util.concurrent.locks.ReentrantLock.))
+      (assoc :type-recheck-state (atom {:status :idle :generation 0}))
       ;; Fleet placement bookkeeping (docs/FLEET_RFC.md §6.2): the set of cell
       ;; ROOTS this executor has loaded via `compile-runtime/load-cell!`. Lets
       ;; `evict-cell!` reference-count shared fns. Empty + unused on a

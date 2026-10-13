@@ -8,7 +8,8 @@
    heal (`graphden.system.branch-router.epoch`), which evict through
    `invalidate!` without depending on each other."
   (:require
-    [clojure.tools.logging :as log]))
+    [clojure.tools.logging :as log]
+    [graphden.system.branch-router.recheck-state :as recheck-state]))
 
 
 (defonce ^:private pinned-branches-fn
@@ -78,7 +79,12 @@
   (when build-monitors
     (when-let [holder (java.util.concurrent.ConcurrentHashMap/.get build-monitors branch-id)]
       (java.util.concurrent.atomic.AtomicLong/.incrementAndGet ^java.util.concurrent.atomic.AtomicLong (:gen holder))))
-  (swap! handlers dissoc branch-id)
+  (let [captured (volatile! nil)
+        [old _] (swap-vals! handlers
+                            (fn [entries]
+                              (vreset! captured (recheck-state/generation (get-in entries [branch-id :ctx])))
+                              (dissoc entries branch-id)))]
+    (recheck-state/cancel! (get-in old [branch-id :ctx]) @captured))
   (forget-ref-cache-for-branch! router branch-id)
   (when build-monitors
     (java.util.concurrent.ConcurrentHashMap/.remove build-monitors branch-id)))
@@ -89,7 +95,13 @@
    schema-migration paths that change the executor's shape under all
    branches."
   [{:keys [handlers ref-cache build-monitors]}]
-  (reset! handlers {})
+  (let [captured (volatile! {})
+        [old _] (swap-vals! handlers
+                            (fn [entries]
+                              (vreset! captured (update-vals entries #(recheck-state/generation (:ctx %))))
+                              {}))]
+    (doseq [[id entry] old]
+      (recheck-state/cancel! (:ctx entry) (get @captured id))))
   (when ref-cache (reset! ref-cache {}))
   (when build-monitors
     (java.util.concurrent.ConcurrentHashMap/.clear build-monitors)))

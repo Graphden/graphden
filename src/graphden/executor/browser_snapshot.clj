@@ -10,6 +10,7 @@
     [graphden.executor.registry.core :as registry]
     [graphden.executor.source-contract :as source-contract]
     [graphden.executor.structural-contracts :as structural-contracts]
+    [graphden.packages.owned :as owned]
     [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.remote.core :as remote]
@@ -78,6 +79,15 @@
       (catch Exception _ (reject! :policy-capture-failed {})))))
 
 
+(defn capture-context-policy
+  "Freeze the same original rich policy and ephemeral common-recheck frontier.
+   Recovery may request a retry, never supply a source certificate or grant."
+  [ctx]
+  (assoc (capture-policy @(or (:rich-types-atom ctx) (registry/active-rich-types-atom)))
+         :type-recheck (some-> (:type-recheck-state ctx) deref
+                               (select-keys [:status :pending-ids]))))
+
+
 (defn read-snapshot
   "Read every graph table and namespace in one read-only REPEATABLE READ
    transaction, through the original decorators. Request/global resolver caches
@@ -117,7 +127,7 @@
 
 
 (defn- check-closure!
-  [snapshot entries original-rich]
+  [snapshot entries original-rich recovery]
   (let [graph (:graph snapshot)
         {:keys [forward-deps reverse-deps]} (deps/build-deps-state graph)
         reachable (set/difference (deps/forward-closure forward-deps (vals entries))
@@ -132,7 +142,12 @@
         (when-not (let [signature (get-in original-rich [:by-id id])]
                     (or (provenance/matches? signature (check/checker-view definition))
                         (provenance/matches-storage-input? signature (get source-fingerprints id))))
-          (reject! :type-source-mismatch {:fn-id id}))
+          (let [{:keys [status pending-ids]} recovery]
+            (if (and (contains? #{:pending :running} status)
+                     (not (owned/owned-fn-id? id))
+                     (or (nil? pending-ids) (contains? pending-ids id)))
+              (reject! :policy-refresh-required {:fn-id id})
+              (reject! :type-source-mismatch {:fn-id id}))))
         (try
           (check/check-fn-def! definition)
           (when-not (registry/rich-type-of-id id)
@@ -146,7 +161,7 @@
 (defn- checked-source
   "Derive a fresh policy and plan from the SAME immutable rows. No writes to
    the executor's rich types, aliases, markers, diagnostics, or storage."
-  [snapshot entries {:keys [rich classes]} structural? consume]
+  [snapshot entries {:keys [rich classes type-recheck]} structural? consume]
   (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
             registry/*per-org-rich-override* (atom {})
             types/*type-aliases-override* (atom {})
@@ -165,7 +180,7 @@
                                      (cond-> (conj (plan/supported-primitive-ids)
                                                    (ids/fn-id "app.ui-components" :ui-components))
                                        structural? (into (structural-contracts/operation-ids)))))
-      (check-closure! snapshot entries rich)
+      (check-closure! snapshot entries rich type-recheck)
       (consume
         {:allow-fn?
          (fn [id]

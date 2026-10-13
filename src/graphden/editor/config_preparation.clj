@@ -178,7 +178,7 @@
     (refuse! :invalid-request))
   (let [storage (request/require-storage ctx)
         context-epoch (context/invalidation-epoch ctx)
-        policy (snapshot/capture-policy @(or (:rich-types-atom ctx) (registry/active-rich-types-atom)))]
+        policy (snapshot/capture-context-policy ctx)]
     (when-not (tx/datasource storage) (refuse! :snapshot-storage-unsupported))
     (tx/assert-owns-commit! storage)
     (let [result (writer/with-write [storage :graph]

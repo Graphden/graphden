@@ -21,6 +21,7 @@
     [cheshire.core :as json]
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.crud.type-check :as type-check]
     [graphden.executor.context :as ctx]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
@@ -440,6 +441,7 @@
   ;; holder's AtomicLong, whose reference the builder captured); install sees
   ;; the mismatch and discards instead of caching a ctx for a gone branch.
   (let [gone-id (random-uuid)
+        recovery (atom {:status :running :generation 1})
         handlers (atom {})
         router (-> (br/->BranchRouter nil default-id handlers :stub-fn-id)
                    (assoc :build-monitors (java.util.concurrent.ConcurrentHashMap.)))]
@@ -447,12 +449,14 @@
               (fn [r bid]
                 ;; simulate a concurrent delete landing mid-build
                 (br-cache/invalidate! r bid)
-                {:handler :stub-h :last-used 1})]
+                {:handler :stub-h :last-used 1 :ctx {:type-recheck-state recovery}})]
       (let [built (#'br/build-and-cache! router gone-id)]
         (is (= :stub-h (:handler built))
             "the in-flight request is still served from the built entry")
         (is (not (contains? @handlers gone-id))
-            "but the deleted branch is NOT installed into the cache")))))
+            "but the deleted branch is NOT installed into the cache")
+        (is (:cancelled? @recovery) "a discarded build cannot keep publishing derived diagnostics")
+        (is (= 2 (:generation @recovery)))))))
 
 
 (deftest lru-eviction-reaps-the-build-monitor-holder
@@ -801,9 +805,8 @@
   ;; EMPTY while an editor-authored fn (random id) is broken in storage.
   ;; The ctx-build recompute must re-record it; a package-derived
   ;; sibling explicitly registered as package-owned must be SKIPPED —
-  ;; the boot sync sweep owns those. Runs the private worker
-  ;; synchronously (the production hook fires it on a future with
-  ;; conveyed bindings, so the store semantics are identical).
+  ;; the boot sync sweep owns those. Exercise the actual coalesced worker
+  ;; and await its completion signal rather than sleeping for readiness.
   (exec/with-isolated-rich-types
     (fn []
       (binding [diag/*diagnostics-override* (atom {})]
@@ -841,7 +844,19 @@
                   _ (setup/bind-value! vstorage personal-id (:id slot) "also-bad")]
               (is (nil? (diag/errors-for-fn branch-id (:id broken)))
                   "post-restart baseline: nothing recorded")
-              (#'br-recheck/recheck-user-fns! {:storage vstorage} branch-id)
+              (let [state (atom {:status :idle :generation 0})
+                    completed (promise)]
+                (add-watch state ::completed
+                           (fn [_ _ _ current]
+                             (when (and (not (:worker-running? current))
+                                        (contains? #{:ready :failed} (:status current)))
+                               (deliver completed true))))
+                (try
+                  (br-recheck/schedule-user-fn-recheck!
+                    {:storage vstorage :type-recheck-state state} branch-id)
+                  (is (true? (deref completed 10000 ::timeout))
+                      "the common restart worker finishes its exact user set")
+                  (finally (remove-watch state ::completed))))
               (is (seq (diag/errors-for-fn branch-id (:id broken)))
                   "editor-authored broken fn re-recorded by the ctx-build recheck")
               (is (nil? (diag/errors-for-fn branch-id det-id))
@@ -898,3 +913,25 @@
           (#'br/evict-idle-ctxs! router)
           (is (not (contains? @(:handlers router) :stale3)))
           (finally (br-cache/set-pinned-branches-fn! nil)))))))
+
+
+(deftest recovery-order-does-not-use-a-stale-compile-index
+  (let [parent (random-uuid)
+        child (random-uuid)
+        base (random-uuid)
+        rows [{:id child :name "child" :parent-ids [parent]}
+              {:id parent :name "parent" :parent-ids [base]}]
+        reads (atom [])
+        checked (atom [])
+        context {:storage {} :compile-deps (atom {:reverse-deps {child #{parent}}})}]
+    (with-redefs [sp/query-entities (fn [_ entity _]
+                                      (swap! reads conj entity)
+                                      (if (= entity :fn) rows []))
+                  owned/owned-fn-id? (constantly false)
+                  type-check/type-check-fn-after-mutation! (fn [_ id _] (swap! checked conj id))]
+      (#'br-recheck/record-ordered-snapshot! context nil (#'br-recheck/ordered-user-fn-ids context))
+      (is (= [parent child] @checked) "the actual batch checker preserves the captured order")
+      (is (= [parent child] (#'br-recheck/ordered-user-fn-ids context)))
+      (is (some #{:binding} @reads) "fresh authoritative edges are read once before partitioning")
+      (is (= {:reverse-deps {child #{parent}}} @(:compile-deps context))
+          "recovery does not mutate the compiler's index"))))

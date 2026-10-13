@@ -422,15 +422,23 @@
    it even when the cache install is discarded)."
   [{:keys [handlers build-monitors]} branch-id entry max-size default-branch-id gen-holder gen0]
   (let [pinned (cache/pinned-branches)
+        incoming-generation (some-> entry :ctx :type-recheck-state deref :generation)
+        captured (volatile! {})
         [old new] (swap-vals!
                     handlers
                     (fn [m]
+                      (vreset! captured (update-vals m #(some-> % :ctx :type-recheck-state deref :generation)))
                       (if (and gen-holder
                                (not= gen0 (java.util.concurrent.atomic.AtomicLong/.get gen-holder)))
                         m
                         (-> m
                             (evict-lru-if-full max-size default-branch-id branch-id pinned)
                             (assoc branch-id entry)))))]
+    (doseq [[id prior] old
+            :when (not (identical? (:ctx prior) (get-in new [id :ctx])))]
+      (recheck/cancel-user-fn-recheck! (:ctx prior) (get @captured id)))
+    (when-not (identical? (:ctx entry) (get-in new [branch-id :ctx]))
+      (recheck/cancel-user-fn-recheck! (:ctx entry) incoming-generation))
     (when build-monitors
       (doseq [gone (keys old)
               :when (and (not= gone branch-id) (not (contains? new gone)))]

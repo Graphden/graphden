@@ -287,3 +287,18 @@
     (is (= (json/generate-string {:args {} :return :text})
            (json/generate-string signature)))
     (is (not (str/includes? (pr-str signature) (provenance/fingerprint a))))))
+
+
+(deftest common-recheck-frontier-retries-without-certifying-an-unchecked-source
+  (let [{:keys [id] :as f} (fixture [] {})
+        policy (snapshot/capture-policy (update (:rich f) :by-id dissoc id))]
+    (doseq [recovery [{:status :pending :pending-ids nil}
+                      {:status :running :pending-ids #{id}}]]
+      (is (= :policy-refresh-required
+             (:reason (failure #(export (assoc f :policy (assoc policy :type-recheck recovery))))))))
+    (doseq [recovery [{:status :ready :pending-ids #{}}
+                      {:status :failed :pending-ids #{}}
+                      {:status :running :pending-ids #{(random-uuid)}}]]
+      (is (= :type-source-mismatch
+             (:reason (failure #(export (assoc f :policy (assoc policy :type-recheck recovery))))))))
+    (is (map? (export f)) "ordinary completed certificates still govern export")))

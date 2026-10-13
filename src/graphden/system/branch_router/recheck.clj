@@ -28,6 +28,8 @@
     [graphden.packages.owned :as owned]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.tx :as tx]
+    [graphden.system.branch-router.recheck-lifecycle :as lifecycle]
+    [graphden.system.branch-router.recheck-state :as recheck-state]
     [graphden.util.ns-path :as ns-path]
     [graphden.versioning.branch-local :as branch-local]
     [graphden.versioning.storage.resolution :as resolution]
@@ -45,18 +47,15 @@
 
 
 (def ^:private max-user-fn-recheck
-  "Upper bound on how many editor-authored fns one ctx build will
-   re-check. A branch beyond this logs a warn and skips — the ROADMAP
-   restart caveat then still applies to it (huge editor graphs are
-   rare; the bound keeps a pathological branch from soaking a core)."
-  500)
+  "Synchronous ctx-build bound; asynchronous recovery uses this batch size."
+  lifecycle/batch-size)
 
 
 (defn- user-authored-fn-ids
   "IDs of named, non-anonymous composed fns not owned by this boot's
    bundled packages. Personal copies may also use deterministic IDs;
    identity spelling does not establish package ownership."
-  [storage]
+  [rows]
   (into []
         (keep (fn [row]
                 (when (and (:name row)
@@ -65,40 +64,20 @@
                            (not (str/starts-with? (:name row) "_anon-"))
                            (not (owned/owned-fn-id? (:id row))))
                   (:id row))))
-        (sp/query-entities storage :fn {})))
+        rows))
 
 
-(declare record-fn-types!)
+(declare record-fn-types! record-import-snapshot! record-ordered-snapshot! call-with-read-snapshot)
 
 
-(defn- recheck-user-fns!
-  "Re-run `type-check-fn-after-mutation!` for every editor-authored fn
-   visible on `branch-ctx`'s branch, repopulating the per-branch
-   diagnostics store (failure records, success clears). Best-effort:
-   any throw is logged and swallowed — a diagnostics gap must never
-   fail a ctx build or a request."
-  [branch-ctx branch-id]
-  (try
-    (let [storage (:storage branch-ctx)
-          ids (user-authored-fn-ids storage)]
-      (cond
-        (empty? ids) nil
-
-        (> (count ids) max-user-fn-recheck)
-        (log/warn (str "skipping ctx-build diagnostics recompute — user-fn count over bound; "
-                       "this branch's rich-types slice may miss branch-authored fns "
-                       "until they are edited (post-eviction rebuild re-forks from base)")
-                  {:branch-id branch-id :count (count ids)
-                   :cap max-user-fn-recheck})
-
-        :else
-        (do (record-fn-types! branch-ctx branch-id ids)
-            (log/debug "ctx-build diagnostics recompute done"
-                       {:branch-id branch-id :checked (count ids)}))))
-    (catch Exception t
-      ;; Includes storages a test hand-constructed without :fn/:ns tables.
-      (log/debug t "ctx-build diagnostics recompute failed"
-                 {:branch-id branch-id}))))
+(defn- ordered-user-fn-ids
+  [ctx]
+  (call-with-read-snapshot
+    (:storage ctx)
+    (fn [snapshot]
+      (let [graph (compile-runtime/fresh-graph-snapshot snapshot (:executor-orgs ctx))]
+        (:ordered (deps/dependency-order (deps/build-reverse-deps graph)
+                                         (user-authored-fn-ids (:fns graph))))))))
 
 
 (def ^:dynamic *ctx-build-async-recheck?*
@@ -109,15 +88,19 @@
 
 
 (defn schedule-user-fn-recheck!
-  "Fire `recheck-user-fns!` on a background future. `future` conveys
-   the caller's dynamic bindings (org context, the diagnostics-store
-   override the parallel test plugin binds, THIS ctx's rich-types
-   slice), so the recompute records into the same stores the
-   triggering thread would."
+  "Coalesce one dependency-ordered recovery worker for this context.
+   Each snapshot checks at most 500 user IDs; completed source/epoch proofs
+   conditionally publish only their changed checker entries."
   [branch-ctx branch-id]
   (when (and *recheck-user-fns?* *ctx-build-async-recheck?*)
-    (future (recheck-user-fns! branch-ctx branch-id)))
+    (lifecycle/schedule! branch-ctx branch-id ordered-user-fn-ids record-ordered-snapshot!))
   nil)
+
+
+(defn cancel-user-fn-recheck!
+  "Retire a removed context's captured recovery generation."
+  ([ctx] (recheck-state/cancel! ctx))
+  ([ctx generation] (recheck-state/cancel! ctx generation)))
 
 
 (defn call-with-ctx-slices
@@ -144,38 +127,54 @@
   ([branch-ctx branch-id fn-ids options]
    (when (seq fn-ids)
      (let [{:keys [ordered cyclic]}
-           (deps/dependency-order (compile-runtime/ctx-reverse-deps branch-ctx) fn-ids)]
+           (if (:preserve-order? options)
+             {:ordered fn-ids}
+             (deps/dependency-order (compile-runtime/ctx-reverse-deps branch-ctx) fn-ids))]
        (when (seq cyclic)
          (log/warn "cycle in branch type recheck; checking remaining fns in stable order"
                    {:branch-id branch-id :cycle-fn-ids cyclic}))
        (doseq [id ordered]
          (try
            (if options
-             (type-check/type-check-fn-after-mutation! (:storage branch-ctx) id options)
+             (type-check/type-check-fn-after-mutation! (:storage branch-ctx) id (dissoc options :preserve-order?))
              (type-check/type-check-fn-after-mutation! (:storage branch-ctx) id))
            (catch Exception t
              (log/debug t "slice type re-record failed for fn"
                         {:branch-id branch-id :fn-id id}))))))))
 
 
-(defn- record-import-snapshot!
-  "Reuse reconstruction metadata only within one decorated, read-only snapshot.
-   Connection-backed and non-JDBC callers retain their existing check path."
-  [branch-ctx branch-id fn-ids]
-  (let [storage (:storage branch-ctx)
-        datasource (tx/datasource storage)]
+(defn- call-with-read-snapshot
+  [storage f]
+  (let [datasource (tx/datasource storage)]
     (if (and datasource (not (instance? Connection datasource)))
       (binding [jdbc-tx/*nested-tx* :prohibit
                 resolution/*branch-chain-cache* (atom {})
                 branch-local/*storage-caches-override* (atom {})]
         (resolution/call-with-fresh-memos
           #(jdbc/with-transaction [connection datasource {:isolation :repeatable-read :read-only true}]
-                                  (let [snapshot (tx/with-connection storage connection)
-                                        options {:namespace-paths (delay (ns-path/path-map (sp/query-entities snapshot :ns {})))}]
-                                    (type-check/call-with-reconstruction-memo
-                                      snapshot
-                                      (fn [] (record-fn-types! (assoc branch-ctx :storage snapshot) branch-id fn-ids options)))))))
-      (record-fn-types! branch-ctx branch-id fn-ids))))
+                                  (f (tx/with-connection storage connection)))))
+      (f storage))))
+
+
+(defn- record-import-snapshot!
+  "Reuse reconstruction metadata only within one decorated, read-only snapshot.
+   Recovery batches preserve the authoritative order captured by their pass."
+  ([branch-ctx branch-id fn-ids]
+   (record-import-snapshot! branch-ctx branch-id fn-ids false))
+  ([branch-ctx branch-id fn-ids preserve-order?]
+   (call-with-read-snapshot
+     (:storage branch-ctx)
+     (fn [snapshot]
+       (let [options {:namespace-paths (delay (ns-path/path-map (sp/query-entities snapshot :ns {})))
+                      :preserve-order? preserve-order?}]
+         (type-check/call-with-reconstruction-memo
+           snapshot
+           #(record-fn-types! (assoc branch-ctx :storage snapshot) branch-id fn-ids options)))))))
+
+
+(defn- record-ordered-snapshot!
+  [branch-ctx branch-id fn-ids]
+  (record-import-snapshot! branch-ctx branch-id fn-ids true))
 
 
 (defn record-own-fn-types!
@@ -195,8 +194,8 @@
 
 (defn record-imported-fn-types!
   "Record a successful import's exact IDs before returning to its caller.
-   Unlike the bounded startup sweep, a mutation must not silently skip a
-   large bundle. Invalid definitions keep their ordinary diagnostics;
+   A mutation must not silently skip a large bundle; startup recovers the
+   same persisted user definitions in bounded asynchronous batches. Invalid definitions keep their ordinary diagnostics;
    this does not grant a type to a definition that failed checking."
   [branch-ctx branch-id fn-ids]
   (when (seq fn-ids)
@@ -220,10 +219,9 @@
    best-effort, same contract as the ctx-build recompute."
   [branch-ctx branch-id fn-ids]
   (when *recheck-user-fns?*
-    (future
-      (call-with-ctx-slices
-        branch-ctx
-        #(if (seq fn-ids)
-           (record-fn-types! branch-ctx branch-id fn-ids)
-           (recheck-user-fns! branch-ctx branch-id)))))
+    (if (seq fn-ids)
+      (future (call-with-ctx-slices branch-ctx
+                                    #(record-fn-types! branch-ctx branch-id fn-ids)))
+      (call-with-ctx-slices branch-ctx
+                            #(lifecycle/schedule! branch-ctx branch-id ordered-user-fn-ids record-ordered-snapshot!))))
   nil)

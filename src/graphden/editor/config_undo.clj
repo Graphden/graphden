@@ -13,7 +13,6 @@
     [graphden.executor.browser-snapshot :as snapshot]
     [graphden.executor.browser-source :as source]
     [graphden.executor.context :as context]
-    [graphden.executor.registry.core :as registry]
     [graphden.graph.metadata :as metadata]
     [graphden.storage.graph-writer :as writer]
     [graphden.storage.protocol.core :as sp]
@@ -103,7 +102,7 @@
   (let [input (parse-command input)
         storage (request/require-storage ctx)
         context-epoch (context/invalidation-epoch ctx)
-        policy (snapshot/capture-policy @(or (:rich-types-atom ctx) (registry/active-rich-types-atom)))]
+        policy (snapshot/capture-context-policy ctx)]
     (tx/assert-owns-commit! storage)
     (let [{:keys [rows result]}
           (writer/with-write [storage :graph]

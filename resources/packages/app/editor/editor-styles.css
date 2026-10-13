@@ -620,14 +620,11 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
   color: var(--error-fg-strong);
   flex-shrink: 0;
 }
-/* Failed-runs / lint chips on namespace rows and the matching per-row
-   markers — the problem lenses' counts (editor-problems.js). */
+/* Failed-runs / lint chips on native namespace rows. Function-row markers
+   use the scoped app.ui-explorer style graph. */
 .ns-problem-chip { margin-left: 6px; font-size: 0.625rem; flex-shrink: 0; white-space: nowrap; }
 .ns-failed-chip { color: var(--error-fg-strong); }
 .ns-lint-chip { color: var(--muted-fg); }
-.kind-marker-failed { color: var(--error-fg-strong); }
-.kind-marker-type-error { color: var(--warning-fg); }
-.kind-marker-lint { color: var(--muted-fg); }
 
 .ns-header-pseudo .ns-label { font-style: italic; color: var(--muted-fg); }
 .ns-children { padding-left: 16px; }
@@ -635,7 +632,6 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
   display: flex; align-items: center; }
 #entity-list .entity-item:hover { background: var(--hover-bg); }
 #entity-list .entity-item.selected { background: var(--selected-bg); }
-#entity-list .entity-item .name { font-weight: 400; font-size: 0.8125rem; }
 
 /* Proactive per-org plan-usage badge (editor-quota.js, task #8-frontend). */
 .quota-badge {
@@ -5743,50 +5739,6 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
    ========================================================================= */
 
 #entity-list .entity-secret { display: flex; align-items: center; gap: 4px; }
-#entity-list .entity-secret .name { flex: 0 0 auto; }
-#entity-list .entity-secret .secret-path {
-  flex: 1 1 auto;
-  font-family: monospace;
-  font-size: 0.6875rem;
-  color: var(--card-fg);
-  opacity: 0.7;
-  margin-left: 4px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.secret-lock-icon {
-  font-size: 0.6875rem;
-  margin-right: 2px;
-  flex: 0 0 auto;
-}
-/* Tree-row kind markers — the same glyphs as the lens chips, so a mixed
-   (All-lens) tree reads at a glance. Service markers reuse the badge's
-   state palette (running/failed/disabled/pending). */
-.fn-kind-marker {
-  font-size: 0.625rem;
-  margin-right: 2px;
-  flex: 0 0 auto;
-  color: var(--muted-fg);
-  user-select: none;
-}
-.kind-marker-service.svc-running   { color: var(--success-fg); }
-.kind-marker-service.svc-failed    { color: var(--error-fg); }
-.kind-marker-service.svc-backoff   { color: var(--warning-fg); }
-.kind-marker-service.svc-exited    { color: var(--warning-fg); opacity: 0.8; }
-.kind-marker-service.svc-elsewhere { color: var(--muted-fg); }
-.kind-marker-service.svc-disabled  { color: var(--muted-fg); opacity: 0.65; }
-.kind-marker-app { color: var(--accent); }
-/* fx detail marker — effect footprint; italic + muted so a tree full of
-   effectful web fns reads as texture, not alarm. */
-.kind-marker-fx { font-style: italic; opacity: 0.8; }
-.kind-marker-type { font-size: 0.5625rem; opacity: 0.8; }
-/* Test status dot — latest execution of the fn's CURRENT version:
-   passed / failed / stale (not run since the last edit). */
-.kind-marker-test.test-passed { color: var(--success-fg); }
-.kind-marker-test.test-failed { color: var(--error-fg); }
-.kind-marker-test.test-stale  { color: var(--muted-fg); opacity: 0.65; }
 
 .secrets-popover {
   position: absolute;

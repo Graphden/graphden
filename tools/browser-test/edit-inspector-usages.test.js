@@ -122,6 +122,10 @@ let phase = 'boot';
     held[6].release();
     assert(await page.evaluate(() => !window.accountUsages.isConnected && !document.querySelector('[data-gd-usages-host]')), 'account change disposes its pending owner');
     await page.unroute(routePath);
+    // Auth replacement clears the old graph cache. Re-prime the server tree
+    // before exercising navigation under the new (test) session.
+    await page.evaluate(() => initGraph());
+    await page.evaluate(id => ensureSubtreeFor(id), selection.id);
     phase = 'navigation';
     await page.evaluate(id => gdInspectorRender(id), selection.id);
     await filter.waitFor({state: 'visible'});

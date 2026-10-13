@@ -41,6 +41,17 @@ let _searchFailed = false;
 let _searchSeq = 0;
 let _searchDebounce = null;
 
+function gdInvalidateExplorerAuth() {
+  _searchSeq++;
+  clearTimeout(_searchDebounce);
+  _searchDebounce = null;
+  _searchResults = null;
+  _searchTruncated = false;
+  _searchFailed = false;
+  _lastRootFns = null;
+  _lastTree = null;
+}
+
 
 // The last render's namespace-less (root/primitives) fn list — applyLensVisibility
 // re-renders that small bucket in place on a lens flip.
@@ -152,6 +163,7 @@ function findNsChildGroup(nsPath) {
 // fresh `.fns` also flips this namespace's / its ancestors' nodeShouldShow
 // under an active lens.
 function refreshLoadedNamespace(nsPath, searchMode) {
+  if (!graphData) return;
   const old = findNsChildGroup(nsPath);
   if (!old) return;   // collapsed again before the load landed
   _lastTree = buildNsTree(graphData);
@@ -161,6 +173,7 @@ function refreshLoadedNamespace(nsPath, searchMode) {
   // started before its fns landed) — it survives, typed text and all.
   const kept = gdKeepInlineRow(old);
   const fresh = buildNsChildGroup(node, nsPath, searchMode);
+  window.gdExplorerGraph?.disposeRows(old);
   old.replaceWith(fresh);
   gdRestoreInlineRow(fresh, kept);
   applyLensVisibility();
@@ -249,6 +262,7 @@ function announceSearch(query, total, truncated) {
 // the tree first so a lazy load that just appended root fns to `graphData.fns`
 // is reflected — `_lastRootFns` captured at an earlier render is frozen-empty.
 function refreshRootNode() {
+  if (!graphData) return;
   const list = document.getElementById('entity-list');
   if (!list) return;
   _lastTree = buildNsTree(graphData);
@@ -258,7 +272,10 @@ function refreshRootNode() {
     const rootChildren = rootHeader.nextElementSibling?.classList.contains('ns-children')
       ? rootHeader.nextElementSibling : null;
     rootHeader.remove();
-    if (rootChildren) rootChildren.remove();
+    if (rootChildren) {
+      window.gdExplorerGraph?.disposeRows(rootChildren);
+      rootChildren.remove();
+    }
   }
   if (_lastRootFns) renderRootNode(list, _lastRootFns, false);
 }
@@ -427,14 +444,17 @@ function updateEntityList(data) {
 }
 
 function renderEntityList(data) {
-  if (typeof renderRecentFns === 'function') renderRecentFns();
-  // A search reply (or an early auth repaint) can land before the graph
-  // data primes on a fresh tab — painting from null threw mid-function
-  // and left the sidebar dead. An empty shape renders the transient
-  // empty state instead; the post-prime repaint fills it in.
-  if (!data) data = { namespaces: [], fns: [] };
   const list = document.getElementById('entity-list');
+  window.gdExplorerGraph?.disposeRows(list);
   list.innerHTML = '';
+  // A former account's cached rows must not be repainted by a late search,
+  // preference change or native lens callback while the next tree is loading.
+  if (!graphData) {
+    list.innerHTML = '<div class="loading">Loading Explorer…</div>';
+    return;
+  }
+  data = graphData;
+  if (typeof renderRecentFns === 'function') renderRecentFns();
 
   // Keep the lens chips + secret-add in sync with persisted state, and
   // prime the caches classification depends on (services, app routes,

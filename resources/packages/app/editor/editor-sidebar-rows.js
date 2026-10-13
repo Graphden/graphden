@@ -1,13 +1,46 @@
 // Editor Sidebar — building the ROWS: one fn item, one namespace node, one
 // child group.
 //
-// `buildFnItem` (the fn row with
-// its kind glyph, badges, test dot, `fx` mark and ⋯ trigger), `renderNsNode`
+// `buildFnItem` (native tree identity/actions around a graph-presented fn
+// body), `renderNsNode`
 // (a namespace header + lazy children — `loadNamespaceFns` → `?scope=namespace`
 // on first expand) and `buildNsChildGroup` (the `.ns-children` container the
 // diff ghosts and the tree keys walk). Pure DOM construction over
 // `graphData` / `lookups`; the lens predicates it consults live in
 // editor-sidebar-lens.js, the tree walk that calls it in editor-sidebar.js.
+
+// Graph element titles have a 4096-character host limit. A failed test can
+// carry an unbounded error, while route/effect lists can grow with the graph.
+const explorerRowDetail = value => String(value ?? '').slice(0, 4000);
+const explorerRowCount = value => Number.isSafeInteger(value) && value > 0 ? value : 0;
+
+function explorerRowProjection(fn, isSecret) {
+  const kinds = fnKindSet(fn);
+  const problems = fnProblemSet(fn);
+  const service = kinds.has('services') && typeof getServiceForFnId === 'function'
+    ? getServiceForFnId(fn.id) : null;
+  const state = service && typeof serviceBadgeState === 'function' ? serviceBadgeState(service) : '';
+  const routes = kinds.has('apps') && typeof getAppRoutesForFnId === 'function'
+    ? getAppRoutesForFnId(fn.id) : [];
+  const status = kinds.has('tests') && typeof getTestStatusForFnId === 'function'
+    ? getTestStatusForFnId(fn.id) : null;
+  const effects = treeDetails.fx && typeof richTypes !== 'undefined' && fn.name
+    ? richTypes?.[fn.name]?.effects : null;
+  const secret = isSecret && typeof secretRecordForFn === 'function'
+    ? secretRecordForFn(fn.id) : null;
+  return {
+    name: fn.displayName, secret: isSecret, 'secret-path': secret?.path || '',
+    service: kinds.has('services'), 'service-state': state || '',
+    app: kinds.has('apps'), 'app-hosts': explorerRowDetail(routes.map(route => typeof appRouteHost === 'function'
+      ? appRouteHost(route) : route.label).filter(Boolean).join(', ')),
+    type: kinds.has('types'), test: kinds.has('tests'),
+    'test-status': explorerRowDetail(status?.status), 'test-error': explorerRowDetail(status?.error),
+    failed: problems.has('failed') ? explorerRowCount(getFailureCountForFnId(fn.id)) : 0,
+    'type-errors': problems.has('type-errors') ? explorerRowCount(fn['type-error-count']) : 0,
+    lint: problems.has('lint') ? explorerRowCount(getLintCountForFnId(fn.id)) : 0,
+    effects: explorerRowDetail(Array.isArray(effects) ? effects.join(', ') : ''),
+  };
+}
 
 function buildFnItem(fn, level = 1) {
   const item = document.createElement('div');
@@ -23,121 +56,10 @@ function buildFnItem(fn, level = 1) {
   if (isSecret) item.className += ' entity-secret';
   item.dataset.fnId = fn.id;
 
-  if (isSecret) {
-    const lock = document.createElement('span');
-    lock.className = 'secret-lock-icon';
-    lock.textContent = '🔒';
-    lock.title = 'Secret — value lives in the vault, never in the graph DB';
-    item.appendChild(lock);
-  }
-
-  // Kind markers — so the mixed (All-lens) tree stays legible: a row says
-  // WHAT it is at a glance (the lens chips use the same glyphs). Secrets
-  // keep their 🔒 above; plain fns carry no marker (they're the default).
-  const kinds = fnKindSet(fn);
-  if (kinds.has('services')) {
-    const svc = (typeof getServiceForFnId === 'function') ? getServiceForFnId(fn.id) : null;
-    const state = (typeof serviceBadgeState === 'function') ? serviceBadgeState(svc) : null;
-    const m = document.createElement('span');
-    m.className = 'fn-kind-marker kind-marker-service' + (state ? ' svc-' + state : '');
-    m.textContent = '⚙';
-    m.title = 'Service' + (state ? ' — ' + state : '');
-    item.appendChild(m);
-  }
-  if (kinds.has('apps')) {
-    const routes = (typeof getAppRoutesForFnId === 'function') ? getAppRoutesForFnId(fn.id) : [];
-    const hosts = routes.map((r) => (typeof appRouteHost === 'function') ? appRouteHost(r) : r.label)
-      .filter(Boolean).join(', ');
-    const m = document.createElement('span');
-    m.className = 'fn-kind-marker kind-marker-app';
-    m.textContent = '▣';
-    m.title = hosts ? 'App — served at ' + hosts : 'App handler';
-    item.appendChild(m);
-  }
-  if (kinds.has('types')) {
-    const m = document.createElement('span');
-    m.className = 'fn-kind-marker kind-marker-type';
-    m.textContent = 'T';
-    m.title = 'Type';
-    item.appendChild(m);
-  }
-  if (kinds.has('tests')) {
-    // Status dot: latest execution of the fn's CURRENT version —
-    // passed / failed / no-run-yet (stale). Reads the primed
-    // /api/tests/status cache (editor-tests.js).
-    const st = (typeof getTestStatusForFnId === 'function') ? getTestStatusForFnId(fn.id) : null;
-    const status = st?.status || null;
-    const m = document.createElement('span');
-    let cls = 'test-stale';
-    let label = 'Test — not run for the current version';
-    if (status === 'succeeded') { cls = 'test-passed'; label = 'Test — passed'; }
-    else if (status === 'failed') { cls = 'test-failed'; label = 'Test — failed' + (st?.error ? ': ' + st.error : ''); }
-    else if (status) { label = 'Test — ' + status; }
-    m.className = 'fn-kind-marker kind-marker-test ' + cls;
-    m.textContent = '●';
-    m.title = label;
-    item.appendChild(m);
-  }
-
-  // Problem markers — always on: a fn that fails, mistypes or duplicates
-  // says so where you work, not only in a drawer. Each carries its count.
-  const problems = fnProblemSet(fn);
-  if (problems.has('failed')) {
-    const n = getFailureCountForFnId(fn.id);
-    const m = document.createElement('span');
-    m.className = 'fn-kind-marker kind-marker-failed';
-    m.textContent = '✕' + n;
-    m.title = n + ' unresolved failed run' + (n === 1 ? '' : 's');
-    item.appendChild(m);
-  }
-  if (problems.has('type-errors')) {
-    const n = fn['type-error-count'];
-    const m = document.createElement('span');
-    m.className = 'fn-kind-marker kind-marker-type-error';
-    m.textContent = '⚠' + n;
-    m.title = n + ' type error' + (n === 1 ? '' : 's');
-    item.appendChild(m);
-  }
-  if (problems.has('lint')) {
-    const n = getLintCountForFnId(fn.id);
-    const m = document.createElement('span');
-    m.className = 'fn-kind-marker kind-marker-lint';
-    m.textContent = '⚐' + n;
-    m.title = n + ' lint finding' + (n === 1 ? '' : 's') + ' — see the Lint tab or the Inspector';
-    item.appendChild(m);
-  }
-
-  // fx detail — the effect footprint, the strongest "what does running
-  // this touch" signal the registry has. Off by default (most platform
-  // web fns are effectful — a always-on marker would wallpaper the
-  // tree); the `fx` chip next to the kind lens flips it.
-  if (treeDetails.fx && typeof richTypes !== 'undefined' && fn.name) {
-    const effs = richTypes?.[fn.name]?.effects;
-    if (Array.isArray(effs) && effs.length) {
-      const m = document.createElement('span');
-      m.className = 'fn-kind-marker kind-marker-fx';
-      m.textContent = 'fx';
-      m.title = 'Effects: ' + effs.join(', ');
-      item.appendChild(m);
-    }
-  }
-
-  const nameSpan = document.createElement('span');
-  nameSpan.className = 'name';
-  nameSpan.textContent = fn.displayName;
-  item.appendChild(nameSpan);
-
-  // Secret rows show their vault path (parity with the old Secrets
-  // section). `secretRecordForFn` reads the primed /api/secrets list.
-  if (isSecret && typeof secretRecordForFn === 'function') {
-    const rec = secretRecordForFn(fn.id);
-    if (rec?.path) {
-      const pathSpan = document.createElement('span');
-      pathSpan.className = 'secret-path';
-      pathSpan.textContent = rec.path;
-      item.appendChild(pathSpan);
-    }
-  }
+  const body = document.createElement('span');
+  body.className = 'gd-explorer-row-host';
+  item.appendChild(body);
+  window.gdExplorerGraph.mountRow(body, explorerRowProjection(fn, isSecret));
 
   // Right-edge action group — same shape as `.ns-row-actions`. Order:
   // ✎ rename (hover-only), ↗ open-in-new-tab (hover-only), `i`
@@ -297,7 +219,10 @@ function renderNsNode(container, name, node, path, searchMode) {
       // resync is needed.
       expandedNamespaces.delete(nsPath);
       const cg = findNsChildGroup(nsPath);
-      if (cg) cg.remove();
+      if (cg) {
+        window.gdExplorerGraph?.disposeRows(cg);
+        cg.remove();
+      }
       arrow.classList.add('collapsed');
       arrow.textContent = '▶';
       // The arrow is the sighted cue; aria-expanded is the other half of it.

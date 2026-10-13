@@ -1,12 +1,16 @@
 {:namespace "app.ui-explorer"
- :description "Finite Explorer kind toolbar, projected from existing authorized cache summaries."
+ :description "Explorer kind toolbar and function-row presentation over authorized host projections."
  :fns [{:name :_explorer-toolbar-state :type {:handled :bool}}
-       {:name :_explorer-toolbar-inputs :type {:selected [:map :text :bool] :counts [:map :text [:union :null :int]] :failed :int :authenticated :bool :apps-available :bool :fx :bool}}
+       {:name :_explorer-row-input :type {:name :text :secret :bool :secret-path :text :service :bool :service-state :text :app :bool :app-hosts :text :type :bool :test :bool :test-status :text :test-error :text :failed :int :type-errors :int :lint :int :effects :text}}
+       {:name :_explorer-toolbar-inputs :type {:surface :text :row :_explorer-row-input :selected [:map :text :bool] :counts [:map :text [:union :null :int]] :failed :int :authenticated :bool :apps-available :bool :fx :bool}}
        {:name :_explorer-toolbar-event :type {:kind :text :value :text}}
        {:name :_explorer-toolbar-request :type {:kind :text :value :text}}
        {:name :_explorer-toolbar-requests :list :_explorer-toolbar-request}
        {:name :_explorer-toolbar-transition :type {:state :_explorer-toolbar-state :requests :_explorer-toolbar-requests}}
        {:name :explorer-toolbar-initial :parent :const :args {:value {:value {:handled false}}} :return-type :_explorer-toolbar-state}
+       {:name :_explorer-input-surface :parent :get :args {:coll {:as :inputs :type :_explorer-toolbar-inputs} :key {:value :surface} :default {:value "toolbar"}}}
+       {:name :_explorer-is-row :parent :equal? :args {:a :_explorer-input-surface :b "row"}}
+       {:name :_explorer-input-row :parent :get :args {:coll {:as :inputs :type :_explorer-toolbar-inputs} :key {:value :row}}}
        {:name :_explorer-input-selected :parent :get :args {:coll {:as :inputs :type :_explorer-toolbar-inputs} :key {:value :selected} :default {:value {}}}}
        {:name :_explorer-input-counts :parent :get :args {:coll {:as :inputs :type :_explorer-toolbar-inputs} :key {:value :counts} :default {:value {}}}}
        {:name :_explorer-input-failed :parent :get :args {:coll {:as :inputs :type :_explorer-toolbar-inputs} :key {:value :failed} :default {:value 0}}}
@@ -155,4 +159,98 @@
        {:name :_explorer-nonzero-run :parent :if :args {:test :_explorer-zero-run :then false :else :_explorer-known-run}}
        {:name :_explorer-actions :parent :zipmap :args {:keys [{:value :secret} {:value :dismiss} {:value :run}] :vals [:_explorer-action-secret :_explorer-nonzero-dismiss :_explorer-nonzero-run]}}
        {:name :explorer-styles :parent :const :args {:value {:value [{:selector "& .gd-explorer-kinds" :declarations {"display" "flex" "flex-wrap" "wrap" "align-items" "center" "gap" "2px 3px" "padding" "2px 0"}} {:selector "& .kind-count" :declarations {"font-size" "0.625rem" "opacity" "0.85"}} {:selector "& .kind-count:empty" :declarations {"display" "none"}} {:selector "& .kind-count.kind-count-bad" :declarations {"color" "var(--error-fg)" "opacity" "1"}}]}} :return-type [:list {:selector :text :declarations [:map :text :text]}]}
-       {:name :explorer-toolbar-view :parent :zipmap :args {:keys [{:value :tree} {:value :styles} {:value :actions}] :vals [:_explorer-toolbar-tree :explorer-styles :_explorer-actions]}}]}
+       {:name :_explorer-row-name :parent :get :args {:coll :_explorer-input-row :key {:value :name} :default ""}}
+       {:name :_explorer-row-secret :parent :get :args {:coll :_explorer-input-row :key {:value :secret} :default false}}
+       {:name :_explorer-row-path :parent :get :args {:coll :_explorer-input-row :key {:value :secret-path} :default ""}}
+       {:name :_explorer-row-service :parent :get :args {:coll :_explorer-input-row :key {:value :service} :default false}}
+       {:name :_explorer-row-service-state :parent :get :args {:coll :_explorer-input-row :key {:value :service-state} :default ""}}
+       {:name :_explorer-row-app :parent :get :args {:coll :_explorer-input-row :key {:value :app} :default false}}
+       {:name :_explorer-row-app-hosts :parent :get :args {:coll :_explorer-input-row :key {:value :app-hosts} :default ""}}
+       {:name :_explorer-row-type :parent :get :args {:coll :_explorer-input-row :key {:value :type} :default false}}
+       {:name :_explorer-row-test :parent :get :args {:coll :_explorer-input-row :key {:value :test} :default false}}
+       {:name :_explorer-row-test-status :parent :get :args {:coll :_explorer-input-row :key {:value :test-status} :default ""}}
+       {:name :_explorer-row-test-error :parent :get :args {:coll :_explorer-input-row :key {:value :test-error} :default ""}}
+       {:name :_explorer-row-failed :parent :get :args {:coll :_explorer-input-row :key {:value :failed} :default 0}}
+       {:name :_explorer-row-type-errors :parent :get :args {:coll :_explorer-input-row :key {:value :type-errors} :default 0}}
+       {:name :_explorer-row-lint :parent :get :args {:coll :_explorer-input-row :key {:value :lint} :default 0}}
+       {:name :_explorer-row-effects :parent :get :args {:coll :_explorer-input-row :key {:value :effects} :default ""}}
+       {:name :_explorer-row-marker-attrs :parent :zipmap :args {:keys [{:value :class} {:value :title} {:value :hidden}]}}
+       {:name :_explorer-row-hide-secret :parent :if :args {:test :_explorer-row-secret :then false :else true}}
+       {:name :_explorer-row-lock-attrs :parent :_explorer-row-marker-attrs :args {:vals ["secret-lock-icon" "Secret — value lives in the vault, never in the graph DB" :_explorer-row-hide-secret]}}
+       {:name :_explorer-row-lock :parent :hiccup :args {:tag "span" :attrs :_explorer-row-lock-attrs :children ["🔒"]}}
+       {:name :_explorer-row-service-class :parent :get :args {:coll {:value {"running" "fn-kind-marker kind-marker-service svc-running" "failed" "fn-kind-marker kind-marker-service svc-failed" "backoff" "fn-kind-marker kind-marker-service svc-backoff" "exited" "fn-kind-marker kind-marker-service svc-exited" "elsewhere" "fn-kind-marker kind-marker-service svc-elsewhere" "disabled" "fn-kind-marker kind-marker-service svc-disabled"}} :key :_explorer-row-service-state :default "fn-kind-marker kind-marker-service"}}
+       {:name :_explorer-row-service-state-empty :parent :equal? :args {:a :_explorer-row-service-state :b ""}}
+       {:name :_explorer-row-service-state-title :parent :str :args {:parts ["Service — " :_explorer-row-service-state]}}
+       {:name :_explorer-row-service-label :parent :if :args {:test :_explorer-row-service-state-empty :then "Service" :else :_explorer-row-service-state-title}}
+       {:name :_explorer-row-hide-service :parent :if :args {:test :_explorer-row-service :then false :else true}}
+       {:name :_explorer-row-service-attrs :parent :_explorer-row-marker-attrs :args {:vals [:_explorer-row-service-class :_explorer-row-service-label :_explorer-row-hide-service]}}
+       {:name :_explorer-row-service-node :parent :hiccup :args {:tag "span" :attrs :_explorer-row-service-attrs :children ["⚙"]}}
+       {:name :_explorer-row-app-hosts-empty :parent :equal? :args {:a :_explorer-row-app-hosts :b ""}}
+       {:name :_explorer-row-app-hosts-title :parent :str :args {:parts ["App — served at " :_explorer-row-app-hosts]}}
+       {:name :_explorer-row-app-title :parent :if :args {:test :_explorer-row-app-hosts-empty :then "App handler" :else :_explorer-row-app-hosts-title}}
+       {:name :_explorer-row-hide-app :parent :if :args {:test :_explorer-row-app :then false :else true}}
+       {:name :_explorer-row-app-attrs :parent :_explorer-row-marker-attrs :args {:vals ["fn-kind-marker kind-marker-app" :_explorer-row-app-title :_explorer-row-hide-app]}}
+       {:name :_explorer-row-app-node :parent :hiccup :args {:tag "span" :attrs :_explorer-row-app-attrs :children ["▣"]}}
+       {:name :_explorer-row-hide-type :parent :if :args {:test :_explorer-row-type :then false :else true}}
+       {:name :_explorer-row-type-attrs :parent :_explorer-row-marker-attrs :args {:vals ["fn-kind-marker kind-marker-type" "Type" :_explorer-row-hide-type]}}
+       {:name :_explorer-row-type-node :parent :hiccup :args {:tag "span" :attrs :_explorer-row-type-attrs :children ["T"]}}
+       {:name :_explorer-row-test-class :parent :get :args {:coll {:value {"succeeded" "fn-kind-marker kind-marker-test test-passed" "failed" "fn-kind-marker kind-marker-test test-failed"}} :key :_explorer-row-test-status :default "fn-kind-marker kind-marker-test test-stale"}}
+       {:name :_explorer-row-test-error-empty :parent :equal? :args {:a :_explorer-row-test-error :b ""}}
+       {:name :_explorer-row-test-failed-error :parent :str :args {:parts ["Test — failed: " :_explorer-row-test-error]}}
+       {:name :_explorer-row-test-failed-title :parent :if :args {:test :_explorer-row-test-error-empty :then "Test — failed" :else :_explorer-row-test-failed-error}}
+       {:name :_explorer-row-test-generic-title :parent :str :args {:parts ["Test — " :_explorer-row-test-status]}}
+       {:name :_explorer-row-test-status-empty :parent :equal? :args {:a :_explorer-row-test-status :b ""}}
+       {:name :_explorer-row-test-stale-title :parent :if :args {:test :_explorer-row-test-status-empty :then "Test — not run for the current version" :else :_explorer-row-test-generic-title}}
+       {:name :_explorer-row-test-failed-status :parent :equal? :args {:a :_explorer-row-test-status :b "failed"}}
+       {:name :_explorer-row-test-other-title :parent :if :args {:test :_explorer-row-test-failed-status :then :_explorer-row-test-failed-title :else :_explorer-row-test-stale-title}}
+       {:name :_explorer-row-test-passed-status :parent :equal? :args {:a :_explorer-row-test-status :b "succeeded"}}
+       {:name :_explorer-row-test-title :parent :if :args {:test :_explorer-row-test-passed-status :then "Test — passed" :else :_explorer-row-test-other-title}}
+       {:name :_explorer-row-hide-test :parent :if :args {:test :_explorer-row-test :then false :else true}}
+       {:name :_explorer-row-test-attrs :parent :_explorer-row-marker-attrs :args {:vals [:_explorer-row-test-class :_explorer-row-test-title :_explorer-row-hide-test]}}
+       {:name :_explorer-row-test-node :parent :hiccup :args {:tag "span" :attrs :_explorer-row-test-attrs :children ["●"]}}
+       {:name :_explorer-row-no-failed :parent :equal? :args {:a :_explorer-row-failed :b 0}}
+       {:name :_explorer-row-failed-plural :parent :equal? :args {:a :_explorer-row-failed :b 1}}
+       {:name :_explorer-row-failed-suffix :parent :if :args {:test :_explorer-row-failed-plural :then "" :else "s"}}
+       {:name :_explorer-row-failed-title :parent :str :args {:parts [:_explorer-row-failed " unresolved failed run" :_explorer-row-failed-suffix]}}
+       {:name :_explorer-row-failed-glyph :parent :str :args {:parts ["✕" :_explorer-row-failed]}}
+       {:name :_explorer-row-failed-attrs :parent :_explorer-row-marker-attrs :args {:vals ["fn-kind-marker kind-marker-failed" :_explorer-row-failed-title :_explorer-row-no-failed]}}
+       {:name :_explorer-row-failed-node :parent :hiccup :args {:tag "span" :attrs :_explorer-row-failed-attrs :children [:_explorer-row-failed-glyph]}}
+       {:name :_explorer-row-no-type-errors :parent :equal? :args {:a :_explorer-row-type-errors :b 0}}
+       {:name :_explorer-row-type-errors-plural :parent :equal? :args {:a :_explorer-row-type-errors :b 1}}
+       {:name :_explorer-row-type-errors-suffix :parent :if :args {:test :_explorer-row-type-errors-plural :then "" :else "s"}}
+       {:name :_explorer-row-type-errors-title :parent :str :args {:parts [:_explorer-row-type-errors " type error" :_explorer-row-type-errors-suffix]}}
+       {:name :_explorer-row-type-errors-glyph :parent :str :args {:parts ["⚠" :_explorer-row-type-errors]}}
+       {:name :_explorer-row-type-errors-attrs :parent :_explorer-row-marker-attrs :args {:vals ["fn-kind-marker kind-marker-type-error" :_explorer-row-type-errors-title :_explorer-row-no-type-errors]}}
+       {:name :_explorer-row-type-errors-node :parent :hiccup :args {:tag "span" :attrs :_explorer-row-type-errors-attrs :children [:_explorer-row-type-errors-glyph]}}
+       {:name :_explorer-row-no-lint :parent :equal? :args {:a :_explorer-row-lint :b 0}}
+       {:name :_explorer-row-lint-plural :parent :equal? :args {:a :_explorer-row-lint :b 1}}
+       {:name :_explorer-row-lint-suffix :parent :if :args {:test :_explorer-row-lint-plural :then "" :else "s"}}
+       {:name :_explorer-row-lint-title :parent :str :args {:parts [:_explorer-row-lint " lint finding" :_explorer-row-lint-suffix " — see the Lint tab or the Inspector"]}}
+       {:name :_explorer-row-lint-glyph :parent :str :args {:parts ["⚐" :_explorer-row-lint]}}
+       {:name :_explorer-row-lint-attrs :parent :_explorer-row-marker-attrs :args {:vals ["fn-kind-marker kind-marker-lint" :_explorer-row-lint-title :_explorer-row-no-lint]}}
+       {:name :_explorer-row-lint-node :parent :hiccup :args {:tag "span" :attrs :_explorer-row-lint-attrs :children [:_explorer-row-lint-glyph]}}
+       {:name :_explorer-row-no-effects :parent :equal? :args {:a :_explorer-row-effects :b ""}}
+       {:name :_explorer-row-effects-title :parent :str :args {:parts ["Effects: " :_explorer-row-effects]}}
+       {:name :_explorer-row-effects-attrs :parent :_explorer-row-marker-attrs :args {:vals ["fn-kind-marker kind-marker-fx" :_explorer-row-effects-title :_explorer-row-no-effects]}}
+       {:name :_explorer-row-effects-node :parent :hiccup :args {:tag "span" :attrs :_explorer-row-effects-attrs :children ["fx"]}}
+       {:name :_explorer-row-name-node :parent :hiccup :args {:tag "span" :attrs {:value {:class "name"}} :children [:_explorer-row-name]}}
+       {:name :_explorer-row-no-path :parent :equal? :args {:a :_explorer-row-path :b ""}}
+       {:name :_explorer-row-path-attrs :parent :_explorer-row-marker-attrs :args {:vals ["secret-path" "Secret vault path" :_explorer-row-no-path]}}
+       {:name :_explorer-row-path-node :parent :hiccup :args {:tag "span" :attrs :_explorer-row-path-attrs :children [:_explorer-row-path]}}
+       {:name :_explorer-row-lock-visible :parent :if :args {:test :_explorer-row-secret :then :_explorer-row-lock :else nil}}
+       {:name :_explorer-row-service-visible :parent :if :args {:test :_explorer-row-service :then :_explorer-row-service-node :else nil}}
+       {:name :_explorer-row-app-visible :parent :if :args {:test :_explorer-row-app :then :_explorer-row-app-node :else nil}}
+       {:name :_explorer-row-type-visible :parent :if :args {:test :_explorer-row-type :then :_explorer-row-type-node :else nil}}
+       {:name :_explorer-row-test-visible :parent :if :args {:test :_explorer-row-test :then :_explorer-row-test-node :else nil}}
+       {:name :_explorer-row-failed-visible :parent :if :args {:test :_explorer-row-no-failed :then nil :else :_explorer-row-failed-node}}
+       {:name :_explorer-row-type-errors-visible :parent :if :args {:test :_explorer-row-no-type-errors :then nil :else :_explorer-row-type-errors-node}}
+       {:name :_explorer-row-lint-visible :parent :if :args {:test :_explorer-row-no-lint :then nil :else :_explorer-row-lint-node}}
+       {:name :_explorer-row-effects-visible :parent :if :args {:test :_explorer-row-no-effects :then nil :else :_explorer-row-effects-node}}
+       {:name :_explorer-row-path-visible :parent :if :args {:test :_explorer-row-no-path :then nil :else :_explorer-row-path-node}}
+       {:name :_explorer-row-tree :parent :hiccup :args {:tag "span" :attrs {:value {:class "gd-explorer-row"}} :children [:_explorer-row-lock-visible :_explorer-row-service-visible :_explorer-row-app-visible :_explorer-row-type-visible :_explorer-row-test-visible :_explorer-row-failed-visible :_explorer-row-type-errors-visible :_explorer-row-lint-visible :_explorer-row-effects-visible :_explorer-row-name-node :_explorer-row-path-visible]}}
+       {:name :_explorer-row-styles :parent :const :args {:value {:value [{:selector "& .gd-explorer-row" :declarations {"display" "inline-flex" "align-items" "center" "min-width" "0" "gap" "0"}} {:selector "& .gd-explorer-row .name" :declarations {"font-weight" "400" "font-size" "0.8125rem"}} {:selector "& .entity-secret .gd-explorer-row .name" :declarations {"flex" "0 0 auto"}} {:selector "& .gd-explorer-row .secret-path" :declarations {"flex" "1 1 auto" "font-family" "monospace" "font-size" "0.6875rem" "color" "var(--card-fg)" "opacity" "0.7" "margin-left" "4px" "white-space" "nowrap" "overflow" "hidden" "text-overflow" "ellipsis"}} {:selector "& .gd-explorer-row .secret-lock-icon" :declarations {"font-size" "0.6875rem" "margin-inline" "0 2px" "flex" "0 0 auto"}} {:selector "& .gd-explorer-row .fn-kind-marker" :declarations {"font-size" "0.625rem" "margin-inline" "0 2px" "flex" "0 0 auto" "color" "var(--muted-fg)"}} {:selector "& .gd-explorer-row .kind-marker-failed" :declarations {"color" "var(--error-fg-strong)"}} {:selector "& .gd-explorer-row .kind-marker-type-error" :declarations {"color" "var(--warning-fg)"}} {:selector "& .gd-explorer-row .kind-marker-lint" :declarations {"color" "var(--muted-fg)"}} {:selector "& .gd-explorer-row .kind-marker-service.svc-running" :declarations {"color" "var(--success-fg)"}} {:selector "& .gd-explorer-row .kind-marker-service.svc-failed" :declarations {"color" "var(--error-fg)"}} {:selector "& .gd-explorer-row .kind-marker-service.svc-backoff" :declarations {"color" "var(--warning-fg)"}} {:selector "& .gd-explorer-row .kind-marker-service.svc-exited" :declarations {"color" "var(--warning-fg)" "opacity" "0.8"}} {:selector "& .gd-explorer-row .kind-marker-service.svc-disabled" :declarations {"opacity" "0.65"}} {:selector "& .gd-explorer-row .kind-marker-app" :declarations {"color" "var(--accent)"}} {:selector "& .gd-explorer-row .kind-marker-fx" :declarations {"font-style" "italic" "opacity" "0.8"}} {:selector "& .gd-explorer-row .kind-marker-type" :declarations {"font-size" "0.5625rem" "opacity" "0.8"}} {:selector "& .gd-explorer-row .kind-marker-test.test-passed" :declarations {"color" "var(--success-fg)"}} {:selector "& .gd-explorer-row .kind-marker-test.test-failed" :declarations {"color" "var(--error-fg)"}} {:selector "& .gd-explorer-row .kind-marker-test.test-stale" :declarations {"opacity" "0.65"}}]}} :return-type [:list {:selector :text :declarations [:map :text :text]}]}
+       {:name :_explorer-no-actions :parent :const :args {:value {:value {:secret false :dismiss false :run false}}}}
+       {:name :_explorer-view-tree :parent :if :args {:test :_explorer-is-row :then :_explorer-row-tree :else :_explorer-toolbar-tree}}
+       {:name :_explorer-view-styles :parent :if :args {:test :_explorer-is-row :then :_explorer-row-styles :else :explorer-styles}}
+       {:name :_explorer-view-actions :parent :if :args {:test :_explorer-is-row :then :_explorer-no-actions :else :_explorer-actions}}
+       {:name :explorer-toolbar-view :parent :zipmap :args {:keys [{:value :tree} {:value :styles} {:value :actions}] :vals [:_explorer-view-tree :_explorer-view-styles :_explorer-view-actions]}}]}

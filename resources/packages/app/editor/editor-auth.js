@@ -84,7 +84,8 @@ async function probeAccountsAuth() {
     }
   } catch (_) { /* network/parse failure → treat as no accounts */ }
   if (accountsMode) {
-    if (wasAuthed !== accountsAuthed || priorAccount !== window.gdAccount?.id) window.dispatchEvent(new Event('gd-auth-changed'));
+    const changed = wasAuthed !== accountsAuthed || priorAccount !== window.gdAccount?.id;
+    if (changed) window.dispatchEvent(new Event('gd-auth-changed'));
     renderAuthLock();
     // The sidebar (edit affordances + admin panels) is painted at boot, BEFORE
     // this async probe resolves — with isAuthenticated() still false for a
@@ -92,7 +93,9 @@ async function probeAccountsAuth() {
     // accounts operator actually sees the create/edit controls + Operate panels
     // instead of a read-only view. Idempotent; skipped until graphData loads
     // (initGraph's own render then paints with the correct auth state).
-    if (accountsAuthed && typeof updateEntityList === 'function'
+    if (accountsAuthed && typeof initGraph === 'function' && changed) {
+      void initGraph().catch(() => {});
+    } else if (accountsAuthed && typeof updateEntityList === 'function'
         && typeof graphData !== 'undefined' && graphData) {
       try { updateEntityList(graphData); } catch (_) {}
     }

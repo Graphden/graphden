@@ -1398,6 +1398,17 @@
            cancellation discards late effect completions after replacement or disposal."
      :see [[:editor "mount"] [:editor "renderRecentFns"]]}
 
+    {:file "resources/packages/app/editor/editor-explorer-graph.js" :defn mountRow
+     :say "Presents one already-authorized Explorer function row through the same ordinary
+           `app.ui-explorer` view as the kind toolbar. The native tree owns the function ID,
+           navigation, selection, ARIA and action buttons; the graph owns the row body's
+           markers, name, vault path and scoped style rules. Loaded rows share one runtime
+           and one list stylesheet. A personal toolbar view with no row surface falls back
+           only for rows, preserving its valid toolbar selection and showing a diagnostic.
+           Disposal follows native subtree removal, and the renderer budget applies per row,
+           never as a cap on the loaded Explorer tree."
+     :see [[:editor "mount"] [:editor "renderRecentFns"]]}
+
     {:file "resources/packages/app/editor/editor-recents.js" :defn renderRecentFns
      :say "The Explorer trail executes the shipped `app.ui-recents` initial and view graphs.
            Its update graph returns state and fixed persistence/navigation requests, deduplicates selections, limits the trail and toggles pins; the view

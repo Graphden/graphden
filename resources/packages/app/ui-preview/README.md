@@ -329,13 +329,23 @@ server Overview subtree. Inspector plans use the existing bounded browser
 budget of 150,000 operations and 10,000 renderer nodes for this section, including
 the server's maximum 400-row usages response.
 
-The Explorer kind/status toolbar is a finite component in `app.ui-explorer`.
-Its ordinary initial/update/view functions project the existing filter model and
-authorized service/app/test/problem cache summaries into eleven toggles and count
-badges. The graph emits only finite filter/detail requests; host adapters invoke
-the existing mutation functions. It neither interprets saved view bindings nor
-limits Explorer entities. Lazy namespace rows, search/view-members results and
-their existing truncation semantics remain independent of this component.
+The Explorer toolbar and function-row presentation share the ordinary
+`app.ui-explorer` initial/update/view identities. The view's typed `surface`
+input selects the finite kind/status toolbar or one function-row body. Host
+projections supply only already authorized cache summaries: kind and problem
+flags, current test/service status, the display name, and a secret's vault path
+(never its value). The graph chooses marker Hiccup and scoped styles. Empty
+markers produce no DOM. Each loaded row gets a small renderer host; the list
+holds one shared row stylesheet and the same runtime serves every row, without
+a whole-tree cap. A legacy personal Explorer view that only supports the toolbar
+keeps that toolbar and uses the shipped graph for rows, with a visible section
+diagnostic.
+
+The graph emits only finite toolbar filter/detail requests; native adapters
+invoke the existing mutation functions. Native treeitems retain function IDs,
+ARIA, focus, selection, actions, lazy namespace loading, search, filter/view
+membership, and their existing truncation semantics. Row output cannot add an
+ID, destination, interactive element, or authorized action.
 
 Create-secret, Dismiss-all and Run-all buttons remain native siblings because
 their pending HTTP operations own their labels and disabled state. The graph

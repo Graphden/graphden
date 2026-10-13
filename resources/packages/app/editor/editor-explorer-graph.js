@@ -1,5 +1,6 @@
-// The finite kind/status toolbar owns its empty host. Filters, lazy rows,
-// persistence, stream lifetimes and pending POST action buttons remain native.
+// The finite toolbar and each function-row body own empty hosts. One Explorer
+// runtime and one scoped row stylesheet serve all loaded rows; the tree,
+// filters, navigation and pending POST controls remain native.
 (() => {
   const api = window.GraphdenBrowser;
   const key = api.keyword;
@@ -15,6 +16,15 @@
   let owner = null;
   let generation = 0;
   let pending = null;
+  let builtinRuntime = null;
+  let rowRuntime = null;
+  let rowSheet = null;
+  let rowStyleSignature = null;
+  let rowFallback = false;
+  const rows = new Set();
+  const rowDefaults = {name: '', secret: false, 'secret-path': '', service: false,
+    'service-state': '', app: false, 'app-hosts': '', type: false, test: false,
+    'test-status': '', 'test-error': '', failed: 0, 'type-errors': 0, lint: 0, effects: ''};
   const context = () => JSON.stringify([window.gdPrefOwner || null,
     typeof graphdenCurrentOrg === 'string' ? graphdenCurrentOrg : null,
     typeof getCurrentBranchName === 'function' ? getCurrentBranchName() : null]);
@@ -23,7 +33,8 @@
     return Number.isSafeInteger(value) && value >= 0 ? value : null;
   }
   function inputs() {
-    return record({selected: new Map(kinds.slice(1).map(kind => [kind, lensKinds.has(kind)])),
+    return record({surface: 'toolbar', row: record(rowDefaults),
+      selected: new Map(kinds.slice(1).map(kind => [kind, lensKinds.has(kind)])),
       counts: new Map([['services', count('getAllServiceFnIdCount')], ['apps', count('getAppRouteCount')],
         ['tests', count('getTestStatusCount')], ['failed', count('getFailureTotal')],
         ['type-errors', count('getTypeErrorTotal')], ['lint', count('getLintTotal')]]),
@@ -55,6 +66,95 @@
         || !['true', 'false'].includes(button.props['aria-pressed'])
         || (index < kinds.length ? button.props['data-kind'] !== kinds[index] : button.props['data-detail'] !== 'fx')) throw new Error('Invalid Explorer toggle');
     });
+  }
+  function rowInputs(projection) {
+    return record({surface: 'row', row: record(projection), selected: new Map(), counts: new Map(),
+      failed: 0, authenticated: false, 'apps-available': false, fx: false});
+  }
+  function validateRow(view, projection) {
+    exact(view, ['tree', 'styles', 'actions']);
+    const actions = field(view, 'actions');
+    exact(actions, ['secret', 'dismiss', 'run']);
+    if (['secret', 'dismiss', 'run'].some(name => field(actions, name) !== false)) throw new Error('Explorer row cannot request actions');
+    const tree = window.GraphdenRenderer.vnode(field(view, 'tree'), 'gd-explorer-row', 48);
+    const parts = children(tree);
+    const classes = ['secret-lock-icon', 'kind-marker-service', 'kind-marker-app', 'kind-marker-type',
+      'kind-marker-test', 'kind-marker-failed', 'kind-marker-type-error', 'kind-marker-lint',
+      'kind-marker-fx', 'name', 'secret-path'];
+    const visible = [projection.secret, projection.service, projection.app, projection.type,
+      projection.test, projection.failed > 0, projection['type-errors'] > 0,
+      projection.lint > 0, !!projection.effects, true, !!projection['secret-path']];
+    const expected = classes.filter((_, index) => visible[index]);
+    if (tree.type !== 'span' || tree.props.className !== 'gd-explorer-row'
+      || Object.keys(tree.props).some(name => name !== 'className' && name !== 'children')
+      || parts.length !== expected.length) throw new Error('Invalid Explorer row');
+    parts.forEach((part, index) => {
+      if (part.type !== 'span' || !part.props.className?.split(' ').includes(expected[index])
+        || Object.keys(part.props).some(name => !['className', 'title', 'hidden', 'children', 'key'].includes(name))
+        || children(part).some(value => typeof value !== 'string' && !Number.isSafeInteger(value))
+        || (expected[index] !== 'name' && part.props.hidden !== false)) throw new Error('Invalid Explorer row field');
+    });
+    const name = parts[expected.indexOf('name')];
+    const path = parts[expected.indexOf('secret-path')];
+    if (children(name).join('') !== projection.name
+      || (path && children(path).join('') !== projection['secret-path'])) {
+      throw new Error('Explorer row identity mismatch');
+    }
+    return window.GraphdenStyles.normalize(field(view, 'styles'));
+  }
+  function clearRowStyles() {
+    window.GraphdenStyles.release(rowSheet);
+    rowSheet = null; rowStyleSignature = null;
+    const list = document.getElementById('entity-list');
+    if (list) delete list.dataset.gdUiStyle;
+  }
+  function renderRow(instance) {
+    let view;
+    let normalized;
+    try {
+      view = rowRuntime.run('view', {inputs: rowInputs(instance.projection)});
+      normalized = validateRow(view, instance.projection);
+      const signature = JSON.stringify(normalized);
+      if (rowStyleSignature !== null && signature !== rowStyleSignature) throw new Error('Explorer row styles vary by row');
+      if (!rowSheet) {
+        rowSheet = window.GraphdenStyles.acquire(normalized);
+        rowStyleSignature = signature;
+        document.getElementById('entity-list').dataset.gdUiStyle = rowSheet.id;
+      }
+    } catch (error) {
+      if (rowRuntime === builtinRuntime || rowFallback) throw error;
+      rowRuntime = builtinRuntime;
+      rowFallback = true;
+      clearRowStyles();
+      window.gdUIComponentSectionFallback?.('explorer', 'rows');
+      for (const row of rows) renderRow(row);
+      return;
+    }
+    instance.renderer.render(field(view, 'tree'));
+  }
+  function mountRow(rowHost, projection) {
+    if (!builtinRuntime) builtinRuntime = builtin();
+    if (!rowRuntime) rowRuntime = builtinRuntime;
+    const renderer = window.GraphdenRenderer.mount(rowHost, {idPrefix: 'gd-explorer-row', nodeLimit: 48});
+    const instance = {host: rowHost, projection, renderer};
+    rows.add(instance);
+    try { renderRow(instance); }
+    catch (error) { rows.delete(instance); renderer.dispose(); throw error; }
+  }
+  function disposeRows(scope) {
+    if (!scope) return;
+    for (const instance of rows) {
+      if (scope === instance.host || scope.contains(instance.host)) {
+        instance.renderer.dispose();
+        rows.delete(instance);
+      }
+    }
+  }
+  function resetRows(runtime) {
+    rowRuntime = runtime;
+    rowFallback = false;
+    clearRowStyles();
+    for (const instance of rows) renderRow(instance);
   }
   function paint(view) {
     mounted.render(field(view, 'tree'), field(view, 'styles'));
@@ -91,7 +191,9 @@
     if (!host) return;
     owner = context();
     mounted = window.GraphdenRenderer.mount(host, {idPrefix: 'gd-explorer', nodeLimit: 96});
-    controller = window.GraphdenComponent.create(builtin(), {inputs, validateState, validateView, render: paint,
+    if (!builtinRuntime) builtinRuntime = builtin();
+    if (!rowRuntime) rowRuntime = builtinRuntime;
+    controller = window.GraphdenComponent.create(builtinRuntime, {inputs, validateState, validateView, render: paint,
       rendererOptions: {idPrefix: 'gd-explorer', nodeLimit: 96}, requests: {
         'toggle-filter': {validate: value => request(value, 'toggle-filter', kinds), execute: kind => { toggleKind(kind); }},
         'toggle-detail': {validate: value => request(value, 'toggle-detail', ['fx']), execute: value => { toggleTreeDetail(value); }},
@@ -101,7 +203,7 @@
   }
   async function reload() {
     if (!controller || typeof window.gdLoadUIComponentRuntime !== 'function') return;
-    if (owner !== context()) { dispose(); refresh(); return; }
+    if (owner !== context()) { resetContext(); refresh(); return; }
     const own = ++generation;
     const active = controller;
     const started = context();
@@ -111,13 +213,15 @@
       const runtime = await window.gdLoadUIComponentRuntime('explorer', window.GraphdenBuiltinPlans.plans.explorer, {}, loading.signal);
       if (loading.signal.aborted || own !== generation || active !== controller || started !== context()) return;
       active.replaceRuntime(runtime);
+      resetRows(runtime);
     } catch (error) {
       if (loading.signal.aborted || own !== generation || active !== controller || started !== context() || error.name === 'AbortError') return;
       window.gdUIComponentFailed?.('explorer');
-      active.replaceRuntime(builtin());
+      active.replaceRuntime(builtinRuntime);
+      resetRows(builtinRuntime);
     } finally { if (pending === loading) pending = null; }
   }
-  function dispose() {
+  function disposeToolbar() {
     generation++;
     pending?.abort(); pending = null;
     host?.removeEventListener('click', click);
@@ -125,11 +229,25 @@
     mounted?.dispose(); mounted = null;
     host = null; owner = null;
   }
+  function resetContext() {
+    disposeToolbar();
+    // A preference or view-context refresh can preserve native loaded rows.
+    // Auth changes use dispose(), which drops rows and their stylesheet.
+    if (rows.size) resetRows(builtinRuntime);
+    else { clearRowStyles(); rowRuntime = builtinRuntime; rowFallback = false; }
+  }
+  function dispose() {
+    disposeToolbar();
+    disposeRows(document.getElementById('entity-list'));
+    clearRowStyles();
+    rowRuntime = builtinRuntime;
+    rowFallback = false;
+  }
   function refresh() {
-    if (controller && owner !== context()) dispose();
+    if (controller && owner !== context()) resetContext();
     create();
     controller?.refresh();
   }
-  window.gdExplorerGraph = {refresh, reload, dispose};
+  window.gdExplorerGraph = {refresh, reload, dispose, mountRow, disposeRows};
   window.addEventListener('gd-auth-changed', () => { dispose(); refresh(); });
 })();

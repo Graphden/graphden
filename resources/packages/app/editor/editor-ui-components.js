@@ -149,6 +149,11 @@
   window.addEventListener('focus', () => { if (eligible()) refresh(); });
   document.addEventListener('visibilitychange', () => { if (!document.hidden && eligible()) refresh(); });
   window.gdUIComponentFailed = component => { runtimeIdentities.delete(component); status(component, 'Personal UI graph does not match the component contract. Using built-in controls.'); };
+  // A legacy Explorer view can still own its valid toolbar while its newer
+  // function-row section uses the shipped graph. Keep that selection identity.
+  window.gdUIComponentSectionFallback = (component, section) => {
+    if (component === 'explorer' && section === 'rows') status(component, 'Personal Explorer rows are unavailable. Using built-in row presentation.');
+  };
   window.gdUIComponentRuntimeIdentity = component => { const value = runtimeIdentities.get(component); return value?.stamp === stamp() ? value.id : null; };
   window.gdUIComponentsStatus = () => [...statuses.values()].find(Boolean) || '';
   window.gdUIComponentsSelection = selection;

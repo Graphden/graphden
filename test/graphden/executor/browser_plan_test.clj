@@ -859,3 +859,32 @@
         :expected {:secret true :dismiss false :run false}}
        {:entry :toolbar-actions :inputs {:inputs (assoc inputs :selected {})}
         :expected {:secret false :dismiss false :run false}}])))
+
+
+(deftest explorer-function-row-presentation-matches-jvm-and-browser
+  (let [definitions (:fns (edn/read-string (slurp "resources/packages/app/ui-explorer/fns.edn")))
+        definitions (conj definitions {:name :row-tree :parent :get
+                                       :args {:coll :explorer-toolbar-view :key {:value :tree}}})
+        {:keys [graph impls ids]} (map-fixture definitions)
+        row {:name "demo" :secret true :secret-path "/demo" :service true :service-state "running"
+             :app true :app-hosts "example.test" :type true :test true :test-status "failed"
+             :test-error "oops" :failed 2 :type-errors 1 :lint 3 :effects "io, time"}
+        marker (fn [css-class title hidden glyph]
+                 [:span {:class css-class :title title :hidden hidden} glyph])]
+    (assert-differential!
+      graph impls ids
+      [{:entry :row-tree
+        :inputs {:inputs {:surface "row" :row row :selected {} :counts {} :failed 0
+                          :authenticated false :apps-available false :fx false}}
+        :expected [:span {:class "gd-explorer-row"}
+                   (marker "secret-lock-icon" "Secret — value lives in the vault, never in the graph DB" false "🔒")
+                   (marker "fn-kind-marker kind-marker-service svc-running" "Service — running" false "⚙")
+                   (marker "fn-kind-marker kind-marker-app" "App — served at example.test" false "▣")
+                   (marker "fn-kind-marker kind-marker-type" "Type" false "T")
+                   (marker "fn-kind-marker kind-marker-test test-failed" "Test — failed: oops" false "●")
+                   (marker "fn-kind-marker kind-marker-failed" "2 unresolved failed runs" false "✕2")
+                   (marker "fn-kind-marker kind-marker-type-error" "1 type error" false "⚠1")
+                   (marker "fn-kind-marker kind-marker-lint" "3 lint findings — see the Lint tab or the Inspector" false "⚐3")
+                   (marker "fn-kind-marker kind-marker-fx" "Effects: io, time" false "fx")
+                   [:span {:class "name"} "demo"]
+                   (marker "secret-path" "Secret vault path" false "/demo")]}])))

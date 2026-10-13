@@ -42,6 +42,9 @@ const _subtreeFetchInFlight = new Map();
 // (they are as current as any), one from before a reload contributes nothing.
 let _subtreeEpoch = 0;
 let _subtreeResetEpoch = 0;
+// Authentication changes invalidate every server-fed graph reply, including
+// requests already in flight under the previous account.
+let _graphAuthEpoch = 0;
 
 // Merge freshly-fetched fn rows into the accumulating cache. Full (subtree)
 // rows and light (tree/namespace/search) rows coexist: a later light row
@@ -89,20 +92,25 @@ window.isNamespaceLoading = isNamespaceLoading;
 const _nsFetchInFlight = new Map();
 async function loadNamespaceFns(nsId) {
   const key = nsId || '';
+  const authEpoch = _graphAuthEpoch;
   if (_loadedNamespaceIds.has(key)) return;
   if (_nsFetchInFlight.has(key)) return _nsFetchInFlight.get(key);
   const p = (async () => {
     const url = API.api_graph_entities + '?scope=namespace'
       + (nsId ? '&namespace-id=' + encodeURIComponent(nsId) : '');
     const r = await fetch(url);
+    if (authEpoch !== _graphAuthEpoch) return;
     if (!r.ok) throw new Error('loadNamespaceFns HTTP ' + r.status);
     const payload = await r.json();
+    if (authEpoch !== _graphAuthEpoch) return;
     mergeKnownFns(payload.fns);
     _loadedNamespaceIds.add(key);
     syncKnownFnsIntoGraph();
   })();
   _nsFetchInFlight.set(key, p);
-  try { await p; } finally { _nsFetchInFlight.delete(key); }
+  try { await p; } finally {
+    if (_nsFetchInFlight.get(key) === p) _nsFetchInFlight.delete(key);
+  }
 }
 window.loadNamespaceFns = loadNamespaceFns;
 
@@ -111,9 +119,12 @@ window.loadNamespaceFns = loadNamespaceFns;
 async function searchFns(q) {
   const needle = (q || '').trim();
   if (!needle) return { fns: [], truncated: false };
+  const authEpoch = _graphAuthEpoch;
   const r = await fetch(API.api_graph_entities + '?scope=search&q=' + encodeURIComponent(needle));
+  if (authEpoch !== _graphAuthEpoch) return {fns: [], truncated: false};
   if (!r.ok) throw new Error('searchFns HTTP ' + r.status);
   const payload = await r.json();
+  if (authEpoch !== _graphAuthEpoch) return {fns: [], truncated: false};
   mergeKnownFns(payload.fns);
   syncKnownFnsIntoGraph();
   return { fns: payload.fns || [], truncated: !!payload['truncated?'] };
@@ -260,11 +271,26 @@ function resetGraphCaches() {
   _loadedNamespaceIds = new Set();
 }
 
+window.addEventListener('gd-auth-changed', () => {
+  _graphAuthEpoch++;
+  resetGraphCaches();
+  _nsFetchInFlight.clear();
+  graphData = null;
+  lookups = null;
+  richTypes = {};
+  VALUE_KINDS = [];
+  if (typeof gdInvalidateSecretsAuth === 'function') gdInvalidateSecretsAuth();
+  if (typeof gdInvalidateExplorerAuth === 'function') gdInvalidateExplorerAuth();
+  if (typeof gdInvalidateViewAuth === 'function') gdInvalidateViewAuth();
+  if (typeof renderEntityList === 'function') renderEntityList(null);
+});
+
 // After the fetches: install the fresh shell and what rides with it.
 // `typeResp` is the GET /api/types response (null / not-ok → the registry
 // is left as it was); `onTypesUnparseable(err)` decides what a broken body
 // means for the caller.
-async function installGraphShell(tree, typeResp, onTypesUnparseable) {
+async function installGraphShell(tree, typeResp, onTypesUnparseable, authEpoch) {
+  if (authEpoch !== _graphAuthEpoch) return false;
   graphData = graphShellFromTree(tree);
   // The shell has NO subtree — say so again. A selection's `ensureSubtreeFor`
   // that landed during the caller's awaits set `_subtreeRootId` to its fn and
@@ -284,7 +310,11 @@ async function installGraphShell(tree, typeResp, onTypesUnparseable) {
   // still-settling boot, 2026-09-19).
   syncKnownFnsIntoGraph();
   if (typeResp?.ok) {
-    try { richTypes = await typeResp.json(); } catch (err) { onTypesUnparseable(err); }
+    try {
+      const parsed = await typeResp.json();
+      if (authEpoch !== _graphAuthEpoch) return false;
+      richTypes = parsed;
+    } catch (err) { onTypesUnparseable(err); }
     // Server-partial popovers key rich args by binding-id in
     // `_rowActionsUseSiteArgs`; entries staled by this refresh would
     // otherwise accumulate for the whole session.
@@ -298,6 +328,7 @@ async function installGraphShell(tree, typeResp, onTypesUnparseable) {
   // Resolve the secret-leaf base-fn id once so isSecretFn() stays
   // synchronous without a full-fns mirror to scan.
   if (typeof primeSecretLeafId === 'function') primeSecretLeafId();
+  return authEpoch === _graphAuthEpoch;
 }
 
 // Repaint the Explorer from the installed shell. A graph write can change
@@ -316,6 +347,7 @@ function repaintExplorer() {
  * Initialize the graph editor
  */
 async function initGraph() {
+  const authEpoch = _graphAuthEpoch;
   // Load the namespace tree + the rich-type registry in parallel. Types feed
   // the in-place edit popovers' "Expected: <type>" hints, so they need to be
   // ready before the user opens any editor.
@@ -333,7 +365,13 @@ async function initGraph() {
   // auth question for everyone — only when it isn't 401 do the three
   // secondary fetches go out (in parallel; they start on the tree's
   // response headers, so the authed path pays ~one RTT).
-  const entResp = await fetch(API.api_graph_entities + '?scope=tree');
+  let entResp;
+  try { entResp = await fetch(API.api_graph_entities + '?scope=tree'); }
+  catch (error) {
+    if (authEpoch !== _graphAuthEpoch) return;
+    throw error;
+  }
+  if (authEpoch !== _graphAuthEpoch) return;
   const [typeResp, vkResp] = (entResp.status === 401)
     ? [null, null]
     : await Promise.all([
@@ -343,6 +381,7 @@ async function initGraph() {
           ? loadServicesEager().catch(() => null)
           : null,
       ]);
+  if (authEpoch !== _graphAuthEpoch) return;
   // Auth wall (B3): the graph view is login-gated when auth is active, so an
   // unauthenticated (or stale-token) boot gets 401 here — send the user to
   // sign in instead of dying into the red fatal banner. `openAuthPopover`
@@ -361,16 +400,22 @@ async function initGraph() {
     return;
   }
   const tree = await entResp.json();
+  if (authEpoch !== _graphAuthEpoch) return;
   if (vkResp?.ok) {
-    try { VALUE_KINDS = await vkResp.json(); } catch (err) {
+    try {
+      const parsed = await vkResp.json();
+      if (authEpoch !== _graphAuthEpoch) return;
+      VALUE_KINDS = parsed;
+    } catch (err) {
       console.error(API.api_value_kinds + ' JSON parse failed — type-picker may be incomplete', err);
       VALUE_KINDS = [];
     }
   }
-  await installGraphShell(tree, typeResp, (err) => {
+  const installed = await installGraphShell(tree, typeResp, (err) => {
     console.error(API.api_types + ' JSON parse failed — type tooltips will be empty', err);
     richTypes = {};
-  });
+  }, authEpoch);
+  if (!installed) return;
   repaintExplorer();
   // Proactive plan-usage badge — the fn count just (re)loaded, so refresh it
   // after every graph mutation (create / delete / rename all call initGraph).
@@ -398,6 +443,7 @@ async function initGraph() {
 // without a full page reload. Kept as a separate fn from `init()` so it
 // doesn't also re-fire the auth / hash navigation work.
 async function loadGraphData() {
+  const authEpoch = _graphAuthEpoch;
   // Post-mutation refresh: re-fetch the namespace tree (counts can shift on
   // create/delete/rename) AND re-prime the current subtree.
   const prevRoot = _subtreeRootId;
@@ -415,17 +461,20 @@ async function loadGraphData() {
       fetch(API.api_types).catch(() => null),
     ]);
   } catch (err) {
+    if (authEpoch !== _graphAuthEpoch) return;
     // Surface network drops in DevTools — caller (post-mutation
     // refresh) silently leaves stale state on the screen otherwise.
     console.error('loadGraphData fetch threw', err);
     return;
   }
+  if (authEpoch !== _graphAuthEpoch) return;
   if (!treeResp.ok) {
     console.error('loadGraphData HTTP', treeResp.status, treeResp.statusText);
     return;
   }
   // A broken types body keeps the prior richTypes rather than blanking chips.
-  await installGraphShell(await treeResp.json(), typeResp, () => {});
+  const installed = await installGraphShell(await treeResp.json(), typeResp, () => {}, authEpoch);
+  if (!installed) return;
   // Re-fetch subtree for the previously-rendered fn so overlays /
   // type-chips reflect the mutation. `renderGraph` would do this
   // anyway, but a fresh prime here keeps any synchronous reads of
@@ -437,6 +486,7 @@ async function loadGraphData() {
       console.error('loadGraphData subtree refresh failed', err);
     }
   }
+  if (authEpoch !== _graphAuthEpoch) return;
   repaintExplorer();
 
   // Exactly one render: `selectFnByName` → `selectFn` → `renderGraph`

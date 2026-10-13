@@ -32,10 +32,12 @@ let _primedSecretLeafId = null;
 async function primeSecretLeafId() {
   if (_primedSecretLeafId) return _primedSecretLeafId;
   if (typeof resolveFnByName !== 'function') return null;
+  const authEpoch = _secretsAuthEpoch;
   try {
     // Qualified: a user fn named `secret-leaf` in another namespace
     // must not shadow the platform one (per-namespace names).
     const fn = await resolveFnByName('web.vault/secret-leaf');
+    if (authEpoch !== _secretsAuthEpoch) return null;
     if (fn?.id) {
       _primedSecretLeafId = fn.id;
       // Repaint so 🔒 badges / secret classification appear now that the
@@ -78,8 +80,17 @@ function isSecretFn(fn) {
 
 let _secretsList = [];
 let _secretsLoaded = false;
+let _secretsAuthEpoch = 0;
+
+function gdInvalidateSecretsAuth() {
+  _secretsAuthEpoch++;
+  _secretsList = [];
+  _secretsLoaded = false;
+  _primedSecretLeafId = null;
+}
 
 async function loadSecrets() {
+  const authEpoch = _secretsAuthEpoch;
   if (!isAuthenticated()) {
     _secretsList = [];
     _secretsLoaded = true;
@@ -87,6 +98,7 @@ async function loadSecrets() {
   }
   try {
     const r = await authFetch(API.api_secrets);
+    if (authEpoch !== _secretsAuthEpoch) return _secretsList;
     if (!r.ok) {
       // 401 is the common case (anonymous visitor); keep that quiet.
       // Other statuses indicate a real backend problem we should
@@ -99,8 +111,10 @@ async function loadSecrets() {
       return _secretsList;
     }
     const data = await r.json();
+    if (authEpoch !== _secretsAuthEpoch) return _secretsList;
     _secretsList = data.ok ? (data.secrets || []) : [];
   } catch (err) {
+    if (authEpoch !== _secretsAuthEpoch) return _secretsList;
     console.error('list-secrets fetch threw', err);
     _secretsList = [];
   }

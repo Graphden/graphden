@@ -49,6 +49,14 @@ editor to load a tab, focus its button or close the narrow sheet. Server-rendere
 tab bodies, Run forms, comparison discussions and CodeMirror retain their native
 owners; changing graph chrome does not replace those controls.
 
+The Explorer's selected view also presents each loaded function row. Its typed
+`surface` input selects the toolbar or row body, so an inherited Explorer view
+can change marker Hiccup and scoped styles through the same graph editor. The
+tree still owns function IDs, keyboard navigation, selection and action buttons.
+Rows read only the display fields and status summaries already authorized for
+that tree. Older personal Explorer views continue to control their toolbar;
+the shipped row presentation appears with a section-specific diagnostic.
+
 1. Choose **Personalize account menu**, then **Menu view** to open your own
    `account-menu-view` child.
 2. On the root's free `theme` input, choose **+ → Bind literal**. Set `accent`

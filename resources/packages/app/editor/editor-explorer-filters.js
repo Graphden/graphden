@@ -64,6 +64,7 @@ let _viewTotal = null;          // the server's count before the 500 cap (null =
 let _viewMissing = null;        // {uses:[ids], views:[ids]} — chips naming a deleted fn / view
 let _viewSeq = 0;
 let _sharedViews = null;        // GET /api/views cache: [{id,name,filters}] | null
+let _sharedViewsAuthEpoch = 0;
 let _viewApplySeq = 0;
 
 function _normFilters(raw) {
@@ -496,9 +497,11 @@ function gdRefreshViewMembers() {
 async function gdFetchSharedViews(force) {
   if (_sharedViews && !force) return _sharedViews;
   if (!(window.API && API.api_views) || typeof authFetch !== 'function') { _sharedViews = []; return _sharedViews; }
+  const authSeq = _sharedViewsAuthEpoch;
   try {
     const r = await authFetch(API.api_views);
     const rows = r.ok ? await r.json() : [];
+    if (authSeq !== _sharedViewsAuthEpoch) return [];
     const viewNames = new Map((rows || []).map(view => [view.id, view.name]));
     _sharedViews = (rows || []).map(view => {
       const src = view.filters || {};
@@ -512,10 +515,18 @@ async function gdFetchSharedViews(force) {
         views: [...new Set([...(src.views || []), ...(src.also || [])])].map(reference)});
       return {...view, filters, shared: true};
     });
-  } catch (_) { _sharedViews = []; }
+  } catch (_) { if (authSeq === _sharedViewsAuthEpoch) _sharedViews = []; }
   return _sharedViews;
 }
 function gdInvalidateSharedViews() { _sharedViews = null; }
+function gdInvalidateViewAuth() {
+  _viewSeq++;
+  _sharedViewsAuthEpoch++;
+  _viewMembers = null;
+  _viewTotal = null;
+  _viewMissing = null;
+  _sharedViews = null;
+}
 function gdSharedViewsCached() { return _sharedViews; }
 
 // A view just saved in the graph under `name` IS the active set — name it

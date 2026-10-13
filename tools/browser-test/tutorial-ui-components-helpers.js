@@ -1,6 +1,6 @@
 'use strict';
 const {assert, api, BASE} = require('./edit-test-helpers');
-const {waitTourTitle, clickTourButton, finishAndDelete} = require('./tutorial-tour-helpers');
+const {waitTourTitle, clickTourButton} = require('./tutorial-tour-helpers');
 
 async function settings(page) {
   if (!await page.locator('.auth-menu-item[data-item="Settings"]').isVisible()) {
@@ -62,7 +62,8 @@ async function waitForPersonalMenuValue(page, fnId, configuration, value, token 
   // plan finish reloading. Opening earlier is closed by that reload.
   await page.waitForFunction(({fnId, configuration, value, token}) => {
     const shell = window.gdShellMenuGraph;
-    if (!shell?.ready || !shell.runtime || window.gdUIComponentRuntimeIdentity?.('account-menu') !== configuration
+    if (!shell?.ready || !shell.runtime || window.gdUIComponentsRoots?.()['menu-id'] !== configuration
+      || window.gdUIComponentRuntimeIdentity?.('account-menu') !== window.gdUIConfigurationState?.()?.selection?.['fn-id']
       || !(graphData.bindings || []).some(row => row['fn-id'] === fnId && row.value === value
         && lookups.slotMap.get(row['slot-id'])?.name === 'value')) return false;
     const key = window.GraphdenBrowser.keyword;
@@ -75,7 +76,8 @@ async function waitForPersonalMenuValue(page, fnId, configuration, value, token 
 async function waitForPersonalMenuHome(page, fnId, configuration) {
   await page.waitForFunction(({fnId, configuration}) => {
     const shell = window.gdShellMenuGraph;
-    if (!shell?.ready || !shell.runtime || window.gdUIComponentRuntimeIdentity?.('account-menu') !== configuration) return false;
+    if (!shell?.ready || !shell.runtime || window.gdUIComponentsRoots?.()['menu-id'] !== configuration
+      || window.gdUIComponentRuntimeIdentity?.('account-menu') !== window.gdUIConfigurationState?.()?.selection?.['fn-id']) return false;
     const binding = (graphData.bindings || []).find(row => row['fn-id'] === fnId
       && lookups.slotMap.get(row['slot-id'])?.name === 'vals');
     if (!(graphData['list-items'] || []).some(row => row['binding-id'] === binding?.id
@@ -97,98 +99,124 @@ function componentCleanupTimeout(manifest) {
   return Math.max(120000, (manifest.functions.length + manifest.namespaces.length) * 10000);
 }
 
-async function walkUIComponentsLesson(page, {onReceipt = async () => {}, cleanupOnly = false} = {}) {
+async function reviewEditorConfigurationCleanup(page, timeout) {
+  let remaining = await page.evaluate(() => (_tourState?.editorConfigurations || []).filter(row => row.receipt !== 'removed').length);
+  while (remaining) {
+    await waitTourTitle(page, 'Delete these tutorial UI graphs?', timeout);
+    const text = await page.locator('#gd-tour-pop').textContent();
+    assert(text.includes('including your edits') && text.includes('Restore'),
+      'cleanup presents the current deletion and restore decision before consent');
+    assert(await clickTourButton(page, 'Delete these graphs & restore'), 'confirm the reviewed exact configuration cleanup');
+    await page.waitForFunction(previous => (_tourState?.editorConfigurations || [])
+      .filter(row => row.receipt !== 'removed').length < previous, remaining, {timeout});
+    remaining = await page.evaluate(() => (_tourState?.editorConfigurations || []).filter(row => row.receipt !== 'removed').length);
+  }
+}
+
+async function bindPersonalMenuTheme(page, entry, accent, background) {
+  await page.waitForFunction(entry => [...document.querySelectorAll('.placeholder-binder[data-arg-name="theme"]')]
+    .some(el => el.dataset.fnName === lookups.fnMap.get(entry)?.name), entry);
+  const selector = await page.evaluate(entry => {
+    const el = [...document.querySelectorAll('.placeholder-binder[data-arg-name="theme"]')]
+      .find(el => el.dataset.fnName === lookups.fnMap.get(entry)?.name);
+    return '.placeholder-binder[data-node-id="' + CSS.escape(el.dataset.nodeId) + '"]';
+  }, entry);
+  const binder = page.locator(selector);
+  await binder.waitFor({state: 'visible'});
+  assert(await binder.evaluate((el, id) => el.dataset.fnName === lookups.fnMap.get(id)?.name, entry),
+    'the free input binder belongs to the personal view root');
+  await binder.click();
+  await page.getByRole('button', {name: 'Bind literal', exact: true}).click();
+  const form = page.locator('.arg-value-edit-popover');
+  await form.locator('[data-form-field][data-field-path="accent"]').waitFor({state: 'visible', timeout: 60000});
+  assert(await form.locator('input[type="color"]').count() === 2,
+    'the inherited theme record retains both canonical color widgets');
+  await form.locator('[data-form-field][data-field-path="accent"]').fill(accent);
+  await form.locator('[data-form-field][data-field-path="canvas-background"]').fill(background);
+  await form.getByRole('button', {name: 'Save', exact: true}).click();
+  await form.waitFor({state: 'detached'});
+}
+
+async function walkUIComponentsLesson(page, {onReceipt = async () => {}, onStagedReceipt = async () => {}, cleanupOnly = false} = {}) {
   await page.goto(BASE + '/?tutorial=25');
-  await waitTourTitle(page, 'Personal graphs, real editor components', 150000);
+  await waitTourTitle(page, 'Personal graphs, shared definitions', 150000);
   assert(await clickTourButton(page, 'Next'), 'lesson 25 starts');
   await waitTourTitle(page, 'Open UI graphs');
   await settings(page);
-  await waitTourTitle(page, 'Create personal graphs');
-  const previous = await page.evaluate(() => ({components: gdPrefRead('components'), theme: gdPrefRead('theme'), branch: getCurrentBranchName()}));
-  const preferencePath = await page.evaluate(() => new URL(API.api_prefs_key('components'), location.href).pathname);
-  const matchesSelectionWrite = url => url.pathname === preferencePath;
+  await waitTourTitle(page, 'Personalize the menu');
+  const previous = await page.evaluate(() => ({components: gdPrefRead('components'),
+    configuration: gdUIConfigurationState().selection['fn-id'], theme: gdPrefRead('theme'),
+    picker: gdUIComponentsRoots()['picker-id'], branch: getCurrentBranchName()}));
+  const applyPath = await page.evaluate(() => new URL(API.api_ui_configuration_apply, location.href).pathname);
+  const matchesApply = url => url.pathname === applyPath;
   let selectionWaitedForPersistence = false;
-  const holdSelectionWrite = async route => {
-    if (route.request().method() !== 'PUT') return route.continue();
+  const holdApply = async route => {
+    if (route.request().method() !== 'POST') return route.continue();
     try {
-      // Delay the real write, without synthesizing its response. The first
-      // plan must not race the server's authoritative preference lookup.
-      await page.waitForTimeout(300);
-      selectionWaitedForPersistence = await page.evaluate(value =>
-        JSON.stringify(gdPrefRead('components')) === JSON.stringify(value), previous.components);
+      const staged = await page.evaluate(() => _tourState.editorConfigurations.at(-1));
+      await onStagedReceipt({...staged, configurationProposal: route.request().postDataJSON()});
+      selectionWaitedForPersistence = await page.evaluate(id =>
+        gdUIConfigurationState()?.selection?.['fn-id'] === id, previous.configuration);
     } finally { await route.continue(); }
   };
-  await page.route(matchesSelectionWrite, holdSelectionWrite);
-  await page.locator('#gd-ui-components-create').click();
-  const picker = page.locator('.fn-picker-popover[aria-label="Pick a namespace"]');
-  // A cloud runner supplies the full authorized path. Resolve its actual
-  // UUID from the editor's namespace index and refuse ambiguous labels.
-  const destinationPath = process.env.GRAPHDEN_COMPONENT_NAMESPACE || '(root)';
-  const destinationIds = await page.evaluate(path => path === '(root)' ? [null]
-    : [...lookups.nsPathMap].filter(([, value]) => value === path).map(([id]) => id), destinationPath);
-  assert(destinationIds.length === 1, 'the exact destination path identifies one loaded namespace');
-  const destinationId = destinationIds[0];
-  await picker.getByRole('combobox', {name: 'Filter namespaces', exact: true}).fill(destinationPath);
-  const option = picker.getByRole('option', {name: destinationPath, exact: true});
-  assert(await option.count() === 1, 'the picker offers exactly the intended full namespace path');
-  const previewPath = await page.evaluate(() => new URL(API.api_ui_components_create_preview, location.href).pathname);
-  const previewRequest = page.waitForRequest(request => request.method() === 'POST'
-    && new URL(request.url()).pathname === previewPath);
-  await option.click();
-  assert((await previewRequest).postDataJSON()['namespace-id'] === destinationId,
-    'the visible picker sends the intended namespace UUID to the real preview');
-  try { await waitTourTitle(page, 'Open the theme group', 150000); }
-  finally { await page.unroute(matchesSelectionWrite, holdSelectionWrite); }
-  assert(selectionWaitedForPersistence, 'the personal selection waits for the real preference write before loading plans');
-  const receipt = await page.evaluate(() => _tourState.uiComponentManifests.at(-1));
-  const manifest = receipt.manifest;
-  assert(receipt.request['namespace-id'] === destinationId,
-    'the authoritative creation request retains the selected namespace UUID');
-  assert(manifest.namespaces.find(row => row.id === receipt.request['root-id'])?.['parent-id'] === destinationId,
-    'the created manifest root belongs to the intended namespace UUID');
-  await onReceipt(receipt);
+  await page.route(matchesApply, holdApply);
+  try {
+    await page.locator('[data-ui-component="account-menu"]').click();
+    await waitTourTitle(page, 'Open your menu view', 150000);
+  } finally { await page.unroute(matchesApply, holdApply); }
+  const receipt = await page.evaluate(() => _tourState.editorConfigurations.at(-1));
+  const roots = await page.evaluate(() => gdUIComponentsRoots());
+  const manifest = {namespaces: [], functions: receipt.original['function-receipts'], roots};
+  await onReceipt({...receipt, manifest});
+  assert(manifest.functions.length < 20, 'the lesson creates a small inherited component instead of a full closure copy');
+  assert(roots['menu-id'] === receipt.original['entry-id'], 'the personal view is the exact previewed entry');
+  assert(roots['picker-id'] === previous.picker, 'personalizing the menu retains the previous picker identity');
+  assert(selectionWaitedForPersistence, 'selection publication waits for the actual APPLY commit');
+  assert(await page.evaluate(theme => JSON.stringify(gdPrefRead('theme')) === JSON.stringify(theme), previous.theme),
+    'personalization keeps the theme preference');
   if (cleanupOnly) {
     await page.keyboard.press('Escape');
-    await waitTourTitle(page, 'Clean up tutorial items?');
-    assert(await clickTourButton(page, 'Delete them'), 'ordinary Cancel/Delete cleanup');
-    await page.waitForFunction(() => !document.querySelector('#gd-tour-pop'),
-      null, {timeout: componentCleanupTimeout(manifest), polling: 200});
   } else {
-    await page.locator('[data-ui-graph="theme-id"]').click();
-    await waitTourTitle(page, 'Change a shared color');
-    const canvas = await selectCreatedLeaf(page, manifest, 'theme', 'theme-canvas-color');
-    await editOwnValue(page, canvas, 'value', '#fff7ed');
-    await waitTourTitle(page, 'Open the menu view', 60000);
-    await waitForPersonalMenuValue(page, canvas, manifest.roots['configuration-id'], '#fff7ed', '--bg');
-    await openGroup(page, 'menu-id');
-    await waitTourTitle(page, 'A local menu value');
-    const hover = await selectCreatedLeaf(page, manifest, 'menu', 'account-menu-hover');
-    await editOwnValue(page, hover, 'value', '#fed7aa');
-    await waitForPersonalMenuValue(page, hover, manifest.roots['configuration-id'], '#fed7aa');
+    await page.locator('[data-ui-graph="menu-id"]').click();
+    await waitTourTitle(page, 'Capture a personal theme input');
+    await bindPersonalMenuTheme(page, roots['menu-id'], '#7c3aed', '#f5f3ff');
+    await waitTourTitle(page, 'Shared helpers stay shared', 60000);
     await page.locator('.auth-avatar:visible, #auth-lock-btn:visible').first().click();
-    await waitTourTitle(page, 'Open the menu behavior', 60000);
-    await openGroup(page, 'menu-update-id');
-    await waitTourTitle(page, 'Change a keyboard decision');
-    const keymap = await selectCreatedLeaf(page, manifest, 'menu', 'account-menu-key-map');
-    await editOwnValue(page, keymap, 'vals', 'last', 2);
-    await waitForPersonalMenuHome(page, keymap, manifest.roots['configuration-id']);
-    await page.locator('.auth-avatar:visible, #auth-lock-btn:visible').first().click();
-    await page.locator('.auth-menu [role="menuitem"]').first().focus();
-    await page.keyboard.press('Home');
-    await waitTourTitle(page, 'Open the picker view', 60000);
+    assert(await page.evaluate(() => gdThemeTokenValue('--gd-flow') === '#7c3aed'
+      && gdThemeTokenValue('--bg') === '#f5f3ff'), 'the local capture changes actual editor tokens');
+    assert(await clickTourButton(page, 'Next'), 'continue after the live color change');
+    await waitTourTitle(page, 'Other components keep their identities');
     await openGroup(page, 'picker-id');
     await waitTourTitle(page, 'The boundary and cleanup');
+    assert(await page.evaluate(id => selectedFnId === id, previous.picker), 'the picker identity remains unchanged');
     await page.screenshot({path: '/tmp/graphden-personal-ui-components.png'});
-    await finishAndDelete(page, componentCleanupTimeout(manifest));
+    assert(await clickTourButton(page, 'Finish'), 'Finish button');
   }
-  const after = await page.evaluate(() => ({components: gdPrefRead('components'), theme: gdPrefRead('theme'), branch: getCurrentBranchName()}));
-  assert(JSON.stringify(after) === JSON.stringify(previous), 'cleanup restores previous Appearance selections and keeps the current branch');
+  await reviewEditorConfigurationCleanup(page, 120000);
+  await page.waitForFunction(() => !document.querySelector('#gd-tour-pop')
+    || document.querySelector('#gd-tour-title')?.textContent === 'Lesson 25 finished',
+  null, {timeout: 120000});
+  if (await page.locator('#gd-tour-title').count()
+    && await page.locator('#gd-tour-title').textContent() === 'Lesson 25 finished') {
+    assert(await clickTourButton(page, 'Close'), 'close the finished lesson after cleanup');
+  }
+  await page.waitForFunction(() => !document.querySelector('#gd-tour-pop'), null, {timeout: 120000});
+  await page.waitForFunction(previous => gdUIConfigurationState()?.selection?.['fn-id'] === previous.configuration
+    && gdUIComponentsRoots()?.['picker-id'] === previous.picker
+    && JSON.stringify(gdPrefRead('components')) === JSON.stringify(previous.components)
+    && JSON.stringify(gdPrefRead('theme')) === JSON.stringify(previous.theme)
+    && getCurrentBranchName() === previous.branch,
+  previous, {timeout: 60000});
+  const after = await page.evaluate(() => ({components: gdPrefRead('components'),
+    configuration: gdUIConfigurationState()?.selection?.['fn-id'], theme: gdPrefRead('theme'),
+    picker: gdUIComponentsRoots()['picker-id'], branch: getCurrentBranchName()}));
+  assert(JSON.stringify(after) === JSON.stringify(previous), 'cleanup restores the previous ordinary configuration and retains other selections');
   const rows = await api(page, 'GET', '/api/graph/entities?scope=index');
-  for (const namespace of manifest.namespaces) {
-    assert(!rows.namespaces.some(row => row.id === namespace.id), 'the exact created namespace is gone');
-  }
   const remaining = new Set(rows.fns.map(row => row.id));
-  assert(manifest.functions.every(row => !remaining.has(row.id)), 'every exact created function is gone');
+  assert(manifest.functions.every(row => !remaining.has(row.id)), 'all exact lesson function identities are gone');
+  assert(rows.namespaces.some(row => row.id === manifest.functions[0]['namespace-id']),
+    'cleanup retains the personal profile namespace');
   return manifest;
 }
-module.exports = {componentCleanupTimeout, walkUIComponentsLesson, selectCreatedLeaf, editOwnValue, waitForPersonalMenuValue, waitForPersonalMenuHome};
+
+module.exports = {componentCleanupTimeout, walkUIComponentsLesson, bindPersonalMenuTheme, selectCreatedLeaf, editOwnValue, waitForPersonalMenuValue, waitForPersonalMenuHome};

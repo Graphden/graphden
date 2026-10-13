@@ -9,11 +9,13 @@ async function preparePickerOnlySelection(page, remember) {
   page.on('pageerror', capturePageError);
   try {
     await page.goto(BASE);
-    await page.waitForFunction(() => window.gdPrefsReady && window.gdPrefOwner);
-    const previous = await page.evaluate(() => ({components: gdPrefRead('components'), owner: gdPrefOwner}));
+    await page.waitForFunction(() => window.gdPrefsReady && window.gdPrefOwner && window.gdUIConfigurationState?.()?.revision);
+    const previous = await page.evaluate(() => ({components: gdPrefRead('components'), owner: gdPrefOwner,
+      menu: gdUIComponentsRoots()['menu-id']}));
     const fixture = {previous};
     remember(fixture);
-    assert(await page.evaluate(() => gdPrefWrite('components', null)), 'fixture selection reset commits');
+    assert((await api(page, 'POST', '/api/ui/configuration/prepare', {home: true})).ok, 'fixture home setup succeeds');
+    await page.evaluate(() => gdCaptureUIConfiguration());
     const destinationPath = process.env.GRAPHDEN_COMPONENT_NAMESPACE || '(root)';
     const destinationIds = await page.evaluate(path => path === '(root)' ? [null]
       : [...lookups.nsPathMap].filter(([, value]) => value === path).map(([id]) => id), destinationPath);
@@ -25,22 +27,41 @@ async function preparePickerOnlySelection(page, remember) {
     remember(fixture);
     const created = await api(page, 'POST', '/api/ui/components/create/apply', proposed.request);
     assert(created.ok && created.committed, 'picker-only fixture create commits');
-    const value = {'fn-id': proposed.manifest.roots['configuration-id'], org: proposed.request.org,
-      'branch-id': proposed.request['branch-id']};
-    assert(await page.evaluate(({value, expected}) => gdPrefWrite('components', value, {expected}),
-      {value, expected: proposed.manifest['expected-preference']}), 'picker-only activation commits');
-    await page.waitForFunction(id => gdUIComponentRuntimeIdentity('fn-picker') === id,
-      proposed.manifest.roots['configuration-id']);
-    assert(await page.evaluate(() => gdUIComponentRuntimeIdentity('account-menu') === null && gdShellMenuGraph.ready),
-      'the missing menu has a working builtin host');
+    const state = await page.evaluate(() => gdUIConfigurationState());
+    const activation = await api(page, 'POST', '/api/ui/configuration/preview', {operation: 'activate',
+      command: {'selection-id': proposed.manifest.roots['configuration-id'],
+        'expected-preference': state.preference, 'expected-configuration-revision': state.revision}});
+    assert(activation.ok && activation.receipt.created, 'partial manifest activates through an ordinary editor graph');
+    fixture.activation = activation;
+    remember(fixture);
+    const activated = await api(page, 'POST', '/api/ui/configuration/apply', activation.request);
+    assert(activated.ok && activated.committed, 'ordinary fixture activation commits');
+    await page.evaluate(() => gdRefreshUIConfiguration());
+    await page.waitForFunction(({root, picker}) => gdUIComponentRuntimeIdentity('fn-picker') === root
+      && gdUIComponentsRoots()['picker-id'] === picker,
+    {root: activated.id, picker: proposed.manifest.roots['picker-id']});
+    await page.waitForFunction(({root, menu}) => gdShellMenuGraph.ready
+      && gdUIComponentRuntimeIdentity('account-menu') === root
+      && gdUIComponentsRoots()['menu-id'] === menu, {root: activated.id, menu: previous.menu});
+    assert(await page.evaluate(menu => gdShellMenuGraph.ready
+      && gdUIComponentsRoots()['menu-id'] === menu, previous.menu),
+    'the partial manifest receives its shared menu through graph composition');
     assert(pageErrors.length === 0, 'partial-manifest preparation has no page errors');
   } finally { page.off('pageerror', capturePageError); }
 }
 
 async function restorePickerOnlySelection(page, fixture) {
   if (!fixture) return;
-  assert(await page.evaluate(value => gdPrefWrite('components', value), fixture.previous.components),
-    'fixture restores its original authoritative selection before deletion');
+  if (fixture.activation) {
+    const receipt = fixture.activation.receipt;
+    const restored = await api(page, 'POST', '/api/ui/configuration/undo', {
+      'current-id': receipt.id, 'expected-configuration-revision': receipt['configuration-revision'],
+      'cohort-revision': receipt['cohort-revision'], previous: receipt.previous,
+      functions: receipt['function-receipts']},
+    {'X-Graphden-Branch': fixture.activation.request.scope['branch-id']});
+    assert(restored.ok, 'fixture restores its original ordinary configuration atomically');
+    await page.evaluate(() => gdRefreshUIConfiguration());
+  }
   if (!fixture.receipt) return;
   const {request, manifest} = fixture.receipt;
   const headers = {'X-Graphden-Branch': request['branch-id']};

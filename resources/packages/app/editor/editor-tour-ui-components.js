@@ -69,7 +69,8 @@ function _tourEditorReceiptMatches(original, result) {
 function gdTourStageEditorConfiguration(request, original) {
   if (_tourState?.lessonId !== '25' || _tourState.phase === 'cleanup' || !original.created) return null;
   const receipt = JSON.parse(JSON.stringify({request, original, principal: _tourState.principal,
-    'branch-name': getCurrentBranchName(), token: crypto.randomUUID(), receipt: 'pending'}));
+    'branch-name': getCurrentBranchName(), token: crypto.randomUUID(), receipt: 'pending',
+    previousRoots: window.gdUIComponentsRoots?.()}));
   if (!_tourEditorConfigurationContext(receipt)) throw new Error('Tutorial configuration context changed.');
   const fields = {creation: 'editor-configuration', token: receipt.token, receipt: 'pending',
     'branch-id': request.scope['branch-id'], 'branch-name': receipt['branch-name']};
@@ -284,7 +285,68 @@ function _tourUIComponentFn(receipt, group, name) {
   return actual?.name === row?.name && actual?.['namespace-id'] === row?.['namespace-id'] ? actual : null;
 }
 
+function gdTourObserveExistingUIComponent(request, result, beforeRoots) {
+  if (_tourState?.lessonId !== '25' || request.operation !== 'personalize'
+    || request.command?.component !== 'account-menu' || result.created !== false || !result['entry-id']) return;
+  const observation = JSON.parse(JSON.stringify({request, original: result, previousRoots: beforeRoots,
+    principal: _tourState.principal, 'branch-name': getCurrentBranchName()}));
+  if (!_tourEditorConfigurationContext(observation)) return;
+  _tourState.existingUIComponent = observation;
+  _tourSaveState();
+}
+
+function _tourExistingPersonalComponent() {
+  const observation = _tourState?.existingUIComponent;
+  return _tourEditorConfigurationContext(observation)
+    && observation.original['entry-id'] === window.gdUIComponentsRoots?.()['menu-id'] ? observation : null;
+}
+
+function gdTourUIComponentStep(step) {
+  if (!_tourExistingPersonalComponent()) return step;
+  if (step?.check?.action === 'personal-theme') return {...step, title: 'Inspect your existing theme input',
+    body: 'This is your existing menu; the lesson did not create it and will not delete it. Inspect its theme input and shared dependencies. Keep your current values. Click Next to continue without changing them.',
+    target: null, targets: [], check: {kind: 'manual'}};
+  if (step?.title === 'Shared helpers stay shared') return {...step,
+    body: 'Your existing menu retains its own inputs and shared dependencies. Filled ancestor bindings remain sealed. The lesson has not changed your graph or created a cleanup receipt.'};
+  if (step?.title === 'The boundary and cleanup') return {...step,
+    body: 'You inspected your existing graphs. The lesson created no graphs to delete and keeps your configuration. Graphs author presentation; the host retains DOM, account actions, search and storage. Click Finish.'};
+  return step;
+}
+
+function _tourPersonalComponentReceipt(component) {
+  const root = component === 'account-menu' ? 'menu-id' : component === 'fn-picker' ? 'picker-id' : null;
+  const entry = root && window.gdUIComponentsRoots?.()[root];
+  return _tourState?.editorConfigurations?.find(receipt => receipt.receipt === 'created'
+    && _tourEditorConfigurationContext(receipt) && receipt.request.command?.component === component
+    && receipt.original['entry-id'] === entry);
+}
+
+function _tourPersonalComponentCheck(check) {
+  if (check.action === 'retained-open') {
+    const menu = _tourPersonalComponentReceipt('account-menu') || _tourExistingPersonalComponent();
+    const previous = menu?.previousRoots?.[check.root];
+    return !!previous && previous === window.gdUIComponentsRoots?.()[check.root] && selectedFnId === previous;
+  }
+  const receipt = _tourPersonalComponentReceipt(check.component)
+    || (check.component === 'account-menu' ? _tourExistingPersonalComponent() : null);
+  if (!receipt || !lookups) return false;
+  const entry = receipt.original['entry-id'];
+  if (check.action === 'personalized') return receipt.original.id === window.gdUIComponentsSelection?.()?.['fn-id']
+    && window.gdUIComponentRuntimeIdentity?.(check.component) === receipt.original.id;
+  if (check.action === 'personal-open') return selectedFnId === entry;
+  if (check.action === 'personal-theme') {
+    const binding = (graphData.bindings || []).find(row => row['fn-id'] === entry
+      && row.value?.accent === check.accent && row.value?.['canvas-background'] === check.background);
+    return !!binding && window.gdThemeTokenValue('--gd-flow') === check.accent
+      && window.gdThemeTokenValue('--bg') === check.background;
+  }
+  return false;
+}
+
 function gdTourUIComponentCheck(check) {
+  if (['personalized', 'personal-open', 'personal-theme', 'retained-open'].includes(check.action)) {
+    return _tourPersonalComponentCheck(check);
+  }
   const receipt = _tourUIComponentActive();
   if (!receipt || !lookups) return false;
   const activeRoot = window.gdUIComponentsSelection?.()?.['fn-id'];

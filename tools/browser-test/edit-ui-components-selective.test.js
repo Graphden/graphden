@@ -1,9 +1,21 @@
-// Visible selective copies, retained authored identities, and a real cross-tab
+// Compatibility selective copies, retained authored identities, and a real cross-tab
 // activation conflict. Every cleanup operation uses exact creation receipts.
 const {unexpectedSelectiveCopyErrors} = require('./selective-copy-errors');
+const {unexpectedThemeRetryErrors} = require('./theme-retry-errors');
 const {chromium} = require('playwright');
 const {assert, newContext, api} = require('./edit-test-helpers');
 const {selectCreatedLeaf, editOwnValue} = require('./tutorial-ui-components-helpers');
+
+function themeSelection(value) {
+  const normalize = item => Array.isArray(item) ? item.map(normalize)
+    : item && typeof item === 'object' ? Object.fromEntries(Object.keys(item).sort().map(key => [key, normalize(item[key])])) : item;
+  const selected = structuredClone(value);
+  if (selected?.graph) { delete selected.graph.name; delete selected.graph.qname; }
+  return JSON.stringify(normalize(selected));
+}
+async function unchangedTheme(page, previous) {
+  return themeSelection(await page.evaluate(() => gdPrefRead('theme'))) === themeSelection(previous);
+}
 
 async function appearance(page) {
   if (!await page.locator('#gd-ui-components-root').isVisible()) {
@@ -12,23 +24,33 @@ async function appearance(page) {
   }
   await page.locator('#gd-ui-components-root').waitFor({state: 'visible'});
 }
+async function activate(page, selectionId) {
+  await page.evaluate(() => gdCaptureUIConfiguration());
+  const state = await page.evaluate(() => gdUIConfigurationState());
+  const proposal = await api(page, 'POST', '/api/ui/configuration/preview', {operation: 'activate',
+    command: {'selection-id': selectionId, 'expected-preference': state.preference,
+      'expected-configuration-revision': state.revision}});
+  assert(proposal.ok, 'compatibility selection receives an ordinary activation preview');
+  const result = await api(page, 'POST', '/api/ui/configuration/apply', proposal.request);
+  assert(result.ok && result.committed, 'compatibility selection activates by reference');
+  await page.evaluate(async () => { await loadGraphData(); gdRefreshUIConfiguration(); });
+  return proposal;
+}
 async function copy(page, component, receipts) {
-  await appearance(page);
-  await page.locator('[data-ui-component="' + component + '"]').click();
-  const picker = page.locator('.fn-picker-popover[aria-label="Pick a namespace"]');
-  const preview = page.waitForResponse(response => response.request().method() === 'POST'
-    && new URL(response.url()).pathname.endsWith('/ui/components/create/preview'));
-  const applied = page.waitForResponse(response => response.request().method() === 'POST'
-    && new URL(response.url()).pathname.endsWith('/ui/components/create/apply'));
-  await picker.getByRole('option', {name: '(root)', exact: true}).click();
-  const proposed = await (await preview).json();
-  assert(proposed.ok && proposed.manifest.component === component, 'preview owns only the selected component');
-  receipts.push({request: proposed.request, manifest: proposed.manifest});
-  const result = await (await applied).json();
+  const owner = await page.evaluate(() => gdPrefOwner);
+  const proposed = await api(page, 'POST', '/api/ui/components/create/preview',
+    {owner, 'namespace-id': null, component});
+  assert(proposed.ok && proposed.manifest.component === component, 'compatibility preview owns only the selected component');
+  const receipt = {request: proposed.request, manifest: proposed.manifest};
+  receipts.push(receipt);
+  const result = await api(page, 'POST', '/api/ui/components/create/apply', proposed.request);
   assert(result.ok && result.committed && JSON.stringify(result.manifest) === JSON.stringify(proposed.manifest),
     'apply confirms the exact create-only receipt');
-  await page.waitForFunction(() => !document.querySelector('#gd-ui-components-create').disabled);
-  return proposed.manifest;
+  receipt.activation = await activate(page, proposed.manifest.roots['configuration-id']);
+  await page.waitForFunction(({root, component}) => gdUIComponentRuntimeIdentity(component) === root
+    && gdUIComponentRuntimeIdentity('account-menu') === root && gdShellMenuGraph.ready,
+  {root: receipt.activation.receipt.id, component});
+  return {...proposed.manifest, activationId: receipt.activation.receipt.id};
 }
 async function editPickerAndSettle(page, leaf, value) {
   // Save detaches the form before its refresh publishes graph-changed. Menu
@@ -61,6 +83,15 @@ async function editPickerAndSettle(page, leaf, value) {
 }
 
 async function cleanup(page, receipts) {
+  for (const receipt of [...receipts].reverse()) {
+    if (!receipt.activation) continue;
+    const r = receipt.activation.receipt;
+    const undone = await api(page, 'POST', '/api/ui/configuration/undo', {
+      'current-id': r.id, 'expected-configuration-revision': r['configuration-revision'],
+      'cohort-revision': r['cohort-revision'], previous: r.previous, functions: r['function-receipts']},
+    {'X-Graphden-Branch': receipt.activation.request.scope['branch-id']});
+    assert(undone.ok, 'compatibility cleanup restores each original root in LIFO order');
+  }
   const functions = receipts.flatMap(receipt => receipt.manifest.functions);
   if (functions.length) {
     const result = await api(page, 'POST', '/api/functions/delete-batch', {functions},
@@ -82,85 +113,88 @@ async function cleanup(page, receipts) {
   const {browser, page} = await newContext(chromium, {boot: false});
   const receipts = [];
   const failures = [];
-  const replies = [], pendingReplies = [], requestSequences = new WeakMap();
+  const replies = [], themeReplies = [], pendingReplies = [], requestSequences = new WeakMap();
   let sequence = 0;
   page.on('pageerror', error => failures.push({kind: 'pageerror', text: error.message}));
   page.on('console', message => { if (message.type() === 'error') failures.push({kind: 'console', text: message.text(), url: message.location().url}); });
   page.on('response', response => pendingReplies.push((async () => {
     const path = new URL(response.url()).pathname;
-    if (response.request().method() !== 'POST' || !path.endsWith('/ui/components/plan')) return;
+    if (response.request().method() === 'POST' && path.endsWith('/ui/theme/evaluate')) {
+      const body = await response.json().catch(() => null);
+      const command = response.request().postDataJSON();
+      themeReplies.push({url: response.url(), sequence: requestSequences.get(response.request()),
+        identity: typeof command?.['fn-id'] === 'string' && typeof command?.org === 'string'
+          && typeof command?.owner === 'string' && typeof response.request().headers()['x-graphden-branch'] === 'string'
+          ? JSON.stringify([command['fn-id'], command.org, command.owner, response.request().headers()['x-graphden-branch']]) : null,
+        status: response.status(), code: body?.code, reason: body?.reason,
+        retryable: body?.retryable === true, ok: body?.ok === true, payload: !!body?.payload});
+      return;
+    }
+    if (response.request().method() !== 'POST' || !path.endsWith('/ui/configuration/plan')) return;
     const body = await response.json().catch(() => null);
     replies.push({kind: 'plan', url: response.url(), component: response.request().postDataJSON()?.component,
       sequence: requestSequences.get(response.request()), status: response.status(), code: body?.code,
       fallback: body?.fallback, retryable: body?.retryable === true, ok: body?.ok === true});
   })()));
   let previous;
-  let conflict = null;
-  let copies = 0;
   let phase = 'boot';
   page.on('request', request => {
     requestSequences.set(request, ++sequence);
-    if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/ui/components/create/preview')) copies++;
   });
   try {
     await page.goto(require('./edit-test-helpers').BASE);
     await page.waitForFunction(() => window.gdPrefsReady && window.gdPrefOwner);
+    await page.waitForFunction(() => gdUIConfigurationState()?.revision);
+    assert((await api(page, 'POST', '/api/ui/configuration/prepare', {home: true})).ok, 'explicit home setup succeeds');
     previous = await page.evaluate(() => ({components: gdPrefRead('components'), theme: gdPrefRead('theme'), owner: gdPrefOwner}));
     await appearance(page);
-    if (previous.components) {
-      await page.locator('#gd-ui-components-reset').click();
-      await page.waitForFunction(() => gdPrefRead('components') === null);
-    }
     phase = 'copy-picker';
     const picker = await copy(page, 'fn-picker', receipts);
     phase = 'runtime-picker';
-    await page.waitForFunction(id => gdUIComponentRuntimeIdentity('fn-picker') === id, picker.roots['configuration-id']);
-    const firstPreference = await page.evaluate(() => gdPrefRead('components'));
-    assert(await page.evaluate(() => gdUIComponentRuntimeIdentity('account-menu') === null && gdShellMenuGraph.ready),
-      'missing menu override keeps the builtin component available');
-    await appearance(page);
-    await page.locator('[data-ui-component="fn-picker"]').click();
+    await page.waitForFunction(id => gdUIComponentRuntimeIdentity('fn-picker') === id, picker.activationId);
+    assert(await page.evaluate(() => gdShellMenuGraph.ready && gdUIComponentsRoots()['menu-id']),
+      'partial compatibility manifests receive a working shared menu through graph composition');
+    await page.evaluate(async id => { await ensureSubtreeFor(id); gdShellSurface('build'); selectFn(id); }, picker.roots['picker-id']);
     await page.waitForFunction(id => selectedFnId === id, picker.roots['picker-id']);
-    assert(copies === 1, 'existing group opens its exact identity without another copy');
     const leaf = await selectCreatedLeaf(page, picker, 'picker', 'picker-active-background');
     await editPickerAndSettle(page, leaf, 'rgb(254, 215, 170)');
     phase = 'copy-recents';
     const recents = await copy(page, 'recents', receipts);
     phase = 'runtime-recents';
-    await page.waitForFunction(id => gdUIComponentRuntimeIdentity('recents') === id, recents.roots['configuration-id']);
+    await page.waitForFunction(id => gdUIComponentRuntimeIdentity('recents') === id, recents.activationId);
     assert(await page.evaluate(id => gdUIComponentsRoots()['picker-id'] === id, picker.roots['picker-id']),
       'adding Recents retains the authored picker view identity');
     assert(await page.evaluate(id => graphData.bindings.some(row => row['fn-id'] === id && row.value === 'rgb(254, 215, 170)'), leaf),
       'adding Recents preserves the edited picker value');
     const ownedPicker = new Set(picker.functions.map(row => row.id));
     assert(recents.functions.every(row => !ownedPicker.has(row.id)), 'new receipt excludes all retained picker identities');
-    assert(await page.evaluate(value => JSON.stringify(gdPrefRead('theme')) === JSON.stringify(value), previous.theme),
+    assert(await unchangedTheme(page, previous.theme),
       'selective copies do not activate a theme');
 
     phase = 'copy-inspector';
     const inspector = await copy(page, 'inspector', receipts);
     phase = 'runtime-inspector';
-    await page.waitForFunction(id => gdUIComponentRuntimeIdentity('inspector') === id, inspector.roots['configuration-id']);
+    await page.waitForFunction(id => gdUIComponentRuntimeIdentity('inspector') === id, inspector.activationId);
     assert(await page.evaluate(id => gdUIComponentsRoots()['picker-id'] === id, picker.roots['picker-id']),
       'adding Inspector retains the authored picker identity');
     assert(await page.evaluate(id => graphData.bindings.some(row => row['fn-id'] === id && row.value === 'rgb(254, 215, 170)'), leaf),
       'adding Inspector preserves the edited picker leaf');
     const retained = new Set([...picker.functions, ...recents.functions].map(row => row.id));
     assert(inspector.functions.every(row => !retained.has(row.id)), 'Inspector receipt excludes both retained component closures');
-    assert(await page.evaluate(value => JSON.stringify(gdPrefRead('theme')) === JSON.stringify(value), previous.theme),
+    assert(await unchangedTheme(page, previous.theme),
       'Inspector copy leaves the active theme unchanged');
 
     phase = 'copy-explorer';
     const explorer = await copy(page, 'explorer', receipts);
     phase = 'runtime-explorer';
-    await page.waitForFunction(id => gdUIComponentRuntimeIdentity('explorer') === id, explorer.roots['configuration-id']);
+    await page.waitForFunction(id => gdUIComponentRuntimeIdentity('explorer') === id, explorer.activationId);
     assert(await page.evaluate(id => gdUIComponentsRoots()['picker-id'] === id, picker.roots['picker-id']),
       'adding the Explorer toolbar retains the authored picker identity');
     assert(await page.evaluate(id => graphData.bindings.some(row => row['fn-id'] === id && row.value === 'rgb(254, 215, 170)'), leaf),
       'adding the Explorer toolbar preserves the edited picker leaf');
     const existing = new Set([...picker.functions, ...recents.functions, ...inspector.functions].map(row => row.id));
     assert(explorer.functions.every(row => !existing.has(row.id)), 'Explorer receipt contains only new graph identities');
-    assert(await page.evaluate(value => JSON.stringify(gdPrefRead('theme')) === JSON.stringify(value), previous.theme),
+    assert(await unchangedTheme(page, previous.theme),
       'Explorer copy leaves the active theme unchanged');
     await page.evaluate(() => gdShellSurface('build'));
     await page.locator('#kind-filters [data-kind="types"]').waitFor({state: 'visible'});
@@ -170,42 +204,38 @@ async function cleanup(page, receipts) {
     await page.locator('#kind-filters [data-kind="all"]').click();
     assert(await page.evaluate(() => !gdFiltersActive()), 'the stored personal All request preserves the native clear semantics');
 
-    const prefPath = await page.evaluate(() => new URL(API.api_prefs_key('components'), location.href).pathname);
-    const preferenceRoute = url => url.pathname === prefPath;
-    await page.route(preferenceRoute, async route => {
-      if (route.request().method() !== 'PUT' || !route.request().postDataJSON()?.expected) {
-        await route.continue(); return;
-      }
-      // A second writer uses the real preference API while this tab's
-      // conditional activation is paused; no response is synthesized.
-      const external = await api(page, 'PUT', prefPath, {owner: previous.owner, value: firstPreference});
-      assert(external.ok === true, 'another tab commits its newer selection');
-      const response = await route.fetch();
-      conflict = {status: response.status(), body: await response.json()};
-      replies.push({kind: 'activation', url: route.request().url(), status: conflict.status,
-        code: conflict.body.reason, noValue: !Object.hasOwn(conflict.body, 'value')});
-      await route.fulfill({response});
-    });
-    phase = 'copy-menu';
-    const menu = await copy(page, 'account-menu', receipts);
-    await page.unroute(preferenceRoute);
-    assert(conflict?.status === 409 && conflict.body.reason === 'stale-preference'
-      && !Object.hasOwn(conflict.body, 'value'), 'activation CAS rejects the stale selection without leaking its value');
-    await page.waitForFunction(id => gdPrefRead('components')['fn-id'] === id, picker.roots['configuration-id']);
+    phase = 'copy-menu-conflict';
+    const owner = previous.owner;
+    const proposed = await api(page, 'POST', '/api/ui/components/create/preview',
+      {owner, 'namespace-id': null, component: 'account-menu'});
+    assert(proposed.ok, 'unselected menu copy previews');
+    const menuReceipt = {request: proposed.request, manifest: proposed.manifest};
+    receipts.push(menuReceipt);
+    const created = await api(page, 'POST', '/api/ui/components/create/apply', proposed.request);
+    assert(created.ok && created.committed, 'menu graphs exist before activation');
+    const menu = proposed.manifest;
+    await page.evaluate(() => gdCaptureUIConfiguration());
+    const current = await page.evaluate(() => gdUIConfigurationState());
+    const stale = await api(page, 'POST', '/api/ui/configuration/preview', {operation: 'activate', command: {
+      'selection-id': menu.roots['configuration-id'], 'expected-preference': current.preference,
+      'expected-configuration-revision': current.revision}});
+    assert(stale.ok, 'the first tab previews menu activation');
+    const external = await activate(page, picker.roots['configuration-id']);
+    menuReceipt.activation = external;
+    const rejected = await api(page, 'POST', '/api/ui/configuration/apply', stale.request);
+    assert(rejected.status === 409, 'a stale ordinary-root activation cannot overwrite the second tab');
     const index = await api(page, 'GET', '/api/graph/entities?scope=index');
     const live = new Set(index.fns.map(row => row.id));
     assert(menu.functions.every(row => live.has(row.id)), 'activation conflict retains every newly created menu graph');
-    assert(await page.evaluate(value => JSON.stringify(gdPrefRead('theme')) === JSON.stringify(value), previous.theme),
+    assert(await unchangedTheme(page, previous.theme),
       'creating a menu also leaves the active theme unchanged');
-    assert(await page.locator('#gd-ui-components-status').textContent().then(text => text.includes('were created')),
-      'the editor explains that unselected graphs remain available');
     await cleanup(page, [receipts.pop()]);
     const remaining = await api(page, 'GET', '/api/graph/entities?scope=index');
     const remainingIds = new Set(remaining.fns.map(row => row.id));
     assert([...picker.functions, ...recents.functions, ...inspector.functions, ...explorer.functions].every(row => remainingIds.has(row.id)),
       'cleaning the new receipt preserves all previously authored copies');
     await Promise.all(pendingReplies);
-    const unexpected = unexpectedSelectiveCopyErrors(failures, replies, true);
+    const unexpected = unexpectedSelectiveCopyErrors(unexpectedThemeRetryErrors(failures, themeReplies, true), replies, true);
     if (unexpected.length) console.error('Unclassified selective errors:', JSON.stringify({
       errors: unexpected.map(error => ({kind: error.kind, status: Number(error.text?.match(/status of (\d+)/)?.[1]) || null,
         path: error.url ? new URL(error.url).pathname : null})),
@@ -225,7 +255,6 @@ async function cleanup(page, receipts) {
   } finally {
     try {
       await page.unrouteAll({behavior: 'wait'});
-      if (previous) await api(page, 'PUT', '/api/prefs/components', {owner: previous.owner, value: previous.components});
       await cleanup(page, receipts);
     } finally {
       await browser.close();

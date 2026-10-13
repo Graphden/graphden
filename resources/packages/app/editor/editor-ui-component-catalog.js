@@ -106,6 +106,7 @@
       || !uuid.test(preview.request?.nonce || '') || !/^[0-9a-f]{64}$/.test(preview.request?.['expected-proposal'] || '')) {
       throw new Error('The configuration preview is unavailable.');
     }
+    const beforeRoots = window.gdUIComponentsRoots?.();
     const ticket = preview.receipt.created
       ? window.gdTourStageEditorConfiguration?.(preview.request, preview.receipt) : null;
     try {
@@ -121,6 +122,7 @@
         result['publication-warnings'] = [{reason: 'Your configuration is active. The tutorial receipt needs review before cleanup.'},
           ...(result['publication-warnings'] || [])];
       }
+      if (result.created === false) window.gdTourObserveExistingUIComponent?.(preview.request, result, beforeRoots);
       window.gdRefreshUIConfiguration?.();
       return result;
     } catch (error) {

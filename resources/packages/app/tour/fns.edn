@@ -2037,14 +2037,14 @@
             {:id "25"
              :slug "asset-overrides"
              :chapter "The editor"
-             :version 5
+             :version 6
              :in-place true
              :requires "personal-ui-graphs"
              :title "Editing the editor"
-             :reads "covers personal theme, menu, picker, recent-function and Inspector graphs, their fixed host boundary, and advanced self-hosted source files."
+             :reads "covers an ordinary personal editor configuration, inherited menu graphs and a local capture of a shared component's free theme input."
              :steps
-             [{:title "Personal graphs, real editor components"
-               :body "The menu, picker, recents, Inspector, Explorer toolbar and theme values are ordinary graphs. Shared defaults remain shared. Personalize creates inherited children and an ordinary editor graph in your profile, without copying component bodies or selecting a theme. Graphs decide state and request permitted actions; the editor owns account actions, search, navigation and browser storage. This lesson uses the explicit full bundle for its deeper theme and helper exercises."
+             [{:title "Personal graphs, shared definitions"
+               :body "The menu, picker, recents, Inspector and Explorer toolbar are ordinary graphs. Your profile's editor graph selects them by reference. Personalize creates small inherited children: shared component definitions remain shared, and other personal edits remain in place."
                :target nil
                :check {:kind "manual"}}
               {:title "Open UI graphs"
@@ -2052,47 +2052,30 @@
                :target "#auth-lock-btn, .auth-avatar"
                :targets ["#auth-lock-btn, .auth-avatar" ".auth-menu-item[data-item=\"Settings\"]" "#gd-ui-components-root"]
                :check {:kind "dom" :selector "#gd-ui-components-root"}}
-              {:title "Create personal graphs"
-               :body "Click [[Create personal graphs]] and choose an existing namespace where you have write, read, view-impl and execute access. This explicit full-bundle action copies Theme, Menu, Picker, Recents, Inspector and Explorer groups for these deep editing exercises. Your ordinary profile editor references the new configuration; the previous root and theme are retained for cleanup. The smaller Personalize buttons inherit shared definitions instead."
-               :target "#gd-ui-components-create"
-               :targets ["#gd-ui-components-create" ".fn-picker-popover"]
-               :check {:kind "ui-component" :action "created"}}
-              {:title "Open the theme group"
-               :body "Click [[Theme]] in UI graphs. This opens the created function by identity, even if another namespace has a function with the same name. Its named value dependencies appear in the graph."
-               :target "[data-ui-graph=\"theme-id\"]"
-               :check {:kind "ui-component" :action "open" :root "theme-id"}}
-              {:title "Change a shared color"
-               :body "Follow the theme's values to [[theme-canvas-color]], or find it in the Explorer inside the created theme namespace. Open its card and edit its own :value to `#fff7ed`, then [[Save]]. The existing color widget still applies: the copied wrapper inherits the canonical color type. This value feeds both the canvas and the menu's background."
-               :target ".node-overlay[data-fn-name=\"theme-canvas-color\"]"
-               :targets [".node-overlay[data-fn-name=\"theme-canvas-color\"]" ".arg-value-edit-popover"]
-               :check {:kind "ui-component" :action "literal" :group "theme" :name "theme-canvas-color" :slot "value" :value "#fff7ed" :token "--bg"}}
-              {:title "Open the menu view"
-               :body "Return to Settings → Appearance → UI graphs and click [[Menu view]]. The component's style, theme values and motion are graph dependencies; the Settings and Organization callbacks remain owned by the editor."
+              {:title "Personalize the menu"
+               :body "Click [[Personalize]] for Account menu. This creates inherited initial, update and view graphs plus a small editor composition in your profile. It keeps the current theme and the other component identities. If you already own this menu, the lesson opens it for inspection and keeps its existing values. The explicit full-bundle copy remains an advanced compatibility tool; this lesson does not need it."
+               :target "[data-ui-component=\"account-menu\"]"
+               :check {:kind "ui-component" :action "personalized" :component "account-menu"}}
+              {:title "Open your menu view"
+               :body "Click [[Menu view]]. Your view inherits the shared menu. Its free [[theme]] input reaches the color readers inside the composition; capturing that input locally does not edit their shared bodies."
+               :target "[data-ui-graph=\"menu-id\"]"
+               :check {:kind "ui-component" :action "personal-open" :component "account-menu" :root "menu-id"}}
+              {:title "Capture a personal theme input"
+               :body "On the view's root, click the [[+]] next to [[theme]], then [[Bind literal]]. In the color form set [[accent]] to `#7c3aed` and [[canvas-background]] to `#f5f3ff`, then [[Save]]. This own binding supplies the shared readers with your values. The selected theme preference is unchanged."
+               :target ".placeholder-binder[data-arg-name=\"theme\"]"
+               :targets [".placeholder-binder[data-arg-name=\"theme\"]" ".arg-value-edit-popover"]
+               :check {:kind "ui-component" :action "personal-theme" :component "account-menu" :accent "#7c3aed" :background "#f5f3ff"}}
+              {:title "Shared helpers stay shared"
+               :body "Open the account menu to see your colors. Its rows, keyboard decisions, motion and styles still come from shared dependencies. An already-filled ancestor binding is sealed: to vary it, compose at an exposed free input or create the precise local dependency path you need. Inheritance does not redirect every nested reference."
                :target "#auth-lock-btn, .auth-avatar"
-               :targets ["#auth-lock-btn, .auth-avatar" ".auth-menu-item[data-item=\"Settings\"]" "[data-ui-graph=\"menu-id\"]"]
-               :check {:kind "ui-component" :action "open" :root "menu-id"}}
-              {:title "A local menu value"
-               :body "Find [[account-menu-hover]] in this graph, or in the Explorer inside the created menu namespace. Open its card and edit its own :value to `#fed7aa`, then [[Save]]. Open the account menu to see its hover color. The canvas stays at the shared `#fff7ed`: this leaf supplies only the menu's local token."
-               :target ".node-overlay[data-fn-name=\"account-menu-hover\"]"
-               :targets [".node-overlay[data-fn-name=\"account-menu-hover\"]" ".arg-value-edit-popover" "#auth-lock-btn, .auth-avatar"]
-               :check {:kind "ui-component" :action "menu-local" :group "menu" :name "account-menu-hover" :slot "value" :value "#fed7aa" :canvas "#fff7ed"}}
-              {:title "Open the menu behavior"
-               :body "Choose [[Settings]] again and click [[Menu behavior]] in UI graphs. This is the update entry: events and the current state flow through ordinary named helpers."
-               :target ".auth-menu-item[data-item=\"Settings\"]"
-               :targets [".auth-menu-item[data-item=\"Settings\"]" "[data-ui-graph=\"menu-update-id\"]"]
-               :check {:kind "ui-component" :action "open" :root "menu-update-id"}}
-              {:title "Change a keyboard decision"
-               :body "Follow the event helpers to [[account-menu-key-map]], or find it in the created menu namespace in the Explorer. Its :keys list includes Home; in the matching third :vals item change `first` to `last`, then [[Save]]. Open the account menu and press Home. Focus now moves to its last item, and the graph's active index follows it."
-               :target ".node-overlay[data-fn-name=\"account-menu-key-map\"]"
-               :targets [".node-overlay[data-fn-name=\"account-menu-key-map\"]" ".arg-value-edit-popover" "#auth-lock-btn, .auth-avatar"]
-               :check {:kind "ui-component" :action "home-last" :group "menu" :name "account-menu-key-map" :slot "vals"}}
-              {:title "Open the picker view"
-               :body "Choose [[Settings]] and click [[Picker view]]. This graph authors the candidate rows, groups and styles. The native picker still owns queries, compatibility checks and selection; editing this view does not replace those decisions."
-               :target ".auth-menu-item[data-item=\"Settings\"]"
-               :targets [".auth-menu-item[data-item=\"Settings\"]" "[data-ui-graph=\"picker-id\"]"]
-               :check {:kind "ui-component" :action "open" :root "picker-id"}}
+               :check {:kind "manual"}}
+              {:title "Other components keep their identities"
+               :body "Return to Settings → Appearance → UI graphs and open [[Picker view]]. It retains the shared or personal identity it had before this lesson. You can personalize another component independently; the editor composition preserves this menu by reference."
+               :target "#auth-lock-btn, .auth-avatar"
+               :targets ["#auth-lock-btn, .auth-avatar" ".auth-menu-item[data-item=\"Settings\"]" "[data-ui-graph=\"picker-id\"]"]
+               :check {:kind "ui-component" :action "retained-open" :root "picker-id"}}
               {:title "The boundary and cleanup"
-               :body "Personal components run as bounded data with a fixed DOM and operation contract. They cannot load arbitrary JavaScript, HTML or source files into the editor. Advanced [[Source files]] under Organization retains the legacy self-hosted override tool. Click [[Finish]] to keep these graphs or review deletion of their exact created identities and restore the previous editor root and theme. Intentional changes are included only in the visible deletion review; a later edit requires another review. Your profile namespace is retained."
+               :body "Graphs author bounded state, views and permitted action requests. The editor owns DOM, account actions, search and storage. Advanced [[Source files]] under Organization retains the legacy self-hosted override tool. Click [[Finish]] to keep your graphs or review deletion of their exact identities, including your edits, and restore the previous editor configuration. A later edit requires another review. Your profile namespace is retained."
                :target nil
                :check {:kind "manual"}}]}
             {:id "26"

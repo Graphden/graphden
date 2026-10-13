@@ -33,9 +33,10 @@ const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
   const attempts = new Map();
   const deletes = [];
   const batches = [];
+  const undos = [];
   let ownedIds = new Set();
   const stages = new Map([
-    ['/api/ui/components/plan', 'component-plan'],
+    ['/api/ui/configuration/plan', 'component-plan'],
     ['/api/ui/theme/evaluate', 'theme-evaluate'],
     ['/api/ui/components/create/preview', 'create-preview'],
     ['/api/ui/components/create/apply', 'create-apply'],
@@ -45,6 +46,10 @@ const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
   const refusalCodes = new Set(['policy-refresh-required', 'component-missing', 'tainted-result', 'runtime-effects', 'not-plain-pure', 'graph-changed']);
   page.on('request', request => {
     requestSequences.set(request, ++sequence);
+    if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/ui/configuration/undo') {
+      try { undos.push(request.postDataJSON().functions.map(row => row.id)); }
+      catch (_) { undos.push(null); }
+    }
     if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/functions/delete-batch') {
       try { batches.push(JSON.parse(request.postData()).functions.map(row => row.id)); }
       catch (_) { batches.push(null); }
@@ -73,6 +78,11 @@ const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
         status: response.status(), code: body?.code, reason: body?.reason,
         retryable: body?.retryable === true, ok: body?.ok === true, payload: !!body?.payload});
     }
+    if (stage.startsWith('create-') && !body?.ok) {
+      console.log(JSON.stringify({diagnostic: 'ui-creation-refusal', stage, attempt,
+        status: response.status(), ok: body?.ok === true,
+        committed: typeof body?.committed === 'boolean' ? body.committed : null}));
+    }
     if (response.status() !== 422) return;
     const code = refusalCodes.has(body?.code) ? body.code : 'unclassified';
     const reason = stage === 'theme-evaluate' && themeReasons.has(body?.reason) ? body.reason : 'unclassified';
@@ -89,7 +99,7 @@ const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
   const forcePolicyRetry = process.env.GRAPHDEN_POLICY_RETRY_PROOF === '1';
   let forcedPolicyRetry = false;
   if (forcePolicyRetry) {
-    await page.route(url => url.pathname.endsWith('/ui/components/plan'), async route => {
+    await page.route(url => url.pathname.endsWith('/ui/configuration/plan'), async route => {
       const request = route.request();
       if (!forcedPolicyRetry && request.method() === 'POST'
         && request.postDataJSON()?.component === 'account-menu') {
@@ -101,6 +111,11 @@ const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
   }
   try {
     await walkUIComponentsLesson(page, {cleanupOnly: process.env.GRAPHDEN_COMPONENT_CLEANUP_ONLY === '1',
+      onStagedReceipt: async receipt => {
+        const path = '/tmp/graphden-native25-staged-ledger-' + process.pid + '.json';
+        fs.writeFileSync(path, JSON.stringify(receipt), {mode: 0o600, flag: 'wx'});
+        console.log(JSON.stringify({diagnostic: 'staged-creation-receipt', path}));
+      },
       onReceipt: async receipt => {
         const path = '/tmp/graphden-native25-ledger-' + process.pid + '.json';
         fs.writeFileSync(path, JSON.stringify(receipt), {mode: 0o600, flag: 'wx'});
@@ -108,8 +123,9 @@ const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
         console.log(JSON.stringify({diagnostic: 'owned-creation-receipt', path}));
       }});
     console.log('PASS lesson 25 walkthrough completed; checking console');
-    assert.equal(batches.length, 1, 'the complete receipt uses one guarded batch');
-    assert.deepEqual(new Set(batches[0]), ownedIds, 'the batch contains every exact owned function and no others');
+    assert.equal(undos.length, 1, 'the inherited component uses one atomic reviewed undo');
+    assert.deepEqual(new Set(undos[0]), ownedIds, 'undo contains every exact lesson function and no others');
+    assert.equal(batches.length, 0, 'the lesson does not need a separate deletion transaction');
     assert(!deletes.some(row => /^\/api\/entities\/fn\//.test(new URL(row.url).pathname)),
       'manifest cleanup does not issue per-function DELETE requests');
     await Promise.all(pendingReplies);

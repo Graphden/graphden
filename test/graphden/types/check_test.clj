@@ -1210,6 +1210,25 @@
                                 :args {:n "not-a-number"}})))))
 
 
+(deftest nested-literal-refinements-are-checked-at-the-binding
+  (let [color [:refine :text [:matches "^#[0-9a-fA-F]{6}$"]]
+        shape {:accent color :canvas-background color}]
+    (registry/record-rich-types! :theme-input
+                                 {:args {:theme {:type shape}} :return-type :text})
+    (is (some? (check/check-fn-def!
+                 {:name :local-theme :parent :theme-input
+                  :args {:theme {:value {:accent "#7c3aed" :canvas-background "#f5f3ff"}}}})))
+    (is (thrown? clojure.lang.ExceptionInfo
+          (check/check-fn-def!
+            {:name :bad-theme :parent :theme-input
+             :args {:theme {:value {:accent "invalid" :canvas-background "#f5f3ff"}}}})))
+    (registry/record-rich-types! :plain-theme
+                                 {:args {} :return-type {:accent :text :canvas-background :text}})
+    (is (thrown? clojure.lang.ExceptionInfo
+          (check/check-fn-def! {:name :unproved-theme :parent :theme-input
+                                :args {:theme :plain-theme}})))))
+
+
 ;; -----------------------------------------------------------------------------
 ;; Passthrough polymorphism — :value carries 'a all the way to return-type.
 ;; Covers `:constantly` / `:const` / `:identity` after the type-var fix.

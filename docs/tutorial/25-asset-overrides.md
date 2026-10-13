@@ -1,8 +1,8 @@
 # Lesson 25 — Editing the editor: personal UI graphs
 
-**Goal**: create personal named graphs for the editor, change a shared theme
-value and a local menu value, and change a menu keyboard decision. This works
-on cloud and self-hosted deployments with ordinary graph permissions.
+**Goal**: personalize the account menu with a small inherited graph, bind its
+open theme input, and preserve shared definitions and other component identities.
+This works on cloud and self-hosted deployments with ordinary graph permissions.
 
 ## Personal UI graphs
 
@@ -20,13 +20,14 @@ writable roles open for editing; a shared read-only custom role gets a new child
 Theme selection stays unchanged. Inheritance does not redirect deeply referenced
 helpers: their identities remain shared until you explicitly replace a reference.
 
-This lesson's deeper theme and helper exercises use the explicit **Create
-personal graphs** bundle. Choose an existing namespace where you can write and
-inspect source. That compatibility action creates a fresh child with Theme,
-Menu, Picker, Recents, Inspector and Explorer groups and a descriptor-list `ui`
-configuration. Your ordinary profile editor references that configuration;
-other users retain their own editor graphs. The full bundle also selects its
-theme, while the smaller Personalize actions do not.
+The lesson uses **Personalize account menu**. Its view inherits the shared menu
+and exposes an unbound `theme` input. Binding that input on your own view changes
+its theme tokens without copying or modifying the shared helpers.
+
+The explicit **Create personal graphs** bundle remains an advanced compatibility
+action. It copies Theme, Menu, Picker, Recents, Inspector and Explorer groups into
+a namespace where you can write and inspect source. Unlike the smaller
+Personalize actions, it also selects its copied theme.
 
 The profile namespace comes from the deployment's personal-namespace authority.
 Without tenancy there is one operator profile named `personal`, not anonymous
@@ -48,24 +49,23 @@ editor to load a tab, focus its button or close the narrow sheet. Server-rendere
 tab bodies, Run forms, comparison discussions and CodeMirror retain their native
 owners; changing graph chrome does not replace those controls.
 
-1. Open **Theme** and follow its values to `theme-canvas-color`. Set its own
-   `value` to `#fff7ed`. The copied color wrapper inherits the canonical color
-   type, so the existing color form applies. This leaf feeds the canvas and
-   the menu background.
-2. Open **Menu view** and edit `account-menu-hover` to `#fed7aa`. This leaf has
-   its own literal and local menu token; changing it leaves the canvas color
-   unchanged. Open the menu to inspect the result.
-3. Open **Menu behavior**, follow the event helpers to `account-menu-key-map`,
-   and change the third `vals` item, corresponding to Home, from `first` to
-   `last`. Open the menu and press Home: both focus and the graph's active
-   index move to the last item.
-4. Open **Picker view** to inspect its rows, groups and styles. Search,
-   compatibility verdicts and selection remain native. The graph authors the
-   presentation; it does not replace those decisions.
+1. Choose **Personalize account menu**, then **Menu view** to open your own
+   `account-menu-view` child.
+2. On the root's free `theme` input, choose **+ → Bind literal**. Set `accent`
+   to `#7c3aed` and `canvas-background` to `#f5f3ff`, then save the record.
+3. Open the account menu and inspect the changed colors. The binding belongs
+   to your view; the referenced shared helpers and the selected Theme preference
+   remain unchanged. Already-filled ancestor bindings stay sealed.
+4. Open **Picker view**. Its identity remains the same: personalizing the menu
+   does not copy or replace unrelated components.
 
-Changes to a named shared value affect all graphs referencing that value in
-this bundle. A local leaf affects its dependent component. Ordinary branch
-and ownership rules still apply when you edit a function with other consumers.
+If you already have an own writable menu, Personalize opens it. The lesson
+uses an inspection-only path, keeps its existing inputs and creates no deletion
+receipt for that graph.
+
+A free input captures a value through ordinary graph composition. To change a
+filled shared helper, replace an exposed reference or explicitly create a local
+path; inheritance alone does not redirect deeply referenced identities.
 
 The component host keeps the supported operation and DOM contract, account
 callbacks, search and navigation. Personal graph dependencies need source

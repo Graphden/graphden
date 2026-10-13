@@ -52,7 +52,9 @@ test('a saved menu value waits for the authorized plan rather than the old ready
     graphData: {bindings: [{'fn-id': 'own-hover', 'slot-id': 'own-slot', get value() { return persisted; }}]},
     lookups: {slotMap: new Map([['own-slot', {name: 'value'}]])},
     window: {
-      gdUIComponentRuntimeIdentity: () => 'own-configuration',
+      gdUIComponentsRoots: () => ({'menu-id': 'own-configuration'}),
+      gdUIConfigurationState: () => ({selection: {'fn-id': 'editor-root'}}),
+      gdUIComponentRuntimeIdentity: () => 'editor-root',
       GraphdenBrowser: {keyword: value => value},
       gdGraphThemeBase: () => ({'--bg': '#fff7ed'}),
       gdShellMenuGraph: {ready: true, state: new Map(), runtime: {
@@ -112,7 +114,9 @@ test('Home waits for both its exact persisted list item and the reloaded update 
   const context = vm.createContext({Map, args: null, graphData: data,
     lookups: {slotMap: new Map([['own-slot', {name: 'vals'}]])},
     window: {
-      gdUIComponentRuntimeIdentity: () => 'own-configuration',
+      gdUIComponentsRoots: () => ({'menu-id': 'own-configuration'}),
+      gdUIConfigurationState: () => ({selection: {'fn-id': 'editor-root'}}),
+      gdUIComponentRuntimeIdentity: () => 'editor-root',
       GraphdenBrowser: {keyword: value => value},
       gdShellMenuGraph: {ready: true, state, runtime: {run(entry, args) {
         if (entry === 'initial') return state;

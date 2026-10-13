@@ -68,7 +68,8 @@ function _tourLesson() {
 function _tourStep() {
   const lesson = _tourLesson();
   if (!lesson) return null;
-  return (lesson.steps || [])[_tourState.step] || null;
+  const step = (lesson.steps || [])[_tourState.step] || null;
+  return window.gdTourUIComponentStep?.(step) || step;
 }
 
 

@@ -1495,7 +1495,8 @@
      :say "Copies the fixed shipped theme, menu, picker, Recents, Inspector and Explorer definitions into a fresh named namespace.
            An ordinary descriptor list selects component entry identities. Shared menu colors reference
            copied theme leaves; menu hover owns a local literal. Color wrappers retain the canonical
-           color type and ordinary editor form. The full bundle remains the Lesson 25 creation path."}
+           color type and ordinary editor form. This is an advanced legacy compatibility path; Lesson 25
+           instead creates a small inherited menu child and captures its free theme input."}
     {:ns graphden.editor.component-templates :defn selected-definitions
      :say "The retained legacy selective-copy compatibility path keeps only the chosen component and its owned reference closure. A new ordinary concat manifest
            references the previous authored manifest and the new descriptor list, preserving existing

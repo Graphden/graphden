@@ -6,7 +6,7 @@
 ;; not the one recorded here (refresh after every bump). See the fns.edn header.
 {"ai-clients-and-api-tokens" {:version 2, :steps "80e107f421297613cc29cb30b0c4eb950e9065f9"}
  "apps" {:version 2, :steps "c4365c3f00dc28ea233ba70c2d8f4413f28c01b0"}
- "asset-overrides" {:version 5, :steps "295da1c00c1c5d38a82c28da92680c01e5980930"}
+ "asset-overrides" {:version 6, :steps "e0e4eaab62d7a024792fa03649296da7011d6a1f"}
  "branches" {:version 3, :steps "90d46a43c26c026b58471c97d05dd20c20a79587"}
  "components-and-pages" {:version 2, :steps "1edd3031e8453661c3c921a32fcfe7de89195ec7"}
  "custom-script-escape-hatch" {:version 1, :steps "6888c73f5709486153de1f056cea1c220e0fa128"}

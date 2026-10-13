@@ -4,7 +4,6 @@
  [{:name :_component-entry :type {:role :keyword :fn-id :uuid}}
   {:name :_component-entries :list :_component-entry}
   {:name :_component-descriptor :type {:component-id :uuid :entries :_component-entries}}
-  {:name :_component-manifest :list :_component-descriptor}
   {:name :_account-menu-initial-id :parent :const :return-type :fn-ref
    :args {:value {:ref :app.ui-account-menu/account-menu-initial :type :fn-ref}}}
   {:name :_account-menu-initial-entry :parent :zipmap :return-type :_component-entry

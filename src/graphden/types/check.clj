@@ -554,6 +554,14 @@
         (if (types/fail? s) subst s))
       subst)
 
+    ;; A concrete record/list literal may satisfy refinements nested below
+    ;; its top-level shape. The directional literal check validates every
+    ;; nested value and keeps markers closed; references have no samples.
+    (and (some? b-form) (literal-binding? b-form)
+         (not (has-type-var? expected)) (not (has-type-var? actual))
+         (gradual/fits? actual expected [(literal-binding-value b-form)]))
+    subst
+
     ;; Unification binds variables; gradual/fits? then enforces direction
     ;; on the concrete structure, retaining the literal/refinement escape.
     (or (has-type-var? expected) (has-type-var? actual))

@@ -1026,8 +1026,8 @@ async function waitTourClosed(page, ms) {
 }
 
 
-async function finishAndDelete(page, cleanupTimeout = 20000) {
-  assert(await clickTourButton(page, 'Finish'), 'Finish button');
+async function finishAndDelete(page, cleanupTimeout = 20000, {alreadyFinished = false} = {}) {
+  if (!alreadyFinished) assert(await clickTourButton(page, 'Finish'), 'Finish button');
   await page.waitForFunction(() => {
     const title = document.querySelector('#gd-tour-pop .gd-tour-title')?.textContent.trim();
     return title === 'Clean up tutorial items?' || title === 'Delete the tutorial branch?';

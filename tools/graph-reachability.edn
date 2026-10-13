@@ -82,10 +82,10 @@
    "src/graphden/executor/interface.clj"
    "src/graphden/crud/fn_execution/lookup.clj"}
 
- ;; Composed fn-defs that are DELIBERATELY unreferenced: starter
- ;; vocabulary kept complete for whoever is composing in the editor,
- ;; not leftovers. Each is user-facing (public name + `:description`),
- ;; and the reason is recorded at the definition too.
+ ;; Composed fn-defs deliberately entered from generated definitions or
+ ;; trusted UUID resolution, plus starter vocabulary for editor authors.
+ ;; These consumers do not occur as static graph references in the package
+ ;; corpus, so each root needs its concrete reason here.
  ;; fn-defs the OTHER repos reach by QUALIFIED name from their own fns.edn —
  ;; graphden-cloud's landing (the anonymous storefront pages) and the
  ;; tenancy addon. The audit also scans a sibling checkout when one is
@@ -106,6 +106,14 @@
 
  :vocabulary
  {
+  :_descriptor-component-id "config_templates.clj definitions generates a legacy descriptor adapter through _descriptor-pair"
+  :_descriptor-entries "config_templates.clj definitions generates a legacy descriptor adapter through _descriptor-pair"
+  :_descriptor-pair "config_templates.clj definitions references this function from generated legacy descriptor maps"
+  :_legacy-menu-initial "config_templates.clj legacy-record generates an identity child of this getter"
+  :_legacy-menu-update "config_templates.clj legacy-record generates an identity child of this getter"
+  :_legacy-menu-view "config_templates.clj legacy-record generates an identity child of this getter"
+  :_legacy-picker-view "config_templates.clj legacy-record generates an identity child of this getter"
+  :editor-resolver "config_resolution.clj resolves this protected graph by its fixed package UUID"
   :ensure-color "docs/TYPES.md — explicit text-to-color boundary for graph-built HEX values"
   :explorer-toolbar-initial "app.ui-explorer browser entry: tools/ui_preview/builtin_plans.clj; docs/EDITOR_MODULES.md"
   :explorer-toolbar-update "app.ui-explorer finite host requests: editor-explorer-graph.js; docs/EDITOR_MODULES.md"

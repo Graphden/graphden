@@ -22,8 +22,14 @@ the new entries. It does not copy the shared component closure. Deeply reference
 helpers retain their original identities: inheritance does not redirect them.
 An already owned, writable role opens for editing; a shared read-only custom
 role is inherited into a new personal child. Group personalization leaves theme
-selection unchanged. The explicit full-copy action remains available for the
-older theme and deep-helper exercises.
+selection unchanged. The explicit full-copy action remains available as an
+advanced compatibility tool.
+
+For example, the personal account-menu view has a free `theme` record input.
+Bind `accent` and `canvas-background` on that child to capture personal tokens
+through the shared dependency graph. This creates an own binding rather than
+changing packaged helpers. Filled ancestor slots remain sealed; changing a
+deeply referenced helper requires an exposed reference or an explicit local path.
 
 Replacing an editor root renames the old root privately in the current branch
 and creates a new UUID named `editor`. Its parent relationships are retained.

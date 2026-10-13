@@ -37,7 +37,9 @@
     [graphden.system.branch-router.epoch :as br-epoch]
     [graphden.system.branch-router.recheck :as br-recheck]
     [graphden.system.branch-router.request :as br-req]
+    [graphden.tenancy.context :as tenancy]
     [graphden.test-infra.schemas :as schemas]
+    [graphden.types.core :as types]
     [graphden.types.diagnostics :as diag]
     [graphden.versioning.storage.core :as vs]))
 
@@ -927,6 +929,7 @@
     (with-redefs [sp/query-entities (fn [_ entity _]
                                       (swap! reads conj entity)
                                       (if (= entity :fn) rows []))
+                  sp/read-entities (fn [_ _ ids] (into {} (map (fn [id] [id (first (filter #(= id (:id %)) rows))])) ids))
                   owned/owned-fn-id? (constantly false)
                   type-check/type-check-fn-after-mutation! (fn [_ id _] (swap! checked conj id))]
       (#'br-recheck/record-ordered-snapshot! context nil (#'br-recheck/ordered-user-fn-ids context))
@@ -935,3 +938,37 @@
       (is (some #{:binding} @reads) "fresh authoritative edges are read once before partitioning")
       (is (= {:reverse-deps {child #{parent}}} @(:compile-deps context))
           "recovery does not mutate the compiler's index"))))
+
+
+(deftest recovery-batches-bind-actual-org-and-discard-caller-alias-scope
+  (let [ids (repeatedly 3 random-uuid)
+        [a b c] ids
+        rows {a {:id a :org-id "recovery-org"} b {:id b} c {:id c :org-id "recovery-org"}}
+        calls (atom [])
+        context {:storage {} :compile-deps (atom {:reverse-deps {}})}]
+    (binding [tenancy/*current-org* "caller-org"
+              types/*type-aliases-override* (atom {::caller :text})
+              type-check/*request-alias-view?* true]
+      (with-redefs [sp/read-entities (fn [_ _ _] rows)
+                    sp/query-entities (fn [_ _ _] [])
+                    type-check/type-check-fn-after-mutation!
+                    (fn [_ id _]
+                      (swap! calls conj {:id id :org (tenancy/current-org)
+                                         :caller-alias? (contains? @types/*type-aliases-override* ::caller)
+                                         :request-view? type-check/*request-alias-view?*}))]
+        (#'br-recheck/record-ordered-snapshot! context nil ids)))
+    (is (= ids (map :id @calls)))
+    (is (= ["recovery-org" tenancy/public-org "recovery-org"] (mapv :org @calls)))
+    (is (not-any? :caller-alias? @calls))
+    (is (not-any? :request-view? @calls))))
+
+
+(deftest recovery-does-not-classify-missing-metadata-as-public
+  (let [checked? (atom false)]
+    (with-redefs [sp/read-entities (fn [_ _ _] {})
+                  type-check/type-check-fn-after-mutation! (fn [& _] (reset! checked? true))]
+      (is (= :recheck/function-metadata-unavailable
+             (try (#'br-recheck/record-ordered-snapshot! {:storage {}} nil [(random-uuid)])
+                  nil
+                  (catch clojure.lang.ExceptionInfo e (:type (ex-data e))))))
+      (is (false? @checked?)))))

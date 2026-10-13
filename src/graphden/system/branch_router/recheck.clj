@@ -30,6 +30,8 @@
     [graphden.storage.tx :as tx]
     [graphden.system.branch-router.recheck-lifecycle :as lifecycle]
     [graphden.system.branch-router.recheck-state :as recheck-state]
+    [graphden.tenancy.context :as tenancy]
+    [graphden.types.core :as types]
     [graphden.util.ns-path :as ns-path]
     [graphden.versioning.branch-local :as branch-local]
     [graphden.versioning.storage.resolution :as resolution]
@@ -93,7 +95,8 @@
    conditionally publish only their changed checker entries."
   [branch-ctx branch-id]
   (when (and *recheck-user-fns?* *ctx-build-async-recheck?*)
-    (lifecycle/schedule! branch-ctx branch-id ordered-user-fn-ids record-ordered-snapshot!))
+    (lifecycle/schedule! (assoc branch-ctx :storage (or (:compile-storage branch-ctx) (:storage branch-ctx)))
+                         branch-id ordered-user-fn-ids record-ordered-snapshot!))
   nil)
 
 
@@ -157,24 +160,40 @@
 
 
 (defn- record-import-snapshot!
-  "Reuse reconstruction metadata only within one decorated, read-only snapshot.
-   Recovery batches preserve the authoritative order captured by their pass."
-  ([branch-ctx branch-id fn-ids]
-   (record-import-snapshot! branch-ctx branch-id fn-ids false))
-  ([branch-ctx branch-id fn-ids preserve-order?]
-   (call-with-read-snapshot
-     (:storage branch-ctx)
-     (fn [snapshot]
-       (let [options {:namespace-paths (delay (ns-path/path-map (sp/query-entities snapshot :ns {})))
-                      :preserve-order? preserve-order?}]
-         (type-check/call-with-reconstruction-memo
-           snapshot
-           #(record-fn-types! (assoc branch-ctx :storage snapshot) branch-id fn-ids options)))))))
+  "Reuse reconstruction metadata only within one decorated, read-only snapshot."
+  [branch-ctx branch-id fn-ids]
+  (call-with-read-snapshot
+    (:storage branch-ctx)
+    (fn [snapshot]
+      (let [options {:namespace-paths (delay (ns-path/path-map (sp/query-entities snapshot :ns {})))}]
+        (type-check/call-with-reconstruction-memo
+          snapshot
+          #(record-fn-types! (assoc branch-ctx :storage snapshot) branch-id fn-ids options))))))
 
 
 (defn- record-ordered-snapshot!
+  "Recover the compiled shard, binding each contiguous group's actual row
+   organization and branch alias view instead of a conveyed request scope."
   [branch-ctx branch-id fn-ids]
-  (record-import-snapshot! branch-ctx branch-id fn-ids true))
+  (call-with-read-snapshot
+    (:storage branch-ctx)
+    (fn [snapshot]
+      (let [rows (sp/read-entities snapshot :fn fn-ids)
+            _ (when-not (every? #(contains? rows %) fn-ids)
+                (throw (ex-info "Recovery function metadata is unavailable"
+                                {:type :recheck/function-metadata-unavailable})))
+            org-of #(or (:org-id (get rows %)) tenancy/public-org)
+            namespace-paths (delay (ns-path/path-map (sp/query-entities snapshot :ns {})))
+            alias-source (compile-runtime/storage-alias-source snapshot)]
+        (doseq [group (partition-by org-of fn-ids)]
+          (let [org (org-of (first group))]
+            (binding [tenancy/*current-org* org
+                      types/*type-aliases-override* (atom (compile-runtime/org-alias-snapshot tenancy/public-org org alias-source))
+                      type-check/*request-alias-view?* false]
+              (type-check/call-with-reconstruction-memo
+                snapshot
+                #(record-fn-types! (assoc branch-ctx :storage snapshot) branch-id group
+                                   {:namespace-paths namespace-paths :preserve-order? true})))))))))
 
 
 (defn record-own-fn-types!
@@ -223,5 +242,6 @@
       (future (call-with-ctx-slices branch-ctx
                                     #(record-fn-types! branch-ctx branch-id fn-ids)))
       (call-with-ctx-slices branch-ctx
-                            #(lifecycle/schedule! branch-ctx branch-id ordered-user-fn-ids record-ordered-snapshot!))))
+                            #(lifecycle/schedule! (assoc branch-ctx :storage (or (:compile-storage branch-ctx) (:storage branch-ctx)))
+                                                  branch-id ordered-user-fn-ids record-ordered-snapshot!))))
   nil)

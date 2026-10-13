@@ -246,9 +246,9 @@
     (try
       (context/invalidate-graph-cache! ctx fn-ids)
       (recheck/record-imported-fn-types! ctx (versioned/current-branch-id storage) fn-ids)
-      (doseq [id fn-ids]
-        (invalidation/notify-after-write! ctx storage :fn :write
-                                          {:id id :org-id (tenancy/current-org)}))
+      (when (seq fn-ids)
+        (invalidation/notify-after-bulk-write! ctx storage
+                                               {:org-id (tenancy/current-org)}))
       (router-epoch/note-graph-epoch-validated! storage)
       result
       (catch Exception _

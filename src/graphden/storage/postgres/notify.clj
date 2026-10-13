@@ -116,6 +116,20 @@
            :else ""))))
 
 
+(defn bounded-payload
+  "Keep PostgreSQL's strict 8KiB UTF-8 limit. Oversized coverage is omitted
+   in full, leaving the receiver's coarse-heal gap intact. An event whose
+   non-coverage fields do not fit is refused rather than truncated."
+  [event]
+  (let [fits? (fn [payload]
+                (< (alength (String/.getBytes payload java.nio.charset.StandardCharsets/UTF_8)) 8192))
+        payload (format-payload event)]
+    (if (fits? payload)
+      payload
+      (let [without-coverage (format-payload (dissoc event :epochs))]
+        (when (fits? without-coverage) without-coverage)))))
+
+
 ;; =============================================================================
 ;; LISTEN connection + dispatch loop
 ;; =============================================================================
@@ -337,13 +351,18 @@
     (with-meta
       (fn emit-notify
         [event]
-        (try
-          (util/exec! ds ["SELECT pg_notify(?, ?)" channel-name
-                          (format-payload (assoc event :emitter id))] {})
-          nil
-          (catch Exception e
-            (log/warn e "NOTIFY emit failed — sibling pods may lag until next mutation"
-                      {:event event}))))
+        (let [payload (bounded-payload (assoc event :emitter id))
+              diagnostic {:kind (:kind event) :op (:op event)
+                          :epoch-count (count (:epochs event))
+                          :payload-bytes (when payload
+                                           (alength (String/.getBytes payload java.nio.charset.StandardCharsets/UTF_8)))}]
+          (if payload
+            (try
+              (util/exec! ds ["SELECT pg_notify(?, ?)" channel-name payload] {})
+              nil
+              (catch Exception _
+                (log/warn "NOTIFY emit failed — sibling pods may lag until next mutation" diagnostic)))
+            (log/warn "NOTIFY event exceeds payload limit — coarse healing remains required" diagnostic))))
       {::emitter-id id})))
 
 

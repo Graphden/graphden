@@ -151,9 +151,9 @@
       (try
         (when (seq ids) (context/invalidate-graph-cache! ctx ids))
         (when (seq ids) (recheck/record-imported-fn-types! ctx (versioned/current-branch-id storage) ids))
-        (doseq [id ids]
-          (invalidation/notify-after-write! ctx storage :fn :write
-                                            {:id id :org-id (tenancy/current-org)}))
+        (when (seq ids)
+          (invalidation/notify-after-bulk-write! ctx storage
+                                                 {:org-id (tenancy/current-org)}))
         ;; A newly materialized empty namespace changes no function/type
         ;; closure. Acknowledge its committed request bump without pretending
         ;; that the function-only NOTIFY adapter publishes namespace events.

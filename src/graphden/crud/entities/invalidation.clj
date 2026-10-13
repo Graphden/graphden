@@ -293,3 +293,16 @@
           ;; ctx)` full clear.
           (nil? seeds) (emit (event ""))
           :else nil)))))
+
+
+(defn notify-after-bulk-write!
+  "Publish one branch/org full clear after a committed cohort. No epoch
+   coverage is claimed: a lost event must leave the ordinary coarse-heal
+   gap visible, and no individual seed can cover the whole cohort."
+  [ctx storage data]
+  (when-let [emit (:notify-emitter ctx)]
+    (emit (cond-> {:kind :fn :op :invalidate :id ""}
+            (vcore/current-branch-id storage)
+            (assoc :branch-id (str (vcore/current-branch-id storage)))
+            (:org-id data) (assoc :org-id (:org-id data))
+            (:invalidate-origin? data) (assoc :invalidate-origin? true)))))

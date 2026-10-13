@@ -12,18 +12,18 @@
   {:name :_item-id :parent :get  :args {:coll {:as :item} :key {:value :id} :default ""}}
   {:name :_same-entry :parent :equal?  :args {:a :_item-id :b :_entry-id}}
   {:name :_keep-entry :parent :if :lambda-params [:item] :args {:test :_same-entry :then false :else true}}
-  {:name :_other-pins :parent :filter  :args {:pred :_keep-entry :coll :recents-pins}}
-  {:name :_other-trail :parent :filter  :args {:pred :_keep-entry :coll :recents-trail}}
+  {:name :_other-pins :return-type :_recents-entry-list :parent :filter  :args {:pred :_keep-entry :coll :recents-pins}}
+  {:name :_other-trail :return-type :_recents-entry-list :parent :filter  :args {:pred :_keep-entry :coll :recents-trail}}
   {:name :_pin-count :parent :count  :args {:coll :recents-pins}}
   {:name :_other-pin-count :parent :count  :args {:coll :_other-pins}}
   {:name :_not-pinned :parent :equal?  :args {:a :_pin-count :b :_other-pin-count}}
-  {:name :_entry-list :parent :list :args {:items [:_entry]}}
-  {:name :_prepend-pin :parent :concat  :args {:colls [:_entry-list :recents-pins]}}
-  {:name :_toggled-pins :parent :if  :args {:test :_not-pinned :then :_prepend-pin :else :_other-pins}}
-  {:name :recents-toggle-pin :parent :assoc  :args {:map {:as :state :type :_recents-state} :key {:value :pins} :value :_toggled-pins}}
-  {:name :_prepend-trail :parent :concat  :args {:colls [:_entry-list :_other-trail]}}
-  {:name :_limited-trail :parent :take  :args {:count 6 :coll :_prepend-trail}}
-  {:name :_push-trail :parent :assoc  :args {:map {:as :state :type :_recents-state} :key {:value :trail} :value :_limited-trail}}
+  {:name :_entry-list :return-type :_recents-entry-list :parent :list :args {:items [:_entry]}}
+  {:name :_prepend-pin :return-type :_recents-entry-list :parent :concat  :args {:colls [:_entry-list :recents-pins]}}
+  {:name :_toggled-pins :return-type :_recents-entry-list :parent :if  :args {:test :_not-pinned :then :_prepend-pin :else :_other-pins}}
+  {:name :recents-toggle-pin :return-type :_recents-state :parent :assoc  :args {:map {:as :state :type :_recents-state} :key {:value :pins} :value :_toggled-pins}}
+  {:name :_prepend-trail :return-type :_recents-entry-list :parent :concat  :args {:colls [:_entry-list :_other-trail]}}
+  {:name :_limited-trail :return-type :_recents-entry-list :parent :take  :args {:count 6 :coll :_prepend-trail}}
+  {:name :_push-trail :return-type :_recents-state :parent :assoc  :args {:map {:as :state :type :_recents-state} :key {:value :trail} :value :_limited-trail}}
   {:name :_anonymous-name :parent :str-starts-with?  :args {:string :_entry-name :prefix "_anon-"}}
   {:name :_empty-name :parent :equal?  :args {:a :_entry-name :b ""}}
   {:name :_unchanged-state :parent :const :args {:value {:as :state :type :_recents-state}}}
@@ -42,8 +42,8 @@
   {:name :_item-unpinned :parent :if :args {:test :_item-pinned :then false :else true}}
   {:name :_item-selected :parent :equal?  :args {:a :_item-id :b :_selected}}
   {:name :_visible-item :parent :if :lambda-params [:item] :args {:test :_item-selected :then false :else :_item-unpinned}}
-  {:name :_visible-trail :parent :filter  :args {:pred :_visible-item :coll :recents-trail}}
-  {:name :_recents-visible-trail :parent :take  :args {:count 5 :coll :_visible-trail}}
+  {:name :_visible-trail :return-type :_recents-entry-list :parent :filter  :args {:pred :_visible-item :coll :recents-trail}}
+  {:name :_recents-visible-trail :return-type :_recents-entry-list :parent :take  :args {:count 5 :coll :_visible-trail}}
   {:name :_visible-count :parent :count  :args {:coll :_recents-visible-trail}}
   {:name :_total-count :parent :add  :args {:nums [:_visible-count :_pin-count]}}
   {:name :_empty :parent :equal?  :args {:a :_total-count :b 0}}
@@ -78,29 +78,31 @@
   {:name :recents-styles :parent :list  :args {:items [{:value {:selector "&" :declarations {"padding" "4px 8px 2px"}}} {:value {:selector "& .gd-recent-cap" :declarations {"font-size" "0.625rem" "font-weight" "600" "letter-spacing" "0.06em" "text-transform" "uppercase" "color" "var(--gd-ink-3)" "padding" "2px 4px"}}} {:value {:selector "& .gd-recent-row" :declarations {"display" "block" "width" "100%" "border" "0" "border-radius" "4px" "margin" "0" "padding" "2px 6px" "background-color" "transparent" "color" "var(--fg)" "text-align" "left" "cursor" "pointer" "font-family" "var(--gd-mono)" "font-size" "0.75rem" "overflow" "hidden" "text-overflow" "ellipsis" "white-space" "nowrap" "flex" "1" "min-width" "0"}}} {:value {:selector "& .gd-recent-line" :declarations {"display" "flex" "align-items" "center"}}} {:value {:selector "& .gd-recent-pin" :declarations {"flex" "none" "border" "0" "background-color" "transparent" "color" "var(--muted-fg)" "cursor" "pointer" "padding" "2px 6px" "border-radius" "4px" "font-size" "0.75rem" "opacity" "0"}}} {:value {:selector "& .gd-recent-line:hover .gd-recent-pin" :declarations {"opacity" "1"}}} {:value {:selector "& .gd-recent-line:focus-within .gd-recent-pin" :declarations {"opacity" "1"}}} {:value {:selector "& .gd-recent-pin:hover" :declarations {"color" "var(--fg)" "background-color" "var(--hover-bg)"}}} {:value {:selector "& .gd-recent-pin:focus-visible" :declarations {"outline" "2px solid var(--accent)" "outline-offset" "1px" "opacity" "1"}}} {:value {:selector "& .gd-recent-row:hover" :declarations {"background-color" "var(--hover-bg)"}}} {:value {:selector "& .gd-recent-row:focus-visible" :declarations {"outline" "2px solid var(--accent)" "outline-offset" "1px"}}}]}}
   {:name :recents-view :parent :zipmap  :args {:keys [{:value :tree} {:value :styles} {:value :hidden}] :vals [:_tree :recents-styles :_model-hidden]}}
   {:name :_recents-entry :type {:id :text :name :text :qname :text}}
+  {:name :_recents-entry-list :list :_recents-entry}
   {:name :_recents-state :type {:pins [:list :_recents-entry] :trail [:list :_recents-entry]}}
   {:name :_recents-inputs :type {:pins [:list :_recents-entry] :trail [:list :_recents-entry] :selected [:union :null :text] :searching :bool}}
   {:name :_recents-event :type {:kind :text :entry :_recents-entry}}
   {:name :_recents-persist-request :type {:kind :text :entries [:list :_recents-entry]}}
   {:name :_recents-navigate-request :type {:kind :text :fn-id :text :qname :text}}
   {:name :_recents-request :union [:_recents-persist-request :_recents-navigate-request]}
+  {:name :_recents-requests :list :_recents-request}
   {:name :_recents-transition :type {:state :_recents-state :requests [:list :_recents-request]}}
   {:name :_sync-event :parent :equal? :args {:a :_event-kind :b "sync"}}
   {:name :_next-state :parent :if :args {:test :_sync-event :then :recents-initial :else :_event-state}}
   {:name :_next-trail :parent :get :args {:coll :_next-state :key {:value :trail} :default {:value []}}}
   {:name :_next-pins :parent :get :args {:coll :_next-state :key {:value :pins} :default {:value []}}}
-  {:name :_trail-request :parent :zipmap :args {:keys [{:value :kind} {:value :entries}] :vals ["persist-trail" :_next-trail]}}
-  {:name :_pins-request :parent :zipmap :args {:keys [{:value :kind} {:value :entries}] :vals ["persist-pins" :_next-pins]}}
-  {:name :_trail-requests :parent :list :args {:items [:_trail-request]}}
-  {:name :_pins-requests :parent :list :args {:items [:_pins-request]}}
-  {:name :_no-requests :parent :const :args {:value {:value []}}}
+  {:name :_trail-request :return-type :_recents-persist-request :parent :zipmap :args {:keys [{:value :kind} {:value :entries}] :vals ["persist-trail" :_next-trail]}}
+  {:name :_pins-request :return-type :_recents-persist-request :parent :zipmap :args {:keys [{:value :kind} {:value :entries}] :vals ["persist-pins" :_next-pins]}}
+  {:name :_trail-requests :return-type :_recents-requests :parent :list :args {:items [:_trail-request]}}
+  {:name :_pins-requests :return-type :_recents-requests :parent :list :args {:items [:_pins-request]}}
+  {:name :_no-requests :return-type :_recents-requests :parent :const :args {:value {:value []}}}
   {:name :_navigate-event :parent :equal? :args {:a :_event-kind :b "navigate"}}
   {:name :_entry-qname :parent :get :args {:coll :_entry :key {:value :qname} :default ""}}
-  {:name :_navigate-request :parent :zipmap :args {:keys [{:value :kind} {:value :fn-id} {:value :qname}] :vals ["navigate-fn" :_entry-id :_entry-qname]}}
-  {:name :_navigate-requests :parent :list :args {:items [:_navigate-request]}}
+  {:name :_navigate-request :return-type :_recents-navigate-request :parent :zipmap :args {:keys [{:value :kind} {:value :fn-id} {:value :qname}] :vals ["navigate-fn" :_entry-id :_entry-qname]}}
+  {:name :_navigate-requests :return-type :_recents-requests :parent :list :args {:items [:_navigate-request]}}
   {:name :_push-changed :parent :equal? :args {:a :_next-state :b :_unchanged-state}}
-  {:name :_push-requests :parent :if :args {:test :_push-changed :then :_no-requests :else :_trail-requests}}
-  {:name :_navigation-requests :parent :if :args {:test :_navigate-event :then :_navigate-requests :else :_no-requests}}
-  {:name :_selection-requests :parent :if :args {:test :_push-event :then :_push-requests :else :_navigation-requests}}
-  {:name :_requests :parent :if :args {:test :_toggle-event :then :_pins-requests :else :_selection-requests}}
+  {:name :_push-requests :return-type :_recents-requests :parent :if :args {:test :_push-changed :then :_no-requests :else :_trail-requests}}
+  {:name :_navigation-requests :return-type :_recents-requests :parent :if :args {:test :_navigate-event :then :_navigate-requests :else :_no-requests}}
+  {:name :_selection-requests :return-type :_recents-requests :parent :if :args {:test :_push-event :then :_push-requests :else :_navigation-requests}}
+  {:name :_requests :return-type :_recents-requests :parent :if :args {:test :_toggle-event :then :_pins-requests :else :_selection-requests}}
   {:name :recents-update :parent :zipmap :return-type :_recents-transition :args {:keys [{:value :state} {:value :requests}] :vals [:_next-state :_requests]}}]}

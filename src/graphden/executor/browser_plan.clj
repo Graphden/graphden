@@ -147,7 +147,7 @@
 
 (def ^:private primitive-ops
   (into {}
-        (for [[ns-path names] [["core.logic" [:const :if :equal?]]
+        (for [[ns-path names] [["core.logic" [:const :if :equal? :nil? :coalesce]]
                                ["core.collections" [:list :get :assoc :zipmap :count :take :concat :vals]]
                                ["core.arithmetic" [:add :mod]]
                                ["core.hof" [:map :filter :group-by :sort-by]]

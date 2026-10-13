@@ -520,6 +520,31 @@
                              (str/starts-with? % "app.ui-")) paths))))))))
 
 
+(deftest installed-default-component-bodies-export-from-certified-storage-input
+  (let [ctx (:ctx ga/*bootstrap*)
+        policy (snapshot/capture-policy
+                 @(or (:rich-types-atom ctx) (registry/active-rich-types-atom)))]
+    (source/with-snapshot
+      (:storage ga/*bootstrap*)
+      (fn [storage authorize!]
+        (let [resolved (resolution/capture storage authorize! policy)]
+          (doseq [[component entries] (:configuration resolved)]
+            (let [body (source/collect-closure storage (vals entries) authorize!)
+                  captured {:graph body :namespaces (source/collect-namespaces storage body)}
+                  check! check/check-fn-def!
+                  plan (with-redefs [check/check-fn-def!
+                                     (fn [definition]
+                                       (try (check! definition)
+                                            (catch clojure.lang.ExceptionInfo error
+                                              (println "Safe component checker diagnostic"
+                                                       {:component component
+                                                        :checker (select-keys (ex-data error)
+                                                                              [:type :expected :actual :declared :computed])})
+                                              (throw error))))]
+                         (snapshot/export-snapshot captured (:base-fns ctx) entries policy))]
+              (is (map? plan) (name component)))))))))
+
+
 (deftest actual-personal-editor-child-resolves-with-shared-default-dependencies
   (let [storage (:storage ga/*bootstrap*)
         capture (fn []

@@ -282,6 +282,9 @@
    {:name :self-mask :parent :pair :args {:x :read-x :y 12}}
    {:name :boom :parent :mod :args {:dividend 1 :divisor 0}}
    {:name :choice :parent :if :args {:test {:as :condition} :then "then" :else :boom}}
+   {:name :nil-test :parent :nil? :args {:value {:as :value}}}
+   {:name :coalesce-value :parent :coalesce :args {:value {:as :value} :default 0}}
+   {:name :coalesce-default-error :parent :coalesce :args {:value {:as :value} :default :boom}}
    {:name :lookup :parent :get
     :args {:coll {:as :state} :key {:as :key} :default "fallback"}}
    {:name :update :parent :assoc
@@ -310,6 +313,14 @@
    {:entry :choice :inputs {:condition ""} :expected "then"}
    {:entry :choice :inputs {:condition false} :error true}
    {:entry :choice :inputs {:condition nil} :error true}
+   {:entry :nil-test :inputs {:value nil} :expected true}
+   {:entry :nil-test :inputs {:value false} :expected false}
+   {:entry :nil-test :inputs {:value 0} :expected false}
+   {:entry :coalesce-value :inputs {:value nil} :expected 0}
+   {:entry :coalesce-value :inputs {:value false} :expected 0}
+   {:entry :coalesce-value :inputs {:value ""} :expected ""}
+   {:entry :coalesce-default-error :inputs {:value 0} :expected 0}
+   {:entry :coalesce-default-error :inputs {:value nil} :error true}
    {:entry :lookup :inputs {:state {:phase nil} :key :phase} :expected nil}
    {:entry :lookup :inputs {:state {:phase false} :key :phase} :expected false}
    {:entry :lookup :inputs {:state {} :key :phase} :expected "fallback"}
@@ -387,7 +398,7 @@
   ([definitions]
    (let [loaded (loader/load-packages ["web"])
          base-defs (select-keys (:base-fn-defs loaded)
-                                [:const :if :list :mod :get :equal? :count :map :filter :take :concat
+                                [:const :if :list :mod :get :equal? :nil? :coalesce :count :map :filter :take :concat
                                  :vals :group-by :sort-by :str :str-starts-with? :str-lower :str-trim
                                  :str-contains? :hiccup :zipmap :assoc :add])
          type-defs (remove #(or (:parent %) (:parents %)) (:fn-defs loaded))
@@ -623,7 +634,7 @@
 
 (deftest browser-runtime-matches-jvm-for-stored-compositions-test
   (let [loaded (loader/load-packages ["core"])
-        base-defs (select-keys (:base-fn-defs loaded) [:const :if :list :mod :get :assoc :equal? :count :zipmap :add])
+        base-defs (select-keys (:base-fn-defs loaded) [:const :if :list :mod :get :assoc :equal? :nil? :coalesce :count :zipmap :add])
         type-defs (remove #(or (:parent %) (:parents %)) (:fn-defs loaded))
         primitive-rows (into (vec type-defs) (map (fn [[n d]] (assoc d :name n))) base-defs)
         {:keys [graph ids]} (graph-of primitive-rows differential-definitions)

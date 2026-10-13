@@ -279,6 +279,11 @@
     },
     if: (arg) => arg(truth(arg('test')) ? 'then' : 'else'),
     'equal?': (arg) => equal(arg('a'), arg('b')),
+    'nil?': (arg) => arg('value') === null,
+    coalesce: (arg) => {
+      const value = arg('value');
+      return truth(value) ? value : arg('default');
+    },
     add: (arg) => { let total = 0; for (const value of sequence(arg('nums'))) total = integer(total + integer(value)); return total; },
     mod: (arg) => {
       const a = integer(arg('dividend')); const b = integer(arg('divisor'));

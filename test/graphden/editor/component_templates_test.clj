@@ -87,3 +87,16 @@
     (is (< (count full) 1000))
     (is (every? #(contains? #{root (str root ".explorer")} (:namespace %)) selected))
     (is (every? (set (map :name selected)) [:explorer-toolbar-initial :explorer-toolbar-update :explorer-toolbar-view]))))
+
+
+(deftest copied-recents-request-union-retains-local-member-identities
+  (let [root "users.alice.ui-test"
+        recents-namespace (str root ".recents")
+        definitions (templates/definitions root)
+        union (first (filter #(and (= recents-namespace (:namespace %)) (= :_recents-request (:name %))) definitions))]
+    (is (= [:_recents-persist-request :_recents-navigate-request]
+           (:union union)))
+    (doseq [member (:union union)]
+      (is (boolean (some #(and (= recents-namespace (:namespace %))
+                               (= member (:name %))) definitions))
+          "Every copied union member resolves inside the same bundle"))))

@@ -90,15 +90,19 @@ browser implementation of all Graphden functions.
 There is no application transpilation step or CDN dependency: Preact uses the
 existing, separate vendor-build pipeline.
 
-The browser backend supports `const`, `if`, `equal?`, `list`, `map`, `get`,
-`assoc`, `zipmap`, `count`, `add`, `mod`, and `hiccup`. The server resolves
+The browser backend supports `const`, `if`, `equal?`, `nil?`, `coalesce`,
+`list`, `map`, `filter`, `group-by`, `sort-by`, `get`, `assoc`, `zipmap`,
+`count`, `take`, `concat`, `vals`, `add`, `mod`, `str`, `str-starts-with?`,
+`str-lower`, `str-trim`, `str-contains?`, and `hiccup`. The server resolves
 inheritance, bindings and renames with the existing compiler helpers. The client
 executes an ID-based derived plan; it does not resolve graph names or redefine
 inheritance. Static `map` callbacks support zero or one lambda parameter and
 ordinary captured inputs; identity references and functions that produce
 callables are rejected. JVM `map` eagerly realizes callbacks but returns a
 sequence, which the browser preserves. Calls and arguments are lazy and memoized
-per entry invocation.
+per entry invocation. Each operation forces the same arguments as its JVM
+counterpart: `if` selects one branch; `coalesce` implements the JVM's `or`,
+selecting its lazy default when the value is nil or false.
 Keyword/string identity is preserved. Values are nil, booleans, safe integers,
 strings, keywords, vectors and maps with string or keyword keys; finite result
 sequences are materialized with a bound. Unsupported values/operations fail.

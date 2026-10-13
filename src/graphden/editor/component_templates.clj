@@ -12,7 +12,7 @@
 
 (def ^:private abi-names
   (into {}
-        (for [[path names] [["core.logic" [:const :if :equal?]]
+        (for [[path names] [["core.logic" [:const :if :equal? :nil? :coalesce]]
                             ["core.collections" [:list :get :assoc :zipmap :count :take :concat :vals]]
                             ["core.arithmetic" [:add :mod]]
                             ["core.hof" [:map :filter :group-by :sort-by]]
@@ -37,7 +37,7 @@
    resolves slots against these shipped declarations, then checks every actual
    installed dependency under source authorization before writing anything."
   []
-  (let [modules {"core/logic" ["core.logic" #{:const :if :equal?}]
+  (let [modules {"core/logic" ["core.logic" #{:const :if :equal? :nil? :coalesce}]
                  "core/collections" ["core.collections" #{:list :get :assoc :zipmap :count :take :concat :vals}]
                  "core/arithmetic" ["core.arithmetic" #{:add :mod}]
                  "core/hof" ["core.hof" #{:map :filter :group-by :sort-by}]

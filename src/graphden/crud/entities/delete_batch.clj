@@ -97,10 +97,10 @@
     (refuse! :graph-write/functions-in-use)))
 
 
-(defn delete-locked!
-  "Delete exact receipts within a caller-owned graph-writer transaction.
-   Revalidates untrusted receipts and all ordinary write/reference guards.
-   Does not publish derived state: callers must publish only after commit."
+(defn validate-locked!
+  "Read-only validation of exact deletion receipts in a caller-owned writer
+   transaction. Metadata, write, package, secret and reference guards match
+   DELETE; a later mutation must validate again inside its own transaction."
   [storage receipts]
   (when-not (and tx/*transaction-context*
                  (identical? tx/*transaction-context* (tx/writer-context storage))
@@ -112,7 +112,18 @@
         rows (validate-identities! storage receipts)
         ids (set (keys rows))]
     (when (seq ids)
-      (validate-references! storage ids)
+      (validate-references! storage ids))
+    {:rows rows :receipts receipts}))
+
+
+(defn delete-locked!
+  "Delete exact receipts within a caller-owned graph-writer transaction.
+   Revalidates untrusted receipts and all ordinary write/reference guards.
+   Does not publish derived state: callers must publish only after commit."
+  [storage receipts]
+  (let [{:keys [rows receipts]} (validate-locked! storage receipts)
+        ids (set (keys rows))]
+    (when (seq ids)
       (binding [versioned/*tombstone-delete?* true]
         (doseq [id ids]
           ;; Keep actual decorated per-identity authorization and branch/merge

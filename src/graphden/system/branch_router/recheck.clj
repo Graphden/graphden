@@ -25,7 +25,7 @@
     [graphden.executor.compile-runtime :as compile-runtime]
     [graphden.executor.compile.deps :as deps]
     [graphden.executor.registry.core :as registry-core]
-    [graphden.packages.records :as records]
+    [graphden.packages.owned :as owned]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.tx :as tx]
     [graphden.util.ns-path :as ns-path]
@@ -53,27 +53,19 @@
 
 
 (defn- user-authored-fn-ids
-  "IDs of the branch's editor-authored composed fns — named, non-anon
-   rows whose id is NOT the deterministic package derivation
-   `uuid-v5(ns-path, name)` (see docs/adr/ADR-identity-model.md: the
-   package-sync world derives ids from names; the editor world mints
-   `random-uuid`s). Package fns are excluded because the sync sweep
-   already re-records them at boot."
+  "IDs of named, non-anonymous composed fns not owned by this boot's
+   bundled packages. Personal copies may also use deterministic IDs;
+   identity spelling does not establish package ownership."
   [storage]
-  (let [fn-rows (sp/query-entities storage :fn {})
-        ns-path (ns-path/path-map (sp/query-entities storage :ns {}))]
-    (into []
-          (keep (fn [row]
-                  (when (and (:name row)
-                             (seq (:parent-ids row))
-                             (nil? (:anonymous-hash row))
-                             (not (str/starts-with? (:name row) "_anon-"))
-                             (not= (:id row)
-                                   (some-> (:namespace-id row)
-                                           ns-path
-                                           (records/fn-id (keyword (:name row))))))
-                    (:id row))))
-          fn-rows)))
+  (into []
+        (keep (fn [row]
+                (when (and (:name row)
+                           (seq (:parent-ids row))
+                           (nil? (:anonymous-hash row))
+                           (not (str/starts-with? (:name row) "_anon-"))
+                           (not (owned/owned-fn-id? (:id row))))
+                  (:id row))))
+        (sp/query-entities storage :fn {})))
 
 
 (declare record-fn-types!)

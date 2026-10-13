@@ -25,6 +25,7 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
+    [graphden.packages.owned :as owned]
     [graphden.packages.records :as records]
     [graphden.storage.postgres.core :as pg]
     [graphden.storage.postgres.graph-epoch :as epoch]
@@ -799,7 +800,7 @@
   ;; Simulates the post-restart state: the derived diagnostics store is
   ;; EMPTY while an editor-authored fn (random id) is broken in storage.
   ;; The ctx-build recompute must re-record it; a package-derived
-  ;; sibling (deterministic uuid-v5(ns, name) id) must be SKIPPED —
+  ;; sibling explicitly registered as package-owned must be SKIPPED —
   ;; the boot sync sweep owns those. Runs the private worker
   ;; synchronously (the production hook fires it on a future with
   ;; conveyed bindings, so the store semantics are identical).
@@ -820,8 +821,7 @@
                                             :name "rchk-user-broken"
                                             :parent-ids [(:id base)]})
                   _ (setup/bind-value! vstorage (:id broken) (:id slot) "not-an-int")
-                  ;; PACKAGE-authored sibling: id IS uuid-v5(ns-path, name),
-                  ;; equally broken — out of scope for the recompute.
+                  ;; Actual package membership excludes this sibling, not ID spelling.
                   ns-row (sp/create-entity vstorage :ns {:name "pkgroot"})
                   det-id (records/fn-id "pkgroot" :rchk-pkg-broken)
                   _ (sp/create-entity vstorage :fn
@@ -829,14 +829,25 @@
                                        :name "rchk-pkg-broken"
                                        :namespace-id (:id ns-row)
                                        :parent-ids [(:id base)]})
-                  _ (setup/bind-value! vstorage det-id (:id slot) "also-bad")]
+                  _ (setup/bind-value! vstorage det-id (:id slot) "also-bad")
+                  _ (owned/record-owned-ids! [det-id])
+                  personal-ns (sp/create-entity vstorage :ns {:name "personal-copy"})
+                  personal-id (records/fn-id "personal-copy" :rchk-personal-broken)
+                  _ (sp/create-entity vstorage :fn
+                                      {:id personal-id
+                                       :name "rchk-personal-broken"
+                                       :namespace-id (:id personal-ns)
+                                       :parent-ids [(:id base)]})
+                  _ (setup/bind-value! vstorage personal-id (:id slot) "also-bad")]
               (is (nil? (diag/errors-for-fn branch-id (:id broken)))
                   "post-restart baseline: nothing recorded")
               (#'br-recheck/recheck-user-fns! {:storage vstorage} branch-id)
               (is (seq (diag/errors-for-fn branch-id (:id broken)))
                   "editor-authored broken fn re-recorded by the ctx-build recheck")
               (is (nil? (diag/errors-for-fn branch-id det-id))
-                  "package-derived id skipped — the boot sweep owns those"))
+                  "actual package-owned id skipped — the boot sweep owns it")
+              (is (seq (diag/errors-for-fn branch-id personal-id))
+                  "deterministic personal copy is rechecked after restart"))
             (finally (sp/close (vs/unwrap vstorage)))))))))
 
 

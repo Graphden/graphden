@@ -982,6 +982,14 @@
                   :api-ui-theme-evaluate
                   :api-ui-theme-create-template
                   :api-ui-components-plan
+                  :api-editor-configuration-plan
+                  :api-editor-configuration-prepare
+                  :api-editor-configuration-preview
+                  :api-editor-configuration-apply
+                  :api-editor-configuration-reconcile
+                  :api-editor-configuration-reconcile-undo
+                  :api-editor-configuration-cleanup-preview
+                  :api-editor-configuration-undo
                   :api-ui-components-create-preview
                   :api-ui-components-create-apply
                   :api-execution-by-id

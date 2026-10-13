@@ -5,6 +5,7 @@
     [graphden.executor.compile.bindings :as bindings]
     [graphden.executor.compile.lookups :as lookups]
     [graphden.executor.compile.renames :as renames]
+    [graphden.graph.metadata :as metadata]
     [graphden.packages.records.ids :as ids]))
 
 
@@ -56,7 +57,7 @@
    `literal?` is the caller's fixed data contract, never client input. This
    function performs no storage reads. Each callback gets a fresh call frame;
    its cache cannot reuse another item's argument-dependent result."
-  [graph fn-id literal? record-contracts]
+  [graph fn-id literal? record-contracts inputs lookup-capability]
   (let [index (lookups/build-lookups graph)
         steps (atom 0)
         const-id (ids/fn-id "core.logic" :const)
@@ -143,6 +144,8 @@
                 :merge (let [maps (:maps args)]
                          (when-not (and (vector? maps) (every? #(or (nil? %) (map? %)) maps)) (reject!))
                          (reduce #(bounded (merge %1 %2)) {} maps))
+                :find-function (when-let [row (metadata/lookup-function lookup-capability args)]
+                                 {:fn-id (assoc (->Identity (:fn-id row)) :origin :authorized-discovery)})
                 (reject!)))
             (visit
               [id current depth]
@@ -152,7 +155,10 @@
                 (val cached)
                 (let [root-id (:id (lookups/root-fn id (:fn-map index) index))
                       record-contract (get record-contracts root-id)
-                      op (or (get primitive-operations root-id) (when record-contract :record))
+                      op (or (get primitive-operations root-id) (when record-contract :record)
+                             (when (and lookup-capability
+                                        (= root-id (ids/fn-id "web.graph-metadata" :find-function)))
+                               :find-function))
                       chain (lookups/inheritance-chain* id index)
                       classified (bindings/collect-bindings id index)]
                   (when (or (nil? op)
@@ -180,7 +186,7 @@
                     (swap! (:visiting current) disj id)
                     (swap! (:cache current) assoc id result)
                     result))))]
-      (visit fn-id (frame {} {}) 0))))
+      (visit fn-id (frame inputs {}) 0))))
 
 
 (defn project
@@ -189,6 +195,17 @@
    callbacks or request data. Only compiler-classified fn-ref fields emit
    identity values. Literal data is constrained by the caller's fixed contract."
   ([graph fn-id literal?]
-   (project* graph fn-id literal? {}))
+   (project* graph fn-id literal? {} {} nil))
   ([graph fn-id literal? record-contracts]
-   (project* graph fn-id literal? record-contracts)))
+   (project* graph fn-id literal? record-contracts {} nil)))
+
+
+(defn project-resolver
+  "Project a server-validated closed resolver source with authenticated inputs
+   and one exact snapshot metadata capability. This is not the tenant config
+   projection path: its caller must validate the protected source contract
+   before supplying authority. Discovered identities retain separate provenance
+   from literal or computed UUIDs; no discovered function is executed."
+  [graph fn-id literal? inputs lookup-capability]
+  (when-not (and (map? inputs) (<= (count inputs) 16)) (reject!))
+  (project* graph fn-id literal? {} inputs lookup-capability))

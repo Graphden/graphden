@@ -5,6 +5,7 @@
   (:require
     [graphden.crud.request :as request]
     [graphden.editor.component-config :as config]
+    [graphden.editor.config-resolution :as resolution]
     [graphden.executor.browser-snapshot :as snapshot]
     [graphden.executor.browser-source :as source]
     [graphden.executor.context :as context]
@@ -70,47 +71,69 @@
 
 
 (defn- export-in-snapshot
-  [ctx component storage authorize! policy epoch]
-  (let [id (selected-id storage)
+  [ctx component storage authorize! policy epoch resolved?]
+  (let [resolved (when resolved? (resolution/capture storage authorize! policy))
+        id (or (:id resolved) (selected-id storage))
         row (sp/read-entity storage :fn id)]
     (when-not row (reject! :source-missing))
     ;; This selected root is distinct from the HTTP handler's own identity.
     (authorize! row true)
-    (let [graph (source/collect-manifest storage id authorize!)
-          configuration (config/configuration graph id)
+    (let [graph (or (get-in resolved [:snapshot :graph]) (source/collect-manifest storage id authorize!))
+          configuration (or (:configuration resolved) (config/configuration graph id))
           entries (get configuration component)
-          captured {:graph graph :namespaces (source/collect-namespaces storage graph)}]
+          captured (or (:snapshot resolved) {:graph graph :namespaces (source/collect-namespaces storage graph)})]
       ;; The original policy was frozen before opening this transaction.
       ;; A fresh check may veto it, never relax erased secret annotations.
       (assert-current-policy! storage)
-      (let [_ (snapshot/validate-source! captured id policy)
+      (let [_ (when-not resolved (snapshot/validate-source! captured id policy))
             _ (when-not entries (reject! :component-missing))
             body (source/collect-closure storage (vals entries) authorize!)
             body-snapshot {:graph body :namespaces (source/collect-namespaces storage body)}
-            plan (snapshot/export-snapshot body-snapshot (:base-fns ctx) entries policy)]
+            plan (snapshot/export-snapshot body-snapshot (:base-fns ctx) entries policy)
+            preference-rows (when resolved
+                              (sp/query-entities storage :ui-pref
+                                                 {:owner-id (tenancy/current-user-id) :key "components"} {:limit 2}))]
+        (when (> (count preference-rows) 1) (reject! :invalid-selection))
         (assert-current-policy! storage)
         (when-not (= epoch (context/invalidation-epoch ctx))
           (reject! :policy-refresh-required))
-        {:ok true :selection-id (str id) :plan plan
-         :roots {:configuration-id (str id)
-                 :menu-id (str (get-in configuration [:account-menu :view]))
-                 :menu-update-id (str (get-in configuration [:account-menu :update]))
-                 :picker-id (str (get-in configuration [:fn-picker :view]))
-                 :explorer-id (some-> (get-in configuration [:explorer :view]) str)
-                 :explorer-initial-id (some-> (get-in configuration [:explorer :initial]) str)
-                 :explorer-update-id (some-> (get-in configuration [:explorer :update]) str)
-                 :inspector-id (some-> (get-in configuration [:inspector :view]) str)
-                 :inspector-initial-id (some-> (get-in configuration [:inspector :initial]) str)
-                 :inspector-update-id (some-> (get-in configuration [:inspector :update]) str)
-                 :recents-id (some-> (get-in configuration [:recents :view]) str)
-                 :recents-initial-id (some-> (get-in configuration [:recents :initial]) str)
-                 :recents-update-id (some-> (get-in configuration [:recents :update]) str)}}))))
+        (cond-> {:ok true :selection-id (str id) :plan plan
+                 :roots {:configuration-id (str id)
+                         :menu-id (str (get-in configuration [:account-menu :view]))
+                         :menu-update-id (str (get-in configuration [:account-menu :update]))
+                         :picker-id (str (get-in configuration [:fn-picker :view]))
+                         :explorer-id (some-> (get-in configuration [:explorer :view]) str)
+                         :explorer-initial-id (some-> (get-in configuration [:explorer :initial]) str)
+                         :explorer-update-id (some-> (get-in configuration [:explorer :update]) str)
+                         :inspector-id (some-> (get-in configuration [:inspector :view]) str)
+                         :inspector-initial-id (some-> (get-in configuration [:inspector :initial]) str)
+                         :inspector-update-id (some-> (get-in configuration [:inspector :update]) str)
+                         :recents-id (some-> (get-in configuration [:recents :view]) str)
+                         :recents-initial-id (some-> (get-in configuration [:recents :initial]) str)
+                         :recents-update-id (some-> (get-in configuration [:recents :update]) str)}}
+          resolved (assoc :configuration-revision (:revision resolved)
+                          :configuration-preference {:present (boolean (seq preference-rows))
+                                                     :value (:value (first preference-rows))}
+                          :configuration-branch-id (str (get-in resolved [:scope :branch-id]))
+                          :configuration-defaults-id (str resolution/defaults-id)
+                          :custom-components (resolution/owned-writable-components storage resolved)))))))
 
 
-(defn export-current
-  "Export only a selected personal component. The generic whole-graph preview
-   remains tenancy-disabled. Refusals contain no diagnostics, source or values."
-  [ctx input]
+(defn failure-response
+  "Finite source failure envelope. No exception message, source or identity is
+   returned; only a trusted policy-freshness refusal may request a retry."
+  [error]
+  (let [{:keys [type reason]} (ex-data error)]
+    (cond-> {:ok false :reason "Personal UI graph is unavailable. Using built-in components."
+             :http-status (if (= :authz/forbidden type) 403 422)}
+      (and (= :browser-plan/unsupported type) (= :component-missing reason))
+      (assoc :code "component-missing" :fallback "builtin")
+      (and (= :browser-plan/unsupported type) (= :policy-refresh-required reason))
+      (assoc :code "policy-refresh-required" :retryable true :retry-after 1))))
+
+
+(defn- export-request
+  [ctx input resolved?]
   (try
     (when-not (and (map? input) (= #{:component} (set (keys input))))
       (reject! :invalid-request))
@@ -120,14 +143,19 @@
             policy (snapshot/capture-policy
                      @(or (:rich-types-atom ctx) (registry/active-rich-types-atom)))]
         (source/with-snapshot (request/require-storage ctx)
-                              #(export-in-snapshot ctx component %1 %2 policy epoch))))
+                              #(export-in-snapshot ctx component %1 %2 policy epoch resolved?))))
     (catch Exception error
-      (let [{:keys [type reason]} (ex-data error)]
-        (cond-> {:ok false :reason "Personal UI graph is unavailable. Using built-in components."
-                 :http-status (if (= :authz/forbidden type) 403 422)}
-          (and (= :browser-plan/unsupported type) (= :component-missing reason))
-          (assoc :code "component-missing" :fallback "builtin")
-          ;; Only this trusted freshness refusal permits a bounded retry.
-          ;; Never copy exception messages, source identities or other data.
-          (and (= :browser-plan/unsupported type) (= :policy-refresh-required reason))
-          (assoc :code "policy-refresh-required" :retryable true :retry-after 1))))))
+      (failure-response error))))
+
+
+(defn export-current
+  "Compatibility export for the legacy owner preference."
+  [ctx input]
+  (export-request ctx input false))
+
+
+(defn export-resolved
+  "Export default or personal components through the same ordinary resolver,
+   source snapshot and authorization path. Never executes a user identity."
+  [ctx input]
+  (export-request ctx input true))

@@ -159,6 +159,7 @@
 
 (deftest manifest-identity-targets-are-authorized-without-body-reads
   (let [root (random-uuid)
+        sibling-root (random-uuid)
         parent (random-uuid)
         target (random-uuid)
         const-id (ids/fn-id "core.logic" :const)
@@ -167,6 +168,7 @@
         calls (atom [])
         authorized (atom #{})
         tables {:fn (keyed [{:id root :parent-ids [parent]}
+                            {:id sibling-root :parent-ids [parent]}
                             {:id parent :parent-ids [const-id]}
                             {:id const-id :return-type-fn-id any-id :parent-ids []}
                             {:id any-id :parent-ids []}
@@ -179,7 +181,8 @@
                                  {:id (random-uuid) :fn-id root :slot-id slot-id :ref-fn-id target}
                                  {:id (random-uuid) :fn-id target :value-present true :value "private body"}])}
         storage (fixture-storage tables calls)
-        graph (source/collect-manifest storage root #(swap! authorized conj (:id %)))]
+        graph (source/collect-manifests storage [root sibling-root] #(swap! authorized conj (:id %)))]
+    (is (every? (set (map :id (:fns graph))) [root sibling-root]))
     (is (contains? @authorized target))
     (is (contains? (set (map :id (:fns graph))) target))
     (is (not-any? #(= target (:fn-id %)) (:bindings graph)))
@@ -193,6 +196,17 @@
     (is (some (fn [[operation entity where]]
                 (and (= operation :query) (= entity :binding)
                      (some #{target} (:fn-id where)))) @calls))))
+
+
+(deftest manifest-roots-share-one-function-budget
+  (let [roots (vec (repeatedly 2049 random-uuid))
+        calls (atom [])
+        storage (fixture-storage {:fn (keyed (for [id roots] {:id id}))} calls)]
+    (is (= :source-function-limit
+           (try (source/collect-manifests storage roots (constantly nil))
+                (catch clojure.lang.ExceptionInfo error (:reason (ex-data error))))))
+    (is (not-any? #(= :query (first %)) @calls)
+        "Combined identity overflow refuses before any body or literal query")))
 
 
 (deftest shipped-discriminator-permission-is-explicitly-metadata-only

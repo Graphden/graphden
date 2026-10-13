@@ -31,6 +31,13 @@
    :return-type :jsonb
    :effects #{:db :time}}
 
+  {:name :ui-pref-store-status
+   :description "Store the CURRENT owner's preference with optional expected-state; returns saved, stale, invalid, or unsupported without exposing the current document."
+   :args {:pref-key {:type :text} :pref-value {:type :jsonb}
+          :conditional? {:type :bool} :expected {:type :jsonb}}
+   :return-type :text
+   :effects #{:db :time}}
+
   {:name :ui-pref-compare-write!
    :description "Atomically compare row presence/value and write the current owner's preference; status is saved, stale, invalid, or unsupported."
    :args {:pref-key {:type :text} :pref-value {:type :jsonb}
@@ -126,11 +133,6 @@
    :parent :zipmap
    :args {:keys [{:value :ok} {:value :key} {:value :value}]}}
 
-  {:name :_pref-put-ok
-   :parent :_pref-put-success
-   :args {:vals [{:value true} :_pref-put-key
-                 {:parent :ui-pref-write! :args {:pref-key :_pref-put-key :pref-value :_pref-put-value}}]}}
-
   {:name :_pref-put-conditional?
    :parent :contains? :args {:coll :parse-json-body :key {:value :expected}}}
 
@@ -153,8 +155,9 @@
    :args {:vals [{:value true} :_pref-put-key :_pref-put-value]}}
 
   {:name :_pref-put-write-status
-   :parent :ui-pref-compare-write!
-   :args {:pref-key :_pref-put-key :pref-value :_pref-put-value :expected :_pref-put-expected}}
+   :parent :ui-pref-store-status
+   :args {:pref-key :_pref-put-key :pref-value :_pref-put-value
+          :conditional? :_pref-put-conditional? :expected :_pref-put-expected}}
 
   {:name :_pref-put-err-expected
    :parent :_pref-put-err
@@ -177,8 +180,7 @@
    :args {:clauses [:_pref-put-wrong-owner? :_pref-put-err-owner
                     :_pref-put-unknown? :_pref-put-err-key
                     :_pref-put-too-large? :_pref-put-err-size
-                    :_pref-put-conditional? :_pref-put-conditional-result
-                    {:value true} :_pref-put-ok]}}
+                    {:value true} :_pref-put-conditional-result]}}
 
   {:name :_pref-put-handler
    :lambda-params [:request]

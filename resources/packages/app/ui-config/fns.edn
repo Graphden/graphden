@@ -1,0 +1,98 @@
+{:namespace "app.ui-config"
+ :description "Pure shared editor configuration and a protected authenticated metadata resolver. No component body copies or per-user selector table."
+ :fns
+ [{:name :_component-entry :type {:role :keyword :fn-id :uuid}}
+  {:name :_component-entries :list :_component-entry}
+  {:name :_component-descriptor :type {:component-id :uuid :entries :_component-entries}}
+  {:name :_component-manifest :list :_component-descriptor}
+  {:name :_account-menu-initial-id :parent :const :return-type :fn-ref
+   :args {:value {:ref :app.ui-account-menu/account-menu-initial :type :fn-ref}}}
+  {:name :_account-menu-initial-entry :parent :zipmap :return-type :_component-entry
+   :args {:keys [{:value :role} {:value :fn-id}] :vals [{:value :initial} :_account-menu-initial-id]}}
+  {:name :_account-menu-update-id :parent :const :return-type :fn-ref
+   :args {:value {:ref :app.ui-account-menu/account-menu-update :type :fn-ref}}}
+  {:name :_account-menu-update-entry :parent :zipmap :return-type :_component-entry
+   :args {:keys [{:value :role} {:value :fn-id}] :vals [{:value :update} :_account-menu-update-id]}}
+  {:name :_account-menu-view-id :parent :const :return-type :fn-ref
+   :args {:value {:ref :app.ui-account-menu/account-menu-view :type :fn-ref}}}
+  {:name :_account-menu-view-entry :parent :zipmap :return-type :_component-entry
+   :args {:keys [{:value :role} {:value :fn-id}] :vals [{:value :view} :_account-menu-view-id]}}
+  {:name :_account-menu-entries :parent :list :return-type :_component-entries
+   :args {:items [:_account-menu-initial-entry :_account-menu-update-entry :_account-menu-view-entry]}}
+  {:name :_fn-picker-view-id :parent :const :return-type :fn-ref
+   :args {:value {:ref :app.ui-fn-picker/picker-view :type :fn-ref}}}
+  {:name :_fn-picker-view-entry :parent :zipmap :return-type :_component-entry
+   :args {:keys [{:value :role} {:value :fn-id}] :vals [{:value :view} :_fn-picker-view-id]}}
+  {:name :_fn-picker-entries :parent :list :return-type :_component-entries
+   :args {:items [:_fn-picker-view-entry]}}
+  {:name :_recents-initial-id :parent :const :return-type :fn-ref
+   :args {:value {:ref :app.ui-recents/recents-initial :type :fn-ref}}}
+  {:name :_recents-initial-entry :parent :zipmap :return-type :_component-entry
+   :args {:keys [{:value :role} {:value :fn-id}] :vals [{:value :initial} :_recents-initial-id]}}
+  {:name :_recents-update-id :parent :const :return-type :fn-ref
+   :args {:value {:ref :app.ui-recents/recents-update :type :fn-ref}}}
+  {:name :_recents-update-entry :parent :zipmap :return-type :_component-entry
+   :args {:keys [{:value :role} {:value :fn-id}] :vals [{:value :update} :_recents-update-id]}}
+  {:name :_recents-view-id :parent :const :return-type :fn-ref
+   :args {:value {:ref :app.ui-recents/recents-view :type :fn-ref}}}
+  {:name :_recents-view-entry :parent :zipmap :return-type :_component-entry
+   :args {:keys [{:value :role} {:value :fn-id}] :vals [{:value :view} :_recents-view-id]}}
+  {:name :_recents-entries :parent :list :return-type :_component-entries
+   :args {:items [:_recents-initial-entry :_recents-update-entry :_recents-view-entry]}}
+  {:name :_inspector-initial-id :parent :const :return-type :fn-ref
+   :args {:value {:ref :app.ui-inspector/inspector-initial :type :fn-ref}}}
+  {:name :_inspector-initial-entry :parent :zipmap :return-type :_component-entry
+   :args {:keys [{:value :role} {:value :fn-id}] :vals [{:value :initial} :_inspector-initial-id]}}
+  {:name :_inspector-update-id :parent :const :return-type :fn-ref
+   :args {:value {:ref :app.ui-inspector/inspector-update :type :fn-ref}}}
+  {:name :_inspector-update-entry :parent :zipmap :return-type :_component-entry
+   :args {:keys [{:value :role} {:value :fn-id}] :vals [{:value :update} :_inspector-update-id]}}
+  {:name :_inspector-view-id :parent :const :return-type :fn-ref
+   :args {:value {:ref :app.ui-inspector/inspector-view :type :fn-ref}}}
+  {:name :_inspector-view-entry :parent :zipmap :return-type :_component-entry
+   :args {:keys [{:value :role} {:value :fn-id}] :vals [{:value :view} :_inspector-view-id]}}
+  {:name :_inspector-entries :parent :list :return-type :_component-entries
+   :args {:items [:_inspector-initial-entry :_inspector-update-entry :_inspector-view-entry]}}
+  {:name :_explorer-initial-id :parent :const :return-type :fn-ref
+   :args {:value {:ref :app.ui-explorer/explorer-toolbar-initial :type :fn-ref}}}
+  {:name :_explorer-initial-entry :parent :zipmap :return-type :_component-entry
+   :args {:keys [{:value :role} {:value :fn-id}] :vals [{:value :initial} :_explorer-initial-id]}}
+  {:name :_explorer-update-id :parent :const :return-type :fn-ref
+   :args {:value {:ref :app.ui-explorer/explorer-toolbar-update :type :fn-ref}}}
+  {:name :_explorer-update-entry :parent :zipmap :return-type :_component-entry
+   :args {:keys [{:value :role} {:value :fn-id}] :vals [{:value :update} :_explorer-update-id]}}
+  {:name :_explorer-view-id :parent :const :return-type :fn-ref
+   :args {:value {:ref :app.ui-explorer/explorer-toolbar-view :type :fn-ref}}}
+  {:name :_explorer-view-entry :parent :zipmap :return-type :_component-entry
+   :args {:keys [{:value :role} {:value :fn-id}] :vals [{:value :view} :_explorer-view-id]}}
+  {:name :_explorer-entries :parent :list :return-type :_component-entries
+   :args {:items [:_explorer-initial-entry :_explorer-update-entry :_explorer-view-entry]}}
+  {:name :editor-defaults :parent :zipmap
+   :description "Shared editor defaults. Personal ordinary graphs may reference these entries or override exposed constructor slots without copying their component bodies."
+   :args {:keys [:_account-menu-view-id :_fn-picker-view-id :_recents-view-id :_inspector-view-id :_explorer-view-id]
+          :vals [:_account-menu-entries :_fn-picker-entries :_recents-entries :_inspector-entries :_explorer-entries]}}
+  {:name :_descriptor-component-id :parent :get
+   :args {:coll {:as :item :type :_component-descriptor} :key {:value :component-id} :default {:value nil}}}
+  {:name :_descriptor-entries :parent :get
+   :args {:coll {:as :item :type :_component-descriptor} :key {:value :entries} :default {:value []}}}
+  {:name :_descriptor-pair :parent :list :lambda-params [:item]
+   :args {:items [:_descriptor-component-id :_descriptor-entries]}}
+  {:name :_legacy-menu-initial :parent :get :return-type :uuid
+   :args {:coll {:as :legacy :type :app.ui-components/_ui-components-identities}
+          :key {:value :menu-initial} :default {:value nil}}}
+  {:name :_legacy-menu-update :parent :get :return-type :uuid
+   :args {:coll {:as :legacy :type :app.ui-components/_ui-components-identities}
+          :key {:value :menu-update} :default {:value nil}}}
+  {:name :_legacy-menu-view :parent :get :return-type :uuid
+   :args {:coll {:as :legacy :type :app.ui-components/_ui-components-identities}
+          :key {:value :menu-view} :default {:value nil}}}
+  {:name :_legacy-picker-view :parent :get :return-type :uuid
+   :args {:coll {:as :legacy :type :app.ui-components/_ui-components-identities}
+          :key {:value :picker-view} :default {:value nil}}}
+  {:name :_editor-discovery :parent :web.graph-metadata/find-function
+   :args {:name "editor"}}
+  {:name :_editor-defaults-id :parent :const :return-type :fn-ref
+   :args {:value {:ref :editor-defaults :type :fn-ref}}}
+  {:name :editor-resolver :parent :get
+   :description "Protected identity selection: authenticated exact home/name discovery, otherwise shared ordinary defaults. Discovery grants no access to the chosen configuration or its component bodies."
+   :args {:coll :_editor-discovery :key {:value :fn-id} :default :_editor-defaults-id}}]}

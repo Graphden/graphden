@@ -1,0 +1,12 @@
+{:namespace "web.graph-metadata"
+ :description "Bounded authenticated metadata discovery. Identities are data, not dynamic callables."
+ :fns
+ [{:name :find-function
+   :description "Find one exact namespace/name in the authenticated principal, organization and branch. Missing is null; denied visibility is an error. Never reads or executes the discovered function body."
+   :args {:namespace-path {:type [:union :null :text]}
+          :name {:type :text}
+          :principal-id {:type :text}
+          :org {:type :text}
+          :branch-id {:type :uuid}}
+   :return-type [:union :null {:fn-id :uuid}]
+   :effects #{:db}}]}

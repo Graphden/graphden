@@ -3,6 +3,10 @@
   (:require
     [graphden.editor.component-creation :as creation]
     [graphden.editor.components :as components]
+    [graphden.editor.config-activation :as activation]
+    [graphden.editor.config-preparation :as preparation]
+    [graphden.editor.config-receipts :as receipts]
+    [graphden.editor.config-undo :as undo]
     [graphden.executor.compile-runtime :as runtime]
     [graphden.executor.defbase :refer [defbase]]))
 
@@ -17,6 +21,71 @@
   [input]
   (runtime/record-effect! :db)
   (components/export-current ctx input))
+
+
+(defbase _editor-configuration-plan
+  [input]
+  (runtime/record-effect! :db)
+  (components/export-resolved ctx input))
+
+
+(defn- configuration-result
+  [operation ctx input]
+  (try
+    (assoc (operation ctx input) :ok true)
+    (catch Exception error
+      (cond-> (components/failure-response error)
+        (or (= :invalid-request (:reason (ex-data error)))
+            (= :validation-error/delete-receipts (:type (ex-data error)))) (assoc :http-status 400)
+        (= :stale-configuration (:reason (ex-data error)))
+        (assoc :http-status 409 :code "stale-configuration"
+               :reason "The editor configuration changed. Refresh before selecting another configuration.")
+        (and (contains? #{:personal-home/unavailable :browser-plan/unsupported} (:type (ex-data error)))
+             (= :personal-home-unavailable (:reason (ex-data error))))
+        (assoc :code "personal-home-unavailable"
+               :reason "Your deployment has no available personal graph namespace.")))))
+
+
+(defbase _editor-configuration-prepare
+  [input]
+  (runtime/record-effect! :db)
+  (configuration-result preparation/prepare! ctx input))
+
+
+(defbase _editor-configuration-preview
+  [input]
+  (runtime/record-effect! :db)
+  (configuration-result activation/preview! ctx input))
+
+
+(defbase _editor-configuration-undo
+  [input]
+  (runtime/record-effect! :db)
+  (configuration-result undo/undo! ctx input))
+
+
+(defbase _editor-configuration-apply
+  [input]
+  (runtime/record-effect! :db)
+  (configuration-result activation/apply-proposal! ctx input))
+
+
+(defbase _editor-configuration-reconcile
+  [input]
+  (runtime/record-effect! :db)
+  (configuration-result receipts/reconcile! ctx input))
+
+
+(defbase _editor-configuration-reconcile-undo
+  [input]
+  (runtime/record-effect! :db)
+  (configuration-result receipts/reconcile-undo! ctx input))
+
+
+(defbase _editor-configuration-cleanup-preview
+  [input]
+  (runtime/record-effect! :db)
+  (configuration-result receipts/cleanup-preview! ctx input))
 
 
 (defbase _ui-components-create-preview
@@ -34,5 +103,13 @@
 (def impls
   {:ui-components ui-components
    :_ui-components-plan {:impl _ui-components-plan :taint-propagate? true}
+   :_editor-configuration-plan {:impl _editor-configuration-plan :taint-propagate? true}
+   :_editor-configuration-prepare {:impl _editor-configuration-prepare :taint-propagate? true}
+   :_editor-configuration-preview {:impl _editor-configuration-preview :taint-propagate? true}
+   :_editor-configuration-reconcile {:impl _editor-configuration-reconcile :taint-propagate? true}
+   :_editor-configuration-reconcile-undo {:impl _editor-configuration-reconcile-undo :taint-propagate? true}
+   :_editor-configuration-cleanup-preview {:impl _editor-configuration-cleanup-preview :taint-propagate? true}
+   :_editor-configuration-undo {:impl _editor-configuration-undo :taint-propagate? true}
+   :_editor-configuration-apply {:impl _editor-configuration-apply :taint-propagate? true}
    :_ui-components-create-preview {:impl _ui-components-create-preview :taint-propagate? true}
    :_ui-components-create-apply {:impl _ui-components-create-apply :taint-propagate? true}})

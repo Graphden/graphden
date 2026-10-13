@@ -42,8 +42,19 @@
   [pref-key pref-value]
   (cr/record-effect! :db)
   (cr/record-effect! :time)
-  (preference-write/write! (request/require-storage ctx) pref-key pref-value false nil)
-  pref-value)
+  (let [status (preference-write/write! (request/require-storage ctx) pref-key pref-value false nil)]
+    (when-not (= :saved status)
+      (throw (ex-info "Preference write was refused" {:type :prefs/write-refused :status status})))
+    pref-value))
+
+
+(defbase ui-pref-store-status
+  "Store one current-owner document with optional atomic expected-state.
+   Returns a finite status and never leaks the current preference value."
+  [pref-key pref-value conditional? expected]
+  (cr/record-effect! :db)
+  (cr/record-effect! :time)
+  (name (preference-write/write! (request/require-storage ctx) pref-key pref-value conditional? expected)))
 
 
 (defbase ui-pref-compare-write!
@@ -60,5 +71,6 @@
    :ui-prefs-read ui-prefs-read
    ;; taint-propagate: returns the caller's own document back
    :ui-pref-write! {:impl ui-pref-write! :taint-propagate? true}
+   :ui-pref-store-status {:impl ui-pref-store-status :taint-propagate? true}
    ;; The comparison status depends on caller-selected content.
    :ui-pref-compare-write! {:impl ui-pref-compare-write! :taint-propagate? true}})

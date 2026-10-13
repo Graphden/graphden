@@ -3,6 +3,7 @@
     [clojure.test :refer [deftest is testing]]
     [graphden.editor.component-config :as config]
     [graphden.editor.components :as components]
+    [graphden.editor.config-resolution :as resolution]
     [graphden.executor.browser-snapshot :as snapshot]
     [graphden.executor.browser-source :as source]
     [graphden.executor.context :as context]
@@ -151,3 +152,47 @@
       (is (:ok (components/export-current ctx {:component "fn-picker"})))
       (is (= [:epoch [:capture {:original :secret}] :snapshot
               [:manifest policy] [:component policy] :epoch] @events)))))
+
+
+(deftest resolved-export-uses-authorized-configuration-not-legacy-selector
+  (let [selected (random-uuid)
+        storage {:snapshot :fixture}
+        policy {:original :policy}
+        calls (atom [])
+        authorize! (constantly nil)
+        ctx {:storage storage :rich-types-atom (atom {})}]
+    (with-redefs [snapshot/capture-policy (constantly policy)
+                  source/with-snapshot (fn [actual f]
+                                         (is (= storage actual))
+                                         (f actual authorize!))
+                  resolution/capture (fn [actual guard frozen]
+                                       (swap! calls conj :resolve)
+                                       (is (= [storage authorize! policy] [actual guard frozen]))
+                                       {:id selected :revision "authoritative-revision"
+                                        :configuration {:fn-picker {:view fn-id}}
+                                        :snapshot {:graph {} :namespaces []}})
+                  components/selected-id (fn [& _] (throw (AssertionError. "Legacy preference must not select source")))
+                  components/assert-current-policy! (constantly nil)
+                  sp/read-entity (fn [_ _ id] {:id id})
+                  sp/query-entities (fn [actual entity where opts]
+                                      (is (= storage actual))
+                                      (is (= :ui-pref entity))
+                                      (is (= "components" (:key where)))
+                                      (is (= {:limit 2} opts))
+                                      (swap! calls conj :preference)
+                                      [{:value {:fn-id "unselected-legacy-identity"}}])
+                  source/collect-closure (fn [actual ids _]
+                                           (is (= storage actual))
+                                           (is (= [fn-id] (vec ids)))
+                                           (swap! calls conj :body) {})
+                  source/collect-namespaces (constantly [])
+                  snapshot/export-snapshot (fn [_ _ entries frozen]
+                                             (is (= {:view fn-id} entries))
+                                             (is (= policy frozen))
+                                             (swap! calls conj :export) {:checked true})]
+      (let [result (components/export-resolved ctx {:component "fn-picker"})]
+        (is (:ok result))
+        (is (= (str selected) (:selection-id result)))
+        (is (= "authoritative-revision" (:configuration-revision result)))
+        (is (= {:present true :value {:fn-id "unselected-legacy-identity"}} (:configuration-preference result)))
+        (is (= [:resolve :body :export :preference] @calls))))))

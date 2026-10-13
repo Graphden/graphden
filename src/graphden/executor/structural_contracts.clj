@@ -11,21 +11,26 @@
 
 (defn- load-contracts
   []
-  (let [{definitions :fns path :namespace}
-        (edn/read-string (slurp (io/resource "packages/core/collections/fns.edn")))
-        names (into (ids/primitive-fn-ids)
-                    (map (fn [{:keys [name]}] [name (ids/fn-id path name)])) definitions)]
-    (into {}
-          (map (fn [definition]
-                 (let [records (parse/parse-fn-def (assoc definition :namespace path) names)
-                       id (ids/fn-id path (:name definition))
-                       grouped (group-by :kind records)
-                       junctions (filterv #(= id (:fn-id %)) (:fn-slot grouped))
-                       slot-ids (into #{} (map :slot-id) junctions)]
-                   [id {:fn (first (filter #(= id (:id %)) (:fn grouped)))
-                        :slots (filterv #(contains? slot-ids (:id %)) (:slot grouped))
-                        :fn-slots junctions}])))
-          (filter #(contains? #{:into :merge} (:name %)) definitions))))
+  (into {}
+        (mapcat
+          (fn [[resource names-to-load]]
+            (let [{definitions :fns path :namespace}
+                  (edn/read-string (slurp (io/resource resource)))
+                  names (into (ids/primitive-fn-ids)
+                              (map (fn [{:keys [name]}] [name (ids/fn-id path name)])) definitions)]
+              (into {}
+                    (map (fn [definition]
+                           (let [records (parse/parse-fn-def (assoc definition :namespace path) names)
+                                 id (ids/fn-id path (:name definition))
+                                 grouped (group-by :kind records)
+                                 junctions (filterv #(= id (:fn-id %)) (:fn-slot grouped))
+                                 slot-ids (into #{} (map :slot-id) junctions)]
+                             [id {:fn (first (filter #(= id (:id %)) (:fn grouped)))
+                                  :slots (filterv #(contains? slot-ids (:id %)) (:slot grouped))
+                                  :fn-slots junctions}])))
+                    (filter #(contains? names-to-load (:name %)) definitions))))
+          [["packages/core/collections/fns.edn" #{:into :merge}]
+           ["packages/web/graph-metadata/fns.edn" #{:find-function}]])))
 
 
 (def ^:private fixed-contracts (delay (load-contracts)))

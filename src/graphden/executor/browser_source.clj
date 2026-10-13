@@ -168,12 +168,19 @@
       rows)))
 
 
-(defn collect-manifest
+(defn collect-manifests
   "Collect manifest source with compiler-classified fn-ref edges terminal.
    Only identity metadata is read for those targets; all other dependencies
-   retain the normal bounded ACL-before-values collection."
+   retain the normal bounded ACL-before-values collection. Multiple roots
+   share the SAME function/row budget; this never installs a caller policy."
+  [storage roots authorize!]
+  (collect-source storage roots authorize! true))
+
+
+(defn collect-manifest
+  "Single-root form of the constrained manifest collector."
   [storage root authorize!]
-  (collect-source storage [root] authorize! true))
+  (collect-manifests storage [root] authorize!))
 
 
 (defn with-snapshot

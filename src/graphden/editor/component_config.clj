@@ -77,20 +77,20 @@
              :roles #{:initial :update :view}}})
 
 
-(defn manifest-entries
-  "Project finite structural composition without invoking graph code.
-   UUIDs originate exclusively in compiler-classified const value fn-ref
-   bindings. A descriptor list or explicit component map carries the same
-   entries; identity tags survive get/map/into/merge until validation."
+(defn- projected-manifest
   [graph fn-id]
-  (let [value (projection/project graph fn-id
-                                  (fn [value]
-                                    (or (nil? value) (= {} value)
-                                        (contains? literal-fields value)
-                                        (and (vector? value)
-                                             (every? literal-fields value))))
-                                  record-contracts)
-        descriptors (cond
+  (projection/project graph fn-id
+                      (fn [value]
+                        (or (nil? value) (= {} value)
+                            (contains? literal-fields value)
+                            (and (vector? value)
+                                 (every? literal-fields value))))
+                      record-contracts))
+
+
+(defn- checked-manifest-entries
+  [value]
+  (let [descriptors (cond
                       (vector? value) value
                       (map? value) (mapv (fn [[component entry-list]] {:component-id component :entries entry-list}) value)
                       :else (reject!))]
@@ -114,15 +114,33 @@
             {} descriptors)))
 
 
-(defn configuration
-  "Keep the historical four-slot interface exact; otherwise read the bounded
-   ordinary descriptor-list manifest. Missing components are not executable."
+(defn manifest-entries
+  "Project finite structural composition without invoking graph code.
+   UUIDs originate exclusively in compiler-classified const value fn-ref
+   bindings. A descriptor list or explicit component map carries the same
+   entries; identity tags survive get/map/into/merge until validation."
+  [graph fn-id]
+  (checked-manifest-entries (projected-manifest graph fn-id)))
+
+
+(defn configuration-info
+  "Validate one source configuration and report its ordinary record/list/map
+   shape for composition adapters. This is source evidence, not client input."
   [graph fn-id]
   (if (some #{configuration-id}
             (lookups/inheritance-chain* fn-id (lookups/build-lookups graph)))
-    (entries graph fn-id)
-    (let [manifest (manifest-entries graph fn-id)]
-      (into {} (keep (fn [[component {:keys [id roles]}]]
-                       (when-let [entry (get manifest id)]
-                         (when-not (= roles (set (keys entry))) (reject!))
-                         [component entry]))) component-contracts))))
+    {:format :record :configuration (entries graph fn-id)}
+    (let [value (projected-manifest graph fn-id)
+          manifest (checked-manifest-entries value)]
+      {:format (if (map? value) :map :list)
+       :configuration (into {} (keep (fn [[component {:keys [id roles]}]]
+                                       (when-let [entry (get manifest id)]
+                                         (when-not (= roles (set (keys entry))) (reject!))
+                                         [component entry]))) component-contracts)})))
+
+
+(defn configuration
+  "Keep the historical four-slot interface exact; otherwise read the bounded
+   ordinary descriptor-list or component-map manifest."
+  [graph fn-id]
+  (:configuration (configuration-info graph fn-id)))

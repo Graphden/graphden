@@ -3,10 +3,13 @@
   (:require
     [cheshire.core :as json]
     [clojure.test :refer [deftest is use-fixtures]]
+    [graphden.editor.config-preparation :as preparation]
     [graphden.editor.preference-write :as preferences]
     [graphden.storage.postgres.util :as pg]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.tx :as tx]
+    [graphden.system.branch-router.epoch :as epoch]
+    [graphden.tenancy.context :as tenancy]
     [graphden.test-infra.golden-app :as ga]))
 
 
@@ -44,6 +47,29 @@
         (is (= 400 (:status response)))
         (is (= "invalid-expected" (get-in response [:body :reason])))))
     (is (= changed-value (:value (row storage "components"))))))
+
+
+(deftest legacy-put-cannot-reselect-after-an-ordinary-editor-exists
+  (let [ctx (:ctx ga/*bootstrap*) storage (:storage ctx)
+        home-name (str "pref-profile-" (random-uuid))
+        value {:fn-id (str (random-uuid))}]
+    (sp/create-entity storage :ns {:name home-name})
+    (binding [tenancy/*seams-override* (atom (tenancy/seams-isolation-seed))]
+      (tenancy/install-personal-namespace-fn!
+        (constantly {:namespace-path home-name :source :fixture :isolated? false}))
+      (epoch/seed-watermark! storage)
+      (let [created (preparation/prepare! ctx {:create true})
+            current (row storage "components")
+            expected {:present (boolean current) :value (:value current)}]
+        (is (true? (:created created)))
+        (doseq [body [{:owner "anonymous" :value value}
+                      {:owner "anonymous" :value value :expected expected}]]
+          (let [response (put body)]
+            (is (= 409 (:status response)))
+            (is (= "stale-preference" (get-in response [:body :reason])))
+            (is (not (contains? (:body response) :value)))))
+        (is (= current (row storage "components")))
+        (is (= "editor" (:name (sp/read-entity storage :fn (:id created)))))))))
 
 
 (deftest json-roundtrip-and-row-presence-are-compared-without-returning-the-current-document

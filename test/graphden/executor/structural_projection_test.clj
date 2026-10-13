@@ -3,12 +3,18 @@
     [clojure.edn :as edn]
     [clojure.java.io :as io]
     [clojure.test :refer [deftest is]]
+    [graphden.editor.component-config :as component-config]
+    [graphden.editor.config-resolution :as config-resolution]
     [graphden.executor.composition.core :as composition]
+    [graphden.executor.source-contract :as source-contract]
     [graphden.executor.structural-contracts :as contracts]
     [graphden.executor.structural-projection :as projection]
+    [graphden.graph.metadata :as metadata]
+    [graphden.packages.owned :as owned]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
-    [graphden.packages.records.types :as record-types]))
+    [graphden.packages.records.types :as record-types]
+    [graphden.storage.remote.core :as remote]))
 
 
 (def ^:private namespace-path "projection.fixture")
@@ -24,31 +30,39 @@
                          (filter #(contains? names (:name %)) definitions)))))
         [["core/logic" "core.logic" #{:const}]
          ["core/collections" "core.collections" #{:list :get :zipmap :into :merge}]
-         ["core/hof" "core.hof" #{:map}]]))
+         ["core/hof" "core.hof" #{:map}]
+         ["web/graph-metadata" "web.graph-metadata" #{:find-function}]]))
 
 
 (defn- graph
-  [definitions]
-  (let [records (concat (ids/boot-primitive-records)
-                        (mapcat #(parse/parse-fn-def % {}) (interface-definitions))
-                        (mapcat #(record-types/inline-fn-type-rows-from-form
-                                   (get-in % [:args :func :type]))
-                                (filter #(= :map (:name %)) (interface-definitions)))
-                        (composition/fn-defs->records
-                          (mapv #(assoc % :namespace namespace-path) definitions)
-                          (reduce (fn [result {:keys [name] path :namespace}]
-                                    (assoc result name (ids/fn-id path name)
-                                           (keyword path (clojure.core/name name)) (ids/fn-id path name)))
-                                  (into (ids/primitive-fn-ids)
-                                        (map (fn [id] [id id]))
-                                        (filter uuid? (tree-seq coll? seq definitions)))
-                                  (interface-definitions))
-                          (reduce (fn [result {:keys [name] path :namespace :as definition}]
-                                    (assoc result name definition (keyword path (clojure.core/name name)) definition))
-                                  {} (interface-definitions))))
-        grouped (group-by :kind records)]
-    {:fns (:fn grouped) :slots (:slot grouped) :fn-slots (:fn-slot grouped)
-     :bindings (:binding grouped) :list-items (:binding-list-item grouped)}))
+  ([definitions] (graph definitions namespace-path))
+  ([definitions path]
+   (let [records (concat (ids/boot-primitive-records)
+                         (mapcat #(parse/parse-fn-def % {}) (interface-definitions))
+                         (mapcat #(record-types/inline-fn-type-rows-from-form
+                                    (get-in % [:args :func :type]))
+                                 (filter #(= :map (:name %)) (interface-definitions)))
+                         (composition/fn-defs->records
+                           (mapv #(assoc % :namespace path) definitions)
+                           (reduce (fn [result {:keys [name] path :namespace}]
+                                     (assoc result name (ids/fn-id path name)
+                                            (keyword path (clojure.core/name name)) (ids/fn-id path name)))
+                                   (into (ids/primitive-fn-ids)
+                                         (mapcat (fn [value]
+                                                   (cond
+                                                     (uuid? value) [[value value]]
+                                                     (and (keyword? value) (namespace value))
+                                                     [[value (ids/fn-id (namespace value) (name value))]
+                                                      [(keyword (name value)) (ids/fn-id (namespace value) (name value))]]
+                                                     :else [])))
+                                         (tree-seq coll? seq definitions))
+                                   (interface-definitions))
+                           (reduce (fn [result {:keys [name] path :namespace :as definition}]
+                                     (assoc result name definition (keyword path (clojure.core/name name)) definition))
+                                   {} (interface-definitions))))
+         grouped (group-by :kind records)]
+     {:fns (:fn grouped) :slots (:slot grouped) :fn-slots (:fn-slot grouped)
+      :bindings (:binding grouped) :list-items (:binding-list-item grouped)})))
 
 
 (defn- definition
@@ -89,6 +103,88 @@
 (defn- project
   [definitions name]
   (projection/project (graph definitions) (ids/fn-id namespace-path name) literal?))
+
+
+(deftest packaged-editor-defaults-reference-all-shared-components-without-copying-bodies
+  (let [{:keys [fns] package-path :namespace} (edn/read-string
+                                                (slurp (io/resource "packages/app/ui-config/fns.edn")))
+        source (graph fns package-path)
+        actual (component-config/configuration source (ids/fn-id package-path :editor-defaults))
+        contracts {:account-menu ["app.ui-account-menu" "account-menu" #{:initial :update :view}]
+                   :fn-picker ["app.ui-fn-picker" "picker" #{:view}]
+                   :recents ["app.ui-recents" "recents" #{:initial :update :view}]
+                   :inspector ["app.ui-inspector" "inspector" #{:initial :update :view}]
+                   :explorer ["app.ui-explorer" "explorer-toolbar" #{:initial :update :view}]}]
+    (is (= (set (keys contracts)) (set (keys actual))))
+    (doseq [[component [path prefix roles]] contracts]
+      (is (= (into {} (map (fn [role]
+                             [role (ids/fn-id path (str prefix "-" (name role)))])) roles)
+             (get actual component))))
+    (is (not-any? #(contains? (set (mapcat vals (vals actual))) (:id %)) (:fns source)))))
+
+
+(deftest protected-resolver-contract-refuses-source-and-binding-drift
+  (let [{:keys [fns] package-path :namespace} (edn/read-string
+                                                (slurp (io/resource "packages/app/ui-config/fns.edn")))
+        source (graph fns package-path)
+        owners (set (map #(ids/fn-id package-path %) [:editor-resolver :_editor-discovery :_editor-defaults-id]))
+        id (ids/fn-id package-path :_editor-discovery)
+        resolver (ids/fn-id package-path :editor-resolver)
+        binding (first (filter #(and (= id (:fn-id %)) (not (:value-present %))) (:bindings source)))
+        changed-binding (fn [key value]
+                          (update source :bindings
+                                  #(mapv (fn [row]
+                                           (if (= (:id binding) (:id row)) (assoc row key value) row)) %)))]
+    (is (source-contract/matches? source source owners))
+    (is (source-contract/matches?
+          source (update source :fns #(mapv (fn [row] (assoc row :description "Edited documentation")) %)) owners))
+    (doseq [[key value] [[:ref-fn-id (random-uuid)] [:type-override-fn-id (random-uuid)]
+                         [:resolver-fn-id (random-uuid)] [:terminal true] [:value-present true]]]
+      (is (not (source-contract/matches? source (changed-binding key value) owners))))
+    (is (not (source-contract/matches?
+               source (update source :fns
+                              #(mapv (fn [row]
+                                       (if (= resolver (:id row)) (assoc row :parent-ids [(random-uuid)]) row)) %))
+               owners)))
+    (is (not (source-contract/matches?
+               source (update source :bindings conj
+                              (assoc binding :id (random-uuid) :slot-id (random-uuid))) owners)))
+    (is (not (source-contract/matches? source (update source :fns #(remove (fn [row] (= id (:id row))) %)) owners)))))
+
+
+(deftest packaged-resolver-requires-closed-public-package-source-before-discovery
+  (let [{:keys [fns] package-path :namespace} (edn/read-string
+                                                (slurp (io/resource "packages/app/ui-config/fns.edn")))
+        app-id (random-uuid)
+        config-id (random-uuid)
+        namespaces [{:id app-id :name "app" :parent-id nil}
+                    {:id config-id :name "ui-config" :parent-id app-id}]
+        source (update (graph fns package-path) :fns
+                       #(mapv (fn [row]
+                                (if (= package-path (:namespace-id row)) (assoc row :namespace-id config-id) row)) %))
+        snapshot {:graph source :namespaces namespaces}
+        scope {:namespace-path nil :name "editor" :principal-id "operator"
+               :org "public" :branch-id (random-uuid)}
+        capability (metadata/function-lookup (remote/from-bundle {}) (fn [& _]) scope)
+        owners (set (map #(ids/fn-id package-path %) [:editor-resolver :_editor-discovery :_editor-defaults-id]))]
+    (with-redefs [owned/owned-fn-id? owners]
+      (is (= config-resolution/defaults-id (:id (config-resolution/resolve-identity snapshot scope capability))))
+      (is (thrown? clojure.lang.ExceptionInfo
+            (config-resolution/resolve-identity
+              (assoc snapshot :namespaces [(assoc (first namespaces) :parent-id config-id) (second namespaces)])
+              scope capability)))
+      (is (thrown? clojure.lang.ExceptionInfo
+            (config-resolution/resolve-identity
+              (assoc snapshot :namespaces [(assoc (first namespaces) :org-id "foreign") (second namespaces)])
+              scope capability)))
+      (is (thrown? clojure.lang.ExceptionInfo
+            (config-resolution/resolve-identity
+              (update-in snapshot [:graph :bindings] conj
+                         {:id (random-uuid) :fn-id config-resolution/resolver-id :slot-id (random-uuid) :value "poison"})
+              scope capability))))
+    (with-redefs [owned/owned-fn-id? (constantly false)]
+      (is (thrown? clojure.lang.ExceptionInfo
+            (config-resolution/resolve-identity snapshot scope capability))))))
 
 
 (deftest callback-frames-retain-each-descriptors-identity-test
@@ -166,3 +262,39 @@
     (is (not (contracts/matches? operation changed-return)))
     (is (not (contracts/matches? operation changed-slot)))
     (is (not (contracts/matches? operation own-binding)))))
+
+
+(deftest protected-resolver-discovers-only-exact-authorized-identity
+  (let [namespace-id (random-uuid)
+        selected-id (random-uuid)
+        default-id (random-uuid)
+        scope {:namespace-path "personal" :name "editor" :principal-id "operator"
+               :org "public" :branch-id (random-uuid)}
+        definitions [(definition :lookup :web.graph-metadata/find-function
+                       {:namespace-path {:as :namespace-path :type [:union :null :text]}
+                        :name "editor" :principal-id {:as :principal-id :type :text}
+                        :org {:as :org :type :text} :branch-id {:as :branch-id :type :uuid}})
+                     (definition :default :core.logic/const {:value {:ref default-id :type :fn-ref}})
+                     (definition :resolver :core.collections/get
+                       {:coll :lookup :key {:value :fn-id} :default :default})]
+        source (graph definitions)
+        root (ids/fn-id namespace-path :resolver)
+        storage (remote/from-bundle
+                  {:ns [{:id namespace-id :name "personal" :parent-id nil :org-id "public"}]
+                   :fn [{:id selected-id :namespace-id namespace-id :name "editor" :org-id "public"}]})
+        capability (metadata/function-lookup storage (fn [& _]) scope)
+        result (projection/project-resolver source root (constantly true) scope capability)]
+    (is (= selected-id (:id result)))
+    (is (= :authorized-discovery (:origin result)))
+    (is (projection/identity-value? result))
+    (is (= default-id
+           (:id (projection/project-resolver source root (constantly true) scope
+                                             (metadata/function-lookup (remote/from-bundle {}) (fn [& _]) scope)))))
+    (is (thrown? clojure.lang.ExceptionInfo (projection/project source root (constantly true))))
+    (is (thrown? clojure.lang.ExceptionInfo
+          (projection/project-resolver source root (constantly true) (assoc scope :principal-id "foreign") capability)))
+    (is (thrown? clojure.lang.ExceptionInfo
+          (projection/project-resolver source root (constantly true) scope
+                                       (metadata/function-lookup storage
+                                                                 (fn [& _] (throw (ex-info "Denied" {:type :authz/forbidden})))
+                                                                 scope))))))

@@ -27,6 +27,70 @@
   {:name :api-ui-components-plan :parent :app.routes.auth/post
    :description "Authenticated personal menu/picker plan in the selected organization and branch."
    :args {:path "/ui/components/plan" :handler :_ui-components-plan-handler}}
+  {:name :_editor-configuration-plan
+   :description "Export one component selected by the protected ordinary authenticated editor resolver. Default and personal source use the same authorization and snapshot."
+   :args {:input {:type :jsonb}} :return-type :keyword-map :effects #{:db}}
+  {:name :_editor-configuration-plan-handler :parent :json-envelope-response
+   :lambda-params [:request]
+   :args {:envelope {:parent :_editor-configuration-plan :args {:input :parse-json-body}}}}
+  {:name :api-editor-configuration-plan :parent :app.routes.auth/post
+   :args {:path "/ui/configuration/plan" :handler :_editor-configuration-plan-handler}}
+  {:name :_editor-configuration-prepare
+   :description "Explicitly prepare the owner's ordinary editor root, preserving legacy configuration by reference. Creates no component closure copy."
+   :args {:input {:type :jsonb}} :return-type :keyword-map :effects #{:db}}
+  {:name :_editor-configuration-prepare-handler :parent :json-envelope-response
+   :lambda-params [:request]
+   :args {:envelope {:parent :_editor-configuration-prepare :args {:input :parse-json-body}}}}
+  {:name :api-editor-configuration-prepare :parent :app.routes.auth/post
+   :args {:path "/ui/configuration/prepare" :handler :_editor-configuration-prepare-handler}}
+  {:name :_editor-configuration-preview
+   :description "Read-only preparation of exact original receipts and a scoped source proof before any configuration write."
+   :args {:input {:type :jsonb}} :return-type :keyword-map :effects #{:db}}
+  {:name :_editor-configuration-preview-handler :parent :json-envelope-response
+   :lambda-params [:request]
+   :args {:envelope {:parent :_editor-configuration-preview :args {:input :parse-json-body}}}}
+  {:name :api-editor-configuration-preview :parent :app.routes.auth/post
+   :args {:path "/ui/configuration/preview" :handler :_editor-configuration-preview-handler}}
+  {:name :_editor-configuration-undo
+   :description "Atomically undo one exact LIFO activation receipt: delete only its new identities and restore the previous root's versioned name after fresh source and write checks."
+   :args {:input {:type :jsonb}} :return-type :keyword-map :effects #{:db}}
+  {:name :_editor-configuration-undo-handler :parent :json-envelope-response
+   :lambda-params [:request]
+   :args {:envelope {:parent :_editor-configuration-undo :args {:input :parse-json-body}}}}
+  {:name :api-editor-configuration-undo :parent :app.routes.auth/post
+   :args {:path "/ui/configuration/undo" :handler :_editor-configuration-undo-handler}}
+  {:name :_editor-configuration-apply
+   :description "Revalidate the exact preview under current source, policy and revision expectations, then atomically create the planned ordinary graph."
+   :args {:input {:type :jsonb}} :return-type :keyword-map :effects #{:db}}
+  {:name :_editor-configuration-apply-handler :parent :json-envelope-response
+   :lambda-params [:request]
+   :args {:envelope {:parent :_editor-configuration-apply :args {:input :parse-json-body}}}}
+  {:name :api-editor-configuration-apply :parent :app.routes.auth/post
+   :args {:path "/ui/configuration/apply" :handler :_editor-configuration-apply-handler}}
+  {:name :_editor-configuration-reconcile
+   :description "Read-only confirmation of an original uncertain receipt. Never recreates, deletes or adopts changed source."
+   :args {:input {:type :jsonb}} :return-type :keyword-map :effects #{:db}}
+  {:name :_editor-configuration-reconcile-handler :parent :json-envelope-response
+   :lambda-params [:request]
+   :args {:envelope {:parent :_editor-configuration-reconcile :args {:input :parse-json-body}}}}
+  {:name :api-editor-configuration-reconcile :parent :app.routes.auth/post
+   :args {:path "/ui/configuration/reconcile" :handler :_editor-configuration-reconcile-handler}}
+  {:name :_editor-configuration-reconcile-undo
+   :description "Read-only confirmation of staged undo postconditions. Exact scoped restored source and absent cohort are required; no mutation or new source certificate."
+   :args {:input {:type :jsonb}} :return-type :keyword-map :effects #{:db}}
+  {:name :_editor-configuration-reconcile-undo-handler :parent :json-envelope-response
+   :lambda-params [:request]
+   :args {:envelope {:parent :_editor-configuration-reconcile-undo :args {:input :parse-json-body}}}}
+  {:name :api-editor-configuration-reconcile-undo :parent :app.routes.auth/post
+   :args {:path "/ui/configuration/reconcile-undo" :handler :_editor-configuration-reconcile-undo-handler}}
+  {:name :_editor-configuration-cleanup-preview
+   :description "Read-only exact deletion proposal for visible consent. Retain original IDs and restore anchor; current source revisions are a new reviewed decision, not an amended creation receipt."
+   :args {:input {:type :jsonb}} :return-type :keyword-map :effects #{:db}}
+  {:name :_editor-configuration-cleanup-preview-handler :parent :json-envelope-response
+   :lambda-params [:request]
+   :args {:envelope {:parent :_editor-configuration-cleanup-preview :args {:input :parse-json-body}}}}
+  {:name :api-editor-configuration-cleanup-preview :parent :app.routes.auth/post
+   :args {:path "/ui/configuration/cleanup-preview" :handler :_editor-configuration-cleanup-preview-handler}}
   {:name :_ui-components-create-preview
    :description "Reserve a create-only fixed-template manifest for exact recovery. This does not create graph rows."
    :args {:input {:type :jsonb}} :return-type :keyword-map :effects #{:db}}

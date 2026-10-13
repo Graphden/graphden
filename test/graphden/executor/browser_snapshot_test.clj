@@ -106,6 +106,21 @@
                                                 [:secret :text]))))))))
 
 
+(deftest source-only-metadata-interface-is-checked-without-browser-callability
+  (let [metadata-definition (->> (edn/read-string (slurp "resources/packages/web/graph-metadata/fns.edn")) :fns first)
+        get-definition (->> (edn/read-string (slurp "resources/packages/core/collections/fns.edn"))
+                            :fns (filter #(= :get (:name %))) first)
+        f (fixture [(assoc metadata-definition :namespace "web.graph-metadata")
+                    (assoc get-definition :namespace "core.collections")]
+                   [{:name :lookup :parent :find-function
+                     :args {:namespace-path "personal" :name "editor" :principal-id "operator"
+                            :org "public" :branch-id {:value (random-uuid)}}}]
+                   {:parent :get :args {:coll :lookup :key {:value :fn-id} :default {:value nil}}})
+        operation (get-in f [:ids :find-function])]
+    (is (nil? (snapshot/validate-source! (:snapshot f) (:id f) (policy-of f))))
+    (is (not (contains? (plan/supported-primitive-ids) operation)))))
+
+
 (deftest source-only-structural-interfaces-are-checked-without-browser-callability
   (let [definition (->> (edn/read-string (slurp "resources/packages/core/collections/fns.edn"))
                         :fns (filter #(= :into (:name %))) first)

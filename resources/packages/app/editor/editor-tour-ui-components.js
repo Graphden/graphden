@@ -122,7 +122,7 @@ async function _tourEditorConfigurationRequest(route, body) {
 async function _tourEditorUndoConfirmed(receipt) {
   if (!_tourEditorConfigurationContext(receipt)) return false;
   const expected = receipt.undoAttempt;
-  const result = await _tourEditorConfigurationRequest(API.api_editor_configuration_reconcile_undo, expected);
+  const result = await _tourEditorConfigurationRequest(API.api_ui_configuration_reconcile_undo, expected);
   return _tourEditorConfigurationContext(receipt) && result.confirmed === true && result.undone === true
     && result.id === (expected.receipt.previous?.id || receipt.original['restore-id'])
     && result['restore-revision'] === expected['restore-revision'];
@@ -139,7 +139,7 @@ async function gdTourUndoEditorConfigurations(created, options = {}) {
     const input = options.review?.request || _tourEditorUndoInput(receipt.original);
     try {
       if (receipt.receipt === 'pending') {
-        const confirmed = await _tourEditorConfigurationRequest(API.api_editor_configuration_reconcile, input);
+        const confirmed = await _tourEditorConfigurationRequest(API.api_ui_configuration_reconcile, input);
         if (_tourState !== state || !_tourEditorConfigurationContext(receipt) || !confirmed.confirmed
           || confirmed['cohort-revision'] !== receipt.original['cohort-revision']
           || confirmed['configuration-revision'] !== receipt.original['configuration-revision']) return rows;
@@ -154,7 +154,7 @@ async function gdTourUndoEditorConfigurations(created, options = {}) {
           'restore-revision': options.review?.['restore-revision'] || receipt.original['restore-revision']}));
         _tourSaveState();
         try {
-          const result = await _tourEditorConfigurationRequest(API.api_editor_configuration_undo, input);
+          const result = await _tourEditorConfigurationRequest(API.api_ui_configuration_undo, input);
           if (JSON.stringify([...(result.deleted || [])].sort()) !== JSON.stringify([...receipt.original.functions].sort())) return rows;
         } catch (error) {
           if (error.definite) { delete receipt.undoAttempt; _tourSaveState(); return rows; }
@@ -185,7 +185,7 @@ async function gdTourReviewEditorConfigurationCleanup(nextLessonId) {
       return true;
     }
     if (receipt.receipt === 'pending') {
-      const confirmed = await _tourEditorConfigurationRequest(API.api_editor_configuration_reconcile,
+      const confirmed = await _tourEditorConfigurationRequest(API.api_ui_configuration_reconcile,
         _tourEditorUndoInput(receipt.original));
       if (_tourState !== state || !_tourEditorConfigurationContext(receipt) || !confirmed.confirmed
         || confirmed['cohort-revision'] !== receipt.original['cohort-revision']
@@ -194,7 +194,7 @@ async function gdTourReviewEditorConfigurationCleanup(nextLessonId) {
       for (const row of state.created) if (row.token === receipt.token) row.receipt = 'created';
       _tourSaveState();
     }
-    const review = await _tourEditorConfigurationRequest(API.api_editor_configuration_cleanup_preview,
+    const review = await _tourEditorConfigurationRequest(API.api_ui_configuration_cleanup_preview,
       {receipt: _tourEditorUndoInput(receipt.original), scope: receipt.request.scope,
         'restore-revision': receipt.original['restore-revision']});
     if (_tourState !== state || !_tourEditorConfigurationContext(receipt)

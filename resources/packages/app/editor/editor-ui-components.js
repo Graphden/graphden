@@ -29,7 +29,7 @@
     if (prepared?.key !== key) {
       // The explicit compatibility operation preserves existing edits by ref;
       // it never creates a new root when the ordinary editor already exists.
-      const promise = window.authFetch(window.API.api_editor_configuration_prepare, {
+      const promise = window.authFetch(window.API.api_ui_configuration_prepare, {
         method: 'POST', cache: 'no-store', headers: {'Content-Type': 'application/json'},
         body: '{}',
       }).then(async response => {
@@ -63,7 +63,7 @@
   async function loadPlan(component, started, signal) {
     for (let attempt = 0; attempt < 3; attempt++) {
       if (started !== stamp() || signal?.aborted) throw new DOMException('Selection changed', 'AbortError');
-      const response = await window.authFetch(window.API.api_editor_configuration_plan, {
+      const response = await window.authFetch(window.API.api_ui_configuration_plan, {
         method: 'POST', signal, cache: 'no-store',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({component}),

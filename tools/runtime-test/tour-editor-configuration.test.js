@@ -14,8 +14,8 @@ function fixture() {
     getCurrentBranchName: () => 'sandbox', gdPrefOwner: 'alice',
     _tourPrincipalMatches: saved => saved.principal?.accountId === ctx.gdPrefOwner && saved.principal?.orgId === 'acme',
     _tourSaveState() {}, gdRefreshUIConfiguration() {},
-    API: {api_editor_configuration_reconcile: '/reconcile', api_editor_configuration_undo: '/undo',
-      api_editor_configuration_reconcile_undo: '/reconcile-undo'},
+    API: {api_ui_configuration_reconcile: '/reconcile', api_ui_configuration_undo: '/undo',
+      api_ui_configuration_reconcile_undo: '/reconcile-undo'},
     authFetch: async (route, options) => {
       const input = JSON.parse(options.body); calls.push({route, input});
       return {ok: !refused, json: async () => refused ? {ok: false} : route === '/reconcile'
@@ -140,7 +140,7 @@ test('account change during an uncertain undo sends no postcondition request in 
 test('cleanup shows current exact names and submits the reviewed stamps only after consent', async () => {
   const f = fixture(), original = f.original(1);
   f.ctx.gdTourConfirmEditorConfiguration(f.ctx.gdTourStageEditorConfiguration(f.request, original), original);
-  f.ctx.API.api_editor_configuration_cleanup_preview = '/cleanup-preview';
+  f.ctx.API.api_ui_configuration_cleanup_preview = '/cleanup-preview';
   let dialog, ended = 0;
   f.ctx._tourDialog = value => { dialog = value; };
   f.ctx._tourEnd = async () => { ended++; };
@@ -172,7 +172,7 @@ test('cleanup shows current exact names and submits the reviewed stamps only aft
 test('stale reviewed cleanup retains the original receipt and asks for a new visible review', async () => {
   const f = fixture(), original = f.original(1);
   f.ctx.gdTourConfirmEditorConfiguration(f.ctx.gdTourStageEditorConfiguration(f.request, original), original);
-  f.ctx.API.api_editor_configuration_cleanup_preview = '/cleanup-preview';
+  f.ctx.API.api_ui_configuration_cleanup_preview = '/cleanup-preview';
   let dialog, reported = false;
   f.ctx._tourDialog = value => { dialog = value; };
   f.ctx._tourEnd = async () => { assert.fail('Stale cleanup must not advance'); };

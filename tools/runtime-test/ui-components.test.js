@@ -16,7 +16,7 @@ function fixture() {
   const timers = new Map();
   let timerId = 0;
   const window = {
-    gdPrefsReady: true, gdPrefOwner: 'owner-a', API: {api_editor_configuration_plan: '/api/ui/configuration/plan'},
+    gdPrefsReady: true, gdPrefOwner: 'owner-a', API: {api_ui_configuration_plan: '/api/ui/configuration/plan'},
     gdPrefRead: () => null,
     gdPrefOnChange(callback) { window.changed = callback; },
     authFetch: (route, options) => new Promise(resolve => requests.push({route, options, resolve})),

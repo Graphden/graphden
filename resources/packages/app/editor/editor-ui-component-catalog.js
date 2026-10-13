@@ -97,7 +97,7 @@
   async function previewApply(operation, command, controller, current) {
     const state = window.gdUIConfigurationState?.();
     if (!state?.revision || !state.preference) throw new Error('Refresh the editor configuration before changing it.');
-    const preview = await json(window.API.api_editor_configuration_preview, {operation,
+    const preview = await json(window.API.api_ui_configuration_preview, {operation,
       command: {...command, 'expected-preference': state.preference,
         'expected-configuration-revision': state.revision}}, controller.signal);
     if (!current()) return null;
@@ -109,7 +109,7 @@
     const ticket = preview.receipt.created
       ? window.gdTourStageEditorConfiguration?.(preview.request, preview.receipt) : null;
     try {
-      const result = await json(window.API.api_editor_configuration_apply, preview.request, controller.signal);
+      const result = await json(window.API.api_ui_configuration_apply, preview.request, controller.signal);
       if (!current()) return null;
       const comparable = {...result};
       for (const key of ['ok', 'committed', 'changed-functions', 'publication-warnings']) delete comparable[key];
@@ -137,7 +137,7 @@
     const current = () => own === generation && started === context();
     notify('Preparing personal UI graphs…');
     try {
-      await json(window.API.api_editor_configuration_prepare, {home: true}, controller.signal);
+      await json(window.API.api_ui_configuration_prepare, {home: true}, controller.signal);
       if (!current()) return;
       await window.gdCaptureUIConfiguration(controller.signal);
       if (!current()) return;
@@ -162,7 +162,7 @@
     let ticket = null;
     notify('Creating personal UI graphs…');
     try {
-      await json(window.API.api_editor_configuration_prepare, {home: true}, controller.signal);
+      await json(window.API.api_ui_configuration_prepare, {home: true}, controller.signal);
       if (!current()) return;
       await window.gdCaptureUIConfiguration(controller.signal);
       if (!current()) return;

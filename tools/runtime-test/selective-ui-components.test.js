@@ -33,8 +33,8 @@ function fixture(component = 'recents') {
   let failApply = false;
   let preference = null;
   const window = {gdPrefOwner: 'alice', gdPrefsReady: true,
-    API: {api_editor_configuration_prepare: '/prepare', api_editor_configuration_preview: '/preview',
-      api_editor_configuration_apply: '/apply', api_ui_components_create_preview: '/full-preview', api_ui_components_create_apply: '/full-apply'},
+    API: {api_ui_configuration_prepare: '/prepare', api_ui_configuration_preview: '/preview',
+      api_ui_configuration_apply: '/apply', api_ui_components_create_preview: '/full-preview', api_ui_components_create_apply: '/full-apply'},
     gdPrefRead: () => preference, gdUIComponentsSelection: () => selection, gdUIComponentsRoots: () => roots,
     gdShellSurface() {}, gdUIConfigurationState: () => state, gdUIComponentsStatus: () => '', gdPrefOnChange() {},
     addEventListener: (name, callback) => events.set(name, callback), gdRefreshUIConfiguration() {},

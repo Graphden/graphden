@@ -178,7 +178,18 @@
        {:name :_explorer-row-hide-secret :parent :if :args {:test :_explorer-row-secret :then false :else true}}
        {:name :_explorer-row-lock-attrs :parent :_explorer-row-marker-attrs :args {:vals ["secret-lock-icon" "Secret — value lives in the vault, never in the graph DB" :_explorer-row-hide-secret]}}
        {:name :_explorer-row-lock :parent :hiccup :args {:tag "span" :attrs :_explorer-row-lock-attrs :children ["🔒"]}}
-       {:name :_explorer-row-service-class :parent :get :args {:coll {:value {"running" "fn-kind-marker kind-marker-service svc-running" "failed" "fn-kind-marker kind-marker-service svc-failed" "backoff" "fn-kind-marker kind-marker-service svc-backoff" "exited" "fn-kind-marker kind-marker-service svc-exited" "elsewhere" "fn-kind-marker kind-marker-service svc-elsewhere" "disabled" "fn-kind-marker kind-marker-service svc-disabled"}} :key :_explorer-row-service-state :default "fn-kind-marker kind-marker-service"}}
+       {:name :_explorer-row-service-disabled :parent :equal? :args {:a :_explorer-row-service-state :b "disabled"}}
+       {:name :_explorer-row-service-elsewhere :parent :equal? :args {:a :_explorer-row-service-state :b "elsewhere"}}
+       {:name :_explorer-row-service-exited :parent :equal? :args {:a :_explorer-row-service-state :b "exited"}}
+       {:name :_explorer-row-service-backoff :parent :equal? :args {:a :_explorer-row-service-state :b "backoff"}}
+       {:name :_explorer-row-service-failed :parent :equal? :args {:a :_explorer-row-service-state :b "failed"}}
+       {:name :_explorer-row-service-running :parent :equal? :args {:a :_explorer-row-service-state :b "running"}}
+       {:name :_explorer-row-service-disabled-class :parent :if :args {:test :_explorer-row-service-disabled :then "fn-kind-marker kind-marker-service svc-disabled" :else "fn-kind-marker kind-marker-service"}}
+       {:name :_explorer-row-service-elsewhere-class :parent :if :args {:test :_explorer-row-service-elsewhere :then "fn-kind-marker kind-marker-service svc-elsewhere" :else :_explorer-row-service-disabled-class}}
+       {:name :_explorer-row-service-exited-class :parent :if :args {:test :_explorer-row-service-exited :then "fn-kind-marker kind-marker-service svc-exited" :else :_explorer-row-service-elsewhere-class}}
+       {:name :_explorer-row-service-backoff-class :parent :if :args {:test :_explorer-row-service-backoff :then "fn-kind-marker kind-marker-service svc-backoff" :else :_explorer-row-service-exited-class}}
+       {:name :_explorer-row-service-failed-class :parent :if :args {:test :_explorer-row-service-failed :then "fn-kind-marker kind-marker-service svc-failed" :else :_explorer-row-service-backoff-class}}
+       {:name :_explorer-row-service-class :parent :if :args {:test :_explorer-row-service-running :then "fn-kind-marker kind-marker-service svc-running" :else :_explorer-row-service-failed-class}}
        {:name :_explorer-row-service-state-empty :parent :equal? :args {:a :_explorer-row-service-state :b ""}}
        {:name :_explorer-row-service-state-title :parent :str :args {:parts ["Service — " :_explorer-row-service-state]}}
        {:name :_explorer-row-service-label :parent :if :args {:test :_explorer-row-service-state-empty :then "Service" :else :_explorer-row-service-state-title}}
@@ -194,7 +205,6 @@
        {:name :_explorer-row-hide-type :parent :if :args {:test :_explorer-row-type :then false :else true}}
        {:name :_explorer-row-type-attrs :parent :_explorer-row-marker-attrs :args {:vals ["fn-kind-marker kind-marker-type" "Type" :_explorer-row-hide-type]}}
        {:name :_explorer-row-type-node :parent :hiccup :args {:tag "span" :attrs :_explorer-row-type-attrs :children ["T"]}}
-       {:name :_explorer-row-test-class :parent :get :args {:coll {:value {"succeeded" "fn-kind-marker kind-marker-test test-passed" "failed" "fn-kind-marker kind-marker-test test-failed"}} :key :_explorer-row-test-status :default "fn-kind-marker kind-marker-test test-stale"}}
        {:name :_explorer-row-test-error-empty :parent :equal? :args {:a :_explorer-row-test-error :b ""}}
        {:name :_explorer-row-test-failed-error :parent :str :args {:parts ["Test — failed: " :_explorer-row-test-error]}}
        {:name :_explorer-row-test-failed-title :parent :if :args {:test :_explorer-row-test-error-empty :then "Test — failed" :else :_explorer-row-test-failed-error}}
@@ -204,6 +214,8 @@
        {:name :_explorer-row-test-failed-status :parent :equal? :args {:a :_explorer-row-test-status :b "failed"}}
        {:name :_explorer-row-test-other-title :parent :if :args {:test :_explorer-row-test-failed-status :then :_explorer-row-test-failed-title :else :_explorer-row-test-stale-title}}
        {:name :_explorer-row-test-passed-status :parent :equal? :args {:a :_explorer-row-test-status :b "succeeded"}}
+       {:name :_explorer-row-test-failed-class :parent :if :args {:test :_explorer-row-test-failed-status :then "fn-kind-marker kind-marker-test test-failed" :else "fn-kind-marker kind-marker-test test-stale"}}
+       {:name :_explorer-row-test-class :parent :if :args {:test :_explorer-row-test-passed-status :then "fn-kind-marker kind-marker-test test-passed" :else :_explorer-row-test-failed-class}}
        {:name :_explorer-row-test-title :parent :if :args {:test :_explorer-row-test-passed-status :then "Test — passed" :else :_explorer-row-test-other-title}}
        {:name :_explorer-row-hide-test :parent :if :args {:test :_explorer-row-test :then false :else true}}
        {:name :_explorer-row-test-attrs :parent :_explorer-row-marker-attrs :args {:vals [:_explorer-row-test-class :_explorer-row-test-title :_explorer-row-hide-test]}}

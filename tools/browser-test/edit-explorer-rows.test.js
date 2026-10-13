@@ -103,6 +103,51 @@ const {assert, newContext, BASE} = require('./edit-test-helpers');
       && scale.longTitle === 4015,
       'large row set shares one sheet, disposes cleanly and bounded styled badges fit a 600-operation budget');
 
+    stage = 'server graph parity';
+    const serverParity = await page.evaluate(async () => {
+      const response = await authFetch(API.api_ui_configuration_plan, {method: 'POST', cache: 'no-store',
+        headers: {'Content-Type': 'application/json'}, body: JSON.stringify({component: 'explorer'})});
+      const result = await response.json();
+      if (!response.ok || !result.ok || !result.plan) return {available: false};
+      const keyword = GraphdenBrowser.keyword;
+      const record = object => new Map(Object.entries(object).map(([key, value]) => [keyword(key), value]));
+      const runtime = GraphdenBrowser.createRuntime(result.plan, {operationLimit: 600});
+      const row = {name: 'server row', secret: false, 'secret-path': '', service: true,
+        'service-state': '', app: false, 'app-hosts': '', type: false, test: true,
+        'test-status': '', 'test-error': '', failed: 0, 'type-errors': 0, lint: 0, effects: ''};
+      const markers = changes => {
+        const view = runtime.run('view', {inputs: record({surface: 'row', row: record({...row, ...changes}),
+          selected: new Map(), counts: new Map(), failed: 0, authenticated: false,
+          'apps-available': false, fx: false})});
+        const nodes = [GraphdenRenderer.vnode(view.get(keyword('tree')), 'gd-server-row', 48)];
+        const found = {};
+        while (nodes.length) {
+          const node = nodes.pop();
+          if (node?.props?.className?.includes('kind-marker-service')) found.service = node.props.className;
+          if (node?.props?.className?.includes('kind-marker-test')) found.test = node.props.className;
+          nodes.push(...[node?.props?.children].flat().filter(Boolean));
+        }
+        return found;
+      };
+      return {available: true,
+        tests: ['succeeded', 'failed', ''].map(value => markers({'test-status': value}).test),
+        services: ['running', 'failed', 'backoff', 'exited', 'elsewhere', 'disabled', ''].map(value => markers({'service-state': value}).service)};
+    });
+    assert(serverParity.available
+      && JSON.stringify(serverParity.tests) === JSON.stringify([
+        'fn-kind-marker kind-marker-test test-passed',
+        'fn-kind-marker kind-marker-test test-failed',
+        'fn-kind-marker kind-marker-test test-stale'])
+      && JSON.stringify(serverParity.services) === JSON.stringify([
+        'fn-kind-marker kind-marker-service svc-running',
+        'fn-kind-marker kind-marker-service svc-failed',
+        'fn-kind-marker kind-marker-service svc-backoff',
+        'fn-kind-marker kind-marker-service svc-exited',
+        'fn-kind-marker kind-marker-service svc-elsewhere',
+        'fn-kind-marker kind-marker-service svc-disabled',
+        'fn-kind-marker kind-marker-service']),
+    'server-resolved Explorer graph preserves every row status class across package import');
+
     stage = 'fallback';
     const fallback = await page.evaluate(async () => {
       const original = window.gdLoadUIComponentRuntime;

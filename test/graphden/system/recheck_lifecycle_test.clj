@@ -82,6 +82,24 @@
       (is (not= :ready (:status @(:type-recheck-state ctx)))))))
 
 
+(deftest recovery-does-not-wait-on-invalidation-with-a-publication-connection
+  (let [lock (java.util.concurrent.locks.ReentrantLock.)
+        ctx (assoc (context) :invalidation-lock lock)
+        id (random-uuid)]
+    (java.util.concurrent.locks.ReentrantLock/.lock lock)
+    (try
+      (binding [diagnostics/*diagnostics-override* (atom {})]
+        (let [attempt (future (lifecycle/run-pass! ctx nil 1 (constantly [id]) record))]
+          (is (nil? (deref attempt 2000 ::blocked))
+              "recovery yields while a mutation holds the context lock")
+          (is (= #{id} (:pending-ids @(:type-recheck-state ctx))))
+          (is (nil? (get-in @(:rich-types-atom ctx) [:by-id id])))))
+      (finally (java.util.concurrent.locks.ReentrantLock/.unlock lock)))
+    (binding [diagnostics/*diagnostics-override* (atom {})]
+      (is (lifecycle/run-pass! ctx nil 1 (constantly [id]) record))
+      (is (= :ready (:status @(:type-recheck-state ctx)))))))
+
+
 (deftest delayed-retirement-does-not-cancel-a-reused-context
   (let [ctx (context)
         captured (state/generation ctx)]

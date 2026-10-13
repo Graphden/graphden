@@ -66,13 +66,13 @@ Finds the underlying database pool and rebuilds the [[file:glossary.org::#term/p
 :PROPERTIES:
 :CUSTOM_ID: versioning/call-with-write
 :FILE: src/graphden/storage/graph_writer.clj
-:LINE: 145
-:MINS: 1.8
+:LINE: 166
+:MINS: 1.3
 :END:
 
 Keeps decisive graph reads, validation and all related writes in one database transaction. Its advisory locks serialize edits of the same organization while private writes in separate organizations can proceed together. A write to a public identity takes the shared graph's exclusive lock, including a version-only edit by a private actor. Ownership is checked again after waiting. Cache invalidation, notifications and type diagnostics are published after commit, with compilation outside the writer lock.
 
-- source :: [[file:../../../src/graphden/storage/graph_writer.clj::(defn call-with-write][src/graphden/storage/graph_writer.clj:145]]
+- source :: [[file:../../../src/graphden/storage/graph_writer.clj::(defn call-with-write][src/graphden/storage/graph_writer.clj:166]]
 - referenced from :: [[file:editor.org::#editor/apply!][apply!]]
 
 * 6. entity-config

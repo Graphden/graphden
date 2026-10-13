@@ -2,7 +2,6 @@
   "Bounded asynchronous recovery of persisted user checker state. Snapshot
    checking is isolated; only conditional patches publish under the writer."
   (:require
-    [graphden.executor.compile-runtime :as runtime]
     [graphden.executor.context :as context]
     [graphden.executor.registry.conditional-patch :as patch]
     [graphden.executor.registry.core :as registry]
@@ -16,6 +15,21 @@
 
 
 (def batch-size 500)
+
+
+(def ^:private publication-permit
+  ;; Recovery is best-effort and may be scheduled for several cached branches
+  ;; at once. Keep all but one worker OUT of the JDBC pool while a writer holds
+  ;; the graph lock; the normal mutation path may need that spare connection.
+  (java.util.concurrent.Semaphore. 1 true))
+
+
+(defn- try-with-invalidation-lock
+  [ctx f]
+  (if-let [^java.util.concurrent.locks.ReentrantLock lock (:invalidation-lock ctx)]
+    (when (java.util.concurrent.locks.ReentrantLock/.tryLock lock)
+      (try (f) (finally (java.util.concurrent.locks.ReentrantLock/.unlock lock))))
+    (f)))
 
 
 (defn- current-epoch
@@ -75,33 +89,48 @@
      :diagnostics (mapv #(vector branch-id %) ids)}))
 
 
+(defn- publish-snapshot!
+  [ctx branch-id ids expected targets before after last-batch?]
+  (when (current? ctx expected)
+    (let [selected (paths before after branch-id ids)
+          ;; Do not roll back an earlier successful atom patch if a different
+          ;; store conflicts. Restart from fresh baselines instead.
+          applied (mapv #(patch/apply! (get targets %) (get before %)
+                                       (get after %) (get selected %))
+                        [:rich :orgs :diagnostics])]
+      (when (every? true? applied)
+        (let [failed (into #{} (filter #(or (seq (get-in after [:diagnostics branch-id %]))
+                                            (nil? (get-in after [:rich :by-id %])))) ids)]
+          (swap! (:type-recheck-state ctx)
+                 (fn [state]
+                   (if (= (:generation expected) (:generation state))
+                     (cond-> (-> state
+                                 (update :pending-ids #(reduce disj % ids))
+                                 (update :failed-ids into failed))
+                       last-batch? (assoc :status (if (seq (into (:failed-ids state) failed)) :failed :ready)))
+                     state))))
+        true))))
+
+
 (defn- publish-staged!
   [ctx branch-id ids expected {:keys [targets before after]} last-batch?]
-  (writer/call-with-write
-    (:storage ctx) :graph
-    (fn [locked]
-      (runtime/call-with-invalidation-lock
-        ctx
-        (fn []
-          (when (current? (assoc ctx :storage locked) expected)
-            (let [selected (paths before after branch-id ids)
-                  ;; Do not roll back an earlier successful atom patch if a
-                  ;; different store conflicts. Restart from fresh baselines.
-                  applied (mapv #(patch/apply! (get targets %) (get before %)
-                                               (get after %) (get selected %))
-                                [:rich :orgs :diagnostics])]
-              (when (every? true? applied)
-                (let [failed (into #{} (filter #(or (seq (get-in after [:diagnostics branch-id %]))
-                                                    (nil? (get-in after [:rich :by-id %])))) ids)]
-                  (swap! (:type-recheck-state ctx)
-                         (fn [state]
-                           (if (= (:generation expected) (:generation state))
-                             (cond-> (-> state
-                                         (update :pending-ids #(reduce disj % ids))
-                                         (update :failed-ids into failed))
-                               last-batch? (assoc :status (if (seq (into (:failed-ids state) failed)) :failed :ready)))
-                             state))))
-                true))))))))
+  ;; Never wait for this ctx's invalidation lock while holding a JDBC
+  ;; connection. A mutation holds that lock while re-reading its graph; on a
+  ;; two-connection pool, two recovery workers previously occupied both slots
+  ;; (one inside the writer, one waiting for it), blocking the mutation's read
+  ;; for the full connection timeout. A failed try is retried from a fresh
+  ;; snapshot by work!, with no stale publication.
+  (when (try-with-invalidation-lock ctx (constantly true))
+    (java.util.concurrent.Semaphore/.acquire publication-permit)
+    (try
+      (writer/call-with-try-write
+        (:storage ctx) :graph
+        (fn [locked]
+          (try-with-invalidation-lock
+            ctx
+            #(publish-snapshot! (assoc ctx :storage locked) branch-id ids expected
+                                targets before after last-batch?))))
+      (finally (java.util.concurrent.Semaphore/.release publication-permit)))))
 
 
 (defn run-pass!

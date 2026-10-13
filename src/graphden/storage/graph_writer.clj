@@ -100,22 +100,30 @@
     @(:writer-scope token)))
 
 
+(defn- acquire-lock!
+  [connection key shared? try?]
+  ;; Both paths use the same transaction-scoped advisory lock. The recovery
+  ;; worker alone asks for the try form, so a busy writer releases its JDBC
+  ;; connection immediately instead of queuing inside PostgreSQL.
+  (let [name (str "pg_" (when try? "try_") "advisory_xact_lock" (when shared? "_shared"))]
+    (if try?
+      (true? (first (vals (jdbc/execute-one! connection
+                                             [(str "SELECT " name "(hashtextextended(?, 0)) AS acquired") key]))))
+      (do (jdbc/execute! connection [(str "SELECT " name "(hashtextextended(?, 0))") key])
+          true))))
+
+
 (defn- acquire-locks!
-  [connection scope]
-  ;; PG built-in RPC: parameterized SQL, before branch/row/identity locks.
-  (jdbc/execute! connection
-                 [(if (= :global scope)
-                    "SELECT pg_advisory_xact_lock(hashtextextended(?, 0))"
-                    "SELECT pg_advisory_xact_lock_shared(hashtextextended(?, 0))")
-                  global-lock-key])
-  (when-not (= :global scope)
-    (jdbc/execute! connection
-                   ["SELECT pg_advisory_xact_lock(hashtextextended(?, 0))"
-                    (org-lock-key scope)])))
+  [connection scope try?]
+  ;; Global public writers take this key exclusively; private writers share
+  ;; it and then exclude only writers for their own org.
+  (and (acquire-lock! connection global-lock-key (not= :global scope) try?)
+       (or (= :global scope)
+           (acquire-lock! connection (org-lock-key scope) false try?))))
 
 
 (defn- enter-writer!
-  [storage mutation]
+  [storage mutation try?]
   (let [context tx/*transaction-context*
         _ (when-not (and context @(:active? context))
             (throw (ex-info "Graph writer context is inactive"
@@ -130,16 +138,29 @@
     (when (and held (not= :global held) (not= held requested))
       (throw (ex-info "Graph writer scope cannot change inside a transaction"
                       {:type :graph-write/scope-change})))
-    (when-not held
-      (acquire-locks! (:connection context) requested)
-      (reset! (:writer-scope context) requested))
-    (when (and (not= :global requested)
-               (or (satisfies? GraphWriterAdmission storage)
-                   (satisfies? GraphWriterScope storage))
-               (not= requested (trusted-scope storage mutation)))
-      (throw (ex-info "Graph writer ownership changed while waiting; retry"
-                      {:type :graph-write/stale-scope})))
-    (tx/with-writer-context storage)))
+    (when (or held (acquire-locks! (:connection context) requested try?))
+      (when-not held (reset! (:writer-scope context) requested))
+      (when (and (not= :global requested)
+                 (or (satisfies? GraphWriterAdmission storage)
+                     (satisfies? GraphWriterScope storage))
+                 (not= requested (trusted-scope storage mutation)))
+        (throw (ex-info "Graph writer ownership changed while waiting; retry"
+                        {:type :graph-write/stale-scope})))
+      (tx/with-writer-context storage))))
+
+
+(defn- call-with-admission
+  [storage mutation try? f]
+  (let [entity-name (if (map? mutation) (:entity mutation) mutation)]
+    (if (and (or (= :graph entity-name) (contains? semantic-entities entity-name))
+             (tx/datasource storage))
+      (do
+        ;; Reject stale/foreign tokens before borrowing another connection.
+        (delegated-scope storage tx/*transaction-context*)
+        (tx/in-transaction storage
+                           #(when-let [locked (enter-writer! % mutation try?)]
+                              (f locked))))
+      (f storage))))
 
 
 (defn call-with-write
@@ -148,14 +169,20 @@
    Reentrant physical writes join only the current internal context token.
    No pooled backend means no concurrency or atomicity promise."
   [storage mutation f]
-  (let [entity-name (if (map? mutation) (:entity mutation) mutation)]
-    (if (and (or (= :graph entity-name) (contains? semantic-entities entity-name))
-             (tx/datasource storage))
-      (do
-        ;; Reject stale/foreign tokens before borrowing another connection.
-        (delegated-scope storage tx/*transaction-context*)
-        (tx/in-transaction storage #(f (enter-writer! % mutation))))
-      (f storage))))
+  (call-with-admission storage mutation false f))
+
+
+(defn call-with-try-write
+  "Attempt the ordinary graph writer admission without waiting for an advisory
+   lock. Return nil when busy; otherwise run `f` in the same guarded transaction.
+   For best-effort background publication only: the caller must retry from a
+   fresh snapshot after nil. Requires ownership of the pooled commit boundary,
+   so a failed private-org try cannot leave its shared global lock in a caller's
+   transaction. The returned storage retains every decorator."
+  [storage mutation f]
+  (when (tx/datasource storage)
+    (tx/assert-owns-commit! storage))
+  (call-with-admission storage mutation true f))
 
 
 (defmacro with-write

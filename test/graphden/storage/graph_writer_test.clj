@@ -29,14 +29,15 @@
 
 
 (defn- with-storage
-  [f]
-  (let [storage (pg/create-storage
-                  (assoc (helpers/get-container-config *container*) :pool-size 6))
-        schema (-> (malli/create-builder) graph-schema/extend-builder schema/build)]
-    (try
-      (sp/initialize storage schema)
-      (f storage)
-      (finally (sp/close storage)))))
+  ([f] (with-storage 6 f))
+  ([pool-size f]
+   (let [storage (pg/create-storage
+                   (assoc (helpers/get-container-config *container*) :pool-size pool-size))
+         schema (-> (malli/create-builder) graph-schema/extend-builder schema/build)]
+     (try
+       (sp/initialize storage schema)
+       (f storage)
+       (finally (sp/close storage))))))
 
 
 (defn- exception-type
@@ -123,6 +124,52 @@
             (deliver release true)
             (deref holding 10000 :timeout)
             (future-cancel holding)))))))
+
+
+(deftest background-writer-releases-busy-admission-without-waiting-test
+  (with-storage 2
+    (fn [storage]
+      (let [entered (promise)
+            release (promise)
+            acme (->ScopedWriter storage "acme")
+            beta (->ScopedWriter storage "beta")
+            holding (future (writer/call-with-write acme :graph
+                                                    (fn [_] (deliver entered true) @release)))]
+        (try
+          (is (true? (deref entered 10000 :timeout)))
+          (let [attempt (future (writer/call-with-try-write acme :graph
+                                                            (fn [_] :entered)))]
+            (is (nil? (deref attempt 2000 :timeout))
+                "a busy org lock returns without keeping a pooled connection")
+            (is (zero? (waiting-writers storage))
+                "the try path never queues an advisory lock in PostgreSQL"))
+          (is (= :other-org (writer/call-with-try-write beta :graph
+                                                        (fn [_] :other-org))))
+          (deliver release true)
+          (is (true? (deref holding 10000 :timeout)))
+          (is (= :acquired (writer/call-with-try-write acme :graph
+                                                       (fn [_] :acquired))))
+          (finally
+            (deliver release true)
+            (future-cancel holding)))))))
+
+
+(deftest background-writer-requires-its-own-commit-boundary-test
+  (with-storage
+    (fn [storage]
+      (let [scoped (->ScopedWriter storage "acme")]
+        (tx/in-transaction
+          storage
+          (fn [bound]
+            (is (= :graph-write/commit-boundary-required
+                   (exception-type #(writer/call-with-try-write
+                                      (->ScopedWriter bound "acme") :graph
+                                      (fn [_] :unexpected)))))))
+        (jdbc/with-transaction [connection (:pool storage)]
+                               (let [bound (tx/with-connection scoped connection)]
+                                 (is (= :graph-write/commit-boundary-required
+                                        (exception-type #(writer/call-with-try-write
+                                                           bound :graph (fn [_] :unexpected)))))))))))
 
 
 (defn- assert-exclusion

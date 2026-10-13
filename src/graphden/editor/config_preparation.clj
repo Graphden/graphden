@@ -141,15 +141,19 @@
   "Publish committed type/cache changes while preserving the create-only
    cleanup receipt even if derived-state publication fails."
   [ctx storage result]
-  (let [ids (vec (distinct (concat (:functions result) (:changed-functions result))))]
-    (if (empty? ids)
+  (let [ids (vec (distinct (concat (:functions result) (:changed-functions result))))
+        namespaces (:changed-namespaces result)]
+    (if (and (empty? ids) (empty? namespaces))
       result
       (try
-        (context/invalidate-graph-cache! ctx ids)
-        (recheck/record-imported-fn-types! ctx (versioned/current-branch-id storage) ids)
+        (when (seq ids) (context/invalidate-graph-cache! ctx ids))
+        (when (seq ids) (recheck/record-imported-fn-types! ctx (versioned/current-branch-id storage) ids))
         (doseq [id ids]
           (invalidation/notify-after-write! ctx storage :fn :write
                                             {:id id :org-id (tenancy/current-org)}))
+        ;; A newly materialized empty namespace changes no function/type
+        ;; closure. Acknowledge its committed request bump without pretending
+        ;; that the function-only NOTIFY adapter publishes namespace events.
         (epoch/note-graph-epoch-validated! storage)
         result
         (catch Exception _
@@ -182,8 +186,10 @@
                                           #(do
                                              (components/assert-current-policy! storage)
                                              (let [result (if (:home input)
-                                                            {:setup true :home (select-keys (personal-home/ensure-current! storage)
-                                                                                            [:id :name])}
+                                                            (let [home (personal-home/ensure-current! storage)]
+                                                              (cond-> {:setup true :home (select-keys home [:id :name])}
+                                                                (::personal-home/created? (meta home))
+                                                                (assoc :changed-namespaces [(:id home)])))
                                                             (prepare-in-transaction storage (:create input) policy))]
                                                (when-not (= context-epoch (context/invalidation-epoch ctx))
                                                  (refuse! :policy-refresh-required))

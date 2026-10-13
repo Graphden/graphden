@@ -1,8 +1,10 @@
 (ns ^:serial graphden.editor.config-preparation-test
   (:require
     [clojure.test :refer [deftest is]]
+    [graphden.crud.entities.invalidation :as invalidation]
     [graphden.editor.config-preparation :as preparation]
-    [graphden.executor.context :as context]))
+    [graphden.executor.context :as context]
+    [graphden.system.branch-router.epoch :as epoch]))
 
 
 (deftest unknown-storage-layout-cannot-reserve-resolved-absent-identities
@@ -29,3 +31,19 @@
     (is (= receipt (dissoc result :publication-warnings)))
     (is (= [{:reason "Your editor configuration was created. Refresh the editor to reload its derived state."}]
            (:publication-warnings result)))))
+
+
+(deftest namespace-only-home-setup-acknowledges-its-committed-epoch
+  (let [id (random-uuid)
+        result {:setup true :home {:id id :name "personal"} :changed-namespaces [id]}
+        calls (atom [])]
+    (with-redefs [context/invalidate-graph-cache! (fn [& _] (throw (ex-info "No function was created" {})))
+                  invalidation/notify-after-write! (fn [& _] (throw (ex-info "No function was changed" {})))
+                  epoch/note-graph-epoch-validated! (fn [storage]
+                                                      (is (= ::storage storage))
+                                                      (swap! calls conj :acknowledged))]
+      (is (= result (#'preparation/publish! {} ::storage result)))
+      (is (= [:acknowledged] @calls))
+      (reset! calls [])
+      (is (= {:setup true} (#'preparation/publish! {} ::storage {:setup true})))
+      (is (empty? @calls)))))

@@ -3,6 +3,7 @@
    root remains a real graph identity; no existing parent junction is changed."
   (:require
     [cheshire.core :as json]
+    [clojure.tools.logging :as log]
     [graphden.crud.request :as request]
     [graphden.editor.component-config :as config]
     [graphden.editor.components :as components]
@@ -29,6 +30,16 @@
   [reason]
   (throw (ex-info "Editor configuration activation was refused"
                   {:type :browser-plan/unsupported :reason reason})))
+
+
+(defn- source-mismatch!
+  [stage]
+  ;; The stage is a server-owned enum. Never log source rows, revisions,
+  ;; submitted commands or an exception object from this refusal.
+  (log/warn "Editor configuration source mismatch" (name stage))
+  (throw (ex-info "Editor configuration activation was refused"
+                  {:type :browser-plan/unsupported :reason :write-source-mismatch
+                   :stage stage})))
 
 
 (defn revision?
@@ -163,10 +174,12 @@
         revision (resolution/source-revision (:id prepared) actual scope)]
     ;; Exact prechecked rows and previously authorized external source are the
     ;; witness. Reading the current DB alone never creates a source certificate.
-    (when-not (and (= ids (set (map :id (:fns graph))))
-                   (contract/matches? (:graph expected) graph ids)
-                   (= revision (resolution/source-revision (:id prepared) expected scope)))
-      (refuse! :write-source-mismatch))
+    (when-not (= ids (set (map :id (:fns graph))))
+      (source-mismatch! :function-identities))
+    (when-not (contract/matches? (:graph expected) graph ids)
+      (source-mismatch! :structural-rows))
+    (when-not (= revision (resolution/source-revision (:id prepared) expected scope))
+      (source-mismatch! :source-revision))
     ;; Normal resolution deliberately leaves role bodies terminal. Its root
     ;; stamp must use that same view; the cohort stamp covers new own bodies.
     (let [revisions {:configuration-revision (resolution/source-revision
@@ -174,7 +187,7 @@
                                                {:graph (source/collect-manifest storage (:id prepared) authorize!)} scope)
                      :cohort-revision (resolution/cohort-revision own-ids actual scope)}]
       (when-not (= revisions (expected-revisions prepared prior-row private-name scope authorize!))
-        (refuse! :write-source-mismatch))
+        (source-mismatch! :projected-revisions))
       revisions)))
 
 
@@ -251,7 +264,7 @@
       (preparation/create-records! storage (:records prepared))
       (let [revisions (committed-revision! storage prepared prior-row private-name scope authorize!)]
         (when-not (= revisions (select-keys receipt [:configuration-revision :cohort-revision]))
-          (refuse! :write-source-mismatch))
+          (source-mismatch! :preview-revisions))
         (assoc receipt :committed true)))))
 
 

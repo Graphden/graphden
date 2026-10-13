@@ -5,6 +5,7 @@
     [graphden.schema.graph.schema :as schema]
     [graphden.schema.malli.core :as malli]
     [graphden.schema.protocol.protocol :as ds]
+    [graphden.storage.expected-source :as expected-source]
     [graphden.storage.postgres.core :as postgres]
     [graphden.storage.protocol.core :as storage]
     [graphden.types.check.provenance :as provenance]))
@@ -33,6 +34,26 @@
     (is (= (:return original) (:return certified)))
     (is (provenance/matches? certified definition))
     (is (nil? (storage/expected-stored-rows backend :unknown [])))))
+
+
+(deftest expected-cohort-is-complete-and-backend-canonical-before-writing
+  (let [metadata (schema/build-schema (malli/create-builder))
+        fields (into {} (map (fn [entity] [entity (ds/entity-fields metadata entity)]))
+                     [:fn :slot :fn-slot :binding :binding-list-item])
+        backend (postgres/->PostgresStorage nil (atom {:fields-by-entity fields}) (Object.) (atom {}))
+        row {:kind :binding-list-item :id (random-uuid) :binding-id (random-uuid) :position 0
+             :value {"display" "contents"}}
+        authored {:list-items [row]}
+        expected (expected-source/canonical-graph backend authored)]
+    (is (= #{:fns :slots :fn-slots :bindings :list-items} (set (keys expected))))
+    (is (= {:display "contents"} (get-in expected [:list-items 0 :value])))
+    (is (not (contains? (first (:list-items expected)) :kind)))
+    (is (= {"display" "contents"} (get-in authored [:list-items 0 :value])))
+    (is (nil? (expected-source/canonical-graph {} authored)))
+    (is (nil? (expected-source/canonical-graph
+                (reify storage/StorageExpectedSource
+                  (expected-stored-rows [_ entity rows] (when-not (= :slot entity) rows)))
+                authored)))))
 
 
 (deftest source-contract-covers-current-slot-schema

@@ -21,6 +21,7 @@
     [graphden.packages.export :as export]
     [graphden.packages.records :as records]
     [graphden.packages.records.slot-resolution :as slot-res]
+    [graphden.storage.expected-source :as expected-source]
     [graphden.storage.graph-writer :as writer]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.context :as tc]
@@ -224,18 +225,6 @@
   nil)
 
 
-(defn- expected-source
-  [storage prepared]
-  (when (satisfies? sp/StorageExpectedSource storage)
-    (reduce-kv
-      (fn [result kind entity]
-        (if-let [rows (sp/expected-stored-rows storage entity (get prepared kind))]
-          (assoc result kind rows)
-          (reduced nil)))
-      {}
-      {:fns :fn :slots :slot :fn-slots :fn-slot :bindings :binding :list-items :binding-list-item})))
-
-
 (defn write-records!
   "Batch-upsert records of all kinds to storage in dependency order,
    then reconcile each synced fn's body so storage matches the
@@ -263,7 +252,7 @@
                                          :fn-slots (strip-kind fn-slots)
                                          :bindings (strip-kind bindings)
                                          :list-items (strip-kind items)}
-                               canonical-prepared (expected-source storage prepared)]
+                               canonical-prepared (expected-source/canonical-graph storage prepared)]
                            ;; Order matters because of FK constraints:
                            ;; fn → slot (slot.type-fn-id FK)
                            ;;    → fn-slot (FKs to fn + slot)

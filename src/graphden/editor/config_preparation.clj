@@ -19,6 +19,7 @@
     [graphden.graph.metadata :as metadata]
     [graphden.graph.personal-home :as personal-home]
     [graphden.packages.rebase :as rebase]
+    [graphden.storage.expected-source :as expected-source]
     [graphden.storage.graph-writer :as writer]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.tx :as tx]
@@ -70,12 +71,14 @@
                           (= :fn (:kind %)) (assoc :namespace-id (:id home))
                           (and (= (:root-id parsed) (:id %)) (contains? selected :description))
                           (assoc :description (:description selected))) (:records parsed))
+         expected (or (expected-source/canonical-graph storage (bundle/graph records))
+                      (refuse! :expected-source-unavailable))
          external (source/collect-manifests storage (bundle/external-identities records) authorize!)
          captured {:graph external :namespaces (source/collect-namespaces storage external)}]
      ;; Shipped parse declarations are not authority. Check their ACTUAL
      ;; installed source and original classifications before any CREATE.
      (snapshot/validate-source! captured resolution/defaults-id policy)
-     (config/configuration (merge-with into external (bundle/graph records)) (:root-id parsed))
+     (config/configuration (merge-with into external expected) (:root-id parsed))
      ;; Type-check the exact generated compositions before writing them, in a
      ;; private registry. Retained aliases resolve to the authenticated UUID,
      ;; including anonymous roots. This grants nothing and publishes no cache
@@ -101,7 +104,7 @@
                    (group-by :kind records))
          (refuse! :identity-collision)))
      {:records records :id (:root-id parsed)
-      :snapshot {:graph (merge-with into external (bundle/graph records))}})))
+      :snapshot {:graph (merge-with into external expected)}})))
 
 
 (defn create-records!

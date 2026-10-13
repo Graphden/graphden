@@ -1,5 +1,6 @@
 'use strict';
 const {assert, api, BASE} = require('./edit-test-helpers');
+const {undoConfiguration} = require('./configuration-undo-test-helpers');
 
 // A controlled prior partial manifest makes lesson25's restore/fallback
 // contract independent of which editor spec happened to run before it.
@@ -53,12 +54,7 @@ async function preparePickerOnlySelection(page, remember) {
 async function restorePickerOnlySelection(page, fixture) {
   if (!fixture) return;
   if (fixture.activation) {
-    const receipt = fixture.activation.receipt;
-    const restored = await api(page, 'POST', '/api/ui/configuration/undo', {
-      'current-id': receipt.id, 'expected-configuration-revision': receipt['configuration-revision'],
-      'cohort-revision': receipt['cohort-revision'], previous: receipt.previous,
-      functions: receipt['function-receipts']},
-    {'X-Graphden-Branch': fixture.activation.request.scope['branch-id']});
+    const restored = await undoConfiguration(page, fixture.activation);
     assert(restored.ok, 'fixture restores its original ordinary configuration atomically');
     await page.evaluate(() => gdRefreshUIConfiguration());
   }

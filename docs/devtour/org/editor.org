@@ -483,13 +483,13 @@ After a lost UNDO response, confirms only exact restored source and absence in t
 :PROPERTIES:
 :CUSTOM_ID: editor/gdTourRestoreUIComponentPreferences
 :FILE: resources/packages/app/editor/editor-tour-ui-components.js
-:LINE: 229
+:LINE: 238
 :MINS: 2.6
 :END:
 
 Restores Appearance preferences before deleting the lesson's exact selected graph UUID. Unrelated selections survive. Failed persistence retains the graph and lesson ledger and retries even when the preference owner's optimistic local value already changed.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-tour-ui-components.js::async function gdTourRestoreUIComponentPreferences(created, failed) {][resources/packages/app/editor/editor-tour-ui-components.js:229]]
+- source :: [[file:../../../resources/packages/app/editor/editor-tour-ui-components.js::async function gdTourRestoreUIComponentPreferences(created, failed) {][resources/packages/app/editor/editor-tour-ui-components.js:238]]
 
 * 38. gdApplyKeymap
 :PROPERTIES:

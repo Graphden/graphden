@@ -109,15 +109,23 @@ function _tourEditorUndoInput(original) {
     'cohort-revision': original['cohort-revision'], previous: original.previous, functions: original['function-receipts']};
 }
 
-async function _tourEditorConfigurationRequest(route, body) {
-  const response = await authFetch(route, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
-  const result = await response.json();
-  if (!response.ok || !result.ok) {
+async function _tourEditorConfigurationRequest(route, body, retryPolicy) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const response = await authFetch(route, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+    const result = await response.json();
+    if (response.ok && result.ok) return result;
+    // This one explicit refusal rolls the whole UNDO transaction back. Keep
+    // the staged receipt, wait for policy publication, and retry its exact IDs.
+    if (retryPolicy && attempt < 2 && response.status === 422 && result?.ok === false
+      && result.code === 'policy-refresh-required' && result.retryable === true) {
+      await window.gdWaitForGraphPolicy();
+      if (!retryPolicy()) throw new Error('Tutorial configuration context changed.');
+      continue;
+    }
     const error = new Error('The tutorial configuration needs review before cleanup.');
     error.definite = true;
     throw error;
   }
-  return result;
 }
 
 async function _tourEditorUndoConfirmed(receipt) {
@@ -155,7 +163,8 @@ async function gdTourUndoEditorConfigurations(created, options = {}) {
           'restore-revision': options.review?.['restore-revision'] || receipt.original['restore-revision']}));
         _tourSaveState();
         try {
-          const result = await _tourEditorConfigurationRequest(API.api_ui_configuration_undo, input);
+          const result = await _tourEditorConfigurationRequest(API.api_ui_configuration_undo, input,
+            () => _tourEditorConfigurationContext(receipt));
           if (JSON.stringify([...(result.deleted || [])].sort()) !== JSON.stringify([...receipt.original.functions].sort())) return rows;
         } catch (error) {
           if (error.definite) { delete receipt.undoAttempt; _tourSaveState(); return rows; }

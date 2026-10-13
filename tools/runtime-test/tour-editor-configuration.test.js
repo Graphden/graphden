@@ -53,6 +53,64 @@ test('confirmed original receipts undo strictly LIFO without refreshing revision
     [['/undo', 'root-2', 'cohort-stamp-2'], ['/undo', 'root-1', 'cohort-stamp-1']]);
   assert(f.state.created.every(row => row.receipt === 'removed'));
 });
+test('classified policy refresh retries only the same staged undo receipt', async () => {
+  const f = fixture();
+  for (const n of [1, 2]) {
+    const original = f.original(n);
+    f.ctx.gdTourConfirmEditorConfiguration(f.ctx.gdTourStageEditorConfiguration(f.request, original), original);
+  }
+  let waits = 0;
+  f.ctx.gdWaitForGraphPolicy = async () => { waits++; };
+  f.ctx.authFetch = async (route, options) => {
+    const input = JSON.parse(options.body);
+    f.calls.push({route, input});
+    const staged = f.state.editorConfigurations.find(row => row.original.id === input['current-id']);
+    assert.deepEqual(clone(staged.undoAttempt.receipt), input);
+    return f.calls.length < 3
+      ? {ok: false, status: 422, json: async () => ({ok: false, code: 'policy-refresh-required', retryable: true})}
+      : {ok: true, status: 200, json: async () => ({ok: true, deleted: staged.original.functions})};
+  };
+  assert.equal((await f.ctx.gdTourUndoEditorConfigurations(f.state.created)).length, 0);
+  assert.equal(waits, 2);
+  assert.deepEqual(f.calls.map(row => [row.route, row.input['current-id']]),
+    [['/undo', 'root-2'], ['/undo', 'root-2'], ['/undo', 'root-2'], ['/undo', 'root-1']]);
+  assert(f.state.created.every(row => row.receipt === 'removed'));
+});
+test('terminal and stale undo refusals never replay the mutation', async () => {
+  for (const {status, body} of [
+    {status: 422, body: {ok: false, code: 'policy-refresh-required', retryable: false}},
+    {status: 409, body: {ok: false, code: 'stale-configuration', retryable: true}},
+  ]) {
+    const f = fixture(), original = f.original(1);
+    f.ctx.gdTourConfirmEditorConfiguration(f.ctx.gdTourStageEditorConfiguration(f.request, original), original);
+    f.ctx.gdWaitForGraphPolicy = async () => { assert.fail('terminal refusal must not wait'); };
+    f.ctx.authFetch = async (route, options) => {
+      f.calls.push({route, input: JSON.parse(options.body)});
+      return {ok: false, status, json: async () => body};
+    };
+    assert.equal((await f.ctx.gdTourUndoEditorConfigurations(f.state.created)).length, 2);
+    assert.deepEqual(f.calls.map(row => row.route), ['/undo']);
+    assert.equal(f.state.editorConfigurations[0].undoAttempt, undefined);
+    assert(f.state.created.every(row => row.receipt === 'created'));
+  }
+});
+test('classified undo refusal stops after three exact attempts', async () => {
+  const f = fixture(), original = f.original(1);
+  f.ctx.gdTourConfirmEditorConfiguration(f.ctx.gdTourStageEditorConfiguration(f.request, original), original);
+  let waits = 0;
+  f.ctx.gdWaitForGraphPolicy = async () => { waits++; };
+  f.ctx.authFetch = async (route, options) => {
+    f.calls.push({route, input: JSON.parse(options.body)});
+    return {ok: false, status: 422,
+      json: async () => ({ok: false, code: 'policy-refresh-required', retryable: true})};
+  };
+  assert.equal((await f.ctx.gdTourUndoEditorConfigurations(f.state.created)).length, 2);
+  assert.equal(waits, 2);
+  assert.equal(f.calls.length, 3);
+  assert(f.calls.every(row => row.route === '/undo' && row.input['current-id'] === original.id));
+  assert.equal(f.state.editorConfigurations[0].undoAttempt, undefined);
+  assert(f.state.created.every(row => row.receipt === 'created'));
+});
 test('uncertain APPLY is reconciled using original stamps before undo', async () => {
   const f = fixture(); f.ctx.gdTourStageEditorConfiguration(f.request, f.original(1));
   await f.ctx.gdTourUndoEditorConfigurations(f.state.created);

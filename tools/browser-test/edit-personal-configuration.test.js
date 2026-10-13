@@ -1,6 +1,7 @@
 'use strict';
 const {chromium} = require('playwright');
 const {assert, newContext, api} = require('./edit-test-helpers');
+const {undoConfiguration} = require('./configuration-undo-test-helpers');
 let phase = 'boot';
 const fs = require('node:fs');
 function saveReceipts(receipts) {
@@ -8,12 +9,6 @@ function saveReceipts(receipts) {
     JSON.stringify(receipts), {mode: 0o600});
 }
 
-function undoRequest(receipt) {
-  return {'current-id': receipt.id,
-    'expected-configuration-revision': receipt['configuration-revision'],
-    'cohort-revision': receipt['cohort-revision'], previous: receipt.previous,
-    functions: receipt['function-receipts']};
-}
 async function appearance(page) {
   if (!await page.locator('#gd-ui-components-root').isVisible()) {
     await page.locator('.auth-avatar:visible, #auth-lock-btn:visible').first().click();
@@ -95,10 +90,7 @@ async function personalize(page, component, receipts) {
     try {
     phase = 'undo';
     for (const proposal of [...receipts].reverse()) {
-      const result = await api(page, 'POST', '/api/ui/configuration/undo', undoRequest(proposal.receipt),
-        {'X-Graphden-Branch': proposal.request.scope['branch-id']});
-      if (!result.ok) process.stderr.write(JSON.stringify({phase: 'undo-response', status: result.status,
-        code: typeof result.body === 'string' ? JSON.parse(result.body).code : null}) + '\n');
+      const result = await undoConfiguration(page, proposal);
       const expected = new Set(proposal.receipt['function-receipts'].map(row => row.id));
       assert(result.ok && result.deleted.length === expected.size
         && result.deleted.every(id => expected.has(id)),

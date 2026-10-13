@@ -4,6 +4,7 @@ const {unexpectedSelectiveCopyErrors} = require('./selective-copy-errors');
 const {unexpectedThemeRetryErrors} = require('./theme-retry-errors');
 const {chromium} = require('playwright');
 const {assert, newContext, api} = require('./edit-test-helpers');
+const {undoConfiguration} = require('./configuration-undo-test-helpers');
 const {selectCreatedLeaf, editOwnValue} = require('./tutorial-ui-components-helpers');
 
 function themeSelection(value) {
@@ -85,23 +86,7 @@ async function editPickerAndSettle(page, leaf, value) {
 async function cleanup(page, receipts) {
   for (const receipt of [...receipts].reverse()) {
     if (!receipt.activation) continue;
-    const r = receipt.activation.receipt;
-    const command = {
-      'current-id': r.id, 'expected-configuration-revision': r['configuration-revision'],
-      'cohort-revision': r['cohort-revision'], previous: r.previous, functions: r['function-receipts']};
-    let undone;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      undone = await api(page, 'POST', '/api/ui/configuration/undo', command,
-        {'X-Graphden-Branch': receipt.activation.request.scope['branch-id']});
-      if (undone.ok) break;
-      let refusal;
-      try { refusal = JSON.parse(undone.body); } catch (_) { refusal = null; }
-      // This classified refusal rolls its transaction back; the exact receipt
-      // can be retried after the graph policy settles, as the UI host does.
-      if (attempt === 2 || undone.status !== 422 || refusal?.code !== 'policy-refresh-required'
-        || refusal?.retryable !== true) break;
-      await page.evaluate(() => gdWaitForGraphPolicy());
-    }
+    const undone = await undoConfiguration(page, receipt.activation);
     assert(undone.ok, 'compatibility cleanup restores each original root in LIFO order');
   }
   const functions = receipts.flatMap(receipt => receipt.manifest.functions);

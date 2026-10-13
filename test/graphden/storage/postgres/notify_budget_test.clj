@@ -23,12 +23,13 @@
 (deftest utf8-budget-includes-emitter-and-noncoverage-fields
   (let [calls (atom [])
         emit (notify/make-emitter nil)]
-    (with-redefs [util/exec! (fn [& args] (swap! calls conj args))]
+    (binding [util/*jdbc-override* {:execute! (fn [_ sql _]
+                                                (swap! calls conj sql))}]
       (emit {:kind :fn :op :invalidate :id (str/join (repeat 4096 "я"))})
       (is (empty? @calls))
       (emit {:kind :fn :op :invalidate :id "one" :epochs (vec (range 5000))})
       (is (= 1 (count @calls)))
-      (let [event (notify/parse-payload (last (second (first @calls))))]
+      (let [event (notify/parse-payload (last (first @calls)))]
         (is (= "one" (:id event)))
         (is (string? (:emitter event)))
         (is (not (contains? event :epochs)))))))

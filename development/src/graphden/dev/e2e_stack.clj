@@ -529,6 +529,7 @@
                 env (ProcessBuilder/.environment pb)]
             (java.util.Map/.put env "GRAPHDEN_URL" url)
             (java.util.Map/.put env "AUTH_TOKEN" auth-token)
+            (java.util.Map/.put env "GD_E2E_BOOTSTRAP_HOME" "1")
             ;; run-edit-tests.sh reads the executor's memory straight from
             ;; this container's cgroup instead of paying a `docker ps` +
             ;; `docker stats --no-stream` (~3 s) per file.

@@ -86,10 +86,22 @@ async function cleanup(page, receipts) {
   for (const receipt of [...receipts].reverse()) {
     if (!receipt.activation) continue;
     const r = receipt.activation.receipt;
-    const undone = await api(page, 'POST', '/api/ui/configuration/undo', {
+    const command = {
       'current-id': r.id, 'expected-configuration-revision': r['configuration-revision'],
-      'cohort-revision': r['cohort-revision'], previous: r.previous, functions: r['function-receipts']},
-    {'X-Graphden-Branch': receipt.activation.request.scope['branch-id']});
+      'cohort-revision': r['cohort-revision'], previous: r.previous, functions: r['function-receipts']};
+    let undone;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      undone = await api(page, 'POST', '/api/ui/configuration/undo', command,
+        {'X-Graphden-Branch': receipt.activation.request.scope['branch-id']});
+      if (undone.ok) break;
+      let refusal;
+      try { refusal = JSON.parse(undone.body); } catch (_) { refusal = null; }
+      // This classified refusal rolls its transaction back; the exact receipt
+      // can be retried after the graph policy settles, as the UI host does.
+      if (attempt === 2 || undone.status !== 422 || refusal?.code !== 'policy-refresh-required'
+        || refusal?.retryable !== true) break;
+      await page.evaluate(() => gdWaitForGraphPolicy());
+    }
     assert(undone.ok, 'compatibility cleanup restores each original root in LIFO order');
   }
   const functions = receipts.flatMap(receipt => receipt.manifest.functions);

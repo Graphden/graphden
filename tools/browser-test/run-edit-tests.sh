@@ -493,6 +493,24 @@ run_is_degraded() {
   for x in $ENV_FLAKED; do env_count=$((env_count+1)); done
   [ "$DEGRADED_FILES" -ge "$THRASH_MIN_FILES" ] || [ "$env_count" -ge "$THRASH_MIN_FLAKED" ]
 }
+# The single-operator personal home is durable account state, like the stock
+# graph loaded at boot. Personalization creates it on first use; counting that
+# once-per-stack setup as a per-file leak is incorrect. Individual tests must
+# not delete the durable home just to satisfy the leak counter; that also
+# leaves versioned tombstones. The isolated stack opts in before any file's
+# leak baseline is sampled.
+if [ "${GD_E2E_BOOTSTRAP_HOME:-0}" = 1 ]; then
+  if ! wait_for_server || ! curl -fsS --max-time 30 \
+       -H "Authorization: Bearer ${AUTH_TOKEN:-}" -H 'Content-Type: application/json' \
+       -X POST --data '{"home":true}' -o "$SAMPLE_DIR/personal-home.json" \
+       "$URL/api/ui/configuration/prepare" \
+       || ! python3 -c 'import json,sys; x=json.load(open(sys.argv[1])); sys.exit(0 if x.get("ok") is True and x.get("setup") is True and x.get("home", {}).get("id") else 1)' \
+            "$SAMPLE_DIR/personal-home.json"; then
+    echo "isolated personal home fixture unavailable" >&2
+    exit 1
+  fi
+  echo "isolated personal home fixture ready"
+fi
 for f in $FILES; do
   if [ "$STOP_AFTER_RED" = "1" ]; then
     UNRUN_AFTER_RED="$UNRUN_AFTER_RED $f"

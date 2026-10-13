@@ -12,6 +12,7 @@
    - crud.clj - CRUD operations"
   (:require
     [graphden.storage.graph-writer :as writer]
+    [graphden.storage.postgres.codec :as codec]
     [graphden.storage.postgres.crud :as crud]
     [graphden.storage.postgres.graph :as graph]
     [graphden.storage.postgres.graph-epoch :as graph-epoch]
@@ -135,6 +136,14 @@
 
 (defrecord PostgresStorage
   [pool metadata-cache lock slot-row-cache]
+
+  sp/StorageExpectedSource
+
+  (expected-stored-rows
+    [_ entity-name rows]
+    (when-let [fields (get-entity-fields pool metadata-cache lock entity-name)]
+      (mapv #(codec/decode-row (codec/encode-row % fields) fields) rows)))
+
 
   writer/GraphWriteAuthorization
 

@@ -224,6 +224,18 @@
   nil)
 
 
+(defn- expected-source
+  [storage prepared]
+  (when (satisfies? sp/StorageExpectedSource storage)
+    (reduce-kv
+      (fn [result kind entity]
+        (if-let [rows (sp/expected-stored-rows storage entity (get prepared kind))]
+          (assoc result kind rows)
+          (reduced nil)))
+      {}
+      {:fns :fn :slots :slot :fn-slots :fn-slot :bindings :binding :list-items :binding-list-item})))
+
+
 (defn write-records!
   "Batch-upsert records of all kinds to storage in dependency order,
    then reconcile each synced fn's body so storage matches the
@@ -232,8 +244,9 @@
    `records` is a flat vector of tagged maps (output of
    `records/parse-module` or `records/boot-primitive-records`).
    Returns `{fn-name → fn-id}` for named fn rows. Private receipt metadata
-   records structural fingerprints of the exact prepared rows committed by
-   this writer; it is evidence of input, not a checker or authorization."
+   records structural fingerprints of the backend-canonical expected writer
+   input. An unsupported backend receives no storage witness. This is input
+   evidence, not a checker, a current-row read or an authorization."
   [storage records ns-id-map]
   (writer/with-write [storage :graph]
                      (res/call-with-fresh-memos
@@ -249,7 +262,8 @@
                                          :slots (strip-kind slots)
                                          :fn-slots (strip-kind fn-slots)
                                          :bindings (strip-kind bindings)
-                                         :list-items (strip-kind items)}]
+                                         :list-items (strip-kind items)}
+                               canonical-prepared (expected-source storage prepared)]
                            ;; Order matters because of FK constraints:
                            ;; fn → slot (slot.type-fn-id FK)
                            ;;    → fn-slot (FKs to fn + slot)
@@ -277,7 +291,8 @@
                                            (when-let [n (:name fr)]
                                              [(keyword n) (:id fr)])))
                                    fns)
-                             {::source-fingerprints (source-contract/fingerprints prepared)}))))))
+                             {::source-fingerprints (when canonical-prepared
+                                                      (source-contract/fingerprints canonical-prepared))}))))))
 
 
 ;; =============================================================================

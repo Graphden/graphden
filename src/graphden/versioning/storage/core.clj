@@ -799,6 +799,16 @@
         (assoc data version-id-field id :branch-id branch-id) nil)))
 
 
+  sp/StorageExpectedSource
+
+  (expected-stored-rows
+    [_ entity-name rows]
+    ;; Versioning changes where fields are stored, not their value codec or
+    ;; identity/ref-many representation in a resolved graph.
+    (when (satisfies? sp/StorageExpectedSource base-storage)
+      (sp/expected-stored-rows base-storage entity-name rows)))
+
+
   sp/Storage
 
   (initialize

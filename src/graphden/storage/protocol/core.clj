@@ -243,6 +243,16 @@
     "Returns a set of all fn-ids that fn-id depends on (transitive)."))
 
 
+(defprotocol StorageExpectedSource
+  "Optional pure canonicalization of exact writer input for source witnesses.
+   This is not a read of committed rows or an authorization capability."
+
+  (expected-stored-rows
+    [this entity-name rows]
+    "Return the decoded form expected from this backend's normal writer, or
+     nil when unavailable. Never execute writes or adopt current database rows."))
+
+
 (defprotocol StorageValueCodec
   "Protocol for encoding/decoding values between Clojure and storage backend."
 

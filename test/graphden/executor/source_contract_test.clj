@@ -4,7 +4,35 @@
     [graphden.executor.source-contract :as contract]
     [graphden.schema.graph.schema :as schema]
     [graphden.schema.malli.core :as malli]
-    [graphden.schema.protocol.protocol :as ds]))
+    [graphden.schema.protocol.protocol :as ds]
+    [graphden.storage.postgres.core :as postgres]
+    [graphden.storage.protocol.core :as storage]
+    [graphden.types.check.provenance :as provenance]))
+
+
+(deftest writer-witness-uses-the-backend-codec-without-reading-current-source
+  (let [id (random-uuid) binding-id (random-uuid)
+        fields schema/binding-list-item-fields
+        backend (postgres/->PostgresStorage nil (atom {:fields-by-entity {:binding-list-item fields}})
+                                            (Object.) (atom {}))
+        authored {:id (random-uuid) :binding-id binding-id :position 0
+                  :value {:selector "&" :declarations {"display" "contents"}}}
+        decoded (first (storage/expected-stored-rows backend :binding-list-item [authored]))
+        graph {:fns [{:id id :parent-ids [(random-uuid)]}]
+               :bindings [{:id binding-id :fn-id id}] :list-items [authored]}
+        stored (assoc graph :list-items [decoded])
+        definition {:name :checked :parent :const :args {:value (:value authored)}}
+        original (provenance/stamp {:return [:secret :jsonb]} definition)
+        fingerprint #(get (contract/fingerprints %) id)
+        certified (provenance/stamp-storage-input original definition (fingerprint stored))]
+    (is (= #{:display} (set (keys (get-in decoded [:value :declarations])))))
+    (is (not= (fingerprint graph) (fingerprint stored)))
+    (is (provenance/matches-storage-input? certified (fingerprint stored)))
+    (is (not (provenance/matches-storage-input?
+               certified (fingerprint (assoc-in stored [:list-items 0 :value :declarations :display] "grid")))))
+    (is (= (:return original) (:return certified)))
+    (is (provenance/matches? certified definition))
+    (is (nil? (storage/expected-stored-rows backend :unknown [])))))
 
 
 (deftest source-contract-covers-current-slot-schema

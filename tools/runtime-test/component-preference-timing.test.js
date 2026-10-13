@@ -12,16 +12,23 @@ function fixture(initial = null) {
   let server = initial;
   let mirror = JSON.stringify({components: initial});
   const writes = [], plans = [], events = new Map(), loaded = [];
-  const window = {API: {api_prefs: '/prefs', api_prefs_key: key => '/prefs/' + key, api_ui_components_plan: '/plan'},
-    addEventListener: (name, fn) => events.set(name, fn), dispatchEvent() {},
+  const window = {API: {api_prefs: '/prefs', api_prefs_key: key => '/prefs/' + key,
+    api_ui_configuration_prepare: '/prepare', api_ui_configuration_plan: '/plan'},
+    addEventListener: (name, fn) => events.set(name, [...(events.get(name) || []), fn]), dispatchEvent() {},
     gdApplyThemeGraphPreference() {},
     GraphdenBrowser: {createRuntime: () => ({run() {}})},
     authFetch(route, options) {
       if (route.startsWith('/prefs/')) return new Promise((resolve, reject) => writes.push({resolve, reject, value: JSON.parse(options.body).value, body: JSON.parse(options.body)}));
       if (route === '/prefs') return Promise.resolve({ok: true, headers: {get: () => 'owner-a'}, json: async () => ({components: server})});
+      if (route === '/prepare') return Promise.resolve({ok: true, json: async () => ({ok: true})});
       plans.push(server);
       return Promise.resolve({ok: !!server, json: async () => server
-        ? {ok: true, 'selection-id': server['fn-id'], plan} : {ok: false}});
+        ? {ok: true, 'selection-id': server['fn-id'],
+          'configuration-branch-id': server['branch-id'],
+          'configuration-defaults-id': first['fn-id'],
+          'configuration-revision': 'a'.repeat(64),
+          'configuration-preference': {present: true, value: server},
+          roots: {}, plan} : {ok: false}});
     },
   };
   const context = vm.createContext({window, graphdenCurrentOrg: 'org-a', document: {addEventListener() {}},
@@ -77,7 +84,7 @@ function fixture(initial = null) {
   {
     const f = fixture();
     const writing = f.window.gdPrefWrite('components', first);
-    f.events.get('gd-auth-changed')();
+    for (const listener of f.events.get('gd-auth-changed')) listener();
     f.complete(0);
     assert.equal(await writing, false);
     assert.equal(f.window.gdPrefRead('components'), null, 'an old account reply cannot restore its selection');

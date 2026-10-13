@@ -149,11 +149,18 @@
         "ui-component"
         (let [check (:check s)
               action (:action check)]
-          (is (contains? #{"created" "open" "literal" "menu-local" "home-last"} action)
+          (is (contains? #{"created" "open" "literal" "menu-local" "home-last"
+                           "personalized" "personal-open" "personal-theme" "retained-open"} action)
               "UI component checks need an implemented action")
-          (when (= action "open")
+          (when (contains? #{"open" "personal-open" "retained-open"} action)
             (is (contains? #{"configuration-id" "theme-id" "menu-id" "menu-update-id" "picker-id"} (:root check))
                 "Open checks use a manifest root identity"))
+          (when (contains? #{"personalized" "personal-open" "personal-theme"} action)
+            (is (contains? #{"account-menu" "fn-picker"} (:component check))
+                "Personal checks name the supported component"))
+          (when (= action "personal-theme")
+            (is (every? #(and (string? %) (not (str/blank? %))) [(:accent check) (:background check)])
+                "Theme checks name the expected literal colors"))
           (when (contains? #{"literal" "menu-local" "home-last"} action)
             (is (and (contains? #{"theme" "menu" "picker"} (:group check))
                      (not (str/blank? (:name check))) (not (str/blank? (:slot check))))

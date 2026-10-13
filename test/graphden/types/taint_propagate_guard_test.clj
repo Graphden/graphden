@@ -43,6 +43,13 @@
     ;; Returns caller entry identities and their selected graph content;
     ;; the exporter is not a declassification boundary.
     :_ui-preview-export :_ui-preview-export-ids
+    ;; Personal configuration receipts echo caller-selected graph identities and
+    ;; binding values; the protected metadata lookup returns server-owned rows.
+    :_editor-configuration-apply :_editor-configuration-cleanup-preview
+    :_editor-configuration-plan :_editor-configuration-prepare
+    :_editor-configuration-preview :_editor-configuration-reconcile
+    :_editor-configuration-reconcile-undo :_editor-configuration-undo
+    :find-function :ui-pref-store-status
     ;; Selected ordinary theme graph and args determine the validated payload.
     :_ui-theme-evaluate :fn-def-id
     ;; These commands return selected plans, derived manifests or normalized
@@ -227,6 +234,13 @@
     :parse-inheritance-command :preview-inheritance :apply-inheritance
     ;; Entry identities select the exported content and also appear in it.
     :_ui-preview-export :_ui-preview-export-ids
+    ;; The configuration operations and preference status return caller graph
+    ;; identities, values or receipt fields; none declassifies marked content.
+    :_editor-configuration-apply :_editor-configuration-cleanup-preview
+    :_editor-configuration-plan :_editor-configuration-prepare
+    :_editor-configuration-preview :_editor-configuration-reconcile
+    :_editor-configuration-reconcile-undo :_editor-configuration-undo
+    :ui-pref-store-status
     ;; Selected ordinary theme graph and args determine the validated payload.
     :_ui-theme-evaluate :fn-def-id
     ;; Component plans/manifests and view parse/save outcomes derive from

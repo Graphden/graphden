@@ -30,6 +30,8 @@
   "dispatch table: every method is a two-line versioned?-or-not fork; the versioned arms are named fns above it"
   "graphden.storage.postgres.core/PostgresStorage"
   "dispatch table: each protocol method delegates to postgres/{crud,ddl,graph} with the pool + field specs"
+  "graphden.storage.remote.core/RemoteStorage"
+  "dispatch table: read-only storage protocol methods each query the in-memory bundle or refuse writes"
   "graphden.schema.malli.core/MalliDataSchemaBuilder"
   "dispatch table: one small map-update per builder method of the DataSchema protocol"
   "graphden.storage.postgres.migration/make-postgres-callbacks"
@@ -74,6 +76,8 @@
   "one unit: mutually recursive with process-any-fn / process-fn over one shared `state` atom"
   "graphden.layout.graph/process-any-fn"
   "one unit: the dispatch half of that same mutual recursion"
+  "graphden.executor.structural-projection/project*"
+  "one unit: mutually recursive finite graph readers share the same work budget, call frames and source indexes"
   "graphden.system.branch-router/dispatch*"
   "one unit: one request's routing decision — the arms share the resolved branch, ctx and generation snapshot"
 

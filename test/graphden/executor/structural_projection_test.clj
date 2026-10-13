@@ -128,13 +128,14 @@
                                                 (slurp (io/resource "packages/app/ui-config/fns.edn")))
         source (graph fns package-path)
         owners (set (map #(ids/fn-id package-path %) [:editor-resolver :_editor-discovery :_editor-defaults-id]))
-        id (ids/fn-id package-path :_editor-discovery)
+        id (ids/fn-id package-path :editor-resolver)
         resolver (ids/fn-id package-path :editor-resolver)
         binding (first (filter #(and (= id (:fn-id %)) (not (:value-present %))) (:bindings source)))
         changed-binding (fn [key value]
                           (update source :bindings
                                   #(mapv (fn [row]
                                            (if (= (:id binding) (:id row)) (assoc row key value) row)) %)))]
+    (is (some? binding) "The protected resolver has a structural reference binding to guard")
     (is (source-contract/matches? source source owners))
     (is (source-contract/matches?
           source (update source :fns #(mapv (fn [row] (assoc row :description "Edited documentation")) %)) owners))

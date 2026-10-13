@@ -117,26 +117,26 @@ Resolves one entity as visible on a branch by reading and combining its version 
 :PROPERTIES:
 :CUSTOM_ID: versioning/collect-branch-chain
 :FILE: src/graphden/versioning/storage/resolution.clj
-:LINE: 499
+:LINE: 500
 :MINS: 1.9
 :END:
 
 Follows ~:base-branch-id~ from a branch to its parent and root, caching the resulting chain. Version resolution and [[file:glossary.org::#term/invalidation][cache invalidation]] use it to determine which branches can contribute visible data. This is branch ancestry, separate from [[file:glossary.org::#term/inheritance][function inheritance]] through ~:parent-ids~.
 
-- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(defn collect-branch-chain][src/graphden/versioning/storage/resolution.clj:499]]
+- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(defn collect-branch-chain][src/graphden/versioning/storage/resolution.clj:500]]
 - same file :: [[file:versioning.org::#versioning/entity-config][entity-config]], [[file:versioning.org::#versioning/resolve-version][resolve-version]], [[file:versioning.org::#versioning/resolve-version-from-cache][resolve-version-from-cache]]
 
 * 10. resolve-version-from-cache
 :PROPERTIES:
 :CUSTOM_ID: versioning/resolve-version-from-cache
 :FILE: src/graphden/versioning/storage/resolution.clj
-:LINE: 690
+:LINE: 691
 :MINS: 1.4
 :END:
 
 Resolves cached version candidates along a branch's ancestry. At each level it considers locally written and merged versions using their effective timestamps. Single-entity and whole-graph resolution share this algorithm.
 
-- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(defn- resolve-version-from-cache][src/graphden/versioning/storage/resolution.clj:690]]
+- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(defn- resolve-version-from-cache][src/graphden/versioning/storage/resolution.clj:691]]
 - same file :: [[file:versioning.org::#versioning/entity-config][entity-config]], [[file:versioning.org::#versioning/resolve-version][resolve-version]], [[file:versioning.org::#versioning/collect-branch-chain][collect-branch-chain]]
 
 * 11. effective-branch-local?

@@ -10,18 +10,31 @@ Sign in to use the Appearance graph catalog. Access to the lesson means the
 interface is available; creation still checks namespace read, view-impl, write
 and execute permissions and the current quota on the server.
 
-Open **Settings → Appearance → UI graphs**, then **Create personal graphs**.
-Choose an existing namespace where you can write and inspect the source. The
-editor creates a fresh child with Theme, Menu, Picker, Recents, Inspector and Explorer groups and a
-`ui` configuration. Its descriptor list selects each component's entry identities. Selecting it changes your own editor
-preference; it does not select it for other users.
+Open **Settings → Appearance → UI graphs**. Normally use **Personalize account
+menu**, **Personalize function picker**, **Personalize recent functions**,
+**Personalize Inspector**, or **Personalize Explorer toolbar**. They create small
+ordinary children inheriting the selected role definitions and a profile `editor`
+graph merging their entries with shared defaults and your previous configuration.
+Shared dependency bodies are retained by reference, not copied. Existing own
+writable roles open for editing; a shared read-only custom role gets a new child.
+Theme selection stays unchanged. Inheritance does not redirect deeply referenced
+helpers: their identities remain shared until you explicitly replace a reference.
 
-For a smaller personal copy, use **Personalize account menu**, **Personalize
-function picker**, **Personalize recent functions**, **Personalize Inspector**, or **Personalize Explorer toolbar**. These actions create only
-that component and its dependencies, keep existing personal identities and edits,
-and leave the active theme unchanged. An existing group opens for editing instead
-of being replaced. This lesson uses the complete **Create personal graphs** bundle
-so its shared theme exercises have all their dependencies.
+This lesson's deeper theme and helper exercises use the explicit **Create
+personal graphs** bundle. Choose an existing namespace where you can write and
+inspect source. That compatibility action creates a fresh child with Theme,
+Menu, Picker, Recents, Inspector and Explorer groups and a descriptor-list `ui`
+configuration. Your ordinary profile editor references that configuration;
+other users retain their own editor graphs. The full bundle also selects its
+theme, while the smaller Personalize actions do not.
+
+The profile namespace comes from the deployment's personal-namespace authority.
+Without tenancy there is one operator profile named `personal`, not anonymous
+user isolation. Explicit setup materializes its namespace without creating an
+extra editor function. An unavailable configured home is reported rather than
+silently borrowing another user's namespace. See
+[ordinary editor configuration](../UI_CONFIGURATION.md) for the source and
+provisioning boundaries.
 
 The group buttons open exact function identities. **Configuration** shows the
 entry bindings, **Theme** the shared named values, **Menu behavior** the event
@@ -60,12 +73,16 @@ access, and the selected configuration needs execution access. Unsupported,
 effectful or unavailable graphs fall back to built-in controls with a reason.
 No arbitrary JavaScript, HTML or source-file override is loaded by this flow.
 
-The interactive lesson records the exact server-proposed identities before
-creation. Cleanup removes only those functions and empty namespaces; it keeps
-changed or inaccessible identities for review. Before deletion it restores
-previous Appearance selections only while they still point at the lesson's
-graphs. Failed preference persistence retains the graphs and receipt for retry.
-**Keep & close** retains the graphs and selection.
+The interactive lesson records exact server-proposed identities and original
+source expectations before creation. These receipts never adopt later edits.
+Finish shows a separate current-state deletion proposal, including intentional
+lesson changes and the root to restore. Confirming it deletes exactly those new
+identities and restores the previous editor root atomically. An edit after review
+refuses cleanup and requires another review; uncertain replies retain their
+original witnesses for read-only reconciliation. Multiple activations are reviewed
+one at a time in reverse order. The full bundle's theme restoration is separate.
+Profile infrastructure and retained prior roots are kept. **Keep & close** retains
+the graphs and selection.
 
 ## Advanced self-hosted source files
 

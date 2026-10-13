@@ -52,6 +52,179 @@ function gdTourRejectUIComponentsManifest(ticket) {
   _tourSaveState();
 }
 
+function _tourEditorConfigurationContext(receipt) {
+  const scope = receipt?.request?.scope;
+  const org = typeof graphdenCurrentOrg === 'string' && graphdenCurrentOrg ? graphdenCurrentOrg : 'public';
+  return scope && _tourState && _tourPrincipalMatches(_tourState) && _tourPrincipalMatches(receipt)
+    && scope['principal-id'] === window.gdPrefOwner && scope.org === org
+    && receipt['branch-name'] === getCurrentBranchName();
+}
+
+function _tourEditorReceiptMatches(original, result) {
+  const stable = value => Array.isArray(value) ? value.map(stable)
+    : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, stable(value[key])])) : value;
+  return Object.keys(original).every(key => JSON.stringify(stable(original[key])) === JSON.stringify(stable(result?.[key])));
+}
+
+function gdTourStageEditorConfiguration(request, original) {
+  if (_tourState?.lessonId !== '25' || _tourState.phase === 'cleanup' || !original.created) return null;
+  const receipt = JSON.parse(JSON.stringify({request, original, principal: _tourState.principal,
+    'branch-name': getCurrentBranchName(), token: crypto.randomUUID(), receipt: 'pending'}));
+  if (!_tourEditorConfigurationContext(receipt)) throw new Error('Tutorial configuration context changed.');
+  const fields = {creation: 'editor-configuration', token: receipt.token, receipt: 'pending',
+    'branch-id': request.scope['branch-id'], 'branch-name': receipt['branch-name']};
+  for (const row of original['function-receipts']) _tourState.created.push({type: 'fn', ...row, ...fields});
+  _tourState.editorConfigurations ||= [];
+  _tourState.editorConfigurations.push(receipt);
+  _tourSaveState();
+  return {token: receipt.token, lessonId: _tourState.lessonId, principal: {...receipt.principal}};
+}
+
+function _tourEditorConfigurationReceipt(ticket) {
+  if (!ticket || !_tourState || _tourState.lessonId !== ticket.lessonId || !_tourPrincipalMatches(ticket)) return null;
+  const receipt = _tourState.editorConfigurations?.find(row => row.token === ticket.token);
+  return _tourEditorConfigurationContext(receipt) ? receipt : null;
+}
+
+function gdTourConfirmEditorConfiguration(ticket, result) {
+  const receipt = _tourEditorConfigurationReceipt(ticket);
+  if (!receipt || !_tourEditorReceiptMatches(receipt.original, result)) return false;
+  receipt.receipt = 'created';
+  for (const row of _tourState.created) if (row.token === receipt.token) row.receipt = 'created';
+  _tourSaveState();
+  return true;
+}
+
+function gdTourRejectEditorConfiguration(ticket) {
+  const receipt = _tourEditorConfigurationReceipt(ticket);
+  if (receipt?.receipt !== 'pending') return;
+  _tourState.created = _tourState.created.filter(row => row.token !== receipt.token);
+  _tourState.editorConfigurations = _tourState.editorConfigurations.filter(row => row !== receipt);
+  _tourSaveState();
+}
+
+function _tourEditorUndoInput(original) {
+  return {'current-id': original.id, 'expected-configuration-revision': original['configuration-revision'],
+    'cohort-revision': original['cohort-revision'], previous: original.previous, functions: original['function-receipts']};
+}
+
+async function _tourEditorConfigurationRequest(route, body) {
+  const response = await authFetch(route, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  const result = await response.json();
+  if (!response.ok || !result.ok) {
+    const error = new Error('The tutorial configuration needs review before cleanup.');
+    error.definite = true;
+    throw error;
+  }
+  return result;
+}
+
+async function _tourEditorUndoConfirmed(receipt) {
+  if (!_tourEditorConfigurationContext(receipt)) return false;
+  const expected = receipt.undoAttempt;
+  const result = await _tourEditorConfigurationRequest(API.api_editor_configuration_reconcile_undo, expected);
+  return _tourEditorConfigurationContext(receipt) && result.confirmed === true && result.undone === true
+    && result.id === (expected.receipt.previous?.id || receipt.original['restore-id'])
+    && result['restore-revision'] === expected['restore-revision'];
+}
+
+async function gdTourUndoEditorConfigurations(created, options = {}) {
+  const state = _tourState;
+  if (!state?.editorConfigurations?.length) return [];
+  for (const receipt of [...state.editorConfigurations].reverse()) {
+    if (receipt.receipt === 'removed') continue;
+    const rows = created.filter(row => row.token === receipt.token && row.creation === 'editor-configuration');
+    if (options.token && options.token !== receipt.token) return rows;
+    if (!_tourEditorConfigurationContext(receipt)) return rows;
+    const input = options.review?.request || _tourEditorUndoInput(receipt.original);
+    try {
+      if (receipt.receipt === 'pending') {
+        const confirmed = await _tourEditorConfigurationRequest(API.api_editor_configuration_reconcile, input);
+        if (_tourState !== state || !_tourEditorConfigurationContext(receipt) || !confirmed.confirmed
+          || confirmed['cohort-revision'] !== receipt.original['cohort-revision']
+          || confirmed['configuration-revision'] !== receipt.original['configuration-revision']) return rows;
+        receipt.receipt = 'created';
+        for (const row of rows) row.receipt = 'created';
+        _tourSaveState();
+      }
+      if (receipt.undoAttempt) {
+        if (!await _tourEditorUndoConfirmed(receipt)) return rows;
+      } else {
+        receipt.undoAttempt = JSON.parse(JSON.stringify({receipt: input, scope: receipt.request.scope,
+          'restore-revision': options.review?.['restore-revision'] || receipt.original['restore-revision']}));
+        _tourSaveState();
+        try {
+          const result = await _tourEditorConfigurationRequest(API.api_editor_configuration_undo, input);
+          if (JSON.stringify([...(result.deleted || [])].sort()) !== JSON.stringify([...receipt.original.functions].sort())) return rows;
+        } catch (error) {
+          if (error.definite) { delete receipt.undoAttempt; _tourSaveState(); return rows; }
+          if (!await _tourEditorUndoConfirmed(receipt)) return rows;
+        }
+      }
+      if (_tourState !== state || !_tourEditorConfigurationContext(receipt)) return rows;
+      receipt.receipt = 'removed';
+      for (const row of rows) row.receipt = 'removed';
+      _tourSaveState();
+      window.gdRefreshUIConfiguration?.();
+      if (options.token) return [];
+    } catch (_) { return rows; }
+  }
+  return [];
+}
+
+async function gdTourReviewEditorConfigurationCleanup(nextLessonId) {
+  const state = _tourState;
+  const receipt = [...(state?.editorConfigurations || [])].reverse().find(row => row.receipt !== 'removed');
+  if (!receipt) return false;
+  try {
+    if (!_tourEditorConfigurationContext(receipt)) throw new Error('Context changed');
+    if (receipt.undoAttempt) {
+      const failed = await gdTourUndoEditorConfigurations(state.created, {token: receipt.token});
+      if (failed.length) throw new Error('Undo outcome uncertain');
+      await _tourEnd(nextLessonId);
+      return true;
+    }
+    if (receipt.receipt === 'pending') {
+      const confirmed = await _tourEditorConfigurationRequest(API.api_editor_configuration_reconcile,
+        _tourEditorUndoInput(receipt.original));
+      if (_tourState !== state || !_tourEditorConfigurationContext(receipt) || !confirmed.confirmed
+        || confirmed['cohort-revision'] !== receipt.original['cohort-revision']
+        || confirmed['configuration-revision'] !== receipt.original['configuration-revision']) throw new Error('Apply outcome uncertain');
+      receipt.receipt = 'created';
+      for (const row of state.created) if (row.token === receipt.token) row.receipt = 'created';
+      _tourSaveState();
+    }
+    const review = await _tourEditorConfigurationRequest(API.api_editor_configuration_cleanup_preview,
+      {receipt: _tourEditorUndoInput(receipt.original), scope: receipt.request.scope,
+        'restore-revision': receipt.original['restore-revision']});
+    if (_tourState !== state || !_tourEditorConfigurationContext(receipt)
+      || review.kind !== 'editor-configuration-cleanup-review'
+      || review.request?.['current-id'] !== receipt.original.id
+      || !_tourEditorReceiptMatches({previous: receipt.original.previous}, review.request)
+      || JSON.stringify(review.delete?.map(row => row.id).sort()) !== JSON.stringify([...receipt.original.functions].sort())) {
+      throw new Error('Review does not match receipt');
+    }
+    _tourDialog({title: 'Delete these tutorial UI graphs?',
+      body: 'Delete these exact tutorial graphs, including your edits: '
+        + review.delete.map(row => JSON.stringify(row.name || row.id)).join(', ')
+        + '. Restore ' + JSON.stringify(review.restore.name) + '. Other graphs are kept.',
+      primary: ['Delete these graphs & restore', async () => {
+        if (_tourState !== state || !_tourEditorConfigurationContext(receipt)) return;
+        const failed = await gdTourUndoEditorConfigurations(state.created, {token: receipt.token, review});
+        if (failed.length) {
+          _tourReport(false, 'Kept tutorial UI graphs: the reviewed state changed or deletion could not be confirmed. Review cleanup again.');
+          return;
+        }
+        await _tourEnd(nextLessonId);
+      }],
+      quiet: ['Keep & close', () => _tourKeepAndContinue(nextLessonId)],
+    });
+  } catch (_) {
+    _tourReport(false, 'Kept tutorial UI graphs: their current state could not be reviewed. Return through Lessons to retry cleanup.');
+  }
+  return true;
+}
+
 async function gdTourRestoreUIComponentPreferences(created, failed) {
   if (!_tourState?.uiComponentManifests?.length) return [];
   const state = _tourState;
@@ -97,8 +270,11 @@ async function gdTourRestoreUIComponentPreferences(created, failed) {
 
 function _tourUIComponentActive() {
   const selected = window.gdUIComponentsSelection?.();
+  const activation = _tourState?.editorConfigurations?.find(receipt => receipt.receipt === 'created'
+    && _tourEditorConfigurationContext(receipt) && receipt.original.id === selected?.['fn-id']);
   return _tourState?.uiComponentManifests?.find(receipt => receipt.receipt === 'created'
-    && _tourUIComponentContext(receipt) && receipt.manifest.roots['configuration-id'] === selected?.['fn-id']);
+    && _tourUIComponentContext(receipt) && (receipt.manifest.roots['configuration-id'] === selected?.['fn-id']
+      || receipt.manifest.roots['configuration-id'] === activation?.request?.command?.['selection-id']));
 }
 
 function _tourUIComponentFn(receipt, group, name) {
@@ -111,13 +287,14 @@ function _tourUIComponentFn(receipt, group, name) {
 function gdTourUIComponentCheck(check) {
   const receipt = _tourUIComponentActive();
   if (!receipt || !lookups) return false;
+  const activeRoot = window.gdUIComponentsSelection?.()?.['fn-id'];
   if (check.action === 'created') return window.gdShellMenuGraph?.ready && window.gdFnPickerGraph?.ready
-    && window.gdUIComponentRuntimeIdentity?.('account-menu') === receipt.manifest.roots['configuration-id']
-    && window.gdUIComponentRuntimeIdentity?.('fn-picker') === receipt.manifest.roots['configuration-id']
+    && window.gdUIComponentRuntimeIdentity?.('account-menu') === activeRoot
+    && window.gdUIComponentRuntimeIdentity?.('fn-picker') === activeRoot
     && (!receipt.manifest.roots['recents-id']
-      || window.gdUIComponentRuntimeIdentity?.('recents') === receipt.manifest.roots['configuration-id'])
+      || window.gdUIComponentRuntimeIdentity?.('recents') === activeRoot)
     && (!receipt.manifest.roots['inspector-id']
-      || window.gdUIComponentRuntimeIdentity?.('inspector') === receipt.manifest.roots['configuration-id']);
+      || window.gdUIComponentRuntimeIdentity?.('inspector') === activeRoot);
   if (check.action === 'open') return selectedFnId === receipt.manifest.roots[check.root];
   const fn = _tourUIComponentFn(receipt, check.group, check.name);
   if (!fn) return false;

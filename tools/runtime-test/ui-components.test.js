@@ -10,15 +10,14 @@ const second = '22222222-2222-2222-2222-222222222222';
 const branch = '33333333-3333-3333-3333-333333333333';
 const plan = {entries: {view: 'view-id'}, inputs: {'view-id': {accepted: ['state'], required: ['state']}}};
 function fixture() {
-  let chosen = {'fn-id': first, 'branch-id': branch, org: 'org-a'};
   const requests = [];
   const events = new Map();
   const calls = [];
   const timers = new Map();
   let timerId = 0;
   const window = {
-    gdPrefsReady: true, gdPrefOwner: 'owner-a', API: {api_ui_components_plan: '/api/ui/components/plan'},
-    gdPrefRead: () => chosen,
+    gdPrefsReady: true, gdPrefOwner: 'owner-a', API: {api_editor_configuration_plan: '/api/ui/configuration/plan'},
+    gdPrefRead: () => null,
     gdPrefOnChange(callback) { window.changed = callback; },
     authFetch: (route, options) => new Promise(resolve => requests.push({route, options, resolve})),
     addEventListener: (name, callback) => events.set(name, callback), dispatchEvent() {},
@@ -40,8 +39,14 @@ function fixture() {
       timers.delete(id);
       timer.callback();
       await new Promise(resolve => setImmediate(resolve));
-    }, choose: value => { chosen = value; }, finish(request, body, ok = true, status = ok ? 200 : 422) {
-    request.resolve({ok, status, json: async () => body});
+    }, choose: () => { window.gdRefreshUIConfiguration();
+      for (const [id, timer] of timers) if (timer.delay === 0) { timers.delete(id); timer.callback(); }
+    }, finish(request, body, ok = true, status = ok ? 200 : 422) {
+    request.resolve({ok, status, json: async () => ok ? {
+      'configuration-branch-id': branch, 'configuration-revision': 'a'.repeat(64),
+      'configuration-preference': {present: false, value: null},
+      'configuration-defaults-id': first, 'custom-components': {}, ...body,
+    } : body});
   }};
 }
 (async () => {
@@ -135,7 +140,8 @@ function fixture() {
   {
     const f = fixture();
     const loading = f.window.gdLoadUIComponentRuntime('account-menu', plan);
-    assert.equal(f.requests[0].options.headers['X-Graphden-Branch'], branch);
+    assert.equal(f.requests[0].route, '/api/ui/configuration/plan');
+    assert.equal(f.requests[0].options.headers['X-Graphden-Branch'], undefined, 'current branch wrapper owns request context');
     assert.deepEqual(JSON.parse(f.requests[0].options.body), {component: 'account-menu'});
     f.choose({'fn-id': second, 'branch-id': branch, org: 'org-a'});
     f.finish(f.requests[0], {ok: true, 'selection-id': first, plan});
@@ -148,6 +154,17 @@ function fixture() {
     f.window.gdPrefOwner = 'owner-b';
     f.finish(f.requests[0], {ok: true, 'selection-id': first, plan});
     await assert.rejects(loading, {name: 'AbortError'}, 'account change also invalidates a reply');
+  }
+  {
+    const f = fixture();
+    const loading = f.window.gdLoadUIComponentRuntime('account-menu', plan);
+    f.window.gdPrefOwner = 'owner-b';
+    f.events.get('gd-auth-changed')();
+    f.window.gdPrefOwner = 'owner-a';
+    f.events.get('gd-auth-changed')();
+    f.finish(f.requests[0], {ok: true, 'selection-id': first, plan});
+    await assert.rejects(loading, {name: 'AbortError'}, 'A→B→A never adopts the earlier authenticated snapshot');
+    assert.equal(f.window.gdUIConfigurationState(), null);
   }
   {
     const f = fixture();
@@ -165,10 +182,22 @@ function fixture() {
     const loading = f.window.gdLoadUIComponentRuntime('account-menu', plan);
     f.finish(f.requests[0], {ok: true, 'selection-id': second, plan});
     await loading;
-    assert.match(f.window.gdUIComponentsStatus(), /unavailable/, 'mismatched identity falls back');
-    f.choose({'fn-id': first, 'branch-id': branch, org: 'org-b'});
+    assert.equal(f.window.gdUIComponentRuntimeIdentity('account-menu'), second,
+      'the authenticated ordinary resolver, not a mirrored preference, selects the root');
+    assert.equal(f.window.gdUIConfigurationState().revision, 'a'.repeat(64));
+    f.window.graphdenAccountsMode = () => true;
+    f.window.isAuthenticated = () => false;
     await f.window.gdLoadUIComponentRuntime('fn-picker', plan);
-    assert.equal(f.requests.length, 1, 'foreign organization never sends a plan request');
+    assert.equal(f.requests.length, 1, 'true guests use the checked shipped artifact');
+  }
+  {
+    const f = fixture();
+    const loading = f.window.gdLoadUIComponentRuntime('account-menu', plan);
+    f.finish(f.requests[0], {ok: true, 'selection-id': first,
+      'configuration-revision': 'not-a-source-revision', plan});
+    await loading;
+    assert.match(f.window.gdUIComponentsStatus(), /unavailable/);
+    assert.equal(f.window.gdUIConfigurationState(), null, 'invalid source metadata never publishes configuration state');
   }
   console.log('PASS personal UI plans: scoped request, late reply rejection, fallback and input contract');
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -10,10 +10,10 @@
 |------|---------|
 | `editor-shell-menu-graph.js` | Default bounded graph evaluator supplies the account menu frame, common destinations, keyboard state and transitions from shipped plans; existing auth/capability callbacks remain native. Explicit self-hosted review URLs may select an editable plan and temporary theme overlay. |
 | `editor-fn-picker-graph.js` | Default ordinary graph renderer for the existing picker list; native search, verdicts and selection remain in their owners. Lists exceeding the supported bound retain native rendering. |
-| `editor-ui-components.js` | Per-user menu/picker configuration loader; authenticated bounded plans, stale response rejection, supplied input filtering, installed fallback and catalog identities. Loaded after builtin plans and before menu/picker adapters. |
+| `editor-ui-components.js` | Authenticated ordinary editor configuration loader; protected principal/org/branch resolution, bounded authorized plans, stale response rejection and immediate account disposal. Existing legacy selections migrate by reference; a truly anonymous deployment uses the checked shipped artifact. |
 | `editor-ui-policy.js` | Cancellable one-second wait shared by personal theme and component reads; each owner retries only its explicit transient refusal, at most three attempts. Loaded before theme graph evaluation. |
-| `editor-ui-component-catalog.js` | Graph-rendered Appearance catalog; existing namespace/function picker coordination, internal create-only preview/apply, exact manifest receipts, preference selection and UUID graph navigation. Loaded after theme preference owner. |
-| `editor-tour-ui-components.js` | Lesson 25 exact create-only manifest ledger, identity-scoped live graph/style/menu checks and previous Appearance preference restoration. Loaded before tour check dispatch; shared cleanup restores selected preferences before deletion and retains the graph receipt if persistence fails. |
+| `editor-ui-component-catalog.js` | Appearance graph catalog; ordinary inherited role children and merge-by-reference editor roots, scoped preview/APPLY CAS, exact staged receipts and UUID navigation. The full copied bundle remains an explicit compatibility action; group personalization leaves theme selection unchanged. |
+| `editor-tour-ui-components.js` | Immutable creation receipts, read-only lost-response reconciliation and one visible LIFO deletion review per editor activation. Current edits require a separate reviewed proposal; its exact source stamps are sent unchanged to atomic delete-and-restore. Legacy full-bundle theme restoration remains separate. |
 | `editor-theme-graph.js` | Personal ordinary theme graph selection, creation and opening; server-authorized evaluation, response ownership, cancellation and last successful color fallback. Loaded after theme; picker globals are used only when invoked. |
 | `ui-preview/graph-component.js` | Component state and event queue; complete transition preflight, fixed request descriptors, runtime replacement and async cancellation. Loaded after renderer. |
 | `ui-preview/builtin-plans.js` | Generated immutable package plans for the default menu, picker and Explorer navigation trail. Loaded after graph runtime/renderer and before their editor adapters; contains no tenant graph data. |
@@ -172,3 +172,13 @@ the server verifies the receipt tuples and external dependencies under one
 writer transaction. The client accepts only a complete, disjoint partition of
 the requested UUIDs into `deleted` and `already-absent`. A conflict or ambiguous
 reply keeps every receipt; namespace cleanup follows confirmed function removal.
+
+Ordinary editor activation has a separate scoped undo: delete its exact new
+function IDs and restore the previous root's versioned name in one transaction.
+No existing parent junction is rewritten. Original creation receipts remain
+immutable for uncertain APPLY recovery. Intentional lesson edits require a
+read-only cleanup preview before visible consent; an edit after review refuses
+the operation. Lost UNDO responses use the pre-staged exact restored-source
+witness and scoped resolved absence, without repeating DELETE or adopting a
+new source stamp. Profile namespaces are retained infrastructure, not lesson
+creation receipts.

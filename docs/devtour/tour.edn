@@ -1497,7 +1497,7 @@
            copied theme leaves; menu hover owns a local literal. Color wrappers retain the canonical
            color type and ordinary editor form. The full bundle remains the Lesson 25 creation path."}
     {:ns graphden.editor.component-templates :defn selected-definitions
-     :say "Keeps only the chosen component and its owned reference closure. A new ordinary concat manifest
+     :say "The retained legacy selective-copy compatibility path keeps only the chosen component and its owned reference closure. A new ordinary concat manifest
            references the previous authored manifest and the new descriptor list, preserving existing
            identities and edits. Legacy slots are adapted to descriptors without copying their bodies.
            Retained identities are outside the create-only receipt; group creation does not activate a theme."}
@@ -1507,8 +1507,8 @@
            One transaction through the existing [storage decorators](#term/protocol) creates all
            rows with ordinary access checks. Cache-publication warnings preserve a successful commit
            and its identities. An internal preview lets lesson cleanup record exact new UUIDs before
-           sending APPLY, so a lost network reply does not leave untracked objects. Preference activation
-           is a separate owner/key compare-write transaction; a conflict leaves the new graphs available."
+           sending APPLY, so a lost network reply does not leave untracked objects. The explicit full bundle
+           then activates by reference through the ordinary editor configuration; a conflict leaves the copied bundle available."
      :see [[:versioning "call-with-write"]]}
     {:ns graphden.executor.browser-source :defn collect-closure
      :say "Collects only the selected [reachable graph](#term/reachable-graph) and its type dependencies,
@@ -1516,11 +1516,33 @@
            snapshot-local policy; generic whole-graph preview remains unavailable to cloud tenants.
            Narrow exceptions for fixed shipped primitive/type interfaces verify identity and
            installed origin; a matching name is insufficient."}
-    {:ns graphden.editor.components :defn export-current
-     :say "Reads the current user's authoritative configuration preference and exports a bounded
-           JSON plan for one component. It never evaluates selected code to discover entry UUIDs.
+    {:ns graphden.editor.components :defn export-resolved
+     :say "A protected ordinary resolver finds editor in the current principal/org/branch's exact personal namespace,
+           or shared editor-defaults. Default and custom configurations use the same authorized bounded
+           JSON export. Legacy selections migrate by reference; no preference UUID chooses the active root.
+           The protected lookup is bounded metadata discovery, not arbitrary graph execution.
            Source and policy use one snapshot; fresh checking cannot erase cached secret metadata.
            The editor host still owns callbacks, search, navigation and the validated DOM contract."}
+    {:ns graphden.graph.personal-home :defn ensure-current!
+     :say "Explicit profile infrastructure setup follows the configured personal namespace authority.
+           Tenancy requires an already provisioned exact home; an addonless single operator may create
+           only the fixed personal namespace through ordinary decorated CRUD. No editor function or grant
+           is created here, and profile infrastructure is excluded from lesson cleanup."}
+    {:ns graphden.editor.config-activation :defn apply-proposal!
+     :say "Rebuilds the exact scoped preview and source expectations before writes. Small ordinary role
+           children inherit selected definitions; the editor root merges defaults, retained prior and new entries.
+           Replacing editor privately renames the old root in this branch and creates a new UUID,
+           never rewriting its shared identity-plane parent junctions. All new IDs and original restore
+           witnesses are staged before APPLY; source, policy or CAS changes refuse the transaction."}
+    {:ns graphden.editor.config-receipts :defn cleanup-preview!
+     :say "Read-only proposal for a new visible deletion decision on intentionally edited tutorial graphs.
+           Original creation receipts remain immutable. The exact new-ID set and unchanged prior anchor
+           retain normal home, write, source, package, secret and external-reference checks. The dialog
+           shows current names and restore target before consent; another edit requires a new review."}
+    {:ns graphden.editor.config-receipts :defn reconcile-undo!
+     :say "After a lost UNDO response, confirms only exact restored source and absence in the saved scoped
+           resolved view, using the witness staged before DELETE. It never repeats deletion or adopts
+           a newer stamp. This proves current state, not physical global absence or historical exactly-once."}
     {:file "resources/packages/app/editor/editor-tour-ui-components.js" :defn gdTourRestoreUIComponentPreferences
      :say "Restores Appearance preferences before deleting the lesson's exact selected graph UUID.
            Unrelated selections survive. Failed persistence retains the graph and lesson ledger

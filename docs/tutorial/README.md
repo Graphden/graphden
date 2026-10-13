@@ -175,8 +175,10 @@ instance. A missing condition leaves the lesson visible but disabled with a
 reason on its row.
 
 Lesson 25 edits personal UI graphs on both cloud and self-hosted installations
-(`:requires "personal-ui-graphs"`). Appearance selects the current user's
-components; creating and editing their graphs requires a writable namespace.
+(`:requires "personal-ui-graphs"`). A protected ordinary resolver finds the
+current profile's `editor` graph or shared defaults. Personalize creates inherited
+role children; the explicit full bundle is used for the lesson's deeper theme
+and helper edits. Creating and editing graphs still requires ordinary permissions.
 The separate Source files panel edits shared frontend assets and remains
 self-hosted/platform-only because those writes affect every user of the instance.
 

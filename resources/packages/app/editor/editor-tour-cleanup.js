@@ -456,6 +456,13 @@ async function _tourDeleteNamespaces(created, options) {
 // report success".
 async function _tourDeleteCreated(created, options) {
   const rejected = [];
+  // Ordinary configurations undo atomically in LIFO order before any generic
+  // deletion or preference restoration can remove a referenced source.
+  if (typeof window !== 'undefined' && typeof window.gdTourUndoEditorConfigurations === 'function') {
+    try { rejected.push(...await window.gdTourUndoEditorConfigurations(created)); }
+    catch (_) { rejected.push(...created.filter(row => row.creation === 'editor-configuration' && row.receipt !== 'removed')); }
+    if (rejected.length) return {failed: created.filter(row => row.receipt !== 'removed')};
+  }
   // Stop readers of owned UI sources before deleting those sources. A failed
   // preference write retains the graph and its exact recovery receipt.
   if (typeof window !== 'undefined' && typeof window.gdTourRestoreUIComponentPreferences === 'function') {

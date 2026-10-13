@@ -76,6 +76,11 @@ async function _tourEnd(nextLessonId = null) {
   const lesson = _tourLesson();
   const finished = !!lesson && (_tourState?.step || 0) >= (lesson.steps || []).length;
 
+  // Personal graph identities outlive a sandbox branch. Review their scoped
+  // undo while that branch still exists, before offering branch rollback.
+  if (typeof gdTourReviewEditorConfigurationCleanup === 'function'
+    && await gdTourReviewEditorConfigurationCleanup(nextLessonId)) return;
+
   // Branch-isolated run (org mode): the WHOLE lesson lives on a tour
   // branch, so the cleanup offer is one decision — delete the branch
   // (full rollback, returns to main) or keep it.

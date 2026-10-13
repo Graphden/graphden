@@ -40,13 +40,13 @@ Defines row operations such as ~read-entity~, ~query-entities~, and ~create-enti
 :PROPERTIES:
 :CUSTOM_ID: storage/ExecutionGraph
 :FILE: src/graphden/storage/protocol/core.clj
-:LINE: 276
+:LINE: 278
 :MINS: 0.9
 :END:
 
 Defines ~resolve-execution-graph~: given a root function ID, return the [[file:glossary.org::#term/reachable-graph][reachable graph]] and its indexes. Generic and PostgreSQL implementations follow below. This is a separate API from the executor's full-registry rebuild, which currently queries the graph entity tables through ~StorageCRUD~.
 
-- source :: [[file:../../../src/graphden/storage/protocol/core.clj::(defprotocol ExecutionGraph][src/graphden/storage/protocol/core.clj:276]]
+- source :: [[file:../../../src/graphden/storage/protocol/core.clj::(defprotocol ExecutionGraph][src/graphden/storage/protocol/core.clj:278]]
 - see also :: [[file:executor.org::#executor/rebuild!][rebuild!]]
 - same file :: [[file:storage.org::#storage/Storage][Storage]], [[file:storage.org::#storage/StorageCRUD][StorageCRUD]]
 
@@ -222,13 +222,13 @@ Runs the [[file:glossary.org::#term/cte][recursive query]] for reachable functio
 :PROPERTIES:
 :CUSTOM_ID: storage/candidate-ids
 :FILE: src/graphden/storage/bounded_query.clj
-:LINE: 29
+:LINE: 37
 :MINS: 1.3
 :END:
 
 Loads a limited set of identity IDs before reading their values. The optional ~StorageBoundedQuery~ [[file:glossary.org::#term/protocol][protocol]] supports owner queries for function slots, bindings, and list items. Ownership can change in version rows, so candidate discovery considers every stored version; ordinary branch resolution then selects the visible rows. Exceeding the candidate limit or using an unsupported backend rejects the operation rather than returning an incomplete component graph. UI component export uses this path.
 
-- source :: [[file:../../../src/graphden/storage/bounded_query.clj::(defn candidate-ids][src/graphden/storage/bounded_query.clj:29]]
+- source :: [[file:../../../src/graphden/storage/bounded_query.clj::(defn candidate-ids][src/graphden/storage/bounded_query.clj:37]]
 
 * 18. make-emitter
 :PROPERTIES:

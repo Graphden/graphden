@@ -7,7 +7,7 @@ Access policy, safe rendering, monitoring, and remote executors.
 
 after: services
 
-[[file:index.org][index]] · ~27 min
+[[file:index.org][index]] · ~28 min
 
 * 1. platform-tier?
 :PROPERTIES:
@@ -27,13 +27,13 @@ Tests whether the current request has platform-level context rather than an orga
 :PROPERTIES:
 :CUSTOM_ID: platform/notify!
 :FILE: src/graphden/tenancy/context.clj
-:LINE: 257
+:LINE: 258
 :MINS: 1.0
 :END:
 
 Passes a domain event to an installed notification handler, such as a package-moderation decision. The [[file:glossary.org::#term/integrant][addon]] decides recipients and delivery. With no handler the event is ignored; delivery failure does not reverse the domain write.
 
-- source :: [[file:../../../src/graphden/tenancy/context.clj::(defn notify!][src/graphden/tenancy/context.clj:257]]
+- source :: [[file:../../../src/graphden/tenancy/context.clj::(defn notify!][src/graphden/tenancy/context.clj:258]]
 - same file :: [[file:platform.org::#platform/platform-tier?][platform-tier?]], [[file:constellation.org::#constellation/install-org-cap-fn!][install-org-cap-fn!]], [[file:constellation.org::#constellation/tenancy-addon-active?][tenancy-addon-active?]]
 
 * 3. single-token-provider
@@ -127,13 +127,13 @@ Relays branch and organisation [[file:glossary.org::#term/invalidation][invalida
 :PROPERTIES:
 :CUSTOM_ID: platform/RemoteStorage
 :FILE: src/graphden/storage/remote/core.clj
-:LINE: 132
-:MINS: 3.6
+:LINE: 133
+:MINS: 5.1
 :END:
 
 Implements read-only ~StorageCRUD~ over graph rows fetched from the hub through HTTP. Writes are rejected. ~refresh!~ replaces the in-memory bundle, and the [[file:glossary.org::#term/sse][SSE]] relay described above triggers refresh after [[file:glossary.org::#term/invalidation][invalidation]] events.
 
-- source :: [[file:../../../src/graphden/storage/remote/core.clj::(defrecord RemoteStorage][src/graphden/storage/remote/core.clj:132]]
+- source :: [[file:../../../src/graphden/storage/remote/core.clj::(defrecord RemoteStorage][src/graphden/storage/remote/core.clj:133]]
 - see also :: [[file:storage.org::#storage/StorageCRUD][StorageCRUD]]
 
 * 11. start-byo!

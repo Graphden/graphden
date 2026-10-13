@@ -1,13 +1,14 @@
-(ns graphden.system.branch-router-test
+(ns ^:serial graphden.system.branch-router-test
   "Tests for `graphden.system.branch-router`.
 
-   Parallel-safe (un-pinned): the resolution stubs that
+   Resolution stubs that
    used to be process-global `with-redefs` of `br/resolve-branch-id`
    / `br/resolve-branch-id-uncached` now go through the per-thread
    seams `br/*resolve-branch-id-override*` (dispatch suite) and
    `br/*resolve-uncached-override*` (ref-cache / TOCTOU suite) via
    `binding` — sibling NS-threads resolving real branch refs never
-   see this NS's scripted resolutions.
+   see this NS's scripted resolutions. Recovery tests additionally replace
+   storage and type-check Vars globally, so this namespace runs serially.
 
    - Pure-function (UNIT): extract-branch-ref + dispatch (with stubbed
      resolve-branch-id), invalidate, LRU eviction (testing the

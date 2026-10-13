@@ -21,6 +21,18 @@
   (first (sp/query-entities storage :ui-pref {:owner-id "anonymous" :key key})))
 
 
+(use-fixtures :each
+  (fn [test-fn]
+    ;; The :once golden DB is shared by this namespace's randomly ordered
+    ;; tests. A compatibility PUT deliberately saves an arbitrary fn-id; that
+    ;; value cannot be the starting selection for the ordinary-editor test.
+    (let [storage (:storage ga/*bootstrap*)
+          clear! #(when-let [selection (row storage "components")]
+                    (sp/delete-entity storage :ui-pref (:id selection)))]
+      (clear!)
+      (try (test-fn) (finally (clear!))))))
+
+
 (defn- put
   [body]
   (let [response (ga/exec-handler :_pref-put-handler

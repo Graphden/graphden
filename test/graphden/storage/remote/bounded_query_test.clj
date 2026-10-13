@@ -1,4 +1,5 @@
-(ns graphden.storage.remote.bounded-query-test
+(ns ^:serial graphden.storage.remote.bounded-query-test
+  "The manifest assertion globally blocks network graph fetches."
   (:require
     [clojure.test :refer [deftest is]]
     [graphden.executor.browser-source :as source]

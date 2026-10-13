@@ -61,8 +61,23 @@
 (use-fixtures :once (ga/fixture (ns-name *ns*)))
 
 
+(use-fixtures :each
+  (fn [test-fn]
+    ;; Tests in this namespace share one golden DB. The legacy migration
+    ;; proof creates a components preference that must not select a source
+    ;; in another test's fresh-home scenario.
+    (let [storage (:storage ga/*bootstrap*)
+          clear! #(doseq [row (sp/query-entities storage :ui-pref
+                                                 {:owner-id (tenancy/current-user-id) :key "components"})]
+                    (sp/delete-entity storage :ui-pref (:id row)))]
+      (clear!)
+      (try (test-fn) (finally (clear!))))))
+
+
 (deftest first-use-http-setup-preview-apply-reconcile-and-undo-keep-no-baseline-editor
   (let [ctx (:ctx ga/*bootstrap*) storage (:storage ctx)
+        home-name (str "first-use-profile-" (random-uuid))
+        home-id (:id (sp/create-entity storage :ns {:name home-name}))
         submit (fn [operation body]
                  ;; Direct graph handlers omit the real router's epoch healing.
                  (epoch/seed-watermark! storage)
@@ -73,9 +88,13 @@
                                    :body (json/generate-string body)})]
                    {:status (:status response) :body (json/parse-string (:body response) true)}))]
     (binding [tenancy/*seams-override* (atom (tenancy/seams-isolation-seed))]
-      (is (nil? (metadata/namespace-row storage "personal" (tenancy/current-org))))
+      ;; Configured tenancy homes are provisioned by account lifecycle. This
+      ;; fresh authority has no editor root even when other randomly ordered
+      ;; tests have created one in the shared golden DB.
+      (tenancy/install-personal-namespace-fn!
+        (constantly {:namespace-path home-name :source :fixture :isolated? false}))
+      (is (empty? (sp/query-entities storage :fn {:namespace-id home-id})))
       (let [setup (submit "prepare" {:home true})
-            home-id (parse-uuid (get-in setup [:body :home :id]))
             initial (submit "plan" {:component "fn-picker"})
             preview (submit "preview" {:operation "personalize"
                                        :command {:component "fn-picker"
@@ -83,6 +102,7 @@
                                                  :expected-configuration-revision (get-in initial [:body :configuration-revision])}})
             original (get-in preview [:body :receipt])]
         (is (= 200 (:status setup) (:status initial) (:status preview)))
+        (is (= (str home-id) (get-in setup [:body :home :id])))
         (is (true? (get-in setup [:body :setup])))
         (is (empty? (sp/query-entities storage :fn {:namespace-id home-id})))
         (is (nil? (:previous original)))

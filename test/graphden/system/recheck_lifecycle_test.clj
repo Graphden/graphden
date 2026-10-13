@@ -1,4 +1,5 @@
-(ns graphden.system.recheck-lifecycle-test
+(ns ^:serial graphden.system.recheck-lifecycle-test
+  "Epoch fault injection replaces a process-global Var during each test."
   (:require
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.executor.registry.core :as registry]

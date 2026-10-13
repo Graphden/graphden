@@ -1,5 +1,6 @@
-(ns ^:integration graphden.executor.composition.coherent-sync-test
-  "A parsed bundle must apply against the graph snapshot used by its parser."
+(ns ^:integration ^:serial graphden.executor.composition.coherent-sync-test
+  "A parsed bundle must apply against the graph snapshot used by its parser.
+   Its commit-boundary fault injection replaces composition Vars globally."
   (:require
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.executor.composition.core :as composition]

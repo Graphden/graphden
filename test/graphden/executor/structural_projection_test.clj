@@ -1,4 +1,5 @@
-(ns graphden.executor.structural-projection-test
+(ns ^:serial graphden.executor.structural-projection-test
+  "Projection ownership assertions globally replace the ownership predicate."
   (:require
     [clojure.edn :as edn]
     [clojure.java.io :as io]

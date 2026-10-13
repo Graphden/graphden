@@ -1,4 +1,5 @@
-(ns graphden.storage.postgres.notify-budget-test
+(ns ^:serial graphden.storage.postgres.notify-budget-test
+  "The bulk publication assertion globally replaces branch-id lookup."
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is]]

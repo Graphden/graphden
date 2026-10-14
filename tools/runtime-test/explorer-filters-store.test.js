@@ -51,6 +51,7 @@ function filtersCtx(seed) {
     crypto: require('node:crypto').webcrypto,
     document,
     window: { gdAnnounce: (m) => announced.push(m),
+              addEventListener: () => {},
               API: { api_graph_entities: '/api/graph/entities', api_views_members: '/api/views/members', api_views: '/api/views' } },
     localStorage: {
       getItem: (kk) => (store.has(kk) ? store.get(kk) : null),
@@ -80,6 +81,20 @@ function filtersCtx(seed) {
       });
     },
   });
+  // This suite checks the filter store and API contract. The separate graph
+  // plan/browser probes check actual Hiccup; keep the host adapter here small.
+  ctx.window.gdExplorerGraph = {
+    disposeFilters: () => {},
+    mountFilter: (body, _surface, projection) => {
+      const label = document.createElement('span');
+      label.className = 'kind-label';
+      const prefix = {namespace: 'in ', exclude: 'not ', uses: 'uses ', effect: 'fx ',
+        unused: '', name: 'name ', view: 'view '}[projection.axis] || '';
+      label.textContent = (projection.missing ? '⚠ ' : '') + prefix + projection.name;
+      body.appendChild(label);
+    },
+    selectFilter: (_kind, _value, execute) => { execute(); return true; },
+  };
   // querySelector on the mini-dom body for the ids the module uses.
   // The model, then the UI half (chips, the view chip) — the pair the
   // bundle loads in this order.
@@ -90,6 +105,7 @@ function filtersCtx(seed) {
 }
 
 const tick = () => new Promise((r) => setTimeout(r, 5));
+const chipLabels = chips => chips.children.map(chip => chip.children[0].children[0].textContent);
 
 (async () => {
   await test('migration: lens + workspace roots/hidden + smart views become the new stores, old keys go', async () => {
@@ -126,7 +142,7 @@ const tick = () => new Promise((r) => setTimeout(r, 5));
     const { ctx, chips, updates, announced } = filtersCtx();
     ctx.gdToggleNamespace('core');
     ctx.gdToggleExclude('core.tests');
-    const labels = chips.children.map((c) => c.children.find((x) => String(x.className).includes('kind-label')).textContent);
+    const labels = chipLabels(chips);
     assert(labels.join('|') === 'in core|not core.tests', 'one chip per filter: ' + labels.join('|'));
     assert(updates.includes('tree'), 'structural axes rebuild the tree');
     assert(announced.some((m) => /Only core/.test(m)) && announced.some((m) => /hidden/.test(m)), 'announced: ' + announced.join(' / '));
@@ -170,7 +186,7 @@ const tick = () => new Promise((r) => setTimeout(r, 5));
     ctx.gdAddView({ id: 'v1', name: 'api-surface' });
     ctx.gdToggleKind('apps');
     await tick(); await tick();
-    const labels = chips.children.map((c) => c.children.find((x) => String(x.className).includes('kind-label')).textContent);
+    const labels = chipLabels(chips);
     assert(labels.join('|') === 'name handler|view api-surface', 'chips for the two axes: ' + labels.join('|'));
     const call = fetches.filter((f) => f.url === '/api/views/members').pop();
     assert(call && call.body.name === 'handler' && call.body.views.join() === 'v1', 'posted name + view ids: ' + JSON.stringify(call?.body));
@@ -198,7 +214,7 @@ const tick = () => new Promise((r) => setTimeout(r, 5));
     assert(reads.filter(url => url.includes('scope=index')).length === 1
       && !reads.some(url => url.includes('scope=subtree')),
     'one light index read supplies all axes without subtree composition reads');
-    const labels = chips.children.map(c => c.children.find(x => String(x.className).includes('kind-label')).textContent);
+    const labels = chipLabels(chips);
     assert(labels.includes('uses core.logic.const'), 'reopened graph view displays the readable chip');
   });
 

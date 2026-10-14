@@ -21,38 +21,59 @@
 // toggles in #kind-filters; this renders the DYNAMIC ones after them).
 // ---------------------------------------------------------------------------
 
-function _chip(label, title, onRemove, cls, missing) {
+function _chip(host, axis, name, title, kind, value, onRemove, missing) {
   const b = document.createElement('button');
   b.type = 'button';
-  b.className = 'kind-toggle gd-filter-chip' + (cls ? ' ' + cls : '') + (missing ? ' gd-filter-chip-missing' : '');
+  b.className = 'kind-toggle gd-filter-chip' + (missing ? ' gd-filter-chip-missing' : '');
   b.setAttribute('aria-pressed', 'true');
   b.title = (missing ? 'No longer exists — this filter matches nothing. ' : '') + title + ' — click to remove';
   b.setAttribute('aria-label', 'Remove filter: ' + title + (missing ? ' (no longer exists)' : ''));
-  const l = document.createElement('span');
-  l.className = 'kind-label';
-  l.textContent = (missing ? '⚠ ' : '') + label;
-  const x = document.createElement('span');
-  x.className = 'gd-filter-chip-x';
-  x.setAttribute('aria-hidden', 'true');
-  x.textContent = '×';
-  b.appendChild(l);
-  b.appendChild(x);
-  b.addEventListener('click', onRemove);
+  b.dataset.filterKind = kind;
+  b.dataset.filterValue = value;
+  const body = document.createElement('span');
+  body.className = 'gd-filter-graph-host';
+  b.appendChild(body);
+  host.appendChild(b);
+  window.gdExplorerGraph.mountFilter(body, 'filter-chip', {axis, name, selected: true, missing: !!missing});
+  b.addEventListener('click', () => {
+    if (host.contains(b)) window.gdExplorerGraph.selectFilter(kind, value, onRemove);
+  });
   return b;
 }
 
 function gdRenderFilterChips() {
   const host = document.getElementById('gd-filter-chips');
   if (!host) return;
+  const active = document.activeElement;
+  const buttons = [...host.children];
+  const focusIndex = buttons.indexOf(active);
+  const focusKind = active?.dataset?.filterKind;
+  const focusValue = active?.dataset?.filterValue;
+  window.gdExplorerGraph.disposeFilters(host);
   host.replaceChildren();
-  for (const p of gdFilters().namespaces) host.appendChild(_chip('in ' + p, 'Only namespace ' + p, () => gdToggleNamespace(p)));
-  for (const p of gdFilters().exclude) host.appendChild(_chip('not ' + p, 'Hide namespace ' + p, () => gdToggleExclude(p)));
+  if (typeof graphData === 'undefined' || !graphData) return;
+  for (const p of gdFilters().namespaces) _chip(host, 'namespace', p, 'Only namespace ' + p,
+    'remove-namespace', p, () => gdToggleNamespace(p));
+  for (const p of gdFilters().exclude) _chip(host, 'exclude', p, 'Hide namespace ' + p,
+    'remove-exclude', p, () => gdToggleExclude(p));
   const missing = (typeof gdViewMissing === 'function') ? gdViewMissing() : { uses: [], views: [] };
-  for (const u of gdFilters().uses) host.appendChild(_chip('uses ' + u.name, 'Only fns using ' + u.name, () => gdRemoveUses(u.id), null, missing.uses.includes(u.id)));
-  for (const e of gdFilters().effects) host.appendChild(_chip('fx ' + e, 'Only fns with effect ' + e, () => gdToggleEffect(e)));
-  if (gdFilters().unused) host.appendChild(_chip('unused', 'Only unused fns', () => gdToggleUnused()));
-  if (gdFilters().name) host.appendChild(_chip('name ' + gdFilters().name, 'Only names containing ' + gdFilters().name, () => gdSetName('')));
-  for (const v of gdFilters().views) host.appendChild(_chip('view ' + v.name, 'Only fns in view ' + v.name, () => gdRemoveView(v.id), null, missing.views.includes(v.id)));
+  for (const u of gdFilters().uses) _chip(host, 'uses', u.name, 'Only fns using ' + u.name,
+    'remove-uses', u.id, () => gdRemoveUses(u.id), missing.uses.includes(u.id));
+  for (const e of gdFilters().effects) _chip(host, 'effect', e, 'Only fns with effect ' + e,
+    'remove-effect', e, () => gdToggleEffect(e));
+  if (gdFilters().unused) _chip(host, 'unused', 'unused', 'Only unused fns',
+    'remove-unused', '', () => gdToggleUnused());
+  if (gdFilters().name) _chip(host, 'name', gdFilters().name, 'Only names containing ' + gdFilters().name,
+    'remove-name', '', () => gdSetName(''));
+  for (const v of gdFilters().views) _chip(host, 'view', v.name, 'Only fns in view ' + v.name,
+    'remove-view', v.id, () => gdRemoveView(v.id), missing.views.includes(v.id));
+  if (focusIndex >= 0) {
+    const next = [...host.children].find(button => button.dataset.filterKind === focusKind
+      && button.dataset.filterValue === focusValue)
+      || host.children[Math.min(focusIndex, host.children.length - 1)]
+      || document.getElementById('gd-filter-add');
+    next?.focus?.();
+  }
   const addBtn = document.getElementById('gd-filter-add');
   if (addBtn) addBtn.hidden = false;
 }
@@ -80,12 +101,21 @@ function gdSyncViewChip() {
 
 let _addPopEl = null;
 let _addPopAnchor = null;
+let _addPopOwner = null;
+
+function _filterOwner() {
+  return JSON.stringify([window.gdPrefOwner || null, window.gdAccount?.id || null,
+    typeof graphdenCurrentOrg === 'string' ? graphdenCurrentOrg : null,
+    typeof getCurrentBranchName === 'function' ? getCurrentBranchName() : null]);
+}
 
 function gdCloseFilterAdd() {
   if (!_addPopEl) return;
   const hadFocus = _addPopEl.contains(document.activeElement);
+  window.gdExplorerGraph.disposeFilters(_addPopEl);
   _addPopEl.remove();
   _addPopEl = null;
+  _addPopOwner = null;
   if (hadFocus && typeof returnFocusTo === 'function') returnFocusTo(_addPopAnchor);
 }
 
@@ -99,21 +129,6 @@ function _rootNamespaces() {
 
 const EFFECT_KINDS = ['io', 'db', 'network', 'state', 'time', 'random', 'env', 'process', 'raw-sql'];
 
-function gdOpenFilterAdd(anchorEl) {
-  if (_addPopEl) { gdCloseFilterAdd(); return; }
-  const el = document.createElement('div');
-  el.className = 'gd-views-pop gd-filter-add-pop';
-  el.setAttribute('role', 'dialog');
-  el.setAttribute('aria-modal', 'false');
-  el.setAttribute('aria-label', 'Add a filter');
-  _renderFilterAdd(el, anchorEl);
-  document.body.appendChild(el);
-  _addPopEl = el;
-  _addPopAnchor = anchorEl || null;
-  if (typeof anchorBelowClamped === 'function' && anchorEl) anchorBelowClamped(el, anchorEl);
-  if (typeof focusIntoDialog === 'function') focusIntoDialog(el);
-}
-
 function _section(el, title) {
   const cap = document.createElement('div');
   cap.className = 'gd-views-pop-cap';
@@ -121,8 +136,19 @@ function _section(el, title) {
   el.appendChild(cap);
 }
 
-function _renderFilterAdd(el, anchorEl) {
-  el.replaceChildren();
+function _filterOptionSection(el, title, key, cls) {
+  const section = document.createElement('div');
+  section.dataset.filterSection = key;
+  if (title) _section(section, title);
+  const host = document.createElement('div');
+  host.dataset.filterOptions = key;
+  if (cls) host.className = cls;
+  section.appendChild(host);
+  el.appendChild(section);
+  return {section, host};
+}
+
+function _buildFilterAdd(el) {
   const head = document.createElement('div');
   head.className = 'gd-views-pop-head';
   head.textContent = 'Add a filter';
@@ -132,100 +158,12 @@ function _renderFilterAdd(el, anchorEl) {
   hint.textContent = 'Filters combine (AND). Namespaces and kinds OR within their row.';
   el.appendChild(hint);
 
-  // Namespaces — tick the roots you work in; ⊘ in the tree hides a path.
-  _section(el, 'Namespaces — only these');
-  const roots = _rootNamespaces();
-  for (const n of roots) {
-    const on = gdFilters().namespaces.includes(n.name);
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'gd-views-row gd-ws-opt' + (on ? ' sel' : '');
-    b.setAttribute('role', 'checkbox');
-    b.setAttribute('aria-checked', on ? 'true' : 'false');
-    b.dataset.ws = n.name;
-    b.title = n.desc || n.name;
-    b.textContent = (on ? '☑ ' : '☐ ') + n.name;
-    b.addEventListener('click', () => { gdToggleNamespace(n.name); _renderFilterAdd(el, anchorEl); });
-    el.appendChild(b);
-  }
-  if (gdFilters().exclude.length) {
-    _section(el, 'Hidden by you — restore');
-    for (const p of gdFilters().exclude.slice().sort()) {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'gd-views-row';
-      b.dataset.restore = p;
-      b.textContent = '↺ ' + p;
-      b.addEventListener('click', () => { gdToggleExclude(p); _renderFilterAdd(el, anchorEl); });
-      el.appendChild(b);
-    }
-  }
+  _filterOptionSection(el, 'Namespaces — only these', 'namespaces');
+  _filterOptionSection(el, 'Hidden by you — restore', 'exclude');
+  _filterOptionSection(el, 'Uses a function', 'uses');
+  _filterOptionSection(el, 'Effect', 'effects', 'gd-filter-fx-row');
+  _filterOptionSection(el, 'In a graph view', 'views');
 
-  // Uses — the fn picker (the Explorer's search, with type hints).
-  _section(el, 'Uses a function');
-  const usesBtn = document.createElement('button');
-  usesBtn.type = 'button';
-  usesBtn.className = 'gd-views-row';
-  usesBtn.dataset.action = 'add-uses';
-  usesBtn.textContent = '+ pick a fn — only what is built on it';
-  usesBtn.addEventListener('click', () => {
-    if (typeof openFnPicker !== 'function') return;
-    // The picker takes the menu's place: anchored where the menu was, the
-    // menu itself gone (two stacked dialogs left the picker half-covered).
-    const anchor = _addPopAnchor || usesBtn;
-    gdCloseFilterAdd();
-    openFnPicker({
-      anchorEl: anchor,
-      title: 'Only fns that use…',
-      onPick: (fn) => gdAddUses(fn),
-    });
-  });
-  el.appendChild(usesBtn);
-
-  // Effects
-  _section(el, 'Effect');
-  const fxRow = document.createElement('div');
-  fxRow.className = 'gd-filter-fx-row';
-  for (const k of EFFECT_KINDS) {
-    const on = gdFilters().effects.includes(k);
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'kind-toggle';
-    b.dataset.effect = k;
-    b.setAttribute('aria-pressed', on ? 'true' : 'false');
-    b.textContent = k;
-    b.addEventListener('click', () => { gdToggleEffect(k); _renderFilterAdd(el, anchorEl); });
-    fxRow.appendChild(b);
-  }
-  el.appendChild(fxRow);
-
-  // Views saved in the graph — "also in view X". Loaded once per open;
-  // the section appears when the fetch lands.
-  const shared = (typeof gdSharedViewsCached === 'function') ? gdSharedViewsCached() : null;
-  if (shared === null && typeof gdFetchSharedViews === 'function') {
-    gdFetchSharedViews().then(() => { if (_addPopEl === el) _renderFilterAdd(el, anchorEl); });
-  }
-  if (shared?.length) {
-    _section(el, 'In a graph view');
-    for (const v of shared) {
-      const on = gdFilters().views.some((x) => x.id === v.id);
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'gd-views-row' + (on ? ' sel' : '');
-      b.setAttribute('role', 'checkbox');
-      b.setAttribute('aria-checked', on ? 'true' : 'false');
-      b.dataset.view = v.id;
-      b.title = _summarise(v.filters);
-      b.textContent = (on ? '☑ ' : '☐ ') + v.name;
-      b.addEventListener('click', () => {
-        if (on) gdRemoveView(v.id); else gdAddView(v);
-        _renderFilterAdd(el, anchorEl);
-      });
-      el.appendChild(b);
-    }
-  }
-
-  // Name — the saved form of the filter box.
   _section(el, 'Name contains');
   const nameRow = document.createElement('div');
   nameRow.className = 'gd-views-form';
@@ -235,27 +173,136 @@ function _renderFilterAdd(el, anchorEl) {
   nameIn.placeholder = 'part of a name — Enter to add the chip';
   nameIn.setAttribute('aria-label', 'Only names containing');
   nameIn.value = gdFilters().name || '';
-  nameIn.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter') return;
-    e.preventDefault();
+  nameIn.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
     gdSetName(nameIn.value);
-    _renderFilterAdd(el, anchorEl);
+    if (_addPopEl === el) _refreshFilterAdd(el);
   });
   nameRow.appendChild(nameIn);
   el.appendChild(nameRow);
-
-  // Unused
-  const un = document.createElement('button');
-  un.type = 'button';
-  un.className = 'gd-views-row';
-  un.dataset.action = 'unused';
-  un.setAttribute('role', 'checkbox');
-  un.setAttribute('aria-checked', gdFilters().unused ? 'true' : 'false');
-  un.textContent = (gdFilters().unused ? '☑ ' : '☐ ') + 'Unused — nothing references or extends it';
-  un.addEventListener('click', () => { gdToggleUnused(); _renderFilterAdd(el, anchorEl); });
-  el.appendChild(un);
-
+  _filterOptionSection(el, '', 'unused');
   if (typeof ensurePopoverClose === 'function') ensurePopoverClose(el, gdCloseFilterAdd, 'Close');
+}
+
+function _filterOption(el, host, option) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = option.cls || 'gd-views-row';
+  button.dataset.filterKind = option.kind;
+  button.dataset.filterValue = option.value;
+  if (option.data) button.dataset[option.data.key] = option.data.value;
+  if (option.title) button.title = option.title;
+  if (option.role) {
+    button.setAttribute('role', option.role);
+    button.setAttribute('aria-checked', option.selected ? 'true' : 'false');
+  }
+  if (option.pressed) button.setAttribute('aria-pressed', option.selected ? 'true' : 'false');
+  const body = document.createElement('span');
+  body.className = 'gd-filter-graph-host';
+  button.appendChild(body);
+  host.appendChild(button);
+  window.gdExplorerGraph.mountFilter(body, 'filter-option', {
+    axis: option.axis, name: option.name, selected: !!option.selected, missing: false,
+  });
+  button.addEventListener('click', () => {
+    if (_addPopEl !== el || _addPopOwner !== _filterOwner() || !el.contains(button)) return;
+    window.gdExplorerGraph.selectFilter(option.kind, option.value, () => {
+      option.execute();
+      if (_addPopEl === el) _refreshFilterAdd(el);
+    });
+  });
+}
+
+function _renderFilterOptions(el, key, options) {
+  const section = el.querySelector('[data-filter-section="' + key + '"]');
+  const host = section?.querySelector('[data-filter-options="' + key + '"]');
+  if (!host) return;
+  section.hidden = options.length === 0 && (key === 'exclude' || key === 'views');
+  const prior = document.activeElement;
+  const buttons = [...host.children];
+  const index = buttons.indexOf(prior);
+  const kind = prior?.dataset?.filterKind;
+  const value = prior?.dataset?.filterValue;
+  window.gdExplorerGraph.disposeFilters(host);
+  host.replaceChildren();
+  for (const option of options) _filterOption(el, host, option);
+  if (index >= 0) {
+    const next = [...host.children].find(button => button.dataset.filterKind === kind
+      && button.dataset.filterValue === value)
+      || host.children[Math.min(index, host.children.length - 1)]
+      || el.querySelector('[data-filter-options="uses"] button');
+    next?.focus?.();
+  }
+}
+
+function _refreshFilterAdd(el) {
+  if (_addPopEl !== el || _addPopOwner !== _filterOwner()
+      || typeof graphData === 'undefined' || !graphData) return;
+  const filters = gdFilters();
+  _renderFilterOptions(el, 'namespaces', _rootNamespaces().map(n => ({
+    axis: 'namespace', name: n.name, selected: filters.namespaces.includes(n.name),
+    kind: 'select-namespace', value: n.name,
+    cls: 'gd-views-row gd-ws-opt' + (filters.namespaces.includes(n.name) ? ' sel' : ''),
+    role: 'checkbox', title: n.desc || n.name, data: {key: 'ws', value: n.name},
+    execute: () => gdToggleNamespace(n.name),
+  })));
+  _renderFilterOptions(el, 'exclude', filters.exclude.slice().sort().map(path => ({
+    axis: 'restore', name: path, kind: 'restore-exclude', value: path,
+    data: {key: 'restore', value: path}, execute: () => gdToggleExclude(path),
+  })));
+  _renderFilterOptions(el, 'uses', [{
+    axis: 'uses-picker', name: 'pick a fn — only what is built on it',
+    kind: 'pick-uses', value: '', data: {key: 'action', value: 'add-uses'},
+    execute: () => {
+      if (typeof openFnPicker !== 'function') return;
+      const anchor = _addPopAnchor || el.querySelector('[data-filter-options="uses"] button');
+      gdCloseFilterAdd();
+      openFnPicker({anchorEl: anchor, title: 'Only fns that use…', onPick: fn => gdAddUses(fn)});
+    },
+  }]);
+  _renderFilterOptions(el, 'effects', EFFECT_KINDS.map(effect => ({
+    axis: 'effect', name: effect, selected: filters.effects.includes(effect),
+    kind: 'select-effect', value: effect, cls: 'kind-toggle', pressed: true,
+    data: {key: 'effect', value: effect}, execute: () => gdToggleEffect(effect),
+  })));
+  const shared = typeof gdSharedViewsCached === 'function' ? gdSharedViewsCached() : null;
+  _renderFilterOptions(el, 'views', (shared || []).map(view => ({
+    axis: 'view', name: view.name, selected: filters.views.some(item => item.id === view.id),
+    kind: 'select-view', value: view.id,
+    cls: 'gd-views-row' + (filters.views.some(item => item.id === view.id) ? ' sel' : ''),
+    role: 'checkbox', title: _summarise(view.filters), data: {key: 'view', value: view.id},
+    execute: () => {
+      if (gdFilters().views.some(item => item.id === view.id)) gdRemoveView(view.id);
+      else gdAddView(view);
+    },
+  })));
+  _renderFilterOptions(el, 'unused', [{
+    axis: 'unused', name: 'Unused — nothing references or extends it',
+    selected: filters.unused, kind: 'select-unused', value: '', role: 'checkbox',
+    data: {key: 'action', value: 'unused'}, execute: () => gdToggleUnused(),
+  }]);
+}
+
+function gdOpenFilterAdd(anchorEl) {
+  if (_addPopEl) { gdCloseFilterAdd(); return; }
+  if (typeof graphData === 'undefined' || !graphData) return;
+  const el = document.createElement('div');
+  el.className = 'gd-views-pop gd-filter-add-pop';
+  el.setAttribute('role', 'dialog');
+  el.setAttribute('aria-modal', 'false');
+  el.setAttribute('aria-label', 'Add a filter');
+  _buildFilterAdd(el);
+  document.body.appendChild(el);
+  _addPopEl = el;
+  _addPopAnchor = anchorEl || null;
+  _addPopOwner = _filterOwner();
+  _refreshFilterAdd(el);
+  if (typeof anchorBelowClamped === 'function' && anchorEl) anchorBelowClamped(el, anchorEl);
+  if (typeof focusIntoDialog === 'function') focusIntoDialog(el);
+  gdFetchSharedViews().then(() => {
+    if (_addPopEl === el && _addPopOwner === _filterOwner()) _refreshFilterAdd(el);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -519,6 +566,23 @@ function installExplorerFilters() {
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', installExplorerFilters);
 else installExplorerFilters();
+
+window.addEventListener('gd-auth-changed', () => {
+  gdCloseFilterAdd();
+  gdCloseViewPop();
+  const host = document.getElementById('gd-filter-chips');
+  if (host) {
+    window.gdExplorerGraph.disposeFilters(host);
+    host.replaceChildren();
+  }
+  const chip = document.getElementById('gd-ws-chip');
+  if (chip) {
+    const label = chip.querySelector('b');
+    if (label) label.textContent = 'Loading views…';
+    chip.removeAttribute('data-view');
+    chip.removeAttribute('data-view-id');
+  }
+});
 
 // The filter model's own exports live in editor-explorer-filters.js.
 window.gdOpenViewPop = gdOpenViewPop;

@@ -273,6 +273,8 @@
     (is (true? (get-in reserved [:body :ok])))
     (is (= before (graph-identities storage)))
     (is (= 7 (count (get-in reserved [:body :manifest :namespaces]))))
+    (is (<= (count (get-in reserved [:body :manifest :functions])) 1000)
+        "the full editable UI template must fit its existing function budget")
     (let [created (apply-preview reserved)
           manifest (get-in created [:body :manifest])]
       (is (= 200 (:status created)) (pr-str created))
@@ -498,6 +500,9 @@
       (is (some :retained-target? @queries) "retained entry metadata was read")
       (is (not-any? #(and (:body? %) (:retained-target? %)) @queries))
       (is (= #{component} (set (map :name (rest (:namespaces added))))))
+      (when (= component "explorer")
+        (is (<= (count (:functions added)) 512)
+            "the selective Explorer copy must fit its existing function budget"))
       (is (empty? (set/intersection (set (map :id (:functions first-copy))) (set (map :id (:functions added))))))
       (is (= :saved (activate-selected storage added)))
       (is (= "#fed7aa" (:value (sp/read-entity storage :binding (:id binding)))))

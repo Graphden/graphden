@@ -13,13 +13,13 @@ after: web, layout
 :PROPERTIES:
 :CUSTOM_ID: editor/initGraph
 :FILE: resources/packages/app/editor/editor-main.js
-:LINE: 349
+:LINE: 351
 :MINS: 5.0
 :END:
 
 Initializes the editor's plain JavaScript modules, concatenated in a fixed order. It first requests the namespace tree to determine [[file:glossary.org::#term/auth][authentication]] state, then starts secondary loads; function details load on demand. A 401 opens sign-in. See the [[file:../../../docs/EDITOR_MODULES.md][module map]].
 
-- source :: [[file:../../../resources/packages/app/editor/editor-main.js::async function initGraph() {][resources/packages/app/editor/editor-main.js:349]]
+- source :: [[file:../../../resources/packages/app/editor/editor-main.js::async function initGraph() {][resources/packages/app/editor/editor-main.js:351]]
 - see also :: [[file:editor.org::#editor/authFetch][authFetch]]
 
 * 2. buildLookups
@@ -221,13 +221,13 @@ Owns component state and serializes events independently of the DOM renderer. In
 :PROPERTIES:
 :CUSTOM_ID: editor/mountRow
 :FILE: resources/packages/app/editor/editor-explorer-graph.js
-:LINE: 239
+:LINE: 380
 :MINS: 1.5
 :END:
 
 Presents one already-authorized Explorer function row through the same ordinary ~app.ui-explorer~ view as the kind toolbar. The native tree owns the function ID, navigation, selection, ARIA and action buttons; the graph owns the row body's markers, name, vault path and scoped style rules. Loaded rows share one runtime and one list stylesheet with namespace bodies. A personal toolbar view with no row surface falls back only for rows, preserving its valid toolbar selection and showing a diagnostic. Disposal follows native subtree removal, and the renderer budget applies per row, never as a cap on the loaded Explorer tree.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-explorer-graph.js::  function mountRow(rowHost, projection) {][resources/packages/app/editor/editor-explorer-graph.js:239]]
+- source :: [[file:../../../resources/packages/app/editor/editor-explorer-graph.js::  function mountRow(rowHost, projection) {][resources/packages/app/editor/editor-explorer-graph.js:380]]
 - see also :: [[file:editor.org::#editor/mountNamespace][mountNamespace]], [[file:editor.org::#editor/mount][mount]]
 - same file :: [[file:editor.org::#editor/mountNamespace][mountNamespace]]
 - referenced from :: [[file:editor.org::#editor/mountNamespace][mountNamespace]]
@@ -236,13 +236,13 @@ Presents one already-authorized Explorer function row through the same ordinary 
 :PROPERTIES:
 :CUSTOM_ID: editor/mountNamespace
 :FILE: resources/packages/app/editor/editor-explorer-graph.js
-:LINE: 223
+:LINE: 364
 :MINS: 1.4
 :END:
 
 Projects an authorized namespace's display name, expanded state and diagnostic counts into the same Explorer view graph as its toolbar and function rows. The shipped graph presents normal and ~(primitives)~ headers; a personal graph may change safe passive Hiccup and scoped styles. The native outer treeitem keeps the accessible name, path, lazy expansion, keyboard focus and action buttons. All loaded bodies share one tree stylesheet; invalid personal namespace output falls back for this section alone. Each body has its own bounded renderer, never a whole-tree row cap.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-explorer-graph.js::  function mountNamespace(body, projection) {][resources/packages/app/editor/editor-explorer-graph.js:223]]
+- source :: [[file:../../../resources/packages/app/editor/editor-explorer-graph.js::  function mountNamespace(body, projection) {][resources/packages/app/editor/editor-explorer-graph.js:364]]
 - see also :: [[file:editor.org::#editor/mountRow][mountRow]], [[file:editor.org::#editor/mount][mount]]
 - same file :: [[file:editor.org::#editor/mountRow][mountRow]]
 - referenced from :: [[file:editor.org::#editor/mountRow][mountRow]]

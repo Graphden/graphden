@@ -1,6 +1,6 @@
-// The finite toolbar, function rows and namespace headers own empty hosts. One
-// runtime and one scoped tree stylesheet serve all loaded bodies; the tree,
-// filters, navigation and pending POST controls remain native.
+// The finite toolbar, tree bodies and filter choices own empty hosts. One
+// runtime and shared scoped styles serve all loaded bodies; tree navigation,
+// filter mutation, focus and pending POST controls remain native.
 (() => {
   const api = window.GraphdenBrowser;
   const key = api.keyword;
@@ -19,19 +19,26 @@
   let builtinRuntime = null;
   let rowRuntime = null;
   let namespaceRuntime = null;
+  let filterRuntime = null;
   let treeSheet = null;
+  let filterSheet = null;
+  let filterStyleSignature = null;
   const treeStyles = {row: null, namespace: null};
   const treeStyleSignatures = {row: null, namespace: null};
   let rowFallback = false;
   let namespaceFallback = false;
+  let filterFallback = false;
   const rows = new Set();
   const namespaces = new Set();
+  const filters = new Set();
+  const filterStyleRoots = new Set();
   const namespaceByHost = new WeakMap();
   const rowDefaults = {name: '', secret: false, 'secret-path': '', service: false,
     'service-state': '', app: false, 'app-hosts': '', type: false, test: false,
     'test-status': '', 'test-error': '', failed: 0, 'type-errors': 0, lint: 0, effects: ''};
   const namespaceDefaults = {name: '', expanded: false, pseudo: false, count: 0,
     'type-errors': 0, failed: 0, lint: 0};
+  const filterDefaults = {axis: '', name: '', selected: false, missing: false};
   const context = () => JSON.stringify([window.gdPrefOwner || null,
     typeof graphdenCurrentOrg === 'string' ? graphdenCurrentOrg : null,
     typeof getCurrentBranchName === 'function' ? getCurrentBranchName() : null]);
@@ -41,6 +48,7 @@
   }
   function inputs() {
     return record({surface: 'toolbar', row: record(rowDefaults), namespace: record(namespaceDefaults),
+      filter: record(filterDefaults),
       selected: new Map(kinds.slice(1).map(kind => [kind, lensKinds.has(kind)])),
       counts: new Map([['services', count('getAllServiceFnIdCount')], ['apps', count('getAppRouteCount')],
         ['tests', count('getTestStatusCount')], ['failed', count('getFailureTotal')],
@@ -76,13 +84,20 @@
   }
   function rowInputs(projection) {
     return record({surface: 'row', row: record(projection), namespace: record(namespaceDefaults),
+      filter: record(filterDefaults),
       selected: new Map(), counts: new Map(),
       failed: 0, authenticated: false, 'apps-available': false, fx: false});
   }
   function namespaceInputs(projection) {
     return record({surface: 'namespace', row: record(rowDefaults), namespace: record(projection),
+      filter: record(filterDefaults),
       selected: new Map(), counts: new Map(), failed: 0, authenticated: false,
       'apps-available': false, fx: false});
+  }
+  function filterInputs(surface, projection) {
+    return record({surface, row: record(rowDefaults), namespace: record(namespaceDefaults),
+      filter: record(projection), selected: new Map(), counts: new Map(), failed: 0,
+      authenticated: false, 'apps-available': false, fx: false});
   }
   function validateRow(view, projection) {
     exact(view, ['tree', 'styles', 'actions']);
@@ -145,6 +160,132 @@
       throw new Error('Explorer namespace style must stay inside its body');
     }
     return rules;
+  }
+  function validateFilter(view) {
+    exact(view, ['tree', 'styles', 'actions']);
+    const actions = field(view, 'actions');
+    exact(actions, ['secret', 'dismiss', 'run']);
+    if (['secret', 'dismiss', 'run'].some(name => field(actions, name) !== false)) {
+      throw new Error('Explorer filter body cannot request actions');
+    }
+    const tree = window.GraphdenRenderer.vnode(field(view, 'tree'), 'gd-explorer-filter', 48);
+    const passive = new Set(['div', 'span', 'strong', 'small']);
+    let textLength = 0;
+    function inspect(node) {
+      if (typeof node === 'string' || typeof node === 'number') {
+        textLength += String(node).length;
+        return;
+      }
+      if (!node || !passive.has(node.type)
+        || Object.keys(node.props).some(name => !['className', 'title', 'aria-hidden', 'children', 'key'].includes(name))) {
+        throw new Error('Invalid Explorer filter body');
+      }
+      if (/(^|\s)(?:gd-filter-graph-host|gd-filter-chip|gd-views-row|gd-filter-add-pop|kind-toggle)(\s|$)/.test(node.props.className || '')) {
+        throw new Error('Explorer filter cannot forge host classes');
+      }
+      for (const child of children(node)) inspect(child);
+    }
+    inspect(tree);
+    if (textLength > 8192) throw new Error('Explorer filter body too large');
+    const rules = window.GraphdenStyles.normalize(field(view, 'styles'));
+    const root = '& .gd-filter-graph-host';
+    if (rules.some(rule => !rule.selector.startsWith(root)
+      || !['', ' ', '.', ':', '[', '>'].includes(rule.selector[root.length] || ''))) {
+      throw new Error('Explorer filter style must stay inside its body');
+    }
+    return rules;
+  }
+  function clearFilterStyles() {
+    for (const root of filterStyleRoots) delete root.dataset.gdUiStyle;
+    filterStyleRoots.clear();
+    window.GraphdenStyles.release(filterSheet);
+    filterSheet = null;
+    filterStyleSignature = null;
+  }
+  function updateFilterStyles(host, normalized) {
+    const signature = JSON.stringify(normalized);
+    if (filterStyleSignature !== null && signature !== filterStyleSignature) {
+      throw new Error('Explorer filter styles vary by choice');
+    }
+    if (filterStyleSignature === null) {
+      filterSheet = window.GraphdenStyles.acquire(normalized);
+      filterStyleSignature = signature;
+    }
+    const root = host.closest('#gd-filter-chips') || host.closest('.gd-filter-add-pop');
+    if (!root) throw new Error('Explorer filter host has no scope');
+    root.dataset.gdUiStyle = filterSheet.id;
+    filterStyleRoots.add(root);
+  }
+  function renderFilter(instance) {
+    let view;
+    try {
+      view = filterRuntime.run('view', {inputs: filterInputs(instance.surface, instance.projection)});
+      updateFilterStyles(instance.host, validateFilter(view));
+    } catch (error) {
+      if (filterRuntime === builtinRuntime || filterFallback) throw error;
+      filterRuntime = builtinRuntime;
+      filterFallback = true;
+      clearFilterStyles();
+      window.gdUIComponentSectionFallback?.('explorer', 'filters');
+      for (const item of filters) renderFilter(item);
+      return;
+    }
+    instance.renderer.render(field(view, 'tree'));
+  }
+  function mountFilter(body, surface, projection) {
+    if (!['filter-chip', 'filter-option'].includes(surface)) throw new Error('Invalid Explorer filter surface');
+    if (!builtinRuntime) builtinRuntime = builtin();
+    if (!filterRuntime) filterRuntime = builtinRuntime;
+    const renderer = window.GraphdenRenderer.mount(body, {idPrefix: 'gd-explorer-filter', nodeLimit: 48});
+    const instance = {host: body, surface, projection, renderer};
+    filters.add(instance);
+    try { renderFilter(instance); }
+    catch (error) { filters.delete(instance); renderer.dispose(); throw error; }
+  }
+  function disposeFilters(scope) {
+    if (!scope) return;
+    for (const instance of filters) {
+      if (scope === instance.host || scope.contains(instance.host)) {
+        instance.renderer.dispose();
+        filters.delete(instance);
+      }
+    }
+    for (const root of filterStyleRoots) {
+      if (scope === root || scope.contains(root)) {
+        delete root.dataset.gdUiStyle;
+        filterStyleRoots.delete(root);
+      }
+    }
+    if (!filterStyleRoots.size) clearFilterStyles();
+  }
+  function selectFilter(kind, value, execute) {
+    if (!filterRuntime || typeof kind !== 'string' || typeof value !== 'string') return false;
+    try {
+      const result = filterRuntime.run('update', {state: record({handled: false}), event: record({kind, value})});
+      exact(result, ['state', 'requests']);
+      validateState(field(result, 'state'));
+      const requests = field(result, 'requests');
+      if (!Array.isArray(requests) && !api.isSequence(requests)) throw new Error('Invalid Explorer filter requests');
+      const iterator = requests[Symbol.iterator]();
+      const first = iterator.next();
+      if (first.done) return false;
+      if (!iterator.next().done) throw new Error('Explorer filter may request one native choice');
+      const req = first.value;
+      exact(req, ['kind', 'value']);
+      if (field(req, 'kind') !== kind || field(req, 'value') !== value) {
+        throw new Error('Explorer filter request differs from its native choice');
+      }
+    } catch (error) {
+      if (filterRuntime === builtinRuntime || filterFallback) throw error;
+      filterRuntime = builtinRuntime;
+      filterFallback = true;
+      clearFilterStyles();
+      window.gdUIComponentSectionFallback?.('explorer', 'filters');
+      for (const item of filters) renderFilter(item);
+      return selectFilter(kind, value, execute);
+    }
+    execute();
+    return true;
   }
   function updateTreeStyles(surface, normalized) {
     const signature = JSON.stringify(normalized);
@@ -271,6 +412,12 @@
     for (const instance of rows) renderRow(instance);
     for (const instance of namespaces) renderNamespace(instance);
   }
+  function resetFilterBodies(runtime) {
+    filterRuntime = runtime;
+    filterFallback = false;
+    clearFilterStyles();
+    for (const instance of filters) renderFilter(instance);
+  }
   function paint(view) {
     mounted.render(field(view, 'tree'), field(view, 'styles'));
     // These siblings retain exact nodes/disabled labels while their POST is
@@ -308,6 +455,7 @@
     mounted = window.GraphdenRenderer.mount(host, {idPrefix: 'gd-explorer', nodeLimit: 96});
     if (!builtinRuntime) builtinRuntime = builtin();
     if (!rowRuntime) rowRuntime = builtinRuntime;
+    if (!filterRuntime) filterRuntime = builtinRuntime;
     controller = window.GraphdenComponent.create(builtinRuntime, {inputs, validateState, validateView, render: paint,
       rendererOptions: {idPrefix: 'gd-explorer', nodeLimit: 96}, requests: {
         'toggle-filter': {validate: value => request(value, 'toggle-filter', kinds), execute: kind => { toggleKind(kind); }},
@@ -329,11 +477,13 @@
       if (loading.signal.aborted || own !== generation || active !== controller || started !== context()) return;
       active.replaceRuntime(runtime);
       resetTreeBodies(runtime);
+      resetFilterBodies(runtime);
     } catch (error) {
       if (loading.signal.aborted || own !== generation || active !== controller || started !== context() || error.name === 'AbortError') return;
       window.gdUIComponentFailed?.('explorer');
       active.replaceRuntime(builtinRuntime);
       resetTreeBodies(builtinRuntime);
+      resetFilterBodies(builtinRuntime);
     } finally { if (pending === loading) pending = null; }
   }
   function disposeToolbar() {
@@ -354,19 +504,25 @@
       rowRuntime = builtinRuntime; namespaceRuntime = builtinRuntime;
       rowFallback = false; namespaceFallback = false;
     }
+    if (filters.size) resetFilterBodies(builtinRuntime);
+    else { clearFilterStyles(); filterRuntime = builtinRuntime; filterFallback = false; }
   }
   function dispose() {
     disposeToolbar();
     disposeRows(document.getElementById('entity-list'));
     clearTreeStyles();
+    disposeFilters(document.body);
+    clearFilterStyles();
     rowRuntime = builtinRuntime; namespaceRuntime = builtinRuntime;
-    rowFallback = false; namespaceFallback = false;
+    filterRuntime = builtinRuntime;
+    rowFallback = false; namespaceFallback = false; filterFallback = false;
   }
   function refresh() {
     if (controller && owner !== context()) resetContext();
     create();
     controller?.refresh();
   }
-  window.gdExplorerGraph = {refresh, reload, dispose, mountRow, mountNamespace, updateNamespace, disposeRows};
+  window.gdExplorerGraph = {refresh, reload, dispose, mountRow, mountNamespace, updateNamespace,
+    disposeRows, mountFilter, disposeFilters, selectFilter};
   window.addEventListener('gd-auth-changed', () => { dispose(); refresh(); });
 })();

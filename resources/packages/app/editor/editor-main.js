@@ -337,6 +337,8 @@ async function installGraphShell(tree, typeResp, onTypesUnparseable, authEpoch) 
 // (editor-explorer-filters.js).
 function repaintExplorer() {
   if (typeof gdInvalidateSharedViews === 'function') gdInvalidateSharedViews();
+  if (typeof gdRenderFilterChips === 'function') gdRenderFilterChips();
+  if (typeof gdSyncViewChip === 'function') gdSyncViewChip();
   updateEntityList(graphData);
   if (typeof gdRefreshViewMembers === 'function') gdRefreshViewMembers();
   // An active search shows the server's pre-write matches — re-ask.

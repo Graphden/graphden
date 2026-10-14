@@ -850,6 +850,9 @@
        (transition "toggle" "unknown" [])
        (transition "detail" "fx" [{:kind "toggle-detail" :value "fx"}])
        (transition "detail" "unknown" [])
+       (transition "select-effect" "io" [{:kind "select-effect" :value "io"}])
+       (transition "remove-view" "view-id" [{:kind "remove-view" :value "view-id"}])
+       (transition "unknown-filter" "io" [])
        (transition "other" "tests" [])
        {:entry :toolbar-actions :inputs {:inputs inputs}
         :expected {:secret true :dismiss true :run true}}
@@ -922,3 +925,58 @@
                    [:span {:class "ns-type-error-chip" :title "1 type error in this namespace"} "⚠ 1"]
                    [:span {:class "ns-problem-chip ns-failed-chip" :title "2 unresolved failed runs in this namespace"} "✕ 2"]
                    [:span {:class "ns-problem-chip ns-lint-chip" :title "3 fns with lint findings in this namespace"} "⚐ 3"]]}])))
+
+
+(deftest explorer-filter-choice-presentation-matches-jvm-and-browser
+  (let [definitions (:fns (edn/read-string (slurp "resources/packages/app/ui-explorer/fns.edn")))
+        definitions (conj definitions {:name :filter-tree :parent :get
+                                       :args {:coll :explorer-toolbar-view :key {:value :tree}}})
+        {:keys [graph impls ids]} (map-fixture definitions)
+        input (fn [surface projection]
+                {:inputs {:surface surface :filter projection :selected {} :counts {}
+                          :failed 0 :authenticated false :apps-available false :fx false}})]
+    (assert-differential!
+      graph impls ids
+      [{:entry :filter-tree
+        :inputs (input "filter-chip" {:axis "uses" :name "core.const" :selected true :missing true})
+        :expected [:span {:class "gd-filter-chip-body"}
+                   [:span {:class "kind-label"} "⚠ uses core.const"]
+                   [:span {:class "gd-filter-chip-x" :aria-hidden "true"} "×"]]}
+       {:entry :filter-tree
+        :inputs (input "filter-option" {:axis "effect" :name "io" :selected false :missing false})
+        :expected [:span {:class "gd-filter-option-body"} "☐ io"]}
+       {:entry :filter-tree
+        :inputs (input "filter-option" {:axis "restore" :name "core.old" :selected false :missing false})
+        :expected [:span {:class "gd-filter-option-body"} "↺ core.old"]}
+       {:entry :filter-tree
+        :inputs (input "filter-option" {:axis "uses-picker" :name "pick a fn" :selected false :missing false})
+        :expected [:span {:class "gd-filter-option-body"} "+ pick a fn"]}])))
+
+
+(deftest explorer-string-enum-lookups-use-zipmap
+  ;; A literal map's string keys become keywords when fn-defs are stored in PG.
+  ;; These dictionaries are looked up with browser-provided string enum values.
+  (let [definitions (:fns (edn/read-string (slurp "resources/packages/app/ui-explorer/fns.edn")))
+        by-name (into {} (map (juxt :name identity)) definitions)
+        literal-string-map? (fn [source]
+                              (let [value (get-in source [:args :value :value])]
+                                (and (= :const (:parent source))
+                                     (map? value)
+                                     (some string? (keys value)))))
+        offending (for [{:keys [name parent args]} definitions
+                        :when (= :get parent)
+                        :let [coll (:coll args)]
+                        :when (or (and (keyword? coll)
+                                       (literal-string-map? (get by-name coll)))
+                                  (and (map? coll) (literal-string-map? {:parent :const
+                                                                         :args {:value coll}})))]
+                    name)]
+    (is (empty? offending) (str "String-keyed enum maps cannot be :const lookup sources: " offending))
+    (doseq [[name expected-keys] [[:_explorer-filter-prefixes
+                                   ["namespace" "exclude" "uses" "effect" "unused" "name" "view"]]
+                                  [:_explorer-filter-request-kinds
+                                   ["remove-namespace" "remove-exclude" "remove-uses" "remove-effect"
+                                    "remove-unused" "remove-name" "remove-view" "select-namespace"
+                                    "restore-exclude" "select-effect" "select-view" "select-unused" "pick-uses"]]]]
+      (is (= :zipmap (:parent (get by-name name))) (str name " must retain string keys through PG"))
+      (is (= expected-keys (get-in by-name [name :args :keys]))))))

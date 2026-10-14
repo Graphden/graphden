@@ -49,6 +49,23 @@ function fixture() {
   assert.equal(f.button('all').getAttribute('aria-pressed'), 'true');
   assert.equal(f.button('tests').querySelector('.kind-count').textContent, '12000 · 2✗');
   assert.equal(f.button('tests').getAttribute('title'), 'Only tests (fns in a `tests` namespace) — 2 failed');
+  const chips = f.document.createElement('div'); chips.id = 'gd-filter-chips';
+  const chipBody = f.document.createElement('span'); chipBody.className = 'gd-filter-graph-host';
+  chips.appendChild(chipBody); f.document.body.appendChild(chips);
+  f.context.gdExplorerGraph.mountFilter(chipBody, 'filter-chip',
+    {axis: 'uses', name: 'core.const', selected: true, missing: true});
+  assert.equal(chipBody.querySelector('.kind-label').textContent, '⚠ uses core.const');
+  const pop = f.document.createElement('div'); pop.className = 'gd-filter-add-pop';
+  const optionBody = f.document.createElement('span'); optionBody.className = 'gd-filter-graph-host';
+  pop.appendChild(optionBody); f.document.body.appendChild(pop);
+  f.context.gdExplorerGraph.mountFilter(optionBody, 'filter-option',
+    {axis: 'effect', name: 'io', selected: false, missing: false});
+  assert.equal(optionBody.textContent, '☐ io');
+  let selected = 0;
+  assert.equal(f.context.gdExplorerGraph.selectFilter('select-effect', 'io', () => selected++), true);
+  assert.equal(selected, 1, 'typed graph request reaches only the exact native choice');
+  assert.equal(f.context.gdExplorerGraph.selectFilter('unknown', 'io', () => selected++), false);
+  assert.equal(selected, 1, 'an unknown request cannot mutate filters');
   f.host.dispatch('click', {target: f.button('tests')});
   assert.deepEqual(f.calls, [['kind', 'tests']]);
   assert.equal(f.button('all').getAttribute('aria-pressed'), 'false');

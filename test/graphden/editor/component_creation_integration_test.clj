@@ -248,7 +248,7 @@
                                                  (reconstruction/call-with-reconstruction-memo
                                                    snapshot
                                                    (fn []
-                                                     (reconstruction/prefetch-reconstruction-owners! snapshot [(:id row)])
+                                                     (reconstruction/prefetch-reconstruction-owners! snapshot #{(:id row)})
                                                      (let [first-read (reconstruction/reconstruct-fn-def snapshot (:id row))
                                                            repeated-read (reconstruction/reconstruct-fn-def snapshot (:id row))]
                                                        (is (= ordinary first-read) "prefetched owner reconstructs the same graph")

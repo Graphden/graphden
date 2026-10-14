@@ -75,7 +75,7 @@
   (when-let [scope *reconstruction-reads*]
     (when (and (identical? storage (:storage scope))
                (= (tc/current-org) (:org scope)))
-      (let [owners (vec (distinct fn-ids))
+      (let [owners (vec (distinct (seq fn-ids)))
             bindings (query-owner-batches storage :binding :fn-id owners)
             fn-slots (query-owner-batches storage :fn-slot :fn-id owners)
             binding-ids (vec (distinct (map :id bindings)))

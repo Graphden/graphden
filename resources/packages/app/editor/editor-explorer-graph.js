@@ -20,19 +20,24 @@
   let rowRuntime = null;
   let namespaceRuntime = null;
   let filterRuntime = null;
+  let viewRuntime = null;
   let treeSheet = null;
-  let filterSheet = null;
-  let filterStyleSignature = null;
+  let choiceSheet = null;
+  const choiceStyles = {filter: null, view: null};
+  const choiceStyleSignatures = {filter: null, view: null};
   const treeStyles = {row: null, namespace: null};
   const treeStyleSignatures = {row: null, namespace: null};
   let rowFallback = false;
   let namespaceFallback = false;
   let filterFallback = false;
+  let viewFallback = false;
   const rows = new Set();
   const namespaces = new Set();
   const filters = new Set();
-  const filterStyleRoots = new Set();
+  const views = new Set();
+  const choiceStyleRoots = new Set();
   const namespaceByHost = new WeakMap();
+  const viewByHost = new WeakMap();
   const rowDefaults = {name: '', secret: false, 'secret-path': '', service: false,
     'service-state': '', app: false, 'app-hosts': '', type: false, test: false,
     'test-status': '', 'test-error': '', failed: 0, 'type-errors': 0, lint: 0, effects: ''};
@@ -98,6 +103,13 @@
     return record({surface, row: record(rowDefaults), namespace: record(namespaceDefaults),
       filter: record(projection), selected: new Map(), counts: new Map(), failed: 0,
       authenticated: false, 'apps-available': false, fx: false});
+  }
+  function formInputs(facts) {
+    return record({surface: 'view-form', row: record(rowDefaults), namespace: record(namespaceDefaults),
+      filter: record({...filterDefaults, name: facts.name, selected: facts.filtersActive}),
+      selected: new Map([['view-editing', facts.editing], ['share-available', facts.shareAvailable],
+        ['pending', facts.pending]]), counts: new Map(), failed: 0,
+      authenticated: facts.authenticated, 'apps-available': false, fx: false});
   }
   function validateRow(view, projection) {
     exact(view, ['tree', 'styles', 'actions']);
@@ -195,37 +207,82 @@
     }
     return rules;
   }
-  function clearFilterStyles() {
-    for (const root of filterStyleRoots) delete root.dataset.gdUiStyle;
-    filterStyleRoots.clear();
-    window.GraphdenStyles.release(filterSheet);
-    filterSheet = null;
-    filterStyleSignature = null;
+  function validateViewItem(view) {
+    exact(view, ['tree', 'styles', 'actions']);
+    const actions = field(view, 'actions');
+    exact(actions, ['secret', 'dismiss', 'run']);
+    if (['secret', 'dismiss', 'run'].some(name => field(actions, name) !== false)) {
+      throw new Error('Explorer view body cannot request actions');
+    }
+    const tree = window.GraphdenRenderer.vnode(field(view, 'tree'), 'gd-explorer-view', 48);
+    const passive = new Set(['div', 'span', 'strong', 'small']);
+    let textLength = 0;
+    function inspect(node) {
+      if (typeof node === 'string' || typeof node === 'number') { textLength += String(node).length; return; }
+      if (!node || !passive.has(node.type)
+        || Object.keys(node.props).some(name => !['className', 'title', 'aria-hidden', 'children', 'key'].includes(name))) {
+        throw new Error('Invalid Explorer view body');
+      }
+      if (/(^|\s)(?:gd-view-graph-host|gd-views-row|gd-views-input|gd-views-save|gd-views-apply|gd-views-del|gd-view-pop)(\s|$)/.test(node.props.className || '')) {
+        throw new Error('Explorer view cannot forge host classes');
+      }
+      for (const child of children(node)) inspect(child);
+    }
+    inspect(tree);
+    if (textLength > 8192) throw new Error('Explorer view body too large');
+    const rules = window.GraphdenStyles.normalize(field(view, 'styles'));
+    const root = '& .gd-view-graph-host';
+    if (rules.some(rule => !rule.selector.startsWith(root)
+      || !['', ' ', '.', ':', '[', '>'].includes(rule.selector[root.length] || ''))) {
+      throw new Error('Explorer view style must stay inside its body');
+    }
+    return rules;
   }
-  function updateFilterStyles(host, normalized) {
+  function clearChoiceStyles(surface) {
+    choiceStyles[surface] = null;
+    choiceStyleSignatures[surface] = null;
+    const combined = [...(choiceStyles.filter || []), ...(choiceStyles.view || [])];
+    const next = combined.length ? window.GraphdenStyles.acquire(combined) : null;
+    const old = choiceSheet;
+    choiceSheet = next;
+    for (const root of choiceStyleRoots) {
+      if (next) root.dataset.gdUiStyle = next.id;
+      else delete root.dataset.gdUiStyle;
+    }
+    window.GraphdenStyles.release(old);
+  }
+  function updateChoiceStyles(surface, host, normalized) {
     const signature = JSON.stringify(normalized);
-    if (filterStyleSignature !== null && signature !== filterStyleSignature) {
-      throw new Error('Explorer filter styles vary by choice');
+    if (choiceStyleSignatures[surface] !== null && signature !== choiceStyleSignatures[surface]) {
+      throw new Error(`Explorer ${surface} styles vary by choice`);
     }
-    if (filterStyleSignature === null) {
-      filterSheet = window.GraphdenStyles.acquire(normalized);
-      filterStyleSignature = signature;
+    if (choiceStyleSignatures[surface] === null) {
+      choiceStyles[surface] = normalized;
+      choiceStyleSignatures[surface] = signature;
+      const combined = [...(choiceStyles.filter || []), ...(choiceStyles.view || [])];
+      if (combined.length > 128) throw new Error('Explorer choice style limit exceeded');
+      const next = window.GraphdenStyles.acquire(combined);
+      const old = choiceSheet;
+      choiceSheet = next;
+      for (const root of choiceStyleRoots) root.dataset.gdUiStyle = next.id;
+      window.GraphdenStyles.release(old);
     }
-    const root = host.closest('#gd-filter-chips') || host.closest('.gd-filter-add-pop');
-    if (!root) throw new Error('Explorer filter host has no scope');
-    root.dataset.gdUiStyle = filterSheet.id;
-    filterStyleRoots.add(root);
+    const root = surface === 'view' ? host.closest('.gd-view-pop')
+      : host.closest('#gd-filter-chips') || host.closest('.gd-filter-add-pop');
+    if (!root) throw new Error('Explorer choice host has no scope');
+    root.dataset.gdUiStyle = choiceSheet.id;
+    choiceStyleRoots.add(root);
   }
   function renderFilter(instance) {
     let view;
     try {
       view = filterRuntime.run('view', {inputs: filterInputs(instance.surface, instance.projection)});
-      updateFilterStyles(instance.host, validateFilter(view));
+      updateChoiceStyles('filter', instance.host, validateFilter(view));
     } catch (error) {
       if (filterRuntime === builtinRuntime || filterFallback) throw error;
       filterRuntime = builtinRuntime;
       filterFallback = true;
-      clearFilterStyles();
+      clearChoiceStyles('filter');
       window.gdUIComponentSectionFallback?.('explorer', 'filters');
       for (const item of filters) renderFilter(item);
       return;
@@ -242,26 +299,96 @@
     try { renderFilter(instance); }
     catch (error) { filters.delete(instance); renderer.dispose(); throw error; }
   }
-  function disposeFilters(scope) {
+  function renderViewItem(instance) {
+    let view;
+    try {
+      view = viewRuntime.run('view', {inputs: filterInputs('view-item', instance.projection)});
+      updateChoiceStyles('view', instance.host, validateViewItem(view));
+    } catch (error) {
+      if (viewRuntime === builtinRuntime || viewFallback) throw error;
+      fallbackViews();
+      return;
+    }
+    instance.renderer.render(field(view, 'tree'));
+  }
+  function mountViewItem(body, projection) {
+    if (!builtinRuntime) builtinRuntime = builtin();
+    if (!viewRuntime) viewRuntime = builtinRuntime;
+    const renderer = window.GraphdenRenderer.mount(body, {idPrefix: 'gd-explorer-view', nodeLimit: 48});
+    const instance = {host: body, projection, renderer};
+    views.add(instance);
+    viewByHost.set(body, instance);
+    try { renderViewItem(instance); }
+    catch (error) { views.delete(instance); viewByHost.delete(body); renderer.dispose(); throw error; }
+  }
+  function updateViewItem(body, projection) {
+    const instance = viewByHost.get(body);
+    if (!instance) throw new Error('Explorer view body was disposed');
+    instance.projection = projection;
+    renderViewItem(instance);
+  }
+  function disposeChoices(scope, items) {
     if (!scope) return;
-    for (const instance of filters) {
+    for (const instance of items) {
       if (scope === instance.host || scope.contains(instance.host)) {
         instance.renderer.dispose();
-        filters.delete(instance);
+        items.delete(instance);
+        if (items === views) viewByHost.delete(instance.host);
       }
     }
-    for (const root of filterStyleRoots) {
+    for (const root of choiceStyleRoots) {
       if (scope === root || scope.contains(root)) {
         delete root.dataset.gdUiStyle;
-        filterStyleRoots.delete(root);
+        choiceStyleRoots.delete(root);
       }
     }
-    if (!filterStyleRoots.size) clearFilterStyles();
   }
-  function selectFilter(kind, value, execute) {
-    if (!filterRuntime || typeof kind !== 'string' || typeof value !== 'string') return false;
+  function disposeFilters(scope) {
+    disposeChoices(scope, filters);
+    if (!filters.size) clearChoiceStyles('filter');
+  }
+  function disposeViews(scope) {
+    disposeChoices(scope, views);
+    if (!views.size) clearChoiceStyles('view');
+  }
+  function fallbackViews() {
+    viewRuntime = builtinRuntime;
+    viewFallback = true;
+    clearChoiceStyles('view');
+    window.gdUIComponentSectionFallback?.('explorer', 'views');
+    for (const item of views) renderViewItem(item);
+  }
+  function validateFormPolicy(value) {
+    const names = ['visible', 'mode', 'device-available', 'graph-visible', 'graph-available',
+      'enter-target', 'name-valid', 'validation-message'];
+    exact(value, names);
+    for (const name of ['visible', 'device-available', 'graph-visible', 'graph-available', 'name-valid']) {
+      if (typeof field(value, name) !== 'boolean') throw new Error('Invalid Explorer view form policy');
+    }
+    if (!['save', 'edit'].includes(field(value, 'mode'))
+      || !['none', 'device', 'graph'].includes(field(value, 'enter-target'))
+      || typeof field(value, 'validation-message') !== 'string'
+      || field(value, 'validation-message').length > 120) throw new Error('Invalid Explorer view form policy');
+    return Object.fromEntries(names.map(name => [name, field(value, name)]));
+  }
+  function formPolicy(facts) {
+    if (!builtinRuntime) builtinRuntime = builtin();
+    if (!viewRuntime) viewRuntime = builtinRuntime;
+    if (typeof facts.name !== 'string'
+      || ['filtersActive', 'editing', 'authenticated', 'shareAvailable', 'pending']
+        .some(name => typeof facts[name] !== 'boolean')) throw new Error('Invalid Explorer view form facts');
+    try { return validateFormPolicy(viewRuntime.run('initial', {inputs: formInputs(facts)})); }
+    catch (error) {
+      if (viewRuntime === builtinRuntime || viewFallback) throw error;
+      fallbackViews();
+      return formPolicy(facts);
+    }
+  }
+  function selectChoice(surface, kind, value, execute) {
+    const runtime = surface === 'view' ? viewRuntime : filterRuntime;
+    if (!runtime || typeof kind !== 'string' || typeof value !== 'string') return false;
     try {
-      const result = filterRuntime.run('update', {state: record({handled: false}), event: record({kind, value})});
+      const result = runtime.run('update', {state: record({handled: false}), event: record({kind, value})});
       exact(result, ['state', 'requests']);
       validateState(field(result, 'state'));
       const requests = field(result, 'requests');
@@ -276,17 +403,23 @@
         throw new Error('Explorer filter request differs from its native choice');
       }
     } catch (error) {
-      if (filterRuntime === builtinRuntime || filterFallback) throw error;
-      filterRuntime = builtinRuntime;
-      filterFallback = true;
-      clearFilterStyles();
-      window.gdUIComponentSectionFallback?.('explorer', 'filters');
-      for (const item of filters) renderFilter(item);
-      return selectFilter(kind, value, execute);
+      const fallback = surface === 'view' ? viewFallback : filterFallback;
+      if (runtime === builtinRuntime || fallback) throw error;
+      if (surface === 'view') {
+        fallbackViews();
+      } else {
+        filterRuntime = builtinRuntime; filterFallback = true;
+        clearChoiceStyles('filter');
+        window.gdUIComponentSectionFallback?.('explorer', 'filters');
+        for (const item of filters) renderFilter(item);
+      }
+      return selectChoice(surface, kind, value, execute);
     }
     execute();
     return true;
   }
+  const selectFilter = (kind, value, execute) => selectChoice('filter', kind, value, execute);
+  const selectView = (kind, value, execute) => selectChoice('view', kind, value, execute);
   function updateTreeStyles(surface, normalized) {
     const signature = JSON.stringify(normalized);
     if (treeStyleSignatures[surface] !== null && signature !== treeStyleSignatures[surface]) {
@@ -415,8 +548,14 @@
   function resetFilterBodies(runtime) {
     filterRuntime = runtime;
     filterFallback = false;
-    clearFilterStyles();
+    clearChoiceStyles('filter');
     for (const instance of filters) renderFilter(instance);
+  }
+  function resetViewBodies(runtime) {
+    viewRuntime = runtime;
+    viewFallback = false;
+    clearChoiceStyles('view');
+    for (const instance of views) renderViewItem(instance);
   }
   function paint(view) {
     mounted.render(field(view, 'tree'), field(view, 'styles'));
@@ -456,6 +595,7 @@
     if (!builtinRuntime) builtinRuntime = builtin();
     if (!rowRuntime) rowRuntime = builtinRuntime;
     if (!filterRuntime) filterRuntime = builtinRuntime;
+    if (!viewRuntime) viewRuntime = builtinRuntime;
     controller = window.GraphdenComponent.create(builtinRuntime, {inputs, validateState, validateView, render: paint,
       rendererOptions: {idPrefix: 'gd-explorer', nodeLimit: 96}, requests: {
         'toggle-filter': {validate: value => request(value, 'toggle-filter', kinds), execute: kind => { toggleKind(kind); }},
@@ -478,12 +618,14 @@
       active.replaceRuntime(runtime);
       resetTreeBodies(runtime);
       resetFilterBodies(runtime);
+      resetViewBodies(runtime);
     } catch (error) {
       if (loading.signal.aborted || own !== generation || active !== controller || started !== context() || error.name === 'AbortError') return;
       window.gdUIComponentFailed?.('explorer');
       active.replaceRuntime(builtinRuntime);
       resetTreeBodies(builtinRuntime);
       resetFilterBodies(builtinRuntime);
+      resetViewBodies(builtinRuntime);
     } finally { if (pending === loading) pending = null; }
   }
   function disposeToolbar() {
@@ -505,17 +647,22 @@
       rowFallback = false; namespaceFallback = false;
     }
     if (filters.size) resetFilterBodies(builtinRuntime);
-    else { clearFilterStyles(); filterRuntime = builtinRuntime; filterFallback = false; }
+    else { clearChoiceStyles('filter'); filterRuntime = builtinRuntime; filterFallback = false; }
+    if (views.size) resetViewBodies(builtinRuntime);
+    else { clearChoiceStyles('view'); viewRuntime = builtinRuntime; viewFallback = false; }
   }
   function dispose() {
     disposeToolbar();
     disposeRows(document.getElementById('entity-list'));
     clearTreeStyles();
     disposeFilters(document.body);
-    clearFilterStyles();
+    disposeViews(document.body);
+    clearChoiceStyles('filter');
+    clearChoiceStyles('view');
     rowRuntime = builtinRuntime; namespaceRuntime = builtinRuntime;
     filterRuntime = builtinRuntime;
-    rowFallback = false; namespaceFallback = false; filterFallback = false;
+    viewRuntime = builtinRuntime;
+    rowFallback = false; namespaceFallback = false; filterFallback = false; viewFallback = false;
   }
   function refresh() {
     if (controller && owner !== context()) resetContext();
@@ -523,6 +670,7 @@
     controller?.refresh();
   }
   window.gdExplorerGraph = {refresh, reload, dispose, mountRow, mountNamespace, updateNamespace,
-    disposeRows, mountFilter, disposeFilters, selectFilter};
+    disposeRows, mountFilter, disposeFilters, mountViewItem, updateViewItem, disposeViews,
+    formPolicy, selectFilter, selectView};
   window.addEventListener('gd-auth-changed', () => { dispose(); refresh(); });
 })();

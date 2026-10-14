@@ -1,6 +1,7 @@
 {:namespace "app.ui-explorer"
  :description "Explorer toolbar, tree bodies and filter choices over authorized host projections."
  :fns [{:name :_explorer-toolbar-state :type {:handled :bool}}
+       {:name :_explorer-view-form-policy :type {:visible :bool :mode :text :device-available :bool :graph-visible :bool :graph-available :bool :enter-target :text :name-valid :bool :validation-message :text}}
        {:name :_explorer-row-input :type {:name :text :secret :bool :secret-path :text :service :bool :service-state :text :app :bool :app-hosts :text :type :bool :test :bool :test-status :text :test-error :text :failed :int :type-errors :int :lint :int :effects :text}}
        {:name :_explorer-namespace-input :type {:name :text :expanded :bool :pseudo :bool :count :int :type-errors :int :failed :int :lint :int}}
        {:name :_explorer-filter-input :type {:axis :text :name :text :selected :bool :missing :bool}}
@@ -9,12 +10,15 @@
        {:name :_explorer-toolbar-request :type {:kind :text :value :text}}
        {:name :_explorer-toolbar-requests :list :_explorer-toolbar-request}
        {:name :_explorer-toolbar-transition :type {:state :_explorer-toolbar-state :requests :_explorer-toolbar-requests}}
-       {:name :explorer-toolbar-initial :parent :const :args {:value {:value {:handled false}}} :return-type :_explorer-toolbar-state}
+       {:name :_explorer-toolbar-initial-state :parent :const :args {:value {:value {:handled false}}} :return-type :_explorer-toolbar-state}
+       {:name :explorer-toolbar-initial :parent :if :args {:test :_explorer-is-view-form :then :_explorer-view-form-state :else :_explorer-toolbar-initial-state}}
        {:name :_explorer-input-surface :parent :get :args {:coll {:as :inputs :type :_explorer-toolbar-inputs} :key {:value :surface} :default {:value "toolbar"}}}
        {:name :_explorer-is-row :parent :equal? :args {:a :_explorer-input-surface :b "row"}}
        {:name :_explorer-is-namespace :parent :equal? :args {:a :_explorer-input-surface :b "namespace"}}
        {:name :_explorer-is-filter-chip :parent :equal? :args {:a :_explorer-input-surface :b "filter-chip"}}
        {:name :_explorer-is-filter-option :parent :equal? :args {:a :_explorer-input-surface :b "filter-option"}}
+       {:name :_explorer-is-view-item :parent :equal? :args {:a :_explorer-input-surface :b "view-item"}}
+       {:name :_explorer-is-view-form :parent :equal? :args {:a :_explorer-input-surface :b "view-form"}}
        {:name :_explorer-input-row :parent :get :args {:coll {:as :inputs :type :_explorer-toolbar-inputs} :key {:value :row}}}
        {:name :_explorer-input-namespace :parent :get :args {:coll {:as :inputs :type :_explorer-toolbar-inputs} :key {:value :namespace}}}
        {:name :_explorer-input-filter :parent :get :args {:coll {:as :inputs :type :_explorer-toolbar-inputs} :key {:value :filter}}}
@@ -24,6 +28,20 @@
        {:name :_explorer-input-authenticated :parent :get :args {:coll {:as :inputs :type :_explorer-toolbar-inputs} :key {:value :authenticated} :default {:value false}}}
        {:name :_explorer-input-apps-available :parent :get :args {:coll {:as :inputs :type :_explorer-toolbar-inputs} :key {:value :apps-available} :default {:value false}}}
        {:name :_explorer-input-fx :parent :get :args {:coll {:as :inputs :type :_explorer-toolbar-inputs} :key {:value :fx} :default {:value false}}}
+       {:name :_explorer-view-form-editing :parent :get :args {:coll :_explorer-input-selected :key {:value "view-editing"} :default false}}
+       {:name :_explorer-view-form-share-visible :parent :get :args {:coll :_explorer-input-selected :key {:value "share-available"} :default false}}
+       {:name :_explorer-view-form-pending :parent :get :args {:coll :_explorer-input-selected :key {:value "pending"} :default false}}
+       {:name :_explorer-view-form-visible :parent :if :args {:test :_explorer-filter-selected :then true :else :_explorer-view-form-editing}}
+       {:name :_explorer-view-form-mode :parent :if :args {:test :_explorer-view-form-editing :then "edit" :else "save"}}
+       {:name :_explorer-view-form-trimmed :parent :str-trim :args {:string :_explorer-filter-name}}
+       {:name :_explorer-view-form-name-empty :parent :equal? :args {:a :_explorer-view-form-trimmed :b ""}}
+       {:name :_explorer-view-form-name-valid :parent :if :args {:test :_explorer-view-form-name-empty :then false :else true}}
+       {:name :_explorer-view-form-ready :parent :if :args {:test :_explorer-view-form-pending :then false :else true}}
+       {:name :_explorer-view-form-graph-auth :parent :if :args {:test :_explorer-input-authenticated :then :_explorer-view-form-ready :else false}}
+       {:name :_explorer-view-form-graph-available :parent :if :args {:test :_explorer-view-form-share-visible :then :_explorer-view-form-graph-auth :else false}}
+       {:name :_explorer-view-form-enter-ready :parent :if :args {:test :_explorer-view-form-share-visible :then "graph" :else "device"}}
+       {:name :_explorer-view-form-enter-target :parent :if :args {:test :_explorer-view-form-ready :then :_explorer-view-form-enter-ready :else "none"}}
+       {:name :_explorer-view-form-state :parent :zipmap :args {:keys [{:value :visible} {:value :mode} {:value :device-available} {:value :graph-visible} {:value :graph-available} {:value :enter-target} {:value :name-valid} {:value :validation-message}] :vals [:_explorer-view-form-visible :_explorer-view-form-mode :_explorer-view-form-ready :_explorer-view-form-share-visible :_explorer-view-form-graph-available :_explorer-view-form-enter-target :_explorer-view-form-name-valid "Give the view a name"]} :return-type :_explorer-view-form-policy}
        {:name :_explorer-event-kind :parent :get :args {:coll {:as :event :type :_explorer-toolbar-event} :key {:value :kind} :default {:value ""}}}
        {:name :_explorer-event-value :parent :get :args {:coll {:as :event :type :_explorer-toolbar-event} :key {:value :value} :default {:value ""}}}
        {:name :_explorer-selected-fn :parent :get :args {:coll :_explorer-input-selected :key {:value "fn"} :default {:value false}}}
@@ -45,7 +63,7 @@
        {:name :_explorer-is-toggle :parent :equal? :args {:a :_explorer-event-kind :b "toggle"}}
        {:name :_explorer-is-detail :parent :equal? :args {:a :_explorer-event-kind :b "detail"}}
        {:name :_explorer-is-fx :parent :equal? :args {:a :_explorer-event-value :b "fx"}}
-       {:name :_explorer-filter-request-kinds :parent :zipmap :args {:keys ["remove-namespace" "remove-exclude" "remove-uses" "remove-effect" "remove-unused" "remove-name" "remove-view" "select-namespace" "restore-exclude" "select-effect" "select-view" "select-unused" "pick-uses"] :vals [true true true true true true true true true true true true true]}}
+       {:name :_explorer-filter-request-kinds :parent :zipmap :args {:keys ["remove-namespace" "remove-exclude" "remove-uses" "remove-effect" "remove-unused" "remove-name" "remove-view" "select-namespace" "restore-exclude" "select-effect" "select-view" "select-unused" "pick-uses" "clear-view" "apply-device-view" "apply-graph-view" "delete-device-view" "edit-graph-view" "open-graph-view" "save-device-view" "save-graph-view"] :vals [true true true true true true true true true true true true true true true true true true true true true]}}
        {:name :_explorer-filter-event-valid :parent :get :args {:coll :_explorer-filter-request-kinds :key :_explorer-event-kind :default {:value false}}}
        {:name :_explorer-filter-request :parent :zipmap :args {:keys [{:value :kind} {:value :value}] :vals [:_explorer-event-kind :_explorer-event-value]} :return-type :_explorer-toolbar-request}
        {:name :_explorer-filter-requests :parent :list :args {:items [:_explorer-filter-request]} :return-type :_explorer-toolbar-requests}
@@ -329,24 +347,29 @@
        {:name :_explorer-filter-chip-remove :parent :hiccup :args {:tag "span" :attrs {:value {:class "gd-filter-chip-x" :aria-hidden "true"}} :children ["×"]}}
        {:name :_explorer-filter-chip-tree :parent :hiccup :args {:tag "span" :attrs {:value {:class "gd-filter-chip-body"}} :children [:_explorer-filter-chip-name :_explorer-filter-chip-remove]}}
        {:name :_explorer-filter-option-check :parent :if :args {:test :_explorer-filter-selected :then "☑ " :else "☐ "}}
-       {:name :_explorer-filter-option-pick :parent :equal? :args {:a :_explorer-filter-axis :b "uses-picker"}}
-       {:name :_explorer-filter-option-restore :parent :equal? :args {:a :_explorer-filter-axis :b "restore"}}
-       {:name :_explorer-filter-option-other-marker :parent :if :args {:test :_explorer-filter-option-restore :then "↺ " :else :_explorer-filter-option-check}}
-       {:name :_explorer-filter-option-marker :parent :if :args {:test :_explorer-filter-option-pick :then "+ " :else :_explorer-filter-option-other-marker}}
+       {:name :_explorer-filter-option-marker :parent :get :args {:coll :_explorer-view-static-labels :key :_explorer-filter-axis :default :_explorer-filter-option-check}}
        {:name :_explorer-filter-option-label :parent :str :args {:parts [:_explorer-filter-option-marker :_explorer-filter-name]}}
        {:name :_explorer-filter-option-tree :parent :hiccup :args {:tag "span" :attrs {:value {:class "gd-filter-option-body"}} :children [:_explorer-filter-option-label]}}
        {:name :_explorer-filter-styles :parent :const :args {:value {:value [{:selector "& .gd-filter-graph-host .gd-filter-chip-body" :declarations {"display" "inline-flex" "align-items" "center" "min-width" "0"}} {:selector "& .gd-filter-graph-host .gd-filter-option-body" :declarations {"display" "inline"}}]}} :return-type [:list {:selector :text :declarations [:map :text :text]}]}
+       {:name :_explorer-view-static-labels :parent :zipmap :args {:keys ["head" "hint" "all" "device-section" "graph-section" "save-section" "edit-section" "device-delete" "graph-edit" "graph-open" "save-device" "save-graph" "save-graph-edit" "uses-picker" "restore"] :vals ["Views" "Save in the graph to share on this branch. Device only stays in this browser." "◍ All functions — no filters" "Device only" "In the graph" "Save the current filters" "Edit " "×" "Edit filters" "Edit graph" "Device only" "Save in graph" "Save changes" "+ " "↺ "]}}
+       {:name :_explorer-view-label-prefix :parent :get :args {:coll :_explorer-view-static-labels :key :_explorer-filter-axis :default ""}}
+       {:name :_explorer-view-label :parent :str :args {:parts [:_explorer-view-label-prefix :_explorer-filter-name]}}
+       {:name :_explorer-view-active-mark :parent :if :args {:test :_explorer-filter-selected :then "● " :else ""}}
+       {:name :_explorer-view-text :parent :str :args {:parts [:_explorer-view-active-mark :_explorer-filter-chip-warning :_explorer-view-label]}}
+       {:name :_explorer-view-item-tree :parent :hiccup :args {:tag "span" :attrs {:value {:class "gd-view-item-body"}} :children [:_explorer-view-text]}}
+       {:name :_explorer-view-item-styles :parent :const :args {:value {:value [{:selector "& .gd-view-graph-host .gd-view-item-body" :declarations {"display" "inline" "min-width" "0"}}]}} :return-type [:list {:selector :text :declarations [:map :text :text]}]}
        {:name :_explorer-no-actions :parent :const :args {:value {:value {:secret false :dismiss false :run false}}}}
        {:name :_explorer-row-or-toolbar-tree :parent :if :args {:test :_explorer-is-row :then :_explorer-row-tree :else :_explorer-toolbar-tree}}
        {:name :_explorer-row-or-toolbar-styles :parent :if :args {:test :_explorer-is-row :then :_explorer-row-styles :else :explorer-styles}}
-       {:name :_explorer-row-or-toolbar-actions :parent :if :args {:test :_explorer-is-row :then :_explorer-no-actions :else :_explorer-actions}}
        {:name :_explorer-filter-or-other-tree :parent :if :args {:test :_explorer-is-filter-chip :then :_explorer-filter-chip-tree :else :_explorer-row-or-toolbar-tree}}
        {:name :_explorer-filter-or-other-styles :parent :if :args {:test :_explorer-is-filter-chip :then :_explorer-filter-styles :else :_explorer-row-or-toolbar-styles}}
-       {:name :_explorer-filter-or-other-actions :parent :if :args {:test :_explorer-is-filter-chip :then :_explorer-no-actions :else :_explorer-row-or-toolbar-actions}}
        {:name :_explorer-option-or-other-tree :parent :if :args {:test :_explorer-is-filter-option :then :_explorer-filter-option-tree :else :_explorer-filter-or-other-tree}}
        {:name :_explorer-option-or-other-styles :parent :if :args {:test :_explorer-is-filter-option :then :_explorer-filter-styles :else :_explorer-filter-or-other-styles}}
-       {:name :_explorer-option-or-other-actions :parent :if :args {:test :_explorer-is-filter-option :then :_explorer-no-actions :else :_explorer-filter-or-other-actions}}
-       {:name :_explorer-view-tree :parent :if :args {:test :_explorer-is-namespace :then :_explorer-ns-tree :else :_explorer-option-or-other-tree}}
-       {:name :_explorer-view-styles :parent :if :args {:test :_explorer-is-namespace :then :_explorer-ns-styles :else :_explorer-option-or-other-styles}}
-       {:name :_explorer-view-actions :parent :if :args {:test :_explorer-is-namespace :then :_explorer-no-actions :else :_explorer-option-or-other-actions}}
+       {:name :_explorer-view-or-other-tree :parent :if :args {:test :_explorer-is-view-item :then :_explorer-view-item-tree :else :_explorer-option-or-other-tree}}
+       {:name :_explorer-view-or-other-styles :parent :if :args {:test :_explorer-is-view-item :then :_explorer-view-item-styles :else :_explorer-option-or-other-styles}}
+       {:name :_explorer-view-tree :parent :if :args {:test :_explorer-is-namespace :then :_explorer-ns-tree :else :_explorer-view-or-other-tree}}
+       {:name :_explorer-view-styles :parent :if :args {:test :_explorer-is-namespace :then :_explorer-ns-styles :else :_explorer-view-or-other-styles}}
+       {:name :_explorer-no-action-surfaces :parent :zipmap :args {:keys ["row" "namespace" "filter-chip" "filter-option" "view-item"] :vals [true true true true true]}}
+       {:name :_explorer-is-no-action-surface :parent :get :args {:coll :_explorer-no-action-surfaces :key :_explorer-input-surface :default false}}
+       {:name :_explorer-view-actions :parent :if :args {:test :_explorer-is-no-action-surface :then :_explorer-no-actions :else :_explorer-actions}}
        {:name :explorer-toolbar-view :parent :zipmap :args {:keys [{:value :tree} {:value :styles} {:value :actions}] :vals [:_explorer-view-tree :_explorer-view-styles :_explorer-view-actions]}}]}

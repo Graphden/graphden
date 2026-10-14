@@ -329,10 +329,10 @@ server Overview subtree. Inspector plans use the existing bounded browser
 budget of 150,000 operations and 10,000 renderer nodes for this section, including
 the server's maximum 400-row usages response.
 
-The Explorer toolbar, function-row, namespace-header and filter-choice presentations share the ordinary
+The Explorer toolbar, function-row, namespace-header, filter-choice and saved-view popup presentations share the ordinary
 `app.ui-explorer` initial/update/view identities. The view's typed `surface`
 input selects the finite kind/status toolbar, one tree body, an active filter
-chip or one Add filter option. Host
+chip, one Add filter option or one saved-view popup item. Host
 projections supply only already authorized cache summaries: kind and problem
 flags, current test/service status, the display name, and a secret's vault path
 (never its value). The graph chooses marker Hiccup and scoped styles. Empty
@@ -342,16 +342,24 @@ a whole-tree cap. A legacy personal Explorer view that only supports the toolbar
 keeps that toolbar and uses the shipped graph for rows, with a visible section
 diagnostic.
 
-The graph emits only finite toolbar filter/detail and exact filter-choice
+The graph emits only finite toolbar filter/detail and exact filter/view-choice
 requests; native adapters
 invoke the existing mutation functions. Native treeitems retain function IDs,
 ARIA, focus, selection, actions, lazy namespace loading, search, filter/view
 membership, and their existing truncation semantics. Filter buttons retain
 their native identities and accessibility labels; the graph owns their passive
 body and scoped styles, while the chooser keeps its name input and fn picker
-stable across asynchronous view-list refresh. Graph output cannot add an ID,
+stable across asynchronous view-list refresh. The view popup keeps its native
+input and keyed action buttons in place while graph-list replies update only
+the affected rows; an account change closes it and rejects old results. The graph's
+`initial` with `surface=view-form` also returns a validated policy record from
+the current filter/edit/auth/API/pending facts and draft name. It chooses form
+visibility, save or edit mode, button availability, Enter target and the empty
+name message. The host applies this model to its existing controls, and still
+checks live authority and the pending request before any save. A personal plan
+without this form policy falls back only in the view section. Graph output cannot add an ID,
 destination, interactive element, or authorized action. One runtime and one
-shared filter stylesheet serve all loaded choices without a collection cap.
+shared choice stylesheet serve all loaded choices without a collection cap.
 
 Create-secret, Dismiss-all and Run-all buttons remain native siblings because
 their pending HTTP operations own their labels and disabled state. The graph

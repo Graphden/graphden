@@ -362,6 +362,7 @@ async function gdApplyView(view) {
   }
   const applySeq = ++_viewApplySeq;
   const revision = _filterRevision;
+  const authEpoch = _sharedViewsAuthEpoch;
   _editingGraphView = null;
   const f = _normFilters(view.filters);
   await _hydrateViewReferenceLabels(f);
@@ -381,11 +382,11 @@ async function gdApplyView(view) {
       else if (typeof gdToast === 'function') gdToast('View "' + view.name + '": no fn named ' + u.name + ' — that filter was dropped');
     }
     f.uses = resolved;
-    if (!view.shared) {
+    if (!view.shared && authEpoch === _sharedViewsAuthEpoch) {
       gdWriteViews(gdReadViews().map((v) => (v.name === view.name ? { name: v.name, filters: f } : v)));
     }
   }
-  if (applySeq !== _viewApplySeq || revision !== _filterRevision) return false;
+  if (applySeq !== _viewApplySeq || revision !== _filterRevision || authEpoch !== _sharedViewsAuthEpoch) return false;
   _filters = f;
   _viewName = view.name;
   _viewId = view.shared ? view.id : null;

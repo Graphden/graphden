@@ -231,6 +231,43 @@ const chipLabels = chips => chips.children.map(chip => chip.children[0].children
       'newer draft remains active');
   });
 
+  await test('old account hydration and committed Save cannot repopulate the new owner', async () => {
+    const {ctx} = filtersCtx();
+    ctx.API.api_views_save = ctx.window.API.api_views_save = '/api/views/save';
+    ctx.window.gdAccount = {id: 'account-a'};
+    let releaseRead;
+    ctx.authFetch = async () => ({ok: true, json: () => new Promise(resolve => { releaseRead = resolve; })});
+    const applying = ctx.gdApplyView({id: 'old-id', name: 'old', shared: true,
+      filters: {uses: [{id: 'ref-id', name: 'ref-id'}]}});
+    await tick();
+    ctx.window.gdAccount = {id: 'account-b'};
+    ctx.gdInvalidateViewAuth();
+    releaseRead({fns: [{id: 'ref-id', name: 'old-secret-label'}]});
+    assert(!(await applying) && ctx.gdActiveViewId() === null && ctx.gdFilters().uses.length === 0,
+      'late hydrated view from old owner is discarded');
+
+    ctx.window.gdAccount = {id: 'account-a'};
+    ctx.gdToggleKind('fn');
+    let releaseSave;
+    let additionalReads = 0;
+    ctx.authFetch = async (url) => {
+      if (url === '/api/views/save') return new Promise(resolve => { releaseSave = resolve; });
+      additionalReads++;
+      return {ok: true, json: async () => []};
+    };
+    const saving = ctx.gdShareViewToGraph('old-owner-view');
+    ctx.window.gdAccount = {id: 'account-b'};
+    ctx.gdInvalidateViewAuth();
+    releaseSave({ok: true, json: async () => ({ok: true, committed: true,
+      view: {id: 'old-created-id', name: 'old-owner-view'}})});
+    let error;
+    try { await saving; } catch (caught) { error = caught; }
+    assert(error?.message.includes('context changed') && additionalReads === 0,
+      'old-owner committed response cannot trigger a new-owner graph read');
+    assert(ctx.gdActiveViewId() === null && ctx.gdSharedViewsCached() === null,
+      'old-owner result cannot become the new owner\'s active or cached view');
+  });
+
   await test('a chip naming a deleted fn is marked ⚠ and its accessible name says so', async () => {
     const { ctx, chips } = filtersCtx();
     ctx.gdAddUses({ id: 'gone-1', name: 'old-fn' });

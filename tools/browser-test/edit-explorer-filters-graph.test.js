@@ -149,9 +149,29 @@ const {assert, newContext, BASE} = require('./edit-test-helpers');
             {axis, name, selected, missing: false})});
           return [axis, textOf(GraphdenRenderer.vnode(view.get(key('tree')), axis, 48)), expected];
         });
+      const viewItems = [['head', '', false, false, 'Views'],
+        ['hint', '', false, false, 'Save in the graph to share on this branch. Device only stays in this browser.'],
+        ['all', '', false, false, '◍ All functions — no filters'],
+        ['device-section', '', false, false, 'Device only'], ['graph-section', '', false, false, 'In the graph'],
+        ['device-apply', 'personal', true, false, '● personal'],
+        ['graph-apply', 'shared', false, true, '⚠ shared'],
+        ['device-delete', '', false, false, '×'], ['graph-edit', '', false, false, 'Edit filters'],
+        ['graph-open', '', false, false, 'Edit graph'],
+        ['save-section', '', false, false, 'Save the current filters'],
+        ['edit-section', 'shared', false, false, 'Edit shared'],
+        ['save-device', '', false, false, 'Device only'],
+        ['save-graph', '', false, false, 'Save in graph'],
+        ['save-graph-edit', '', false, false, 'Save changes']]
+        .map(([axis, name, selected, missing, expected]) => {
+          const view = runtime.run('view', {inputs: input('view-item', {axis, name, selected, missing})});
+          return [axis, textOf(GraphdenRenderer.vnode(view.get(key('tree')), axis, 48)), expected,
+            GraphdenStyles.normalize(view.get(key('styles'))).length];
+        });
       const kinds = ['remove-namespace', 'remove-exclude', 'remove-uses', 'remove-effect',
         'remove-unused', 'remove-name', 'remove-view', 'select-namespace', 'restore-exclude',
-        'select-effect', 'select-view', 'select-unused', 'pick-uses'];
+        'select-effect', 'select-view', 'select-unused', 'pick-uses', 'clear-view',
+        'apply-device-view', 'apply-graph-view', 'delete-device-view', 'edit-graph-view',
+        'open-graph-view', 'save-device-view', 'save-graph-view'];
       const requests = kinds.map(kind => {
         const transition = runtime.run('update', {state: record({handled: false}),
           event: record({kind, value: 'exact-value'})});
@@ -160,9 +180,27 @@ const {assert, newContext, BASE} = require('./edit-test-helpers');
       });
       const unknown = runtime.run('update', {state: record({handled: false}),
         event: record({kind: 'forged-filter-request', value: 'exact-value'})});
+      const formPolicies = [
+        [{}, {visible: true, mode: 'save', 'device-available': true,
+          'graph-visible': true, 'graph-available': true, 'enter-target': 'graph', 'name-valid': true}],
+        [{editing: true, active: false}, {visible: true, mode: 'edit'}],
+        [{authenticated: false}, {'graph-available': false}],
+        [{share: false}, {'graph-visible': false, 'enter-target': 'device'}],
+        [{pending: true, name: ' \t '}, {'device-available': false,
+          'graph-available': false, 'enter-target': 'none', 'name-valid': false}],
+      ].map(([changes, expected]) => {
+        const facts = {active: true, editing: false, authenticated: true,
+          share: true, pending: false, name: ' café ', ...changes};
+        const supplied = input('view-form', {axis: '', name: facts.name, selected: facts.active, missing: false});
+        supplied.set(key('selected'), new Map([['view-editing', facts.editing],
+          ['share-available', facts.share], ['pending', facts.pending]]));
+        supplied.set(key('authenticated'), facts.authenticated);
+        const actual = runtime.run('initial', {inputs: supplied});
+        return Object.entries(expected).every(([name, value]) => actual.get(key(name)) === value);
+      });
       return {available: true, functionCount: result.plan.functions.length,
-        chips, missing: textOf(GraphdenRenderer.vnode(
-        missing.get(key('tree')), 'missing', 48)), options, requests,
+        chips, formPolicies, missing: textOf(GraphdenRenderer.vnode(
+        missing.get(key('tree')), 'missing', 48)), options, viewItems, requests,
         unknown: [...unknown.get(key('requests'))].length,
         styles: GraphdenStyles.normalize(missing.get(key('styles'))).length};
     });
@@ -170,12 +208,70 @@ const {assert, newContext, BASE} = require('./edit-test-helpers');
       && server.chips.every(([, actual, expected]) => actual === expected + '×')
       && server.missing === '⚠ view saved×'
       && server.options.every(([, actual, expected]) => actual === expected)
-      && server.requests.length === 13
+      && server.viewItems.every(([, actual, expected, styles]) => actual === expected && styles > 0)
+      && server.requests.length === 21
       && server.requests.every(([kind, requests]) =>
         JSON.stringify(requests) === JSON.stringify([[kind, 'exact-value']]))
-      && server.unknown === 0 && server.styles > 0,
+      && server.formPolicies.every(Boolean) && server.unknown === 0 && server.styles > 0,
     'actual server-selected source exports every filter axis, option, typed request, and styles: '
       + JSON.stringify(server));
+
+    stage = 'saved-view popup draft, actions and visual';
+    const savedName = 'popup-device-' + Date.now().toString(36);
+    await page.evaluate(() => {
+      window.__originalViewFetch = window.gdFetchSharedViews;
+      gdInvalidateSharedViews();
+      window.gdFetchSharedViews = () => new Promise(resolve => {
+        window.__releaseViewFetch = () => resolve([]);
+      });
+    });
+    await page.locator('#gd-ws-chip').click();
+    const popupInput = page.locator('#gd-ws-pop .gd-views-input');
+    await popupInput.fill(savedName);
+    await popupInput.focus();
+    await page.evaluate(() => {
+      window.__savedViewInput = document.querySelector('#gd-ws-pop .gd-views-input');
+      window.__savedViewRow = document.querySelector('#gd-ws-pop [data-ws-all]');
+      window.__releaseViewFetch();
+    });
+    assert(await page.evaluate(() => {
+      const pop = document.getElementById('gd-ws-pop');
+      const input = pop?.querySelector('.gd-views-input');
+      return input === window.__savedViewInput && input.value && document.activeElement === input
+        && pop.querySelector('[data-ws-all]') === window.__savedViewRow
+        && GraphdenRenderer.ownsTarget(pop.querySelector('.gd-view-graph-host'))
+        && document.querySelectorAll('style[data-gd-ui-styles="' + pop.dataset.gdUiStyle + '"]').length === 1;
+    }), 'late graph-list refresh retains the exact focused draft/all action and one shared sheet');
+    await page.evaluate(() => { window.gdFetchSharedViews = window.__originalViewFetch; });
+    await page.getByRole('button', {name: 'Device only', exact: true}).click();
+    assert(await page.evaluate(name => gdReadViews().some(view => view.name === name)
+      && document.querySelector('#gd-ws-pop .gd-views-input') === window.__savedViewInput
+      && document.querySelector('#gd-ws-pop [data-view-row="device:' + name + '"] .gd-views-apply')?.textContent === '● ' + name,
+    savedName), 'typed graph request saves the exact device view without replacing the draft');
+    await page.screenshot({path: '/tmp/gd-explorer-views-light.png'});
+    await page.evaluate(() => document.body.classList.add('theme-dark'));
+    await page.screenshot({path: '/tmp/gd-explorer-views-dark.png'});
+    await page.evaluate(() => document.body.classList.remove('theme-dark'));
+    await page.keyboard.press('Escape');
+    await page.evaluate(name => gdDeleteView(name), savedName);
+
+    const manyViews = await page.evaluate(() => {
+      const before = localStorage.getItem('graphden.explorer.views');
+      try {
+        gdWriteViews(Array.from({length: 540}, (_, index) => ({name: 'device-' + index, filters: gdEmptyFilters()})));
+        gdOpenViewPop(document.getElementById('gd-ws-chip'));
+        const pop = document.getElementById('gd-ws-pop');
+        return {count: pop.querySelectorAll('[data-view-row^="device:"]').length,
+          owned: GraphdenRenderer.ownsTarget(pop.querySelector('[data-view-row="device:device-539"] .gd-view-graph-host')),
+          sheetCount: document.querySelectorAll('style[data-gd-ui-styles="' + pop.dataset.gdUiStyle + '"]').length};
+      } finally {
+        gdCloseViewPop();
+        if (before === null) localStorage.removeItem('graphden.explorer.views');
+        else localStorage.setItem('graphden.explorer.views', before);
+      }
+    });
+    assert(manyViews.count === 540 && manyViews.owned && manyViews.sheetCount === 1,
+      '540 device views render without a popup collection cap or per-row stylesheet');
 
     stage = 'visual and auth lifetime';
     await page.screenshot({path: '/tmp/gd-explorer-filters-light.png'});

@@ -578,7 +578,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: crate-ci/typos@v1.50.2
+      - uses: crate-ci/typos@v1.51.1
 
   markdownlint:
     needs: release-proof-guard

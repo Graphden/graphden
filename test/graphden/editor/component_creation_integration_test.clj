@@ -228,20 +228,30 @@
       (is (pos? (get-in @profile [:fn :count] 0)) "observe actual function metadata reads")
       (is (<= (reduce + (map :count (vals @profile))) (* 16 (count fn-ids)))
           (str "publication must avoid repeated metadata/item reads: " (pr-str @profile)))
+      (let [batches (quot (+ (count fn-ids) 255) 256)]
+        (doseq [family [:binding :binding-list-item]]
+          (is (<= (get-in @profile [family :count] 0) (* 16 batches))
+              (str "import owner reads must scale with bounded batches, not function count: "
+                   (pr-str (select-keys @profile [:binding :binding-list-item]))))))
       (with-redefs [jdbc/execute! reader]
         (recheck/record-imported-fn-types! ctx (vs/current-branch-id storage) fn-ids))
       (is (= 2 @queries) "a later import obtains fresh metadata instead of a global cached view")
-      (let [row (some #(let [row (sp/read-entity storage :fn %)]
-                         (when (seq (:parent-ids row)) row)) fn-ids)
+      (let [bound-id (:fn-id (first (sp/query-entities storage :binding {:fn-id fn-ids})))
+            row (or (when bound-id (sp/read-entity storage :fn bound-id))
+                    (some #(let [row (sp/read-entity storage :fn %)]
+                             (when (seq (:parent-ids row)) row)) fn-ids))
             read-name (fn []
                         (jdbc/with-transaction [connection (tx/datasource storage)
                                                 {:isolation :repeatable-read :read-only true}]
-                                               (let [snapshot (tx/with-connection storage connection)]
+                                               (let [snapshot (tx/with-connection storage connection)
+                                                     ordinary (reconstruction/reconstruct-fn-def snapshot (:id row))]
                                                  (reconstruction/call-with-reconstruction-memo
                                                    snapshot
                                                    (fn []
+                                                     (reconstruction/prefetch-reconstruction-owners! snapshot [(:id row)])
                                                      (let [first-read (reconstruction/reconstruct-fn-def snapshot (:id row))
                                                            repeated-read (reconstruction/reconstruct-fn-def snapshot (:id row))]
+                                                       (is (= ordinary first-read) "prefetched owner reconstructs the same graph")
                                                        (is (= first-read repeated-read) "metadata reuse preserves reconstruction")
                                                        (:name repeated-read)))))))]
         (is (some? row))
@@ -402,7 +412,11 @@
 (deftest legacy-four-slot-preferences-remain-functional-and-missing-components-fallback
   (let [ctx (:ctx ga/*bootstrap*)
         storage (:storage ctx)
-        manifest (get-in (apply-preview (preview)) [:body :manifest])
+        applied (apply-preview (preview))
+        manifest (get-in applied [:body :manifest])
+        publication (some #(when (= 'record-imported-fn-types! (:stage %)) %)
+                          (:creation-phases applied))
+        batches (quot (+ (count (:functions manifest)) 255) 256)
         root (:path (first (:namespaces manifest)))
         id (records/fn-id root :legacy-ui)
         definition {:name :legacy-ui :namespace root :parent :app.ui-components/ui-components
@@ -411,6 +425,11 @@
                            :menu-view (keyword (str root ".menu") "account-menu-view")
                            :picker-view (keyword (str root ".picker") "picker-view")}}
         preference {:fn-id (str id) :branch-id (str (vs/current-branch-id storage)) :org "public"}]
+    (is (= 200 (:status applied)))
+    (is (:complete publication) "the full legacy import publishes its types synchronously")
+    (doseq [family [:binding :binding-list-item]]
+      (is (<= (get-in publication [:sql-profile family :count] 0) (* 16 batches))
+          (str "full import owner reads must scale with batches: " family)))
     ((impls/impl-of :sync-fn-defs-branch!)
      {:branch-id (vs/current-branch-id storage) :fn-defs [definition]} ctx)
     (if-let [prior (first (sp/query-entities storage :ui-pref {:owner-id "anonymous" :key "components"}))]

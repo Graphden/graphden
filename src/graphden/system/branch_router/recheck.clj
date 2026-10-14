@@ -168,7 +168,9 @@
       (let [options {:namespace-paths (delay (ns-path/path-map (sp/query-entities snapshot :ns {})))}]
         (type-check/call-with-reconstruction-memo
           snapshot
-          #(record-fn-types! (assoc branch-ctx :storage snapshot) branch-id fn-ids options))))))
+          #(do
+             (type-check/prefetch-reconstruction-owners! snapshot fn-ids)
+             (record-fn-types! (assoc branch-ctx :storage snapshot) branch-id fn-ids options)))))))
 
 
 (defn- record-ordered-snapshot!

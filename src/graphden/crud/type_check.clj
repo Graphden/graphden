@@ -41,17 +41,70 @@
 
 
 (defn call-with-reconstruction-memo
-  "Reuse exact metadata reads only within a decorated read-only snapshot.
-   Binding/list-item rows are not cached; ordinary CRUD reads stay unchanged."
+  "Reuse metadata reads only within a decorated read-only snapshot.
+   An import may additionally preload its exact owners; ordinary CRUD reads
+   stay unchanged."
   [storage f]
   (let [connection (tx/datasource storage)]
     (if (and (instance? Connection connection)
              (Connection/.isReadOnly ^Connection connection)
              (= Connection/TRANSACTION_REPEATABLE_READ
                 (Connection/.getTransactionIsolation ^Connection connection)))
-      (binding [*reconstruction-reads* {:storage storage :org (tc/current-org) :entries (atom {})}]
+      (binding [*reconstruction-reads* {:storage storage :org (tc/current-org)
+                                        :entries (atom {}) :owners (atom nil)}]
         (f))
       (f))))
+
+
+(def ^:private owner-prefetch-batch-size 256)
+
+
+(defn- query-owner-batches
+  [storage entity owner-field ids]
+  (into []
+        (mapcat #(sp/query-entities storage entity {owner-field (vec %)}))
+        (partition-all owner-prefetch-batch-size ids)))
+
+
+(defn prefetch-reconstruction-owners!
+  "Within the current import snapshot, load only the fn owners scheduled for
+   recheck and their list items. Empty owners are complete negative hits.
+   Install the index only after every bounded query succeeds; an unrelated
+   owner or a different storage/org still takes its normal read path."
+  [storage fn-ids]
+  (when-let [scope *reconstruction-reads*]
+    (when (and (identical? storage (:storage scope))
+               (= (tc/current-org) (:org scope)))
+      (let [owners (vec (distinct fn-ids))
+            bindings (query-owner-batches storage :binding :fn-id owners)
+            fn-slots (query-owner-batches storage :fn-slot :fn-id owners)
+            binding-ids (vec (distinct (map :id bindings)))
+            items (query-owner-batches storage :binding-list-item :binding-id binding-ids)]
+        (reset! (:owners scope)
+                {:fn-ids (set owners)
+                 :bindings (group-by :fn-id bindings)
+                 :fn-slots (group-by :fn-id fn-slots)
+                 :binding-ids (set binding-ids)
+                 :items (group-by :binding-id items)})))))
+
+
+(defn- prefetched-owner-query
+  [index entity argument]
+  (when (and index (map? argument))
+    (case entity
+      :binding (when (and (= [:fn-id] (vec (keys argument)))
+                          (contains? (:fn-ids index) (:fn-id argument)))
+                 (get (:bindings index) (:fn-id argument) []))
+      :fn-slot (when (and (= [:fn-id] (vec (keys argument)))
+                          (contains? (:fn-ids index) (:fn-id argument)))
+                 (get (:fn-slots index) (:fn-id argument) []))
+      :binding-list-item
+      (let [ids (:binding-id argument)]
+        (when (and (= [:binding-id] (vec (keys argument)))
+                   (sequential? ids)
+                   (every? (:binding-ids index) ids))
+          (into [] (mapcat #(get (:items index) % [])) ids)))
+      nil)))
 
 
 (defn- reconstruction-read
@@ -61,9 +114,14 @@
                   :one (sp/read-entity storage entity argument)
                   :many (sp/read-entities storage entity argument)
                   :query (sp/query-entities storage entity argument)))
-        scope *reconstruction-reads*]
-    (if (and scope (identical? storage (:storage scope))
-             (= (tc/current-org) (:org scope)) (#{:fn :slot :fn-slot} entity))
+        scope *reconstruction-reads*
+        scoped? (and scope (identical? storage (:storage scope))
+                     (= (tc/current-org) (:org scope)))
+        prefetched (when (and scoped? (= operation :query))
+                     (prefetched-owner-query @(:owners scope) entity argument))]
+    (cond
+      (some? prefetched) prefetched
+      (and scoped? (#{:fn :slot :fn-slot} entity))
       (let [key [operation entity argument]
             entries (:entries scope)]
         (if-let [hit (find @entries key)]
@@ -73,7 +131,7 @@
             (when (< (count @entries) 4096)
               (swap! entries assoc key result))
             result)))
-      (fetch))))
+      :else (fetch))))
 
 
 (def ^:dynamic *request-alias-view?*

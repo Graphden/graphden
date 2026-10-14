@@ -136,50 +136,27 @@ function renderNsNode(container, name, node, path, searchMode) {
   header.setAttribute('role', 'treeitem');
   header.setAttribute('aria-level', String(path ? path.split('.').length + 1 : 1));
   header.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
+  header.setAttribute('aria-label', name);
   header.setAttribute('tabindex', '-1');
-
-  const arrow = document.createElement('span');
-  arrow.className = 'ns-arrow' + (isCollapsed ? ' collapsed' : '');
-  arrow.textContent = isCollapsed ? '\u25B6' : '\u25BC';
-  header.appendChild(arrow);
-
-  const label = document.createElement('span');
-  label.className = 'ns-label';
-  label.textContent = name;
-  header.appendChild(label);
   // Type-error chip (error-tolerance Phase 3) — server-computed
   // per-namespace count of recorded type diagnostics on the current
   // branch (`:type-error-count` on the `:tree` counts payload).
   const nsTypeErrs = node?.nsId != null
     ? (lookups?.nsTypeErrors?.get(node.nsId) || 0) : 0;
-  if (nsTypeErrs > 0) {
-    const chip = document.createElement('span');
-    chip.className = 'ns-type-error-chip';
-    chip.textContent = '⚠ ' + nsTypeErrs;
-    chip.title = nsTypeErrs + ' type error' + (nsTypeErrs === 1 ? '' : 's')
-      + ' in this namespace';
-    header.appendChild(chip);
-  }
   // Failed-runs / lint chips — the same per-namespace idea over the two
   // primed caches (editor-problems.js): fns with problems in this namespace.
-  if (node?.nsId !== undefined) {
-    const nsFailed = (typeof nsFailureCount === 'function') ? nsFailureCount(node.nsId) : 0;
-    if (nsFailed > 0) {
-      const chip = document.createElement('span');
-      chip.className = 'ns-problem-chip ns-failed-chip';
-      chip.textContent = '✕ ' + nsFailed;
-      chip.title = nsFailed + ' unresolved failed run' + (nsFailed === 1 ? '' : 's') + ' in this namespace';
-      header.appendChild(chip);
-    }
-    const nsLint = (typeof nsLintCount === 'function') ? nsLintCount(node.nsId) : 0;
-    if (nsLint > 0) {
-      const chip = document.createElement('span');
-      chip.className = 'ns-problem-chip ns-lint-chip';
-      chip.textContent = '⚐ ' + nsLint;
-      chip.title = nsLint + ' fn' + (nsLint === 1 ? '' : 's') + ' with lint findings in this namespace';
-      header.appendChild(chip);
-    }
-  }
+  const nsFailed = node?.nsId !== undefined && typeof nsFailureCount === 'function'
+    ? nsFailureCount(node.nsId) : 0;
+  const nsLint = node?.nsId !== undefined && typeof nsLintCount === 'function'
+    ? nsLintCount(node.nsId) : 0;
+  const body = document.createElement('span');
+  body.className = 'gd-explorer-namespace-host';
+  header.appendChild(body);
+  window.gdExplorerGraph.mountNamespace(body, {
+    name, expanded: !isCollapsed, pseudo: false, count: 0,
+    'type-errors': explorerRowCount(nsTypeErrs), failed: explorerRowCount(nsFailed),
+    lint: explorerRowCount(nsLint),
+  });
   // All three right-edge icons live in one group. Order:
   //   ✎ (rename, hover-only)  +  + (create-child, hover-only)  +  i (description, always)
   // The always-visible `i` sits LAST so the empty slots left by the
@@ -188,6 +165,7 @@ function renderNsNode(container, name, node, path, searchMode) {
   // left of the `i`.
   const actions = document.createElement('span');
   actions.className = 'ns-row-actions';
+  header.appendChild(actions);
   if (node?.nsId && typeof buildNsRowButtons === 'function') {
     buildNsRowButtons(actions, node.nsId, nsPath);
   }
@@ -199,7 +177,7 @@ function renderNsNode(container, name, node, path, searchMode) {
     });
     if (desc) actions.appendChild(desc);
   }
-  if (actions.children.length > 0) header.appendChild(actions);
+  if (actions.children.length === 0) actions.remove();
 
   header.onclick = (e) => {
     e.stopPropagation();
@@ -223,8 +201,7 @@ function renderNsNode(container, name, node, path, searchMode) {
         window.gdExplorerGraph?.disposeRows(cg);
         cg.remove();
       }
-      arrow.classList.add('collapsed');
-      arrow.textContent = '▶';
+      window.gdExplorerGraph.updateNamespace(body, false);
       // The arrow is the sighted cue; aria-expanded is the other half of it.
       // Setting it only at build time (as this did) leaves a screen reader —
       // and the keyboard navigation, which reads this attribute to decide
@@ -235,8 +212,7 @@ function renderNsNode(container, name, node, path, searchMode) {
       // rows/namespaces set their own `hidden` overlay, so no global resync is
       // needed here — a lazy load (buildNsChildGroup) does its own resync.
       expandedNamespaces.add(nsPath);
-      arrow.classList.remove('collapsed');
-      arrow.textContent = '▼';
+      window.gdExplorerGraph.updateNamespace(body, true);
       header.setAttribute('aria-expanded', 'true');
       // Fresh node (current `.fns`), never the one captured when this header
       // was built — see refreshLoadedNamespace / treeNodeAt.

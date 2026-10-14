@@ -180,14 +180,16 @@ const {assert, newContext, BASE} = require('./edit-test-helpers');
         await gdExplorerGraph.reload();
       }
     });
-    assert(fallback.toolbar === 11 && fallback.names > 0 && fallback.status.includes('rows')
-      && fallback.fallbackCalls === 1 && fallback.surfaces.includes('row'),
-    'legacy personal view keeps the toolbar while only rows use the built-in graph');
+    assert(fallback.toolbar === 11 && fallback.names > 0 && fallback.status.includes('namespaces')
+      && fallback.fallbackCalls === 2
+      && fallback.surfaces.includes('row') && fallback.surfaces.includes('namespace'),
+    'legacy personal toolbar keeps both tree-body sections on the built-in graph');
     stage = 'auth lifetime';
     const authChange = await page.evaluate(async () => {
       const list = document.getElementById('entity-list');
       const priorGraph = graphData;
       const oldHost = list.querySelector('.gd-explorer-row-host');
+      const oldNamespaceHost = list.querySelector('.gd-explorer-namespace-host');
       const style = list.dataset.gdUiStyle;
       const secret = '/previous-owner/private';
       const fixture = document.createElement('span');
@@ -209,6 +211,7 @@ const {assert, newContext, BASE} = require('./edit-test-helpers');
         const blocked = graphData === null && _knownFns.size === 0 && _secretsList.length === 0
           && !list.textContent.includes(secret) && !list.querySelector('.entity-item')
           && !GraphdenRenderer.ownsTarget(oldHost)
+          && !GraphdenRenderer.ownsTarget(oldNamespaceHost)
           && !list.dataset.gdUiStyle
           && !document.querySelector('style[data-gd-ui-styles="' + style + '"]');
         release();

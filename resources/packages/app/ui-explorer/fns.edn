@@ -1,8 +1,9 @@
 {:namespace "app.ui-explorer"
- :description "Explorer kind toolbar and function-row presentation over authorized host projections."
+ :description "Explorer toolbar, function rows and namespace headers over authorized host projections."
  :fns [{:name :_explorer-toolbar-state :type {:handled :bool}}
        {:name :_explorer-row-input :type {:name :text :secret :bool :secret-path :text :service :bool :service-state :text :app :bool :app-hosts :text :type :bool :test :bool :test-status :text :test-error :text :failed :int :type-errors :int :lint :int :effects :text}}
-       {:name :_explorer-toolbar-inputs :type {:surface :text :row :_explorer-row-input :selected [:map :text :bool] :counts [:map :text [:union :null :int]] :failed :int :authenticated :bool :apps-available :bool :fx :bool}}
+       {:name :_explorer-namespace-input :type {:name :text :expanded :bool :pseudo :bool :count :int :type-errors :int :failed :int :lint :int}}
+       {:name :_explorer-toolbar-inputs :type {:surface :text :row :_explorer-row-input :namespace :_explorer-namespace-input :selected [:map :text :bool] :counts [:map :text [:union :null :int]] :failed :int :authenticated :bool :apps-available :bool :fx :bool}}
        {:name :_explorer-toolbar-event :type {:kind :text :value :text}}
        {:name :_explorer-toolbar-request :type {:kind :text :value :text}}
        {:name :_explorer-toolbar-requests :list :_explorer-toolbar-request}
@@ -10,7 +11,9 @@
        {:name :explorer-toolbar-initial :parent :const :args {:value {:value {:handled false}}} :return-type :_explorer-toolbar-state}
        {:name :_explorer-input-surface :parent :get :args {:coll {:as :inputs :type :_explorer-toolbar-inputs} :key {:value :surface} :default {:value "toolbar"}}}
        {:name :_explorer-is-row :parent :equal? :args {:a :_explorer-input-surface :b "row"}}
+       {:name :_explorer-is-namespace :parent :equal? :args {:a :_explorer-input-surface :b "namespace"}}
        {:name :_explorer-input-row :parent :get :args {:coll {:as :inputs :type :_explorer-toolbar-inputs} :key {:value :row}}}
+       {:name :_explorer-input-namespace :parent :get :args {:coll {:as :inputs :type :_explorer-toolbar-inputs} :key {:value :namespace}}}
        {:name :_explorer-input-selected :parent :get :args {:coll {:as :inputs :type :_explorer-toolbar-inputs} :key {:value :selected} :default {:value {}}}}
        {:name :_explorer-input-counts :parent :get :args {:coll {:as :inputs :type :_explorer-toolbar-inputs} :key {:value :counts} :default {:value {}}}}
        {:name :_explorer-input-failed :parent :get :args {:coll {:as :inputs :type :_explorer-toolbar-inputs} :key {:value :failed} :default {:value 0}}}
@@ -261,8 +264,54 @@
        {:name :_explorer-row-path-visible :parent :if :args {:test :_explorer-row-no-path :then nil :else :_explorer-row-path-node}}
        {:name :_explorer-row-tree :parent :hiccup :args {:tag "span" :attrs {:value {:class "gd-explorer-row"}} :children [:_explorer-row-lock-visible :_explorer-row-service-visible :_explorer-row-app-visible :_explorer-row-type-visible :_explorer-row-test-visible :_explorer-row-failed-visible :_explorer-row-type-errors-visible :_explorer-row-lint-visible :_explorer-row-effects-visible :_explorer-row-name-node :_explorer-row-path-visible]}}
        {:name :_explorer-row-styles :parent :const :args {:value {:value [{:selector "& .gd-explorer-row" :declarations {"display" "inline-flex" "align-items" "center" "min-width" "0" "gap" "0"}} {:selector "& .gd-explorer-row .name" :declarations {"font-weight" "400" "font-size" "0.8125rem"}} {:selector "& .entity-secret .gd-explorer-row .name" :declarations {"flex" "0 0 auto"}} {:selector "& .gd-explorer-row .secret-path" :declarations {"flex" "1 1 auto" "font-family" "monospace" "font-size" "0.6875rem" "color" "var(--card-fg)" "opacity" "0.7" "margin-left" "4px" "white-space" "nowrap" "overflow" "hidden" "text-overflow" "ellipsis"}} {:selector "& .gd-explorer-row .secret-lock-icon" :declarations {"font-size" "0.6875rem" "margin-inline" "0 2px" "flex" "0 0 auto"}} {:selector "& .gd-explorer-row .fn-kind-marker" :declarations {"font-size" "0.625rem" "margin-inline" "0 2px" "flex" "0 0 auto" "color" "var(--muted-fg)"}} {:selector "& .gd-explorer-row .kind-marker-failed" :declarations {"color" "var(--error-fg-strong)"}} {:selector "& .gd-explorer-row .kind-marker-type-error" :declarations {"color" "var(--warning-fg)"}} {:selector "& .gd-explorer-row .kind-marker-lint" :declarations {"color" "var(--muted-fg)"}} {:selector "& .gd-explorer-row .kind-marker-service.svc-running" :declarations {"color" "var(--success-fg)"}} {:selector "& .gd-explorer-row .kind-marker-service.svc-failed" :declarations {"color" "var(--error-fg)"}} {:selector "& .gd-explorer-row .kind-marker-service.svc-backoff" :declarations {"color" "var(--warning-fg)"}} {:selector "& .gd-explorer-row .kind-marker-service.svc-exited" :declarations {"color" "var(--warning-fg)" "opacity" "0.8"}} {:selector "& .gd-explorer-row .kind-marker-service.svc-disabled" :declarations {"opacity" "0.65"}} {:selector "& .gd-explorer-row .kind-marker-app" :declarations {"color" "var(--accent)"}} {:selector "& .gd-explorer-row .kind-marker-fx" :declarations {"font-style" "italic" "opacity" "0.8"}} {:selector "& .gd-explorer-row .kind-marker-type" :declarations {"font-size" "0.5625rem" "opacity" "0.8"}} {:selector "& .gd-explorer-row .kind-marker-test.test-passed" :declarations {"color" "var(--success-fg)"}} {:selector "& .gd-explorer-row .kind-marker-test.test-failed" :declarations {"color" "var(--error-fg)"}} {:selector "& .gd-explorer-row .kind-marker-test.test-stale" :declarations {"opacity" "0.65"}}]}} :return-type [:list {:selector :text :declarations [:map :text :text]}]}
+       {:name :_explorer-ns-name :parent :get :args {:coll :_explorer-input-namespace :key {:value :name}}}
+       {:name :_explorer-ns-expanded :parent :get :args {:coll :_explorer-input-namespace :key {:value :expanded}}}
+       {:name :_explorer-ns-pseudo :parent :get :args {:coll :_explorer-input-namespace :key {:value :pseudo}}}
+       {:name :_explorer-ns-count :parent :get :args {:coll :_explorer-input-namespace :key {:value :count}}}
+       {:name :_explorer-ns-type-errors :parent :get :args {:coll :_explorer-input-namespace :key {:value :type-errors}}}
+       {:name :_explorer-ns-failed :parent :get :args {:coll :_explorer-input-namespace :key {:value :failed}}}
+       {:name :_explorer-ns-lint :parent :get :args {:coll :_explorer-input-namespace :key {:value :lint}}}
+       {:name :_explorer-ns-arrow-class :parent :if :args {:test :_explorer-ns-expanded :then "ns-arrow" :else "ns-arrow collapsed"}}
+       {:name :_explorer-ns-arrow-glyph :parent :if :args {:test :_explorer-ns-expanded :then "▼" :else "▶"}}
+       {:name :_explorer-ns-arrow-attrs :parent :zipmap :args {:keys [{:value :class}] :vals [:_explorer-ns-arrow-class]}}
+       {:name :_explorer-ns-arrow :parent :hiccup :args {:tag "span" :attrs :_explorer-ns-arrow-attrs :children [:_explorer-ns-arrow-glyph]}}
+       {:name :_explorer-ns-label-plain :parent :const :args {:value {:value {:class "ns-label"}}}}
+       {:name :_explorer-ns-label-pseudo :parent :const :args {:value {:value {:class "ns-label" :title "Namespace-less entities — the boot-seeded primitive types, plus any top-level fn"}}}}
+       {:name :_explorer-ns-label-attrs :parent :if :args {:test :_explorer-ns-pseudo :then :_explorer-ns-label-pseudo :else :_explorer-ns-label-plain}}
+       {:name :_explorer-ns-label :parent :hiccup :args {:tag "span" :attrs :_explorer-ns-label-attrs :children [:_explorer-ns-name]}}
+       {:name :_explorer-ns-count-node :parent :hiccup :args {:tag "span" :attrs {:value {:class "ns-count"}} :children [:_explorer-ns-count]}}
+       {:name :_explorer-ns-count-visible :parent :if :args {:test :_explorer-ns-pseudo :then :_explorer-ns-count-node :else nil}}
+       {:name :_explorer-ns-type-zero :parent :equal? :args {:a :_explorer-ns-type-errors :b 0}}
+       {:name :_explorer-ns-type-one :parent :equal? :args {:a :_explorer-ns-type-errors :b 1}}
+       {:name :_explorer-ns-type-suffix :parent :if :args {:test :_explorer-ns-type-one :then "" :else "s"}}
+       {:name :_explorer-ns-type-title :parent :str :args {:parts [:_explorer-ns-type-errors " type error" :_explorer-ns-type-suffix " in this namespace"]}}
+       {:name :_explorer-ns-type-glyph :parent :str :args {:parts ["⚠ " :_explorer-ns-type-errors]}}
+       {:name :_explorer-ns-type-attrs :parent :zipmap :args {:keys [{:value :class} {:value :title}] :vals ["ns-type-error-chip" :_explorer-ns-type-title]}}
+       {:name :_explorer-ns-type-node :parent :hiccup :args {:tag "span" :attrs :_explorer-ns-type-attrs :children [:_explorer-ns-type-glyph]}}
+       {:name :_explorer-ns-type-visible :parent :if :args {:test :_explorer-ns-type-zero :then nil :else :_explorer-ns-type-node}}
+       {:name :_explorer-ns-failed-zero :parent :equal? :args {:a :_explorer-ns-failed :b 0}}
+       {:name :_explorer-ns-failed-one :parent :equal? :args {:a :_explorer-ns-failed :b 1}}
+       {:name :_explorer-ns-failed-suffix :parent :if :args {:test :_explorer-ns-failed-one :then "" :else "s"}}
+       {:name :_explorer-ns-failed-title :parent :str :args {:parts [:_explorer-ns-failed " unresolved failed run" :_explorer-ns-failed-suffix " in this namespace"]}}
+       {:name :_explorer-ns-failed-glyph :parent :str :args {:parts ["✕ " :_explorer-ns-failed]}}
+       {:name :_explorer-ns-failed-attrs :parent :zipmap :args {:keys [{:value :class} {:value :title}] :vals ["ns-problem-chip ns-failed-chip" :_explorer-ns-failed-title]}}
+       {:name :_explorer-ns-failed-node :parent :hiccup :args {:tag "span" :attrs :_explorer-ns-failed-attrs :children [:_explorer-ns-failed-glyph]}}
+       {:name :_explorer-ns-failed-visible :parent :if :args {:test :_explorer-ns-failed-zero :then nil :else :_explorer-ns-failed-node}}
+       {:name :_explorer-ns-lint-zero :parent :equal? :args {:a :_explorer-ns-lint :b 0}}
+       {:name :_explorer-ns-lint-one :parent :equal? :args {:a :_explorer-ns-lint :b 1}}
+       {:name :_explorer-ns-lint-suffix :parent :if :args {:test :_explorer-ns-lint-one :then "" :else "s"}}
+       {:name :_explorer-ns-lint-title :parent :str :args {:parts [:_explorer-ns-lint " fn" :_explorer-ns-lint-suffix " with lint findings in this namespace"]}}
+       {:name :_explorer-ns-lint-glyph :parent :str :args {:parts ["⚐ " :_explorer-ns-lint]}}
+       {:name :_explorer-ns-lint-attrs :parent :zipmap :args {:keys [{:value :class} {:value :title}] :vals ["ns-problem-chip ns-lint-chip" :_explorer-ns-lint-title]}}
+       {:name :_explorer-ns-lint-node :parent :hiccup :args {:tag "span" :attrs :_explorer-ns-lint-attrs :children [:_explorer-ns-lint-glyph]}}
+       {:name :_explorer-ns-lint-visible :parent :if :args {:test :_explorer-ns-lint-zero :then nil :else :_explorer-ns-lint-node}}
+       {:name :_explorer-ns-tree :parent :hiccup :args {:tag "span" :attrs {:value {:class "gd-explorer-namespace"}} :children [:_explorer-ns-arrow :_explorer-ns-label :_explorer-ns-count-visible :_explorer-ns-type-visible :_explorer-ns-failed-visible :_explorer-ns-lint-visible]}}
+       {:name :_explorer-ns-styles :parent :const :args {:value {:value [{:selector "& .gd-explorer-namespace-host .gd-explorer-namespace" :declarations {"display" "inline-flex" "align-items" "center" "min-width" "0"}} {:selector "& .gd-explorer-namespace-host .gd-explorer-namespace .ns-arrow" :declarations {"width" "16px" "font-size" "0.625rem" "color" "var(--muted-fg)" "flex" "0 0 auto" "text-align" "center"}} {:selector "& .gd-explorer-namespace-host .gd-explorer-namespace .ns-label" :declarations {"font-size" "0.8125rem" "font-weight" "600" "color" "var(--fg)"}} {:selector "& .gd-explorer-namespace-host.pseudo .gd-explorer-namespace .ns-label" :declarations {"font-style" "italic" "color" "var(--muted-fg)"}} {:selector "& .gd-explorer-namespace-host .gd-explorer-namespace .ns-count" :declarations {"margin-left" "6px" "font-size" "0.625rem" "color" "var(--muted-fg)" "font-style" "italic"}} {:selector "& .gd-explorer-namespace-host .gd-explorer-namespace .ns-type-error-chip" :declarations {"margin-left" "6px" "font-size" "0.625rem" "color" "var(--error-fg-strong)" "flex" "0 0 auto"}} {:selector "& .gd-explorer-namespace-host .gd-explorer-namespace .ns-problem-chip" :declarations {"margin-left" "6px" "font-size" "0.625rem" "flex" "0 0 auto" "white-space" "nowrap"}} {:selector "& .gd-explorer-namespace-host .gd-explorer-namespace .ns-failed-chip" :declarations {"color" "var(--error-fg-strong)"}} {:selector "& .gd-explorer-namespace-host .gd-explorer-namespace .ns-lint-chip" :declarations {"color" "var(--muted-fg)"}}]}} :return-type [:list {:selector :text :declarations [:map :text :text]}]}
        {:name :_explorer-no-actions :parent :const :args {:value {:value {:secret false :dismiss false :run false}}}}
-       {:name :_explorer-view-tree :parent :if :args {:test :_explorer-is-row :then :_explorer-row-tree :else :_explorer-toolbar-tree}}
-       {:name :_explorer-view-styles :parent :if :args {:test :_explorer-is-row :then :_explorer-row-styles :else :explorer-styles}}
-       {:name :_explorer-view-actions :parent :if :args {:test :_explorer-is-row :then :_explorer-no-actions :else :_explorer-actions}}
+       {:name :_explorer-row-or-toolbar-tree :parent :if :args {:test :_explorer-is-row :then :_explorer-row-tree :else :_explorer-toolbar-tree}}
+       {:name :_explorer-row-or-toolbar-styles :parent :if :args {:test :_explorer-is-row :then :_explorer-row-styles :else :explorer-styles}}
+       {:name :_explorer-row-or-toolbar-actions :parent :if :args {:test :_explorer-is-row :then :_explorer-no-actions :else :_explorer-actions}}
+       {:name :_explorer-view-tree :parent :if :args {:test :_explorer-is-namespace :then :_explorer-ns-tree :else :_explorer-row-or-toolbar-tree}}
+       {:name :_explorer-view-styles :parent :if :args {:test :_explorer-is-namespace :then :_explorer-ns-styles :else :_explorer-row-or-toolbar-styles}}
+       {:name :_explorer-view-actions :parent :if :args {:test :_explorer-is-namespace :then :_explorer-no-actions :else :_explorer-row-or-toolbar-actions}}
        {:name :explorer-toolbar-view :parent :zipmap :args {:keys [{:value :tree} {:value :styles} {:value :actions}] :vals [:_explorer-view-tree :_explorer-view-styles :_explorer-view-actions]}}]}

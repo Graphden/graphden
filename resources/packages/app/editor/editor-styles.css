@@ -601,32 +601,6 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
    a left accent. No-op without the addon — the class is only added when the
    X-Graphden-Workspace header lists the namespace. */
 .ns-header.ns-in-workspace { border-left: 2px solid var(--accent); padding-left: 6px; }
-.ns-arrow { width: 16px; font-size: 0.625rem; color: var(--muted-fg); flex-shrink: 0; text-align: center; }
-.ns-label { font-size: 0.8125rem; font-weight: 600; color: var(--fg); }
-/* Item-count chip on the pseudo "(root)" group header. Italic +
-   muted so it reads as metadata not a name. */
-.ns-count {
-  margin-left: 6px;
-  font-size: 0.625rem;
-  color: var(--muted-fg);
-  font-style: italic;
-}
-/* Per-namespace type-error chip (error-tolerance Phase 3) — ⚠ N on a
-   namespace row when fns inside carry recorded type diagnostics on the
-   current branch. Count-chip sizing, error-colored to stand out. */
-.ns-type-error-chip {
-  margin-left: 6px;
-  font-size: 0.625rem;
-  color: var(--error-fg-strong);
-  flex-shrink: 0;
-}
-/* Failed-runs / lint chips on native namespace rows. Function-row markers
-   use the scoped app.ui-explorer style graph. */
-.ns-problem-chip { margin-left: 6px; font-size: 0.625rem; flex-shrink: 0; white-space: nowrap; }
-.ns-failed-chip { color: var(--error-fg-strong); }
-.ns-lint-chip { color: var(--muted-fg); }
-
-.ns-header-pseudo .ns-label { font-style: italic; color: var(--muted-fg); }
 .ns-children { padding-left: 16px; }
 #entity-list .entity-item { padding: 2px 8px 2px 24px; cursor: pointer;
   display: flex; align-items: center; }

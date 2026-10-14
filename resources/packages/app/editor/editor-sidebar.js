@@ -271,6 +271,7 @@ function refreshRootNode() {
   if (rootHeader) {
     const rootChildren = rootHeader.nextElementSibling?.classList.contains('ns-children')
       ? rootHeader.nextElementSibling : null;
+    window.gdExplorerGraph?.disposeRows(rootHeader);
     rootHeader.remove();
     if (rootChildren) {
       window.gdExplorerGraph?.disposeRows(rootChildren);
@@ -322,49 +323,24 @@ function renderRootNode(list, rootFns, searchMode) {
   header.setAttribute('role', 'treeitem');
   header.setAttribute('aria-level', '1');
   header.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  header.setAttribute('aria-label', '(primitives)');
   header.setAttribute('tabindex', '-1');
-  const arrow = document.createElement('span');
-  arrow.className = 'ns-arrow' + (isOpen ? '' : ' collapsed');
-  arrow.textContent = isOpen ? '▼' : '▶';
-  header.appendChild(arrow);
-  const label = document.createElement('span');
-  label.className = 'ns-label';
-  label.textContent = '(primitives)';
-  label.title = 'Namespace-less entities — the boot-seeded primitive types, plus any top-level fn';
-  header.appendChild(label);
-  const count = document.createElement('span');
-  count.className = 'ns-count';
-  count.textContent = loaded ? visible.length : rootCount;
-  header.appendChild(count);
   // Type-error chip for the null bucket — namespace-less fns' recorded
   // diagnostics land under the `null` key of the `:tree` counts payload.
   const rootTypeErrs = lookups?.nsTypeErrors?.get(null) || 0;
-  if (rootTypeErrs > 0) {
-    const chip = document.createElement('span');
-    chip.className = 'ns-type-error-chip';
-    chip.textContent = '⚠ ' + rootTypeErrs;
-    chip.title = rootTypeErrs + ' type error' + (rootTypeErrs === 1 ? '' : 's')
-      + ' in this namespace';
-    header.appendChild(chip);
-  }
   // Failed-runs / lint chips for the null bucket — same caches as the
   // namespace rows (editor-problems.js keys the root by null).
   const rootFailed = (typeof nsFailureCount === 'function') ? nsFailureCount(null) : 0;
-  if (rootFailed > 0) {
-    const chip = document.createElement('span');
-    chip.className = 'ns-problem-chip ns-failed-chip';
-    chip.textContent = '✕ ' + rootFailed;
-    chip.title = rootFailed + ' unresolved failed run' + (rootFailed === 1 ? '' : 's') + ' in this namespace';
-    header.appendChild(chip);
-  }
   const rootLint = (typeof nsLintCount === 'function') ? nsLintCount(null) : 0;
-  if (rootLint > 0) {
-    const chip = document.createElement('span');
-    chip.className = 'ns-problem-chip ns-lint-chip';
-    chip.textContent = '⚐ ' + rootLint;
-    chip.title = rootLint + ' fn' + (rootLint === 1 ? '' : 's') + ' with lint findings in this namespace';
-    header.appendChild(chip);
-  }
+  const body = document.createElement('span');
+  body.className = 'gd-explorer-namespace-host pseudo';
+  header.appendChild(body);
+  window.gdExplorerGraph.mountNamespace(body, {
+    name: '(primitives)', expanded: isOpen, pseudo: true,
+    count: explorerRowCount(loaded ? visible.length : rootCount),
+    'type-errors': explorerRowCount(rootTypeErrs), failed: explorerRowCount(rootFailed),
+    lint: explorerRowCount(rootLint),
+  });
   header.onclick = (e) => {
     e.stopPropagation();
     if (isOpen) expandedNamespaces.delete(groupPath);

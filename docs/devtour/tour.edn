@@ -1403,11 +1403,22 @@
            `app.ui-explorer` view as the kind toolbar. The native tree owns the function ID,
            navigation, selection, ARIA and action buttons; the graph owns the row body's
            markers, name, vault path and scoped style rules. Loaded rows share one runtime
-           and one list stylesheet. A personal toolbar view with no row surface falls back
+           and one list stylesheet with namespace bodies. A personal toolbar view with no row surface falls back
            only for rows, preserving its valid toolbar selection and showing a diagnostic.
            Disposal follows native subtree removal, and the renderer budget applies per row,
            never as a cap on the loaded Explorer tree."
-     :see [[:editor "mount"] [:editor "renderRecentFns"]]}
+     :see [[:editor "mountNamespace"] [:editor "mount"]]}
+
+    {:file "resources/packages/app/editor/editor-explorer-graph.js" :defn mountNamespace
+     :say "Projects an authorized namespace's display name, expanded state and diagnostic
+           counts into the same Explorer view graph as its toolbar and function rows. The
+           shipped graph presents normal and `(primitives)` headers; a personal graph may
+           change safe passive Hiccup and scoped styles. The native outer treeitem keeps
+           the accessible name, path, lazy expansion, keyboard focus and action buttons.
+           All loaded bodies share one tree stylesheet; invalid personal namespace output
+           falls back for this section alone. Each body has its own bounded renderer,
+           never a whole-tree row cap."
+     :see [[:editor "mountRow"] [:editor "mount"]]}
 
     {:file "resources/packages/app/editor/editor-recents.js" :defn renderRecentFns
      :say "The Explorer trail executes the shipped `app.ui-recents` initial and view graphs.

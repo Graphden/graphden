@@ -1,5 +1,5 @@
-// The finite toolbar and each function-row body own empty hosts. One Explorer
-// runtime and one scoped row stylesheet serve all loaded rows; the tree,
+// The finite toolbar, function rows and namespace headers own empty hosts. One
+// runtime and one scoped tree stylesheet serve all loaded bodies; the tree,
 // filters, navigation and pending POST controls remain native.
 (() => {
   const api = window.GraphdenBrowser;
@@ -18,13 +18,20 @@
   let pending = null;
   let builtinRuntime = null;
   let rowRuntime = null;
-  let rowSheet = null;
-  let rowStyleSignature = null;
+  let namespaceRuntime = null;
+  let treeSheet = null;
+  const treeStyles = {row: null, namespace: null};
+  const treeStyleSignatures = {row: null, namespace: null};
   let rowFallback = false;
+  let namespaceFallback = false;
   const rows = new Set();
+  const namespaces = new Set();
+  const namespaceByHost = new WeakMap();
   const rowDefaults = {name: '', secret: false, 'secret-path': '', service: false,
     'service-state': '', app: false, 'app-hosts': '', type: false, test: false,
     'test-status': '', 'test-error': '', failed: 0, 'type-errors': 0, lint: 0, effects: ''};
+  const namespaceDefaults = {name: '', expanded: false, pseudo: false, count: 0,
+    'type-errors': 0, failed: 0, lint: 0};
   const context = () => JSON.stringify([window.gdPrefOwner || null,
     typeof graphdenCurrentOrg === 'string' ? graphdenCurrentOrg : null,
     typeof getCurrentBranchName === 'function' ? getCurrentBranchName() : null]);
@@ -33,7 +40,7 @@
     return Number.isSafeInteger(value) && value >= 0 ? value : null;
   }
   function inputs() {
-    return record({surface: 'toolbar', row: record(rowDefaults),
+    return record({surface: 'toolbar', row: record(rowDefaults), namespace: record(namespaceDefaults),
       selected: new Map(kinds.slice(1).map(kind => [kind, lensKinds.has(kind)])),
       counts: new Map([['services', count('getAllServiceFnIdCount')], ['apps', count('getAppRouteCount')],
         ['tests', count('getTestStatusCount')], ['failed', count('getFailureTotal')],
@@ -68,8 +75,14 @@
     });
   }
   function rowInputs(projection) {
-    return record({surface: 'row', row: record(projection), selected: new Map(), counts: new Map(),
+    return record({surface: 'row', row: record(projection), namespace: record(namespaceDefaults),
+      selected: new Map(), counts: new Map(),
       failed: 0, authenticated: false, 'apps-available': false, fx: false});
+  }
+  function namespaceInputs(projection) {
+    return record({surface: 'namespace', row: record(rowDefaults), namespace: record(projection),
+      selected: new Map(), counts: new Map(), failed: 0, authenticated: false,
+      'apps-available': false, fx: false});
   }
   function validateRow(view, projection) {
     exact(view, ['tree', 'styles', 'actions']);
@@ -102,11 +115,76 @@
     }
     return window.GraphdenStyles.normalize(field(view, 'styles'));
   }
-  function clearRowStyles() {
-    window.GraphdenStyles.release(rowSheet);
-    rowSheet = null; rowStyleSignature = null;
+  function validateNamespace(view) {
+    exact(view, ['tree', 'styles', 'actions']);
+    const actions = field(view, 'actions');
+    exact(actions, ['secret', 'dismiss', 'run']);
+    if (['secret', 'dismiss', 'run'].some(name => field(actions, name) !== false)) throw new Error('Explorer namespace cannot request actions');
+    const tree = window.GraphdenRenderer.vnode(field(view, 'tree'), 'gd-explorer-namespace', 48);
+    const passive = new Set(['div', 'span', 'ul', 'li', 'p', 'strong', 'small', 'section']);
+    let textLength = 0;
+    function inspect(node) {
+      if (typeof node === 'string' || typeof node === 'number') {
+        textLength += String(node).length;
+        return;
+      }
+      if (!node || !passive.has(node.type)
+        || Object.keys(node.props).some(name => !['className', 'title', 'aria-hidden', 'children', 'key'].includes(name))) {
+        throw new Error('Invalid Explorer namespace body');
+      }
+      if (/(^|\s)(?:ns-header|ns-children|entity-item|ns-row-actions|gd-explorer-namespace-host|gd-explorer-row-host|gd-explorer-row|gd-explorer-kinds)(\s|$)/.test(node.props.className || '')) {
+        throw new Error('Explorer namespace cannot forge host classes');
+      }
+      for (const child of children(node)) inspect(child);
+    }
+    inspect(tree);
+    if (textLength > 8192) throw new Error('Explorer namespace body too large');
+    const rules = window.GraphdenStyles.normalize(field(view, 'styles'));
+    if (rules.some(rule => !rule.selector.startsWith('& .gd-explorer-namespace-host')
+      || !['', ' ', '.', ':', '[', '>'].includes(rule.selector['& .gd-explorer-namespace-host'.length] || ''))) {
+      throw new Error('Explorer namespace style must stay inside its body');
+    }
+    return rules;
+  }
+  function updateTreeStyles(surface, normalized) {
+    const signature = JSON.stringify(normalized);
+    if (treeStyleSignatures[surface] !== null && signature !== treeStyleSignatures[surface]) {
+      throw new Error(`Explorer ${surface} styles vary by item`);
+    }
+    if (treeStyleSignatures[surface] !== null) return;
+    const next = {...treeStyles, [surface]: normalized};
+    const combined = [...(next.row || []), ...(next.namespace || [])];
+    if (combined.length > 128) throw new Error('Explorer tree style limit exceeded');
+    const sheet = window.GraphdenStyles.acquire(combined);
+    const old = treeSheet;
+    treeSheet = sheet;
+    treeStyles[surface] = normalized;
+    treeStyleSignatures[surface] = signature;
     const list = document.getElementById('entity-list');
-    if (list) delete list.dataset.gdUiStyle;
+    if (list) list.dataset.gdUiStyle = sheet.id;
+    window.GraphdenStyles.release(old);
+  }
+  function clearTreeStyles(surface) {
+    if (surface) {
+      treeStyles[surface] = null;
+      treeStyleSignatures[surface] = null;
+      const combined = [...(treeStyles.row || []), ...(treeStyles.namespace || [])];
+      const sheet = combined.length ? window.GraphdenStyles.acquire(combined) : null;
+      window.GraphdenStyles.release(treeSheet);
+      treeSheet = sheet;
+    } else {
+      window.GraphdenStyles.release(treeSheet);
+      treeSheet = null;
+      for (const name of ['row', 'namespace']) {
+        treeStyles[name] = null;
+        treeStyleSignatures[name] = null;
+      }
+    }
+    const list = document.getElementById('entity-list');
+    if (list) {
+      if (treeSheet) list.dataset.gdUiStyle = treeSheet.id;
+      else delete list.dataset.gdUiStyle;
+    }
   }
   function renderRow(instance) {
     let view;
@@ -114,27 +192,54 @@
     try {
       view = rowRuntime.run('view', {inputs: rowInputs(instance.projection)});
       normalized = validateRow(view, instance.projection);
-      const signature = JSON.stringify(normalized);
-      if (rowStyleSignature !== null && signature !== rowStyleSignature) throw new Error('Explorer row styles vary by row');
-      if (!rowSheet) {
-        rowSheet = window.GraphdenStyles.acquire(normalized);
-        rowStyleSignature = signature;
-        document.getElementById('entity-list').dataset.gdUiStyle = rowSheet.id;
-      }
+      updateTreeStyles('row', normalized);
     } catch (error) {
       if (rowRuntime === builtinRuntime || rowFallback) throw error;
       rowRuntime = builtinRuntime;
       rowFallback = true;
-      clearRowStyles();
+      clearTreeStyles('row');
       window.gdUIComponentSectionFallback?.('explorer', 'rows');
       for (const row of rows) renderRow(row);
       return;
     }
     instance.renderer.render(field(view, 'tree'));
   }
+  function renderNamespace(instance) {
+    let view;
+    try {
+      view = namespaceRuntime.run('view', {inputs: namespaceInputs(instance.projection)});
+      updateTreeStyles('namespace', validateNamespace(view));
+    } catch (error) {
+      if (namespaceRuntime === builtinRuntime || namespaceFallback) throw error;
+      namespaceRuntime = builtinRuntime;
+      namespaceFallback = true;
+      clearTreeStyles('namespace');
+      window.gdUIComponentSectionFallback?.('explorer', 'namespaces');
+      for (const item of namespaces) renderNamespace(item);
+      return;
+    }
+    instance.renderer.render(field(view, 'tree'));
+  }
+  function mountNamespace(body, projection) {
+    if (!builtinRuntime) builtinRuntime = builtin();
+    if (!namespaceRuntime) namespaceRuntime = builtinRuntime;
+    const renderer = window.GraphdenRenderer.mount(body, {idPrefix: 'gd-explorer-namespace', nodeLimit: 48});
+    const instance = {host: body, projection, renderer};
+    namespaces.add(instance);
+    namespaceByHost.set(body, instance);
+    try { renderNamespace(instance); }
+    catch (error) { namespaces.delete(instance); namespaceByHost.delete(body); renderer.dispose(); throw error; }
+  }
+  function updateNamespace(body, expanded) {
+    const instance = namespaceByHost.get(body);
+    if (!instance) return;
+    instance.projection.expanded = expanded;
+    renderNamespace(instance);
+  }
   function mountRow(rowHost, projection) {
     if (!builtinRuntime) builtinRuntime = builtin();
     if (!rowRuntime) rowRuntime = builtinRuntime;
+    if (!namespaceRuntime) namespaceRuntime = builtinRuntime;
     const renderer = window.GraphdenRenderer.mount(rowHost, {idPrefix: 'gd-explorer-row', nodeLimit: 48});
     const instance = {host: rowHost, projection, renderer};
     rows.add(instance);
@@ -149,12 +254,22 @@
         rows.delete(instance);
       }
     }
+    for (const instance of namespaces) {
+      if (scope === instance.host || scope.contains(instance.host)) {
+        instance.renderer.dispose();
+        namespaces.delete(instance);
+        namespaceByHost.delete(instance.host);
+      }
+    }
   }
-  function resetRows(runtime) {
+  function resetTreeBodies(runtime) {
     rowRuntime = runtime;
+    namespaceRuntime = runtime;
     rowFallback = false;
-    clearRowStyles();
+    namespaceFallback = false;
+    clearTreeStyles();
     for (const instance of rows) renderRow(instance);
+    for (const instance of namespaces) renderNamespace(instance);
   }
   function paint(view) {
     mounted.render(field(view, 'tree'), field(view, 'styles'));
@@ -213,12 +328,12 @@
       const runtime = await window.gdLoadUIComponentRuntime('explorer', window.GraphdenBuiltinPlans.plans.explorer, {}, loading.signal);
       if (loading.signal.aborted || own !== generation || active !== controller || started !== context()) return;
       active.replaceRuntime(runtime);
-      resetRows(runtime);
+      resetTreeBodies(runtime);
     } catch (error) {
       if (loading.signal.aborted || own !== generation || active !== controller || started !== context() || error.name === 'AbortError') return;
       window.gdUIComponentFailed?.('explorer');
       active.replaceRuntime(builtinRuntime);
-      resetRows(builtinRuntime);
+      resetTreeBodies(builtinRuntime);
     } finally { if (pending === loading) pending = null; }
   }
   function disposeToolbar() {
@@ -233,21 +348,25 @@
     disposeToolbar();
     // A preference or view-context refresh can preserve native loaded rows.
     // Auth changes use dispose(), which drops rows and their stylesheet.
-    if (rows.size) resetRows(builtinRuntime);
-    else { clearRowStyles(); rowRuntime = builtinRuntime; rowFallback = false; }
+    if (rows.size || namespaces.size) resetTreeBodies(builtinRuntime);
+    else {
+      clearTreeStyles();
+      rowRuntime = builtinRuntime; namespaceRuntime = builtinRuntime;
+      rowFallback = false; namespaceFallback = false;
+    }
   }
   function dispose() {
     disposeToolbar();
     disposeRows(document.getElementById('entity-list'));
-    clearRowStyles();
-    rowRuntime = builtinRuntime;
-    rowFallback = false;
+    clearTreeStyles();
+    rowRuntime = builtinRuntime; namespaceRuntime = builtinRuntime;
+    rowFallback = false; namespaceFallback = false;
   }
   function refresh() {
     if (controller && owner !== context()) resetContext();
     create();
     controller?.refresh();
   }
-  window.gdExplorerGraph = {refresh, reload, dispose, mountRow, disposeRows};
+  window.gdExplorerGraph = {refresh, reload, dispose, mountRow, mountNamespace, updateNamespace, disposeRows};
   window.addEventListener('gd-auth-changed', () => { dispose(); refresh(); });
 })();

@@ -888,3 +888,37 @@
                    (marker "fn-kind-marker kind-marker-fx" "Effects: io, time" false "fx")
                    [:span {:class "name"} "demo"]
                    (marker "secret-path" "Secret vault path" false "/demo")]}])))
+
+
+(deftest explorer-namespace-presentation-matches-jvm-and-browser
+  (let [definitions (:fns (edn/read-string (slurp "resources/packages/app/ui-explorer/fns.edn")))
+        definitions (conj definitions {:name :namespace-tree :parent :get
+                                       :args {:coll :explorer-toolbar-view :key {:value :tree}}})
+        {:keys [graph impls ids]} (map-fixture definitions)
+        input (fn [projection]
+                {:inputs {:surface "namespace" :namespace projection :selected {} :counts {}
+                          :failed 0 :authenticated false :apps-available false :fx false}})
+        ordinary {:name "demo" :expanded false :pseudo false :count 0
+                  :type-errors 0 :failed 0 :lint 0}
+        root {:name "(primitives)" :expanded true :pseudo true :count 512
+              :type-errors 1 :failed 2 :lint 3}]
+    (assert-differential!
+      graph impls ids
+      [{:entry :namespace-tree :inputs (input ordinary)
+        :expected [:span {:class "gd-explorer-namespace"}
+                   [:span {:class "ns-arrow collapsed"} "▶"]
+                   [:span {:class "ns-label"} "demo"] nil nil nil nil]}
+       {:entry :namespace-tree :inputs (input (assoc ordinary :expanded true))
+        :expected [:span {:class "gd-explorer-namespace"}
+                   [:span {:class "ns-arrow"} "▼"]
+                   [:span {:class "ns-label"} "demo"] nil nil nil nil]}
+       {:entry :namespace-tree :inputs (input root)
+        :expected [:span {:class "gd-explorer-namespace"}
+                   [:span {:class "ns-arrow"} "▼"]
+                   [:span {:class "ns-label"
+                           :title "Namespace-less entities — the boot-seeded primitive types, plus any top-level fn"}
+                    "(primitives)"]
+                   [:span {:class "ns-count"} 512]
+                   [:span {:class "ns-type-error-chip" :title "1 type error in this namespace"} "⚠ 1"]
+                   [:span {:class "ns-problem-chip ns-failed-chip" :title "2 unresolved failed runs in this namespace"} "✕ 2"]
+                   [:span {:class "ns-problem-chip ns-lint-chip" :title "3 fns with lint findings in this namespace"} "⚐ 3"]]}])))

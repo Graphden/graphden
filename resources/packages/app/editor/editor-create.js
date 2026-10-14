@@ -576,7 +576,7 @@ function startNsRename(headerEl, nsId, nsPath) {
   // Replace label + actions with input row inline.
   const segments = nsPath.split('.');
   const currentName = segments[segments.length - 1];
-  const hides = '.ns-label, .description-badge, .ns-row-actions';
+  const hides = '.gd-explorer-namespace-host, .description-badge, .ns-row-actions';
   // Hide the original label/actions; the input row takes their place.
   headerEl.querySelectorAll(hides).forEach((el) => { el.style.display = 'none'; });
 

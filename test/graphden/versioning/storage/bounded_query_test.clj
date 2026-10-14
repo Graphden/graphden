@@ -7,6 +7,7 @@
     [graphden.storage.postgres.util :as util]
     [graphden.storage.protocol.core :as sp]
     [graphden.versioning.storage.core :as vs]
+    [graphden.versioning.storage.resolution :as resolution]
     [next.jdbc :as jdbc]))
 
 
@@ -139,11 +140,16 @@
                       result (binding [util/*jdbc-override* (jdbc-spy calls)]
                                (sp/query-bounded-entities storage :binding {:fn-id ids} 64))]
                   [(count result) (count @calls)]))]
-    ;; Prime the immutable branch-chain cache before comparing query families.
-    (sp/query-bounded-entities storage :binding {:fn-id [(:id (first owners))]} 64)
-    (let [[one one-queries] (query [(:id (first owners))])
-          [all all-queries] (query (mapv :id owners))]
-      (is (= 1 one))
-      (is (= (count rows) all))
-      (is (pos? one-queries) "The JDBC spy observed actual SQL")
-      (is (= one-queries all-queries) "A 64-owner batch uses the same SQL round trips"))))
+    ;; Other parallel fixtures reset the process-global chain cache when they
+    ;; wipe their own DB. Keep the priming read and both counts on one local
+    ;; cache so the comparison measures only batch size, not a concurrent reset.
+    (binding [resolution/*branch-chain-cache* (atom {})]
+      (sp/query-bounded-entities storage :binding {:fn-id [(:id (first owners))]} 64)
+      (let [[one one-queries] (query [(:id (first owners))])
+            ;; Simulate another fixture's global cache reset between reads.
+            _ (resolution/invalidate-chain-cache!)
+            [all all-queries] (query (mapv :id owners))]
+        (is (= 1 one))
+        (is (= (count rows) all))
+        (is (pos? one-queries) "The JDBC spy observed actual SQL")
+        (is (= one-queries all-queries) "A 64-owner batch uses the same SQL round trips")))))

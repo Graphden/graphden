@@ -27,7 +27,12 @@
     [next.jdbc.transaction :as jdbc-tx])
   (:import
     (java.sql
-      Connection)))
+      Connection)
+    (java.util
+      WeakHashMap)
+    (java.util.concurrent
+      Semaphore
+      TimeUnit)))
 
 
 (def ^:dynamic *transaction-context*
@@ -35,6 +40,47 @@
    physical connection and writer scope; it becomes inactive after commit or
    rollback. Never populated from request data or storage map fields."
   nil)
+
+
+(def ^:private background-admissions (WeakHashMap.))
+
+
+(defn- background-admission
+  [datasource]
+  (locking background-admissions
+    (or (WeakHashMap/.get background-admissions datasource)
+        (let [admission {:permit (Semaphore. 1 true) :retired? (atom false)}]
+          (WeakHashMap/.put background-admissions datasource admission)
+          admission))))
+
+
+(defn try-with-background-admission
+  "Run at most one background storage task per datasource. Busy callers
+   own no connection and retry outside their transaction. A retired pool
+   rejects queued tasks before they can borrow from it."
+  [datasource f]
+  (let [{:keys [^Semaphore permit retired?]} (background-admission datasource)]
+    (when @retired?
+      (throw (ex-info "Background storage has retired" {:type :storage/background-retired})))
+    (when (Semaphore/.tryAcquire permit)
+      (try
+        (when @retired?
+          (throw (ex-info "Background storage has retired" {:type :storage/background-retired})))
+        (f)
+        (finally (Semaphore/.release permit))))))
+
+
+(defn retire-background-admission!
+  "Prevent queued work from entering a closing pool, then drain its active
+   background task before the physical datasource closes. Never interrupts
+   a transaction in progress."
+  [datasource]
+  (let [{:keys [^Semaphore permit retired?]} (background-admission datasource)]
+    (reset! retired? true)
+    (when-not (Semaphore/.tryAcquire permit 30 TimeUnit/SECONDS)
+      (throw (ex-info "Background storage did not drain before close"
+                      {:type :storage/background-drain-timeout})))
+    (Semaphore/.release permit)))
 
 
 (defn- map-backend

@@ -17,11 +17,24 @@
 (def batch-size 500)
 
 
-(def ^:private publication-permit
-  ;; Recovery is best-effort and may be scheduled for several cached branches
-  ;; at once. Keep all but one worker OUT of the JDBC pool while a writer holds
-  ;; the graph lock; the normal mutation path may need that spare connection.
-  (java.util.concurrent.Semaphore. 1 true))
+(def ^:private unpooled-permit (java.util.concurrent.Semaphore. 1 true))
+
+
+(defn try-with-recovery-admission
+  "Run a background storage pass only when its pool has a spare recovery
+   permit. A busy result owns no JDBC resource; callers retry outside it."
+  [storage f]
+  (if-let [datasource (tx/datasource storage)]
+    (do
+      ;; Admission must precede every recovery snapshot. A connection-backed
+      ;; storage cannot release its caller-owned connection when busy.
+      (when (instance? java.sql.Connection datasource)
+        (throw (ex-info "Recovery admission requires a pooled storage"
+                        {:type :recheck/admission-requires-pool})))
+      (tx/assert-owns-commit! storage)
+      (tx/try-with-background-admission datasource f))
+    (when (java.util.concurrent.Semaphore/.tryAcquire unpooled-permit)
+      (try (f) (finally (java.util.concurrent.Semaphore/.release unpooled-permit))))))
 
 
 (defn- try-with-invalidation-lock
@@ -121,39 +134,45 @@
   ;; for the full connection timeout. A failed try is retried from a fresh
   ;; snapshot by work!, with no stale publication.
   (when (try-with-invalidation-lock ctx (constantly true))
-    (java.util.concurrent.Semaphore/.acquire publication-permit)
-    (try
-      (writer/call-with-try-write
-        (:storage ctx) :graph
-        (fn [locked]
-          (try-with-invalidation-lock
-            ctx
-            #(publish-snapshot! (assoc ctx :storage locked) branch-id ids expected
-                                targets before after last-batch?))))
-      (finally (java.util.concurrent.Semaphore/.release publication-permit)))))
+    (writer/call-with-try-write
+      (:storage ctx) :graph
+      (fn [locked]
+        (try-with-invalidation-lock
+          ctx
+          #(publish-snapshot! (assoc ctx :storage locked) branch-id ids expected
+                              targets before after last-batch?))))))
 
 
 (defn run-pass!
   "Discover/order once, then check contiguous dependency-ordered batches.
    Every batch releases its snapshot before a short conditional publication."
   [ctx branch-id generation discover check-batch]
-  (let [expected (token ctx generation)
-        ids (binding [branch-local/*storage-caches-override* (atom {})]
-              (resolution/call-with-fresh-memos #(vec (discover ctx))))
-        batches (vec (partition-all batch-size ids))]
-    (swap! (:type-recheck-state ctx)
-           #(if (= generation (:generation %))
-              (assoc % :status :running :pending-ids (set ids) :failed-ids #{}) %))
-    (if (empty? batches)
-      (publish-staged! ctx branch-id [] expected (stage ctx branch-id [] check-batch) true)
-      (loop [remaining batches]
-        (when (current? ctx expected)
-          (let [batch (first remaining)
-                staged (stage ctx branch-id batch check-batch)]
-            (when (publish-staged! ctx branch-id batch expected staged (= 1 (count remaining)))
-              (if (next remaining)
-                (do (Thread/yield) (recur (next remaining)))
-                true))))))))
+  ;; One recovery pass per physical pool, across branch contexts and all
+  ;; phases. Busy admission leaves no connection or context lock behind;
+  ;; work! retries after its outside-resource backoff. In particular, two
+  ;; discovery snapshots cannot consume both slots of a two-connection pool.
+  (try-with-recovery-admission
+    (:storage ctx)
+    (fn []
+      (when (let [state @(:type-recheck-state ctx)]
+              (and (= generation (:generation state)) (not (:cancelled? state))))
+        (let [expected (token ctx generation)
+              ids (binding [branch-local/*storage-caches-override* (atom {})]
+                    (resolution/call-with-fresh-memos #(vec (discover ctx))))
+              batches (vec (partition-all batch-size ids))]
+          (swap! (:type-recheck-state ctx)
+                 #(if (= generation (:generation %))
+                    (assoc % :status :running :pending-ids (set ids) :failed-ids #{}) %))
+          (if (empty? batches)
+            (publish-staged! ctx branch-id [] expected (stage ctx branch-id [] check-batch) true)
+            (loop [remaining batches]
+              (when (current? ctx expected)
+                (let [batch (first remaining)
+                      staged (stage ctx branch-id batch check-batch)]
+                  (when (publish-staged! ctx branch-id batch expected staged (= 1 (count remaining)))
+                    (if (next remaining)
+                      (do (Thread/yield) (recur (next remaining)))
+                      true)))))))))))
 
 
 (defn- work!

@@ -179,6 +179,9 @@
 
   (close
     [_this]
+    ;; A queued recovery must not borrow from this pool after shutdown;
+    ;; an admitted pass finishes before the datasource is closed.
+    (tx/retire-background-admission! pool)
     (locking lock
       ;; Clear cache first to prevent memory leak from stale references
       (reset! metadata-cache nil)

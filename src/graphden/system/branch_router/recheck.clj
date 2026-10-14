@@ -223,6 +223,14 @@
       #(record-import-snapshot! branch-ctx branch-id fn-ids))))
 
 
+(defn- current-recheck-generation?
+  [ctx generation]
+  (if-let [state (:type-recheck-state ctx)]
+    (let [current @state]
+      (and (= generation (:generation current)) (not (:cancelled? current))))
+    true))
+
+
 (defn recheck-ctx-types!
   "Re-record rich-types (+ diagnostics) INTO `branch-ctx`'s own
    rich-types slice — the propagation channel between per-branch
@@ -239,8 +247,20 @@
   [branch-ctx branch-id fn-ids]
   (when *recheck-user-fns?*
     (if (seq fn-ids)
-      (future (call-with-ctx-slices branch-ctx
-                                    #(record-fn-types! branch-ctx branch-id fn-ids)))
+      (let [generation (recheck-state/generation branch-ctx)]
+        (future
+          (binding [tx/*transaction-context* nil]
+            (loop []
+              (when (current-recheck-generation? branch-ctx generation)
+                (when-not (lifecycle/try-with-recovery-admission
+                            (:storage branch-ctx)
+                            (fn []
+                              (when (current-recheck-generation? branch-ctx generation)
+                                (call-with-ctx-slices branch-ctx
+                                                      #(record-fn-types! branch-ctx branch-id fn-ids)))
+                              true))
+                  (Thread/sleep 50)
+                  (recur)))))))
       (call-with-ctx-slices branch-ctx
                             #(lifecycle/schedule! (assoc branch-ctx :storage (or (:compile-storage branch-ctx) (:storage branch-ctx)))
                                                   branch-id ordered-user-fn-ids record-ordered-snapshot!))))

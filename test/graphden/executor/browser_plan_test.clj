@@ -844,7 +844,7 @@
                       :expected {:state state :requests requests}})]
     (assert-differential!
       graph impls ids
-      [{:entry :explorer-toolbar-initial :inputs {} :expected state}
+      [{:entry :explorer-toolbar-initial :inputs {:inputs inputs} :expected state}
        (transition "toggle" "tests" [{:kind "toggle-filter" :value "tests"}])
        (transition "toggle" "all" [{:kind "toggle-filter" :value "all"}])
        (transition "toggle" "unknown" [])
@@ -977,6 +977,8 @@
                                   [:_explorer-filter-request-kinds
                                    ["remove-namespace" "remove-exclude" "remove-uses" "remove-effect"
                                     "remove-unused" "remove-name" "remove-view" "select-namespace"
-                                    "restore-exclude" "select-effect" "select-view" "select-unused" "pick-uses"]]]]
+                                    "restore-exclude" "select-effect" "select-view" "select-unused" "pick-uses"
+                                    "clear-view" "apply-device-view" "apply-graph-view" "delete-device-view"
+                                    "edit-graph-view" "open-graph-view" "save-device-view" "save-graph-view"]]]]
       (is (= :zipmap (:parent (get by-name name))) (str name " must retain string keys through PG"))
       (is (= expected-keys (get-in by-name [name :args :keys]))))))

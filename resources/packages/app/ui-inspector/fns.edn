@@ -35,30 +35,25 @@
        {:name :_inspector-is-viewport :parent :equal? :args {:a :_inspector-event-kind :b {:value "viewport"}}}
        {:name :_inspector-is-close :parent :equal? :args {:a :_inspector-event-kind :b {:value "close"}}}
        {:name :_inspector-tab-ids :parent :const :args {:value {:value ["overview" "bindings" "stats" "history"]}} :return-type :_inspector-text-list}
-       {:name :_inspector-tab-index :parent :get :args {:coll {:value {"overview" 0 "bindings" 1 "stats" 2 "history" 3}} :key :_inspector-state-tab :default 0}}
-       {:name :_inspector-key-right :parent :equal? :args {:a :_inspector-event-key :b {:value "ArrowRight"}}}
-       {:name :_inspector-key-left :parent :equal? :args {:a :_inspector-event-key :b {:value "ArrowLeft"}}}
-       {:name :_inspector-key-home :parent :equal? :args {:a :_inspector-event-key :b {:value "Home"}}}
-       {:name :_inspector-key-end :parent :equal? :args {:a :_inspector-event-key :b {:value "End"}}}
+       {:name :_inspector-tab-indices :parent :zipmap :args {:keys :_inspector-tab-ids :vals [0 1 2 3]}}
+       {:name :_inspector-tab-index :parent :get :args {:coll :_inspector-tab-indices :key :_inspector-state-tab :default 0}}
        {:name :_inspector-next-sum :parent :add :args {:nums [:_inspector-tab-index 1]}}
        {:name :_inspector-next-index :parent :mod :args {:dividend :_inspector-next-sum :divisor 4}}
        {:name :_inspector-previous-sum :parent :add :args {:nums [:_inspector-tab-index 3]}}
        {:name :_inspector-previous-index :parent :mod :args {:dividend :_inspector-previous-sum :divisor 4}}
-       {:name :_inspector-end-index :parent :if :args {:test :_inspector-key-end :then 3 :else :_inspector-tab-index}}
-       {:name :_inspector-home-index :parent :if :args {:test :_inspector-key-home :then 0 :else :_inspector-end-index}}
-       {:name :_inspector-left-index :parent :if :args {:test :_inspector-key-left :then :_inspector-previous-index :else :_inspector-home-index}}
-       {:name :_inspector-key-index :parent :if :args {:test :_inspector-key-right :then :_inspector-next-index :else :_inspector-left-index}}
+       {:name :_inspector-key-targets :parent :zipmap :args {:keys ["ArrowRight" "ArrowLeft" "Home" "End"]
+                                                             :vals [:_inspector-next-index :_inspector-previous-index 0 3]}}
+       {:name :_inspector-key-target :parent :get :args {:coll :_inspector-key-targets :key :_inspector-event-key :default nil}}
+       {:name :_inspector-key-index :parent :coalesce :args {:value :_inspector-key-target :default :_inspector-tab-index}}
        {:name :_inspector-key-tab :parent :get :args {:coll :_inspector-tab-ids :key :_inspector-key-index :default "overview"}}
-       {:name :_inspector-chosen-tab :parent :get :args {:coll {:value {"overview" "overview" "bindings" "bindings" "stats" "stats" "history" "history"}} :key :_inspector-event-tab :default :_inspector-state-tab}}
+       {:name :_inspector-tabs-by-id :parent :zipmap :args {:keys :_inspector-tab-ids :vals :_inspector-tab-ids}}
+       {:name :_inspector-chosen-tab :parent :get :args {:coll :_inspector-tabs-by-id :key :_inspector-event-tab :default :_inspector-state-tab}}
        {:name :_inspector-preset-tab :parent :if :args {:test :_inspector-is-preset :then :_inspector-chosen-tab :else :_inspector-state-tab}}
        {:name :_inspector-clicked-tab :parent :if :args {:test :_inspector-is-tab :then :_inspector-chosen-tab :else :_inspector-preset-tab}}
        {:name :_inspector-next-tab :parent :if :args {:test :_inspector-is-keydown :then :_inspector-key-tab :else :_inspector-clicked-tab}}
        {:name :_inspector-selected-open :parent :if :args {:test :_inspector-is-selection :then :_inspector-input-selected :else :_inspector-state-open}}
        {:name :_inspector-next-open :parent :if :args {:test :_inspector-is-close :then false :else :_inspector-selected-open}}
-       {:name :_inspector-end-handled :parent :if :args {:test :_inspector-key-end :then true :else false}}
-       {:name :_inspector-home-handled :parent :if :args {:test :_inspector-key-home :then true :else :_inspector-end-handled}}
-       {:name :_inspector-left-handled :parent :if :args {:test :_inspector-key-left :then true :else :_inspector-home-handled}}
-       {:name :_inspector-key-handled :parent :if :args {:test :_inspector-key-right :then true :else :_inspector-left-handled}}
+       {:name :_inspector-key-handled :parent :if :args {:test :_inspector-key-target :then true :else false}}
        {:name :_inspector-handled :parent :if :args {:test :_inspector-is-keydown :then :_inspector-key-handled :else false}}
        {:name :_inspector-next-state :parent :_inspector-state-fields :args {:vals [:_inspector-next-tab :_inspector-next-open :_inspector-handled]} :return-type :_inspector-chrome-state}
        {:name :_inspector-load-request :parent :zipmap :args {:keys [{:value :kind} {:value :tab}] :vals ["load-tab" :_inspector-next-tab]} :return-type :_inspector-request}

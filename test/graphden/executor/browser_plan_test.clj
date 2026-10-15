@@ -806,6 +806,11 @@
                    (assoc initial :open true) [{:kind "load-tab" :tab "overview"}])
        (transition initial {:kind "preset" :tab "stats" :key ""}
                    (assoc initial :tab "stats") [])
+       (transition initial {:kind "tab" :tab "bindings" :key ""}
+                   (assoc initial :tab "bindings") [{:kind "load-tab" :tab "bindings"}])
+       (transition (assoc initial :tab "bindings") {:kind "keydown" :tab "" :key "ArrowRight"}
+                   {:tab "stats" :open false :handled true}
+                   [{:kind "load-tab" :tab "stats"} {:kind "focus-tab" :tab "stats"}])
        (transition (assoc initial :open true) {:kind "close" :tab "" :key ""}
                    initial [{:kind "close-sheet" :tab "overview"}])
        (transition initial {:kind "keydown" :tab "" :key "ArrowLeft"}
@@ -821,6 +826,12 @@
                    {:tab "overview" :open false :handled true}
                    [{:kind "load-tab" :tab "overview"} {:kind "focus-tab" :tab "overview"}])
        (transition initial {:kind "keydown" :tab "" :key "x"} initial [])
+       (transition (assoc initial :tab "bindings") {:kind "keydown" :tab "" :key "Tab"}
+                   (assoc initial :tab "bindings") [])
+       (transition (assoc initial :tab "bindings") {:kind "keydown" :tab "" :key "ArrowRight"
+                                                    :altKey true :ctrlKey true :metaKey true :shiftKey true}
+                   {:tab "stats" :open false :handled true}
+                   [{:kind "load-tab" :tab "stats"} {:kind "focus-tab" :tab "stats"}])
        (transition initial {:kind "viewport" :tab "" :key ""} initial
                    [{:kind "resume-tab" :tab "overview"}])
        {:entry :inspector-update
@@ -829,6 +840,18 @@
        {:entry :inspector-update
         :inputs {:state initial :inputs (assoc inputs :selected false) :event {:kind "viewport" :tab "" :key ""}}
         :expected {:state initial :requests []}}])))
+
+
+(deftest inspector-string-enum-lookups-survive-postgres-codec
+  (let [definitions (:fns (edn/read-string (slurp "resources/packages/app/ui-inspector/fns.edn")))
+        by-name (into {} (map (juxt :name identity)) definitions)
+        roundtrip (fn [value]
+                    (:value (codec/decode-row {:value (codec/encode-value value {:type :jsonb})}
+                                              {:value {:type :jsonb}})))]
+    (is (= {:overview 0} (roundtrip {"overview" 0}))
+        "stored literal string-key maps cannot be used for browser string enums")
+    (is (= :zipmap (:parent (by-name :_inspector-tab-indices))))
+    (is (= :zipmap (:parent (by-name :_inspector-tabs-by-id))))))
 
 
 (deftest explorer-toolbar-transitions-and-action-projections-match-jvm

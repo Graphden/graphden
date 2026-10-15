@@ -1,11 +1,11 @@
-// Editor COMPARE MODE — the EXPLORER half: badges, ghosts, the diff lens bar.
+// Editor COMPARE MODE — authorized Explorer diff facts, native tree ownership.
 //
 // `gdDiffModeDecorateSidebar`
-// re-applies `.gd-diff-badge` +/−/± on changed fn rows, `.gd-diff-ns-badge`
-// aggregate counts on namespace headers, 💬 markers for anchored review
-// comments and the per-fn digest (`gdDiffSummaryParts`), and injects GHOST rows
-// for fns that exist only on the compared branch; `gdDiffEnsureLensBar` is the
-// `#gd-diff-lens` bar under the kind chips (`GD_DIFF_LENS_CHIPS`);
+// projects the already authorized diff onto loaded rows and namespaces;
+// app.ui-explorer renders statuses, summaries, counts and the lens bar.
+// Native code still owns review notes, ghost identities/navigation, tree
+// visibility and the lens model. `gdDiffEnsureLensBar` owns the outer
+// `#gd-diff-lens` group under the kind chips;
 // `gdDiffModeObserve` is the MutationObserver on `#entity-list` that keeps the
 // decoration on across tree rebuilds. Reads the mode's state
 // (`_gdDiffMode`, `gdDiffLens`) from editor-diff-mode.js; writes nothing but DOM.
@@ -20,8 +20,14 @@ let _gdDiffDecorating = false;
 function gdDiffModeDecorateSidebar() {
   const list = document.getElementById('entity-list');
   if (!list) return;
+  if (_gdDiffMode && _gdDiffMode.ownerContext !== gdDiffOwnerContext()) {
+    gdExitDiffMode();
+    return;
+  }
+  window.gdExplorerGraph?.sweepDiff();
   _gdDiffDecorating = true;
   try {
+    if (!_gdDiffMode) window.gdExplorerGraph?.disposeDiff(document.body);
     // ns counts under the CURRENT lens.
     const nsCounts = new Map();
     const bump = (nsPath, kind) => {
@@ -50,44 +56,30 @@ function gdDiffModeDecorateSidebar() {
     list.querySelectorAll('.entity-item[data-fn-id]').forEach((item) => {
       const g = _gdDiffMode ? gdDiffVisibleGroup(item.dataset.fnId) : null;
       const aff = (!g && _gdDiffMode) ? gdDiffAffectedInfo(item.dataset.fnId) : null;
-      let b = item.querySelector('.gd-diff-badge');
+      let body = item.querySelector(':scope > .gd-diff-graph-host');
       if (!g && !aff) {
-        if (b) b.remove();
+        if (body) { window.gdExplorerGraph?.disposeDiff(body); body.remove(); }
         item.querySelector('.gd-diff-note-badge')?.remove();
-        item.querySelector('.gd-diff-summary')?.remove();
         item.classList.remove('gd-diff-changed', 'gd-diff-inside');
         return;
       }
       item.classList.add('gd-diff-changed');
       item.classList.toggle('gd-diff-inside', !!aff);
-      if (!b) {
-        b = document.createElement('span');
-        b.className = 'gd-diff-badge';
-        item.appendChild(b);
+      if (!body) {
+        body = document.createElement('span');
+        body.className = 'gd-diff-graph-host';
+        item.appendChild(body);
       }
-      const kind = g ? g.__kind : 'inside';
-      const glyph = GD_DIFF_GLYPH[kind];
-      if (b.textContent !== glyph) b.textContent = glyph;
-      const cls = 'gd-diff-badge ' + GD_DIFF_CLS[kind];
-      if (b.className !== cls) b.className = cls;
-      const btitle = g ? g.__title : aff.title;
-      if (b.title !== btitle) b.title = btitle;
-      // The per-fn digest under the row: what changed, in a line.
+      // The native diff model supplies only fields already visible on this
+      // row; the selected graph owns status and presentation.
       const parts = g ? gdDiffSummaryParts(g) : ['∿ via ' + aff.viaLabel];
-      let sm = item.querySelector('.gd-diff-summary');
-      if (!parts.length) {
-        if (sm) sm.remove();
-      } else {
-        if (!sm) {
-          sm = document.createElement('span');
-          sm.className = 'gd-diff-summary';
-          item.appendChild(sm);
-        }
-        const full = parts.join(' · ');
-        const text = gdDiffShort(full, 160);
-        if (sm.textContent !== text) sm.textContent = text;
-        if (sm.title !== full) sm.title = full;
-      }
+      const full = parts.join(' · ');
+      body.title = full;
+      window.gdExplorerGraph?.mountDiffItem(body, {
+        kind: g ? g.__kind : 'inside', title: g ? g.__title : aff.title,
+        summary: full ? gdDiffShort(full, 160) : null,
+        branch: _gdDiffMode.branch, counts: {},
+      });
       if (!g) {
         item.querySelector('.gd-diff-note-badge')?.remove();
         return;
@@ -115,7 +107,10 @@ function gdDiffModeDecorateSidebar() {
     // (expanded) namespace group; collapsed groups keep the aggregate
     // badge as their signal. Skipped while the filter box is active —
     // ghosts don't participate in server-side filtering.
-    list.querySelectorAll('.gd-diff-ghost').forEach((g) => { g.remove(); });
+    list.querySelectorAll('.gd-diff-ghost').forEach((g) => {
+      window.gdExplorerGraph?.disposeDiff(g);
+      g.remove();
+    });
     const filterBox = document.getElementById('search-input');
     const filtering = !!filterBox?.value.trim();
     if (_gdDiffMode && !filtering) {
@@ -133,14 +128,9 @@ function gdDiffModeDecorateSidebar() {
         ghost.setAttribute('tabindex', '-1');
         ghost.setAttribute('aria-level',
           String((g.__nsPath ? g.__nsPath.split('.').length : 1) + 1));
-        const name = document.createElement('span');
-        name.className = 'name';
-        name.textContent = (g['fn-label'] || '').replace(/^:/, '');
-        ghost.appendChild(name);
-        const badge = document.createElement('span');
-        badge.className = 'gd-diff-badge bd-removed';
-        badge.textContent = '−';
-        ghost.appendChild(badge);
+        const body = document.createElement('span');
+        body.className = 'gd-diff-graph-host';
+        ghost.appendChild(body);
         const gnotes = _gdDiffLens.notes
           ? (_gdDiffMode.noteCounts?.get(g['fn-id']) || 0) : 0;
         if (gnotes) {
@@ -163,6 +153,11 @@ function gdDiffModeDecorateSidebar() {
           switchToBranch(_gdDiffMode.branch);
         });
         container.appendChild(ghost);
+        window.gdExplorerGraph?.mountDiffItem(body, {
+          kind: 'missing', title: g.__title,
+          summary: (g['fn-label'] || '').replace(/^:/, ''),
+          branch: _gdDiffMode.branch, counts: {},
+        });
       }
     }
     // changedOnly — the tree shows ONLY what differs (ghosts included).
@@ -204,28 +199,23 @@ function gdDiffModeDecorateSidebar() {
     if (pseudo) headerTargets.push(pseudo);
     headerTargets.forEach((header) => {
       const c = nsCounts.get(header.dataset.nsPath || '__root__');
-      let b = header.querySelector('.gd-diff-ns-badge');
-      if (!c) { if (b) b.remove(); return; }
-      if (!b) {
-        b = document.createElement('span');
-        b.className = 'gd-diff-ns-badge';
+      let body = header.querySelector(':scope > .gd-diff-graph-host');
+      if (!c) {
+        if (body) { window.gdExplorerGraph?.disposeDiff(body); body.remove(); }
+        return;
+      }
+      if (!body) {
+        body = document.createElement('span');
+        body.className = 'gd-diff-graph-host';
         // Before the row-action buttons if present, else append.
         const actions = header.querySelector('.ns-row-actions');
-        if (actions) header.insertBefore(b, actions);
-        else header.appendChild(b);
+        if (actions) header.insertBefore(body, actions);
+        else header.appendChild(body);
       }
-      const parts = [];
-      if (c.added) parts.push('+' + c.added);
-      if (c.modified) parts.push('±' + c.modified);
-      if (c.missing) parts.push('−' + c.missing);
-      if (c.inside) parts.push('∿' + c.inside);
-      b.textContent = parts.join(' ');
-      b.title = 'vs ' + _gdDiffMode.branch + ': '
-        + [c.added ? c.added + ' added' : null,
-           c.modified ? c.modified + ' modified' : null,
-           c.missing ? c.missing + ' only there' : null,
-           c.inside ? c.inside + ' changed inside' : null]
-          .filter(Boolean).join(', ');
+      window.gdExplorerGraph?.mountDiffItem(body, {
+        kind: null, title: '', summary: null,
+        branch: _gdDiffMode.branch, counts: c,
+      });
     });
   } finally {
     // MutationObserver callbacks fire on a MICROTASK — after this
@@ -242,27 +232,20 @@ function gdDiffModeDecorateSidebar() {
 
 // --- the sidebar DIFF LENS bar ---------------------------------------------
 
-// A second chip row under the kind-lens chips, present only in compare
-// mode. Same .kind-toggle look so the Explorer reads as one system.
-const GD_DIFF_LENS_CHIPS = [
-  { key: 'changedOnly', glyph: 'Δ', label: 'changed',
-    title: 'Show only what differs vs the compared branch' },
-  { key: 'added', glyph: '+', label: 'added', invertless: true,
-    title: 'Show fns added on this branch' },
-  { key: 'modified', glyph: '±', label: 'mod', invertless: true,
-    title: 'Show modified fns' },
-  { key: 'missing', glyph: '−', label: 'there', invertless: true,
-    title: 'Show fns that exist only on the compared branch' },
-  { key: 'inside', glyph: '∿', label: 'inside',
-    title: 'Mark fns whose own rows are equal but whose behaviour differs — '
-      + 'an ancestor or a referenced fn is in the diff' },
-  { key: 'substantiveOnly', glyph: 'Aa', label: 'core',
-    title: 'Hide edits that touch nothing but names and descriptions' },
-  { key: 'notes', glyph: '💬', label: 'notes',
-    title: 'Mark fns that carry anchored review comments' },
-  { key: 'effectsOnly', glyph: 'fx', label: 'fx',
-    title: 'Show only changes whose effect footprint differs' },
-];
+// A second chip row under the kind-lens chips. Its buttons, labels and
+// selected presentation come from the same ordinary Explorer graph.
+function gdDiffLensClick(event) {
+  const bar = event.currentTarget;
+  const button = event.target.closest?.('button[data-kind]');
+  if (!_gdDiffMode || !button || !bar.contains(button)) return;
+  const current = _gdDiffMode;
+  window.gdExplorerGraph?.selectDiffLens(button, (key) => {
+    if (_gdDiffMode !== current) return;
+    const turningOn = key === 'changedOnly' && !_gdDiffLens.changedOnly;
+    gdDiffSetLens({[key]: !_gdDiffLens[key]});
+    if (turningOn) gdDiffExpandChangedGroups();
+  });
+}
 
 // Expand every collapsed Explorer group that holds a visible change
 // (used when the "only changed" lens flips on). Clicking the header is
@@ -307,44 +290,25 @@ function gdDiffExpandChangedGroups() {
 function gdDiffEnsureLensBar() {
   const host = document.getElementById('kind-filters')?.parentElement;
   let bar = document.getElementById('gd-diff-lens');
-  if (!_gdDiffMode) { bar?.remove(); return; }
+  if (!_gdDiffMode) {
+    if (bar) { window.gdExplorerGraph?.disposeDiff(bar); bar.remove(); }
+    return;
+  }
   if (!host) return;
   if (!bar) {
     bar = document.createElement('div');
     bar.id = 'gd-diff-lens';
     bar.setAttribute('role', 'group');
     bar.setAttribute('aria-label', 'Diff lens — which changes the tree shows');
-    for (const chip of GD_DIFF_LENS_CHIPS) {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'kind-toggle gd-diff-lens-chip';
-      b.dataset.lensKey = chip.key;
-      b.title = chip.title;
-      const glyph = document.createElement('span');
-      glyph.className = 'kind-glyph';
-      glyph.setAttribute('aria-hidden', 'true');
-      glyph.textContent = chip.glyph;
-      b.appendChild(glyph);
-      const label = document.createElement('span');
-      label.className = 'kind-label';
-      label.textContent = chip.label;
-      b.appendChild(label);
-      b.addEventListener('click', () => {
-        const turningOn = chip.key === 'changedOnly' && !_gdDiffLens.changedOnly;
-        gdDiffSetLens({ [chip.key]: !_gdDiffLens[chip.key] });
-        // "Only changed" leaves just the touched groups — expand them
-        // so the survivors are visible without a second round of
-        // clicking through collapsed headers.
-        if (turningOn) gdDiffExpandChangedGroups();
-      });
-      bar.appendChild(b);
-    }
+    const body = document.createElement('div');
+    body.className = 'gd-diff-lens-graph-host';
+    bar.appendChild(body);
+    bar.addEventListener('click', gdDiffLensClick);
     document.getElementById('kind-filters')
       .insertAdjacentElement('afterend', bar);
   }
-  bar.querySelectorAll('.gd-diff-lens-chip').forEach((b) => {
-    b.setAttribute('aria-pressed', String(!!_gdDiffLens[b.dataset.lensKey]));
-  });
+  window.gdExplorerGraph?.mountDiffLens(bar.querySelector('.gd-diff-lens-graph-host'),
+    gdDiffLens());
 }
 
 // Re-decorate whenever the Explorer re-renders (lens flips, search,
@@ -357,8 +321,10 @@ function gdDiffModeObserve() {
   if (_gdDiffObserver) return;
   const list = document.getElementById('entity-list');
   if (!list) return;
-  _gdDiffObserver = new MutationObserver(() => {
+  _gdDiffObserver = new MutationObserver((records) => {
     if (_gdDiffDecorating || !_gdDiffMode) return;
+    if (records.every(record => record.target.nodeType === 1
+      && record.target.closest('.gd-diff-graph-host'))) return;
     clearTimeout(_gdDiffDecorateTimer);
     _gdDiffDecorateTimer = setTimeout(() => {
       // Refresh stale data opportunistically: a rebuild usually means

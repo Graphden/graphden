@@ -112,6 +112,11 @@ async function cleanup(page) {
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002') + '/');
     await page.waitForSelector('#branch-chip-btn', {timeout: 10000});
     await cleanup(page);
+    await page.waitForFunction(() => {
+      const selected = window.gdUIConfigurationState?.()?.selection?.['fn-id'];
+      return selected && window.gdUIComponentRuntimeIdentity?.('explorer') === selected;
+    }, {timeout: 20000});
+    assert(true, 'Explorer uses the server-selected graph source');
 
     // =================================================================
     // Seed: feat + probe fn on feat + propose feat + suggestion child.
@@ -458,21 +463,34 @@ async function cleanup(page) {
       if (h && h.getAttribute('aria-expanded') !== 'true') h.click();
     });
     await page.waitForFunction((nm) => {
-      return Array.from(document.querySelectorAll('.gd-diff-ghost .name'))
+      return Array.from(document.querySelectorAll('.gd-diff-ghost .gd-diff-label'))
         .some((n) => n.textContent === nm);
     }, PROBE_FN, {timeout: 20000});
     assert(true, 'ghost row for the branch-only fn appears in the Explorer');
+    await page.screenshot({path: '/tmp/gd-explorer-compare-light.png'});
+    await page.evaluate(() => document.body.classList.add('theme-dark'));
+    await page.screenshot({path: '/tmp/gd-explorer-compare-dark.png'});
+    await page.evaluate(() => document.body.classList.remove('theme-dark'));
 
     // The diff lens bar rides under the kind chips; "Δ changed" hides
     // fns that did not change — and auto-expands the groups that hold
     // the survivors (collapse the root first to prove it).
     await page.waitForSelector('#gd-diff-lens', {timeout: 15000});
+    const notesButton = '#gd-diff-lens [data-kind="notes"]';
+    await page.locator(notesButton).focus();
+    await page.keyboard.press('Space');
+    await page.waitForFunction(() => window.gdDiffLens().notes === false);
+    const retainedFocus = await page.evaluate(() =>
+      document.activeElement?.dataset.kind === 'notes');
+    assert(retainedFocus, 'keyboard lens toggle retains focus on the same button');
+    await page.keyboard.press('Space');
+    await page.waitForFunction(() => window.gdDiffLens().notes === true);
     await page.evaluate(() => {
       const h = document.querySelector('.ns-header-pseudo');
       if (h && h.getAttribute('aria-expanded') === 'true') h.click();
     });
     await page.evaluate(() => {
-      document.querySelector('#gd-diff-lens [data-lens-key="changedOnly"]').click();
+      document.querySelector('#gd-diff-lens [data-kind="changedOnly"]').click();
     });
     await page.waitForFunction(() => {
       return document.querySelector('.ns-header-pseudo')
@@ -488,7 +506,7 @@ async function cleanup(page) {
     }, {timeout: 20000});
     assert(true, '"Δ changed" lens hides unchanged fns from the tree');
     await page.evaluate(() => {
-      document.querySelector('#gd-diff-lens [data-lens-key="changedOnly"]').click();
+      document.querySelector('#gd-diff-lens [data-kind="changedOnly"]').click();
     });
 
     // Sidebar: the modified probe's row carries the ± badge (the
@@ -533,7 +551,7 @@ async function cleanup(page) {
     await page.waitForFunction((nm) => {
       const row = Array.from(document.querySelectorAll('#entity-list .entity-item'))
         .find((e) => e.querySelector('.name')?.textContent.trim() === nm);
-      return row && /\(there 2\)/.test(row.querySelector('.gd-diff-summary')?.textContent || '');
+      return row && /\(there 2\)/.test(row.querySelector('.gd-diff-label')?.textContent || '');
     }, VAL_FN, {timeout: 20000});
     assert(true, 'Explorer digest reads "value: 1 (there 2)"');
     // (3) changed INSIDE: the untouched child is marked ∿ via its parent,
@@ -545,7 +563,7 @@ async function cleanup(page) {
         .find((e) => e.querySelector('.name')?.textContent.trim() === nm);
       return row && row.classList.contains('gd-diff-inside')
         && row.querySelector('.gd-diff-badge')?.textContent === '∿'
-        && /^∿ via /.test(row.querySelector('.gd-diff-summary')?.textContent || '');
+        && /^∿ via /.test(row.querySelector('.gd-diff-label')?.textContent || '');
     }, INSIDE_FN, {timeout: 20000});
     assert(true, 'Explorer marks the untouched child ∿ via its parent');
     const affectedApi = await page.evaluate(
@@ -699,14 +717,14 @@ async function cleanup(page) {
     assert(true, 'tree row carries the 💬 anchored-comment marker');
     // The notes chip toggles the markers off.
     await page.evaluate(() => {
-      document.querySelector('#gd-diff-lens [data-lens-key="notes"]').click();
+      document.querySelector('#gd-diff-lens [data-kind="notes"]').click();
     });
     await page.waitForFunction(() => {
       return !document.querySelector('#entity-list .gd-diff-note-badge');
     }, {timeout: 15000});
     assert(true, '💬 notes chip hides the markers');
     await page.evaluate(() => {
-      document.querySelector('#gd-diff-lens [data-lens-key="notes"]').click();
+      document.querySelector('#gd-diff-lens [data-kind="notes"]').click();
     });
     await page.fill('#search-input', '');
 
@@ -726,7 +744,7 @@ async function cleanup(page) {
       was: document.querySelectorAll('.arg-diff-was, .fn-diff-was').length,
       badges: document.querySelectorAll('.fn-diff-inside-badge').length,
       ghosts: document.querySelectorAll('.gd-ghost-cluster, .gd-ghost-link').length,
-      summaries: document.querySelectorAll('.gd-diff-summary').length,
+      summaries: document.querySelectorAll('#entity-list .gd-diff-label').length,
     }));
     assert(Object.values(ringsGone).every((n) => n === 0),
            'exit clears card AND arg rings, there-lines, ∿ badges, ghosts, digests: '
@@ -934,6 +952,36 @@ async function cleanup(page) {
       return (d.fns || []).some((f) => f.name === nm);
     }, {branch: FEAT, nm: SUGG_FN});
     assert(applied, 'applied suggestion is visible on the proposal branch');
+
+    // A reply begun in the previous account context cannot reinstall its
+    // compare model after auth changes. Hold only the read response, then
+    // release it after the native owner and graph hosts have been retired.
+    let releaseDiff;
+    let sawDiff;
+    const held = new Promise(resolve => { releaseDiff = resolve; });
+    const requested = new Promise(resolve => { sawDiff = resolve; });
+    const delayDiff = async route => { sawDiff(); await held; await route.continue(); };
+    await page.route('**/diff-view**', delayDiff);
+    const lateEnter = page.evaluate(branch => window.gdEnterDiffMode(branch), FEAT);
+    try {
+      await Promise.race([requested, new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Diff request was not observed')), 10000))]);
+      await page.evaluate(() => {
+        window.gdPrefOwner += '-switched';
+        window.dispatchEvent(new Event('gd-auth-changed'));
+      });
+      const clearedOnAuth = await page.evaluate(() =>
+        !window.gdDiffModeActive() && !document.getElementById('gd-diff-chip')
+          && !document.querySelector('.gd-diff-graph-host, .gd-diff-ghost'));
+      assert(clearedOnAuth, 'auth change retires the old diff and graph hosts');
+      releaseDiff();
+      await lateEnter;
+      assert(!(await page.evaluate(() => window.gdDiffModeActive())),
+             'late old-owner diff reply cannot revive compare mode');
+    } finally {
+      releaseDiff();
+      await page.unroute('**/diff-view**', delayDiff);
+    }
 
     console.log('✓ compare mode / anchored comments / suggestions verified');
     await cleanup(page);

@@ -154,6 +154,7 @@
   window.gdUIComponentSectionFallback = (component, section) => {
     if (component === 'explorer' && section === 'rows') status(component, 'Personal Explorer rows are unavailable. Using built-in row presentation.');
     if (component === 'explorer' && section === 'namespaces') status(component, 'Personal Explorer namespaces are unavailable. Using built-in namespace presentation.');
+    if (component === 'explorer' && section === 'diff') status(component, 'Personal Explorer compare presentation is unavailable. Using built-in compare controls.');
   };
   window.gdUIComponentRuntimeIdentity = component => { const value = runtimeIdentities.get(component); return value?.stamp === stamp() ? value.id : null; };
   window.gdUIComponentsStatus = () => [...statuses.values()].find(Boolean) || '';

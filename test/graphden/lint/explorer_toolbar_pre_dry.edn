@@ -1,64 +1,62 @@
 ;; Exact closure of six Explorer toolbar buttons from core 38396c48.
 ;; Captured before the shared button renderer refactor.
 {:namespace "app.ui-explorer"
- :fns [
-  {:name :_explorer-row-input, :type {:service :bool, :secret-path :text, :test-error :text, :name :text, :type :bool, :test-status :text, :secret :bool, :lint :int, :service-state :text, :effects :text, :app :bool, :app-hosts :text, :type-errors :int, :test :bool, :failed :int}}
-  {:name :_explorer-namespace-input, :type {:name :text, :expanded :bool, :pseudo :bool, :count :int, :type-errors :int, :failed :int, :lint :int}}
-  {:name :_explorer-filter-input, :type {:axis :text, :name :text, :selected :bool, :missing :bool}}
-  {:name :_explorer-toolbar-inputs, :type {:authenticated :bool, :counts [:map :text [:union :null :int]], :selected [:map :text :bool], :filter :_explorer-filter-input, :apps-available :bool, :fx :bool, :namespace :_explorer-namespace-input, :surface :text, :failed :int, :row :_explorer-row-input}}
-  {:name :_explorer-input-selected, :parent :get, :args {:coll {:as :inputs, :type :_explorer-toolbar-inputs}, :key {:value :selected}, :default {:value {}}}}
-  {:name :_explorer-input-counts, :parent :get, :args {:coll {:as :inputs, :type :_explorer-toolbar-inputs}, :key {:value :counts}, :default {:value {}}}}
-  {:name :_explorer-selected-fn, :parent :get, :args {:coll :_explorer-input-selected, :key {:value "fn"}, :default {:value false}}}
-  {:name :_explorer-selected-types, :parent :get, :args {:coll :_explorer-input-selected, :key {:value "types"}, :default {:value false}}}
-  {:name :_explorer-selected-secrets, :parent :get, :args {:coll :_explorer-input-selected, :key {:value "secrets"}, :default {:value false}}}
-  {:name :_explorer-selected-failed, :parent :get, :args {:coll :_explorer-input-selected, :key {:value "failed"}, :default {:value false}}}
-  {:name :_explorer-selected-type-errors, :parent :get, :args {:coll :_explorer-input-selected, :key {:value "type-errors"}, :default {:value false}}}
-  {:name :_explorer-selected-lint, :parent :get, :args {:coll :_explorer-input-selected, :key {:value "lint"}, :default {:value false}}}
-  {:name :_explorer-toggle-attrs, :parent :zipmap, :args {:keys [{:value :type} {:value :class} {:value :data-kind} {:value :aria-pressed} {:value :title} {:value :hidden}]}}
-  {:name :_explorer-pressed-fn, :parent :if, :args {:test :_explorer-selected-fn, :then "true", :else "false"}}
-  {:name :_explorer-glyph-fn, :parent :hiccup, :args {:tag "span", :attrs {:value {:class "kind-glyph", :aria-hidden "true"}}, :children ["λ"]}}
-  {:name :_explorer-label-fn, :parent :hiccup, :args {:tag "span", :attrs {:value {:class "kind-label"}}, :children ["fn"]}}
-  {:name :_explorer-attrs-fn, :parent :_explorer-toggle-attrs, :args {:vals ["button" "kind-toggle" "fn" :_explorer-pressed-fn "Only functions" false]}}
-  {:name :_explorer-button-fn, :parent :hiccup, :args {:tag "button", :attrs :_explorer-attrs-fn, :children [:_explorer-glyph-fn :_explorer-label-fn]}}
-  {:name :_explorer-pressed-types, :parent :if, :args {:test :_explorer-selected-types, :then "true", :else "false"}}
-  {:name :_explorer-glyph-types, :parent :hiccup, :args {:tag "span", :attrs {:value {:class "kind-glyph", :aria-hidden "true"}}, :children ["T"]}}
-  {:name :_explorer-label-types, :parent :hiccup, :args {:tag "span", :attrs {:value {:class "kind-label"}}, :children ["types"]}}
-  {:name :_explorer-attrs-types, :parent :_explorer-toggle-attrs, :args {:vals ["button" "kind-toggle" "types" :_explorer-pressed-types "Only types" false]}}
-  {:name :_explorer-button-types, :parent :hiccup, :args {:tag "button", :attrs :_explorer-attrs-types, :children [:_explorer-glyph-types :_explorer-label-types]}}
-  {:name :_explorer-pressed-secrets, :parent :if, :args {:test :_explorer-selected-secrets, :then "true", :else "false"}}
-  {:name :_explorer-glyph-secrets, :parent :hiccup, :args {:tag "span", :attrs {:value {:class "kind-glyph", :aria-hidden "true"}}, :children ["🔒"]}}
-  {:name :_explorer-label-secrets, :parent :hiccup, :args {:tag "span", :attrs {:value {:class "kind-label"}}, :children ["secrets"]}}
-  {:name :_explorer-attrs-secrets, :parent :_explorer-toggle-attrs, :args {:vals ["button" "kind-toggle" "secrets" :_explorer-pressed-secrets "Only secrets" false]}}
-  {:name :_explorer-button-secrets, :parent :hiccup, :args {:tag "button", :attrs :_explorer-attrs-secrets, :children [:_explorer-glyph-secrets :_explorer-label-secrets]}}
-  {:name :_explorer-count-attrs, :parent :const, :args {:value {:value {:class "kind-count", :aria-hidden "true"}}}}
-  {:name :_explorer-pressed-failed, :parent :if, :args {:test :_explorer-selected-failed, :then "true", :else "false"}}
-  {:name :_explorer-glyph-failed, :parent :hiccup, :args {:tag "span", :attrs {:value {:class "kind-glyph", :aria-hidden "true"}}, :children ["✕"]}}
-  {:name :_explorer-label-failed, :parent :hiccup, :args {:tag "span", :attrs {:value {:class "kind-label"}}, :children ["failed"]}}
-  {:name :_explorer-count-failed, :parent :get, :args {:coll :_explorer-input-counts, :key {:value "failed"}, :default {:value nil}}}
-  {:name :_explorer-unknown-count-failed, :parent :nil?, :args {:value :_explorer-count-failed}}
-  {:name :_explorer-count-text-failed, :parent :str, :args {:parts [:_explorer-count-failed]}}
-  {:name :_explorer-count-display-failed, :parent :if, :args {:test :_explorer-unknown-count-failed, :then "", :else :_explorer-count-text-failed}}
-  {:name :_explorer-count-node-failed, :parent :hiccup, :args {:tag "span", :attrs :_explorer-count-attrs, :children [:_explorer-count-display-failed]}}
-  {:name :_explorer-attrs-failed, :parent :_explorer-toggle-attrs, :args {:vals ["button" "kind-toggle kind-problem" "failed" :_explorer-pressed-failed "Only fns with unresolved failed runs (last 7 days)" false]}}
-  {:name :_explorer-button-failed, :parent :hiccup, :args {:tag "button", :attrs :_explorer-attrs-failed, :children [:_explorer-glyph-failed :_explorer-label-failed :_explorer-count-node-failed]}}
-  {:name :_explorer-pressed-type-errors, :parent :if, :args {:test :_explorer-selected-type-errors, :then "true", :else "false"}}
-  {:name :_explorer-glyph-type-errors, :parent :hiccup, :args {:tag "span", :attrs {:value {:class "kind-glyph", :aria-hidden "true"}}, :children ["⚠"]}}
-  {:name :_explorer-label-type-errors, :parent :hiccup, :args {:tag "span", :attrs {:value {:class "kind-label"}}, :children ["type errors"]}}
-  {:name :_explorer-count-type-errors, :parent :get, :args {:coll :_explorer-input-counts, :key {:value "type-errors"}, :default {:value nil}}}
-  {:name :_explorer-unknown-count-type-errors, :parent :nil?, :args {:value :_explorer-count-type-errors}}
-  {:name :_explorer-count-text-type-errors, :parent :str, :args {:parts [:_explorer-count-type-errors]}}
-  {:name :_explorer-count-display-type-errors, :parent :if, :args {:test :_explorer-unknown-count-type-errors, :then "", :else :_explorer-count-text-type-errors}}
-  {:name :_explorer-count-node-type-errors, :parent :hiccup, :args {:tag "span", :attrs :_explorer-count-attrs, :children [:_explorer-count-display-type-errors]}}
-  {:name :_explorer-attrs-type-errors, :parent :_explorer-toggle-attrs, :args {:vals ["button" "kind-toggle kind-problem" "type-errors" :_explorer-pressed-type-errors "Only fns with recorded type errors on this branch" false]}}
-  {:name :_explorer-button-type-errors, :parent :hiccup, :args {:tag "button", :attrs :_explorer-attrs-type-errors, :children [:_explorer-glyph-type-errors :_explorer-label-type-errors :_explorer-count-node-type-errors]}}
-  {:name :_explorer-pressed-lint, :parent :if, :args {:test :_explorer-selected-lint, :then "true", :else "false"}}
-  {:name :_explorer-glyph-lint, :parent :hiccup, :args {:tag "span", :attrs {:value {:class "kind-glyph", :aria-hidden "true"}}, :children ["⚐"]}}
-  {:name :_explorer-label-lint, :parent :hiccup, :args {:tag "span", :attrs {:value {:class "kind-label"}}, :children ["lint"]}}
-  {:name :_explorer-count-lint, :parent :get, :args {:coll :_explorer-input-counts, :key {:value "lint"}, :default {:value nil}}}
-  {:name :_explorer-unknown-count-lint, :parent :nil?, :args {:value :_explorer-count-lint}}
-  {:name :_explorer-count-text-lint, :parent :str, :args {:parts [:_explorer-count-lint]}}
-  {:name :_explorer-count-display-lint, :parent :if, :args {:test :_explorer-unknown-count-lint, :then "", :else :_explorer-count-text-lint}}
-  {:name :_explorer-count-node-lint, :parent :hiccup, :args {:tag "span", :attrs :_explorer-count-attrs, :children [:_explorer-count-display-lint]}}
-  {:name :_explorer-attrs-lint, :parent :_explorer-toggle-attrs, :args {:vals ["button" "kind-toggle kind-problem" "lint" :_explorer-pressed-lint "Only fns the graph lint reports (duplicates, dead privates, restated bindings, siblings to share a parent)" false]}}
-  {:name :_explorer-button-lint, :parent :hiccup, :args {:tag "button", :attrs :_explorer-attrs-lint, :children [:_explorer-glyph-lint :_explorer-label-lint :_explorer-count-node-lint]}}
-]}
+ :fns [{:name :_explorer-row-input, :type {:service :bool, :secret-path :text, :test-error :text, :name :text, :type :bool, :test-status :text, :secret :bool, :lint :int, :service-state :text, :effects :text, :app :bool, :app-hosts :text, :type-errors :int, :test :bool, :failed :int}}
+       {:name :_explorer-namespace-input, :type {:name :text, :expanded :bool, :pseudo :bool, :count :int, :type-errors :int, :failed :int, :lint :int}}
+       {:name :_explorer-filter-input, :type {:axis :text, :name :text, :selected :bool, :missing :bool}}
+       {:name :_explorer-toolbar-inputs, :type {:authenticated :bool, :counts [:map :text [:union :null :int]], :selected [:map :text :bool], :filter :_explorer-filter-input, :apps-available :bool, :fx :bool, :namespace :_explorer-namespace-input, :surface :text, :failed :int, :row :_explorer-row-input}}
+       {:name :_explorer-input-selected, :parent :get, :args {:coll {:as :inputs, :type :_explorer-toolbar-inputs}, :key {:value :selected}, :default {:value {}}}}
+       {:name :_explorer-input-counts, :parent :get, :args {:coll {:as :inputs, :type :_explorer-toolbar-inputs}, :key {:value :counts}, :default {:value {}}}}
+       {:name :_explorer-selected-fn, :parent :get, :args {:coll :_explorer-input-selected, :key {:value "fn"}, :default {:value false}}}
+       {:name :_explorer-selected-types, :parent :get, :args {:coll :_explorer-input-selected, :key {:value "types"}, :default {:value false}}}
+       {:name :_explorer-selected-secrets, :parent :get, :args {:coll :_explorer-input-selected, :key {:value "secrets"}, :default {:value false}}}
+       {:name :_explorer-selected-failed, :parent :get, :args {:coll :_explorer-input-selected, :key {:value "failed"}, :default {:value false}}}
+       {:name :_explorer-selected-type-errors, :parent :get, :args {:coll :_explorer-input-selected, :key {:value "type-errors"}, :default {:value false}}}
+       {:name :_explorer-selected-lint, :parent :get, :args {:coll :_explorer-input-selected, :key {:value "lint"}, :default {:value false}}}
+       {:name :_explorer-toggle-attrs, :parent :zipmap, :args {:keys [{:value :type} {:value :class} {:value :data-kind} {:value :aria-pressed} {:value :title} {:value :hidden}]}}
+       {:name :_explorer-pressed-fn, :parent :if, :args {:test :_explorer-selected-fn, :then "true", :else "false"}}
+       {:name :_explorer-glyph-fn, :parent :hiccup, :args {:tag "span", :attrs {:value {:class "kind-glyph", :aria-hidden "true"}}, :children ["λ"]}}
+       {:name :_explorer-label-fn, :parent :hiccup, :args {:tag "span", :attrs {:value {:class "kind-label"}}, :children ["fn"]}}
+       {:name :_explorer-attrs-fn, :parent :_explorer-toggle-attrs, :args {:vals ["button" "kind-toggle" "fn" :_explorer-pressed-fn "Only functions" false]}}
+       {:name :_explorer-button-fn, :parent :hiccup, :args {:tag "button", :attrs :_explorer-attrs-fn, :children [:_explorer-glyph-fn :_explorer-label-fn]}}
+       {:name :_explorer-pressed-types, :parent :if, :args {:test :_explorer-selected-types, :then "true", :else "false"}}
+       {:name :_explorer-glyph-types, :parent :hiccup, :args {:tag "span", :attrs {:value {:class "kind-glyph", :aria-hidden "true"}}, :children ["T"]}}
+       {:name :_explorer-label-types, :parent :hiccup, :args {:tag "span", :attrs {:value {:class "kind-label"}}, :children ["types"]}}
+       {:name :_explorer-attrs-types, :parent :_explorer-toggle-attrs, :args {:vals ["button" "kind-toggle" "types" :_explorer-pressed-types "Only types" false]}}
+       {:name :_explorer-button-types, :parent :hiccup, :args {:tag "button", :attrs :_explorer-attrs-types, :children [:_explorer-glyph-types :_explorer-label-types]}}
+       {:name :_explorer-pressed-secrets, :parent :if, :args {:test :_explorer-selected-secrets, :then "true", :else "false"}}
+       {:name :_explorer-glyph-secrets, :parent :hiccup, :args {:tag "span", :attrs {:value {:class "kind-glyph", :aria-hidden "true"}}, :children ["🔒"]}}
+       {:name :_explorer-label-secrets, :parent :hiccup, :args {:tag "span", :attrs {:value {:class "kind-label"}}, :children ["secrets"]}}
+       {:name :_explorer-attrs-secrets, :parent :_explorer-toggle-attrs, :args {:vals ["button" "kind-toggle" "secrets" :_explorer-pressed-secrets "Only secrets" false]}}
+       {:name :_explorer-button-secrets, :parent :hiccup, :args {:tag "button", :attrs :_explorer-attrs-secrets, :children [:_explorer-glyph-secrets :_explorer-label-secrets]}}
+       {:name :_explorer-count-attrs, :parent :const, :args {:value {:value {:class "kind-count", :aria-hidden "true"}}}}
+       {:name :_explorer-pressed-failed, :parent :if, :args {:test :_explorer-selected-failed, :then "true", :else "false"}}
+       {:name :_explorer-glyph-failed, :parent :hiccup, :args {:tag "span", :attrs {:value {:class "kind-glyph", :aria-hidden "true"}}, :children ["✕"]}}
+       {:name :_explorer-label-failed, :parent :hiccup, :args {:tag "span", :attrs {:value {:class "kind-label"}}, :children ["failed"]}}
+       {:name :_explorer-count-failed, :parent :get, :args {:coll :_explorer-input-counts, :key {:value "failed"}, :default {:value nil}}}
+       {:name :_explorer-unknown-count-failed, :parent :nil?, :args {:value :_explorer-count-failed}}
+       {:name :_explorer-count-text-failed, :parent :str, :args {:parts [:_explorer-count-failed]}}
+       {:name :_explorer-count-display-failed, :parent :if, :args {:test :_explorer-unknown-count-failed, :then "", :else :_explorer-count-text-failed}}
+       {:name :_explorer-count-node-failed, :parent :hiccup, :args {:tag "span", :attrs :_explorer-count-attrs, :children [:_explorer-count-display-failed]}}
+       {:name :_explorer-attrs-failed, :parent :_explorer-toggle-attrs, :args {:vals ["button" "kind-toggle kind-problem" "failed" :_explorer-pressed-failed "Only fns with unresolved failed runs (last 7 days)" false]}}
+       {:name :_explorer-button-failed, :parent :hiccup, :args {:tag "button", :attrs :_explorer-attrs-failed, :children [:_explorer-glyph-failed :_explorer-label-failed :_explorer-count-node-failed]}}
+       {:name :_explorer-pressed-type-errors, :parent :if, :args {:test :_explorer-selected-type-errors, :then "true", :else "false"}}
+       {:name :_explorer-glyph-type-errors, :parent :hiccup, :args {:tag "span", :attrs {:value {:class "kind-glyph", :aria-hidden "true"}}, :children ["⚠"]}}
+       {:name :_explorer-label-type-errors, :parent :hiccup, :args {:tag "span", :attrs {:value {:class "kind-label"}}, :children ["type errors"]}}
+       {:name :_explorer-count-type-errors, :parent :get, :args {:coll :_explorer-input-counts, :key {:value "type-errors"}, :default {:value nil}}}
+       {:name :_explorer-unknown-count-type-errors, :parent :nil?, :args {:value :_explorer-count-type-errors}}
+       {:name :_explorer-count-text-type-errors, :parent :str, :args {:parts [:_explorer-count-type-errors]}}
+       {:name :_explorer-count-display-type-errors, :parent :if, :args {:test :_explorer-unknown-count-type-errors, :then "", :else :_explorer-count-text-type-errors}}
+       {:name :_explorer-count-node-type-errors, :parent :hiccup, :args {:tag "span", :attrs :_explorer-count-attrs, :children [:_explorer-count-display-type-errors]}}
+       {:name :_explorer-attrs-type-errors, :parent :_explorer-toggle-attrs, :args {:vals ["button" "kind-toggle kind-problem" "type-errors" :_explorer-pressed-type-errors "Only fns with recorded type errors on this branch" false]}}
+       {:name :_explorer-button-type-errors, :parent :hiccup, :args {:tag "button", :attrs :_explorer-attrs-type-errors, :children [:_explorer-glyph-type-errors :_explorer-label-type-errors :_explorer-count-node-type-errors]}}
+       {:name :_explorer-pressed-lint, :parent :if, :args {:test :_explorer-selected-lint, :then "true", :else "false"}}
+       {:name :_explorer-glyph-lint, :parent :hiccup, :args {:tag "span", :attrs {:value {:class "kind-glyph", :aria-hidden "true"}}, :children ["⚐"]}}
+       {:name :_explorer-label-lint, :parent :hiccup, :args {:tag "span", :attrs {:value {:class "kind-label"}}, :children ["lint"]}}
+       {:name :_explorer-count-lint, :parent :get, :args {:coll :_explorer-input-counts, :key {:value "lint"}, :default {:value nil}}}
+       {:name :_explorer-unknown-count-lint, :parent :nil?, :args {:value :_explorer-count-lint}}
+       {:name :_explorer-count-text-lint, :parent :str, :args {:parts [:_explorer-count-lint]}}
+       {:name :_explorer-count-display-lint, :parent :if, :args {:test :_explorer-unknown-count-lint, :then "", :else :_explorer-count-text-lint}}
+       {:name :_explorer-count-node-lint, :parent :hiccup, :args {:tag "span", :attrs :_explorer-count-attrs, :children [:_explorer-count-display-lint]}}
+       {:name :_explorer-attrs-lint, :parent :_explorer-toggle-attrs, :args {:vals ["button" "kind-toggle kind-problem" "lint" :_explorer-pressed-lint "Only fns the graph lint reports (duplicates, dead privates, restated bindings, siblings to share a parent)" false]}}
+       {:name :_explorer-button-lint, :parent :hiccup, :args {:tag "button", :attrs :_explorer-attrs-lint, :children [:_explorer-glyph-lint :_explorer-label-lint :_explorer-count-node-lint]}}]}

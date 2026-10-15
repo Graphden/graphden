@@ -1420,6 +1420,22 @@
            never a whole-tree row cap."
      :see [[:editor "mountRow"] [:editor "mount"]]}
 
+    {:file "resources/packages/app/editor/editor-explorer-graph.js" :defn mountDiffItem
+     :say "Displays one authorized compare-mode projection through the selected
+           Explorer view graph. Function rows, namespace aggregates and
+           comparison-only ghost labels use the same bounded passive body and
+           shared scoped stylesheet; native treeitems retain identity, ARIA,
+           focus, loading and navigation. An older personal view can fall back
+           for this section while its toolbar stays selected."
+     :see [[:editor "mountNamespace"] [:editor "gdEnterDiffMode"]]}
+
+    {:file "resources/packages/app/editor/editor-explorer-graph.js" :defn selectDiffLens
+     :say "A lens button is rendered by the selected Explorer graph, but native
+           code dispatches a change only after the graph update returns one
+           exact receipt matching that button. The host owns the lens model,
+           keyboard focus and effects on the loaded tree."
+     :see [[:editor "mountDiffItem"] [:editor "gdEnterDiffMode"]]}
+
     {:file "resources/packages/app/editor/editor-recents.js" :defn renderRecentFns
      :say "The Explorer trail executes the shipped `app.ui-recents` initial and view graphs.
            Its update graph returns state and fixed persistence/navigation requests, deduplicates selections, limits the trail and toggles pins; the view
@@ -1462,7 +1478,10 @@
      :say "Loads grouped differences for a selected comparison branch. Explorer badges, canvas
            highlights, field changes, [effect](#term/effect) changes, and review comments use this
            data; comparison-only functions appear as additional display rows. Reads and edits still
-           target the current branch. The comparison menu provides review and merge actions."}
+           target the current branch. The account, organization and branch stamp
+           rejects late comparison replies after a context change; authentication
+           change clears the mode. The comparison menu provides review and merge actions."
+     :see [[:editor "mountDiffItem"] [:editor "selectDiffLens"]]}
 
     {:file "resources/packages/app/editor/editor-execute.js" :defn submitExecution
      :say "The selected card's Run button delegates to the existing Inspector Run owner; it does

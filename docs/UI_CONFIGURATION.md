@@ -31,6 +31,17 @@ through the shared dependency graph. This creates an own binding rather than
 changing packaged helpers. Filled ancestor slots remain sealed; changing a
 deeply referenced helper requires an exposed reference or an explicit local path.
 
+Explorer compare presentation uses the same selected `initial`/`update`/`view`
+roles as the toolbar. The host supplies already authorized diff labels and
+bounded counts; the graph renders row badges, namespace aggregates, ghost
+labels and lens buttons. Its lens update must return the exact selected button
+receipt before the native lens changes. The existing toolbar `inputs` record
+keeps its former shape, while the `view` graph reads an optional typed `diff`
+argument through `get` with a default. An older personal view that lacks the
+compare surface falls back only for compare presentation. The native editor
+still owns branch and account context, ghost navigation, focus, review actions
+and all diff data reads.
+
 Replacing an editor root renames the old root privately in the current branch
 and creates a new UUID named `editor`. Its parent relationships are retained.
 Other branches and references to the old UUID keep their composition. A stored

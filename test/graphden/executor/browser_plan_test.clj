@@ -399,7 +399,8 @@
    (let [loaded (loader/load-packages ["web"])
          base-defs (select-keys (:base-fn-defs loaded)
                                 [:const :if :list :mod :get :equal? :nil? :coalesce :count :map :filter :take :concat
-                                 :vals :group-by :sort-by :str :str-starts-with? :str-lower :str-trim
+                                 :vals :group-by :sort-by :str :str-join :str-starts-with? :str-lower :str-trim
+                                 :blank? :non-blank?
                                  :str-contains? :hiccup :zipmap :assoc :add])
          type-defs (remove #(or (:parent %) (:parents %)) (:fn-defs loaded))
          primitives (into (vec type-defs) (map (fn [[n d]] (assoc d :name n))) base-defs)]
@@ -901,6 +902,64 @@
                                 [8 4 2])))
     (is (true? (get-in (browser/decode-value (:value (second jvm)))
                        [7 1 :hidden])))))
+
+
+(deftest explorer-compare-surfaces-preserve-old-caller-and-export-the-same-projection
+  (let [definitions (:fns (edn/read-string (slurp "resources/packages/app/ui-explorer/fns.edn")))
+        {:keys [graph impls ids]} (map-fixture definitions)
+        input {:selected {} :counts {} :failed 0 :authenticated true
+               :apps-available false :fx false}
+        lens-input (assoc input :surface "diff-lens"
+                          :selected {"added" true "modified" false "missing" true
+                                     "inside" true "changedOnly" false
+                                     "substantiveOnly" false "notes" true "effectsOnly" false})
+        item-input (assoc input :surface "diff-item")
+        diff (fn [kind title summary counts]
+               {:kind kind :title title :summary summary :branch "review"
+                :counts counts})
+        cases [{:entry :explorer-toolbar-view :inputs {:inputs input}}
+               {:entry :explorer-toolbar-view :inputs {:inputs input :diff nil}}
+               {:entry :explorer-toolbar-view :inputs {:inputs lens-input}}
+               {:entry :explorer-toolbar-view
+                :inputs {:inputs item-input :diff (diff "modified" "Changed" "name ~" {})}}
+               {:entry :explorer-toolbar-view
+                :inputs {:inputs item-input :diff (diff "missing" "Only on review" "lost-fn" {})}}
+               {:entry :explorer-toolbar-view
+                :inputs {:inputs item-input :diff (diff nil "" nil {"added" 2 "modified" 1 "inside" 3})}}
+               {:entry :explorer-toolbar-view
+                :inputs {:inputs item-input :diff (diff nil "" nil {})}}
+               {:entry :explorer-toolbar-update
+                :inputs {:state {:handled false} :event {:kind "toggle-diff-lens" :value "missing"}}}]
+        plan (browser/export-plan graph impls
+                                  (select-keys ids [:explorer-toolbar-view :explorer-toolbar-update])
+                                  {:allow-fn? (constantly true)})
+        jvm (jvm-results graph impls ids cases)
+        exported (browser-results plan cases)
+        values (mapv (comp browser/decode-value :value) jvm)]
+    (is (= (count cases) (count exported)))
+    (doseq [[local remote] (map vector jvm exported)]
+      (is (nil? (:error local)) (:message local))
+      (is (nil? (:error remote)) (:error remote))
+      (is (= (browser/decode-value (:value local))
+             (browser/decode-value (:value remote)))))
+    (is (= "gd-explorer-kinds" (get-in values [0 :tree 1 :class]))
+        "An old toolbar caller still omits the new typed optional diff")
+    (is (= (get-in values [0 :tree]) (get-in values [1 :tree]))
+        "Absent and present-nil diff both preserve the old toolbar")
+    (let [buttons (drop 2 (get-in values [2 :tree]))]
+      (is (= ["changedOnly" "added" "modified" "missing" "inside"
+              "substantiveOnly" "notes" "effectsOnly"]
+             (mapv #(get-in % [1 :data-kind]) buttons)))
+      (is (= ["false" "true" "false" "true" "true" "false" "true" "false"]
+             (mapv #(get-in % [1 :aria-pressed]) buttons))))
+    (is (= "±" (get-in values [3 :tree 3 2])))
+    (is (= "name ~" (get-in values [3 :tree 2 2])))
+    (is (= "−" (get-in values [4 :tree 3 2])))
+    (is (= "+2 ±1 ∿3" (get-in values [5 :tree 4 2])))
+    (is (= "vs review: +2 ±1 ∿3" (get-in values [5 :tree 4 1 :title])))
+    (is (true? (get-in values [6 :tree 4 1 :hidden])))
+    (is (= [{:kind "toggle-diff-lens" :value "missing"}]
+           (get-in values [7 :requests])))))
 
 
 (deftest explorer-function-row-presentation-matches-jvm-and-browser

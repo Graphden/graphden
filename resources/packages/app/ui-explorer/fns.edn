@@ -6,6 +6,10 @@
        {:name :_explorer-namespace-input :type {:name :text :expanded :bool :pseudo :bool :count :int :type-errors :int :failed :int :lint :int}}
        {:name :_explorer-filter-input :type {:axis :text :name :text :selected :bool :missing :bool}}
        {:name :_explorer-toolbar-inputs :type {:surface :text :row :_explorer-row-input :namespace :_explorer-namespace-input :filter :_explorer-filter-input :selected [:map :text :bool] :counts [:map :text [:union :null :int]] :failed :int :authenticated :bool :apps-available :bool :fx :bool}}
+       {:name :_explorer-diff-input :type {:kind [:union :null :text] :title :text :summary [:union :null :text] :branch :text :counts [:map :text :int]}}
+       {:name :_explorer-diff-read :parent :get :args {:coll {:value {}} :key {:value :diff} :default {:as :diff :type [:union :null :_explorer-diff-input]}}}
+       {:name :_explorer-diff-default :parent :const :args {:value {:value {:kind nil :title "" :summary nil :branch "" :counts {}}}} :return-type :_explorer-diff-input :return-type-wide? true}
+       {:name :_explorer-input-diff :parent :coalesce :args {:value :_explorer-diff-read :default :_explorer-diff-default} :return-type :_explorer-diff-input}
        {:name :_explorer-toolbar-event :type {:kind :text :value :text}}
        {:name :_explorer-toolbar-request :type {:kind :text :value :text}}
        {:name :_explorer-toolbar-requests :list :_explorer-toolbar-request}
@@ -19,6 +23,8 @@
        {:name :_explorer-is-filter-option :parent :equal? :args {:a :_explorer-input-surface :b "filter-option"}}
        {:name :_explorer-is-view-item :parent :equal? :args {:a :_explorer-input-surface :b "view-item"}}
        {:name :_explorer-is-view-form :parent :equal? :args {:a :_explorer-input-surface :b "view-form"}}
+       {:name :_explorer-is-diff-lens :parent :equal? :args {:a :_explorer-input-surface :b "diff-lens"}}
+       {:name :_explorer-is-diff-item :parent :equal? :args {:a :_explorer-input-surface :b "diff-item"}}
        {:name :_explorer-input-row :parent :get :args {:coll {:as :inputs :type :_explorer-toolbar-inputs} :key {:value :row}}}
        {:name :_explorer-input-namespace :parent :get :args {:coll {:as :inputs :type :_explorer-toolbar-inputs} :key {:value :namespace}}}
        {:name :_explorer-input-filter :parent :get :args {:coll {:as :inputs :type :_explorer-toolbar-inputs} :key {:value :filter}}}
@@ -44,16 +50,10 @@
        {:name :_explorer-view-form-state :parent :zipmap :args {:keys [{:value :visible} {:value :mode} {:value :device-available} {:value :graph-visible} {:value :graph-available} {:value :enter-target} {:value :name-valid} {:value :validation-message}] :vals [:_explorer-view-form-visible :_explorer-view-form-mode :_explorer-view-form-ready :_explorer-view-form-share-visible :_explorer-view-form-graph-available :_explorer-view-form-enter-target :_explorer-view-form-name-valid "Give the view a name"]} :return-type :_explorer-view-form-policy}
        {:name :_explorer-event-kind :parent :get :args {:coll {:as :event :type :_explorer-toolbar-event} :key {:value :kind} :default {:value ""}}}
        {:name :_explorer-event-value :parent :get :args {:coll {:as :event :type :_explorer-toolbar-event} :key {:value :value} :default {:value ""}}}
-       {:name :_explorer-selected-fn :parent :get :args {:coll :_explorer-input-selected :key {:value "fn"} :default {:value false}}}
-       {:name :_explorer-selected-types :parent :get :args {:coll :_explorer-input-selected :key {:value "types"} :default {:value false}}}
        {:name :_explorer-selected-secrets :parent :get :args {:coll :_explorer-input-selected :key {:value "secrets"} :default {:value false}}}
-       {:name :_explorer-selected-services :parent :get :args {:coll :_explorer-input-selected :key {:value "services"} :default {:value false}}}
-       {:name :_explorer-selected-apps :parent :get :args {:coll :_explorer-input-selected :key {:value "apps"} :default {:value false}}}
        {:name :_explorer-selected-tests :parent :get :args {:coll :_explorer-input-selected :key {:value "tests"} :default {:value false}}}
        {:name :_explorer-selected-failed :parent :get :args {:coll :_explorer-input-selected :key {:value "failed"} :default {:value false}}}
-       {:name :_explorer-selected-type-errors :parent :get :args {:coll :_explorer-input-selected :key {:value "type-errors"} :default {:value false}}}
-       {:name :_explorer-selected-lint :parent :get :args {:coll :_explorer-input-selected :key {:value "lint"} :default {:value false}}}
-       {:name :_explorer-selected-flags :parent :list :args {:items [:_explorer-selected-fn :_explorer-selected-types :_explorer-selected-secrets :_explorer-selected-services :_explorer-selected-apps :_explorer-selected-tests :_explorer-selected-failed :_explorer-selected-type-errors :_explorer-selected-lint]}}
+       {:name :_explorer-selected-flags :parent :vals :args {:map :_explorer-input-selected}}
        {:name :_explorer-selected-flag-true :parent :equal? :args {:a {:as :item :type :bool} :b true} :lambda-params [:item]}
        {:name :_explorer-selected-true :parent :filter :args {:pred :_explorer-selected-flag-true :coll :_explorer-selected-flags}}
        {:name :_explorer-selected-count :parent :count :args {:coll :_explorer-selected-true}}
@@ -63,7 +63,7 @@
        {:name :_explorer-is-toggle :parent :equal? :args {:a :_explorer-event-kind :b "toggle"}}
        {:name :_explorer-is-detail :parent :equal? :args {:a :_explorer-event-kind :b "detail"}}
        {:name :_explorer-is-fx :parent :equal? :args {:a :_explorer-event-value :b "fx"}}
-       {:name :_explorer-filter-request-kinds :parent :zipmap :args {:keys ["remove-namespace" "remove-exclude" "remove-uses" "remove-effect" "remove-unused" "remove-name" "remove-view" "select-namespace" "restore-exclude" "select-effect" "select-view" "select-unused" "pick-uses" "clear-view" "apply-device-view" "apply-graph-view" "delete-device-view" "edit-graph-view" "open-graph-view" "save-device-view" "save-graph-view"] :vals [true true true true true true true true true true true true true true true true true true true true true]}}
+       {:name :_explorer-filter-request-kinds :parent :zipmap :args {:keys ["remove-namespace" "remove-exclude" "remove-uses" "remove-effect" "remove-unused" "remove-name" "remove-view" "select-namespace" "restore-exclude" "select-effect" "select-view" "select-unused" "pick-uses" "clear-view" "apply-device-view" "apply-graph-view" "delete-device-view" "edit-graph-view" "open-graph-view" "save-device-view" "save-graph-view" "toggle-diff-lens"] :vals [true true true true true true true true true true true true true true true true true true true true true true]}}
        {:name :_explorer-filter-event-valid :parent :get :args {:coll :_explorer-filter-request-kinds :key :_explorer-event-kind :default {:value false}}}
        {:name :_explorer-filter-request :parent :zipmap :args {:keys [{:value :kind} {:value :value}] :vals [:_explorer-event-kind :_explorer-event-value]} :return-type :_explorer-toolbar-request}
        {:name :_explorer-filter-requests :parent :list :args {:items [:_explorer-filter-request]} :return-type :_explorer-toolbar-requests}
@@ -96,6 +96,7 @@
        {:name :_explorer-detail-label :parent :hiccup :args {:tag "span" :attrs {:value {:class "kind-label"}} :children ["marks"]}}
        {:name :_explorer-detail-button :parent :hiccup :args {:tag "button" :attrs :_explorer-detail-attrs :children [:_explorer-detail-glyph :_explorer-detail-label]}}
        {:name :_explorer-button-spec-type :type {:kind :text :class :text :glyph :text :label :text :title :text :hidden :bool :counted :bool :count-suffix :text :count-class :text}}
+       {:name :_explorer-button-spec-list :list :_explorer-button-spec-type}
        {:name :_explorer-button-spec :parent :zipmap :return-type :_explorer-button-spec-type :args {:keys [{:value :kind} {:value :class} {:value :glyph} {:value :label} {:value :title} {:value :hidden} {:value :counted} {:value :count-suffix} {:value :count-class}]}}
        {:name :_explorer-spec-all :parent :_explorer-button-spec :args {:vals ["all" "kind-toggle kind-all" "◍" "all" "Show everything — clears every filter" false false "" "kind-count"]}}
        {:name :_explorer-spec-fn :parent :_explorer-button-spec :args {:vals ["fn" "kind-toggle" "λ" "fn" "Only functions" false false "" "kind-count"]}}
@@ -138,6 +139,19 @@
        {:name :_explorer-toolbar-detail-list :parent :list :args {:items [:_explorer-detail-button]}}
        {:name :_explorer-toolbar-children :parent :concat :args {:colls [:_explorer-button-nodes :_explorer-toolbar-detail-list]}}
        {:name :_explorer-toolbar-tree :parent :hiccup :args {:tag "div" :attrs {:value {:class "gd-explorer-kinds"}} :children :_explorer-toolbar-children}}
+       {:name :_explorer-diff-lens-specs :parent :const
+        :return-type :_explorer-button-spec-list
+        :args {:value {:value
+                       [{:kind "changedOnly" :class "kind-toggle gd-diff-lens-chip" :glyph "Δ" :label "changed" :title "Show only what differs vs the compared branch" :hidden false :counted false :count-suffix "" :count-class "kind-count"}
+                        {:kind "added" :class "kind-toggle gd-diff-lens-chip" :glyph "+" :label "added" :title "Show fns added on this branch" :hidden false :counted false :count-suffix "" :count-class "kind-count"}
+                        {:kind "modified" :class "kind-toggle gd-diff-lens-chip" :glyph "±" :label "mod" :title "Show modified fns" :hidden false :counted false :count-suffix "" :count-class "kind-count"}
+                        {:kind "missing" :class "kind-toggle gd-diff-lens-chip" :glyph "−" :label "there" :title "Show fns that exist only on the compared branch" :hidden false :counted false :count-suffix "" :count-class "kind-count"}
+                        {:kind "inside" :class "kind-toggle gd-diff-lens-chip" :glyph "∿" :label "inside" :title "Mark fns whose own rows are equal but whose behaviour differs — an ancestor or a referenced fn is in the diff" :hidden false :counted false :count-suffix "" :count-class "kind-count"}
+                        {:kind "substantiveOnly" :class "kind-toggle gd-diff-lens-chip" :glyph "Aa" :label "core" :title "Hide edits that touch nothing but names and descriptions" :hidden false :counted false :count-suffix "" :count-class "kind-count"}
+                        {:kind "notes" :class "kind-toggle gd-diff-lens-chip" :glyph "💬" :label "notes" :title "Mark fns that carry anchored review comments" :hidden false :counted false :count-suffix "" :count-class "kind-count"}
+                        {:kind "effectsOnly" :class "kind-toggle gd-diff-lens-chip" :glyph "fx" :label "fx" :title "Show only changes whose effect footprint differs" :hidden false :counted false :count-suffix "" :count-class "kind-count"}]}}}
+       {:name :_explorer-diff-lens-nodes :parent :map :args {:func :_explorer-button-node :coll :_explorer-diff-lens-specs}}
+       {:name :_explorer-diff-lens-tree :parent :hiccup :args {:tag "div" :attrs {:value {:class "gd-explorer-kinds gd-diff-lens-kinds"}} :children :_explorer-diff-lens-nodes}}
        {:name :_explorer-action-secret :parent :if :args {:test :_explorer-selected-secrets :then :_explorer-input-authenticated :else false}}
        {:name :_explorer-action-dismiss :parent :if :args {:test :_explorer-selected-failed :then :_explorer-input-authenticated :else false}}
        {:name :_explorer-count-failed-or-zero :parent :coalesce :args {:value :_explorer-count-failed :default 0}}
@@ -320,6 +334,36 @@
        {:name :_explorer-view-text :parent :str :args {:parts [:_explorer-view-active-mark :_explorer-filter-chip-warning :_explorer-view-label]}}
        {:name :_explorer-view-item-tree :parent :hiccup :args {:tag "span" :attrs {:value {:class "gd-view-item-body"}} :children [:_explorer-view-text]}}
        {:name :_explorer-view-item-styles :parent :const :args {:value {:value [{:selector "& .gd-view-graph-host .gd-view-item-body" :declarations {"display" "inline" "min-width" "0"}}]}} :return-type [:list {:selector :text :declarations [:map :text :text]}]}
+       {:name :_explorer-diff-kind :parent :get :args {:coll :_explorer-input-diff :key {:value :kind}}}
+       {:name :_explorer-diff-title :parent :get :args {:coll :_explorer-input-diff :key {:value :title}}}
+       {:name :_explorer-diff-label :parent :get :args {:coll :_explorer-input-diff :key {:value :summary}}}
+       {:name :_explorer-diff-branch :parent :get :args {:coll :_explorer-input-diff :key {:value :branch}}}
+       {:name :_explorer-diff-counts :parent :get :args {:coll :_explorer-input-diff :key {:value :counts}}}
+       {:name :_explorer-diff-status-map :parent :zipmap :args {:keys ["added" "modified" "missing" "inside"]}}
+       {:name :_explorer-diff-glyphs :parent :_explorer-diff-status-map :args {:vals ["+" "±" "−" "∿"]}}
+       {:name :_explorer-diff-classes :parent :_explorer-diff-status-map :args {:vals ["gd-diff-badge bd-added" "gd-diff-badge bd-modified" "gd-diff-badge bd-removed" "gd-diff-badge bd-inside"]}}
+       {:name :_explorer-diff-class :parent :get :args {:coll :_explorer-diff-classes :key :_explorer-diff-kind :default "gd-diff-badge"}}
+       {:name :_explorer-diff-badge-attrs :parent :zipmap :args {:keys [{:value :class} {:value :title}] :vals [:_explorer-diff-class :_explorer-diff-title]}}
+       {:name :_explorer-diff-badge-node :parent :hiccup :args {:tag "span" :attrs :_explorer-diff-badge-attrs :children [:_explorer-diff-count-glyph] :kind :_explorer-diff-kind}}
+       {:name :_explorer-diff-badge :parent :if :args {:test :_explorer-diff-kind :then :_explorer-diff-badge-node :else nil}}
+       {:name :_explorer-diff-label-node :parent :hiccup :args {:tag "span" :attrs {:value {:class "gd-diff-label"}} :children [:_explorer-diff-label]}}
+       {:name :_explorer-diff-count-value :parent :get :args {:coll :_explorer-diff-counts :key {:as :kind :type :text} :default 0}}
+       {:name :_explorer-diff-count-glyph :parent :get :args {:coll :_explorer-diff-glyphs :key {:as :kind :type [:union :null :text]} :default ""}}
+       {:name :_explorer-diff-count-zero :parent :equal? :args {:a :_explorer-diff-count-value :b 0}}
+       {:name :_explorer-diff-count-display :parent :str :args {:parts [:_explorer-diff-count-glyph :_explorer-diff-count-value " "]}}
+       {:name :_explorer-diff-count-token :parent :if :lambda-params [:kind] :args {:test :_explorer-diff-count-zero :then "" :else :_explorer-diff-count-display}}
+       {:name :_explorer-diff-count-added :parent :_explorer-diff-count-token :args {:kind "added"}}
+       {:name :_explorer-diff-count-modified :parent :_explorer-diff-count-token :args {:kind "modified"}}
+       {:name :_explorer-diff-count-missing :parent :_explorer-diff-count-token :args {:kind "missing"}}
+       {:name :_explorer-diff-count-inside :parent :_explorer-diff-count-token :args {:kind "inside"}}
+       {:name :_explorer-diff-count-joined :parent :str :args {:parts [:_explorer-diff-count-added :_explorer-diff-count-modified :_explorer-diff-count-missing :_explorer-diff-count-inside]}}
+       {:name :_explorer-diff-count-text :parent :str-trim :args {:string :_explorer-diff-count-joined}}
+       {:name :_explorer-diff-count-empty :parent :equal? :args {:a :_explorer-diff-count-text :b ""}}
+       {:name :_explorer-diff-aggregate-title :parent :str :args {:parts ["vs " :_explorer-diff-branch ": " :_explorer-diff-count-text]}}
+       {:name :_explorer-diff-aggregate-attrs :parent :_explorer-row-marker-attrs :args {:vals ["gd-diff-ns-badge" :_explorer-diff-aggregate-title :_explorer-diff-count-empty]}}
+       {:name :_explorer-diff-aggregate-node :parent :hiccup :args {:tag "span" :attrs :_explorer-diff-aggregate-attrs :children [:_explorer-diff-count-text]}}
+       {:name :_explorer-diff-tree :parent :hiccup :args {:tag "span" :attrs {:value {:class "gd-diff-body"}} :children [:_explorer-diff-label-node :_explorer-diff-badge :_explorer-diff-aggregate-node]}}
+       {:name :_explorer-diff-styles :parent :const :args {:value {:value [{:selector "& .gd-diff-body" :declarations {"display" "contents"}} {:selector "& .gd-diff-label" :declarations {"overflow" "hidden" "text-overflow" "ellipsis" "white-space" "nowrap"}}]}} :return-type [:list {:selector :text :declarations [:map :text :text]}]}
        {:name :_explorer-no-actions :parent :const :args {:value {:value {:secret false :dismiss false :run false}}}}
        {:name :_explorer-row-or-toolbar-tree :parent :if :args {:test :_explorer-is-row :then :_explorer-row-tree :else :_explorer-toolbar-tree}}
        {:name :_explorer-row-or-toolbar-styles :parent :if :args {:test :_explorer-is-row :then :_explorer-row-styles :else :explorer-styles}}
@@ -329,9 +373,13 @@
        {:name :_explorer-option-or-other-styles :parent :if :args {:test :_explorer-is-filter-option :then :_explorer-filter-styles :else :_explorer-filter-or-other-styles}}
        {:name :_explorer-view-or-other-tree :parent :if :args {:test :_explorer-is-view-item :then :_explorer-view-item-tree :else :_explorer-option-or-other-tree}}
        {:name :_explorer-view-or-other-styles :parent :if :args {:test :_explorer-is-view-item :then :_explorer-view-item-styles :else :_explorer-option-or-other-styles}}
-       {:name :_explorer-view-tree :parent :if :args {:test :_explorer-is-namespace :then :_explorer-ns-tree :else :_explorer-view-or-other-tree}}
-       {:name :_explorer-view-styles :parent :if :args {:test :_explorer-is-namespace :then :_explorer-ns-styles :else :_explorer-view-or-other-styles}}
-       {:name :_explorer-no-action-surfaces :parent :zipmap :args {:keys ["row" "namespace" "filter-chip" "filter-option" "view-item"] :vals [true true true true true]}}
+       {:name :_explorer-namespace-or-other-tree :parent :if :args {:test :_explorer-is-namespace :then :_explorer-ns-tree :else :_explorer-view-or-other-tree}}
+       {:name :_explorer-namespace-or-other-styles :parent :if :args {:test :_explorer-is-namespace :then :_explorer-ns-styles :else :_explorer-view-or-other-styles}}
+       {:name :_explorer-diff-or-other-tree :parent :if :args {:test :_explorer-is-diff-item :then :_explorer-diff-tree :else :_explorer-namespace-or-other-tree}}
+       {:name :_explorer-diff-or-other-styles :parent :if :args {:test :_explorer-is-diff-item :then :_explorer-diff-styles :else :_explorer-namespace-or-other-styles}}
+       {:name :_explorer-view-tree :parent :if :args {:test :_explorer-is-diff-lens :then :_explorer-diff-lens-tree :else :_explorer-diff-or-other-tree}}
+       {:name :_explorer-view-styles :parent :if :args {:test :_explorer-is-diff-lens :then :explorer-styles :else :_explorer-diff-or-other-styles}}
+       {:name :_explorer-no-action-surfaces :parent :zipmap :args {:keys ["row" "namespace" "filter-chip" "filter-option" "view-item" "diff-lens" "diff-item"] :vals [true true true true true true true]}}
        {:name :_explorer-is-no-action-surface :parent :get :args {:coll :_explorer-no-action-surfaces :key :_explorer-input-surface :default false}}
        {:name :_explorer-view-actions :parent :if :args {:test :_explorer-is-no-action-surface :then :_explorer-no-actions :else :_explorer-actions}}
        {:name :explorer-toolbar-view :parent :zipmap :args {:keys [{:value :tree} {:value :styles} {:value :actions}] :vals [:_explorer-view-tree :_explorer-view-styles :_explorer-view-actions]}}]}

@@ -119,6 +119,12 @@ function gdDmLookups() {
 let _gdDiffMode = null;
 let _gdDiffModeFetching = false;
 
+function gdDiffOwnerContext() {
+  return JSON.stringify([window.gdPrefOwner || null,
+    typeof graphdenCurrentOrg === 'string' ? graphdenCurrentOrg : null,
+    typeof getCurrentBranchName === 'function' ? getCurrentBranchName() : null]);
+}
+
 function gdDiffModeActive() { return !!_gdDiffMode; }
 function gdDiffModeBranch() { return _gdDiffMode?.branch || null; }
 function gdDiffModeGroup(fnId) {
@@ -398,7 +404,7 @@ async function gdDiffModeLoadEffects(mode) {
       gdDiffFetchTypes(mode.branch),
     ]);
   } catch (_) { /* fall back to the structural signal alone */ }
-  if (_gdDiffMode !== mode) return;   // mode changed under the fetch
+  if (_gdDiffMode !== mode || mode.ownerContext !== gdDiffOwnerContext()) return;
   for (const g of mode.byFnId.values()) {
     const d = (hereTypes && thereTypes)
       ? gdDiffEffectSetDelta(hereTypes, thereTypes, g['fn-name'])
@@ -425,12 +431,12 @@ function gdDiffModeKind(group) {
   return 'modified';
 }
 
-const GD_DIFF_GLYPH = { added: '+', missing: '−', modified: '±', inside: '∿' };
 const GD_DIFF_CLS = { added: 'bd-added', missing: 'bd-removed', modified: 'bd-modified', inside: 'bd-inside' };
 
 // --- data -------------------------------------------------------------------
 
 async function gdDiffModeFetch(otherBranch) {
+  const ownerContext = gdDiffOwnerContext();
   const cur = (typeof getCurrentBranchName === 'function')
     ? getCurrentBranchName() : 'main';
   // Resolve both names to IDS first — the :ref path segment (and any
@@ -520,7 +526,7 @@ async function gdDiffModeFetch(otherBranch) {
   for (const [id, info] of Object.entries(d.affected || {})) {
     if (!byFnId.has(id)) affected.set(id, info);
   }
-  return { branch: otherBranch, branchId: otherId, currentId: curId,
+  return { branch: otherBranch, branchId: otherId, currentId: curId, ownerContext,
            byFnId, affected, noteCounts, proposalRef, fetchedAt: Date.now() };
 }
 
@@ -532,13 +538,15 @@ let _gdDiffEnterEpoch = 0;
 async function gdEnterDiffMode(otherBranch) {
   if (!otherBranch || otherBranch === getCurrentBranchName()) return;
   const epoch = ++_gdDiffEnterEpoch;
+  const ownerContext = gdDiffOwnerContext();
   _gdDiffModeFetching = true;
   try {
     const fetched = await gdDiffModeFetch(otherBranch);
     // The user may have exited (×) or picked ANOTHER branch while the
     // fetch was in flight — installing a stale result would resurrect
     // a dismissed mode (the refresh path has the same guard).
-    if (epoch !== _gdDiffEnterEpoch) return;
+    if (epoch !== _gdDiffEnterEpoch || ownerContext !== gdDiffOwnerContext()
+        || fetched.ownerContext !== ownerContext) return;
     _gdDiffMode = fetched;
     if (typeof gdDiffGhostsReset === 'function') gdDiffGhostsReset();
     try { localStorage.setItem(GD_DIFF_MODE_KEY, otherBranch); } catch (_) {}
@@ -568,6 +576,7 @@ async function gdEnterDiffMode(otherBranch) {
 
 async function gdDiffModeRefresh() {
   if (!_gdDiffMode || _gdDiffModeFetching) return;
+  if (_gdDiffMode.ownerContext !== gdDiffOwnerContext()) { gdExitDiffMode(); return; }
   _gdDiffModeFetching = true;
   const prev = _gdDiffMode;
   try {
@@ -575,7 +584,7 @@ async function gdDiffModeRefresh() {
     // The user may have EXITED (or re-entered vs another branch) while
     // the fetch was in flight — installing the stale result would
     // resurrect a mode with no chip and no way out.
-    if (_gdDiffMode === prev) {
+    if (_gdDiffMode === prev && fresh.ownerContext === gdDiffOwnerContext()) {
       _gdDiffMode = fresh;
       // Invalidate pending subtree reads as well as drawn clusters. A slow
       // ghost from the previous comparison must never repaint this model.
@@ -596,7 +605,8 @@ function gdExitDiffMode() {
   // re-persist it past reloads).
   _gdDiffEnterEpoch += 1;
   gdCloseDiffChipMenu();
-  document.getElementById('gd-diff-lens')?.remove();
+  const lens = document.getElementById('gd-diff-lens');
+  if (lens) { window.gdExplorerGraph?.disposeDiff(lens); lens.remove(); }
   document.getElementById('gd-diff-insp')?.remove();
   _gdDiffMode = null;
   try { localStorage.removeItem(GD_DIFF_MODE_KEY); } catch (_) {}
@@ -667,3 +677,6 @@ window.gdExitDiffMode = gdExitDiffMode;
 window.gdDiffVisibleGroup = gdDiffVisibleGroup;
 window.gdDiffLens = gdDiffLens;
 window.gdDiffSetLens = gdDiffSetLens;
+window.addEventListener('gd-auth-changed', () => {
+  if (_gdDiffMode || _gdDiffModeFetching) gdExitDiffMode();
+});

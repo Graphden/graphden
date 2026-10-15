@@ -1009,6 +1009,7 @@ body.gd-tenancy.gd-no-write .branch-row-more-menu .branch-row-policy { display: 
   display: flex; flex-wrap: wrap; gap: 2px;
   padding: 2px 0 0;
 }
+.gd-diff-lens-graph-host { flex: 1; min-width: 0; }
 #gd-diff-lens .gd-diff-lens-chip[aria-pressed="true"] {
   background: var(--warning-fg); color: var(--bg);
   border-color: var(--warning-fg);
@@ -1089,22 +1090,26 @@ body.gd-tenancy.gd-no-write .branch-row-more-menu .branch-row-policy { display: 
   font-family: var(--mono); font-weight: 700; font-size: 0.625rem;
   padding: 0 3px;
 }
+.gd-diff-graph-host { display: contents; }
+.gd-diff-label:empty { display: none; }
 .entity-item .gd-diff-badge.bd-added { color: var(--success-fg); }
 .entity-item .gd-diff-badge.bd-removed { color: var(--error-fg); }
 .entity-item .gd-diff-badge.bd-modified { color: var(--warning-fg); }
 .entity-item .gd-diff-badge.bd-inside { color: var(--warning-fg); opacity: 0.8; }
-/* The per-fn digest under a changed row (compare mode, UX-v4): the row
-   wraps and the summary takes the next line. */
+/* The graph's digest stays below the native row identity; the badge and
+   native review count keep their first-line positions. */
 #entity-list .entity-item.gd-diff-changed { flex-wrap: wrap; }
-.gd-diff-summary {
+#entity-list .entity-item.gd-diff-changed .gd-diff-label {
+  order: 2;
   flex-basis: 100%; min-width: 0;
   font-size: 0.625rem; line-height: 1.3; color: var(--muted-fg);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.entity-item.gd-diff-inside .gd-diff-summary { color: var(--warning-fg); opacity: 0.85; }
+.entity-item.gd-diff-inside .gd-diff-label { color: var(--warning-fg); opacity: 0.85; }
 /* 💬 — anchored review comments on this fn's changes (compare mode).
    Sits right after the +/±/− badge; the count rides in the text. */
 .gd-diff-note-badge {
+  order: 1;
   flex: none;
   font-size: 0.5625rem;
   opacity: 0.85;
@@ -1118,7 +1123,7 @@ body.gd-tenancy.gd-no-write .branch-row-more-menu .branch-row-policy { display: 
   cursor: pointer;
 }
 .gd-diff-ghost:hover { opacity: 0.85; }
-.gd-diff-ghost .name { text-decoration: line-through dotted; }
+.gd-diff-ghost .gd-diff-label { text-decoration: line-through dotted; }
 .gd-diff-ns-badge {
   margin-left: 4px; flex: none;
   font-family: var(--mono); font-size: 0.5625rem;

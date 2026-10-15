@@ -103,6 +103,32 @@ const {assert, newContext, BASE} = require('./edit-test-helpers');
       && scale.longTitle === 4015,
       'large row set shares one sheet, disposes cleanly and bounded styled badges fit a 600-operation budget');
 
+    stage = 'compare scale';
+    const compareScale = await page.evaluate(() => {
+      const group = document.createElement('div');
+      document.getElementById('entity-list').appendChild(group);
+      for (let index = 0; index < 240; index++) {
+        const host = document.createElement('span');
+        group.appendChild(host);
+        gdExplorerGraph.mountDiffItem(host, {kind: 'modified', title: 'Changed',
+          summary: 'row ' + index, branch: 'review', counts: {}});
+      }
+      const first = group.firstElementChild;
+      const sheet = first.dataset.gdUiStyle;
+      const result = {bodies: group.querySelectorAll('.gd-diff-body').length,
+        labels: group.querySelectorAll('.gd-diff-label').length,
+        shared: Array.from(group.children).every(host => host.dataset.gdUiStyle === sheet),
+        sheets: document.querySelectorAll('style[data-gd-ui-styles="' + sheet + '"]').length};
+      gdExplorerGraph.disposeDiff(group);
+      result.disposed = !GraphdenRenderer.ownsTarget(first);
+      group.remove();
+      return result;
+    });
+    assert(compareScale.bodies === 240 && compareScale.labels === 240
+      && compareScale.shared && compareScale.sheets === 1 && compareScale.disposed,
+    '240 compare bodies share one scoped sheet and dispose without a tree cap: '
+      + JSON.stringify(compareScale));
+
     stage = 'server graph parity';
     const serverParity = await page.evaluate(async () => {
       const response = await authFetch(API.api_ui_configuration_plan, {method: 'POST', cache: 'no-store',
@@ -169,21 +195,37 @@ const {assert, newContext, BASE} = require('./edit-test-helpers');
         }
         return builtin.run(entry, args);
       }});
+      const diffGroup = document.createElement('div');
+      const diffItem = document.createElement('span');
+      const diffLens = document.createElement('div');
+      diffGroup.append(diffItem, diffLens);
+      document.getElementById('entity-list').appendChild(diffGroup);
       try {
         await gdExplorerGraph.reload();
+        gdExplorerGraph.mountDiffItem(diffItem, {kind: 'modified', title: 'Changed',
+          summary: 'value changed', branch: 'review', counts: {}});
+        gdExplorerGraph.mountDiffLens(diffLens, {changedOnly: false, added: true,
+          modified: true, missing: true, inside: true, substantiveOnly: false,
+          notes: true, effectsOnly: false});
         return {toolbar: document.querySelectorAll('#kind-filters button').length,
           names: document.querySelectorAll('#entity-list .entity-item .gd-explorer-row .name').length,
+          diffBadge: diffItem.querySelector('.gd-diff-badge')?.textContent,
+          diffButtons: diffLens.querySelectorAll('button[data-kind]').length,
           status: gdUIComponentsStatus(), fallbackCalls, surfaces};
       } finally {
+        gdExplorerGraph.disposeDiff(diffGroup);
+        diffGroup.remove();
         window.gdUIComponentSectionFallback = sectionFallback;
         window.gdLoadUIComponentRuntime = original;
         await gdExplorerGraph.reload();
       }
     });
-    assert(fallback.toolbar === 11 && fallback.names > 0 && fallback.status.includes('namespaces')
-      && fallback.fallbackCalls === 2
-      && fallback.surfaces.includes('row') && fallback.surfaces.includes('namespace'),
-    'legacy personal toolbar keeps both tree-body sections on the built-in graph');
+    assert(fallback.toolbar === 11 && fallback.names > 0 && fallback.status.includes('compare')
+      && fallback.diffBadge === '±' && fallback.diffButtons === 8
+      && fallback.fallbackCalls === 3
+      && fallback.surfaces.includes('row') && fallback.surfaces.includes('namespace')
+      && fallback.surfaces.includes('diff-item'),
+    'legacy personal toolbar keeps row, namespace and compare sections on the built-in graph');
     stage = 'auth lifetime';
     const authChange = await page.evaluate(async () => {
       const list = document.getElementById('entity-list');

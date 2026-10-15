@@ -1,6 +1,7 @@
 (ns ^:integration ^:serial graphden.editor.config-resolution-integration-test
   (:require
     [cheshire.core :as json]
+    [clojure.edn :as edn]
     [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.crud.type-check :as type-check]
@@ -26,7 +27,9 @@
     [graphden.tenancy.context :as tenancy]
     [graphden.test-infra.golden-app :as ga]
     [graphden.types.check :as check]
+    [graphden.types.check.literals :as literals]
     [graphden.types.check.provenance :as provenance]
+    [graphden.types.core :as types]
     [graphden.util.ns-path :as ns-path]
     [graphden.versioning.storage.core :as versioned]))
 
@@ -56,6 +59,54 @@
     (let [id (ids/fn-id path :legacy)]
       (check/check-fn-def! (type-check/reconstruct-fn-def storage id))
       id)))
+
+
+(deftest explorer-optional-diff-preserves-a-stored-pinned-personal-child
+  (let [storage (:storage ga/*bootstrap*)
+        path (str "pinned-explorer-" (random-uuid))
+        namespace-row (sp/create-entity storage :ns {:name path})
+        old-shape (->> (edn/read-string
+                         (slurp "test/graphden/lint/explorer_toolbar_pre_dry.edn"))
+                       :fns
+                       (some #(when (= :_explorer-toolbar-inputs (:name %)) (:type %))))
+        current-definitions (:fns (edn/read-string
+                                    (slurp "resources/packages/app/ui-explorer/fns.edn")))
+        current-shape (some #(when (= :_explorer-toolbar-inputs (:name %)) (:type %))
+                            current-definitions)
+        default-definition (some #(when (= :_explorer-diff-default (:name %)) %)
+                                 current-definitions)
+        definition {:name :view :namespace path
+                    :parent :app.ui-explorer/_explorer-input-surface
+                    :args {:inputs {:as :inputs :type :_explorer-toolbar-inputs}}}
+        id (ids/fn-id path :view)]
+    (is (= old-shape current-shape)
+        "The shipped toolbar record keeps the old pinned personal contract")
+    (composition/sync-fns-to-storage! storage [definition] {path (:id namespace-row)})
+    (let [stored (type-check/reconstruct-fn-def storage id)]
+      (is (= :app.ui-explorer/_explorer-toolbar-inputs
+             (get-in stored [:args :inputs :type])))
+      (is (some? (registry/rich-type-of :app.ui-explorer/_explorer-input-surface)))
+      (is (some? (check/check-fn-def! stored))
+          "The stored old child still passes strict type checking"))
+    (is (some? (registry/rich-type-of :app.ui-explorer/_explorer-diff-read)))
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"(?i)type-check failed"
+          (check/check-fn-def! {:name :invalid-diff-default
+                                :parent :app.ui-explorer/_explorer-diff-read
+                                :args {:diff {:value "not a diff record"}}}))
+        "The optional slot rejects a value outside nullable Diff")
+    (let [value {:kind nil :title "" :summary nil :branch "" :counts {}}
+          inferred (literals/classify-literal value)
+          declared (types/resolve-alias :_explorer-diff-input)]
+      (is (= {:kind :null :title :text :summary :null
+              :branch :text :counts :empty-map}
+             inferred))
+      (is (= :_explorer-diff-input (:return-type default-definition)))
+      (is (true? (:return-type-wide? default-definition)))
+      (is (not= inferred declared)
+          "The empty default has a narrower literal type")
+      (is (types/subtype? inferred declared)
+          "The explicit wide return is only the declared Diff record"))))
 
 
 (use-fixtures :once (ga/fixture (ns-name *ns*)))

@@ -112,7 +112,7 @@ async function cleanup(page) {
       if (h && h.getAttribute('aria-expanded') !== 'true') h.click();
     });
     await page.waitForFunction((nm) => {
-      return Array.from(document.querySelectorAll('.gd-diff-ghost .name'))
+      return Array.from(document.querySelectorAll('.gd-diff-ghost .gd-diff-label'))
         .some((n) => n.textContent === nm);
     }, PROBE_FN, {timeout: 20000});
     assert(true, 'ghost row for the feat-only probe appears');
@@ -131,7 +131,7 @@ async function cleanup(page) {
     // that window found nothing and never raised the confirm.
     // dispatchEvent re-resolves the row until it is attached.
     await page.locator('.gd-diff-ghost')
-      .filter({ has: page.locator('.name', { hasText: PROBE_FN }) })
+      .filter({ has: page.locator('.gd-diff-label', { hasText: PROBE_FN }) })
       .first()
       .dispatchEvent('click', {}, { timeout: 20000 });
     await page.waitForFunction(

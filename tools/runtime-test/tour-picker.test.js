@@ -32,6 +32,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { createDocument, MiniElement } = require('./mini-dom');
+const graphRenderer = require('./tour-catalog-renderer-fixture');
 
 const source = fs.readFileSync(
   path.join(__dirname, '..', '..', 'resources', 'packages', 'app', 'editor',
@@ -47,47 +48,6 @@ const builtinSource = fs.readFileSync(path.join(__dirname, '..', '..', 'resource
   'ui-preview', 'builtin-plans.js'), 'utf8');
 const graphSource = fs.readFileSync(path.join(__dirname, '..', '..', 'resources', 'packages', 'app',
   'editor', 'editor-tour-catalog-graph.js'), 'utf8');
-
-function graphRenderer(document, api) {
-  const isMap = item => Object.prototype.toString.call(item) === '[object Map]';
-  function nodes(raw) {
-    if (raw == null || raw === false) return [];
-    if (!Array.isArray(raw) && api.isSequence(raw)) return [...raw].flatMap(nodes);
-    if (!Array.isArray(raw)) return [raw];
-    const tag = raw[0] instanceof api.Keyword ? raw[0].name : raw[0];
-    const attrs = isMap(raw[1]) ? raw[1] : new Map();
-    const props = {};
-    for (const [key, item] of attrs) {
-      const name = key instanceof api.Keyword ? key.name : key;
-      props[name === 'class' ? 'className' : name] = item;
-    }
-    props.children = raw.slice(attrs.size ? 2 : 1).flatMap(nodes).map(vnode);
-    return [{type: tag, props}];
-  }
-  function vnode(raw) { return nodes(raw)[0] ?? null; }
-  function element(node) {
-    if (node == null || node === false) return null;
-    if (typeof node !== 'object') return document.createTextNode(node);
-    const el = document.createElement(node.type);
-    for (const [name, item] of Object.entries(node.props)) {
-      if (name === 'className') el.className = item;
-      else if (name !== 'children' && name !== 'key') el.setAttribute(name, item);
-    }
-    for (const child of node.props.children || []) {
-      const rendered = element(child);
-      if (rendered) el.appendChild(rendered);
-    }
-    return el;
-  }
-  return {vnode, mount(host) {
-    return {render(tree) {
-      host.replaceChildren();
-      delete host.dataset.gdUiStyle;
-      const node = element(vnode(tree));
-      if (node) host.appendChild(node);
-    }, dispose() { host.replaceChildren(); delete host.dataset.gdUiStyle; }};
-  }};
-}
 
 let failures = 0;
 let passes = 0;
@@ -176,9 +136,10 @@ function makeWorld(opts) {
     },
   };
   ctx.window = ctx;
-  const windowListeners = new Map();
-  ctx.addEventListener = (name, listener) => windowListeners.set(name, [...(windowListeners.get(name) || []), listener]);
-  ctx.dispatchEvent = event => (windowListeners.get(event.type) || []).forEach(listener => listener(event));
+  const windowEvents = new EventTarget();
+  ctx.addEventListener = windowEvents.addEventListener.bind(windowEvents);
+  ctx.removeEventListener = windowEvents.removeEventListener.bind(windowEvents);
+  ctx.dispatchEvent = windowEvents.dispatchEvent.bind(windowEvents);
   ctx.window.graphdenHasCap = (cap) => o.caps.includes(cap);
   ctx.window.graphdenTenancyActive = () => o.tenancy === true;
   ctx.window.API = o.api || {};
@@ -666,7 +627,7 @@ function makeWorld(opts) {
     const loading = w.ctx.gdTourCatalogGraph.reload();
     assert(w.rows().length === 5, 'builtin catalogue remains available while selection loads');
     w.ctx.gdPrefOwner = 'another-account';
-    w.ctx.dispatchEvent({type: 'gd-auth-changed'});
+    w.ctx.dispatchEvent(new Event('gd-auth-changed'));
     assert(w.pop.children.length === 0 && !w.pop.classList.contains('gd-tour-visible'),
       'old-account catalogue data is removed immediately');
     resolveRuntime(w.ctx.GraphdenBrowser.createRuntime(deferredPlan));

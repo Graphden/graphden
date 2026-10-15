@@ -25,9 +25,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { createDocument } = require('./mini-dom');
+const graphRenderer = require('./tour-catalog-renderer-fixture');
 
 const editor = path.join(__dirname, '..', '..', 'resources', 'packages', 'app', 'editor');
 const read = (f) => fs.readFileSync(path.join(editor, f), 'utf8');
+const readPreview = (f) => fs.readFileSync(path.join(editor, '..', 'ui-preview', f), 'utf8');
 
 let failures = 0;
 let passes = 0;
@@ -77,9 +79,13 @@ function makeWorld(opts) {
   if (o.saved) store.set('graphden.tour', JSON.stringify(o.saved));
   const document = createDocument();
   const calls = [];
+  const windowEvents = new EventTarget();
   const ctx = {
     console, JSON, Set, URLSearchParams, Math, Object, Array, Promise,
     document,
+    addEventListener: windowEvents.addEventListener.bind(windowEvents),
+    removeEventListener: windowEvents.removeEventListener.bind(windowEvents),
+    dispatchEvent: windowEvents.dispatchEvent.bind(windowEvents),
     setInterval: () => 0,
     clearInterval: () => {},
     performance: { now: () => Date.now() },
@@ -128,6 +134,14 @@ function makeWorld(opts) {
   vm.runInContext(read('editor-tour-cleanup.js'), ctx);
   Object.assign(ctx, seams);
   vm.runInContext(read('editor-tour-end.js'), ctx);
+  // The end tests inspect native cleanup controls, while the catalogue body
+  // and resume label come from the actual shipped graph runtime and plan.
+  vm.runInContext(readPreview('browser-runtime.js'), ctx);
+  vm.runInContext(readPreview('builtin-plans.js'), ctx);
+  ctx.GraphdenStyles = {normalize: rules => [...rules], acquire: () => ({id: 'tour-end'}), release: () => {}};
+  ctx.GraphdenRenderer = graphRenderer(document, ctx.GraphdenBrowser);
+  ctx.gdLoadUIComponentRuntime = async (_component, plan) => ctx.GraphdenBrowser.createRuntime(plan);
+  vm.runInContext(read('editor-tour-catalog-graph.js'), ctx);
   vm.runInContext(read('editor-tour-picker.js'), ctx);
   // `_tourLessons` / `_tourState` are script-scope `let`s — the browser's tour
   // engine owns them, so a test seeds them the only way anything else can.
@@ -350,7 +364,9 @@ const finishedOn = (id, extra) => Object.assign(
     assert(await w.ctx.maybeStartTutorial() === false, 'boot stays on the chosen branch');
     assert(w.saved().sandboxBranch === 'tutorial-owned', 'boot preserves sandbox ownership');
     await w.ctx.openTutorialMenu();
-    assert(w.btn('Continue 01 · First fn — step 2/2'), 'Lessons offers the saved step');
+    assert(w.btn('Continue 01 · First fn — step 2/2'),
+      'Lessons offers the saved step (buttons: ' + JSON.stringify(w.btns())
+      + ', calls: ' + JSON.stringify(w.calls) + ')');
     w.btn('End lesson & clean up').click();
     await new Promise((r) => setTimeout(r, 0));
     assert(w.calls.includes('switchToBranch tutorial-owned'),

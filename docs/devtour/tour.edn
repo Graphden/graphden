@@ -1420,7 +1420,7 @@
            never a whole-tree row cap."
      :see [[:editor "mountRow"] [:editor "mount"]]}
 
-    {:file "resources/packages/app/editor/editor-explorer-graph.js" :defn mountDiffItem
+    {:file "resources/packages/app/editor/editor-explorer-compare.js" :defn mountDiffItem
      :say "Displays one authorized compare-mode projection through the selected
            Explorer view graph. Function rows, namespace aggregates and
            comparison-only ghost labels use the same bounded passive body and
@@ -1429,7 +1429,7 @@
            for this section while its toolbar stays selected."
      :see [[:editor "mountNamespace"] [:editor "gdEnterDiffMode"]]}
 
-    {:file "resources/packages/app/editor/editor-explorer-graph.js" :defn selectDiffLens
+    {:file "resources/packages/app/editor/editor-explorer-compare.js" :defn selectDiffLens
      :say "A lens button is rendered by the selected Explorer graph, but native
            code dispatches a change only after the graph update returns one
            exact receipt matching that button. The host owns the lens model,

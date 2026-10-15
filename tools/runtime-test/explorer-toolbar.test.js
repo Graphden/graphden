@@ -33,7 +33,9 @@ function fixture() {
   });
   context.window = context;
   installInspectorGraph(context, document);
-  vm.runInContext(fs.readFileSync(path.join(__dirname, '../../resources/packages/app/editor/editor-explorer-graph.js'), 'utf8'), context);
+  for (const file of ['editor-explorer-compare.js', 'editor-explorer-graph.js']) {
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '../../resources/packages/app/editor', file), 'utf8'), context);
+  }
   context.gdExplorerGraph.refresh();
   const host = document.getElementById('kind-filters');
   const button = kind => host.querySelectorAll('button').find(el => el.dataset.kind === kind || el.dataset.detail === kind);
@@ -66,6 +68,16 @@ function fixture() {
   assert.equal(selected, 1, 'typed graph request reaches only the exact native choice');
   assert.equal(f.context.gdExplorerGraph.selectFilter('unknown', 'io', () => selected++), false);
   assert.equal(selected, 1, 'an unknown request cannot mutate filters');
+  const lensBody = f.document.createElement('div');
+  f.document.body.appendChild(lensBody);
+  const lensState = Object.fromEntries(['changedOnly', 'added', 'modified', 'missing',
+    'inside', 'substantiveOnly', 'notes', 'effectsOnly'].map(kind => [kind, false]));
+  f.context.gdExplorerGraph.mountDiffLens(lensBody, lensState);
+  const addedLens = lensBody.querySelectorAll('button').find(el => el.dataset.kind === 'added');
+  let selectedLens = null;
+  assert.equal(f.context.gdExplorerGraph.selectDiffLens(addedLens, kind => { selectedLens = kind; }), true,
+    'the actual Explorer host passes its compare adapter dependencies through the lens receipt');
+  assert.equal(selectedLens, 'added');
   f.host.dispatch('click', {target: f.button('tests')});
   assert.deepEqual(f.calls, [['kind', 'tests']]);
   assert.equal(f.button('all').getAttribute('aria-pressed'), 'false');

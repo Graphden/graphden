@@ -845,24 +845,28 @@
                       :expected {:state state :requests requests}})]
     (assert-differential!
       graph impls ids
-      [{:entry :explorer-toolbar-initial :inputs {:inputs inputs} :expected state}
-       (transition "toggle" "tests" [{:kind "toggle-filter" :value "tests"}])
-       (transition "toggle" "all" [{:kind "toggle-filter" :value "all"}])
-       (transition "toggle" "unknown" [])
-       (transition "detail" "fx" [{:kind "toggle-detail" :value "fx"}])
-       (transition "detail" "unknown" [])
-       (transition "select-effect" "io" [{:kind "select-effect" :value "io"}])
-       (transition "remove-view" "view-id" [{:kind "remove-view" :value "view-id"}])
-       (transition "unknown-filter" "io" [])
-       (transition "other" "tests" [])
-       {:entry :toolbar-actions :inputs {:inputs inputs}
-        :expected {:secret true :dismiss true :run true}}
-       {:entry :toolbar-actions :inputs {:inputs (assoc inputs :authenticated false)}
-        :expected {:secret false :dismiss false :run false}}
-       {:entry :toolbar-actions :inputs {:inputs (assoc inputs :counts {"tests" 0 "failed" nil})}
-        :expected {:secret true :dismiss false :run false}}
-       {:entry :toolbar-actions :inputs {:inputs (assoc inputs :selected {})}
-        :expected {:secret false :dismiss false :run false}}])))
+      (concat
+        [{:entry :explorer-toolbar-initial :inputs {:inputs inputs} :expected state}]
+        (map (fn [kind] (transition "toggle" kind [{:kind "toggle-filter" :value kind}]))
+             ["all" "fn" "types" "secrets" "services" "apps" "tests"
+              "failed" "type-errors" "lint"])
+        [(transition "toggle" "tests" [{:kind "toggle-filter" :value "tests"}])
+         (transition "toggle" "all" [{:kind "toggle-filter" :value "all"}])
+         (transition "toggle" "unknown" [])
+         (transition "detail" "fx" [{:kind "toggle-detail" :value "fx"}])
+         (transition "detail" "unknown" [])
+         (transition "select-effect" "io" [{:kind "select-effect" :value "io"}])
+         (transition "remove-view" "view-id" [{:kind "remove-view" :value "view-id"}])
+         (transition "unknown-filter" "io" [])
+         (transition "other" "tests" [])
+         {:entry :toolbar-actions :inputs {:inputs inputs}
+          :expected {:secret true :dismiss true :run true}}
+         {:entry :toolbar-actions :inputs {:inputs (assoc inputs :authenticated false)}
+          :expected {:secret false :dismiss false :run false}}
+         {:entry :toolbar-actions :inputs {:inputs (assoc inputs :counts {"tests" 0 "failed" nil})}
+          :expected {:secret true :dismiss false :run false}}
+         {:entry :toolbar-actions :inputs {:inputs (assoc inputs :selected {})}
+          :expected {:secret false :dismiss false :run false}}]))))
 
 
 (deftest explorer-toolbar-shared-button-renderer-keeps-flat-tree-and-browser-parity
@@ -870,21 +874,26 @@
         definitions (conj definitions {:name :toolbar-tree :parent :get
                                        :args {:coll :explorer-toolbar-view :key {:value :tree}}})
         {:keys [graph impls ids]} (map-fixture definitions)
+        empty-input {:selected {} :counts {} :failed 0 :authenticated true
+                     :apps-available true :fx false}
         cases (mapv (fn [inputs] {:entry :toolbar-tree :inputs {:inputs inputs}})
-                    [{:selected {} :counts {} :failed 0 :authenticated true
-                      :apps-available true :fx false}
-                     {:selected {"tests" true "failed" true "lint" true}
-                      :counts {"tests" 12000 "failed" 3 "lint" 9}
-                      :failed 3 :authenticated true :apps-available false :fx true}
-                     {:selected {"secrets" true} :counts {"tests" nil "secrets" nil}
-                      :failed 0 :authenticated false :apps-available false :fx false}])
+                    (concat
+                      [empty-input
+                       {:selected {"tests" true "failed" true "lint" true}
+                        :counts {"tests" 12000 "failed" 3 "lint" 9}
+                        :failed 3 :authenticated true :apps-available false :fx true}
+                       {:selected {"secrets" true} :counts {"tests" nil "secrets" nil}
+                        :failed 0 :authenticated false :apps-available false :fx false}]
+                      (map (fn [kind] (assoc empty-input :selected {kind true}))
+                           ["fn" "types" "secrets" "services" "apps" "tests"
+                            "failed" "type-errors" "lint"])))
         exported (browser/export-plan graph impls {:toolbar-tree (:toolbar-tree ids)}
                                       {:allow-fn? (constantly true)})
         jvm (jvm-results graph impls ids cases)
         browser (browser-results exported cases)
         kinds ["all" "fn" "types" "secrets" "services" "apps"
                "tests" "failed" "type-errors" "lint"]]
-    (is (= 3 (count browser)))
+    (is (= 12 (count browser)))
     (doseq [[idx jvm-result browser-result] (map vector (range) jvm browser)]
       (is (nil? (:error jvm-result)) (:message jvm-result))
       (is (nil? (:error browser-result)) (:error browser-result))
@@ -901,7 +910,13 @@
     (is (= "12000 · 3✗" (get-in (browser/decode-value (:value (second jvm)))
                                 [8 4 2])))
     (is (true? (get-in (browser/decode-value (:value (second jvm)))
-                       [7 1 :hidden])))))
+                       [7 1 :hidden])))
+    (doseq [[kind result] (map vector (rest kinds) (drop 3 jvm))]
+      (let [buttons (vec (drop 2 (browser/decode-value (:value result))))]
+        (is (= "false" (get-in buttons [0 1 :aria-pressed])))
+        (is (= [kind] (->> (take 10 buttons)
+                           (filter #(= "true" (get-in % [1 :aria-pressed])))
+                           (mapv #(get-in % [1 :data-kind])))))))))
 
 
 (deftest explorer-compare-surfaces-preserve-old-caller-and-export-the-same-projection
@@ -1077,6 +1092,7 @@
                                     "remove-unused" "remove-name" "remove-view" "select-namespace"
                                     "restore-exclude" "select-effect" "select-view" "select-unused" "pick-uses"
                                     "clear-view" "apply-device-view" "apply-graph-view" "delete-device-view"
-                                    "edit-graph-view" "open-graph-view" "save-device-view" "save-graph-view"]]]]
+                                    "edit-graph-view" "open-graph-view" "save-device-view" "save-graph-view"
+                                    "toggle-diff-lens"]]]]
       (is (= :zipmap (:parent (get by-name name))) (str name " must retain string keys through PG"))
       (is (= expected-keys (get-in by-name [name :args :keys]))))))

@@ -16,6 +16,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { installWindowEvents } = require('./window-events');
 
 const MODULE = path.join(__dirname, '..', '..', 'resources', 'packages',
                          'app', 'editor', 'editor-diff-mode.js');
@@ -44,6 +45,7 @@ const sandbox = {
   },
 };
 sandbox.globalThis = sandbox;
+installWindowEvents(sandbox.window);
 vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync(MODULE, 'utf8'), sandbox, { filename: 'editor-diff-mode.js' });
 

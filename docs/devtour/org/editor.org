@@ -221,60 +221,60 @@ Owns component state and serializes events independently of the DOM renderer. In
 :PROPERTIES:
 :CUSTOM_ID: editor/mountRow
 :FILE: resources/packages/app/editor/editor-explorer-graph.js
-:LINE: 747
+:LINE: 516
 :MINS: 1.5
 :END:
 
 Presents one already-authorized Explorer function row through the same ordinary ~app.ui-explorer~ view as the kind toolbar. The native tree owns the function ID, navigation, selection, ARIA and action buttons; the graph owns the row body's markers, name, vault path and scoped style rules. Loaded rows share one runtime and one list stylesheet with namespace bodies. A personal toolbar view with no row surface falls back only for rows, preserving its valid toolbar selection and showing a diagnostic. Disposal follows native subtree removal, and the renderer budget applies per row, never as a cap on the loaded Explorer tree.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-explorer-graph.js::  function mountRow(rowHost, projection) {][resources/packages/app/editor/editor-explorer-graph.js:747]]
+- source :: [[file:../../../resources/packages/app/editor/editor-explorer-graph.js::  function mountRow(rowHost, projection) {][resources/packages/app/editor/editor-explorer-graph.js:516]]
 - see also :: [[file:editor.org::#editor/mountNamespace][mountNamespace]], [[file:editor.org::#editor/mount][mount]]
-- same file :: [[file:editor.org::#editor/mountNamespace][mountNamespace]], [[file:editor.org::#editor/mountDiffItem][mountDiffItem]], [[file:editor.org::#editor/selectDiffLens][selectDiffLens]]
+- same file :: [[file:editor.org::#editor/mountNamespace][mountNamespace]]
 - referenced from :: [[file:editor.org::#editor/mountNamespace][mountNamespace]]
 
 * 18. mountNamespace
 :PROPERTIES:
 :CUSTOM_ID: editor/mountNamespace
 :FILE: resources/packages/app/editor/editor-explorer-graph.js
-:LINE: 731
+:LINE: 500
 :MINS: 1.4
 :END:
 
 Projects an authorized namespace's display name, expanded state and diagnostic counts into the same Explorer view graph as its toolbar and function rows. The shipped graph presents normal and ~(primitives)~ headers; a personal graph may change safe passive Hiccup and scoped styles. The native outer treeitem keeps the accessible name, path, lazy expansion, keyboard focus and action buttons. All loaded bodies share one tree stylesheet; invalid personal namespace output falls back for this section alone. Each body has its own bounded renderer, never a whole-tree row cap.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-explorer-graph.js::  function mountNamespace(body, projection) {][resources/packages/app/editor/editor-explorer-graph.js:731]]
+- source :: [[file:../../../resources/packages/app/editor/editor-explorer-graph.js::  function mountNamespace(body, projection) {][resources/packages/app/editor/editor-explorer-graph.js:500]]
 - see also :: [[file:editor.org::#editor/mountRow][mountRow]], [[file:editor.org::#editor/mount][mount]]
-- same file :: [[file:editor.org::#editor/mountRow][mountRow]], [[file:editor.org::#editor/mountDiffItem][mountDiffItem]], [[file:editor.org::#editor/selectDiffLens][selectDiffLens]]
+- same file :: [[file:editor.org::#editor/mountRow][mountRow]]
 - referenced from :: [[file:editor.org::#editor/mountRow][mountRow]], [[file:editor.org::#editor/mountDiffItem][mountDiffItem]]
 
 * 19. mountDiffItem
 :PROPERTIES:
 :CUSTOM_ID: editor/mountDiffItem
-:FILE: resources/packages/app/editor/editor-explorer-graph.js
-:LINE: 575
+:FILE: resources/packages/app/editor/editor-explorer-compare.js
+:LINE: 161
 :MINS: 1.5
 :END:
 
 Displays one authorized compare-mode projection through the selected Explorer view graph. Function rows, namespace aggregates and comparison-only ghost labels use the same bounded passive body and shared scoped stylesheet; native treeitems retain identity, ARIA, focus, loading and navigation. An older personal view can fall back for this section while its toolbar stays selected.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-explorer-graph.js::  function mountDiffItem(body, facts) {][resources/packages/app/editor/editor-explorer-graph.js:575]]
+- source :: [[file:../../../resources/packages/app/editor/editor-explorer-compare.js::  function mountDiffItem(body, facts) {][resources/packages/app/editor/editor-explorer-compare.js:161]]
 - see also :: [[file:editor.org::#editor/mountNamespace][mountNamespace]], [[file:editor.org::#editor/gdEnterDiffMode][gdEnterDiffMode]]
-- same file :: [[file:editor.org::#editor/mountRow][mountRow]], [[file:editor.org::#editor/mountNamespace][mountNamespace]], [[file:editor.org::#editor/selectDiffLens][selectDiffLens]]
+- same file :: [[file:editor.org::#editor/selectDiffLens][selectDiffLens]]
 - referenced from :: [[file:editor.org::#editor/selectDiffLens][selectDiffLens]], [[file:editor.org::#editor/gdEnterDiffMode][gdEnterDiffMode]]
 
 * 20. selectDiffLens
 :PROPERTIES:
 :CUSTOM_ID: editor/selectDiffLens
-:FILE: resources/packages/app/editor/editor-explorer-graph.js
-:LINE: 629
+:FILE: resources/packages/app/editor/editor-explorer-compare.js
+:LINE: 215
 :MINS: 2.0
 :END:
 
 A lens button is rendered by the selected Explorer graph, but native code dispatches a change only after the graph update returns one exact receipt matching that button. The host owns the lens model, keyboard focus and effects on the loaded tree.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-explorer-graph.js::  function selectDiffLens(button, execute) {][resources/packages/app/editor/editor-explorer-graph.js:629]]
+- source :: [[file:../../../resources/packages/app/editor/editor-explorer-compare.js::  function selectDiffLens(button, execute) {][resources/packages/app/editor/editor-explorer-compare.js:215]]
 - see also :: [[file:editor.org::#editor/mountDiffItem][mountDiffItem]], [[file:editor.org::#editor/gdEnterDiffMode][gdEnterDiffMode]]
-- same file :: [[file:editor.org::#editor/mountRow][mountRow]], [[file:editor.org::#editor/mountNamespace][mountNamespace]], [[file:editor.org::#editor/mountDiffItem][mountDiffItem]]
+- same file :: [[file:editor.org::#editor/mountDiffItem][mountDiffItem]]
 - referenced from :: [[file:editor.org::#editor/gdEnterDiffMode][gdEnterDiffMode]]
 
 * 21. renderRecentFns

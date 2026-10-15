@@ -220,6 +220,7 @@
                   ;; build time by the rows; then the row builders, the tree
                   ;; walk, and the Organization / Platform surface sections.
                   "packages/app/editor/editor-sidebar-lens.js"
+                  "packages/app/editor/editor-explorer-compare.js"
                   "packages/app/editor/editor-explorer-graph.js"
                   ;; The Explorer's FILTER model (kinds + namespaces + uses +
                   ;; effects + unused, saved views) — after sidebar-lens

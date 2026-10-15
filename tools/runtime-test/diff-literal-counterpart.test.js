@@ -5,9 +5,11 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 const {createDocument} = require('./mini-dom');
+const {installWindowEvents} = require('./window-events');
 const document = createDocument();
 const ctx = vm.createContext({console, document, localStorage: {getItem: () => null}});
 ctx.window = ctx;
+installWindowEvents(ctx);
 const source = name => fs.readFileSync(path.join(__dirname,
   '../../resources/packages/app/editor/', name), 'utf8');
 for (const name of ['editor-diff-mode.js', 'editor-diff-inspector.js', 'editor-diff-ghost.js']) {

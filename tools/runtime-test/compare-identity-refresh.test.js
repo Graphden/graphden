@@ -7,6 +7,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { createDocument } = require('./mini-dom');
+const { installWindowEvents } = require('./window-events');
 
 const EDITOR = path.join(__dirname, '../../resources/packages/app/editor');
 const doc = createDocument();
@@ -27,6 +28,7 @@ const ctx = vm.createContext({
   gdDiffModeDecorateSidebar() {}, gdDiffModeRenderChip() {},
 });
 ctx.window = ctx;
+installWindowEvents(ctx);
 vm.runInContext(fs.readFileSync(path.join(EDITOR, 'editor-diff-mode.js'), 'utf8'), ctx);
 const binding = (slot, source) => ({ 'entity-name': 'binding', 'entity-id': 'b-' + slot,
   'slot-id': slot, 'slot-name': 'same-label', change: 'modified',
@@ -39,7 +41,8 @@ const group = { 'fn-id': 'owner', __kind: 'modified', entries: [
   binding('first-slot', 'first-new'), binding('second-slot', 'second-new'),
   item('item-zero', 0, 'new-zero', 'old-zero'), item('item-one', 1, 'new-one', 'old-one'),
 ] };
-const mode = { branch: 'feature', byFnId: new Map([['owner', group]]), affected: new Map() };
+const mode = { branch: 'feature', ownerContext: ctx.gdDiffOwnerContext(),
+  byFnId: new Map([['owner', group]]), affected: new Map() };
 ctx.fixture = mode;
 vm.runInContext('_gdDiffMode = fixture;', ctx);
 

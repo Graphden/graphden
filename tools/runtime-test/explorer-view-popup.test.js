@@ -35,7 +35,7 @@ const context = vm.createContext({document, console, Map, Set, Promise, AbortCon
 });
 context.window = context;
 installInspectorGraph(context, document);
-for (const file of ['editor-explorer-graph.js', 'editor-explorer-filters.js', 'editor-explorer-views-ui.js']) {
+for (const file of ['editor-explorer-compare.js', 'editor-explorer-graph.js', 'editor-explorer-filters.js', 'editor-explorer-views-ui.js']) {
   vm.runInContext(fs.readFileSync(path.join(editor, file), 'utf8'), context, {filename: file});
 }
 

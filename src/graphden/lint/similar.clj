@@ -26,6 +26,32 @@
     :else nil))
 
 
+(defn- literal-template
+  "Normalize literal structure within the caller's shared depth/visit budget."
+  [value path mask? visit! literals]
+  (visit! path)
+  (let [walk (fn [v p] (literal-template v p mask? visit! literals))]
+    (cond
+      (map? value)
+      [:map (ordered-map (map (fn [[k v]] [k (walk v (conj path k))]) value))]
+
+      (vector? value)
+      [:vector (mapv (fn [i v] (walk v (conj path i))) (range) value)]
+
+      (sequential? value)
+      [:sequence (mapv (fn [i v] (walk v (conj path i))) (range) value)]
+
+      (set? value)
+      [:set (mapv (fn [i v] (walk v (conj path i)))
+                  (range) (sort-by pr-str value))]
+
+      (and mask? (literal-kind value))
+      (do (swap! literals assoc path value)
+          [:literal (literal-kind value)])
+
+      :else [:literal-exact value])))
+
+
 (defn- template
   [idx fd]
   (let [expanded (volatile! 0)
@@ -43,29 +69,7 @@
                 (incomplete! :structure-size)))
             (literal
               [value path mask?]
-              (visit! path)
-              (cond
-                (map? value)
-                [:map (ordered-map
-                        (map (fn [[k v]] [k (literal v (conj path k) mask?)]) value))]
-
-                (vector? value)
-                [:vector (mapv (fn [i v] (literal v (conj path i) mask?))
-                               (range) value)]
-
-                (sequential? value)
-                [:sequence (mapv (fn [i v] (literal v (conj path i) mask?))
-                                 (range) value)]
-
-                (set? value)
-                [:set (mapv (fn [i v] (literal v (conj path i) mask?))
-                            (range) (sort-by pr-str value))]
-
-                (and mask? (literal-kind value))
-                (do (swap! literals assoc path value)
-                    [:literal (literal-kind value)])
-
-                :else [:literal-exact value]))
+              (literal-template value path mask? visit! literals))
             (reference
               [kw seen depth path mask?]
               (visit! path)

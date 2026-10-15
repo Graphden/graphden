@@ -156,13 +156,11 @@
        {:name :_explorer-action-dismiss :parent :if :args {:test :_explorer-selected-failed :then :_explorer-input-authenticated :else false}}
        {:name :_explorer-count-failed-or-zero :parent :coalesce :args {:value :_explorer-count-failed :default 0}}
        {:name :_explorer-zero-dismiss :parent :equal? :args {:a :_explorer-count-failed-or-zero :b 0}}
-       {:name :_explorer-known-dismiss :parent :if :args {:test :_explorer-unknown-count-failed :then false :else :_explorer-action-dismiss}}
-       {:name :_explorer-nonzero-dismiss :parent :if :args {:test :_explorer-zero-dismiss :then false :else :_explorer-known-dismiss}}
+       {:name :_explorer-nonzero-dismiss :parent :if :args {:test :_explorer-zero-dismiss :then false :else :_explorer-action-dismiss}}
        {:name :_explorer-action-run :parent :if :args {:test :_explorer-selected-tests :then :_explorer-input-authenticated :else false}}
        {:name :_explorer-count-tests-or-zero :parent :coalesce :args {:value :_explorer-count-tests :default 0}}
        {:name :_explorer-zero-run :parent :equal? :args {:a :_explorer-count-tests-or-zero :b 0}}
-       {:name :_explorer-known-run :parent :if :args {:test :_explorer-unknown-count-tests :then false :else :_explorer-action-run}}
-       {:name :_explorer-nonzero-run :parent :if :args {:test :_explorer-zero-run :then false :else :_explorer-known-run}}
+       {:name :_explorer-nonzero-run :parent :if :args {:test :_explorer-zero-run :then false :else :_explorer-action-run}}
        {:name :_explorer-actions :parent :zipmap :args {:keys [{:value :secret} {:value :dismiss} {:value :run}] :vals [:_explorer-action-secret :_explorer-nonzero-dismiss :_explorer-nonzero-run]}}
        {:name :explorer-styles :parent :const :args {:value {:value [{:selector "& .gd-explorer-kinds" :declarations {"display" "flex" "flex-wrap" "wrap" "align-items" "center" "gap" "2px 3px" "padding" "2px 0"}} {:selector "& .kind-count" :declarations {"font-size" "0.625rem" "opacity" "0.85"}} {:selector "& .kind-count:empty" :declarations {"display" "none"}} {:selector "& .kind-count.kind-count-bad" :declarations {"color" "var(--error-fg)" "opacity" "1"}}]}} :return-type [:list {:selector :text :declarations [:map :text :text]}]}
        {:name :_explorer-row-name :parent :get :args {:coll :_explorer-input-row :key {:value :name} :default ""}}

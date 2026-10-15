@@ -24,6 +24,31 @@ const {
   moveSeqItem, insertSeqLiteralBefore, addMiParentViaParentRow,
 } = require('./tutorial-tour-helpers');
 
+async function leaveInheritedTailPreview(page) {
+  const committed = await page.evaluate(() => {
+    const card = document.querySelector('.node-overlay[data-fn-name="tutorial-sum-more"]');
+    return {nodeId: card?.dataset.nodeId, depth: expansionState.get(card?.dataset.nodeId)?.fullDepth || 0};
+  });
+  assert(committed.nodeId && committed.depth >= 1, 'the child list remains committed open before leaving the parent row');
+  // The click can leave the pointer over a repainted ancestor row. Its hover
+  // preview temporarily folds the card; moving to the viewport corner exits it.
+  await page.mouse.move(5, 5);
+  await page.waitForFunction(({nodeId, depth}) => {
+    const card = document.querySelector('.node-overlay[data-fn-name="tutorial-sum-more"]');
+    const tail = document.querySelector(
+      '.placeholder-binder.is-seq-anchor[data-fn-name="tutorial-sum-more"][data-arg-name="nums"]');
+    return card?.dataset.nodeId === nodeId
+      && (expansionState.get(nodeId)?.fullDepth || 0) === depth
+      && !previewState.has(nodeId)
+      && !!tail && tail.getClientRects().length > 0;
+  }, committed);
+  assert(await page.evaluate(({nodeId, depth}) =>
+    (expansionState.get(nodeId)?.fullDepth || 0) === depth && !previewState.has(nodeId)
+      && !!document.querySelector(
+        '.placeholder-binder.is-seq-anchor[data-fn-name="tutorial-sum-more"][data-arg-name="nums"]'),
+  committed), 'hover preview clears while committed expansion and the child tail remain visible');
+}
+
 (async () => {
   const {browser, page} = await newContext(chromium, {boot: false});
   // Lesson 08's "remove this binding" step fires a native confirm(); with no
@@ -151,6 +176,7 @@ const {
     assert(inherited.items === 3, 'the unfolded child shows the parent\'s three items (got: ' + JSON.stringify(inherited) + ')');
     assert(inherited.tailOwner === 'tutorial-sum-more', 'and the tail is the child\'s own');
     await waitTourTitle(page, 'Append here', 150000);
+    await leaveInheritedTailPreview(page);
     await bindPlaceholderOn(page, 'tutorial-sum-more', 'nums', 'literal', '3');
     await waitTourTitle(page, 'Run it', 150000);
     await page.waitForFunction(() => [...graph.edges.values()]

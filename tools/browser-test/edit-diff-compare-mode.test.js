@@ -659,11 +659,24 @@ async function cleanup(page) {
         oldV: p.querySelector('.bd-old')?.textContent,
         newV: p.querySelector('.bd-new')?.textContent,
         hasCommentBtn: !!p.querySelector('.branch-diff-comment-btn'),
+        graphBody: !!p.querySelector('.gd-diff-insp-graph-head')
+          && !!p.querySelector('.gd-diff-insp-graph-entry'),
+        graphOwned: [...p.querySelectorAll('.gd-diff-graph-host')].every(host => GraphdenRenderer.ownsTarget(host)),
+        nativeAnchors: !GraphdenRenderer.ownsTarget(p.querySelector('.gd-diff-insp-head'))
+          && !!p.querySelector('.branch-diff-entry[data-anchor-id]'),
       };
     });
     assert(/vs /.test(insp.vs) && insp.oldV === '1' && insp.newV === '2'
-           && insp.hasCommentBtn,
+           && insp.hasCommentBtn && insp.graphBody && insp.graphOwned && insp.nativeAnchors,
            'inspector diff panel shows old → new + 💬: ' + JSON.stringify(insp));
+    const commentAction = page.locator('#gd-diff-insp .gd-diff-insp-head .branch-diff-comment-btn');
+    assert(await commentAction.getAttribute('aria-label') === 'Comment on this element'
+           && await commentAction.getAttribute('type') === 'button',
+           'native Inspector comment action keeps its accessible name and button semantics');
+    await page.screenshot({path: '/tmp/gd-inspector-compare-light.png'});
+    await page.evaluate(() => document.body.classList.add('theme-dark'));
+    await page.screenshot({path: '/tmp/gd-inspector-compare-dark.png'});
+    await page.evaluate(() => document.body.classList.remove('theme-dark'));
     // Anchor a comment FROM the inspector.
     await page.evaluate(() => {
       document.querySelector('#gd-diff-insp .branch-diff-comment-btn').click();

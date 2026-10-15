@@ -42,6 +42,18 @@ compare surface falls back only for compare presentation. The native editor
 still owns branch and account context, ghost navigation, focus, review actions
 and all diff data reads.
 
+Inspector compare presentation uses two more `view` surfaces in the existing
+`app.ui-inspector` roles: `compare-head` and `compare-entry`. Its unchanged
+`inputs` record still accepts explicitly pinned personal descendants; a
+genuinely optional typed `diff` argument carries only authorized display
+fields. The graph chooses the change marker, branch-local/effects presentation,
+entry label, field pair versus preview, and scoped styles. A legacy personal
+view without these surfaces falls back for this section alone. The native
+Inspector retains the exact anchor wrappers, comment buttons, threads and
+draft controls across graph reloads and compare refreshes; graph nodes cannot
+claim their IDs or actions. Review and suggestion previews keep the shared
+native diff renderer's existing behavior.
+
 Replacing an editor root renames the old root privately in the current branch
 and creates a new UUID named `editor`. Its parent relationships are retained.
 Other branches and references to the old UUID keep their composition. A stored

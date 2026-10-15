@@ -13,6 +13,8 @@
 //                pass false)
 //   entriesOnly: skip the group head (the inspector panel — the fn is
 //                already the panel's subject)
+//   body:        optional passive Inspector-only renderer; native row anchors
+//                and comment controls stay owned here (other callers omit it)
 
 function gdDiffMarkerEl(change) {
   const m = document.createElement('span');
@@ -48,6 +50,12 @@ function gdDiffRenderEntry(e, opts) {
   row.setAttribute('data-anchor-id', e['entity-id']);
   if (e['slot-id']) row.setAttribute('data-slot-id', e['slot-id']);
   if (e['slot-name']) row.setAttribute('data-slot-name', e['slot-name']);
+  const body = opts.body?.(e);
+  if (body) {
+    row.appendChild(body);
+    if (opts.comments !== false) row.appendChild(gdDiffCommentBtnEl(e['entity-name'], e['entity-id']));
+    return row;
+  }
   row.appendChild(gdDiffMarkerEl(e.change));
   const label = document.createElement('span');
   label.className = 'branch-diff-entry-label';

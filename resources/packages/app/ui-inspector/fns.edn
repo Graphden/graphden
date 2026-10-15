@@ -11,6 +11,11 @@
        {:name :_inspector-usages-payload, :type {:rows [:list :_inspector-usage-row], :count :int, :truncated :bool}}
        {:name :_inspector-state :union [:_inspector-chrome-state :_inspector-usages-state]}
        {:name :_inspector-inputs :type {:selected :bool :name :text :namespace :text :description :text :parents [:list :text] :has-return :bool :narrow :bool :surface :text :usages :_inspector-usages-payload}}
+       {:name :_inspector-diff-field :type {:name :text :old :text :new :text :show-name :bool}}
+       {:name :_inspector-diff-input :type {:change :text :branch :text :effects :text :local :bool :entity :text :slot :text :position :text :preview :text :fields [:list :_inspector-diff-field]}}
+       {:name :_inspector-diff-read :parent :get :args {:coll {:value {}} :key {:value :diff} :default {:as :diff :type [:union :null :_inspector-diff-input]}}}
+       {:name :_inspector-diff-default :parent :const :args {:value {:value {:change "modified" :branch "" :effects "" :local false :entity "" :slot "" :position "" :preview "" :fields []}}} :return-type :_inspector-diff-input :return-type-wide? true}
+       {:name :_inspector-diff :parent :coalesce :args {:value :_inspector-diff-read :default :_inspector-diff-default} :return-type :_inspector-diff-input}
        {:name :_inspector-event :type {:kind :text :tab :text :key :text}}
        {:name :_inspector-request :type {:kind :text :tab :text}}
        {:name :_inspector-transition :union [:_inspector-chrome-transition :_inspector-usages-transition]}
@@ -247,4 +252,70 @@
        {:name :_usages-view :parent :_usages-render :args {:groups :_usages-by-kind}}
        {:name :inspector-initial, :parent :if, :args {:test :_inspector-usages-surface, :then :_usages-initial, :else :_inspector-chrome-initial}, :return-type :_inspector-state, :return-type-wide? true}
        {:name :inspector-update, :parent :if, :args {:test :_inspector-usages-surface, :then :_usages-update, :else :_inspector-chrome-update} :return-type :_inspector-transition}
-       {:name :inspector-view, :parent :if, :args {:test :_inspector-usages-surface, :then :_usages-view, :else :_inspector-chrome-view}}]}
+       {:name :_inspector-diff-change :parent :get :args {:coll :_inspector-diff :key {:value :change} :default {:value "modified"}}}
+       {:name :_inspector-diff-branch :parent :get :args {:coll :_inspector-diff :key {:value :branch} :default {:value ""}}}
+       {:name :_inspector-diff-effects :parent :get :args {:coll :_inspector-diff :key {:value :effects} :default {:value ""}}}
+       {:name :_inspector-diff-local :parent :get :args {:coll :_inspector-diff :key {:value :local} :default {:value false}}}
+       {:name :_inspector-diff-entity :parent :get :args {:coll :_inspector-diff :key {:value :entity} :default {:value ""}}}
+       {:name :_inspector-diff-slot :parent :get :args {:coll :_inspector-diff :key {:value :slot} :default {:value ""}}}
+       {:name :_inspector-diff-position :parent :get :args {:coll :_inspector-diff :key {:value :position} :default {:value ""}}}
+       {:name :_inspector-diff-preview :parent :get :args {:coll :_inspector-diff :key {:value :preview} :default {:value ""}}}
+       {:name :_inspector-diff-fields :parent :get :args {:coll :_inspector-diff :key {:value :fields} :default {:value []}}}
+       {:name :_inspector-diff-added :parent :equal? :args {:a :_inspector-diff-change :b "added-in-source"}}
+       {:name :_inspector-diff-missing :parent :equal? :args {:a :_inspector-diff-change :b "added-in-target"}}
+       {:name :_inspector-diff-added-sign :parent :if :args {:test :_inspector-diff-added :then "+" :else "±"}}
+       {:name :_inspector-diff-sign :parent :if :args {:test :_inspector-diff-missing :then "−" :else :_inspector-diff-added-sign}}
+       {:name :_inspector-diff-added-class :parent :if :args {:test :_inspector-diff-added :then "bd-added" :else "bd-modified"}}
+       {:name :_inspector-diff-class :parent :if :args {:test :_inspector-diff-missing :then "bd-removed" :else :_inspector-diff-added-class}}
+       {:name :_inspector-diff-marker-class :parent :str :args {:parts ["branch-diff-marker " :_inspector-diff-class]}}
+       {:name :_inspector-diff-marker-attrs :parent :zipmap :args {:keys [{:value :class} {:value :aria-hidden}] :vals [:_inspector-diff-marker-class "true"]}}
+       {:name :_inspector-diff-marker :parent :hiccup :args {:tag "span" :attrs :_inspector-diff-marker-attrs :children [:_inspector-diff-sign]}}
+       {:name :_inspector-diff-vs :parent :str :args {:parts ["vs " :_inspector-diff-branch]}}
+       {:name :_inspector-diff-vs-node :parent :hiccup :args {:tag "span" :children [:_inspector-diff-vs]}}
+       {:name :_inspector-diff-effects-empty :parent :equal? :args {:a :_inspector-diff-effects :b ""}}
+       {:name :_inspector-diff-effects-node :parent :hiccup :args {:tag "span" :attrs {:value {:class "bd-effects-chip"}} :children [:_inspector-diff-effects]}}
+       {:name :_inspector-diff-effects-visible :parent :if :args {:test :_inspector-diff-effects-empty :then nil :else :_inspector-diff-effects-node}}
+       {:name :_inspector-diff-local-node :parent :hiccup :args {:tag "span" :attrs {:value {:class "branch-diff-row-local-badge" :title "Won't propagate on merge — branch-local fn"}} :children ["📍 branch-local"]}}
+       {:name :_inspector-diff-local-visible :parent :if :args {:test :_inspector-diff-local :then :_inspector-diff-local-node :else nil}}
+       {:name :_inspector-diff-head-tree :parent :hiccup :args {:tag "span" :attrs {:value {:class "gd-diff-insp-graph-head"}} :children [:_inspector-diff-marker :_inspector-diff-vs-node :_inspector-diff-effects-visible :_inspector-diff-local-visible]}}
+       {:name :_inspector-diff-slot-empty :parent :equal? :args {:a :_inspector-diff-slot :b ""}}
+       {:name :_inspector-diff-slot-display :parent :if :args {:test :_inspector-diff-slot-empty :then "?" :else :_inspector-diff-slot}}
+       {:name :_inspector-diff-position-empty :parent :equal? :args {:a :_inspector-diff-position :b ""}}
+       {:name :_inspector-diff-position-display :parent :if :args {:test :_inspector-diff-position-empty :then "?" :else :_inspector-diff-position}}
+       {:name :_inspector-diff-fn :parent :equal? :args {:a :_inspector-diff-entity :b "fn"}}
+       {:name :_inspector-diff-fn-slot :parent :equal? :args {:a :_inspector-diff-entity :b "fn-slot"}}
+       {:name :_inspector-diff-binding :parent :equal? :args {:a :_inspector-diff-entity :b "binding"}}
+       {:name :_inspector-diff-asset :parent :equal? :args {:a :_inspector-diff-entity :b "resource-override"}}
+       {:name :_inspector-diff-slot-label :parent :str :args {:parts ["slot " :_inspector-diff-slot-display]}}
+       {:name :_inspector-diff-arg-label :parent :str :args {:parts ["arg " :_inspector-diff-slot-display]}}
+       {:name :_inspector-diff-item-label :parent :str :args {:parts ["item " :_inspector-diff-position-display " of " :_inspector-diff-slot-display]}}
+       {:name :_inspector-diff-asset-or-item-label :parent :if :args {:test :_inspector-diff-asset :then "asset" :else :_inspector-diff-item-label}}
+       {:name :_inspector-diff-binding-label :parent :if :args {:test :_inspector-diff-binding :then :_inspector-diff-arg-label :else :_inspector-diff-asset-or-item-label}}
+       {:name :_inspector-diff-slot-or-other-label :parent :if :args {:test :_inspector-diff-fn-slot :then :_inspector-diff-slot-label :else :_inspector-diff-binding-label}}
+       {:name :_inspector-diff-label :parent :if :args {:test :_inspector-diff-fn :then "fn" :else :_inspector-diff-slot-or-other-label}}
+       {:name :_inspector-diff-entry-label :parent :hiccup :args {:tag "span" :attrs {:value {:class "branch-diff-entry-label"}} :children [:_inspector-diff-label]}}
+       {:name :_inspector-diff-field-name :parent :get :args {:coll {:as :item :type :_inspector-diff-field} :key {:value :name} :default {:value ""}}}
+       {:name :_inspector-diff-field-old :parent :get :args {:coll {:as :item :type :_inspector-diff-field} :key {:value :old} :default {:value ""}}}
+       {:name :_inspector-diff-field-new :parent :get :args {:coll {:as :item :type :_inspector-diff-field} :key {:value :new} :default {:value ""}}}
+       {:name :_inspector-diff-field-show-name :parent :get :args {:coll {:as :item :type :_inspector-diff-field} :key {:value :show-name} :default {:value false}}}
+       {:name :_inspector-diff-field-name-node :parent :hiccup :args {:tag "span" :attrs {:value {:class "branch-diff-field-name"}} :children [:_inspector-diff-field-name]}}
+       {:name :_inspector-diff-field-name-visible :parent :if :args {:test :_inspector-diff-field-show-name :then :_inspector-diff-field-name-node :else nil}}
+       {:name :_inspector-diff-old-node :parent :hiccup :args {:tag "span" :attrs {:value {:class "bd-old"}} :children [:_inspector-diff-field-old]}}
+       {:name :_inspector-diff-arrow :parent :hiccup :args {:tag "span" :attrs {:value {:class "bd-arrow" :aria-hidden "true"}} :children ["→"]}}
+       {:name :_inspector-diff-new-node :parent :hiccup :args {:tag "span" :attrs {:value {:class "bd-new"}} :children [:_inspector-diff-field-new]}}
+       {:name :_inspector-diff-field-row :parent :hiccup :args {:tag "div" :attrs {:value {:class "branch-diff-field"}} :children [:_inspector-diff-field-name-visible :_inspector-diff-old-node :_inspector-diff-arrow :_inspector-diff-new-node]} :lambda-params [:item]}
+       {:name :_inspector-diff-field-rows :parent :map :args {:func :_inspector-diff-field-row :coll :_inspector-diff-fields}}
+       {:name :_inspector-diff-fields-node :parent :hiccup :args {:tag "div" :attrs {:value {:class "branch-diff-fields"}} :children [:_inspector-diff-field-rows]}}
+       {:name :_inspector-diff-preview-node :parent :hiccup :args {:tag "span" :attrs {:value {:class "branch-diff-entry-preview"}} :children [:_inspector-diff-preview]}}
+       {:name :_inspector-diff-field-count :parent :count :args {:coll :_inspector-diff-fields}}
+       {:name :_inspector-diff-fields-empty :parent :equal? :args {:a :_inspector-diff-field-count :b 0}}
+       {:name :_inspector-diff-entry-content :parent :if :args {:test :_inspector-diff-fields-empty :then :_inspector-diff-preview-node :else :_inspector-diff-fields-node}}
+       {:name :_inspector-diff-entry-tree :parent :hiccup :args {:tag "span" :attrs {:value {:class "gd-diff-insp-graph-entry"}} :children [:_inspector-diff-marker :_inspector-diff-entry-label :_inspector-diff-entry-content]}}
+       {:name :_inspector-diff-head-surface :parent :equal? :args {:a :_inspector-surface :b "compare-head"}}
+       {:name :_inspector-diff-entry-surface :parent :equal? :args {:a :_inspector-surface :b "compare-entry"}}
+       {:name :_inspector-diff-tree :parent :if :args {:test :_inspector-diff-head-surface :then :_inspector-diff-head-tree :else :_inspector-diff-entry-tree}}
+       {:name :_inspector-diff-styles :parent :list :args {:items [{:value {:selector "& .gd-diff-insp-graph-head" :declarations {"display" "inline-flex" "align-items" "center" "gap" "6px"}}} {:value {:selector "& .gd-diff-insp-graph-entry" :declarations {"display" "contents"}}}]}}
+       {:name :_inspector-diff-view :parent :_inspector-view-fields :args {:vals [:_inspector-diff-tree :_inspector-diff-styles "overview" false false]}}
+       {:name :_inspector-diff-surface :parent :if :args {:test :_inspector-diff-head-surface :then true :else :_inspector-diff-entry-surface}}
+       {:name :_inspector-diff-or-chrome-view :parent :if :args {:test :_inspector-diff-surface :then :_inspector-diff-view :else :_inspector-chrome-view}}
+       {:name :inspector-view, :parent :if, :args {:test :_inspector-usages-surface, :then :_usages-view, :else :_inspector-diff-or-chrome-view}}]}

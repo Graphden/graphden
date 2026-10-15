@@ -854,6 +854,42 @@
     (is (= :zipmap (:parent (by-name :_inspector-tabs-by-id))))))
 
 
+(deftest inspector-compare-presentation-preserves-old-view-and-export-parity
+  (let [definitions (:fns (edn/read-string (slurp "resources/packages/app/ui-inspector/fns.edn")))
+        {:keys [graph impls ids]} (map-fixture definitions)
+        inputs {:selected true :name "demo" :namespace "app" :description ""
+                :parents [] :has-return false :narrow false
+                :usages {:rows [] :count 0 :truncated false}}
+        state {:tab "overview" :open false :handled false}
+        diff {:change "modified" :branch "review" :effects "pure → io"
+              :local true :entity "binding" :slot "x" :position ""
+              :preview "" :fields []}
+        field {:name "value" :old "1" :new "2" :show-name false}
+        cases [{:entry :inspector-view :inputs {:inputs inputs :state state}}
+               {:entry :inspector-view :inputs {:inputs inputs :state state :diff nil}}
+               {:entry :inspector-view :inputs {:inputs (assoc inputs :surface "compare-head") :state state}}
+               {:entry :inspector-view :inputs {:inputs (assoc inputs :surface "compare-head") :state state :diff diff}}
+               {:entry :inspector-view :inputs {:inputs (assoc inputs :surface "compare-entry") :state state
+                                                :diff (assoc diff :fields [field])}}
+               {:entry :inspector-view :inputs {:inputs (assoc inputs :surface "compare-entry") :state state
+                                                :diff (assoc diff :fields [] :preview "added slot")}}]
+        plan (browser/export-plan graph impls {:inspector-view (:inspector-view ids)} {:allow-fn? (constantly true)})
+        jvm (jvm-results graph impls ids cases)
+        remote (browser-results plan cases)
+        values (mapv (comp browser/decode-value :value) jvm)]
+    (is (= ["diff" "inputs" "state"] (get-in plan [:inputs (get-in plan [:entries "inspector-view"]) :accepted])))
+    (is (= ["inputs" "state"] (get-in plan [:inputs (get-in plan [:entries "inspector-view"]) :required])))
+    (doseq [[local browser] (map vector jvm remote)]
+      (is (nil? (:error local)) (:message local))
+      (is (nil? (:error browser)) (:error browser))
+      (is (= (browser/decode-value (:value local)) (browser/decode-value (:value browser)))))
+    (is (= (get-in values [0 :tree]) (get-in values [1 :tree]))
+        "old view callers omit diff without changing the chrome")
+    (is (= "gd-insp-chrome" (get-in values [0 :tree 1 :class])))
+    (is (= "gd-diff-insp-graph-head" (get-in values [3 :tree 1 :class])))
+    (is (= "gd-diff-insp-graph-entry" (get-in values [4 :tree 1 :class])))))
+
+
 (deftest explorer-toolbar-transitions-and-action-projections-match-jvm
   (let [definitions (:fns (edn/read-string (slurp "resources/packages/app/ui-explorer/fns.edn")))
         definitions (conj definitions {:name :toolbar-actions :parent :get

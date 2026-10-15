@@ -479,16 +479,20 @@ function initDiffConversation(container, sourceName, sourceRef, opts) {
   };
 
   // Fresh annotation nodes need their own click wiring after a remount.
+  const wiredButtons = new WeakSet();
   const wireButtons = () => container.querySelectorAll('.branch-diff-comment-btn').forEach((btn) => {
+    if (wiredButtons.has(btn)) return;
+    wiredButtons.add(btn);
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const anchorEl = btn.closest('[data-anchor-id]');
       if (!anchorEl) return;
       const next = anchorEl.classList.contains('branch-diff-entry')
         ? anchorEl.nextElementSibling
-        : anchorEl.querySelector('.branch-diff-anchor-thread');
+        : (anchorEl.querySelector('.branch-diff-anchor-thread') || anchorEl.nextElementSibling);
       const existing = next?.classList?.contains('branch-diff-anchor-thread')
-        ? next : null;
+        && next.dataset.anchorName === anchorEl.getAttribute('data-anchor-name')
+        && next.dataset.anchorId === anchorEl.getAttribute('data-anchor-id') ? next : null;
       if (existing) {
         let form = existing.querySelector('.branch-diff-anchor-compose');
         if (!form) {

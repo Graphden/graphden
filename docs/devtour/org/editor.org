@@ -7,7 +7,7 @@ Loading, graph-backed controls, actions, forms, and preferences.
 
 after: web, layout
 
-[[file:index.org][index]] · ~148 min
+[[file:index.org][index]] · ~150 min
 
 * 1. initGraph
 :PROPERTIES:
@@ -408,15 +408,29 @@ Evaluates a selected personal theme graph in the request's existing organisation
 :PROPERTIES:
 :CUSTOM_ID: editor/paint
 :FILE: resources/packages/app/editor/editor-inspector-graph.js
-:LINE: 70
+:LINE: 107
 :MINS: 0.9
 :END:
 
 The ordinary app.ui-inspector initial/update/view graphs own the header, kind classifier, ARIA tabs and structured styles. Finite requests delegate panel loading, roving focus and close to native hosts. Chrome painting never replaces the sibling diff conversation or tab body.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-inspector-graph.js::  function paint(view) {][resources/packages/app/editor/editor-inspector-graph.js:70]]
+- source :: [[file:../../../resources/packages/app/editor/editor-inspector-graph.js::  function paint(view) {][resources/packages/app/editor/editor-inspector-graph.js:107]]
+- same file :: [[file:editor.org::#editor/compareView][compareView]]
 
-* 31. requestHost
+* 31. compareView
+:PROPERTIES:
+:CUSTOM_ID: editor/compareView
+:FILE: resources/packages/app/editor/editor-inspector-graph.js
+:LINE: 32
+:MINS: 2.0
+:END:
+
+The same Inspector view role projects read-only compare head and entry surfaces from an optional typed display argument. Passive DOM validation and section-local fallback protect native anchors, comment controls and existing personal chrome selections.
+
+- source :: [[file:../../../resources/packages/app/editor/editor-inspector-graph.js::  function compareView(surface, diff) {][resources/packages/app/editor/editor-inspector-graph.js:32]]
+- same file :: [[file:editor.org::#editor/paint][paint]]
+
+* 32. requestHost
 :PROPERTIES:
 :CUSTOM_ID: editor/requestHost
 :FILE: resources/packages/app/editor/editor-inspector.js
@@ -428,7 +442,7 @@ Each server partial captures a latest-wins read token and exact native host. Tab
 
 - source :: [[file:../../../resources/packages/app/editor/editor-inspector.js::  function requestHost(id, retry) {][resources/packages/app/editor/editor-inspector.js:51]]
 
-* 32. definitions
+* 33. definitions
 :PROPERTIES:
 :CUSTOM_ID: editor/definitions
 :FILE: src/graphden/editor/component_templates.clj
@@ -441,7 +455,7 @@ Copies the fixed shipped theme, menu, picker, Recents, Inspector and Explorer de
 - source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn definitions][src/graphden/editor/component_templates.clj:98]]
 - same file :: [[file:editor.org::#editor/selected-definitions][selected-definitions]]
 
-* 33. selected-definitions
+* 34. selected-definitions
 :PROPERTIES:
 :CUSTOM_ID: editor/selected-definitions
 :FILE: src/graphden/editor/component_templates.clj
@@ -454,7 +468,7 @@ The retained legacy selective-copy compatibility path keeps only the chosen comp
 - source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn selected-definitions][src/graphden/editor/component_templates.clj:170]]
 - same file :: [[file:editor.org::#editor/definitions][definitions]]
 
-* 34. apply!
+* 35. apply!
 :PROPERTIES:
 :CUSTOM_ID: editor/apply!
 :FILE: src/graphden/editor/component_creation.clj
@@ -467,7 +481,7 @@ Rebuilds the manifest, the fixed list of proposed objects and UUIDs, while holdi
 - source :: [[file:../../../src/graphden/editor/component_creation.clj::(defn apply!][src/graphden/editor/component_creation.clj:273]]
 - see also :: [[file:versioning.org::#versioning/call-with-write][call-with-write]]
 
-* 35. collect-closure
+* 36. collect-closure
 :PROPERTIES:
 :CUSTOM_ID: editor/collect-closure
 :FILE: src/graphden/executor/browser_source.clj
@@ -479,7 +493,7 @@ Collects only the selected [[file:glossary.org::#term/reachable-graph][reachable
 
 - source :: [[file:../../../src/graphden/executor/browser_source.clj::(defn collect-closure][src/graphden/executor/browser_source.clj:151]]
 
-* 36. export-resolved
+* 37. export-resolved
 :PROPERTIES:
 :CUSTOM_ID: editor/export-resolved
 :FILE: src/graphden/editor/components.clj
@@ -491,7 +505,7 @@ A protected ordinary resolver finds editor in the current principal/org/branch's
 
 - source :: [[file:../../../src/graphden/editor/components.clj::(defn export-resolved][src/graphden/editor/components.clj:158]]
 
-* 37. ensure-current!
+* 38. ensure-current!
 :PROPERTIES:
 :CUSTOM_ID: editor/ensure-current!
 :FILE: src/graphden/graph/personal_home.clj
@@ -503,7 +517,7 @@ Explicit profile infrastructure setup follows the configured personal namespace 
 
 - source :: [[file:../../../src/graphden/graph/personal_home.clj::(defn ensure-current!][src/graphden/graph/personal_home.clj:11]]
 
-* 38. apply-proposal!
+* 39. apply-proposal!
 :PROPERTIES:
 :CUSTOM_ID: editor/apply-proposal!
 :FILE: src/graphden/editor/config_activation.clj
@@ -515,7 +529,7 @@ Rebuilds the exact scoped preview and source expectations before writes. Small o
 
 - source :: [[file:../../../src/graphden/editor/config_activation.clj::(defn apply-proposal!][src/graphden/editor/config_activation.clj:335]]
 
-* 39. cleanup-preview!
+* 40. cleanup-preview!
 :PROPERTIES:
 :CUSTOM_ID: editor/cleanup-preview!
 :FILE: src/graphden/editor/config_receipts.clj
@@ -528,7 +542,7 @@ Read-only proposal for a new visible deletion decision on intentionally edited t
 - source :: [[file:../../../src/graphden/editor/config_receipts.clj::(defn cleanup-preview!][src/graphden/editor/config_receipts.clj:186]]
 - same file :: [[file:editor.org::#editor/reconcile-undo!][reconcile-undo!]]
 
-* 40. reconcile-undo!
+* 41. reconcile-undo!
 :PROPERTIES:
 :CUSTOM_ID: editor/reconcile-undo!
 :FILE: src/graphden/editor/config_receipts.clj
@@ -541,7 +555,7 @@ After a lost UNDO response, confirms only exact restored source and absence in t
 - source :: [[file:../../../src/graphden/editor/config_receipts.clj::(defn reconcile-undo!][src/graphden/editor/config_receipts.clj:136]]
 - same file :: [[file:editor.org::#editor/cleanup-preview!][cleanup-preview!]]
 
-* 41. gdTourRestoreUIComponentPreferences
+* 42. gdTourRestoreUIComponentPreferences
 :PROPERTIES:
 :CUSTOM_ID: editor/gdTourRestoreUIComponentPreferences
 :FILE: resources/packages/app/editor/editor-tour-ui-components.js
@@ -553,7 +567,7 @@ Restores Appearance preferences before deleting the lesson's exact selected grap
 
 - source :: [[file:../../../resources/packages/app/editor/editor-tour-ui-components.js::async function gdTourRestoreUIComponentPreferences(created, failed) {][resources/packages/app/editor/editor-tour-ui-components.js:238]]
 
-* 42. gdApplyKeymap
+* 43. gdApplyKeymap
 :PROPERTIES:
 :CUSTOM_ID: editor/gdApplyKeymap
 :FILE: resources/packages/app/editor/editor-shortcuts.js
@@ -565,7 +579,7 @@ Applies user key overrides by stable shortcut ID. The registry keeps defaults fo
 
 - source :: [[file:../../../resources/packages/app/editor/editor-shortcuts.js::function gdApplyKeymap(bindings) {][resources/packages/app/editor/editor-shortcuts.js:81]]
 
-* 43. authFetch
+* 44. authFetch
 :PROPERTIES:
 :CUSTOM_ID: editor/authFetch
 :FILE: resources/packages/app/editor/editor-auth.js
@@ -578,7 +592,7 @@ Sends authenticated editor requests and handles 401 by clearing the stored crede
 - source :: [[file:../../../resources/packages/app/editor/editor-auth.js::async function authFetch(url, opts = {}) {][resources/packages/app/editor/editor-auth.js:117]]
 - referenced from :: [[file:editor.org::#editor/initGraph][initGraph]], [[file:editor.org::#editor/gdTourBeginBranchCreation][gdTourBeginBranchCreation]], [[file:editor.org::#editor/gdTourRecordAppCreation][gdTourRecordAppCreation]]
 
-* 44. _tourTick
+* 45. _tourTick
 :PROPERTIES:
 :CUSTOM_ID: editor/_tourTick
 :FILE: resources/packages/app/editor/editor-tour.js
@@ -591,7 +605,7 @@ Evaluates the current interactive lesson step against editor state. Lesson data 
 - source :: [[file:../../../resources/packages/app/editor/editor-tour.js::function _tourTick() {][resources/packages/app/editor/editor-tour.js:310]]
 - referenced from :: [[file:editor.org::#editor/_tourStartPositioning][_tourStartPositioning]]
 
-* 45. gdTourBeginBranchCreation
+* 46. gdTourBeginBranchCreation
 :PROPERTIES:
 :CUSTOM_ID: editor/gdTourBeginBranchCreation
 :FILE: resources/packages/app/editor/editor-tour-receipts.js
@@ -606,7 +620,7 @@ Records a proposed branch UUID, its actual base branch UUID, and the current sig
 - same file :: [[file:editor.org::#editor/gdTourRecordPackageInstall][gdTourRecordPackageInstall]]
 - referenced from :: [[file:editor.org::#editor/gdTourRecordPackageInstall][gdTourRecordPackageInstall]], [[file:editor.org::#editor/gdTourRecordAppCreation][gdTourRecordAppCreation]]
 
-* 46. gdTourRecordPackageInstall
+* 47. gdTourRecordPackageInstall
 :PROPERTIES:
 :CUSTOM_ID: editor/gdTourRecordPackageInstall
 :FILE: resources/packages/app/editor/editor-tour-receipts.js
@@ -620,7 +634,7 @@ Records a successful lesson installation using the returned pin, branch, package
 - see also :: [[file:packages.org::#packages/sync-namespaces!][sync-namespaces!]], [[file:editor.org::#editor/gdTourBeginBranchCreation][gdTourBeginBranchCreation]]
 - same file :: [[file:editor.org::#editor/gdTourBeginBranchCreation][gdTourBeginBranchCreation]]
 
-* 47. gdTourRecordAppCreation
+* 48. gdTourRecordAppCreation
 :PROPERTIES:
 :CUSTOM_ID: editor/gdTourRecordAppCreation
 :FILE: resources/packages/app/editor/editor-tour-app-receipts.js
@@ -633,7 +647,7 @@ An Apps form is an ordinary server mutation, not a tutorial-only endpoint. Befor
 - source :: [[file:../../../resources/packages/app/editor/editor-tour-app-receipts.js::async function gdTourRecordAppCreation(ticket, xhr) {][resources/packages/app/editor/editor-tour-app-receipts.js:38]]
 - see also :: [[file:editor.org::#editor/gdTourBeginBranchCreation][gdTourBeginBranchCreation]], [[file:editor.org::#editor/authFetch][authFetch]]
 
-* 48. _tourStartPositioning
+* 49. _tourStartPositioning
 :PROPERTIES:
 :CUSTOM_ID: editor/_tourStartPositioning
 :FILE: resources/packages/app/editor/editor-tour-spot.js

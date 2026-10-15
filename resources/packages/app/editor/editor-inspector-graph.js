@@ -21,7 +21,44 @@
   let pending = null;
   let presetOnly = false;
   let sharedRuntime = null;
+  const invalidCompareRuntimes = new WeakSet();
   const runtimeListeners = new Set();
+  const nativeCompareClasses = new Set(['gd-diff-insp', 'gd-diff-insp-head',
+    'gd-diff-graph-host', 'branch-diff-entry', 'branch-diff-entries',
+    'branch-diff-comment-btn', 'branch-diff-anchor-thread',
+    'branch-diff-anchor-compose', 'branch-comment-send']);
+  const compareInputs = (surface) => value({...metadata, narrow: narrow.matches, surface,
+    usages: value({rows: [], count: 0, truncated: false})});
+  function compareView(surface, diff) {
+    if (surface !== 'compare-head' && surface !== 'compare-entry') throw new Error('Invalid Inspector compare surface');
+    if (!Array.isArray(diff.fields)) throw new Error('Invalid Inspector compare fields');
+    const supplied = {inputs: compareInputs(surface),
+      state: value({tab: 'overview', open: false, handled: false}),
+      diff: value({...diff, fields: diff.fields.map(value)})};
+    function run(runtime) {
+      const view = runtime.run('view', supplied);
+      fields(view, ['tree', 'styles', 'tab', 'open', 'handled']);
+      const tree = window.GraphdenRenderer.vnode(field(view, 'tree'), 'gd-inspdiff', 10000);
+      function passive(node) {
+        if (!node || typeof node !== 'object') return;
+        if (node.type !== 'span' && node.type !== 'div') throw new Error('Inspector compare must be passive');
+        if (Object.keys(node.props).some(name => !['className', 'title', 'aria-hidden', 'aria-label', 'children', 'key'].includes(name))) throw new Error('Inspector compare cannot own actions or anchors');
+        if (String(node.props.className || '').split(/\s+/).some(name => nativeCompareClasses.has(name))) throw new Error('Inspector compare cannot forge native owners');
+        for (const child of children(node)) passive(child);
+      }
+      passive(tree);
+      const styles = window.GraphdenStyles.normalize(field(view, 'styles'));
+      return {tree: field(view, 'tree'), styles};
+    }
+    const selected = sharedRuntime || builtin();
+    if (invalidCompareRuntimes.has(selected)) return run(builtin());
+    try { return run(selected); }
+    catch (_) {
+      invalidCompareRuntimes.add(selected);
+      window.gdUIComponentFailed?.('inspector');
+      return run(builtin());
+    }
+  }
   function visible() { return !!output && metadata.selected && (!narrow.matches || field(output, 'open')); }
   function inputs() { return value({...metadata, narrow: narrow.matches, surface: 'chrome', usages: value({rows: [], count: 0, truncated: false})}); }
   function validateState(state) {
@@ -163,6 +200,7 @@
     sharedRuntime = null;
   }
   window.gdInspectorGraph = {
+    compareView,
     subscribeRuntime(listener) {
       runtimeListeners.add(listener);
       listener(sharedRuntime || builtin());

@@ -109,6 +109,47 @@
           "The explicit wide return is only the declared Diff record"))))
 
 
+(deftest inspector-optional-compare-preserves-a-stored-pinned-personal-child
+  (let [storage (:storage ga/*bootstrap*)
+        path (str "pinned-inspector-" (random-uuid))
+        namespace-row (sp/create-entity storage :ns {:name path})
+        old-inputs {:selected :bool :name :text :namespace :text :description :text
+                    :parents [:list :text] :has-return :bool :narrow :bool :surface :text
+                    :usages :_inspector-usages-payload}
+        definitions (:fns (edn/read-string
+                            (slurp "resources/packages/app/ui-inspector/fns.edn")))
+        current-inputs (some #(when (= :_inspector-inputs (:name %)) (:type %)) definitions)
+        definition {:name :surface :namespace path
+                    :parent :app.ui-inspector/_inspector-surface
+                    :args {:inputs {:as :inputs :type :_inspector-inputs}}}
+        id (ids/fn-id path :surface)]
+    (is (= old-inputs current-inputs)
+        "The installed Inspector record is unchanged for explicitly pinned children")
+    (composition/sync-fns-to-storage! storage [definition] {path (:id namespace-row)})
+    (let [stored (type-check/reconstruct-fn-def storage id)]
+      (is (= :app.ui-inspector/_inspector-inputs
+             (get-in stored [:args :inputs :type])))
+      (is (some? (check/check-fn-def! stored))))
+    (is (some? (registry/rich-type-of :app.ui-inspector/_inspector-diff-read)))
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"(?i)type-check failed"
+          (check/check-fn-def! {:name :invalid-inspector-diff
+                                :parent :app.ui-inspector/_inspector-diff-read
+                                :args {:diff {:value "not a diff record"}}}))
+        "The optional slot rejects a value outside nullable Inspector Diff")
+    (let [view-id (ids/fn-id "app.ui-inspector" :inspector-view)
+          authorized (tenancy/browser-source-policy storage)
+          graph (source/collect-manifest storage view-id authorized)
+          namespaces (source/collect-namespaces storage graph)
+          policy (snapshot/capture-policy @(registry/active-rich-types-atom))
+          plan (snapshot/export-snapshot {:graph graph :namespaces namespaces}
+                                         {} {:view view-id} policy)
+          inputs (get-in plan [:inputs (get-in plan [:entries "view"])])]
+      (is (= ["diff" "inputs" "state"] (:accepted inputs))
+          "Installed PostgreSQL source exports the compare projection")
+      (is (= ["inputs" "state"] (:required inputs))))))
+
+
 (use-fixtures :once (ga/fixture (ns-name *ns*)))
 
 

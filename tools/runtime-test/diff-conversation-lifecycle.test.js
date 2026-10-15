@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const {createDocument} = require('./mini-dom');
 
-function fixture(anchoredOnly = true) {
+function fixture(anchoredOnly = true, head = false) {
   const document = createDocument();
   const create = document.createElement.bind(document);
   document.createElement = (tag) => {
@@ -14,7 +14,7 @@ function fixture(anchoredOnly = true) {
     return element;
   };
   const root = create('div'); document.body.appendChild(root);
-  const anchor = create('div'); anchor.className = 'branch-diff-entry';
+  const anchor = create('div'); anchor.className = head ? 'gd-diff-insp-head' : 'branch-diff-entry';
   anchor.dataset.anchorName = 'fn'; anchor.dataset.anchorId = 'fixture';
   anchor.insertAdjacentElement = (_position, element) => {
     const index = root.children.indexOf(anchor);
@@ -52,6 +52,21 @@ test('late initial read retains exact composer and includes newly read comments'
   assert.equal(input.value, 'Keep my draft');
   assert.equal(document.activeElement, input);
   assert.equal(root.querySelector('.branch-comment-body').textContent, 'Saved comment');
+});
+
+test('retained Inspector head and entry wire one composer across repeated mounts', () => {
+  for (const head of [true, false]) {
+    const f = fixture(true, head);
+    const send = f.root.querySelector('.branch-comment-send');
+    f.controller.mount(f.root);
+    f.controller.mount(f.root);
+    f.button.click();
+    assert.equal(f.root.querySelectorAll('.branch-diff-anchor-thread').length, 1);
+    assert.equal(f.root.querySelectorAll('textarea').length, 1);
+    assert.equal(f.root.querySelector('.branch-comment-send'), send);
+    assert.equal(f.root.querySelector('textarea'), f.input);
+    assert.equal(f.document.activeElement, f.input);
+  }
 });
 
 test('successful send closes only the submitted composer; failed send retains it', async () => {

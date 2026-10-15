@@ -607,7 +607,7 @@ function gdExitDiffMode() {
   gdCloseDiffChipMenu();
   const lens = document.getElementById('gd-diff-lens');
   if (lens) { window.gdExplorerGraph?.disposeDiff(lens); lens.remove(); }
-  document.getElementById('gd-diff-insp')?.remove();
+  gdDiffDisposeInspectorPanel(document.getElementById('gd-diff-insp'));
   _gdDiffMode = null;
   try { localStorage.removeItem(GD_DIFF_MODE_KEY); } catch (_) {}
   gdDiffModeRenderChip();

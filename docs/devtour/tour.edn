@@ -1526,6 +1526,10 @@
      :say "The ordinary app.ui-inspector initial/update/view graphs own the header, kind classifier,
            ARIA tabs and structured styles. Finite requests delegate panel loading, roving focus and close
            to native hosts. Chrome painting never replaces the sibling diff conversation or tab body."}
+    {:file "resources/packages/app/editor/editor-inspector-graph.js" :defn compareView
+     :say "The same Inspector view role projects read-only compare head and entry surfaces from an
+           optional typed display argument. Passive DOM validation and section-local fallback protect
+           native anchors, comment controls and existing personal chrome selections."}
     {:file "resources/packages/app/editor/editor-inspector.js" :defn requestHost
      :say "Each server partial captures a latest-wins read token and exact native host. Tab changes,
            selection and account changes invalidate body ownership, including A-to-B-to-A. Closing

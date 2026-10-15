@@ -28,11 +28,11 @@ function fixture(component = 'recents') {
   const full = {namespaces: [{id: id(1), name: 'personal', path: 'personal', 'parent-id': null}],
     functions: Array.from({length: 6}, (_, n) => ({id: id(n + 20), name: 'part-' + n, 'namespace-id': id(1)})),
     roots: {'configuration-id': id(20), 'theme-id': id(21), 'menu-id': id(22), 'menu-update-id': id(23), 'picker-id': id(24)}};
-  const requests = [], stages = [], confirms = [], rejects = [], themes = [], selections = [], events = new Map();
+  const requests = [], stages = [], confirms = [], rejects = [], themes = [], selections = [], manifestStages = [], events = new Map();
   let applyResolve;
   let failApply = false;
   let preference = null;
-  const window = {gdPrefOwner: 'alice', gdPrefsReady: true,
+  const window = {gdPrefOwner: 'alice', gdPrefsReady: true, GraphdenAtomicFunctionBatchMax: 2048,
     API: {api_ui_configuration_prepare: '/prepare', api_ui_configuration_preview: '/preview',
       api_ui_configuration_apply: '/apply', api_ui_components_create_preview: '/full-preview', api_ui_components_create_apply: '/full-apply'},
     gdPrefRead: () => preference, gdUIComponentsSelection: () => selection, gdUIComponentsRoots: () => roots,
@@ -41,6 +41,10 @@ function fixture(component = 'recents') {
     gdCaptureUIConfiguration: async () => state,
     gdPrefWrite: async () => assert.fail('ordinary configuration never writes a selector preference'),
     gdTourStageEditorConfiguration: (request, staged) => { stages.push(JSON.parse(JSON.stringify(staged))); return {token: 'exact'}; },
+    gdTourStageUIComponentsManifest: (_request, manifest) => {
+      manifestStages.push(JSON.parse(JSON.stringify(manifest))); return {token: 'manifest'};
+    },
+    gdTourConfirmUIComponentsManifest: () => true,
     gdTourConfirmEditorConfiguration: (_ticket, result) => { confirms.push(result); return true; },
     gdTourRejectEditorConfiguration: ticket => rejects.push(ticket), gdUseThemeGraph: async theme => themes.push(theme),
     authFetch: async (route, options) => {
@@ -63,7 +67,7 @@ function fixture(component = 'recents') {
     ensureSubtreeFor: async () => true, lookups: {fnMap: new Map([[id(95), {id: id(95)}]])},
     selectFn: value => selections.push(value)});
   vm.runInContext(source, context); window.gdRenderUIComponentCatalog();
-  return {window, group, root, receipt, full, requests, stages, confirms, rejects, themes, selections, events,
+  return {window, group, root, receipt, full, requests, stages, confirms, rejects, themes, selections, manifestStages, events,
     create: buttons.get('#gd-ui-components-create'), apply: () => applyResolve(),
     conflict: () => { failApply = true; }, own: () => { state.custom[component] = true; window.gdRenderUIComponentCatalog(); },
     changePreference: value => { preference = value; }, status: () => buttons.get('#gd-ui-components-status').textContent};
@@ -110,11 +114,13 @@ for (const [count, accepted] of [[512, true], [513, false]]) test('new cohort re
   assert.equal(f.requests.some(row => row.route === '/apply'), accepted);
   if (accepted) { f.apply(); await until(() => f.confirms.length === 1); }
 });
-for (const [count, accepted] of [[1000, true], [1001, false]]) test('full compatibility receipt bound ' + count, async () => {
+for (const [count, accepted] of [[1001, true], [2048, true], [2049, false]]) test('full compatibility receipt bound ' + count, async () => {
   const f = fixture(); f.full.functions = Array.from({length: count}, (_, n) => ({id: id(n + 20), name: 'part-' + n, 'namespace-id': id(1)}));
   f.create.click({currentTarget: f.create});
   await until(() => accepted ? f.requests.some(row => row.route === '/apply') : f.status() === 'Creation manifest is unavailable.');
   assert.equal(f.requests.some(row => row.route === '/full-apply'), accepted);
+  assert.equal(f.manifestStages.length, Number(accepted));
+  if (accepted) assert.deepEqual(f.manifestStages[0].functions, f.full.functions);
   if (accepted) { f.apply(); await until(() => f.confirms.length === 1); }
 });
 for (const corrupt of [f => { f.receipt['function-receipts'][1].id = f.receipt.id; },

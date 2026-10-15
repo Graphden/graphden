@@ -1,6 +1,7 @@
 (ns graphden.editor.component-templates-test
   (:require
     [clojure.test :refer [deftest is]]
+    [graphden.crud.entities.function-batch-budget :as batch-budget]
     [graphden.editor.component-templates :as templates]
     [graphden.packages.rebase :as rebase]))
 
@@ -84,7 +85,7 @@
         selected (templates/selected-definitions root :explorer nil nil)
         full (templates/definitions root)]
     (is (< (count selected) 512))
-    (is (< (count full) 1000))
+    (is (batch-budget/accepted-count? (count full)))
     (is (every? #(contains? #{root (str root ".explorer")} (:namespace %)) selected))
     (is (every? (set (map :name selected)) [:explorer-toolbar-initial :explorer-toolbar-update :explorer-toolbar-view]))))
 

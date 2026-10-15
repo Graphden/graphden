@@ -8,6 +8,7 @@
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.crud.entities.function-batch-budget :as batch-budget]
     [graphden.system.api-routes-js :as api-js]
     [reitit.ring :as ring]))
 
@@ -29,6 +30,8 @@
   (testing "static path lands as a string-constant entry — no per-entry function(…)"
     (let [out (api-js/routes->js-bundle ["/api/health"])]
       (is (str/includes? out "api_health: \"/api/health\","))
+      (is (str/includes? out (str "window.GraphdenAtomicFunctionBatchMax = "
+                                  batch-budget/max-functions ";")))
       ;; Exclude `(function () {` from the IIFE wrapper — only
       ;; per-entry `function(<name>…)` callbacks are forbidden.
       (is (not (str/includes? out "function("))))))

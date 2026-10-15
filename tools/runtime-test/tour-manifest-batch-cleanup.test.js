@@ -14,7 +14,8 @@ function receipts(count = 2) {
 }
 function fixture(rows, body, status = 200) {
   const calls = [], effects = {saved: 0, cleared: 0};
-  const ctx = vm.createContext({API: {api_functions_delete_batch: '/api/functions/delete-batch'},
+  const ctx = vm.createContext({GraphdenAtomicFunctionBatchMax: 2048,
+    API: {api_functions_delete_batch: '/api/functions/delete-batch'},
     selectedFnId: rows[0].id, getCurrentBranchName: () => 'main',
     _tourSaveState: () => effects.saved++, gdClearSelection: () => effects.cleared++,
     authFetch: async (url, options) => {
@@ -52,6 +53,18 @@ test('352 exact receipts use one branch-scoped request and retire only after a c
     ({id: row.id, name: row.name, 'namespace-id': namespace})));
   assert(rows.every(row => row.receipt === 'removed'));
   assert.deepEqual(f.effects, {saved: 1, cleared: 1});
+});
+test('the boot contract admits 2048 exact receipts and rejects 2049 before mutation', async () => {
+  const admitted = receipts(2048);
+  const f = fixture(admitted, {deleted: admitted.map(row => row.id), 'already-absent': []});
+  assert.equal((await f.run()).length, 0);
+  assert.equal(f.calls.length, 1);
+  assert.equal(JSON.parse(f.calls[0].options.body).functions.length, 2048);
+  const rejected = receipts(2049);
+  const g = fixture(rejected, {});
+  assert.equal(await g.ctx._tourDeleteManifestFns(rejected), null);
+  assert.equal(g.calls.length, 0);
+  assert(rejected.every(row => row.receipt === 'created'));
 });
 test('partial, duplicate, foreign and malformed replies retain all receipts and selection', async () => {
   for (const body of [{deleted: [id(1)], 'already-absent': []},

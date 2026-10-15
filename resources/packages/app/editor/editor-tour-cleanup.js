@@ -304,7 +304,9 @@ async function _tourDeleteFns(created, options) {
 async function _tourDeleteManifestFns(entries, options) {
   const uuid = value => typeof value === 'string'
     && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
-  if (!entries.length || entries.length > 1000 || typeof API.api_functions_delete_batch !== 'string') return null;
+  const limit = globalThis.GraphdenAtomicFunctionBatchMax;
+  if (!Number.isInteger(limit) || limit < 1 || !entries.length || entries.length > limit
+      || typeof API.api_functions_delete_batch !== 'string') return null;
   const first = entries[0];
   if (!uuid(first['branch-id']) || !first['manifest-root-id']) return null;
   if (entries.some(row => row.creation !== 'create-only-manifest'

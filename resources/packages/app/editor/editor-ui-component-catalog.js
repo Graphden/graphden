@@ -45,9 +45,11 @@
     return result;
   }
   function validManifest(manifest) {
+    const fullLimit = window.GraphdenAtomicFunctionBatchMax;
     if (!manifest || !Array.isArray(manifest.namespaces) || !Array.isArray(manifest.functions)
       || !manifest.namespaces.length || manifest.namespaces.length > 16
-      || !manifest.functions.length || manifest.functions.length > (manifest.component ? 512 : 1000)) return false;
+      || !Number.isInteger(fullLimit) || fullLimit < 1
+      || !manifest.functions.length || manifest.functions.length > (manifest.component ? 512 : fullLimit)) return false;
     const namespaces = new Set(manifest.namespaces.map(row => row.id));
     const identities = new Set([...namespaces, ...manifest.functions.map(row => row.id)]);
     if (identities.size !== manifest.namespaces.length + manifest.functions.length) return false;

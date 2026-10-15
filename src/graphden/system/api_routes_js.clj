@@ -22,6 +22,7 @@
    validator that catches stale `/api/*` literals in editor JS."
   (:require
     [clojure.string :as str]
+    [graphden.crud.entities.function-batch-budget :as batch-budget]
     [graphden.system.api-url-drift :as drift]
     [graphden.system.route-collection :as rc]))
 
@@ -114,6 +115,7 @@
        "  window.API = {\n"
        (str/join "\n" (mapv emit-entry (sort (distinct paths)))) "\n"
        "  };\n"
+       "  window.GraphdenAtomicFunctionBatchMax = " batch-budget/max-functions ";\n"
        "})();\n"))
 
 

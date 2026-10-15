@@ -2,6 +2,7 @@
   (:require
     [clojure.test :refer [deftest is]]
     [graphden.crud.entities.delete-batch :as batch]
+    [graphden.crud.entities.function-batch-budget :as budget]
     [graphden.crud.entities.invalidation :as invalidation]
     [graphden.crud.type-check :as type-check]
     [graphden.executor.compile-runtime :as runtime]
@@ -44,7 +45,7 @@
     (is (= parsed (batch/parse-receipts {:functions parsed})))
     (doseq [input [nil false 1 "functions" [] {} {:functions nil} {:functions []}
                    {:functions row} {:functions [row row]} {:functions [row] :extra true}
-                   {:functions (vec (repeat 1001 row))}
+                   {:functions (vec (repeat (inc budget/max-functions) row))}
                    {:functions [nil]} {:functions [42]}
                    {:functions [(assoc row :id "bogus")]}
                    {:functions [(assoc row :namespace-id [])]}
@@ -54,6 +55,19 @@
       (is (= :validation-error/delete-receipts
              (try (batch/parse-receipts input) nil
                   (catch clojure.lang.ExceptionInfo e (:type (ex-data e)))))))))
+
+
+(deftest exact-receipt-count-boundary-test
+  (let [namespace-id (str (random-uuid))
+        rows (mapv (fn [index]
+                     {:id (str (random-uuid)) :name (str "owned-" index)
+                      :namespace-id namespace-id})
+                   (range (inc budget/max-functions)))]
+    (is (= budget/max-functions
+           (count (batch/parse-receipts {:functions (pop rows)}))))
+    (is (= :validation-error/delete-receipts
+           (try (batch/parse-receipts {:functions rows}) nil
+                (catch clojure.lang.ExceptionInfo e (:type (ex-data e))))))))
 
 
 (deftest bulk-delete-rechecks-surviving-diamond-once-test

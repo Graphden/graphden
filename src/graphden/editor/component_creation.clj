@@ -2,6 +2,7 @@
   "Create-only fixed UI bundles. Preview is an internal recovery protocol;
    apply owns one atomic decorated transaction and never revives a UUID."
   (:require
+    [graphden.crud.entities.function-batch-budget :as batch-budget]
     [graphden.crud.entities.invalidation :as invalidation]
     [graphden.crud.request :as request]
     [graphden.editor.component-bundle :as bundle]
@@ -109,11 +110,13 @@
 (defn- existing-identities!
   [storage records namespaces]
   (let [base (versioned/unwrap storage)]
-    (doseq [[entity rows] (assoc (group-by :kind records) :ns namespaces)]
+    (doseq [[entity rows] (assoc (group-by :kind records) :ns namespaces)
+            :let [ids (mapv :id rows)]]
       ;; Reading identity rows, rather than resolved versions, rejects a
       ;; tombstone too. Hidden collisions are still rejected by CREATE's
       ;; database identity constraint; no UPSERT follows an absent read.
-      (when (seq (sp/read-entities base entity (mapv :id rows)))
+      (when (or (not= (count ids) (count (set ids)))
+                (seq (sp/read-entities base entity ids)))
         (refuse! :identity-conflict 409)))))
 
 
@@ -125,6 +128,9 @@
         selected (when group (selection/capture storage group authorize! policy root))
         parsed (if group (bundle/parse root group (:retained selected) (:legacy selected) (:names selected))
                    (bundle/parse root))
+        _ (when-not (batch-budget/accepted-count?
+                      (count (filter #(= :fn (:kind %)) (:records parsed))))
+            (refuse! :function-batch-limit 422))
         ns-ids (into {} (map (juxt :path :id)) rows)
         records (mapv (fn [row]
                         (cond-> row (= :fn (:kind row))
@@ -226,16 +232,25 @@
 
 (defn- create!
   [storage prepared]
-  (let [records (:records prepared)]
+  (let [records (:records prepared)
+        by-entity (group-by :kind records)
+        chunk-size (min 512 sp/*max-batch-size*)]
     (when (or (sync/records-seal-rej storage records) (sync/records-vault-path-rej storage records))
       (refuse! :invalid-template-source 422))
     (doseq [row (get-in prepared [:manifest :namespaces])]
       (when-not (sp/create-entity storage :ns (dissoc row :path))
         (refuse! :write-refused 403)))
+    ;; Keep the same entity order under the caller's ONE writer transaction.
+    ;; Decorated batch CRUD retains each row's ACL/branch checks, projected
+    ;; quota and uniqueness guards while avoiding a round trip per record.
     (doseq [entity [:fn :slot :fn-slot :binding :binding-list-item]
-            row (filter #(= entity (:kind %)) records)]
-      (when-not (sp/create-entity storage entity (dissoc row :kind))
-        (refuse! :write-refused 403)))
+            chunk (partition-all chunk-size (get by-entity entity))]
+      (let [expected (mapv :id chunk)
+            created (vec (sp/create-entities storage entity (mapv #(dissoc % :kind) chunk)))
+            actual (mapv :id created)]
+        (when-not (and (= (count expected) (count actual))
+                       (= (set expected) (set actual)))
+          (refuse! :write-refused 403))))
     {:ok true :committed true :manifest (wire-manifest (:manifest prepared))}))
 
 

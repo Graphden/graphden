@@ -735,11 +735,21 @@
   ;; hiccup output — see `test/graphden/regressions/inline_script_
   ;; sibling_drop_test.clj` for the pinned regression. Using two
   ;; `<script src>` siblings sidesteps the issue entirely.
+  {:name :_api-routes-js-version
+   :description "Cache key for the boot JS: frontend overrides plus baked backend/packages hashes. A backend-only atomic-cohort budget change must not reuse an immutable copy with an old client limit."
+   :parent :subs
+   :args {:string {:parent :sha256-hex
+                   :args {:s {:parent :str
+                              :args {:parts [:frontend-hash-effective
+                                             {:parent :get :args {:coll :build-hashes :key "backend"}}
+                                             {:parent :get :args {:coll :build-hashes :key "packages"}}]}}}}
+          :start {:value 0} :end {:value 12}}}
+
   {:name :_api-routes-js-url
-   :description "`/assets/api-routes.js?v=<frontend-build-hash>` — `<script src>` URL for the cached `window.API` module."
+   :description "`/assets/api-routes.js?v=<boot-contract-hash>` — `<script src>` URL for the cached routes and atomic function-batch budget."
    :parent :str-join
    :return-type :text
-   :args {:coll ["/assets/api-routes.js?v=" :frontend-hash-effective]
+   :args {:coll ["/assets/api-routes.js?v=" :_api-routes-js-version]
           :separator ""}}
 
   {:name :_api-routes-js-handler

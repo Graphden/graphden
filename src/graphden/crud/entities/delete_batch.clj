@@ -4,6 +4,7 @@
   (:require
     [clojure.string :as str]
     [clojure.tools.logging :as log]
+    [graphden.crud.entities.function-batch-budget :as batch-budget]
     [graphden.crud.entities.invalidation :as invalidation]
     [graphden.crud.package-guard :as package-guard]
     [graphden.crud.request :as request]
@@ -40,11 +41,11 @@
 
 
 (defn parse-receipts
-  "Validate an untrusted JSON envelope into 1–1000 distinct exact identities.
+  "Validate an untrusted JSON envelope into a bounded set of distinct exact identities.
    Does not read storage. The mutation revalidates even direct graph callers."
   [input]
   (when-not (and (map? input) (= #{:functions} (set (keys input)))
-                 (vector? (:functions input)) (<= 1 (count (:functions input)) 1000))
+                 (vector? (:functions input)) (batch-budget/accepted-count? (count (:functions input))))
     (refuse! :validation-error/delete-receipts))
   (let [rows (mapv receipt (:functions input))]
     (when-not (= (count rows) (count (set (map :id rows))))

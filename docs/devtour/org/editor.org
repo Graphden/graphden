@@ -458,13 +458,13 @@ The retained legacy selective-copy compatibility path keeps only the chosen comp
 :PROPERTIES:
 :CUSTOM_ID: editor/apply!
 :FILE: src/graphden/editor/component_creation.clj
-:LINE: 258
+:LINE: 273
 :MINS: 2.4
 :END:
 
 Rebuilds the manifest, the fixed list of proposed objects and UUIDs, while holding the graph writer lock. It rejects a changed user, branch, source snapshot or existing identity. One transaction through the existing [[file:glossary.org::#term/protocol][storage decorators]] creates all rows with ordinary access checks. Cache-publication warnings preserve a successful commit and its identities. An internal preview lets lesson cleanup record exact new UUIDs before sending APPLY, so a lost network reply does not leave untracked objects. The explicit full bundle then activates by reference through the ordinary editor configuration; a conflict leaves the copied bundle available.
 
-- source :: [[file:../../../src/graphden/editor/component_creation.clj::(defn apply!][src/graphden/editor/component_creation.clj:258]]
+- source :: [[file:../../../src/graphden/editor/component_creation.clj::(defn apply!][src/graphden/editor/component_creation.clj:273]]
 - see also :: [[file:versioning.org::#versioning/call-with-write][call-with-write]]
 
 * 35. collect-closure

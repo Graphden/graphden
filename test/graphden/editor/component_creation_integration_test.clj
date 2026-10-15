@@ -5,9 +5,13 @@
     [clojure.set :as set]
     [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
+    [graphden.crud.entities.delete-batch :as deletion]
+    [graphden.crud.entities.function-batch-budget :as batch-budget]
     [graphden.crud.type-check :as reconstruction]
+    [graphden.editor.component-bundle :as bundle]
     [graphden.editor.component-config :as config]
     [graphden.editor.component-creation :as creation]
+    [graphden.editor.component-templates :as templates]
     [graphden.editor.components :as components]
     [graphden.editor.preference-write :as preferences]
     [graphden.executor.browser-snapshot :as snapshot]
@@ -195,6 +199,62 @@
         [:ns :fn :slot :fn-slot :binding :binding-list-item]))
 
 
+(defn- with-function-count
+  [target f]
+  (let [original templates/definitions]
+    (with-redefs [templates/definitions
+                  (fn [root]
+                    (let [existing (original root)
+                          extra (- target (count existing))]
+                      (when (neg? extra)
+                        (throw (ex-info "Function count target is below the shipped bundle" {})))
+                      (into existing
+                            (map (fn [index]
+                                   {:name (keyword (str "_batch-proof-" index))
+                                    :namespace (str root ".inspector")
+                                    :parent :core.logic/const
+                                    :args {:value 0} :return-type :int}))
+                            (range extra))))]
+      (f))))
+
+
+(deftest full-cohort-over-1000-creates-and-deletes-by-exact-receipt
+  (let [ctx (:ctx ga/*bootstrap*)
+        storage (:storage ctx)
+        target (max 1001 (count (templates/definitions "proof.root")))
+        before (graph-identities storage)]
+    (with-function-count target
+      #(let [reserved (preview)
+             created (apply-preview reserved)
+             receipts (get-in created [:body :manifest :functions])]
+         (is (= 200 (:status reserved)))
+         (is (= 200 (:status created)))
+         (is (= target (count receipts)))
+         (is (= (get-in reserved [:body :manifest])
+                (get-in created [:body :manifest])))
+         (let [deleted (deletion/delete-receipts! ctx receipts)]
+           (is (= target (count (:deleted deleted))))
+           (is (empty? (:already-absent deleted)))
+           (is (= (:fn before) (:fn (graph-identities storage)))))))))
+
+
+(deftest full-cohort-budget-refuses-over-bound-before-create
+  (let [storage (:storage ga/*bootstrap*)
+        reserved (preview)
+        before (graph-identities storage)]
+    (with-function-count batch-budget/max-functions
+      #(is (= batch-budget/max-functions
+              (count (get-in (preview) [:body :manifest :functions])))))
+    (with-function-count (inc batch-budget/max-functions)
+      #(do
+         (is (= 422 (:status (preview))))
+         (let [result (submit :_ui-components-create-apply-handler
+                              (get-in reserved [:body :request]))]
+           (is (= 422 (:status result)))
+           (is (false? (get-in result [:body :committed]))))))
+    (is (= before (graph-identities storage)))))
+
+
 (deftest imported-bundle-recheck-shares-namespace-metadata
   (let [ctx (:ctx ga/*bootstrap*)
         storage (:storage ctx)
@@ -273,8 +333,9 @@
     (is (true? (get-in reserved [:body :ok])))
     (is (= before (graph-identities storage)))
     (is (= 7 (count (get-in reserved [:body :manifest :namespaces]))))
-    (is (<= (count (get-in reserved [:body :manifest :functions])) 1000)
-        "the full editable UI template must fit its existing function budget")
+    (is (batch-budget/accepted-count?
+          (count (get-in reserved [:body :manifest :functions])))
+        "the full editable UI template must fit the atomic cleanup budget")
     (let [created (apply-preview reserved)
           manifest (get-in created [:body :manifest])]
       (is (= 200 (:status created)) (pr-str created))
@@ -317,32 +378,67 @@
         reserved (preview)
         before (graph-identities storage)
         writes (atom 0)
-        original @#'pg-crud/create-entity]
-    (binding [pg-crud/*create-entity-override*
+        original @#'pg-crud/create-entities]
+    (binding [pg-crud/*create-entities-override*
               (fn [datasource entity data fields]
-                (when (and (= entity :binding) (= 3 (swap! writes inc)))
-                  (throw (ex-info "Injected SQL failure after namespace and function writes" {})))
-                (binding [pg-crud/*create-entity-override* nil]
+                (when (and (= entity :binding-list-item) (= 2 (swap! writes inc)))
+                  (throw (ex-info "Injected SQL failure after an earlier batch" {})))
+                (binding [pg-crud/*create-entities-override* nil]
                   (original datasource entity data fields)))]
       (let [result (apply-preview reserved)]
         (is (= 500 (:status result)) "A rolled-back internal SQL failure is not an authorization refusal")
         (is (false? (get-in result [:body :committed])))
         (is (= before (graph-identities storage)))))
-    (is (pos? @writes))
+    (is (<= 2 @writes) "a prior item chunk committed inside the outer transaction")
     (is (:ok (:body (apply-preview reserved))) "same reservation can be retried after rollback")))
+
+
+(deftest duplicate-identity-in-different-batch-refuses-before-writing
+  (let [storage (:storage ga/*bootstrap*)
+        before (graph-identities storage)
+        original @#'bundle/parse]
+    (with-redefs [bundle/parse
+                  (fn [& args]
+                    (let [parsed (apply original args)
+                          first-fn (first (filter #(= :fn (:kind %)) (:records parsed)))]
+                      (update parsed :records conj
+                              (assoc first-fn :name :_duplicate-after-first-chunk))))]
+      (let [result (preview)]
+        (is (= 409 (:status result)))
+        (is (= before (graph-identities storage)))))))
+
+
+(deftest mismatched-batch-result-rolls-back-the-whole-cohort
+  (let [storage (:storage ga/*bootstrap*)
+        reserved (preview)
+        before (graph-identities storage)
+        original @#'vs/create-entities-versioned!]
+    ;; The PG batch seam sits below the versioned adapter, which returns
+    ;; authored rows; inject at that adapter to exercise create!'s receipt.
+    (with-redefs-fn
+      {#'vs/create-entities-versioned!
+       (fn [base branch entity rows]
+         (let [created (original base branch entity rows)]
+           (if (= entity :binding-list-item)
+             (assoc (vec created) 0 (assoc (first created) :id (random-uuid)))
+             created)))}
+      #(let [result (apply-preview reserved)]
+         (is (= 403 (:status result)))
+         (is (false? (get-in result [:body :committed])))
+         (is (= before (graph-identities storage)))))))
 
 
 (deftest quota-refusal-returns-429-and-rolls-back-the-bundle
   (let [storage (:storage ga/*bootstrap*)
         reserved (preview)
         before (graph-identities storage)
-        original @#'pg-crud/create-entity]
-    (binding [pg-crud/*create-entity-override*
+        original @#'pg-crud/create-entities]
+    (binding [pg-crud/*create-entities-override*
               (fn [datasource entity data fields]
                 (when (= entity :fn)
                   (throw (ex-info "Private quota diagnostic"
                                   {:type :quota/entity-limit :org "private-org" :entity :fn})))
-                (binding [pg-crud/*create-entity-override* nil]
+                (binding [pg-crud/*create-entities-override* nil]
                   (original datasource entity data fields)))]
       (let [result (apply-preview reserved)]
         (is (= 429 (:status result)))

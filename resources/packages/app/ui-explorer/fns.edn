@@ -135,7 +135,9 @@
        {:name :_explorer-button-children :parent :if :args {:test :_explorer-button-counted :then :_explorer-button-counted-children :else :_explorer-button-plain-children}}
        {:name :_explorer-button-node :parent :hiccup :lambda-params [:button] :args {:tag "button" :attrs :_explorer-button-attrs :children :_explorer-button-children}}
        {:name :_explorer-button-nodes :parent :map :args {:func :_explorer-button-node :coll :_explorer-button-specs}}
-       {:name :_explorer-toolbar-tree :parent :hiccup :args {:tag "div" :attrs {:value {:class "gd-explorer-kinds"}} :children [:_explorer-button-nodes :_explorer-detail-button]}}
+       {:name :_explorer-toolbar-detail-list :parent :list :args {:items [:_explorer-detail-button]}}
+       {:name :_explorer-toolbar-children :parent :concat :args {:colls [:_explorer-button-nodes :_explorer-toolbar-detail-list]}}
+       {:name :_explorer-toolbar-tree :parent :hiccup :args {:tag "div" :attrs {:value {:class "gd-explorer-kinds"}} :children :_explorer-toolbar-children}}
        {:name :_explorer-action-secret :parent :if :args {:test :_explorer-selected-secrets :then :_explorer-input-authenticated :else false}}
        {:name :_explorer-action-dismiss :parent :if :args {:test :_explorer-selected-failed :then :_explorer-input-authenticated :else false}}
        {:name :_explorer-count-failed-or-zero :parent :coalesce :args {:value :_explorer-count-failed :default 0}}

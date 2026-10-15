@@ -864,6 +864,45 @@
         :expected {:secret false :dismiss false :run false}}])))
 
 
+(deftest explorer-toolbar-shared-button-renderer-keeps-flat-tree-and-browser-parity
+  (let [definitions (:fns (edn/read-string (slurp "resources/packages/app/ui-explorer/fns.edn")))
+        definitions (conj definitions {:name :toolbar-tree :parent :get
+                                       :args {:coll :explorer-toolbar-view :key {:value :tree}}})
+        {:keys [graph impls ids]} (map-fixture definitions)
+        cases (mapv (fn [inputs] {:entry :toolbar-tree :inputs {:inputs inputs}})
+                    [{:selected {} :counts {} :failed 0 :authenticated true
+                      :apps-available true :fx false}
+                     {:selected {"tests" true "failed" true "lint" true}
+                      :counts {"tests" 12000 "failed" 3 "lint" 9}
+                      :failed 3 :authenticated true :apps-available false :fx true}
+                     {:selected {"secrets" true} :counts {"tests" nil "secrets" nil}
+                      :failed 0 :authenticated false :apps-available false :fx false}])
+        exported (browser/export-plan graph impls {:toolbar-tree (:toolbar-tree ids)}
+                                      {:allow-fn? (constantly true)})
+        jvm (jvm-results graph impls ids cases)
+        browser (browser-results exported cases)
+        kinds ["all" "fn" "types" "secrets" "services" "apps"
+               "tests" "failed" "type-errors" "lint"]]
+    (is (= 3 (count browser)))
+    (doseq [[idx jvm-result browser-result] (map vector (range) jvm browser)]
+      (is (nil? (:error jvm-result)) (:message jvm-result))
+      (is (nil? (:error browser-result)) (:error browser-result))
+      (let [tree (browser/decode-value (:value jvm-result))
+            browser-tree (browser/decode-value (:value browser-result))
+            buttons (vec (drop 2 tree))]
+        (is (= tree browser-tree) (str "toolbar case " idx " uses the exported graph"))
+        (is (= :div (first tree)))
+        (is (= "gd-explorer-kinds" (get-in tree [1 :class])))
+        (is (= 11 (count buttons)) "Mapped buttons and native detail form one flat child list")
+        (is (every? #(= :button (first %)) buttons))
+        (is (= kinds (mapv #(get-in % [1 :data-kind]) (take 10 buttons))))
+        (is (= "fx" (get-in buttons [10 1 :data-detail])))))
+    (is (= "12000 · 3✗" (get-in (browser/decode-value (:value (second jvm)))
+                                [8 4 2])))
+    (is (true? (get-in (browser/decode-value (:value (second jvm)))
+                       [7 1 :hidden])))))
+
+
 (deftest explorer-function-row-presentation-matches-jvm-and-browser
   (let [definitions (:fns (edn/read-string (slurp "resources/packages/app/ui-explorer/fns.edn")))
         definitions (conj definitions {:name :row-tree :parent :get

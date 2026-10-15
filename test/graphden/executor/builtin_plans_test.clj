@@ -80,10 +80,14 @@
         (is (= (mapv #(assoc % :namespace "__GRAPHDEN_THEME_NAMESPACE__")
                      (:fns (edn/read-string (slurp "resources/packages/app/ui-theme-template/fns.edn"))))
                (:fns (edn/read-string (get-in artifact [:themeTemplate :edn])))))
-        (is (= #{:accountMenu :fnPicker :recents :inspector :explorer} (set (keys (:plans artifact)))))
-        (doseq [[_ compiled] (:plans artifact)]
+        (is (= #{:accountMenu :fnPicker :recents :inspector :explorer :tutorialCatalog}
+               (set (keys (:plans artifact)))))
+        (doseq [[kind compiled] (:plans artifact)]
           (is (= 1 (:format compiled) (:primitiveAbi compiled)))
-          (is (= #{"initial" "update" "view"} (set (keys (:entries compiled)))))))
+          (is (= (case kind
+                   :tutorialCatalog #{"view"}
+                   #{"initial" "update" "view"})
+                 (set (keys (:entries compiled)))))))
       (is (= {:by-id {} :by-name {}} @rich))
       (is (= {:outside :int} @aliases))
       (is (= {:secret {:monotone? true :hide-result? true}} @markers)))

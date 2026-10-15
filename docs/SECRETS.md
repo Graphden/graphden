@@ -144,7 +144,7 @@ diagnostic's type-carrying keys (`:expected`/`:actual`/`:declared`/
 | `core/logic` | All 15 fns propagate (passthrough / conditional). |
 | `core/arithmetic` | Every fn propagates (`:add` `:sub` `:mul` `:div` `:mod` `:quot` `:neg` `:abs` `:min` `:max` `:floor` `:ceil` `:sqrt` `:pow` `:neq` `:lt` `:lte` `:gt` `:gte`). `(lt secret 42)` leaks; the comparisons are included. |
 | `core/system` | 15 fns propagate. Bare environment readers (`:jvm-version`, `:env`, etc.) take no user input so taint can't enter — left bare. |
-| `core/hof` | All 13 fns propagate (content-passing by construction: `coll` elements / `init` / the captured `value` flow into the result). |
+| `core/hof` | All 14 fns propagate (content-passing by construction: `coll` elements / `init` / the captured `value` flow into the result; `partition-by` returns the original elements in adjacent groups). |
 | `core/refinements` | The `:ensure-*` narrowers (`:ensure-positive-int`, `:ensure-non-empty-text`) preserve taint structurally — refinement impls carry no `:taint-propagate?` flag. |
 | `web/html` | `:render-hiccup` / `:hiccup` propagate — they serialize/assemble a tree whose `[:list :any]` arm (and `:hiccup`'s `:any` attr values) can carry a secret. `:h-raw` is bare — its `:string` input can't accept a `[:secret :text]`. |
 | `web/vault` | `:secret-leaf` declares `[:secret :text]` return directly. |

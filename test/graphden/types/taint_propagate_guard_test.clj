@@ -217,7 +217,7 @@
     :usage-org-daily :usage-org-fn-stats
     :usage-org-summary :utf8-bytes :vals :value-kinds :vault-delete
     :vault-get :vault-metadata-get :vault-metadata-put :vault-put :vec
-    :version-qualified-ns :withdraw-package-apply :write-rej :zero? :zipmap :min :max :floor :ceil :sqrt :pow :re-groups :re-seq :str-index-of :str-pad-left :str-pad-right :last :partition :frequencies :parse-float :base64-encode :base64-decode :random :random-uuid :log :instant-parse :instant-format :instant-plus :with-timeout})
+    :version-qualified-ns :withdraw-package-apply :write-rej :zero? :zipmap :min :max :floor :ceil :sqrt :pow :re-groups :re-seq :str-index-of :str-pad-left :str-pad-right :last :partition :partition-by :frequencies :parse-float :base64-encode :base64-decode :random :random-uuid :log :instant-parse :instant-format :instant-plus :with-timeout})
 
 
 (def ^:private golden-tainted
@@ -271,7 +271,7 @@
     :str-upper :sub :subs :tabulate-records :take :throw :throwable-class-name :throwable-message
     :to-json-pretty :to-json-string :to-str :transduce :try :update-in :update-keys :update-vals
     :url-decode :vals :vec :zero? :zipmap
-    :min :max :floor :ceil :sqrt :pow :re-groups :re-seq :str-index-of :str-pad-left :str-pad-right :last :partition :frequencies :parse-float :base64-encode :base64-decode :instant-parse :instant-format :instant-plus :with-timeout})
+    :min :max :floor :ceil :sqrt :pow :re-groups :re-seq :str-index-of :str-pad-left :str-pad-right :last :partition :partition-by :frequencies :parse-float :base64-encode :base64-decode :instant-parse :instant-format :instant-plus :with-timeout})
 
 
 (deftest taint-propagate-set-has-not-drifted

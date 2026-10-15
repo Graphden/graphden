@@ -115,7 +115,8 @@
                    :fn-picker ["app.ui-fn-picker" "picker" #{:view}]
                    :recents ["app.ui-recents" "recents" #{:initial :update :view}]
                    :inspector ["app.ui-inspector" "inspector" #{:initial :update :view}]
-                   :explorer ["app.ui-explorer" "explorer-toolbar" #{:initial :update :view}]}]
+                   :explorer ["app.ui-explorer" "explorer-toolbar" #{:initial :update :view}]
+                   :tutorial-catalog ["app.ui-tutorial-catalog" "catalog" #{:view}]}]
     (is (= (set (keys contracts)) (set (keys actual))))
     (doseq [[component [path prefix roles]] contracts]
       (is (= (into {} (map (fn [role]

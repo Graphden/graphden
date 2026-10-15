@@ -661,6 +661,55 @@ function makeWorld(opts) {
       'a pending catalogue is retired before any DOM ownership is created');
   });
 
+  await test('initial preference owner hydration preserves the requested catalogue', async () => {
+    let resolveLessons;
+    const pending = new Promise(resolve => { resolveLessons = resolve; });
+    const w = makeWorld({fetchLessons: () => pending});
+    w.ctx.gdPrefsReady = false;
+    w.ctx.gdPrefOwner = null;
+    const opening = w.ctx.openTutorialMenu();
+    w.ctx.gdPrefOwner = 'first-account';
+    w.ctx.gdPrefsReady = true;
+    resolveLessons(LESSONS);
+    await opening;
+    assert(w.rows().length === 5 && w.pop.classList.contains('gd-tour-visible'),
+      'first resolved owner does not discard an otherwise valid pending open');
+    w.row('01').querySelector('.gd-tour-btn-primary').click();
+    assert(w.started.length === 1 && w.started[0] === '01',
+      'hydrated catalogue keeps the native lesson action available');
+  });
+
+  await test('a settled owner change during lesson fetch cannot open stale rows', async () => {
+    let resolveLessons;
+    const pending = new Promise(resolve => { resolveLessons = resolve; });
+    const w = makeWorld({fetchLessons: () => pending});
+    w.ctx.gdPrefsReady = true;
+    w.ctx.gdPrefOwner = 'first-account';
+    const opening = w.ctx.openTutorialMenu();
+    w.ctx.gdPrefOwner = 'another-account';
+    resolveLessons(LESSONS);
+    await opening;
+    assert(w.pop.children.length === 0 && !w.pop.classList.contains('gd-tour-visible'),
+      'a changed settled owner cannot render the old pending catalogue');
+  });
+
+  await test('first preference hydration cannot adopt a different auth account', async () => {
+    let resolveLessons;
+    const pending = new Promise(resolve => { resolveLessons = resolve; });
+    const w = makeWorld({fetchLessons: () => pending});
+    w.ctx.gdPrefsReady = false;
+    w.ctx.gdPrefOwner = null;
+    w.ctx.gdAccount = {id: 'first-account'};
+    const opening = w.ctx.openTutorialMenu();
+    w.ctx.gdAccount = {id: 'another-account'};
+    w.ctx.gdPrefOwner = 'another-owner';
+    w.ctx.gdPrefsReady = true;
+    resolveLessons(LESSONS);
+    await opening;
+    assert(w.pop.children.length === 0 && !w.pop.classList.contains('gd-tour-visible'),
+      'a changed account is never treated as first preference hydration');
+  });
+
   await test('finite HTTP lessons depend on host availability, not a dedicated service plan', async () => {
     const w = makeWorld({caps: []});
     const lesson = {requires: 'temporary-http'};

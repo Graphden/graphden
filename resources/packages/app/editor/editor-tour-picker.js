@@ -300,10 +300,19 @@ function _tourNextUp(lessonId) {
 let _tourCatalogEpoch = 0;
 let _tourCatalogClose = null;
 
-function _tourCatalogContext() {
-  return JSON.stringify([window.gdPrefOwner || null,
+function _tourCatalogLocation() {
+  return JSON.stringify([
     typeof graphdenCurrentOrg === 'string' ? graphdenCurrentOrg : null,
     typeof getCurrentBranchName === 'function' ? getCurrentBranchName() : null]);
+}
+
+function _tourCatalogContext() {
+  return JSON.stringify([window.gdPrefOwner || null, _tourCatalogLocation()]);
+}
+
+function _tourCatalogAuthIdentity() {
+  return JSON.stringify([window.gdAccount?.id || null,
+    typeof isAuthenticated === 'function' ? !!isAuthenticated() : null]);
 }
 
 window.addEventListener('gd-auth-changed', () => {
@@ -320,7 +329,10 @@ window.addEventListener('gd-graph-changed', () => {
 async function openTutorialMenu() {
   _tourCatalogClose?.();
   const epoch = ++_tourCatalogEpoch;
-  const context = _tourCatalogContext();
+  const location = _tourCatalogLocation();
+  const authIdentity = _tourCatalogAuthIdentity();
+  const openingOwner = window.gdPrefOwner || null;
+  const openingPrefsReady = !!window.gdPrefsReady;
   const closePending = () => {
     if (_tourCatalogClose !== closePending) return;
     _tourCatalogEpoch++;
@@ -333,7 +345,17 @@ async function openTutorialMenu() {
   let lessons;
   try { lessons = await _tourFetchLessons(); }
   catch (error) { closePending(); throw error; }
-  if (epoch !== _tourCatalogEpoch || context !== _tourCatalogContext()) return;
+  const owner = window.gdPrefOwner || null;
+  const firstOwnerLoaded = openingOwner === null && !openingPrefsReady && !!window.gdPrefsReady;
+  if (epoch !== _tourCatalogEpoch || location !== _tourCatalogLocation()
+    || authIdentity !== _tourCatalogAuthIdentity()
+    || (owner !== openingOwner && !firstOwnerLoaded)) {
+    closePending();
+    return;
+  }
+  // Initial preference hydration does not change the account; unlike an auth
+  // event, it only resolves the owner of the page that requested this menu.
+  const context = _tourCatalogContext();
   _tourCatalogClose = null;
   window.gdTourCatalogClose = null;
   if (!lessons || !(lessons.lessons || []).length) {

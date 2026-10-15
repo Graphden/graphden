@@ -7,7 +7,7 @@ Loading, graph-backed controls, actions, forms, and preferences.
 
 after: web, layout
 
-[[file:index.org][index]] · ~169 min
+[[file:index.org][index]] · ~170 min
 
 * 1. initGraph
 :PROPERTIES:
@@ -323,13 +323,13 @@ Runs the selected ordinary tutorial catalogue view over browser-local display fa
 :PROPERTIES:
 :CUSTOM_ID: editor/openTutorialMenu
 :FILE: resources/packages/app/editor/editor-tour-picker.js
-:LINE: 320
-:MINS: 15.7
+:LINE: 329
+:MINS: 16.4
 :END:
 
 Owns the tutorial catalogue's local reading history, requirement checks, stable filter and Read/Unmark controls. The graph filters lessons and partitions adjacent chapter runs after filtering; native actions recheck membership and context. Teardown cancels both an initial lesson fetch and a later graph load.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-tour-picker.js::async function openTutorialMenu() {][resources/packages/app/editor/editor-tour-picker.js:320]]
+- source :: [[file:../../../resources/packages/app/editor/editor-tour-picker.js::async function openTutorialMenu() {][resources/packages/app/editor/editor-tour-picker.js:329]]
 - see also :: [[file:editor.org::#editor/mountCatalog][mountCatalog]], [[file:editor.org::#editor/createRuntime][createRuntime]]
 - referenced from :: [[file:editor.org::#editor/mountCatalog][mountCatalog]]
 

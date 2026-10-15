@@ -1523,6 +1523,7 @@ constraint; `:map`'s `:func` deliberately does NOT:
 | `:every?` | `:pred` | `#{}` | same |
 | `:find-first` | `:pred` | `#{}` | same |
 | `:group-by` | `:key-fn` | `#{}` | same item must hash to the same bucket |
+| `:partition-by` | `:key-fn` | `#{}` | adjacent-run boundaries depend only on stable keys; A/B/A remains three runs |
 | `:sort-by` | `:key-fn` | `#{}` | comparator stability |
 | `:transduce` | `:reducer` | `#{}` | same fold rationale as `:reduce` |
 

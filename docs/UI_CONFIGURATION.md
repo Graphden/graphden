@@ -54,6 +54,17 @@ draft controls across graph reloads and compare refreshes; graph nodes cannot
 claim their IDs or actions. Review and suggestion previews keep the shared
 native diff renderer's existing behavior.
 
+The tutorial catalogue is another ordinary view-only component:
+`app.ui-tutorial-catalog/catalog-view`. It receives ordered lesson display
+facts and a browser-local filter, then composes counts, adjacent chapter runs,
+status badges, row and introduction bodies, resume copy and scoped styles.
+The filter groups rows *after* matching, so an A/B/A source list can become
+one A section when the B row is filtered out. The native tutorial keeps reading
+history, requirement checks, URLs, focus, navigation and all Read/Unmark/Clear
+controls. Personal styles are scoped to passive graph body hosts and cannot
+cover those native controls; an older personal manifest can use the shared
+catalogue view without replacing its other selected components.
+
 Replacing an editor root renames the old root privately in the current branch
 and creates a new UUID named `editor`. Its parent relationships are retained.
 Other branches and references to the old UUID keep their composition. A stored
@@ -94,12 +105,13 @@ access, and no grant on the `app` or root namespace is added.
 New-org creation seeds the frozen deployment publication policy atomically.
 Existing organizations require explicit reviewed operator maintenance.
 Authentication, reads, restart and ordinary redeploy do not restore a revoked
-grant. Maintenance checks the exact organization set and all relevant grant
-revisions before inserting any grant, in one writer transaction. Its artifact
-and deployment label are bound to the reviewed plan. State CAS detects current
-changes, not an ABA sequence or historical exactly-once execution; never
-automatically replay a completed or uncertain APPLY. A new republish requires
-a new operator decision.
+grant. Forward-only delta maintenance binds exact predecessor and current
+artifacts, admits only newly introduced source namespaces, and checks the
+frozen organization cohort and grant audit before the first write in one
+writer transaction. A revoked old grant remains absent. Its artifact and
+deployment label are bound to the reviewed plan. Never automatically replay
+a completed or uncertain APPLY; a new republish requires a new operator
+decision.
 
 ## Configuration HTTP operations
 

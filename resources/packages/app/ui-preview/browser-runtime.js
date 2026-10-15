@@ -184,6 +184,24 @@
       }
       return groups;
     },
+    'partition-by': (arg, tick) => {
+      const callback = arg('key-fn');
+      if (!(callback instanceof GraphClosure)) throw new Error('Browser partition-by requires a graph callback');
+      const runs = [];
+      let previous;
+      let first = true;
+      let count = 0;
+      for (const item of sequence(arg('coll'))) {
+        tick();
+        if (++count > 50000) throw new Error('Browser graph sequence limit exceeded');
+        const current = callback.invoke(item);
+        if (first || !equal(current, previous)) runs.push([]);
+        runs[runs.length - 1].push(item);
+        previous = current;
+        first = false;
+      }
+      return runs;
+    },
     'sort-by': (arg, tick) => {
       const callback = arg('key-fn');
       if (!(callback instanceof GraphClosure)) throw new Error('Browser sort-by requires a graph callback');

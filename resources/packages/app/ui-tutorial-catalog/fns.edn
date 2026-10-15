@@ -1,0 +1,177 @@
+{:namespace "app.ui-tutorial-catalog"
+ :description "Pure browser-local presentation of the ordered lesson catalogue. History, requirements, links, and actions remain editor-owned."
+ :fns
+ [{:name :_catalog-lesson
+   :type {:id :text :title :text :chapter :text :done :bool :stale :bool :fresh :bool
+          :allowed :bool :text-only :bool :need-short :text :done-version :int :version :int}}
+  {:name :_catalog-lessons :list :_catalog-lesson}
+  {:name :_catalog-resume :type {:active :bool :ended :bool :id :text :title :text :step :int :steps :int}}
+  {:name :_catalog-inputs :type {:lessons :_catalog-lessons :query :text :resume :_catalog-resume :text-only-copy :text}}
+  {:name :_catalog-row :type {:id :text :tree :web.html/hiccup-node :done :bool :fresh :bool :stale :bool :locked :bool :text-only :bool}}
+  {:name :_catalog-rows :list :_catalog-row}
+  {:name :_catalog-section :type {:chapter :text :rows :_catalog-rows}}
+  {:name :_catalog-sections :list :_catalog-section}
+
+  {:name :_catalog-lessons-input :parent :get
+   :args {:coll {:as :inputs :type :_catalog-inputs} :key {:value :lessons} :default {:value []}}}
+  {:name :_catalog-query-input :parent :get
+   :args {:coll {:as :inputs :type :_catalog-inputs} :key {:value :query} :default ""}}
+  {:name :_catalog-resume-input :parent :get
+   :args {:coll {:as :inputs :type :_catalog-inputs} :key {:value :resume}
+          :default {:value {:active false :ended false :id "" :title "" :step 0 :steps 0}}}}
+  {:name :_catalog-text-only-copy :parent :get
+   :args {:coll {:as :inputs :type :_catalog-inputs} :key {:value :text-only-copy} :default "text only"}}
+  {:name :_catalog-query-trim :parent :str-trim :args {:string :_catalog-query-input}}
+  {:name :_catalog-query :parent :str-lower :args {:string :_catalog-query-trim}}
+  {:name :_catalog-no-query :parent :equal? :args {:a :_catalog-query :b ""}}
+
+  {:name :_lesson-id :parent :get :args {:coll {:as :lesson :type :_catalog-lesson} :key {:value :id} :default ""}}
+  {:name :_lesson-title :parent :get :args {:coll {:as :lesson :type :_catalog-lesson} :key {:value :title} :default ""}}
+  {:name :_lesson-chapter :parent :get :lambda-params [:lesson]
+   :args {:coll {:as :lesson :type :_catalog-lesson} :key {:value :chapter} :default ""}}
+  {:name :_lesson-done :parent :get :lambda-params [:lesson]
+   :args {:coll {:as :lesson :type :_catalog-lesson} :key {:value :done} :default false}}
+  {:name :_lesson-stale :parent :get :lambda-params [:lesson]
+   :args {:coll {:as :lesson :type :_catalog-lesson} :key {:value :stale} :default false}}
+  {:name :_lesson-fresh :parent :get :lambda-params [:lesson]
+   :args {:coll {:as :lesson :type :_catalog-lesson} :key {:value :fresh} :default false}}
+  {:name :_lesson-allowed :parent :get :args {:coll {:as :lesson :type :_catalog-lesson} :key {:value :allowed} :default false}}
+  {:name :_lesson-text-only :parent :get :lambda-params [:lesson]
+   :args {:coll {:as :lesson :type :_catalog-lesson} :key {:value :text-only} :default false}}
+  {:name :_lesson-need-short :parent :get
+   :args {:coll {:as :lesson :type :_catalog-lesson} :key {:value :need-short} :default ""}}
+  {:name :_lesson-done-version :parent :get
+   :args {:coll {:as :lesson :type :_catalog-lesson} :key {:value :done-version} :default 0}}
+  {:name :_lesson-version :parent :get
+   :args {:coll {:as :lesson :type :_catalog-lesson} :key {:value :version} :default 1}}
+  {:name :_lesson-label :parent :str :args {:parts [:_lesson-id " · " :_lesson-title]}}
+  {:name :_lesson-label-lower :parent :str-lower :args {:string :_lesson-label}}
+  {:name :_lesson-chapter-lower :parent :str-lower :args {:string :_lesson-chapter}}
+  {:name :_lesson-label-matches :parent :str-contains?
+   :args {:string :_lesson-label-lower :substring :_catalog-query}}
+  {:name :_lesson-chapter-matches :parent :str-contains?
+   :args {:string :_lesson-chapter-lower :substring :_catalog-query}}
+  {:name :_lesson-match-chapter :parent :if :lambda-params [:lesson]
+   :args {:test :_lesson-label-matches :then true :else :_lesson-chapter-matches}}
+  {:name :_lesson-visible :parent :if :lambda-params [:lesson]
+   :args {:test :_catalog-no-query :then true :else :_lesson-match-chapter}}
+  {:name :_catalog-visible :parent :filter :return-type :_catalog-lessons
+   :args {:pred :_lesson-visible :coll :_catalog-lessons-input}}
+  {:name :_catalog-runs :parent :partition-by :args {:key-fn :_lesson-chapter :coll :_catalog-visible}}
+
+  {:name :_lesson-not-text-only :parent :equal? :args {:a :_lesson-text-only :b false}}
+  {:name :_lesson-runnable :parent :if :lambda-params [:lesson]
+   :args {:test :_lesson-not-text-only :then :_lesson-allowed :else false}}
+  {:name :_lesson-unavailable :parent :equal? :args {:a :_lesson-allowed :b false}}
+  {:name :_lesson-locked :parent :if
+   :args {:test :_lesson-text-only :then false :else :_lesson-unavailable}}
+  {:name :_catalog-done :parent :filter :args {:pred :_lesson-done :coll :_catalog-lessons-input}}
+  {:name :_catalog-runnable :parent :filter :args {:pred :_lesson-runnable :coll :_catalog-lessons-input}}
+  {:name :_catalog-text-only :parent :filter :args {:pred :_lesson-text-only :coll :_catalog-lessons-input}}
+  {:name :_catalog-fresh :parent :filter :args {:pred :_lesson-fresh :coll :_catalog-lessons-input}}
+  {:name :_catalog-stale :parent :filter :args {:pred :_lesson-stale :coll :_catalog-lessons-input}}
+  {:name :_done-count :parent :count :args {:coll :_catalog-done}}
+  {:name :_available-count :parent :count :args {:coll :_catalog-runnable}}
+  {:name :_catalog-total-count :parent :count :args {:coll :_catalog-lessons-input}}
+  {:name :_text-count :parent :count :args {:coll :_catalog-text-only}}
+  {:name :_fresh-count :parent :count :args {:coll :_catalog-fresh}}
+  {:name :_stale-count :parent :count :args {:coll :_catalog-stale}}
+  {:name :_shown-count :parent :count :args {:coll :_catalog-visible}}
+  {:name :_no-shown :parent :equal? :args {:a :_shown-count :b 0}}
+  {:name :_singular-total :parent :equal? :args {:a :_catalog-total-count :b 1}}
+  {:name :_total-suffix :parent :if :args {:test :_singular-total :then "" :else "s"}}
+
+  {:name :_count-done-text :parent :str :args {:parts [:_done-count " done"]}}
+  {:name :_count-available-text :parent :str :args {:parts [:_available-count " available"]}}
+  {:name :_count-total-text :parent :str :args {:parts [:_catalog-total-count " lesson" :_total-suffix]}}
+  {:name :_count-text-only-text :parent :str :args {:parts [:_text-count " " :_catalog-text-only-copy]}}
+  {:name :_count-fresh-text :parent :str :args {:parts [:_fresh-count " new"]}}
+  {:name :_count-stale-text :parent :str :args {:parts [:_stale-count " updated"]}}
+  {:name :_count-done-node :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "gd-tour-count gd-tour-count-done"}} :children [:_count-done-text]}}
+  {:name :_count-available-node :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "gd-tour-count gd-tour-count-available"}} :children [:_count-available-text]}}
+  {:name :_count-total-node :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "gd-tour-count gd-tour-count-total"}} :children [:_count-total-text]}}
+  {:name :_count-text-node :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "gd-tour-count gd-tour-count-text"}} :children [:_count-text-only-text]}}
+  {:name :_count-fresh-node :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "gd-tour-count gd-tour-count-new"}} :children [:_count-fresh-text]}}
+  {:name :_count-stale-node :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "gd-tour-count gd-tour-count-updated"}} :children [:_count-stale-text]}}
+  {:name :_has-text :parent :equal? :args {:a :_text-count :b 0}}
+  {:name :_has-fresh :parent :equal? :args {:a :_fresh-count :b 0}}
+  {:name :_has-stale :parent :equal? :args {:a :_stale-count :b 0}}
+  {:name :_maybe-text-node :parent :if :args {:test :_has-text :then nil :else :_count-text-node}}
+  {:name :_maybe-fresh-node :parent :if :args {:test :_has-fresh :then nil :else :_count-fresh-node}}
+  {:name :_maybe-stale-node :parent :if :args {:test :_has-stale :then nil :else :_count-stale-node}}
+  {:name :_counts-tree :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "gd-tour-graph-counts"}}
+          :children [:_count-done-node :_count-available-node :_count-total-node :_maybe-text-node :_maybe-fresh-node :_maybe-stale-node]}}
+
+  {:name :_lesson-done-note :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "gd-tour-lesson-note"}} :children [" ✓ done"]}}
+  {:name :_lesson-text-note-text :parent :str :args {:parts [" — " :_catalog-text-only-copy " ↗"]}}
+  {:name :_lesson-text-note :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "gd-tour-lesson-note"}} :children [:_lesson-text-note-text]}}
+  {:name :_lesson-locked-note-text :parent :str :args {:parts [" — needs " :_lesson-need-short]}}
+  {:name :_lesson-locked-note :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "gd-tour-lesson-note"}} :children [:_lesson-locked-note-text]}}
+  {:name :_lesson-updated-title :parent :str
+   :args {:parts ["Changed since you finished it (edition " :_lesson-done-version " → " :_lesson-version ") — worth taking again"]}}
+  {:name :_lesson-fresh-badge :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "gd-tour-lesson-badge gd-tour-lesson-badge-new"
+                                      :title "Added since you last opened the catalogue"}}
+          :children ["new"]}}
+  {:name :_lesson-stale-attrs :parent :zipmap
+   :args {:keys [{:value :class} {:value :title}]
+          :vals ["gd-tour-lesson-badge gd-tour-lesson-badge-updated" :_lesson-updated-title]}}
+  {:name :_lesson-stale-badge :parent :hiccup
+   :args {:tag "span" :attrs :_lesson-stale-attrs :children ["updated"]}}
+  {:name :_lesson-maybe-done :parent :if :args {:test :_lesson-done :then :_lesson-done-note :else nil}}
+  {:name :_lesson-maybe-fresh :parent :if :args {:test :_lesson-fresh :then :_lesson-fresh-badge :else nil}}
+  {:name :_lesson-maybe-stale :parent :if :args {:test :_lesson-stale :then :_lesson-stale-badge :else nil}}
+  {:name :_lesson-maybe-text :parent :if :args {:test :_lesson-text-only :then :_lesson-text-note :else nil}}
+  {:name :_lesson-maybe-locked :parent :if :args {:test :_lesson-locked :then :_lesson-locked-note :else nil}}
+  {:name :_lesson-tree :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "gd-tour-graph-row-body"}}
+          :children [:_lesson-label :_lesson-maybe-text :_lesson-maybe-done :_lesson-maybe-fresh :_lesson-maybe-stale :_lesson-maybe-locked]}}
+  {:name :_catalog-row-output :parent :zipmap :lambda-params [:lesson] :return-type :_catalog-row
+   :args {:keys [{:value :id} {:value :tree} {:value :done} {:value :fresh} {:value :stale} {:value :locked} {:value :text-only}]
+          :vals [:_lesson-id :_lesson-tree :_lesson-done :_lesson-fresh :_lesson-stale :_lesson-locked :_lesson-text-only]}}
+  {:name :_section-first :parent :get :args {:coll {:as :run :type :_catalog-lessons} :key 0 :default {:value nil}}}
+  {:name :_section-chapter :parent :get :args {:coll :_section-first :key {:value :chapter} :default ""}}
+  {:name :_section-rows :parent :map :return-type :_catalog-rows :args {:func :_catalog-row-output :coll {:as :run :type :_catalog-lessons}}}
+  {:name :_catalog-section-output :parent :zipmap :lambda-params [:run] :return-type :_catalog-section
+   :args {:keys [{:value :chapter} {:value :rows}] :vals [:_section-chapter :_section-rows]}}
+  {:name :_catalog-sections-output :parent :map :return-type :_catalog-sections
+   :args {:func :_catalog-section-output :coll :_catalog-runs}}
+  {:name :_empty-copy :parent :str :args {:parts ["No lesson matches “" :_catalog-query "”."]}}
+  {:name :_empty-tree :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "gd-tour-hint"}} :children [:_empty-copy]}}
+  {:name :_maybe-empty-tree :parent :if :args {:test :_no-shown :then :_empty-tree :else nil}}
+  {:name :_intro-tree :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "gd-tour-intro-text"}}
+          :children ["Pick a lesson. In an organization workspace the lesson runs on its own branch, so ending it can roll everything back in one step."]}}
+
+  {:name :_resume-active :parent :get :args {:coll :_catalog-resume-input :key {:value :active} :default false}}
+  {:name :_resume-ended :parent :get :args {:coll :_catalog-resume-input :key {:value :ended} :default false}}
+  {:name :_resume-id :parent :get :args {:coll :_catalog-resume-input :key {:value :id} :default ""}}
+  {:name :_resume-title :parent :get :args {:coll :_catalog-resume-input :key {:value :title} :default ""}}
+  {:name :_resume-step :parent :get :args {:coll :_catalog-resume-input :key {:value :step} :default 0}}
+  {:name :_resume-steps :parent :get :args {:coll :_catalog-resume-input :key {:value :steps} :default 0}}
+  {:name :_resume-next-step :parent :add :args {:nums [:_resume-step 1]}}
+  {:name :_resume-prefix :parent :if :args {:test :_resume-ended :then "Clean up " :else "Continue "}}
+  {:name :_resume-suffix :parent :str :args {:parts [" — step " :_resume-next-step "/" :_resume-steps]}}
+  {:name :_resume-maybe-suffix :parent :if :args {:test :_resume-ended :then "" :else :_resume-suffix}}
+  {:name :_resume-label :parent :str :args {:parts [:_resume-prefix :_resume-id " · " :_resume-title :_resume-maybe-suffix]}}
+  {:name :_resume-visible-label :parent :if :args {:test :_resume-active :then :_resume-label :else ""}}
+
+  {:name :catalog-styles :parent :list
+   :args {:items [{:value {:selector "& .gd-tour-graph-row-body" :declarations {"display" "inline"}}}
+                  {:value {:selector "& .gd-tour-graph-counts" :declarations {"display" "contents"}}}]}}
+  {:name :catalog-view :parent :zipmap
+   :args {:keys [{:value :counts} {:value :sections} {:value :empty} {:value :intro}
+                 {:value :resume-label} {:value :styles}]
+          :vals [:_counts-tree :_catalog-sections-output :_maybe-empty-tree :_intro-tree
+                 :_resume-visible-label :catalog-styles]}}]}

@@ -74,7 +74,9 @@
                :reference :app.ui-inspector/inspector-view :roles #{:initial :update :view}}
    :recents {:id (ids/fn-id "app.ui-recents" :recents-view)
              :reference :app.ui-recents/recents-view
-             :roles #{:initial :update :view}}})
+             :roles #{:initial :update :view}}
+   :tutorial-catalog {:id (ids/fn-id "app.ui-tutorial-catalog" :catalog-view)
+                      :reference :app.ui-tutorial-catalog/catalog-view :roles #{:view}}})
 
 
 (defn- projected-manifest

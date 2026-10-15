@@ -2,6 +2,7 @@
   "The normal graph handlers create a fixed bundle in one JDBC transaction."
   (:require
     [cheshire.core :as json]
+    [clojure.java.shell :as sh]
     [clojure.set :as set]
     [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
@@ -14,6 +15,7 @@
     [graphden.editor.component-templates :as templates]
     [graphden.editor.components :as components]
     [graphden.editor.preference-write :as preferences]
+    [graphden.executor.browser-plan :as browser-plan]
     [graphden.executor.browser-snapshot :as snapshot]
     [graphden.executor.browser-source :as source]
     [graphden.executor.context :as context]
@@ -174,7 +176,7 @@
      :component component :diagnostics @diagnostics}))
 
 
-(deftest created-manifest-exports-its-recents-controller
+(deftest created-manifest-exports-its-recents-and-tutorial-catalog-views
   (let [ctx (:ctx ga/*bootstrap*)
         storage (:storage ctx)
         created (apply-preview (preview))
@@ -190,7 +192,31 @@
                          :updated-at (java.time.Instant/now)}))
     (epoch/seed-watermark! storage)
     (let [{:keys [result] :as diagnosed} (export-diagnosed ctx "recents")]
-      (is (:ok result) (pr-str diagnosed)))))
+      (is (:ok result) (pr-str diagnosed)))
+    (let [{:keys [result] :as diagnosed} (export-diagnosed ctx "tutorial-catalog")]
+      (is (:ok result) (pr-str diagnosed))
+      (is (= (get-in manifest [:roots :tutorial-catalog-id])
+             (get-in result [:roots :tutorial-catalog-id])))
+      (when (:ok result)
+        (let [lesson (fn [id chapter title]
+                       {:id id :chapter chapter :title title :done false :stale false :fresh false
+                        :allowed true :text-only false :need-short "" :done-version 0 :version 1})
+              input {:lessons [(lesson "01" "A" "Match one") (lesson "02" "B" "Other")
+                               (lesson "03" "A" "Match three")]
+                     :query "match" :resume {:active false :ended false :id "" :title "" :step 0 :steps 0}
+                     :text-only-copy "text only"}
+              request {:plan (:plan result)
+                       :cases [{:entry "view" :inputs {"inputs" (browser-plan/encode-value input)}}]}
+              {:keys [exit out err]} (sh/sh "node" "tools/runtime-test/browser-plan-runner.js"
+                                            :in (json/generate-string request))]
+          (is (zero? exit) err)
+          (when (zero? exit)
+            (let [response (first (json/parse-string-strict out true))
+                  view (when-let [wire (:value response)] (browser-plan/decode-value wire))]
+              (is (nil? (:error response)) (:error response))
+              (is (= :div (first (:intro view))))
+              (is (= ["A"] (mapv :chapter (:sections view))))
+              (is (= ["01" "03"] (mapv :id (get-in view [:sections 0 :rows])))))))))))
 
 
 (defn- graph-identities

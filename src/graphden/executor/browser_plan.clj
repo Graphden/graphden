@@ -150,7 +150,7 @@
         (for [[ns-path names] [["core.logic" [:const :if :equal? :nil? :coalesce]]
                                ["core.collections" [:list :get :assoc :zipmap :count :take :concat :vals]]
                                ["core.arithmetic" [:add :mod]]
-                               ["core.hof" [:map :filter :group-by :sort-by]]
+                               ["core.hof" [:map :filter :group-by :partition-by :sort-by]]
                                ["core.strings" [:str :str-starts-with? :str-lower :str-trim :str-contains?]]
                                ["web.html" [:hiccup]]]
               n names]
@@ -215,6 +215,7 @@
                  (contains? #{(ids/slot-id (ids/fn-id "core.hof" :map) :func)
                               (ids/slot-id (ids/fn-id "core.hof" :filter) :pred)
                               (ids/slot-id (ids/fn-id "core.hof" :group-by) :key-fn)
+                              (ids/slot-id (ids/fn-id "core.hof" :partition-by) :key-fn)
                               (ids/slot-id (ids/fn-id "core.hof" :sort-by) :key-fn)} slot-id)
                  (not (:env-binding? context)))
     (reject! :callable-binding context))

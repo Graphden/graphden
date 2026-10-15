@@ -181,7 +181,8 @@ tree within both limits.
 
 ## Personal component manifests
 
-Appearance can copy account-menu, function-picker, Recents and Inspector
+Appearance can copy account-menu, function-picker, Recents, Inspector, Explorer
+and the tutorial catalogue
 independently, or create a complete copy. Its `ui` entry is an ordinary list or a composition
 of retained and new lists through `concat`, returning the named
 `app.ui-components/ui-component-manifest` type. Each item has this shape:
@@ -195,9 +196,10 @@ of retained and new lists through `concat`, returning the named
 
 The component discriminator is the UUID of the shipped view:
 `app.ui-account-menu/account-menu-view`, `app.ui-fn-picker/picker-view`,
-`app.ui-recents/recents-view`, or `app.ui-inspector/inspector-view`.
-Menu, Recents and Inspector require all three roles; the
-picker requires only `:view`. Entry UUIDs select personal graph functions.
+`app.ui-recents/recents-view`, `app.ui-inspector/inspector-view`,
+`app.ui-explorer/explorer-toolbar-view`, or `app.ui-tutorial-catalog/catalog-view`.
+Menu, Recents, Inspector and Explorer require all three roles; the picker and
+catalogue require only `:view`. Entry UUIDs select personal graph functions.
 The subtypes are `ui-component-entry`, `ui-component-entries`, and
 `ui-component-descriptor` in `app.ui-components`.
 
@@ -224,7 +226,8 @@ normal bounded browser ABI rather than the narrower manifest projection ABI.
 
 `POST /api/ui/components/plan` accepts exactly
 `{"component":"account-menu"}`, `{"component":"fn-picker"}`,
-`{"component":"recents"}`, or `{"component":"inspector"}`. The existing owner/org/branch-scoped `components`
+`{"component":"recents"}`, `{"component":"inspector"}`,
+`{"component":"explorer"}`, or `{"component":"tutorial-catalog"}`. The existing owner/org/branch-scoped `components`
 preference selects the configuration. Each request authorizes manifest source,
 checks its original secret classification and snapshot provenance, then reads
 and exports only that component's body closure. Other entry targets provide
@@ -245,7 +248,7 @@ explicit diagnostic.
 Legacy configurations inheriting `app.ui-components/ui-components` continue to
 use the exact four identity slots (`menu-initial`, `menu-update`, `menu-view`,
 `picker-view`). They remain selectable and exportable; Recents uses the built-in
-component when that old configuration has no Recents descriptor. No fifth slot
+component when that old configuration has no Recents or catalogue descriptor. No fifth slot
 is added to the legacy interface.
 
 ## Exact creation cleanup
@@ -265,14 +268,15 @@ and namespaces are removed only after confirmed function cleanup.
 ## Selective personal copies
 
 Appearance offers **Personalize account menu**, **Personalize function picker**,
-**Personalize recent functions**, and **Personalize Inspector**. Once that group is present, its action opens
+**Personalize recent functions**, **Personalize Inspector**, **Personalize Explorer**,
+and **Personalize tutorial catalogue**. Once that group is present, its action opens
 its existing view instead. Creation copies only the selected shipped component
 and its necessary owned dependencies. Recents and picker copy no theme graphs;
 the menu copies its shared color leaves without selecting a different theme.
 **Create personal graphs** retains the complete bundle used by Lesson 25.
 
 The existing preview/apply endpoints accept an optional `component` field with
-one of `account-menu`, `fn-picker`, or `recents`. Preview resolves the current
+one of the shipped component groups above. Preview resolves the current
 owner/org/branch selection on the server and validates its manifest source under
 policy frozen before reads. Apply repeats that proof and rejects a stale preview
 or an already-present group. Client roots are never source authorization.
@@ -371,3 +375,16 @@ diagnostic. Shared native chip styling still serves the comparison lens.
 Toolbar layout/count rules are structured graph
 styles. Appearance can personalize this complete toolbar as one component while
 retaining unrelated authored descriptors and themes.
+
+The tutorial catalogue is a view-only `app.ui-tutorial-catalog` component.
+Its `inputs` record contains ordered, authorized lesson display facts, a
+browser-local query, resume display facts and a text-only copy string. The
+ordinary graph filters first, then uses pure `core.hof/partition-by` to form
+adjacent chapter runs; A/B/A can remain three runs or become one A run when B
+is filtered away. It returns passive Hiccup for introduction, counts, row
+bodies and empty state, plus a bounded structured stylesheet and resume label.
+The host validates every returned row against the original lesson order and
+keeps local reading history, requirement checks, URLs, native controls, focus
+and actions. One shared stylesheet is attached only to passive graph hosts,
+never the dialog or its controls. Old personal manifests without this view use
+the shared default while other selected components keep their identities.

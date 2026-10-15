@@ -31,7 +31,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { createDocument } = require('./mini-dom');
+const { createDocument, MiniElement } = require('./mini-dom');
 
 const source = fs.readFileSync(
   path.join(__dirname, '..', '..', 'resources', 'packages', 'app', 'editor',
@@ -41,6 +41,53 @@ const source = fs.readFileSync(
 const createSource = fs.readFileSync(
   path.join(__dirname, '..', '..', 'resources', 'packages', 'app', 'editor',
             'editor-create.js'), 'utf8');
+const browserSource = fs.readFileSync(path.join(__dirname, '..', '..', 'resources', 'packages', 'app',
+  'ui-preview', 'browser-runtime.js'), 'utf8');
+const builtinSource = fs.readFileSync(path.join(__dirname, '..', '..', 'resources', 'packages', 'app',
+  'ui-preview', 'builtin-plans.js'), 'utf8');
+const graphSource = fs.readFileSync(path.join(__dirname, '..', '..', 'resources', 'packages', 'app',
+  'editor', 'editor-tour-catalog-graph.js'), 'utf8');
+
+function graphRenderer(document, api) {
+  const isMap = item => Object.prototype.toString.call(item) === '[object Map]';
+  function nodes(raw) {
+    if (raw == null || raw === false) return [];
+    if (!Array.isArray(raw) && api.isSequence(raw)) return [...raw].flatMap(nodes);
+    if (!Array.isArray(raw)) return [raw];
+    const tag = raw[0] instanceof api.Keyword ? raw[0].name : raw[0];
+    const attrs = isMap(raw[1]) ? raw[1] : new Map();
+    const props = {};
+    for (const [key, item] of attrs) {
+      const name = key instanceof api.Keyword ? key.name : key;
+      props[name === 'class' ? 'className' : name] = item;
+    }
+    props.children = raw.slice(attrs.size ? 2 : 1).flatMap(nodes).map(vnode);
+    return [{type: tag, props}];
+  }
+  function vnode(raw) { return nodes(raw)[0] ?? null; }
+  function element(node) {
+    if (node == null || node === false) return null;
+    if (typeof node !== 'object') return document.createTextNode(node);
+    const el = document.createElement(node.type);
+    for (const [name, item] of Object.entries(node.props)) {
+      if (name === 'className') el.className = item;
+      else if (name !== 'children' && name !== 'key') el.setAttribute(name, item);
+    }
+    for (const child of node.props.children || []) {
+      const rendered = element(child);
+      if (rendered) el.appendChild(rendered);
+    }
+    return el;
+  }
+  return {vnode, mount(host) {
+    return {render(tree) {
+      host.replaceChildren();
+      delete host.dataset.gdUiStyle;
+      const node = element(vnode(tree));
+      if (node) host.appendChild(node);
+    }, dispose() { host.replaceChildren(); delete host.dataset.gdUiStyle; }};
+  }};
+}
 
 let failures = 0;
 let passes = 0;
@@ -83,6 +130,7 @@ function makeWorld(opts) {
   if (!doneEmpty) store.set('graphden.tour.done', JSON.stringify(o.done));
   if (o.seen) store.set('graphden.tour.seen', JSON.stringify(o.seen));
   const document = createDocument();
+  MiniElement.prototype.focus = function () { document.activeElement = this; };
   const pop = document.createElement('div');
   document.body.appendChild(pop);
   const said = [];
@@ -90,6 +138,8 @@ function makeWorld(opts) {
   const toasts = [];
   const ctx = {
     console,
+    process,
+    AbortController,
     JSON,
     Set,
     localStorage: {
@@ -101,7 +151,7 @@ function makeWorld(opts) {
     _tourLessons: o.lessons,
     _tourState: null,
     _tourLoadState: () => null,
-    _tourFetchLessons: async () => o.lessons,
+    _tourFetchLessons: o.fetchLessons || (async () => o.lessons),
     _tourCopy: (_key, fallback, vars = {}) => fallback.replace(
       /\{(\w+)\}/g, (_match, key) => String(vars[key] ?? '')),
     _tourEnsureEls: () => ({ pop }),
@@ -112,6 +162,7 @@ function makeWorld(opts) {
     // of clearing the step's inline position itself (2026-09-17).
     _tourCenterPop: (p) => { p.classList.add('gd-tour-centered'); p.style.left = ''; p.style.top = ''; },
     _tourResume: () => {},
+    _tourTeardown: () => { ctx.gdTourCatalogClose?.(); },
     _tourSay: (m) => said.push(m),
     gdToast: (m) => toasts.push(m),
     startTutorialIsolated: (id) => started.push(id),
@@ -125,10 +176,20 @@ function makeWorld(opts) {
     },
   };
   ctx.window = ctx;
+  const windowListeners = new Map();
+  ctx.addEventListener = (name, listener) => windowListeners.set(name, [...(windowListeners.get(name) || []), listener]);
+  ctx.dispatchEvent = event => (windowListeners.get(event.type) || []).forEach(listener => listener(event));
   ctx.window.graphdenHasCap = (cap) => o.caps.includes(cap);
   ctx.window.graphdenTenancyActive = () => o.tenancy === true;
   ctx.window.API = o.api || {};
   vm.createContext(ctx);
+  vm.runInContext(browserSource, ctx);
+  vm.runInContext(builtinSource, ctx);
+  ctx.GraphdenStyles = {normalize: rules => [...rules], acquire: () => ({id: 'catalog-test'}), release: () => {}};
+  ctx.GraphdenRenderer = graphRenderer(document, ctx.GraphdenBrowser);
+  ctx.gdLoadUIComponentRuntime = o.loadRuntime
+    || (async (_component, plan) => ctx.GraphdenBrowser.createRuntime(plan));
+  vm.runInContext(graphSource, ctx);
   vm.runInContext(createSource, ctx);
   vm.runInContext(source, ctx);
   return {
@@ -141,7 +202,7 @@ function makeWorld(opts) {
       const raw = store.get('graphden.tour.seen');
       return raw === undefined ? null : JSON.parse(raw);
     },
-    counts: () => (pop.querySelector('div.gd-tour-counts') || { children: [] }).children
+    counts: () => (pop.querySelector('div.gd-tour-counts') || { querySelectorAll: () => [] }).querySelectorAll('.gd-tour-count')
       .map((c) => c.textContent),
     rows: () => pop.querySelector('div.gd-tour-lesson-list').children
       .filter((c) => c.classList.contains('gd-tour-lesson-row')),
@@ -538,6 +599,105 @@ function makeWorld(opts) {
       'and a mark on it is still removable');
     w.row('04').children[0].click();
     assert(w.started.length === 0, 'clicking a locked row starts nothing');
+  });
+
+  await test('filtered chapter runs follow the filtered order, including A/B/A', async () => {
+    const w = makeWorld({lessons: {lessons: [
+      {id: '01', chapter: 'A', title: 'Match one', steps: [{}]},
+      {id: '02', chapter: 'B', title: 'Other', steps: [{}]},
+      {id: '03', chapter: 'A', title: 'Match three', steps: [{}]},
+    ]}});
+    await w.ctx.openTutorialMenu();
+    const headings = () => w.pop.querySelectorAll('.gd-tour-chapter').map(node => node.textContent);
+    assert(JSON.stringify(headings()) === '["A","B","A"]', 'unfiltered adjacent runs stay distinct');
+    const filter = w.pop.querySelector('.gd-tour-filter');
+    filter.value = 'match';
+    filter.dispatch('input');
+    assert(JSON.stringify(headings()) === '["A"]', 'the intervening B is removed before grouping');
+    assert(w.rows().map(row => row.dataset.lessonId).join() === '01,03', 'filter keeps the original row order');
+  });
+
+  await test('graph refresh keeps native draft, focus, row controls and their single listeners', async () => {
+    const w = makeWorld({done: ['02']});
+    w.ctx._tourTextUrl = lesson => '/lessons/' + lesson.id;
+    await w.ctx.openTutorialMenu();
+    const filter = w.pop.querySelector('.gd-tour-filter');
+    const row = w.row('02');
+    const button = row.children[0];
+    const undo = row.querySelector('.gd-tour-unmark');
+    const read = row.querySelector('.gd-tour-read-btn');
+    filter.value = 'slots';
+    filter.dispatch('input');
+    filter.focus();
+    await w.ctx.gdTourCatalogGraph.reload();
+    await w.ctx.gdTourCatalogGraph.reload();
+    assert(w.pop.querySelector('.gd-tour-filter') === filter && filter.value === 'slots'
+      && w.ctx.document.activeElement === filter, 'draft and focus survive selected-runtime refresh');
+    assert(w.row('02') === row && row.children[0] === button
+      && row.querySelector('.gd-tour-unmark') === undo, 'native controls retain identity');
+    const scopes = w.pop.querySelectorAll('[data-gd-ui-style]');
+    const underStyleScope = node => scopes.some(scope => scope.contains(node));
+    assert(scopes.length >= 2 && !!w.pop.querySelector('.gd-tour-counts[data-gd-ui-style]')
+      && !!w.pop.querySelector('.gd-tour-body[data-gd-ui-style]')
+      && !!button.firstChild?.dataset.gdUiStyle
+      && !underStyleScope(filter) && !underStyleScope(button)
+      && !underStyleScope(read) && !underStyleScope(undo)
+      && !underStyleScope(w.footBtn('Clear progress (1)')),
+    'personal graph styles are scoped to passive body hosts, not native controls');
+    for (const control of [button, read, undo]) {
+      control.focus();
+      await w.ctx.gdTourCatalogGraph.reload();
+      assert(w.ctx.document.activeElement === control && w.row('02') === row,
+        'chapter redraw retains connected control focus and row identity');
+    }
+    undo.click();
+    assert(w.said.filter(message => message.includes('02') && message.includes('not done')).length === 1,
+      'refresh did not duplicate the unmark handler');
+  });
+
+  await test('auth retirement clears old catalogue DOM and ignores its late graph runtime', async () => {
+    let resolveRuntime;
+    let deferredPlan;
+    const w = makeWorld({loadRuntime: (_component, plan) => {
+      deferredPlan = plan;
+      return new Promise(resolve => { resolveRuntime = resolve; });
+    }});
+    await w.ctx.openTutorialMenu();
+    const loading = w.ctx.gdTourCatalogGraph.reload();
+    assert(w.rows().length === 5, 'builtin catalogue remains available while selection loads');
+    w.ctx.gdPrefOwner = 'another-account';
+    w.ctx.dispatchEvent({type: 'gd-auth-changed'});
+    assert(w.pop.children.length === 0 && !w.pop.classList.contains('gd-tour-visible'),
+      'old-account catalogue data is removed immediately');
+    resolveRuntime(w.ctx.GraphdenBrowser.createRuntime(deferredPlan));
+    await loading;
+    assert(w.pop.children.length === 0, 'late old-account selection cannot revive old rows');
+  });
+
+  await test('legacy or invalid personal view falls back only for the catalogue body', async () => {
+    const w = makeWorld();
+    await w.ctx.openTutorialMenu();
+    const filter = w.pop.querySelector('.gd-tour-filter');
+    const otherPersonalOwner = {id: 'other-component-runtime'};
+    w.ctx.otherPersonalOwner = otherPersonalOwner;
+    w.ctx.gdLoadUIComponentRuntime = async () => ({run: () => new Map()});
+    await w.ctx.gdTourCatalogGraph.reload();
+    assert(w.rows().length === 5 && w.pop.querySelector('.gd-tour-filter') === filter,
+      'the section-local built-in view remains usable with native controls');
+    assert(w.ctx.otherPersonalOwner === otherPersonalOwner,
+      'catalogue fallback does not replace unrelated personal component state');
+  });
+
+  await test('teardown during initial lesson fetch cannot open a late catalogue', async () => {
+    let resolveLessons;
+    const pending = new Promise(resolve => { resolveLessons = resolve; });
+    const w = makeWorld({fetchLessons: () => pending});
+    const opening = w.ctx.openTutorialMenu();
+    w.ctx._tourTeardown();
+    resolveLessons(LESSONS);
+    await opening;
+    assert(w.pop.children.length === 0 && !w.pop.classList.contains('gd-tour-visible'),
+      'a pending catalogue is retired before any DOM ownership is created');
   });
 
   await test('finite HTTP lessons depend on host availability, not a dedicated service plan', async () => {

@@ -498,6 +498,7 @@ function _tourResume() {
 // Stop showing steps, keep the state. `maybeStartTutorial` resumes it on the
 // next load, and the catalogue offers "Continue …" right away.
 function _tourPause() {
+  window.gdTourCatalogClose?.();
   const lesson = _tourLesson();
   _tourStopFollowing();
   if (_tourTimer) { clearInterval(_tourTimer); _tourTimer = null; }
@@ -560,6 +561,7 @@ function _tourCopy(key, fallback, vars) {
 
 
 function _tourTeardown(keepSaved = false) {
+  window.gdTourCatalogClose?.();
   _tourStopFollowing();
   _tourState = null;
   _tourReserveForSheet(0);

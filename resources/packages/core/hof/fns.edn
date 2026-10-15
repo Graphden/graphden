@@ -113,6 +113,14 @@
                  :description "Collection to group."}}
    :return-type [:map b [:list a]]}
 
+  {:name :partition-by
+   :description "Split items into consecutive runs with equal key-fn results, preserving input order."
+   :args {:key-fn {:type [:fn {:item a} b #{}]
+                   :description "Pure key for each item; a later equal key starts a new run after any intervening key."}
+          :coll {:type [:list a]
+                 :description "Collection to partition; nil yields an empty list."}}
+   :return-type [:list [:list a]]}
+
   {:name :sort-by
    :description "Sort by the result of `(key-fn item)` in natural order (Clojure's `sort-by`)."
    ;; Sorting requires a stable, deterministic key function — same

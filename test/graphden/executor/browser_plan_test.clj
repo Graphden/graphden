@@ -399,7 +399,7 @@
    (let [loaded (loader/load-packages ["web"])
          base-defs (select-keys (:base-fn-defs loaded)
                                 [:const :if :list :mod :get :equal? :nil? :coalesce :count :map :filter :take :concat
-                                 :vals :group-by :sort-by :str :str-join :str-starts-with? :str-lower :str-trim
+                                 :vals :group-by :partition-by :sort-by :str :str-join :str-starts-with? :str-lower :str-trim
                                  :blank? :non-blank?
                                  :str-contains? :hiccup :zipmap :assoc :add])
          type-defs (remove #(or (:parent %) (:parents %)) (:fn-defs loaded))
@@ -702,6 +702,10 @@
                       :args {:parts [{:as :prefix} :kind]}}
                      {:name :grouped :parent :group-by
                       :args {:key-fn :prefixed-kind :coll {:as :rows}}}
+                     {:name :partitioned :parent :partition-by
+                      :args {:key-fn :prefixed-kind :coll {:as :rows}}}
+                     {:name :partition-view :parent :list
+                      :args {:items [{:as :prefix} :partitioned]}}
                      {:name :group-view :parent :list
                       :args {:items [{:as :prefix} :grouped]}}
                      {:name :key :parent :get :lambda-params [:item]
@@ -718,6 +722,12 @@
       [{:entry :group-view :inputs {:prefix "g:" :rows [{:kind "a"} {:kind "b"} {:kind "a"}]}
         :expected ["g:" {"g:a" [{:kind "a"} {:kind "a"}] "g:b" [{:kind "b"}]}]}
        {:entry :group-view :inputs {:prefix "g:" :rows []} :expected ["g:" {}]}
+       {:entry :partition-view :inputs {:prefix "g:" :rows [{:kind "a"} {:kind "b"} {:kind "a"}]}
+        :expected ["g:" [[{:kind "a"}] [{:kind "b"}] [{:kind "a"}]]]}
+       {:entry :partition-view :inputs {:prefix "g:" :rows [{:kind "a"} {:kind "a"}]}
+        :expected ["g:" [[{:kind "a"} {:kind "a"}]]]}
+       {:entry :partition-view :inputs {:prefix "g:" :rows []} :expected ["g:" []]}
+       {:entry :partition-view :inputs {:prefix "g:" :rows nil} :expected ["g:" []]}
        {:entry :sorted :inputs {:rows [{:key [1 "a"]} {:key [0 "z"]} {:key [0 "a"]}]}
         :expected [{:key [0 "a"]} {:key [0 "z"]} {:key [1 "a"]}]}
        {:entry :sorted :inputs {:rows [{:key [0 0]} {:key [9]} {:key []}]}
@@ -738,6 +748,47 @@
       (is (= "Browser graph operation limit exceeded"
              (:error (first (browser-results plan [{:entry :view :inputs {:rows (vec (repeat 100 {:key 1}))}
                                                     :operation-limit 20}]))))))))
+
+
+(deftest tutorial-catalog-view-preserves-filtered-teaching-order-and-all-lesson-counts
+  (let [definitions (:fns (edn/read-string (slurp "resources/packages/app/ui-tutorial-catalog/fns.edn")))
+        {:keys [graph impls ids]} (map-fixture definitions)
+        lesson (fn [id chapter & {:keys [done stale fresh allowed text-only]
+                                  :or {done false stale false fresh false allowed true text-only false}}]
+                 {:id id :title (str "Lesson " id) :chapter chapter :done done :stale stale
+                  :fresh fresh :allowed allowed :text-only text-only :need-short "account"
+                  :done-version (if done 1 0) :version (if stale 2 1)})
+        lessons [(lesson "01" "A" :done true)
+                 (lesson "02" "B" :allowed false)
+                 (lesson "03" "A" :fresh true)
+                 (lesson "04" "A" :text-only true :stale true)]
+        cases [{:entry :catalog-view :inputs {:inputs {:lessons lessons :query ""
+                                                       :resume {:active true :ended false :id "03" :title "Lesson 03" :step 1 :steps 4}
+                                                       :text-only-copy "text only"}}}
+               {:entry :catalog-view :inputs {:inputs {:lessons lessons :query "A"
+                                                       :resume {:active false :ended false :id "" :title "" :step 0 :steps 0}
+                                                       :text-only-copy "text only"}}}
+               {:entry :catalog-view :inputs {:inputs {:lessons lessons :query "no match"
+                                                       :resume {:active false :ended false :id "" :title "" :step 0 :steps 0}
+                                                       :text-only-copy "text only"}}}]
+        plan (browser/export-plan graph impls {:catalog-view (get ids :catalog-view)} {:allow-fn? (constantly true)})
+        browser (browser-results plan cases)
+        jvm (jvm-results graph impls ids cases)]
+    (doseq [[a b] (map vector jvm browser)]
+      (is (nil? (:error a)) (:message a))
+      (is (nil? (:error b)) (:error b))
+      (when (and (:value a) (:value b))
+        (is (= (browser/decode-value (:value a)) (browser/decode-value (:value b))))))
+    (when-let [shown (some-> browser first :value browser/decode-value)]
+      (is (= ["A" "B" "A"] (mapv :chapter (:sections shown))))
+      (is (= [["01"] ["02"] ["03" "04"]]
+             (mapv (fn [section] (mapv :id (:rows section))) (:sections shown))))
+      (is (= "Continue 03 · Lesson 03 — step 2/4" (:resume-label shown))))
+    (when-let [filtered (some-> browser second :value browser/decode-value)]
+      (is (= ["A"] (mapv :chapter (:sections filtered)))))
+    (when-let [empty-view (some-> browser (nth 2) :value browser/decode-value)]
+      (is (empty? (:sections empty-view)))
+      (is (= [:div {:class "gd-tour-hint"} "No lesson matches “no match”."] (:empty empty-view))))))
 
 
 (deftest inspector-usages-transitions-match-jvm-and-browser

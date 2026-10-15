@@ -17,7 +17,8 @@
 
 
 (def ^:private component-keys
-  {"account-menu" :account-menu "fn-picker" :fn-picker "recents" :recents "inspector" :inspector "explorer" :explorer})
+  {"account-menu" :account-menu "fn-picker" :fn-picker "recents" :recents "inspector" :inspector "explorer" :explorer
+   "tutorial-catalog" :tutorial-catalog})
 
 
 (defn- reject!
@@ -109,7 +110,8 @@
                          :inspector-update-id (some-> (get-in configuration [:inspector :update]) str)
                          :recents-id (some-> (get-in configuration [:recents :view]) str)
                          :recents-initial-id (some-> (get-in configuration [:recents :initial]) str)
-                         :recents-update-id (some-> (get-in configuration [:recents :update]) str)}}
+                         :recents-update-id (some-> (get-in configuration [:recents :update]) str)
+                         :tutorial-catalog-id (some-> (get-in configuration [:tutorial-catalog :view]) str)}}
           resolved (assoc :configuration-revision (:revision resolved)
                           :configuration-preference {:present (boolean (seq preference-rows))
                                                      :value (:value (first preference-rows))}

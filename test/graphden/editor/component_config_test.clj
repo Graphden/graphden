@@ -112,6 +112,7 @@
             :recents {:initial (ids/fn-id (str root ".recents") :recents-initial)
                       :update (ids/fn-id (str root ".recents") :recents-update)
                       :view (ids/fn-id (str root ".recents") :recents-view)}
+            :tutorial-catalog {:view (ids/fn-id (str root ".tutorial-catalog") :catalog-view)}
             :inspector {:initial (ids/fn-id (str root ".inspector") :inspector-initial)
                         :update (ids/fn-id (str root ".inspector") :inspector-update)
                         :view (ids/fn-id (str root ".inspector") :inspector-view)}}

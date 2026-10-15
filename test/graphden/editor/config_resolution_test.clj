@@ -22,7 +22,8 @@
                                                     (swap! checked conj id)
                                                     (when (= denied-id id)
                                                       (throw (ex-info "Denied" {:type :authz/forbidden}))))]
-      (is (= {"account-menu" false "fn-picker" true "inspector" false "explorer" false "recents" false}
+      (is (= {"account-menu" false "fn-picker" true "inspector" false "explorer" false "recents" false
+              "tutorial-catalog" false}
              (resolution/owned-writable-components nil current)))
       (is (= 1 @walks))
       (is (= #{own-id denied-id} (set @checked)))

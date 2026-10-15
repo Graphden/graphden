@@ -15,7 +15,7 @@
         (for [[path names] [["core.logic" [:const :if :equal? :nil? :coalesce]]
                             ["core.collections" [:list :get :assoc :zipmap :count :take :concat :vals]]
                             ["core.arithmetic" [:add :mod]]
-                            ["core.hof" [:map :filter :group-by :sort-by]]
+                            ["core.hof" [:map :filter :group-by :partition-by :sort-by]]
                             ["core.strings" [:str :str-starts-with? :str-lower :str-trim :str-contains?]]
                             ["web.html" [:hiccup]]]
               name names]
@@ -40,7 +40,7 @@
   (let [modules {"core/logic" ["core.logic" #{:const :if :equal? :nil? :coalesce}]
                  "core/collections" ["core.collections" #{:list :get :assoc :zipmap :count :take :concat :vals}]
                  "core/arithmetic" ["core.arithmetic" #{:add :mod}]
-                 "core/hof" ["core.hof" #{:map :filter :group-by :sort-by}]
+                 "core/hof" ["core.hof" #{:map :filter :group-by :partition-by :sort-by}]
                  "core/strings" ["core.strings" #{:str :str-starts-with? :str-lower :str-trim :str-contains?}]
                  "web/html" ["web.html" #{:hiccup :hiccup-node}]
                  "core/refinements" ["core.refinements" (set (keys public-type-names))]
@@ -49,6 +49,7 @@
                  "app/ui-recents" ["app.ui-recents" #{:recents-view}]
                  "app/ui-explorer" ["app.ui-explorer" #{:explorer-toolbar-view}]
                  "app/ui-inspector" ["app.ui-inspector" #{:inspector-view}]
+                 "app/ui-tutorial-catalog" ["app.ui-tutorial-catalog" #{:catalog-view}]
                  "app/ui-components" ["app.ui-components" #{:ui-components :_ui-components-identities :ui-component-entry :ui-component-entries
                                                             :ui-component-descriptor :ui-component-manifest}]}]
     (into []
@@ -124,6 +125,7 @@
         recents (str root ".recents")
         inspector (str root ".inspector")
         explorer (str root ".explorer")
+        tutorial-catalog (str root ".tutorial-catalog")
         descriptors (concat (component-definitions root "explorer" :app.ui-explorer/explorer-toolbar-view
                                                    [[:initial (keyword explorer "explorer-toolbar-initial")]
                                                     [:update (keyword explorer "explorer-toolbar-update")]
@@ -141,7 +143,9 @@
                             (component-definitions root "recents" :app.ui-recents/recents-view
                                                    [[:initial (keyword recents "recents-initial")]
                                                     [:update (keyword recents "recents-update")]
-                                                    [:view (keyword recents "recents-view")]]))
+                                                    [:view (keyword recents "recents-view")]])
+                            (component-definitions root "tutorial-catalog" :app.ui-tutorial-catalog/catalog-view
+                                                   [[:view (keyword tutorial-catalog "catalog-view")]]))
         configuration {:name :ui :namespace root :parent :core.collections/list
                        :return-type :app.ui-components/ui-component-manifest
                        :description "Your ordinary component manifest. Each descriptor selects entry identities; browser effects remain host-owned."
@@ -149,22 +153,25 @@
                                       (keyword root "_picker-descriptor")
                                       (keyword root "_recents-descriptor")
                                       (keyword root "_inspector-descriptor")
-                                      (keyword root "_explorer-descriptor")]}}]
+                                      (keyword root "_explorer-descriptor")
+                                      (keyword root "_tutorial-catalog-descriptor")]}}]
     (when-not color-const
       (throw (ex-info "Installed UI templates are unavailable" {:type :browser-plan/unsupported})))
     (into [(assoc color-const :namespace theme) configuration]
           (concat descriptors theme-definitions menu-definitions (copy-module "app/ui-fn-picker" picker)
-                  (copy-module "app/ui-recents" recents) (copy-module "app/ui-inspector" inspector) (copy-module "app/ui-explorer" explorer)))))
+                  (copy-module "app/ui-recents" recents) (copy-module "app/ui-inspector" inspector)
+                  (copy-module "app/ui-explorer" explorer) (copy-module "app/ui-tutorial-catalog" tutorial-catalog)))))
 
 
 (def namespace-suffixes
   "Owned child namespaces reserved for the installed personal template bundle."
-  ["theme" "menu" "picker" "recents" "inspector" "explorer"])
+  ["theme" "menu" "picker" "recents" "inspector" "explorer" "tutorial-catalog"])
 
 
 (def groups
   "Fixed creation choices and their personal namespace/descriptor prefixes."
-  {:account-menu "menu" :fn-picker "picker" :recents "recents" :inspector "inspector" :explorer "explorer"})
+  {:account-menu "menu" :fn-picker "picker" :recents "recents" :inspector "inspector" :explorer "explorer"
+   :tutorial-catalog "tutorial-catalog"})
 
 
 (defn selected-definitions
@@ -225,4 +232,5 @@
    :inspector-update-id (str (ids/fn-id (str root ".inspector") :inspector-update))
    :recents-id (str (ids/fn-id (str root ".recents") :recents-view))
    :recents-initial-id (str (ids/fn-id (str root ".recents") :recents-initial))
-   :recents-update-id (str (ids/fn-id (str root ".recents") :recents-update))})
+   :recents-update-id (str (ids/fn-id (str root ".recents") :recents-update))
+   :tutorial-catalog-id (str (ids/fn-id (str root ".tutorial-catalog") :catalog-view))})

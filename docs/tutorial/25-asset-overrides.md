@@ -12,7 +12,7 @@ and execute permissions and the current quota on the server.
 
 Open **Settings → Appearance → UI graphs**. Normally use **Personalize account
 menu**, **Personalize function picker**, **Personalize recent functions**,
-**Personalize Inspector**, or **Personalize Explorer toolbar**. They create small
+**Personalize Inspector**, **Personalize Explorer toolbar**, or **Personalize tutorial catalogue**. They create small
 ordinary children inheriting the selected role definitions and a profile `editor`
 graph merging their entries with shared defaults and your previous configuration.
 Shared dependency bodies are retained by reference, not copied. Existing own
@@ -25,7 +25,7 @@ and exposes an unbound `theme` input. Binding that input on your own view change
 its theme tokens without copying or modifying the shared helpers.
 
 The explicit **Create personal graphs** bundle remains an advanced compatibility
-action. It copies Theme, Menu, Picker, Recents, Inspector and Explorer groups into
+action. It copies Theme, Menu, Picker, Recents, Inspector, Explorer and Tutorial catalogue groups into
 a namespace where you can write and inspect source. Unlike the smaller
 Personalize actions, it also selects its copied theme.
 
@@ -56,6 +56,14 @@ tree still owns function IDs, keyboard navigation, selection and action buttons.
 Rows read only the display fields and status summaries already authorized for
 that tree. Older personal Explorer views continue to control their toolbar;
 the shipped row presentation appears with a section-specific diagnostic.
+
+The tutorial catalogue is another view-only ordinary graph. It filters and
+groups browser-local lesson display facts into adjacent chapter sections and
+renders counts, statuses, row bodies, introductory text and scoped styles.
+Reading history, availability checks, URLs, focus and the Read/Unmark controls
+remain native. Personal catalogue styles apply only to passive graph body
+hosts. An older personal configuration without this component keeps its other
+selected graphs and uses the shared catalogue view.
 
 1. Choose **Personalize account menu**, then **Menu view** to open your own
    `account-menu-view` child.

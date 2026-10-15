@@ -1,14 +1,9 @@
 // editor-tour-picker.js — the lesson catalogue.
 //
-// Twenty-five lessons in five chapters is a library, not a menu, so the list
-// answers three questions before it lists anything: where did I stop, what
-// have I already done, and which of these can this session even run.
-//
-// graph-first-exception: this list is a function of the graph payload the
-// engine already fetched AND two things only the browser knows — the reading
-// history in localStorage and the capability signals the session carries. A
-// server partial would have to be told the reader's own history to render
-// their own catalogue, which is worse on every axis including privacy.
+// The ordinary catalogue graph filters and presents browser-local display
+// facts. This host owns reading history, requirement checks, navigation,
+// actions, input focus and DOM lifetime. Neither history nor capability
+// signals are sent to a server to render the catalogue.
 //
 // Completion lives in localStorage next to the in-flight tour state — it is a
 // reading history, personal to the browser, not graph data. `:requires` is the
@@ -302,48 +297,105 @@ function _tourNextUp(lessonId) {
   return { next, unfinished: (unfinished && unfinished !== next) ? unfinished : null };
 }
 
+let _tourCatalogEpoch = 0;
+let _tourCatalogClose = null;
+
+function _tourCatalogContext() {
+  return JSON.stringify([window.gdPrefOwner || null,
+    typeof graphdenCurrentOrg === 'string' ? graphdenCurrentOrg : null,
+    typeof getCurrentBranchName === 'function' ? getCurrentBranchName() : null]);
+}
+
+window.addEventListener('gd-auth-changed', () => {
+  _tourCatalogEpoch++;
+  if (_tourCatalogClose) {
+    _tourCatalogClose();
+    _tourTeardown(true);
+  }
+});
+window.addEventListener('gd-graph-changed', () => {
+  if (_tourCatalogClose && !_tourCatalogClose.current()) _tourCatalogClose();
+});
+
 async function openTutorialMenu() {
-  const lessons = await _tourFetchLessons();
+  _tourCatalogClose?.();
+  const epoch = ++_tourCatalogEpoch;
+  const context = _tourCatalogContext();
+  const closePending = () => {
+    if (_tourCatalogClose !== closePending) return;
+    _tourCatalogEpoch++;
+    _tourCatalogClose = null;
+    if (window.gdTourCatalogClose === closePending) window.gdTourCatalogClose = null;
+  };
+  closePending.current = () => false;
+  _tourCatalogClose = closePending;
+  window.gdTourCatalogClose = closePending;
+  let lessons;
+  try { lessons = await _tourFetchLessons(); }
+  catch (error) { closePending(); throw error; }
+  if (epoch !== _tourCatalogEpoch || context !== _tourCatalogContext()) return;
+  _tourCatalogClose = null;
+  window.gdTourCatalogClose = null;
   if (!lessons || !(lessons.lessons || []).length) {
     if (typeof gdToast === 'function') gdToast('Tutorial unavailable on this deployment');
     return;
   }
-  const { pop } = _tourEnsureEls();
+  const {pop} = _tourEnsureEls();
   _tourStopFollowing();
   if (typeof _tourTimer !== 'undefined' && _tourTimer) {
     clearInterval(_tourTimer);
     _tourTimer = null;
   }
-  _tourSpotHide();   // both spotlight layers — the ring AND the scrim
+  _tourSpotHide();
   pop.replaceChildren();
   pop.classList.add('gd-tour-visible');
   _tourCenterPop(pop);
-  // The catalogue is a dialog: focus goes in when it opens and back to the
-  // menu chip (or wherever the reader was) when it closes; Escape is the
-  // Cancel button — consumed, so the tour engine's "Escape ends the
-  // lesson" never sees it (a paused lesson resumes, as Cancel does).
   const returnEl = document.activeElement;
+  let disposed = false;
+  let graph = null;
+  let countsRenderer = null;
+  let introRenderer = null;
+  let emptyRenderer = null;
+  const rows = new Map();
+  const headings = [];
+  const current = () => !disposed && epoch === _tourCatalogEpoch
+    && context === _tourCatalogContext() && pop.isConnected;
+  const retire = () => {
+    if (disposed) return;
+    disposed = true;
+    if (_tourCatalogClose === retire) _tourCatalogClose = null;
+    if (window.gdTourCatalogClose === retire) window.gdTourCatalogClose = null;
+    graph?.dispose();
+    countsRenderer?.dispose();
+    introRenderer?.dispose();
+    emptyRenderer?.dispose();
+    for (const entry of rows.values()) entry.bodyRenderer.dispose();
+    rows.clear();
+    pop.replaceChildren();
+    pop.onkeydown = null;
+    pop.classList.remove('gd-tour-visible');
+  };
+  retire.current = current;
+  _tourCatalogClose = retire;
+  window.gdTourCatalogClose = retire;
   const cancel = () => {
+    if (!current()) return;
+    retire();
     _tourResume();
     if (returnEl && typeof returnEl.focus === 'function' && document.contains(returnEl)) {
       returnEl.focus();
     }
   };
-  pop.onkeydown = (e) => {
+  pop.onkeydown = e => {
     if (e.key !== 'Escape') return;
     e.preventDefault();
     e.stopPropagation();
     cancel();
   };
-  // On a phone the catalogue is a bottom sheet like every other tour surface
-  // — `_tourPosition` sets this while a lesson RUNS, and the catalogue can be
-  // opened without one.
   pop.classList.toggle('gd-tour-sheet', _tourNarrow());
 
   let done = _tourDoneMap();
   const saved = _tourState || _tourLoadState();
-  // What is news THIS time — measured before the look is recorded, so the
-  // chips show once, on the look that answers the menu's count.
   const news = _tourNews(lessons);
   _tourWriteSeen(lessons.lessons);
 
@@ -352,275 +404,228 @@ async function openTutorialMenu() {
   title.textContent = 'Interactive tutorial';
   const body = document.createElement('div');
   body.className = 'gd-tour-body';
-  body.textContent = 'Pick a lesson. In an organization workspace the'
-    + ' lesson runs on its own branch, so ending it can roll everything'
-    + ' back in one step.';
   pop.appendChild(title);
   pop.appendChild(body);
+  introRenderer = window.GraphdenRenderer.mount(body, {nodeLimit: 48});
 
-  // Where the reader stands, in one line: finished / runnable here / listed.
-  // "Available" is the session's, not the reader's — a locked lesson is still
-  // listed (that is the point of a catalogue) but cannot be counted as a move.
   const counts = document.createElement('div');
   counts.className = 'gd-tour-counts';
   counts.setAttribute('role', 'status');
   pop.appendChild(counts);
-  const renderCounts = () => {
-    counts.replaceChildren();
-    const all = lessons.lessons;
-    const finished = all.filter((l) => done.has(_tourKey(l))).length;
-    const available = all.filter((l) => !l['text-only?'] && _tourRequirement(l).allowed).length;
-    const textOnly = all.filter((l) => l['text-only?']).length;
-    const seg = (text, cls) => {
-      const el = document.createElement('span');
-      el.className = 'gd-tour-count' + (cls ? ' ' + cls : '');
-      el.textContent = text;
-      counts.appendChild(el);
-    };
-    seg(finished + ' done', 'gd-tour-count-done');
-    seg(available + ' available', 'gd-tour-count-available');
-    seg(all.length + ' lesson' + (all.length === 1 ? '' : 's'), 'gd-tour-count-total');
-    // Listed so the catalogue is the whole tutorial, but not "available":
-    // nothing on this instance can start them.
-    if (textOnly) seg(textOnly + ' ' + _tourCopy('read-only', 'text only'), 'gd-tour-count-text');
-    // "new" is this look's news; "updated" is STATE — every ✓ the script has
-    // since moved past, chipped on its row until the lesson is finished again.
-    const stale = all.filter((l) => _tourStale(l, done)).length;
-    if (news.fresh.length) seg(news.fresh.length + ' new', 'gd-tour-count-new');
-    if (stale) seg(stale + ' updated', 'gd-tour-count-updated');
-  };
-  renderCounts();
+  countsRenderer = window.GraphdenRenderer.mount(counts, {nodeLimit: 96});
 
-  // An unfinished lesson is the single most likely reason the catalogue is
-  // open at all, so it goes first, with the step count it stopped at — the
-  // state was always resumable, it was just invisible.
-  if (saved?.lessonId) {
-    const paused = (lessons.lessons || []).find((l) => l.id === saved.lessonId);
-    if (paused) {
-      const ended = saved.phase === 'cleanup' || saved.step >= (paused.steps || []).length;
-      const resume = _tourBtn(
-        (ended ? 'Clean up ' : 'Continue ') + _tourLessonLabel(paused)
-        + (ended ? '' : ' — step ' + ((saved.step || 0) + 1) + '/' + (paused.steps || []).length),
-        'gd-tour-btn-primary gd-tour-btn-resume',
-        () => _tourRestoreSession(saved));
-      pop.appendChild(resume);
-      if (!ended) pop.appendChild(_tourBtn(
-        'End lesson & clean up', 'gd-tour-btn-quiet', () => _tourRestoreSession(saved, true)));
-    }
+  const paused = saved?.lessonId
+    ? lessons.lessons.find(lesson => lesson.id === saved.lessonId) : null;
+  const ended = !!paused && (saved.phase === 'cleanup' || saved.step >= (paused.steps || []).length);
+  let resume = null;
+  if (paused) {
+    resume = _tourBtn('', 'gd-tour-btn-primary gd-tour-btn-resume', () => {
+      if (!current() || !lessons.lessons.some(lesson => lesson.id === paused.id)) return;
+      retire();
+      _tourRestoreSession(saved);
+    });
+    pop.appendChild(resume);
+    if (!ended) pop.appendChild(_tourBtn('End lesson & clean up', 'gd-tour-btn-quiet', () => {
+      if (!current() || !lessons.lessons.some(lesson => lesson.id === paused.id)) return;
+      retire();
+      _tourRestoreSession(saved, true);
+    }));
   }
 
-  // The filter is a plain input, not a search endpoint: the catalogue is
-  // already in memory and typing must not wait on a round trip.
   const filter = document.createElement('input');
   filter.type = 'search';
   filter.className = 'gd-tour-filter';
   filter.placeholder = 'Filter lessons…';
   filter.setAttribute('aria-label', 'Filter lessons');
   pop.appendChild(filter);
-
   const list = document.createElement('div');
   list.className = 'gd-tour-lesson-list';
   pop.appendChild(list);
-
-  // Lessons arrive in TEACHING order, grouped by `:chapter` — a flat wall of
-  // buttons told the reader nothing about where to start. The heading is
-  // emitted when the chapter changes, so the graph's order is the only
-  // ordering authority (no sort here).
-  const render = (needle) => {
-    list.replaceChildren();
-    const q = (needle || '').trim().toLowerCase();
-    let chapter = null;
-    let shown = 0;
-    for (const lesson of lessons.lessons) {
-      const label = _tourLessonLabel(lesson);
-      if (q && !label.toLowerCase().includes(q)
-          && !(lesson.chapter || '').toLowerCase().includes(q)) continue;
-      shown++;
-      if (lesson.chapter && lesson.chapter !== chapter) {
-        chapter = lesson.chapter;
-        const head = document.createElement('div');
-        head.className = 'gd-tour-chapter';
-        head.textContent = chapter;
-        list.appendChild(head);
-      }
-      // Offering a lesson to a reader who cannot complete it is a dead end,
-      // so it stays listed — seeing what exists is the point of a catalogue —
-      // but disabled, with the reason on the row rather than in a tooltip.
-      const need = _tourRequirement(lesson);
-      const textUrl = (typeof _tourTextUrl === 'function') ? _tourTextUrl(lesson) : null;
-      // A text-only lesson's row IS the link to its text: there is no tour
-      // to start, and a disabled button would say "not for you" about a
-      // lesson that is for everyone.
-      const textOnly = !!lesson['text-only?'];
-      let btn;
-      if (textOnly) {
-        btn = document.createElement('a');
-        btn.className = 'gd-tour-btn gd-tour-btn-primary gd-tour-btn-text';
-        btn.textContent = label;
-        if (textUrl) { btn.href = textUrl; btn.target = '_blank'; btn.rel = 'noopener'; }
-        const note = document.createElement('span');
-        note.className = 'gd-tour-lesson-note';
-        note.textContent = ' — ' + _tourCopy('read-only', 'text only') + ' ↗';
-        btn.appendChild(note);
-      } else {
-        btn = _tourBtn(label, 'gd-tour-btn-primary',
-                       () => { if (need.allowed) _tourChooseLesson(lesson.id); });
-      }
-      // The row is a CONTAINER, not just the button: a done lesson carries a
-      // second control (take the ✓ off), and a control nested inside a button
-      // is neither valid markup nor reachable by keyboard.
-      const row = document.createElement('div');
-      row.className = 'gd-tour-lesson-row' + (textOnly ? ' gd-tour-lesson-row-text' : '');
-      row.setAttribute('data-lesson-id', lesson.id);
-      row.appendChild(btn);
-      // One entry point to the written lesson; its optional summary stays
-      // in the tooltip instead of adding another row to the catalogue.
-      const readLabel = _tourCopy('read-label', 'Read the written lesson {lesson}',
-        { lesson: lesson.id });
-      const readSummary = lesson.reads
-        ? _tourCopy('read-adds', 'In the text: {adds}', { adds: lesson.reads }) : '';
-      const readControl = textOnly ? btn : (textUrl
-        ? _tourBtn('↗', 'gd-tour-btn-quiet gd-tour-read-btn',
-          () => window.open(textUrl, '_blank', 'noopener')) : null);
-      if (readControl) {
-        readControl.title = readLabel + (readSummary ? '\n' + readSummary : '');
-        if (readSummary) readControl.setAttribute('aria-description', readSummary);
-        if (!textOnly) {
-          readControl.setAttribute('aria-label', readLabel);
-          row.appendChild(readControl);
-        }
-      }
-      // A lesson the reader's last look did not list is chipped once, on the
-      // look that follows the menu's count; a lesson they finished at an
-      // older edition stays chipped until they finish it again — the ✓ is
-      // still theirs, the chip says what it no longer vouches for.
-      const chip = (text, cls, title) => {
-        const c = document.createElement('span');
-        c.className = 'gd-tour-lesson-badge ' + cls;
-        c.textContent = text;
-        if (title) c.title = title;
-        btn.appendChild(c);
-      };
-      if (news.fresh.includes(lesson.id)) {
-        row.classList.add('gd-tour-lesson-row-new');
-        chip('new', 'gd-tour-lesson-badge-new', 'Added since you last opened the catalogue');
-      }
-      if (done.has(_tourKey(lesson))) {
-        row.classList.add('gd-tour-lesson-row-done');
-        btn.classList.add('gd-tour-btn-done');
-        const mark = document.createElement('span');
-        mark.className = 'gd-tour-lesson-note';
-        mark.textContent = ' ✓ done';
-        btn.appendChild(mark);
-        if (_tourStale(lesson, done)) {
-          row.classList.add('gd-tour-lesson-row-updated');
-          chip('updated', 'gd-tour-lesson-badge-updated',
-               'Changed since you finished it (edition ' + done.get(_tourKey(lesson))
-               + ' → ' + _tourVersionOf(lesson) + ') — worth taking again');
-        }
-        const undo = _tourBtn('↺', 'gd-tour-btn-quiet gd-tour-unmark', () => {
-          if (!_tourUnmarkDone(lesson)) return;
-          done = _tourDoneMap();
-          renderFoot(false);
-          renderCounts();
-          render(filter.value);
-          // The re-render threw away the button that had focus; the lesson it
-          // belonged to is still listed, so focus lands back on its row.
-          const back = list.querySelector(
-            '[data-lesson-id="' + lesson.id + '"] .gd-tour-btn');
-          if (back && typeof back.focus === 'function') back.focus();
-          _tourSay('Lesson ' + lesson.id + ' marked as not done');
-        });
-        undo.title = 'Mark lesson ' + lesson.id + ' as not done';
-        undo.setAttribute('aria-label', 'Mark lesson ' + label + ' as not done');
-        row.appendChild(undo);
-      }
-      if (!need.allowed && !textOnly) {
-        btn.classList.add('gd-tour-btn-locked');
-        btn.disabled = true;
-        btn.title = 'Needs ' + need.phrase + ' — this session does not have it.';
-        const note = document.createElement('span');
-        note.className = 'gd-tour-lesson-note';
-        note.textContent = ' — needs ' + need.short;
-        btn.appendChild(note);
-      }
-      list.appendChild(row);
-    }
-    if (!shown) {
-      const empty = document.createElement('div');
-      empty.className = 'gd-tour-hint';
-      empty.textContent = 'No lesson matches “' + q + '”.';
-      list.appendChild(empty);
-    }
-  };
-
-  // Cancel sits OUTSIDE the list, which scrolls: twenty-five lessons plus five
-  // chapter headings are taller than a laptop viewport, and a way out that
-  // scrolls off the bottom is no way out.
+  const emptyHost = document.createElement('div');
+  emptyRenderer = window.GraphdenRenderer.mount(emptyHost, {nodeLimit: 48});
   const foot = document.createElement('div');
   foot.className = 'gd-tour-foot gd-tour-picker-foot';
   pop.appendChild(foot);
 
-  // Two footers, one slot. The normal one is Cancel (plus "clear my ✓s" when
-  // there are any); confirming the clear swaps that row rather than opening a
-  // second dialog over the catalogue — the list behind it is the context for
-  // the decision, and a dialog would cover exactly what the reader is deciding
-  // about.
-  const renderFoot = (confirming) => {
+  function nativeRow(lesson) {
+    const row = document.createElement('div');
+    row.className = 'gd-tour-lesson-row';
+    row.dataset.lessonId = lesson.id;
+    const textOnly = !!lesson['text-only?'];
+    const btn = textOnly ? document.createElement('a') : _tourBtn('', 'gd-tour-btn-primary', () => {
+      if (!current() || !lessons.lessons.some(item => item.id === lesson.id)
+        || !_tourRequirement(lesson).allowed) return;
+      retire();
+      _tourChooseLesson(lesson.id);
+    });
+    if (textOnly) {
+      btn.className = 'gd-tour-btn gd-tour-btn-primary gd-tour-btn-text';
+      const textUrl = typeof _tourTextUrl === 'function' ? _tourTextUrl(lesson) : null;
+      if (textUrl) { btn.href = textUrl; btn.target = '_blank'; btn.rel = 'noopener'; }
+    }
+    const bodyHost = document.createElement('span');
+    btn.appendChild(bodyHost);
+    row.appendChild(btn);
+    graph.own(bodyHost);
+    const readUrl = typeof _tourTextUrl === 'function' ? _tourTextUrl(lesson) : null;
+    if (!textOnly && readUrl) {
+      const read = _tourBtn('↗', 'gd-tour-btn-quiet gd-tour-read-btn', () => {
+        if (!current() || !lessons.lessons.some(item => item.id === lesson.id)) return;
+        const url = typeof _tourTextUrl === 'function' ? _tourTextUrl(lesson) : null;
+        if (url) window.open(url, '_blank', 'noopener');
+      });
+      const readLabel = _tourCopy('read-label', 'Read the written lesson {lesson}', {lesson: lesson.id});
+      const readSummary = lesson.reads
+        ? _tourCopy('read-adds', 'In the text: {adds}', {adds: lesson.reads}) : '';
+      read.title = readLabel + (readSummary ? '\n' + readSummary : '');
+      read.setAttribute('aria-label', readLabel);
+      if (readSummary) read.setAttribute('aria-description', readSummary);
+      row.appendChild(read);
+    }
+    const undo = _tourBtn('↺', 'gd-tour-btn-quiet gd-tour-unmark', () => {
+      if (!current() || !lessons.lessons.some(item => item.id === lesson.id)) return;
+      if (!_tourUnmarkDone(lesson)) return;
+      done = _tourDoneMap();
+      renderFoot(false);
+      render(filter.value);
+      btn.focus();
+      _tourSay('Lesson ' + lesson.id + ' marked as not done');
+    });
+    undo.title = 'Mark lesson ' + lesson.id + ' as not done';
+    undo.setAttribute('aria-label', 'Mark lesson ' + _tourLessonLabel(lesson) + ' as not done');
+    return {row, btn, undo, bodyRenderer: window.GraphdenRenderer.mount(bodyHost, {nodeLimit: 48})};
+  }
+
+  // The shared renderer owns its host attribute and clears it for empty local
+  // rules. Restore the catalogue sheet only after each passive body render.
+  function renderPassive(renderer, host, tree) {
+    renderer.render(tree, []);
+    graph.own(host);
+  }
+
+  function render(needle) {
+    if (!current()) return;
+    const facts = lessons.lessons.map(lesson => {
+      const need = _tourRequirement(lesson);
+      const key = _tourKey(lesson);
+      return {id: lesson.id, title: lesson.title || '', chapter: lesson.chapter || '',
+        done: done.has(key), stale: _tourStale(lesson, done), fresh: news.fresh.includes(lesson.id),
+        allowed: !!need.allowed, 'text-only': !!lesson['text-only?'],
+        'need-short': need.short || '', 'done-version': done.get(key) || 0, version: _tourVersionOf(lesson)};
+    });
+    const input = {lessons: facts, query: needle || '',
+      resume: {active: !!paused, ended, id: paused?.id || '', title: paused?.title || '',
+        step: saved?.step || 0, steps: (paused?.steps || []).length},
+      'text-only-copy': _tourCopy('read-only', 'text only')};
+    let model;
+    try { model = graph.view(input); }
+    catch (error) {
+      retire();
+      if (typeof gdToast === 'function') gdToast('Tutorial catalogue unavailable');
+      return;
+    }
+    renderPassive(countsRenderer, counts, model.counts);
+    renderPassive(introRenderer, body, model.intro);
+    if (resume) resume.textContent = model.resumeLabel;
+    const desired = [];
+    const lessonsById = new Map(lessons.lessons.map(lesson => [lesson.id, lesson]));
+    for (const [sectionIndex, section] of model.sections.entries()) {
+      if (section.chapter) {
+        let heading = headings[sectionIndex];
+        if (!heading) {
+          heading = document.createElement('div');
+          heading.className = 'gd-tour-chapter';
+          headings[sectionIndex] = heading;
+        }
+        heading.textContent = section.chapter;
+        desired.push(heading);
+      }
+      for (const item of section.rows) {
+        const lesson = lessonsById.get(item.id);
+        let entry = rows.get(item.id);
+        if (!entry) {
+          entry = nativeRow(lesson);
+          rows.set(item.id, entry);
+        }
+        const need = _tourRequirement(lesson);
+        entry.row.className = 'gd-tour-lesson-row'
+          + (item['text-only'] ? ' gd-tour-lesson-row-text' : '')
+          + (item.fresh ? ' gd-tour-lesson-row-new' : '')
+          + (item.done ? ' gd-tour-lesson-row-done' : '')
+          + (item.stale ? ' gd-tour-lesson-row-updated' : '');
+        entry.btn.classList.toggle('gd-tour-btn-done', item.done);
+        entry.btn.classList.toggle('gd-tour-btn-locked', !need.allowed && !lesson['text-only?']);
+        if (!lesson['text-only?']) {
+          entry.btn.disabled = !need.allowed;
+          entry.btn.title = need.allowed ? '' : 'Needs ' + need.phrase + ' — this session does not have it.';
+        }
+        if (done.has(_tourKey(lesson))) {
+          if (entry.undo.parentNode !== entry.row) entry.row.appendChild(entry.undo);
+        } else if (entry.undo.parentNode === entry.row) entry.undo.remove();
+        renderPassive(entry.bodyRenderer, entry.btn.firstChild, item.tree);
+        desired.push(entry.row);
+      }
+    }
+    if (!desired.length && model.empty !== null) {
+      renderPassive(emptyRenderer, emptyHost, model.empty);
+      desired.push(emptyHost);
+    }
+    const focused = document.activeElement;
+    const retainFocus = focused && desired.some(node => node.contains(focused));
+    desired.forEach((node, index) => {
+      if (list.children[index] !== node) list.insertBefore(node, list.children[index] || null);
+    });
+    while (list.children.length > desired.length) list.children[list.children.length - 1].remove();
+    if (retainFocus && document.activeElement !== focused && focused.isConnected) focused.focus();
+  }
+
+  function renderFoot(confirming) {
+    if (!current()) return;
     foot.replaceChildren();
     if (confirming) {
       const ask = document.createElement('span');
       ask.className = 'gd-tour-hint';
-      ask.textContent = 'Clear ' + done.size + ' ✓ mark'
-        + (done.size === 1 ? '' : 's') + '?';
+      ask.textContent = 'Clear ' + done.size + ' ✓ mark' + (done.size === 1 ? '' : 's') + '?';
       foot.appendChild(ask);
       const yes = _tourBtn('Clear', 'gd-tour-btn-primary gd-tour-clear-confirm', () => {
+        if (!current()) return;
         const n = _tourClearDone();
         done = _tourDoneMap();
         renderFoot(false);
-        renderCounts();
         render(filter.value);
         _tourSay(n + ' lesson mark' + (n === 1 ? '' : 's') + ' cleared');
-        if (typeof gdToast === 'function') {
-          gdToast('Progress cleared — ' + n + ' lesson'
-                  + (n === 1 ? '' : 's') + ' no longer marked done');
-        }
-        const back = foot.querySelector('.gd-tour-btn-quiet');
-        if (back && typeof back.focus === 'function') back.focus();
+        if (typeof gdToast === 'function') gdToast('Progress cleared — ' + n + ' lesson'
+          + (n === 1 ? '' : 's') + ' no longer marked done');
+        foot.querySelector('.gd-tour-btn-quiet')?.focus();
       });
       const no = _tourBtn('Keep them', 'gd-tour-btn-quiet', () => {
+        if (!current()) return;
         renderFoot(false);
-        const back = foot.querySelector('.gd-tour-clear');
-        if (back && typeof back.focus === 'function') back.focus();
+        foot.querySelector('.gd-tour-clear')?.focus();
       });
       foot.appendChild(yes);
       foot.appendChild(no);
       if (typeof yes.focus === 'function') yes.focus();
       return;
     }
-    // Dismissing the catalogue returns to the tour it covered — ARMED. A bare
-    // re-render left a step that polled nothing and ignored Escape.
     foot.appendChild(_tourBtn('Cancel', 'gd-tour-btn-quiet', cancel));
-    if (done.size) {
-      foot.appendChild(_tourBtn(
-        'Clear progress (' + done.size + ')', 'gd-tour-btn-quiet gd-tour-clear',
-        () => renderFoot(true)));
-    }
-  };
+    if (done.size) foot.appendChild(_tourBtn('Clear progress (' + done.size + ')',
+      'gd-tour-btn-quiet gd-tour-clear', () => renderFoot(true)));
+  }
 
+  graph = window.gdTourCatalogGraph.mount(() => render(filter.value));
+  graph.own(body);
+  graph.own(counts);
+  graph.own(emptyHost);
   renderFoot(false);
   filter.addEventListener('input', () => render(filter.value));
-  // Escape inside the filter clears it rather than ending anything — the
-  // catalogue's own Cancel is the way out.
-  filter.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape' || !filter.value) return;   // empty: the dialog's Escape (Cancel)
+  filter.addEventListener('keydown', e => {
+    if (e.key !== 'Escape' || !filter.value) return;
     e.stopPropagation();
     filter.value = '';
     render('');
   });
   render('');
-  // Focus goes in once the catalogue is built — onto the filter, the first
-  // focusable thing (synchronous: the vm tests run without timers).
   if (typeof focusIntoDialog === 'function') focusIntoDialog(pop);
   else if (typeof filter.focus === 'function') filter.focus();
 }

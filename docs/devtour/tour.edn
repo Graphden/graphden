@@ -1452,6 +1452,20 @@
            callbacks. Follow this lifecycle when changing a graph-backed menu or picker."
      :see [[:editor "createRuntime"] [:web "hiccup-element"]]}
 
+    {:file "resources/packages/app/editor/editor-tour-catalog-graph.js" :defn mountCatalog
+     :say "Runs the selected ordinary tutorial catalogue view over browser-local display facts.
+           Its checked output keeps lesson identities in source order and accepts only passive
+           Hiccup; one shared stylesheet scopes to graph body hosts, never native buttons or
+           the dialog. A legacy personal view falls back for this section alone."
+     :see [[:editor "openTutorialMenu"] [:editor "createRuntime"]]}
+
+    {:file "resources/packages/app/editor/editor-tour-picker.js" :defn openTutorialMenu
+     :say "Owns the tutorial catalogue's local reading history, requirement checks, stable
+           filter and Read/Unmark controls. The graph filters lessons and partitions adjacent
+           chapter runs after filtering; native actions recheck membership and context.
+           Teardown cancels both an initial lesson fetch and a later graph load."
+     :see [[:editor "mountCatalog"] [:editor "createRuntime"]]}
+
     {:file "resources/packages/app/editor/editor-edit-modes.js" :defn enterArgValueEditMode
      :say "Asks `/api/value-form` for a widget appropriate to the [slot](#term/slot), then dispatches
            by `data-form-widget`. The client does not choose the widget from raw type tags. After

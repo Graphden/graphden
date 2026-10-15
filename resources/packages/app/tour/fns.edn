@@ -2044,7 +2044,7 @@
              :reads "covers an ordinary personal editor configuration, inherited menu graphs and a local capture of a shared component's free theme input."
              :steps
              [{:title "Personal graphs, shared definitions"
-               :body "The menu, picker, recents, Inspector and Explorer toolbar are ordinary graphs. Your profile's editor graph selects them by reference. Personalize creates small inherited children: shared component definitions remain shared, and other personal edits remain in place."
+               :body "The menu, picker, recents, Inspector, Explorer and tutorial catalogue are ordinary graphs. Your profile's editor graph selects them by reference. Personalize creates small inherited children: shared component definitions remain shared, and other personal edits remain in place."
                :target nil
                :check {:kind "manual"}}
               {:title "Open UI graphs"

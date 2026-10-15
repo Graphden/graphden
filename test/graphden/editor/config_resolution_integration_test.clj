@@ -621,7 +621,8 @@
           (is (= resolution/defaults-id (:id selected-reference)))
           (is (nil? (validate-with-safe-provenance-diagnostic! storage captured resolution/resolver-id policy)))
           (is (nil? (validate-with-safe-provenance-diagnostic! storage default-snapshot resolution/defaults-id policy)))
-          (is (= #{:account-menu :fn-picker :recents :inspector :explorer} (set (keys configuration))))
+          (is (= #{:account-menu :fn-picker :recents :inspector :explorer :tutorial-catalog}
+                 (set (keys configuration))))
           (let [body (source/collect-closure storage (mapcat vals (vals configuration)) authorize!)
                 paths (set (vals (ns-path/path-map (source/collect-namespaces storage body))))]
             ;; Safe namespace metadata only, retained for the subsequent

@@ -63,6 +63,10 @@
   (group-by key-fn coll))
 
 
+(defbase partition-by-fn [key-fn coll]
+  (mapv vec (partition-by key-fn coll)))
+
+
 (defbase sort-by-fn [key-fn coll]
   (vec (sort-by key-fn coll)))
 
@@ -105,6 +109,7 @@
    :every?     {:impl every?-fn     :taint-propagate? true}
    :find-first {:impl find-first    :taint-propagate? true}
    :group-by   {:impl group-by-fn   :taint-propagate? true}
+   :partition-by {:impl partition-by-fn :taint-propagate? true}
    :sort-by    {:impl sort-by-fn    :taint-propagate? true}
    :constantly {:impl constantly-fn :taint-propagate? true}
    :comp       {:impl comp-fn       :taint-propagate? true}

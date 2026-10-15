@@ -358,7 +358,13 @@
     (is (= 200 (:status reserved)) (pr-str reserved))
     (is (true? (get-in reserved [:body :ok])))
     (is (= before (graph-identities storage)))
-    (is (= 7 (count (get-in reserved [:body :manifest :namespaces]))))
+    (let [namespaces (get-in reserved [:body :manifest :namespaces])
+          root (:path (first namespaces))
+          paths (mapv :path namespaces)]
+      (is (= (set (map :namespace (templates/definitions root))) (set paths))
+          "preview reserves exactly the authored template namespaces")
+      (is (= (count paths) (count (set paths)))
+          "each authored namespace is reserved once"))
     (is (batch-budget/accepted-count?
           (count (get-in reserved [:body :manifest :functions])))
         "the full editable UI template must fit the atomic cleanup budget")

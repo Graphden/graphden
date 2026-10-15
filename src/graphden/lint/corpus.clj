@@ -16,6 +16,7 @@
     [clojure.edn :as edn]
     [clojure.string :as str]
     [graphden.lint.core :as lint]
+    [graphden.lint.similar :as similar]
     [graphden.packages.loader :as loader]))
 
 
@@ -48,16 +49,26 @@
         (into (keys vocabulary)))))
 
 
-(defn corpus-findings
-  "Lint the loaded corpus."
-  []
-  (let [{:keys [base-fn-defs fn-defs]} (loader/load-packages packages)
-        base-names (keys base-fn-defs)]
+(defn- corpus-findings-from
+  [{:keys [base-fn-defs fn-defs]}]
+  (let [base-names (keys base-fn-defs)]
     (lint/lint fn-defs {:base-fn-names base-names
                         :roots (into (registry-roots)
                                      (lint/names-referenced-by fn-defs base-names
                                                                (vals base-fn-defs)))
                         :check-public? true})))
+
+
+(defn corpus-findings
+  "Lint the loaded corpus."
+  []
+  (corpus-findings-from (loader/load-packages packages)))
+
+
+(defn similar-findings
+  "Opt-in, informational structural template candidates from the same corpus."
+  [{:keys [base-fn-defs fn-defs]}]
+  (similar/analyze fn-defs {:base-fn-names (keys base-fn-defs)}))
 
 
 (defn- format-finding
@@ -90,8 +101,42 @@
      :ok? (and (empty? unexpected) (empty? stale))}))
 
 
+(defn- similar-report
+  [{:keys [groups skipped subjects]} details?]
+  (let [display (take 100 groups)
+        reasons (->> skipped (map :skipped) frequencies
+                     (sort-by (comp name key))
+                     (map (fn [[reason occurrences]] (str (name reason) "=" occurrences))))]
+    (str/join "\n"
+              (concat
+                [(str "similar-template: " (count groups) " candidate groups among "
+                      (- subjects (count skipped)) "/" subjects " analyzed subjects; "
+                      (count skipped) " bounded skips"
+                      (when (seq reasons) (str " (" (str/join ", " reasons) ")")))]
+                (map (fn [{:keys [fns difference-paths expanded-fns]}]
+                       (str "INFO    " (pr-str fns) " — " expanded-fns " graph fns; differing literal paths "
+                            (pr-str difference-paths)))
+                     display)
+                (when (> (count groups) 100)
+                  [(str "... " (- (count groups) 100) " further candidates; pure analyzer returns all")])
+                (when details?
+                  (concat (map (fn [{:keys [skipped] :as entry}]
+                                 (str "SKIP    " (pr-str (:fn entry)) " — " (name skipped)))
+                               (take 50 skipped))
+                          (when (> (count skipped) 50)
+                            [(str "... " (- (count skipped) 50) " further bounded skips")])))))))
+
+
 (defn -main
-  [& _]
-  (let [{:keys [text ok?]} (report (corpus-findings))]
+  [& args]
+  (when-not (or (empty? args) (= ["--similar"] (vec args))
+                (= ["--similar" "--details"] (vec args)))
+    (binding [*out* *err*] (println "Usage: bb graph-lint [--similar [--details]]"))
+    (System/exit 2))
+  (let [corpus (loader/load-packages packages)
+        {:keys [text ok?]} (report (corpus-findings-from corpus))]
     (println text)
+    (when (= "--similar" (first args))
+      (println)
+      (println (similar-report (similar-findings corpus) (= "--details" (second args)))))
     (System/exit (if ok? 0 1))))

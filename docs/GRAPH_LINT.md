@@ -11,6 +11,7 @@ rows — so one engine serves both authoring worlds.
 | Where | What |
 |-------|------|
 | `src/graphden/lint/core.clj` | the pure engine — `lint` over a fn-def seq |
+| `src/graphden/lint/similar.clj` | opt-in, pure structural template suggestions over the same fn-defs |
 | `src/graphden/lint/corpus.clj` | `bb graph-lint` — the first-party fns.edn corpus, no DB, ~10 s |
 | `src/graphden/lint/graph.clj` | the live branch — graph snapshot → fn-defs → `lint`, memoised per snapshot |
 | editor **⚐ lint** filter chip + Inspector **Lint** section | `GET /api/lint` primes the chip; `POST /partials/inspector-lint/{suppress,restore}` — "Not an issue" / "Restore" write the branch's `lint-suppressions` const |
@@ -117,6 +118,24 @@ nothing on the corpus; `:deep-hierarchy` starts two levels above the
 MCP tools' chains.
 
 ## Gate
+
+`bb graph-lint --similar` also reports **structural template similarity**.
+It expands private helpers and compares the resulting parent, operation,
+slot, list, type, effect and binding-policy structure while allowing
+terminal text or number literals to differ. The output names the fn-defs
+and the paths of differing literals, never their values. This is a review
+candidate, not proof of semantic equivalence or permission to merge the
+functions: a differing `get` key, for example, may be essential. The
+suggestion requires at least four expanded fn-defs and three differing
+literal paths, so short accessors do not become noise. Guard branch
+values and public references stay exact, including through private helpers.
+
+The advisory never changes the normal gate verdict or live lint. Each
+subject has finite expansion limits (24 private levels, 512 expanded
+fn-defs, 128 structural levels, 32768 structural visits). A cycle or
+limit skips the whole subject; the report gives analyzed/total counts
+and skip reasons, and `bb graph-lint --similar --details` lists up to
+50 skipped identities. Zero candidates only describes analyzed subjects.
 
 `bb graph-lint` is in `bb ci` (group `:clj`, diff-scoped to
 `fns.edn` / the engine / the reachability registry). Warnings fail

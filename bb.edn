@@ -372,8 +372,8 @@
    :task (binding [*command-line-args* ["check"]] (load-file "scripts/tour_versions.clj"))}
 
   graph-lint
-  {:doc "Graph linters over the first-party package corpus (no DB): duplicate definitions (exact and after private-helper expansion), unreferenced / unreachable private fn-defs, shadowed overrides, siblings to extract a parent from, over-deep chains. Warnings fail unless allowlisted in graphden.lint.corpus/allowed-warnings; a stale allowlist entry fails too. ~10s."
-   :task (clojure "-M:dev -m graphden.lint.corpus")}
+  {:doc "Graph linters over the first-party package corpus (no DB): duplicate definitions (exact and after private-helper expansion), unreferenced / unreachable private fn-defs, shadowed overrides, siblings to extract a parent from, over-deep chains. Warnings fail unless allowlisted in graphden.lint.corpus/allowed-warnings; a stale allowlist entry fails too. --similar adds informational structural template candidates. ~10s."
+   :task (apply clojure "-M:dev -m graphden.lint.corpus" *command-line-args*)}
 
   type-sweep
   {:doc "Type-check sweep over the first-party package corpus (no DB, ~1 min) — the SAME sweep production runs at boot, with the same allowlist gate (`graphden.types.check/allowed-type-check-failures`, empty: the corpus stays at zero). Every test fixture passes `:skip-type-check? true`, so until this check existed a corpus type regression surfaced only when a real instance booted — `bb wt up`, or the gate's e2e stack, minutes in. Runs in `bb ci`'s POST-TEST wave (not `bb lint`): the lint wave launches every check at once, and one more whole-corpus JVM there was what tipped a 12 GB dev host into killing children mid-run. Run it by hand (`bb type-sweep`, ~1 min) after touching fns.edn if you do not want to wait for `bb ci`."

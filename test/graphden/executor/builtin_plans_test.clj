@@ -95,6 +95,32 @@
     (is (= package-body (types/package-alias-body :text-map)))))
 
 
+(deftest authored-private-names-in-distinct-namespaces-keep-their-identities
+  (let [source-var (ns-resolve 'tools.ui-preview.builtin-plans 'source-definitions)
+        entries-var (ns-resolve 'tools.ui-preview.builtin-plans 'entries)
+        definitions (source-var)
+        probes [{:namespace "builtin.identity.a" :name :_same :parent :core.logic/const
+                 :return-type :text :args {:value "first namespace"}}
+                {:namespace "builtin.identity.b" :name :_same :parent :core.logic/const
+                 :return-type :text :args {:value "second namespace"}}]
+        roots {:identityA {:view (ids/fn-id "builtin.identity.a" :_same)}
+               :identityB {:view (ids/fn-id "builtin.identity.b" :_same)}}
+        artifact (with-redefs-fn {source-var #(into definitions probes)
+                                  entries-var (merge @entries-var roots)}
+                   #(tool 'generate))]
+    (doseq [[kind expected] [[:identityA "first namespace"] [:identityB "second namespace"]]]
+      (let [compiled (get-in artifact [:plans kind])
+            request {:plan compiled :cases [{:entry "view" :inputs {}}]}
+            {:keys [exit out err]} (sh/sh "node" "tools/runtime-test/browser-plan-runner.js"
+                                          :in (json/generate-string request))]
+        (is (= (str (get-in roots [kind :view])) (get-in compiled [:entries "view"])))
+        (is (zero? exit) err)
+        (when (zero? exit)
+          (let [result (first (json/parse-string-strict out true))]
+            (is (nil? (:error result)) (:error result))
+            (is (= expected (some-> (:value result) plan/decode-value)))))))))
+
+
 (deftest source-errors-and-secret-annotations-veto-generation
   (let [source-var (ns-resolve 'tools.ui-preview.builtin-plans 'source-definitions)
         definitions (source-var)]

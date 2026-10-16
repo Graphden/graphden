@@ -119,7 +119,7 @@
     ;; First check the authored forms: their marker/type annotations must veto
     ;; export even when a storage representation deliberately erases them.
     (doseq [id ordered :let [d (get by-id id)] :when (or (:parent d) (:parents d))]
-      (check/check-fn-def! (assoc d :id id)))
+      (check/check-fn-def! (assoc d :fn-id id)))
     (let [authored (snapshot/capture-policy @registry/*rich-types-override*)]
       ;; Certify the exact reconstructed rows used by the existing snapshot
       ;; exporter, without manufacturing or weakening its provenance metadata.

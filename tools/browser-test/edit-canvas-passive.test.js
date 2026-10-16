@@ -193,7 +193,62 @@ const source = process.env.GRAPHDEN_CANVAS_SOURCE_ROOT || path.join(__dirname, '
         sameButton: fixture.owner.firstChild === fixture.button, clicks: fixture.clicks};
     });
     assert.deepEqual(disposed, {aborted: true, empty: true, released: true, sheets: 0, sameButton: true, clicks: 1});
+
+    const switched = await page.evaluate(async () => {
+      window.gdPrefsReady = true;
+      window.gdPrefOwner = 'settled-owner-a';
+      const {host} = fixture.mount('fn-name', {name: 'Owner A label', secret: true});
+      const replies = [];
+      window.gdLoadUIComponentRuntime = (_name, _plan, _options, signal) => new Promise(resolve => {
+        replies.push({resolve, signal});
+      });
+      const previous = gdCanvasGraph.reload();
+      window.gdPrefOwner = 'settled-owner-b'; // Cookie/prefs refresh, no auth event.
+      const current = gdCanvasGraph.reload();
+      const retiredBeforeReply = !host.childNodes.length && !host.dataset.gdUiStyle
+        && !GraphdenRenderer.ownsTarget(host) && replies[0].signal.aborted;
+      replies[0].resolve(fixture.personal);
+      await previous;
+      const ignoredPrevious = !host.childNodes.length;
+      replies[1].resolve(fixture.personal);
+      await current;
+      const ignoredCurrent = !host.childNodes.length;
+      const fresh = fixture.mount('fn-name', {name: 'Owner B label'}).host;
+      const newOwner = fresh.textContent === 'Owner B label'
+        && !!fresh.querySelector('.gd-canvas-personal');
+      gdCanvasGraph.dispose(fixture.owner);
+      return {retiredBeforeReply, ignoredPrevious, ignoredCurrent, newOwner,
+        sameButton: fixture.owner.firstChild === fixture.button,
+        sheets: document.querySelectorAll('style[data-gd-ui-styles]').length};
+    });
+    assert.deepEqual(switched, {retiredBeforeReply: true, ignoredPrevious: true,
+      ignoredCurrent: true, newOwner: true, sameButton: true, sheets: 0});
+
+    const hydration = await page.evaluate(async () => {
+      window.gdAccount = {id: 'same-auth-account'};
+      window.isAuthenticated = () => true;
+      window.gdPrefOwner = null;
+      window.gdPrefsReady = false;
+      const {host} = fixture.mount('fn-name', {name: 'Hydrated label'});
+      const nativeButton = fixture.button;
+      const bodyNode = host.firstElementChild;
+      nativeButton.focus();
+      window.gdPrefOwner = 'first-authorized-owner';
+      window.gdPrefsReady = true;
+      window.gdLoadUIComponentRuntime = async () => fixture.personal;
+      await gdCanvasGraph.reload();
+      window.dispatchEvent(new Event('gd-graph-changed'));
+      const result = {connected: host.isConnected && bodyNode.isConnected,
+        sameBody: host.firstElementChild === bodyNode, text: host.textContent,
+        owned: GraphdenRenderer.ownsTarget(host), scoped: !!host.dataset.gdUiStyle,
+        sameButton: fixture.owner.firstChild === nativeButton,
+        focus: document.activeElement === nativeButton};
+      gdCanvasGraph.dispose(fixture.owner);
+      return result;
+    });
+    assert.deepEqual(hydration, {connected: true, sameBody: true, text: 'Hydrated label',
+      owned: true, scoped: true, sameButton: true, focus: true});
     assert.deepEqual(errors, [], 'no browser errors');
-    console.log('PASS passive canvas: shipped/selected plans, native ownership, scopes and late auth replies');
+    console.log('PASS passive canvas: shipped/selected plans, ownership, scopes, auth replies and owner hydration');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

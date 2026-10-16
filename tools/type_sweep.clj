@@ -19,6 +19,7 @@
   (:require
     [graphden.executor.registry.core :as registry-core]
     [graphden.packages.loader :as pkg]
+    [graphden.packages.records :as records]
     [graphden.packages.records.parse :as records-parse]
     [graphden.packages.sync :as sync]))
 
@@ -33,9 +34,10 @@
    `:args` carry the real `:type`s), then every fn-def. A mis-shaped
    entry is recoverable by the sweep itself, exactly as in production."
   [defs]
-  (doseq [[fn-name fn-def] defs]
+  (doseq [{fn-name :name :as fn-def} defs]
     (when fn-name
-      (try (registry-core/record-rich-types! fn-name fn-def)
+      (try (registry-core/record-rich-types!
+             fn-name (assoc fn-def :fn-id (records/fn-id (:namespace fn-def) fn-name)))
            (catch Exception _ nil)))))
 
 
@@ -54,12 +56,12 @@
     ;; Aliases BEFORE rich-types, so `:type :port` records its
     ;; structural `[:refine :int …]` form (sync does the same).
     (sync/register-type-aliases! fn-defs)
-    (seed-rich-types! extra-defs)
-    (seed-rich-types! (into {} (keep (fn [fd] (when (:name fd) [(:name fd) fd]))) fn-defs))
-    (let [expanded (records-parse/expand-inline-anons-in-module fn-defs)]
-      (seed-rich-types! (into {} (keep (fn [fd] (when (:name fd) [(:name fd) fd]))) expanded))
+    (seed-rich-types! (vals extra-defs))
+    (seed-rich-types! fn-defs)
+    (let [prepared (records-parse/prepare-module fn-defs (sync/compute-all-fn-name-ids packages) extra-defs)]
+      (seed-rich-types! (:fn-defs prepared))
       (try
-        (#'sync/run-type-check-sweep! expanded extra-defs false nil)
+        (#'sync/run-type-check-sweep! prepared false nil)
         (println "type-sweep: 0 failures — the corpus type-checks clean")
         (System/exit 0)
         (catch Exception e

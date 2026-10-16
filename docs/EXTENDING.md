@@ -22,26 +22,37 @@ the `:fn` primitive (overlayable per-fn via
 slots go through `hof-wrap` instead of the normal thunk path. The
 legacy `:is-fn` boolean was retired — type IS the marker.
 
-### Wrap shape by free-arg count
+### Call-site parameters and captured arguments
 
-`hof-wrap` inspects the wrapped fn-graph's leftover free args (names
-the author chose for unbound slots). The compiler never inspects
-specific names.
+The compiler first determines which free arguments the HOF supplies on
+each call and which are captured from the surrounding graph. Authored
+`:lambda-params` takes precedence; otherwise the slot's structural
+`[:fn {ARGS} RET]` signature determines the call-site shape. Structural
+names participate in that matching. Ambiguous positional cases require an
+explicit declaration rather than guessing from all leftover free args.
+Bare `:fn` slots use the fallback capture analysis. See
+[CLOSURE_CAPTURE.md](CLOSURE_CAPTURE.md) and
+`executor.compile.renames/hof-lambda-params`.
 
-| Free args of wrapped fn | Callable shape | Impl invokes as |
-|-------------------------|----------------|----------------|
-| 0 | variadic, ignores input | `(f)` or `(f anything)` |
-| 1 | single-arg | `(f value)` — value is bound to that one name |
-| ≥ 2 | map-callable | `(f {:name1 v1 :name2 v2 …})` — keys chosen by impl, author's `{:as :…}` renames must match |
+After that selection, `hof-wrap` uses the call-site parameter count:
 
-### Example: `map` (1 leftover — single-arg)
+| Call-site parameters | Callable shape | Impl invokes as |
+|----------------------|----------------|-----------------|
+| 0 | variadic, ignores input; free args are captured | `(f)` or `(f anything)` |
+| 1 | single-arg | `(f value)` — value fills that parameter |
+| ≥ 2 | map-callable | `(f {:name1 v1 :name2 v2 …})` — keys match the call-site parameters |
+
+A callback can therefore have several free args while receiving only one
+argument per invocation: the remaining args are captured at wrap time.
+
+### Example: `map` (one call-site parameter)
 
 ```edn
 ;; In fns.edn
 {:name :map
- :args {:func :fn
-        :coll {:type :jsonb :required false}}
- :return-type :any}
+ :args {:func {:type [:fn {:item a} b]}
+        :coll {:type [:list a]}}
+ :return-type [:list b]}
 ```
 
 ```clojure
@@ -50,10 +61,11 @@ specific names.
   (doall (map func coll)))   ; func is called (func item) per element; SEQ, not mapv→vector
 ```
 
-A user binds their unary fn-graph as `:func`; its one leftover free
-arg (whatever name) receives each item.
+A user binds a callback as `:func`; its call-site parameter receives each
+item, while other free arguments are captured. A differently named unary
+parameter is accepted positionally when capture analysis is unambiguous.
 
-### Example: `reduce` (1 leftover via vec packing)
+### Example: `reduce` (one parameter via vector packing)
 
 ```clojure
 (defbase reduce-fn [func init coll]
@@ -64,7 +76,7 @@ Impl packs `[acc item]` as a single value. The user's fn-graph is
 unary (leftover = `:pair` or similar) and destructures via
 `:get :key 0` / `:key 1` inside.
 
-### Example: `middleware` (2 leftovers — map-callable)
+### Example: `middleware` (two call-site parameters)
 
 ```clojure
 (defbase middleware [name body]
@@ -76,8 +88,9 @@ unary (leftover = `:pair` or similar) and destructures via
 ```
 
 The body fn-graph declares `{:as :request}` and `{:as :next-handler}`
-renames somewhere; those become its two leftover free-args; compiler
-produces a map-callable that impl populates.
+renames somewhere; those match the slot's two structural call-site
+parameters. The compiler produces a map-callable that the impl populates;
+additional free arguments are captured.
 
 ### `make-single-arg-callable` — raw fn-id entry point
 
@@ -127,8 +140,9 @@ create a new backend:
 ### Contract tests
 
 ```clojure
-(require '[graphden.storage.protocol.contract-test :as contract])
-(contract/run-storage-tests create-my-storage)
+(require '[graphden.storage.protocol.contract-tests :as contract]
+         '[graphden.storage.protocol.core :as sp])
+(contract/run-graph-constraints-tests create-my-storage sp/close)
 ```
 
 ### Read-only / remote backends (the minimal surface)

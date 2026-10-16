@@ -41,12 +41,12 @@ and finding `:str-len` also points at a fn-row. One graph.
 
 ## Primitive types
 
-14 baked-in primitives:
+15 storage-seeded primitives:
 
 ```text
 :null :uuid :text :int :bool :numeric
 :timestamptz :jsonb :bytes :any :fn
-:sequence :keyword :float
+:sequence :keyword :float :fn-ref
 ```
 
 These are seeded at storage init (`composition/sync-primitives!`).

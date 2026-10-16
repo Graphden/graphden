@@ -1,9 +1,11 @@
 # Monitoring & alerting
 
-Three layers, cheapest first. All three are **privacy-safe by
-construction** — they count and time, they never read a tenant's args,
-results, or error bodies (those stay in the org-scoped, TTL'd
-`:fn-execution` rows, sanitised at write time).
+Three layers, cheapest first. Usage rollups and operational alerts use
+counts and durations rather than tenant arguments, results or error
+bodies. The org-scoped failure viewer reads sanitised errors from TTL'd
+`:fn-execution` rows. Separately, the opt-in feedback intake stores
+user-submitted report text and the built-in alerter can forward clipped
+feedback to the configured operator channel (§ 3b and § 4).
 
 ## 1. Usage rollups — per-org / per-fn stats (always on)
 

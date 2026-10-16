@@ -120,5 +120,8 @@ guards registry install / fork / import). Tutorial lesson 07.
   after every `bb wt up`, and expect a stale config after `bb wt drop`.
 - `fn-defs` travel as EDN TEXT inside the JSON call — only EDN keeps
   `:other-fn` (a reference) distinguishable from `"other-fn"` (a string).
-- `execute-fn` is bounded (10s, no trace/value capture) and does not
-  persist history; long or effectful runs come back `pending`.
+- `execute-fn` waits up to 10s inline and uses the shared execution
+  pipeline. `trace: true` captures the call tree and persists the run;
+  intermediate-value capture is not exposed by this tool. Effectful runs
+  also persist, and runs still pending after the inline wait return an
+  `execution-id`.

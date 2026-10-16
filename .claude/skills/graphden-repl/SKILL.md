@@ -19,7 +19,7 @@ If there's no port — ask the user to run `bb nrepl-bg` (background headless nR
 
 ## 1. Bring up the system
 
-The `dev` namespace ([development/src/dev.clj](../../development/src/dev.clj)) is loaded in the REPL:
+The `dev` namespace ([development/src/dev.clj](../../../development/src/dev.clj)) is loaded in the REPL:
 
 ```clojure
 (require 'dev :reload)         ; always :reload — otherwise you may work with a stale def

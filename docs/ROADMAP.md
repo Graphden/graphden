@@ -133,13 +133,14 @@ partitioning. Open decisions: data transfer between executors, granularity,
 side-effect ordering, retry. See
 [ARCHITECTURE.md § Distributed Execution](ARCHITECTURE.md#part-8-distributed-execution-future).
 
-### Type System (Type Algebra)
+### Type System
 
-Function types, parametric polymorphism (`List[T]`, `Map[K,V]`),
-inference for compositions, HOF signatures such as
-`map : (a -> b) -> List[a] -> List[b]`. A separate large project; the
-decisions already taken are in
-[TYPE_SYSTEM_DECISIONS.md](TYPE_SYSTEM_DECISIONS.md).
+Function types, rank-1 parametric polymorphism (`[:list a]`,
+`[:map k v]`), composition inference and typed HOF signatures are
+implemented; see [TYPES.md](TYPES.md). Further type-system research
+has no scheduled project here. Before proposing an extension, read
+[TYPE_SYSTEM_DECISIONS.md](TYPE_SYSTEM_DECISIONS.md) for the accepted
+limits and rejected alternatives.
 
 ### Git-like Versioning
 

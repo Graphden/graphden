@@ -59,7 +59,8 @@ The type system combines three mechanisms:
 
 3. **Refinement subtypes** — named subtypes with constraints (e.g., `:positive-int`), expressed as regular fn-defs. The system enforces subtype relationships: where a supertype is expected, a subtype is accepted; where a subtype is expected, a supertype is rejected.
 
-All three mechanisms use the same infrastructure — fn-defs, arg entities, `computed-type` field.
+All three mechanisms use the same infrastructure — fn/type rows, slots and
+bindings, plus inferred contracts in the rich-types registry.
 
 ---
 
@@ -180,35 +181,23 @@ Subtyping rules:
 
 ## When Types Are Checked
 
-Type checking happens **at fn-def save time** — when the user creates or modifies a fn-def through API or UI. Not at runtime.
+Type checking runs when a fn-def is created or modified through the
+editor / CRUD API. Ordinary type mismatches **keep the write** and return
+`type-warnings`; diagnostics are recorded for the current branch, shown in
+the editor, and block execution with `:unresolved-type-errors` until fixed.
+A successful later check clears the diagnostic. This lets an author save
+an incomplete composition and repair it in subsequent edits.
 
-```text
-User creates/modifies fn-def
-         │
-         ▼
-┌─────────────────┐
-│ Resolve parents  │  Walk inheritance chain, find base-fn
-└────────┬────────┘
-         ▼
-┌─────────────────┐
-│ Type inference   │  Substitute type variables,
-│                  │  apply type-rules for assoc/get,
-│                  │  compute return-type
-└────────┬────────┘
-         ▼
-┌─────────────────┐
-│ Compatibility    │  For each arg with ref-id:
-│ check            │  ref-fn return-type ⊂ expected arg type?
-└────────┬────────┘
-         │
-    OK? ──┤
-    │     └─ NO → error, fn-def NOT saved
-    │           "arg :a expects :int, but :my-fn returns :text"
-    ▼
-┌─────────────────┐
-│ Save             │  fn-def + computed-type stored in DB
-└─────────────────┘
-```
+Structural violations (cycles, name collisions, seals, MI and cross-branch
+reparenting) still reject the write. Secret-flow subtype violations also
+remain hard rejects: allowing them to persist would make flow protection
+depend on the best-effort diagnostics store. See
+[SECRETS.md](SECRETS.md) § Flow protection vs Error Tolerance.
+
+Package sync checks the whole corpus and remains hard-gated; its contract
+is stricter than interactive authoring. Inference results live in the
+rich-types registry; per-branch diagnostics record failures. There is no
+stored `computed-type` column on a function row.
 
 When a fn that others depend on is modified through the editor / CRUD API, its
 cached **transitive** dependents are re-checked in the same write, in dependency
@@ -429,17 +418,16 @@ A record type is defined as a fn-row with a `:type {field type …}` map:
         :text :text
         :timestamp :int}}
 
-;; System computes:
-;;   return-type = {:from :text, :text :text, :timestamp :int}
-;;   Free args: {:from :text, :text :text, :timestamp :int}
+;; Registered structural shape:
+;;   {:from :text, :text :text, :timestamp :int}
 ```
 
-This serves as both:
+The type-row describes a record's structure; it is not an executable
+record constructor. Build the value with ordinary compositions such as
+`:assoc` or `:zipmap`. Inheriting the type-row and binding its fields does
+not by itself construct a record at runtime.
 
-- **Type definition** — `computed-type` describes the structure
-- **Constructor** — binding all args creates a concrete value
-
-No new entity needed. A type IS a fn.
+No separate type entity is needed: the definition is stored as a fn-row.
 
 ---
 
@@ -603,7 +591,11 @@ form fields; blank or whitespace-only text throws `:refinement/violated`.
 ;; sqrt accepts :positive-int ✓
 ```
 
-The system does NOT prove that a value is positive. It forces the programmer to **explicitly mark the point where the constraint is validated**. The validation itself happens at runtime. But forgetting it is impossible — the type system rejects the fn-def without it.
+The system does not prove that an arbitrary runtime integer is positive.
+An explicit narrower validates that value at runtime. Without the required
+subtype, an interactive edit receives a diagnostic and execution is blocked;
+package sync rejects the mismatch. Concrete literal values can be checked
+against refinement constraints at save time.
 
 ### Refinement constraints do NOT propagate through arithmetic
 
@@ -1323,6 +1315,11 @@ stored column.
 ---
 
 ## Implementation Phases
+
+The early phases below retain the original implementation plan, including
+retired storage terminology (`computed-type`, arg fields). Current storage
+and save behaviour are described above; Phase 7 records the later switch to
+error-tolerant interactive writes. Phase 5 remains unshipped.
 
 ### Phase 1: Primitive type checking
 

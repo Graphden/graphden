@@ -286,11 +286,15 @@ bb devtour-emacs # (in bb ci) ert over docs/devtour/devtour.el — anchors resol
 bb devtour-page  # (in bb ci) the baked page in a real browser (no stack needed)
 
 # Build & Deploy (Docker)
-bb rebuild      # Rebuild jar + docker + restart (ALWAYS use this after code changes!)
-bb deploy       # Full rebuild with DB truncate (for clean deployments)
+bb rebuild      # Shared-stack rebuild; owned by the serialized landing gate
+bb deploy       # Shared-stack clean deployment; owned by the landing gate
 ```
 
-**IMPORTANT:** After ANY backend code change (Clojure files, resources/packages/), ALWAYS run `bb rebuild` to apply changes. Never use raw docker commands.
+**Agent workflow:** apply backend changes to your isolated instance with
+`bb wt up`; the serialized landing gate owns shared-stack rebuild/deploy.
+Follow [dev/wtq/AGENT.md](dev/wtq/AGENT.md), including its focused-test
+wrapper and landing rules. Never run `bb rebuild` / `bb deploy` from an
+agent worktree.
 
 ### Running a Single Test
 
@@ -330,8 +334,8 @@ Three consumers read those hashes:
 Workflow:
 
 ```bash
-bb rebuild           # rebuild JAR + docker image
-bb verify            # per-section ✓/✗ — tells you WHICH part of the
+bb wt up             # build and start this worktree; includes bb verify
+bb verify <base-url> # use the isolated URL printed by wt up; tells you WHICH part of the
                      # deploy didn't ship: e.g. frontend matches but
                      # backend differs → docker image rebuilt with a
                      # stale jar
@@ -883,8 +887,8 @@ editor function reddens `bb devtour-check` exactly like a renamed `defn`.
    See [docs/devtour/README.md](docs/devtour/README.md) for the anchor forms
    (`:ns` / `:file` / `:dispatch`) and how to add a block.
 
-Unlike the user tutorial (propose lessons, get sign-off), developer-tour edits
-are part of the change itself — no separate sign-off. Do **not** add a step for
+Like user-tutorial updates, developer-tour edits are part of the change
+itself — no separate sign-off. Do **not** add a step for
 an internal refactor that changes no entry-point, a bug fix, or perf work,
 unless it changes what a newcomer should read.
 

@@ -106,7 +106,7 @@ check that the interface shows/hides by the graph marker.
 > the private many.
 >
 > **REFRAMED 2026-08-13 (design discussion, recorded in
-> [docs/ROADMAP.md § Package Interface Declaration](../docs/ROADMAP.md#package-interface-declaration-packages-spec-6-reframed)
+> [docs/ROADMAP.md § Package Interface Declaration](../docs/ROADMAP.md#deprioritized-do-when-theres-a-slot-no-critical-path)
 > — read THAT entry first, it supersedes §6's "hide internals"
 > wording):** the feature is an UPDATE-CONTRACT declaration, not
 > hiding — cross-language survey shows visibility's real function is

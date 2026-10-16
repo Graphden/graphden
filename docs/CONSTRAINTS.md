@@ -161,7 +161,7 @@ is opt-in via fn-slot pointing at the same slot-id).
 
 | Storage | Location |
 |---|---|
-| all backends | `src/graphden/storage/protocol/constraints.clj` — `validate-no-dependency-cycle-impl` walks `read-entities` results (backend-agnostic in-memory `StorageCRUD` traversal, NOT a SQL CTE); postgres delegates to it |
+| all backends | `generic-constraints/dependency-closure` loads the execution graph through `resolve-execution-graph` (the PostgreSQL recursive-CTE resolver), then walks its indexed rows in memory. `constraints/validate-no-dependency-cycle-impl` uses that closure to reject a cycle. |
 
 The `GraphConstraints` extension is wired generically through
 `graphden.storage.protocol.generic-constraints`.
@@ -170,8 +170,9 @@ The `GraphConstraints` extension is wired generically through
 
 `src/graphden/storage/protocol/contract_tests.clj` exercises the
 protocol against any storage that registers `GraphConstraints`.
-The suite covers cycle detection (allow nil ref, reject self,
-allow distinct fn) plus concurrent CRUD.
+The suite covers the per-binding contract (allow nil ref, allow self-ref,
+allow a distinct independent fn) plus concurrent CRUD. The sync-time
+topological-sort rejection of graph cycles is a separate layer.
 
 ```bash
 bb test  # runs unit tests

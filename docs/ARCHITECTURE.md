@@ -271,7 +271,7 @@ Storage-layer graph resolution caps walks via
 | value       jsonb NULL                                     |
 | ref-fn-id   ref<fn> NULL                                   |
 | literal     bool NULL  -- :literal? for keyword items      |
-| UNIQUE(binding-id, position)                               |
+| (binding-id, position) unique per branch — resolved-view   |
 +-----------------------------------------------------------+
 ```
 
@@ -364,7 +364,7 @@ receive `[acc item]` as a single vector arg.
 
 ```clojure
 (defbase map-fn [func coll]
-  (mapv func coll))   ;; eager; the transducer form is its own base-fn, :map-xf
+  (doall (map func coll))) ;; eager SEQ; streaming uses :map-xf
 ```
 
 The HOF marker is the slot's effective type — `slot.type-fn-id`

@@ -1,5 +1,15 @@
 # Tutorial: Periodic API Poll with User-Owned Storage
 
+**Status: needs alignment with the current secret-flow contract.** The
+walkthrough below records an earlier end-to-end composition. Today
+`:sql-exec` and `:sql-query` conservatively propagate the secret password
+mark to their results: the Run pane hides the SQL results promised in
+Steps 4–5, and Step 7's `list-history` cannot flow into `:json-handler`'s
+plain `:jsonb` input. Do not treat the final history endpoint as a current
+working recipe or bypass the marker to make it work. Use the focused
+[lessons](tutorial/README.md) and [SECRETS.md](SECRETS.md) for current
+contracts; the full composition needs a reviewed output design.
+
 Build, end-to-end through the editor UI, a service that:
 
 1. Calls an external HTTP API on a cron schedule

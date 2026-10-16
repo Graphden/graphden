@@ -384,10 +384,11 @@ curl -X POST "$BASE/api/orgs/services/delete" \
 
 ### One current limitation
 
-The tenant list shows a service's **desired** state (enabled?, restart-policy)
-but not its live **run** status — the reconciler's running / failed signal lives
-on your dedicated pod, not on the platform endpoint that serves the list, so the
-editor badge reads *configured* / *disabled*, not *running* / *failed*, for now.
+The tenant list's badge shows a service's **desired** state (enabled?,
+restart-policy): *configured* / *disabled*. The instances popover separately
+shows live copies reported by cross-pod heartbeats. Detailed reconciler failure
+and backoff state still lives on the executor pod; the badge does not summarize
+that state across the fleet.
 
 Operators provisioning a dedicated tenant (the pod set, the shard, the limits):
 see [docs/FLEET_DEPLOY.md § Dedicated tenant shard](../FLEET_DEPLOY.md).

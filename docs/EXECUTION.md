@@ -227,7 +227,7 @@ Two caps gate how many executions run at once, with different scopes
 | Cap | Env | Default | Scope | Overflow |
 |-----|-----|---------|-------|----------|
 | Global | `GRAPHDEN_MAX_CONCURRENT_EXECUTIONS` | 128 | Per-POD. Sizes the bounded execution pool's worker count. | **Parks in the pool queue** (bounded `LinkedBlockingQueue`); it no longer rejects at admission. Only when workers AND queue are both full does submit throw → `503` + `Retry-After` `{:reason :queue-full}`. |
-| Per-org | `GRAPHDEN_MAX_CONCURRENT_EXECUTIONS_PER_ORG` | 32 | **Fleet-wide for tenants** (counts pending `:fn-execution` rows in shared storage, so N pods share one budget); per-pod atom for the public/platform org. | **Rejects at admission**, no row or future created: `{:ok false :status :rejected :error-data {:reason :over-capacity}}`. |
+| Per-org | `GRAPHDEN_MAX_CONCURRENT_EXECUTIONS_PER_ORG` | 32 | Per-pod live counter for **every org**, including pure inline runs; tenants additionally check pending `:fn-execution` rows for a fleet-wide persisted-run budget. | **Rejects at admission**, no row or future created: `{:ok false :status :rejected :error-data {:reason :over-capacity}}`. |
 
 The per-org cap is the admission gate. The global cap moved to the bounded
 pool: it queues work (`park-then-503`) rather than dropping it, and the

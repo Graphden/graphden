@@ -5,6 +5,13 @@ description: Quality of Clojure code in `src/` and `test/` — DRY, dead code, d
 
 # graphden-code-quality — clean Clojure src/ and test/
 
+**Agent execution contract:** claim an isolated worktree and follow
+[dev/wtq/AGENT.md](../../../dev/wtq/AGENT.md). Use `bb wt test` for focused
+tests and `bb wt up` for live verification at its printed URL. The landing
+gate owns shared rebuilds and heavy suites; older generic build/test recipes
+below do not authorize `bb rebuild`, `bb deploy` or shared-port work from an
+agent worktree.
+
 The goal of this skill: **open the code in front of an outside developer and not
 wince**. This is not "run linters until green" (`bb check` we run anyway),
 but catching semantic problems the linter doesn't
@@ -930,8 +937,9 @@ grep -LE 'cleanup\(|deleteFnByName|delete.*before' tools/browser-test/*.test.js 
 ```
 
 Browser tests run in parallel — each seeds a fn-def with a unique `RUN_ID`
-(`process.pid + Date.now`). If cleanup doesn't work — garbage piles up
-in the dev-DB → the next full reset via `bb deploy`.
+(`process.pid + Date.now`). Broken cleanup leaves test fixtures behind.
+Repair the exact fixture cleanup and use the isolated test stack lifecycle;
+do not reset the shared database to hide the leak.
 
 **Pattern check**: `RUN_ID = '-' + process.pid + '-' + Date.now()` —
 each probe-fn should have a suffix.

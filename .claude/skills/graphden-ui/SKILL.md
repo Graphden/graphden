@@ -5,6 +5,13 @@ description: Frontend changes to the Graphden editor (resources/packages/app/edi
 
 # graphden-ui — UI work that actually gets verified
 
+**Agent execution contract:** claim an isolated worktree and follow
+[dev/wtq/AGENT.md](../../../dev/wtq/AGENT.md). Use `bb wt test` for focused
+tests and `bb wt up` for live verification at its printed URL. The landing
+gate owns shared rebuilds and heavy suites; older generic build/test recipes
+below do not authorize `bb rebuild`, `bb deploy` or shared-port work from an
+agent worktree.
+
 Frontend = ~22.6K lines of vanilla JS (editor modules + the shared `web/runtime` bundle) + one CSS file with `:root` / `body.theme-dark` design tokens. No build step, no module system, no React. Files load in the order declared in `app/editor/fns.edn :_editor-script-paths`.
 
 The recurring failure mode this skill prevents: **claiming "the UI is done" without ever opening a browser or reading a console log.** `bb rebuild` ships the jar; that's not the same as the feature working.
@@ -28,7 +35,10 @@ Plus three CLI checks wired into `bb`:
 
 A **Stop hook** (`.claude/hooks/check-ui-on-stop.sh`, wired in `.claude/settings.json`) auto-runs biome + stylelint on UI files modified in the working tree at the end of every turn — if either fails with errors (warnings ignored), Claude is forced to fix before stopping. So the skill's "before claiming done" checklist below is enforced, not just guidance.
 
-If a tool name like `mcp__playwright__navigate` doesn't show up in your toolbox, the MCP isn't connected — ask the user to restart Claude Code (the MCPs only register at startup) before continuing.
+Use the available Playwright/browser tools. If an MCP is unavailable, use
+the repository's existing Playwright CLI against your isolated URL; missing
+MCP registration does not require stopping for a client restart. Keep the
+same real-browser verification bar and report any unavailable checks.
 
 Fallback (if MCPs unavailable): `tools/browser-test/check-editor.js <fn-name>` writes a screenshot to `/tmp/editor-screenshot.png` and prints console logs. Read both before claiming the change works.
 
@@ -78,9 +88,9 @@ After ANY editor change, run all six (the Stop hook auto-runs 1 + 2; do the rest
 
 1. **`bb biome`** — JS lint. Must exit 0 at error level (warnings allowed, errors block).
 2. **`bb stylelint`** — CSS lint. Must exit 0. Catches off-palette colours and mis-formed CSS.
-3. **`bb rebuild`** — ships the change to the running container. Wait for "✓ smoke OK".
+3. **`bb wt up`** — builds and starts the isolated worktree stack and verifies its hashes.
 4. **Live browser check** — via Playwright MCP:
-   - Navigate to `http://localhost:9002/#<some-fn>` (the graph only renders once a fn is selected — nodes/edges are fetched from the server and laid out from server positions, so the empty editor is not a useful screenshot baseline).
+   - Navigate to `<isolated-url>/#<some-fn>` (the URL printed by `bb wt up`) (the graph only renders once a fn is selected — nodes/edges are fetched from the server and laid out from server positions, so the empty editor is not a useful screenshot baseline).
    - Read `console` — zero errors expected.
    - Take a screenshot, eyeball it (overlapping elements, cut-off text, contrast issues).
    - For interactive features: click / type / observe state change.

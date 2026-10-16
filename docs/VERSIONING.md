@@ -130,18 +130,20 @@ at all.
 
 ### Invalidation
 
-The standard `invalidate-graph-cache!` flow still applies — writes
-land on the per-branch ctx via the normal `defbase` path, and the
-post-write invalidation only touches that branch's atoms. main stays
-warm; other unrelated branches stay warm. Only the just-written
-branch pays a rebuild on the next read.
+The standard `invalidate-graph-cache!` flow still applies to the written
+branch. `branch-router/invalidate-affected-ctxs!` also invalidates cached
+branches whose resolved view inherits from it. A write on a feature branch
+leaves main and unrelated branches warm; a write on main can affect its
+inheriting branches. Known fn-id seeds trigger delta recompilation; an
+unknown write shape clears the affected caches. Uncached branches are not
+built just to invalidate them.
 
 ### Cost model
 
 - First request on a branch: full compile pass (~100ms on the
   current package set).
 - Subsequent requests: O(1) lookup in the atom.
-- Write on branch X: invalidates X only.
+- Write on branch X: invalidates X and cached branches inheriting from X.
 - Memory: one ExecutionContext per active branch, bounded by an **LRU
   cap** (`default-max-cached-branches`, default 16; tune per deployment
   via `GRAPHDEN_MAX_CACHED_BRANCHES`); a cached entry idle for 15 min

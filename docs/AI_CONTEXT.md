@@ -190,12 +190,15 @@ shows the free-arg list; an unexpected `else` there is this.
 
 ## 9. Effects — what the cloud will and won't run
 
-If your fn is executed in the hosted platform, only these effects are
-allowed: reading/writing the graph DB, time, randomness, and in-graph
-state. The external world — network, environment variables, files,
-spawning processes — is **blocked** for tenant graphs. Compose within
-that budget; if a step needs the outside world, it belongs to a
-platform-provided base-fn, not your composition.
+On the hosted platform, the organization's tier bounds your graph's
+effects. The anonymous demo allows graph DB operations, time, randomness
+and in-graph state. Registered free and paid tiers also allow metered,
+egress-guarded network access (including HTTP and the organization's own
+external database); persistent processes require the dedicated tier.
+Environment variables, local files and raw SQL on the platform database
+remain blocked for tenant graphs. Discover the available primitives and
+compose within your tier's budget; a different composition cannot bypass
+the runtime effect gate.
 
 ## 10. Tests — pin your invariants in the graph
 

@@ -31,9 +31,9 @@ their own — please keep these in mind:
   Reports of "the demo compose is open" are expected, not bugs — but
   reports that a *hardened* deployment (auth on, tenancy addon loaded)
   can be bypassed are in scope.
-- **The anonymous tier on the hosted demo can author and run graphs in a
-  shared public org.** That is the demo product, bounded by per-request
-  resource limits.
+- **The anonymous hosted demo can author and run graphs in its own
+  ephemeral org on shared infrastructure.** That is the demo product,
+  bounded by anonymous-tier quotas and per-request resource limits.
 - **Effects are a capability, not a sandbox escape.** A fn declaring
   `:io` / `:network` / `:process` and running under a principal granted
   those effects is doing what it's allowed to. In scope: a fn that runs

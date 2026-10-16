@@ -5,6 +5,13 @@ description: REPL-driven workflow for Graphden via the clojure MCP server. Use w
 
 # graphden-repl — REPL-first for Graphden
 
+**Agent execution contract:** claim an isolated worktree and follow
+[dev/wtq/AGENT.md](../../../dev/wtq/AGENT.md). Use `bb wt test` for focused
+tests and `bb wt up` for live verification at its printed URL. The landing
+gate owns shared rebuilds and heavy suites; older generic build/test recipes
+below do not authorize `bb rebuild`, `bb deploy` or shared-port work from an
+agent worktree.
+
 The purpose of this skill: **first verify the hypothesis in a live nREPL, then edit files**. The `bb rebuild` cycle (jar + docker + restart, ~30–60 s) is only needed for the final deploy — not for debugging.
 
 ## 0. Sanity check (once at the start of a session)
@@ -15,11 +22,15 @@ The purpose of this skill: **first verify the hypothesis in a live nREPL, then e
 (System/getProperty "user.dir")  ; => "/root/projects/graphden"
 ```
 
-If there's no port — ask the user to run `bb nrepl-bg` (background headless nREPL, writes `.nrepl-port`).
+Use an nREPL belonging to the claimed worktree and verify `user.dir`
+against that path; the main-checkout path above is only an example. Do not
+attach to another agent's or the shared demo's runtime. If no suitable REPL
+is available, use the authorized focused-test/live-stack workflow from
+`dev/wtq/AGENT.md`; unavailable MCP tools do not require a user restart.
 
 ## 1. Bring up the system
 
-The `dev` namespace ([development/src/dev.clj](../../development/src/dev.clj)) is loaded in the REPL:
+The `dev` namespace ([development/src/dev.clj](../../../development/src/dev.clj)) is loaded in the REPL:
 
 ```clojure
 (require 'dev :reload)         ; always :reload — otherwise you may work with a stale def

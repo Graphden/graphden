@@ -21,10 +21,11 @@ you find as you go. Walking a parent chain until you hit a root.
 Retrying until a condition holds. Flattening a nested structure.
 
 In a normal language you would call the function from inside itself.
-Here you cannot, and not by omission: graphden **rejects every cycle**
-in the graph at write time, and again over the whole set at sync time
-([CONSTRAINTS.md](../CONSTRAINTS.md) has the rules). A fn that referred to itself would be a cycle, so it is
-refused. There is no flag to turn that off.
+Evaluation dependencies must form a DAG. The per-binding write guard
+rejects longer dependency cycles; sync-time topological sorting also rejects
+bare self-references. Identity-only `:fn-ref` edges do not evaluate their
+targets and are excluded from that rule ([CONSTRAINTS.md](../CONSTRAINTS.md)).
+There is no flag that enables graph-level recursive evaluation.
 
 That constraint is load-bearing — it is what makes the graph safe to
 compile eagerly, to lay out, and to reason about — so recursion gets an

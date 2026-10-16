@@ -111,14 +111,13 @@ The `:self` callable threads through every iteration: `:_call-self`
 `:invoke`s it with the next input; `fix-fn` re-enters the step;
 recursion bounded by `*max-recursion-depth*` (default 1000).
 
-### Type signature (MVP)
+### Current type signature
 
 ```edn
-;; LOOSE — recursive types are a follow-up. :step is bare :fn;
-;; editor doesn't auto-derive recursive return type.
+;; The call shape is structural; input and result remain :any.
 :fix
-  :args {:step {:type :fn :description "Step fn; receives :self + user args, returns result."}
-         :input {:type :any :description "Initial input to the recursive call."}}
+  :args {:step {:type [:fn {:input :any :self [:fn {:arg :any} :any]} :any]}
+         :input {:type :any}}
   :return-type :any
 ```
 
@@ -175,14 +174,13 @@ approach B.
   simpler to type-check (no arity ambiguity); positional is closer to
   Clojure idiom. **Shipped: positional** — `:self` is a 1-arg callable
   re-entered via `:invoke :func :self :arg <next>`.
-+ **Effects propagation**: ideally `:fix`'s declared effects = the
-  union of `:step`'s effects; the type-checker would need to handle
-  the recursive effect propagation without an infinite loop. As
-  shipped, `:fix` declares `:effects #{}` (the HOF pure-by-contract
-  house rule — same as `:map`/`:filter`): the static checker does no
-  recursive union, so a `:fix` over an effectful step under-reports
-  statically, while the runtime effect gate still records the step's
-  actual effects at execution.
++ **Effects propagation**: `:fix` itself declares `:effects #{}`.
+  A composition binding `:step` to a known fn inherits that ref's
+  computed effects through the checker's ordinary parent/ref union
+  (`types.check/compute-per-arg-effects` / `compute-effects`), just
+  like other HOF compositions. This does not require a graph cycle
+  or a recursive effect solver. Runtime effect enforcement remains
+  separate from the static declaration.
 
 ---
 

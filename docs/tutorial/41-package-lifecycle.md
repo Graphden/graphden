@@ -169,8 +169,9 @@ These are real external operations described in Lessons 31 and 34, not
 additional local fixtures created by this walkthrough.
 
 Package dependencies must be present before installation. A package that
-reads secrets carries the required paths; the consumer defines them in its
-own environment, as in [Lesson 16](16-effects-and-secrets.md). For ratings,
+reads secrets carries a manifest of arguments needing secret definitions;
+vault paths are stripped by default. The consumer defines those secrets in
+its own environment, as in [Lesson 16](16-effects-and-secrets.md). For ratings,
 metadata and install counts, see [Lesson 40](40-marketplace-themes-keymaps.md).
 
 ## Next

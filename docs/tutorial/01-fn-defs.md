@@ -34,9 +34,9 @@ Executing `:hello-handler` returns the map `{:status 200 :body "Hello from Graph
 
 Two places:
 
-1. **`resources/packages/<pkg>/<module>/fns.edn`** — a vector of
-   fn-def maps, loaded at startup. This is the source-of-truth
-   form. See [PACKAGES.md](../PACKAGES.md).
+1. **`resources/packages/<pkg>/<module>/fns.edn`** — a module map with
+   `:namespace` and a `:fns` vector of definitions, loaded at startup.
+   This is the package source form. See [PACKAGES.md](../PACKAGES.md).
 2. **Inside the running editor** — when you click `+` in a
    namespace, the editor creates a fn entity directly via
    `POST /api/entities/fn`. Same shape, different entry point.

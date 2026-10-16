@@ -214,8 +214,9 @@ Pass `{:value []}` if you want no stylesheet.
 
 To mount it, edit `resources/packages/app/route-groups/fns.edn`
 and append `:my-about-page` to `:all`'s `:items`. Run
-`bb rebuild` (or `bb deploy` if your DB is dirty). Visit
-`http://localhost:9002/about`.
+`bb rebuild`, then visit `http://localhost:9002/about`. Contributor agents
+use their claimed worktree's `bb wt up` and its printed URL. A routine
+package edit does not require truncating the database.
 
 ### When the simple template isn't enough
 

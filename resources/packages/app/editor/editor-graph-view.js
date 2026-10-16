@@ -27,6 +27,7 @@ function _gvNode(node) {
     height: () => nodeHeight(node),
     /** Record the card's real height, once the DOM has told us what it is. */
     setHeight: (h) => { node.data.layoutHeight = h; },
+    setWidth: (w) => { node.data.layoutWidth = w; },
     incomingEdges: () => _gvEdgesFrom(graph.incoming.get(node.id)),
     outgoingEdges: () => _gvEdgesFrom(graph.outgoing.get(node.id)),
   };

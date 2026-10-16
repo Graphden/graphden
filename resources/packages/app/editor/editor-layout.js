@@ -45,6 +45,29 @@ function computeRowCenters(gridPos, heightOf) {
   return rowCenterY;
 }
 
+/** The same column placement for estimated and measured content widths. */
+function computeColumnGeometry(gridPos, widthOf, gaps) {
+  const widths = new Map();
+  const minimums = new Map();
+  for (const [id, pos] of Object.entries(gridPos)) {
+    const width = widthOf(id);
+    if (!Number.isFinite(width)) continue;
+    widths.set(pos.col, Math.max(widths.get(pos.col) || 0, width));
+    minimums.set(pos.col, Math.min(minimums.get(pos.col) ?? width, width));
+  }
+  const lefts = new Map();
+  const rights = new Map();
+  let x = 0;
+  for (const col of [...widths.keys()].sort((a, b) => a - b)) {
+    const width = widths.get(col);
+    lefts.set(col, x);
+    rights.set(col, x + width);
+    const spread = Math.max(0, (width - minimums.get(col)) / 2);
+    x += width + (gaps.get(col) || GRID_GAP_X) + spread;
+  }
+  return {lefts, rights};
+}
+
 // ============================================================================
 // TAXI EDGE GEOMETRY
 // ============================================================================
@@ -381,26 +404,6 @@ async function fetchBackendLayout() {
       sizes.set(n.data.id, calculateNodeSize(n.data));
     });
 
-    // Calculate column widths
-    const colWidths = new Map();
-    Object.entries(gridPos).forEach(([nodeId, pos]) => {
-      const size = sizes.get(nodeId);
-      if (size) {
-        const currentMax = colWidths.get(pos.col) || 0;
-        colWidths.set(pos.col, Math.max(currentMax, size.width));
-      }
-    });
-
-    // Calculate min node width per column (for width spread compensation)
-    const colMinWidths = new Map();
-    Object.entries(gridPos).forEach(([nodeId, pos]) => {
-      const size = sizes.get(nodeId);
-      if (size) {
-        const currentMin = colMinWidths.get(pos.col);
-        colMinWidths.set(pos.col, currentMin === undefined ? size.width : Math.min(currentMin, size.width));
-      }
-    });
-
     // Calculate per-column gap based on:
     // 1. Longest edge label crossing each column boundary, INCLUDING the
     //    type-chip / sequence buttons / description badge that the
@@ -469,21 +472,8 @@ async function fetchBackendLayout() {
       }
     });
 
-    // Calculate X positions with per-column gaps + width spread compensation.
-    // Skip empty columns entirely — the backend reserves some cells for edge
-    // routing but those produce no nodes, so padding them with a default width
-    // wastes horizontal space.
-    const colLeftX = new Map();
-    const usedCols = Array.from(colWidths.keys()).sort((a, b) => a - b);
-    let currentX = 0;
-    usedCols.forEach(c => {
-      colLeftX.set(c, currentX);
-      const maxWidth = colWidths.get(c);
-      const minWidth = colMinWidths.get(c) || maxWidth;
-      const widthSpread = Math.max(0, (maxWidth - minWidth) / 2);
-      const gap = colGaps.get(c) || GRID_GAP_X;
-      currentX += maxWidth + Math.max(gap, gap + widthSpread);
-    });
+    const {lefts: colLeftX, rights: colRightX} = computeColumnGeometry(
+      gridPos, id => sizes.get(id)?.width, colGaps);
 
     // Calculate Y positions from the ESTIMATED card heights. The estimate is
     // only good enough to avoid a flash: a card's real height is content-driven
@@ -521,7 +511,7 @@ async function fetchBackendLayout() {
     nodes.forEach(n => {
       const pos = gridPos[n.data.id];
       if (pos) {
-        n.data.colRightX = colLeftX.get(pos.col) + (colWidths.get(pos.col) || 0);
+        n.data.colRightX = colRightX.get(pos.col);
       }
       const size = sizes.get(n.data.id);
       if (size) {

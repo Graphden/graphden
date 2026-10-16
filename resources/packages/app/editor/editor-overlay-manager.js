@@ -497,58 +497,83 @@ function updateOverlayPositions() {
 
 
 /**
- * Correct the layout against the cards' REAL heights.
- *
- * `calculateNodeSize` predicts a card's height by mirroring what the overlay
- * renderer will draw. That mirror cannot be right: the effects strip wraps to
- * as many chip rows as the card's width allows, which depends on font metrics,
- * and every strip the renderer gains has to be remembered here too — it had
- * already forgotten `branch-local`. On `web-server` the estimate was 90 graph
- * units against a real 167.
- *
- * Under-estimating pushes a card 77 units into the row below (the grid leaves
- * 40), and anchors its edges 38 units above its visual centre.
- *
- * So the estimate is demoted to a first guess that keeps the first paint from
- * flashing, and the DOM — which knows — supplies the answer. `offsetHeight`
- * ignores ancestor transforms, so inside the scaled layer it already reports
- * graph units.
- *
- * Mutates `layout` (node id → {x, y, …}) in place and returns whether anything
- * moved, so the caller can animate towards the corrected targets.
+ * Correct the existing grid against actual card and edge-label footprints.
+ * Estimates only prevent a first-paint flash. Read intrinsic arg widths without
+ * the assigned node width, restore widths, then read final natural heights.
+ * Keep edge-label row reservations separate from the cards' actual heights.
  */
 function reflowFromMeasuredHeights(layout) {
   const gridPos = lastGridPos();
   if (!gv.ready() || !gridPos || !layout) return false;
-
-  const measured = new Map();
-  let changed = false;
-  for (const [nodeId, overlay] of _overlaysByNodeId) {
-    const node = gv.node(nodeId);
-    // Placeholders are a fixed-size `+` target, not a card: their overlay is a
-    // transparent wrapper whose height says nothing about the slot.
+  const cards = [];
+  for (const [id, overlay] of _overlaysByNodeId) {
+    const node = gv.node(id);
     if (!node || node.data('isPlaceholder')) continue;
-    const h = overlay.offsetHeight;
-    if (!h) continue;
-    measured.set(nodeId, h);
-    if (Math.abs(h - node.height()) > 0.5) changed = true;
+    cards.push({id, overlay, node, arg: node.data('type') === 'arg'});
   }
-  if (!changed) return false;
-
-  for (const [nodeId, h] of measured) {
-    gv.node(nodeId)?.setHeight(h);
-    const entry = layout.get(nodeId);
-    if (entry) entry.height = h;
+  // Batch writes, then reads. A stale min-height otherwise prevents shrinking
+  // when a personal view is replaced by the smaller builtin view.
+  for (const card of cards) {
+    card.overlay.style.minHeight = '';
+    if (card.arg) card.overlay.style.width = 'max-content';
   }
-
-  // Rows restack around the tallest card in each. Columns are untouched: an
-  // overlay's width is set from the node, so it never overflows.
-  const rowCenterY = computeRowCenters(
-    gridPos, (id) => measured.get(id) ?? layout.get(id)?.height);
-  for (const [nodeId, pos] of Object.entries(gridPos)) {
-    const y = rowCenterY.get(pos.row);
-    const entry = layout.get(nodeId);
-    if (y !== undefined && entry) entry.y = y;
+  const widths = new Map();
+  for (const {id, overlay, node, arg} of cards) {
+    widths.set(id, arg ? Math.max(40 * typographyScale(), Math.ceil(overlay.offsetWidth)) : node.width());
   }
-  return true;
+  for (const {id, overlay} of cards) overlay.style.width = widths.get(id) + 'px';
+  const heights = new Map(cards.map(({id, overlay, node}) => [id, overlay.offsetHeight || node.height()]));
+  const envelopes = new Map(heights);
+  const gaps = new Map();
+  const groups = new Map();
+  for (const edge of graph.edges.values()) {
+    if (!edge.data.seqGroup) continue;
+    const members = groups.get(edge.data.seqGroup) || [];
+    members.push(edge);
+    groups.set(edge.data.seqGroup, members);
+  }
+  const labelSizes = new Map([..._edgeOverlaysByEdgeId].map(([id, overlay]) =>
+    [id, {width: overlay.offsetWidth, height: overlay.offsetHeight}]));
+  for (const [edgeId, overlay] of _edgeOverlaysByEdgeId) {
+    const sequence = isSeqTrunkId(edgeId);
+    const members = sequence
+      ? groups.get(overlay.dataset.seqGroup) || []
+      : [graph.edges.get(edgeId)].filter(Boolean);
+    const {width, height} = labelSizes.get(edgeId);
+    const itemWidth = sequence ? Math.max(0, ...members.map(edge => labelSizes.get(edge.id)?.width || 0)) : 0;
+    for (const edge of members) {
+      const source = gridPos[edge.sourceId];
+      const target = gridPos[edge.targetId];
+      if (!source || !target) continue;
+      const col = Math.min(source.col, target.col);
+      // The SAME native bend/post-bend/target constants used by positioning.
+      // A sequence trunk additionally reserves its fan and item-button chrome.
+      const gap = TAXI_COL_CLEARANCE + EDGE_LABEL_POST_BEND_GAP + width
+        + EDGE_LABEL_TARGET_GAP + (sequence ? SEQ_FAN_GAP + itemWidth : 0);
+      gaps.set(col, Math.max(gaps.get(col) || GRID_GAP_X, gap));
+      // A trunk is centred over several target rows. Reserving its height in
+      // every member row is conservative and uses the same grid row solver.
+      envelopes.set(edge.targetId, Math.max(envelopes.get(edge.targetId) ?? gv.node(edge.targetId)?.height() ?? 0, height));
+    }
+  }
+  const widthOf = id => widths.get(id) ?? gv.node(id)?.width();
+  const columns = computeColumnGeometry(gridPos, widthOf, gaps);
+  const rows = computeRowCenters(gridPos, id => envelopes.get(id) ?? gv.node(id)?.height());
+  let changed = false;
+  for (const [id, pos] of Object.entries(gridPos)) {
+    const node = gv.node(id);
+    const entry = layout.get(id);
+    if (!node || !entry) continue;
+    const width = widthOf(id);
+    const height = heights.get(id) ?? node.height();
+    const x = columns.lefts.get(pos.col) + width / 2;
+    const y = rows.get(pos.row);
+    if (Math.abs(width - node.width()) > 0.5 || Math.abs(height - node.height()) > 0.5
+      || (!userMovedNodes.has(id) && (Math.abs(x - entry.x) > 0.5 || Math.abs(y - entry.y) > 0.5))) changed = true;
+    node.setWidth(width);
+    node.setHeight(height);
+    node.data().colRightX = columns.rights.get(pos.col);
+    Object.assign(entry, {x, y, width, height});
+  }
+  return changed;
 }

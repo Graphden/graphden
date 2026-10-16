@@ -117,8 +117,11 @@
                    :recents ["app.ui-recents" "recents" #{:initial :update :view}]
                    :inspector ["app.ui-inspector" "inspector" #{:initial :update :view}]
                    :explorer ["app.ui-explorer" "explorer-toolbar" #{:initial :update :view}]
-                   :tutorial-catalog ["app.ui-tutorial-catalog" "catalog" #{:view}]}]
-    (is (= (set (keys contracts)) (set (keys actual))))
+                   :tutorial-catalog ["app.ui-tutorial-catalog" "catalog" #{:view}]
+                   :canvas ["app.ui-canvas" "canvas" #{:view}]}]
+    (is (= (set (keys component-config/component-contracts))
+           (set (keys contracts))
+           (set (keys actual))))
     (is (= (set (map :id (vals component-config/component-contracts)))
            (set (keys authored)))
         "the raw shipped manifest has exactly the trusted discriminator identities")

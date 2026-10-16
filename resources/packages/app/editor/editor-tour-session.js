@@ -42,20 +42,21 @@ function _tourRejectGraphViewCreation(command) {
   _tourSaveState();
 }
 
-async function _tourExpectedBranch(saved) {
+async function _tourExpectedBranch(saved, current = () => true) {
   const lesson = (_tourLessons?.lessons || []).find((l) => l.id === saved.lessonId);
   const check = lesson?.steps?.[saved.step]?.check;
   if (check?.kind === 'on-branch') return check.name;
   if (check?.kind !== 'created-branch') return null;
   const receipt = saved.created?.find(row => row.type === 'branch'
     && row.name === check.name && row.receipt === 'created' && row.id && row['base-branch-id']);
-  if (!receipt || !await _tourConfirmPrincipal(saved)) return null;
+  if (!receipt || !await _tourConfirmPrincipal(saved, current)) return null;
+  if (!current()) return null;
   try {
     const response = await authFetch(API.api_branches);
     if (!response.ok) return null;
     const body = await response.json();
     const rows = Array.isArray(body) ? body : body?.branches;
-    return _tourPrincipalMatches(saved) && rows?.some(row => row.id === receipt.id
+    return current() && _tourPrincipalMatches(saved) && rows?.some(row => row.id === receipt.id
       && row.name === receipt.name && row['base-branch-id'] === receipt['base-branch-id'])
       ? receipt.name : null;
   } catch (_) { return null; }
@@ -82,7 +83,7 @@ function _tourPrincipalMatches(saved, current = _tourSessionPrincipal()) {
   return saved.principal.accountId === current.accountId && saved.principal.orgId === current.orgId;
 }
 
-async function _tourConfirmPrincipal(saved) {
+async function _tourConfirmPrincipal(saved, current = () => true) {
   let confirmed = _tourSessionPrincipal();
   try {
     if (window.gdAccountsReady && await window.gdAccountsReady) {
@@ -109,6 +110,7 @@ async function _tourConfirmPrincipal(saved) {
   } catch (_) {
     confirmed = null;
   }
+  if (!current()) return false;
   if (confirmed && _tourPrincipalMatches(saved, confirmed)) return true;
   _tourDialog({
     title: 'Tutorial context changed',
@@ -161,21 +163,28 @@ async function _tourConfirmCleanupContext(branch) {
 
 // Returning to Build on another branch must not silently run the saved
 // lesson's checks there. Lessons is the explicit route back to that context.
-async function _tourRestoreSession(saved, cleanup = false, nextLessonId = null) {
-  if (!saved?.lessonId) return false;
+async function _tourRestoreSession(saved, cleanup = false, nextLessonId = null,
+                                   ticket = _tourStartTicket()) {
+  if (!saved?.lessonId || !_tourStartCurrent(ticket)) return false;
   _tourState = { ...saved };
+  const state = _tourState;
   if (cleanup) _tourState.phase = 'cleanup';
   if (nextLessonId) _tourState.nextLessonId = nextLessonId;
   _tourSaveState();
-  if (!await _tourConfirmPrincipal(_tourState)) return false;
+  if (!await _tourConfirmPrincipal(state,
+    () => _tourState === state && _tourStartCurrent(ticket))) return false;
+  if (_tourState !== state || !_tourStartCurrent(ticket)) return false;
   const ending = cleanup || saved.phase === 'cleanup';
   if (ending && typeof _tourDeleteHttpPublications === 'function') {
     await _tourDeleteHttpPublications(_tourState.created || []);
+    if (_tourState !== state || !_tourStartCurrent(ticket)) return false;
   }
   const branch = ending ? _tourCleanupBranch(saved)
     : saved.activeBranch || saved.sandboxBranch || saved.branch || 'main';
   if (branch !== _tourSessionBranch() && typeof switchToBranch === 'function') {
-    if (!await _tourBranchAvailable(branch)) {
+    const available = await _tourBranchAvailable(branch);
+    if (_tourState !== state || !_tourStartCurrent(ticket)) return false;
+    if (!available) {
       _tourUnavailableContext(branch);
       return false;
     }
@@ -183,11 +192,12 @@ async function _tourRestoreSession(saved, cleanup = false, nextLessonId = null) 
     return true;
   }
   const lesson = ((await _tourFetchLessons())?.lessons || []).find((l) => l.id === saved.lessonId);
+  if (_tourState !== state || !_tourStartCurrent(ticket)) return false;
   if (_tourState.phase === 'cleanup' || (lesson && saved.step >= lesson.steps.length)) {
     await _tourEnd(_tourState.nextLessonId);
     return true;
   }
-  return startTutorial(saved.lessonId, saved.step, saved.created, saved);
+  return startTutorial(saved.lessonId, saved.step, saved.created, saved, ticket);
 }
 
 // Choosing another lesson is a decision about the pending lesson too. Reuse
@@ -215,8 +225,9 @@ function _tourKeepAndContinue(lessonId, branch) {
 // saved tour state on the branch), and the end-of-tour dialog offers
 // branch deletion = full rollback. Falls back to a plain in-place tour
 // when branch creation is unavailable (401/403/older deploys).
-async function startTutorialIsolated(lessonId) {
+async function startTutorialIsolated(lessonId, ticket = _tourStartTicket()) {
   const lessons = await _tourFetchLessons();
+  if (!_tourStartCurrent(ticket)) return false;
   if (!lessons) {
     if (typeof gdToast === 'function') gdToast('Tutorial unavailable on this deployment');
     return false;
@@ -228,8 +239,8 @@ async function startTutorialIsolated(lessonId) {
   // scratch-branch isolation — double-wrapping broke its own "main
   // never saw it" beat and leaked the scratch branch.
   const lesson = (lessons.lessons || []).find((l) => l.id === lessonId);
-  if (lesson?.['in-place']) return startTutorial(lessonId);
-  if (!canBranch || !onMain) return startTutorial(lessonId);
+  if (lesson?.['in-place']) return startTutorial(lessonId, null, null, null, ticket);
+  if (!canBranch || !onMain) return startTutorial(lessonId, null, null, null, ticket);
   const branch = 'tutorial-' + lessonId + '-'
     + Math.random().toString(36).slice(2, 6);
   const principal = _tourSessionPrincipal();
@@ -237,11 +248,13 @@ async function startTutorialIsolated(lessonId) {
   let id;
   try {
     base = await _tourReadBranchBase('main');
+    if (!_tourStartCurrent(ticket)) return false;
     if (!_tourPrincipalMatches({principal})) throw new Error('Tutorial principal changed');
     id = window.crypto.randomUUID();
   } catch (_) {
+    if (!_tourStartCurrent(ticket)) return false;
     if (typeof gdToast === 'function') gdToast('Starting in place (no branch)');
-    return startTutorial(lessonId);
+    return startTutorial(lessonId, null, null, null, ticket);
   }
   // Save exact create-only ownership BEFORE sending the mutation. A reload or
   // ambiguous response restores cleanup on main, without claiming a name.
@@ -256,19 +269,20 @@ async function startTutorialIsolated(lessonId) {
       body: JSON.stringify({id, name: branch, 'base-branch-id': base.id}),
     });
     const body = await response.json().catch(() => null);
-    if (_tourState !== state || !_tourPrincipalMatches(state)) return false;
+    if (_tourState !== state || !_tourStartCurrent(ticket)
+        || !_tourPrincipalMatches(state)) return false;
     if ((response.status >= 400 && response.status < 500) || (response.ok && body?.ok === false)) {
       _tourState.created = [];
       _tourSaveState();
       if (typeof gdToast === 'function') gdToast('Starting in place (no branch)');
-      return startTutorial(lessonId);
+      return startTutorial(lessonId, null, null, null, ticket);
     }
     const row = body?.branch;
     if (!response.ok || body?.ok !== true || row?.id !== id
         || row.name !== branch || row['base-branch-id'] !== base.id) throw new Error('Unconfirmed branch creation');
     pending.receipt = 'created';
   } catch (_) {
-    if (_tourState === state) {
+    if (_tourState === state && _tourStartCurrent(ticket)) {
       if (typeof gdToast === 'function') gdToast('Branch creation could not be confirmed. Cleanup remains available in Lessons.');
       await _tourEnd();
     }

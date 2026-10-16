@@ -14,6 +14,8 @@ function fixture() {
     crypto: {randomUUID: () => 'session-id'},
     getCurrentBranchName: () => 'main',
     _tourState: null, _tourSaveState() {}, _tourCopy: (_, fallback) => fallback,
+    // This focused session fixture excludes the tour engine that owns intent tickets.
+    _tourStartTicket: () => ({}), _tourStartCurrent: () => true,
     _tourDialog: opts => dialogs.push(opts),
     _tourDeleteHttpPublications: async rows => {revoked.push(...rows.map(row => row.id)); return [];},
     switchToBranch() {throw new Error('must not switch to a missing branch');},

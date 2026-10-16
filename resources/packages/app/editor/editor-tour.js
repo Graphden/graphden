@@ -29,6 +29,22 @@ const TOUR_TICK_MS = 600;
 
 let _tourLessons = null; // fetched /api/tour payload
 let _tourState = null;   // {lessonId, step, created: [{type,name}]}
+let _tourStartGeneration = 0;
+
+// A same-document boot resume must never replace a lesson the reader started
+// while the initial graph was still loading. Explicit starts claim ownership
+// before their first await; account and branch changes invalidate the claim.
+function _tourStartTicket(manual = true) {
+  if (manual) _tourStartGeneration++;
+  return {generation: _tourStartGeneration, authEpoch: _graphAuthEpoch,
+    branch: _tourSessionBranch()};
+}
+
+function _tourStartCurrent(ticket) {
+  return ticket?.generation === _tourStartGeneration
+    && ticket.authEpoch === _graphAuthEpoch
+    && ticket.branch === _tourSessionBranch();
+}
 let _tourTimer = null;
 let _tourEls = null;     // {dim, spot, pop}
 
@@ -498,6 +514,7 @@ function _tourResume() {
 // Stop showing steps, keep the state. `maybeStartTutorial` resumes it on the
 // next load, and the catalogue offers "Continue …" right away.
 function _tourPause() {
+  _tourStartGeneration++;
   window.gdTourCatalogClose?.();
   const lesson = _tourLesson();
   _tourStopFollowing();
@@ -561,6 +578,7 @@ function _tourCopy(key, fallback, vars) {
 
 
 function _tourTeardown(keepSaved = false) {
+  _tourStartGeneration++;
   window.gdTourCatalogClose?.();
   _tourStopFollowing();
   _tourState = null;
@@ -660,8 +678,9 @@ async function _tourFetchLessons() {
 }
 
 // Entry point — shell menu and ?tutorial=NN both land here.
-async function startTutorial(lessonId, resumeStep, resumeCreated, session) {
+async function startTutorial(lessonId, resumeStep, resumeCreated, session, ticket = _tourStartTicket()) {
   const lessons = await _tourFetchLessons();
+  if (!_tourStartCurrent(ticket)) return false;
   if (!lessons) {
     if (typeof gdToast === 'function') gdToast('Tutorial unavailable on this deployment');
     return false;
@@ -705,27 +724,33 @@ async function startTutorial(lessonId, resumeStep, resumeCreated, session) {
 // for ?tutorial=NN (param stripped, survives the ?demo=1 reload), else
 // resumes a mid-lesson tour from localStorage.
 async function maybeStartTutorial() {
-  if (window.gdAccountsReady) await window.gdAccountsReady;
   const params = new URLSearchParams(window.location.search);
   const requested = params.get('tutorial');
-  // Read-and-clear ALWAYS, even when something else wins this load: a queued
-  // lesson left in storage would open on some unrelated later visit.
+  // Consume boot-only requests even when a manual start already owns this
+  // document; otherwise a later branch navigation can start a stale lesson.
   const queued = _tourTakeNext();
   if (requested) {
     params.delete('tutorial');
     const qs = params.toString();
     window.history.replaceState(null, '',
       window.location.pathname + (qs ? '?' + qs : '') + window.location.hash);
+  }
+  if (_tourState || _tourStartGeneration !== 0) return false;
+  const initialGeneration = _tourStartGeneration;
+  if (window.gdAccountsReady) await window.gdAccountsReady;
+  if (_tourState || _tourStartGeneration !== initialGeneration) return false;
+  const ticket = _tourStartTicket(false);
+  if (requested) {
     // A 2-digit id ("01") or bare number ("1") both resolve.
     const id = requested.length === 1 ? '0' + requested : requested;
-    return startTutorial(id);
+    return startTutorial(id, null, null, null, ticket);
   }
   // "Start the next lesson" from the end of a branch-isolated run: the
   // rollback switched to main, which reloaded the page, and this is the other
   // side of that. Isolated again — the next lesson gets its own branch.
   if (queued) {
     if (typeof gdToast === 'function') gdToast('Starting lesson ' + queued + '…');
-    return startTutorialIsolated(queued);
+    return startTutorialIsolated(queued, ticket);
   }
   const saved = _tourLoadState();
   if (saved?.lessonId) {
@@ -734,10 +759,13 @@ async function maybeStartTutorial() {
     if (branch !== _tourSessionBranch()) {
       // Branch lessons explicitly ask for a reload onto another branch.
       await _tourFetchLessons();
-      if (await _tourExpectedBranch(saved) !== _tourSessionBranch()) return false;
+      if (await _tourExpectedBranch(saved, () => _tourStartCurrent(ticket) && !_tourState)
+          !== _tourSessionBranch()
+          || !_tourStartCurrent(ticket) || _tourState) return false;
       saved.activeBranch = _tourSessionBranch();
     }
-    return _tourRestoreSession(saved);
+    if (!_tourStartCurrent(ticket) || _tourState) return false;
+    return _tourRestoreSession(saved, false, null, ticket);
   }
   return false;
 }

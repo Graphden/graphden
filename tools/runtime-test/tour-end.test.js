@@ -82,6 +82,7 @@ function makeWorld(opts) {
   const windowEvents = new EventTarget();
   const ctx = {
     console, JSON, Set, URLSearchParams, Math, Object, Array, Promise,
+    _graphAuthEpoch: 0,
     document,
     addEventListener: windowEvents.addEventListener.bind(windowEvents),
     removeEventListener: windowEvents.removeEventListener.bind(windowEvents),
@@ -239,7 +240,8 @@ const finishedOn = (id, extra) => Object.assign(
     w.btn('Start 02 · Slots').click();
     await new Promise((r) => setTimeout(r, 0));
     // The other side of the reload.
-    vm.runInContext('_tourState = null;', w.ctx);
+    // The queued lesson is picked up in a fresh document after the switch.
+    vm.runInContext('_tourState = null; _tourStartGeneration = 0;', w.ctx);
     assert(await w.ctx.maybeStartTutorial() === true, 'the next load picks it up');
     assert(w.calls.includes('startIsolated 02'),
       'and starts it ISOLATED, on its own branch (got: '

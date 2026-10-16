@@ -144,13 +144,13 @@ Stages a create-only publication UUID before sending the request. The graph part
 :PROPERTIES:
 :CUSTOM_ID: editor/_tourTrackHttpPublication
 :FILE: resources/packages/app/editor/editor-tour-session.js
-:LINE: 290
+:LINE: 304
 :MINS: 1.1
 :END:
 
 Records the exact lease, handler, namespace, branch, lesson session, and principal before publication. Cleanup can revoke that lease after its lesson branches disappear without guessing identity from a name or deleting another account's publication.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-tour-session.js::function _tourTrackHttpPublication(id, fn) {][resources/packages/app/editor/editor-tour-session.js:290]]
+- source :: [[file:../../../resources/packages/app/editor/editor-tour-session.js::function _tourTrackHttpPublication(id, fn) {][resources/packages/app/editor/editor-tour-session.js:304]]
 
 * 12. applyInheritancePreview
 :PROPERTIES:
@@ -624,13 +624,13 @@ Sends authenticated editor requests and handles 401 by clearing the stored crede
 :PROPERTIES:
 :CUSTOM_ID: editor/_tourTick
 :FILE: resources/packages/app/editor/editor-tour.js
-:LINE: 310
+:LINE: 326
 :MINS: 3.7
 :END:
 
 Evaluates the current interactive lesson step against editor state. Lesson data comes from ~app.tour/_tour-lessons~; this engine ensures required panels and targets are visible, checks the declared completion condition, and advances when it succeeds.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-tour.js::function _tourTick() {][resources/packages/app/editor/editor-tour.js:310]]
+- source :: [[file:../../../resources/packages/app/editor/editor-tour.js::function _tourTick() {][resources/packages/app/editor/editor-tour.js:326]]
 - referenced from :: [[file:editor.org::#editor/_tourStartPositioning][_tourStartPositioning]]
 
 * 48. gdTourBeginBranchCreation

@@ -11,6 +11,8 @@ function boot(outcome) {
   const ctx = vm.createContext({console, crypto, API: {api_branches: '/api/branches'},
     _tourState: null, _tourLessons: null, graphdenCurrentOrg: 'org', gdAccount: {id: 'account'},
     getCurrentBranchName: () => 'main',
+    // This receipt fixture excludes the tour engine that owns intent tickets.
+    _tourStartTicket: () => ({}), _tourStartCurrent: () => true,
     _tourFetchLessons: async () => ({lessons: [{id: '32', steps: [{check: {kind: 'manual'}}]}]}),
     _tourStep: () => null,
     _tourSaveState: () => {saves.push(JSON.parse(JSON.stringify(ctx._tourState)));},

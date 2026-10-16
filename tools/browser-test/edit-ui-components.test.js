@@ -4,7 +4,7 @@
 'use strict';
 const fs = require('node:fs');
 const assert = require('node:assert/strict');
-const {unexpectedSelectiveCopyErrors} = require('./selective-copy-errors');
+const {unexpectedSelectiveCopyErrors, components} = require('./selective-copy-errors');
 const {unexpectedThemeRetryErrors} = require('./theme-retry-errors');
 const {preparePickerOnlySelection, restorePickerOnlySelection} = require('./partial-ui-components-fixture');
 const {unexpectedCleanupErrors} = require('./owned-cleanup-errors');
@@ -50,7 +50,6 @@ const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
     ['/api/ui/components/create/preview', 'create-preview'],
     ['/api/ui/components/create/apply', 'create-apply'],
   ]);
-  const componentNames = new Set(['account-menu', 'fn-picker', 'recents', 'inspector', 'explorer']);
   const themeReasons = new Set(['not-plain-pure', 'evaluation-failed', 'result-unavailable', 'timeout', 'unavailable']);
   const refusalCodes = new Set(['policy-refresh-required', 'component-missing', 'tainted-result', 'runtime-effects', 'not-plain-pure', 'graph-changed']);
   page.on('request', request => {
@@ -98,7 +97,7 @@ const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
     const component = stage === 'component-plan' ? response.request().postDataJSON()?.component : undefined;
     console.log(JSON.stringify({diagnostic: 'ui-graph-refusal', stage, attempt, status: 422,
       code, retryable: body?.retryable === true, reason,
-      component: componentNames.has(component) ? component : undefined,
+      component: components.has(component) ? component : undefined,
       fallback: body?.fallback === 'builtin' ? 'builtin' : undefined}));
   };
   page.on('response', response => pendingReplies.push(captureResponse(response)));
@@ -106,13 +105,14 @@ const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
   page.on('console', message => { if (message.type() === 'error') errors.push({kind: 'console', text: message.text(), url: message.location().url}); });
   page.on('dialog', dialog => dialog.accept());
   const forcePolicyRetry = process.env.GRAPHDEN_POLICY_RETRY_PROOF === '1';
-  let forcedPolicyRetry = false;
+  const forcedPolicyRetries = new Set();
+  const proofComponents = new Set(['account-menu', 'tutorial-catalog']);
   if (forcePolicyRetry) {
     await page.route(url => url.pathname.endsWith('/ui/configuration/plan'), async route => {
       const request = route.request();
-      if (!forcedPolicyRetry && request.method() === 'POST'
-        && request.postDataJSON()?.component === 'account-menu') {
-        forcedPolicyRetry = true;
+      const component = request.method() === 'POST' ? request.postDataJSON()?.component : undefined;
+      if (proofComponents.has(component) && !forcedPolicyRetries.has(component)) {
+        forcedPolicyRetries.add(component);
         await route.fulfill({status: 422, contentType: 'application/json',
           body: JSON.stringify({ok: false, code: 'policy-refresh-required', retryable: true})});
       } else await route.continue();
@@ -139,11 +139,14 @@ const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
       'manifest cleanup does not issue per-function DELETE requests');
     await Promise.all(pendingReplies);
     if (forcePolicyRetry) {
-      assert(forcedPolicyRetry, 'the targeted proof forced one classified policy refusal');
-      assert(planReplies.some(reply => reply.status === 422 && reply.retryable),
-        'the harness observed the policy refusal');
-      assert(errors.some(error => error.kind === 'console' && error.text.includes('status of 422')),
-        'the browser emitted the network-console error under test');
+      assert.deepEqual(forcedPolicyRetries, proofComponents,
+        'the targeted proof forced both known component policy refusals');
+      for (const component of proofComponents) {
+        assert(planReplies.some(reply => reply.component === component && reply.status === 422 && reply.retryable),
+          'the harness observed the ' + component + ' policy refusal');
+      }
+      assert(errors.filter(error => error.kind === 'console' && error.text.includes('status of 422')).length >= proofComponents.size,
+        'the browser emitted both network-console errors under test');
     }
     const behaviorVerified = process.env.GRAPHDEN_COMPONENT_CLEANUP_ONLY !== '1';
     const unexpected = unexpectedCleanupErrors(unexpectedThemeRetryErrors(

@@ -22,6 +22,24 @@ test('restoring a partial manifest recovers a policy refusal only through its la
     assert.deepEqual(unexpectedSelectiveCopyErrors([error, error], [retry, {...restored, ...changed}], true), [error, error]);
   assert.deepEqual(unexpectedSelectiveCopyErrors([error, error], [retry, restored], false), [error, error]);
 });
+test('tutorial catalog policy retry needs an exact later success and verified behavior', () => {
+  const refusal = {kind: 'plan', url, component: 'tutorial-catalog', status: 422,
+    code: 'policy-refresh-required', retryable: true, sequence: 7};
+  const success = {...refusal, status: 200, ok: true, sequence: 8};
+  assert.deepEqual(unexpectedSelectiveCopyErrors([error], [refusal, success], true), []);
+  assert.deepEqual(unexpectedSelectiveCopyErrors([error, error], [refusal, success], true), [error]);
+  assert.deepEqual(unexpectedSelectiveCopyErrors([error], [refusal, success], false), [error]);
+  for (const change of [{component: 'unknown'}, {code: 'tainted-result'}, {retryable: false}]) {
+    assert.deepEqual(unexpectedSelectiveCopyErrors([error], [{...refusal, ...change}, success], true), [error]);
+  }
+  for (const change of [{component: 'recents'}, {url: url + '/other'},
+    {sequence: 7}, {status: 409}, {ok: false}]) {
+    assert.deepEqual(unexpectedSelectiveCopyErrors([error], [refusal, {...success, ...change}], true), [error]);
+  }
+  assert.deepEqual(unexpectedSelectiveCopyErrors([error], [refusal], true), [error]);
+  assert.deepEqual(unexpectedSelectiveCopyErrors([{...error, kind: 'pageerror'}], [refusal, success], true),
+    [{...error, kind: 'pageerror'}]);
+});
 test('unknown terminal refusals, wrong URLs, page errors and unverified behavior remain fatal', () => {
   for (const reply of [{...missing, code: 'tainted-result'}, {...missing, fallback: null}, {...missing, component: 'unknown'}, {...missing, url: url + '/other'}])
     assert.deepEqual(unexpectedSelectiveCopyErrors([error], [reply], true), [error]);

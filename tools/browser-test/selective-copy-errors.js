@@ -1,6 +1,11 @@
 'use strict';
 const {unexpectedPolicyRetryErrors} = require('./policy-retry-errors');
-const components = new Set(['account-menu', 'fn-picker', 'recents', 'inspector', 'explorer']);
+// Keep the finite console-recovery contract in sync with the shipped graph
+// component catalog. The runtime test checks these exact names and root keys.
+const componentRoots = Object.freeze({'account-menu': 'menu-id', 'fn-picker': 'picker-id',
+  recents: 'recents-id', inspector: 'inspector-id', explorer: 'explorer-id',
+  'tutorial-catalog': 'tutorial-catalog-id'});
+const components = new Set(Object.keys(componentRoots));
 const builtinFallback = reply => reply.kind === 'plan' && reply.status === 422
   && reply.code === 'component-missing' && reply.fallback === 'builtin' && components.has(reply.component);
 const fallbackRecovery = (reply, replies) => reply.kind === 'plan' && reply.status === 422
@@ -40,4 +45,4 @@ function unexpectedSelectiveCopyErrors(errors, replies, behaviorVerified) {
     return false;
   });
 }
-module.exports = {unexpectedSelectiveCopyErrors};
+module.exports = {unexpectedSelectiveCopyErrors, componentRoots, components};

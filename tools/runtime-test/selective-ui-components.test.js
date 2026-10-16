@@ -4,10 +4,15 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const {componentRoots: viewKeys} = require('../browser-test/selective-copy-errors');
 const source = fs.readFileSync(path.join(__dirname, '../../resources/packages/app/editor/editor-ui-component-catalog.js'), 'utf8');
 const id = n => String(n).padStart(8, '0') + '-1111-1111-1111-111111111111';
 const revision = 'a'.repeat(64);
-const viewKeys = {'account-menu': 'menu-id', 'fn-picker': 'picker-id', recents: 'recents-id', inspector: 'inspector-id', explorer: 'explorer-id'};
+test('console recovery roster matches the shipped graph component catalog', () => {
+  const declaration = source.match(/\bconst groups\s*=\s*(\{[^}]+\});/);
+  assert(declaration, 'the catalog declares its selectable component roots');
+  assert.deepEqual({...vm.runInNewContext('(' + declaration[1] + ')')}, viewKeys);
+});
 function fixture(component = 'recents') {
   const buttons = new Map();
   for (const name of ['create', 'choose', 'reset', 'label', 'status']) buttons.set('#gd-ui-components-' + name,

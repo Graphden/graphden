@@ -54,7 +54,7 @@
     ;; `:range` left OUT deliberately: fully concrete declaration,
     ;; no rule, no vars — `rule-owner-of` returns nil, the popover
     ;; never opens, so a narrative would be dead prose.
-    :map :filter :reduce :find-first :group-by :sort-by
+    :map :filter :reduce :find-first :group-by :partition-by :sort-by
     :constantly :transduce :call :call-noargs :call-noargs-traced :call-with :call-traced :with-heartbeat :with-timeout :try
     ;; stdlib batch 2026-09-22 (var-carrying declarations):
     :last :partition :frequencies

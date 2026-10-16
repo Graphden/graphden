@@ -892,6 +892,7 @@
            :reduce "Declared signature — result follows the accumulator: [:fn {:acc a :item b} a] → a."
            :find-first "Declared signature — first matching element, nil when none: [:list a] → [:union :null a]."
            :group-by "Declared signature — keys from `:func`'s return, values group the input: [:map b [:list a]]."
+           :partition-by "Declared signature — consecutive runs preserve the input element type: [:list a] → [:list [:list a]]."
            :sort-by "Declared signature — order changes, element type preserved: [:list a] → [:list a]."
            :constantly "Declared signature — always returns the captured value: a → a."
            :transduce "Declared signature — result follows the reducing fn's accumulator: a."

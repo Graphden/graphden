@@ -34,6 +34,10 @@
     [graphden.versioning.storage.core :as versioned]))
 
 
+(def ^:private default-component-roles
+  #{:account-menu :fn-picker :recents :inspector :explorer :tutorial-catalog})
+
+
 (defn- create-legacy-record!
   [storage namespace-row]
   (let [path (:name namespace-row)
@@ -621,8 +625,7 @@
           (is (= resolution/defaults-id (:id selected-reference)))
           (is (nil? (validate-with-safe-provenance-diagnostic! storage captured resolution/resolver-id policy)))
           (is (nil? (validate-with-safe-provenance-diagnostic! storage default-snapshot resolution/defaults-id policy)))
-          (is (= #{:account-menu :fn-picker :recents :inspector :explorer :tutorial-catalog}
-                 (set (keys configuration))))
+          (is (= default-component-roles (set (keys configuration))))
           (let [body (source/collect-closure storage (mapcat vals (vals configuration)) authorize!)
                 paths (set (vals (ns-path/path-map (source/collect-namespaces storage body))))]
             ;; Safe namespace metadata only, retained for the subsequent
@@ -716,7 +719,7 @@
         (let [policy (snapshot/capture-policy @(or (:rich-types-atom ctx) (registry/active-rich-types-atom)))
               captured (source/with-snapshot storage #(resolution/capture %1 %2 policy))]
           (is (= (:id result) (:id captured)))
-          (is (= 5 (count (:configuration captured)))))))))
+          (is (= default-component-roles (set (keys (:configuration captured))))))))))
 
 
 (deftest preparation-retains-legacy-record-and-observes-later-authored-field-edits
@@ -746,7 +749,7 @@
         (is (not-any? #{old-id} (:functions result)))
         (is (empty? (:namespaces result)))
         (is (= preference (sp/read-entity storage :ui-pref (:id preference))))
-        (is (= 5 (count (:configuration captured))))
+        (is (= default-component-roles (set (keys (:configuration captured)))))
         (is (= (ids/fn-id "app.ui-fn-picker" :picker-view)
                (get-in captured [:configuration :account-menu :view])))
         (is (sp/read-entity storage :fn old-id))

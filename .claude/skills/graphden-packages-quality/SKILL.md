@@ -5,6 +5,13 @@ description: Quality of `resources/packages/**/{fns.edn,impls.clj}` — narrow t
 
 # graphden-packages-quality — types, impls, fn-defs in `resources/packages/`
 
+**Agent execution contract:** claim an isolated worktree and follow
+[dev/wtq/AGENT.md](../../../dev/wtq/AGENT.md). Use `bb wt test` for focused
+tests and `bb wt up` for live verification at its printed URL. The landing
+gate owns shared rebuilds and heavy suites; older generic build/test recipes
+below do not authorize `bb rebuild`, `bb deploy` or shared-port work from an
+agent worktree.
+
 The goal of this skill: **keep the Graphden package layer in a shape in which
 it stays explainable to an external contributor** — narrow types, named-and-
 reused aliases, minimal base-fn impls (all composition in the graph), and
@@ -616,16 +623,16 @@ curl -s http://localhost:8080/api/graph/entities -H "Authorization: $AUTH" \
 
 ### 5.5 When the DB is not yet in the right state
 
-If you've just added a fn-def to EDN, the DB doesn't see it yet until
-`bb rebuild` / `bb deploy`. The declarative sync **doesn't remove** rows
-that dropped out of EDN — they accumulate in the dev DB. Therefore:
+After an EDN edit, query the database only after the matching package sync:
+for an agent this is `bb wt up` on the isolated stack, followed by `bb verify`
+at its printed URL. A REPL hypothesis is not proof of production boot-sync.
 
-- For **finding dead code** (what's in the DB but not in EDN) — you need
-  `bb deploy` (truncate + clean sync), not `bb rebuild` (see
-  `graphden-fn-refactor` §7).
-- For **finding what's-in-EDN-but-broken** — `bb rebuild` is enough.
-- For **production debugging** — the DB of the production server, WITHOUT a rebuild
-  (which is done only on deploy — NO `bb rebuild` against prod).
+Boot sync reconciles retired deterministic package identities. Unreferenced
+ones are purged; live inbound references retain an identity with a warning.
+Editor-created random identities remain untouched. Use source reachability
+and inspect those retained references; do not use `bb deploy`/truncation as
+routine audit cleanup. See [OPERATIONS.md](../../../docs/OPERATIONS.md#migrations--upgrades).
+For production diagnosis, read the deployed graph without mutating it.
 
 ## 6. The check order for existing packages
 

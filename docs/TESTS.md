@@ -64,8 +64,10 @@ execute-pipeline scrub chain).
   terminal status lands on the row asynchronously).
 - **GET `/api/tests/status`** — every test on the current branch with
   the newest execution of its **CURRENT version**. `status` null =
-  the current version never ran. Keying by current version makes an
-  edited test read as **stale by construction** — no bookkeeping.
+  the current version never ran. An edit that creates a new fn-version
+  therefore reads as **stale by construction**. Binding and dependency
+  edits can leave that version unchanged: the status is not a fingerprint
+  of the whole resolved graph. Auto-run or an explicit run refreshes it.
 - Statuses are ordinary `:fn-execution` rows: the TTL sweeper applies
   (succeeded 7 d, failed 30 d), so an untouched green suite fades to
   stale after a week — re-run to refresh.
@@ -124,8 +126,8 @@ service-restart blast):
    instead of silently firing (the tenancy-gate stance: don't trust
    the static set);
 4. debounced per `[org branch]` (500 ms, bursts coalesce), capped at
-   25 tests per pass (`*max-auto-run*`; dropped tests keep their
-   stale status), off-switch `*auto-run?*`;
+   25 tests per pass (`*max-auto-run*`; tests beyond the cap retain their
+   previous status), off-switch `*auto-run?*`;
 5. the runner future conveys the writing request's dynamic bindings —
    tests execute under the writer's org, exactly as the writer would
    run them;

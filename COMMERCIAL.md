@@ -17,7 +17,8 @@ A commercial licence is for organisations that
 
 - modify the core itself and cannot publish those modifications;
 - embed the core in a product or service offered to third parties and
-  cannot accept AGPL section 13 (network use is distribution); or
+  cannot meet the applicable AGPL obligations, including section 13 for
+  modified versions that support remote network interaction; or
 - have a policy that forbids AGPL dependencies outright.
 
 If none of these apply, you do not need one.

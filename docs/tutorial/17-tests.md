@@ -6,7 +6,7 @@ pass/fail dots in the sidebar, and understand when graphden re-runs
 them for you automatically.
 
 **Concepts introduced**: the `tests` namespace segment, `:assert`,
-`:assert-eq`, test statuses ("stale by construction"), the `tests`
+`:assert-eq`, test statuses, the `tests`
 filter chip with its **▶ Run all** action, the Inspector's **Test** section,
 auto-run on writes.
 
@@ -66,10 +66,9 @@ running editor:
    failing one errors with `assert-eq failed` and both operands in
    the error data.
 7. Now lie to it: click the bound `4` on `:expected`, change it to
-   `5`, **Save**. The dot goes grey the instant you save (this
-   version has not run), then RED — the auto-run compared `4` with
-   `5` and the assertion threw. Change it back to `4`: grey, then
-   green again.
+   `5`, **Save**. The auto-run turns the dot RED — it compared `4`
+   with `5` and the assertion threw. Change it back to `4` and the
+   next run turns it green again.
 
 Any fn of your own works as the subject — `slugify` extended as
 `slugify-hello` with its `:s` pinned to `Hello World`, expected
@@ -80,7 +79,7 @@ Now the surfaces:
 - In the Explorer's filter bar click the **✓ tests** chip (or press
   `Space t`) — the tree
   focuses on your tests, each with a status dot: **green** passed,
-  **red** failed, **grey** not run since its last edit.
+  **red** failed, **grey** no recorded run for the current fn-version.
 - With the ✓ tests chip on, the chip row shows **▶ Run all** — every test
   on the branch runs, and the dots update one by one as each run
   lands (the chip keeps a live signal open, so nothing needs a
@@ -95,10 +94,11 @@ Now the surfaces:
   message on a failure, and **Run this test** runs just this one —
   the section re-renders from the run itself.
 
-That grey-then-red (or grey-then-green) in step 7 is the status
-being keyed to the fn's *current version*: an edited test honestly
-reads "not run yet" instead of showing a stale colour, and the
-auto-run below is what settles it a moment later.
+Statuses are keyed to the fn's *current version*. An edit to its own
+fields creates a new version and reads "not run yet" until it runs.
+The binding edit in step 7 does not create a new fn-version, so its
+previous colour can remain until auto-run finishes. A status does not
+prove that every dependency still matches the last run.
 
 ## Auto-run
 
@@ -110,8 +110,8 @@ background, debounced, and their dots refresh. Two deliberate limits:
 - Only **pure** tests auto-run. A test whose closure declares
   effects (`:network`, `:db`, …) runs only from the Run buttons —
   nothing fires network calls just because you saved an edit.
-- Big blast radii are capped (25 tests per pass) — the rest keep
-  their grey dot until you press Run all.
+- Big blast radii are capped (25 tests per pass) — the rest retain
+  their previous status until you press Run all.
 
 This is the graph paying rent: no file globs, no watch-mode
 heuristics — the dependency edges that *are* your program select

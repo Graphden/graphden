@@ -10,7 +10,8 @@ records — ADRs, RFCs, perf notes, migration ledgers.)
 1. [Root README](../README.md) — what Graphden is, and the bet behind it.
 2. [PHILOSOPHY.md](PHILOSOPHY.md) — the design principles and rationale.
 3. [tutorial/](tutorial/) — hands-on lessons 01–42, from zero to a running
-   service. Then the end-to-end [API-poller walkthrough](TUTORIAL_API_POLL.md).
+   service. The older [API-poller walkthrough](TUTORIAL_API_POLL.md) needs
+   alignment with the current secret-flow contract; see its status note.
 4. [ARCHITECTURE.md](ARCHITECTURE.md) — the data model and execution model.
 5. [FAQ.md](FAQ.md) — the sharp objections, answered honestly.
 

@@ -26,6 +26,10 @@ rebalancing of tenant graphs across a fleet of executors by load and size, and
 the runtime substrate to run it on.
 
 Read SCALING.md first — this RFC extends it and reuses most of its machinery.
+The problem statements and phased checklist below retain the original design
+context. For current installation commands and the shipped L1 dedicated-shard
+assembly, use [FLEET_DEPLOY.md](FLEET_DEPLOY.md); the CRaC/scale-to-zero
+track remains a demonstrated PoC, as distinguished in the maturity table.
 
 ## 1. Problem & goals
 

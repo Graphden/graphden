@@ -21,7 +21,7 @@ transient start failure — all without a restart.
 **Multi-pod coordination is built.** Every pod runs its own
 reconciler; a service's `:cardinality` decides how many pods run it
 (`:singleton` → advisory-lock-gated, `:per-pod` → everywhere). Cron
-schedules come in a later phase (see § Roadmap).
+and fixed-period schedules ship as graph compositions (§ Service shapes).
 
 ## Why services?
 
@@ -79,7 +79,7 @@ parsing the result. Visible in the graph, type-checked, versioned.
 
 The service registry doesn't care WHAT shape of long-running work the
 fn spawns — only that the fn's return is a 0-arg stopper-thunk and
-that the fn declares the `:process` effect. Two patterns ship with
+that the fn declares the `:process` effect. These patterns ship with
 graphden today:
 
 | Pattern | Parent | Shape | Example |
@@ -381,7 +381,10 @@ the explicit `POST /api/services/reconcile`, boot and CRaC resume. Tests pass th
 
 ## HTTP API
 
-All endpoints require bearer-token auth.
+Endpoints use the normal authentication seam: a session or bearer when
+authentication is enabled. A bare self-host with authentication disabled
+retains its open mode. Tenant service management uses the addon's own
+dedicated-tier endpoints rather than generic service CRUD.
 
 ### `POST /api/entities/service` (generic CRUD)
 
@@ -632,8 +635,11 @@ cost on a queue of a million rows as on ten. Tutorial:
 
 ## Waiting for a webhook, an approval, a human
 
-A run is a future: it answers within its inline budget or is cancelled
-after an hour ([EXECUTION.md](EXECUTION.md)). There is deliberately no
+A run is a bounded future: it answers within its inline budget or returns
+a pending execution ID. The wall-clock watchdog defaults to five minutes
+(`GRAPHDEN_MAX_EXECUTION_WALL_MS`); cancellation is cooperative. The hourly
+zombie sweep is a separate cleanup backstop ([EXECUTION.md](EXECUTION.md)).
+There is deliberately no
 suspended execution that sleeps for days waiting for a callback — a
 paused thread is state the reconciler cannot restart, move between
 pods or merge across branches. The graph-native shape of "wait for

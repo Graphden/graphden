@@ -3,9 +3,8 @@
 For a customer or self-hoster evaluating how Graphden isolates tenants and
 handles their code and secrets. It describes the isolation **architecture** and
 its **boundaries** — it is not an exhaustive threat enumeration, and it does
-not publish exploit paths. Report vulnerabilities **privately** per the org's
-SECURITY policy (private disclosure via GitHub Security Advisories), never a
-public issue.
+not publish exploit paths. Report vulnerabilities **privately** through the
+channel in [SECURITY.md](../SECURITY.md), never a public issue.
 
 (Contributor view: the multi-tenant *policy* is an optional addon from the
 private `graphden-tenancy` repo; the core seams it plugs into are documented

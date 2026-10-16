@@ -113,19 +113,22 @@ implementation tasks.
 ### 2.3 Tenancy addon — isolation, workspace, effect-gate
 
 - **Two-layer isolation**: `OrgScopedStorage` decorator (own+public read,
-  own write, stamps `org-id`) under `VersionedStorage`, plus Postgres RLS as
-  the belt-and-suspenders lower layer. `src/graphden/tenancy/{storage.clj,rls.clj}`.
+  own write, stamps `org-id`) under `VersionedStorage`, plus Postgres RLS.
+  The storage/RLS policy lives in the private `graphden-tenancy` addon;
+  core keeps the `tenancy/context.clj` seam.
 - **Workspace = union of `:read`-granted namespaces** —
-  `src/graphden/tenancy/grant.clj` (`workspace`). Grants are
-  `(subject, capability, namespace)`; capabilities
-  `#{:read :write :execute :admin :bind-args :append-list}`.
+  the addon's `tenancy/grant.clj` (`workspace`). Grants are
+  `(subject, capability, namespace)`; graph capabilities include
+  `#{:read :view-impl :write :execute :admin :bind-args :append-list}`.
 - **`public` org** — the shared tenant; `OrgScopedStorage` returns
   own-org + public rows, so a public-org package is visible to every tenant
   **without copying**. This is the foundation of reference-install (§ 4.2).
 - **Effect-gate** — `record-effect!` throws when an effect is outside the
-  request's `:allowed-effects`. Cloud-forbidden set:
-  `#{:env :io :network :process :raw-sql :cross-org}`. This — not "no
-  impl" — is the real cloud security boundary
+  request's `:allowed-effects`. The locked anonymous tier excludes
+  `:env`, `:io`, `:network`, `:process`, `:raw-sql` and `:cross-org`;
+  registered free and paid tiers add guarded network access, and the
+  dedicated tier adds persistent processes. See [PLANS.md](PLANS.md).
+  The runtime gate — not "no impl" — is the cloud security boundary
   ([TENANCY_SEAM.md § Effect gate](TENANCY_SEAM.md#effect-gate)).
 
 ### 2.4 Branch versioning — the staging + rollback engine
@@ -139,8 +142,8 @@ implementation tasks.
 
 ### 2.5 The gaps this branch closed
 
-All shipped except moderation (below). Kept as a record of what the branch set
-out to close.
+The original gap list below records what the branch set out to close.
+Those mechanisms and the later moderation surface are now shipped (§ 9).
 
 1. ✓ Version **constraints** in `:dependencies` (Task 2) — package.edn accepts
    constraints; the loader resolves them (§ 4.4).
@@ -153,8 +156,8 @@ out to close.
 5. ✓ Type-3 swap **seams**: documented + one proven (Task 6, § 6.3 —
    `extension_seam_test`).
 6. ✓ Cloud→self-hosted export (`GET /api/export/graph`, § 9).
-   Moderation queue is **deferred** (a cloud-control-plane / public-registry
-   concern; self-hosted↔self-hosted needs none — § 9).
+   Moderation subsequently shipped through the marketplace (§ 9);
+   self-hosted↔self-hosted direct exchange needs no moderation queue.
 
 ---
 
@@ -214,7 +217,7 @@ cannot express that.
 **Decision.** An impl-package is an ordinary Clojure library: its own git repo
 with `packages/<name>/` resources (`package.edn` + `fns.edn` + `impls.clj`) and
 a `deps.edn`. Self-hosters add its coordinate. A data manifest
-`executor-packages.edn` (list of `{:coord … :package "name"}`) is spliced by
+`executor-packages.edn` (list of `{:name "name" :lib group/lib :coord …}`) is spliced by
 `build.clj` into `deps.edn :extra-deps` **and** the loader's package-name list,
 so the operator edits one data file and never touches executor code.
 
@@ -301,13 +304,14 @@ as `:namespace` on each fn-def, reconstructed on install).
 - **Reference a package fn**: when the user composes with a package fn (drops it
   into their graph in the editor, or writes a fn-def referencing it), that
   stores a `ref-fn-id` into the public-org fn — a reference, not a copy.
-- **Update** `POST /api/packages/install` with a newer version (or a dedicated
-  `PUT /api/packages/pin`): materialise the new version, repoint the pin,
+- **Update** `POST /api/packages/update` with `{name, version}`:
+  materialise the new version, repoint the pin,
   **rewrite the branch's own bindings that reference the old version's ns** to
   the new version's fn-ids (AD-2), re-grant. Do it on a test branch, verify,
   merge to main.
-- **Rollback**: repoint the pin to the older version and rewrite refs back, or
-  `git revert` the merge on main. Reuses branch/merge/revert wholesale.
+- **Rollback**: update to the older version and rewrite refs back. Use
+  graph branches/review to stage changed references; a Git command does
+  not change a live graph's package pin.
 - **Update available**: the packages panel compares each
   pin against the registry's highest published version on render — a
   `↑ <latest> available` badge on the row, and the ↑ input prefilled with it,
@@ -525,7 +529,7 @@ UUIDs (AD-2). No symbolic-ref column.
 - `POST /api/packages/publish` — unchanged (+ optional materialise-to-public step).
 - `GET /api/packages` — registry index (+ latest-version surfacing).
 - `POST /api/packages/install` — now writes a pin + grant (reference model).
-- `PUT /api/packages/pin` (or reuse install) — change pinned version (update/rollback).
+- `POST /api/packages/update` — change pinned version and rewrite own refs (update/rollback).
 - `POST /api/packages/fork` — copy-on-write into the user's namespace (§ 4.5).
 - `GET /api/packages/installed` — this branch's pins (for the editor).
 - `GET /api/packages/:name/:version` — full bundle (export / self-hosted pull) — shipped.
@@ -615,11 +619,11 @@ version input prefilled to that version (§ 4.3).
 
 ## 10. Task plan + checkpoints
 
-Tracked in the session task list. Order chosen for
-"cheapest self-contained value first, deepest last," each a commit checkpoint
-(rebuild + verify + smoke after every backend change, per the rebuild rule).
+Historical implementation sequence, retained for its dependencies and
+checkpoint rationale. Current contributor commands follow
+[dev/wtq/AGENT.md](../dev/wtq/AGENT.md).
 
-1. **This design doc** — plan-of-record. ← current
+1. **This design doc** — the original plan-of-record.
 2. **Version constraints** (Task 2) — self-contained loader change; unlocks
    correct dependency resolution for every later step.
 3. **Reference install: public-org materialization + `:package-install` pin**
@@ -640,13 +644,12 @@ Tracked in the session task list. Order chosen for
    (credential-gated):** a Clojars `com.graphden/graphden-core` jar via
    `b/jar` + `deps-deploy` — a versioned Maven coordinate that ships built
    classes (not the whole repo). Not needed to consume graphden today.
-8. **Shipped:** editor Packages panel (§ 8) + cloud→self-hosted **export**
-   (`GET /api/export/graph`, § 9). **Deferred:** moderation queue (a
-   cloud-control-plane / public-registry concern — § 9).
+8. **Shipped:** editor Packages panel (§ 8), cloud→self-hosted **export**
+   (`GET /api/export/graph`) and the later marketplace moderation queue (§ 9).
 
-Each backend checkpoint: `bb rebuild` → `bb verify` all-match → smoke all-✓,
-and `bb ci` green before it is called done. Roll back the branch if the whole
-shape proves wrong — one branch, no proliferation.
+Agent checkpoints use `bb wt up` for an isolated live instance and
+`bb wt test` for focused tests; the serialized landing gate owns shared
+rebuilds. See [dev/wtq/AGENT.md](../dev/wtq/AGENT.md).
 
 ---
 
@@ -681,10 +684,15 @@ assembled (§ 16). Both are supported; they differ in *who owns the build*.
 
 ### Track A — "run graphden as it ships" (works today)
 
-1. `git clone <repo> && cd graphden`
-2. Point at Postgres: `export GRAPHDEN_JDBC_URL=jdbc:postgresql://host:5432/graphden`
-3. `bb rebuild` (or `docker compose up -d`)
-4. Editor + API on `:8080`.
+1. Clone the repository and enter its directory.
+2. Configure `.env` as described in [DEPLOYMENT.md](DEPLOYMENT.md).
+3. `bb rebuild` builds the jar/image and starts the bundled Postgres stack.
+   A clean clone has no prebuilt executor image for `docker compose up` alone.
+4. Open the editor/API at `http://localhost:9002` (container port `8080`).
+
+For an external database or direct jar, follow DEPLOYMENT.md and set
+`JDBC_URL`, `DB_USERNAME` and `DB_PASSWORD`. Contributor agents use their
+claimed worktree's `bb wt up` and its printed isolated URL instead.
 
 Customising here means editing the checkout / building a custom image — a mild
 fork with a rebase burden. Fine for a one-off; for a product, use Track B.
@@ -727,7 +735,11 @@ arbitrary local identifier (it need not match any published coordinate).
    ```
 
    (or your own three-line `-main` calling `graphden.system/start!` for full control.)
-5. A graphden engine running on **your** storage, no Postgres, no fork.
+5. Complete the consumer's system wiring for that backend. The fragment
+   above illustrates the storage seam; it is not a tested non-Postgres
+   deployment recipe. The default production config also contains
+   PostgreSQL notification/lock components and `:pg-storage` references.
+   Replace or omit those in the consumer's selected component graph.
 
 Headless boot (`["core" "storage" "web"]`, no `app`) is verified end-to-end by
 `test/graphden/system/headless_boot_test.clj` — the packages load + sync and the
@@ -815,18 +827,18 @@ layers. Concrete steps in § 12 (Track B) and § 5 (Type-2); the decision matrix
 | Motivation | Mechanism |
 |---|---|
 | different DB / storage engine | **Integrant seam** `:app/storage` — protocol impl + `:db/schema` builder (§ 12 Track B, § 6.1) |
-| a base-fn impl is written badly, interface is fine | **override package** — a small `impls.clj` redefining specific base-fns, declaring `:overrides ["core"]`, loaded after core (§ 5 / below) |
+| a base-fn impl needs replacement, interface is fine | trusted consumer bootstrap wiring; the `:overrides` package syntax below is a proposal, not supported loader behavior |
 | rewrite a whole graph subsystem | **replace a module** — your fns in the same namespaces (same deterministic `fn-id`) |
 | fork graphden wholesale | edit the monorepo checkout (AGPL-native) |
 
-### Override a core base-fn impl (Type-2, targeted — the recommended path)
+### Base-fn overrides — proposed package syntax, not a shipped install path
 
-`register-base-fn!` is a last-wins `assoc`, and declaring a dependency on the
-package you override places you after it in the topo-sort — so an override is
-expressible today. What we **add** (Task 6): make it *explicit* — a package
-declares `:overrides ["core"]` (or per-fn), the loader applies defined
-precedence and **logs** `core/add impl overridden by my-core/add` (principle #3;
-silent last-wins is the current footgun). Example:
+The `:overrides` syntax below is a design sketch. The loader does not
+interpret this key, and package sync rejects duplicate base-fn names with
+`:packages/base-fn-name-collision` (or a duplicate identity pair). Adding a
+second `:add` declaration therefore does not install an override. A
+consumer replacing trusted implementations needs explicit bootstrap wiring;
+ordinary package dependencies alone do not provide this policy. Proposed syntax:
 
 ```clojure
 ;; packages/my-core/arithmetic/impls.clj
@@ -836,18 +848,19 @@ silent last-wins is the current footgun). Example:
 {:name "my-core" :dependencies ["core"] :overrides ["core"] :modules ["arithmetic"]}
 ```
 
-You keep upstream's `fns.edn` (graph structure) — only the Clojure closure
-diverges, so graph-shape updates still flow from upstream.
+The intended design would retain upstream's `fns.edn` graph structure
+while replacing its Clojure closure; that package policy remains unimplemented.
 
 ### Swap storage — what our impl does when overridden
 
-Integrant only instantiates keys reachable from the system config. Override
-`:app/storage` → our `:db/postgres` is simply never built. It is an unselected
-default (a few KB of unused classes in the jar), **not** dead code — most
-self-hosters keep Postgres and only stack decorators. The real work in a swap is
-implementing `ExecutionGraph` (Postgres uses recursive CTEs) in the new backend
-and providing/omitting the Postgres-specific `NOTIFY` invalidation +
-advisory-locks — all in the *addon's* lib, our repo untouched.
+The default one-argument `system.interface/start!` initializes the whole
+merged Integrant config. Overriding `:app/storage` alone leaves
+`:db/postgres`, the PostgreSQL notification/lock components and
+`:exec/context`'s `:pg-storage` reference configured. A non-Postgres
+consumer must replace or omit that wiring, or explicitly start a selected
+component subset with compatible dependencies. Implementing `ExecutionGraph`
+and the needed invalidation/locking contracts remains backend work; the
+headless package test does not prove a non-Postgres deployment.
 
 ---
 
@@ -941,11 +954,13 @@ a restriction policy** ("cloud vs self-hosted = mode, not code, one binary" —
 (platform-admin behind a VPN). Our cloud build is literally the best dogfood of
 Track B (§ 12): a thin project depending on `graphden-core` + the addons.
 
-Two layers of "modules for cloud" — only the second is private:
+The core mechanisms, tenancy policy and cloud-business modules have different
+ownership:
 
 | Layer | What | Where | Openness |
 |---|---|---|---|
-| Tenancy primitives | orgs / users / RLS / effect-gate / FaaS | **this repo** | AGPL — self-hosted teams use them too; **not** "private" |
+| Open mechanisms + identity | org context, auth-provider/effect-gate/storage seams, opt-in accounts | **this repo** | AGPL |
+| Tenancy policy | orgs / grants / RLS / plans / tenant FaaS routing | **graphden-tenancy** | separate proprietary addon; core remains single-org without it |
 | **Private cloud modules** | billing / metering / at-scale routing / admin dashboards / managed-model gateway | **separate closed repos** | proprietary; we don't publish them |
 
 Private cloud modules attach via the **same** mechanism as any addon
@@ -957,10 +972,8 @@ tenancy addon (shipped) + swap seams (Tasks 5–6) → cloud = `core + tenancy +
 [private modules] + policy`. What remains beyond this plan is *writing* the
 private modules (billing etc.); they plug into the socket unchanged.
 
-**Honest asterisks.** (1) `org-id` is a core column (default `public`) present
-in both modes — the one place "core knows nothing about tenancy" blurs;
-accepted (§ 3.0 nuance 2). (2) The open/closed line holds by **discipline**, not
-automation: only genuine cloud-business (billing, our infra orchestration) goes
-private; anything a self-hoster needs for their own multi-user (orgs/RLS) stays
-open, or we break "no feature-gating between shapes." Billing hooks must never
-land in `resources/packages/` or open `src/`.
+The `org-id` columns exist in core (NULL means public/unowned); the
+addon supplies ownership stamping and isolation policy. Accounts can be
+enabled independently on a single-org self-host. This split is documented
+in [TENANCY_SEAM.md](TENANCY_SEAM.md); consuming the same core does not
+imply that the proprietary tenancy addon is part of the AGPL repository.

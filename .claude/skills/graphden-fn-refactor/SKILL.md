@@ -5,6 +5,13 @@ description: Staged decomposition of large / non-atomic base-fn impls in Graphde
 
 # graphden-fn-refactor — decomposing impls into atomic base-fn + fn-def
 
+**Agent execution contract:** claim an isolated worktree and follow
+[dev/wtq/AGENT.md](../../../dev/wtq/AGENT.md). Use `bb wt test` for focused
+tests and `bb wt up` for live verification at its printed URL. The landing
+gate owns shared rebuilds and heavy suites; older generic build/test recipes
+below do not authorize `bb rebuild`, `bb deploy` or shared-port work from an
+agent worktree.
+
 The skill's job: systematically fix a violation of Graphden's core principle —
 **the Graphden user writes fn-defs, not base-fns**. Anything the user might
 need to vary without asking an admin for a new Clojure impl should be visible
@@ -245,10 +252,11 @@ Graphden type-checks ALL fn-defs at sync (topological order).
 For new base-fns in `fns.edn`:
 
 - `:args {:x {:type T :description "…"}}` — the type of each slot; `:return-type T`.
-- A slot that accepts a READY value from a base-fn ref (not a callable) → NOT `:any`:
-  `:any` = "don't touch", the executor won't force-deref the delay. Use `:jsonb`
-  (or a concrete record). `:any` — only for an already-built Clojure fn,
-  `:fn` — for an fn-graph under an HOF wrap.
+- A slot taking a computed data value should declare its actual contract:
+  a concrete type, `:jsonb` for JSON-shaped data, or a type variable for
+  a polymorphic value. `:any` is the top type; it does not disable thunk
+  resolution. `defbase` resolves referenced arguments through `resolve-arg`
+  when their symbols are read. A `:fn`-typed slot receives a callable.
 - **Base-fn** names (the `defbase` ones you are adding here) are GLOBALLY
   unique — the impls registry is name-keyed. **Fn-def** names (including
   `_`-private ones) are unique only per-`(namespace, name)` (ADR-identity
@@ -269,14 +277,18 @@ Consequences:
 
 ## 7. Workflow
 
-Debug in the live nREPL (skill `graphden-repl`), `bb rebuild` — once at the end,
-then `bb verify` (per-section ✓/✗) → endpoint smoke → `bb ci`.
+Debug in your worktree's live nREPL when available (skill `graphden-repl`),
+then use `bb wt up` for the actual package boot-sync and endpoint checks.
+Use `bb wt test` for focused tests and follow the landing contract for CI.
 
-Declarative sync **does not delete** rows that dropped out of `fns.edn` — they accumulate
-in the dev DB. Deleted a fn-def → for a clean state (and a trustworthy
-reachability audit) you need `bb deploy` (truncate + clean sync), not `bb rebuild`.
+Boot sync reconciles retired deterministic package identities: unreferenced
+ones are purged, while identities still referenced by live graph rows are kept
+and reported. Editor-created random identities are not package garbage.
+Do not truncate the database for a routine refactor or reachability audit;
+see [OPERATIONS.md](../../../docs/OPERATIONS.md#migrations--upgrades).
 
-Commit per-stage (a checkpoint per stage) — but only when the user asks.
+Commit reviewable stages under the worktree contract; ask only when a real
+scope or design decision requires the owner's choice.
 
 ## 8. Anti-patterns
 
@@ -301,13 +313,15 @@ Commit per-stage (a checkpoint per stage) — but only when the user asks.
   the same violation (a), just smaller.
 - **Silent rollback on a blocker.** If a seam turned out uncuttable or the target
   turned out dead — surface the finding and replan, don't roll back quietly.
-- **Committing without being asked.**
+- **Waiting for a redundant commit permission when the worktree contract authorizes it.**
 
 ## 9. Reachability audit — finding dead code
 
 To find unused fn-defs across the whole graph:
 
-1. `bb deploy` — a clean DB (otherwise accumulated junk skews the result).
+1. Run the source-corpus reachability audit (`bb graph-reachability`); for a
+   live comparison, sync your isolated stack with `bb wt up`. Inspect retained
+   referenced package identities instead of truncating graph data.
 2. `curl /api/graph/entities` — dump `fns` / `slots` / `fn-slots` / `bindings`
    / `list-items`.
 3. Build the fn→fn edge graph: `parent-ids`; `base-fn-id` / `element-fn-id` /

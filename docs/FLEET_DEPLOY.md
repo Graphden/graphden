@@ -197,9 +197,12 @@ Controller observability: the tick counters (`:fleet/ticks`,
 (docs/MONITORING.md), alongside `GET /internal/fleet/status` and the
 `"Fleet controller applied placement"` log line.
 
-**Still open (topology-dependent, not shipped):** the tenant's editor lists its
-services' DESIRED state only; cross-pod runtime status (running / failed) and a
-tenant-mode browser e2e need this dedicated stack live and are deferred to it.
+The tenant list/badge shows configured/disabled desired state; the service
+popover additionally reads cross-pod **running copies** from the shared
+`:service-instance` heartbeat rows (`/partials/service-instances`). This is
+not a fleet-wide aggregation of each pod's detailed running/failed/backoff
+verdict. Verify dedicated-stack behavior against the actual deployment;
+the static desired-state list alone does not prove a service started.
 
 ## Local verification with kind
 

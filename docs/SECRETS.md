@@ -150,16 +150,18 @@ diagnostic's type-carrying keys (`:expected`/`:actual`/`:declared`/
 | `web/vault` | `:secret-leaf` declares `[:secret :text]` return directly. |
 | `app/reprs` | `:render-value-repr` and `:tabulate-records` propagate — their record/`:any` inputs can carry a marked value and the output (repr hiccup / cell strings) derives from it. `:svg-polyline-points` (`[:list :numeric]` slot) and `:fn-return-type` (id in, type expr out) are bare — taint can't enter. |
 
-`web/http-*` and `web/sql` SQL impls are sinks — they don't return
-the input content, they send it as a side-effect. Mark a sink's
+`web/http-*` and `web/sql` also send inputs as side-effects. Mark a sink's
 slot `[:secret :text]` to require its inputs be secret-aware
-(currently `:sql-exec/:password` and `:sql-query/:password`).
+(currently `:sql-exec/:password` and `:sql-query/:password`). SQL results
+propagate taint conservatively; accepting a secret input does not imply
+that a sink's result is safe to display.
 
 ## Backend hide at `/api/execute` (T4)
 
 `graphden.crud.fn-execution.persist/redact-outcome` consults
-`(tainted-fn? fn-name)`, which walks the rich-types registry's
-`:return` via `types/contains-secret?`. If the marker is present:
+`(tainted-fn? fn-id)`, which reads the identity-keyed rich-types entry
+and tests its `:return` with `types/contains-hide-result-marker?`.
+The seeded `:secret` and other hide-result markers use this boundary:
 
 - Inline succeeded response → `{status: succeeded, result: nil,
   tainted?: true}`. No value crosses the wire.
@@ -322,7 +324,9 @@ The only remaining concern is `:throw` — see Known limits.
 
 ## Sharing / export policy — "never silently"
 
-A secret's VALUE never enters graph storage, so no export can leak it.
+Vault-backed secret values never enter graph storage, so graph export does
+not read those values from Vault. A literal supplied directly as graph data
+is stored as graph data; use the vault-backed binding for secret values.
 The vault PATH does live in the graph (`binding.value` on a
 `:vault-get`-resolver binding) and is org-topology information — so
 every share-shaped bundle treats it explicitly:
@@ -439,7 +443,7 @@ layered redaction:
 `:fn-execution.touched-secret?` is set to `true` on rows where
 BOTH halves are satisfied:
 
-- `(persist/touches-secret? fn-name)` — the rich-types registry
+- `(persist/touches-secret? fn-id)` — the identity-keyed rich-types registry
     entry for the executed fn-def carries a `:secret` marker on
     its return OR on any of its declared arg slots. Strictly
     broader than `tainted-fn?`: a sink like `:sql-exec` whose
@@ -531,9 +535,9 @@ The Secrets-panel admin flow writes new secrets with this shape:
     inherited `[:secret :text]` return-type lands in the rich-
     types registry; otherwise `tainted-fn?` wouldn't see the
     marker and T4's redaction wouldn't fire.
-- `validation/secret-path-rej` walks `binding.slot-id →
-    fn-slot.fn-id → fn.name → rich-types[name] → :args →
-    slot-name keyword → :type` and asks `contains-secret?`. The
+- `validation/resolver-rej` walks `binding.slot-id →
+    fn-slot.fn-id → rich-types[fn-id] → :args →
+    slot-name keyword → :type` and asks `contains-hide-result-marker?`. The
     storage layer drops `[:secret T]` down to its inner type's
     `fn-id` for the `:type-fn-id` foreign key (see
     `packages/records/types.clj`), so the marker lives only in

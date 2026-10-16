@@ -29,8 +29,9 @@ Graphden separates them on purpose, and each has its own filter chip:
 
 A type error is not a failed run: the write **succeeded**, the fn is in
 the graph, and the diagnostic rides alongside it (lesson 08 — "a
-diagnostic, not a wall"). A failed run is the opposite: nothing was
-written, something was attempted and threw.
+diagnostic, not a wall"). A failed run means execution was attempted and
+threw. It may already have produced side effects; failure does not promise
+a rollback of everything the graph called.
 
 A lint finding is neither: nothing failed and nothing is mistyped —
 the graph simply already contains what you just built, or holds a

@@ -185,12 +185,13 @@ thing that changes as shards are rebalanced; the pods need no LB awareness.
 ## Fleet-wide per-org quota
 
 `*max-concurrent-executions-per-org*` (default 32,
-`GRAPHDEN_MAX_CONCURRENT_EXECUTIONS_PER_ORG`) is enforced **fleet-wide for
-tenants**: `acquire-execution-slot!` counts a tenant's non-terminal
-(`:pending`) `:fn-execution` rows in shared storage, so N pods enforce ONE
-budget instead of N×budget. It is self-healing — the pending rows are the
-source of truth, so a crashed pod leaks no counter (the zombie/TTL sweeper
-reaps its rows), unlike a durable counter table would.
+`GRAPHDEN_MAX_CONCURRENT_EXECUTIONS_PER_ORG`) has two layers in
+`acquire-execution-slot!`. Every org has a **per-pod live counter**, covering
+inline pure runs as well as persisted/async work. A tenant additionally
+checks shared non-terminal (`:pending`) `:fn-execution` rows for the
+**fleet-wide persisted-run** budget. Pure inline runs that write no row
+remain bounded on each pod; they are not counted globally by that query.
+The pending-row budget self-heals through the zombie/TTL sweeper after a crash.
 
 The **global** cap (`*max-concurrent-executions*`, default 128) stays
 per-pod: it sizes the worker count of each JVM's **bounded execution pool**
@@ -216,7 +217,9 @@ and bounded for *fairness*:
   [DEPLOYMENT.md § non-superuser DB role](DEPLOYMENT.md)) confine every row to
   its org.
 - **Capability** — the two-layer effect gate bounds what a tenant graph may
-  *do* (a free tenant can't touch `:network` / `:process` at all).
+  *do*: the anonymous demo has no network access; registered free and paid
+  tiers have guarded network access, while persistent processes require
+  the dedicated tier ([PLANS.md](PLANS.md)).
 - **Fairness** — the fleet-wide per-org execution quota, the per-org egress
   rate-limit, and the response byte-cap bound how *often* and how *much*.
   The per-org execution cap also bounds an org's share of the bounded

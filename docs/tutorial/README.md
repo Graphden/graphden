@@ -143,7 +143,7 @@ capture in 09, …), the same thing as fn-defs, and a "what we glossed
 over" list. The tour says so at the hand-over: its last step links to
 the written lesson and says in one line what the text adds, and the
 catalogue repeats that line under every lesson you have marked `✓ done`
-(the `↗` on any row opens the text). The six lessons without a tour are
+(the `↗` on any row opens the text). The two lessons without a tour are
 listed in the catalogue too, as **text only** rows that open the text —
 so the catalogue is the whole tutorial, not just the part the editor can
 walk. The link target is `https://graphden.dev/tutorial/` plus the
@@ -187,14 +187,16 @@ New lessons are added as features ship. If a lesson would document
 a feature that doesn't yet exist or behaves differently from how
 it's described, it stays ⏳ planned until the gap closes.
 
-## End-to-end worked example
+## Earlier end-to-end worked example
 
 Once you've worked through the Basics and Composing chapters
 (lessons 01–14) plus Services (lesson 35),
-[**Building an API-poller**](../TUTORIAL_API_POLL.md) puts it all
-together: a scheduled service that calls an external HTTP API with a
+[**Building an API-poller**](../TUTORIAL_API_POLL.md) shows an earlier
+composition: a scheduled service that calls an external HTTP API with a
 vault-backed bearer token and writes each result into your own Postgres
-table — built entirely from fn-defs, no Clojure.
+table — built entirely from fn-defs, no Clojure. It needs alignment with
+the current secret-flow contract before it is a working end-to-end recipe;
+read its status note first.
 
 ## How to contribute a lesson
 

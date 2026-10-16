@@ -89,8 +89,10 @@ The loop an agent runs, and what each turn gives you back:
 3. **`execute-fn`** / **`run-tests`** on that branch — the same
    pipeline as the editor's Run pane and the tests runner
    ([Lesson 15](15-executing-a-fn.md), [Lesson 17](17-tests.md)).
-   `execute-fn` is bounded (10 s, no trace, nothing persisted); long or
-   effectful runs come back `pending`.
+   `execute-fn` waits up to 10 s inline; a still-running call returns
+   `pending` with its execution ID. Effectful runs persist automatically,
+   and `trace: true` records the call tree and persists the run. The tool
+   does not expose intermediate-value capture.
 4. **`diff-branch`** — the proposal, as data.
 5. **You** open the editor on `ai/<feature>`, press **Δ** against
    main, and land it through the review cycle you already know —

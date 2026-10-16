@@ -92,8 +92,10 @@ On a multi-tenant cloud, a published version is **private to your
 organization by default**: it lands in the registry stamped with
 your org, and only your org's members see it when browsing. The ⬆
 popover has a **"Public — visible outside your organization"**
-checkbox for the explicit opt-in — tick it and the version becomes
-visible platform-wide. In the packages chip's browse list, private
+checkbox for the explicit opt-in. When moderation is enabled, a public
+version waits for operator approval before other organizations see it;
+your own org can use it while pending. See
+[Lesson 40](40-marketplace-themes-keymaps.md). In the packages chip's browse list, private
 versions carry a **`private`** badge. (The programmatic
 equivalent: `"public": true` in the publish JSON body.)
 

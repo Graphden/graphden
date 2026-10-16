@@ -5,6 +5,13 @@ description: Design rules for creating Graphden fn-defs — when to give a fn an
 
 # graphden-fn-design — fn-def declaration rules
 
+**Agent execution contract:** claim an isolated worktree and follow
+[dev/wtq/AGENT.md](../../../dev/wtq/AGENT.md). Use `bb wt test` for focused
+tests and `bb wt up` for live verification at its printed URL. The landing
+gate owns shared rebuilds and heavy suites; older generic build/test recipes
+below do not authorize `bb rebuild`, `bb deploy` or shared-port work from an
+agent worktree.
+
 Purpose of the skill: when adding / restructuring fn-defs, know precisely
 **whether an explicit name is needed**, **whether to put it in a private
 namespace**, **whether to use MI or not**, and what display consequences
@@ -60,7 +67,15 @@ is an ordinary fn with an ordinary name. UI:
 - on hover, the `i`-tooltip shows the auto-name + a rename option;
 - in the sidebar, `_`-fns are hidden under a fold / in a private-namespace.
 
-## 2. Auto-name for a private fn — format
+## 2. Proposed extraction names — not a shipped UI action
+
+The `_<parent>-<slot>` naming recipe below describes the proposed
+"extract into helper" action (§12). The current EDN inline-composition
+parser instead generates `_anon-<hash>` using shape plus namespace and
+use-site identity (`packages.records.parse/anon-fn-name`); do not infer
+an existing function's UUID from the proposed UI recipe.
+
+### Proposed format
 
 When the author did NOT specify a name explicitly (anonymous fn-def via the
 UI "extract into helper" or a legacy-EDN import without a name), we generate
@@ -99,9 +114,10 @@ not value semantics).
  :input {:user-name :text :greeting :text}}   ; ← the same shape-hash X → the same fn-row
 ```
 
-The auto-name for such rows: `_anon-<shape-hash[0..7]>` in the namespace of
-the fn-def that declared them (if there are two, the lexicographically first
-one is chosen — sync is deterministic).
+Inline record type rows have `name=nil`, `namespace-id=nil` and a
+shape-derived anonymous identity (`packages.records.parse/emit-anon-composite-fn`).
+They are separate from synthetic `_anon-*` names for executable inline
+compositions. No lexicographically chosen host namespace owns the type row.
 
 **When to write an inline composite vs a `_`-private fn:**
 
@@ -145,11 +161,12 @@ whose return equals the given `:value`". It is not a redundant layer, it is
 the **minimal necessary ceremony** for a value to be able to be NAMED and
 REFERENCED via `{:ref :name}` / bare keyword refs.
 
-When to write `:return-type T` on a named constant: always. Without an
-explicit return-type, `:const`'s rule will return the type inferred by
-classify-literal (`:jsonb` for maps/vectors, `:int` for numbers, etc.) — which
-is usually too wide a type. Pinning to a concrete record/refinement
-shows the reader exactly what this constant represents.
+Write `:return-type T` when the constant introduces a reusable declared
+contract or needs a refinement the literal cannot express. Otherwise
+`:const` infers the literal's structural type: keyword-keyed maps become
+record shapes, vectors become lists, and integers become `:int`
+(`types.check.literals/classify-literal`). An extra declaration is not
+required solely because the value has a name.
 
 ## 5. Multiple inheritance — when it is justified
 

@@ -43,6 +43,7 @@ const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
   const deletes = [];
   const batches = [];
   const undos = [];
+  let cleanupCommitted = false;
   let ownedIds = new Set();
   const stages = new Map([
     ['/api/ui/configuration/plan', 'component-plan'],
@@ -65,6 +66,7 @@ const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
   });
   const captureResponse = async response => {
     if (response.request().method() === 'DELETE') deletes.push({url: response.url(), status: response.status()});
+    if (new URL(response.url()).pathname === '/api/ui/configuration/undo' && response.ok()) cleanupCommitted = true;
     const stage = stages.get(new URL(response.url()).pathname);
     if (!stage) return;
     const attempt = (attempts.get(stage) || 0) + 1;
@@ -106,18 +108,18 @@ const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
   page.on('dialog', dialog => dialog.accept());
   const forcePolicyRetry = process.env.GRAPHDEN_POLICY_RETRY_PROOF === '1';
   const forcedPolicyRetries = new Set();
+  const forcedCleanupPolicyRetries = new Set();
   const proofComponents = new Set(['account-menu', 'tutorial-catalog']);
-  if (forcePolicyRetry) {
-    await page.route(url => url.pathname.endsWith('/ui/configuration/plan'), async route => {
-      const request = route.request();
-      const component = request.method() === 'POST' ? request.postDataJSON()?.component : undefined;
-      if (proofComponents.has(component) && !forcedPolicyRetries.has(component)) {
-        forcedPolicyRetries.add(component);
-        await route.fulfill({status: 422, contentType: 'application/json',
-          body: JSON.stringify({ok: false, code: 'policy-refresh-required', retryable: true})});
-      } else await route.continue();
-    });
-  }
+  await page.route(url => url.pathname.endsWith('/ui/configuration/plan'), async route => {
+    const request = route.request();
+    const component = request.method() === 'POST' ? request.postDataJSON()?.component : undefined;
+    const forced = cleanupCommitted ? forcedCleanupPolicyRetries : forcedPolicyRetries;
+    if ((cleanupCommitted || forcePolicyRetry) && proofComponents.has(component) && !forced.has(component)) {
+      forced.add(component);
+      await route.fulfill({status: 422, contentType: 'application/json',
+        body: JSON.stringify({ok: false, code: 'policy-refresh-required', retryable: true})});
+    } else await route.continue();
+  });
   try {
     await walkUIComponentsLesson(page, {cleanupOnly: process.env.GRAPHDEN_COMPONENT_CLEANUP_ONLY === '1',
       onStagedReceipt: async receipt => {
@@ -138,6 +140,8 @@ const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
     assert(!deletes.some(row => /^\/api\/entities\/fn\//.test(new URL(row.url).pathname)),
       'manifest cleanup does not issue per-function DELETE requests');
     await Promise.all(pendingReplies);
+    assert.deepEqual(forcedCleanupPolicyRetries, proofComponents,
+      'both loaded components recover an exact policy refusal after the undo commit');
     if (forcePolicyRetry) {
       assert.deepEqual(forcedPolicyRetries, proofComponents,
         'the targeted proof forced both known component policy refusals');

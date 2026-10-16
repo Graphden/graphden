@@ -37,21 +37,19 @@
    resolves slots against these shipped declarations, then checks every actual
    installed dependency under source authorization before writing anything."
   []
-  (let [modules {"core/logic" ["core.logic" #{:const :if :equal? :nil? :coalesce}]
-                 "core/collections" ["core.collections" #{:list :get :assoc :zipmap :count :take :concat :vals}]
-                 "core/arithmetic" ["core.arithmetic" #{:add :mod}]
-                 "core/hof" ["core.hof" #{:map :filter :group-by :partition-by :sort-by}]
-                 "core/strings" ["core.strings" #{:str :str-starts-with? :str-lower :str-trim :str-contains?}]
-                 "web/html" ["web.html" #{:hiccup :hiccup-node}]
-                 "core/refinements" ["core.refinements" (set (keys public-type-names))]
-                 "app/ui-account-menu" ["app.ui-account-menu" #{:account-menu-view}]
-                 "app/ui-fn-picker" ["app.ui-fn-picker" #{:picker-view}]
-                 "app/ui-recents" ["app.ui-recents" #{:recents-view}]
-                 "app/ui-explorer" ["app.ui-explorer" #{:explorer-toolbar-view}]
-                 "app/ui-inspector" ["app.ui-inspector" #{:inspector-view}]
-                 "app/ui-tutorial-catalog" ["app.ui-tutorial-catalog" #{:catalog-view}]
-                 "app/ui-components" ["app.ui-components" #{:ui-components :_ui-components-identities :ui-component-entry :ui-component-entries
-                                                            :ui-component-descriptor :ui-component-manifest}]}]
+  (let [modules (into {"core/logic" ["core.logic" #{:const :if :equal? :nil? :coalesce}]
+                       "core/collections" ["core.collections" #{:list :get :assoc :zipmap :count :take :concat :vals}]
+                       "core/arithmetic" ["core.arithmetic" #{:add :mod}]
+                       "core/hof" ["core.hof" #{:map :filter :group-by :partition-by :sort-by}]
+                       "core/strings" ["core.strings" #{:str :str-starts-with? :str-lower :str-trim :str-contains?}]
+                       "web/html" ["web.html" #{:hiccup :hiccup-node}]
+                       "core/refinements" ["core.refinements" (set (keys public-type-names))]
+                       "app/ui-components" ["app.ui-components" #{:ui-components :_ui-components-identities :ui-component-entry :ui-component-entries
+                                                                  :ui-component-descriptor :ui-component-manifest}]}
+                      (map (fn [[_ {:keys [reference]}]]
+                             (let [path (namespace reference)]
+                               [(str/replace path "." "/") [path #{(keyword (name reference))}]])))
+                      config/component-contracts)]
     (into []
           (mapcat (fn [[module [path names]]]
                     (map #(assoc % :namespace path)

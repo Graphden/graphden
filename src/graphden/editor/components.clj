@@ -17,8 +17,7 @@
 
 
 (def ^:private component-keys
-  {"account-menu" :account-menu "fn-picker" :fn-picker "recents" :recents "inspector" :inspector "explorer" :explorer
-   "tutorial-catalog" :tutorial-catalog})
+  (into {} (map (juxt name identity)) (keys config/component-contracts)))
 
 
 (defn- reject!

@@ -5,7 +5,8 @@
     [graphden.executor.compile.bindings :as bindings]
     [graphden.executor.compile.lookups :as lookups]
     [graphden.executor.structural-projection :as projection]
-    [graphden.packages.records.ids :as ids]))
+    [graphden.packages.records.ids :as ids]
+    [graphden.ui.component-contracts :as shipped]))
 
 
 (def configuration-id
@@ -63,20 +64,7 @@
 (def component-contracts
   "Shipped view identities are the stable component discriminators. No names
    supplied by a client participate in dispatch."
-  {:explorer {:id (ids/fn-id "app.ui-explorer" :explorer-toolbar-view)
-              :reference :app.ui-explorer/explorer-toolbar-view :roles #{:initial :update :view}}
-   :account-menu {:id (ids/fn-id "app.ui-account-menu" :account-menu-view)
-                  :reference :app.ui-account-menu/account-menu-view
-                  :roles #{:initial :update :view}}
-   :fn-picker {:id (ids/fn-id "app.ui-fn-picker" :picker-view)
-               :reference :app.ui-fn-picker/picker-view :roles #{:view}}
-   :inspector {:id (ids/fn-id "app.ui-inspector" :inspector-view)
-               :reference :app.ui-inspector/inspector-view :roles #{:initial :update :view}}
-   :recents {:id (ids/fn-id "app.ui-recents" :recents-view)
-             :reference :app.ui-recents/recents-view
-             :roles #{:initial :update :view}}
-   :tutorial-catalog {:id (ids/fn-id "app.ui-tutorial-catalog" :catalog-view)
-                      :reference :app.ui-tutorial-catalog/catalog-view :roles #{:view}}})
+  shipped/component-contracts)
 
 
 (defn- projected-manifest

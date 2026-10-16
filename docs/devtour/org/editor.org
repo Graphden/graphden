@@ -474,26 +474,26 @@ Each server partial captures a latest-wins read token and exact native host. Tab
 :PROPERTIES:
 :CUSTOM_ID: editor/definitions
 :FILE: src/graphden/editor/component_templates.clj
-:LINE: 99
+:LINE: 97
 :MINS: 5.1
 :END:
 
 Copies the fixed shipped theme, menu, picker, Recents, Inspector and Explorer definitions into a fresh named namespace. An ordinary descriptor list selects component entry identities. Shared menu colors reference copied theme leaves; menu hover owns a local literal. Color wrappers retain the canonical color type and ordinary editor form. This is an advanced legacy compatibility path; Lesson 25 instead creates a small inherited menu child and captures its free theme input.
 
-- source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn definitions][src/graphden/editor/component_templates.clj:99]]
+- source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn definitions][src/graphden/editor/component_templates.clj:97]]
 - same file :: [[file:editor.org::#editor/selected-definitions][selected-definitions]]
 
 * 36. selected-definitions
 :PROPERTIES:
 :CUSTOM_ID: editor/selected-definitions
 :FILE: src/graphden/editor/component_templates.clj
-:LINE: 177
+:LINE: 175
 :MINS: 3.4
 :END:
 
 The retained legacy selective-copy compatibility path keeps only the chosen component and its owned reference closure. A new ordinary concat manifest references the previous authored manifest and the new descriptor list, preserving existing identities and edits. Legacy slots are adapted to descriptors without copying their bodies. Retained identities are outside the create-only receipt; group creation does not activate a theme.
 
-- source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn selected-definitions][src/graphden/editor/component_templates.clj:177]]
+- source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn selected-definitions][src/graphden/editor/component_templates.clj:175]]
 - same file :: [[file:editor.org::#editor/definitions][definitions]]
 
 * 37. apply!
@@ -525,13 +525,13 @@ Collects only the selected [[file:glossary.org::#term/reachable-graph][reachable
 :PROPERTIES:
 :CUSTOM_ID: editor/export-resolved
 :FILE: src/graphden/editor/components.clj
-:LINE: 160
+:LINE: 159
 :MINS: 1.2
 :END:
 
 A protected ordinary resolver finds editor in the current principal/org/branch's exact personal namespace, or shared editor-defaults. Default and custom configurations use the same authorized bounded JSON export. Legacy selections migrate by reference; no preference UUID chooses the active root. The protected lookup is bounded metadata discovery, not arbitrary graph execution. Source and policy use one snapshot; fresh checking cannot erase cached secret metadata. The editor host still owns callbacks, search, navigation and the validated DOM contract.
 
-- source :: [[file:../../../src/graphden/editor/components.clj::(defn export-resolved][src/graphden/editor/components.clj:160]]
+- source :: [[file:../../../src/graphden/editor/components.clj::(defn export-resolved][src/graphden/editor/components.clj:159]]
 
 * 40. ensure-current!
 :PROPERTIES:

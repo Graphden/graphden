@@ -1,9 +1,36 @@
 (ns graphden.editor.component-templates-test
   (:require
+    [cheshire.core :as json]
+    [clojure.java.io :as io]
+    [clojure.set :as set]
+    [clojure.string :as str]
     [clojure.test :refer [deftest is]]
     [graphden.crud.entities.function-batch-budget :as batch-budget]
+    [graphden.editor.component-config :as config]
     [graphden.editor.component-templates :as templates]
     [graphden.packages.rebase :as rebase]))
+
+
+(deftest shipped-component-interfaces-and-builtins-match-trusted-discriminators
+  (let [contracts config/component-contracts
+        interfaces (templates/interface-definitions)
+        paths (set (map (comp namespace :reference) (vals contracts)))
+        interface-paths (set (filter #(and (str/starts-with? % "app.ui-")
+                                           (not= % "app.ui-components"))
+                                     (map :namespace interfaces)))
+        interface-refs (set (map #(keyword (:namespace %) (name (:name %))) interfaces))
+        plans (:plans (json/parse-string
+                        (slurp (io/resource "packages/app/ui-preview/builtin-plans.json")) true))
+        plan-key (fn [component]
+                   (let [[head & tail] (str/split (name component) #"-")]
+                     (keyword (apply str head (map str/capitalize tail)))))]
+    (is (= paths interface-paths))
+    (is (every? interface-refs (map :reference (vals contracts))))
+    (is (= (set (map plan-key (keys contracts))) (set (keys plans))))
+    (doseq [[component {:keys [id roles]}] contracts]
+      (let [entries (get-in plans [(plan-key component) :entries])]
+        (is (= (str id) (:view entries)))
+        (is (set/subset? roles (set (keys entries))))))))
 
 
 (deftest copied-colors-share-canonical-typed-leaves-without-source-wrapper-access

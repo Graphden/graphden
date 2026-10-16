@@ -111,6 +111,7 @@
                                                 (slurp (io/resource "packages/app/ui-config/fns.edn")))
         source (graph fns package-path)
         actual (component-config/configuration source (ids/fn-id package-path :editor-defaults))
+        authored (component-config/manifest-entries source (ids/fn-id package-path :editor-defaults))
         contracts {:account-menu ["app.ui-account-menu" "account-menu" #{:initial :update :view}]
                    :fn-picker ["app.ui-fn-picker" "picker" #{:view}]
                    :recents ["app.ui-recents" "recents" #{:initial :update :view}]
@@ -118,6 +119,9 @@
                    :explorer ["app.ui-explorer" "explorer-toolbar" #{:initial :update :view}]
                    :tutorial-catalog ["app.ui-tutorial-catalog" "catalog" #{:view}]}]
     (is (= (set (keys contracts)) (set (keys actual))))
+    (is (= (set (map :id (vals component-config/component-contracts)))
+           (set (keys authored)))
+        "the raw shipped manifest has exactly the trusted discriminator identities")
     (doseq [[component [path prefix roles]] contracts]
       (is (= (into {} (map (fn [role]
                              [role (ids/fn-id path (str prefix "-" (name role)))])) roles)

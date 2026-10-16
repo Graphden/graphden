@@ -161,12 +161,12 @@
   (let [root (random-uuid)
         sibling-root (random-uuid)
         parent (random-uuid)
-        target (random-uuid)
+        target (ids/fn-id "app.ui-tutorial-catalog" :catalog-view)
         const-id (ids/fn-id "core.logic" :const)
         slot-id (ids/slot-id const-id :value)
         any-id (ids/primitive-fn-id :any)
         calls (atom [])
-        authorized (atom #{})
+        authorized (atom {})
         tables {:fn (keyed [{:id root :parent-ids [parent]}
                             {:id sibling-root :parent-ids [parent]}
                             {:id parent :parent-ids [const-id]}
@@ -181,9 +181,12 @@
                                  {:id (random-uuid) :fn-id root :slot-id slot-id :ref-fn-id target}
                                  {:id (random-uuid) :fn-id target :value-present true :value "private body"}])}
         storage (fixture-storage tables calls)
-        graph (source/collect-manifests storage [root sibling-root] #(swap! authorized conj (:id %)))]
+        graph (source/collect-manifests storage [root sibling-root]
+                                        (fn [row & [permission]]
+                                          (swap! authorized assoc (:id row) permission)))]
     (is (every? (set (map :id (:fns graph))) [root sibling-root]))
     (is (contains? @authorized target))
+    (is (= {:identity-only? true} (get @authorized target)))
     (is (contains? (set (map :id (:fns graph))) target))
     (is (not-any? #(= target (:fn-id %)) (:bindings graph)))
     (is (not-any? (fn [[operation entity where]]
@@ -210,18 +213,20 @@
 
 
 (deftest shipped-discriminator-permission-is-explicitly-metadata-only
-  (let [id (first (keys contracts/component-identities))
-        calls (atom [])
-        permissions (atom [])
-        row {:id id :name "shipped-view" :parent-ids [(random-uuid)]}
-        storage (fixture-storage {:fn {id row}
-                                  :binding {(random-uuid) {:fn-id id :value "never read"}}} calls)]
-    (is (= [row] (source/collect-component-identities
-                   storage [id] (fn [actual permission]
-                                  (swap! permissions conj [(:id actual) permission])))))
-    (is (= [[id {:identity-only? true}]] @permissions))
-    (is (= [[:read :fn id]] @calls))
-    (is (= :invalid-component-identities
-           (try (source/collect-component-identities storage [(random-uuid)] (constantly nil))
-                (catch clojure.lang.ExceptionInfo error (:reason (ex-data error))))))
-    (is (= [[:read :fn id]] @calls))))
+  (is (= "app.ui-tutorial-catalog"
+         (get contracts/component-identities (ids/fn-id "app.ui-tutorial-catalog" :catalog-view))))
+  (doseq [id (keys contracts/component-identities)]
+    (let [calls (atom [])
+          permissions (atom [])
+          row {:id id :name "shipped-view" :parent-ids [(random-uuid)]}
+          storage (fixture-storage {:fn {id row}
+                                    :binding {(random-uuid) {:fn-id id :value "never read"}}} calls)]
+      (is (= [row] (source/collect-component-identities
+                     storage [id] (fn [actual permission]
+                                    (swap! permissions conj [(:id actual) permission])))))
+      (is (= [[id {:identity-only? true}]] @permissions))
+      (is (= [[:read :fn id]] @calls))
+      (is (= :invalid-component-identities
+             (try (source/collect-component-identities storage [(random-uuid)] (constantly nil))
+                  (catch clojure.lang.ExceptionInfo error (:reason (ex-data error))))))
+      (is (= [[:read :fn id]] @calls)))))

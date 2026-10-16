@@ -224,6 +224,36 @@ const source = process.env.GRAPHDEN_CANVAS_SOURCE_ROOT || path.join(__dirname, '
     assert.deepEqual(switched, {retiredBeforeReply: true, ignoredPrevious: true,
       ignoredCurrent: true, newOwner: true, sameButton: true, sheets: 0});
 
+    const mountedScope = await page.evaluate(async () => {
+      window.gdLoadUIComponentRuntime = async () => fixture.personal;
+      await gdCanvasGraph.reload();
+      const previous = fixture.mount('fn-name', {name: 'Previous owner'}).host;
+      const wasPersonal = !!previous.querySelector('.gd-canvas-personal');
+      window.gdPrefOwner = 'mount-owner-c';
+      const current = fixture.mount('fn-name', {name: 'Current owner'}).host;
+      const builtinBeforeReload = !!current.querySelector('.gd-canvas-name')
+        && !current.querySelector('.gd-canvas-personal') && current.textContent === 'Current owner';
+      let release;
+      let signal;
+      window.gdLoadUIComponentRuntime = (_name, _plan, _options, abortSignal) => {
+        signal = abortSignal;
+        return new Promise(resolve => { release = resolve; });
+      };
+      const pending = gdCanvasGraph.reload();
+      window.gdPrefOwner = 'mount-owner-d';
+      const fresh = fixture.mount('fn-name', {name: 'Fresh owner'}).host;
+      release(fixture.personal);
+      await pending;
+      const result = {wasPersonal, builtinBeforeReload, aborted: signal.aborted,
+        oldHostsEmpty: !previous.childNodes.length && !current.childNodes.length,
+        lateIgnored: fresh.textContent === 'Fresh owner' && !!fresh.querySelector('.gd-canvas-name')
+          && !fresh.querySelector('.gd-canvas-personal')};
+      gdCanvasGraph.dispose(fixture.owner);
+      return result;
+    });
+    assert.deepEqual(mountedScope, {wasPersonal: true, builtinBeforeReload: true,
+      aborted: true, oldHostsEmpty: true, lateIgnored: true});
+
     const hydration = await page.evaluate(async () => {
       window.gdAccount = {id: 'same-auth-account'};
       window.isAuthenticated = () => true;

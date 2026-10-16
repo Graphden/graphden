@@ -626,32 +626,30 @@
            [primary-parent arg-name])))))
 
 
-(defn build-defs-by-name
-  "Map of {fn-name → fn-def} from the input vector for parse-time
-   slot resolution. DUAL-keyed (bare + `:ns.path/name` qualified) —
-   ambiguous PARENT refs arrive already qualified from
-   `normalize-qualified-refs`, so their shape lookups hit the precise
-   key; a bare key under per-ns duplicates is last-write and is only
-   consulted for unique names.
+(defn definition-ref
+  "Precise authoring identity, including the root namespace's empty spelling."
+  [fn-def]
+  (keyword (or (:namespace fn-def) "") (name (:name fn-def))))
 
-   KNOWN-LATENT (audit-5): the last-write bare key silently
-   mis-resolves the day a bare lookup hits a duplicated name.
-   Removing the colliding key was tried and REVERTED —
-   parse resolves a def's OWN name through this map on the binding
-   emission path, so an absent key drops the duplicated defs'
-   bindings from the round-trip. The real fix is qualified own-name
-   lookups at those call sites first; until then this stays
-   bug-compatible."
-  [module-fn-defs]
-  (reduce
-    (fn [m fd]
-      (if-not (:name fd)
-        m
-        (cond-> (assoc m (:name fd) fd)
-          (:namespace fd)
-          (assoc (keyword (:namespace fd) (name (:name fd))) fd))))
-    {}
-    module-fn-defs))
+
+(defn own-ref
+  "Resolve a definition's own identity without consulting a colliding bare key.
+   Legacy single-definition callers may supply a bare-only index."
+  [fn-def defs-by-name]
+  (let [qualified (definition-ref fn-def)]
+    (if (contains? defs-by-name qualified) qualified (:name fn-def))))
+
+
+(defn build-defs-by-name
+  "Precise qualified entries plus bare aliases only for unambiguous identities.
+   Later revisions of the same identity replace earlier definitions."
+  [fn-defs]
+  (let [qualified (into {} (keep (fn [fd]
+                                   (when (:name fd) [(definition-ref fd) fd]))) fn-defs)
+        by-name (group-by :name (vals qualified))]
+    (reduce-kv (fn [m n defs]
+                 (if (= 1 (count defs)) (assoc m n (first defs)) m))
+               qualified by-name)))
 
 
 (defn ancestor-type-pin
@@ -805,12 +803,12 @@
    topological sort so two services may each name the other."
   [fn-def arg-name defs-by-name]
   (boolean
-    (when-let [fn-name (:name fn-def)]
+    (when (:name fn-def)
       ;; The STRICT resolver: nil (not a throw) when no concrete
       ;; inheritance / ref hit exists — this runs over partial def
       ;; sets, where an orphan-looking binding is a lookup gap, not an
       ;; authoring error (the parser reports those).
-      (let [[owner owner-arg] (resolve-slot-owner-strict fn-name arg-name
+      (let [[owner owner-arg] (resolve-slot-owner-strict (own-ref fn-def defs-by-name) arg-name
                                                          defs-by-name #{})]
         (and owner
              (= :fn-ref (slot-type-of owner owner-arg defs-by-name)))))))

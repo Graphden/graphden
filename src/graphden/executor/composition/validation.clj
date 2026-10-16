@@ -67,11 +67,11 @@
                     {:type :fn-composition/invalid-defs
                      :fn-defs-type (type fn-defs)})))
   (let [duplicates (->> fn-defs
-                        (map :name)
+                        (map (juxt :namespace :name))
                         frequencies
                         (keep (fn [[n c]] (when (> c 1) n))))]
     (when (seq duplicates)
-      (throw (ex-info "Duplicate fn names in definitions"
+      (throw (ex-info "Duplicate (namespace, name) pairs in definitions"
                       {:type :fn-composition/duplicate-names
                        :duplicates (vec duplicates)}))))
   (doseq [fn-def fn-defs]

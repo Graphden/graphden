@@ -724,26 +724,26 @@
      tolerance is for user CRUD, our corpus stays at zero.
      `skip-allowlist-gate?` opts a test bootstrap out — useful when
      loading a SUBSET of production packages."
-  [expanded-fn-defs extra-defs skip-allowlist-gate? branch-id]
+  [{:keys [fn-defs defs-by-name name->id]} skip-allowlist-gate? branch-id]
   (let [;; Identity edges (`:fn-ref` slots) are not ordering
         ;; dependencies — a pair of services naming each other must
         ;; not read as a cycle here (nor at write time, nor in compile).
         ;; `extra-defs` (the base-fn defs) are where `:fn-ref` slots are
         ;; declared, so the owner lookup needs them alongside the fn-defs.
-        defs-by-name (merge extra-defs (slot-res/build-defs-by-name expanded-fn-defs))
         identity-arg? (fn [fd arg] (slot-res/fn-ref-arg? fd arg defs-by-name))
         ;; The checker's view of a list binding is its items — a `{:append …
         ;; :closed true}` map is a vector to it (`checker-view`); the
         ;; narrowing builders below read `:args` directly, so view first.
         sorted (mapv types-check/checker-view
-                     (deps/topological-sort expanded-fn-defs identity-arg?))
+                     (deps/topological-sort fn-defs identity-arg? name->id))
         fd-fn-id (fn [fd]
-                   (when (and (:name fd) (:namespace fd))
+                   (when (:name fd)
                      (records/fn-id (:namespace fd) (:name fd))))
         failures (atom {})
         collect! (fn [fd e]
-                   (swap! failures assoc (:name fd)
-                          {:message (ex-message e)
+                   (swap! failures assoc (fd-fn-id fd)
+                          {:name (:name fd)
+                           :message (ex-message e)
                            :fn-id (fd-fn-id fd)
                            :diagnostic (diag/from-ex e)})
                    (log/debug "Type-check failed for fn-def" (:name fd) "—"
@@ -787,8 +787,8 @@
                 " docs/TYPE_SYSTEM_DECISIONS.md"))
     (when-not skip-allowlist-gate?
       (types-check/assert-sweep-failures-match-allowlist!
-        (set (keys @failures))
-        (update-vals @failures :message)))
+        (into #{} (map :name) (vals @failures))
+        (into {} (map (juxt :name :message)) (vals @failures))))
     (set (keys @failures))))
 
 
@@ -806,7 +806,7 @@
                          signature (get-in rich [:by-id id])
                          fingerprint (get fingerprints id)]
                      (if (and signature fingerprint
-                              (not (contains? failures (:name definition))))
+                              (not (contains? failures id)))
                        (assoc-in rich [:by-id id]
                                  (provenance/stamp-storage-input
                                    signature (types-check/checker-view definition) fingerprint))
@@ -1134,7 +1134,8 @@
    (sync-fn-entities-from-packages! storage packages base-fns-info nil))
   ([storage packages base-fns-info
     {:keys [skip-type-check? skip-allowlist-gate?]}]
-   (let [fn-defs (:fn-defs packages)
+   (let [fn-defs (mapv #(assoc % :fn-id (records/fn-id (:namespace %) (:name %)))
+                       (:fn-defs packages))
          ns-id-map (or (:ns-id-map base-fns-info) {})
          extra-name->id (or (:all-name->id base-fns-info) {})
          ;; Hand the base-fn defs into the composed-fn sync so the slot
@@ -1244,7 +1245,8 @@
      ;;
      ;; Run the same `expand-inline-anons-in-module` pass on the
      ;; type-check input so the sweep sees the synthetic refs.
-     (let [expanded-fn-defs (records-parse/expand-inline-anons-in-module fn-defs)]
+     (let [{expanded-fn-defs :fn-defs :as prepared}
+           (records-parse/prepare-module fn-defs extra-name->id extra-defs)]
        ;; Re-seed rich-types so synthetic anons get a registry entry too.
        (doseq [fd expanded-fn-defs]
          (when-let [fn-name (:name fd)]
@@ -1255,7 +1257,7 @@
          ;; The sweep records its final failure set into the per-branch
          ;; diagnostics store — key it by the branch this sync ran on
          ;; (nil for an unversioned/base storage = default branch).
-         (let [failures (run-type-check-sweep! expanded-fn-defs extra-defs skip-allowlist-gate?
+         (let [failures (run-type-check-sweep! prepared skip-allowlist-gate?
                                                (vs/current-branch-id storage))]
            (certify-written-source! expanded-fn-defs failures fns))
          ;; Port-collision scan — runs against the expanded fn-def

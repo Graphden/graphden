@@ -19,25 +19,29 @@
   (let [definitions (mapv #(hash-map :name % :namespace "certified" :parent :const
                                      :args {:value {:value "authored"}})
                           [:passing :failed :superseded :missing])
+        healthy-twin (assoc (second definitions) :namespace "healthy-twin")
+        definitions (conj definitions healthy-twin)
         ids (into {} (map (fn [definition]
                             [(:name definition) (registry/fn-def-registry-id (:name definition) definition)]))
-                  definitions)
+                  (butlast definitions))
+        twin-id (records/fn-id "healthy-twin" :failed)
         signature {:return [:secret :text] :args {} :effects #{:db}}
         signatures (into {} (map (fn [definition]
-                                   [(get ids (:name definition))
+                                   [(records/fn-id (:namespace definition) (:name definition))
                                     (provenance/stamp signature definition)])) definitions)
         signatures (assoc signatures (:superseded ids)
                           (provenance/stamp signature {:name :other-input}))
         by-name {:passing (:passing ids)}
         rich (atom {:by-id signatures :by-name by-name})
         receipt (with-meta {} {::composition/source-fingerprints
-                               (into {} (map #(vector (get ids %) "written"))
-                                     [:passing :failed :superseded])})]
+                               (assoc (into {} (map #(vector (get ids %) "written"))
+                                            [:passing :failed :superseded]) twin-id "written")})]
     (binding [registry/*rich-types-override* rich]
-      (#'sync/certify-written-source! definitions #{:failed} receipt))
+      (#'sync/certify-written-source! definitions #{(:failed ids)} receipt))
     (is (= by-name (:by-name @rich)))
     (is (= signatures (:by-id @rich)) "certificate metadata does not alter any type values")
     (is (provenance/matches-storage-input? (get-in @rich [:by-id (:passing ids)]) "written"))
+    (is (provenance/matches-storage-input? (get-in @rich [:by-id twin-id]) "written"))
     (doseq [name [:failed :superseded :missing]]
       (is (false? (provenance/matches-storage-input? (get-in @rich [:by-id (get ids name)]) "written"))))))
 

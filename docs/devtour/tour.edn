@@ -945,10 +945,11 @@
      :say "Reads a module's [EDN](#term/edn) definitions while retaining source file and line
            information. Later validation and type errors use those locations to identify the authored
            definition."}
-    {:ns graphden.packages.records.parse :defn parse-module
-     :say "Converts module definitions into stored rows in two passes. First it assigns deterministic
-           IDs; then it parses definitions using the module and previously known definitions to
-           resolve inherited [slot](#term/slot) ownership before writing any rows."}
+    {:ns graphden.packages.records.parse :defn prepare-module
+     :say "Prepares the module shared by production composition and its type sweep. References resolve
+           within their namespace before dependency sorting, and inline functions expand before
+           checker identities are attached. The public `parse-module` entry uses these same indexes
+           to resolve inherited [slot](#term/slot) ownership before emitting stored rows."}
     {:ns graphden.packages.records.parse :defn parse-composed
      :say "Parses a composed function's parents and arguments. A bound argument creates a
            [binding](#term/binding) to an inherited [slot](#term/slot); a type-only argument

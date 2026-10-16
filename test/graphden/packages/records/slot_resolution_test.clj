@@ -185,7 +185,7 @@
     (let [idx (sr/build-defs-by-name [{:name :a :parent :p}
                                       {:name :b}
                                       {:no-name true}])]
-      (is (= #{:a :b} (set (keys idx))))
+      (is (= #{:a :b (keyword "" "a") (keyword "" "b")} (set (keys idx))))
       (is (= :p (:parent (:a idx)))))))
 
 

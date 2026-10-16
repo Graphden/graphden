@@ -20,6 +20,7 @@
     [graphden.executor.source-contract :as source-contract]
     [graphden.packages.export :as export]
     [graphden.packages.records :as records]
+    [graphden.packages.records.parse :as record-parse]
     [graphden.packages.records.slot-resolution :as slot-res]
     [graphden.storage.expected-source :as expected-source]
     [graphden.storage.graph-writer :as writer]
@@ -340,13 +341,7 @@
    a second lossy reconstruction. `records->fn-defs` skips primitives +
    anonymous rows, matching what `parse-module` expects as extra-defs."
   [records]
-  (reduce
-    (fn [m fd]
-      (cond-> (assoc m (:name fd) fd)
-        (:namespace fd)
-        (assoc (keyword (:namespace fd) (name (:name fd))) fd)))
-    {}
-    (export/records->fn-defs records)))
+  (slot-res/build-defs-by-name (export/records->fn-defs records)))
 
 
 (defn- existing-state
@@ -368,13 +363,13 @@
    no-DB view of a package corpus (`packages.corpus-seals-test`)."
   [fn-defs extra-name->id extra-defs-by-name]
   (validation/validate-all-defs! fn-defs)
-  (let [;; Identity edges (`:fn-ref` slots) don't order the sync — two
-        ;; services may name each other. The slot type resolves across
-        ;; this module + the already-synced defs.
-        defs-by-name (merge extra-defs-by-name (slot-res/build-defs-by-name fn-defs))
+  (let [{:keys [fn-defs name->id defs-by-name] :as prepared}
+        (record-parse/prepare-module fn-defs extra-name->id extra-defs-by-name)
+        ;; Identity edges name targets without evaluating them, so mutual
+        ;; fn-ref bindings do not order the sync. Slot lookup is normalized too.
         identity-arg? (fn [fd arg] (slot-res/fn-ref-arg? fd arg defs-by-name))
-        sorted (deps/topological-sort fn-defs identity-arg?)]
-    (records/parse-module sorted extra-name->id extra-defs-by-name)))
+        sorted (deps/topological-sort fn-defs identity-arg? name->id)]
+    (record-parse/parse-prepared-module (assoc prepared :fn-defs sorted))))
 
 
 (defn prepare-sync

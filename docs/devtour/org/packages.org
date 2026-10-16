@@ -7,7 +7,7 @@ Declarations, implementations, synchronization, import, and lint.
 
 after: executor
 
-[[file:index.org][index]] · ~100 min
+[[file:index.org][index]] · ~99 min
 
 * 1. load-packages
 :PROPERTIES:
@@ -101,31 +101,31 @@ Reads a module's [[file:glossary.org::#term/edn][EDN]] definitions while retaini
 - source :: [[file:../../../src/graphden/packages/loader.clj::(defn- load-module-fns][src/graphden/packages/loader.clj:210]]
 - same file :: [[file:packages.org::#packages/load-packages][load-packages]], [[file:packages.org::#packages/resolve-dependencies][resolve-dependencies]], [[file:packages.org::#packages/validate-dep-constraints!][validate-dep-constraints!]], [[file:packages.org::#packages/load-single-package][load-single-package]], [[file:packages.org::#packages/process-module][process-module]], [[file:packages.org::#packages/base-fn?][base-fn?]], [[file:packages.org::#packages/load-impls-via-eval][load-impls-via-eval]], [[file:packages.org::#packages/fn-def->base-fn-def][fn-def->base-fn-def]], [[file:packages.org::#packages/sync-namespaces!][sync-namespaces!]]
 
-* 8. parse-module
+* 8. prepare-module
 :PROPERTIES:
-:CUSTOM_ID: packages/parse-module
+:CUSTOM_ID: packages/prepare-module
 :FILE: src/graphden/packages/records/parse.clj
-:LINE: 1240
-:MINS: 4.3
+:LINE: 1178
+:MINS: 3.2
 :END:
 
-Converts module definitions into stored rows in two passes. First it assigns deterministic IDs; then it parses definitions using the module and previously known definitions to resolve inherited [[file:glossary.org::#term/slot][slot]] ownership before writing any rows.
+Prepares the module shared by production composition and its type sweep. References resolve within their namespace before dependency sorting, and inline functions expand before checker identities are attached. The public ~parse-module~ entry uses these same indexes to resolve inherited [[file:glossary.org::#term/slot][slot]] ownership before emitting stored rows.
 
-- source :: [[file:../../../src/graphden/packages/records/parse.clj::(defn parse-module][src/graphden/packages/records/parse.clj:1240]]
+- source :: [[file:../../../src/graphden/packages/records/parse.clj::(defn prepare-module][src/graphden/packages/records/parse.clj:1178]]
 - same file :: [[file:packages.org::#packages/parse-composed][parse-composed]]
 
 * 9. parse-composed
 :PROPERTIES:
 :CUSTOM_ID: packages/parse-composed
 :FILE: src/graphden/packages/records/parse.clj
-:LINE: 713
-:MINS: 6.5
+:LINE: 714
+:MINS: 6.6
 :END:
 
 Parses a composed function's parents and arguments. A bound argument creates a [[file:glossary.org::#term/binding][binding]] to an inherited [[file:glossary.org::#term/slot][slot]]; a type-only argument declaration can add an own [[file:glossary.org::#term/slot][slot]]. ~resolve-slot-owner~ determines which ancestor owns the targeted [[file:glossary.org::#term/slot][slot]].
 
-- source :: [[file:../../../src/graphden/packages/records/parse.clj::(defn- parse-composed][src/graphden/packages/records/parse.clj:713]]
-- same file :: [[file:packages.org::#packages/parse-module][parse-module]]
+- source :: [[file:../../../src/graphden/packages/records/parse.clj::(defn- parse-composed][src/graphden/packages/records/parse.clj:714]]
+- same file :: [[file:packages.org::#packages/prepare-module][prepare-module]]
 
 * 10. resolve-slot-owner
 :PROPERTIES:
@@ -145,13 +145,13 @@ Finds the function that declared an argument's [[file:glossary.org::#term/slot][
 :PROPERTIES:
 :CUSTOM_ID: packages/build-rename-slot-records
 :FILE: src/graphden/packages/records/slot_resolution.clj
-:LINE: 725
+:LINE: 723
 :MINS: 5.1
 :END:
 
 Represents ~{Y {:as :X}}~ by creating an own rename [[file:glossary.org::#term/slot][slot]] linked to the original [[file:glossary.org::#term/slot][slot]] through ~source-slot-id~. Parser, executor, and editor use this link to keep public names separate from underlying [[file:glossary.org::#term/slot][slot]] identity.
 
-- source :: [[file:../../../src/graphden/packages/records/slot_resolution.clj::(defn build-rename-slot-records][src/graphden/packages/records/slot_resolution.clj:725]]
+- source :: [[file:../../../src/graphden/packages/records/slot_resolution.clj::(defn build-rename-slot-records][src/graphden/packages/records/slot_resolution.clj:723]]
 - see also :: [[file:executor.org::#executor/build-ref-renames][build-ref-renames]]
 - same file :: [[file:packages.org::#packages/resolve-slot-owner][resolve-slot-owner]]
 
@@ -216,7 +216,7 @@ Creates the stored namespace hierarchy, such as ~core~ and ~core.arithmetic~, an
 :CUSTOM_ID: packages/sync-fn-entities-from-packages!
 :FILE: src/graphden/packages/sync.clj
 :LINE: 1115
-:MINS: 11.0
+:MINS: 11.1
 :END:
 
 Synchronizes packaged definitions into storage, repairs moved identities, removes unused retired definitions, and checks types in [[file:glossary.org::#term/topological-order][dependency order]]. Packages on disk describe the desired state. Test bootstraps may skip the full type sweep; production boot and ~bb type-sweep~ run it explicitly.

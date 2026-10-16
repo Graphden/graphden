@@ -238,13 +238,13 @@ Checks definitions in [[file:glossary.org::#term/topological-order][dependency o
 :PROPERTIES:
 :CUSTOM_ID: types/record-rich-types!
 :FILE: src/graphden/executor/registry/core.clj
-:LINE: 448
+:LINE: 447
 :MINS: 10.0
 :END:
 
 Stores each function's computed argument types, return type, and [[file:glossary.org::#term/effect][effects]] in the [[file:glossary.org::#term/rich-types][rich-types registry]]. Compiler decisions, runtime checks, [[file:glossary.org::#term/secret][secret redaction]], and editor labels read this data. Writes target the active branch's registry, so checking one branch does not overwrite another branch's types.
 
-- source :: [[file:../../../src/graphden/executor/registry/core.clj::(defn record-rich-types!][src/graphden/executor/registry/core.clj:448]]
+- source :: [[file:../../../src/graphden/executor/registry/core.clj::(defn record-rich-types!][src/graphden/executor/registry/core.clj:447]]
 - see also :: [[file:executor.org::#executor/compile-all][compile-all]], [[file:web.org::#web/api-rich-types][api-rich-types]]
 - same file :: [[file:types.org::#types/rich-type-of-id][rich-type-of-id]]
 
@@ -252,11 +252,11 @@ Stores each function's computed argument types, return type, and [[file:glossary
 :PROPERTIES:
 :CUSTOM_ID: types/rich-type-of-id
 :FILE: src/graphden/executor/registry/core.clj
-:LINE: 656
+:LINE: 655
 :MINS: 1.3
 :END:
 
 Looks up [[file:glossary.org::#term/rich-types][rich type information]] by function ID. Names may repeat across namespaces and are not a unique identity. The remaining name index supports [[file:glossary.org::#term/base-function][base functions]] and older call sites; new consumers should use IDs. See the [[file:../../../docs/adr/ADR-identity-model.md][identity model]].
 
-- source :: [[file:../../../src/graphden/executor/registry/core.clj::(defn rich-type-of-id][src/graphden/executor/registry/core.clj:656]]
+- source :: [[file:../../../src/graphden/executor/registry/core.clj::(defn rich-type-of-id][src/graphden/executor/registry/core.clj:655]]
 - same file :: [[file:types.org::#types/record-rich-types!][record-rich-types!]]

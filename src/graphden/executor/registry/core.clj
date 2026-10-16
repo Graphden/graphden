@@ -335,8 +335,8 @@
 
 (defn- index-keys-for
   "The `:by-name` index keys one entry claims: the bare name always,
-   plus the `:ns.path/name` qualified form when the namespace is
-   known. Under per-ns duplicates the BARE key is last-write-wins and
+   plus the `:ns.path/name` qualified form (empty namespace for root).
+   Under per-ns duplicates the BARE key is last-write-wins and
    only qualified lookups are precise — ambiguous bare refs are
    rewritten to qualified form at parse entry, and the editor's crud
    path reconstructs qualified names, so precise resolution always
@@ -344,8 +344,7 @@
   [fn-name ns-path]
   (if (nil? fn-name)
     []
-    (cond-> [fn-name]
-      ns-path (conj (keyword ns-path (name fn-name))))))
+    [fn-name (keyword (or ns-path "") (name fn-name))]))
 
 
 (defn- remove-anonymous-name-keys
@@ -1117,7 +1116,7 @@
   ([storage defs ns-id-map extra-name->id]
    (validate-all-defs! defs)
    (doseq [[fn-name fn-def] defs]
-     (record-rich-types! fn-name fn-def))
+     (record-rich-types! fn-name (assoc fn-def :fn-id (records/fn-id (:namespace fn-def) fn-name))))
    (let [fn-def-records (mapv def-pair->fn-def-record defs)
          records-list (records/parse-module fn-def-records extra-name->id)
          name->id (composition/write-records! storage records-list ns-id-map)]

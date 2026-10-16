@@ -4,7 +4,9 @@
    process records in (file order is free; cycles are rejected)."
   (:require
     [clojure.set :as set]
-    [graphden.executor.composition.parsing :as parsing]))
+    [graphden.executor.composition.parsing :as parsing]
+    [graphden.packages.records.ids :as ids]
+    [graphden.packages.records.parse :as record-parse]))
 
 
 (defn- arg-value-fn-refs
@@ -14,7 +16,7 @@
    Handles:
 
      - keyword          → that ref
-     - {:ref X}/{:value X}  → X if it's a fn-ref
+     - {:ref X}/{:resolver X} → X if it's a fn-ref
      - vector of items  → union of item refs (each via the rules above)"
   [arg-value]
   (cond
@@ -25,16 +27,14 @@
     (into #{} (mapcat arg-value-fn-refs) arg-value)
 
     (map? arg-value)
-    ;; {:as :name :ref :fn-name} / {:as :name :value :fn-name} /
+    ;; {:as :name :ref :fn-name} /
     ;; {:resolver :fn-name ...} -- the resolver runs at
     ;; arg-resolution time, so it must be synced BEFORE its consumer
     ;; (same topo-sort dependency as a plain ref).
     (let [r (parsing/parse-fn-ref (:ref arg-value))
-          v (parsing/parse-fn-ref (:value arg-value))
           rz (parsing/parse-fn-ref (:resolver arg-value))]
       (cond-> #{}
         r (conj r)
-        v (conj v)
         rz (conj rz)))
 
     :else #{}))
@@ -101,15 +101,25 @@
     (into arg-deps (concat parent-deps (filter fn-names-in-set type-deps)))))
 
 
+(defn- definition-id
+  [fd]
+  (ids/fn-id (:namespace fd) (:name fd)))
+
+
 (defn- build-dependency-graph
-  "Builds dependency graph from fn-defs.
-   Returns map of {fn-name -> #{dependency-names}}."
-  [fn-defs identity-arg?]
-  (let [fn-names (into #{} (map :name) fn-defs)]
-    (into {}
-          (map (fn [fd]
-                 [(:name fd) (extract-dependencies fd fn-names identity-arg?)])
-               fn-defs))))
+  "Dependency vertices and edges use deterministic fn identities. References
+   resolve through the parser's namespace-aware reference boundary."
+  [fn-defs identity-arg? name->id]
+  (let [fn-ids (into #{} (map definition-id) fn-defs)
+        refs (set (keys name->id))]
+    (into {} (map (fn [fd]
+                    [(definition-id fd)
+                     (into #{} (comp
+                                 (map #(get name->id
+                                            (record-parse/normalize-ref % name->id (:namespace fd))))
+                                 (filter fn-ids))
+                           (extract-dependencies fd refs identity-arg?))]))
+          fn-defs)))
 
 
 (defn topological-sort
@@ -130,9 +140,11 @@
   ([fn-defs]
    (topological-sort fn-defs (constantly false)))
   ([fn-defs identity-arg?]
-   (let [dep-graph (build-dependency-graph fn-defs identity-arg?)
-         fn-def-map (into {} (map (juxt :name identity) fn-defs))
-         all-names (into #{} (map :name) fn-defs)
+   (topological-sort fn-defs identity-arg? (record-parse/name->id-index {} fn-defs)))
+  ([fn-defs identity-arg? name->id]
+   (let [dep-graph (build-dependency-graph fn-defs identity-arg? name->id)
+         fn-def-map (into {} (map (juxt definition-id identity) fn-defs))
+         all-names (into #{} (map definition-id) fn-defs)
          ;; Build reverse dependency map: {fn-name -> #{fns-that-depend-on-it}}
          reverse-deps (reduce-kv
                         (fn [acc fn-name deps]
@@ -158,11 +170,18 @@
          (if (= (count sorted) (count fn-defs))
            (mapv fn-def-map sorted)
            ;; Not all processed - cycle detected
-           (let [remaining (set/difference all-names (set sorted))]
+           (let [remaining (set/difference all-names (set sorted))
+                 label (fn [id]
+                         (let [fd (get fn-def-map id)]
+                           (if (:namespace fd)
+                             (keyword (:namespace fd) (name (:name fd)))
+                             (:name fd))))]
              (throw (ex-info "Circular dependency detected in fn definitions"
                              {:type :fn-composition/circular-dependency
-                              :remaining remaining
-                              :dep-graph (select-keys dep-graph remaining)}))))
+                              :remaining (into #{} (map label) remaining)
+                              :dep-graph (into {} (map (fn [[id deps]]
+                                                         [(label id) (into #{} (map label) deps)]))
+                                               (select-keys dep-graph remaining))}))))
          ;; Pick any ready node (first for determinism)
          (let [current (first ready-set)
                rest-ready (disj ready-set current)

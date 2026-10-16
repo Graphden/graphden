@@ -5,8 +5,10 @@
 ID (uuid: fn-id, slot-id, binding-id), NOT by human NAME (fn-name,
 arg/slot as-name). Names are for humans (readability + docs). Graphden IDs
 are deterministic `uuid-v5(namespace,name)` / `uuid-v5(fn-id,slot-name)`;
-fn-NAMES are globally unique (sync-validated); **arg/slot as-names are NOT
-unique across flows** — that's where name-keying is a real bug surface.
+this audit originally assumed globally unique fn names. The accepted
+[identity ADR](ADR-identity-model.md) supersedes that assumption: fn names
+are unique per namespace, while base-fn implementation labels stay global.
+**Arg/slot as-names are NOT unique across flows.**
 
 Classification: **FRAGILE** (name not stable/unique in context → real
 risk) · **BENIGN** (unique fn-name convenience key, id derivable, no
@@ -120,8 +122,8 @@ accept the caller's necessarily-named args, output is per-slot-id),
 `rich-type-of` keyed by unique fn-name (resolution at `bindings.clj:181,193`,
 `compile_runtime.clj:326`); `resolve-impl`/`has-impl?` (base-fns
 name-registry by design); `compute-fn-typed-fn-ids` matching the `:fn`
-primitive name; `composition/*` sync path (`name→id` is THE
-name→deterministic-id boundary — names legitimately live here);
+primitive name; `composition/*` sync boundary (the parser resolves author labels by
+namespace; dependency vertices and failure tracking use fn-ids);
 `execute-by-name` (explicit name-lookup public API → resolves to id then
 delegates).
 

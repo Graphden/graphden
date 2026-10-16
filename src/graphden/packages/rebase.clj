@@ -50,10 +50,13 @@
     (keyword? value) (ref-fn value)
     (vector? value) (mapv #(map-argument-refs ref-fn %) value)
     (map? value)
-    (-> (map-definition-refs ref-fn value)
-        (update-present :ref ref-fn)
-        (update-present :resolver ref-fn)
-        (update-present :append #(mapv (partial map-argument-refs ref-fn) %)))
+    (let [value (if (or (:parent value) (:parents value))
+                  (map-definition-refs ref-fn value)
+                  (update-present value :type #(map-type-refs ref-fn %)))]
+      (-> value
+          (update-present :ref ref-fn)
+          (update-present :resolver ref-fn)
+          (update-present :append #(mapv (partial map-argument-refs ref-fn) %))))
     :else value))
 
 

@@ -9,6 +9,7 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.registry.core :as reg]
     [graphden.executor.test-setup :as setup]
+    [graphden.packages.records :as records]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.context :as tc]))
 
@@ -315,3 +316,13 @@
                          {})]
           (is (contains? name->id :reg-sync-fn-3)))
         (finally (sp/close storage))))))
+
+
+(deftest root-qualified-name-resolves-its-own-identity
+  (let [root (records/fn-id nil :same)
+        other (records/fn-id "other" :same)]
+    (binding [reg/*rich-types-override* (atom {:by-id {} :by-name {}})]
+      (reg/record-rich-types-raw! root :same {:return :int :args {}})
+      (reg/record-rich-types-raw! other :same {:return :text :args {} :namespace "other"})
+      (is (= :int (:return (reg/rich-type-of (keyword "" "same")))))
+      (is (= :text (:return (reg/rich-type-of :other/same)))))))

@@ -13,6 +13,8 @@
   (:require
     [clojure.test :refer [deftest is]]
     [graphden.executor.registry.core :as reg]
+    [graphden.packages.records :as records]
+    [graphden.packages.records.parse :as parse]
     [graphden.types.check.narrowing :as nar]))
 
 
@@ -202,3 +204,46 @@
                 {:name :producer1 :parent :p :args {}}
                 {:name :producer2 :parent :p :args {}}
                 {:name :H :parent :p :args {:val {:as :val}}}]))))))
+
+
+(deftest caller-narrowing-keeps-namespaced-host-identities
+  (let [definitions (:fn-defs
+                      (parse/prepare-module
+                        [{:namespace "a" :name :caller :parent :p :args {:val :producer :body :host}}
+                         {:namespace "b" :name :caller :parent :p :args {:val :producer :body :host}}
+                         {:namespace "a" :name :producer :parent :p}
+                         {:namespace "b" :name :producer :parent :p}
+                         {:namespace "a" :name :host :parent :p :args {:val {:as :val}}}
+                         {:namespace "b" :name :host :parent :p :args {:val {:as :val}}}]
+                        {} {}))]
+    (stub-registry
+      {:p {:args {}} :a/producer {:return :int} :b/producer {:return :text}}
+      {}
+      (fn []
+        (is (= {(records/fn-id "a" :host) {:val :int}
+                (records/fn-id "b" :host) {:val :text}}
+               (nar/build-caller-narrowings definitions)))))))
+
+
+(deftest branch-overrides-keep-namespaced-host-and-target-identities
+  (let [definitions (:fn-defs
+                      (parse/prepare-module
+                        [{:namespace "a" :name :guard :parent :if :args {:test :pred :then :branch}}
+                         {:namespace "b" :name :guard :parent :if :args {:test :pred :then :branch}}
+                         {:namespace "a" :name :pred :parent :some? :args {:value :target}}
+                         {:namespace "b" :name :pred :parent :some? :args {:value :target}}
+                         {:namespace "a" :name :target :parent :p}
+                         {:namespace "b" :name :target :parent :p}
+                         {:namespace "a" :name :branch :parent :p}
+                         {:namespace "b" :name :branch :parent :p}]
+                        {} {}))]
+    (stub-registry
+      {:a/pred {:resolved-bindings {:value {:ref :a/target}} :return :bool}
+       :b/pred {:resolved-bindings {:value {:ref :b/target}} :return :bool}
+       :a/target {:return [:union :null :int]}
+       :b/target {:return [:union :null :text]}}
+      {:a/pred :some? :b/pred :some?}
+      (fn []
+        (is (= {(records/fn-id "a" :branch) {:a/target :int}
+                (records/fn-id "b" :branch) {:b/target :text}}
+               (nar/build-ref-return-overrides definitions)))))))

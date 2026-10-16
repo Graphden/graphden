@@ -51,3 +51,10 @@
     (is (= :value (get-in moved [1 :args :bare])))
     (is (= root-ref (get-in moved [0 :args :value :value])))
     (is (= root-ref (get-in moved [1 :args :literal :value])))))
+
+
+(deftest plain-map-payloads-do-not-become-inline-definitions
+  (let [literal {:map "data" :tuple "data" :args "data" :variant [:lib/value 1]}
+        definitions [{:name :value :namespace "lib" :parent :const :args {:value literal}}]
+        moved (rebase/rebase-bundle definitions (constantly "copy"))]
+    (is (= literal (get-in moved [0 :args :value])))))

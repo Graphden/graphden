@@ -29,6 +29,7 @@
    deferred."
   (:require
     [graphden.executor.registry.core :as registry]
+    [graphden.packages.records.slot-resolution :as slot-res]
     [graphden.types.check :as check]
     [graphden.types.core :as types]))
 
@@ -61,14 +62,23 @@
        (not (contains? b :ref))))
 
 
-(defn- ref-children-of
-  "The KNOWN fn-names `fd`'s own args reference (`check/ref-targets`
-   over every binding — bare keyword, `{:ref X}`, vector items)."
-  [fd known-names]
-  (into #{}
-        (comp (mapcat (fn [[_ b]] (check/ref-targets b)))
-              (filter known-names))
-        (:args fd)))
+(defn- definition-key
+  [fd]
+  (or (:fn-id fd) (:name fd)))
+
+
+(defn- graph-index
+  "Keep graph traversal keyed by authored identity. Bare aliases exist only
+   for unique identities; normalized qualified references remain exact."
+  [fn-defs]
+  (let [definitions (into {} (map (juxt definition-key identity)) fn-defs)
+        ref->key (update-vals (slot-res/build-defs-by-name fn-defs) definition-key)
+        children (into {} (map (fn [[key fd]]
+                                 [key (into #{} (comp (mapcat (comp check/ref-targets val))
+                                                      (keep ref->key))
+                                            (:args fd))]))
+                       definitions)]
+    {:definitions definitions :ref->key ref->key :children children}))
 
 
 (defn- rename-as-names-in
@@ -123,7 +133,7 @@
 
 (defn build-caller-narrowings
   "Pass 2 — narrowings for rename-host fn-defs. Returns
-   `{rename-host-name → {as-name → narrowed-type}}`.
+   `{fn-id (or legacy name) → {as-name → narrowed-type}}`.
 
    PRECONDITION: call AFTER the full per-fn-def check sweep
    (`packages/sync`'s fault-tolerant check loop in production;
@@ -131,15 +141,11 @@
    `registry/rich-type-of`, so an under-populated registry silently
    produces no narrowings."
   [fn-defs]
-  (let [fn-defs-by-name (into {} (map (fn [fd] [(:name fd) fd])) fn-defs)
-        known-names     (set (keys fn-defs-by-name))
-        ref-children    (into {}
-                              (map (fn [[n fd]]
-                                     [n (ref-children-of fd known-names)]))
-                              fn-defs-by-name)]
+  (let [{fn-defs-by-name :definitions ref->key :ref->key ref-children :children}
+        (graph-index fn-defs)]
     (reduce
       (fn [acc fd]
-        (let [F-name (:name fd)
+        (let [F-name (definition-key fd)
               ;; ALL parents' slots, not just the primary's — the
               ;; checker merges the full MI parent list
               ;; (`merge-mi-parent-infos`), and this exclusion must
@@ -157,14 +163,14 @@
                 (cond
                   (contains? parent-slots arg-name) acc
 
-                  (and ref-name (contains? known-names ref-name))
+                  (and ref-name (contains? ref->key ref-name))
                   (let [ref-info (registry/rich-type-of ref-name)
                         narrowed (some-> ref-info :return)]
                     (if (or (nil? narrowed) (= :any narrowed))
                       acc
                       (propagate-narrowing-to-rename-hosts
                         ref-children fn-defs-by-name
-                        F-name ref-name arg-name narrowed acc)))
+                        F-name (ref->key ref-name) arg-name narrowed acc)))
 
                   :else acc)))
             acc
@@ -178,8 +184,8 @@
   ([fd narrowings-map]
    (check-fn-def-with-narrowings! fd narrowings-map nil))
   ([fd narrowings-map overrides-map]
-   (binding [check/*caller-narrowings*    (get narrowings-map (:name fd))
-             check/*ref-return-overrides* (get overrides-map (:name fd))]
+   (binding [check/*caller-narrowings*    (get narrowings-map (definition-key fd))
+             check/*ref-return-overrides* (get overrides-map (definition-key fd))]
      (check/check-fn-def! fd))))
 
 
@@ -436,7 +442,7 @@
 
 
 (defn build-ref-return-overrides
-  "Phase #170 — build `{fn-name → {target-fn-name → narrowed-type}}`.
+  "Phase #170 — build `{fn-id (or legacy name) → {target-ref → narrowed-type}}`.
    For each F whose parent root is `:if` / `:cond`, compute per-
    branch overrides and propagate into the branch's transitive ref-
    tree. Pass 3 binds `*ref-return-overrides*` to the per-callee
@@ -450,12 +456,8 @@
    yields empty / `:any` overrides (no error, just no narrowing).
    Same ordering dependency as `build-caller-narrowings`."
   [fn-defs]
-  (let [fn-defs-by-name (into {} (map (fn [fd] [(:name fd) fd])) fn-defs)
-        known-names     (set (keys fn-defs-by-name))
-        ref-children    (into {}
-                              (map (fn [[n fd]]
-                                     [n (ref-children-of fd known-names)]))
-                              fn-defs-by-name)]
+  (let [{fn-defs-by-name :definitions ref->key :ref->key ref-children :children}
+        (graph-index fn-defs)]
     (reduce
       (fn [acc fd]
         (let [parent (or (:parent fd) (first (:parents fd)))
@@ -469,7 +471,7 @@
             (reduce-kv
               (fn [a branch-ref override-map]
                 (propagate-override-to-ref-tree
-                  ref-children fn-defs-by-name branch-ref override-map a))
+                  ref-children fn-defs-by-name (ref->key branch-ref) override-map a))
               acc
               branch-overrides))))
       {}

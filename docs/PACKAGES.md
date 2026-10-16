@@ -183,7 +183,8 @@ normalizes the shorthand to the map form.
 - Qualified reference: `{:handler :web.reitit/router-fn}` — same
   reference, namespace-explicit. Validated at parse time (a wrong
   namespace fails loud instead of silently resolving to a same-named
-  fn elsewhere) and normalized to the bare form. Works in every
+  fn elsewhere). Unique references normalize to the bare form; duplicated
+  names retain qualification. Works in every
   reference position: `:parent`/`:parents`, arg refs, `{:ref …}`,
   sequence items, inline-anon bodies, `:return-type`, type members.
   See [ADR-identity-model.md](adr/ADR-identity-model.md) stage 4.

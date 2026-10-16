@@ -5,6 +5,7 @@
    rename chain via `slot-resolution`."
   (:require
     [clojure.tools.logging :as log]
+    [graphden.packages.rebase :as rebase]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.slot-resolution :as slot-res]
     [graphden.packages.records.types :as types]))
@@ -725,6 +726,7 @@
   [fn-def name->id defs-by-name]
   (let [{:keys [args description return-type] fn-name :name ns-id :namespace} fn-def
         own-id (ids/fn-id ns-id fn-name)
+        own-ref (slot-res/own-ref fn-def defs-by-name)
         parent-ids (resolve-parent-list fn-def name->id)
         ;; NO degradation here: `resolve-type-ref` handles every
         ;; declarable shape itself (structural forms degrade to their
@@ -743,7 +745,7 @@
                                                   args)
         own-slot-map (into {} own-slot-args)
         binding-map (into {} binding-args)
-        exposed-names (slot-res/collect-exposed-names binding-map fn-name defs-by-name)
+        exposed-names (slot-res/collect-exposed-names binding-map own-ref defs-by-name)
         ;; PB' own-slot decls — emit the slot/fn-slot rows. Then
         ;; enrich each top-level slot with a `:source-slot-id` link
         ;; if the same name exists deeper in the ref-tree. The link
@@ -784,7 +786,7 @@
                           r)
                         r)))
                   (emit-composite-records own-id own-slot-map name->id))))
-        binding+items (mapv #(build-binding-and-items own-id fn-name %
+        binding+items (mapv #(build-binding-and-items own-id own-ref %
                                                       name->id defs-by-name)
                             binding-map)
         return-rows (inline-record-rows-for-return-type return-type name->id)
@@ -794,7 +796,7 @@
         ;; non-deterministic `fn-slots-by-fn` ordering.
         pb-slot-count (count (filter #(= :fn-slot (:kind %)) own-slot-records))
         rename-slot-records (slot-res/build-rename-slot-records
-                              fn-name exposed-names own-id name->id
+                              own-ref exposed-names own-id name->id
                               defs-by-name pb-slot-count)]
     (into [own-fn]
           (concat (or own-slot-records [])
@@ -1078,7 +1080,7 @@
     (vec (concat expanded-defs unique-extras))))
 
 
-(defn- normalize-qref
+(defn normalize-ref
   "One reference keyword → its canonical form, validated.
 
    QUALIFIED keywords: the pair must be a KNOWN fn (dual-keyed
@@ -1105,8 +1107,8 @@
                       {:type :packages/unresolved-ref :ref kw})))
 
     (= ambiguous-name (get name->id kw))
-    (let [preferred (when module-ns (keyword module-ns (name kw)))]
-      (if (and preferred (contains? name->id preferred))
+    (let [preferred (keyword (or module-ns "") (name kw))]
+      (if (contains? name->id preferred)
         preferred
         (throw (ex-info (str "Ambiguous reference " (pr-str kw)
                              " — the name exists in multiple namespaces "
@@ -1118,93 +1120,15 @@
     :else kw))
 
 
-(declare normalize-qualified-arg-value)
-
-
-(defn- normalize-qualified-type-ref
-  "Type-reference positions accept keywords, inline-composite maps
-   (`{field type}`), and structural vectors (`[:list T]`, `[:refine B C]`,
-   `[:union …]`, `[:fn {args} ret]`, `[:map K V]`, `[:tuple …]`) —
-   normalize any qualified keyword found in type position, leaving
-   refinement CONSTRAINT payloads (value world) untouched."
-  [t name->id module-ns]
-  (cond
-    (keyword? t) (normalize-qref t name->id module-ns)
-    (map? t) (into {} (map (fn [[k v]] [k (normalize-qualified-type-ref v name->id module-ns)])) t)
-    (vector? t)
-    (case (first t)
-      :refine (assoc t 1 (normalize-qualified-type-ref (nth t 1) name->id module-ns))
-      (:list :union :tuple :map) (into [(first t)]
-                                       (map #(normalize-qualified-type-ref % name->id module-ns))
-                                       (rest t))
-      :fn (cond-> t
-            (map? (nth t 1 nil)) (assoc 1 (normalize-qualified-type-ref (nth t 1) name->id module-ns))
-            (>= (count t) 3) (assoc 2 (normalize-qualified-type-ref (nth t 2) name->id module-ns)))
-      t)
-    :else t))
-
-
-(defn- normalize-qualified-arg-value
-  "Normalize qualified references inside ONE arg-value, mirroring the
-   shapes `arg-value->binding-fields` recognises. Literal payloads
-   (`:value`, refinement constraints) are deliberately untouched — a
-   qualified keyword there is user DATA, not a reference."
-  [v name->id module-ns]
-  (cond
-    (keyword? v) (normalize-qref v name->id module-ns)
-    (vector? v) (mapv #(normalize-qualified-arg-value % name->id module-ns) v)
-    (map? v)
-    (cond-> v
-      (contains? v :ref)     (update :ref #(normalize-qref % name->id module-ns))
-      (contains? v :resolver) (update :resolver #(normalize-qref % name->id module-ns))
-      (contains? v :type)    (update :type #(normalize-qualified-type-ref % name->id module-ns))
-      (contains? v :append)  (update :append (fn [items] (mapv #(normalize-qualified-arg-value % name->id module-ns) items)))
-      ;; inline anon fn-def in arg position
-      (contains? v :parent)  (update :parent #(normalize-qref % name->id module-ns))
-      (contains? v :parents) (update :parents (fn [ps] (mapv #(normalize-qref % name->id module-ns) ps)))
-      (contains? v :args)    (update :args (fn [args]
-                                             (into {}
-                                                   (map (fn [[k av]] [k (normalize-qualified-arg-value av name->id module-ns)]))
-                                                   args))))
-    :else v))
-
-
 (defn- normalize-qualified-refs
-  "Per-ns migration stage 4 (ADR-identity-model.md): accept
-   `:ns.path/name`-QUALIFIED reference keywords in every fn/type
-   reference position of a fn-def — parents, arg refs, `{:ref …}`
-   maps, sequence items, inline-anon bodies, `:return-type` and
-   type-row member positions — validate the (namespace, name) pair
-   against the dual-keyed `name->id`, and rewrite to the bare form.
-
-   Normalizing (rather than threading qualified names further) is the
-   deliberate stage-4 scope: while `validate-no-name-collisions!`
-   still enforces GLOBAL name uniqueness, a qualified ref is exactly
-   equivalent to its bare form — the win is authoring: self-documenting
-   references that fail loud on a wrong namespace instead of silently
-   resolving to a same-named fn elsewhere. Namespace-aware resolution
-   through the type-checker's name world is stage 5."
+  "Normalize semantic reference positions through the dual identity index.
+   The bundle grammar walker leaves literal values, variant tags, field names
+   and refinement constraints untouched. Unique refs use their minimal form."
   [fd name->id]
-  (let [module-ns (:namespace fd)]
-    (cond-> fd
-      (contains? fd :parent)  (update :parent #(normalize-qref % name->id module-ns))
-      (contains? fd :parents) (update :parents (fn [ps] (mapv #(normalize-qref % name->id module-ns) ps)))
-      (contains? fd :args)    (update :args (fn [args]
-                                              (into {}
-                                                    (map (fn [[k av]] [k (normalize-qualified-arg-value av name->id module-ns)]))
-                                                    args)))
-      (contains? fd :return-type) (update :return-type #(normalize-qualified-type-ref % name->id module-ns))
-      (contains? fd :type)    (update :type #(normalize-qualified-type-ref % name->id module-ns))
-      (contains? fd :list)    (update :list #(normalize-qualified-type-ref % name->id module-ns))
-      (contains? fd :union)   (update :union (fn [ts] (mapv #(normalize-qualified-type-ref % name->id module-ns) ts)))
-      (contains? fd :refine)  (update-in [:refine :base] #(normalize-qref % name->id module-ns))
-      (contains? fd :variant) (update :variant (fn [ts] (mapv #(normalize-qualified-type-ref % name->id module-ns) ts)))
-      (contains? fd :fn-type) (update :fn-type (fn [[args ret]]
-                                                 [(normalize-qualified-type-ref args name->id module-ns)
-                                                  (normalize-qualified-type-ref ret name->id module-ns)])))))
+  (rebase/rewrite-references fd #(normalize-ref % name->id (:namespace fd))))
 
 
-(defn- build-name->id
+(defn name->id-index
   "`{name → fn-id}` for every NAMED def, seeded with `extra` (names
    known from prior syncs).
 
@@ -1237,62 +1161,86 @@
     module-fn-defs))
 
 
+(defn- qualify-existing-definitions
+  "Freeze prior shapes against their original identity index before incoming
+   definitions can introduce a new local preference or bare-name ambiguity."
+  [definitions name->id]
+  (let [id->ref (into {} (keep (fn [[ref id]]
+                                 (when (qualified-keyword? ref) [id ref]))) name->id)]
+    (mapv (fn [fd]
+            (rebase/rewrite-references
+              fd (fn [ref]
+                   (let [resolved (normalize-ref ref name->id (:namespace fd))]
+                     (get id->ref (get name->id resolved) resolved)))))
+          definitions)))
+
+
+(defn prepare-module
+  "Normalize references and expand inline functions once, before dependency
+   analysis or slot lookup. Both consumers share these exact identity indexes."
+  [module-fn-defs extra-name->id extra-defs-by-name]
+  (let [;; Marker declarations register FIRST — a module that declares
+        ;; AND uses its own marker (`{:name :pii :marker {…}}` +
+        ;; `[:pii :text]` in a sibling slot) must parse standalone;
+        ;; registration is idempotent with the sync-time pass in
+        ;; `system.core/register-type-aliases!`.
+        _ (doseq [fd module-fn-defs
+                  :when (:marker fd)]
+            ((requiring-resolve 'graphden.types.core.shapes/register-marker!)
+             (:name fd) (:marker fd)))
+        ;; Normalize BEFORE anon expansion: equivalent unique references
+        ;; hash identically, while duplicated names retain qualification.
+        ;; The validation map is dual-keyed from the RAW named defs
+        ;; (+ prior syncs) — synthetic anon names are never the
+        ;; target of a qualified ref.
+        pre-name->id (name->id-index extra-name->id module-fn-defs)
+        module-fn-defs (mapv #(normalize-qualified-refs % pre-name->id) module-fn-defs)
+        ;; Pre-pass: lift every inline `{:parent X :args Y}` map in
+        ;; arg-value position into a synthetic `_anon-<hash>` fn-def
+        ;; (deterministic, dedup'd by shape). The regular parser
+        ;; then sees a longer list with all the anons as ordinary
+        ;; named composed fn-defs.
+        module-fn-defs (expand-inline-anons-in-module module-fn-defs)
+        ;; Rebuilt over the EXPANDED list, so the synthetic anons get
+        ;; ids too. `:fn-type` declarations take the same name→id path
+        ;; as any other named def — their structural shape rides in
+        ;; `:constraint` (see `parse-fn-def`), not in the id.
+        ;; Checker writes carry the exact authored identity. Tag AFTER inline
+        ;; expansion so parser bookkeeping cannot change anonymous hashes.
+        module-fn-defs (mapv #(assoc % :fn-id (ids/fn-id (:namespace %) (:name %))) module-fn-defs)
+        name->id (name->id-index extra-name->id module-fn-defs)
+        defs-by-name (slot-res/build-defs-by-name
+                       (concat (map #(normalize-qualified-refs % name->id)
+                                    (qualify-existing-definitions (vals extra-defs-by-name) extra-name->id))
+                               module-fn-defs))]
+    {:fn-defs module-fn-defs :name->id name->id :defs-by-name defs-by-name}))
+
+
+(defn parse-prepared-module
+  "Emit records from a prepared module, optionally with its :fn-defs reordered."
+  [{:keys [fn-defs name->id defs-by-name]}]
+  (let [;; Inline `[:fn args ret]` references buried in fn-defs'
+        ;; type-bearing fields produce anonymous fn-rows that the
+        ;; slot's `:type-fn-id` lands on. Synthesised once per
+        ;; module (deduped by id) and prepended so they exist
+        ;; before any slot row references them.
+        inline-fn-rows (->> fn-defs
+                            (mapcat types/inline-fn-type-rows-from-fn-def)
+                            (distinct)
+                            vec)]
+    (vec (concat inline-fn-rows
+                 (mapcat #(parse-fn-def % name->id defs-by-name) fn-defs)))))
+
+
 (defn parse-module
-  "Parse fn-defs into records. Two passes:
-   1. Pre-compute `name->id` (deterministic UUIDs) and `defs-by-name`
-      (for parse-time slot resolution through rename chains).
-   2. Run `parse-fn-def` on each, threading both maps.
+  "Parse fn-defs into records after shared namespace-aware preparation.
 
-   `extra-name->id` (optional) carries names known from prior syncs
-   so cross-module references resolve.
-
-   `extra-defs-by-name` (optional) — defs from prior syncs whose
-   shapes the slot resolver needs to see (base-fn `:args` declarations,
-   record/refinement/list type-rows). Without these, a composed fn
-   binding `:m` to a slot owned by a base-fn synced earlier wouldn't
-   resolve, since the current pass's `defs-by-name` only contains the
-   incoming defs."
-  ([module-fn-defs] (parse-module module-fn-defs {} {}))
-  ([module-fn-defs extra-name->id]
-   (parse-module module-fn-defs extra-name->id {}))
-  ([module-fn-defs extra-name->id extra-defs-by-name]
-   (let [;; Marker declarations register FIRST — a module that declares
-         ;; AND uses its own marker (`{:name :pii :marker {…}}` +
-         ;; `[:pii :text]` in a sibling slot) must parse standalone;
-         ;; registration is idempotent with the sync-time pass in
-         ;; `system.core/register-type-aliases!`.
-         _ (doseq [fd module-fn-defs
-                   :when (:marker fd)]
-             ((requiring-resolve 'graphden.types.core.shapes/register-marker!)
-              (:name fd) (:marker fd)))
-         ;; Stage 4 — validate + rewrite `:ns.path/name`-qualified refs
-         ;; to bare BEFORE anon expansion, so a qualified and a bare
-         ;; spelling of the same ref hash to the SAME anon identity.
-         ;; The validation map is dual-keyed from the RAW named defs
-         ;; (+ prior syncs) — synthetic anon names are never the
-         ;; target of a qualified ref.
-         pre-name->id (build-name->id extra-name->id module-fn-defs)
-         module-fn-defs (mapv #(normalize-qualified-refs % pre-name->id) module-fn-defs)
-         ;; Pre-pass: lift every inline `{:parent X :args Y}` map in
-         ;; arg-value position into a synthetic `_anon-<hash>` fn-def
-         ;; (deterministic, dedup'd by shape). The regular parser
-         ;; then sees a longer list with all the anons as ordinary
-         ;; named composed fn-defs.
-         module-fn-defs (expand-inline-anons-in-module module-fn-defs)
-         ;; Rebuilt over the EXPANDED list, so the synthetic anons get
-         ;; ids too. `:fn-type` declarations take the same name→id path
-         ;; as any other named def — their structural shape rides in
-         ;; `:constraint` (see `parse-fn-def`), not in the id.
-         name->id (build-name->id extra-name->id module-fn-defs)
-         defs-by-name (merge extra-defs-by-name (slot-res/build-defs-by-name module-fn-defs))
-         ;; Inline `[:fn args ret]` references buried in fn-defs'
-         ;; type-bearing fields produce anonymous fn-rows that the
-         ;; slot's `:type-fn-id` lands on. Synthesised once per
-         ;; module (deduped by id) and prepended so they exist
-         ;; before any slot row references them.
-         inline-fn-rows (->> module-fn-defs
-                             (mapcat types/inline-fn-type-rows-from-fn-def)
-                             (distinct)
-                             vec)]
-     (vec (concat inline-fn-rows
-                  (mapcat #(parse-fn-def % name->id defs-by-name) module-fn-defs))))))
+   `extra-name->id` supplies identities known from prior syncs.
+   `extra-defs-by-name` supplies their shapes for inherited slot resolution,
+   including base-fn declarations, renamed slots and referenced free args.
+   Without those shapes, a binding to a previously synced ancestor's slot
+   cannot recover its declaring owner."
+  ([fn-defs] (parse-module fn-defs {} {}))
+  ([fn-defs extra-name->id] (parse-module fn-defs extra-name->id {}))
+  ([fn-defs extra-name->id extra-defs-by-name]
+   (parse-prepared-module (prepare-module fn-defs extra-name->id extra-defs-by-name))))

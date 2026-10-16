@@ -10,9 +10,8 @@
 2. **Names are human labels, unique PER NAMESPACE, not globally.**
    The per-branch `(namespace-id, name)` CRUD gate
    (`check-fn-name-collision!`) expresses the intended semantics; the
-   package layer's global-uniqueness validation
-   (`validate-no-name-collisions!`) is a *transitional* constraint that
-   shrinks as name-keyed machinery is retired (see § Migration).
+   package validation enforces the same pair; only base-fn labels stay
+   globally unique because the Clojure implementation registry uses them.
 3. Name→id resolution happens at **boundaries only**: fns.edn authoring
    (the records parser), public APIs that accept names, UI search.
 
@@ -111,8 +110,15 @@ Stage 1 (this branch): registry re-key (above). Remaining, in order:
     discovery, the rich-types `:by-name` index) — bare keys carry an
     `ambiguous` sentinel / last-write on collision, qualified keys are
     always precise;
+  - production composition and the bootstrap type sweep share the parser
+    preparation before sorting: dependency vertices are fn-ids, own-slot
+    lookups use qualified identities, and ambiguous bare shape aliases are
+    absent. Prior-sync shapes resolve against their original identity index
+    before an incoming namespace can introduce a new local preference;
+  - sweep diagnostics and source certification track failure fn-ids;
+    the historical failure allowlist accepts bare labels only at its boundary;
   - ambiguous bare refs resolve by the Clojure-like rule at parse
-    entry (`normalize-qref`): the referencing module's OWN namespace
+    entry (`normalize-ref`): the referencing module's OWN namespace
     wins, else a loud `:packages/ambiguous-ref` demands qualification;
   - the exporter emits qualified refs for duplicated names (round-trip
     proof: `roundtrip-per-ns-duplicates`). Namespaces that can't be

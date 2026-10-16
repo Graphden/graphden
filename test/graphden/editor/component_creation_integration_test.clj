@@ -663,6 +663,10 @@
   (selective-retention-proof "inspector"))
 
 
+(deftest selective-canvas-values-keeps-installed-output-fields-and-retains-picker
+  (selective-retention-proof "canvas-values"))
+
+
 (deftest selective-apply-rejects-a-changed-server-preference-before-any-create
   (let [storage (:storage ga/*bootstrap*)
         _ (preferences/write! storage "components" nil false nil)

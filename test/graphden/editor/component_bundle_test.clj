@@ -21,7 +21,15 @@
                (= group :account-menu) (conj (str root ".theme"))) paths))
       (is (contains? names :ui))
       (is (not (contains? names :theme)) "a selected component never copies the theme entry")
-      (is (= (count definitions) (count (filter #(= :fn (:kind %)) records)))))))
+      (is (= (count definitions) (count (filter #(= :fn (:kind %)) records))))
+      (when (= group :canvas-values)
+        (let [view-id (ids/fn-id (str root ".canvas-values") :canvas-values-view)
+              fields-id (ids/fn-id "app.ui-canvas" :canvas-view-fields)
+              view (first (filter #(= view-id (:id %)) records))]
+          (is (= [fields-id] (:parent-ids view)))
+          (is (contains? (bundle/external-identities records) fields-id))
+          (is (not-any? #(= fields-id (:id %)) records)
+              "the fixed public helper is authorized externally, never copied under its installed identity"))))))
 
 
 (defn- manifest-operation-records

@@ -49,7 +49,10 @@
                       (map (fn [[_ {:keys [reference]}]]
                              (let [path (namespace reference)]
                                [(str/replace path "." "/") [path #{(keyword (name reference))}]])))
-                      config/component-contracts)]
+                      config/component-contracts)
+        ;; The shared ordinary output shape stays an installed dependency.
+        ;; Union with the entry interface instead of replacing that module.
+        modules (update-in modules ["app/ui-canvas" 1] conj :canvas-view-fields)]
     (into []
           (mapcat (fn [[module [path names]]]
                     (map #(assoc % :namespace path)

@@ -178,6 +178,47 @@ const source = process.env.GRAPHDEN_CANVAS_SOURCE_ROOT || path.join(__dirname, '
       gdCanvasValuesGraph.dispose(owner);
       check(!fresh.childNodes.length && !document.querySelector('style[data-gd-ui-styles]'), 'explicit disposal is idempotent');
     });
+    for (const file of ['editor-type-expand-render.js', 'editor-overlay-type-expand.js']) {
+      await page.addScriptTag({path: path.join(source, 'resources/packages/app/editor', file)});
+    }
+    await page.evaluate(async () => {
+      const {check} = fixture;
+      const previous = window.expectedSlotType;
+      const oldEdit = window.enterArgTypeEditMode;
+      window.gv = {ready: () => false, onViewportChange() {}};
+      window.expectedSlotType = () => ['refine', 'int', ['and', ['>=', 1], ['<=', 65535]]];
+      window.enterArgTypeEditMode = () => {};
+      window.gdLoadUIComponentRuntime = async () => null;
+      await gdCanvasValuesGraph.reload();
+      const owner = document.createElement('section');
+      document.getElementById('canvas').appendChild(owner);
+      try {
+        const arg = {type: 'int'};
+        const chip = createTypeChip(arg, {owner});
+        owner.appendChild(chip);
+        attachArgChipExpand(chip, arg, 'refinement', {editable: true});
+        const secondary = chip.querySelector('.gd-canvas-values-secondary');
+        check(secondary?.textContent === '1..65535' && chip.querySelector('.gd-canvas-values-stacked')
+          && !secondary.classList.contains('gd-canvas-values-narrowing'), 'actual refinement has the secondary row and stacking class');
+        check(chip.title.includes(formatTypeHint(expectedSlotType(arg))) && chip.getAttribute('aria-label') === chip.title
+          && chip.getAttribute('role') === 'button' && chip.tabIndex === 0 && chip.dataset.inlineAnchor === 'refinement/arg-chip'
+          && !GraphdenRenderer.ownsTarget(chip), 'full native title/ARIA and real expand target remain outside renderer ownership');
+      } finally {
+        window.expectedSlotType = previous;
+        window.enterArgTypeEditMode = oldEdit;
+        gdCanvasValuesGraph.dispose(owner);
+      }
+      const host = document.createElement('span');
+      owner.appendChild(host);
+      const history = Array.from({length: 250}, () => ({label: 'text', 'source-label': 'base', kind: 'slot'}));
+      gdCanvasValuesGraph.mount(owner, host, 'type-history', {history});
+      check(host.textContent === '250 type history entries — presentation unavailable'
+        && !host.querySelector('.gd-canvas-values-history-row'), 'builtin node-budget failure reports the full count without a silent cap');
+      gdCanvasValuesGraph.dispose(owner);
+      check(!host.childNodes.length && !host.dataset.gdUiStyle && !document.querySelector('style[data-gd-ui-styles]'),
+        'budget-failed renderer and stylesheet clean up');
+      owner.remove();
+    });
     assert.deepEqual(errors, [], 'no browser errors');
     console.log('PASS canvas values: real overlay ownership, previews, selected plans, flow fallback and late scope replies');
   } finally { await browser.close(); }

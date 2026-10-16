@@ -8423,6 +8423,9 @@ button.lambda-params-chip:focus-visible { outline: 1px solid var(--accent); }
 /* Appearance: graph groups wrap within the available settings pane. */
 .gd-ui-components-actions { flex-wrap: wrap; justify-content: flex-start; }
 
+/* Passive graph bodies preserve their native row/strip layout owner. */
+.gd-canvas-body-host { display: contents; }
+
 @media (prefers-reduced-motion: reduce) {
   /* Near-zero rather than `none`: keeps transitionend firing for any
      future listener while being imperceptible. */
@@ -8449,6 +8452,3 @@ button.lambda-params-chip:focus-visible { outline: 1px solid var(--accent); }
     opacity: 0.75;
   }
 }
-
-/* Passive graph bodies preserve their native row/strip layout owner. */
-.gd-canvas-body-host { display: contents; }

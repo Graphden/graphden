@@ -187,14 +187,17 @@ function bootRender() {
 
   console.log(' empty overlay rebuild clears cards, edge labels and SVG');
   {
-    let removed = 0; let edgesRebuilt = 0;
+    let removed = 0; let edgesRebuilt = 0; let disposed = 0;
     const c = vm.createContext({previewState: new Map(), gv: {ready: () => false},
       renderEdges: () => { edgesRebuilt++; }});
+    c.window = c;
+    c.gdCanvasGraph = {dispose() { disposed++; }};
     vm.runInContext(fs.readFileSync(path.join(EDITOR, 'editor-overlay-manager.js'), 'utf8'), c);
     c.registerNodeOverlay({dataset: {nodeId: 'old'}, remove() { removed++; }});
     c.registerEdgeOverlay({dataset: {edgeId: 'old-edge'}, remove() { removed++; }});
     c.createNodeOverlays();
     assert(removed === 2, 'both node and edge label overlays removed');
+    assert(disposed === 1, 'node removal retires passive canvas ownership; edge labels stay native');
     assert(edgesRebuilt === 1, 'SVG renderer runs even when graph is empty');
   }
 

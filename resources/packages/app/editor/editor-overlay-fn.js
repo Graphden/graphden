@@ -303,7 +303,7 @@ function createFnOverlay(node, container) {
   const { restoreStyles } = paint;
   // Bundle threaded into the per-row render helpers below so they don't
   // each take a 12-arg signature.
-  const rowCtx = { nodeId, originalFnId, isNavRoot, isLocalFn,
+  const rowCtx = { overlay, nodeId, originalFnId, isNavRoot, isLocalFn,
                    fullDepth, partialFns, visibleLevels, linesByDepth, paint };
 
   const useSiteHeader = appendUseSiteHeader(overlay, rowCtx);

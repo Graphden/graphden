@@ -59,7 +59,8 @@
             (keyword root "_recents-descriptor")
             (keyword root "_inspector-descriptor")
             (keyword root "_explorer-descriptor")
-            (keyword root "_tutorial-catalog-descriptor")]
+            (keyword root "_tutorial-catalog-descriptor")
+            (keyword root "_canvas-descriptor")]
            (get-in by-name [[root :ui] :args :items])))
     (is (= {:ref (keyword (str root ".recents") "recents-view") :type :fn-ref}
            (get-in by-name [[root :_recents-view-id] :args :value])))))
@@ -105,7 +106,7 @@
   (let [root "users.alice.ui-test"
         reserved (into #{root} (map #(str root "." %)) templates/namespace-suffixes)]
     (is (= reserved (set (map :namespace (templates/definitions root)))))
-    (is (= 8 (count reserved)))))
+    (is (= (inc (count templates/namespace-suffixes)) (count reserved)))))
 
 
 (deftest selected-tutorial-catalog-retains-ordinary-adjacent-partition

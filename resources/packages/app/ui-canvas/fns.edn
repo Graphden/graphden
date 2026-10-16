@@ -1,0 +1,148 @@
+{:namespace "app.ui-canvas"
+ :description "Pure passive canvas presentation. Overlay identity, controls, authorization and geometry remain native."
+ :fns
+ [{:name :_canvas-inputs :type {:surface [:refine :text {:constraint [:in #{"fn-name" "root-diagnostics" "branch-local" "deep-free"}]}]
+                                :name :nullable-text :secret :bool :root :bool
+                                :type-errors :non-negative-int :failed-runs :non-negative-int :lint :non-negative-int
+                                :branch-state [:refine :text {:constraint [:in #{"off" "own" "inherited"}]}]
+                                :branch-seed :nullable-text :deep-free [:list :text]}}
+  {:name :_canvas-output :type {:tree :web.html/hiccup-node :title :text :styles [:list {:selector :text :declarations [:map :text :text]}]}}
+  {:name :_canvas-surface :parent :get
+   :args {:coll {:as :inputs :type :_canvas-inputs} :key {:value :surface} :default "fn-name"}}
+  {:name :_canvas-name :parent :get
+   :args {:coll {:as :inputs :type :_canvas-inputs} :key {:value :name} :default nil}}
+  {:name :_canvas-secret :parent :get
+   :args {:coll {:as :inputs :type :_canvas-inputs} :key {:value :secret} :default false}}
+  {:name :_canvas-root :parent :get
+   :args {:coll {:as :inputs :type :_canvas-inputs} :key {:value :root} :default false}}
+  {:name :_canvas-type-errors :parent :get
+   :args {:coll {:as :inputs :type :_canvas-inputs} :key {:value :type-errors} :default 0}}
+  {:name :_canvas-failed-runs :parent :get
+   :args {:coll {:as :inputs :type :_canvas-inputs} :key {:value :failed-runs} :default 0}}
+  {:name :_canvas-lint :parent :get
+   :args {:coll {:as :inputs :type :_canvas-inputs} :key {:value :lint} :default 0}}
+  {:name :_canvas-branch-state :parent :get
+   :args {:coll {:as :inputs :type :_canvas-inputs} :key {:value :branch-state} :default "off"}}
+  {:name :_canvas-branch-seed :parent :get
+   :args {:coll {:as :inputs :type :_canvas-inputs} :key {:value :branch-seed} :default nil}}
+  {:name :_canvas-deep-free :parent :get
+   :args {:coll {:as :inputs :type :_canvas-inputs} :key {:value :deep-free} :default {:value []}}}
+  {:name :_canvas-name-text :parent :coalesce
+   :args {:value :_canvas-name :default ""}}
+  {:name :_canvas-secret-mark :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "fn-row-secret-mark" :title "Secret — the value lives in the vault; the graph stores only its path" :aria-label "Secret"}} :children ["🔒 "]}}
+  {:name :_canvas-maybe-secret :parent :if
+   :args {:test :_canvas-secret :then :_canvas-secret-mark :else nil}}
+  {:name :_canvas-name-tree :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "gd-canvas-name"}} :children [:_canvas-maybe-secret :_canvas-name-text]}}
+  {:name :_canvas-type-errors-one :parent :equal?
+   :args {:a :_canvas-type-errors :b 1}}
+  {:name :_canvas-type-errors-many-title :parent :str
+   :args {:parts [:_canvas-type-errors " type errors on this fn"]}}
+  {:name :_canvas-type-errors-title :parent :if
+   :args {:test :_canvas-type-errors-one :then "1 type error on this fn" :else :_canvas-type-errors-many-title}}
+  {:name :_canvas-type-errors-label :parent :str
+   :args {:parts ["⚠"]}}
+  {:name :_canvas-type-errors-attrs :parent :zipmap
+   :args {:keys [{:value :class} {:value :title}] :vals ["type-error-badge" :_canvas-type-errors-title]}}
+  {:name :_canvas-type-errors-tree :parent :hiccup
+   :args {:tag "span" :attrs :_canvas-type-errors-attrs :children [:_canvas-type-errors-label]}}
+  {:name :_canvas-type-errors-empty :parent :equal?
+   :args {:a :_canvas-type-errors :b 0}}
+  {:name :_canvas-type-errors-maybe :parent :if
+   :args {:test :_canvas-type-errors-empty :then nil :else :_canvas-type-errors-tree}}
+  {:name :_canvas-failed-runs-one :parent :equal?
+   :args {:a :_canvas-failed-runs :b 1}}
+  {:name :_canvas-failed-runs-many-title :parent :str
+   :args {:parts [:_canvas-failed-runs " unresolved failed runs — see the Runs tab"]}}
+  {:name :_canvas-failed-runs-title :parent :if
+   :args {:test :_canvas-failed-runs-one :then "1 unresolved failed run — see the Runs tab" :else :_canvas-failed-runs-many-title}}
+  {:name :_canvas-failed-runs-label :parent :str
+   :args {:parts ["✕" :_canvas-failed-runs]}}
+  {:name :_canvas-failed-runs-attrs :parent :zipmap
+   :args {:keys [{:value :class} {:value :title}] :vals ["failed-run-badge" :_canvas-failed-runs-title]}}
+  {:name :_canvas-failed-runs-tree :parent :hiccup
+   :args {:tag "span" :attrs :_canvas-failed-runs-attrs :children [:_canvas-failed-runs-label]}}
+  {:name :_canvas-failed-runs-empty :parent :equal?
+   :args {:a :_canvas-failed-runs :b 0}}
+  {:name :_canvas-failed-runs-maybe :parent :if
+   :args {:test :_canvas-failed-runs-empty :then nil :else :_canvas-failed-runs-tree}}
+  {:name :_canvas-lint-one :parent :equal?
+   :args {:a :_canvas-lint :b 1}}
+  {:name :_canvas-lint-many-title :parent :str
+   :args {:parts [:_canvas-lint " lint findings — see the Inspector"]}}
+  {:name :_canvas-lint-title :parent :if
+   :args {:test :_canvas-lint-one :then "1 lint finding — see the Inspector" :else :_canvas-lint-many-title}}
+  {:name :_canvas-lint-label :parent :str
+   :args {:parts ["⚐" :_canvas-lint]}}
+  {:name :_canvas-lint-attrs :parent :zipmap
+   :args {:keys [{:value :class} {:value :title}] :vals ["lint-badge" :_canvas-lint-title]}}
+  {:name :_canvas-lint-tree :parent :hiccup
+   :args {:tag "span" :attrs :_canvas-lint-attrs :children [:_canvas-lint-label]}}
+  {:name :_canvas-lint-empty :parent :equal?
+   :args {:a :_canvas-lint :b 0}}
+  {:name :_canvas-lint-maybe :parent :if
+   :args {:test :_canvas-lint-empty :then nil :else :_canvas-lint-tree}}
+  {:name :_canvas-diagnostics-tree :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "gd-canvas-diagnostics"}} :children [:_canvas-type-errors-maybe :_canvas-failed-runs-maybe :_canvas-lint-maybe]}}
+  {:name :_canvas-root-diagnostics :parent :if
+   :args {:test :_canvas-root :then :_canvas-diagnostics-tree :else nil}}
+  {:name :_canvas-branch-off :parent :equal?
+   :args {:a :_canvas-branch-state :b "off"}}
+  {:name :_canvas-branch-own :parent :equal?
+   :args {:a :_canvas-branch-state :b "own"}}
+  {:name :_canvas-branch-label :parent :if
+   :args {:test :_canvas-branch-off :then "merges across branches" :else "branch-local"}}
+  {:name :_canvas-branch-glyph :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "branch-local-strip-glyph" :aria-hidden "true"}} :children ["📍"]}}
+  {:name :_canvas-branch-label-node :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "branch-local-strip-label"}} :children [:_canvas-branch-label]}}
+  {:name :_canvas-branch-tree :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "gd-canvas-branch"}} :children [:_canvas-branch-glyph :_canvas-branch-label-node]}}
+  {:name :_canvas-branch-seed-text :parent :coalesce
+   :args {:value :_canvas-branch-seed :default ""}}
+  {:name :_canvas-branch-seed-empty :parent :equal?
+   :args {:a :_canvas-branch-seed-text :b ""}}
+  {:name :_canvas-branch-seed-named :parent :str
+   :args {:parts ["`:" :_canvas-branch-seed-text "`"]}}
+  {:name :_canvas-branch-seed-label :parent :if
+   :args {:test :_canvas-branch-seed-empty :then "an ancestor" :else :_canvas-branch-seed-named}}
+  {:name :_canvas-branch-inherited-title :parent :str
+   :args {:parts ["This fn inherits branch-local from " :_canvas-branch-seed-label ". Version rows do not propagate across branches on merge."]}}
+  {:name :_canvas-branch-active-title :parent :if
+   :args {:test :_canvas-branch-own :then "This fn is sticky-local: version rows do not propagate across branches on merge." :else :_canvas-branch-inherited-title}}
+  {:name :_canvas-branch-title :parent :if
+   :args {:test :_canvas-branch-off :then "Version rows of this fn propagate on merge like any other." :else :_canvas-branch-active-title}}
+  {:name :_canvas-deep-free-arg-name :parent :const
+   :args {:value {:as :arg-name :type :text}}}
+  {:name :_canvas-deep-free-arg :parent :hiccup :lambda-params [:arg-name]
+   :args {:tag "span" :attrs {:value {:class "gd-canvas-free-arg"}}
+          :children ["⇣" :_canvas-deep-free-arg-name " "]}}
+  {:name :_canvas-deep-free-args :parent :map
+   :args {:func :_canvas-deep-free-arg :coll :_canvas-deep-free}}
+  {:name :_canvas-deep-free-tree :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "gd-canvas-deep-free"}} :children [:_canvas-deep-free-args]}}
+  {:name :_canvas-surface-fn-name :parent :equal?
+   :args {:a :_canvas-surface :b "fn-name"}}
+  {:name :_canvas-surface-root-diagnostics :parent :equal?
+   :args {:a :_canvas-surface :b "root-diagnostics"}}
+  {:name :_canvas-surface-branch-local :parent :equal?
+   :args {:a :_canvas-surface :b "branch-local"}}
+  {:name :_canvas-metadata-tree :parent :if
+   :args {:test :_canvas-surface-branch-local :then :_canvas-branch-tree :else :_canvas-deep-free-tree}}
+  {:name :_canvas-other-tree :parent :if
+   :args {:test :_canvas-surface-root-diagnostics :then :_canvas-root-diagnostics :else :_canvas-metadata-tree}}
+  {:name :_canvas-tree :parent :if
+   :args {:test :_canvas-surface-fn-name :then :_canvas-name-tree :else :_canvas-other-tree}}
+  {:name :_canvas-title :parent :if
+   :args {:test :_canvas-surface-branch-local :then :_canvas-branch-title :else ""}}
+  {:name :_canvas-branch-declarations :parent :zipmap
+   :args {:keys ["display"] :vals ["contents"]}}
+  {:name :_canvas-branch-rule :parent :zipmap
+   :args {:keys [{:value :selector} {:value :declarations}]
+          :vals ["& .gd-canvas-branch" :_canvas-branch-declarations]}}
+  {:name :canvas-styles :parent :list
+   :return-type [:list {:selector :text :declarations [:map :text :text]}]
+   :args {:items [:_canvas-branch-rule]}}
+  {:name :canvas-view :parent :zipmap :return-type :_canvas-output
+   :args {:keys [{:value :tree} {:value :title} {:value :styles}] :vals [:_canvas-tree :_canvas-title :canvas-styles]}}]}

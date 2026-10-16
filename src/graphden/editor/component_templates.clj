@@ -24,7 +24,7 @@
 
 (def ^:private public-type-names
   (into {} (map #(vector % (keyword "core.refinements" (name %))))
-        [:color :non-negative-int :text-map :keyword-map :text-keyed-map :keyword-or-text]))
+        [:nullable-text :color :non-negative-int :text-map :keyword-map :text-keyed-map :keyword-or-text]))
 
 
 (defn- installed-definitions
@@ -124,6 +124,7 @@
         inspector (str root ".inspector")
         explorer (str root ".explorer")
         tutorial-catalog (str root ".tutorial-catalog")
+        canvas (str root ".canvas")
         descriptors (concat (component-definitions root "explorer" :app.ui-explorer/explorer-toolbar-view
                                                    [[:initial (keyword explorer "explorer-toolbar-initial")]
                                                     [:update (keyword explorer "explorer-toolbar-update")]
@@ -143,7 +144,9 @@
                                                     [:update (keyword recents "recents-update")]
                                                     [:view (keyword recents "recents-view")]])
                             (component-definitions root "tutorial-catalog" :app.ui-tutorial-catalog/catalog-view
-                                                   [[:view (keyword tutorial-catalog "catalog-view")]]))
+                                                   [[:view (keyword tutorial-catalog "catalog-view")]])
+                            (component-definitions root "canvas" :app.ui-canvas/canvas-view
+                                                   [[:view (keyword canvas "canvas-view")]]))
         configuration {:name :ui :namespace root :parent :core.collections/list
                        :return-type :app.ui-components/ui-component-manifest
                        :description "Your ordinary component manifest. Each descriptor selects entry identities; browser effects remain host-owned."
@@ -152,24 +155,26 @@
                                       (keyword root "_recents-descriptor")
                                       (keyword root "_inspector-descriptor")
                                       (keyword root "_explorer-descriptor")
-                                      (keyword root "_tutorial-catalog-descriptor")]}}]
+                                      (keyword root "_tutorial-catalog-descriptor")
+                                      (keyword root "_canvas-descriptor")]}}]
     (when-not color-const
       (throw (ex-info "Installed UI templates are unavailable" {:type :browser-plan/unsupported})))
     (into [(assoc color-const :namespace theme) configuration]
           (concat descriptors theme-definitions menu-definitions (copy-module "app/ui-fn-picker" picker)
                   (copy-module "app/ui-recents" recents) (copy-module "app/ui-inspector" inspector)
-                  (copy-module "app/ui-explorer" explorer) (copy-module "app/ui-tutorial-catalog" tutorial-catalog)))))
+                  (copy-module "app/ui-explorer" explorer) (copy-module "app/ui-tutorial-catalog" tutorial-catalog)
+                  (copy-module "app/ui-canvas" canvas)))))
 
 
 (def namespace-suffixes
   "Owned child namespaces reserved for the installed personal template bundle."
-  ["theme" "menu" "picker" "recents" "inspector" "explorer" "tutorial-catalog"])
+  ["theme" "menu" "picker" "recents" "inspector" "explorer" "tutorial-catalog" "canvas"])
 
 
 (def groups
   "Fixed creation choices and their personal namespace/descriptor prefixes."
   {:account-menu "menu" :fn-picker "picker" :recents "recents" :inspector "inspector" :explorer "explorer"
-   :tutorial-catalog "tutorial-catalog"})
+   :tutorial-catalog "tutorial-catalog" :canvas "canvas"})
 
 
 (defn selected-definitions
@@ -231,4 +236,5 @@
    :recents-id (str (ids/fn-id (str root ".recents") :recents-view))
    :recents-initial-id (str (ids/fn-id (str root ".recents") :recents-initial))
    :recents-update-id (str (ids/fn-id (str root ".recents") :recents-update))
+   :canvas-id (str (ids/fn-id (str root ".canvas") :canvas-view))
    :tutorial-catalog-id (str (ids/fn-id (str root ".tutorial-catalog") :catalog-view))})

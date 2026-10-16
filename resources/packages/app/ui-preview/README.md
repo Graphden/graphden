@@ -197,7 +197,7 @@ of retained and new lists through `concat`, returning the named
 The component discriminator is the UUID of the shipped view:
 `app.ui-account-menu/account-menu-view`, `app.ui-fn-picker/picker-view`,
 `app.ui-recents/recents-view`, `app.ui-inspector/inspector-view`,
-`app.ui-explorer/explorer-toolbar-view`, or `app.ui-tutorial-catalog/catalog-view`.
+`app.ui-explorer/explorer-toolbar-view`, `app.ui-tutorial-catalog/catalog-view`, or `app.ui-canvas/canvas-view`.
 Menu, Recents, Inspector and Explorer require all three roles; the picker and
 catalogue require only `:view`. Entry UUIDs select personal graph functions.
 The subtypes are `ui-component-entry`, `ui-component-entries`, and
@@ -227,7 +227,7 @@ normal bounded browser ABI rather than the narrower manifest projection ABI.
 `POST /api/ui/components/plan` accepts exactly
 `{"component":"account-menu"}`, `{"component":"fn-picker"}`,
 `{"component":"recents"}`, `{"component":"inspector"}`,
-`{"component":"explorer"}`, or `{"component":"tutorial-catalog"}`. The existing owner/org/branch-scoped `components`
+`{"component":"explorer"}`, `{"component":"tutorial-catalog"}`, or `{"component":"canvas"}`. The existing owner/org/branch-scoped `components`
 preference selects the configuration. Each request authorizes manifest source,
 checks its original secret classification and snapshot provenance, then reads
 and exports only that component's body closure. Other entry targets provide
@@ -388,3 +388,55 @@ keeps local reading history, requirement checks, URLs, native controls, focus
 and actions. One shared stylesheet is attached only to passive graph hosts,
 never the dialog or its controls. Old personal manifests without this view use
 the shared default while other selected components keep their identities.
+
+### Passive canvas presentation
+
+`app.ui-canvas/canvas-view` is a view-only component. Personalize **canvas
+presentation** in Appearance to create an ordinary child and edit its graph;
+shared defaults, full templates and selective copies use the same component
+identity. It owns passive bodies within the existing canvas, with no new
+requests, authentication decisions, geometry or editing behavior.
+
+Its one `inputs` record has these fields:
+
+| Field | Type / values | Default |
+| --- | --- | --- |
+| `surface` | `fn-name`, `root-diagnostics`, `branch-local`, `deep-free` | Explicit for every call |
+| `name` | Nullable text; existing display label with one private prefix removed | `nil` |
+| `secret`, `root` | Boolean display classifications | `false` |
+| `type-errors`, `failed-runs`, `lint` | Non-negative integer counts | `0` |
+| `branch-state` | `off`, `own`, `inherited` | `off` |
+| `branch-seed` | Nullable public source label | `nil` |
+| `deep-free` | List of argument names | `[]` |
+
+The host fills irrelevant fields with these defaults so one precise record
+supports four finite surfaces without changing the evaluator ABI. No function
+ID, secret path/value, editable flag or effect authority enters the record.
+The existing `displayLabel` projection remains native; the graph determines
+its displayed body. Root diagnostic hosts exist only on the navigation root,
+even if a personal view would ignore `root`.
+
+The exact output is `{tree, title, styles}`. `tree` uses the existing Hiccup
+value type and only passive `span`, `small`, or `strong` elements, with bounded
+attributes and component-local classes. `styles` uses the existing structured
+rules (`selector` text and text-keyed declaration map); all surfaces and inputs
+of one selected view return the same common stylesheet. Rules scope only empty
+body hosts, never native controls or their outer rows. A changed scope is
+restored after rendering; overlay disposal releases bodies and the shared
+sheet. A malformed personal surface diagnoses the component and selects the
+builtin for all its bodies.
+
+`title` can customize metadata presentation; an empty value preserves the
+native explanation. Native branch-local accessibility labels and the
+"Click to change" suffix remain independent of that value. The outer strip
+retains edit guards, keyboard behavior and its popover anchor. Deep-free names
+remain in order with the same `⇣` and collapsed inter-name spaces, with no
+visible row truncation. A runtime-budget failure reports presentation failure
+explicitly, including the free-argument count if the builtin also cannot render.
+
+Fn-row Run/actions/service controls, full-name tooltips, diff markers,
+expansion/hover, native ARIA, layout measurement and viewport motion retain
+their existing owners. Account replacement or a settled preference-owner change disposes bodies before
+a delayed personal-plan reply can install old content. First preference
+hydration retains bodies only when authentication, organization and branch
+still match the context that supplied their facts.

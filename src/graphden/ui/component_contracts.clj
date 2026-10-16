@@ -20,5 +20,7 @@
    :recents {:id (ids/fn-id "app.ui-recents" :recents-view)
              :reference :app.ui-recents/recents-view
              :roles #{:initial :update :view}}
+   :canvas {:id (ids/fn-id "app.ui-canvas" :canvas-view)
+            :reference :app.ui-canvas/canvas-view :roles #{:view}}
    :tutorial-catalog {:id (ids/fn-id "app.ui-tutorial-catalog" :catalog-view)
                       :reference :app.ui-tutorial-catalog/catalog-view :roles #{:view}}})

@@ -13,7 +13,7 @@ function element(tag = 'div') {
 }
 function fixture({signedIn = true, isNavRoot = true, depth = 0, known = true} = {}) {
   const entity = {id: 'root', name: 'selected'}, calls = [], toolbars = [];
-  const context = vm.createContext({document: {createElement: element},
+  const context = vm.createContext({window: {gdCanvasGraph: {mount() {}}}, document: {createElement: element},
     lookups: {fnMap: new Map(known ? [['root', entity]] : [])},
     implementationFnIds: new Set(['root']), isAuthenticated: () => signedIn,
     measureCanvasText: text => text.length * 7, displayLabel: name => name, bindFullNameHover() {}, onPreviewLeave() {},
@@ -26,7 +26,7 @@ function fixture({signedIn = true, isNavRoot = true, depth = 0, known = true} = 
   vm.runInContext(source, context);
   const level = {depth, fns: [{fnId: 'root', name: 'selected'}], blockIsRoot: true,
     groupMaxDepth: depth};
-  const ctx = {nodeId: 'node', originalFnId: 'root', isNavRoot,
+  const ctx = {overlay: element(), nodeId: 'node', originalFnId: 'root', isNavRoot,
     fullDepth: 0, partialFns: new Set(), visibleLevels: [level],
     paint: {setRowBg() {}, fnIsHighlighted: () => false,
       applyPreviewStyle() {}, restoreStyles() {}}};

@@ -471,15 +471,6 @@ function appendBranchLocalStrip(c) {
     const strip = document.createElement('div');
     strip.className = 'branch-local-strip branch-local-strip-' + state;
     strip.dataset.state = state;
-    const glyph = document.createElement('span');
-    glyph.className = 'branch-local-strip-glyph';
-    glyph.textContent = '📍';
-    glyph.setAttribute('aria-hidden', 'true');
-    const label = document.createElement('span');
-    label.className = 'branch-local-strip-label';
-    label.textContent = state === 'off' ? 'merges across branches' : 'branch-local';
-    strip.appendChild(glyph);
-    strip.appendChild(label);
     // Tooltip explains the policy + names the ancestor that carries
     // the seed so the user can trace where it came from.
     strip.title = state === 'own'
@@ -489,11 +480,22 @@ function appendBranchLocalStrip(c) {
            + (branchLocal.seed ? '`:' + branchLocal.seed + '`' : 'an ancestor')
            + '. Version rows do not propagate across branches on merge.')
         : 'Version rows of this fn propagate on merge like any other.';
+    const nativeTitle = strip.title;
+    const editable = flagEditable && typeof enterBranchLocalEditMode === 'function';
+    // Native accessible meaning remains available if a personal title is empty
+    // or its passive body omits the builtin words.
+    strip.setAttribute('aria-label', nativeTitle + (editable ? ' Click to change.' : ''));
+    const host = document.createElement('span');
+    host.className = 'gd-canvas-body-host';
+    strip.appendChild(host);
+    window.gdCanvasGraph.mount(overlay, host, 'branch-local', {
+      'branch-state': state,
+      'branch-seed': typeof branchLocal?.seed === 'string' ? branchLocal.seed : null,
+    }, {titleElement: strip, nativeTitle, titleSuffix: editable ? ' Click to change.' : ''});
     if (flagEditable && typeof enterBranchLocalEditMode === 'function') {
       strip.classList.add('branch-local-strip-editable');
       strip.tabIndex = 0;
       strip.setAttribute('role', 'button');
-      strip.title += ' Click to change.';
       const handler = (e) => {
         e.stopPropagation();
         enterBranchLocalEditMode(cardFnEntity, strip, branchLocal || null);
@@ -578,6 +580,10 @@ function appendDeepFreeArgsStrip(overlay, deepFreeArgs) {
   strip.className = 'hof-args-strip';   // same look as the λ strip; static looks in editor-styles.css
   strip.title = 'Free args this fn accepts from the caller and threads into its sub-tree: '
                 + deepFreeArgs.join(', ');
-  strip.textContent = deepFreeArgs.map(n => '⇣' + n).join(' ');
+  const host = document.createElement('span');
+  host.className = 'gd-canvas-body-host';
+  strip.appendChild(host);
+  window.gdCanvasGraph.mount(overlay, host, 'deep-free', {'deep-free': deepFreeArgs},
+    {titleElement: strip, nativeTitle: strip.title});
   overlay.appendChild(strip);
 }

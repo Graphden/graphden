@@ -137,6 +137,7 @@
       void window.gdInspectorGraph?.reload();
       void window.gdExplorerGraph?.reload();
       void window.gdTourCatalogGraph?.reload();
+      void window.gdCanvasGraph?.reload();
     }, 0);
   }
   window.gdPrefOnChange((key) => { if (key === 'components') refresh(); });

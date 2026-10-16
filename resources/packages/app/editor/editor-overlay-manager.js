@@ -63,6 +63,7 @@ function registerEdgeOverlay(el) {
 function unregisterNodeOverlay(nodeId) {
   const el = _overlaysByNodeId.get(nodeId);
   if (el) {
+    window.gdCanvasGraph?.dispose(el);
     el.remove();
     _overlaysByNodeId.delete(nodeId);
   }
@@ -75,6 +76,7 @@ function getNodeOverlay(nodeId) {
 function _removeAllNodeOverlays(preservedNodeId) {
   for (const [nodeId, el] of _overlaysByNodeId) {
     if (nodeId === preservedNodeId) continue;
+    window.gdCanvasGraph?.dispose(el);
     el.remove();
     _overlaysByNodeId.delete(nodeId);
   }

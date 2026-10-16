@@ -176,7 +176,7 @@
      :component component :diagnostics @diagnostics}))
 
 
-(deftest created-manifest-exports-its-recents-and-tutorial-catalog-views
+(deftest created-manifest-exports-its-passive-and-stateful-views
   (let [ctx (:ctx ga/*bootstrap*)
         storage (:storage ctx)
         created (apply-preview (preview))
@@ -193,6 +193,9 @@
     (epoch/seed-watermark! storage)
     (let [{:keys [result] :as diagnosed} (export-diagnosed ctx "recents")]
       (is (:ok result) (pr-str diagnosed)))
+    (let [{:keys [result] :as diagnosed} (export-diagnosed ctx "canvas")]
+      (is (:ok result) (pr-str diagnosed))
+      (is (= (get-in manifest [:roots :canvas-id]) (get-in result [:roots :canvas-id]))))
     (let [{:keys [result] :as diagnosed} (export-diagnosed ctx "tutorial-catalog")]
       (is (:ok result) (pr-str diagnosed))
       (is (= (get-in manifest [:roots :tutorial-catalog-id])

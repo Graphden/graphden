@@ -110,6 +110,7 @@
                          :recents-id (some-> (get-in configuration [:recents :view]) str)
                          :recents-initial-id (some-> (get-in configuration [:recents :initial]) str)
                          :recents-update-id (some-> (get-in configuration [:recents :update]) str)
+                         :canvas-id (some-> (get-in configuration [:canvas :view]) str)
                          :tutorial-catalog-id (some-> (get-in configuration [:tutorial-catalog :view]) str)}}
           resolved (assoc :configuration-revision (:revision resolved)
                           :configuration-preference {:present (boolean (seq preference-rows))

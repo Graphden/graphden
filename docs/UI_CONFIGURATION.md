@@ -65,6 +65,13 @@ controls. Personal styles are scoped to passive graph body hosts and cannot
 cover those native controls; an older personal manifest can use the shared
 catalogue view without replacing its other selected components.
 
+The canvas has a separate view-only `app.ui-canvas/canvas-view` component.
+It presents ordinary function names, secret classification marks, root
+problem badges and passive branch-local/deep-free annotations. Native overlay
+owners retain controls, edit guards, focus, expansion and geometry. Inputs are
+finite authorized display facts, with no secret contents or source identities;
+see the [canvas contract](../resources/packages/app/ui-preview/README.md#passive-canvas-presentation).
+
 Replacing an editor root renames the old root privately in the current branch
 and creates a new UUID named `editor`. Its parent relationships are retained.
 Other branches and references to the old UUID keep their composition. A stored

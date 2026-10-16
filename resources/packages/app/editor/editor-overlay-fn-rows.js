@@ -406,7 +406,13 @@ function renderSingleFnRow(line, levelInfo, ctx) {
   // Whole-line click cascading to groupMaxDepth (so empty grouped
   // levels expand together).
   line.style.cursor = 'pointer';
-  line.textContent = displayLabel(lineFn.name);
+  const nameHost = document.createElement('span');
+  nameHost.className = 'gd-canvas-body-host';
+  line.appendChild(nameHost);
+  window.gdCanvasGraph.mount(ctx.overlay, nameHost, 'fn-name', {
+    name: typeof lineFn.name === 'string' ? displayLabel(lineFn.name) : null,
+    secret: !!(lineFnEntity && typeof isSecretFn === 'function' && isSecretFn(lineFnEntity)),
+  });
   if (levelInfo.depth > 0 && typeof gdDiffAncestorBadgeEl === 'function') {
     const badge = gdDiffAncestorBadgeEl(lineFn.fnId);
     if (badge) line.appendChild(badge);
@@ -426,17 +432,6 @@ function renderSingleFnRow(line, levelInfo, ctx) {
       showExecutePopover(lineFnEntity, run);
     });
     line.appendChild(run);
-  }
-  // Secret fns wear the same 🔒 the tree rows use — on canvas the only
-  // tell used to be the parent name "secret-leaf". The marker also
-  // explains the model: the graph stores the VAULT PATH, never the value.
-  if (lineFnEntity && typeof isSecretFn === 'function' && isSecretFn(lineFnEntity)) {
-    const lock = document.createElement('span');
-    lock.className = 'fn-row-secret-mark';
-    lock.textContent = '🔒 ';
-    lock.title = 'Secret — the value lives in the vault; the graph stores only its path';
-    lock.setAttribute('aria-label', 'Secret');
-    line.prepend(lock);
   }
   const cardFnEntity = lookups?.fnMap?.get(ctx.originalFnId) || null;
 
@@ -589,39 +584,19 @@ function renderSingleFnRow(line, levelInfo, ctx) {
       line.appendChild(badge);
     }
   }
-  // Type-error badge (error-tolerance Phase 3) — root row of a card
-  // whose fn currently fails the aggregate type-check. The count is
-  // server-computed (`:type-error-count` on the subtree payload, from
-  // the per-branch diagnostics store) and refreshes with the subtree
-  // re-fetch after every mutation.
-  if (lineIsRoot && lineFnEntity && (lineFnEntity['type-error-count'] || 0) > 0) {
-    const n = lineFnEntity['type-error-count'];
-    const warn = document.createElement('span');
-    warn.className = 'type-error-badge';
-    warn.textContent = '⚠';
-    warn.title = n === 1
-      ? '1 type error on this fn'
-      : n + ' type errors on this fn';
-    line.appendChild(warn);
-  }
-  // Failed-runs / lint badges — same place, same root-row rule, over the
-  // primed problem caches (editor-problems.js).
+  // Root visibility and diagnostic facts belong to the authenticated host;
+  // the selected graph owns only the passive badge bodies.
   if (lineIsRoot && lineFnEntity) {
-    const failed = (typeof getFailureCountForFnId === 'function') ? getFailureCountForFnId(lineFnEntity.id) : 0;
-    if (failed > 0) {
-      const b = document.createElement('span');
-      b.className = 'failed-run-badge';
-      b.textContent = '✕' + failed;
-      b.title = failed + ' unresolved failed run' + (failed === 1 ? '' : 's') + ' — see the Runs tab';
-      line.appendChild(b);
-    }
-    const lint = (typeof getLintCountForFnId === 'function') ? getLintCountForFnId(lineFnEntity.id) : 0;
-    if (lint > 0) {
-      const b = document.createElement('span');
-      b.className = 'lint-badge';
-      b.textContent = '⚐' + lint;
-      b.title = lint + ' lint finding' + (lint === 1 ? '' : 's') + ' — see the Inspector';
-      line.appendChild(b);
+    const counts = {
+      'type-errors': lineFnEntity['type-error-count'] || 0,
+      'failed-runs': typeof getFailureCountForFnId === 'function' ? getFailureCountForFnId(lineFnEntity.id) : 0,
+      lint: typeof getLintCountForFnId === 'function' ? getLintCountForFnId(lineFnEntity.id) : 0,
+    };
+    if (Object.values(counts).some(count => count > 0)) {
+      const host = document.createElement('span');
+      host.className = 'gd-canvas-body-host';
+      line.appendChild(host);
+      window.gdCanvasGraph.mount(ctx.overlay, host, 'root-diagnostics', {root: true, ...counts});
     }
   }
   if (typeof createMoreActionsTrigger === 'function') {

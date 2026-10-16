@@ -8449,3 +8449,6 @@ button.lambda-params-chip:focus-visible { outline: 1px solid var(--accent); }
     opacity: 0.75;
   }
 }
+
+/* Passive graph bodies preserve their native row/strip layout owner. */
+.gd-canvas-body-host { display: contents; }

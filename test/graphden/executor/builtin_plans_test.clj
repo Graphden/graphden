@@ -80,12 +80,12 @@
         (is (= (mapv #(assoc % :namespace "__GRAPHDEN_THEME_NAMESPACE__")
                      (:fns (edn/read-string (slurp "resources/packages/app/ui-theme-template/fns.edn"))))
                (:fns (edn/read-string (get-in artifact [:themeTemplate :edn])))))
-        (is (= #{:accountMenu :fnPicker :recents :inspector :explorer :tutorialCatalog}
+        (is (= #{:accountMenu :fnPicker :recents :inspector :explorer :tutorialCatalog :canvas}
                (set (keys (:plans artifact)))))
         (doseq [[kind compiled] (:plans artifact)]
           (is (= 1 (:format compiled) (:primitiveAbi compiled)))
           (is (= (case kind
-                   :tutorialCatalog #{"view"}
+                   (:tutorialCatalog :canvas) #{"view"}
                    #{"initial" "update" "view"})
                  (set (keys (:entries compiled)))))))
       (is (= {:by-id {} :by-name {}} @rich))
@@ -198,4 +198,39 @@
               (is (nil? (:error actual)) (:error actual))
               (is (= expected (exec/execute ctx row-id inputs)
                      (some-> (:value actual) plan/decode-value)) (pr-str inputs)))))
+        (finally (sp/close storage))))))
+
+
+(deftest stored-canvas-display-facts-have-the-same-jvm-and-browser-view
+  (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
+            registry/*per-org-rich-override* (atom {})
+            types/*type-aliases-override* (atom {})
+            types/*alias-view* nil
+            runtime/*per-org-aliases-override* (atom {})]
+    (let [{:keys [storage ctx]} (setup/bootstrap-crud-graph-from-golden!)]
+      (try
+        (let [root (ids/fn-id "app.ui-canvas" :canvas-view)
+              defaults {:name nil :secret false :root false :type-errors 0 :failed-runs 0 :lint 0
+                        :branch-state "off" :branch-seed nil :deep-free []}
+              cases (mapv #(merge defaults %)
+                          [{:surface "fn-name" :name "private-label" :secret true}
+                           {:surface "root-diagnostics" :root true :type-errors 2 :failed-runs 3 :lint 1}
+                           {:surface "root-diagnostics" :type-errors 2}
+                           {:surface "branch-local" :branch-state "inherited" :branch-seed "source-label"}
+                           {:surface "deep-free" :deep-free ["request" "response"]}])
+              artifact (json/parse-string-strict
+                         (slurp "resources/packages/app/ui-preview/builtin-plans.json") true)
+              request {:plan (get-in artifact [:plans :canvas])
+                       :cases (mapv #(hash-map :entry "view" :inputs {"inputs" (plan/encode-value %)}) cases)}
+              {:keys [exit out err]} (sh/sh "node" "tools/runtime-test/browser-plan-runner.js"
+                                            :in (json/generate-string request))]
+          (is (zero? exit) err)
+          (when (zero? exit)
+            (doseq [[input actual] (map vector cases (json/parse-string-strict out true))]
+              (is (nil? (:error actual)) (:error actual))
+              (is (= (exec/execute ctx root {:inputs input})
+                     (some-> (:value actual) plan/decode-value)) (:surface input))))
+          (is (nil? (:tree (exec/execute ctx root {:inputs (nth cases 2)}))))
+          (is (= "This fn inherits branch-local from `:source-label`. Version rows do not propagate across branches on merge."
+                 (:title (exec/execute ctx root {:inputs (nth cases 3)})))))
         (finally (sp/close storage))))))

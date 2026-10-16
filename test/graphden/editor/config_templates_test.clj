@@ -43,7 +43,7 @@
         source (graph definitions)
         editor-id (ids/fn-id root :editor)
         configuration (config/configuration source editor-id)]
-    (is (= 6 (count configuration)))
+    (is (= (set (keys config/component-contracts)) (set (keys configuration))))
     (is (= :list (:format (config/configuration-info source (ids/fn-id legacy :manifest)))))
     (is (= :map (:format (config/configuration-info source editor-id))))
     (is (= (ids/fn-id "app.ui-fn-picker" :picker-view) (get-in configuration [:account-menu :view])))
@@ -68,7 +68,7 @@
                           (templates/definitions root (keyword legacy "legacy") true))
         editor-id (ids/fn-id root :editor)
         configuration (config/configuration (graph definitions) editor-id)]
-    (is (= 6 (count configuration)))
+    (is (= (set (keys config/component-contracts)) (set (keys configuration))))
     (is (= :record (:format (config/configuration-info (graph definitions) (ids/fn-id legacy :legacy)))))
     (is (= (ids/fn-id "app.ui-fn-picker" :picker-view) (get-in configuration [:account-menu :view])))
     (is (= (ids/fn-id "app.ui-inspector" :inspector-view) (get-in configuration [:fn-picker :view])))
@@ -114,7 +114,7 @@
     (is (= (ids/fn-id "app.ui-fn-picker" :picker-view) (get-in configuration [:account-menu :view])))
     (is (= (ids/fn-id "app.ui-inspector" :inspector-view) (get-in configuration [:fn-picker :view])))
     (is (= (ids/fn-id "app.ui-recents" :recents-view) (get-in configuration [:recents :view])))
-    (is (= 6 (count configuration)))
+    (is (= (set (keys config/component-contracts)) (set (keys configuration))))
     (is (some #(= (ids/fn-id prior :editor) (:ref-fn-id %)) (:records parsed)))
     (is (not-any? #(= (ids/fn-id prior :editor) (:id %)) (:records parsed)))))
 

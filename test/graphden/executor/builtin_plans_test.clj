@@ -17,7 +17,8 @@
     [graphden.test-infra.account-menu-cases :as account-menu]
     [graphden.test-infra.browser-picker-cases :as picker]
     [graphden.types.core :as types]
-    [graphden.types.core.shapes :as shapes]))
+    [graphden.types.core.shapes :as shapes]
+    [graphden.ui.component-contracts :as shipped]))
 
 
 (use-fixtures :once (setup/create-container-fixture) exec/with-isolated-rich-types)
@@ -47,6 +48,12 @@
              (fingerprint {:a 1 :b 2}))))
     (is (= (fingerprint (array-map :a 1 :b 2))
            (fingerprint (array-map :b 2 :a 1))))))
+
+
+(def ^:private plan-components
+  {:accountMenu :account-menu :fnPicker :fn-picker :recents :recents
+   :inspector :inspector :explorer :explorer :tutorialCatalog :tutorial-catalog
+   :canvas :canvas :canvasValues :canvas-values})
 
 
 (deftest shipped-builtin-plans-are-reproducible-and-isolated
@@ -80,12 +87,14 @@
         (is (= (mapv #(assoc % :namespace "__GRAPHDEN_THEME_NAMESPACE__")
                      (:fns (edn/read-string (slurp "resources/packages/app/ui-theme-template/fns.edn"))))
                (:fns (edn/read-string (get-in artifact [:themeTemplate :edn])))))
-        (is (= #{:accountMenu :fnPicker :recents :inspector :explorer :tutorialCatalog :canvas}
+        (is (= #{:accountMenu :fnPicker :recents :inspector :explorer :tutorialCatalog :canvas :canvasValues}
                (set (keys (:plans artifact)))))
+        (is (= (set (vals plan-components)) (set (keys shipped/component-contracts))))
+        (is (= (set (keys plan-components)) (set (keys (:plans artifact)))))
         (doseq [[kind compiled] (:plans artifact)]
           (is (= 1 (:format compiled) (:primitiveAbi compiled)))
           (is (= (case kind
-                   (:tutorialCatalog :canvas) #{"view"}
+                   (:tutorialCatalog :canvas :canvasValues) #{"view"}
                    #{"initial" "update" "view"})
                  (set (keys (:entries compiled)))))))
       (is (= {:by-id {} :by-name {}} @rich))
@@ -201,6 +210,20 @@
         (finally (sp/close storage))))))
 
 
+(defn- assert-stored-browser-views
+  [ctx root compiled cases]
+  (let [request {:plan compiled
+                 :cases (mapv #(hash-map :entry "view" :inputs {"inputs" (plan/encode-value %)}) cases)}
+        {:keys [exit out err]} (sh/sh "node" "tools/runtime-test/browser-plan-runner.js"
+                                      :in (json/generate-string request))]
+    (is (zero? exit) err)
+    (when (zero? exit)
+      (doseq [[input actual] (map vector cases (json/parse-string-strict out true))]
+        (is (nil? (:error actual)) (:error actual))
+        (is (= (exec/execute ctx root {:inputs input})
+               (some-> (:value actual) plan/decode-value)) (:surface input))))))
+
+
 (deftest stored-canvas-display-facts-have-the-same-jvm-and-browser-view
   (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
             registry/*per-org-rich-override* (atom {})
@@ -219,18 +242,24 @@
                            {:surface "branch-local" :branch-state "inherited" :branch-seed "source-label"}
                            {:surface "deep-free" :deep-free ["request" "response"]}])
               artifact (json/parse-string-strict
-                         (slurp "resources/packages/app/ui-preview/builtin-plans.json") true)
-              request {:plan (get-in artifact [:plans :canvas])
-                       :cases (mapv #(hash-map :entry "view" :inputs {"inputs" (plan/encode-value %)}) cases)}
-              {:keys [exit out err]} (sh/sh "node" "tools/runtime-test/browser-plan-runner.js"
-                                            :in (json/generate-string request))]
-          (is (zero? exit) err)
-          (when (zero? exit)
-            (doseq [[input actual] (map vector cases (json/parse-string-strict out true))]
-              (is (nil? (:error actual)) (:error actual))
-              (is (= (exec/execute ctx root {:inputs input})
-                     (some-> (:value actual) plan/decode-value)) (:surface input))))
+                         (slurp "resources/packages/app/ui-preview/builtin-plans.json") true)]
+          (assert-stored-browser-views ctx root (get-in artifact [:plans :canvas]) cases)
           (is (nil? (:tree (exec/execute ctx root {:inputs (nth cases 2)}))))
           (is (= "This fn inherits branch-local from `:source-label`. Version rows do not propagate across branches on merge."
-                 (:title (exec/execute ctx root {:inputs (nth cases 3)})))))
+                 (:title (exec/execute ctx root {:inputs (nth cases 3)}))))
+          ;; Reuse this same stored fixture; the new passive component does not
+          ;; need another database/bootstrap just to compare its three surfaces.
+          (let [defaults {:label "" :secondary "" :secondary-kind "none" :secondary-title "" :history []}
+                cases (mapv #(merge defaults %)
+                            [{:surface "value-label"}
+                             {:surface "value-label" :label "\"␣\""}
+                             {:surface "type-chip" :label "text"}
+                             {:surface "type-chip" :label "int" :secondary "> 0"
+                              :secondary-kind "refinement" :secondary-title "positive integer"}
+                             {:surface "type-chip" :label "text" :secondary "< :any"
+                              :secondary-kind "narrowing" :secondary-title "subtype of :any"}
+                             {:surface "type-history" :history [{:label "any" :source-label "base, ancestor" :kind "slot"}
+                                                                {:label "text" :source-label "child" :kind "binding-override"}]}])]
+            (assert-stored-browser-views ctx (ids/fn-id "app.ui-canvas-values" :canvas-values-view)
+                                         (get-in artifact [:plans :canvasValues]) cases)))
         (finally (sp/close storage))))))

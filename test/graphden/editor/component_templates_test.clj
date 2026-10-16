@@ -38,7 +38,8 @@
         definitions (templates/definitions root)
         by-name (into {} (map (juxt (juxt :namespace :name) identity)) definitions)
         theme (str root ".theme")
-        menu (str root ".menu")]
+        menu (str root ".menu")
+        manifest-items (get-in by-name [[root :ui] :args :items])]
     (is (= :core.refinements/color
            (get-in by-name [[theme :color-const] :return-type])))
     (is (= (keyword theme "color-const")
@@ -54,14 +55,11 @@
     (is (= :core.collections/zipmap
            (get-in by-name [[menu :account-menu-key-map] :parent])))
     (is (= :core.collections/list (:parent (get by-name [root :ui]))))
-    (is (= [(keyword root "_menu-descriptor")
-            (keyword root "_picker-descriptor")
-            (keyword root "_recents-descriptor")
-            (keyword root "_inspector-descriptor")
-            (keyword root "_explorer-descriptor")
-            (keyword root "_tutorial-catalog-descriptor")
-            (keyword root "_canvas-descriptor")]
-           (get-in by-name [[root :ui] :args :items])))
+    (is (= (count manifest-items) (count (set manifest-items)))
+        "Each component descriptor occurs exactly once")
+    (is (= (set (keys config/component-contracts)) (set (keys templates/groups))))
+    (is (= (into #{} (map #(keyword root (str "_" % "-descriptor"))) (vals templates/groups))
+           (set manifest-items)))
     (is (= {:ref (keyword (str root ".recents") "recents-view") :type :fn-ref}
            (get-in by-name [[root :_recents-view-id] :args :value])))))
 
@@ -143,3 +141,16 @@
       (is (boolean (some #(and (= recents-namespace (:namespace %))
                                (= member (:name %))) definitions))
           "Every copied union member resolves inside the same bundle"))))
+
+
+(deftest selected-canvas-values-keeps-its-finite-contract-and-passive-closure
+  (let [root "users.alice.ui-values"
+        definitions (templates/selected-definitions root :canvas-values nil nil)
+        interfaces (set (map #(keyword (:namespace %) (name (:name %)))
+                             (templates/interface-definitions)))]
+    (is (contains? interfaces :app.ui-canvas-values/canvas-values-view))
+    (is (some #(= :canvas-values-view (:name %)) definitions))
+    (is (every? #(contains? #{root (str root ".canvas-values")} (:namespace %)) definitions))
+    (is (= #{:surface :label :secondary :secondary-title :secondary-kind :history}
+           (set (keys (:type (first (filter #(= :_canvas-values-inputs (:name %)) definitions)))))))
+    (is (not-any? #(or (= :render-value-repr (:parent %)) (= :fn-return-type (:parent %))) definitions))))

@@ -266,8 +266,8 @@ function calculateNodeSize(nodeData) {
     // old 6px-per-character guess under-budgeted the chip's margins and
     // the ↖, and the text then wrapped onto a second line (`"big` /
     // `world"`; a lone space as two bare quotes). The
-    // overlay is fixed to this width (`syncOverlayGeometry`) and its text
-    // is `white-space: pre`, so the two must agree.
+    // first paint uses this estimate. The shared measured pass then reads
+    // actual intrinsic width, including a selected passive type presentation.
     const argScale = typographyScale();
     const shown = (typeof displayLiteralLabel === 'function')
       ? displayLiteralLabel(truncateLabel(label, 30)).text
@@ -447,9 +447,8 @@ async function fetchBackendLayout() {
                       && implementationFnIds.has(editArg['fn-id'])
                       && (typeof isAuthenticated === 'function'
                           ? isAuthenticated() : true);
-        // Estimate the chip's visible text width — the chip's text is
-        // produced by `compactTypeChipText(rich, flat)`, so reserve
-        // the same width here. Fall back to a short default when the
+        // First-paint builtin estimate only. The shared measured pass reserves
+        // the actual selected edge-label width before settling the grid. Fall back to a short default when the
         // helpers aren't loaded yet (e.g. first paint before
         // editor-overlay-arg.js is fully wired).
         const rich = (editArg && typeof expectedSlotType === 'function')

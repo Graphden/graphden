@@ -183,7 +183,9 @@
                   ;; `+` gate the placeholder overlay asks; before both.
                   "packages/app/editor/editor-overlay-seal.js"
                   "packages/app/editor/editor-overlay-edge-label.js"
+                  "packages/app/editor/editor-passive-canvas.js"
                   "packages/app/editor/editor-canvas-graph.js"
+                  "packages/app/editor/editor-canvas-values-graph.js"
                   "packages/app/editor/editor-overlay-fn-rows.js"
                   "packages/app/editor/editor-overlay-fn.js"
                   "packages/app/editor/editor-overlay-strips.js"
@@ -619,7 +621,8 @@
                   [:button {:type "button" :class "gd-set-btn" :data-ui-component "explorer" :data-ui-label "Explorer toolbar"} "Personalize Explorer toolbar"]]
                  [:div {:class "gd-theme-actions gd-ui-components-actions"}
                   [:button {:type "button" :class "gd-set-btn" :data-ui-component "tutorial-catalog" :data-ui-label "tutorial catalogue"} "Personalize tutorial catalogue"]
-                  [:button {:type "button" :class "gd-set-btn" :data-ui-component "canvas" :data-ui-label "canvas presentation"} "Personalize canvas presentation"]]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-component "canvas" :data-ui-label "canvas presentation"} "Personalize canvas presentation"]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-component "canvas-values" :data-ui-label "value and type presentation"} "Personalize value and type presentation"]]
                  [:div {:class "gd-theme-actions gd-ui-components-actions"}
                   [:button {:type "button" :class "gd-set-btn" :data-ui-graph "configuration-id"} "Configuration"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-graph "theme-id"} "Theme"]
@@ -634,7 +637,8 @@
                   [:button {:type "button" :class "gd-set-btn" :data-ui-graph "explorer-id"} "Explorer view"]]
                  [:div {:class "gd-theme-actions gd-ui-components-actions"}
                   [:button {:type "button" :class "gd-set-btn" :data-ui-graph "tutorial-catalog-id"} "Tutorial catalogue view"]
-                  [:button {:type "button" :class "gd-set-btn" :data-ui-graph "canvas-id"} "Canvas presentation view"]]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-graph "canvas-id"} "Canvas presentation view"]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-graph "canvas-values-id"} "Value and type presentation view"]]
                  [:p {:id "gd-ui-components-status" :class "gd-set-hint" :role "status"}]]]
                ;; KEYBOARD — every registered shortcut with a Change control;
                ;; layouts save + share through the marketplace (editor-keymap.js).

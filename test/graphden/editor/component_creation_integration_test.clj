@@ -196,6 +196,9 @@
     (let [{:keys [result] :as diagnosed} (export-diagnosed ctx "canvas")]
       (is (:ok result) (pr-str diagnosed))
       (is (= (get-in manifest [:roots :canvas-id]) (get-in result [:roots :canvas-id]))))
+    (let [{:keys [result] :as diagnosed} (export-diagnosed ctx "canvas-values")]
+      (is (:ok result) (pr-str diagnosed))
+      (is (= (get-in manifest [:roots :canvas-values-id]) (get-in result [:roots :canvas-values-id]))))
     (let [{:keys [result] :as diagnosed} (export-diagnosed ctx "tutorial-catalog")]
       (is (:ok result) (pr-str diagnosed))
       (is (= (get-in manifest [:roots :tutorial-catalog-id])

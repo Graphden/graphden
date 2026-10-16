@@ -64,6 +64,7 @@ function unregisterNodeOverlay(nodeId) {
   const el = _overlaysByNodeId.get(nodeId);
   if (el) {
     window.gdCanvasGraph?.dispose(el);
+    window.gdCanvasValuesGraph?.dispose(el);
     el.remove();
     _overlaysByNodeId.delete(nodeId);
   }
@@ -77,13 +78,17 @@ function _removeAllNodeOverlays(preservedNodeId) {
   for (const [nodeId, el] of _overlaysByNodeId) {
     if (nodeId === preservedNodeId) continue;
     window.gdCanvasGraph?.dispose(el);
+    window.gdCanvasValuesGraph?.dispose(el);
     el.remove();
     _overlaysByNodeId.delete(nodeId);
   }
 }
 
 function _removeAllEdgeOverlays() {
-  for (const [, el] of _edgeOverlaysByEdgeId) el.remove();
+  for (const [, el] of _edgeOverlaysByEdgeId) {
+    window.gdCanvasValuesGraph?.dispose(el);
+    el.remove();
+  }
   _edgeOverlaysByEdgeId.clear();
 }
 

@@ -125,6 +125,7 @@
         explorer (str root ".explorer")
         tutorial-catalog (str root ".tutorial-catalog")
         canvas (str root ".canvas")
+        canvas-values (str root ".canvas-values")
         descriptors (concat (component-definitions root "explorer" :app.ui-explorer/explorer-toolbar-view
                                                    [[:initial (keyword explorer "explorer-toolbar-initial")]
                                                     [:update (keyword explorer "explorer-toolbar-update")]
@@ -146,7 +147,9 @@
                             (component-definitions root "tutorial-catalog" :app.ui-tutorial-catalog/catalog-view
                                                    [[:view (keyword tutorial-catalog "catalog-view")]])
                             (component-definitions root "canvas" :app.ui-canvas/canvas-view
-                                                   [[:view (keyword canvas "canvas-view")]]))
+                                                   [[:view (keyword canvas "canvas-view")]])
+                            (component-definitions root "canvas-values" :app.ui-canvas-values/canvas-values-view
+                                                   [[:view (keyword canvas-values "canvas-values-view")]]))
         configuration {:name :ui :namespace root :parent :core.collections/list
                        :return-type :app.ui-components/ui-component-manifest
                        :description "Your ordinary component manifest. Each descriptor selects entry identities; browser effects remain host-owned."
@@ -156,25 +159,26 @@
                                       (keyword root "_inspector-descriptor")
                                       (keyword root "_explorer-descriptor")
                                       (keyword root "_tutorial-catalog-descriptor")
-                                      (keyword root "_canvas-descriptor")]}}]
+                                      (keyword root "_canvas-descriptor")
+                                      (keyword root "_canvas-values-descriptor")]}}]
     (when-not color-const
       (throw (ex-info "Installed UI templates are unavailable" {:type :browser-plan/unsupported})))
     (into [(assoc color-const :namespace theme) configuration]
           (concat descriptors theme-definitions menu-definitions (copy-module "app/ui-fn-picker" picker)
                   (copy-module "app/ui-recents" recents) (copy-module "app/ui-inspector" inspector)
                   (copy-module "app/ui-explorer" explorer) (copy-module "app/ui-tutorial-catalog" tutorial-catalog)
-                  (copy-module "app/ui-canvas" canvas)))))
+                  (copy-module "app/ui-canvas" canvas) (copy-module "app/ui-canvas-values" canvas-values)))))
 
 
 (def namespace-suffixes
   "Owned child namespaces reserved for the installed personal template bundle."
-  ["theme" "menu" "picker" "recents" "inspector" "explorer" "tutorial-catalog" "canvas"])
+  ["theme" "menu" "picker" "recents" "inspector" "explorer" "tutorial-catalog" "canvas" "canvas-values"])
 
 
 (def groups
   "Fixed creation choices and their personal namespace/descriptor prefixes."
   {:account-menu "menu" :fn-picker "picker" :recents "recents" :inspector "inspector" :explorer "explorer"
-   :tutorial-catalog "tutorial-catalog" :canvas "canvas"})
+   :tutorial-catalog "tutorial-catalog" :canvas "canvas" :canvas-values "canvas-values"})
 
 
 (defn selected-definitions
@@ -237,4 +241,5 @@
    :recents-initial-id (str (ids/fn-id (str root ".recents") :recents-initial))
    :recents-update-id (str (ids/fn-id (str root ".recents") :recents-update))
    :canvas-id (str (ids/fn-id (str root ".canvas") :canvas-view))
+   :canvas-values-id (str (ids/fn-id (str root ".canvas-values") :canvas-values-view))
    :tutorial-catalog-id (str (ids/fn-id (str root ".tutorial-catalog") :catalog-view))})

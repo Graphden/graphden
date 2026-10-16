@@ -2584,42 +2584,6 @@ textarea.value-form-hiccup {
   background: var(--sidebar-bg);
 }
 
-/* Refinement chip — stacked two-line variant. The base type sits on
- * top at the chip's normal weight; the constraint sits below at a
- * smaller weight + reduced opacity so the visual reads "this is a
- * subtype of <base>, narrowed by <constraint>" without forcing the
- * eye to parse `int (> 0)` as a single phrase. */
-.arg-type-chip-refine {
-  flex-direction: column;
-  line-height: 0.6875rem;
-  padding: 1px 4px;
-}
-.arg-type-chip-refine .arg-type-chip-refine-base {
-  font-size: 0.5625rem;
-}
-.arg-type-chip-refine .arg-type-chip-refine-constraint {
-  font-size: 0.5rem;
-  opacity: 0.7;
-  margin-top: -1px;
-}
-
-/* Narrowed chip — when a binding-level override / inherited override /
- * ref-return narrowing produced a type whose declared slot-base is
- * different from the displayed text, append a `< :base` line below the
- * chip. Same column layout as the refinement variant so the visual
- * grammar stays consistent ("this is a subtype of X" reads top→bottom). */
-.arg-type-chip-narrowed {
-  flex-direction: column;
-  line-height: 0.6875rem;
-  padding: 1px 4px;
-}
-.arg-type-chip-narrowed .arg-type-chip-narrowed-base {
-  font-size: 0.5rem;
-  opacity: 0.7;
-  margin-top: -1px;
-  font-style: italic;
-}
-
 /* Sequence-item bracket chrome — wraps an `.arg-type-chip` so it reads
    as `[elem-type]` (graphden's `[:list T]` structural notation) when
    the edge represents one item of a sequence-bound slot. The brackets
@@ -3222,36 +3186,6 @@ textarea.value-form-hiccup {
   margin-top: 2px;
   gap: 1px;
 }
-.edge-type-chain-row {
-  display: inline-flex; align-items: center;
-  white-space: nowrap;
-}
-.edge-type-chain-arrow {
-  font-size: 0.5625rem;
-  color: var(--muted-fg);
-  margin-right: 2px;
-  line-height: 0.875rem;
-}
-.edge-type-chain-source {
-  font-size: 0.5625rem;
-  color: var(--muted-fg);
-  margin-left: 4px;
-  line-height: 1.2;
-}
-/* Narrowing attribution — why a chain entry has its type
- * (binding-override vs the slot's own declaration). */
-.edge-type-chain-kind {
-  font-size: 0.5rem;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: var(--light-fg);
-  margin-left: 4px;
-  padding: 0 3px;
-  border: 1px solid var(--light-border);
-  border-radius: 2px;
-  line-height: 1.4;
-}
-
 /* Free-arg binding chooser — two-button row inside the inline-edit
    popover; user picks "Bind literal" or "Bind fn-ref". */
 .free-arg-bind-chooser {

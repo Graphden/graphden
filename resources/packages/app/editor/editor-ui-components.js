@@ -138,6 +138,7 @@
       void window.gdExplorerGraph?.reload();
       void window.gdTourCatalogGraph?.reload();
       void window.gdCanvasGraph?.reload();
+      void window.gdCanvasValuesGraph?.reload();
     }, 0);
   }
   window.gdPrefOnChange((key) => { if (key === 'components') refresh(); });

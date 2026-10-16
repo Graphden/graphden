@@ -7,7 +7,7 @@ Loading, graph-backed controls, actions, forms, and preferences.
 
 after: web, layout
 
-[[file:index.org][index]] · ~173 min
+[[file:index.org][index]] · ~172 min
 
 * 1. initGraph
 :PROPERTIES:
@@ -52,13 +52,13 @@ Stores nodes, edges, adjacency indexes, and animation state without a graph-rend
 :PROPERTIES:
 :CUSTOM_ID: editor/fetchBackendLayout
 :FILE: resources/packages/app/editor/editor-layout.js
-:LINE: 330
-:MINS: 10.2
+:LINE: 353
+:MINS: 8.6
 :END:
 
 Requests grid layout from ~/api/graph/layout~ using the selected root and expansion state. The browser then measures cards and edge labels to calculate column widths and gaps. The server determines graph order; the browser fits that order to actual pixel sizes.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-layout.js::async function fetchBackendLayout() {][resources/packages/app/editor/editor-layout.js:330]]
+- source :: [[file:../../../resources/packages/app/editor/editor-layout.js::async function fetchBackendLayout() {][resources/packages/app/editor/editor-layout.js:353]]
 - see also :: [[file:layout.org::#layout/build-graph-elements][build-graph-elements]], [[file:layout.org::#layout/compute-layout-matrix][compute-layout-matrix]]
 - referenced from :: [[file:editor.org::#editor/writeBindingFields][writeBindingFields]]
 
@@ -308,14 +308,14 @@ Gives a graph component its own empty DOM host. ~render~ validates live Hiccup a
 * 23. mountCanvasBody
 :PROPERTIES:
 :CUSTOM_ID: editor/mountCanvasBody
-:FILE: resources/packages/app/editor/editor-canvas-graph.js
-:LINE: 162
-:MINS: 2.3
+:FILE: resources/packages/app/editor/editor-passive-canvas.js
+:LINE: 158
+:MINS: 2.4
 :END:
 
-Mounts a passive canvas body from the ordinary app.ui-canvas view over finite display facts. Native overlays retain Run, actions, service controls, edit guards, focus and geometry. All bodies share a checked scoped stylesheet; overlay removal disposes their renderers. Scope reconciliation retires old owner facts before refresh, while first preference hydration keeps bodies only within the same authenticated location. Personal markup cannot claim native controls or identities; a malformed surface selects the builtin component.
+Mounts passive canvas bodies through one shared lifetime and stylesheet mechanism. The app.ui-canvas binding keeps its original display ABI; app.ui-canvas-values separately presents value labels, type chips and inherited type history over finite display facts. Native overlays retain Run, actions, service controls, edit guards, focus and geometry. All bodies share a checked scoped stylesheet; overlay removal disposes their renderers. Scope reconciliation retires old owner facts before refresh, while first preference hydration keeps bodies only within the same authenticated location. Personal markup cannot claim native controls or identities; a malformed surface selects the builtin component. Existing sanitized representation previews stay native siblings. Values styles stay in flow; one measured grid pass reserves card widths, edge labels and type-history row envelopes.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-canvas-graph.js::  function mountCanvasBody(owner, host, surface, facts, options = {}) {][resources/packages/app/editor/editor-canvas-graph.js:162]]
+- source :: [[file:../../../resources/packages/app/editor/editor-passive-canvas.js::  function mountCanvasBody(owner, host, surface, facts, options = {}) {][resources/packages/app/editor/editor-passive-canvas.js:158]]
 - see also :: [[file:editor.org::#editor/createRuntime][createRuntime]], [[file:editor.org::#editor/mount][mount]]
 
 * 24. mountCatalog
@@ -488,10 +488,10 @@ Each server partial captures a latest-wins read token and exact native host. Tab
 :CUSTOM_ID: editor/definitions
 :FILE: src/graphden/editor/component_templates.clj
 :LINE: 97
-:MINS: 5.5
+:MINS: 5.8
 :END:
 
-Copies the fixed shipped theme, menu, picker, Recents, Inspector, Explorer, tutorial catalogue and passive canvas definitions into a fresh named namespace. An ordinary descriptor list selects component entry identities. Shared menu colors reference copied theme leaves; menu hover owns a local literal. Color wrappers retain the canonical color type and ordinary editor form. This is an advanced legacy compatibility path; Lesson 25 instead creates a small inherited menu child and captures its free theme input.
+Copies the fixed shipped theme, menu, picker, Recents, Inspector, Explorer, tutorial catalogue, passive canvas and value/type presentation definitions into a fresh named namespace. An ordinary descriptor list selects component entry identities. Shared menu colors reference copied theme leaves; menu hover owns a local literal. Color wrappers retain the canonical color type and ordinary editor form. This is an advanced legacy compatibility path; Lesson 25 instead creates a small inherited menu child and captures its free theme input.
 
 - source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn definitions][src/graphden/editor/component_templates.clj:97]]
 - same file :: [[file:editor.org::#editor/selected-definitions][selected-definitions]]
@@ -500,13 +500,13 @@ Copies the fixed shipped theme, menu, picker, Recents, Inspector, Explorer, tuto
 :PROPERTIES:
 :CUSTOM_ID: editor/selected-definitions
 :FILE: src/graphden/editor/component_templates.clj
-:LINE: 180
+:LINE: 184
 :MINS: 3.4
 :END:
 
 The retained legacy selective-copy compatibility path keeps only the chosen component and its owned reference closure. A new ordinary concat manifest references the previous authored manifest and the new descriptor list, preserving existing identities and edits. Legacy slots are adapted to descriptors without copying their bodies. Retained identities are outside the create-only receipt; group creation does not activate a theme.
 
-- source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn selected-definitions][src/graphden/editor/component_templates.clj:180]]
+- source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn selected-definitions][src/graphden/editor/component_templates.clj:184]]
 - same file :: [[file:editor.org::#editor/definitions][definitions]]
 
 * 38. apply!
@@ -538,13 +538,13 @@ Collects only the selected [[file:glossary.org::#term/reachable-graph][reachable
 :PROPERTIES:
 :CUSTOM_ID: editor/export-resolved
 :FILE: src/graphden/editor/components.clj
-:LINE: 160
+:LINE: 161
 :MINS: 1.2
 :END:
 
 A protected ordinary resolver finds editor in the current principal/org/branch's exact personal namespace, or shared editor-defaults. Default and custom configurations use the same authorized bounded JSON export. Legacy selections migrate by reference; no preference UUID chooses the active root. The protected lookup is bounded metadata discovery, not arbitrary graph execution. Source and policy use one snapshot; fresh checking cannot erase cached secret metadata. The editor host still owns callbacks, search, navigation and the validated DOM contract.
 
-- source :: [[file:../../../src/graphden/editor/components.clj::(defn export-resolved][src/graphden/editor/components.clj:160]]
+- source :: [[file:../../../src/graphden/editor/components.clj::(defn export-resolved][src/graphden/editor/components.clj:161]]
 
 * 41. ensure-current!
 :PROPERTIES:

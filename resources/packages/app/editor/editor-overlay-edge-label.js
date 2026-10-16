@@ -177,7 +177,7 @@ function buildEdgeLabelOverlay(edge, container, label, overlayId) {
   const isSequenceItem = !!edge.data('sourcePrevArgId');
   let leafChip = null;
   if (editArg) {
-    leafChip = createTypeChip(editArg, { readOnly: !argEditable });
+    leafChip = createTypeChip(editArg, {readOnly: !argEditable, owner: overlay});
     if (leafChip) {
       if (isSequenceItem) {
         const bracket = document.createElement('span');
@@ -292,47 +292,16 @@ function buildEdgeLabelOverlay(edge, container, label, overlayId) {
     if (typeChain.length > chainStart) {
       const block = document.createElement('div');
       block.className = 'edge-type-chain';
-      for (let i = chainStart; i < typeChain.length; i++) {
-        const entry = typeChain[i];
-        const row = document.createElement('div');
-        row.className = 'edge-type-chain-row';
-
-        const arrow = document.createElement('span');
-        arrow.className = 'edge-type-chain-arrow';
-        arrow.textContent = '↑';
-        row.appendChild(arrow);
-
-        const chip = document.createElement('span');
-        chip.className = 'arg-type-chip arg-type-chip-readonly';
-        chip.textContent = entry.type || 'any';
-        chip.title = 'Inherited type at ' + (entry.fns?.join(', ') || 'ancestor');
-        chip.setAttribute('aria-label', chip.title);
-        row.appendChild(chip);
-
-        const src = document.createElement('span');
-        src.className = 'edge-type-chain-source';
-        src.textContent = '(' + (entry.fns?.join(', ') || '') + ')';
-        row.appendChild(src);
-
-        // Attribution — WHY this entry has its type: a binding
-        // type-override narrowed it, or it's the slot's own declared
-        // type. Backend tags each chain group with `:source`.
-        if (entry.source) {
-          const kind = document.createElement('span');
-          kind.className = 'edge-type-chain-kind';
-          if (entry.source === 'binding-override') {
-            kind.textContent = 'override';
-            kind.title = 'Narrowed by a binding type-override';
-          } else {
-            kind.textContent = 'slot';
-            kind.title = 'The slot’s own declared type';
-          }
-          kind.setAttribute('aria-label', kind.title);
-          row.appendChild(kind);
-        }
-
-        block.appendChild(row);
-      }
+      const host = document.createElement('span');
+      host.className = 'gd-canvas-body-host';
+      block.appendChild(host);
+      window.gdCanvasValuesGraph.mount(overlay, host, 'type-history', {
+        // Existing public display projection, not type/refinement semantics.
+        history: typeChain.slice(chainStart).map(entry => ({
+          label: entry.type || 'any', 'source-label': entry.fns?.join(', ') || '',
+          kind: !entry.source ? 'none' : entry.source === 'binding-override' ? 'binding-override' : 'slot',
+        })),
+      });
       overlay.appendChild(block);
     }
   }

@@ -91,7 +91,9 @@ console.log('overlay fn Run trigger: MI rendering and selected-root dispatch pas
 
 {
   const {createDocument} = require('./mini-dom');
+  let projected = null;
   const context = vm.createContext({document: createDocument(),
+    window: {gdCanvasValuesGraph: {mount(owner, _host, surface, facts) { projected = {owner, surface, facts}; }}},
     DRAG_HANDLE_HEIGHT: 6, lookups: {fnMap: new Map()}, expansionState: new Set()});
   vm.runInContext(fs.readFileSync(path.join(__dirname,
     '../../resources/packages/app/editor/editor-overlay-arg.js'), 'utf8'), context);
@@ -101,8 +103,16 @@ console.log('overlay fn Run trigger: MI rendering and selected-root dispatch pas
     namedRefinementPin: () => null, compactTypeChipText: () => 'port',
     refinementConstraintText: () => '1…65535', argRowFromNode: () => ({type: 'port'}),
     displayLiteralLabel: text => ({text}), truncateLabel: text => text});
-  const chip = context.createTypeChip({type: 'port'});
-  assert.equal(chip.children[1].textContent, '1…65535', 'real chip renders its range line');
+  assert.throws(() => context.createTypeChip({type: 'port'}), /native overlay owner/);
+  const owner = context.document.createElement('section');
+  context.createTypeChip({type: 'port'}, {owner});
+  assert.equal(projected.owner, owner, 'type presentation shares its native overlay lifetime');
+  assert.equal(projected.surface, 'type-chip');
+  assert.equal(projected.facts.label, 'port');
+  assert.equal(projected.facts.secondary, '1…65535', 'semantic helper projects the exact range label');
+  assert.equal(projected.facts['secondary-kind'], 'refinement');
+  // Actual graph rendering and expand target identity are covered by the
+  // standalone canvas-values browser fixture, not imitated by this native test.
   const data = {type: 'arg', label: '8080', argType: 'port'};
   const constrained = context.calculateNodeSize(data).width;
   context.refinementConstraintText = () => null;

@@ -197,7 +197,7 @@ of retained and new lists through `concat`, returning the named
 The component discriminator is the UUID of the shipped view:
 `app.ui-account-menu/account-menu-view`, `app.ui-fn-picker/picker-view`,
 `app.ui-recents/recents-view`, `app.ui-inspector/inspector-view`,
-`app.ui-explorer/explorer-toolbar-view`, `app.ui-tutorial-catalog/catalog-view`, or `app.ui-canvas/canvas-view`.
+`app.ui-explorer/explorer-toolbar-view`, `app.ui-tutorial-catalog/catalog-view`, `app.ui-canvas/canvas-view`, or `app.ui-canvas-values/canvas-values-view`.
 Menu, Recents, Inspector and Explorer require all three roles; the picker and
 catalogue require only `:view`. Entry UUIDs select personal graph functions.
 The subtypes are `ui-component-entry`, `ui-component-entries`, and
@@ -227,7 +227,7 @@ normal bounded browser ABI rather than the narrower manifest projection ABI.
 `POST /api/ui/components/plan` accepts exactly
 `{"component":"account-menu"}`, `{"component":"fn-picker"}`,
 `{"component":"recents"}`, `{"component":"inspector"}`,
-`{"component":"explorer"}`, `{"component":"tutorial-catalog"}`, or `{"component":"canvas"}`. The existing owner/org/branch-scoped `components`
+`{"component":"explorer"}`, `{"component":"tutorial-catalog"}`, `{"component":"canvas"}`, or `{"component":"canvas-values"}`. The existing owner/org/branch-scoped `components`
 preference selects the configuration. Each request authorizes manifest source,
 checks its original secret classification and snapshot provenance, then reads
 and exports only that component's body closure. Other entry targets provide
@@ -440,3 +440,56 @@ their existing owners. Account replacement or a settled preference-owner change 
 a delayed personal-plan reply can install old content. First preference
 hydration retains bodies only when authentication, organization and branch
 still match the context that supplied their facts.
+
+### Passive value and type presentation
+
+`app.ui-canvas-values/canvas-values-view` has only the `view` role. It is a
+separate ordinary component so existing personal `canvas-view` inputs and
+plans keep their exact contract. Appearance's **value and type presentation**
+choice supports the same authorized defaults, full-copy and selective-copy
+paths as the other components.
+
+Its precise `inputs` record contains:
+
+| Field | Type / values | Host default |
+| --- | --- | --- |
+| `surface` | `value-label`, `type-chip`, `type-history` | Explicit for every call |
+| `label`, `secondary`, `secondary-title` | Text | Empty text |
+| `secondary-kind` | `none`, `refinement`, `narrowing` | `none` |
+| `history` | List of `{label: text, source-label: text, kind: enum}` | `[]` |
+| History `kind` | `none`, `binding-override`, `slot` | Explicit for every entry |
+
+Irrelevant fields receive those defaults; they do not add optional semantics to
+record subtyping. Native type/refinement formatters project the existing primary,
+secondary and tooltip labels. A history `source-label` is the existing public
+source-name join with a comma and space, not identities or a second type-resolution algorithm.
+The graph composes arrow, parentheses, kind copy, passive trees and styles.
+
+The exact output remains `{tree, title, styles}` with the existing Hiccup and
+structured-style types. All surfaces share one stable stylesheet. This new
+role accepts only passive `span`, `small`, and `strong` nodes, component-local
+classes and in-flow styles after the shared CSS policy normalizes them. Its
+finite style contract refuses positioning/offsets, fixed heights, negative or
+computed margins and other paint that escapes measured flow. Numeric spacing
+uses non-negative `px`, `rem`, or `em` lengths; line height is `normal` or a
+unitless number at least one. Invalid personal output diagnoses the component
+and falls back to its builtin across all bodies. A builtin budget failure
+reports an explicit failure, including the history entry count.
+
+The native value click target, type chip, sequence brackets, editing/expansion,
+provenance, drag handles, native titles and ARIA keep their exact owners. The
+component's optional title does not replace their full accessible explanations.
+Native truncation and whitespace glyphs still produce the value label. Secret
+references skip this component entirely: their path and secret data never
+become its inputs. The already sanitized `literalRepr` is rendered through the
+existing representation path in a sibling preview host; neither renderer owns
+or replaces the other's subtree.
+
+Both canvas components reuse one passive-host lifetime implementation and a
+coalesced native measured-layout pass. It reads intrinsic value-card widths,
+actual edge-label widths and natural card heights, reserves history row space,
+and uses the existing grid/column rules and edge anchors. A sequence gap includes
+its actual member controls. It can shrink again after returning to the builtin;
+function-card width, dragged positions and the viewport transform retain their
+existing contracts. Scope changes dispose node and edge bodies, release sheets,
+abort old requests and reject late replies before rendering another owner.

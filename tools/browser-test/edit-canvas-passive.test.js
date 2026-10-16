@@ -27,7 +27,9 @@ const source = process.env.GRAPHDEN_CANVAS_SOURCE_ROOT || path.join(__dirname, '
       // Transport is controlled; all evaluated plans and rendered DOM are real.
       window.gdLoadUIComponentRuntime = async () => null;
     });
-    await page.addScriptTag({path: path.join(source, 'resources/packages/app/editor/editor-canvas-graph.js')});
+    for (const file of ['editor-passive-canvas.js', 'editor-canvas-graph.js']) {
+      await page.addScriptTag({path: path.join(source, 'resources/packages/app/editor', file)});
+    }
 
     const builtin = await page.evaluate(() => {
       const owner = document.createElement('section');

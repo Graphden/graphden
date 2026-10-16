@@ -9,7 +9,7 @@ const vm = require('node:vm');
 const editor = path.join(__dirname, '../../resources/packages/app/editor');
 const nodes = new Map();
 const edges = new Map();
-const grid = {source: {col: 0, row: 0}, first: {col: 1, row: 0}, second: {col: 1, row: 1}};
+const grid = {source: {col: 0, row: 0}, first: {col: 1, row: 0}, second: {col: 1, row: 1}, third: {col: 1, row: 2}};
 const layout = new Map();
 const userMovedNodes = new Set();
 const ctx = vm.createContext({console, window: {}, GRID_GAP_X: 80, GRID_GAP_Y: 40,
@@ -50,6 +50,7 @@ function card(id, type, intrinsic, height) {
 const source = card('source', 'fn', 900, 30);
 const first = card('first', 'arg', 240, 45);
 const second = card('second', 'arg', 70, 25);
+card('third', 'arg', 70, 25);
 edges.set('ordinary', {sourceId: 'source', targetId: 'first', data: {}});
 const label = {dataset: {edgeId: 'ordinary'}, offsetWidth: 310, offsetHeight: 120};
 ctx.registerEdgeOverlay(label);
@@ -75,19 +76,22 @@ assert.equal(layout.get('second').y, 82.5, 'history envelope shrinks too');
 ctx.registerEdgeOverlay({dataset: {edgeId: 'seq:group', seqGroup: 'group'}, offsetWidth: 220, offsetHeight: 90});
 edges.set('member1', {id: 'member1', sourceId: 'source', targetId: 'first', data: {seqGroup: 'group'}});
 edges.set('member2', {id: 'member2', sourceId: 'source', targetId: 'second', data: {seqGroup: 'group'}});
+edges.set('member3', {id: 'member3', sourceId: 'source', targetId: 'third', data: {seqGroup: 'group'}});
 assert(ctx.reflowFromMeasuredHeights(layout));
 assert.equal(layout.get('first').y, 45);
 assert.equal(layout.get('second').y, 175);
 assert.equal(nodes.get('second').height(), 25);
 assert.equal(ctx.reflowFromMeasuredHeights(layout), false);
-const controls = {dataset: {edgeId: 'member1'}, offsetWidth: 62, offsetHeight: 14};
+const controls = {dataset: {edgeId: 'member2'}, offsetWidth: 62, offsetHeight: 14};
 ctx.registerEdgeOverlay(controls);
 for (const size of [62, 118]) {
   controls.offsetWidth = size;
   ctx.reflowFromMeasuredHeights(layout);
   const sourceRight = nodes.get('source').data().colRightX;
   const trunkRight = sourceRight + 20 + 18 + 220;
-  const targetLeft = layout.get('first').x - nodes.get('first').width() / 2;
+  const targetLeft = layout.get('second').x - nodes.get('second').width() / 2;
+  assert.equal((layout.get('first').y + layout.get('third').y) / 2, layout.get('second').y,
+    'trunk centre shares the middle member controls row');
   const controlsLeft = targetLeft - 6 - size;
   assert(controlsLeft - trunkRight >= 14, 'sequence trunk and actual member controls clear native fan gap');
   assert.equal(ctx.reflowFromMeasuredHeights(layout), false, 'measured control sizes converge');
@@ -104,7 +108,7 @@ assert.equal(nodes.get('first').x, 777, 'actual settle preserves user-dragged x'
 assert.equal(nodes.get('first').y, 888, 'actual settle preserves user-dragged y');
 // A placeholder has no measured card, but retains its native footprint even
 // when a personal edge label is shorter than the fixed placeholder target.
-grid.tail = {col: 1, row: 2};
+grid.tail = {col: 1, row: 3};
 const tailData = {isPlaceholder: true};
 nodes.set('tail', {data: key => key === undefined ? tailData : tailData[key],
   width: () => 20, height: () => 20, setWidth() {}, setHeight() {}});
@@ -112,7 +116,7 @@ layout.set('tail', {x: 0, y: 0, width: 20, height: 20});
 edges.set('tail-edge', {id: 'tail-edge', sourceId: 'source', targetId: 'tail', data: {}});
 ctx.registerEdgeOverlay({dataset: {edgeId: 'tail-edge'}, offsetWidth: 8, offsetHeight: 5});
 ctx.reflowFromMeasuredHeights(layout);
-assert.equal(layout.get('tail').y, 270, 'placeholder row reserves native height floor');
+assert.equal(layout.get('tail').y, 400, 'placeholder row reserves native height floor');
 assert.equal(source.style.width, '80px');
 assert.equal(second.style.width, '70px');
 console.log('PASS canvas measured grid: widths, gaps, row envelopes, shrink, sequence and convergence');

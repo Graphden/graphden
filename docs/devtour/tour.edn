@@ -1452,13 +1452,17 @@
            callbacks. Follow this lifecycle when changing a graph-backed menu or picker."
      :see [[:editor "createRuntime"] [:web "hiccup-element"]]}
 
-    {:file "resources/packages/app/editor/editor-canvas-graph.js" :defn mountCanvasBody
-     :say "Mounts a passive canvas body from the ordinary app.ui-canvas view over finite display facts.
+    {:file "resources/packages/app/editor/editor-passive-canvas.js" :defn mountCanvasBody
+     :say "Mounts passive canvas bodies through one shared lifetime and stylesheet mechanism.
+           The app.ui-canvas binding keeps its original display ABI; app.ui-canvas-values separately
+           presents value labels, type chips and inherited type history over finite display facts.
            Native overlays retain Run, actions, service controls, edit guards, focus and geometry.
            All bodies share a checked scoped stylesheet; overlay removal disposes their renderers.
            Scope reconciliation retires old owner facts before refresh, while first preference hydration
            keeps bodies only within the same authenticated location. Personal markup cannot claim
-           native controls or identities; a malformed surface selects the builtin component."
+           native controls or identities; a malformed surface selects the builtin component.
+           Existing sanitized representation previews stay native siblings. Values styles stay in flow;
+           one measured grid pass reserves card widths, edge labels and type-history row envelopes."
      :see [[:editor "createRuntime"] [:editor "mount"]]}
 
     {:file "resources/packages/app/editor/editor-tour-catalog-graph.js" :defn mountCatalog
@@ -1560,7 +1564,7 @@
            Initial Run forms may finish hidden, but a separate focus epoch blocks old autofocus.
            CodeMirror is disposed before actual body replacement; graph chrome refreshes retain controls."}
     {:ns graphden.editor.component-templates :defn definitions
-     :say "Copies the fixed shipped theme, menu, picker, Recents, Inspector, Explorer, tutorial catalogue and passive canvas definitions into a fresh named namespace.
+     :say "Copies the fixed shipped theme, menu, picker, Recents, Inspector, Explorer, tutorial catalogue, passive canvas and value/type presentation definitions into a fresh named namespace.
            An ordinary descriptor list selects component entry identities. Shared menu colors reference
            copied theme leaves; menu hover owns a local literal. Color wrappers retain the canonical
            color type and ordinary editor form. This is an advanced legacy compatibility path; Lesson 25

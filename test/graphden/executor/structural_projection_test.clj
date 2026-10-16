@@ -118,7 +118,8 @@
                    :inspector ["app.ui-inspector" "inspector" #{:initial :update :view}]
                    :explorer ["app.ui-explorer" "explorer-toolbar" #{:initial :update :view}]
                    :tutorial-catalog ["app.ui-tutorial-catalog" "catalog" #{:view}]
-                   :canvas ["app.ui-canvas" "canvas" #{:view}]}]
+                   :canvas ["app.ui-canvas" "canvas" #{:view}]
+                   :canvas-values ["app.ui-canvas-values" "canvas-values" #{:view}]}]
     (is (= (set (keys component-config/component-contracts))
            (set (keys contracts))
            (set (keys actual))))

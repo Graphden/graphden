@@ -113,6 +113,7 @@
                       :update (ids/fn-id (str root ".recents") :recents-update)
                       :view (ids/fn-id (str root ".recents") :recents-view)}
             :canvas {:view (ids/fn-id (str root ".canvas") :canvas-view)}
+            :canvas-values {:view (ids/fn-id (str root ".canvas-values") :canvas-values-view)}
             :tutorial-catalog {:view (ids/fn-id (str root ".tutorial-catalog") :catalog-view)}
             :inspector {:initial (ids/fn-id (str root ".inspector") :inspector-initial)
                         :update (ids/fn-id (str root ".inspector") :inspector-update)

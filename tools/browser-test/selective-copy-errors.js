@@ -4,7 +4,7 @@ const {unexpectedPolicyRetryErrors} = require('./policy-retry-errors');
 // component catalog. The runtime test checks these exact names and root keys.
 const componentRoots = Object.freeze({'account-menu': 'menu-id', 'fn-picker': 'picker-id',
   recents: 'recents-id', inspector: 'inspector-id', explorer: 'explorer-id',
-  'tutorial-catalog': 'tutorial-catalog-id', canvas: 'canvas-id'});
+  'tutorial-catalog': 'tutorial-catalog-id', canvas: 'canvas-id', 'canvas-values': 'canvas-values-id'});
 const components = new Set(Object.keys(componentRoots));
 const builtinFallback = reply => reply.kind === 'plan' && reply.status === 422
   && reply.code === 'component-missing' && reply.fallback === 'builtin' && components.has(reply.component);

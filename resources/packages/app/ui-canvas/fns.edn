@@ -144,5 +144,8 @@
   {:name :canvas-styles :parent :list
    :return-type [:list {:selector :text :declarations [:map :text :text]}]
    :args {:items [:_canvas-branch-rule]}}
-  {:name :canvas-view :parent :zipmap :return-type :_canvas-output
-   :args {:keys [{:value :tree} {:value :title} {:value :styles}] :vals [:_canvas-tree :_canvas-title :canvas-styles]}}]}
+  {:name :canvas-view-fields :parent :zipmap
+   :description "Shared passive canvas output fields; callers supply their own tree, title and styles values."
+   :args {:keys [{:value :tree} {:value :title} {:value :styles}]}}
+  {:name :canvas-view :parent :canvas-view-fields :return-type :_canvas-output
+   :args {:vals [:_canvas-tree :_canvas-title :canvas-styles]}}]}

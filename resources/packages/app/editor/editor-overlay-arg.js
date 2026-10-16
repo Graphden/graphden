@@ -50,7 +50,6 @@ function createArgOverlay(node, container) {
   const shown = (typeof displayLiteralLabel === 'function')
     ? displayLiteralLabel(truncateLabel(rawLabel, 30))
     : { text: truncateLabel(rawLabel, 30), title: null };
-  content.textContent = shown.text;
   content.classList.add('arg-value-text');
   if (shown.title) content.title = shown.title;
   // A resolver-bound value (layout `secretRef`) is a vault PATH the
@@ -63,6 +62,12 @@ function createArgOverlay(node, container) {
     content.classList.add('arg-value-secret');
     content.dataset.secretRef = 'true';
     content.title = 'Secret — the value lives in the vault at this path';
+  } else {
+    const host = document.createElement('span');
+    host.className = 'gd-canvas-body-host';
+    content.appendChild(host);
+    window.gdCanvasValuesGraph.mount(overlay, host, 'value-label', {label: shown.text});
+    content.setAttribute('aria-label', shown.title || rawLabel);
   }
   const repr = node.data('literalRepr');
   if (repr && !secretRef) {
@@ -199,7 +204,7 @@ function createArgOverlay(node, container) {
     // Type-chip — synth rows carry the slot's resolved `:type`,
     // so this is just a presence check.
     if (arg.type) {
-      const chip = createTypeChip(arg);
+      const chip = createTypeChip(arg, {owner: overlay});
       if (chip) {
         row.appendChild(chip);
         attachArgChipExpand(chip, arg, node.id(), { editable: true });
@@ -219,7 +224,7 @@ function createArgOverlay(node, container) {
       if (typeof openValueViewer === 'function') openValueViewer(arg, content);
     });
     if (arg.type) {
-      const chip = createTypeChip(arg, { readOnly: true });
+      const chip = createTypeChip(arg, {readOnly: true, owner: overlay});
       if (chip) {
         row.appendChild(chip);
         attachArgChipExpand(chip, arg, node.id(), { editable: false });
@@ -242,7 +247,7 @@ function createArgOverlay(node, container) {
       if (lockBtn) lockBtn.click();
     });
     if (arg.type) {
-      const chip = createTypeChip(arg, { readOnly: true });
+      const chip = createTypeChip(arg, {readOnly: true, owner: overlay});
       if (chip) {
         row.appendChild(chip);
         attachArgChipExpand(chip, arg, node.id(), { editable: false });
@@ -268,7 +273,7 @@ function createArgOverlay(node, container) {
       if (typeof openValueViewer === 'function') openValueViewer(arg, content);
     });
     if (arg.type) {
-      const chip = createTypeChip(arg, { readOnly: true });
+      const chip = createTypeChip(arg, {readOnly: true, owner: overlay});
       if (chip) {
         row.appendChild(chip);
         attachArgChipExpand(chip, arg, node.id(), { editable: false });
@@ -537,51 +542,41 @@ function typeChipPresentation(arg) {
   const refineConstraint = refinementConstraintText(refineStruct);
   const narrow = !refineConstraint && typeof getTypeNarrowingInfo === 'function'
     ? getTypeNarrowingInfo(arg) : null;
-  const lines = [{text: display, fontSize: 9}];
+  let secondary = '';
+  let secondaryKind = 'none';
+  let secondaryTitle = '';
   if (refineConstraint && !alias && refineConstraint.length <= 24) {
-    lines.push({text: refineConstraint, fontSize: 8});
+    secondary = refineConstraint;
+    secondaryKind = 'refinement';
+    if (refineStruct && typeof formatTypeHumanReadable === 'function') {
+      secondaryTitle = formatTypeHumanReadable(refineStruct);
+    }
   } else if (narrow?.baseTypeName && narrow.baseTypeName !== display) {
-    lines.push({text: '< :' + narrow.baseTypeName, fontSize: 8});
+    secondary = '< :' + narrow.baseTypeName;
+    secondaryKind = 'narrowing';
+    const verb = narrow.kind === 'ref-return' ? 'narrowed by ref :'
+      : narrow.kind === 'inherited' ? 'inherited narrowing from :' : 'narrowed at :';
+    secondaryTitle = 'subtype of :' + narrow.baseTypeName + ' — ' + verb + (narrow.sourceFnName || '(anonymous)');
   }
-  return {display, flatType, richType, alias, refineStruct, refineConstraint, narrow, lines};
+  const lines = [{text: display, fontSize: 9}];
+  if (secondary) lines.push({text: secondary, fontSize: 8});
+  return {display, flatType, richType, alias, refineStruct, refineConstraint, narrow, lines,
+    secondary, secondaryKind, secondaryTitle};
 }
 
 function createTypeChip(arg, options) {
+  if (!options?.owner) throw new Error('A type chip needs its native overlay owner');
   const readOnly = !!(options?.readOnly)
                 || typeof enterArgTypeEditMode !== 'function';
-  const {display, flatType, richType, alias, refineStruct, refineConstraint, narrow} = typeChipPresentation(arg);
+  const {display, flatType, richType, secondary, secondaryKind, secondaryTitle} = typeChipPresentation(arg);
   const chip = document.createElement('span');
   chip.className = 'arg-type-chip' + (readOnly ? ' arg-type-chip-readonly' : '');
-  // Refinement stacking — two paths reach here:
-  //   1. richType is the structural form ['refine', base, constraint]
-  //      (anonymous refinement on the slot, no alias).
-  //   2. richType is a string alias ('positive-int', 'non-negative-int')
-  //      whose rich-types entry has a refine-shaped :return. Looking
-  //      up the alias gives us the constraint to surface; the chip's
-  //      top line stays the alias name (more informative than the
-  //      base type).
-  if (refineConstraint && !alias && refineConstraint.length <= 24) {
-    chip.classList.add('arg-type-chip-refine');
-    const base = document.createElement('span');
-    base.className = 'arg-type-chip-refine-base';
-    base.textContent = display;
-    chip.appendChild(base);
-    const constraint = document.createElement('span');
-    constraint.className = 'arg-type-chip-refine-constraint';
-    constraint.textContent = refineConstraint;
-    // Hover-title on the constraint span — natural-language form of
-    // the refinement (e.g. "positive integer" / "integer where >= 1024
-    // and <= 65535"). Lets the reader translate `(≥ 1024) (≤ 65535)`
-    // without leaving the chip. The chip's outer title still carries
-    // the compact rich-type form (`:int (> 0)`) for the rest of the
-    // hover surface.
-    if (refineStruct && typeof formatTypeHumanReadable === 'function') {
-      constraint.title = formatTypeHumanReadable(refineStruct);
-    }
-    chip.appendChild(constraint);
-  } else {
-    chip.textContent = display;
-  }
+  const host = document.createElement('span');
+  host.className = 'gd-canvas-body-host';
+  chip.appendChild(host);
+  window.gdCanvasValuesGraph.mount(options.owner, host, 'type-chip', {
+    label: display, secondary, 'secondary-kind': secondaryKind, 'secondary-title': secondaryTitle,
+  });
   // Always surface the FULL type on hover — `compactTypeChipText`
   // truncates fn-shape types aggressively (`(request)→ring-res…`),
   // and before this fix there was no way to discover what got cut.
@@ -593,34 +588,6 @@ function createTypeChip(arg, options) {
       ? formatTypeHumanReadable(richType)
       : flatType;
     if (tip && tip !== display) chip.title = tip;
-  }
-  // Inline subtype-of line for binding-level narrowing — when the
-  // slot's declared base differs from what's displayed (because an
-  // override or an inherited binding narrowed it), append a small
-  // `< :base` line so the relationship is visible without opening
-  // the inline-expand panel or hovering the `↳` badge. Skipped for
-  // refinement-stacked chips (the refinement chain panel already
-  // exposes the base via `:positive-int ⊂ :int`), for chips where
-  // the base equals the displayed text, and when the narrowing
-  // info isn't available (read-only arg-overlay without binding).
-  if (!refineConstraint && typeof getTypeNarrowingInfo === 'function') {
-    if (narrow?.baseTypeName && narrow.baseTypeName !== display) {
-      chip.classList.add('arg-type-chip-narrowed');
-      const subOf = document.createElement('span');
-      subOf.className = 'arg-type-chip-narrowed-base';
-      subOf.textContent = '< :' + narrow.baseTypeName;
-      // Verb mirrors the `↳` badge tooltip so the inline line and the
-      // badge tell the same story — useful when only one is visible at
-      // a given zoom (overlay clip on narrow cards).
-      const verb = narrow.kind === 'ref-return'
-        ? 'narrowed by ref :'
-        : narrow.kind === 'inherited'
-          ? 'inherited narrowing from :'
-          : 'narrowed at :';
-      subOf.title = 'subtype of :' + narrow.baseTypeName
-                  + ' — ' + verb + (narrow.sourceFnName || '(anonymous)');
-      chip.appendChild(subOf);
-    }
   }
   // Hover-title shows the FULL rich type if any. The visible text
   // already prefers the rich form so this is just for cases where

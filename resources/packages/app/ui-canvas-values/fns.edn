@@ -1,0 +1,161 @@
+{:namespace "app.ui-canvas-values"
+ :description "Passive value labels and type presentation. Native owners retain sanitized representations, semantic type resolution, secret refusal, controls and measured geometry."
+ :fns
+ [{:name :_canvas-values-history-entry :type {:label :text :source-label :text
+                                              :kind [:refine :text {:constraint [:in #{"none" "binding-override" "slot"}]}]}}
+  {:name :_canvas-values-inputs :type {:surface [:refine :text {:constraint [:in #{"value-label" "type-chip" "type-history"}]}]
+                                       :label :text :secondary :text :secondary-title :text
+                                       :secondary-kind [:refine :text {:constraint [:in #{"none" "refinement" "narrowing"}]}]
+                                       :history [:list :_canvas-values-history-entry]}}
+  {:name :_canvas-values-output :type {:tree :web.html/hiccup-node :title :text
+                                       :styles [:list {:selector :text :declarations [:map :text :text]}]}}
+  {:name :_canvas-values-surface :parent :get
+   :args {:coll {:as :inputs :type :_canvas-values-inputs} :key {:value :surface} :default "value-label"}}
+  {:name :_canvas-values-label :parent :get
+   :args {:coll {:as :inputs :type :_canvas-values-inputs} :key {:value :label} :default ""}}
+  {:name :_canvas-values-secondary :parent :get
+   :args {:coll {:as :inputs :type :_canvas-values-inputs} :key {:value :secondary} :default ""}}
+  {:name :_canvas-values-secondary-kind :parent :get
+   :args {:coll {:as :inputs :type :_canvas-values-inputs} :key {:value :secondary-kind} :default "none"}}
+  {:name :_canvas-values-secondary-title :parent :get
+   :args {:coll {:as :inputs :type :_canvas-values-inputs} :key {:value :secondary-title} :default ""}}
+  {:name :_canvas-values-history :parent :get
+   :args {:coll {:as :inputs :type :_canvas-values-inputs} :key {:value :history} :default {:value []}}}
+  {:name :_canvas-values-label-tree :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "gd-canvas-values-label"}} :children [:_canvas-values-label]}}
+  {:name :_canvas-values-secondary-empty :parent :equal?
+   :args {:a :_canvas-values-secondary :b ""}}
+  {:name :_canvas-values-secondary-narrowing :parent :equal?
+   :args {:a :_canvas-values-secondary-kind :b "narrowing"}}
+  {:name :_canvas-values-secondary-class :parent :if
+   :args {:test :_canvas-values-secondary-narrowing
+          :then "gd-canvas-values-secondary gd-canvas-values-narrowing"
+          :else "gd-canvas-values-secondary"}}
+  {:name :_canvas-values-secondary-attrs :parent :zipmap
+   :args {:keys [{:value :class} {:value :title}] :vals [:_canvas-values-secondary-class :_canvas-values-secondary-title]}}
+  {:name :_canvas-values-secondary-tree :parent :hiccup
+   :args {:tag "span" :attrs :_canvas-values-secondary-attrs :children [:_canvas-values-secondary]}}
+  {:name :_canvas-values-maybe-secondary :parent :if
+   :args {:test :_canvas-values-secondary-empty :then nil :else :_canvas-values-secondary-tree}}
+  {:name :_canvas-values-type-class :parent :if
+   :args {:test :_canvas-values-secondary-empty :then "gd-canvas-values-type"
+          :else "gd-canvas-values-type gd-canvas-values-stacked"}}
+  {:name :_canvas-values-type-attrs :parent :zipmap
+   :args {:keys [{:value :class}] :vals [:_canvas-values-type-class]}}
+  {:name :_canvas-values-type-primary :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "gd-canvas-values-primary"}} :children [:_canvas-values-label]}}
+  {:name :_canvas-values-type-tree :parent :hiccup
+   :args {:tag "span" :attrs :_canvas-values-type-attrs :children [:_canvas-values-type-primary :_canvas-values-maybe-secondary]}}
+  {:name :_canvas-values-entry-label :parent :get
+   :args {:coll {:as :entry :type :_canvas-values-history-entry} :key {:value :label} :default "any"}}
+  {:name :_canvas-values-entry-source :parent :get
+   :args {:coll {:as :entry :type :_canvas-values-history-entry} :key {:value :source-label} :default ""}}
+  {:name :_canvas-values-entry-kind :parent :get
+   :args {:coll {:as :entry :type :_canvas-values-history-entry} :key {:value :kind} :default "none"}}
+  {:name :_canvas-values-entry-source-empty :parent :equal?
+   :args {:a :_canvas-values-entry-source :b ""}}
+  {:name :_canvas-values-entry-source-title :parent :if
+   :args {:test :_canvas-values-entry-source-empty :then "ancestor" :else :_canvas-values-entry-source}}
+  {:name :_canvas-values-entry-title :parent :str
+   :args {:parts ["Inherited type at " :_canvas-values-entry-source-title]}}
+  {:name :_canvas-values-history-attrs :parent :zipmap
+   :args {:keys [{:value :class} {:value :title} {:value :aria-label}]}}
+  {:name :_canvas-values-entry-attrs :parent :_canvas-values-history-attrs
+   :args {:vals ["gd-canvas-values-history-type" :_canvas-values-entry-title :_canvas-values-entry-title]}}
+  {:name :_canvas-values-entry-chip :parent :hiccup
+   :args {:tag "span" :attrs :_canvas-values-entry-attrs :children [:_canvas-values-entry-label]}}
+  {:name :_canvas-values-entry-arrow :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "gd-canvas-values-history-arrow"}} :children ["↑"]}}
+  {:name :_canvas-values-entry-source-text :parent :str
+   :args {:parts ["(" :_canvas-values-entry-source ")"]}}
+  {:name :_canvas-values-entry-source-tree :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "gd-canvas-values-history-source"}} :children [:_canvas-values-entry-source-text]}}
+  {:name :_canvas-values-entry-override :parent :equal?
+   :args {:a :_canvas-values-entry-kind :b "binding-override"}}
+  {:name :_canvas-values-entry-kind-text :parent :if
+   :args {:test :_canvas-values-entry-override :then "override" :else "slot"}}
+  {:name :_canvas-values-entry-kind-title :parent :if
+   :args {:test :_canvas-values-entry-override :then "Narrowed by a binding type-override" :else "The slot’s own declared type"}}
+  {:name :_canvas-values-entry-kind-attrs :parent :_canvas-values-history-attrs
+   :args {:vals ["gd-canvas-values-history-kind" :_canvas-values-entry-kind-title :_canvas-values-entry-kind-title]}}
+  {:name :_canvas-values-entry-kind-tree :parent :hiccup
+   :args {:tag "span" :attrs :_canvas-values-entry-kind-attrs :children [:_canvas-values-entry-kind-text]}}
+  {:name :_canvas-values-entry-kind-none :parent :equal?
+   :args {:a :_canvas-values-entry-kind :b "none"}}
+  {:name :_canvas-values-entry-maybe-kind :parent :if
+   :args {:test :_canvas-values-entry-kind-none :then nil :else :_canvas-values-entry-kind-tree}}
+  {:name :_canvas-values-entry-row :parent :hiccup :lambda-params [:entry]
+   :args {:tag "span" :attrs {:value {:class "gd-canvas-values-history-row"}}
+          :children [:_canvas-values-entry-arrow :_canvas-values-entry-chip :_canvas-values-entry-source-tree :_canvas-values-entry-maybe-kind]}}
+  {:name :_canvas-values-history-rows :parent :map
+   :args {:func :_canvas-values-entry-row :coll :_canvas-values-history}}
+  {:name :_canvas-values-history-tree :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "gd-canvas-values-history"}} :children [:_canvas-values-history-rows]}}
+  {:name :_canvas-values-surface-label :parent :equal?
+   :args {:a :_canvas-values-surface :b "value-label"}}
+  {:name :_canvas-values-surface-type :parent :equal?
+   :args {:a :_canvas-values-surface :b "type-chip"}}
+  {:name :_canvas-values-type-or-history :parent :if
+   :args {:test :_canvas-values-surface-type :then :_canvas-values-type-tree :else :_canvas-values-history-tree}}
+  {:name :_canvas-values-tree :parent :if
+   :args {:test :_canvas-values-surface-label :then :_canvas-values-label-tree :else :_canvas-values-type-or-history}}
+  {:name :_canvas-values-style-label :parent :zipmap
+   :args {:keys ["white-space"] :vals ["pre"]}}
+  {:name :_canvas-values-rule-label :parent :zipmap
+   :args {:keys [{:value :selector} {:value :declarations}]
+          :vals ["& .gd-canvas-values-label" :_canvas-values-style-label]}}
+  {:name :_canvas-values-style-type :parent :zipmap
+   :args {:keys ["display"] :vals ["contents"]}}
+  {:name :_canvas-values-rule-type :parent :zipmap
+   :args {:keys [{:value :selector} {:value :declarations}]
+          :vals ["& .gd-canvas-values-type" :_canvas-values-style-type]}}
+  {:name :_canvas-values-style-stacked :parent :zipmap
+   :args {:keys ["display" "flex-direction" "align-items" "padding" "line-height"] :vals ["inline-flex" "column" "center" "1px 0" "1.2222222222"]}}
+  {:name :_canvas-values-rule-stacked :parent :zipmap
+   :args {:keys [{:value :selector} {:value :declarations}]
+          :vals ["& .gd-canvas-values-stacked" :_canvas-values-style-stacked]}}
+  {:name :_canvas-values-style-secondary :parent :zipmap
+   :args {:keys ["font-size" "line-height" "opacity"] :vals ["0.5rem" "1.25" "0.7"]}}
+  {:name :_canvas-values-rule-secondary :parent :zipmap
+   :args {:keys [{:value :selector} {:value :declarations}]
+          :vals ["& .gd-canvas-values-secondary" :_canvas-values-style-secondary]}}
+  {:name :_canvas-values-style-narrowing :parent :zipmap
+   :args {:keys ["font-style"] :vals ["italic"]}}
+  {:name :_canvas-values-rule-narrowing :parent :zipmap
+   :args {:keys [{:value :selector} {:value :declarations}]
+          :vals ["& .gd-canvas-values-narrowing" :_canvas-values-style-narrowing]}}
+  {:name :_canvas-values-style-history :parent :zipmap
+   :args {:keys ["display" "flex-direction" "gap"] :vals ["flex" "column" "1px"]}}
+  {:name :_canvas-values-rule-history :parent :zipmap
+   :args {:keys [{:value :selector} {:value :declarations}]
+          :vals ["& .gd-canvas-values-history" :_canvas-values-style-history]}}
+  {:name :_canvas-values-style-history-row :parent :zipmap
+   :args {:keys ["display" "align-items" "white-space"] :vals ["inline-flex" "center" "nowrap"]}}
+  {:name :_canvas-values-rule-history-row :parent :zipmap
+   :args {:keys [{:value :selector} {:value :declarations}]
+          :vals ["& .gd-canvas-values-history-row" :_canvas-values-style-history-row]}}
+  {:name :_canvas-values-style-history-arrow :parent :zipmap
+   :args {:keys ["font-size" "color" "margin" "line-height"] :vals ["0.5625rem" "var(--muted-fg)" "0 2px 0 0" "1.5555555556"]}}
+  {:name :_canvas-values-rule-history-arrow :parent :zipmap
+   :args {:keys [{:value :selector} {:value :declarations}]
+          :vals ["& .gd-canvas-values-history-arrow" :_canvas-values-style-history-arrow]}}
+  {:name :_canvas-values-style-history-type :parent :zipmap
+   :args {:keys ["display" "align-items" "justify-content" "padding" "margin-left" "font-size" "line-height" "border" "border-radius" "color"] :vals ["inline-flex" "center" "center" "0 4px" "4px" "0.5625rem" "1.5555555556" "1px solid currentcolor" "3px" "var(--fg)"]}}
+  {:name :_canvas-values-rule-history-type :parent :zipmap
+   :args {:keys [{:value :selector} {:value :declarations}]
+          :vals ["& .gd-canvas-values-history-type" :_canvas-values-style-history-type]}}
+  {:name :_canvas-values-style-history-source :parent :zipmap
+   :args {:keys ["font-size" "color" "margin-left" "line-height"] :vals ["0.5625rem" "var(--muted-fg)" "4px" "1.2"]}}
+  {:name :_canvas-values-rule-history-source :parent :zipmap
+   :args {:keys [{:value :selector} {:value :declarations}]
+          :vals ["& .gd-canvas-values-history-source" :_canvas-values-style-history-source]}}
+  {:name :_canvas-values-style-history-kind :parent :zipmap
+   :args {:keys ["font-size" "text-transform" "letter-spacing" "color" "margin-left" "padding" "border" "border-radius" "line-height"] :vals ["0.5rem" "uppercase" "0.03em" "var(--light-fg)" "4px" "0 3px" "1px solid var(--light-border)" "2px" "1.4"]}}
+  {:name :_canvas-values-rule-history-kind :parent :zipmap
+   :args {:keys [{:value :selector} {:value :declarations}]
+          :vals ["& .gd-canvas-values-history-kind" :_canvas-values-style-history-kind]}}
+  {:name :canvas-values-styles :parent :list
+   :return-type [:list {:selector :text :declarations [:map :text :text]}]
+   :args {:items [:_canvas-values-rule-label :_canvas-values-rule-type :_canvas-values-rule-stacked :_canvas-values-rule-secondary :_canvas-values-rule-narrowing :_canvas-values-rule-history :_canvas-values-rule-history-row :_canvas-values-rule-history-arrow :_canvas-values-rule-history-type :_canvas-values-rule-history-source :_canvas-values-rule-history-kind]}}
+  {:name :canvas-values-view :parent :app.ui-canvas/canvas-view-fields :return-type :_canvas-values-output
+   :args {:vals [:_canvas-values-tree "" :canvas-values-styles]}}]}

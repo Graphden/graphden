@@ -72,6 +72,14 @@ owners retain controls, edit guards, focus, expansion and geometry. Inputs are
 finite authorized display facts, with no secret contents or source identities;
 see the [canvas contract](../resources/packages/app/ui-preview/README.md#passive-canvas-presentation).
 
+Value labels and type-chip/history bodies use the independent view-only
+`app.ui-canvas-values/canvas-values-view` identity. Appearance can personalize
+it without changing an existing custom canvas view. The value preview remains
+the existing sanitized graph representation in a sibling native host; secret
+paths and values never enter this presentation component. Type resolution,
+refinement formatting, edit/expand anchors and accessibility remain native.
+See the [value/type contract](../resources/packages/app/ui-preview/README.md#passive-value-and-type-presentation).
+
 Replacing an editor root renames the old root privately in the current branch
 and creates a new UUID named `editor`. Its parent relationships are retained.
 Other branches and references to the old UUID keep their composition. A stored

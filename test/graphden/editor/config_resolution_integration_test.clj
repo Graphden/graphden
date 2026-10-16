@@ -35,7 +35,7 @@
 
 
 (def ^:private default-component-roles
-  #{:account-menu :fn-picker :recents :inspector :explorer :tutorial-catalog :canvas})
+  #{:account-menu :fn-picker :recents :inspector :explorer :tutorial-catalog :canvas :canvas-values})
 
 
 (defn- create-legacy-record!

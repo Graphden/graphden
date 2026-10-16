@@ -29,7 +29,7 @@
 (def script-path "resources/packages/app/ui-preview/builtin-plans.js")
 
 
-(def ^:private modules ["ui-account-menu" "ui-fn-picker" "ui-recents" "ui-inspector" "ui-explorer" "ui-tutorial-catalog" "ui-canvas"])
+(def ^:private modules ["ui-account-menu" "ui-fn-picker" "ui-recents" "ui-inspector" "ui-explorer" "ui-tutorial-catalog" "ui-canvas" "ui-canvas-values"])
 
 
 (def ^:private entries
@@ -46,6 +46,7 @@
              :update (ids/fn-id "app.ui-recents" :recents-update)
              :view (ids/fn-id "app.ui-recents" :recents-view)}
    :canvas {:view (ids/fn-id "app.ui-canvas" :canvas-view)}
+   :canvasValues {:view (ids/fn-id "app.ui-canvas-values" :canvas-values-view)}
    :tutorialCatalog {:view (ids/fn-id "app.ui-tutorial-catalog" :catalog-view)}
    :fnPicker {:initial (ids/fn-id "app.ui-account-menu" :account-menu-initial)
               :update (ids/fn-id "app.ui-account-menu" :account-menu-update)

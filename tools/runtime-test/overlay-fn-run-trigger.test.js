@@ -12,8 +12,10 @@ function element(tag = 'div') {
     addEventListener(name, callback) { this.listeners[name] = callback; }};
 }
 function fixture({signedIn = true, isNavRoot = true, depth = 0, known = true} = {}) {
-  const entity = {id: 'root', name: 'selected'}, calls = [], toolbars = [];
-  const context = vm.createContext({window: {gdCanvasGraph: {mount() {}}}, document: {createElement: element},
+  const entity = {id: 'root', name: 'selected'}, calls = [], toolbars = [], presentations = [];
+  const context = vm.createContext({window: {gdCanvasGraph: {mount() {}},
+    gdCanvasInheritanceGraph: {mount(owner, host, surface, facts) { presentations.push({owner, host, surface, facts}); }}},
+    document: {createElement: element},
     lookups: {fnMap: new Map(known ? [['root', entity]] : [])},
     implementationFnIds: new Set(['root']), isAuthenticated: () => signedIn,
     measureCanvasText: text => text.length * 7, displayLabel: name => name, bindFullNameHover() {}, onPreviewLeave() {},
@@ -30,7 +32,7 @@ function fixture({signedIn = true, isNavRoot = true, depth = 0, known = true} = 
     fullDepth: 0, partialFns: new Set(), visibleLevels: [level],
     paint: {setRowBg() {}, fnIsHighlighted: () => false,
       applyPreviewStyle() {}, restoreStyles() {}}};
-  return {context, level, ctx, entity, calls, toolbars};
+  return {context, level, ctx, entity, calls, toolbars, presentations};
 }
 {
   const f = fixture({depth: 1});
@@ -39,10 +41,21 @@ function fixture({signedIn = true, isNavRoot = true, depth = 0, known = true} = 
   const cells = f.context.renderMiRow(line, f.level, 0, f.ctx);
   assert.equal(cells.size, 2, 'MI render completes without a ReferenceError');
   assert.equal(line.children.length, 2, 'MI row contains only its parent cells');
-  for (const cell of line.children) {
-    assert.equal(cell.children.length, 1, 'each parent retains its actions trigger');
-    assert.equal(cell.children[0].className, undefined, 'MI never gets a root Run button');
-    cell.children[0].buildContent(element());
+  for (const [index, cell] of line.children.entries()) {
+    const bodies = cell.children.filter(child => child.className === 'gd-canvas-body-host');
+    const controls = cell.children.filter(child => child.tag === 'button');
+    assert.equal(cell.children.length, 2, 'each parent owns one passive body and one native actions trigger');
+    assert.equal(bodies.length, 1);
+    assert.equal(controls.length, 1, 'each exact parent retains its native actions trigger');
+    assert.equal(cell.children.filter(child => child.className === 'fn-run-trigger').length, 0,
+      'MI never gets a root Run button');
+    const presentation = f.presentations[index];
+    assert.equal(presentation.owner, f.ctx.overlay, 'passive label shares its exact native card lifetime');
+    assert.equal(presentation.host, bodies[0]);
+    assert.equal(presentation.surface, 'label');
+    assert.deepEqual(Object.keys(presentation.facts), ['label'], 'only label display facts reach the graph');
+    assert.equal(presentation.facts.label, f.level.fns[index].name);
+    controls[0].buildContent(element());
   }
   assert.deepEqual(f.toolbars.map(args => [args[1], args[2], args[3].cardFnId]),
     [['a', 'cell', 'root'], ['b', 'cell', 'root']]);

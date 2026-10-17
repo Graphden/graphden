@@ -119,7 +119,9 @@
                    :explorer ["app.ui-explorer" "explorer-toolbar" #{:initial :update :view}]
                    :tutorial-catalog ["app.ui-tutorial-catalog" "catalog" #{:view}]
                    :canvas ["app.ui-canvas" "canvas" #{:view}]
-                   :canvas-values ["app.ui-canvas-values" "canvas-values" #{:view}]}]
+                   :canvas-values ["app.ui-canvas-values" "canvas-values" #{:view}]
+                   :canvas-inheritance ["app.ui-canvas-inheritance" "inheritance" #{:initial :view}]
+                   :canvas-metadata ["app.ui-canvas-metadata" "metadata" #{:view}]}]
     (is (= (set (keys component-config/component-contracts))
            (set (keys contracts))
            (set (keys actual))))

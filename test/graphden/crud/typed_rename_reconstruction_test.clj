@@ -133,11 +133,12 @@
           (registry/record-rich-types-raw! (:id base) :version-source
                                            {:return 'a :args {:value 'a} :effects #{}})
           (cr/refresh-type-registries-from-storage! (exec/create-context {:storage storage}))
-          (testing "storage registration intentionally retains its bare alias"
+          (testing "storage registration retains bare compatibility and the exact canonical alias"
             (is (= [:list :int] (types/resolve-alias :result)))
-            (is (not (types/alias-registered? (keyword "versioned@1-2-0" "result")))))
-          (testing "both type references use that registered name"
-            (is (= {:return-type :result :args {:value {:as :event :type :result}}}
+            (is (types/alias-registered? (keyword "versioned@1-2-0" "result"))))
+          (testing "both type references retain the registered namespace identity"
+            (is (= {:return-type (keyword "versioned@1-2-0" "result")
+                    :args {:value {:as :event :type (keyword "versioned@1-2-0" "result")}}}
                    (select-keys (tc/reconstruct-fn-def storage (:id child))
                                 [:return-type :args]))))
           (is (nil? (tc/type-check-fn-after-mutation! storage (:id child))))

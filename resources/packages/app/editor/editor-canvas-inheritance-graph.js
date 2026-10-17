@@ -84,7 +84,12 @@
       return {bg: tones[value.tone][0], fg: tones[value.tone][1], bold: value.bold};
     })));
   }
-  window.addEventListener('gd-auth-changed', () => bindings.clear());
+  window.addEventListener('gd-auth-changed', () => {
+    // Shared invalidation already retired the selected runtime. Reset finite
+    // native paint/group metadata before releasing its retained-owner binding.
+    try { repaint(); }
+    finally { bindings.clear(); }
+  });
   window.gdCanvasInheritanceGraph = {...component, groups, paintBatch,
     bind(owner, update) { bindings.set(owner, update); },
     dispose(owner) { bindings.delete(owner); component.dispose(owner); },

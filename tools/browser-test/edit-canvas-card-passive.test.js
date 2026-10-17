@@ -47,7 +47,7 @@ const source = process.env.GRAPHDEN_CANVAS_SOURCE_ROOT || path.join(__dirname, '
         mi: position === 1, clickable: position === 1, 'duplicate-next': false}));
     });
     for (const file of ['editor-passive-canvas.js', 'editor-canvas-values-graph.js',
-      'editor-canvas-inheritance-graph.js', 'editor-canvas-metadata-graph.js', 'editor-overlay-strips.js']) {
+      'editor-canvas-inheritance-graph.js', 'editor-canvas-metadata-graph.js', 'editor-overlay-strips.js', 'editor-overlay-fn.js']) {
       await page.addScriptTag({path: path.join(source, 'resources/packages/app/editor', file)});
     }
     await page.evaluate(() => {
@@ -76,7 +76,14 @@ const source = process.env.GRAPHDEN_CANVAS_SOURCE_ROOT || path.join(__dirname, '
       fixture.check(owner.querySelector('.effects-chip-time .gd-canvas-metadata-ghost'), 'overdeclared ghost body');
       fixture.labelHost = document.createElement('span'); owner.appendChild(fixture.labelHost);
       gdCanvasInheritanceGraph.mount(owner, fixture.labelHost, 'label', {label: 'parent'});
-      fixture.applyPolicy = () => { fixture.groups = gdCanvasInheritanceGraph.groups(fixture.levels, false); };
+      fixture.paintLine = document.createElement('div'); owner.appendChild(fixture.paintLine);
+      const levelInfo = {depth: 0, blockIsRoot: false, fns: [{isClickable: false}]};
+      fixture.paint = buildFnPaintState({linesByDepth: new Map([[0, {line: fixture.paintLine, levelInfo}]]),
+        visibleLevels: [levelInfo], fullDepth: 0, partialFns: new Set()});
+      fixture.applyPolicy = () => {
+        fixture.groups = gdCanvasInheritanceGraph.groups(fixture.levels, false);
+        fixture.paint.restoreStyles();
+      };
       fixture.applyPolicy(); gdCanvasInheritanceGraph.bind(owner, fixture.applyPolicy);
       fixture.check(fixture.groups[2].group === fixture.groups[3].group, 'builtin grouped passive followers');
       fixture.lambda.focus();
@@ -93,6 +100,7 @@ const source = process.env.GRAPHDEN_CANVAS_SOURCE_ROOT || path.join(__dirname, '
       };
       const inherit = fixture.replace(fixture.custom('canvasInheritance'), 'gd-canvas-inheritance-label',
         'gd-canvas-inheritance-label gd-canvas-inheritance-personal');
+      fixture.replace(inherit, 'body', 'highlight');
       const previous = inherit.functions.find(fn => fn.args.some(arg => arg.name === 'key'
         && arg.expr.kind === 'literal' && arg.expr.value[0] === 'keyword' && arg.expr.value[2] === 'previous-mi'));
       const branch = inherit.functions.find(fn => fn.args.some(arg => arg.name === 'test'
@@ -110,6 +118,7 @@ const source = process.env.GRAPHDEN_CANVAS_SOURCE_ROOT || path.join(__dirname, '
       && fixture.effect.querySelector('.gd-canvas-metadata-personal'));
     await page.evaluate(() => {
       fixture.check(fixture.groups[2].group !== fixture.groups[3].group, 'personal ordinary graph changes passive group membership');
+      fixture.check(fixture.paintLine.style.background === 'var(--card-row-highlight)', 'personal finite paint reaches exact native owner');
       fixture.check(document.activeElement === fixture.lambda && fixture.effect === fixture.effectIdentity
         && fixture.provenance === fixture.provenanceIdentity, 'runtime swaps retain exact focused native controls');
       fixture.lambda.click(); fixture.effect.click(); fixture.returns.click();
@@ -149,6 +158,11 @@ const source = process.env.GRAPHDEN_CANVAS_SOURCE_ROOT || path.join(__dirname, '
     await page.evaluate(() => {
       fixture.check(fixture.failures.includes('canvas-metadata') && !fixture.owner.textContent.includes('Forbidden'), 'active personal metadata refused across all bodies');
       fixture.check(fixture.effect.querySelector('.gd-canvas-metadata-drift'), 'whole metadata builtin fallback');
+      fixture.selected['canvas-inheritance'] = fixture.personalInheritance;
+    });
+    await page.evaluate(() => gdCanvasInheritanceGraph.reload());
+    await page.waitForFunction(() => fixture.paintLine.style.background === 'var(--card-row-highlight)');
+    await page.evaluate(() => {
       fixture.pending = [];
       gdLoadUIComponentRuntime = (identity, _plan, _options, signal) => new Promise(resolve => fixture.pending.push({identity, signal, resolve}));
       fixture.loads = [gdCanvasInheritanceGraph.reload(), gdCanvasMetadataGraph.reload()];
@@ -156,6 +170,8 @@ const source = process.env.GRAPHDEN_CANVAS_SOURCE_ROOT || path.join(__dirname, '
       gdAccount = {id: 'other-account'}; gdPrefOwner = 'card-owner-b';
       window.dispatchEvent(new Event('gd-auth-changed'));
       fixture.check(fixture.labelHost.textContent === '' && !fixture.owner.querySelector('.gd-canvas-metadata-effect'), 'auth retires all passive old-account content immediately');
+      fixture.check(fixture.paintLine.style.background === 'var(--card-bg)'
+        && fixture.groups[2].group === fixture.groups[3].group, 'auth immediately resets native paint/group metadata to builtin');
       fixture.check(fixture.pending.every(row => row.signal.aborted), 'auth aborts both old component requests');
       fixture.check(fixture.oldScopes.every(id => !document.querySelector('style[data-gd-ui-styles="' + id + '"]')), 'old scoped styles released');
       for (const row of fixture.pending) row.resolve(row.identity === 'canvas-inheritance' ? fixture.personalInheritance : fixture.personalMetadata);

@@ -245,7 +245,7 @@
           (sp/create-entity storage :binding {:id (random-uuid) :fn-id (:id child)
                                               :slot-id (:id slot)
                                               :type-override-fn-id (:id target)})
-          (is (= {:value {:type :rfd-narrow}}
+          (is (= {:value {:type (keyword "" "rfd-narrow")}}
                  (:args (tc/reconstruct-fn-def storage (:id child))))))
         (finally (sp/close storage)))))
 

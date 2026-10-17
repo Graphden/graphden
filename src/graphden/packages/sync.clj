@@ -172,13 +172,6 @@
          (catch Exception e
            (log/warn e "register-marker! failed for" (:name fd)))))
   (let [alias-body type-row-alias-body
-        edn-ns? (fn [ns-path]
-                  ;; Version-materialized namespaces
-                  ;; (`web.components@1-2-0`) contain `@` — invalid in
-                  ;; a keyword ns, so those rows register bare-only
-                  ;; (mirrors export's `edn-keyword-ns?`).
-                  (boolean (and ns-path
-                                (re-matches #"[A-Za-z0-9._-]+" ns-path))))
         candidates (for [fd fn-defs
                          :when (:name fd)
                          :let [body (alias-body fd)]
@@ -191,13 +184,14 @@
                      ;; goes ambiguous (resolve-alias throws) while the
                      ;; qualified forms stay precise.
                      [(:name fd) body (records/fn-id (:namespace fd) (:name fd))
-                      (when (edn-ns? (:namespace fd))
-                        (keyword (:namespace fd) (name (:name fd))))])
+                      ;; Canonical root/@ references are valid in memory and
+                      ;; the wire codec; EDN readability belongs to export.
+                      (keyword (or (:namespace fd) "") (name (:name fd)))])
         ;; The declared bodies outlive this registration: the DB-side
         ;; rebuild prefers them for platform rows (types/core).
         _ (types/remember-package-alias-bodies!
-            (into {} (mapcat (fn [[nm body _ qualified]]
-                               (cond-> [[nm body]]
+            (into {} (mapcat (fn [[nm body owner qualified]]
+                               (cond-> [[nm body] [owner body]]
                                  qualified (conj [qualified body]))))
                   candidates))
         try-once

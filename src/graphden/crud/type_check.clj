@@ -23,7 +23,6 @@
     [graphden.executor.compile.deps :as deps]
     [graphden.executor.context :as exec-ctx]
     [graphden.packages.records.ids :as ids]
-    [graphden.packages.records.wire :as wire]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.tx :as tx]
     [graphden.tenancy.context :as tc]
@@ -318,12 +317,10 @@
 
 (defn- row->type-kw
   [row]
-  ;; Alias registration keeps materialized @version namespaces bare-only
-  ;; (packages/sync and compile-runtime). Function refs use row->kw instead:
-  ;; their rich-type name index supports those qualified namespaces.
-  (if (some-> (::ns-path row) wire/edn-keyword-ns?)
-    (row->kw row)
-    (some-> (:name row) keyword)))
+  ;; Type references share the exact qualification rule used at alias
+  ;; registration, including root/materialized aliases and bare primitives.
+  (or (cr/qualified-type-name {(:namespace-id row) (::ns-path row)} row)
+      (some-> (:name row) keyword)))
 
 
 (defn- row->ref

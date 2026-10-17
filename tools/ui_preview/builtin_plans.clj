@@ -153,7 +153,8 @@
           package-ids (into #{} (map #(ids/fn-id (:namespace %) (:name %))) definitions)
           aliases (into {} (mapcat (fn [d]
                                      (when-let [body (sync/type-row-alias-body d)]
-                                       [[(:name d) body]
+                                       [[(ids/fn-id (:namespace d) (:name d)) body]
+                                        [(:name d) body]
                                         [(keyword (:namespace d) (name (:name d))) body]]))) definitions)]
       ;; Reproduce package bootstrap's source metadata without mutating its
       ;; process-global registries. This utility runs only during asset builds.

@@ -15,6 +15,7 @@
     [clojure.string :as str]
     [graphden.crud.request :as request]
     [graphden.crud.type-check :as tc]
+    [graphden.executor.compile-runtime :as cr]
     [graphden.executor.context :as exec-ctx]
     [graphden.executor.registry.core :as registry]
     [graphden.packages.records.types :as record-types]
@@ -184,14 +185,16 @@
   #{:refinement :list :union :variant :record :fn-type :primitive})
 
 
-(defn type-name-kinds
-  "Sorted vec of `{:name :kind}` rows for the editor's type-name
-   datalist: every NAMED type-row (kind via `compute-fn-role`) plus
-   the bare primitives. Single source for the list the editor used to
-   assemble client-side from `richTypes` keys + a hand-copied
-   primitives set + a per-name `fnMap` scan."
+(defn- type-name-entries
+  "Picker rows with an internal identity-preserving type reference.
+   Selection spelling stays bare when unique, qualified when ambiguous."
   [ctx]
-  (let [{:keys [fns fn-slots]} (cached-or-load-graph ctx)
+  (let [{:keys [fns fn-slots]}
+        (tctx/apply-graph-read-filter (cached-or-load-graph ctx))
+        name-counts (frequencies (keep :name fns))
+        ns-paths (ns-path/path-map
+                   (sp/query-entities (or (:compile-storage ctx)
+                                          (request/require-storage ctx)) :ns {}))
         slotted (into #{} (map :fn-id) fn-slots)
         rich-snapshot (registry/rich-types-snapshot)
         ;; No :primitive here — the datalist appends the BARE primitives
@@ -204,24 +207,39 @@
                                                    (contains? slotted (:id f))
                                                    rich-snapshot)]
                          (when (type-row-roles role)
-                           {:name (:name f) :kind (name role)}))))
+                           (let [qualified (cr/qualified-type-name ns-paths f)
+                                 selection (if (> (get name-counts (:name f)) 1)
+                                             (str (get ns-paths (:namespace-id f) "")
+                                                  "/" (:name f))
+                                             (:name f))]
+                             {:name selection :kind (name role)
+                              :type-ref (or qualified (keyword (:name f)))})))))
                    fns)
-        prims (map (fn [p] {:name (name p) :kind "primitive"})
+        prims (map (fn [p] {:name (name p) :kind "primitive" :type-ref p})
                    types/primitives)]
     (->> (concat rows prims)
          (sort-by :name)
          (vec))))
 
 
+(defn type-name-kinds
+  "Type-picker names and kinds. Unique names retain their existing spelling;
+   collisions use namespace-qualified selection values, including /name at root."
+  [ctx]
+  (mapv #(dissoc % :type-ref) (type-name-entries ctx)))
+
+
 (defn compatible-type-names
-  "`type-name-kinds` rows filtered to the names that can legally
-   narrow `expected` — `(subtype? (keyword name) expected)`, the same
+  "`type-name-kinds` rows filtered by each row's canonical type alias,
+   independently of its display/selection spelling. Uses the same
    alias-aware predicate `/api/types/compatible` answers per pair.
    One call replaces the editor's former per-name fan-out (~50
    parallel POSTs per type-picker open)."
   [ctx expected]
-  (filterv #(types/subtype? (keyword (:name %)) expected)
-           (type-name-kinds ctx)))
+  (into []
+        (comp (filter #(types/subtype? (:type-ref %) expected))
+              (map #(dissoc % :type-ref)))
+        (type-name-entries ctx)))
 
 
 (defn project-rich-type-entry

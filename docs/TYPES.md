@@ -799,8 +799,17 @@ the qualified keyword in the `:type` position:
 :args {:row {:type :web.crud/shape}}
 ```
 
-Version-materialized namespaces (`web.components@1-2-0`) register
-bare-only — `@` is invalid in an EDN keyword namespace.
+Root and version-materialized namespaces also have canonical aliases in
+memory and JSONB: `(keyword "" "shape")` and
+`(keyword "web.components@1-2-0" "shape")`. EDN export uses the existing
+`#graphden/ref "/shape"` / `#graphden/ref "web.components@1-2-0/shape"`
+wire forms because those keyword spellings are not readable EDN.
+
+Type pickers check compatibility using canonical aliases. Unique selection
+names keep their bare spelling; collisions use `namespace/name` (or `/name`
+at root), and the shared storage resolver pins that exact namespace when
+saving. Rebuilds preserve package-declared structural bodies by the declaring
+fn UUID, so a same-named type cannot replace another owner's declaration.
 
 ### Unknown aliases — migration note
 

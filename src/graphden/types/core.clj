@@ -390,7 +390,7 @@
   (or *type-aliases-override* type-aliases))
 
 
-;; `{alias-name → body}` as the PACKAGES declared it — the lossless
+;; `{alias-name-or-owner-UUID → body}` as the PACKAGES declared it — the lossless
 ;; structural form from fns.edn. The DB-side rebuild
 ;; (`compile-runtime/register-type-aliases-from-db!`) reconstructs a
 ;; record's fields from slot `type-fn-id`s, and a slot can only name a
@@ -410,17 +410,18 @@
 
 
 (defn remember-package-alias-bodies!
-  "Record the package-declared body of every alias in `m` (`{name → body}`)."
+  "Record package-declared bodies keyed by alias names and declaring fn UUIDs.
+   UUID lookups preserve the owner when bare aliases collide."
   [m]
   (swap! package-alias-bodies merge m)
   nil)
 
 
 (defn package-alias-body
-  "The body the packages declared for `alias-name`, or nil when no
-   package declares it (a type created through the API)."
-  [alias-name]
-  (get @package-alias-bodies alias-name))
+  "The body declared for an alias name or exact declaring fn UUID, or nil
+   when no package declares it (a type created through the API)."
+  [alias-or-owner]
+  (get @package-alias-bodies alias-or-owner))
 
 
 (declare register-type-aliases-batch)

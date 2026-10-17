@@ -16,14 +16,20 @@
    - `/partials/branch-verification` — the review dialog's
      \"Verified on this branch\" digest (tests line + runs list)."
   (:require
+    [cheshire.core :as json]
     [clojure.edn :as edn]
     [clojure.java.io :as io]
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.crud.types-api :as types-api]
+    [graphden.executor.compile-runtime :as cr]
+    [graphden.executor.context :as exec-ctx]
     [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
+    [graphden.storage.protocol.core :as sp]
     [graphden.test-infra.golden-app :as ga]
     [graphden.types.core :as types]
+    [graphden.util.ns-path :as ns-path]
     [hiccup2.core :as hiccup]))
 
 
@@ -267,6 +273,53 @@
     ;; fragment renders the placeholder. `body-of` asserts status 200.
     (let [body (body-of :_partial-cto-handler {"expected" "{"})]
       (is (str/includes? body "no compatible types")))))
+
+
+(deftest private-type-twins-roundtrip-through-both-picker-partials
+  (let [{:keys [ctx storage] :as bootstrap} ga/*bootstrap*
+        suffix (str (random-uuid))
+        bare (str "_picker-local-" suffix)
+        namespaces (mapv (fn [n] (sp/create-entity storage :ns {:name (str n suffix)}))
+                         ["picker-a-" "picker-b-" "picker@1-0-0-"])
+        rows (mapv (fn [n]
+                     (sp/create-entity storage :fn
+                                       {:name bare :namespace-id (:id n)
+                                        :base-fn-id (get setup/primitive-fn-ids :int)
+                                        :constraint [:>= 0]}))
+                   (cons nil namespaces))
+        spellings (mapv #(str (or (:name %) "") "/" bare) (cons nil namespaces))]
+    (exec-ctx/invalidate-graph-cache! ctx (mapv :id rows))
+    (cr/register-type-aliases-from-db!
+      (types-api/cached-or-load-graph ctx) ::picker-roundtrip
+      (ns-path/path-map (sp/query-entities storage :ns {})))
+    (let [datalist (body-of :_partial-tnd-handler {})
+          compatible (body-of :_partial-cto-handler
+                              {"expected" "\"int\"" "primitives" "true"})]
+      (is (str/includes? compatible "value=\"int\""))
+      (doseq [spelling spellings]
+        (is (str/includes? datalist (str "value=\"" spelling "\"")))
+        (is (str/includes? compatible (str "value=\"" spelling "\""))))
+      (is (not (str/includes? datalist (str "value=\"" bare "\"")))))
+    (doseq [[spelling target] (map vector spellings rows)]
+      (let [request (fn [body]
+                      {:request-method :post :headers {"content-type" "application/json"}
+                       :body (json/generate-string body)})
+            list-result (setup/via-graph bootstrap :process-create-list-type
+                                         (request {:name (str "picker-list-" (random-uuid))
+                                                   :element-type spelling}))
+            record-result (setup/via-graph bootstrap :process-create-record-type
+                                           (request {:name (str "picker-record-" (random-uuid))
+                                                     :fields [{:name "item" :type spelling}]}))]
+        (is (true? (:ok list-result)) (pr-str list-result))
+        (is (true? (:ok record-result)) (pr-str record-result))
+        (when (and (:ok list-result) (:ok record-result))
+          (is (= (:id target)
+                 (:element-fn-id (sp/read-entity storage :fn
+                                                 (java.util.UUID/fromString (:id list-result))))))
+          (let [record-id (java.util.UUID/fromString (:id record-result))
+                junction (first (sp/query-entities storage :fn-slot {:fn-id record-id}))]
+            (is (= (:id target)
+                   (:type-fn-id (sp/read-entity storage :slot (:slot-id junction)))))))))))
 
 
 ;; ============================================================================

@@ -9,6 +9,7 @@
     [graphden.executor.compile.surface :as surface]
     [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]
+    [graphden.util.ns-path :as ns-path]
     [graphden.versioning.storage.core :as vs]
     [graphden.versioning.storage.resolution :as res]))
 
@@ -55,6 +56,8 @@
    an enum (the package-loader codec roundtrip is sometimes one,
    sometimes the other). Try both shapes; swallow the
    validation-error/type-mismatch from the side that doesn't fit.
+   Qualified `namespace/name` (including root `/name` and materialized
+   namespaces) pins the namespace and never falls back to another owner.
 
    `swallow-all?` — when true, swallow ANY ExceptionInfo (used by
    seeder paths that just want to try a name and skip on any
@@ -63,17 +66,27 @@
    don't get silently dropped."
   ([storage fn-name] (query-fn-by-name storage fn-name false))
   ([storage fn-name swallow-all?]
-   (letfn [(try-one
-             [v]
-             (try (first (sp/query-entities storage :fn {:name v}))
-                  (catch clojure.lang.ExceptionInfo e
-                    (when-not (or swallow-all?
-                                  (= :validation-error/type-mismatch
-                                     (:type (ex-data e))))
-                      (throw e))
-                    nil)))]
-     (or (try-one fn-name)
-         (try-one (keyword fn-name))))))
+   (try
+     (let [ref (keyword fn-name)
+           nsp (some-> ref namespace)
+           ns-id (when (seq nsp)
+                   (some (fn [[id path]] (when (= nsp path) id))
+                         (ns-path/path-map (sp/query-entities storage :ns {}))))]
+       (letfn [(try-one
+                 [v]
+                 (try (first (sp/query-entities storage :fn
+                                                (cond-> {:name v}
+                                                  (some? nsp) (assoc :namespace-id ns-id))))
+                      (catch clojure.lang.ExceptionInfo e
+                        (when-not (= :validation-error/type-mismatch (:type (ex-data e)))
+                          (throw e))
+                        nil)))]
+         (when (or (nil? nsp) (empty? nsp) ns-id)
+           (let [bare (if (some? nsp) (name ref) fn-name)]
+             (or (try-one bare) (try-one (keyword bare)))))))
+     (catch clojure.lang.ExceptionInfo e
+       (when-not swallow-all? (throw e))
+       nil))))
 
 
 (defn query-fn-id-by-name

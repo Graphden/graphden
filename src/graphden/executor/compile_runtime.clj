@@ -217,12 +217,13 @@
         graph)))
 
 
-(defn- qualified-type-name
+(defn qualified-type-name
+  "The identity-preserving alias for a type row. Root names use an empty
+   keyword namespace; materialized namespace paths remain valid in memory
+   and the JSONB/wire codec. Seeded root primitives keep their bare spelling."
   [ns-paths {:keys [namespace-id name]}]
-  (when-let [path (get ns-paths namespace-id)]
-    ;; Match the package authoring boundary: materialized @version
-    ;; namespaces keep their existing bare-name compatibility.
-    (when (and name (re-matches #"[A-Za-z0-9._-]+" path))
+  (when (and name (not (and (nil? namespace-id) (types/primitives (keyword name)))))
+    (when-let [path (if namespace-id (get ns-paths namespace-id) "")]
       (keyword path name))))
 
 
@@ -335,7 +336,7 @@
                      ;; storage cannot reconstruct. An untenanted user row is
                      ;; not a package row, even when its short name matches.
                      body (if (owned/owned-fn-id? (:id f))
-                            (or (types/package-alias-body (or qualified nm)) body)
+                            (or (types/package-alias-body (:id f)) body)
                             body)]
                  (when body
                    (map (fn [alias-name]

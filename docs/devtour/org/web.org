@@ -210,26 +210,26 @@ Chooses response encoding from ~Accept-Encoding~. The surrounding ~:process-resp
 :PROPERTIES:
 :CUSTOM_ID: web/compatible-type-names
 :FILE: src/graphden/crud/types_api.clj
-:LINE: 216
-:MINS: 1.2
+:LINE: 232
+:MINS: 1.4
 :END:
 
-Finds named types that may narrow the expected type, resolving aliases and checking [[file:glossary.org::#term/subtype][subtyping]] on the server. The picker receives one rendered set of options instead of issuing a separate compatibility request for each type name.
+Finds named types that may narrow the expected type, resolving aliases and checking [[file:glossary.org::#term/subtype][subtyping]] against each row's canonical namespace identity on the server. Unique selection names retain their bare spelling; collisions are namespace-qualified, including root and materialized namespaces. The picker receives one rendered set of options instead of issuing a separate compatibility request for each type name.
 
-- source :: [[file:../../../src/graphden/crud/types_api.clj::(defn compatible-type-names][src/graphden/crud/types_api.clj:216]]
+- source :: [[file:../../../src/graphden/crud/types_api.clj::(defn compatible-type-names][src/graphden/crud/types_api.clj:232]]
 - same file :: [[file:web.org::#web/api-rich-types][api-rich-types]], [[file:web.org::#web/candidate-fit][candidate-fit]]
 
 * 17. api-rich-types
 :PROPERTIES:
 :CUSTOM_ID: web/api-rich-types
 :FILE: src/graphden/crud/types_api.clj
-:LINE: 844
+:LINE: 862
 :MINS: 1.2
 :END:
 
 Shapes the [[file:glossary.org::#term/rich-types][rich-types registry]] into the compact ~/api/types~ response used by the editor. Fields unnecessary for the bulk listing are omitted; specialized interfaces fetch or render the details they need separately.
 
-- source :: [[file:../../../src/graphden/crud/types_api.clj::(defn api-rich-types][src/graphden/crud/types_api.clj:844]]
+- source :: [[file:../../../src/graphden/crud/types_api.clj::(defn api-rich-types][src/graphden/crud/types_api.clj:862]]
 - same file :: [[file:web.org::#web/compatible-type-names][compatible-type-names]], [[file:web.org::#web/candidate-fit][candidate-fit]]
 - referenced from :: [[file:types.org::#types/record-rich-types!][record-rich-types!]]
 
@@ -237,13 +237,13 @@ Shapes the [[file:glossary.org::#term/rich-types][rich-types registry]] into the
 :PROPERTIES:
 :CUSTOM_ID: web/candidate-fit
 :FILE: src/graphden/crud/types_api.clj
-:LINE: 595
+:LINE: 613
 :MINS: 2.2
 :END:
 
 Ranks already-admissible function candidates by how their parameters fit a callable [[file:glossary.org::#term/slot][slot]]. ~:exact~ uses the supplied parameter count, ~:captures~ needs additional [[file:glossary.org::#term/capture][captured input]], and ~:ignores~ consumes fewer parameters. Ranking changes display order, not whether the type checker admits a candidate.
 
-- source :: [[file:../../../src/graphden/crud/types_api.clj::(defn candidate-fit][src/graphden/crud/types_api.clj:595]]
+- source :: [[file:../../../src/graphden/crud/types_api.clj::(defn candidate-fit][src/graphden/crud/types_api.clj:613]]
 - same file :: [[file:web.org::#web/compatible-type-names][compatible-type-names]], [[file:web.org::#web/api-rich-types][api-rich-types]]
 
 * 19. sync-fn-defs-branch!

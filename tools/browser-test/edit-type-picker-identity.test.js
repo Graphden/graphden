@@ -52,11 +52,20 @@ const namespaceIds = [];
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002') + '/#' + probeName);
     await page.waitForFunction(() => graphReady() && !graph.animating);
     for (let i = 0; i < spellings.length; i++) {
-      assert(await waitFor(() => page.evaluate(() => {
-        if (document.querySelector('.arg-value-edit-popover select')) return true;
-        document.querySelector('.arg-type-chip')?.click();
-        return false;
-      }), 20000), 'native type picker opens');
+      let usedStructuredEdit = false;
+      assert(await waitFor(async () => {
+        const result = await page.evaluate(() => {
+          if (document.querySelector('.arg-value-edit-popover select')) return {ready: true};
+          const edit = [...document.querySelectorAll('.type-inline-header-edit')]
+            .find(button => button.offsetWidth && button.offsetHeight);
+          if (edit) { edit.click(); return {structured: true}; }
+          document.querySelector('.arg-type-chip')?.click();
+          return {};
+        });
+        usedStructuredEdit ||= !!result.structured;
+        return result.ready;
+      }, 20000), 'native type picker opens');
+      if (i > 0) assert(usedStructuredEdit, 'refinement uses native Change type action');
       const select = page.locator('.arg-value-edit-popover select.arg-value-edit-input');
       await page.waitForFunction(spelling => Array.from(document.querySelector(
         '.arg-value-edit-popover select')?.options || []).some(o => o.value === spelling),
@@ -65,13 +74,26 @@ const namespaceIds = [];
       await page.locator('.arg-value-edit-popover .arg-value-edit-btn:not(' +
         '.arg-value-edit-btn-secondary):not(.arg-value-edit-btn-danger)').click();
       await page.waitForFunction(() => !document.querySelector('.arg-value-edit-popover'));
+      let confirmedBinding;
       assert(await waitFor(async () => {
         const graph = await getEntities(page, probe.id);
-        return graph.bindings.some(b => b['fn-id'] === probe.id &&
+        confirmedBinding = graph.bindings.find(b => b['fn-id'] === probe.id &&
           b['type-override-fn-id'] === expectedIds[i]);
+        return !!confirmedBinding;
       }, 15000), 'saved option targets the exact authorized type UUID');
-      await page.waitForFunction(() => graphReady() && !graph.animating &&
-        !!document.querySelector('.arg-type-chip'));
+      // onSaved starts initGraph asynchronously. The old chip can remain
+      // clickable until its new layout/binding arrives; graphReady alone
+      // would immediately reopen that old closure and POST a second binding.
+      await page.waitForFunction(({owner, bindingId, typeId}) => {
+        const binding = lookups.bindingMap.get(bindingId);
+        const node = [...graph.nodes.values()].find(n =>
+          n.data.fnId === owner && n.data.bindingId === bindingId);
+        const overlay = node && [...document.querySelectorAll('.node-overlay')]
+          .find(el => el.dataset.nodeId === node.id);
+        return !graph.animating && binding?.['type-override-fn-id'] === typeId &&
+          !!overlay?.querySelector('.arg-type-chip');
+      }, {owner: probe.id, bindingId: confirmedBinding.id, typeId: expectedIds[i]},
+      {timeout: 20000});
     }
     console.log('PASS: canonical type picker identities and native writes');
   } catch (error) {

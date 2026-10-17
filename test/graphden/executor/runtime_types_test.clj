@@ -275,9 +275,9 @@
             (exec/create-context {:storage storage}))
           (is (= {:n :int} (get (types/aliases-snapshot) :unrelated))
               "non-cyclic alias registers")
-          (is (= {:to-b :rec-b} (get (types/aliases-snapshot) :rec-a))
+          (is (= {:to-b (keyword "" "rec-b")} (get (types/aliases-snapshot) :rec-a))
               "rec-a registers with forward reference to rec-b")
-          (is (= {:to-a :rec-a} (get (types/aliases-snapshot) :rec-b))
+          (is (= {:to-a (keyword "" "rec-a")} (get (types/aliases-snapshot) :rec-b))
               "rec-b registers with forward reference to rec-a")
           ;; resolve-alias must terminate on the cycle via its own
           ;; `seen` set — no stack-overflow even though the alias

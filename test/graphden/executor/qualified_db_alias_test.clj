@@ -73,7 +73,7 @@
 (deftest self-hosted-user-namesake-does-not-inherit-the-package-type-body
   ;; Unique namespace/name: the declared package-body cache is process-wide.
   (let [nm (keyword (str "qualified-alias-" (random-uuid)))
-        package-id (random-uuid)
+        package-id (records/fn-id "alias.fixture" nm)
         qualified (keyword "alias.fixture" (name nm))
         user-qualified (keyword "user.fixture" (name nm))]
     (sync/register-type-aliases!

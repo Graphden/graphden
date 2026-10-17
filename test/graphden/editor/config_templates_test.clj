@@ -149,7 +149,10 @@
   (let [interfaces (templates/interfaces)]
     (doseq [reference [:app.ui-canvas-inheritance/inheritance-view
                        :app.ui-canvas-inheritance/inheritance-initial
-                       :app.ui-canvas-metadata/metadata-view]
+                       :app.ui-canvas-metadata/metadata-view
+                       :app.ui-canvas-type-structure/type-structure-view
+                       :app.ui-canvas-type-structure/type-structure-initial
+                       :app.ui-canvas-bindings/bindings-view]
             :let [matches (filter #(= reference (keyword (:namespace %) (name (:name %)))) interfaces)]]
       (is (seq matches))
       (is (every? #(= #{:name :namespace} (set (keys %))) matches)))))

@@ -100,10 +100,26 @@
    :args {:keys [{:value :role} {:value :fn-id}] :vals [{:value :view} :_canvas-metadata-view-id]}}
   {:name :_canvas-metadata-entries :parent :list :return-type :_component-entries
    :args {:items [:_canvas-metadata-view-entry]}}
+  {:name :_canvas-type-structure-initial-id :parent :const :return-type :fn-ref
+   :args {:value {:ref :app.ui-canvas-type-structure/type-structure-initial :type :fn-ref}}}
+  {:name :_canvas-type-structure-initial-entry :parent :zipmap :return-type :_component-entry
+   :args {:keys [{:value :role} {:value :fn-id}] :vals [{:value :initial} :_canvas-type-structure-initial-id]}}
+  {:name :_canvas-type-structure-view-id :parent :const :return-type :fn-ref
+   :args {:value {:ref :app.ui-canvas-type-structure/type-structure-view :type :fn-ref}}}
+  {:name :_canvas-type-structure-view-entry :parent :zipmap :return-type :_component-entry
+   :args {:keys [{:value :role} {:value :fn-id}] :vals [{:value :view} :_canvas-type-structure-view-id]}}
+  {:name :_canvas-type-structure-entries :parent :list :return-type :_component-entries
+   :args {:items [:_canvas-type-structure-initial-entry :_canvas-type-structure-view-entry]}}
+  {:name :_canvas-bindings-view-id :parent :const :return-type :fn-ref
+   :args {:value {:ref :app.ui-canvas-bindings/bindings-view :type :fn-ref}}}
+  {:name :_canvas-bindings-view-entry :parent :zipmap :return-type :_component-entry
+   :args {:keys [{:value :role} {:value :fn-id}] :vals [{:value :view} :_canvas-bindings-view-id]}}
+  {:name :_canvas-bindings-entries :parent :list :return-type :_component-entries
+   :args {:items [:_canvas-bindings-view-entry]}}
   {:name :editor-defaults :parent :zipmap
    :description "Shared editor defaults. Personal ordinary graphs may reference these entries or override exposed constructor slots without copying their component bodies."
-   :args {:keys [:_account-menu-view-id :_fn-picker-view-id :_recents-view-id :_inspector-view-id :_explorer-view-id :_tutorial-catalog-view-id :_canvas-view-id :_canvas-values-view-id :_canvas-inheritance-view-id :_canvas-metadata-view-id]
-          :vals [:_account-menu-entries :_fn-picker-entries :_recents-entries :_inspector-entries :_explorer-entries :_tutorial-catalog-entries :_canvas-entries :_canvas-values-entries :_canvas-inheritance-entries :_canvas-metadata-entries]}}
+   :args {:keys [:_account-menu-view-id :_fn-picker-view-id :_recents-view-id :_inspector-view-id :_explorer-view-id :_tutorial-catalog-view-id :_canvas-view-id :_canvas-values-view-id :_canvas-inheritance-view-id :_canvas-metadata-view-id :_canvas-type-structure-view-id :_canvas-bindings-view-id]
+          :vals [:_account-menu-entries :_fn-picker-entries :_recents-entries :_inspector-entries :_explorer-entries :_tutorial-catalog-entries :_canvas-entries :_canvas-values-entries :_canvas-inheritance-entries :_canvas-metadata-entries :_canvas-type-structure-entries :_canvas-bindings-entries]}}
   {:name :_descriptor-component-id :parent :get
    :args {:coll {:as :item :type :_component-descriptor} :key {:value :component-id} :default {:value nil}}}
   {:name :_descriptor-entries :parent :get

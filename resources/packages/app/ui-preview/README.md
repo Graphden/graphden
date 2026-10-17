@@ -529,3 +529,40 @@ The optional graph label sits in its own clipped flow wrapper. Empty labels,
 hidden styles or oversized content cannot remove that native affordance, shrink
 its target to zero, or push sibling controls outside the card. Native titles,
 accessible names and handlers remain attached to the exact retained controls.
+
+### Expanded type and binding presentation
+
+`app.ui-canvas-type-structure/type-structure-view` has pure `initial` and `view`
+roles. Native code snapshots authorized type grammar into immutable display
+facts, traverses children in postorder, and stages one complete generation of
+`{human, compact, constraint, short}` receipts. Parent inputs contain only child
+display receipts. Canonical type references, picker values, IDs, cycle paths and
+write values remain native. A malformed personal receipt discards every staged
+child and reruns the original facts with the builtin; no partial personal text
+is cached or passed into the retry.
+
+Each run retains the existing 150,000-operation ceiling. A personal tree attempt
+also shares an opaque host-only 8,388,608-operation counter, an eight-Mi
+UTF-16-code-unit cumulative input/output accounting limit, and a sampled 50 ms
+monotonic deadline. The deadline is checked before/after codec/run boundaries
+and every 256 shared ticks. It is a work refusal, not a hard UI latency promise:
+a single operation, codec work and the compatibility builtin retry are not
+interruptible. A fresh builtin retry has no personal batch deadline. No new
+user type-depth limit is imposed.
+
+The view renders structure labels, headings, descriptions, constraints and
+resolution decorations. The separate view-only
+`app.ui-canvas-bindings/bindings-view` renders argument/source labels,
+provenance explanations and seal presentation. Inputs contain finite authorized
+metadata, never registries, raw binding values or callbacks. Literal string-key
+lookup tables are ordinary `zipmap` compositions so stored JVM execution and
+browser plans retain identical key semantics.
+
+Runtime changes update passive children while native controls, focus, drafts,
+ARIA, selected values and handlers retain their owners. Empty or hidden labels
+cannot remove native expansion/edit marks or checkbox inputs. Viewport-bound
+native popover flow separates optional scrolling content from action rows;
+pan/zoom only reanchors cached hosts. Collapsing, Escape, host reaping and auth
+changes dispose nested renderers/styles and reject late replies. Seal editability,
+checked/disabled state, writes and the nonempty binder-blocking reason stay native.
+Constraint display messages likewise never decide whether a literal is valid.

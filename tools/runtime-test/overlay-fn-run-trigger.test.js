@@ -105,8 +105,14 @@ console.log('overlay fn Run trigger: MI rendering and selected-root dispatch pas
 {
   const {createDocument} = require('./mini-dom');
   let projected = null;
+  let refresh = null;
+  let updated = null;
   const context = vm.createContext({document: createDocument(),
-    window: {gdCanvasValuesGraph: {mount(owner, _host, surface, facts) { projected = {owner, surface, facts}; }}},
+    window: {gdCanvasValuesGraph: {mount(owner, _host, surface, facts) {
+      projected = {owner, surface, facts}; return {update(facts) { updated = facts; }};
+    }}, gdCanvasTypeStructureGraph: {bind(owner, callback) {
+      assert(owner); refresh = callback;
+    }}},
     DRAG_HANDLE_HEIGHT: 6, lookups: {fnMap: new Map()}, expansionState: new Set()});
   vm.runInContext(fs.readFileSync(path.join(__dirname,
     '../../resources/packages/app/editor/editor-overlay-arg.js'), 'utf8'), context);
@@ -124,6 +130,9 @@ console.log('overlay fn Run trigger: MI rendering and selected-root dispatch pas
   assert.equal(projected.facts.label, 'port');
   assert.equal(projected.facts.secondary, '1…65535', 'semantic helper projects the exact range label');
   assert.equal(projected.facts['secondary-kind'], 'refinement');
+  refresh();
+  assert.equal(updated.label, 'port', 'formatter refresh updates the existing type body');
+  assert.equal(updated.secondary, '1…65535', 'retained body keeps the native refinement projection');
   // Actual graph rendering and expand target identity are covered by the
   // standalone canvas-values browser fixture, not imitated by this native test.
   const data = {type: 'arg', label: '8080', argType: 'port'};

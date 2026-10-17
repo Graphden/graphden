@@ -16,6 +16,7 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.test-infra.account-menu-cases :as account-menu]
     [graphden.test-infra.browser-canvas-card-cases :as canvas-card]
+    [graphden.test-infra.browser-canvas-structure-cases :as canvas-structure]
     [graphden.test-infra.browser-picker-cases :as picker]
     [graphden.types.core :as types]
     [graphden.types.core.shapes :as shapes]
@@ -39,6 +40,35 @@
   (try (f) nil (catch clojure.lang.ExceptionInfo e (ex-data e))))
 
 
+(defn- script-roundtrip
+  [artifact script]
+  (let [payload (json/generate-string artifact {:escape-non-ascii true})]
+    (sh/sh "node" "-e"
+           (str "const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict'),z=require('node:zlib');"
+                "const r=JSON.parse(fs.readFileSync(0,'utf8')),c=vm.createContext({window:{}});vm.runInContext(r.script,c);"
+                "const actual=c.window.GraphdenBuiltinPlans,expected=JSON.parse(r.json);"
+                "assert.deepStrictEqual(JSON.parse(JSON.stringify(actual)),expected);"
+                "const op=vm.runInContext('Object.prototype',c),ap=vm.runInContext('Array.prototype',c);"
+                "function check(a,b){if(b===null||typeof b!=='object')return;"
+                "assert.equal(Object.getPrototypeOf(a),Array.isArray(b)?ap:op);"
+                "for(const k of Object.keys(b)){assert(Object.hasOwn(a,k));check(a[k],b[k]);}}check(actual,expected);"
+                "if(actual.dupes)assert.notEqual(actual.dupes[0],actual.dupes[1]);"
+                "console.log(JSON.stringify({bytes:Buffer.byteLength(r.script),gzip:z.gzipSync(r.script).length,"
+                "jsonBytes:Buffer.byteLength(r.json),jsonGzip:z.gzipSync(r.json).length}));")
+           :in (json/generate-string {:script script :json payload} {:escape-non-ascii true}))))
+
+
+(deftest builtin-script-interns-only-string-values-with-json-semantics
+  (let [text (str (apply str (repeat 40 "long")) "\"\\\n\u2028\u2029😀é" (char 0xd800))
+        artifact {"__proto__" {"constructor" "own"} "prototype" "data"
+                  "values" [text text "" false nil 9007199254740991]
+                  "dupes" [{"__proto__" [1 2]} {"__proto__" [1 2]}]}
+        script (tool 'serialize-script artifact)
+        result (script-roundtrip artifact script)]
+    (is (= script (tool 'serialize-script artifact)))
+    (is (= 0 (:exit result)) (:err result))))
+
+
 (deftest source-fingerprint-preserves-edn-value-identity
   (let [fingerprint #(tool 'source-fingerprint [{:args {:value {:value %}}}] {})]
     (is (not= (fingerprint {:phase 1 ":phase" 2})
@@ -51,11 +81,46 @@
            (fingerprint (array-map :b 2 :a 1))))))
 
 
+(deftest authored-builtin-source-keeps-nested-local-type-twins
+  (let [primitives (filter #(= ["core.collections" :get] [(:namespace %) (:name %)])
+                           (tool 'source-definitions))
+        module (fn [path field type]
+                 [{:namespace path :name :_leaf :type {field type}}
+                  {:namespace path :name :_inputs :type {:leaf :_leaf}}
+                  {:namespace path :name :_leaf-value :parent :get
+                   :args {:coll {:as :inputs :type :_inputs}
+                          :key {:value :leaf} :default {:value nil}}}
+                  {:namespace path :name :read-value :parent :get
+                   :args {:coll :_leaf-value :key {:value field} :default {:value nil}}}])
+        left (module "test.ui-left" :text :text)
+        right (module "test.ui-right" :number :int)
+        roots {:left {:initial (ids/fn-id "test.ui-left" :read-value)}
+               :right {:initial (ids/fn-id "test.ui-right" :read-value)}}
+        entries-var (ns-resolve 'tools.ui-preview.builtin-plans 'entries)
+        source-var (ns-resolve 'tools.ui-preview.builtin-plans 'source-definitions)]
+    (doseq [modules [[left right] [right left]]]
+      (let [definitions (vec (concat primitives (mapcat identity modules)))
+            artifact (with-redefs-fn {entries-var roots source-var (constantly definitions)}
+                       #(tool 'generate))]
+        (doseq [[kind input expected] [[:left {:leaf {:text "left"}} "left"]
+                                       [:right {:leaf {:number 73}} 73]]]
+          (let [request {:plan (get-in artifact [:plans kind])
+                         :cases [{:entry "initial" :inputs {"inputs" (plan/encode-value input)}}]}
+                {:keys [exit out err]} (sh/sh "node" "tools/runtime-test/browser-plan-runner.js"
+                                              :in (json/generate-string request))]
+            (is (zero? exit) err)
+            (when (zero? exit)
+              (let [result (first (json/parse-string-strict out true))]
+                (is (nil? (:error result)) (:error result))
+                (is (= expected (some-> (:value result) plan/decode-value)))))))))))
+
+
 (def ^:private plan-components
   {:accountMenu :account-menu :fnPicker :fn-picker :recents :recents
    :inspector :inspector :explorer :explorer :tutorialCatalog :tutorial-catalog
    :canvas :canvas :canvasValues :canvas-values
-   :canvasInheritance :canvas-inheritance :canvasMetadata :canvas-metadata})
+   :canvasInheritance :canvas-inheritance :canvasMetadata :canvas-metadata
+   :canvasTypeStructure :canvas-type-structure :canvasBindings :canvas-bindings})
 
 
 (deftest shipped-builtin-plans-are-reproducible-and-isolated
@@ -72,8 +137,13 @@
             payload (tool 'serialize artifact)]
         (let [baked (slurp "resources/packages/app/ui-preview/builtin-plans.json")
               script (slurp "resources/packages/app/ui-preview/builtin-plans.js")
-              expected-script (str "// Generated by tools/ui_preview/generate_builtin_plans.clj.\n"
-                                   "window.GraphdenBuiltinPlans=" payload ";\n")]
+              expected-script (tool 'serialize-script artifact)]
+          (let [result (script-roundtrip artifact expected-script)]
+            (is (= 0 (:exit result)) (:err result))
+            (when (zero? (:exit result))
+              (let [metrics (json/parse-string (:out result) true)]
+                (is (< (:bytes metrics) 1048576) "Generated script stays below the existing lint ceiling")
+                (println "Builtin script literal metrics" metrics))))
           ;; Keep exact byte equality; report hashes instead of dumping the
           ;; complete generated graph and JavaScript into a failed CI log.
           (is (true? (= baked payload))
@@ -89,15 +159,15 @@
         (is (= (mapv #(assoc % :namespace "__GRAPHDEN_THEME_NAMESPACE__")
                      (:fns (edn/read-string (slurp "resources/packages/app/ui-theme-template/fns.edn"))))
                (:fns (edn/read-string (get-in artifact [:themeTemplate :edn])))))
-        (is (= #{:accountMenu :fnPicker :recents :inspector :explorer :tutorialCatalog :canvas :canvasValues :canvasInheritance :canvasMetadata}
+        (is (= #{:accountMenu :fnPicker :recents :inspector :explorer :tutorialCatalog :canvas :canvasValues :canvasInheritance :canvasMetadata :canvasTypeStructure :canvasBindings}
                (set (keys (:plans artifact)))))
         (is (= (set (vals plan-components)) (set (keys shipped/component-contracts))))
         (is (= (set (keys plan-components)) (set (keys (:plans artifact)))))
         (doseq [[kind compiled] (:plans artifact)]
           (is (= 1 (:format compiled) (:primitiveAbi compiled)))
           (is (= (case kind
-                   (:tutorialCatalog :canvas :canvasValues :canvasMetadata) #{"view"}
-                   :canvasInheritance #{"initial" "view"}
+                   (:tutorialCatalog :canvas :canvasValues :canvasMetadata :canvasBindings) #{"view"}
+                   (:canvasInheritance :canvasTypeStructure) #{"initial" "view"}
                    #{"initial" "update" "view"})
                  (set (keys (:entries compiled)))))))
       (is (= {:by-id {} :by-name {}} @rich))
@@ -272,6 +342,12 @@
                                        (get-in artifact [:plans :canvasInheritance]) [{:label "same, authorized name"}])
           (assert-stored-browser-views ctx (ids/fn-id "app.ui-canvas-metadata" :metadata-view)
                                        (get-in artifact [:plans :canvasMetadata]) canvas-card/metadata-cases)
+          (assert-stored-browser-views ctx (ids/fn-id "app.ui-canvas-type-structure" :type-structure-initial)
+                                       (get-in artifact [:plans :canvasTypeStructure]) canvas-structure/initial-cases "initial")
+          (assert-stored-browser-views ctx (ids/fn-id "app.ui-canvas-type-structure" :type-structure-view)
+                                       (get-in artifact [:plans :canvasTypeStructure]) canvas-structure/type-view-cases)
+          (assert-stored-browser-views ctx (ids/fn-id "app.ui-canvas-bindings" :bindings-view)
+                                       (get-in artifact [:plans :canvasBindings]) canvas-structure/binding-cases)
           (is (= {:tone "body" :bold false}
                  (exec/execute ctx (ids/fn-id "app.ui-canvas-inheritance" :inheritance-initial)
                                {:inputs (last canvas-card/policy-cases)}))))

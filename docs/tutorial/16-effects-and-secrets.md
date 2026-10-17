@@ -13,7 +13,7 @@ on :secret`.
 ## The ten effect categories
 
 ```text
-:db        Reads or writes graphden's storage
+:db        Reads or writes a database
 :network   Outbound HTTP / TCP
 :io        Disk / filesystem
 :env       Reads OS environment variables
@@ -24,6 +24,9 @@ on :secret`.
 :raw-sql   Arbitrary SQL bypassing org-scoped storage (cloud-blocked)
 :cross-org Runs a fn in another org's context (platform-only)
 ```
+
+External `web.sql` operations declare both `:db` and `:network`.
+Raw SQL against Graphden's own storage additionally requires `:raw-sql`.
 
 `:cross-org` is a **platform-only** category: it's declarable (so the
 checker admits and propagates it), but every tenant `:allowed-effects`

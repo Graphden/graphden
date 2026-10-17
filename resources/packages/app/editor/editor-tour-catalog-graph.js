@@ -54,7 +54,7 @@
         throw new Error('Invalid catalogue section');
       }
       const items = list(field(section, 'rows'));
-      if (!items || !items.length || items.length > allowed.length) throw new Error('Invalid catalogue rows');
+      if (!items?.length || items.length > allowed.length) throw new Error('Invalid catalogue rows');
       return {chapter: field(section, 'chapter'), rows: items.map(row => {
         if (!record(row, ['id', 'tree', 'done', 'fresh', 'stale', 'locked', 'text-only'])) {
           throw new Error('Invalid catalogue row');

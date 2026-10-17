@@ -30,6 +30,7 @@ const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve()
 function boot(files) {
   const doc = createDocument();
   const destroyed = [];
+  const timers = [];
   const ctx = vm.createContext({
     console, Promise,
     document: doc,
@@ -39,7 +40,7 @@ function boot(files) {
     returnFocusTo() {},
     focusIntoDialog() {},
     pointerEventInTour: () => false,
-    setTimeout: () => 0,
+    setTimeout: fn => { timers.push(fn); return timers.length; },
     innerWidth: 1200,
   });
   ctx.window = ctx;
@@ -53,7 +54,7 @@ function boot(files) {
   for (const f of files) {
     vm.runInContext(fs.readFileSync(path.join(ROOT, ...f), 'utf8'), ctx, { filename: f[f.length - 1] });
   }
-  return { ctx, doc, destroyed };
+  return { ctx, doc, destroyed, timers };
 }
 
 (async () => {
@@ -93,6 +94,46 @@ function boot(files) {
     t.ctx.closeInlineEdit();
     assert(t.destroyed.includes(pop), 'destroyWithin(popover) before removal');
     assert(!pop.isConnected, 'popover removed');
+  }
+
+  console.log(' retirement cleans passive owners once; late saves/timers cannot close or focus the next editor');
+  {
+    const t = boot(EDIT);
+    const anchor = t.doc.createElement('button');
+    anchor.getBoundingClientRect = () => ({bottom: 10, left: 10});
+    let complete;
+    let closed = 0;
+    let saved = 0;
+    let lateFocus = 0;
+    let first;
+    t.ctx.openInlineEditPopover({anchorEl: anchor,
+      makeControl(root) {
+        first = root;
+        const input = t.doc.createElement('input');
+        input.focus = () => { lateFocus++; };
+        return root.appendChild(input);
+      },
+      doSave: () => new Promise(resolve => { complete = resolve; }),
+      onSaved: () => { saved++; },
+      onClosed() {
+        assert(first.isConnected, 'caller cleanup runs before DOM removal');
+        closed++;
+      },
+    });
+    first.querySelectorAll('.arg-value-edit-btn')[1].click();
+    t.ctx.closeInlineEdit();
+    t.ctx.closeInlineEdit();
+    for (const fn of t.timers.splice(0)) fn();
+    assert(closed === 1 && lateFocus === 0, 'one cleanup; no focus from retired timer');
+    t.ctx.openInlineEditPopover({anchorEl: anchor,
+      makeControl: root => root.appendChild(t.doc.createElement('input')),
+      doSave: async () => true,
+    });
+    const next = t.doc.querySelector('.arg-value-edit-popover');
+    complete(true);
+    await flush();
+    assert(next.isConnected, 'old save completion does not close current editor');
+    assert(saved === 1, 'successful server mutation still invokes existing onSaved contract');
   }
 
   console.log(' raw toggle back to the form destroys the raw textarea\'s view');

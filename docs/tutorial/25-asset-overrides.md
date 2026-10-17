@@ -12,7 +12,7 @@ and execute permissions and the current quota on the server.
 
 Open **Settings → Appearance → UI graphs**. Normally use **Personalize account
 menu**, **Personalize function picker**, **Personalize recent functions**,
-**Personalize Inspector**, **Personalize Explorer toolbar**, or **Personalize tutorial catalogue**. The canvas choices also cover names, values and types, inheritance presentation, and function metadata. They create small
+**Personalize Inspector**, **Personalize Explorer toolbar**, or **Personalize tutorial catalogue**. The canvas choices also cover names, values and types, inheritance presentation, function metadata, expanded type presentation, and binding presentation. They create small
 ordinary children inheriting the selected role definitions and a profile `editor`
 graph merging their entries with shared defaults and your previous configuration.
 Shared dependency bodies are retained by reference, not copied. Existing own

@@ -46,11 +46,15 @@ const source = process.env.GRAPHDEN_CANVAS_SOURCE_ROOT || path.join(__dirname, '
       fixture.levels = Array.from({length: 4}, (_, position) => ({position, depth: position,
         mi: position === 1, clickable: position === 1, 'duplicate-next': false}));
     });
-    for (const file of ['editor-passive-canvas.js', 'editor-canvas-values-graph.js',
-      'editor-canvas-inheritance-graph.js', 'editor-canvas-metadata-graph.js', 'editor-overlay-strips.js', 'editor-overlay-fn.js']) {
+    for (const file of ['editor-passive-canvas.js', 'editor-canvas-values-graph.js', 'editor-canvas-type-structure-graph.js',
+      'editor-canvas-inheritance-graph.js', 'editor-canvas-metadata-graph.js', 'editor-type-format.js', 'editor-overlay-strips.js', 'editor-overlay-fn.js']) {
       await page.addScriptTag({path: path.join(source, 'resources/packages/app/editor', file)});
     }
     await page.evaluate(() => {
+      // Native semantic hints remain fixture facts; human display formatting
+      // uses the actual new graph so its retained metadata subscriber is tested.
+      window.formatTypeHint = () => ':positive-int';
+      window.refinementConstraintText = () => '> 0';
       // Use the actual metadata factories, with a fixture-owned provenance
       // callback so its native sibling button can be checked independently.
       window.appendRuleProvenanceButton = strip => {
@@ -111,14 +115,19 @@ const source = process.env.GRAPHDEN_CANVAS_SOURCE_ROOT || path.join(__dirname, '
       const meta = fixture.replace(fixture.custom('canvasMetadata'), 'gd-canvas-metadata-effect gd-canvas-metadata-effect-',
         'gd-canvas-metadata-personal gd-canvas-metadata-effect gd-canvas-metadata-effect-');
       fixture.personalMetadata = GraphdenBrowser.createRuntime(meta, {operationLimit: 150000});
-      fixture.selected = {'canvas-inheritance': fixture.personalInheritance, 'canvas-metadata': fixture.personalMetadata};
+      const type = fixture.replace(fixture.custom('canvasTypeStructure'), 'integer', 'personal integer');
+      fixture.personalType = GraphdenBrowser.createRuntime(type, {operationLimit: 150000});
+      fixture.selected = {'canvas-inheritance': fixture.personalInheritance, 'canvas-metadata': fixture.personalMetadata,
+        'canvas-type-structure': fixture.personalType};
     });
-    await page.evaluate(async () => { await Promise.all([gdCanvasInheritanceGraph.reload(), gdCanvasMetadataGraph.reload()]); });
+    await page.evaluate(async () => { await Promise.all([gdCanvasInheritanceGraph.reload(), gdCanvasMetadataGraph.reload(), gdCanvasTypeStructureGraph.reload()]); });
     await page.waitForFunction(() => fixture.labelHost.querySelector('.gd-canvas-inheritance-personal')
       && fixture.effect.querySelector('.gd-canvas-metadata-personal'));
     await page.evaluate(() => {
       fixture.check(fixture.groups[2].group !== fixture.groups[3].group, 'personal ordinary graph changes passive group membership');
       fixture.check(fixture.paintLine.style.background === 'var(--card-row-highlight)', 'personal finite paint reaches exact native owner');
+      fixture.check([...fixture.returns.querySelectorAll('[title]')].some(el => el.title.includes('personal integer')),
+        'formatter runtime updates retained metadata constraint title');
       fixture.check(document.activeElement === fixture.lambda && fixture.effect === fixture.effectIdentity
         && fixture.provenance === fixture.provenanceIdentity, 'runtime swaps retain exact focused native controls');
       fixture.lambda.click(); fixture.effect.click(); fixture.returns.click();

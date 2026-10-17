@@ -129,12 +129,14 @@ function appendReturnTypeStrip(c) {
     // body cannot style its marker or push the sibling controls outside.
     window.gdAppendMetadataControlMark(strip, '→ ');
     if (constraintText) strip.classList.add('return-type-strip-refine');
-    window.gdMountMetadataBody(overlay, strip, 'return', {
+    const returnFacts = () => ({
       'declared-return': rt || '', 'computed-return': displayRich || '',
       constraint: constraintText || '',
       'constraint-title': refineStruct && typeof formatTypeHumanReadable === 'function'
         ? formatTypeHumanReadable(refineStruct) : '',
-    }, 'return-type-strip-text');
+    });
+    const returnBody = window.gdMountMetadataBody(overlay, strip, 'return', returnFacts(), 'return-type-strip-text');
+    window.gdCanvasTypeStructureGraph.bind(overlay, () => returnBody.update(returnFacts()));
     // Strip title — three cases:
     //   - declared (`rt` is set): "Return type: <rt>" plus an "(computed: …)"
     //     suffix when the rich form is more specific.

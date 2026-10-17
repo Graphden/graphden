@@ -11,7 +11,52 @@
     [graphden.executor.test-setup :as setup]
     [graphden.packages.records :as records]
     [graphden.storage.protocol.core :as sp]
-    [graphden.tenancy.context :as tc]))
+    [graphden.tenancy.context :as tc]
+    [graphden.types.check.provenance :as provenance]))
+
+
+(deftest absent-explicit-delete-preserves-same-named-owner
+  (doseq [ns-path ["canvas.metadata" nil "package@v1"]
+          org [tc/public-org "tenant-a"]]
+    (binding [reg/*rich-types-override* (atom {})
+              reg/*per-org-rich-override* (atom {})]
+      (tc/with-org org
+                   (let [id (records/fn-id ns-path :_effect)
+                         type-id (records/fn-id "copied.type" :_effect)
+                         definition {:name :_effect :namespace ns-path :args {} :return-type :text}]
+                     ;; A type-only row has no rich function entry. Its UUID must not
+                     ;; select the surviving function through the shared bare spelling.
+                     (reg/record-rich-types-raw! id :_effect
+                                                 (provenance/stamp {:namespace ns-path :return :text :args {}}
+                                                                   definition))
+                     (let [before @reg/*rich-types-override*
+                           org-before @reg/*per-org-rich-override*]
+                       (dotimes [_ 2]
+                         (is (nil? (reg/unregister-rich-type! :_effect type-id)))
+                         (is (identical? before @reg/*rich-types-override*))
+                         (is (= org-before @reg/*per-org-rich-override*))
+                         (is (= id (get-in before [:by-name (keyword (or ns-path "") "_effect")])))
+                         (is (provenance/matches? (reg/rich-type-of-id id) definition)))))))))
+
+
+(deftest explicit-delete-removes-only-that-owner-in-either-registration-order
+  (doseq [reverse? [false true]]
+    (binding [reg/*rich-types-override* (atom {})
+              reg/*per-org-rich-override* (atom {})]
+      (tc/with-org "tenant-a"
+                   (let [a (records/fn-id "a" :_effect)
+                         b (records/fn-id "b" :_effect)
+                         rows [[a "a"] [b "b"]]]
+                     (doseq [[id ns-path] (if reverse? (reverse rows) rows)]
+                       (reg/record-rich-types-raw! id :_effect {:namespace ns-path :return :text :args {}}))
+                     (reg/unregister-rich-type! :_effect a)
+                     (is (nil? (reg/rich-type-of-id a)))
+                     (is (= b (:fn-id (reg/rich-type-of :b/_effect))))
+                     (is (nil? (reg/rich-type-of :a/_effect)))
+                     (is (= b (get-in @reg/*per-org-rich-override* ["tenant-a" :by-name :b/_effect])))
+                     (reg/unregister-rich-type! :b/_effect)
+                     (is (nil? (reg/rich-type-of-id b)))
+                     (is (empty? (:by-name @reg/*rich-types-override*))))))))
 
 
 (deftest rich-type-of-isolates-same-named-fns-per-org

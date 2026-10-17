@@ -434,14 +434,13 @@ body.sidebar-collapsed #sidebar-resizer { display: none; }
   background: var(--bg); color: var(--muted-fg);
   font-size: 0.6875rem; cursor: help;
 }
-.seal-popover { display: flex; flex-direction: column; gap: 6px; font-size: 0.75rem; }
-.seal-popover-head { font-weight: 600; color: var(--fg); }
-.seal-popover-inherited { color: var(--muted-fg); font-style: italic; }
-.seal-popover-row { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; align-items: baseline; cursor: pointer; }
+.seal-popover { display: flex; flex-direction: column; gap: 6px; font-size: 0.75rem; min-height: 0; overflow: auto; }
+.arg-value-edit-popover:has(> .seal-popover) > .arg-value-edit-buttons { flex-shrink: 0; }
+.seal-popover-row { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 8px; align-items: baseline; cursor: pointer; min-height: var(--icon-size); }
 .seal-popover-row input { grid-row: 1 / span 2; align-self: start; margin-top: 3px; }
 .seal-popover-row input:disabled + .seal-popover-label { color: var(--muted-fg); }
-.seal-popover-label { color: var(--fg); }
-.seal-popover-hint { grid-column: 2; color: var(--muted-fg); font-size: 0.6875rem; }
+.seal-popover-label { min-width: 0; max-width: 100%; }
+.seal-popover-hint { grid-column: 2; min-width: 0; max-width: 100%; }
 
 /* Hovering an edge lights the whole visual bundle it belongs to. Markers use
    `fill: context-stroke`, so the arrowheads follow without a rule of their own. */
@@ -2836,11 +2835,6 @@ textarea.value-form-hiccup {
   margin-bottom: 4px;
   border-bottom: 1px solid var(--light-border);
 }
-.type-inline-header-name {
-  font-weight: 600;
-  font-size: 0.625rem;
-  color: var(--card-fg);
-}
 /* Cycle indicator — a chip rendered in place of an expandable one
    when the type would recurse back to an ancestor in the open chain
    (e.g. `:tree = [:list :tree]`). Read-only; clicking does nothing,
@@ -2857,15 +2851,6 @@ textarea.value-form-hiccup {
    Function. Sits next to the name in the inline-expand header so an
    anonymous structural type isn't mistaken for the other kinds with
    similar-looking expanded bodies. */
-.type-inline-header-kind {
-  font-size: 0.5625rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted-fg);
-  padding: 0 4px;
-  border: 1px solid var(--light-border);
-  border-radius: 2px;
-}
 .type-inline-header-edit {
   padding: 1px 6px;
   font-size: 0.5625rem;
@@ -2912,9 +2897,6 @@ textarea.value-form-hiccup {
   margin: 0 0 4px;
   padding-bottom: 4px;
   border-bottom: 1px solid var(--light-border);
-  font-size: 0.625rem;
-  color: var(--muted-fg);
-  font-style: italic;
 }
 /* Promote-anonymous button — appears in the inline-expand panel
    when the type is anonymous (no name) and the user has edit
@@ -3035,7 +3017,7 @@ textarea.value-form-hiccup {
   font-size: 0.5625rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--light-fg);
+  color: var(--muted-fg);
   margin-bottom: 2px;
 }
 .type-inline-usages-list {
@@ -3080,7 +3062,7 @@ textarea.value-form-hiccup {
   font-family: 'SF Mono', Monaco, monospace;
   font-size: 0.625rem;
   line-height: 1.2;
-  max-width: 260px;
+  max-width: min(260px, var(--gd-passive-viewport-width, 100vw));
   overflow-wrap: anywhere;
   pointer-events: auto;
 }
@@ -3118,8 +3100,6 @@ textarea.value-form-hiccup {
 .type-inline-label {
   display: inline-block;
   margin-right: 4px;
-  font-size: 0.5625rem;
-  color: var(--muted-fg);
 }
 .type-inline-label-renameable {
   cursor: pointer;
@@ -3128,8 +3108,6 @@ textarea.value-form-hiccup {
 }
 .type-inline-label-renameable:hover { color: var(--fg); }
 .type-inline-chip {
-  font-size: 0.5625rem;
-  line-height: 0.75rem;
   margin-left: 0;
 }
 .type-inline-chip-expandable {
@@ -3141,11 +3119,6 @@ textarea.value-form-hiccup {
   margin-left: 8px;
   padding-left: 6px;
   border-left: 1px solid var(--light-border);
-}
-.type-inline-constraint-text {
-  font-size: 0.5625rem;
-  color: var(--muted-fg);
-  font-family: inherit;
 }
 
 /* Stacked type-narrowing block — sits below the main edge-label row
@@ -3912,6 +3885,8 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   min-width: 0;
 }
 .type-explainer-tighten-chk {
+  min-height: var(--icon-size);
+  min-width: var(--icon-size);
   display: inline-flex; align-items: center; gap: 4px;
   font-size: 0.6875rem; cursor: pointer;
 }
@@ -8352,6 +8327,66 @@ button.lambda-params-chip:focus-visible { outline: 1px solid var(--accent); }
   line-height: 1;
   white-space: pre;
   pointer-events: none;
+}
+/* Native control geometry and visible marks outlive optional graph bodies.
+   Graph-scoped selectors cannot reach these frames, inputs or siblings. */
+.gd-passive-popover {
+  box-sizing: border-box;
+  flex-direction: column;
+  max-height: var(--gd-passive-viewport-height, calc(100dvh - 16px));
+}
+.gd-passive-popover-flow {
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+}
+.gd-passive-popover > :not(.gd-passive-popover-flow) { flex-shrink: 0; }
+.type-inline-header > span {
+  min-width: 0;
+  max-height: calc(var(--gd-passive-viewport-height, 100dvh) / 4);
+  overflow: hidden;
+}
+.type-inline-header > button { flex-shrink: 0; }
+.canvas-type-structure-body-frame,
+.canvas-bindings-body-frame {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+.canvas-type-structure-control,
+.canvas-bindings-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1875rem;
+  min-width: var(--icon-size);
+  min-height: var(--icon-size);
+  max-width: 100%;
+}
+.canvas-type-structure-control-mark,
+.canvas-bindings-control-mark {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--icon-font-size);
+  font-style: normal;
+  font-weight: normal;
+  color: var(--muted-fg);
+  line-height: 1;
+  white-space: pre;
+  pointer-events: none;
+}
+.canvas-type-structure-control:focus-visible,
+.canvas-bindings-control:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.seal-popover-row:focus-within,
+.type-explainer-tighten-chk:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 .return-type-strip-editable,
 button.lambda-params-chip {

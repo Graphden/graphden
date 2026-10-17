@@ -262,6 +262,12 @@
       return value === null ? false : checkedString(value).startsWith(checkedString(arg('prefix')));
     },
     'str-lower': (arg) => checkedString(arg('string')).toLowerCase(),
+    'str-clip': (arg) => {
+      const string = checkedString(arg('string'));
+      const limit = integer(arg('limit'));
+      if (limit < 0) throw new Error('Browser str-clip requires a non-negative limit');
+      return string.slice(0, limit);
+    },
     // java.lang.String.trim, used by clojure.string/trim, removes code units
     // <= U+0020. JavaScript trim also removes NBSP and would change semantics.
     'str-trim': (arg) => {
@@ -303,6 +309,36 @@
       return truth(value) ? value : arg('default');
     },
     add: (arg) => { let total = 0; for (const value of sequence(arg('nums'))) total = integer(total + integer(value)); return total; },
+    lte: (arg, tick) => {
+      const source = sequence(arg('nums'))[Symbol.iterator]();
+      let consumed = 0;
+      const next = () => {
+        tick();
+        const item = source.next();
+        if (!item.done) {
+          if (++consumed > 50000) throw new Error('Browser graph sequence limit exceeded');
+          integer(item.value);
+        }
+        return item;
+      };
+      const first = next();
+      if (first.done) throw new Error('Browser lte requires at least one number');
+      const second = next();
+      if (second.done) return true;
+      const third = next();
+      if (third.done) return first.value <= second.value;
+      // Clojure apply's variadic dispatch observes this lookahead even when
+      // the first pair is descending. Later tail reads follow <= short-circuiting.
+      let lookahead = next();
+      let left = first.value; let right = second.value; let head = third.value;
+      for (;;) {
+        if (left > right) return false;
+        if (lookahead === undefined) lookahead = next();
+        if (lookahead.done) return right <= head;
+        left = right; right = head; head = lookahead.value;
+        lookahead = undefined;
+      }
+    },
     mod: (arg) => {
       const a = integer(arg('dividend')); const b = integer(arg('divisor'));
       if (!b) throw new Error('Division by zero');
@@ -322,6 +358,32 @@
     },
   };
 
+  const operationBudgets = new WeakMap();
+  function checkOperationDeadline(state) {
+    if (!state?.now) return;
+    const current = state.now();
+    if (!Number.isFinite(current) || current < state.last) throw new Error('Invalid browser batch clock');
+    state.last = current;
+    if (current >= state.deadline) throw new Error('Browser graph batch time limit exceeded');
+  }
+  function createOperationBudget(limit, {durationMs = null, now = () => host.performance.now()} = {}) {
+    if (!Number.isSafeInteger(limit) || limit < 1) throw new Error('Invalid browser batch budget');
+    const state = {remaining: limit, sampled: 0};
+    if (durationMs !== null) {
+      if (!Number.isSafeInteger(durationMs) || durationMs < 1 || typeof now !== 'function') {
+        throw new Error('Invalid browser batch duration');
+      }
+      state.last = now();
+      state.deadline = state.last + durationMs;
+      if (!Number.isFinite(state.last) || !Number.isFinite(state.deadline)) throw new Error('Invalid browser batch clock');
+      state.now = now;
+    }
+    const token = Object.create(null);
+    Object.defineProperty(token, 'remaining', {get: () => state.remaining});
+    Object.freeze(token);
+    operationBudgets.set(token, state);
+    return token;
+  }
   function createRuntime(plan, {operationLimit = 10000} = {}) {
     if (plan.format !== 1 || plan.primitiveAbi !== 1) throw new Error('Unsupported browser graph format');
     const functions = new Map(plan.functions.map((fn) => [fn.id, fn]));
@@ -329,7 +391,11 @@
       if (!Object.hasOwn(operations, op)) throw new Error('Unsupported browser primitive: ' + id);
       return [id, operations[op]];
     }));
-    function run(entry, supplied = {}) {
+    function run(entry, supplied = {}, operationBudget = null) {
+      const shared = operationBudget === null ? null : operationBudgets.get(operationBudget);
+      if (operationBudget !== null && !shared) throw new Error('Invalid browser batch budget token');
+      if (shared && shared.remaining < 1) throw new Error('Browser graph batch operation limit exceeded');
+      checkOperationDeadline(shared);
       const id = plan.entries[entry] || entry;
       const input = plan.inputs[id];
       if (!input || !functions.has(id)) throw new Error('Unknown browser graph entry');
@@ -339,9 +405,19 @@
       const root = {slots: new Map(), names: new Map()};
       for (const [name, value] of Object.entries(supplied)) { encode(value); root.names.set(name, value); }
       for (const {name, slots} of input.destinations) if (Object.hasOwn(supplied, name)) for (const slot of slots) root.slots.set(slot, supplied[name]);
+      checkOperationDeadline(shared);
       let remaining = operationLimit;
       const cache = new WeakMap();
-      function tick() { if (--remaining < 0) throw new Error('Browser graph operation limit exceeded'); }
+      function tick() {
+        remaining--;
+        if (shared) shared.remaining--;
+        if (remaining < 0) throw new Error('Browser graph operation limit exceeded');
+        if (shared && shared.remaining < 0) throw new Error('Browser graph batch operation limit exceeded');
+        if (shared && ++shared.sampled >= 256) {
+          shared.sampled = 0;
+          checkOperationDeadline(shared);
+        }
+      }
       function closure(value, frame) {
         const captured = {slots: new Map(frame.slots), names: new Map(frame.names)};
         for (const {slot, name} of value.translation) {
@@ -405,11 +481,13 @@
         byFunction.set(fnId, result);
         return result.force();
       }
-      return call(id, root);
+      const result = call(id, root);
+      checkOperationDeadline(shared);
+      return result;
     }
     return {run};
   }
-  const api = {createRuntime, encode, decode, keyword, Keyword, equal, isSequence};
+  const api = {createRuntime, createOperationBudget, encode, decode, keyword, Keyword, equal, isSequence};
   host.GraphdenBrowser = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window === 'undefined' ? globalThis : window);

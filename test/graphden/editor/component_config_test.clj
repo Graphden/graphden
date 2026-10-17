@@ -117,6 +117,9 @@
             :canvas-inheritance {:initial (ids/fn-id (str root ".canvas-inheritance") :inheritance-initial)
                                  :view (ids/fn-id (str root ".canvas-inheritance") :inheritance-view)}
             :canvas-metadata {:view (ids/fn-id (str root ".canvas-metadata") :metadata-view)}
+            :canvas-type-structure {:initial (ids/fn-id (str root ".canvas-type-structure") :type-structure-initial)
+                                    :view (ids/fn-id (str root ".canvas-type-structure") :type-structure-view)}
+            :canvas-bindings {:view (ids/fn-id (str root ".canvas-bindings") :bindings-view)}
             :tutorial-catalog {:view (ids/fn-id (str root ".tutorial-catalog") :catalog-view)}
             :inspector {:initial (ids/fn-id (str root ".inspector") :inspector-initial)
                         :update (ids/fn-id (str root ".inspector") :inspector-update)

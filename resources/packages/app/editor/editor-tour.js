@@ -631,7 +631,7 @@ const TOUR_ESCAPE_OWNERS = [
   '.description-tooltip .description-tooltip-close',   // a PINNED tooltip has the ×
   '#branch-diff-modal:not(.hidden)',
   '#merge-conflicts-modal:not(.hidden)',
-  '.type-inline-host[style*="display: block"]',   // the host persists hidden
+  '.type-inline-host[style*="display: flex"]',   // the host persists hidden
 ].join(', ');
 
 function _tourOnKey(e) {

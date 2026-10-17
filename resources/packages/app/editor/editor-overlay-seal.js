@@ -115,20 +115,14 @@ function createSealGhost(reason) {
   return badge;
 }
 
-// One line per seal in force, for tooltips and the popover's read-only part.
-function gdSealLines(info) {
-  const lines = [];
-  const who = (id, name) => (id === info.fnId ? 'here' : ('in ' + (name || 'an ancestor')));
-  if (info.here.terminal) lines.push('Sealed here — descendants cannot bind this slot.');
-  else if (info.above.sealedBy) lines.push('Sealed ' + who(info.above.sealedBy, info.above.sealedByName) + ' — descendants cannot bind this slot.');
-  if (info.here.listClosed) lines.push('List closed here — descendants cannot append.');
-  else if (info.above.listClosedBy) lines.push('List closed ' + who(info.above.listClosedBy, info.above.listClosedByName) + ' — descendants cannot append.');
-  if (info.slotOptional) {
-    if (info.here.required) lines.push('Optional by declaration, required here — and in every descendant.');
-    else if (info.above.requiredBy) lines.push('Optional by declaration, required since ' + (info.above.requiredByName || 'an ancestor') + '.');
-    else lines.push('Optional — the fn runs without it.');
-  }
-  return lines;
+// Native projection contains only authorized metadata and finite seal facts.
+// IDs, permission gates and the binder's authoritative reason stay above.
+function sealDisplayFacts(info) {
+  return {terminal: !!info.here.terminal, 'list-closed': !!info.here.listClosed,
+    required: !!info.here.required, optional: !!info.slotOptional,
+    'terminal-source': info.above.sealedBy ? info.above.sealedByName || 'an ancestor' : '',
+    'list-source': info.above.listClosedBy ? info.above.listClosedByName || 'an ancestor' : '',
+    'required-source': info.above.requiredBy ? info.above.requiredByName || 'an ancestor' : ''};
 }
 
 // The badge on an edge label. State (🔒) whenever a seal is in force;
@@ -142,7 +136,7 @@ function createSealBadge(arg, data) {
   const badge = document.createElement('button');
   badge.type = 'button';
   badge.className = 'seal-badge' + (any ? ' seal-badge-on' : ' seal-badge-off');
-  badge.textContent = any ? '🔒' : '🔓';
+  window.gdAppendBindingControlMark(badge, any ? '🔒' : '🔓');
   // Which seals, for a tour step or a test to ring / read without parsing
   // the tooltip: `data-seal="terminal list-closed"`.
   const kinds = [];
@@ -152,11 +146,11 @@ function createSealBadge(arg, data) {
   else if (info.slotOptional) kinds.push('optional');
   badge.dataset.seal = kinds.join(' ');
   if (arg?.name) badge.dataset.argName = arg.name;
-  const lines = gdSealLines(info);
-  const title = (lines.length ? lines.join('\n') : 'No seal on this slot.')
-    + (canEdit ? '\nClick to change what descendants may do with it.' : '');
+  const title = 'Slot seals: ' + (kinds.join(', ') || 'none') + '. Open seal details.';
   badge.title = title;
   badge.setAttribute('aria-label', title);
+  window.gdMountBindingBody(badge, badge, 'seal-badge', {...sealDisplayFacts(info), editable: canEdit},
+    {titleElement: badge, nativeTitle: title});
   badge.style.pointerEvents = 'auto';
   badge.addEventListener('mousedown', (e) => e.stopPropagation());
   badge.addEventListener('click', (e) => {
@@ -182,22 +176,25 @@ function openSealPopover(arg, data, anchorEl) {
   // rides on the same row as the items, and creating a flag-only row
   // would shadow the first append's own `:list-append` host.
   const hasListBinding = info.own?.['list-append'] === true;
+  let passiveOwner = null;
 
   const boxes = {};
-  const box = (host, key, label, hint, checked, disabled) => {
+  const box = (host, key, label, checked, disabled, ancestor = false) => {
     const row = document.createElement('label');
     row.className = 'seal-popover-row';
     const cb = document.createElement('input');
     cb.type = 'checkbox';
     cb.checked = !!checked;
     cb.disabled = !!disabled;
+    cb.setAttribute('aria-label', label);
     cb.dataset.seal = key;
     const text = document.createElement('span');
     text.className = 'seal-popover-label';
-    text.textContent = label;
     const small = document.createElement('span');
     small.className = 'seal-popover-hint';
-    small.textContent = hint;
+    const facts = {key, source: fnName, ancestor, 'has-list': hasListBinding};
+    window.gdMountBindingBody(passiveOwner, text, 'seal-checkbox', facts);
+    window.gdMountBindingBody(passiveOwner, small, 'seal-hint', facts);
     row.appendChild(cb);
     row.appendChild(text);
     row.appendChild(small);
@@ -210,57 +207,63 @@ function openSealPopover(arg, data, anchorEl) {
     anchorEl,
     ariaLabel: 'Seals on ' + (arg?.name || 'this slot'),
     noSave: !canEdit,
+    onClosed: () => { if (passiveOwner) window.gdCanvasBindingsGraph.disposeWithin(passiveOwner); },
     makeControl: (root) => {
+      passiveOwner = root;
+      // Optional graph labels may be tall. Keep the native action row inside
+      // the viewport and scroll only this popover's seal content. The shared
+      // adapter coalesces this geometry callback after retained-body updates.
+      window.gdCanvasBindingsGraph.bindGeometry(root, () => {
+        window.gdPositionPassivePopover(root, anchorEl, {gap: 6});
+        return false;
+      });
       const wrap = document.createElement('div');
-      wrap.className = 'seal-popover';
+      wrap.className = 'seal-popover gd-passive-popover-flow';
       const head = document.createElement('div');
       head.className = 'seal-popover-head';
-      head.textContent = (arg?.name ? ':' + arg.name : 'This slot') + ' on ' + fnName;
+      window.gdMountBindingBody(root, head, 'seal-header', {label: arg?.name || '', source: fnName});
       wrap.appendChild(head);
 
       // What an ancestor decided — read-only, with where to change it.
       const inherited = [];
-      if (info.above.sealedBy) inherited.push('Sealed in ' + (info.above.sealedByName || 'an ancestor') + ' — lift it there.');
-      if (info.above.listClosedBy) inherited.push('List closed in ' + (info.above.listClosedByName || 'an ancestor') + ' — reopen it there.');
-      if (info.slotOptional && info.above.requiredBy) inherited.push('Required since ' + (info.above.requiredByName || 'an ancestor') + ' — a ratchet, it cannot be undone below.');
-      if (!info.slotOptional && !ownsSlot) inherited.push('Required by declaration' + (ownerId && lookups?.fnMap?.get(ownerId)?.name ? ' (' + lookups.fnMap.get(ownerId).name + ')' : '') + '.');
-      for (const line of inherited) {
+      if (info.above.sealedBy) inherited.push({key: 'terminal', source: info.above.sealedByName || 'an ancestor'});
+      if (info.above.listClosedBy) inherited.push({key: 'list-closed', source: info.above.listClosedByName || 'an ancestor'});
+      if (info.slotOptional && info.above.requiredBy) inherited.push({key: 'required', source: info.above.requiredByName || 'an ancestor'});
+      if (!info.slotOptional && !ownsSlot) inherited.push({key: 'declaration', source: lookups?.fnMap?.get(ownerId)?.name || ''});
+      for (const facts of inherited) {
         const p = document.createElement('div');
         p.className = 'seal-popover-inherited';
-        p.textContent = line;
+        window.gdMountBindingBody(root, p, 'seal-inherited', facts);
         wrap.appendChild(p);
       }
 
       if (canEdit) {
         box(wrap, 'terminal', 'Seal against descendants',
-            info.above.sealedBy ? 'already sealed above' : 'no fn extending ' + fnName + ' may bind this slot',
-            info.here.terminal, !!info.above.sealedBy);
+            info.here.terminal, !!info.above.sealedBy, !!info.above.sealedBy);
         if (info.isSeq) {
           box(wrap, 'list-closed', 'Close the list',
-              info.above.listClosedBy ? 'already closed above'
-                : (hasListBinding ? 'no fn extending ' + fnName + ' may append' : 'append an item first'),
-              info.here.listClosed, !!info.above.listClosedBy || !hasListBinding);
+              info.here.listClosed, !!info.above.listClosedBy || !hasListBinding, !!info.above.listClosedBy);
         }
         if (info.slotOptional) {
           box(wrap, 'required', 'Require it here',
-              info.above.requiredBy ? 'already required above' : 'optional by declaration; required from ' + fnName + ' down',
-              info.here.required, !!info.above.requiredBy);
+              info.here.required, !!info.above.requiredBy, !!info.above.requiredBy);
         }
         if (ownsSlot) {
           box(wrap, 'slot-optional', 'Optional',
-              'the declaration: the fn runs without it; a descendant may still require it',
               info.slotOptional, false);
         }
       } else {
         const p = document.createElement('div');
         p.className = 'seal-popover-inherited';
-        p.textContent = gdSealAny(info) ? '' : 'No seal on this slot.';
-        if (p.textContent) wrap.appendChild(p);
+        if (!gdSealAny(info)) {
+          window.gdMountBindingBody(root, p, 'seal-empty', {any: false});
+          wrap.appendChild(p);
+        }
         const why = document.createElement('div');
         why.className = 'seal-popover-hint';
-        why.textContent = (typeof isAuthenticated === 'function' && !isAuthenticated())
-          ? 'Sign in to change seals on your own fns.'
-          : 'Only the fn’s owner changes its seals.';
+        window.gdMountBindingBody(root, why, 'seal-reason', {
+          authenticated: typeof isAuthenticated !== 'function' || !!isAuthenticated(),
+        });
         wrap.appendChild(why);
       }
       root.appendChild(wrap);

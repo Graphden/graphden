@@ -114,6 +114,9 @@
                          :canvas-values-id (some-> (get-in configuration [:canvas-values :view]) str)
                          :canvas-inheritance-id (some-> (get-in configuration [:canvas-inheritance :view]) str)
                          :canvas-metadata-id (some-> (get-in configuration [:canvas-metadata :view]) str)
+                         :canvas-type-structure-id (some-> (get-in configuration [:canvas-type-structure :view]) str)
+                         :canvas-type-structure-initial-id (some-> (get-in configuration [:canvas-type-structure :initial]) str)
+                         :canvas-bindings-id (some-> (get-in configuration [:canvas-bindings :view]) str)
                          :tutorial-catalog-id (some-> (get-in configuration [:tutorial-catalog :view]) str)}}
           resolved (assoc :configuration-revision (:revision resolved)
                           :configuration-preference {:present (boolean (seq preference-rows))

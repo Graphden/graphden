@@ -401,7 +401,7 @@
                                 [:const :if :list :mod :get :equal? :nil? :coalesce :count :map :filter :take :concat
                                  :vals :group-by :partition-by :sort-by :str :str-join :str-starts-with? :str-lower :str-trim
                                  :blank? :non-blank?
-                                 :str-contains? :hiccup :zipmap :assoc :add])
+                                 :str-contains? :str-clip :hiccup :zipmap :assoc :add :lte])
          type-defs (remove #(or (:parent %) (:parents %)) (:fn-defs loaded))
          primitives (into (vec type-defs) (map (fn [[n d]] (assoc d :name n))) base-defs)]
      (assoc (graph-of primitives definitions)
@@ -502,6 +502,91 @@
       (is (= "Browser graph operation limit exceeded"
              (:error (first (browser-results plan [{:entry :view :inputs {:items (vec (repeat 100 []))}
                                                     :operation-limit 20}]))))))))
+
+
+(def ^:private ordering-clip-definitions
+  [{:name :ordered :parent :lte :args {:nums {:as :nums}}}
+   {:name :clip :parent :str-clip :args {:string {:as :text} :limit {:as :limit}}}
+   {:name :boom :parent :mod :args {:dividend 1 :divisor 0}}
+   {:name :bad-third :parent :lte :args {:nums [2 1 :boom]}}
+   {:name :bad-fourth :parent :lte :args {:nums [2 1 3 :boom]}}
+   {:name :unreached-fifth :parent :lte :args {:nums [2 1 3 4 :boom]}}
+   {:name :later-bad-fourth :parent :lte :args {:nums [1 2 1 :boom]}}
+   {:name :later-unreached-fifth :parent :lte :args {:nums [1 2 1 3 :boom]}}
+   {:name :read-number :parent :const :lambda-params [:number] :args {:value {:as :number}}}
+   {:name :copied :parent :map :args {:func :read-number :coll {:as :nums}}}
+   {:name :lazy-ordered :parent :lte :args {:nums :copied}}
+   {:name :ordered-row :parent :lte :lambda-params [:row] :args {:nums {:as :row}}}
+   {:name :ordered-map :parent :map :args {:func :ordered-row :coll {:as :rows}}}
+   {:name :ordered-map-row :parent :map :lambda-params [:row]
+    :args {:func :ordered-row :coll {:as :row}}}
+   {:name :ordered-nested :parent :map :args {:func :ordered-map-row :coll {:as :rows}}}])
+
+
+(deftest browser-ordering-preserves-jvm-variadic-and-lazy-lookahead
+  (let [{:keys [graph impls ids]} (map-fixture ordering-clip-definitions)
+        vectors [[[] nil] [nil nil] [[0] true] [[-7] true]
+                 [[-9007199254740991 0 9007199254740991] true]
+                 [[1 1 2 3] true] [[2 1] false] [[1 3 2 4] false]]
+        cases (mapv (fn [[nums expected]]
+                      (cond-> {:entry :ordered :inputs {:nums nums}}
+                        (nil? expected) (assoc :error true)
+                        (some? expected) (assoc :expected expected))) vectors)]
+    (assert-differential!
+      graph impls ids
+      (into cases
+            [{:entry :bad-third :inputs {} :error true}
+             {:entry :bad-fourth :inputs {} :error true}
+             {:entry :unreached-fifth :inputs {} :expected false}
+             {:entry :later-bad-fourth :inputs {} :error true}
+             {:entry :later-unreached-fifth :inputs {} :expected false}
+             {:entry :lazy-ordered :inputs {:nums [-3 0 4]} :expected true}
+             {:entry :lazy-ordered :inputs {:nums [4 0 -3]} :expected false}]))))
+
+
+(deftest browser-prefix-clipping-preserves-jvm-utf16-code-units
+  (let [{:keys [graph impls ids]} (map-fixture ordering-clip-definitions)
+        cases [["" 0 ""] ["abc" 0 ""] ["short" 8 "short"]
+               ["abcdefghijk" 8 "abcdefgh"] ["abc" 9007199254740991 "abc"]
+               ["Жюри" 2 "Жю"] ["🙂x" 1 "\uD83D"] ["🙂x" 2 "🙂"]
+               ["e\u0301x" 1 "e"] ["e\u0301x" 2 "e\u0301"]]]
+    (assert-differential!
+      graph impls ids
+      (into (mapv (fn [[text limit expected]]
+                    {:entry :clip :inputs {:text text :limit limit} :expected expected}) cases)
+            [{:entry :clip :inputs {:text nil :limit 0} :error true}
+             {:entry :clip :inputs {:text "abc" :limit -1} :error true}
+             {:entry :clip :inputs {:text "abc" :limit nil} :error true}]))))
+
+
+(deftest browser-ordering-consumption-shares-the-root-operation-budget
+  (let [{:keys [graph impls ids]} (map-fixture ordering-clip-definitions)
+        plan (browser/export-plan graph impls (select-keys ids [:ordered :copied :lazy-ordered :ordered-nested])
+                                  {:allow-fn? (constantly true)})
+        nums (vec (range 100))
+        [small plain lazy nested] (browser-results
+                                    plan [{:entry :ordered :inputs {:nums [1 2]} :operation-limit 40}
+                                          {:entry :ordered :inputs {:nums nums} :operation-limit 40}
+                                          {:entry :lazy-ordered :inputs {:nums nums} :operation-limit 200}
+                                          {:entry :ordered-nested :inputs {:rows (vec (repeat 100 [[1 2] [2 3]]))}
+                                           :operation-limit 200}])]
+    (is (true? (some-> (:value small) browser/decode-value)))
+    (doseq [[kind result] [[:plain plain] [:lazy lazy] [:nested nested]]]
+      (is (= "Browser graph operation limit exceeded" (:error result)) (name kind)))
+    (let [[mapped measured small-nested large-nested]
+          (browser-results plan [{:entry :copied :inputs {:nums nums} :measure-operations true}
+                                 {:entry :lazy-ordered :inputs {:nums nums} :measure-operations true}
+                                 {:entry :ordered-nested :inputs {:rows (vec (repeat 10 [[1 2] [2 3]]))}
+                                  :measure-operations true}
+                                 {:entry :ordered-nested :inputs {:rows (vec (repeat 100 [[1 2] [2 3]]))}
+                                  :measure-operations true}])]
+      (is (nil? (:error measured)) (:error measured))
+      (is (< (+ 100 (:operations mapped)) (:operations measured)))
+      (is (nil? (:error large-nested)) (:error large-nested))
+      (is (< (:operations small-nested) 200 (:operations large-nested)))
+      (is (= (vec (repeat 100 [true true])) (some-> (:value large-nested) browser/decode-value)))
+      (println "Ordering aggregate operation counts"
+               (mapv :operations [mapped measured small-nested large-nested])))))
 
 
 (defn- full-picker-case

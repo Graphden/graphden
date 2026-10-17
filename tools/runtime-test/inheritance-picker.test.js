@@ -25,9 +25,15 @@ async function exercise(graph) {
   doc.body.appendChild(anchor);
   let picked = null;
   let graphRows = [];
+  let refreshFormatting = null;
+  let formattingRetired = false;
   const ctx = vm.createContext({
-    console, Set, Map, Promise, document: doc,
-    window: { innerWidth: 1000, innerHeight: 800 },
+    console, Set, Map, Promise, URLSearchParams, location: {search: ""}, document: doc,
+    window: { innerWidth: 1000, innerHeight: 800,
+      gdCanvasTypeStructureGraph: {bind(owner, callback) {
+        assert(owner); refreshFormatting = callback;
+        return () => { formattingRetired = true; };
+      }} },
     graphData: { fns: [{ id: 'wrong-id', name: 'same-name' }] },
     installTabTrap() {}, returnFocusTo() {}, onViewportChanged() {},
     observePopoverAnchor() { return () => {}; },
@@ -59,6 +65,7 @@ async function exercise(graph) {
       } };
     } };
   }
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../../resources/packages/app/editor/editor-fn-picker-graph.js'), 'utf8'), ctx);
   vm.runInContext(source, ctx);
   vm.runInContext('options.candidates = candidates; openFnPicker(options)', ctx);
   if (graph) {
@@ -72,6 +79,14 @@ async function exercise(graph) {
     assert.equal(doc.querySelectorAll('.fn-picker-row')[1].getAttribute('aria-disabled'), 'true');
   }
   const input = doc.querySelector('input');
+  input.value = 'unfinished IME draft'; doc.activeElement = input;
+  ctx.compactTypeChipText = () => 'personal return';
+  refreshFormatting();
+  assert.equal(doc.querySelector('input'), input, 'formatting retains the native query control');
+  assert.equal(input.value, 'unfinished IME draft', 'formatting cannot replace the query draft');
+  assert.equal(doc.activeElement, input, 'formatting preserves focus');
+  if (graph) assert.equal(graphRows[0].model['return-label'], 'personal return');
+  else assert.equal(doc.querySelector('.fn-picker-row-rt').textContent, '→ personal return');
   input.dispatchEvent({ type: 'keydown', key: 'ArrowDown', preventDefault() {} });
   input.dispatchEvent({ type: 'keydown', key: 'Enter', preventDefault() {} });
   await Promise.resolve();
@@ -82,6 +97,9 @@ async function exercise(graph) {
   await Promise.resolve();
   assert.equal(picked.fn.id, 'allowed-id');
   assert.equal(picked.candidate.id, 'allowed-id');
+  assert(formattingRetired, 'closing unsubscribes the formatter');
+  refreshFormatting();
+  assert.equal(doc.querySelector('.fn-picker-popover'), null, 'a queued formatter cannot reopen the picker');
 }
 
 (async () => {

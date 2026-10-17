@@ -143,7 +143,7 @@ function buildEdgeLabelOverlay(edge, container, label, overlayId) {
   overlay.dataset.argName = label;
 
   const labelSpan = document.createElement('span');
-  labelSpan.textContent = label;
+  window.gdMountBindingBody(overlay, labelSpan, 'label', {label});
   overlay.appendChild(labelSpan);
 
   // Type-chip — show on EVERY edge (not just editable ones) so the
@@ -237,11 +237,18 @@ function buildEdgeLabelOverlay(edge, container, label, overlayId) {
   }
 
   if (argEditable) {
+    window.gdAppendBindingControlMark(labelSpan, '✎');
+    labelSpan.setAttribute('role', 'button');
+    labelSpan.setAttribute('tabindex', '0');
+    labelSpan.setAttribute('aria-label', 'Rename slot ' + label);
     labelSpan.style.cursor = 'pointer';
     labelSpan.title = 'Click to rename arg';
     labelSpan.addEventListener('click', (e) => {
       e.stopPropagation();
       enterArgRenameEditMode(editArg, labelSpan, label);
+    });
+    labelSpan.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); labelSpan.click(); }
     });
 
     // The "change value" affordance lives on the value-fn card's
@@ -306,6 +313,15 @@ function buildEdgeLabelOverlay(edge, container, label, overlayId) {
     }
   }
 
+  let measured = null;
+  window.gdCanvasBindingsGraph.bindGeometry(overlay, () => {
+    const next = [overlay.offsetWidth, overlay.offsetHeight];
+    const changed = !measured || next.some((value, index) => value !== measured[index]);
+    measured = next;
+    // Only a changed native edge envelope needs the existing coalesced grid
+    // correction. Popovers and unchanged pan/zoom geometry never request it.
+    return changed;
+  });
   registerEdgeOverlay(overlay);
   container.appendChild(overlay);
   return overlay;

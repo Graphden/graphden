@@ -1484,6 +1484,21 @@
            edit permission, accessible names, provenance and exact popover anchors."
      :see [[:editor "mountCanvasBody"]]}
 
+    {:file "resources/packages/app/editor/editor-canvas-type-structure-graph.js" :defn format
+     :say "Captures immutable authorized type facts before running one selected formatter over the
+           complete postorder tree. Checked child receipts are display text only: canonical type
+           references, picker/save values, paths and validation stay native. Personal work or deadline
+           refusal discards the entire attempt and restarts original facts with the builtin. Only a
+           completed generation enters the cache; retained bodies refresh without replacing controls."
+     :see [[:editor "mountCanvasBody"] [:editor "createRuntime"]]}
+
+    {:file "resources/packages/app/editor/editor-canvas-bindings-graph.js" :defn projection
+     :say "Projects authorized source labels and finite seal facts into a view-only graph. Native
+           code retains IDs, editability, checkbox state, writes and the binder's nonempty blocking
+           reason. Graph explanations are optional. Unscoped native marks and viewport-bound flow
+           keep controls usable when a personal label is empty, hidden or oversized."
+     :see [[:editor "mountCanvasBody"]]}
+
     {:file "resources/packages/app/editor/editor-tour-catalog-graph.js" :defn mountCatalog
      :say "Runs the selected ordinary tutorial catalogue view over browser-local display facts.
            Its checked output keeps lesson identities in source order and accepts only passive

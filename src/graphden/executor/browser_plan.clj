@@ -149,9 +149,9 @@
   (into {}
         (for [[ns-path names] [["core.logic" [:const :if :equal? :nil? :coalesce]]
                                ["core.collections" [:list :get :assoc :zipmap :count :take :concat :vals]]
-                               ["core.arithmetic" [:add :mod]]
+                               ["core.arithmetic" [:add :mod :lte]]
                                ["core.hof" [:map :filter :group-by :partition-by :sort-by]]
-                               ["core.strings" [:str :str-starts-with? :str-lower :str-trim :str-contains?]]
+                               ["core.strings" [:str :str-starts-with? :str-lower :str-trim :str-contains? :str-clip]]
                                ["web.html" [:hiccup]]]
               n names]
           [(ids/fn-id ns-path n) (name n)])))

@@ -30,6 +30,7 @@ const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve()
   const ctx = vm.createContext({
     console, Promise, JSON,
     document: doc,
+    addEventListener() {},
     API: { api_types_usages: '/api/types/usages' },
     // A composed fn named `port` in some namespace sits FIRST in fnMap; the
     // type row of that name is the parent-less one.
@@ -46,11 +47,13 @@ const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve()
 
   console.log(' usages are fetched for the type row\'s id, and cached by it');
   const host = doc.createElement('div');
+  doc.body.appendChild(host);
   ctx.appendTypeUsagesSection(host, 'port');
   await flush();
   assert(asked.join() === 't-port', 'asked for t-port, got ' + asked.join());
   assert(host.querySelector('.type-inline-usages-head').textContent === 'Used by 1', 'count rendered');
   const again = doc.createElement('div');
+  doc.body.appendChild(again);
   ctx.appendTypeUsagesSection(again, 'port');
   await flush();
   assert(asked.length === 1, 'second panel served from the cache');

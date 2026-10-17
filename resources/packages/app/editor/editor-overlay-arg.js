@@ -305,11 +305,14 @@ function createArgSourceLink(node) {
   const names = chain.map(c => c.fnName || '(anonymous)');
   const link = document.createElement('a');
   link.className = 'arg-source-link';
-  link.textContent = '↖';
+  window.gdAppendBindingControlMark(link, '↖');
   // leaf→root chain reads as "inherited from X, which got it from Y…".
   const label = 'Inherited from ' + names.join(' ← ');
   link.title = label;
   link.setAttribute('aria-label', label);
+  window.gdMountBindingBody(link, link, 'source', {
+    entries: names.map((name, index) => ({name, first: index === 0})),
+  }, {titleElement: link, nativeTitle: label});
   // Navigate to the immediate parent the slot came from, when it
   // resolves to a globally addressable name (anonymous → tooltip only).
   const immediate = chain[0];
@@ -467,7 +470,7 @@ function createProvenanceBadge(narrowingInfo, arg) {
   const badge = document.createElement('button');
   badge.type = 'button';
   badge.className = 'arg-type-provenance';
-  badge.textContent = '↳';
+  window.gdAppendBindingControlMark(badge, '↳');
   const baseHint = narrowingInfo.baseTypeName
     ? ' (narrowed from :' + narrowingInfo.baseTypeName + ')'
     : '';
@@ -484,6 +487,9 @@ function createProvenanceBadge(narrowingInfo, arg) {
   badge.title = verb + narrowingInfo.sourceFnName + baseHint
               + ' — click for full chain';
   badge.setAttribute('aria-label', badge.title);
+  window.gdMountBindingBody(badge, badge, 'provenance', {
+    key: narrowingInfo.kind || '', source: narrowingInfo.sourceFnName || '', base: narrowingInfo.baseTypeName || '',
+  }, {titleElement: badge, nativeTitle: badge.title});
   // Disclosure button — the provenance popover is anchored to and
   // controlled by this trigger. Normally born closed and flipped by
   // editor-provenance-popover.js — but an overlay rebuild can recreate
@@ -574,8 +580,13 @@ function createTypeChip(arg, options) {
   const host = document.createElement('span');
   host.className = 'gd-canvas-body-host';
   chip.appendChild(host);
-  window.gdCanvasValuesGraph.mount(options.owner, host, 'type-chip', {
+  const body = window.gdCanvasValuesGraph.mount(options.owner, host, 'type-chip', {
     label: display, secondary, 'secondary-kind': secondaryKind, 'secondary-title': secondaryTitle,
+  });
+  window.gdCanvasTypeStructureGraph.bind(options.owner, () => {
+    const next = typeChipPresentation(arg);
+    body.update({label: next.display, secondary: next.secondary,
+      'secondary-kind': next.secondaryKind, 'secondary-title': next.secondaryTitle});
   });
   // Always surface the FULL type on hover — `compactTypeChipText`
   // truncates fn-shape types aggressively (`(request)→ring-res…`),
@@ -592,7 +603,7 @@ function createTypeChip(arg, options) {
   // Hover-title shows the FULL rich type if any. The visible text
   // already prefers the rich form so this is just for cases where
   // the compact rendering elided detail.
-  let hint = display;
+  let hint = flatType;
   if (richType && typeof formatTypeHint === 'function') {
     hint = formatTypeHint(richType);
   }

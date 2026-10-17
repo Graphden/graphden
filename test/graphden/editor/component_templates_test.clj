@@ -160,8 +160,12 @@
   (let [interfaces (templates/interface-definitions)
         by-ref (into {} (map #(vector (keyword (:namespace %) (name (:name %))) %)) interfaces)]
     (doseq [reference [:app.ui-canvas-inheritance/inheritance-view
-                       :app.ui-canvas-metadata/metadata-view]]
+                       :app.ui-canvas-metadata/metadata-view
+                       :app.ui-canvas-type-structure/type-structure-view
+                       :app.ui-canvas-bindings/bindings-view]]
       (is (= #{:name :namespace} (set (keys (get by-ref reference))))))
     (is (= :zipmap (:parent (get by-ref :app.ui-canvas/canvas-view-fields))))
     (is (not (contains? by-ref :app.ui-canvas-metadata/_body)))
+    (is (not (contains? by-ref :app.ui-canvas-type-structure/_view-body)))
+    (is (not (contains? by-ref :app.ui-canvas-bindings/_body)))
     (is (not (contains? by-ref :app.ui-canvas-inheritance/_body)))))

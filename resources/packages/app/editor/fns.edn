@@ -117,6 +117,12 @@
                   ;; SVG edge layer — needs `taxiBendX` from editor-layout.js.
                   "packages/app/editor/editor-edges-svg.js"
                   "packages/app/editor/editor-literal-types.js"
+                  ;; Shared local passive runtime precedes synchronous type
+                  ;; display wrappers. Graph plans are already loaded above.
+                  "packages/app/editor/editor-passive-canvas.js"
+                  "packages/app/editor/editor-canvas-values-graph.js"
+                  "packages/app/editor/editor-canvas-type-structure-graph.js"
+                  "packages/app/editor/editor-canvas-bindings-graph.js"
                   ;; Presentation half of the type helpers.
                   "packages/app/editor/editor-type-format.js"
                   ;; EDN reader/printer — graphden-forms.js's `edn`
@@ -183,9 +189,7 @@
                   ;; `+` gate the placeholder overlay asks; before both.
                   "packages/app/editor/editor-overlay-seal.js"
                   "packages/app/editor/editor-overlay-edge-label.js"
-                  "packages/app/editor/editor-passive-canvas.js"
                   "packages/app/editor/editor-canvas-graph.js"
-                  "packages/app/editor/editor-canvas-values-graph.js"
                   "packages/app/editor/editor-canvas-inheritance-graph.js"
                   "packages/app/editor/editor-canvas-metadata-graph.js"
                   "packages/app/editor/editor-overlay-fn-rows.js"
@@ -626,7 +630,9 @@
                   [:button {:type "button" :class "gd-set-btn" :data-ui-component "canvas" :data-ui-label "canvas presentation"} "Personalize canvas presentation"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-component "canvas-values" :data-ui-label "value and type presentation"} "Personalize value and type presentation"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-component "canvas-inheritance" :data-ui-label "inheritance presentation"} "Personalize inheritance presentation"]
-                  [:button {:type "button" :class "gd-set-btn" :data-ui-component "canvas-metadata" :data-ui-label "function metadata"} "Personalize function metadata"]]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-component "canvas-metadata" :data-ui-label "function metadata"} "Personalize function metadata"]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-component "canvas-type-structure" :data-ui-label "expanded type presentation"} "Personalize expanded type presentation"]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-component "canvas-bindings" :data-ui-label "binding presentation"} "Personalize binding presentation"]]
                  [:div {:class "gd-theme-actions gd-ui-components-actions"}
                   [:button {:type "button" :class "gd-set-btn" :data-ui-graph "configuration-id"} "Configuration"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-graph "theme-id"} "Theme"]
@@ -644,7 +650,10 @@
                   [:button {:type "button" :class "gd-set-btn" :data-ui-graph "canvas-id"} "Canvas presentation view"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-graph "canvas-values-id"} "Value and type presentation view"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-graph "canvas-inheritance-id"} "Inheritance presentation view"]
-                  [:button {:type "button" :class "gd-set-btn" :data-ui-graph "canvas-metadata-id"} "Function metadata view"]]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-graph "canvas-metadata-id"} "Function metadata view"]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-graph "canvas-type-structure-initial-id"} "Type formatting"]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-graph "canvas-type-structure-id"} "Expanded type view"]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-graph "canvas-bindings-id"} "Binding presentation view"]]
                  [:p {:id "gd-ui-components-status" :class "gd-set-hint" :role "status"}]]]
                ;; KEYBOARD — every registered shortcut with a Change control;
                ;; layouts save + share through the marketplace (editor-keymap.js).

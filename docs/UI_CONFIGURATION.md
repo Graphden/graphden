@@ -76,8 +76,8 @@ Value labels and type-chip/history bodies use the independent view-only
 `app.ui-canvas-values/canvas-values-view` identity. Appearance can personalize
 it without changing an existing custom canvas view. The value preview remains
 the existing sanitized graph representation in a sibling native host; secret
-paths and values never enter this presentation component. Type resolution,
-refinement formatting, edit/expand anchors and accessibility remain native.
+paths and values never enter this presentation component. Canonical type resolution,
+edit/expand anchors and accessibility remain native.
 See the [value/type contract](../resources/packages/app/ui-preview/README.md#passive-value-and-type-presentation).
 
 Inheritance groups and MI label bodies use
@@ -88,6 +88,15 @@ and effect drift/ghost bodies use the view-only
 older canvas components. Native rows keep expansion events, focus, edit controls
 and accessible anchors when presentation changes. See the
 [fn-card contract](../resources/packages/app/ui-preview/README.md#inheritance-and-function-metadata-presentation).
+
+Expanded type structure and human/compact formatting use
+`app.ui-canvas-type-structure/type-structure-view` with a pure `initial` entry.
+Argument/source labels and seal explanations use the separate view-only
+`app.ui-canvas-bindings/bindings-view`. Formatting is presentation: picker values,
+type references, native validation, binder blocking and writes retain their
+canonical authority. Runtime changes update retained passive children without
+replacing focused native controls. See the
+[expanded type/binding contract](../resources/packages/app/ui-preview/README.md#expanded-type-and-binding-presentation).
 
 Replacing an editor root renames the old root privately in the current branch
 and creates a new UUID named `editor`. Its parent relationships are retained.

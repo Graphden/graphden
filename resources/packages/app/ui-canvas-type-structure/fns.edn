@@ -1,0 +1,1154 @@
+{:namespace "app.ui-canvas-type-structure",
+ :description
+ "Pure display formatting and passive type structure. Native owners retain grammar, identities, controls and paths.",
+ :fns
+ [{:name :_primitive-human-table,
+   :parent :zipmap,
+   :args
+   {:keys
+    ["int"
+     "numeric"
+     "text"
+     "bool"
+     "null"
+     "jsonb"
+     "any"
+     "fn"
+     "sequence"
+     "uuid"
+     "bytes"
+     "timestamptz"
+     "keyword"
+     "float"],
+    :vals
+    ["integer"
+     "number"
+     "text"
+     "true/false"
+     "null"
+     "any JSON value"
+     "any value"
+     "function"
+     "sequence"
+     "UUID"
+     "binary data"
+     "timestamp"
+     "keyword"
+     "decimal number"]}}
+  {:name :_plural-human-table,
+   :parent :zipmap,
+   :args
+   {:keys
+    ["integer"
+     "number"
+     "text"
+     "true/false"
+     "null"
+     "UUID"
+     "timestamp"
+     "keyword"
+     "function"
+     "sequence"
+     "decimal number"
+     "binary data"],
+    :vals
+    ["integers"
+     "numbers"
+     "text values"
+     "booleans"
+     "nulls"
+     "UUIDs"
+     "timestamps"
+     "keywords"
+     "functions"
+     "sequences"
+     "decimal numbers"
+     "binary blobs"]}}
+  {:name :_zero-adjective-table,
+   :parent :zipmap,
+   :args
+   {:keys [">" "<" ">=" "<="],
+    :vals ["positive " "negative " "non-negative " "non-positive "]}}
+  {:name :_view-heading-table,
+   :parent :zipmap,
+   :args
+   {:keys ["inherited" "resolved" "subtype"],
+    :vals ["Inherited via" "Resolved via" "Subtype chain"]}}
+  {:name :_child,
+   :type
+   {:label :text,
+    :first :bool,
+    :last :bool,
+    :human :text,
+    :compact :nullable-text,
+    :constraint :text,
+    :short :text}}
+  {:name :_inputs,
+   :type
+   {:zero :bool,
+    :effect-mode
+    [:refine :text {:constraint [:in #{"limited" "any" "pure"}]}],
+    :children [:list :_child],
+    :variable :bool,
+    :name :text,
+    :base-numeric :bool,
+    :ret-name :nullable-text,
+    :effects [:list :_effect],
+    :kind
+    [:refine
+     :text
+     {:constraint
+      [:in
+       #{"raw-array"
+         "map"
+         "refine"
+         "list"
+         "constraint-in"
+         "record"
+         "union"
+         "fn"
+         "constraint-raw"
+         "constraint-or"
+         "name"
+         "constraint-and"
+         "empty"
+         "tuple"
+         "marker"
+         "raw"
+         "constraint-binary"}]}],
+    :flat :nullable-text,
+    :operator :text,
+    :atom :text}}
+  {:name :_kind,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :kind},
+    :default {:value ""}}}
+  {:name :_name,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :name},
+    :default {:value ""}}}
+  {:name :_operator,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :operator},
+    :default {:value ""}}}
+  {:name :_atom,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :atom},
+    :default {:value ""}}}
+  {:name :_effect-mode,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :effect-mode},
+    :default {:value ""}}}
+  {:name :_flat,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :flat},
+    :default {:value nil}}}
+  {:name :_ret-name,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :ret-name},
+    :default {:value nil}}}
+  {:name :_variable,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :variable},
+    :default {:value false}}}
+  {:name :_base-numeric,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :base-numeric},
+    :default {:value false}}}
+  {:name :_zero,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :zero},
+    :default {:value false}}}
+  {:name :_children,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :children},
+    :default {:value []}}}
+  {:name :_effects,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :effects},
+    :default {:value []}}}
+  {:name :_child-label,
+   :parent :get,
+   :args
+   {:coll {:as :child, :type :_child},
+    :key {:value :label},
+    :default {:value ""}}}
+  {:name :_child-first,
+   :parent :get,
+   :args
+   {:coll {:as :child, :type :_child},
+    :key {:value :first},
+    :default {:value false}}}
+  {:name :_child-last,
+   :parent :get,
+   :args
+   {:coll {:as :child, :type :_child},
+    :key {:value :last},
+    :default {:value false}}}
+  {:name :_child-human,
+   :parent :get,
+   :args
+   {:coll {:as :child, :type :_child},
+    :key {:value :human},
+    :default {:value ""}}}
+  {:name :_child-compact,
+   :parent :get,
+   :args
+   {:coll {:as :child, :type :_child},
+    :key {:value :compact},
+    :default {:value nil}}}
+  {:name :_child-constraint,
+   :parent :get,
+   :args
+   {:coll {:as :child, :type :_child},
+    :key {:value :constraint},
+    :default {:value ""}}}
+  {:name :_child-short,
+   :parent :get,
+   :args
+   {:coll {:as :child, :type :_child},
+    :key {:value :short},
+    :default {:value ""}}}
+  {:name :_size, :parent :count, :args {:coll :_children}}
+  {:name :_first,
+   :parent :get,
+   :args {:coll :_children, :key 0, :default {:value nil}}}
+  {:name :_second,
+   :parent :get,
+   :args {:coll :_children, :key 1, :default {:value nil}}}
+  {:name :_first-human,
+   :parent :get,
+   :args {:coll :_first, :key {:value :human}, :default {:value ""}}}
+  {:name :_first-compact,
+   :parent :get,
+   :args
+   {:coll :_first, :key {:value :compact}, :default {:value nil}}}
+  {:name :_first-short,
+   :parent :get,
+   :args {:coll :_first, :key {:value :short}, :default {:value ""}}}
+  {:name :_first-label,
+   :parent :get,
+   :args {:coll :_first, :key {:value :label}, :default {:value ""}}}
+  {:name :_second-human,
+   :parent :get,
+   :args {:coll :_second, :key {:value :human}, :default {:value ""}}}
+  {:name :_second-compact,
+   :parent :get,
+   :args
+   {:coll :_second, :key {:value :compact}, :default {:value nil}}}
+  {:name :_second-short,
+   :parent :get,
+   :args {:coll :_second, :key {:value :short}, :default {:value ""}}}
+  {:name :_second-constraint,
+   :parent :get,
+   :args
+   {:coll :_second, :key {:value :constraint}, :default {:value ""}}}
+  {:name :_kind-record?,
+   :parent :equal?,
+   :args {:a :_kind, :b "record"}}
+  {:name :_kind-constraint-and?,
+   :parent :equal?,
+   :args {:a :_kind, :b "constraint-and"}}
+  {:name :_kind-constraint-or?,
+   :parent :equal?,
+   :args {:a :_kind, :b "constraint-or"}}
+  {:name :_separator-rest-1,
+   :parent :if,
+   :args {:test :_kind-constraint-or?, :then " or ", :else ", "}}
+  {:name :_separator,
+   :parent :if,
+   :args
+   {:test :_kind-constraint-and?,
+    :then " and ",
+    :else :_separator-rest-1}}
+  {:name :_human-tail-separator,
+   :parent :if,
+   :args {:test :_child-last, :then " and ", :else :_separator}}
+  {:name :_human-record-separator,
+   :parent :if,
+   :args
+   {:test :_kind-record?,
+    :then :_human-tail-separator,
+    :else :_separator}}
+  {:name :_human-separator,
+   :parent :if,
+   :args
+   {:test :_child-first, :then "", :else :_human-record-separator}}
+  {:name :_field-human,
+   :parent :str,
+   :args {:parts [:_child-label " (" :_child-human ")"]}}
+  {:name :_kind-constraint-in?,
+   :parent :equal?,
+   :args {:a :_kind, :b "constraint-in"}}
+  {:name :_human-item-rest-4,
+   :parent :if,
+   :args
+   {:test :_kind-constraint-in?,
+    :then :_child-constraint,
+    :else :_child-human}}
+  {:name :_human-item-rest-3,
+   :parent :if,
+   :args
+   {:test :_kind-constraint-or?,
+    :then :_child-constraint,
+    :else :_human-item-rest-4}}
+  {:name :_human-item-rest-2,
+   :parent :if,
+   :args
+   {:test :_kind-constraint-and?,
+    :then :_child-constraint,
+    :else :_human-item-rest-3}}
+  {:name :_kind-fn?, :parent :equal?, :args {:a :_kind, :b "fn"}}
+  {:name :_human-item-rest-1,
+   :parent :if,
+   :args
+   {:test :_kind-fn?, :then :_field-human, :else :_human-item-rest-2}}
+  {:name :_human-item,
+   :parent :if,
+   :args
+   {:test :_kind-record?,
+    :then :_field-human,
+    :else :_human-item-rest-1}}
+  {:name :_human-part,
+   :parent :str,
+   :args {:parts [:_human-separator :_human-item]},
+   :lambda-params [:child]}
+  {:name :_human-parts,
+   :parent :map,
+   :args {:func :_human-part, :coll :_children}}
+  {:name :_human-joined, :parent :str, :args {:parts :_human-parts}}
+  {:name :_kind-union?, :parent :equal?, :args {:a :_kind, :b "union"}}
+  {:name :_compact-delimiter,
+   :parent :if,
+   :args {:test :_kind-union?, :then "|", :else ","}}
+  {:name :_compact-separator,
+   :parent :if,
+   :args {:test :_child-first, :then "", :else :_compact-delimiter}}
+  {:name :_argument-compact,
+   :parent :str,
+   :args {:parts [:_child-label ":" :_compact-or-any]}}
+  {:name :_compact-item-rest-1,
+   :parent :if,
+   :args
+   {:test :_kind-fn?,
+    :then :_argument-compact,
+    :else :_compact-or-any}}
+  {:name :_compact-item,
+   :parent :if,
+   :args
+   {:test :_kind-record?,
+    :then :_child-label,
+    :else :_compact-item-rest-1}}
+  {:name :_compact-part,
+   :parent :str,
+   :args {:parts [:_compact-separator :_compact-item]},
+   :lambda-params [:child]}
+  {:name :_compact-parts,
+   :parent :map,
+   :args {:func :_compact-part, :coll :_children}}
+  {:name :_compact-joined,
+   :parent :str,
+   :args {:parts :_compact-parts}}
+  {:name :_argument-child?,
+   :parent :equal?,
+   :args {:a :_child-last, :b false},
+   :lambda-params [:child]}
+  {:name :_arguments,
+   :parent :filter,
+   :args {:pred :_argument-child?, :coll :_children}}
+  {:name :_arg-human-parts,
+   :parent :map,
+   :args {:func :_human-part, :coll :_arguments}}
+  {:name :_args-human, :parent :str, :args {:parts :_arg-human-parts}}
+  {:name :_arg-compact-parts,
+   :parent :map,
+   :args {:func :_compact-part, :coll :_arguments}}
+  {:name :_args-compact,
+   :parent :str,
+   :args {:parts :_arg-compact-parts}}
+  {:name :_ret-index, :parent :add, :args {:nums [:_size -1]}}
+  {:name :_return,
+   :parent :get,
+   :args {:coll :_children, :key :_ret-index, :default {:value nil}}}
+  {:name :_return-human,
+   :parent :get,
+   :args {:coll :_return, :key {:value :human}, :default {:value ""}}}
+  {:name :_return-compact,
+   :parent :get,
+   :args
+   {:coll :_return, :key {:value :compact}, :default {:value "any"}}}
+  {:name :_arg-size, :parent :count, :args {:coll :_arguments}}
+  {:name :_no-args, :parent :equal?, :args {:a :_arg-size, :b 0}}
+  {:name :_one-arg, :parent :equal?, :args {:a :_arg-size, :b 1}}
+  {:name :_primitive-human,
+   :parent :get,
+   :args {:coll :_primitive-human-table, :key :_name, :default :_name}}
+  {:name :_plural-human,
+   :parent :get,
+   :args
+   {:coll :_plural-human-table,
+    :key :_first-human,
+    :default :_first-human}}
+  {:name :_list-human,
+   :parent :str,
+   :args {:parts ["list of " :_plural-human]}}
+  {:name :_map-human,
+   :parent :str,
+   :args {:parts ["map of " :_first-human " to " :_second-human]}}
+  {:name :_tuple-human,
+   :parent :str,
+   :args {:parts ["tuple of (" :_human-joined ")"]}}
+  {:name :_either-human,
+   :parent :str,
+   :args {:parts ["either " :_first-human " or " :_second-human]}}
+  {:name :_union-many-human,
+   :parent :str,
+   :args {:parts ["one of: " :_human-joined]}}
+  {:name :_two, :parent :equal?, :args {:a :_size, :b 2}}
+  {:name :_union-human,
+   :parent :if,
+   :args {:test :_two, :then :_either-human, :else :_union-many-human}}
+  {:name :_record-human-fields,
+   :parent :str,
+   :args {:parts ["record with " :_human-joined]}}
+  {:name :_empty, :parent :equal?, :args {:a :_size, :b 0}}
+  {:name :_record-human,
+   :parent :if,
+   :args
+   {:test :_empty, :then "empty record", :else :_record-human-fields}}
+  {:name :_refine-human-generic,
+   :parent :str,
+   :args {:parts [:_first-human " where " :_second-constraint]}}
+  {:name :_zero-adjective,
+   :parent :get,
+   :args {:coll :_zero-adjective-table, :key :_operator, :default ""}}
+  {:name :_no-adjective,
+   :parent :equal?,
+   :args {:a :_zero-adjective, :b ""}}
+  {:name :_friendly-prefix,
+   :parent :if,
+   :args {:test :_no-adjective, :then false, :else :_zero}}
+  {:name :_friendly,
+   :parent :if,
+   :args {:test :_base-numeric, :then :_friendly-prefix, :else false}}
+  {:name :_friendly-human,
+   :parent :str,
+   :args {:parts [:_zero-adjective :_first-human]}}
+  {:name :_refine-human,
+   :parent :if,
+   :args
+   {:test :_friendly,
+    :then :_friendly-human,
+    :else :_refine-human-generic}}
+  {:name :_marker-human,
+   :parent :str,
+   :args {:parts [:_name " " :_first-human]}}
+  {:name :_takes-args,
+   :parent :str,
+   :args {:parts ["takes " :_args-human ", "]}}
+  {:name :_takes,
+   :parent :if,
+   :args
+   {:test :_no-args, :then "takes no args, ", :else :_takes-args}}
+  {:name :_variance,
+   :parent :if,
+   :args
+   {:test :_no-args,
+    :then "",
+    :else ". Args contravariant; return covariant."}}
+  {:name :_compact-or-any,
+   :parent :coalesce,
+   :args {:value :_child-compact, :default "any"}}
+  {:name :_effect, :type {:name :text, :first :bool}}
+  {:name :_effect-name,
+   :parent :get,
+   :args
+   {:coll {:as :effect, :type :_effect},
+    :key {:value :name},
+    :default {:value ""}}}
+  {:name :_effect-first,
+   :parent :get,
+   :args
+   {:coll {:as :effect, :type :_effect},
+    :key {:value :first},
+    :default {:value false}}}
+  {:name :_effect-separator,
+   :parent :if,
+   :args {:test :_effect-first, :then "", :else ", "}}
+  {:name :_effect-text,
+   :parent :str,
+   :args {:parts [:_effect-separator :_effect-name]},
+   :lambda-params [:effect]}
+  {:name :_effect-parts,
+   :parent :map,
+   :args {:func :_effect-text, :coll :_effects}}
+  {:name :_effects-text, :parent :str, :args {:parts :_effect-parts}}
+  {:name :_allowed-effects,
+   :parent :str,
+   :args {:parts ["; allowed effects: " :_effects-text]}}
+  {:name :_effect-suffix-is-1,
+   :parent :equal?,
+   :args {:a :_effect-mode, :b "limited"}}
+  {:name :_effect-suffix-rest-1,
+   :parent :if,
+   :args
+   {:test :_effect-suffix-is-1, :then :_allowed-effects, :else ""}}
+  {:name :_effect-suffix-is-0,
+   :parent :equal?,
+   :args {:a :_effect-mode, :b "pure"}}
+  {:name :_effect-suffix,
+   :parent :if,
+   :args
+   {:test :_effect-suffix-is-0,
+    :then "; must be pure (no effects allowed)",
+    :else :_effect-suffix-rest-1}}
+  {:name :_fn-human,
+   :parent :str,
+   :args
+   {:parts
+    ["function: "
+     :_takes
+     "returns "
+     :_return-human
+     :_effect-suffix
+     :_variance]}}
+  {:name :_kind-marker?,
+   :parent :equal?,
+   :args {:a :_kind, :b "marker"}}
+  {:name :_human-rest-9,
+   :parent :if,
+   :args {:test :_kind-marker?, :then :_marker-human, :else :_atom}}
+  {:name :_human-rest-8,
+   :parent :if,
+   :args {:test :_kind-fn?, :then :_fn-human, :else :_human-rest-9}}
+  {:name :_kind-refine?,
+   :parent :equal?,
+   :args {:a :_kind, :b "refine"}}
+  {:name :_human-rest-7,
+   :parent :if,
+   :args
+   {:test :_kind-refine?, :then :_refine-human, :else :_human-rest-8}}
+  {:name :_human-rest-6,
+   :parent :if,
+   :args
+   {:test :_kind-record?, :then :_record-human, :else :_human-rest-7}}
+  {:name :_human-rest-5,
+   :parent :if,
+   :args
+   {:test :_kind-union?, :then :_union-human, :else :_human-rest-6}}
+  {:name :_kind-tuple?, :parent :equal?, :args {:a :_kind, :b "tuple"}}
+  {:name :_human-rest-4,
+   :parent :if,
+   :args
+   {:test :_kind-tuple?, :then :_tuple-human, :else :_human-rest-5}}
+  {:name :_kind-map?, :parent :equal?, :args {:a :_kind, :b "map"}}
+  {:name :_human-rest-3,
+   :parent :if,
+   :args {:test :_kind-map?, :then :_map-human, :else :_human-rest-4}}
+  {:name :_kind-list?, :parent :equal?, :args {:a :_kind, :b "list"}}
+  {:name :_human-rest-2,
+   :parent :if,
+   :args
+   {:test :_kind-list?, :then :_list-human, :else :_human-rest-3}}
+  {:name :_kind-name?, :parent :equal?, :args {:a :_kind, :b "name"}}
+  {:name :_human-rest-1,
+   :parent :if,
+   :args
+   {:test :_kind-name?, :then :_primitive-human, :else :_human-rest-2}}
+  {:name :_kind-empty?, :parent :equal?, :args {:a :_kind, :b "empty"}}
+  {:name :_human,
+   :parent :if,
+   :args {:test :_kind-empty?, :then "", :else :_human-rest-1}}
+  {:name :_constraint-binary,
+   :parent :str,
+   :args {:parts [:_operator " " :_atom]}}
+  {:name :_constraint-in,
+   :parent :str,
+   :args {:parts ["one of " :_human-joined]}}
+  {:name :_kind-constraint-raw?,
+   :parent :equal?,
+   :args {:a :_kind, :b "constraint-raw"}}
+  {:name :_constraint-rest-4,
+   :parent :if,
+   :args {:test :_kind-constraint-raw?, :then :_atom, :else ""}}
+  {:name :_kind-constraint-binary?,
+   :parent :equal?,
+   :args {:a :_kind, :b "constraint-binary"}}
+  {:name :_constraint-rest-3,
+   :parent :if,
+   :args
+   {:test :_kind-constraint-binary?,
+    :then :_constraint-binary,
+    :else :_constraint-rest-4}}
+  {:name :_constraint-rest-2,
+   :parent :if,
+   :args
+   {:test :_kind-constraint-in?,
+    :then :_constraint-in,
+    :else :_constraint-rest-3}}
+  {:name :_constraint-rest-1,
+   :parent :if,
+   :args
+   {:test :_kind-constraint-or?,
+    :then :_human-joined,
+    :else :_constraint-rest-2}}
+  {:name :_constraint,
+   :parent :if,
+   :args
+   {:test :_kind-constraint-and?,
+    :then :_human-joined,
+    :else :_constraint-rest-1}}
+  {:name :_flat-missing, :parent :nil?, :args {:value :_flat}}
+  {:name :_fallback-name-empty,
+   :parent :equal?,
+   :args {:a :_name, :b ""}}
+  {:name :_fallback-name,
+   :parent :if,
+   :args {:test :_fallback-name-empty, :then nil, :else :_name}}
+  {:name :_fallback,
+   :parent :if,
+   :args {:test :_flat-missing, :then :_fallback-name, :else :_flat}}
+  {:name :_name-first,
+   :parent :str-clip,
+   :args {:string :_name, :limit 1}}
+  {:name :_variable-name,
+   :parent :str,
+   :args {:parts ["'" :_name-first]}}
+  {:name :_name-compact,
+   :parent :if,
+   :args {:test :_variable, :then :_variable-name, :else :_name}}
+  {:name :_list-compact,
+   :parent :str,
+   :args {:parts ["[" :_first-compact "]"]}}
+  {:name :_map-compact,
+   :parent :str,
+   :args {:parts ["{" :_first-compact "→" :_second-compact "}"]}}
+  {:name :_tuple-compact,
+   :parent :str,
+   :args {:parts ["(" :_compact-joined ")"]}}
+  {:name :_record-compact,
+   :parent :str,
+   :args {:parts ["{" :_compact-joined "}"]}}
+  {:name :_record-terse,
+   :parent :str,
+   :args {:parts ["{…" :_size "}"]}}
+  {:name :_map-length, :parent :count, :args {:coll :_map-compact}}
+  {:name :_map-fits, :parent :lte, :args {:nums [:_map-length 14]}}
+  {:name :_map-shown,
+   :parent :if,
+   :args {:test :_map-fits, :then :_map-compact, :else :_fallback}}
+  {:name :_tuple-length, :parent :count, :args {:coll :_tuple-compact}}
+  {:name :_tuple-fits, :parent :lte, :args {:nums [:_tuple-length 16]}}
+  {:name :_tuple-shown,
+   :parent :if,
+   :args {:test :_tuple-fits, :then :_tuple-compact, :else :_fallback}}
+  {:name :_union-length,
+   :parent :count,
+   :args {:coll :_compact-joined}}
+  {:name :_union-fits, :parent :lte, :args {:nums [:_union-length 12]}}
+  {:name :_union-shown,
+   :parent :if,
+   :args
+   {:test :_union-fits, :then :_compact-joined, :else :_fallback}}
+  {:name :_record-length,
+   :parent :count,
+   :args {:coll :_record-compact}}
+  {:name :_record-fits,
+   :parent :lte,
+   :args {:nums [:_record-length 16]}}
+  {:name :_record-shown,
+   :parent :if,
+   :args
+   {:test :_record-fits, :then :_record-compact, :else :_record-terse}}
+  {:name :_fn-full,
+   :parent :str,
+   :args {:parts ["(" :_args-compact ")→" :_return-compact]}}
+  {:name :_fn-full-length, :parent :count, :args {:coll :_fn-full}}
+  {:name :_fn-full-fits,
+   :parent :lte,
+   :args {:nums [:_fn-full-length 32]}}
+  {:name :_arg-prefix,
+   :parent :str-clip,
+   :args {:string :_first-label, :limit 8}}
+  {:name :_single-arg-terse,
+   :parent :str,
+   :args {:parts ["(" :_arg-prefix ")"]}}
+  {:name :_many-arg-terse,
+   :parent :str,
+   :args {:parts ["(" :_arg-size ")"]}}
+  {:name :_nonempty-arg-terse,
+   :parent :if,
+   :args
+   {:test :_one-arg, :then :_single-arg-terse, :else :_many-arg-terse}}
+  {:name :_args-terse,
+   :parent :if,
+   :args {:test :_no-args, :then "()", :else :_nonempty-arg-terse}}
+  {:name :_ret-string,
+   :parent :coalesce,
+   :args {:value :_ret-name, :default ""}}
+  {:name :_ret-length, :parent :count, :args {:coll :_ret-string}}
+  {:name :_ret-fits, :parent :lte, :args {:nums [:_ret-length 9]}}
+  {:name :_ret-prefix,
+   :parent :str-clip,
+   :args {:string :_ret-string, :limit 8}}
+  {:name :_ret-clipped,
+   :parent :str,
+   :args {:parts [:_ret-prefix "…"]}}
+  {:name :_ret-shown,
+   :parent :if,
+   :args {:test :_ret-fits, :then :_ret-name, :else :_ret-clipped}}
+  {:name :_ret-not-name, :parent :nil?, :args {:value :_ret-name}}
+  {:name :_ret-terse,
+   :parent :if,
+   :args {:test :_ret-not-name, :then "*", :else :_ret-shown}}
+  {:name :_fn-terse,
+   :parent :str,
+   :args {:parts [:_args-terse "→" :_ret-terse]}}
+  {:name :_fn-terse-length, :parent :count, :args {:coll :_fn-terse}}
+  {:name :_fn-terse-fits,
+   :parent :lte,
+   :args {:nums [:_fn-terse-length 32]}}
+  {:name :_fn-terse-or-fallback,
+   :parent :if,
+   :args {:test :_fn-terse-fits, :then :_fn-terse, :else :_fallback}}
+  {:name :_fn-compact,
+   :parent :if,
+   :args
+   {:test :_fn-full-fits,
+    :then :_fn-full,
+    :else :_fn-terse-or-fallback}}
+  {:name :_compact-rest-8,
+   :parent :if,
+   :args {:test :_kind-fn?, :then :_fn-compact, :else :_fallback}}
+  {:name :_compact-rest-7,
+   :parent :if,
+   :args
+   {:test :_kind-refine?,
+    :then :_first-compact,
+    :else :_compact-rest-8}}
+  {:name :_compact-rest-6,
+   :parent :if,
+   :args
+   {:test :_kind-record?,
+    :then :_record-shown,
+    :else :_compact-rest-7}}
+  {:name :_compact-rest-5,
+   :parent :if,
+   :args
+   {:test :_kind-union?, :then :_union-shown, :else :_compact-rest-6}}
+  {:name :_compact-rest-4,
+   :parent :if,
+   :args
+   {:test :_kind-tuple?, :then :_tuple-shown, :else :_compact-rest-5}}
+  {:name :_compact-rest-3,
+   :parent :if,
+   :args
+   {:test :_kind-map?, :then :_map-shown, :else :_compact-rest-4}}
+  {:name :_compact-rest-2,
+   :parent :if,
+   :args
+   {:test :_kind-list?, :then :_list-compact, :else :_compact-rest-3}}
+  {:name :_compact-rest-1,
+   :parent :if,
+   :args
+   {:test :_kind-name?, :then :_name-compact, :else :_compact-rest-2}}
+  {:name :_compact,
+   :parent :if,
+   :args {:test :_kind-empty?, :then :_flat, :else :_compact-rest-1}}
+  {:name :_short-separator,
+   :parent :if,
+   :args {:test :_child-first, :then "", :else ","}}
+  {:name :_short-part,
+   :parent :str,
+   :args {:parts [:_short-separator :_child-short]},
+   :lambda-params [:child]}
+  {:name :_short-parts,
+   :parent :map,
+   :args {:func :_short-part, :coll :_children}}
+  {:name :_short-joined, :parent :str, :args {:parts :_short-parts}}
+  {:name :_short-list,
+   :parent :str,
+   :args {:parts ["[" :_first-short "]"]}}
+  {:name :_short-map,
+   :parent :str,
+   :args {:parts ["{" :_first-short "→" :_second-short "}"]}}
+  {:name :_short-tuple,
+   :parent :str,
+   :args {:parts ["(" :_short-joined ")"]}}
+  {:name :_kind-raw-array?,
+   :parent :equal?,
+   :args {:a :_kind, :b "raw-array"}}
+  {:name :_short-rest-10,
+   :parent :if,
+   :args {:test :_kind-raw-array?, :then "type", :else :_atom}}
+  {:name :_short-rest-9,
+   :parent :if,
+   :args {:test :_kind-marker?, :then "type", :else :_short-rest-10}}
+  {:name :_short-rest-8,
+   :parent :if,
+   :args {:test :_kind-record?, :then "record", :else :_short-rest-9}}
+  {:name :_short-rest-7,
+   :parent :if,
+   :args {:test :_kind-fn?, :then "fn", :else :_short-rest-8}}
+  {:name :_short-rest-6,
+   :parent :if,
+   :args {:test :_kind-union?, :then "union", :else :_short-rest-7}}
+  {:name :_short-rest-5,
+   :parent :if,
+   :args
+   {:test :_kind-tuple?, :then :_short-tuple, :else :_short-rest-6}}
+  {:name :_short-rest-4,
+   :parent :if,
+   :args {:test :_kind-map?, :then :_short-map, :else :_short-rest-5}}
+  {:name :_short-rest-3,
+   :parent :if,
+   :args
+   {:test :_kind-list?, :then :_short-list, :else :_short-rest-4}}
+  {:name :_short-rest-2,
+   :parent :if,
+   :args
+   {:test :_kind-refine?, :then :_first-short, :else :_short-rest-3}}
+  {:name :_short-rest-1,
+   :parent :if,
+   :args {:test :_kind-name?, :then :_name, :else :_short-rest-2}}
+  {:name :_short,
+   :parent :if,
+   :args {:test :_kind-empty?, :then "any", :else :_short-rest-1}}
+  {:name :_format-output,
+   :type
+   {:human :text,
+    :compact :nullable-text,
+    :constraint :text,
+    :short :text}}
+  {:name :type-structure-initial,
+   :parent :zipmap,
+   :args
+   {:keys
+    [{:value :human}
+     {:value :compact}
+     {:value :constraint}
+     {:value :short}],
+    :vals [:_human :_compact :_constraint :_short]},
+   :return-type :_format-output}
+  {:name :_view-inputs,
+   :type
+   {:surface
+    [:refine
+     :text
+     {:constraint
+      [:in
+       #{"chip"
+         "resolution-mark"
+         "label"
+         "effects"
+         "field"
+         "resolution-label"
+         "kind"
+         "resolution-tag"
+         "resolution-head"
+         "chain"
+         "header"
+         "description"
+         "constraint"
+         "chain-separator"}]}],
+    :label :text,
+    :secondary :text,
+    :title :text,
+    :winner :bool,
+    :multiple :bool,
+    :mode
+    [:refine
+     :text
+     {:constraint
+      [:in #{"" "subtype" "inherited" "tier" "chain" "resolved"}]}]}}
+  {:name :_view-winner,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_view-inputs},
+    :key {:value :winner},
+    :default {:value false}}}
+  {:name :_view-multiple,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_view-inputs},
+    :key {:value :multiple},
+    :default {:value false}}}
+  {:name :_view-mode,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_view-inputs},
+    :key {:value :mode},
+    :default {:value ""}}}
+  {:name :_view-chain,
+   :parent :equal?,
+   :args {:a :_view-mode, :b "chain"}}
+  {:name :_view-chain-winner,
+   :parent :if,
+   :args {:test :_view-multiple, :then :_view-winner, :else false}}
+  {:name :_view-active,
+   :parent :if,
+   :args
+   {:test :_view-chain,
+    :then :_view-chain-winner,
+    :else :_view-winner}}
+  {:name :_view-surface,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_view-inputs},
+    :key {:value :surface},
+    :default {:value ""}}}
+  {:name :_view-label,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_view-inputs},
+    :key {:value :label},
+    :default {:value ""}}}
+  {:name :_view-secondary,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_view-inputs},
+    :key {:value :secondary},
+    :default {:value ""}}}
+  {:name :_view-title,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_view-inputs},
+    :key {:value :title},
+    :default {:value ""}}}
+  {:name :_view-active-class,
+   :parent :if,
+   :args
+   {:test :_view-active,
+    :then " gd-canvas-type-structure-active",
+    :else ""}}
+  {:name :_view-class,
+   :parent :str,
+   :args
+   {:parts
+    ["gd-canvas-type-structure-" :_view-surface :_view-active-class]}}
+  {:name :_view-attrs,
+   :parent :zipmap,
+   :args {:keys [{:value :class}], :vals [:_view-class]}}
+  {:name :_view-body,
+   :parent :hiccup,
+   :args {:tag "span", :attrs :_view-attrs, :children [:_view-text]}}
+  {:name :_view-chain-mark,
+   :parent :if,
+   :args {:test :_view-chain-winner, :then "✓", :else "↳"}}
+  {:name :_view-tier-mark,
+   :parent :if,
+   :args {:test :_view-winner, :then "✓", :else "·"}}
+  {:name :_view-mark,
+   :parent :if,
+   :args
+   {:test :_view-chain,
+    :then :_view-chain-mark,
+    :else :_view-tier-mark}}
+  {:name :_view-tag,
+   :parent :if,
+   :args {:test :_view-winner, :then "(chosen)", :else "(also by)"}}
+  {:name :_view-heading,
+   :parent :get,
+   :args
+   {:coll :_view-heading-table,
+    :key :_view-mode,
+    :default :_view-label}}
+  {:name :_view-display-is-3,
+   :parent :equal?,
+   :args {:a :_view-surface, :b "chain-separator"}}
+  {:name :_view-display-rest-3,
+   :parent :if,
+   :args {:test :_view-display-is-3, :then "⊂", :else :_view-label}}
+  {:name :_view-display-is-2,
+   :parent :equal?,
+   :args {:a :_view-surface, :b "resolution-head"}}
+  {:name :_view-display-rest-2,
+   :parent :if,
+   :args
+   {:test :_view-display-is-2,
+    :then :_view-heading,
+    :else :_view-display-rest-3}}
+  {:name :_view-display-is-1,
+   :parent :equal?,
+   :args {:a :_view-surface, :b "resolution-tag"}}
+  {:name :_view-display-rest-1,
+   :parent :if,
+   :args
+   {:test :_view-display-is-1,
+    :then :_view-tag,
+    :else :_view-display-rest-2}}
+  {:name :_view-display-is-0,
+   :parent :equal?,
+   :args {:a :_view-surface, :b "resolution-mark"}}
+  {:name :_view-display,
+   :parent :if,
+   :args
+   {:test :_view-display-is-0,
+    :then :_view-mark,
+    :else :_view-display-rest-1}}
+  {:name :_view-text,
+   :parent :str,
+   :args {:parts [:_view-display :_view-secondary]}}
+  {:name :_style-header,
+   :parent :zipmap,
+   :args
+   {:keys ["font-weight" "font-size" "color"],
+    :vals ["600" "0.625rem" "var(--card-fg)"]}}
+  {:name :_rule-header,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :selector} {:value :declarations}],
+    :vals ["& .gd-canvas-type-structure-header" :_style-header]}}
+  {:name :_style-kind,
+   :parent :zipmap,
+   :args
+   {:keys
+    ["font-size"
+     "text-transform"
+     "letter-spacing"
+     "color"
+     "padding"
+     "border"
+     "border-radius"],
+    :vals
+    ["0.5625rem"
+     "uppercase"
+     "0.04em"
+     "var(--muted-fg)"
+     "0 4px"
+     "1px solid var(--light-border)"
+     "2px"]}}
+  {:name :_rule-kind,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :selector} {:value :declarations}],
+    :vals ["& .gd-canvas-type-structure-kind" :_style-kind]}}
+  {:name :_style-description,
+   :parent :zipmap,
+   :args
+   {:keys ["font-size" "color" "font-style"],
+    :vals ["0.625rem" "var(--muted-fg)" "italic"]}}
+  {:name :_rule-description,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :selector} {:value :declarations}],
+    :vals
+    ["& .gd-canvas-type-structure-description" :_style-description]}}
+  {:name :_style-field,
+   :parent :zipmap,
+   :args
+   {:keys ["font-size" "color"],
+    :vals ["0.5625rem" "var(--muted-fg)"]}}
+  {:name :_rule-field,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :selector} {:value :declarations}],
+    :vals ["& .gd-canvas-type-structure-field" :_style-field]}}
+  {:name :_style-chip,
+   :parent :zipmap,
+   :args
+   {:keys ["font-size" "line-height"],
+    :vals ["0.5625rem" "1.3333333333"]}}
+  {:name :_rule-chip,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :selector} {:value :declarations}],
+    :vals ["& .gd-canvas-type-structure-chip" :_style-chip]}}
+  {:name :_style-constraint,
+   :parent :zipmap,
+   :args
+   {:keys ["font-size" "color" "font-family"],
+    :vals ["0.5625rem" "var(--muted-fg)" "inherit"]}}
+  {:name :_rule-constraint,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :selector} {:value :declarations}],
+    :vals
+    ["& .gd-canvas-type-structure-constraint" :_style-constraint]}}
+  {:name :_style-resolution-head,
+   :parent :zipmap,
+   :args
+   {:keys ["font-size" "text-transform" "letter-spacing" "color"],
+    :vals ["0.5625rem" "uppercase" "0.04em" "var(--muted-fg)"]}}
+  {:name :_rule-resolution-head,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :selector} {:value :declarations}],
+    :vals
+    ["& .gd-canvas-type-structure-resolution-head"
+     :_style-resolution-head]}}
+  {:name :_style-chain-separator,
+   :parent :zipmap,
+   :args
+   {:keys ["color" "font-size"], :vals ["var(--light-fg)" "0.625rem"]}}
+  {:name :_rule-chain-separator,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :selector} {:value :declarations}],
+    :vals
+    ["& .gd-canvas-type-structure-chain-separator"
+     :_style-chain-separator]}}
+  {:name :_style-resolution-tag,
+   :parent :zipmap,
+   :args
+   {:keys ["font-size" "font-style" "color"],
+    :vals ["0.5625rem" "italic" "var(--light-fg)"]}}
+  {:name :_rule-resolution-tag,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :selector} {:value :declarations}],
+    :vals
+    ["& .gd-canvas-type-structure-resolution-tag"
+     :_style-resolution-tag]}}
+  {:name :_style-active,
+   :parent :zipmap,
+   :args
+   {:keys ["color" "font-weight"], :vals ["var(--accent)" "600"]}}
+  {:name :_rule-active,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :selector} {:value :declarations}],
+    :vals ["& .gd-canvas-type-structure-active" :_style-active]}}
+  {:name :type-structure-styles,
+   :parent :list,
+   :args
+   {:items
+    [:_rule-header
+     :_rule-kind
+     :_rule-description
+     :_rule-field
+     :_rule-chip
+     :_rule-constraint
+     :_rule-resolution-head
+     :_rule-chain-separator
+     :_rule-resolution-tag
+     :_rule-active]},
+   :return-type
+   [:list {:selector :text, :declarations [:map :text :text]}]}
+  {:name :type-structure-view,
+   :parent :app.ui-canvas/canvas-view-fields,
+   :args {:vals [:_view-body :_view-title :type-structure-styles]}}]}

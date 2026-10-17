@@ -1,0 +1,616 @@
+{:namespace "app.ui-canvas-bindings",
+ :description
+ "Passive binding labels and seal explanations. Native controls retain authority, visibility, checked state and handlers.",
+ :fns
+ [{:name :_checkbox-label-table,
+   :parent :zipmap,
+   :args
+   {:keys ["terminal" "list-closed" "required" "slot-optional"],
+    :vals
+    ["Seal against descendants"
+     "Close the list"
+     "Require it here"
+     "Optional"]}}
+  {:name :_entry, :type {:name :text, :first :bool}}
+  {:name :_inputs,
+   :type
+   {:terminal :bool,
+    :authenticated :bool,
+    :key :text,
+    :editable :bool,
+    :entries [:list :_entry],
+    :has-list :bool,
+    :secondary :text,
+    :source :text,
+    :terminal-source :text,
+    :label :text,
+    :required-source :text,
+    :optional :bool,
+    :list-source :text,
+    :list-closed :bool,
+    :base :text,
+    :ancestor :bool,
+    :required :bool,
+    :surface
+    [:refine
+     :text
+     {:constraint
+      [:in
+       #{"seal-badge"
+         "label"
+         "seal-header"
+         "seal-empty"
+         "seal-reason"
+         "source"
+         "seal-hint"
+         "provenance"
+         "seal-inherited"
+         "seal-checkbox"}]}],
+    :any :bool}}
+  {:name :_surface,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :surface},
+    :default {:value ""}}}
+  {:name :_label,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :label},
+    :default {:value ""}}}
+  {:name :_secondary,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :secondary},
+    :default {:value ""}}}
+  {:name :_source,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :source},
+    :default {:value ""}}}
+  {:name :_base,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :base},
+    :default {:value ""}}}
+  {:name :_key,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :key},
+    :default {:value ""}}}
+  {:name :_terminal-source,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :terminal-source},
+    :default {:value ""}}}
+  {:name :_list-source,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :list-source},
+    :default {:value ""}}}
+  {:name :_required-source,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :required-source},
+    :default {:value ""}}}
+  {:name :_ancestor,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :ancestor},
+    :default {:value false}}}
+  {:name :_has-list,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :has-list},
+    :default {:value false}}}
+  {:name :_authenticated,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :authenticated},
+    :default {:value false}}}
+  {:name :_any,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :any},
+    :default {:value false}}}
+  {:name :_editable,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :editable},
+    :default {:value false}}}
+  {:name :_optional,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :optional},
+    :default {:value false}}}
+  {:name :_terminal,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :terminal},
+    :default {:value false}}}
+  {:name :_list-closed,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :list-closed},
+    :default {:value false}}}
+  {:name :_required,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :required},
+    :default {:value false}}}
+  {:name :_entries,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :entries},
+    :default {:value []}}}
+  {:name :_entry-name,
+   :parent :get,
+   :args
+   {:coll {:as :entry, :type :_entry},
+    :key {:value :name},
+    :default {:value ""}}}
+  {:name :_entry-first,
+   :parent :get,
+   :args
+   {:coll {:as :entry, :type :_entry},
+    :key {:value :first},
+    :default {:value false}}}
+  {:name :_name-separator,
+   :parent :if,
+   :args {:test :_entry-first, :then "", :else " ← "}}
+  {:name :_name-part,
+   :parent :str,
+   :args {:parts [:_name-separator :_entry-name]},
+   :lambda-params [:entry]}
+  {:name :_name-parts,
+   :parent :map,
+   :args {:func :_name-part, :coll :_entries}}
+  {:name :_names, :parent :str, :args {:parts :_name-parts}}
+  {:name :_source-title,
+   :parent :str,
+   :args {:parts ["Inherited from " :_names]}}
+  {:name :_provenance-verb-is-1,
+   :parent :equal?,
+   :args {:a :_key, :b "inherited"}}
+  {:name :_provenance-verb-rest-1,
+   :parent :if,
+   :args
+   {:test :_provenance-verb-is-1,
+    :then "Inherited narrowing from :",
+    :else "Narrowed at :"}}
+  {:name :_provenance-verb-is-0,
+   :parent :equal?,
+   :args {:a :_key, :b "ref-return"}}
+  {:name :_provenance-verb,
+   :parent :if,
+   :args
+   {:test :_provenance-verb-is-0,
+    :then "Narrowed by ref :",
+    :else :_provenance-verb-rest-1}}
+  {:name :_base-empty, :parent :equal?, :args {:a :_base, :b ""}}
+  {:name :_base-hint-text,
+   :parent :str,
+   :args {:parts [" (narrowed from :" :_base ")"]}}
+  {:name :_base-hint,
+   :parent :if,
+   :args {:test :_base-empty, :then "", :else :_base-hint-text}}
+  {:name :_provenance-title,
+   :parent :str,
+   :args
+   {:parts
+    [:_provenance-verb
+     :_source
+     :_base-hint
+     " — click for full chain"]}}
+  {:name :_terminal-source-empty,
+   :parent :equal?,
+   :args {:a :_terminal-source, :b ""}}
+  {:name :_terminal-who,
+   :parent :if,
+   :args
+   {:test :_terminal-source-empty,
+    :then "an ancestor",
+    :else :_terminal-source}}
+  {:name :_list-source-empty,
+   :parent :equal?,
+   :args {:a :_list-source, :b ""}}
+  {:name :_list-who,
+   :parent :if,
+   :args
+   {:test :_list-source-empty,
+    :then "an ancestor",
+    :else :_list-source}}
+  {:name :_required-source-empty,
+   :parent :equal?,
+   :args {:a :_required-source, :b ""}}
+  {:name :_required-who,
+   :parent :if,
+   :args
+   {:test :_required-source-empty,
+    :then "an ancestor",
+    :else :_required-source}}
+  {:name :_terminal-above,
+   :parent :str,
+   :args
+   {:parts
+    ["Sealed in "
+     :_terminal-who
+     " — descendants cannot bind this slot."]}}
+  {:name :_terminal-not-here,
+   :parent :if,
+   :args
+   {:test :_terminal-source-empty, :then "", :else :_terminal-above}}
+  {:name :_terminal-line,
+   :parent :if,
+   :args
+   {:test :_terminal,
+    :then "Sealed here — descendants cannot bind this slot.",
+    :else :_terminal-not-here}}
+  {:name :_list-above,
+   :parent :str,
+   :args
+   {:parts
+    ["List closed in " :_list-who " — descendants cannot append."]}}
+  {:name :_list-not-here,
+   :parent :if,
+   :args {:test :_list-source-empty, :then "", :else :_list-above}}
+  {:name :_list-line,
+   :parent :if,
+   :args
+   {:test :_list-closed,
+    :then "List closed here — descendants cannot append.",
+    :else :_list-not-here}}
+  {:name :_required-above,
+   :parent :str,
+   :args
+   {:parts
+    ["Optional by declaration, required since " :_required-who "."]}}
+  {:name :_required-not-here,
+   :parent :if,
+   :args
+   {:test :_required-source-empty,
+    :then "Optional — the fn runs without it.",
+    :else :_required-above}}
+  {:name :_required-optional,
+   :parent :if,
+   :args
+   {:test :_required,
+    :then
+    "Optional by declaration, required here — and in every descendant.",
+    :else :_required-not-here}}
+  {:name :_required-line,
+   :parent :if,
+   :args {:test :_optional, :then :_required-optional, :else ""}}
+  {:name :_terminal-empty,
+   :parent :equal?,
+   :args {:a :_terminal-line, :b ""}}
+  {:name :_list-empty, :parent :equal?, :args {:a :_list-line, :b ""}}
+  {:name :_required-empty,
+   :parent :equal?,
+   :args {:a :_required-line, :b ""}}
+  {:name :_list-separator,
+   :parent :if,
+   :args {:test :_terminal-empty, :then "", :else "\n"}}
+  {:name :_required-separator,
+   :parent :if,
+   :args {:test :_list-empty, :then :_list-separator, :else "\n"}}
+  {:name :_list-with-separator,
+   :parent :str,
+   :args {:parts [:_list-separator :_list-line]}}
+  {:name :_list-text,
+   :parent :if,
+   :args {:test :_list-empty, :then "", :else :_list-with-separator}}
+  {:name :_required-with-separator,
+   :parent :str,
+   :args {:parts [:_required-separator :_required-line]}}
+  {:name :_required-text,
+   :parent :if,
+   :args
+   {:test :_required-empty, :then "", :else :_required-with-separator}}
+  {:name :_seal-lines,
+   :parent :str,
+   :args {:parts [:_terminal-line :_list-text :_required-text]}}
+  {:name :_seal-lines-empty,
+   :parent :equal?,
+   :args {:a :_seal-lines, :b ""}}
+  {:name :_seal-summary,
+   :parent :if,
+   :args
+   {:test :_seal-lines-empty,
+    :then "No seal on this slot.",
+    :else :_seal-lines}}
+  {:name :_seal-edit-suffix,
+   :parent :if,
+   :args
+   {:test :_editable,
+    :then "\nClick to change what descendants may do with it.",
+    :else ""}}
+  {:name :_seal-title,
+   :parent :str,
+   :args {:parts [:_seal-summary :_seal-edit-suffix]}}
+  {:name :_label-empty, :parent :equal?, :args {:a :_label, :b ""}}
+  {:name :_slot-name, :parent :str, :args {:parts [":" :_label]}}
+  {:name :_slot-label,
+   :parent :if,
+   :args {:test :_label-empty, :then "This slot", :else :_slot-name}}
+  {:name :_seal-header,
+   :parent :str,
+   :args {:parts [:_slot-label " on " :_source]}}
+  {:name :_inherited-terminal,
+   :parent :str,
+   :args {:parts ["Sealed in " :_source " — lift it there."]}}
+  {:name :_inherited-list,
+   :parent :str,
+   :args {:parts ["List closed in " :_source " — reopen it there."]}}
+  {:name :_inherited-required,
+   :parent :str,
+   :args
+   {:parts
+    ["Required since "
+     :_source
+     " — a ratchet, it cannot be undone below."]}}
+  {:name :_owner-empty, :parent :equal?, :args {:a :_source, :b ""}}
+  {:name :_owner-suffix,
+   :parent :str,
+   :args {:parts [" (" :_source ")"]}}
+  {:name :_owner-text,
+   :parent :if,
+   :args {:test :_owner-empty, :then "", :else :_owner-suffix}}
+  {:name :_declaration,
+   :parent :str,
+   :args {:parts ["Required by declaration" :_owner-text "."]}}
+  {:name :_inherited-is-2,
+   :parent :equal?,
+   :args {:a :_key, :b "required"}}
+  {:name :_inherited-rest-2,
+   :parent :if,
+   :args
+   {:test :_inherited-is-2,
+    :then :_inherited-required,
+    :else :_declaration}}
+  {:name :_inherited-is-1,
+   :parent :equal?,
+   :args {:a :_key, :b "list-closed"}}
+  {:name :_inherited-rest-1,
+   :parent :if,
+   :args
+   {:test :_inherited-is-1,
+    :then :_inherited-list,
+    :else :_inherited-rest-2}}
+  {:name :_inherited-is-0,
+   :parent :equal?,
+   :args {:a :_key, :b "terminal"}}
+  {:name :_inherited,
+   :parent :if,
+   :args
+   {:test :_inherited-is-0,
+    :then :_inherited-terminal,
+    :else :_inherited-rest-1}}
+  {:name :_checkbox-label,
+   :parent :get,
+   :args {:coll :_checkbox-label-table, :key :_key, :default :_key}}
+  {:name :_terminal-hint-open,
+   :parent :str,
+   :args {:parts ["no fn extending " :_source " may bind this slot"]}}
+  {:name :_terminal-hint,
+   :parent :if,
+   :args
+   {:test :_ancestor,
+    :then "already sealed above",
+    :else :_terminal-hint-open}}
+  {:name :_list-hint-open,
+   :parent :str,
+   :args {:parts ["no fn extending " :_source " may append"]}}
+  {:name :_list-can-close,
+   :parent :if,
+   :args
+   {:test :_has-list,
+    :then :_list-hint-open,
+    :else "append an item first"}}
+  {:name :_list-hint,
+   :parent :if,
+   :args
+   {:test :_ancestor,
+    :then "already closed above",
+    :else :_list-can-close}}
+  {:name :_required-hint-open,
+   :parent :str,
+   :args
+   {:parts
+    ["optional by declaration; required from " :_source " down"]}}
+  {:name :_required-hint,
+   :parent :if,
+   :args
+   {:test :_ancestor,
+    :then "already required above",
+    :else :_required-hint-open}}
+  {:name :_checkbox-hint-rest-2,
+   :parent :if,
+   :args
+   {:test :_inherited-is-2,
+    :then :_required-hint,
+    :else
+    "the declaration: the fn runs without it; a descendant may still require it"}}
+  {:name :_checkbox-hint-rest-1,
+   :parent :if,
+   :args
+   {:test :_inherited-is-1,
+    :then :_list-hint,
+    :else :_checkbox-hint-rest-2}}
+  {:name :_checkbox-hint,
+   :parent :if,
+   :args
+   {:test :_inherited-is-0,
+    :then :_terminal-hint,
+    :else :_checkbox-hint-rest-1}}
+  {:name :_read-only-why,
+   :parent :if,
+   :args
+   {:test :_authenticated,
+    :then "Only the fn’s owner changes its seals.",
+    :else "Sign in to change seals on your own fns."}}
+  {:name :_empty-seal,
+   :parent :if,
+   :args {:test :_any, :then "", :else "No seal on this slot."}}
+  {:name :_surface-seal-reason?,
+   :parent :equal?,
+   :args {:a :_surface, :b "seal-reason"}}
+  {:name :_display-rest-5,
+   :parent :if,
+   :args
+   {:test :_surface-seal-reason?,
+    :then :_read-only-why,
+    :else :_label}}
+  {:name :_surface-seal-empty?,
+   :parent :equal?,
+   :args {:a :_surface, :b "seal-empty"}}
+  {:name :_display-rest-4,
+   :parent :if,
+   :args
+   {:test :_surface-seal-empty?,
+    :then :_empty-seal,
+    :else :_display-rest-5}}
+  {:name :_surface-seal-hint?,
+   :parent :equal?,
+   :args {:a :_surface, :b "seal-hint"}}
+  {:name :_display-rest-3,
+   :parent :if,
+   :args
+   {:test :_surface-seal-hint?,
+    :then :_checkbox-hint,
+    :else :_display-rest-4}}
+  {:name :_surface-seal-checkbox?,
+   :parent :equal?,
+   :args {:a :_surface, :b "seal-checkbox"}}
+  {:name :_display-rest-2,
+   :parent :if,
+   :args
+   {:test :_surface-seal-checkbox?,
+    :then :_checkbox-label,
+    :else :_display-rest-3}}
+  {:name :_surface-seal-inherited?,
+   :parent :equal?,
+   :args {:a :_surface, :b "seal-inherited"}}
+  {:name :_display-rest-1,
+   :parent :if,
+   :args
+   {:test :_surface-seal-inherited?,
+    :then :_inherited,
+    :else :_display-rest-2}}
+  {:name :_surface-seal-header?,
+   :parent :equal?,
+   :args {:a :_surface, :b "seal-header"}}
+  {:name :_display,
+   :parent :if,
+   :args
+   {:test :_surface-seal-header?,
+    :then :_seal-header,
+    :else :_display-rest-1}}
+  {:name :_surface-seal-badge?,
+   :parent :equal?,
+   :args {:a :_surface, :b "seal-badge"}}
+  {:name :_title-rest-2,
+   :parent :if,
+   :args {:test :_surface-seal-badge?, :then :_seal-title, :else ""}}
+  {:name :_surface-provenance?,
+   :parent :equal?,
+   :args {:a :_surface, :b "provenance"}}
+  {:name :_title-rest-1,
+   :parent :if,
+   :args
+   {:test :_surface-provenance?,
+    :then :_provenance-title,
+    :else :_title-rest-2}}
+  {:name :_surface-source?,
+   :parent :equal?,
+   :args {:a :_surface, :b "source"}}
+  {:name :_title,
+   :parent :if,
+   :args
+   {:test :_surface-source?,
+    :then :_source-title,
+    :else :_title-rest-1}}
+  {:name :_class,
+   :parent :str,
+   :args {:parts ["gd-canvas-bindings-" :_surface]}}
+  {:name :_attrs,
+   :parent :zipmap,
+   :args {:keys [{:value :class}], :vals [:_class]}}
+  {:name :_text, :parent :str, :args {:parts [:_display :_secondary]}}
+  {:name :_body,
+   :parent :hiccup,
+   :args {:tag "span", :attrs :_attrs, :children [:_text]}}
+  {:name :_style-seal-header,
+   :parent :zipmap,
+   :args {:keys ["font-weight" "color"], :vals ["600" "var(--fg)"]}}
+  {:name :_rule-seal-header,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :selector} {:value :declarations}],
+    :vals ["& .gd-canvas-bindings-seal-header" :_style-seal-header]}}
+  {:name :_style-seal-inherited,
+   :parent :zipmap,
+   :args
+   {:keys ["color" "font-style"], :vals ["var(--muted-fg)" "italic"]}}
+  {:name :_rule-seal-inherited,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :selector} {:value :declarations}],
+    :vals
+    ["& .gd-canvas-bindings-seal-inherited" :_style-seal-inherited]}}
+  {:name :_style-seal-checkbox,
+   :parent :zipmap,
+   :args {:keys ["color"], :vals ["var(--fg)"]}}
+  {:name :_rule-seal-checkbox,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :selector} {:value :declarations}],
+    :vals
+    ["& .gd-canvas-bindings-seal-checkbox" :_style-seal-checkbox]}}
+  {:name :_style-seal-hint,
+   :parent :zipmap,
+   :args
+   {:keys ["color" "font-size"],
+    :vals ["var(--muted-fg)" "0.6875rem"]}}
+  {:name :_rule-seal-hint,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :selector} {:value :declarations}],
+    :vals ["& .gd-canvas-bindings-seal-hint" :_style-seal-hint]}}
+  {:name :_rule-seal-reason,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :selector} {:value :declarations}],
+    :vals ["& .gd-canvas-bindings-seal-reason" :_style-seal-hint]}}
+  {:name :bindings-styles,
+   :parent :list,
+   :args
+   {:items
+    [:_rule-seal-header
+     :_rule-seal-inherited
+     :_rule-seal-checkbox
+     :_rule-seal-hint
+     :_rule-seal-reason]},
+   :return-type
+   [:list {:selector :text, :declarations [:map :text :text]}]}
+  {:name :bindings-view,
+   :parent :app.ui-canvas/canvas-view-fields,
+   :args {:vals [:_body :_title :bindings-styles]}}]}

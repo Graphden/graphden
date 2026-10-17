@@ -867,9 +867,9 @@ every read; everything else benefits from sharing.
 
 ### `:expects-effects` policy declarations
 
-Any fn-def can declare an `:expects-effects #{…}` set. At sync time,
-the type-checker compares declared vs computed; categories that show
-up in the actual graph but weren't in the declaration log a `WARN`:
+Any fn-def can declare an `:expects-effects #{…}` set. The type-checker
+compares declared vs computed effects. An actual category missing from
+the declaration raises `:types/expects-effects-drift`, an error diagnostic:
 
 ```text
 fn-def :health declared :expects-effects #{:time}
@@ -879,9 +879,10 @@ fn-def :health declared :expects-effects #{:time}
 
 Useful for routes / module boundaries — declare what each layer is
 ALLOWED to touch, and any accidental introduction of e.g. a DB read
-into a supposedly pure `/health` endpoint shows up in `bb deploy`
-logs at the moment of the regression. Default is no declaration → no
-check (backward compat).
+into a supposedly pure `/health` endpoint appears in checker diagnostics
+and sync checks. This is not a universal save barrier: raw CRUD APIs can
+persist an invalid graph. Default is no declaration → no check
+(backward compat).
 
 `:expects-effects` and **slot-level effect constraints** (Phase 8)
 are complementary:
@@ -1307,8 +1308,8 @@ URL: http://localhost:9002/api/types
 
 Exit code: `0` on no drift or over-declaration only (harmless); `1`
 when at least one fn-def has REAL drift (a computed effect not in
-its `:expects-effects`). Useful in CI as an audit gate without
-blocking on the more lenient sync-time WARN.
+its `:expects-effects`). Useful in CI alongside the type-checker's
+effect-drift diagnostics.
 
 **Return-type drift** is the same idea for `:return-type`: a declaration
 strictly wider than the computed return logs a sync-time WARN
@@ -1394,7 +1395,7 @@ yet; see [Runtime Validation from Types](#runtime-validation-from-types).
 - Loader normalises legacy `:effectful? true` to `:effects #{:effect}`
 - Composition unions ref-binding effects into the fn-def's set
 - Editor renders colour-coded chips per category
-- `:expects-effects` declarations + sync-time WARN on drift
+- `:expects-effects` declarations + error diagnostic on unexpected effects
 - `bb effects` CLI report
 - Per-category caching policy (`:time` / `:random` always-fresh,
   others cacheable within one top-level invocation)

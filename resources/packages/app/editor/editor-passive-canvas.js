@@ -22,6 +22,32 @@
       updateOverlayPositions();
     });
   }
+// Opt-in native placement for passive popovers. It only reads geometry;
+// callers keep their content/control ownership and existing lifecycle.
+window.gdPositionPassivePopover = (host, anchor, {scale = 1, gap = 4} = {}) => {
+  if (!host.isConnected || !anchor?.isConnected || !Number.isFinite(scale) || scale <= 0) return false;
+  const margin = 8;
+  host.classList.add('gd-passive-popover');
+  host.style.setProperty('--gd-passive-viewport-width', Math.max(0, window.innerWidth - 2 * margin) / scale + 'px');
+  host.style.setProperty('--gd-passive-viewport-height', Math.max(0, window.innerHeight - 2 * margin) / scale + 'px');
+  host.style.display = 'flex';
+  host.style.position = 'fixed';
+  host.style.transformOrigin = 'top left';
+  host.style.transform = 'scale(' + scale + ')';
+  const rect = anchor.getBoundingClientRect();
+  // Fixed shrink-to-fit width depends on left. Measure at the same origin
+  // before clamping, so an earlier zoom/anchor cannot change this envelope.
+  host.style.left = '0px';
+  host.style.top = '0px';
+  const width = host.offsetWidth * scale;
+  const height = host.offsetHeight * scale;
+  const left = Math.max(margin, Math.min(rect.left, window.innerWidth - width - margin));
+  const below = rect.bottom + gap;
+  const preferred = below + height > window.innerHeight - margin ? rect.top - height - gap : below;
+  host.style.top = Math.max(margin, Math.min(preferred, window.innerHeight - height - margin)) + 'px';
+  host.style.left = left + 'px';
+  return true;
+};
 window.gdCreatePassiveCanvas = config => {
   const api = window.GraphdenBrowser;
   const field = (map, name) => map instanceof Map ? map.get(api.keyword(name)) : undefined;
@@ -32,6 +58,7 @@ window.gdCreatePassiveCanvas = config => {
   let builtinRuntime = null;
   let pending = null;
   let generation = 0;
+  let revision = 0;
   let sheet = null;
   let signature = null;
   const rejected = new WeakSet();
@@ -40,6 +67,7 @@ window.gdCreatePassiveCanvas = config => {
   let reconciledScope = null;
   let policyRefresh = false;
   function changed() {
+    revision++;
     if (!config.onRuntimeChanged || policyRefresh) return;
     policyRefresh = true;
     queueMicrotask(() => { policyRefresh = false; config.onRuntimeChanged(); });
@@ -59,6 +87,7 @@ window.gdCreatePassiveCanvas = config => {
     const next = context();
     if (reconciledScope && next.owner === reconciledScope.owner && next.ready === reconciledScope.ready
       && next.auth === reconciledScope.auth && next.location === reconciledScope.location) return;
+    revision++;
     if (reconciledScope && !compatible(reconciledScope, next)) {
       generation++;
       pending?.abort();
@@ -142,7 +171,12 @@ window.gdCreatePassiveCanvas = config => {
     const own = generation;
     const started = context();
     const run = current => {
-      const result = build((input, validate) => validate(current.run('initial', {inputs: record(input)})));
+      const personal = current !== builtin();
+      const budget = personal && config.initialBatchOperationLimit
+        ? api.createOperationBudget(config.initialBatchOperationLimit,
+          {durationMs: config.initialBatchMilliseconds ?? null}) : null;
+      const result = build((input, validate) => validate(current.run('initial', {inputs: record(input)}, budget)),
+        {personal});
       if (own !== generation || !compatible(started, context())) throw new Error('Retired canvas policy');
       return result;
     };
@@ -155,6 +189,7 @@ window.gdCreatePassiveCanvas = config => {
     }
   }
   function draw(body) {
+    const own = generation;
     const runtime = selected && !rejected.has(selected) ? selected : builtin();
     let output;
     try { output = checked(runtime, body.input); }
@@ -163,6 +198,7 @@ window.gdCreatePassiveCanvas = config => {
       reject(runtime);
       output = checked(builtin(), body.input);
     }
+    if (!body.active() || own !== generation) return;
     acquireStyles(output.styles);
     body.renderer.render(output.tree);
     // A renderer called without rules removes an externally assigned scope.
@@ -172,7 +208,14 @@ window.gdCreatePassiveCanvas = config => {
         + (body.options.titleSuffix || '');
     }
   }
-  function layoutReady() { reconcileScopes(); return owners.size > 0; }
+  function layoutReady() {
+    reconcileScopes();
+    const connected = [...owners.keys()].filter(owner => owner.isConnected);
+    if (config.geometry) {
+      return connected.length > 0 && config.geometry(connected) === true;
+    }
+    return connected.length > 0;
+  }
   function geometry() { scheduleLayout(layoutReady); }
   const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(geometry) : null;
   function refresh() {
@@ -189,21 +232,43 @@ window.gdCreatePassiveCanvas = config => {
     reconcileScopes();
     const input = config.projection(surface, facts);
     const renderer = window.GraphdenRenderer.mount(host, {idPrefix: config.prefix, nodeLimit: 1024});
+    let disposed = false;
     const body = {input, renderer, options, context: context(),
+      active() { return !disposed && owners.get(owner)?.has(body)
+        && compatible(body.context, context()); },
       scope(value) {
+        if (disposed && value) return;
         if (value) host.dataset.gdUiStyle = value.id;
         else delete host.dataset.gdUiStyle;
       },
       refresh() {
+        if (!body.active()) return;
         try { draw(body); }
         catch (_) {
+          if (!body.active()) return;
           fail();
           // Never silently truncate a large free-argument presentation.
-          renderer.render(config.failureText(input));
+          renderer.render(config.failureText(body.input));
           body.scope(null);
         }
       },
-      dispose() { renderer.dispose(); },
+      update(facts) {
+        reconcileScopes();
+        if (!body.active()) return false;
+        body.input = config.projection(surface, facts);
+        body.refresh();
+        geometry();
+        return body.active();
+      },
+      dispose() {
+        if (disposed) return;
+        disposed = true;
+        renderer.dispose();
+        body.scope(null);
+        const siblings = owners.get(owner);
+        siblings?.delete(body);
+        if (siblings && !siblings.size) dispose(owner);
+      },
     };
     let bodies = owners.get(owner);
     if (!bodies) { bodies = new Set(); owners.set(owner, bodies); observer?.observe(owner); }
@@ -252,7 +317,12 @@ window.gdCreatePassiveCanvas = config => {
   window.addEventListener('gd-graph-changed', () => invalidate());
   window.addEventListener('resize', geometry);
   document.fonts?.addEventListener('loadingdone', geometry);
-  return {mount: mountCanvasBody, dispose, reload, invalidate, initialBatch};
+  function disposeWithin(root) {
+    for (const owner of [...owners.keys()]) if (owner === root || root.contains(owner)) dispose(owner);
+  }
+  return {mount: mountCanvasBody, dispose, disposeWithin, reload, invalidate, initialBatch,
+    revision() { reconcileScopes(); return revision; },
+  };
 };
 
 })();

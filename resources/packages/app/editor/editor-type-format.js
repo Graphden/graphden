@@ -9,165 +9,15 @@
 // immediately AFTER
 // editor-literal-types.js in `_editor-script-paths`.
 
-// Render a structural type as a NATURAL-LANGUAGE string for the
-// type-explainer popover. The terse `formatTypeHint` is the
-// machine-readable form (`:int (> 0)`, `[int]`); this is the
-// "what does this mean?" text a non-Clojure user reads.
-//
-// Heuristics over a curated lookup — common refinements get
-// dedicated phrases (`positive integer`, `non-empty text`); the
-// long tail falls back to "X where CONSTRAINT".
-// graph-first-exception: presentation half of the keystroke/canvas type
-// path (chips, hints, inline validation feedback) — must stay sub-100ms
-// local; the server keeps its own authoritative formatter in graphden.types,
-// these functions are the CLIENT presentation, not a reimplementation of
-// server reasoning (resolution DATA arrives via /api/types + layout facts).
+// Display receipts come from the ordinary local type-structure graph. These
+// wrappers retain their consumers' synchronous ABI. Canonical type hints,
+// identity lookup, validation and submitted values stay in native helpers.
 function formatTypeHumanReadable(t) {
-  if (t == null) return '';
-  if (typeof t === 'string') return primitiveHuman(t);
-  if (Array.isArray(t)) {
-    const head = t[0];
-    if (head === 'refine') {
-      const baseHuman = formatTypeHumanReadable(t[1]);
-      const friendly = refinementFriendlyName(t[1], t[2]);
-      if (friendly) return friendly;
-      return baseHuman + ' where ' + constraintHuman(t[2]);
-    }
-    if (head === 'list') {
-      return 'list of ' + pluralise(formatTypeHumanReadable(t[1]));
-    }
-    if (head === 'map') {
-      return 'map of ' + formatTypeHumanReadable(t[1]) + ' to '
-           + formatTypeHumanReadable(t[2]);
-    }
-    if (head === 'tuple') {
-      return 'tuple of (' + t.slice(1).map(formatTypeHumanReadable).join(', ') + ')';
-    }
-    if (head === 'union') {
-      const parts = t.slice(1).map(formatTypeHumanReadable);
-      if (parts.length === 2) return 'either ' + parts[0] + ' or ' + parts[1];
-      return 'one of: ' + parts.join(', ');
-    }
-    if (head === 'fn') {
-      const args = Object.entries(t[1])
-        .map(([k, v]) => k + ' (' + formatTypeHumanReadable(v) + ')')
-        .join(', ');
-      const ret = formatTypeHumanReadable(t[2]);
-      const argsPart = args.length ? 'takes ' + args + ', ' : 'takes no args, ';
-      // 4th element (when present) is the slot-level effect constraint.
-      // `null`/`'any'`/missing → unconstrained. `[]` → pure (no effects
-      // allowed). Otherwise a list of category names — the callable's
-      // effects must be a SUBSET of these.
-      const effSet = t[3];
-      let effSuffix = '';
-      if (effSet === undefined || effSet === null || effSet === 'any') {
-        effSuffix = '';
-      } else if (Array.isArray(effSet) && effSet.length === 0) {
-        effSuffix = '; must be pure (no effects allowed)';
-      } else if (Array.isArray(effSet)) {
-        effSuffix = '; allowed effects: ' + effSet.join(', ');
-      }
-      // Variance hint — one short line so the tooltip stays compact.
-      // Args are contravariant (callable may accept WIDER inputs),
-      // return is covariant (callable may produce NARROWER outputs).
-      // We only mention it when the function shape is non-trivial
-      // (≥ 1 arg) so the hint doesn't pollute trivial cases.
-      const varianceHint = (args.length > 0)
-                           ? '. Args contravariant; return covariant.'
-                           : '';
-      return 'function: ' + argsPart + 'returns ' + ret + effSuffix + varianceHint;
-    }
-    // Marker head — [:secret T] and any registered marker wraps an
-    // inner type (same structural rule as validateLiteralAgainstType).
-    // Without this branch a secret's type printed as raw JSON
-    // (`["secret","text"]`) on cards and in the inspector.
-    if (t.length === 2 && typeof head === 'string') {
-      return head + ' ' + formatTypeHumanReadable(t[1]);
-    }
-    return JSON.stringify(t);
-  }
-  if (typeof t === 'object') {
-    const fields = Object.entries(t)
-      .map(([k, v]) => k + ' (' + formatTypeHumanReadable(v) + ')');
-    if (fields.length === 0) return 'empty record';
-    if (fields.length === 1) return 'record with ' + fields[0];
-    return 'record with ' + fields.slice(0, -1).join(', ')
-         + ' and ' + fields[fields.length - 1];
-  }
-  return String(t);
+  return window.gdCanvasTypeStructureGraph.format(t, null).human;
 }
 
-function primitiveHuman(name) {
-  const map = {
-    'int':         'integer',
-    'numeric':     'number',
-    'text':        'text',
-    'bool':        'true/false',
-    'null':        'null',
-    'jsonb':       'any JSON value',
-    'any':         'any value',
-    'fn':          'function',
-    'sequence':    'sequence',
-    'uuid':        'UUID',
-    'bytes':       'binary data',
-    'timestamptz': 'timestamp',
-    'keyword':     'keyword',
-    'float':       'decimal number',
-  };
-  return map[name] || name;
-}
-
-// Recognise a handful of common refinements and turn them into a
-// single-word phrase. Anything outside this list flows to the
-// generic "INT where CONSTRAINT" fallback.
-function refinementFriendlyName(base, constraint) {
-  if (base !== 'int' && base !== 'numeric') return null;
-  if (!Array.isArray(constraint)) return null;
-  const op = constraint[0];
-  const v = constraint[1];
-  const baseHuman = primitiveHuman(base);
-  if (op === '>'  && v === 0) return 'positive ' + baseHuman;
-  if (op === '<'  && v === 0) return 'negative ' + baseHuman;
-  if (op === '>=' && v === 0) return 'non-negative ' + baseHuman;
-  if (op === '<=' && v === 0) return 'non-positive ' + baseHuman;
-  return null;
-}
-
-function constraintHuman(c) {
-  if (!Array.isArray(c)) return JSON.stringify(c);
-  const op = c[0];
-  if (op === 'and') {
-    return c.slice(1).map(constraintHuman).join(' and ');
-  }
-  if (op === 'or') {
-    return c.slice(1).map(constraintHuman).join(' or ');
-  }
-  if (op === 'in' && Array.isArray(c[1])) {
-    return 'one of ' + c[1].map(String).join(', ');
-  }
-  if (c.length === 2) return op + ' ' + JSON.stringify(c[1]);
-  return JSON.stringify(c);
-}
-
-// English-plural the head noun. We only handle the cases primitiveHuman
-// emits — everything else stays singular and the surrounding phrase
-// still reads OK (e.g. "list of any JSON value").
-function pluralise(noun) {
-  const map = {
-    'integer': 'integers',
-    'number': 'numbers',
-    'text': 'text values',
-    'true/false': 'booleans',
-    'null': 'nulls',
-    'UUID': 'UUIDs',
-    'timestamp': 'timestamps',
-    'keyword': 'keywords',
-    'function': 'functions',
-    'sequence': 'sequences',
-    'decimal number': 'decimal numbers',
-    'binary data': 'binary blobs',
-  };
-  return map[noun] || noun;
+function constraintHuman(constraint) {
+  return window.gdCanvasTypeStructureGraph.constraint(constraint);
 }
 
 
@@ -232,73 +82,7 @@ function formatTypeHint(t) {
 // Canonical home for chip text — consumed by editor-overlay-arg.js,
 // editor-fn-picker.js and editor-layout.js.
 function compactTypeChipText(rich, flat) {
-  if (rich == null) return flat;
-  // The name to fall back on when the structure is too wide for a chip. A
-  // server row hands the structure itself as `flat`, so say what KIND of
-  // type it is rather than stringify the array.
-  const fallback = () => (typeof flat === 'string'
-    ? flat
-    : (Array.isArray(rich) && typeof rich[0] === 'string' ? rich[0] : null));
-  // A record type is a plain field→type object. It has no `flat` name
-  // to fall back on — a server-sourced picker row hands the object
-  // itself as `flat`, which stringified to "[object Object]".
-  if (typeof rich === 'object' && !Array.isArray(rich)) {
-    const keys = Object.keys(rich);
-    const joined = '{' + keys.join(',') + '}';
-    return joined.length <= 16 ? joined : '{…' + keys.length + '}';
-  }
-  if (typeof rich === 'string') {
-    // Type-var: lowercase letter, optionally "<letter>-<digits>".
-    if (/^[a-z](-\d+)?$/.test(rich) && rich !== flat) return "'" + rich.charAt(0);
-    return rich;
-  }
-  if (Array.isArray(rich)) {
-    const head = rich[0];
-    if (head === 'list')   return '[' + compactTypeChipText(rich[1], 'any') + ']';
-    if (head === 'map') {
-      const joined = '{' + compactTypeChipText(rich[1], 'any') + '→'
-                   + compactTypeChipText(rich[2], 'any') + '}';
-      return joined.length > 14 ? fallback() : joined;
-    }
-    if (head === 'tuple') {
-      const joined = '(' + rich.slice(1)
-                       .map(t => compactTypeChipText(t, 'any')).join(',') + ')';
-      return joined.length > 16 ? fallback() : joined;
-    }
-    if (head === 'refine') return compactTypeChipText(rich[1], flat);
-    if (head === 'union') {
-      const parts = rich.slice(1).map(t => compactTypeChipText(t, 'any'));
-      const joined = parts.join('|');
-      return joined.length > 12 ? fallback() : joined;
-    }
-    if (head === 'fn') {
-      // Two-tier rendering:
-      //  - full `(arg:T,arg:T)→R` if it fits in 32 chars (room for one
-      //    named shape like `:ring-request-shape` in the arg position
-      //    + a short return-type alias)
-      //  - terse `(N)→ret-prefix` otherwise (e.g. `(request)→ring-r…`)
-      // Falls through to `flat` ("fn") only when even the terse form
-      // is too wide.
-      const argEntries = Object.entries(rich[1] || {});
-      const ret = compactTypeChipText(rich[2], 'any');
-      const argsFull = argEntries
-        .map(([k, v]) => k + ':' + compactTypeChipText(v, 'any'))
-        .join(',');
-      const full = '(' + argsFull + ')→' + ret;
-      if (full.length <= 32) return full;
-      const argsTerse = argEntries.length === 0 ? '()'
-                       : argEntries.length === 1 ? '(' + argEntries[0][0].slice(0, 8) + ')'
-                       : '(' + argEntries.length + ')';
-      const retTerse = (typeof rich[2] === 'string')
-                       ? (rich[2].length > 9 ? rich[2].slice(0, 8) + '…' : rich[2])
-                       : '*';
-      const terse = argsTerse + '→' + retTerse;
-      return terse.length > 32 ? fallback() : terse;
-    }
-  }
-  // No name to fall back on (a server row hands the structure itself as
-  // `flat`): say what KIND of type it is rather than stringify the array.
-  return fallback();
+  return window.gdCanvasTypeStructureGraph.format(rich, flat).compact;
 }
 
 
@@ -412,22 +196,7 @@ function resolveRefinementAlias(rich) {
 // lists / maps / tuples render with structural brackets, functions
 // and unions collapse to a single word. Pure (no globals).
 function shortTypeLabel(rich) {
-  if (rich == null) return 'any';
-  if (typeof rich === 'string') return rich;
-  if (Array.isArray(rich)) {
-    const head = rich[0];
-    if (head === 'refine') return shortTypeLabel(rich[1]);
-    if (head === 'list')   return '[' + shortTypeLabel(rich[1]) + ']';
-    if (head === 'union')  return 'union';
-    if (head === 'fn')     return 'fn';
-    if (head === 'map')    return '{' + shortTypeLabel(rich[1]) + '→'
-                                  + shortTypeLabel(rich[2]) + '}';
-    if (head === 'tuple')  return '(' + rich.slice(1).map(shortTypeLabel).join(',')
-                                  + ')';
-    return 'type';
-  }
-  if (typeof rich === 'object') return 'record';
-  return String(rich);
+  return window.gdCanvasTypeStructureGraph.format(rich, null).short;
 }
 
 
@@ -458,14 +227,16 @@ function appendResolutionSection(host, prov, opts) {
 
   // Render a fn-name span — clickable (anchor-like) when onNavigate is
   // provided and fnId is non-null, plain span otherwise.
-  const makeFnLabel = (fnName, fnId) => {
+  const makeFnLabel = (fnName, fnId, facts = {}) => {
     const text = fnName || '(anonymous)';
     if (onNavigate && fnId) {
       const link = document.createElement('a');
       link.href = '#';
       link.className = 'type-inline-resolution-label type-inline-resolution-link';
-      link.textContent = text;
+      window.gdAppendTypeControlMark(link, '↗');
+      window.gdMountTypeStructureBody(link, link, 'resolution-label', {label: text, ...facts});
       link.title = 'Open :' + text;
+      link.setAttribute('aria-label', 'Open function ' + text);
       link.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -475,7 +246,7 @@ function appendResolutionSection(host, prov, opts) {
     }
     const plain = document.createElement('span');
     plain.className = 'type-inline-resolution-label';
-    plain.textContent = text;
+    window.gdMountTypeStructureBody(section, plain, 'resolution-label', {label: text, ...facts});
     return plain;
   };
 
@@ -485,20 +256,23 @@ function appendResolutionSection(host, prov, opts) {
   // don't have a single fn-id to navigate to (compact form via
   // shortTypeLabel keeps the row narrow). Lets the reader jump from
   // ":user-port" in a chain to the type-row that defines it.
-  const makeTypeCell = (type) => {
+  const makeTypeCell = (type, facts = {}) => {
     const cell = document.createElement('span');
     cell.className = 'type-inline-resolution-type';
-    if (type == null) { cell.textContent = '—'; return cell; }
-    const label = shortTypeLabel(type);
-    cell.textContent = label;
+    const display = () => ({label: type == null ? '—' : shortTypeLabel(type), ...facts});
+    const body = window.gdMountTypeStructureBody(cell, cell, 'resolution-label', display());
+    window.gdCanvasTypeStructureGraph.bind(cell, () => body.update(display()));
+    if (type == null) return cell;
     if (onNavigate && typeof type === 'string'
         && typeof lookups !== 'undefined' && lookups?.fnByName) {
       const entry = lookups.fnByName.get(type);
       if (entry?.id) {
         cell.classList.add('type-inline-resolution-link');
+        window.gdAppendTypeControlMark(cell, '↗');
         cell.setAttribute('role', 'link');
         cell.setAttribute('tabindex', '0');
         cell.title = 'Open type :' + type;
+        cell.setAttribute('aria-label', cell.title);
         cell.style.cursor = 'pointer';
         const navigate = (e) => {
           e.preventDefault();
@@ -530,7 +304,7 @@ function appendResolutionSection(host, prov, opts) {
   if (prov.inheritanceChain && prov.inheritanceChain.length > 0) {
     const chainHead = document.createElement('div');
     chainHead.className = 'type-inline-resolution-head';
-    chainHead.textContent = 'Inherited via';
+    window.gdMountTypeStructureBody(section, chainHead, 'resolution-head', {label: '', mode: 'inherited'});
     section.appendChild(chainHead);
     const multi = prov.inheritanceChain.length >= 2;
     prov.inheritanceChain.forEach((link, idx) => {
@@ -541,9 +315,10 @@ function appendResolutionSection(host, prov, opts) {
                     + (!winner && multi ? ' type-inline-resolution-chain-also'  : '');
       const mark = document.createElement('span');
       mark.className = 'type-inline-resolution-mark';
-      mark.textContent = (multi && winner) ? '✓' : '↳';
+      const facts = {mode: 'chain', multiple: multi, winner};
+      window.gdMountTypeStructureBody(section, mark, 'resolution-mark', {label: '', ...facts});
       row.appendChild(mark);
-      row.appendChild(makeFnLabel(link.fnName, link.fnId));
+      row.appendChild(makeFnLabel(link.fnName, link.fnId, facts));
       // Suffix tag — only present in multi-override scenarios. Lets the
       // reader see "this was the closer-fn-wins pick; sibling X had a
       // candidate too but lost". Single-override case stays unadorned
@@ -551,20 +326,20 @@ function appendResolutionSection(host, prov, opts) {
       if (multi) {
         const tag = document.createElement('span');
         tag.className = 'type-inline-resolution-chain-tag';
-        tag.textContent = winner ? '(chosen)' : '(also by)';
+        window.gdMountTypeStructureBody(section, tag, 'resolution-tag', {label: '', ...facts});
         row.appendChild(tag);
       }
       const overrideFn = (typeof lookups !== 'undefined'
                           && lookups?.fnMap?.get(link.overrideFnId)) || null;
       const overrideType = overrideFn ? computeSlotType(overrideFn) : null;
-      row.appendChild(makeTypeCell(overrideType));
+      row.appendChild(makeTypeCell(overrideType, facts));
       section.appendChild(row);
     });
   }
 
   const head = document.createElement('div');
   head.className = 'type-inline-resolution-head';
-  head.textContent = 'Resolved via';
+  window.gdMountTypeStructureBody(section, head, 'resolution-head', {label: '', mode: 'resolved'});
   section.appendChild(head);
   for (const tier of prov.tiers) {
     const won = tier.key === prov.winner;
@@ -573,19 +348,20 @@ function appendResolutionSection(host, prov, opts) {
                   + (won ? ' type-inline-resolution-active' : '');
     const mark = document.createElement('span');
     mark.className = 'type-inline-resolution-mark';
-    mark.textContent = won ? '✓' : '·';
+    const facts = {mode: 'tier', winner: won};
+    window.gdMountTypeStructureBody(section, mark, 'resolution-mark', {label: '', ...facts});
     row.appendChild(mark);
     // The mechanism label and the source-fn name go in separate
     // spans so the fn-name can be a clickable link without dragging
     // the mechanism text into the click target.
     const lab = document.createElement('span');
     lab.className = 'type-inline-resolution-label';
-    lab.textContent = tier.label;
+    window.gdMountTypeStructureBody(section, lab, 'resolution-label', {label: tier.label, ...facts});
     row.appendChild(lab);
     if (tier.source?.fnName) {
       const sep = document.createElement('span');
       sep.className = 'type-inline-resolution-sep';
-      sep.textContent = ' · ';
+      window.gdMountTypeStructureBody(section, sep, 'resolution-label', {label: ' · '});
       row.appendChild(sep);
       // tier.source carries fnName today; resolve fn-id when possible
       // so the link can navigate (slot tier surfaces declaring base-fn
@@ -593,9 +369,9 @@ function appendResolutionSection(host, prov, opts) {
       const sourceFnId = tier.source.fnId
         || (typeof lookups !== 'undefined' && lookups?.fnByName?.get(tier.source.fnName)?.id)
         || null;
-      row.appendChild(makeFnLabel(tier.source.fnName, sourceFnId));
+      row.appendChild(makeFnLabel(tier.source.fnName, sourceFnId, facts));
     }
-    row.appendChild(makeTypeCell(tier.type));
+    row.appendChild(makeTypeCell(tier.type, facts));
     section.appendChild(row);
   }
   host.appendChild(section);

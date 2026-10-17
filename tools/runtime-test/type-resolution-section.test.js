@@ -21,6 +21,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { createDocument } = require('./mini-dom');
+const {installPassiveGraphs} = require('./canvas-passive-fixture');
 
 const EDITOR = path.join(__dirname, '..', '..', 'resources', 'packages', 'app', 'editor');
 const MODULES = ['editor-type-expand-render.js', 'editor-type-format.js',
@@ -51,6 +52,7 @@ function editorCtx(fnByName) {
     richTypes: { 'positive-int': { return: ['refine', 'int', ['>', 0]] } },
     lookups: { fnByName: fnByName || new Map(), fnMap: new Map() },
   });
+  installPassiveGraphs(ctx);
   for (const f of MODULES) {
     vm.runInContext(fs.readFileSync(path.join(EDITOR, f), 'utf8'), ctx, { filename: f });
   }

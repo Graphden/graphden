@@ -149,11 +149,13 @@
         {:keys [records]} (bundle/parse root)
         bindings (filter #(= :binding (:kind %)) records)
         items (filter #(= :binding-list-item (:kind %)) records)]
-    (doseq [[child entry] [["canvas-inheritance" :inheritance-view]
-                           ["canvas-metadata" :metadata-view]]]
+    (doseq [[child entry body] [["canvas-inheritance" :inheritance-view :_body]
+                                ["canvas-metadata" :metadata-view :_body]
+                                ["canvas-type-structure" :type-structure-view :_view-body]
+                                ["canvas-bindings" :bindings-view :_body]]]
       (let [path (str root "." child)
             view-id (ids/fn-id path entry)
-            body-id (ids/fn-id path :_body)
+            body-id (ids/fn-id path body)
             values (first (filter #(and (= view-id (:fn-id %))
                                         (= (ids/slot-id (ids/fn-id "core.collections" :zipmap) :vals) (:slot-id %))) bindings))]
         (is values)

@@ -7,7 +7,7 @@
   let message = '';
   const organization = () => typeof graphdenCurrentOrg === 'string' && graphdenCurrentOrg ? graphdenCurrentOrg : 'public';
   const context = () => JSON.stringify([window.gdPrefOwner, organization(), getCurrentBranchName()]);
-  const groups = { 'account-menu': 'menu-id', 'fn-picker': 'picker-id', recents: 'recents-id', inspector: 'inspector-id', explorer: 'explorer-id', 'tutorial-catalog': 'tutorial-catalog-id', canvas: 'canvas-id', 'canvas-values': 'canvas-values-id', 'canvas-inheritance': 'canvas-inheritance-id', 'canvas-metadata': 'canvas-metadata-id' };
+  const groups = { 'account-menu': 'menu-id', 'fn-picker': 'picker-id', recents: 'recents-id', inspector: 'inspector-id', explorer: 'explorer-id', 'tutorial-catalog': 'tutorial-catalog-id', canvas: 'canvas-id', 'canvas-values': 'canvas-values-id', 'canvas-inheritance': 'canvas-inheritance-id', 'canvas-metadata': 'canvas-metadata-id', 'canvas-type-structure': 'canvas-type-structure-id', 'canvas-bindings': 'canvas-bindings-id' };
   const selectionStamp = () => JSON.stringify(window.gdPrefRead('components') ?? null);
   const selected = () => window.gdUIComponentsSelection();
   function render() {

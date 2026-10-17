@@ -384,7 +384,7 @@
 
   reachability
   {:doc "Graph reachability audit over the fns.edn corpus (no DB, ~40s): every composed fn-def must be reachable from a root (routes, services, the by-name registry in tools/graph-reachability.edn, tests, docs) or be listed there as vocabulary with a reason. Unreachable = dead code; fails the check."
-   :task (clojure "-M:dev" "tools/reachability_audit.clj")}
+   :task (clojure "-M:dev" "-e" "(load-file \"tools/reachability_audit.clj\") (tools.reachability-audit/-main)")}
 
   compile-dev
   {:doc "CI guard for the code CI never loads: require every namespace under development/ (the dev REPL entry, the e2e stack, the benches) under the :dev:test:bench aliases. `graphden.exec-profile` had called a helper that moved out of system.core for weeks before anyone ran it."

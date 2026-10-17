@@ -4,6 +4,7 @@
     [cheshire.core :as json]
     [clojure.edn :as edn]
     [clojure.java.io :as io]
+    [clojure.string :as str]
     [clojure.walk :as walk]
     [graphden.crud.type-check :as type-check]
     [graphden.executor.browser-plan :as plan]
@@ -15,6 +16,7 @@
     [graphden.packages.owned :as owned]
     [graphden.packages.records :as records]
     [graphden.packages.records.ids :as ids]
+    [graphden.packages.records.parse :as records-parse]
     [graphden.packages.sync :as sync]
     [graphden.storage.remote.core :as remote]
     [graphden.types.check :as check]
@@ -29,7 +31,7 @@
 (def script-path "resources/packages/app/ui-preview/builtin-plans.js")
 
 
-(def ^:private modules ["ui-account-menu" "ui-fn-picker" "ui-recents" "ui-inspector" "ui-explorer" "ui-tutorial-catalog" "ui-canvas" "ui-canvas-values" "ui-canvas-inheritance" "ui-canvas-metadata"])
+(def ^:private modules ["ui-account-menu" "ui-fn-picker" "ui-recents" "ui-inspector" "ui-explorer" "ui-tutorial-catalog" "ui-canvas" "ui-canvas-values" "ui-canvas-inheritance" "ui-canvas-metadata" "ui-canvas-type-structure" "ui-canvas-bindings"])
 
 
 (def ^:private entries
@@ -50,6 +52,9 @@
    :canvasInheritance {:initial (ids/fn-id "app.ui-canvas-inheritance" :inheritance-initial)
                        :view (ids/fn-id "app.ui-canvas-inheritance" :inheritance-view)}
    :canvasMetadata {:view (ids/fn-id "app.ui-canvas-metadata" :metadata-view)}
+   :canvasTypeStructure {:initial (ids/fn-id "app.ui-canvas-type-structure" :type-structure-initial)
+                         :view (ids/fn-id "app.ui-canvas-type-structure" :type-structure-view)}
+   :canvasBindings {:view (ids/fn-id "app.ui-canvas-bindings" :bindings-view)}
    :tutorialCatalog {:view (ids/fn-id "app.ui-tutorial-catalog" :catalog-view)}
    :fnPicker {:initial (ids/fn-id "app.ui-account-menu" :account-menu-initial)
               :update (ids/fn-id "app.ui-account-menu" :account-menu-update)
@@ -66,9 +71,9 @@
                                   (= ["core.refinements" :color-const] [(:namespace %) (:name %)]))
                              (:fn-defs loaded))
         ui (mapcat (fn [module]
-                     (let [{:keys [namespace fns]}
+                     (let [{module-namespace :namespace :keys [fns]}
                            (edn/read-string (slurp (io/resource (str "packages/app/" module "/fns.edn"))))]
-                       (map #(assoc % :namespace namespace) fns))) modules)]
+                       (map #(assoc % :namespace module-namespace) fns))) modules)]
     (vec (concat (sort-by (juxt :namespace :name) primitives) dependencies ui))))
 
 
@@ -114,7 +119,8 @@
 (defn- check-source!
   [definitions {:keys [graph namespaces]} storage]
   (runtime/register-type-aliases-from-db! graph ::builtin (ns-path/path-map namespaces))
-  (let [by-id (into {} (map (fn [d] [(ids/fn-id (:namespace d) (:name d)) d])) definitions)
+  (let [prepared (:fn-defs (records-parse/prepare-module definitions {} {}))
+        by-id (into {} (map (juxt :fn-id identity)) prepared)
         {:keys [forward-deps reverse-deps]} (deps/build-deps-state graph)
         reachable (deps/forward-closure forward-deps (mapcat vals (vals entries)))
         {:keys [ordered cyclic]} (deps/dependency-order reverse-deps reachable)]
@@ -148,14 +154,15 @@
             shapes/*marker-registry-override* (atom {:secret {:monotone? true :hide-result? true}})
             runtime/*per-org-aliases-override* (atom {})]
     (let [definitions (source-definitions)
+          prepared (:fn-defs (records-parse/prepare-module definitions {} {}))
           theme-template (edn/read-string
                            (slurp (io/resource "packages/app/ui-theme-template/fns.edn")))
-          package-ids (into #{} (map #(ids/fn-id (:namespace %) (:name %))) definitions)
+          package-ids (into #{} (map :fn-id) prepared)
           aliases (into {} (mapcat (fn [d]
                                      (when-let [body (sync/type-row-alias-body d)]
                                        [[(ids/fn-id (:namespace d) (:name d)) body]
                                         [(:name d) body]
-                                        [(keyword (:namespace d) (name (:name d))) body]]))) definitions)]
+                                        [(keyword (:namespace d) (name (:name d))) body]]))) prepared)]
       ;; Reproduce package bootstrap's source metadata without mutating its
       ;; process-global registries. This utility runs only during asset builds.
       (with-redefs [owned/owned-fn-id? (fn [id] (contains? package-ids id))
@@ -178,11 +185,48 @@
   (str (json/generate-string (canonical artifact)) "\n"))
 
 
+(defn serialize-script
+  "Emit the same JSON data as trusted literals. Only repeated long string
+   VALUES share a constant; every object/array remains independently allocated."
+  [artifact]
+  (let [data (json/parse-string (serialize artifact))
+        string-values (fn string-values
+                        [value]
+                        (cond
+                          (string? value) [value]
+                          (map? value) (mapcat string-values (vals value))
+                          (sequential? value) (mapcat string-values value)
+                          :else []))
+        pool (->> (frequencies (string-values data))
+                  (keep (fn [[value n]] (when (and (> n 1) (>= (count value) 32)) value)))
+                  sort vec)
+        indexes (zipmap pool (range))
+        quote-json #(json/generate-string % {:escape-non-ascii true})
+        literal (fn literal
+                  [value]
+                  (cond
+                    (string? value) (if-some [i (get indexes value)]
+                                      (str "strings[" i "]")
+                                      (quote-json value))
+                    ;; __proto__ needs a computed key to remain an own data
+                    ;; property. Other JSON-quoted keys use normal literals.
+                    (map? value) (str "{" (str/join "," (map (fn [[k v]]
+                                                               (str (if (= k "__proto__")
+                                                                      (str "[" (quote-json k) "]")
+                                                                      (quote-json k))
+                                                                    ":" (literal v)))
+                                                             (sort-by key value))) "}")
+                    (sequential? value) (str "[" (str/join "," (map literal value)) "]")
+                    :else (quote-json value)))]
+    (str "// Generated by tools/ui_preview/generate_builtin_plans.clj.\n"
+         "(()=>{const strings=" (quote-json pool) ";window.GraphdenBuiltinPlans="
+         (literal data) ";})();\n")))
+
+
 (defn -main
   [& args]
   (when (seq args) (throw (ex-info "Builtin generation accepts no source or entry arguments" {})))
-  (let [payload (serialize (generate))]
-    (spit artifact-path payload)
-    (spit script-path (str "// Generated by tools/ui_preview/generate_builtin_plans.clj.\n"
-                           "window.GraphdenBuiltinPlans=" payload ";\n")))
+  (let [artifact (generate)]
+    (spit artifact-path (serialize artifact))
+    (spit script-path (serialize-script artifact)))
   (println "Generated" artifact-path "and" script-path))

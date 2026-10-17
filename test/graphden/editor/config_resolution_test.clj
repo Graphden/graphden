@@ -23,7 +23,7 @@
                                                     (when (= denied-id id)
                                                       (throw (ex-info "Denied" {:type :authz/forbidden}))))]
       (is (= {"account-menu" false "fn-picker" true "inspector" false "explorer" false "recents" false
-              "tutorial-catalog" false "canvas" false "canvas-values" false "canvas-inheritance" false "canvas-metadata" false}
+              "tutorial-catalog" false "canvas" false "canvas-values" false "canvas-inheritance" false "canvas-metadata" false "canvas-type-structure" false "canvas-bindings" false}
              (resolution/owned-writable-components nil current)))
       (is (= 1 @walks))
       (is (= #{own-id denied-id} (set @checked)))

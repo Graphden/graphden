@@ -30,13 +30,31 @@ const inlineHostsByPath = new Map();
 // two type popovers visible at once shows the same "Resolved via"
 // chain in both places, which the type-system audit flagged as
 // confusing duplication. Mutual dismissal collapses the overlap.
-function hideAllInlineHosts() {
-  for (const host of inlineHostsByPath.values()) {
-    host.style.display = 'none';
+function collapseInlineHost(path, host = inlineHostsByPath.get(path)) {
+  expandedTypePaths.delete(path);
+  const anchor = document.querySelector('[data-inline-anchor="' + escAttr(path) + '"]');
+  if (anchor) {
+    anchor.setAttribute('aria-expanded', 'false');
+    const mark = anchor.querySelector('.canvas-type-structure-control-mark');
+    if (mark) mark.textContent = '▸';
   }
-  expandedTypePaths.clear();
+  if (host) retireInlineHost(host);
+}
+function hideAllInlineHosts() {
+  for (const path of [...expandedTypePaths]) collapseInlineHost(path);
+  for (const host of inlineHostsByPath.values()) retireInlineHost(host);
+  repositionAllInlineHosts();
 }
 window.hideAllInlineHosts = hideAllInlineHosts;
+function disposeInlineTypeBodies(root) {
+  window.gdCanvasTypeStructureGraph.disposeWithin(root);
+  window.gdCanvasBindingsGraph.disposeWithin(root);
+  window.gdCanvasMetadataGraph?.disposeWithin(root);
+}
+function retireInlineHost(host) {
+  disposeInlineTypeBodies(host);
+  host.style.display = 'none';
+}
 let inlinePositionListenersInstalled = false;
 
 
@@ -96,8 +114,7 @@ async function promptRenameFnTypeArg(fnId, currentFnType, oldArgName) {
       const text = await r.text().catch(() => '');
       throw new Error((text || '').slice(0, 200) || ('HTTP ' + r.status));
     }
-    expandedTypePaths.clear();
-    for (const h of inlineHostsByPath.values()) h.style.display = 'none';
+    hideAllInlineHosts();
     if (typeof initGraph === 'function') await initGraph();
   } catch (err) {
     alert('Rename failed: ' + (err.message || err));
@@ -128,8 +145,7 @@ function appendPromoteAnonymousButton(host, fnId) {
         const text = await r.text().catch(() => '');
         throw new Error((text || '').slice(0, 200) || ('HTTP ' + r.status));
       }
-      expandedTypePaths.clear();
-      for (const h of inlineHostsByPath.values()) h.style.display = 'none';
+      hideAllInlineHosts();
       if (typeof initGraph === 'function') await initGraph();
       if (typeof selectFnByName === 'function') selectFnByName(trimmed);
     } catch (err) {
@@ -148,8 +164,14 @@ function appendPromoteAnonymousButton(host, fnId) {
 // namespace — ADR-identity-model) and cleared by the reload phase
 // (`installGraphShell`), so a write that adds or drops a use shows up.
 const typeUsagesCache = new Map();
+window.addEventListener('gd-auth-changed', () => {
+  typeUsagesCache.clear();
+  hideAllInlineHosts();
+  repositionAllInlineHosts();
+});
 
 function appendTypeUsagesSection(host, typeName) {
+  const visibilityOwner = host.closest('.type-inline-host') || host;
   const section = document.createElement('div');
   section.className = 'type-inline-usages';
   const head = document.createElement('div');
@@ -230,7 +252,7 @@ function appendTypeUsagesSection(host, typeName) {
     ? resolveTypeFnIdByName(typeName) : Promise.resolve('');
   Promise.resolve(resolveId)
     .then((typeFnId) => {
-      if (!typeFnId) return null;
+      if (!typeFnId || !section.isConnected || visibilityOwner.style.display === 'none') return null;
       const cached = typeUsagesCache.get(typeFnId);
       if (cached) return { cached };
       return fetch(API.api_types_usages, {
@@ -242,7 +264,7 @@ function appendTypeUsagesSection(host, typeName) {
         .then(d => (d?.ok ? { fetched: d.usages || [], typeFnId } : null));
     })
     .then(res => {
-      if (!res) return;
+      if (!res || !section.isConnected || visibilityOwner.style.display === 'none') return;
       if (!res.cached) typeUsagesCache.set(res.typeFnId, res.fetched);
       renderList(res.cached || res.fetched);
       if (typeof repositionAllInlineHosts === 'function') {
@@ -275,6 +297,7 @@ function makeInlineNarrowerSelect(currentType, ariaLabel) {
   if (typeof populateNarrowerOptions === 'function') {
     Promise.resolve(populateNarrowerOptions(sel, currentType))
       .then(() => {
+        if (!sel.isConnected) return;
         if (sel.options.length > 1) {
           sel.style.display = '';
           if (typeof repositionAllInlineHosts === 'function') {
@@ -299,20 +322,20 @@ function makeEffectsReadOnly(currentEff) {
   wrap.className = 'type-inline-effects-readonly';
   const label = document.createElement('span');
   label.className = 'type-inline-effects-label';
-  label.textContent = 'eff:';
+  window.gdMountTypeStructureBody(wrap, label, 'effects', {label: 'eff:'});
   wrap.appendChild(label);
   if (!currentEff || currentEff.size === 0) {
     const pill = document.createElement('span');
-    pill.className = 'type-inline-effects-pure';
-    pill.textContent = 'pure';
+    pill.className = 'type-inline-effect-body';
     pill.title = 'This slot requires a PURE callable (no side effects).';
+    window.gdMountMetadataBody(wrap, pill, 'effect', {effect: 'pure', computed: true});
     wrap.appendChild(pill);
     return wrap;
   }
   for (const cat of currentEff) {
     const chip = document.createElement('span');
-    chip.className = 'effects-chip effects-chip-' + cat;
-    chip.textContent = cat;
+    chip.className = 'type-inline-effect-body';
+    window.gdMountMetadataBody(wrap, chip, 'effect', {effect: cat, computed: true});
     chip.title = 'Allowed effect: ' + cat;
     wrap.appendChild(chip);
   }
@@ -333,11 +356,12 @@ function makeEffectsRow(currentEff) {
     const cb = document.createElement('input');
     cb.type = 'checkbox';
     cb.value = cat;
+    cb.setAttribute('aria-label', 'Allow effect ' + cat);
     if (currentEff?.has(cat)) cb.checked = true;
     checkboxes[cat] = cb;
     lab.appendChild(cb);
     const sp = document.createElement('span');
-    sp.textContent = cat;
+    window.gdMountTypeStructureBody(wrap, sp, 'effects', {label: cat});
     lab.appendChild(sp);
     wrap.appendChild(lab);
   }
@@ -429,8 +453,7 @@ function makeTightenButton(opts) {
         return;
       }
       // Close any open hosts and reload the graph.
-      expandedTypePaths.clear();
-      for (const h of inlineHostsByPath.values()) h.style.display = 'none';
+      hideAllInlineHosts();
       if (typeof initGraph === 'function') initGraph();
     } catch (err) {
       errEl.textContent = String(err?.message ? err.message : err);
@@ -479,36 +502,8 @@ function positionInlineHost(host, anchorEl) {
     host.style.display = 'none';
     return;
   }
-  const r = anchorEl.getBoundingClientRect();
-  // Scale the host with the viewport zoom so it visually tracks the chip
-  // (which itself scales via the edge-label-overlay's transform).
-  // Without this, the host stayed at native size while the chip
-  // grew / shrunk with zoom, breaking the "this card describes
-  // this chip" association at non-default zooms.
   const zoom = (typeof gv !== 'undefined' && gv.ready()) ? gv.zoom() : 1;
-  host.style.display = 'block';
-  host.style.position = 'fixed';
-  host.style.transformOrigin = 'top left';
-  host.style.transform = 'scale(' + zoom + ')';
-  // Render at offscreen origin first so offsetWidth/Height reflect
-  // the unscaled wrapped content (transform doesn't affect those).
-  host.style.top = '-9999px';
-  host.style.left = '0px';
-  const wUnscaled = host.offsetWidth || 0;
-  const hUnscaled = host.offsetHeight || 0;
-  const w = wUnscaled * zoom;
-  const h = hUnscaled * zoom;
-  const margin = 8;
-  let top = r.bottom + 4;
-  let left = r.left;
-  if (left + w > window.innerWidth - margin) {
-    left = Math.max(margin, window.innerWidth - w - margin);
-  }
-  if (top + h > window.innerHeight - margin) {
-    top = Math.max(margin, r.top - h - 4);
-  }
-  host.style.top = top + 'px';
-  host.style.left = left + 'px';
+  window.gdPositionPassivePopover(host, anchorEl, {scale: zoom});
 }
 
 function repositionAllInlineHosts() {
@@ -519,6 +514,7 @@ function repositionAllInlineHosts() {
       // session. Runs on pan/zoom/resize, so cleanup is prompt. Deleting
       // the current key mid-iteration is safe for a Map. Re-expanding the
       // path rebuilds the host on demand (see ensureInlineHost).
+      disposeInlineTypeBodies(host);
       host.remove();
       inlineHostsByPath.delete(path);
       continue;
@@ -556,11 +552,9 @@ function installInlinePositionListeners() {
 // at load so the tour's own listener sees the preventDefault.
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape' || e.defaultPrevented) return;
-  let open = false;
-  for (const h of inlineHostsByPath.values()) {
-    if (h.style.display === 'block') { h.style.display = 'none'; open = true; }
-  }
-  if (open) e.preventDefault();
+  if (![...inlineHostsByPath.values()].some(host => host.style.display !== 'none')) return;
+  hideAllInlineHosts();
+  e.preventDefault();
 });
 
 function attachInlineExpand(chipEl, rich, path, ctx) {
@@ -572,10 +566,16 @@ function attachInlineExpand(chipEl, rich, path, ctx) {
     // No structure to reveal. Editable: clicking the chip opens the
     // type-edit popover directly. Read-only: no-op.
     if (editable) {
+      window.gdAppendTypeControlMark(chipEl, '✎');
+      chipEl.setAttribute('role', 'button');
+      chipEl.setAttribute('tabindex', '0');
       chipEl.style.cursor = 'pointer';
       chipEl.addEventListener('click', (e) => {
         e.stopPropagation();
         c.onEdit();
+      });
+      chipEl.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); chipEl.click(); }
       });
     }
     return null;
@@ -584,6 +584,7 @@ function attachInlineExpand(chipEl, rich, path, ctx) {
   installInlinePositionListeners();
   chipEl.dataset.inlineAnchor = path;
   chipEl.classList.add('type-chip-expandable');
+  const mark = window.gdAppendTypeControlMark(chipEl, expandedTypePaths.has(path) ? '▾' : '▸');
   chipEl.style.cursor = 'pointer';
   // The chip is a real expand/collapse control: `aria-expanded` is
   // only valid on a widget role, and a `button` role must be
@@ -607,6 +608,7 @@ function attachInlineExpand(chipEl, rich, path, ctx) {
     if (willOpen) expandedTypePaths.add(path);
     else expandedTypePaths.delete(path);
     chipEl.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+    mark.textContent = willOpen ? '▾' : '▸';
     if (willOpen) {
       // Mutually exclusive with the mismatch-explainer: the inline
       // panel hosts its own copy of "Resolved via", so showing both
@@ -617,7 +619,7 @@ function attachInlineExpand(chipEl, rich, path, ctx) {
       positionInlineHost(host, chipEl);
     } else {
       const host = inlineHostsByPath.get(path);
-      if (host) host.style.display = 'none';
+      if (host) retireInlineHost(host);
     }
   });
   // Keyboard activation for the button-role chip.

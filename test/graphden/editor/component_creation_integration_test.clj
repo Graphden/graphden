@@ -200,7 +200,9 @@
       (is (:ok result) (pr-str diagnosed))
       (is (= (get-in manifest [:roots :canvas-values-id]) (get-in result [:roots :canvas-values-id]))))
     (doseq [[component root-key] [["canvas-inheritance" :canvas-inheritance-id]
-                                  ["canvas-metadata" :canvas-metadata-id]]]
+                                  ["canvas-metadata" :canvas-metadata-id]
+                                  ["canvas-type-structure" :canvas-type-structure-id]
+                                  ["canvas-bindings" :canvas-bindings-id]]]
       (let [{:keys [result] :as diagnosed} (export-diagnosed ctx component)]
         (is (:ok result) (pr-str diagnosed))
         (is (= (get-in manifest [:roots root-key]) (get-in result [:roots root-key])))))
@@ -713,5 +715,5 @@
 
 
 (deftest selective-canvas-card-components-retain-authorized-installed-output-fields
-  (doseq [component ["canvas-inheritance" "canvas-metadata"]]
+  (doseq [component ["canvas-inheritance" "canvas-metadata" "canvas-type-structure" "canvas-bindings"]]
     (selective-retention-proof component)))

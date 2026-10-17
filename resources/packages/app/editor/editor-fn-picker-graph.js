@@ -1,3 +1,19 @@
+// Native fallback rows share the same display-only formatter refresh as the
+// graph list. Candidate identity, compatibility and selection remain untouched.
+window.gdRefreshPickerReturnLabels = entries => {
+  for (const entry of entries) {
+    if (!entry.c || !entry.rowEl?.isConnected) continue;
+    const text = compactTypeChipText(entry.c.richReturn, entry.c.flatReturn);
+    let label = entry.rowEl.querySelector('.fn-picker-row-rt');
+    if (!text) { label?.remove(); continue; }
+    if (!label) {
+      label = document.createElement('span'); label.className = 'fn-picker-row-rt';
+      entry.rowEl.appendChild(label);
+    }
+    label.textContent = '→ ' + text;
+  }
+};
+
 // Graph list rendering. Search IO, type verdicts and selection stay native.
 (() => {
   const params = new URLSearchParams(location.search);

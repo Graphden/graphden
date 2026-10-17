@@ -11,11 +11,9 @@
 // Loaded immediately BEFORE editor-overlay-type-expand.js in
 // `_editor-script-paths`.
 
-// graph-first-exception: the type-grammar readers here (typeKindLabel /
-// refinementChain / constraintToString) are the SAME ones the always-visible
-// canvas chips use on the sub-100ms path — rendering the expand rows
-// server-side would ADD a second (server) type formatter while these JS
-// readers stay for the chips, i.e. one more mirror, not one less.
+// Native grammar readers retain canonical references, source lookup, cycle
+// paths and edit values. Passive display formatting and row bodies are ordinary
+// browser graph composition in app.ui-canvas-type-structure.
 function compactTypeAsValue(t) {
   if (typeof t === 'string') return t.replace(/^:/, '');
   return JSON.stringify(t);  // structural — Edit by typing isn't supported
@@ -62,7 +60,7 @@ function buildInlineTypeRow(label, rich, path, parentAncestors) {
   if (label != null && label !== '') {
     const lab = document.createElement('span');
     lab.className = 'type-inline-label';
-    lab.textContent = label;
+    window.gdMountTypeStructureBody(row, lab, 'field', {label});
     row.appendChild(lab);
   }
 
@@ -80,27 +78,32 @@ function buildInlineTypeRow(label, rich, path, parentAncestors) {
   chip.className = 'arg-type-chip arg-type-chip-readonly type-inline-chip';
   if (isCycle) {
     chip.classList.add('type-inline-chip-cycle');
-    chip.textContent = '↻ ' + richName;
+    const mark = document.createElement('span');
+    mark.textContent = '↻ ';
+    mark.setAttribute('aria-hidden', 'true');
+    chip.appendChild(mark);
+    window.gdMountTypeStructureBody(chip, chip, 'chip', {label: richName});
     chip.title = 'Recursive type — the chain loops back to :' + richName;
-    chip.setAttribute('aria-label', chip.title);
     row.appendChild(chip);
     return row;
   }
-  chip.textContent = shortTypeLabel(rich);
-  chip.title = (typeof formatTypeHumanReadable === 'function')
-               ? ('Type: ' + formatTypeHumanReadable(rich))
-               : 'Type';
-  chip.setAttribute('aria-label', chip.title);
+  const nativeTitle = 'Type: ' + formatTypeHint(rich);
+  const expandable = isTypeExpandable(rich);
+  const mark = expandable ? window.gdAppendTypeControlMark(chip,
+    expandedTypePaths.has(path) ? '▾' : '▸') : null;
+  const display = () => ({label: shortTypeLabel(rich), title: 'Type: ' + formatTypeHumanReadable(rich)});
+  const body = window.gdMountTypeStructureBody(chip, chip, 'chip', display(), {titleElement: chip, nativeTitle});
+  window.gdCanvasTypeStructureGraph.bind(chip, () => body.update(display()));
   row.appendChild(chip);
 
   const slot = document.createElement('div');
   slot.className = 'type-inline-child';
   row.appendChild(slot);
 
-  const expandable = isTypeExpandable(rich);
   if (expandable) {
     chip.classList.add('type-inline-chip-expandable');
     chip.setAttribute('role', 'button');
+    chip.setAttribute('aria-label', nativeTitle);
     chip.setAttribute('tabindex', '0');
     chip.setAttribute('aria-expanded', expandedTypePaths.has(path) ? 'true' : 'false');
     chip.style.cursor = 'pointer';
@@ -127,8 +130,10 @@ function buildInlineTypeRow(label, rich, path, parentAncestors) {
         // `slot`. Re-rendering with the now-unset state wouldn't
         // clear them — `renderInlineExpansionInto` unconditionally
         // appends rows for an expandable type.
+        disposeInlineTypeBodies(slot);
         slot.textContent = '';
       }
+      mark.textContent = willOpen ? '▾' : '▸';
       chip.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
       // Re-position any open ancestor hosts since the tree's height
       // changed.
@@ -247,7 +252,7 @@ function buildRefinementChainSection(chain, _ctx) {
   wrap.className = 'type-inline-refinement-chain';
   const head = document.createElement('div');
   head.className = 'type-inline-resolution-head';
-  head.textContent = 'Subtype chain';
+  window.gdMountTypeStructureBody(wrap, head, 'resolution-head', {label: '', mode: 'subtype'});
   wrap.appendChild(head);
   const row = document.createElement('div');
   row.className = 'type-inline-refinement-chain-row';
@@ -269,8 +274,10 @@ function buildRefinementChainSection(chain, _ctx) {
       const a = document.createElement('a');
       a.href = '#';
       a.className = 'type-inline-resolution-link';
-      a.textContent = label;
+      window.gdAppendTypeControlMark(a, '↗');
+      window.gdMountTypeStructureBody(a, a, 'chain', {label});
       a.title = tooltip;
+      a.setAttribute('aria-label', 'Open type ' + (name || 'anonymous'));
       a.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -282,7 +289,7 @@ function buildRefinementChainSection(chain, _ctx) {
     sp.className = name
       ? 'type-inline-resolution-label'
       : 'type-inline-refinement-chain-anon';
-    sp.textContent = label;
+    window.gdMountTypeStructureBody(wrap, sp, 'chain', {label});
     sp.title = tooltip;
     return sp;
   };
@@ -290,7 +297,7 @@ function buildRefinementChainSection(chain, _ctx) {
     if (idx > 0) {
       const sep = document.createElement('span');
       sep.className = 'type-inline-refinement-chain-sep';
-      sep.textContent = '⊂';
+      window.gdMountTypeStructureBody(wrap, sep, 'chain-separator', {label: '⊂'});
       row.appendChild(sep);
     }
     row.appendChild(makeStepEl(step));
@@ -305,8 +312,10 @@ function buildRefinementChainSection(chain, _ctx) {
 // the panel header (name + Change button) and the fn-effect tightening
 // row when applicable.
 function renderInlineExpansionInto(host, rich, path, ctx) {
+  disposeInlineTypeBodies(host);
   host.textContent = '';
   const c = ctx || {};
+  const rootHost = host;
   const richEntry = (c.typeName && typeof richTypes === 'object' && richTypes)
                     ? richTypes[c.typeName] : null;
   const description = richEntry?.description;
@@ -316,7 +325,7 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
     if (c.typeName) {
       const name = document.createElement('span');
       name.className = 'type-inline-header-name';
-      name.textContent = c.typeName;
+      window.gdMountTypeStructureBody(host, name, 'header', {label: c.typeName});
       head.appendChild(name);
     }
     // Kind tag — `{K→V}` map vs `{a b}` record both expand into a row
@@ -329,7 +338,7 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
     if (kindTag) {
       const tag = document.createElement('span');
       tag.className = 'type-inline-header-kind';
-      tag.textContent = kindTag;
+      window.gdMountTypeStructureBody(host, tag, 'kind', {label: kindTag});
       head.appendChild(tag);
     }
     if (c.editable && typeof c.onEdit === 'function') {
@@ -342,8 +351,7 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
         ev.stopPropagation();
         // Collapse before edit so the popover that enterArgTypeEditMode
         // opens has room and isn't anchored to a now-hidden chip.
-        expandedTypePaths.delete(path);
-        host.style.display = 'none';
+        collapseInlineHost(path, rootHost);
         c.onEdit();
       });
       head.appendChild(btn);
@@ -376,13 +384,21 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
     }
     host.appendChild(head);
   }
+  // The native header/actions stay outside the optional scrolling body.
+  // Nested constituent slots keep their existing normal document flow.
+  if (host.classList.contains('type-inline-host')) {
+    const content = document.createElement('div');
+    content.className = 'gd-passive-popover-flow';
+    host.appendChild(content);
+    host = content;
+  }
   // Human-readable description from the type-row's `description`
   // field — surfaces author intent without taking a popover detour
   // through the `i` badge.
   if (description) {
     const descEl = document.createElement('div');
     descEl.className = 'type-inline-description';
-    descEl.textContent = description;
+    window.gdMountTypeStructureBody(host, descEl, 'description', {label: description});
     host.appendChild(descEl);
   }
   // Promote-anonymous affordance — when the expansion is on an
@@ -426,11 +442,11 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
       consRow.className = 'type-inline-row type-inline-constraint';
       const lab = document.createElement('span');
       lab.className = 'type-inline-label';
-      lab.textContent = 'where';
+      window.gdMountTypeStructureBody(host, lab, 'field', {label: 'where'});
       consRow.appendChild(lab);
       const val = document.createElement('span');
       val.className = 'type-inline-constraint-text';
-      val.textContent = constraintToString(effective[2]);
+      window.gdMountTypeStructureBody(host, val, 'constraint', {label: constraintToString(effective[2])});
       consRow.appendChild(val);
       host.appendChild(consRow);
       return;
@@ -489,10 +505,17 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
           const labelEl = row.querySelector('.type-inline-label');
           if (labelEl) {
             labelEl.classList.add('type-inline-label-renameable');
+            window.gdAppendTypeControlMark(labelEl, '✎');
+            labelEl.setAttribute('role', 'button');
+            labelEl.setAttribute('tabindex', '0');
+            labelEl.setAttribute('aria-label', 'Rename arg ' + k);
             labelEl.title = 'Click to rename this arg';
             labelEl.addEventListener('click', (ev) => {
               ev.stopPropagation();
               promptRenameFnTypeArg(c.anonymousFnId, effective, k);
+            });
+            labelEl.addEventListener('keydown', ev => {
+              if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); labelEl.click(); }
             });
           }
         }
@@ -519,7 +542,8 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
         const errEl = document.createElement('div');
         errEl.className = 'type-explainer-tighten-err';
         errEl.style.display = 'none';
-        host.appendChild(errEl);
+        const actionHost = rootHost.classList.contains('type-inline-host') ? rootHost : host;
+        actionHost.appendChild(errEl);
         const btn = makeTightenButton({
           argSelects,
           retSelect,
@@ -529,7 +553,7 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
           bindingId: c.bindingId,
           errEl,
         });
-        host.appendChild(btn);
+        actionHost.appendChild(btn);
       } else if (currentEff != null) {
         // Read-only callers: always show the slot's effect contract
         // so a reader knows whether the bound callable must be pure

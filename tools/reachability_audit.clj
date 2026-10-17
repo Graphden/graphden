@@ -1,7 +1,7 @@
 ;; Reachability audit — find unreachable composed fn-defs across all
 ;; packages, per graphden-fn-refactor skill §9.
 ;;
-;; Run via:  clojure -M:dev tools/reachability_audit.clj
+;; Run via:  bb reachability
 ;;
 ;; Source of truth = resources/packages/*/fns.edn (loaded via the same
 ;; loader the system uses). We do NOT need `bb deploy` because we
@@ -14,88 +14,40 @@
 ;;   candidates. Unreachable base-fns + type-rows are vocabulary,
 ;;   left alone per skill §9.
 
-(require '[graphden.packages.loader :as pkg]
-         '[clojure.edn :as edn]
-         '[clojure.java.io :as io]
-         '[clojure.string :as str])
+(ns tools.reachability-audit
+  "Reachability over the package parser's ordinary namespace identities."
+  (:require
+    [clojure.edn :as edn]
+    [clojure.java.io :as io]
+    [clojure.string :as str]
+    [graphden.lint.core :as lint]
+    [graphden.packages.loader :as pkg]))
 
 
-(defn- collect-refs
-  "Recursively collect every fn-name referenced by a fn-def's
-   :parent / :parents / :args / nested values. References can be:
-
-   - **keyword** matching a known fn-name (the common case — fn-def
-     args use `:my-fn` to mean a ref);
-   - **string** matching a known fn-name's `(name kw)` (dynamic
-     dispatch via `executor/execute-by-name`; `:_value-form-registry`
-     is the live example — its `:value` is a list of
-     `[type-string fn-name-string]` pairs, resolved at runtime).
-
-   Over-collection is the safe direction here — a literal that
-   happens to match a fn-name is treated as a ref."
-  [fn-defs-by-name v]
-  (let [string->kw (delay
-                     (into {}
-                           (keep (fn [k] [(name k) k]))
-                           (keys fn-defs-by-name)))]
-    (letfn [(walk
-              [x]
-              (cond
-                (keyword? x)
-                (if (contains? fn-defs-by-name x) #{x} #{})
-
-                (string? x)
-                (if-let [kw (get @string->kw x)] #{kw} #{})
-
-                (map? x)
-                (apply clojure.set/union (map walk (vals x)))
-
-                (sequential? x)
-                (apply clojure.set/union (map walk x))
-
-                :else #{}))]
-      (walk v))))
-
-
-(defn- refs-of-fn-def
-  "Set of fn-def names that `fd` references — parent(s), args, type
-   refs in :type maps. Filters to names that exist in `fn-defs-by-name`."
-  [fn-defs-by-name fd]
-  (let [parents (cond
-                  (:parent fd)  [(:parent fd)]
-                  (:parents fd) (:parents fd)
-                  :else         [])
-        arg-refs (collect-refs fn-defs-by-name (:args fd))
-        type-refs (collect-refs fn-defs-by-name (:type fd))
-        list-refs (collect-refs fn-defs-by-name (:list fd))
-        union-refs (collect-refs fn-defs-by-name (:union fd))
-        refine-refs (collect-refs fn-defs-by-name (:refine fd))]
-    (-> #{}
-        (into (filter #(contains? fn-defs-by-name %) parents))
-        (into arg-refs)
-        (into type-refs)
-        (into list-refs)
-        (into union-refs)
-        (into refine-refs))))
+(defn- root-keys
+  [index names]
+  (into #{}
+        (mapcat (fn [ref]
+                  (if (namespace ref)
+                    (let [[kind target] (lint/resolve-ref index ref)]
+                      (when (= :fn-def kind) [(lint/fn-key target)]))
+                    ;; Docs/tests mention bare names without an owning source
+                    ;; namespace. Conservatively keep every matching identity.
+                    (map lint/fn-key (get-in index [:by-name ref])))))
+        names))
 
 
 (defn- bfs-reachable
-  "Standard BFS — accumulate every fn-def reachable from `roots`
-   following the per-def reference set."
-  [fn-defs-by-name roots]
-  (loop [visited #{}
-         frontier (vec roots)]
+  [index roots]
+  (loop [visited #{} frontier (vec roots)]
     (if (empty? frontier)
       visited
-      (let [next-name (peek frontier)
-            rest-frontier (pop frontier)]
-        (if (contains? visited next-name)
-          (recur visited rest-frontier)
-          (let [fd (get fn-defs-by-name next-name)
-                refs (when fd (refs-of-fn-def fn-defs-by-name fd))
-                new-frontier (into rest-frontier
-                                   (remove visited refs))]
-            (recur (conj visited next-name) new-frontier)))))))
+      (let [key (peek frontier) remaining (pop frontier)]
+        (if (contains? visited key)
+          (recur visited remaining)
+          (let [definition (get-in index [:by-key key])
+                refs (when definition (lint/references index definition))]
+            (recur (conj visited key) (into remaining (remove visited refs)))))))))
 
 
 (defn- composed?
@@ -163,7 +115,7 @@
         scanned (for [d siblings
                       f (file-seq d)
                       :when (and (.isFile f) (= "fns.edn" (.getName f)))
-                      [_ n] (re-seq #":(?:app|web|core|storage|registry|mcp)\.[a-z.-]+/([a-z0-9?!_-]+)" (slurp f))]
+                      [_ n] (re-seq #":((?:app|web|core|storage|registry|mcp)\.[a-z.-]+/[a-z0-9?!_-]+)" (slurp f))]
                   (keyword n))]
     (into #{} (filter #(contains? fn-defs-by-name %)) (concat listed scanned))))
 
@@ -198,6 +150,21 @@
           (find-clj-files "test/graphden"))))
 
 
+(defn- definition-ref
+  [fd]
+  (keyword (or (:namespace fd) "") (name (:name fd))))
+
+
+(defn- collect-example-roots
+  [fn-defs]
+  (into #{}
+        (keep (fn [fd]
+                (when (and (:namespace fd) (:name fd)
+                           (str/starts-with? (:namespace fd) "examples"))
+                  (definition-ref fd))))
+        fn-defs))
+
+
 (defn- collect-tests-namespace-roots
   "Every public fn-def living in a `tests` NAMESPACE is a root — the
    platform's own in-graph tests (`core.tests`, `web.tests`, …,
@@ -221,7 +188,7 @@
                   (when (and ns-path fn-name
                              (some #{"tests"} (str/split (str ns-path) #"\."))
                              (not (str/starts-with? (name fn-name) "_")))
-                    fn-name))))
+                    (definition-ref fd)))))
         fn-defs))
 
 
@@ -256,14 +223,7 @@
    by-name registry, Clojure tests, sibling repos, the docs, and the
    graph's own `tests` namespaces."
   [fn-defs all-by-name fn-def-by-name]
-  (let [example-roots (into #{}
-                            (keep (fn [fd]
-                                    (let [ns (:namespace fd)]
-                                      (when (and ns
-                                                 (str/starts-with? ns "examples")
-                                                 (:name fd))
-                                        (:name fd))))
-                                  fn-defs))
+  (let [example-roots (collect-example-roots fn-defs)
         dynamic-roots (collect-entry-point-roots all-by-name)
         test-roots (collect-test-roots all-by-name)
         external-roots (collect-external-roots fn-def-by-name)
@@ -288,43 +248,53 @@
         (into graph-test-roots))))
 
 
+(defn analyze
+  "Pure audit result. Definitions and traversal retain [namespace name]
+   identities; only root-discovery mentions may be intentionally broad."
+  [base-defs fn-defs root-names vocabulary]
+  (let [index (lint/build-index (concat base-defs fn-defs) #{})
+        roots (root-keys index root-names)
+        reachable (bfs-reachable index roots)
+        by-key (into {} (map (juxt lint/fn-key identity)) fn-defs)
+        composed (filter #(composed? (val %)) by-key)
+        type-rows (filter #(type-row? (val %)) by-key)
+        vocabulary-by-key (into {}
+                                (keep (fn [[ref reason]]
+                                        (let [[kind target] (lint/resolve-ref index ref)]
+                                          (when (= :ambiguous kind)
+                                            (throw (ex-info "Ambiguous reachability vocabulary"
+                                                            {:type :reachability/ambiguous-vocabulary :name ref})))
+                                          (when (= :fn-def kind) [(lint/fn-key target) reason]))))
+                                vocabulary)
+        unreachable (remove #(reachable (key %)) composed)]
+    {:roots roots :reachable reachable :definitions by-key
+     :composed-count (count composed) :type-count (count type-rows)
+     :vocabulary vocabulary-by-key
+     :unreachable-composed (vec (sort-by key (remove #(contains? vocabulary-by-key (key %)) unreachable)))
+     :held-vocabulary (filter #(contains? vocabulary-by-key (key %)) unreachable)
+     :unreachable-type-rows (remove #(reachable (key %)) type-rows)}))
+
+
 (defn- run-audit
   []
-  ;; The FULL first-party set incl. the optional registry/mcp packages —
-  ;; without them their fn-defs (and anything only they reference, e.g.
-  ;; :fn-id-by-name) show as false-positive dead (round-3 audit gap).
-  ;; fns executed BY NAME from src (the auth-pages / _form-* templates)
-  ;; are seeded from `tools/graph-reachability.edn` — a structural walk
-  ;; cannot see them, and without that registry ~51 of the 53 fn-defs
-  ;; this audit called dead were live.
   (let [packages (pkg/load-packages ["core" "storage" "web" "app-base" "app" "registry" "mcp" "examples"])
-        base-fn-defs (:base-fn-defs packages)
+        base-defs (keep (fn [[n fd]] (when n (assoc fd :name n))) (:base-fn-defs packages))
         fn-defs (:fn-defs packages)
-        base-by-name (into {}
-                           (keep (fn [[n fd]]
-                                   (when n [n (assoc fd :name n)])))
-                           base-fn-defs)
-        fn-def-by-name (into {} (keep (fn [fd] [(:name fd) fd])
-                                      fn-defs))
-        all-by-name (merge base-by-name fn-def-by-name)
-        roots (collect-roots fn-defs all-by-name fn-def-by-name)
-        reachable (bfs-reachable all-by-name roots)
-        composed (filter #(composed? (val %)) fn-def-by-name)
-        type-rows (filter #(type-row? (val %)) fn-def-by-name)
-        ;; Starter vocabulary is unreferenced ON PURPOSE. Reported in
-        ;; its own group rather than dropped — a silent filter would
-        ;; read as "covered everything" the day one of these really
-        ;; does become a leftover.
-        vocabulary (:vocabulary (edn/read-string (slurp registry-file)))
-        unreachable (remove #(reachable (key %)) composed)
-        unreachable-composed (remove #(contains? vocabulary (key %)) unreachable)
-        held-vocabulary (filter #(contains? vocabulary (key %)) unreachable)
-        unreachable-type-rows (remove #(reachable (key %)) type-rows)]
+        ;; These indexes discover root mentions only; no selected definition
+        ;; or graph edge is ever looked up through a bare-name map.
+        mentions (into {} (mapcat (fn [fd]
+                                    [[(:name fd) true]
+                                     [(keyword (or (:namespace fd) "") (name (:name fd))) true]]))
+                       (concat base-defs fn-defs))
+        root-names (collect-roots fn-defs mentions mentions)
+        {:keys [roots reachable definitions composed-count type-count vocabulary
+                unreachable-composed held-vocabulary unreachable-type-rows]}
+        (analyze base-defs fn-defs root-names (:vocabulary (edn/read-string (slurp registry-file))))]
     (println "=== Reachability Audit ===")
-    (println "Total base-fns:" (count base-by-name))
-    (println "Total fn-defs (incl. type-rows):" (count fn-def-by-name))
-    (println "  - composed:" (count composed))
-    (println "  - type-rows:" (count type-rows))
+    (println "Total base-fns:" (count base-defs))
+    (println "Total fn-defs (incl. type-rows):" (count definitions))
+    (println "  - composed:" composed-count)
+    (println "  - type-rows:" type-count)
     (println "Roots BFS'd from:" (count roots))
     (println "Reachable (any kind):" (count reachable))
     (println)
@@ -358,13 +328,9 @@
     {:unreachable-composed (vec (sort-by key unreachable-composed))}))
 
 
-;; A CI check (`bb reachability`, group :clj): an unreachable composed
-;; fn-def is dead code or unregistered vocabulary, and either is a fix.
-(let [{:keys [unreachable-composed]} (run-audit)]
-  (when (seq unreachable-composed)
-    (println)
-    (println (str "reachability: " (count unreachable-composed)
-                  " unreachable composed fn-def(s) — delete them, or, if an author is"
-                  " meant to reach for them, list them in tools/graph-reachability.edn"
-                  " :vocabulary with the reason"))
-    (System/exit 1)))
+(defn -main
+  [& _args]
+  (let [{:keys [unreachable-composed]} (run-audit)]
+    (when (seq unreachable-composed)
+      (throw (ex-info "Unreachable composed function definitions"
+                      {:type :reachability/unreachable :count (count unreachable-composed)})))))

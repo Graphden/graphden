@@ -14,9 +14,9 @@
   (into {}
         (for [[path names] [["core.logic" [:const :if :equal? :nil? :coalesce]]
                             ["core.collections" [:list :get :assoc :zipmap :count :take :concat :vals]]
-                            ["core.arithmetic" [:add :mod]]
+                            ["core.arithmetic" [:add :mod :lte]]
                             ["core.hof" [:map :filter :group-by :partition-by :sort-by]]
-                            ["core.strings" [:str :str-starts-with? :str-lower :str-trim :str-contains?]]
+                            ["core.strings" [:str :str-starts-with? :str-lower :str-trim :str-contains? :str-clip]]
                             ["web.html" [:hiccup]]]
               name names]
           [name (keyword path (clojure.core/name name))])))
@@ -45,9 +45,9 @@
   []
   (let [modules {"core/logic" ["core.logic" #{:const :if :equal? :nil? :coalesce}]
                  "core/collections" ["core.collections" #{:list :get :assoc :zipmap :count :take :concat :vals}]
-                 "core/arithmetic" ["core.arithmetic" #{:add :mod}]
+                 "core/arithmetic" ["core.arithmetic" #{:add :mod :lte}]
                  "core/hof" ["core.hof" #{:map :filter :group-by :partition-by :sort-by}]
-                 "core/strings" ["core.strings" #{:str :str-starts-with? :str-lower :str-trim :str-contains?}]
+                 "core/strings" ["core.strings" #{:str :str-starts-with? :str-lower :str-trim :str-contains? :str-clip}]
                  "web/html" ["web.html" #{:hiccup :hiccup-node}]
                  "core/refinements" ["core.refinements" (set (keys public-type-names))]
                  "app/ui-canvas" ["app.ui-canvas" #{:canvas-view-fields}]
@@ -136,6 +136,8 @@
         canvas-values (str root ".canvas-values")
         canvas-inheritance (str root ".canvas-inheritance")
         canvas-metadata (str root ".canvas-metadata")
+        canvas-type-structure (str root ".canvas-type-structure")
+        canvas-bindings (str root ".canvas-bindings")
         descriptors (concat (component-definitions root "explorer" :app.ui-explorer/explorer-toolbar-view
                                                    [[:initial (keyword explorer "explorer-toolbar-initial")]
                                                     [:update (keyword explorer "explorer-toolbar-update")]
@@ -164,7 +166,12 @@
                                                    [[:initial (keyword canvas-inheritance "inheritance-initial")]
                                                     [:view (keyword canvas-inheritance "inheritance-view")]])
                             (component-definitions root "canvas-metadata" :app.ui-canvas-metadata/metadata-view
-                                                   [[:view (keyword canvas-metadata "metadata-view")]]))
+                                                   [[:view (keyword canvas-metadata "metadata-view")]])
+                            (component-definitions root "canvas-type-structure" :app.ui-canvas-type-structure/type-structure-view
+                                                   [[:initial (keyword canvas-type-structure "type-structure-initial")]
+                                                    [:view (keyword canvas-type-structure "type-structure-view")]])
+                            (component-definitions root "canvas-bindings" :app.ui-canvas-bindings/bindings-view
+                                                   [[:view (keyword canvas-bindings "bindings-view")]]))
         configuration {:name :ui :namespace root :parent :core.collections/list
                        :return-type :app.ui-components/ui-component-manifest
                        :description "Your ordinary component manifest. Each descriptor selects entry identities; browser effects remain host-owned."
@@ -177,7 +184,9 @@
                                       (keyword root "_canvas-descriptor")
                                       (keyword root "_canvas-values-descriptor")
                                       (keyword root "_canvas-inheritance-descriptor")
-                                      (keyword root "_canvas-metadata-descriptor")]}}]
+                                      (keyword root "_canvas-metadata-descriptor")
+                                      (keyword root "_canvas-type-structure-descriptor")
+                                      (keyword root "_canvas-bindings-descriptor")]}}]
     (when-not color-const
       (throw (ex-info "Installed UI templates are unavailable" {:type :browser-plan/unsupported})))
     (into [(assoc color-const :namespace theme) configuration]
@@ -186,18 +195,20 @@
                   (copy-module "app/ui-explorer" explorer) (copy-module "app/ui-tutorial-catalog" tutorial-catalog)
                   (copy-module "app/ui-canvas" canvas) (copy-module "app/ui-canvas-values" canvas-values)
                   (copy-module "app/ui-canvas-inheritance" canvas-inheritance)
-                  (copy-module "app/ui-canvas-metadata" canvas-metadata)))))
+                  (copy-module "app/ui-canvas-metadata" canvas-metadata)
+                  (copy-module "app/ui-canvas-type-structure" canvas-type-structure)
+                  (copy-module "app/ui-canvas-bindings" canvas-bindings)))))
 
 
 (def namespace-suffixes
   "Owned child namespaces reserved for the installed personal template bundle."
-  ["theme" "menu" "picker" "recents" "inspector" "explorer" "tutorial-catalog" "canvas" "canvas-values" "canvas-inheritance" "canvas-metadata"])
+  ["theme" "menu" "picker" "recents" "inspector" "explorer" "tutorial-catalog" "canvas" "canvas-values" "canvas-inheritance" "canvas-metadata" "canvas-type-structure" "canvas-bindings"])
 
 
 (def groups
   "Fixed creation choices and their personal namespace/descriptor prefixes."
   {:account-menu "menu" :fn-picker "picker" :recents "recents" :inspector "inspector" :explorer "explorer"
-   :tutorial-catalog "tutorial-catalog" :canvas "canvas" :canvas-values "canvas-values" :canvas-inheritance "canvas-inheritance" :canvas-metadata "canvas-metadata"})
+   :tutorial-catalog "tutorial-catalog" :canvas "canvas" :canvas-values "canvas-values" :canvas-inheritance "canvas-inheritance" :canvas-metadata "canvas-metadata" :canvas-type-structure "canvas-type-structure" :canvas-bindings "canvas-bindings"})
 
 
 (defn selected-definitions
@@ -263,4 +274,7 @@
    :canvas-values-id (str (ids/fn-id (str root ".canvas-values") :canvas-values-view))
    :canvas-inheritance-id (str (ids/fn-id (str root ".canvas-inheritance") :inheritance-view))
    :canvas-metadata-id (str (ids/fn-id (str root ".canvas-metadata") :metadata-view))
+   :canvas-type-structure-id (str (ids/fn-id (str root ".canvas-type-structure") :type-structure-view))
+   :canvas-type-structure-initial-id (str (ids/fn-id (str root ".canvas-type-structure") :type-structure-initial))
+   :canvas-bindings-id (str (ids/fn-id (str root ".canvas-bindings") :bindings-view))
    :tutorial-catalog-id (str (ids/fn-id (str root ".tutorial-catalog") :catalog-view))})

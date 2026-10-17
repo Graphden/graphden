@@ -51,13 +51,13 @@
   }
   function runtime(plan, options) {
     const evaluator = window.GraphdenBrowser.createRuntime(plan, options);
-    return {...evaluator, run(entry, supplied = {}) {
+    return {...evaluator, run(entry, supplied = {}, operationBudget = null) {
       const identity = plan.entries[entry];
       const accepted = new Set(plan.inputs[identity].accepted);
       // A graph edit can remove a formerly free input. Only the fixed host's
       // supplied fields can flow in; the evaluator still checks required ones.
       const argumentsForGraph = Object.fromEntries(Object.entries(supplied).filter(([name]) => accepted.has(name)));
-      return evaluator.run(entry, argumentsForGraph);
+      return evaluator.run(entry, argumentsForGraph, operationBudget);
     }};
   }
   async function loadPlan(component, started, signal) {
@@ -141,6 +141,8 @@
       void window.gdCanvasValuesGraph?.reload();
       void window.gdCanvasInheritanceGraph?.reload();
       void window.gdCanvasMetadataGraph?.reload();
+      void window.gdCanvasTypeStructureGraph?.reload();
+      void window.gdCanvasBindingsGraph?.reload();
     }, 0);
   }
   window.gdPrefOnChange((key) => { if (key === 'components') refresh(); });

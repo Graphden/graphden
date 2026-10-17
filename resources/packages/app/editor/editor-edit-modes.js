@@ -35,6 +35,7 @@ let inlineEditOutsideHandler = null;
 // The row/chip the editor was opened from, so dismissing hands the keyboard
 // back to it rather than dropping focus on the document.
 let inlineEditAnchor = null;
+let inlineEditClosed = null;
 
 // Installed once — reads the live element, inert while closed.
 installTabTrap({
@@ -57,23 +58,31 @@ document.addEventListener('keydown', (e) => {
 });
 
 function closeInlineEdit() {
-  if (inlineEditEl) {
-    const hadFocus = inlineEditEl.contains(document.activeElement);
-    // A code-typed value form is CodeMirror-enhanced; its view holds
-    // document observers that outlive the removed node unless destroyed.
-    window.gdCode?.destroyWithin?.(inlineEditEl);
-    inlineEditEl.remove();
-    inlineEditEl = null;
-    if (hadFocus) returnFocusTo(inlineEditAnchor);
-    inlineEditAnchor = null;
-  }
   if (inlineEditOutsideHandler) {
     document.removeEventListener('pointerdown', inlineEditOutsideHandler);
     inlineEditOutsideHandler = null;
   }
+  if (inlineEditEl) {
+    const el = inlineEditEl;
+    const anchor = inlineEditAnchor;
+    const closed = inlineEditClosed;
+    const hadFocus = el.contains(document.activeElement);
+    inlineEditEl = null;
+    inlineEditAnchor = null;
+    inlineEditClosed = null;
+    // A code-typed value form is CodeMirror-enhanced; its view holds
+    // document observers that outlive the removed node unless destroyed.
+    try { closed?.(); }
+    finally {
+      window.gdCode?.destroyWithin?.(el);
+      el.remove();
+      if (hadFocus) returnFocusTo(anchor);
+    }
+  }
 }
 
-// `opts`: {anchorEl, makeControl(rootEl) → control, doSave(control) → bool|Promise<bool>, onSaved? → void}
+// `opts`: {anchorEl, makeControl(rootEl) → control, doSave(control) → bool|Promise<bool>, onSaved?, onClosed?}
+// `onClosed` releases caller-owned passive renderers before the DOM is removed.
 // `makeControl` builds the focusable element (input/select) and appends
 // it inside rootEl. It must return that element so the skeleton can
 // focus it and listen for Enter/Escape.
@@ -122,7 +131,7 @@ function openInlineEditPopover(opts) {
   // (tutorial finding). `noSave` renders Cancel only.
   if (opts.noSave) save.style.display = 'none';
   const doSave = async () => {
-    if (opts.noSave) return;
+    if (opts.noSave || inlineEditEl !== el || save.disabled) return;
     save.disabled = true;
     cancel.disabled = true;
     errorEl.classList.remove('visible');
@@ -139,9 +148,9 @@ function openInlineEditPopover(opts) {
     }
     const ok = (res === true) || !!res?.ok;
     if (ok) {
-      closeInlineEdit();
+      if (inlineEditEl === el) closeInlineEdit();
       if (typeof opts.onSaved === 'function') opts.onSaved();
-    } else {
+    } else if (inlineEditEl === el) {
       save.disabled = false;
       cancel.disabled = false;
       errorEl.textContent = res?.error
@@ -176,8 +185,10 @@ function openInlineEditPopover(opts) {
   el.appendChild(buttons);
   document.body.appendChild(el);
   inlineEditEl = el;
+  inlineEditClosed = typeof opts.onClosed === 'function' ? opts.onClosed : null;
 
   setTimeout(() => {
+    if (inlineEditEl !== el) return;
     if (control && typeof control.focus === 'function') control.focus();
     if (control && typeof control.select === 'function') {
       try { control.select(); } catch (_) {}
@@ -200,7 +211,10 @@ function openInlineEditPopover(opts) {
   inlineEditOutsideHandler = (e) => {
     if (!el.contains(e.target) && !pointerEventInTour(e)) closeInlineEdit();
   };
-  setTimeout(() => document.addEventListener('pointerdown', inlineEditOutsideHandler), 0);
+  const outsideHandler = inlineEditOutsideHandler;
+  setTimeout(() => {
+    if (inlineEditEl === el) document.addEventListener('pointerdown', outsideHandler);
+  }, 0);
 }
 
 // --- arg-value edit (Phase 0) ---

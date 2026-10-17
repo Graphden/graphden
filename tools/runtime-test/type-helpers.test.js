@@ -24,6 +24,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { createDocument } = require('./mini-dom');
+const {installPassiveGraphs} = require('./canvas-passive-fixture');
 
 const EDITOR = path.join(__dirname, '..', '..', 'resources', 'packages', 'app', 'editor');
 const MODULES = [
@@ -47,6 +48,7 @@ const ctx = vm.createContext({
   lookups: { fnByName: new Map(), fnMap: new Map() },
   document: createDocument(),
 });
+installPassiveGraphs(ctx);
 for (const f of MODULES) {
   vm.runInContext(fs.readFileSync(path.join(EDITOR, f), 'utf8'), ctx, { filename: f });
 }
@@ -105,6 +107,7 @@ test('refinementChain terminates on a circular alias', () => {
     lookups: { fnByName: new Map(), fnMap: new Map() },
     document: createDocument(),
   });
+  installPassiveGraphs(loopy);
   for (const f of MODULES) {
     vm.runInContext(fs.readFileSync(path.join(EDITOR, f), 'utf8'), loopy, { filename: f });
   }

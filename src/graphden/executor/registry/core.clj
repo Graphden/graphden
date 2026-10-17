@@ -937,40 +937,42 @@
    (the entries are small, but tens of thousands of stale entries on
    a long-running prod executor add up to GC pressure).
 
-   No-op if `fn-name` is absent — callers can invoke unconditionally
-   on every delete without checking first.
+   Name-only calls are a no-op if `fn-name` is absent. Callers holding
+   a row id can invoke unconditionally, including for type-only rows.
 
    The thread-local override receives the dissoc when bound; otherwise
    the global atom does. Mirror of `record-rich-types!`'s
-   `target-rich-types-atom` write target."
+   `target-rich-types-atom` write target. An explicit row id is authoritative:
+   if that identity has no entry, neither its name nor another owner is removed."
   ([fn-name] (unregister-rich-type! fn-name nil))
   ([fn-name row-id]
    (let [drop-entry (fn [reg]
-                      ;; Prefer the ROW id (the delete-path caller has
+                      ;; Use the ROW id when supplied (the delete caller has
                       ;; it): with duplicate same-name identities in a
                       ;; long-lived DB, the name index points at ONE of
                       ;; them — keying the drop by name could unregister
                       ;; the SURVIVOR's entry while the deleted row's
                       ;; :by-id entry lived on. Name arity kept for
                       ;; callers without a row (test convenience).
-                      (let [id (or (when (contains? (:by-id reg) row-id)
-                                     row-id)
-                                   (let [nid (get-in reg [:by-name fn-name])]
-                                     (when-not (= nid :graphden.packages.records.types/ambiguous)
-                                       nid)))
-                            entry (when id (get-in reg [:by-id id]))
-                            ;; Only scrub name-index keys when they
-                            ;; actually point at the entry being
-                            ;; dropped — a same-named survivor keeps
-                            ;; its index.
-                            name-keys (if entry
-                                        (filterv #(= id (get-in reg [:by-name %]))
-                                                 (index-keys-for (:name entry)
-                                                                 (:namespace entry)))
-                                        [fn-name])]
-                        (reduce (fn [r k] (update r :by-name dissoc k))
-                                (update reg :by-id dissoc id)
-                                name-keys)))]
+                      (if (and (some? row-id) (not (contains? (:by-id reg) row-id)))
+                        reg
+                        (let [id (or row-id
+                                     (let [nid (get-in reg [:by-name fn-name])]
+                                       (when-not (= nid :graphden.packages.records.types/ambiguous)
+                                         nid)))
+                              entry (when id (get-in reg [:by-id id]))
+                              ;; Only scrub name-index keys when they
+                              ;; actually point at the entry being
+                              ;; dropped — a same-named survivor keeps
+                              ;; its index.
+                              name-keys (if entry
+                                          (filterv #(= id (get-in reg [:by-name %]))
+                                                   (index-keys-for (:name entry)
+                                                                   (:namespace entry)))
+                                          [fn-name])]
+                          (reduce (fn [r k] (update r :by-name dissoc k))
+                                  (update reg :by-id dissoc id)
+                                  name-keys))))]
      (swap! (target-rich-types-atom) drop-entry)
      (when-let [org (current-tenant-org)]
        ;; Only touch an EXISTING slice — the bare `update` used to

@@ -282,6 +282,8 @@ function openFnPicker(opts) {
   list.setAttribute('role', 'listbox');
   list.setAttribute('aria-label', expected ? 'Functions, compatible first' : 'Functions');
   el.appendChild(list);
+  let lastPickerArrangement = null;
+  let lastPickerOptions = null;
   let graphPicker = window.gdFnPickerGraph?.ready ? window.gdFnPickerGraph.mount(list, (c, bareName) => {
     const compatible = fixedCandidates ? c.compatible : expected && serverLoaded ? c.compatible !== false : null;
     const lastDot = c.qualified.lastIndexOf('.');
@@ -580,7 +582,9 @@ function openFnPicker(opts) {
       if (hadListFocus) search.focus();
     }
     if (graphPicker) {
-      try { visibleRows = graphPicker.render(arranged, {q, expected, showOther, activeIdx}); }
+      lastPickerArrangement = arranged;
+      lastPickerOptions = {q, expected, showOther};
+      try { visibleRows = graphPicker.render(arranged, {...lastPickerOptions, activeIdx}); }
       catch (error) { closeFnPicker(); gdToast('Picker graph unavailable: ' + error.message); return; }
       activeIdx = Math.min(activeIdx, Math.max(0, visibleRows.length - 1));
       const active = visibleRows[activeIdx]?.rowEl;
@@ -703,12 +707,24 @@ function openFnPicker(opts) {
   // (no-op unless an expected type was supplied); `choose` awaits it.
   loadPromise = loadTypedCandidates();
 
-  // Instant client-side filter over the loaded candidates, PLUS a debounced
-  // server search so a fn outside the loaded set becomes pickable by typing
-  // its name. searchFns merges matches into the cache; rebuild + re-render.
+  // Filter loaded candidates immediately; debounce whole-graph search and
+  // merge its results into the cache before rendering.
   let _pickerSearchSeq = 0;
   let _pickerSearchTimer = null;
-  fnPickerGraphDispose = () => { clearTimeout(_pickerSearchTimer); graphPicker?.dispose(); };
+  const unsubscribeTypeFormatting = window.gdCanvasTypeStructureGraph.bind(el, () => {
+    if (fnPickerEl !== el || !el.isConnected) return;
+    // Cached presentation cannot search or change compatibility, query/IME,
+    // selection values or navigation IDs.
+    if (graphPicker && lastPickerArrangement) {
+      try { visibleRows = graphPicker.render(lastPickerArrangement, {...lastPickerOptions, activeIdx}); }
+      catch (error) { closeFnPicker(); gdToast('Picker graph unavailable: ' + error.message); }
+      return;
+    }
+    window.gdRefreshPickerReturnLabels(visibleRows);
+  });
+  fnPickerGraphDispose = () => {
+    clearTimeout(_pickerSearchTimer); unsubscribeTypeFormatting(); graphPicker?.dispose();
+  };
   search.addEventListener('input', () => {
     activeIdx = 0;
     render();

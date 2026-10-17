@@ -108,7 +108,7 @@ function appendReturnTypeStrip(c) {
 
   if (rt || rtEditable || flagEditable || displayRich) {
     const strip = document.createElement('div');
-    strip.className = 'return-type-strip';
+    strip.className = 'return-type-strip return-type-strip-flex';
     const displayText = displayRich || rt;
     // Pull the rich form (if any) to feed the refinement detector.
     // displayRich is a string alias like ':positive-int' (or null); the
@@ -125,19 +125,16 @@ function appendReturnTypeStrip(c) {
           : null);
     const constraintText = (typeof refinementConstraintText === 'function')
       ? refinementConstraintText(refineStruct) : null;
-    const body = document.createElement('span');
-    // This exact native body owner reserves space for the sibling provenance
-    // and lambda controls. Its renderer owns only the passive descendants.
-    body.className = 'return-type-strip-text gd-canvas-body-host';
+    // Native chrome survives an empty or hidden personal label. The scoped
+    // body cannot style its marker or push the sibling controls outside.
+    window.gdAppendMetadataControlMark(strip, '→ ');
     if (constraintText) strip.classList.add('return-type-strip-refine');
-    else strip.classList.add('return-type-strip-flex');
-    strip.appendChild(body);
-    window.gdCanvasMetadataGraph.mount(overlay, body, 'return', {
+    window.gdMountMetadataBody(overlay, strip, 'return', {
       'declared-return': rt || '', 'computed-return': displayRich || '',
       constraint: constraintText || '',
       'constraint-title': refineStruct && typeof formatTypeHumanReadable === 'function'
         ? formatTypeHumanReadable(refineStruct) : '',
-    });
+    }, 'return-type-strip-text');
     // Strip title — three cases:
     //   - declared (`rt` is set): "Return type: <rt>" plus an "(computed: …)"
     //     suffix when the rich form is more specific.
@@ -230,6 +227,7 @@ function appendLambdaParamsChip(strip, c) {
     const chip = document.createElement(flagEditable ? 'button' : 'span');
     chip.className = 'lambda-params-chip';
     if (flagEditable) chip.type = 'button';
+    window.gdAppendMetadataControlMark(chip, 'λ ');
     window.gdMountMetadataBody(c.overlay, chip, 'lambda', {
       'lambda-mode': declared == null ? 'derived' : 'declared',
       params: (declared || []).map((label, index) => ({label, first: index === 0})),
@@ -308,6 +306,7 @@ function appendEffectsStrip(c) {
         chip.className = 'effects-chip effects-chip-' + eff + ' effects-chip-native';
         window.gdMountMetadataBody(overlay, chip, 'effect', {effect: eff,
           computed: isComputed, declared: !!isDeclared, 'has-contract': declared !== null});
+        window.gdAppendMetadataControlMark(chip, 'ⓘ');
         chip.title = isComputed
           ? (isDeclared ? 'Effect: ' + eff + ' (declared & computed) — tap for details'
                         : declared ? 'Effect: ' + eff + ' (DRIFT — not in :expects-effects) — tap for details'

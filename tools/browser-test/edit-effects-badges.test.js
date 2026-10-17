@@ -48,7 +48,7 @@ const {assert, newContext} = require('./edit-test-helpers');
       if (!strip) return {error: 'no effects-strip on web-server'};
       const chips = Array.from(strip.querySelectorAll('.effects-chip'))
         .map(c => ({
-          text: c.textContent.trim(),
+          text: c.querySelector('.gd-canvas-metadata-effect').textContent.trim(),
           // Each chip carries a category-specific class
           // `effects-chip-<tag>`.
           cls: Array.from(c.classList).filter(x => x.startsWith('effects-chip-')),
@@ -100,7 +100,7 @@ const {assert, newContext} = require('./edit-test-helpers');
       if (!strip) return {error: 'no effects-strip on health'};
       const chips = Array.from(strip.querySelectorAll('.effects-chip'))
         .map(c => ({
-          text: c.textContent.trim(),
+          text: c.querySelector('.gd-canvas-metadata-effect').textContent.trim(),
           drift: !!c.querySelector('.gd-canvas-metadata-drift'),
           ghost: !!c.querySelector('.gd-canvas-metadata-ghost')
         }));

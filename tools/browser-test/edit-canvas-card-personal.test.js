@@ -233,10 +233,33 @@ const {unexpectedSelectiveCopyErrors} = require('./selective-copy-errors');
       if (process.env.GRAPHDEN_CANVAS_SCREENSHOT)
         await page.screenshot({path: process.env.GRAPHDEN_CANVAS_SCREENSHOT + (dark ? '.dark.png' : '.light.png')});
     }
-    // Exercise the actual retained effect anchor, then restore preferences.
+    // A real authored stylesheet may omit the optional label; the native
+    // details affordance, target and focus must survive that source reload.
+    phase = 'hidden-personal-metadata';
+    await editLiteral(metadata, '_style-effect', 'vals', 'none', 0);
+    await page.evaluate(() => gdRefreshUIConfiguration());
+    await page.waitForFunction(() => getComputedStyle(metadataFocusProof.effect.querySelector('.gd-canvas-metadata-effect')).display === 'none',
+      null, {timeout: 60000});
+    assert(await page.evaluate(() => {
+      const effect = metadataFocusProof.effect, rect = effect.getBoundingClientRect();
+      const mark = effect.querySelector(':scope > .canvas-metadata-control-mark');
+      const box = mark.getBoundingClientRect(), style = getComputedStyle(effect);
+      const target = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+      return effect.isConnected && metadataFocusProof.card.querySelector('.effects-chip-env') === effect
+        && document.activeElement === metadataFocusProof.lambda && !mark.closest('[data-gd-ui-style]')
+        && box.width > 0 && box.height > 0 && rect.width >= parseFloat(style.minWidth)
+        && rect.height >= parseFloat(style.minHeight) && (target === effect || effect.contains(target));
+    }), 'actual stored hidden label retains native details mark, minimum hit area and focused controls');
+    if (process.env.GRAPHDEN_CANVAS_SCREENSHOT)
+      await page.screenshot({path: process.env.GRAPHDEN_CANVAS_SCREENSHOT + '.hidden.png'});
+    // Exercise the actual retained effect anchor, then restore its label.
     await page.locator('.node-overlay[data-original-fn-id="' + effect.id + '"] .effects-chip-env').click();
     await page.locator('.type-explainer.visible').waitFor({state: 'visible', timeout: 60000});
     await page.keyboard.press('Escape');
+    await editLiteral(metadata, '_style-effect', 'vals', 'inline-flex', 0);
+    await page.evaluate(() => gdRefreshUIConfiguration());
+    await page.waitForFunction(() => getComputedStyle(metadataFocusProof.effect.querySelector('.gd-canvas-metadata-effect')).display === 'inline-flex',
+      null, {timeout: 60000});
     phase = 'restore';
     for (const activation of [...activations].reverse()) {
       const undone = await undoConfiguration(page, activation); assert(undone.ok, 'exact configuration restored');

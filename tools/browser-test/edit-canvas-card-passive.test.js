@@ -6,7 +6,7 @@ const {chromium} = require('playwright');
 const source = process.env.GRAPHDEN_CANVAS_SOURCE_ROOT || path.join(__dirname, '../..');
 (async () => {
   const browser = await chromium.launch({headless: true});
-  const page = await browser.newPage();
+  const page = await browser.newPage({hasTouch: !!process.env.GRAPHDEN_VIEWPORT});
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   try {
@@ -143,24 +143,80 @@ const source = process.env.GRAPHDEN_CANVAS_SOURCE_ROOT || path.join(__dirname, '
       fixture.check(fixture.failures.includes('canvas-inheritance'), 'late policy failure diagnosed');
       fixture.check(fixture.groups.length === 4 && fixture.groups.every((row, i) => row.position === i), 'whole builtin retry retains every native ordinal');
       // Real compiled const output with an active element must be refused.
-      const plan = GraphdenBuiltinPlans.plans.accountMenu;
-      const primitive = plan.primitives.find(row => row.op === 'const');
-      const fn = structuredClone(plan.functions.find(row => row.primitive === primitive.id));
-      const output = fixture.record({tree: [fixture.k('button'), fixture.record({}), 'Forbidden'], title: '', styles: []});
-      fn.args = [{name: 'value', slot: fn.args.find(arg => arg.name === 'value').slot,
-        expr: {kind: 'literal', value: GraphdenBrowser.encode(output)}}]; fn.env = []; fn.aliases = [];
-      fixture.selected['canvas-metadata'] = GraphdenBrowser.createRuntime({format: 1, primitiveAbi: 1,
-        entries: {view: fn.id}, inputs: {[fn.id]: {accepted: ['inputs'], required: [], destinations: []}},
-        functions: [fn], primitives: [primitive]});
+      fixture.outputRuntime = output => {
+        const plan = GraphdenBuiltinPlans.plans.accountMenu;
+        const primitive = plan.primitives.find(row => row.op === 'const');
+        const fn = structuredClone(plan.functions.find(row => row.primitive === primitive.id));
+        fn.args = [{name: 'value', slot: fn.args.find(arg => arg.name === 'value').slot,
+          expr: {kind: 'literal', value: GraphdenBrowser.encode(fixture.record(output))}}]; fn.env = []; fn.aliases = [];
+        return GraphdenBrowser.createRuntime({format: 1, primitiveAbi: 1,
+          entries: {view: fn.id}, inputs: {[fn.id]: {accepted: ['inputs'], required: [], destinations: []}},
+          functions: [fn], primitives: [primitive]});
+      };
+      fixture.selected['canvas-metadata'] = fixture.outputRuntime({
+        tree: [fixture.k('button'), {}, 'Forbidden'], title: '', styles: []});
     });
     await page.evaluate(() => gdCanvasMetadataGraph.reload());
     await page.waitForFunction(() => !fixture.owner.querySelector('.gd-canvas-metadata-personal'));
     await page.evaluate(() => {
       fixture.check(fixture.failures.includes('canvas-metadata') && !fixture.owner.textContent.includes('Forbidden'), 'active personal metadata refused across all bodies');
       fixture.check(fixture.effect.querySelector('.gd-canvas-metadata-drift'), 'whole metadata builtin fallback');
-      fixture.selected['canvas-inheritance'] = fixture.personalInheritance;
     });
-    await page.evaluate(() => gdCanvasInheritanceGraph.reload());
+    for (const [label, declarations] of [['empty', null], ['hidden', {display: 'none'}],
+      ['transparent', {opacity: '0'}], ['zero', {display: 'block', width: '0', 'font-size': '0'}],
+      ['large', {display: 'block', width: '4096px', padding: '16px', 'font-size': '48px'}]]) {
+      await page.evaluate(({label, declarations}) => {
+        fixture.owner.style.width = '240px';
+        fixture.lambda.focus(); fixture.beforeOptionalFailures = fixture.failures.length;
+        fixture.selected['canvas-metadata'] = fixture.outputRuntime({title: '',
+          tree: label === 'empty' ? null : [fixture.k('span'), {class: 'gd-canvas-metadata-optional'}, 'optional label'],
+          styles: declarations ? [{selector: '& .gd-canvas-metadata-optional', declarations}] : []});
+      }, {label, declarations});
+      await page.evaluate(() => gdCanvasMetadataGraph.reload());
+      const geometry = await page.evaluate(() => {
+        const controls = [fixture.lambda, fixture.effect];
+        const nativeMark = element => element.querySelector(':scope > .canvas-metadata-control-mark');
+        const markVisible = element => {
+          const mark = nativeMark(element), rect = mark.getBoundingClientRect(), style = getComputedStyle(mark);
+          return !mark.closest('[data-gd-ui-style]') && style.display !== 'none' && Number(style.opacity) > 0
+            && rect.width > 0 && rect.height > 0;
+        };
+        const hit = (element, owner = element) => {
+          const rect = element.getBoundingClientRect();
+          const target = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+          return target === owner || owner.contains(target);
+        };
+        const minimum = controls.every(element => {
+          const rect = element.getBoundingClientRect(), style = getComputedStyle(element);
+          const width = parseFloat(style.minWidth), height = parseFloat(style.minHeight);
+          return Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0
+            && rect.width + 0.5 >= width && rect.height + 0.5 >= height;
+        });
+        const native = [fixture.provenance, fixture.lambda, ...fixture.owner.querySelectorAll('.effects-chip')];
+        const rects = native.map(element => element.getBoundingClientRect());
+        const overlap = rects.some((a, i) => rects.slice(i + 1).some(b =>
+          Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5
+          && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5));
+        const owner = fixture.owner.getBoundingClientRect();
+        const fits = rects.every(rect => rect.left >= owner.left - 1 && rect.right <= owner.right + 1);
+        const focus = document.activeElement === fixture.lambda && fixture.effect === fixture.effectIdentity;
+        const callbacks = fixture.clicks;
+        fixture.lambda.click(); fixture.effect.click(); fixture.returns.click();
+        return {minimum, hit: controls.every(element => hit(element)) && hit(nativeMark(fixture.returns), fixture.returns),
+          marks: [fixture.lambda, fixture.effect, fixture.returns].every(markVisible), overlap, fits, focus,
+          callbacks: fixture.clicks === callbacks + 3,
+          accepted: fixture.failures.length === fixture.beforeOptionalFailures,
+          coarse: matchMedia('(pointer: coarse)').matches};
+      });
+      assert(geometry.minimum && geometry.hit && geometry.marks && !geometry.overlap && geometry.fits
+        && geometry.focus && geometry.callbacks && geometry.accepted, label + ' native metadata controls ' + JSON.stringify(geometry));
+      console.log('PASS optional ' + label + ' metadata controls ' + JSON.stringify(geometry));
+    }
+    await page.evaluate(() => {
+      fixture.selected['canvas-inheritance'] = fixture.personalInheritance;
+      fixture.selected['canvas-metadata'] = fixture.personalMetadata;
+    });
+    await page.evaluate(() => Promise.all([gdCanvasInheritanceGraph.reload(), gdCanvasMetadataGraph.reload()]));
     await page.waitForFunction(() => fixture.paintLine.style.background === 'var(--card-row-highlight)');
     await page.evaluate(() => {
       fixture.pending = [];

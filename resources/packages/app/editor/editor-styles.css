@@ -8177,7 +8177,9 @@ body.gd-no-write .branch-comment-form { display: none; }
    (opens editor-edit-modes-flags.js), a plain span elsewhere. */
 .lambda-params-chip {
   display: inline-flex; align-items: center;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
   margin-left: 6px;
   padding: 0 4px;
   border: 1px solid var(--input-border);
@@ -8331,6 +8333,51 @@ button.lambda-params-chip:focus-visible { outline: 1px solid var(--accent); }
 /* Passive graph bodies preserve their native row/strip layout owner. */
 .gd-canvas-body-host { display: contents; }
 
+/* Native control chrome is outside the optional graph body's style scope. */
+.canvas-metadata-body-frame {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+.canvas-metadata-control-mark {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted-fg);
+  font-size: var(--icon-font-size);
+  font-style: normal;
+  line-height: 1;
+  white-space: pre;
+  pointer-events: none;
+}
+.return-type-strip-editable,
+button.lambda-params-chip {
+  min-width: var(--icon-size);
+  min-height: var(--icon-size);
+}
+.return-type-strip-editable > .canvas-metadata-control-mark {
+  min-width: var(--icon-size);
+  min-height: var(--icon-size);
+}
+.effects-strip .effects-chip-native {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1875rem;
+  min-width: var(--icon-size);
+  min-height: var(--icon-size);
+  max-width: 100%;
+  padding: 0 0.1875rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   /* Near-zero rather than `none`: keeps transitionend firing for any
      future listener while being imperceptible. */
@@ -8356,15 +8403,4 @@ button.lambda-params-chip:focus-visible { outline: 1px solid var(--accent); }
     animation: none;
     opacity: 0.75;
   }
-}
-
-/* Canvas metadata buttons keep focus/hit authority; their graph body owns the pill. */
-.effects-strip .effects-chip-native {
-  padding: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  line-height: 1;
-  letter-spacing: normal;
-  text-transform: none;
 }

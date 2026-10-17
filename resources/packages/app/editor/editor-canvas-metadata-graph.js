@@ -26,9 +26,19 @@
     failureText: () => 'Function metadata presentation unavailable',
   });
   window.gdMountMetadataBody = (owner, element, surface, facts, className = '') => {
+    const frame = document.createElement('span');
+    frame.className = 'canvas-metadata-body-frame' + (className ? ' ' + className : '');
     const host = document.createElement('span');
-    host.className = 'gd-canvas-body-host' + (className ? ' ' + className : '');
-    element.appendChild(host);
+    host.className = 'gd-canvas-body-host';
+    frame.appendChild(host);
+    element.appendChild(frame);
     return window.gdCanvasMetadataGraph.mount(owner, host, surface, facts);
+  };
+  window.gdAppendMetadataControlMark = (element, label) => {
+    const mark = document.createElement('span');
+    mark.className = 'canvas-metadata-control-mark';
+    mark.setAttribute('aria-hidden', 'true');
+    mark.textContent = label;
+    element.appendChild(mark);
   };
 })();

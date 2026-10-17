@@ -121,27 +121,18 @@
   {:name :_return-shown,
    :parent :if,
    :args {:test :_return-empty, :then "(none)", :else :_return-label}}
-  {:name :_return-text,
-   :parent :str,
-   :args {:parts ["→ " :_return-shown]}}
   {:name :_return-normal,
    :parent :hiccup,
    :args
    {:tag "span",
     :attrs {:value {:class "gd-canvas-metadata-return-text"}},
-    :children [:_return-text]}}
+    :children [:_return-shown]}}
   {:name :_return-base,
    :parent :hiccup,
    :args
    {:tag "span",
     :attrs {:value {:class "gd-canvas-metadata-return-base"}},
     :children [:_return-label]}}
-  {:name :_return-arrow,
-   :parent :hiccup,
-   :args
-   {:tag "span",
-    :attrs {:value {:class "gd-canvas-metadata-return-arrow"}},
-    :children ["→ "]}}
   {:name :_constraint-attrs,
    :parent :zipmap,
    :args
@@ -156,7 +147,7 @@
    :args
    {:tag "span",
     :attrs {:value {:class "gd-canvas-metadata-refine"}},
-    :children [:_return-arrow :_return-base :_constraint-body]}}
+    :children [:_return-base :_constraint-body]}}
   {:name :_constraint-empty,
    :parent :equal?,
    :args {:a :_constraint, :b ""}}
@@ -180,15 +171,12 @@
    :parent :if,
    :args
    {:test :_lambda-derived, :then "derived", :else :_lambda-explicit}}
-  {:name :_lambda-text,
-   :parent :str,
-   :args {:parts ["λ " :_lambda-shown]}}
   {:name :_lambda-body,
    :parent :hiccup,
    :args
    {:tag "span",
     :attrs {:value {:class "gd-canvas-metadata-lambda"}},
-    :children [:_lambda-text]}}
+    :children [:_lambda-shown]}}
   {:name :_not-computed,
    :parent :if,
    :args {:test :_computed, :then false, :else true}}

@@ -522,3 +522,10 @@ Native siblings retain real edit/provenance buttons, accessible names and
 permission checks. Secret values, function IDs and registries are absent from
 both component inputs. Existing canvas and value/type component contracts stay
 compatible. Both components can be copied and selected through Appearance.
+
+Interactive metadata keeps an unscoped native marker (`→`, `λ`, details `ⓘ`)
+and the existing native icon-size minimum, including the coarse-pointer floor.
+The optional graph label sits in its own clipped flow wrapper. Empty labels,
+hidden styles or oversized content cannot remove that native affordance, shrink
+its target to zero, or push sibling controls outside the card. Native titles,
+accessible names and handlers remain attached to the exact retained controls.

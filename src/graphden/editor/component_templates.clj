@@ -32,32 +32,37 @@
   (:fns (-> (str "packages/" module "/fns.edn") io/resource slurp edn/read-string)))
 
 
+(defn identity-interface
+  "Parse-only identity metadata. It supplies no callable slots or body authority."
+  [reference]
+  {:namespace (namespace reference) :name (keyword (name reference))})
+
+
 (defn interface-definitions
   "Fixed parse-time interfaces, not a dump of tenant definitions. The import
    resolves slots against these shipped declarations, then checks every actual
    installed dependency under source authorization before writing anything."
   []
-  (let [modules (into {"core/logic" ["core.logic" #{:const :if :equal? :nil? :coalesce}]
-                       "core/collections" ["core.collections" #{:list :get :assoc :zipmap :count :take :concat :vals}]
-                       "core/arithmetic" ["core.arithmetic" #{:add :mod}]
-                       "core/hof" ["core.hof" #{:map :filter :group-by :partition-by :sort-by}]
-                       "core/strings" ["core.strings" #{:str :str-starts-with? :str-lower :str-trim :str-contains?}]
-                       "web/html" ["web.html" #{:hiccup :hiccup-node}]
-                       "core/refinements" ["core.refinements" (set (keys public-type-names))]
-                       "app/ui-components" ["app.ui-components" #{:ui-components :_ui-components-identities :ui-component-entry :ui-component-entries
-                                                                  :ui-component-descriptor :ui-component-manifest}]}
-                      (map (fn [[_ {:keys [reference]}]]
-                             (let [path (namespace reference)]
-                               [(str/replace path "." "/") [path #{(keyword (name reference))}]])))
-                      config/component-contracts)
-        ;; The shared ordinary output shape stays an installed dependency.
-        ;; Union with the entry interface instead of replacing that module.
-        modules (update-in modules ["app/ui-canvas" 1] conj :canvas-view-fields)]
-    (into []
-          (mapcat (fn [[module [path names]]]
-                    (map #(assoc % :namespace path)
-                         (filter #(contains? names (:name %)) (installed-definitions module)))))
-          modules)))
+  (let [modules {"core/logic" ["core.logic" #{:const :if :equal? :nil? :coalesce}]
+                 "core/collections" ["core.collections" #{:list :get :assoc :zipmap :count :take :concat :vals}]
+                 "core/arithmetic" ["core.arithmetic" #{:add :mod}]
+                 "core/hof" ["core.hof" #{:map :filter :group-by :partition-by :sort-by}]
+                 "core/strings" ["core.strings" #{:str :str-starts-with? :str-lower :str-trim :str-contains?}]
+                 "web/html" ["web.html" #{:hiccup :hiccup-node}]
+                 "core/refinements" ["core.refinements" (set (keys public-type-names))]
+                 "app/ui-canvas" ["app.ui-canvas" #{:canvas-view-fields}]
+                 "app/ui-components" ["app.ui-components" #{:ui-components :_ui-components-identities :ui-component-entry :ui-component-entries
+                                                            :ui-component-descriptor :ui-component-manifest}]}
+        structural (mapcat (fn [[module [path names]]]
+                             (map #(assoc % :namespace path)
+                                  (filter #(contains? names (:name %)) (installed-definitions module))))
+                           modules)
+        ;; Installed component discriminators are only const/fn-ref targets in
+        ;; this fixed template parser. Do not import their omitted body refs
+        ;; into the structural interface index. Actual source authorization
+        ;; reads the installed graph separately before any write/export.
+        identities (map (comp identity-interface :reference val) config/component-contracts)]
+    (into (vec structural) identities)))
 
 
 (defn- copy-module
@@ -129,6 +134,8 @@
         tutorial-catalog (str root ".tutorial-catalog")
         canvas (str root ".canvas")
         canvas-values (str root ".canvas-values")
+        canvas-inheritance (str root ".canvas-inheritance")
+        canvas-metadata (str root ".canvas-metadata")
         descriptors (concat (component-definitions root "explorer" :app.ui-explorer/explorer-toolbar-view
                                                    [[:initial (keyword explorer "explorer-toolbar-initial")]
                                                     [:update (keyword explorer "explorer-toolbar-update")]
@@ -152,7 +159,12 @@
                             (component-definitions root "canvas" :app.ui-canvas/canvas-view
                                                    [[:view (keyword canvas "canvas-view")]])
                             (component-definitions root "canvas-values" :app.ui-canvas-values/canvas-values-view
-                                                   [[:view (keyword canvas-values "canvas-values-view")]]))
+                                                   [[:view (keyword canvas-values "canvas-values-view")]])
+                            (component-definitions root "canvas-inheritance" :app.ui-canvas-inheritance/inheritance-view
+                                                   [[:initial (keyword canvas-inheritance "inheritance-initial")]
+                                                    [:view (keyword canvas-inheritance "inheritance-view")]])
+                            (component-definitions root "canvas-metadata" :app.ui-canvas-metadata/metadata-view
+                                                   [[:view (keyword canvas-metadata "metadata-view")]]))
         configuration {:name :ui :namespace root :parent :core.collections/list
                        :return-type :app.ui-components/ui-component-manifest
                        :description "Your ordinary component manifest. Each descriptor selects entry identities; browser effects remain host-owned."
@@ -163,25 +175,29 @@
                                       (keyword root "_explorer-descriptor")
                                       (keyword root "_tutorial-catalog-descriptor")
                                       (keyword root "_canvas-descriptor")
-                                      (keyword root "_canvas-values-descriptor")]}}]
+                                      (keyword root "_canvas-values-descriptor")
+                                      (keyword root "_canvas-inheritance-descriptor")
+                                      (keyword root "_canvas-metadata-descriptor")]}}]
     (when-not color-const
       (throw (ex-info "Installed UI templates are unavailable" {:type :browser-plan/unsupported})))
     (into [(assoc color-const :namespace theme) configuration]
           (concat descriptors theme-definitions menu-definitions (copy-module "app/ui-fn-picker" picker)
                   (copy-module "app/ui-recents" recents) (copy-module "app/ui-inspector" inspector)
                   (copy-module "app/ui-explorer" explorer) (copy-module "app/ui-tutorial-catalog" tutorial-catalog)
-                  (copy-module "app/ui-canvas" canvas) (copy-module "app/ui-canvas-values" canvas-values)))))
+                  (copy-module "app/ui-canvas" canvas) (copy-module "app/ui-canvas-values" canvas-values)
+                  (copy-module "app/ui-canvas-inheritance" canvas-inheritance)
+                  (copy-module "app/ui-canvas-metadata" canvas-metadata)))))
 
 
 (def namespace-suffixes
   "Owned child namespaces reserved for the installed personal template bundle."
-  ["theme" "menu" "picker" "recents" "inspector" "explorer" "tutorial-catalog" "canvas" "canvas-values"])
+  ["theme" "menu" "picker" "recents" "inspector" "explorer" "tutorial-catalog" "canvas" "canvas-values" "canvas-inheritance" "canvas-metadata"])
 
 
 (def groups
   "Fixed creation choices and their personal namespace/descriptor prefixes."
   {:account-menu "menu" :fn-picker "picker" :recents "recents" :inspector "inspector" :explorer "explorer"
-   :tutorial-catalog "tutorial-catalog" :canvas "canvas" :canvas-values "canvas-values"})
+   :tutorial-catalog "tutorial-catalog" :canvas "canvas" :canvas-values "canvas-values" :canvas-inheritance "canvas-inheritance" :canvas-metadata "canvas-metadata"})
 
 
 (defn selected-definitions
@@ -245,4 +261,6 @@
    :recents-update-id (str (ids/fn-id (str root ".recents") :recents-update))
    :canvas-id (str (ids/fn-id (str root ".canvas") :canvas-view))
    :canvas-values-id (str (ids/fn-id (str root ".canvas-values") :canvas-values-view))
+   :canvas-inheritance-id (str (ids/fn-id (str root ".canvas-inheritance") :inheritance-view))
+   :canvas-metadata-id (str (ids/fn-id (str root ".canvas-metadata") :metadata-view))
    :tutorial-catalog-id (str (ids/fn-id (str root ".tutorial-catalog") :catalog-view))})

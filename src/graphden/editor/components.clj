@@ -112,6 +112,8 @@
                          :recents-update-id (some-> (get-in configuration [:recents :update]) str)
                          :canvas-id (some-> (get-in configuration [:canvas :view]) str)
                          :canvas-values-id (some-> (get-in configuration [:canvas-values :view]) str)
+                         :canvas-inheritance-id (some-> (get-in configuration [:canvas-inheritance :view]) str)
+                         :canvas-metadata-id (some-> (get-in configuration [:canvas-metadata :view]) str)
                          :tutorial-catalog-id (some-> (get-in configuration [:tutorial-catalog :view]) str)}}
           resolved (assoc :configuration-revision (:revision resolved)
                           :configuration-preference {:present (boolean (seq preference-rows))

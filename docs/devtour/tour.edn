@@ -1466,6 +1466,22 @@
            one measured grid pass reserves card widths, edge labels and type-history row envelopes."
      :see [[:editor "createRuntime"] [:editor "mount"]]}
 
+    {:file "resources/packages/app/editor/editor-canvas-inheritance-graph.js" :defn groups
+     :say "Stages one ordinary graph transition for each native BFS ordinal. The graph declares
+           passive grouping, root treatment and legal MI columns; checked receipts rejoin exact
+           native row owners. A failed later personal receipt restarts the entire sequence from
+           its original seed with the builtin. Runtime changes update retained group endpoints and
+           separators without replacing focused native controls. Paint is a separate finite local
+           policy and performs no network request."
+     :see [[:editor "createFnOverlay"] [:editor "mountCanvasBody"]]}
+
+    {:file "resources/packages/app/editor/editor-canvas-metadata-graph.js" :defn projection
+     :say "Projects only authorized return/refinement summaries, ordered lambda labels and effect
+           membership into ordinary passive metadata graphs. Their Hiccup and scoped styles own
+           the visible bodies, including drift and ghost badges. Native sibling controls retain
+           edit permission, accessible names, provenance and exact popover anchors."
+     :see [[:editor "mountCanvasBody"]]}
+
     {:file "resources/packages/app/editor/editor-tour-catalog-graph.js" :defn mountCatalog
      :say "Runs the selected ordinary tutorial catalogue view over browser-local display facts.
            Its checked output keeps lesson identities in source order and accepts only passive
@@ -1565,7 +1581,7 @@
            Initial Run forms may finish hidden, but a separate focus epoch blocks old autofocus.
            CodeMirror is disposed before actual body replacement; graph chrome refreshes retain controls."}
     {:ns graphden.editor.component-templates :defn definitions
-     :say "Copies the fixed shipped theme, menu, picker, Recents, Inspector, Explorer, tutorial catalogue, passive canvas and value/type presentation definitions into a fresh named namespace.
+     :say "Copies the fixed shipped theme, menu, picker, Recents, Inspector, Explorer, tutorial catalogue, passive canvas, value/type, inheritance and function metadata definitions into a fresh named namespace.
            An ordinary descriptor list selects component entry identities. Shared menu colors reference
            copied theme leaves; menu hover owns a local literal. Color wrappers retain the canonical
            color type and ordinary editor form. This is an advanced legacy compatibility path; Lesson 25

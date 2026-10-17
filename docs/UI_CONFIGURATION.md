@@ -80,6 +80,15 @@ paths and values never enter this presentation component. Type resolution,
 refinement formatting, edit/expand anchors and accessibility remain native.
 See the [value/type contract](../resources/packages/app/ui-preview/README.md#passive-value-and-type-presentation).
 
+Inheritance groups and MI label bodies use
+`app.ui-canvas-inheritance/inheritance-view`, with a pure `initial` entry for
+checked grouping and finite paint receipts. Return/refinement, ordered lambda
+and effect drift/ghost bodies use the view-only
+`app.ui-canvas-metadata/metadata-view`. They have separate identities from the
+older canvas components. Native rows keep expansion events, focus, edit controls
+and accessible anchors when presentation changes. See the
+[fn-card contract](../resources/packages/app/ui-preview/README.md#inheritance-and-function-metadata-presentation).
+
 Replacing an editor root renames the old root privately in the current branch
 and creates a new UUID named `editor`. Its parent relationships are retained.
 Other branches and references to the old UUID keep their composition. A stored

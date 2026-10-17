@@ -1,0 +1,329 @@
+{:namespace "app.ui-canvas-inheritance",
+ :description
+ "Ordinary passive canvas presentation; native owners retain authority and interaction.",
+ :fns
+ [{:name :_label-inputs, :type {:label :text}}
+  {:name :_paint-output, :type {:tone :text, :bold :bool}}
+  {:name :_level,
+   :type
+   {:position :int,
+    :depth :int,
+    :mi :bool,
+    :clickable :bool,
+    :duplicate-next :bool}}
+  {:name :_row,
+   :type
+   {:position :int,
+    :depth :int,
+    :visible :bool,
+    :group :int,
+    :root :bool,
+    :follows-mi :int}}
+  {:name :_state,
+   :type {:group :int, :root :bool, :mi :int, :previous-mi :bool}}
+  {:name :_inputs,
+   :type
+   {:clickable :bool,
+    :prior :_state,
+    :partial-next :bool,
+    :level :_level,
+    :root :bool,
+    :within :bool,
+    :expanded :bool,
+    :cell :bool,
+    :surface [:refine :text {:constraint [:in #{"paint" "groups"}]}],
+    :use-site :bool}}
+  {:name :_surface,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :surface},
+    :default "groups"}}
+  {:name :_use-site,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :use-site},
+    :default false}}
+  {:name :_acc,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :prior},
+    :default
+    {:value {:group -1, :root true, :mi -1, :previous-mi false}}},
+   :return-type :_state}
+  {:name :_item,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :level},
+    :default
+    {:value
+     {:position 0,
+      :depth 0,
+      :mi false,
+      :clickable false,
+      :duplicate-next false}}},
+   :return-type :_level}
+  {:name :_acc-group,
+   :parent :get,
+   :args {:coll :_acc, :key {:value :group}, :default -1}}
+  {:name :_acc-root,
+   :parent :get,
+   :args {:coll :_acc, :key {:value :root}, :default true}}
+  {:name :_acc-mi,
+   :parent :get,
+   :args {:coll :_acc, :key {:value :mi}, :default -1}}
+  {:name :_acc-previous-mi,
+   :parent :get,
+   :args {:coll :_acc, :key {:value :previous-mi}, :default false}}
+  {:name :_item-position,
+   :parent :get,
+   :args {:coll :_item, :key {:value :position}, :default 0}}
+  {:name :_item-depth,
+   :parent :get,
+   :args {:coll :_item, :key {:value :depth}, :default 0}}
+  {:name :_item-mi,
+   :parent :get,
+   :args {:coll :_item, :key {:value :mi}, :default false}}
+  {:name :_item-clickable,
+   :parent :get,
+   :args {:coll :_item, :key {:value :clickable}, :default false}}
+  {:name :_item-duplicate-next,
+   :parent :get,
+   :args {:coll :_item, :key {:value :duplicate-next}, :default false}}
+  {:name :_visible,
+   :parent :if,
+   :args {:test :_item-duplicate-next, :then false, :else true}}
+  {:name :_first, :parent :equal?, :args {:a :_acc-group, :b -1}}
+  {:name :_starts-group,
+   :parent :if,
+   :args {:test :_first, :then true, :else :_starts-group-remaining-1}}
+  {:name :_starts-group-remaining-1,
+   :parent :if,
+   :args
+   {:test :_item-mi, :then true, :else :_starts-group-remaining-2}}
+  {:name :_starts-group-remaining-2,
+   :parent :if,
+   :args
+   {:test :_item-clickable,
+    :then true,
+    :else :_starts-group-remaining-3}}
+  {:name :_starts-group-remaining-3,
+   :parent :if,
+   :args {:test :_acc-previous-mi, :then true, :else false}}
+  {:name :_next-group, :parent :add, :args {:nums [:_acc-group 1]}}
+  {:name :_group,
+   :parent :if,
+   :args {:test :_starts-group, :then :_next-group, :else :_acc-group}}
+  {:name :_not-first,
+   :parent :if,
+   :args {:test :_first, :then false, :else true}}
+  {:name :_breakable,
+   :parent :if,
+   :args {:test :_use-site, :then true, :else :_breakable-remaining-1}}
+  {:name :_breakable-remaining-1,
+   :parent :if,
+   :args {:test :_not-first, :then true, :else false}}
+  {:name :_breaks-root,
+   :parent :if,
+   :args
+   {:test :_breakable, :then :_breaks-root-remaining-1, :else false}}
+  {:name :_breaks-root-remaining-1,
+   :parent :if,
+   :args {:test :_item-clickable, :then true, :else false}}
+  {:name :_no-break,
+   :parent :if,
+   :args {:test :_breaks-root, :then false, :else true}}
+  {:name :_root,
+   :parent :if,
+   :args {:test :_acc-root, :then :_root-remaining-1, :else false}}
+  {:name :_root-remaining-1,
+   :parent :if,
+   :args {:test :_no-break, :then true, :else false}}
+  {:name :_mi-reset,
+   :parent :if,
+   :args
+   {:test :_item-mi, :then true, :else :_breaks-root-remaining-1}}
+  {:name :_continued-mi,
+   :parent :if,
+   :args {:test :_item-clickable, :then -1, :else :_acc-mi}}
+  {:name :_mi-index,
+   :parent :if,
+   :args
+   {:test :_item-mi, :then :_item-position, :else :_continued-mi}}
+  {:name :_follows-mi,
+   :parent :if,
+   :args {:test :_mi-reset, :then -1, :else :_acc-mi}}
+  {:name :_row-result,
+   :parent :zipmap,
+   :args
+   {:keys
+    [{:value :position}
+     {:value :depth}
+     {:value :visible}
+     {:value :group}
+     {:value :root}
+     {:value :follows-mi}],
+    :vals
+    [:_item-position
+     :_item-depth
+     :_visible
+     :_group
+     :_root
+     :_follows-mi]},
+   :return-type :_row}
+  {:name :_committed-group,
+   :parent :if,
+   :args {:test :_visible, :then :_group, :else :_acc-group}}
+  {:name :_committed-root,
+   :parent :if,
+   :args {:test :_visible, :then :_root, :else :_acc-root}}
+  {:name :_committed-mi,
+   :parent :if,
+   :args {:test :_visible, :then :_mi-index, :else :_acc-mi}}
+  {:name :_committed-previous-mi,
+   :parent :if,
+   :args {:test :_visible, :then :_item-mi, :else :_acc-previous-mi}}
+  {:name :_fold-row,
+   :parent :zipmap,
+   :args
+   {:keys
+    [{:value :group}
+     {:value :root}
+     {:value :mi}
+     {:value :previous-mi}],
+    :vals
+    [:_committed-group
+     :_committed-root
+     :_committed-mi
+     :_committed-previous-mi]},
+   :return-type :_state}
+  {:name :_paint-root,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :root},
+    :default false}}
+  {:name :_paint-cell,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :cell},
+    :default false}}
+  {:name :_paint-clickable,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :clickable},
+    :default false}}
+  {:name :_paint-expanded,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :expanded},
+    :default false}}
+  {:name :_not-cell,
+   :parent :if,
+   :args {:test :_paint-cell, :then false, :else true}}
+  {:name :_not-clickable,
+   :parent :if,
+   :args {:test :_paint-clickable, :then false, :else true}}
+  {:name :_cell-root,
+   :parent :if,
+   :args {:test :_not-cell, :then true, :else :_cell-root-remaining-1}}
+  {:name :_cell-root-remaining-1,
+   :parent :if,
+   :args {:test :_not-clickable, :then true, :else false}}
+  {:name :_root-paint,
+   :parent :if,
+   :args
+   {:test :_paint-root, :then :_root-paint-remaining-1, :else false}}
+  {:name :_root-paint-remaining-1,
+   :parent :if,
+   :args {:test :_cell-root, :then true, :else false}}
+  {:name :_within-depth,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :within},
+    :default false}}
+  {:name :_selected,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :partial-next},
+    :default false}}
+  {:name :_in-expansion,
+   :parent :if,
+   :args
+   {:test :_within-depth,
+    :then true,
+    :else :_in-expansion-remaining-1}}
+  {:name :_in-expansion-remaining-1,
+   :parent :if,
+   :args {:test :_selected, :then true, :else false}}
+  {:name :_highlight,
+   :parent :if,
+   :args
+   {:test :_paint-expanded,
+    :then :_highlight-remaining-1,
+    :else false}}
+  {:name :_highlight-remaining-1,
+   :parent :if,
+   :args {:test :_in-expansion, :then true, :else false}}
+  {:name :_highlight-tone,
+   :parent :if,
+   :args {:test :_highlight, :then "highlight", :else "body"}}
+  {:name :_tone,
+   :parent :if,
+   :args {:test :_root-paint, :then "root", :else :_highlight-tone}}
+  {:name :_bold,
+   :parent :if,
+   :args {:test :_root-paint, :then true, :else :_bold-remaining-1}}
+  {:name :_bold-remaining-1,
+   :parent :if,
+   :args {:test :_highlight, :then true, :else false}}
+  {:name :_paint,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :tone} {:value :bold}], :vals [:_tone :_bold]},
+   :return-type :_paint-output}
+  {:name :_is-groups,
+   :parent :equal?,
+   :args {:a :_surface, :b "groups"}}
+  {:name :inheritance-initial,
+   :parent :if,
+   :args {:test :_is-groups, :then :_group-receipt, :else :_paint}}
+  {:name :_label,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_label-inputs},
+    :key {:value :label},
+    :default ""}}
+  {:name :_body,
+   :parent :hiccup,
+   :args
+   {:tag "span",
+    :attrs {:value {:class "gd-canvas-inheritance-label"}},
+    :children [:_label]}}
+  {:name :inheritance-view,
+   :parent :app.ui-canvas/canvas-view-fields,
+   :args {:vals [:_body "" :inheritance-styles]}}
+  {:name :_group-receipt,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :row} {:value :state}],
+    :vals [:_row-result :_fold-row]}}
+  {:name :_label-declarations,
+   :parent :zipmap,
+   :args {:keys ["white-space" "padding"], :vals ["inherit" "0"]}}
+  {:name :_label-rule,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :selector} {:value :declarations}],
+    :vals ["& .gd-canvas-inheritance-label" :_label-declarations]}}
+  {:name :inheritance-styles,
+   :parent :list,
+   :args {:items [:_label-rule]}}]}

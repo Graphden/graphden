@@ -12,7 +12,7 @@ and execute permissions and the current quota on the server.
 
 Open **Settings → Appearance → UI graphs**. Normally use **Personalize account
 menu**, **Personalize function picker**, **Personalize recent functions**,
-**Personalize Inspector**, **Personalize Explorer toolbar**, or **Personalize tutorial catalogue**. They create small
+**Personalize Inspector**, **Personalize Explorer toolbar**, or **Personalize tutorial catalogue**. The canvas choices also cover names, values and types, inheritance presentation, and function metadata. They create small
 ordinary children inheriting the selected role definitions and a profile `editor`
 graph merging their entries with shared defaults and your previous configuration.
 Shared dependency bodies are retained by reference, not copied. Existing own
@@ -56,6 +56,13 @@ tree still owns function IDs, keyboard navigation, selection and action buttons.
 Rows read only the display fields and status summaries already authorized for
 that tree. Older personal Explorer views continue to control their toolbar;
 the shipped row presentation appears with a section-specific diagnostic.
+
+Inheritance presentation uses an ordinary graph for ancestor groups, MI cell
+labels and expansion highlighting. Function metadata uses a separate view for
+return/refinement labels, ordered λ parameters and effect drift/ghost badges.
+The editor keeps each row's expansion controls, permission checks, edit buttons
+and focus. Changing these views updates their passive content while the native
+controls stay available.
 
 The tutorial catalogue is another view-only ordinary graph. It filters and
 groups browser-local lesson display facts into adjacent chapter sections and

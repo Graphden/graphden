@@ -65,11 +65,6 @@ function _singleEditableIncomingArg(nodeId) {
 //   MI: each parent's cell is independently styled.
 function buildFnPaintState({ linesByDepth, visibleLevels, fullDepth, partialFns }) {
   const ROOT_BG = 'var(--card-header-bg)';
-  const ROOT_FG = 'var(--card-header-fg)';
-  const HIGHLIGHT_BG = 'var(--card-row-highlight)';
-  // Default non-root row bg — matches the card body so the overlay
-  // container (header-coloured) can't bleed through sub-pixel gaps.
-  const DEFAULT_BG = 'var(--card-bg)';
 
   // Sub-pixel-gap mitigation: a 1px box-shadow with the row's own colour
   // fills any rounding slack between this row and the next. When two
@@ -81,77 +76,42 @@ function buildFnPaintState({ linesByDepth, visibleLevels, fullDepth, partialFns 
     el.style.boxShadow = bg ? `0 1px 0 0 ${bg}` : '';
   };
 
-  // Returns true if a particular fn at a given depth would be highlighted
-  // under the given preview/committed spec. With NO expansion at all
-  // (sFull=0 and partial empty) NOTHING is highlighted — including depth 0.
-  // Otherwise depth 0 would always read as gray "expanded", confusing the
-  // signal that highlighting is meant to carry: "this level is part of
-  // the currently-displayed expansion".
-  const fnIsHighlighted = (depth, fnId, sFull, sPartial) => {
-    if (sFull <= 0 && (!sPartial || sPartial.size === 0)) return false;
-    if (depth <= sFull) return true;
-    if (depth === sFull + 1 && sPartial.has(fnId)) return true;
-    return false;
-  };
-
-  // Determine the visual bg for an MI parent given the current spec.
-  const miFnBg = (miFn, miDepth, isRoot, sFull, sPartial) => {
-    const fnInRootBlock = isRoot && !miFn.isClickable;
-    const highlighted = fnIsHighlighted(miDepth, miFn.fnId, sFull, sPartial);
-    if (fnInRootBlock) return { bg: ROOT_BG, fg: ROOT_FG };
-    if (highlighted)   return { bg: HIGHLIGHT_BG, fg: '' };
-    return { bg: DEFAULT_BG, fg: '' };
-  };
-
-  // Apply styles for a given spec. Handles both root-block styling and
-  // expansion highlighting.
   const paintWithSpec = (sFull, sPartial) => {
+    const targets = [];
+    const expanded = sFull > 0 || !!sPartial?.size;
+    const add = (el, fn, depth, root, cell, apply) => {
+      targets.push({el, apply, facts: {root, cell, clickable: !!fn?.isClickable,
+        within: depth <= sFull, 'partial-next': depth === sFull + 1 && !!sPartial?.has(fn?.fnId), expanded}});
+    };
     linesByDepth.forEach(({ line, spansByFnId, levelInfo, colDivs, textOverlay }, depth) => {
       if (!levelInfo) return;
-      const isRoot = levelInfo.blockIsRoot;
-
       if (colDivs) {
-        // Column-below-MI: paint each column with its MI parent's bg
         const miLevel = visibleLevels[levelInfo.followsMI];
-        const miIsRoot = miLevel ? miLevel.blockIsRoot : false;
-        colDivs.forEach(({ col, miFn }) => {
-          const { bg } = miFnBg(miFn, miLevel.depth, miIsRoot, sFull, sPartial);
-          setRowBg(col, bg);
+        const first = targets.length;
+        for (const {col, miFn} of colDivs) add(col, miFn, miLevel.depth, miLevel.blockIsRoot, true);
+        add(textOverlay, null, depth, levelInfo.blockIsRoot, false, (value, results) => {
+          textOverlay.style.color = results[first].fg;
+          textOverlay.style.fontWeight = value.bold ? 'bold' : 'normal';
         });
-        // Text overlay: use the color from the first column (or black if mixed)
-        const firstBg = miFnBg(colDivs[0].miFn, miLevel.depth, miIsRoot, sFull, sPartial);
-        textOverlay.style.color = firstBg.bg === ROOT_BG ? ROOT_FG : '';
-        textOverlay.style.fontWeight = isRoot ? 'bold' : 'normal';
+        // Column text boldness follows its root block, independently of the
+        // MI selection; the exact text owner stays native above the columns.
+        targets[targets.length - 1].facts.expanded = false;
       } else if (spansByFnId) {
-        // MI line: per-fn styling. Line itself stays the DEFAULT bg so any
-        // sub-pixel slack between line and overlay container shows white.
-        line.style.fontWeight = 'normal';
-        setRowBg(line, DEFAULT_BG);
-        line.style.color = '';
-        spansByFnId.forEach(({ span, fn }, fnId) => {
-          const { bg, fg } = miFnBg(fn, depth, isRoot, sFull, sPartial);
-          setRowBg(span, bg);
-          span.style.color = fg;
-          span.style.fontWeight = (bg === ROOT_BG || fnIsHighlighted(depth, fnId, sFull, sPartial))
-            ? 'bold' : 'normal';
-        });
-      } else {
-        // Single-fn line
-        const fn = levelInfo.fns[0];
-        const highlighted = fn && fnIsHighlighted(depth, fn.fnId, sFull, sPartial);
-        if (isRoot) {
-          setRowBg(line, ROOT_BG);
-          line.style.color = ROOT_FG;
-          line.style.fontWeight = 'bold';
-        } else if (highlighted) {
-          setRowBg(line, HIGHLIGHT_BG);
-          line.style.color = '';
-          line.style.fontWeight = 'bold';
-        } else {
-          setRowBg(line, DEFAULT_BG);
-          line.style.color = '';
-          line.style.fontWeight = 'normal';
-        }
+        add(line, null, depth, false, false);
+        targets[targets.length - 1].facts.expanded = false;
+        for (const {span, fn} of spansByFnId.values()) add(span, fn, depth, levelInfo.blockIsRoot, true);
+      } else add(line, levelInfo.fns[0], depth, levelInfo.blockIsRoot, false);
+    });
+    const results = window.gdCanvasInheritanceGraph.paintBatch(targets.map(target => target.facts));
+    // Commit only after the complete policy batch passed. A late personal
+    // refusal reruns every receipt with the builtin before any owner changes.
+    targets.forEach((target, index) => {
+      const value = results[index];
+      if (target.apply) target.apply(value, results);
+      else {
+        setRowBg(target.el, value.bg);
+        target.el.style.color = value.fg;
+        target.el.style.fontWeight = value.bold ? 'bold' : 'normal';
       }
     });
   };
@@ -164,8 +124,8 @@ function buildFnPaintState({ linesByDepth, visibleLevels, fullDepth, partialFns 
   const restoreStyles = () => paintWithSpec(fullDepth, partialFns);
 
   return {
-    ROOT_BG, ROOT_FG, HIGHLIGHT_BG, DEFAULT_BG,
-    setRowBg, fnIsHighlighted,
+    ROOT_BG,
+    setRowBg,
     paintWithSpec, applyPreviewStyle, restoreStyles,
   };
 }
@@ -226,21 +186,8 @@ function createFnOverlay(node, container) {
   const isLocalFn = !(ownFn?.name);
 
   const levels = getInheritanceLevels(originalFnId);
-  const ancestorLevels = buildAncestorLevels(levels);
-  // When a use-site row will be prepended (named non-root), it takes over
-  // the role of "root header". The ancestor levels then start outside the
-  // root-block — a clickable depth-0 like `all-routes` reads as a normal
-  // expandable row (white) rather than a passive black header. Non-clickable
-  // depths still propagate the root-block treatment (so `list` below
-  // `all-routes` stays black until a clickable level breaks the chain).
   const willPrependUseSite = !isNavRoot && !isLocalFn;
-  if (willPrependUseSite) {
-    let currentBlockIsRoot = true;
-    ancestorLevels.forEach((lv) => {
-      if (lv.anyClickable) currentBlockIsRoot = false;
-      lv.blockIsRoot = currentBlockIsRoot;
-    });
-  }
+  const ancestorLevels = buildAncestorLevels(levels, willPrependUseSite);
   const spec = expansionState.get(nodeId) || { fullDepth: 0, partialFns: new Set() };
   const fullDepth = spec.fullDepth;
   const partialFns = spec.partialFns;
@@ -346,6 +293,29 @@ function createFnOverlay(node, container) {
   // because column-below-MI divs don't set their initial bg in the
   // constructor — it's computed dynamically from the MI parents' state.
   restoreStyles();
+  window.gdCanvasInheritanceGraph.bind(overlay, () => {
+    // The policy validator preserves row/control ownership. Rechecking a new
+    // runtime in place retains focused native controls and their exact nodes.
+    const next = buildAncestorLevels(levels, willPrependUseSite);
+    // Valid personal policies may split a passive group. Apply its declared
+    // membership/endpoints to the retained row objects and event closures.
+    for (let index = 0; index < visibleLevels.length; index++) {
+      const current = visibleLevels[index];
+      const receipt = next[index];
+      Object.assign(current, {groupId: receipt.groupId, groupMaxDepth: receipt.groupMaxDepth,
+        blockIsRoot: receipt.blockIsRoot, followsMI: receipt.followsMI});
+      const line = linesByDepth.get(current.depth)?.line;
+      if (line) line.dataset.groupId = current.groupId;
+    }
+    for (let index = 0; index < visibleLevels.length; index++) {
+      const current = visibleLevels[index];
+      const following = visibleLevels[index + 1];
+      const line = linesByDepth.get(current.depth)?.line;
+      if (line) line.style.borderBottom = !following || following.groupId === current.groupId
+        || following.followsMI >= 0 ? 'none' : '1px solid var(--light-border)';
+    }
+    restoreStyles();
+  });
 
   // Merge the use-site header with the depth-0 ancestor row when both
   // share the same root-block bg AND the header has no expansion of its

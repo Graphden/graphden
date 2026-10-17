@@ -139,6 +139,8 @@
       void window.gdTourCatalogGraph?.reload();
       void window.gdCanvasGraph?.reload();
       void window.gdCanvasValuesGraph?.reload();
+      void window.gdCanvasInheritanceGraph?.reload();
+      void window.gdCanvasMetadataGraph?.reload();
     }, 0);
   }
   window.gdPrefOnChange((key) => { if (key === 'components') refresh(); });

@@ -1,0 +1,498 @@
+{:namespace "app.ui-canvas-metadata",
+ :description
+ "Ordinary passive canvas presentation; native owners retain authority and interaction.",
+ :fns
+ [{:name :_param, :type {:label :text, :first :bool}}
+  {:name :_param-label,
+   :parent :get,
+   :args
+   {:coll {:as :param, :type :_param},
+    :key {:value :label},
+    :default ""}}
+  {:name :_param-first,
+   :parent :get,
+   :args
+   {:coll {:as :param, :type :_param},
+    :key {:value :first},
+    :default false}}
+  {:name :_param-separator,
+   :parent :if,
+   :args {:test :_param-first, :then "", :else ", "}}
+  {:name :_param-text,
+   :parent :str,
+   :lambda-params [:param],
+   :args {:parts [:_param-separator :_param-label]}}
+  {:name :_param-texts,
+   :parent :map,
+   :args {:func :_param-text, :coll :_params}}
+  {:name :_param-count, :parent :count, :args {:coll :_params}}
+  {:name :_inputs,
+   :type
+   {:constraint :text,
+    :computed :bool,
+    :params [:list :_param],
+    :has-contract :bool,
+    :declared :bool,
+    :declared-return :text,
+    :lambda-mode :text,
+    :constraint-title :text,
+    :effect :text,
+    :computed-return :text,
+    :surface
+    [:refine :text {:constraint [:in #{"return" "effect" "lambda"}]}]}}
+  {:name :_surface,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :surface},
+    :default "return"}}
+  {:name :_declared-return,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :declared-return},
+    :default ""}}
+  {:name :_computed-return,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :computed-return},
+    :default ""}}
+  {:name :_constraint,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :constraint},
+    :default ""}}
+  {:name :_constraint-title,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :constraint-title},
+    :default ""}}
+  {:name :_lambda-mode,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :lambda-mode},
+    :default "derived"}}
+  {:name :_params,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :params},
+    :default {:value []}}}
+  {:name :_effect,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :effect},
+    :default ""}}
+  {:name :_computed,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :computed},
+    :default false}}
+  {:name :_declared,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :declared},
+    :default false}}
+  {:name :_has-contract,
+   :parent :get,
+   :args
+   {:coll {:as :inputs, :type :_inputs},
+    :key {:value :has-contract},
+    :default false}}
+  {:name :_computed-empty,
+   :parent :equal?,
+   :args {:a :_computed-return, :b ""}}
+  {:name :_return-label,
+   :parent :if,
+   :args
+   {:test :_computed-empty,
+    :then :_declared-return,
+    :else :_computed-return}}
+  {:name :_return-empty,
+   :parent :equal?,
+   :args {:a :_return-label, :b ""}}
+  {:name :_return-shown,
+   :parent :if,
+   :args {:test :_return-empty, :then "(none)", :else :_return-label}}
+  {:name :_return-text,
+   :parent :str,
+   :args {:parts ["→ " :_return-shown]}}
+  {:name :_return-normal,
+   :parent :hiccup,
+   :args
+   {:tag "span",
+    :attrs {:value {:class "gd-canvas-metadata-return-text"}},
+    :children [:_return-text]}}
+  {:name :_return-base,
+   :parent :hiccup,
+   :args
+   {:tag "span",
+    :attrs {:value {:class "gd-canvas-metadata-return-base"}},
+    :children [:_return-label]}}
+  {:name :_return-arrow,
+   :parent :hiccup,
+   :args
+   {:tag "span",
+    :attrs {:value {:class "gd-canvas-metadata-return-arrow"}},
+    :children ["→ "]}}
+  {:name :_constraint-attrs,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :class} {:value :title}],
+    :vals ["gd-canvas-metadata-constraint" :_constraint-title]}}
+  {:name :_constraint-body,
+   :parent :hiccup,
+   :args
+   {:tag "span", :attrs :_constraint-attrs, :children [:_constraint]}}
+  {:name :_return-refine,
+   :parent :hiccup,
+   :args
+   {:tag "span",
+    :attrs {:value {:class "gd-canvas-metadata-refine"}},
+    :children [:_return-arrow :_return-base :_constraint-body]}}
+  {:name :_constraint-empty,
+   :parent :equal?,
+   :args {:a :_constraint, :b ""}}
+  {:name :_return-body,
+   :parent :if,
+   :args
+   {:test :_constraint-empty,
+    :then :_return-normal,
+    :else :_return-refine}}
+  {:name :_params-joined, :parent :str, :args {:parts :_param-texts}}
+  {:name :_lambda-derived,
+   :parent :equal?,
+   :args {:a :_lambda-mode, :b "derived"}}
+  {:name :_lambda-empty,
+   :parent :equal?,
+   :args {:a :_param-count, :b 0}}
+  {:name :_lambda-explicit,
+   :parent :if,
+   :args {:test :_lambda-empty, :then "[]", :else :_params-joined}}
+  {:name :_lambda-shown,
+   :parent :if,
+   :args
+   {:test :_lambda-derived, :then "derived", :else :_lambda-explicit}}
+  {:name :_lambda-text,
+   :parent :str,
+   :args {:parts ["λ " :_lambda-shown]}}
+  {:name :_lambda-body,
+   :parent :hiccup,
+   :args
+   {:tag "span",
+    :attrs {:value {:class "gd-canvas-metadata-lambda"}},
+    :children [:_lambda-text]}}
+  {:name :_not-computed,
+   :parent :if,
+   :args {:test :_computed, :then false, :else true}}
+  {:name :_ghost,
+   :parent :if,
+   :args
+   {:test :_not-computed, :then :_ghost-remaining-1, :else false}}
+  {:name :_ghost-remaining-1,
+   :parent :if,
+   :args {:test :_declared, :then true, :else false}}
+  {:name :_not-declared,
+   :parent :if,
+   :args {:test :_declared, :then false, :else true}}
+  {:name :_drift,
+   :parent :if,
+   :args {:test :_computed, :then :_drift-remaining-1, :else false}}
+  {:name :_drift-remaining-1,
+   :parent :if,
+   :args
+   {:test :_has-contract, :then :_drift-remaining-2, :else false}}
+  {:name :_drift-remaining-2,
+   :parent :if,
+   :args {:test :_not-declared, :then true, :else false}}
+  {:name :_effect-drift,
+   :parent :if,
+   :args {:test :_drift, :then " gd-canvas-metadata-drift", :else ""}}
+  {:name :_effect-status,
+   :parent :if,
+   :args
+   {:test :_ghost,
+    :then " gd-canvas-metadata-ghost",
+    :else :_effect-drift}}
+  {:name :_category-db, :parent :equal?, :args {:a :_effect, :b "db"}}
+  {:name :_category-env,
+   :parent :equal?,
+   :args {:a :_effect, :b "env"}}
+  {:name :_category-io, :parent :equal?, :args {:a :_effect, :b "io"}}
+  {:name :_category-network,
+   :parent :equal?,
+   :args {:a :_effect, :b "network"}}
+  {:name :_category-time,
+   :parent :equal?,
+   :args {:a :_effect, :b "time"}}
+  {:name :_category-random,
+   :parent :equal?,
+   :args {:a :_effect, :b "random"}}
+  {:name :_category-process,
+   :parent :equal?,
+   :args {:a :_effect, :b "process"}}
+  {:name :_category-raw-sql,
+   :parent :equal?,
+   :args {:a :_effect, :b "raw-sql"}}
+  {:name :_known-category,
+   :parent :if,
+   :args
+   {:test :_category-db,
+    :then true,
+    :else :_known-category-remaining-1}}
+  {:name :_known-category-remaining-1,
+   :parent :if,
+   :args
+   {:test :_category-env,
+    :then true,
+    :else :_known-category-remaining-2}}
+  {:name :_known-category-remaining-2,
+   :parent :if,
+   :args
+   {:test :_category-io,
+    :then true,
+    :else :_known-category-remaining-3}}
+  {:name :_known-category-remaining-3,
+   :parent :if,
+   :args
+   {:test :_category-network,
+    :then true,
+    :else :_known-category-remaining-4}}
+  {:name :_known-category-remaining-4,
+   :parent :if,
+   :args
+   {:test :_category-time,
+    :then true,
+    :else :_known-category-remaining-5}}
+  {:name :_known-category-remaining-5,
+   :parent :if,
+   :args
+   {:test :_category-random,
+    :then true,
+    :else :_known-category-remaining-6}}
+  {:name :_known-category-remaining-6,
+   :parent :if,
+   :args
+   {:test :_category-process,
+    :then true,
+    :else :_known-category-remaining-7}}
+  {:name :_known-category-remaining-7,
+   :parent :if,
+   :args {:test :_category-raw-sql, :then true, :else false}}
+  {:name :_effect-category,
+   :parent :if,
+   :args {:test :_known-category, :then :_effect, :else "misc"}}
+  {:name :_effect-class,
+   :parent :str,
+   :args
+   {:parts
+    ["gd-canvas-metadata-effect gd-canvas-metadata-effect-"
+     :_effect-category
+     :_effect-status]}}
+  {:name :_effect-attrs,
+   :parent :zipmap,
+   :args {:keys [{:value :class}], :vals [:_effect-class]}}
+  {:name :_effect-body,
+   :parent :hiccup,
+   :args {:tag "span", :attrs :_effect-attrs, :children [:_effect]}}
+  {:name :_surface-return,
+   :parent :equal?,
+   :args {:a :_surface, :b "return"}}
+  {:name :_surface-lambda,
+   :parent :equal?,
+   :args {:a :_surface, :b "lambda"}}
+  {:name :_non-return,
+   :parent :if,
+   :args
+   {:test :_surface-lambda, :then :_lambda-body, :else :_effect-body}}
+  {:name :_body,
+   :parent :if,
+   :args
+   {:test :_surface-return, :then :_return-body, :else :_non-return}}
+  {:name :_style-return,
+   :parent :zipmap,
+   :args {:keys ["white-space"], :vals ["nowrap"]}}
+  {:name :_rule-return,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :selector} {:value :declarations}],
+    :vals ["& .gd-canvas-metadata-return-text" :_style-return]}}
+  {:name :_style-refine,
+   :parent :zipmap,
+   :args {:keys ["display"], :vals ["inline"]}}
+  {:name :_rule-refine,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :selector} {:value :declarations}],
+    :vals ["& .gd-canvas-metadata-refine" :_style-refine]}}
+  {:name :_style-constraint,
+   :parent :zipmap,
+   :args
+   {:keys ["display" "padding-left" "font-size" "opacity"],
+    :vals ["block" "1em" "0.5625rem" "0.7"]}}
+  {:name :_rule-constraint,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :selector} {:value :declarations}],
+    :vals ["& .gd-canvas-metadata-constraint" :_style-constraint]}}
+  {:name :_style-lambda,
+   :parent :zipmap,
+   :args {:keys ["white-space"], :vals ["nowrap"]}}
+  {:name :_rule-lambda,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :selector} {:value :declarations}],
+    :vals ["& .gd-canvas-metadata-lambda" :_style-lambda]}}
+  {:name :_style-effect,
+   :parent :zipmap,
+   :args
+   {:keys
+    ["display"
+     "padding"
+     "font-family"
+     "font-size"
+     "line-height"
+     "letter-spacing"
+     "text-transform"
+     "border-radius"
+     "color"
+     "background-color"],
+    :vals
+    ["inline-flex"
+     "0 5px"
+     "var(--gd-body-font)"
+     "0.5312rem"
+     "1.4117647059"
+     "0.3px"
+     "uppercase"
+     "2px"
+     "var(--effect-chip-fg)"
+     "var(--muted-fg)"]}}
+  {:name :_rule-effect,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :selector} {:value :declarations}],
+    :vals ["& .gd-canvas-metadata-effect" :_style-effect]}}
+  {:name :_style-effect-db,
+   :parent :zipmap,
+   :args {:keys ["background-color"], :vals ["var(--effect-chip-db)"]}}
+  {:name :_rule-effect-db,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :selector} {:value :declarations}],
+    :vals ["& .gd-canvas-metadata-effect-db" :_style-effect-db]}}
+  {:name :_style-effect-env,
+   :parent :zipmap,
+   :args
+   {:keys ["background-color"], :vals ["var(--effect-chip-env)"]}}
+  {:name :_rule-effect-env,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :selector} {:value :declarations}],
+    :vals ["& .gd-canvas-metadata-effect-env" :_style-effect-env]}}
+  {:name :_style-effect-io,
+   :parent :zipmap,
+   :args {:keys ["background-color"], :vals ["var(--effect-chip-io)"]}}
+  {:name :_rule-effect-io,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :selector} {:value :declarations}],
+    :vals ["& .gd-canvas-metadata-effect-io" :_style-effect-io]}}
+  {:name :_style-effect-network,
+   :parent :zipmap,
+   :args
+   {:keys ["background-color"], :vals ["var(--effect-chip-network)"]}}
+  {:name :_rule-effect-network,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :selector} {:value :declarations}],
+    :vals
+    ["& .gd-canvas-metadata-effect-network" :_style-effect-network]}}
+  {:name :_style-effect-time,
+   :parent :zipmap,
+   :args
+   {:keys ["background-color"], :vals ["var(--effect-chip-time)"]}}
+  {:name :_rule-effect-time,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :selector} {:value :declarations}],
+    :vals ["& .gd-canvas-metadata-effect-time" :_style-effect-time]}}
+  {:name :_style-effect-random,
+   :parent :zipmap,
+   :args
+   {:keys ["background-color"], :vals ["var(--effect-chip-random)"]}}
+  {:name :_rule-effect-random,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :selector} {:value :declarations}],
+    :vals
+    ["& .gd-canvas-metadata-effect-random" :_style-effect-random]}}
+  {:name :_style-effect-process,
+   :parent :zipmap,
+   :args
+   {:keys ["background-color"], :vals ["var(--effect-chip-process)"]}}
+  {:name :_rule-effect-process,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :selector} {:value :declarations}],
+    :vals
+    ["& .gd-canvas-metadata-effect-process" :_style-effect-process]}}
+  {:name :_style-effect-raw-sql,
+   :parent :zipmap,
+   :args
+   {:keys ["background-color"], :vals ["var(--effect-chip-raw-sql)"]}}
+  {:name :_rule-effect-raw-sql,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :selector} {:value :declarations}],
+    :vals
+    ["& .gd-canvas-metadata-effect-raw-sql" :_style-effect-raw-sql]}}
+  {:name :_style-drift,
+   :parent :zipmap,
+   :args {:keys ["border"], :vals ["1.5px solid var(--error-fg)"]}}
+  {:name :_rule-drift,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :selector} {:value :declarations}],
+    :vals ["& .gd-canvas-metadata-drift" :_style-drift]}}
+  {:name :_style-ghost,
+   :parent :zipmap,
+   :args
+   {:keys ["background-color" "color" "border"],
+    :vals ["transparent" "var(--muted-fg)" "1px dashed currentcolor"]}}
+  {:name :_rule-ghost,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :selector} {:value :declarations}],
+    :vals ["& .gd-canvas-metadata-ghost" :_style-ghost]}}
+  {:name :metadata-styles,
+   :parent :list,
+   :args
+   {:items
+    [:_rule-return
+     :_rule-refine
+     :_rule-constraint
+     :_rule-lambda
+     :_rule-effect
+     :_rule-effect-db
+     :_rule-effect-env
+     :_rule-effect-io
+     :_rule-effect-network
+     :_rule-effect-time
+     :_rule-effect-random
+     :_rule-effect-process
+     :_rule-effect-raw-sql
+     :_rule-drift
+     :_rule-ghost]},
+   :return-type
+   [:list {:selector :text, :declarations [:map :text :text]}]}
+  {:name :metadata-view,
+   :parent :app.ui-canvas/canvas-view-fields,
+   :args {:vals [:_body "" :metadata-styles]}}]}

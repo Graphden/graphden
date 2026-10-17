@@ -498,7 +498,7 @@ function fnSetsArgs(fnId) {
 //   anySets: bool,
 //   groupId, groupMaxDepth
 // }]
-function buildAncestorLevels(levels) {
+function buildAncestorLevels(levels, useSite = false) {
   const enriched = levels.map((fnIds, depth) => {
     const topLevel = depth === 0;
     const fns = fnIds.map(fnId => {
@@ -509,15 +509,20 @@ function buildAncestorLevels(levels) {
       // then expand). For deeper levels (>=1) we still fall back to the
       // nearest named ancestor so each row shows something meaningful.
       let displayName = fn?.name;
+      let displaySource = displayName ? fnId : null;
       if (!displayName && fn && !topLevel) {
         const chain = getInheritanceChain(fnId);
         for (let i = 1; i < chain.length; i++) {
           const ancestor = lookups.fnMap.get(chain[i]);
-          if (ancestor?.name) { displayName = ancestor.name; break; }
+          if (ancestor?.name) { displayName = ancestor.name; displaySource = chain[i]; break; }
         }
       }
       return {
         fnId,
+        displaySource,
+        // An anonymous row with its own namespace, description or bindings
+        // has distinct native actions and must keep its exact owner.
+        suppressible: !fn?.name && !fn?.description && !fn?.['namespace-id'] && !fnSetsArgs(fnId),
         name: displayName || (topLevel ? '' : '(anonymous)'),
         description: fn?.description,
         setsArgs: fnSetsArgs(fnId),
@@ -533,74 +538,21 @@ function buildAncestorLevels(levels) {
     };
   });
 
-  // Dedup consecutive single-fn levels with identical names (e.g. an
-  // anonymous fn whose resolved ancestor name matches the very next level).
-  // At depth 0 we now keep the empty-name anonymous row distinct from the
-  // named ancestor below, so dedup never collapses it.
-  for (let i = enriched.length - 1; i > 0; i--) {
-    const prev = enriched[i - 1];
-    const cur = enriched[i];
-    if (!cur.isMI && !prev.isMI
-        && cur.fns.length === 1 && prev.fns.length === 1
-        && cur.fns[0].name === prev.fns[0].name
-        && cur.fns[0].name !== '') {
-      enriched.splice(i - 1, 1); // remove the earlier duplicate
-    }
-  }
-
-  // Grouping: a level starts a new visual group if it has at least one
-  // CLICKABLE fn.  Non-clickable levels merge with the predecessor block
-  // (they share its bg and have no separator).  MI always starts a new
-  // group (individual parents will be styled per-cell inside the group).
-  let groupId = -1;
-  enriched.forEach((lv, idx) => {
-    const prev = enriched[idx - 1];
-    const startsNew =
-      idx === 0 ||
-      lv.anyClickable ||    // at least one clickable fn
-      lv.isMI ||            // MI always starts its own group
-      (prev?.isMI);  // level after MI also starts a new group
-    if (startsNew) groupId++;
-    lv.groupId = groupId;
+  const facts = enriched.map((level, position) => {
+    const fn = level.fns[0];
+    const next = enriched[position + 1];
+    return {position, depth: level.depth, mi: level.isMI, clickable: level.anyClickable,
+      'duplicate-next': !!(next && !level.isMI && !next.isMI && fn?.suppressible
+        && fn.displaySource && fn.displaySource === next.fns[0]?.displaySource)};
   });
-
+  const receipts = window.gdCanvasInheritanceGraph.groups(facts, useSite);
+  const visible = receipts.filter(row => row.visible);
+  const receiptIndex = new Map(visible.map((row, index) => [row.position, index]));
   const maxDepthByGroup = new Map();
-  enriched.forEach(lv => {
-    const cur = maxDepthByGroup.get(lv.groupId);
-    if (cur === undefined || lv.depth > cur) maxDepthByGroup.set(lv.groupId, lv.depth);
-  });
-  enriched.forEach(lv => { lv.groupMaxDepth = maxDepthByGroup.get(lv.groupId); });
-
-  // Compute visual block assignment and column-below-MI flag.
-  //
-  // blockIsRoot: true for levels that belong to the root's black-bg block.
-  // followsMI: index of the MI level this non-clickable level sits below
-  //            (for column-split background), or -1 if not applicable.
-  let currentBlockIsRoot = true;
-  let lastMIIdx = -1;
-  enriched.forEach((lv, idx) => {
-    if (idx === 0) {
-      lv.blockIsRoot = true;
-    } else {
-      // Only a CLICKABLE level breaks out of the root block.
-      // MI with all-non-clickable parents stays in root block.
-      if (lv.anyClickable) {
-        currentBlockIsRoot = false;
-      }
-      lv.blockIsRoot = currentBlockIsRoot;
-    }
-    // Track column-below-MI: a non-clickable, non-MI level immediately
-    // after (or chaining from) an MI level gets column-split rendering.
-    if (lv.isMI) {
-      lastMIIdx = idx;
-      lv.followsMI = -1;
-    } else if (!lv.anyClickable && lastMIIdx >= 0) {
-      lv.followsMI = lastMIIdx;  // index of the MI level to inherit columns from
-    } else {
-      lv.followsMI = -1;
-      lastMIIdx = -1;  // clickable level breaks the MI column chain
-    }
-  });
-
-  return enriched;
+  for (const row of visible) maxDepthByGroup.set(row.group, row.depth);
+  // Materialize graph-declared groups, rejoining the exact native rows by
+  // their original ordinal. No UUID or control owner crosses the graph ABI.
+  return visible.map(row => ({...enriched[row.position], groupId: row.group,
+    groupMaxDepth: maxDepthByGroup.get(row.group), blockIsRoot: row.root,
+    followsMI: row['follows-mi'] < 0 ? -1 : receiptIndex.get(row['follows-mi'])}));
 }

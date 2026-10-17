@@ -60,6 +60,8 @@
   (:require
     [clojure.set :as set]
     [clojure.string :as str]
+    [graphden.packages.rebase :as rebase]
+    [graphden.packages.records.parse :as parse]
     [graphden.packages.records.slot-resolution :as slot-res]))
 
 
@@ -100,24 +102,44 @@
   {:fn-defs (vec fn-defs)
    :by-key (into {} (map (juxt fn-key identity)) fn-defs)
    :by-name (group-by :name fn-defs)
-   :base-fn-names (set base-fn-names)})
+   :base-fn-names (set base-fn-names)
+   :name-index (parse/name->id-index {} fn-defs)})
 
 
 (defn resolve-ref
-  "Resolve a keyword the way package sync does: `:ns/name` → that
-   fn-def; a bare name → the unique fn-def of that name, else a
-   base-fn. Returns `[:fn-def fd]`, `[:base kw]`, `[:ambiguous kw]`
-   (several namespaces declare the bare name) or nil (not a ref —
-   a keyword literal)."
-  [{:keys [by-key by-name base-fn-names]} kw]
-  (if-let [nsp (namespace kw)]
-    (some->> (get by-key [nsp (keyword (name kw))]) (vector :fn-def))
-    (let [cands (get by-name kw)]
-      (cond
-        (= 1 (count cands)) [:fn-def (first cands)]
-        (seq cands) [:ambiguous kw]
-        (contains? base-fn-names kw) [:base kw]
-        :else nil))))
+  "Resolve a lint reference. The two-argument entry keeps global ambiguity
+   for callers without an owner; the owner-aware entry shares package parsing's
+   local namespace preference. Unresolved references remain lint data."
+  ([{:keys [by-key by-name base-fn-names] :as idx} kw]
+   (if (contains? idx :owner-namespace)
+     (resolve-ref (dissoc idx :owner-namespace) kw (:owner-namespace idx))
+     (if-let [nsp (namespace kw)]
+       (some->> (get by-key [(not-empty nsp) (keyword (name kw))]) (vector :fn-def))
+       (let [cands (get by-name kw)]
+         (cond
+           (= 1 (count cands)) [:fn-def (first cands)]
+           (seq cands) [:ambiguous kw]
+           (contains? base-fn-names kw) [:base kw]
+           :else nil)))))
+  ([idx kw owner-namespace]
+   (let [resolved (try (parse/normalize-ref kw (:name-index idx) owner-namespace)
+                       (catch clojure.lang.ExceptionInfo error
+                         (if (#{:packages/ambiguous-ref :packages/unresolved-ref} (:type (ex-data error)))
+                           kw
+                           (throw error))))]
+     (resolve-ref (dissoc idx :owner-namespace) resolved))))
+
+
+(defn normalize-definition
+  "Normalize semantic references for a structural lint consumer using the
+   package parser's namespace rules; literal payloads remain untouched."
+  [idx fd]
+  (rebase/rewrite-references
+    fd (fn [ref]
+         (let [[kind target] (resolve-ref idx ref (:namespace fd))]
+           (if (= :fn-def kind)
+             (keyword (or (:namespace target) "") (name (:name target)))
+             ref)))))
 
 
 ;; -----------------------------------------------------------------------------
@@ -191,7 +213,8 @@
    is an atom caching named fn-defs' signatures per mode — every
    expansion of a shared helper is one lookup."
   [idx mode memo fd]
-  (let [k (when (:name fd) [mode (fn-key fd)])]
+  (let [idx (assoc idx :owner-namespace (if (contains? fd :namespace) (:namespace fd) (:owner-namespace idx)))
+        k (when (:name fd) [mode (fn-key fd)])]
     (or (when k (get @memo k))
         (let [parents (if (:parent fd) [(:parent fd)] (vec (:parents fd)))
               sig [:fn
@@ -266,7 +289,8 @@
   "Set of fn-def keys `fd` references — parents, args, return-type and
    the type-row fields."
   [idx fd]
-  (let [parents (if (:parent fd) [(:parent fd)] (:parents fd))]
+  (let [idx (assoc idx :owner-namespace (:namespace fd))
+        parents (if (:parent fd) [(:parent fd)] (:parents fd))]
     (-> #{}
         (into (mapcat #(walk-refs idx %)) parents)
         (into (walk-refs idx (:args fd)))
@@ -314,7 +338,7 @@
 (defn empty-state
   "The state before any run."
   []
-  {:sigs {} :refs {} :depth {} :shadowed {}})
+  {:sigs {} :refs {} :depth {} :shadowed {} :resolution-identities {}})
 
 
 (defn- stale-closure
@@ -467,7 +491,7 @@
   [idx fd]
   (let [parents (if (:parent fd) [(:parent fd)] (:parents fd))]
     (into [] (keep (fn [p]
-                     (let [[kind x] (resolve-ref idx p)]
+                     (let [[kind x] (resolve-ref idx p (:namespace fd))]
                        (when (= kind :fn-def) x))))
           parents)))
 
@@ -539,7 +563,7 @@
       ::none
       (let [own (into #{}
                       (comp (filter #(contains? (:args %) k))
-                            (map #(canon-value idx :shallow memo (get (:args %) k))))
+                            (map #(canon-value (assoc idx :owner-namespace (:namespace %)) :shallow memo (get (:args %) k))))
                       level)]
         (cond
           (= 1 (count own)) (first own)
@@ -578,7 +602,7 @@
           shadowed (into []
                          (keep (fn [[arg v]]
                                  (when (restated-binding? v)
-                                   (let [own (canon-value idx :shallow memo v)]
+                                   (let [own (canon-value (assoc idx :owner-namespace (:namespace fd)) :shallow memo v)]
                                      (when (and (pos? (canon-weight own))
                                                 (= own (inherited-arg idx memo fd arg)))
                                        arg)))))
@@ -751,6 +775,13 @@
    the next call. Options as for `lint`."
   [fn-defs {:keys [base-fn-names roots platform-fn? suppress check-public?]} state changed]
   (let [idx (build-index fn-defs base-fn-names)
+        resolution-identities (into {} (map (fn [[n definitions]]
+                                              [n (set (map fn-key definitions))]))
+                                    (:by-name idx))
+        ;; Introducing/removing a local twin can change an unchanged bare
+        ;; reference's identity. Its old resolved edge cannot reveal that
+        ;; dependency, so retire cached resolution when namespace membership changes.
+        changed (if (= resolution-identities (:resolution-identities state)) changed :all)
         keys-now (into #{} (map fn-key) fn-defs)
         prior-keys (set (keys (:refs state)))
         stale (if (= :all changed)
@@ -791,7 +822,8 @@
                       (sort-by (juxt (comp severity-rank :severity) :rule :fns))
                       vec)]
     {:findings findings
-     :state {:sigs (into {} (filter (fn [[[_ k] _]] (contains? keys-now k))) @memo)
+     :state {:resolution-identities resolution-identities
+             :sigs (into {} (filter (fn [[[_ k] _]] (contains? keys-now k))) @memo)
              :refs refs-by-key
              :depth (into {} (filter (fn [[k _]] (contains? keys-now k))) @depth)
              :shadowed shadowed}}))

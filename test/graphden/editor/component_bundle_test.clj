@@ -142,3 +142,21 @@
               state-slot (first (filter #(and (= :slot (:kind %))
                                               (= (:id %) (ids/slot-id phase-id :state))) records))]
           (is (= expected-state (:type-fn-id state-slot))))))))
+
+
+(deftest copied-components-preserve-private-local-twins
+  (let [root "users.alice.twin-canvas"
+        {:keys [records]} (bundle/parse root)
+        bindings (filter #(= :binding (:kind %)) records)
+        items (filter #(= :binding-list-item (:kind %)) records)]
+    (doseq [[child entry] [["canvas-inheritance" :inheritance-view]
+                           ["canvas-metadata" :metadata-view]]]
+      (let [path (str root "." child)
+            view-id (ids/fn-id path entry)
+            body-id (ids/fn-id path :_body)
+            vals (first (filter #(and (= view-id (:fn-id %))
+                                      (= (ids/slot-id (ids/fn-id "core.collections" :zipmap) :vals) (:slot-id %))) bindings))]
+        (is vals)
+        (is (= body-id (:ref-fn-id (first (filter #(and (= (:id vals) (:binding-id %))
+                                                        (zero? (:position %))) items)))))
+        (is (not (contains? (bundle/external-identities records) body-id)))))))

@@ -493,3 +493,32 @@ its actual member controls. It can shrink again after returning to the builtin;
 function-card width, dragged positions and the viewport transform retain their
 existing contracts. Scope changes dispose node and edge bodies, release sheets,
 abort old requests and reject late replies before rendering another owner.
+
+### Inheritance and function metadata presentation
+
+`app.ui-canvas-inheritance/inheritance-view` is a separate passive component
+with `initial` and `view` entries. `initial` receives one authorized BFS ordinal,
+finite clickability/equivalence facts and fixed-size prior presentation state.
+It returns a complete ordinal receipt and next state. The host stages the whole
+sequence before joining receipts to its original row owners. A refused personal
+step discards the entire staged sequence and reruns the builtin from the original
+seed. Clickable and MI boundaries, row ownership, root ancestry and legal MI
+columns are checked against native facts. A personal graph may split a passive
+group; its new separators and endpoints update the retained native rows in place.
+The synchronous paint surface returns only a finite tone and boldness receipt.
+
+`view` renders passive MI and column labels with scoped styles. Native code
+retains BFS, IDs, event targets, drag/hover suppression, expansion callbacks,
+accessibility and measured geometry. Named single-row labels still use the
+existing canvas component. Each policy step has a 2048-operation limit; a
+sequence has N such bounded steps, rather than one shared 2048-operation budget.
+No new ancestry depth limit is imposed. Pan and zoom do not rerun these policies.
+
+`app.ui-canvas-metadata/metadata-view` has only `view`. It receives formatted
+return/refinement summaries, ordered lambda parameter labels, and authorized
+computed/declared effect membership. Ordinary graph functions build the return,
+lambda and effect bodies, including drift/ghost choices and scoped styles.
+Native siblings retain real edit/provenance buttons, accessible names and
+permission checks. Secret values, function IDs and registries are absent from
+both component inputs. Existing canvas and value/type component contracts stay
+compatible. Both components can be copied and selected through Appearance.

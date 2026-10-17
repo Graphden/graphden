@@ -41,6 +41,7 @@
       }
     }
   }
+  window.gdCheckCanvasFlowStyles = checkStyles;
   window.gdCanvasValuesGraph = window.gdCreatePassiveCanvas({
     identity: 'canvas-values', prefix: 'gd-canvas-values', classes: new Set(),
     plan: () => window.GraphdenBuiltinPlans.plans.canvasValues,

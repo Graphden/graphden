@@ -1829,6 +1829,7 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
   gap: 4px;
 }
 .return-type-strip-flex .return-type-strip-text {
+  display: inline;
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -8385,4 +8386,15 @@ button.lambda-params-chip:focus-visible { outline: 1px solid var(--accent); }
     animation: none;
     opacity: 0.75;
   }
+}
+
+/* Canvas metadata buttons keep focus/hit authority; their graph body owns the pill. */
+.effects-strip .effects-chip-native {
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
 }

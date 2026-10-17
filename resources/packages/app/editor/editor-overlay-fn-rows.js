@@ -109,7 +109,10 @@ function renderColumnBelowMiRow(line, levelInfo, miLevelAbove, ctx) {
   // text only has to clear that one icon.
   const textOverlay = document.createElement('span');
   textOverlay.className = 'mi-col-text';   // static looks (incl. the 8px/24px insets) in editor-styles.css
-  textOverlay.textContent = displayLabel(colFn.name);
+  const columnBody = document.createElement('span');
+  columnBody.className = 'gd-canvas-body-host';
+  textOverlay.appendChild(columnBody);
+  window.gdCanvasInheritanceGraph.mount(ctx.overlay, columnBody, 'label', {label: displayLabel(colFn.name) || ''});
   // Create invisible column divs for bg + vertical border
   const colDivs = [];
   miLevelAbove.fns.forEach((miFn, _i) => {
@@ -163,9 +166,8 @@ function renderColumnBelowMiRow(line, levelInfo, miLevelAbove, ctx) {
   // without competing with a row-wide expansion handler.
   const fnIdForLine = levelInfo.fns[0].fnId;
   const allFnsAtDepth = [fnIdForLine];
-  const expandDepth = levelInfo.groupMaxDepth;
   const collapseDepth = miLevelAbove.depth;  // collapse whole group
-  const getTargetDepth = () => expandDepth <= fullDepth ? collapseDepth : expandDepth;
+  const getTargetDepth = () => levelInfo.groupMaxDepth <= fullDepth ? collapseDepth : levelInfo.groupMaxDepth;
   // Whole-line click cascades expansion to groupMaxDepth (so empty
   // grouped levels expand together); hover previews the same.
   line.style.cursor = 'pointer';
@@ -173,7 +175,7 @@ function renderColumnBelowMiRow(line, levelInfo, miLevelAbove, ctx) {
     e.stopPropagation();
     e.preventDefault();
     const currentFull = expansionState.get(nodeId)?.fullDepth || 0;
-    const td = expandDepth <= currentFull ? collapseDepth : expandDepth;
+    const td = levelInfo.groupMaxDepth <= currentFull ? collapseDepth : levelInfo.groupMaxDepth;
     applyClickSpec(nodeId, td, fnIdForLine, allFnsAtDepth);
   };
   line.addEventListener('mousedown', onMouseDown);
@@ -194,9 +196,7 @@ function renderColumnBelowMiRow(line, levelInfo, miLevelAbove, ctx) {
 // hand it to `paintWithSpec` via linesByDepth.
 function renderMiRow(line, levelInfo, idx, ctx) {
   const { nodeId, isNavRoot, fullDepth, partialFns, visibleLevels,
-          paint: { ROOT_BG, ROOT_FG, HIGHLIGHT_BG, DEFAULT_BG,
-                   setRowBg, fnIsHighlighted,
-                   applyPreviewStyle, restoreStyles } } = ctx;
+          paint: { applyPreviewStyle, restoreStyles } } = ctx;
   // Multi-fn level — each parent becomes a flex "cell" with its own
   // border-right (= vertical separator running from the top horizontal
   // line to the bottom one). Hovering fills the entire cell area, not
@@ -220,7 +220,10 @@ function renderMiRow(line, levelInfo, idx, ctx) {
   }
   levelInfo.fns.forEach((f, i) => {
     const span = document.createElement('span');
-    span.textContent = displayLabel(f.name);
+    const cellBody = document.createElement('span');
+    cellBody.className = 'gd-canvas-body-host';
+    span.appendChild(cellBody);
+    window.gdCanvasInheritanceGraph.mount(ctx.overlay, cellBody, 'label', {label: displayLabel(f.name) || ''});
     if (levelInfo.depth > 0 && typeof gdDiffAncestorBadgeEl === 'function') {
       const badge = gdDiffAncestorBadgeEl(f.fnId);
       if (badge) span.appendChild(badge);
@@ -271,18 +274,6 @@ function renderMiRow(line, levelInfo, idx, ctx) {
     }
     if (i < levelInfo.fns.length - 1) {
       span.style.borderRight = '1px solid var(--light-border)';
-    }
-    // Initial styling: root-block or highlighted
-    const fnInRootBlock = levelInfo.blockIsRoot && !f.isClickable;
-    if (fnInRootBlock) {
-      setRowBg(span, ROOT_BG);
-      span.style.color = ROOT_FG;
-      span.style.fontWeight = 'bold';
-    } else if (fnIsHighlighted(levelInfo.depth, f.fnId, fullDepth, partialFns)) {
-      span.style.fontWeight = 'bold';
-      setRowBg(span, HIGHLIGHT_BG);
-    } else {
-      setRowBg(span, DEFAULT_BG);
     }
     spansByFnId.set(f.fnId, { span, fn: f });
 
@@ -350,9 +341,7 @@ function fnRowChrome(isRoot, entity) {
 
 function renderSingleFnRow(line, levelInfo, ctx) {
   const { nodeId, isNavRoot, fullDepth, partialFns,
-          paint: { ROOT_BG, ROOT_FG, HIGHLIGHT_BG, DEFAULT_BG,
-                   setRowBg, fnIsHighlighted,
-                   applyPreviewStyle, restoreStyles } } = ctx;
+          paint: { applyPreviewStyle, restoreStyles } } = ctx;
   // Non-MI line: padding on the line itself.
   // Reserve symmetric horizontal room when right-pinned controls
   // are present, so wrapped names stay clear of them and the
@@ -612,31 +601,19 @@ function renderSingleFnRow(line, levelInfo, ctx) {
   bindFullNameHover(line, line, lineFn.name);
   const fnIdForLine = levelInfo.fns[0].fnId;
   const allFnsAtDepth = [fnIdForLine];
-  const targetDepth = levelInfo.groupMaxDepth;
-  // Initial styling: root-block or highlighted
-  if (levelInfo.blockIsRoot) {
-    setRowBg(line, ROOT_BG);
-    line.style.color = ROOT_FG;
-    line.style.fontWeight = 'bold';
-  } else if (fnIsHighlighted(levelInfo.depth, fnIdForLine, fullDepth, partialFns)) {
-    line.style.fontWeight = 'bold';
-    setRowBg(line, HIGHLIGHT_BG);
-  } else {
-    setRowBg(line, DEFAULT_BG);
-  }
   const onMouseDown = (e) => {
     e.stopPropagation();
     e.preventDefault();
-    applyClickSpec(nodeId, targetDepth, fnIdForLine, allFnsAtDepth);
+    applyClickSpec(nodeId, levelInfo.groupMaxDepth, fnIdForLine, allFnsAtDepth);
   };
   line.addEventListener('mousedown', onMouseDown);
   line.addEventListener('touchend', onMouseDown);
   const triggerLinePreview = () => {
     if (isGrabbing || shouldSuppressPreview()) return;
     const preview = computeSpecAfterClick(
-      { fullDepth, partialFns }, targetDepth, fnIdForLine, allFnsAtDepth);
+      { fullDepth, partialFns }, levelInfo.groupMaxDepth, fnIdForLine, allFnsAtDepth);
     applyPreviewStyle(preview || { fullDepth: 0, partialFns: new Set() });
-    applyHoverSpec(nodeId, targetDepth, fnIdForLine, allFnsAtDepth);
+    applyHoverSpec(nodeId, levelInfo.groupMaxDepth, fnIdForLine, allFnsAtDepth);
   };
   attachPreviewHandlers(line, triggerLinePreview, onPreviewLeave, restoreStyles);
 }

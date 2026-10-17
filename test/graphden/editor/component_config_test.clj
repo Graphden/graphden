@@ -114,6 +114,9 @@
                       :view (ids/fn-id (str root ".recents") :recents-view)}
             :canvas {:view (ids/fn-id (str root ".canvas") :canvas-view)}
             :canvas-values {:view (ids/fn-id (str root ".canvas-values") :canvas-values-view)}
+            :canvas-inheritance {:initial (ids/fn-id (str root ".canvas-inheritance") :inheritance-initial)
+                                 :view (ids/fn-id (str root ".canvas-inheritance") :inheritance-view)}
+            :canvas-metadata {:view (ids/fn-id (str root ".canvas-metadata") :metadata-view)}
             :tutorial-catalog {:view (ids/fn-id (str root ".tutorial-catalog") :catalog-view)}
             :inspector {:initial (ids/fn-id (str root ".inspector") :inspector-initial)
                         :update (ids/fn-id (str root ".inspector") :inspector-update)

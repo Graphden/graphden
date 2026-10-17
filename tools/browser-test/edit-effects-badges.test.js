@@ -52,8 +52,8 @@ const {assert, newContext} = require('./edit-test-helpers');
           // Each chip carries a category-specific class
           // `effects-chip-<tag>`.
           cls: Array.from(c.classList).filter(x => x.startsWith('effects-chip-')),
-          drift: c.classList.contains('effects-chip-drift'),
-          ghost: c.classList.contains('effects-chip-ghost')
+          drift: !!c.querySelector('.gd-canvas-metadata-drift'),
+          ghost: !!c.querySelector('.gd-canvas-metadata-ghost')
         }));
       return {
         title: strip.title,
@@ -101,8 +101,8 @@ const {assert, newContext} = require('./edit-test-helpers');
       const chips = Array.from(strip.querySelectorAll('.effects-chip'))
         .map(c => ({
           text: c.textContent.trim(),
-          drift: c.classList.contains('effects-chip-drift'),
-          ghost: c.classList.contains('effects-chip-ghost')
+          drift: !!c.querySelector('.gd-canvas-metadata-drift'),
+          ghost: !!c.querySelector('.gd-canvas-metadata-ghost')
         }));
       return {chips, title: strip.title};
     });

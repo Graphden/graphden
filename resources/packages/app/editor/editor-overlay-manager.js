@@ -65,6 +65,8 @@ function unregisterNodeOverlay(nodeId) {
   if (el) {
     window.gdCanvasGraph?.dispose(el);
     window.gdCanvasValuesGraph?.dispose(el);
+    window.gdCanvasInheritanceGraph?.dispose(el);
+    window.gdCanvasMetadataGraph?.dispose(el);
     el.remove();
     _overlaysByNodeId.delete(nodeId);
   }
@@ -79,6 +81,8 @@ function _removeAllNodeOverlays(preservedNodeId) {
     if (nodeId === preservedNodeId) continue;
     window.gdCanvasGraph?.dispose(el);
     window.gdCanvasValuesGraph?.dispose(el);
+    window.gdCanvasInheritanceGraph?.dispose(el);
+    window.gdCanvasMetadataGraph?.dispose(el);
     el.remove();
     _overlaysByNodeId.delete(nodeId);
   }
@@ -87,6 +91,8 @@ function _removeAllNodeOverlays(preservedNodeId) {
 function _removeAllEdgeOverlays() {
   for (const [, el] of _edgeOverlaysByEdgeId) {
     window.gdCanvasValuesGraph?.dispose(el);
+    window.gdCanvasInheritanceGraph?.dispose(el);
+    window.gdCanvasMetadataGraph?.dispose(el);
     el.remove();
   }
   _edgeOverlaysByEdgeId.clear();

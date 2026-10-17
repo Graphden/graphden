@@ -98,7 +98,7 @@ async function cleanup(page) {
       const chips = Array.from(document.querySelectorAll('.effects-chip-env'));
       return {
         chipCount: chips.length,
-        hasDrift: chips.some((c) => c.classList.contains('effects-chip-drift')),
+        hasDrift: chips.some((c) => !!c.querySelector('.gd-canvas-metadata-drift')),
         anyTitle: chips.find((c) => c.title)?.title || '',
       };
     });
@@ -127,7 +127,7 @@ async function cleanup(page) {
       const chips = Array.from(document.querySelectorAll('.effects-chip-network'));
       return {
         chipCount: chips.length,
-        hasGhost: chips.some((c) => c.classList.contains('effects-chip-ghost')),
+        hasGhost: chips.some((c) => !!c.querySelector('.gd-canvas-metadata-ghost')),
         anyTitle: chips.find((c) => c.title)?.title || '',
       };
     });

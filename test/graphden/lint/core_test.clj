@@ -362,3 +362,65 @@
     (testing "a change the closure does not reach leaves the memo untouched"
       (let [{s :state} (run v0 s0 #{["a" :_dead]})]
         (is (= (get (:sigs s0) [:shallow ["a" :page]]) (get (:sigs s) [:shallow ["a" :page]])))))))
+
+
+(deftest owner-namespace-controls-lint-reachability-and-signatures
+  (let [definitions [(fd "a" :_label :parent :const :args {:value "A"})
+                     (fd "b" :_label :parent :const :args {:value "B"})
+                     (fd "a" :use :parent :assoc :args {:map :_label :key {:value :result}})
+                     (fd "b" :use :parent :assoc :args {:map :_label :key {:value :result}})
+                     (fd "c" :external :parent :assoc :args {:map :a/_label :key {:value :result}})
+                     (fd "a" :_dead :parent :const :args {:value "unused"})]
+        idx (lint/build-index definitions base-fns)
+        refs (fn [n] (lint/references idx (first (filter #(= n (lint/fn-key %)) definitions))))
+        memo (atom {})]
+    (is (= #{["a" :_label]} (refs ["a" :use])))
+    (is (= #{["b" :_label]} (refs ["b" :use])))
+    (is (= #{["a" :_label]} (refs ["c" :external])))
+    (is (= :ambiguous (first (lint/resolve-ref idx :_label "unrelated"))))
+    (is (= ["a" :_label] (lint/fn-key (second (lint/resolve-ref idx :_label "a")))))
+    (is (not= (lint/signature idx :deep memo (nth definitions 2))
+              (lint/signature idx :deep memo (nth definitions 3))))
+    (is (= (lint/signature idx :deep memo (nth definitions 2))
+           (lint/signature idx :deep memo (nth definitions 4))))
+    (is (= [[["a" :_dead]]]
+           (mapv :fns (findings-for :unreferenced-private definitions))))))
+
+
+(deftest incremental-lint-retires-bare-resolution-when-a-local-twin-appears
+  (let [foreign (fd "foreign" :_label :parent :const :args {:value "foreign"})
+        use (fd "local" :use :parent :assoc :args {:map :_label :key {:value :result}})
+        local (fd "local" :_label :parent :const :args {:value "local"})
+        options {:base-fn-names base-fns}
+        before (lint/lint-with-state [foreign use] options (lint/empty-state) :all)
+        after (lint/lint-with-state [foreign local use] options (:state before) #{["local" :_label]})
+        removed (lint/lint-with-state [foreign use] options (:state after) #{["local" :_label]})]
+    (is (= #{["foreign" :_label]} (get-in before [:state :refs ["local" :use]])))
+    (is (= #{["local" :_label]} (get-in after [:state :refs ["local" :use]])))
+    (is (= (lint/lint [foreign local use] options) (:findings after)))
+    (is (= (:findings before) (:findings removed)))
+    (is (= #{["foreign" :_label]} (get-in removed [:state :refs ["local" :use]])))))
+
+
+(deftest root-namespace-twin-resolves-for-root-owner
+  (let [root (fd nil :_label :parent :const :args {:value "root"})
+        foreign (fd "a" :_label :parent :const :args {:value "foreign"})
+        use (fd nil :use :parent :assoc :args {:map :_label :key {:value :result}})
+        index (lint/build-index [root foreign use] base-fns)
+        result (lint/lint-with-state [root foreign use] {:base-fn-names base-fns}
+                                     (lint/empty-state) :all)]
+    (is (= [:fn-def root] (lint/resolve-ref index :_label nil)))
+    (is (= #{[nil :_label]} (get-in result [:state :refs [nil :use]])))))
+
+
+(deftest incremental-lint-retires-already-ambiguous-reference-for-new-local
+  (let [a (fd "a" :_label :parent :const :args {:value "a"})
+        b (fd "b" :_label :parent :const :args {:value "b"})
+        local (fd "c" :_label :parent :const :args {:value "c"})
+        use (fd "c" :use :parent :assoc :args {:map :_label :key {:value :result}})
+        options {:base-fn-names base-fns}
+        before (lint/lint-with-state [a b use] options (lint/empty-state) :all)
+        after (lint/lint-with-state [a b local use] options (:state before) #{["c" :_label]})]
+    (is (empty? (get-in before [:state :refs ["c" :use]])))
+    (is (= #{["c" :_label]} (get-in after [:state :refs ["c" :use]])))
+    (is (= (lint/lint [a b local use] options) (:findings after)))))

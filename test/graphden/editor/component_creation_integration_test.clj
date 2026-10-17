@@ -199,6 +199,11 @@
     (let [{:keys [result] :as diagnosed} (export-diagnosed ctx "canvas-values")]
       (is (:ok result) (pr-str diagnosed))
       (is (= (get-in manifest [:roots :canvas-values-id]) (get-in result [:roots :canvas-values-id]))))
+    (doseq [[component root-key] [["canvas-inheritance" :canvas-inheritance-id]
+                                  ["canvas-metadata" :canvas-metadata-id]]]
+      (let [{:keys [result] :as diagnosed} (export-diagnosed ctx component)]
+        (is (:ok result) (pr-str diagnosed))
+        (is (= (get-in manifest [:roots root-key]) (get-in result [:roots root-key])))))
     (let [{:keys [result] :as diagnosed} (export-diagnosed ctx "tutorial-catalog")]
       (is (:ok result) (pr-str diagnosed))
       (is (= (get-in manifest [:roots :tutorial-catalog-id])
@@ -705,3 +710,8 @@
         (is (:ok result) (pr-str diagnosed))
         (is (= (get-in full [:roots :menu-id]) (get-in result [:roots :menu-id])))
         (is (= (get-in full [:roots :picker-id]) (get-in result [:roots :picker-id])))))))
+
+
+(deftest selective-canvas-card-components-retain-authorized-installed-output-fields
+  (doseq [component ["canvas-inheritance" "canvas-metadata"]]
+    (selective-retention-proof component)))

@@ -24,5 +24,9 @@
             :reference :app.ui-canvas/canvas-view :roles #{:view}}
    :canvas-values {:id (ids/fn-id "app.ui-canvas-values" :canvas-values-view)
                    :reference :app.ui-canvas-values/canvas-values-view :roles #{:view}}
+   :canvas-inheritance {:id (ids/fn-id "app.ui-canvas-inheritance" :inheritance-view)
+                        :reference :app.ui-canvas-inheritance/inheritance-view :roles #{:initial :view}}
+   :canvas-metadata {:id (ids/fn-id "app.ui-canvas-metadata" :metadata-view)
+                     :reference :app.ui-canvas-metadata/metadata-view :roles #{:view}}
    :tutorial-catalog {:id (ids/fn-id "app.ui-tutorial-catalog" :catalog-view)
                       :reference :app.ui-tutorial-catalog/catalog-view :roles #{:view}}})

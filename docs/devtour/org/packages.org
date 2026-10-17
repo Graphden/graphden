@@ -395,13 +395,13 @@ Writes a bundle as namespace module files plus a manifest with deterministic out
 :PROPERTIES:
 :CUSTOM_ID: packages/lint
 :FILE: src/graphden/lint/core.clj
-:LINE: 800
+:LINE: 832
 :MINS: 1.8
 :END:
 
 Checks function definitions for duplicate implementations, unused private definitions, redundant inherited [[file:glossary.org::#term/binding][bindings]], siblings that could share a parent, and excessively deep [[file:glossary.org::#term/inheritance][inheritance]]. Both CI and the editor use this same linter over function-definition data. See [[file:../../../docs/GRAPH_LINT.md][graph lint]].
 
-- source :: [[file:../../../src/graphden/lint/core.clj::(defn lint][src/graphden/lint/core.clj:800]]
+- source :: [[file:../../../src/graphden/lint/core.clj::(defn lint][src/graphden/lint/core.clj:832]]
 
 * 31. lint-branch
 :PROPERTIES:

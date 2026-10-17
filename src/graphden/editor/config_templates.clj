@@ -25,12 +25,7 @@
         collections (module "core/collections")
         identity-targets (filter #(and (keyword? %) (namespace %))
                                  (keep #(get-in % [:args :value :ref]) fns))
-        entries (mapcat (fn [[module-path references]]
-                          (let [names (set (map (comp keyword name) references))
-                                definitions (:fns (module (str/replace module-path "." "/")))]
-                            (map #(assoc % :namespace module-path)
-                                 (filter #(contains? names (:name %)) definitions))))
-                        (group-by namespace identity-targets))]
+        entries (map components/identity-interface identity-targets)]
     (into (components/interface-definitions)
           (concat entries (map #(assoc % :namespace path) fns)
                   (map #(assoc % :namespace "core.collections")

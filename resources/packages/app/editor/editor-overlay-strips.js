@@ -125,43 +125,19 @@ function appendReturnTypeStrip(c) {
           : null);
     const constraintText = (typeof refinementConstraintText === 'function')
       ? refinementConstraintText(refineStruct) : null;
-    if (constraintText) {
-      // Stacked refinement on the return-type strip — mirrors the
-      // arg-overlay chip's two-line layout (base / constraint).
-      strip.classList.add('return-type-strip-refine');
-      const arrow = document.createElement('span');
-      arrow.className = 'return-type-strip-arrow';
-      arrow.textContent = '→ ';
-      strip.appendChild(arrow);
-      const base = document.createElement('span');
-      base.className = 'return-type-strip-base';
-      base.textContent = displayText;
-      strip.appendChild(base);
-      const constraint = document.createElement('span');
-      constraint.className = 'return-type-strip-constraint';
-      constraint.textContent = constraintText;
-      // Hover-title — natural-language form so the reader can translate
-      // a terse `(>= 1024) (<= 65535)` constraint into "integer where
-      // >= 1024 and <= 65535" without opening the inline panel.
-      if (refineStruct && typeof formatTypeHumanReadable === 'function') {
-        constraint.title = formatTypeHumanReadable(refineStruct);
-      }
-      strip.appendChild(constraint);
-    } else {
-      // Wrap the display text in a `flex: 1; overflow: hidden; ellipsis`
-      // span instead of setting textContent on the strip directly — that
-      // way a trailing provenance button (added below) is laid out as a
-      // sibling flex item that never gets clipped by the strip's own
-      // overflow:hidden + text-overflow:ellipsis. Without the wrapper,
-      // a long type expression pushes the button past the strip's
-      // visible edge and the OS hit-tester (Playwright + real mouse)
-      // reports the STRIP as the click target, not the button.
-      strip.classList.add('return-type-strip-flex');
-      const textSpan = document.createElement('span');
-      textSpan.className = 'return-type-strip-text';
-      textSpan.textContent = displayText ? ('→ ' + displayText) : '→ (none)';
-      strip.appendChild(textSpan);
-    }
+    const body = document.createElement('span');
+    // This exact native body owner reserves space for the sibling provenance
+    // and lambda controls. Its renderer owns only the passive descendants.
+    body.className = 'return-type-strip-text gd-canvas-body-host';
+    if (constraintText) strip.classList.add('return-type-strip-refine');
+    else strip.classList.add('return-type-strip-flex');
+    strip.appendChild(body);
+    window.gdCanvasMetadataGraph.mount(overlay, body, 'return', {
+      'declared-return': rt || '', 'computed-return': displayRich || '',
+      constraint: constraintText || '',
+      'constraint-title': refineStruct && typeof formatTypeHumanReadable === 'function'
+        ? formatTypeHumanReadable(refineStruct) : '',
+    });
     // Strip title — three cases:
     //   - declared (`rt` is set): "Return type: <rt>" plus an "(computed: …)"
     //     suffix when the rich form is more specific.
@@ -254,9 +230,10 @@ function appendLambdaParamsChip(strip, c) {
     const chip = document.createElement(flagEditable ? 'button' : 'span');
     chip.className = 'lambda-params-chip';
     if (flagEditable) chip.type = 'button';
-    const shown = declared == null ? 'derived'
-                : (declared.length === 0 ? '[]' : declared.join(', '));
-    chip.textContent = 'λ ' + shown;
+    window.gdMountMetadataBody(c.overlay, chip, 'lambda', {
+      'lambda-mode': declared == null ? 'derived' : 'declared',
+      params: (declared || []).map((label, index) => ({label, first: index === 0})),
+    });
     chip.dataset.declared = declared == null ? 'derived' : JSON.stringify(declared);
     chip.title = (declared == null
       ? 'Call-site parameters: derived — when a HOF or a route calls this fn, the compile picks its one unambiguous free arg (and refuses when several qualify).'
@@ -285,14 +262,9 @@ function appendEffectsStrip(c) {
   // get no row at all (no clutter for the 80% case). Each badge is
   // colour-coded and carries a hover-title with the full category name.
   //
-  // graph-first-exception: the drift/over-declared set arithmetic
-  // stays CLIENT-side deliberately — `:expects-effects` is editable
-  // in-page (✎ below) without a layout refetch, so the client's live
-  // DB value is fresher than anything the server could have baked
-  // into the layout response; the arithmetic is presentation of
-  // client-fresh state, not a re-derivation of server reasoning
-  // (sync-time drift-checking REJECTS, it doesn't render).
-  //
+  // Live DB membership stays current after edits; ordinary graph bodies
+  // compose the resulting drift/ghost presentation. Native buttons retain
+  // exact explainer anchors and accessible names.
   // When the fn-def also declares `:expects-effects`, the strip
   // shows declared/computed drift visually:
   //   - computed AND declared    → solid chip (normal)
@@ -333,14 +305,13 @@ function appendEffectsStrip(c) {
         const isDeclared = declared && declared.indexOf(eff) >= 0;
         const chip = document.createElement('button');
         chip.type = 'button';
-        let cls = 'effects-chip effects-chip-' + eff;
-        if (!isComputed && isDeclared) cls += ' effects-chip-ghost';   // declared only
-        if ( isComputed && declared && !isDeclared) cls += ' effects-chip-drift'; // unexpected
-        chip.className = cls;
-        chip.textContent = eff;
+        chip.className = 'effects-chip effects-chip-' + eff + ' effects-chip-native';
+        window.gdMountMetadataBody(overlay, chip, 'effect', {effect: eff,
+          computed: isComputed, declared: !!isDeclared, 'has-contract': declared !== null});
         chip.title = isComputed
           ? (isDeclared ? 'Effect: ' + eff + ' (declared & computed) — tap for details'
-                        : 'Effect: ' + eff + ' (DRIFT — not in :expects-effects) — tap for details')
+                        : declared ? 'Effect: ' + eff + ' (DRIFT — not in :expects-effects) — tap for details'
+                                   : 'Effect: ' + eff + ' (computed) — tap for details')
           : 'Effect: ' + eff + ' (declared but not computed) — tap for details';
         chip.setAttribute('aria-label', chip.title);
         chip.addEventListener('click', (e) => {

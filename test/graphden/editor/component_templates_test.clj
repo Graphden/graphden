@@ -154,3 +154,14 @@
     (is (= #{:surface :label :secondary :secondary-title :secondary-kind :history}
            (set (keys (:type (first (filter #(= :_canvas-values-inputs (:name %)) definitions)))))))
     (is (not-any? #(or (= :render-value-repr (:parent %)) (= :fn-return-type (:parent %))) definitions))))
+
+
+(deftest installed-role-interfaces-carry-identity-without-body-peers
+  (let [interfaces (templates/interface-definitions)
+        by-ref (into {} (map #(vector (keyword (:namespace %) (name (:name %))) %)) interfaces)]
+    (doseq [reference [:app.ui-canvas-inheritance/inheritance-view
+                       :app.ui-canvas-metadata/metadata-view]]
+      (is (= #{:name :namespace} (set (keys (get by-ref reference))))))
+    (is (= :zipmap (:parent (get by-ref :app.ui-canvas/canvas-view-fields))))
+    (is (not (contains? by-ref :app.ui-canvas-metadata/_body)))
+    (is (not (contains? by-ref :app.ui-canvas-inheritance/_body)))))

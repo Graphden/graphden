@@ -115,7 +115,8 @@
               (visit! path)
               (when (> depth max-expansion-depth) (incomplete! :depth))
               (when (> (vswap! expanded inc) max-expanded-fns) (incomplete! :size))
-              (let [key (when (:name current) (lint/fn-key current))]
+              (let [current (lint/normalize-definition idx current)
+                    key (when (:name current) (lint/fn-key current))]
                 (when (and key (contains? seen key))
                   (throw (ex-info "Incomplete similarity template"
                                   {:reason :cycle :at key :path path})))

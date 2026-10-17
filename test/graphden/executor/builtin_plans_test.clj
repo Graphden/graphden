@@ -15,6 +15,7 @@
     [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]
     [graphden.test-infra.account-menu-cases :as account-menu]
+    [graphden.test-infra.browser-canvas-card-cases :as canvas-card]
     [graphden.test-infra.browser-picker-cases :as picker]
     [graphden.types.core :as types]
     [graphden.types.core.shapes :as shapes]
@@ -53,7 +54,8 @@
 (def ^:private plan-components
   {:accountMenu :account-menu :fnPicker :fn-picker :recents :recents
    :inspector :inspector :explorer :explorer :tutorialCatalog :tutorial-catalog
-   :canvas :canvas :canvasValues :canvas-values})
+   :canvas :canvas :canvasValues :canvas-values
+   :canvasInheritance :canvas-inheritance :canvasMetadata :canvas-metadata})
 
 
 (deftest shipped-builtin-plans-are-reproducible-and-isolated
@@ -87,14 +89,15 @@
         (is (= (mapv #(assoc % :namespace "__GRAPHDEN_THEME_NAMESPACE__")
                      (:fns (edn/read-string (slurp "resources/packages/app/ui-theme-template/fns.edn"))))
                (:fns (edn/read-string (get-in artifact [:themeTemplate :edn])))))
-        (is (= #{:accountMenu :fnPicker :recents :inspector :explorer :tutorialCatalog :canvas :canvasValues}
+        (is (= #{:accountMenu :fnPicker :recents :inspector :explorer :tutorialCatalog :canvas :canvasValues :canvasInheritance :canvasMetadata}
                (set (keys (:plans artifact)))))
         (is (= (set (vals plan-components)) (set (keys shipped/component-contracts))))
         (is (= (set (keys plan-components)) (set (keys (:plans artifact)))))
         (doseq [[kind compiled] (:plans artifact)]
           (is (= 1 (:format compiled) (:primitiveAbi compiled)))
           (is (= (case kind
-                   (:tutorialCatalog :canvas :canvasValues) #{"view"}
+                   (:tutorialCatalog :canvas :canvasValues :canvasMetadata) #{"view"}
+                   :canvasInheritance #{"initial" "view"}
                    #{"initial" "update" "view"})
                  (set (keys (:entries compiled)))))))
       (is (= {:by-id {} :by-name {}} @rich))
@@ -211,17 +214,18 @@
 
 
 (defn- assert-stored-browser-views
-  [ctx root compiled cases]
-  (let [request {:plan compiled
-                 :cases (mapv #(hash-map :entry "view" :inputs {"inputs" (plan/encode-value %)}) cases)}
-        {:keys [exit out err]} (sh/sh "node" "tools/runtime-test/browser-plan-runner.js"
-                                      :in (json/generate-string request))]
-    (is (zero? exit) err)
-    (when (zero? exit)
-      (doseq [[input actual] (map vector cases (json/parse-string-strict out true))]
-        (is (nil? (:error actual)) (:error actual))
-        (is (= (exec/execute ctx root {:inputs input})
-               (some-> (:value actual) plan/decode-value)) (:surface input))))))
+  ([ctx root compiled cases] (assert-stored-browser-views ctx root compiled cases "view"))
+  ([ctx root compiled cases entry]
+   (let [request {:plan compiled
+                  :cases (mapv #(hash-map :entry entry :inputs {"inputs" (plan/encode-value %)}) cases)}
+         {:keys [exit out err]} (sh/sh "node" "tools/runtime-test/browser-plan-runner.js"
+                                       :in (json/generate-string request))]
+     (is (zero? exit) err)
+     (when (zero? exit)
+       (doseq [[input actual] (map vector cases (json/parse-string-strict out true))]
+         (is (nil? (:error actual)) (:error actual))
+         (is (= (exec/execute ctx root {:inputs input})
+                (some-> (:value actual) plan/decode-value)) (:surface input)))))))
 
 
 (deftest stored-canvas-display-facts-have-the-same-jvm-and-browser-view
@@ -261,5 +265,14 @@
                              {:surface "type-history" :history [{:label "any" :source-label "base, ancestor" :kind "slot"}
                                                                 {:label "text" :source-label "child" :kind "binding-override"}]}])]
             (assert-stored-browser-views ctx (ids/fn-id "app.ui-canvas-values" :canvas-values-view)
-                                         (get-in artifact [:plans :canvasValues]) cases)))
+                                         (get-in artifact [:plans :canvasValues]) cases))
+          (assert-stored-browser-views ctx (ids/fn-id "app.ui-canvas-inheritance" :inheritance-initial)
+                                       (get-in artifact [:plans :canvasInheritance]) canvas-card/policy-cases "initial")
+          (assert-stored-browser-views ctx (ids/fn-id "app.ui-canvas-inheritance" :inheritance-view)
+                                       (get-in artifact [:plans :canvasInheritance]) [{:label "same, authorized name"}])
+          (assert-stored-browser-views ctx (ids/fn-id "app.ui-canvas-metadata" :metadata-view)
+                                       (get-in artifact [:plans :canvasMetadata]) canvas-card/metadata-cases)
+          (is (= {:tone "body" :bold false}
+                 (exec/execute ctx (ids/fn-id "app.ui-canvas-inheritance" :inheritance-initial)
+                               {:inputs (last canvas-card/policy-cases)}))))
         (finally (sp/close storage))))))

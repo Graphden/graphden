@@ -143,3 +143,13 @@
       (is (not-any? #(contains? child-ids (:fn-id %)) (filter #(= :binding (:kind %)) (:records parsed))))
       (is (empty? (set/intersection (set (vals roles)) (set (map :id functions)))))
       (is (contains? (set (vals (:reference-identities parsed))) prior)))))
+
+
+(deftest configuration-role-interfaces-do-not-import-private-bodies
+  (let [interfaces (templates/interfaces)]
+    (doseq [reference [:app.ui-canvas-inheritance/inheritance-view
+                       :app.ui-canvas-inheritance/inheritance-initial
+                       :app.ui-canvas-metadata/metadata-view]
+            :let [matches (filter #(= reference (keyword (:namespace %) (name (:name %)))) interfaces)]]
+      (is (seq matches))
+      (is (every? #(= #{:name :namespace} (set (keys %))) matches)))))

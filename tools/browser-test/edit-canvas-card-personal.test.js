@@ -37,7 +37,8 @@ const {unexpectedSelectiveCopyErrors} = require('./selective-copy-errors');
       const receipt = requestReceipts.get(response.request());
       if (receipt) { receipt.status = response.status(); receipt.type = response.headers()['content-type']; }
       const body = await response.json().catch(() => null);
-      plans.push({component: response.request().postDataJSON()?.component, status: response.status(),
+      plans.push({kind: 'plan', url: response.url(), sequence: receipt.sequence,
+        component: response.request().postDataJSON()?.component, status: response.status(),
         ok: body?.ok, fallback: body?.fallback, code: body?.code, selectionId: body?.['selection-id'], retryable: body?.retryable === true});
     })());
   });
@@ -164,6 +165,15 @@ const {unexpectedSelectiveCopyErrors} = require('./selective-copy-errors');
       && metadataFocusProof.card.querySelector('.lambda-params-chip') === metadataFocusProof.lambda
       && metadataFocusProof.card.querySelector('.effects-chip-env') === metadataFocusProof.effect),
       'actual personal metadata retains exact native lambda/effect controls and focus');
+    console.log('bounded activation receipts', JSON.stringify({
+      requests: sourceRequests.filter(row => row.phase === 'activate-canvas-metadata'),
+      identities: await page.evaluate(() => ({
+        inheritance: gdUIComponentRuntimeIdentity('canvas-inheritance'),
+        metadata: gdUIComponentRuntimeIdentity('canvas-metadata'),
+        selectedInheritance: gdUIComponentsRoots()['canvas-inheritance-id'],
+        selectedMetadata: gdUIComponentsRoots()['canvas-metadata-id'], lifecycle: canvasProofLifecycle,
+      })),
+    }));
     for (const dark of [false, true]) {
       await page.evaluate(dark => applyTheme(dark), dark);
       const geometry = await page.evaluate(async () => {

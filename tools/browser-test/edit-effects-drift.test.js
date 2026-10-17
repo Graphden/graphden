@@ -2,16 +2,16 @@
 // chips visually distinguish three states:
 //
 //   computed ∩ declared           — solid chip (normal)
-//   computed NOT declared (drift) — solid + `.effects-chip-drift` (red outline)
-//   declared NOT computed (over)  — outlined `.effects-chip-ghost`
+//   computed NOT declared (drift) — solid + `.gd-canvas-metadata-drift` (red outline)
+//   declared NOT computed (over)  — outlined `.gd-canvas-metadata-ghost`
 //
 // Coverage:
 //   • Drift case: seed an `:env`-parented probe with
 //     `:expects-effects []` (empty declared, but `:env` effect
-//     computes). Verify the `:env` chip carries `effects-chip-drift`.
+//     computes). Verify the `:env` chip carries `gd-canvas-metadata-drift`.
 //   • Ghost case: seed an `:const`-parented probe with
 //     `:expects-effects [:network]` (declared network, but pure
-//     fn). Verify a `:network` chip with `effects-chip-ghost`.
+//     fn). Verify a `:network` chip with `gd-canvas-metadata-ghost`.
 //
 // Run from this directory:  node edit-effects-drift.test.js
 // Exit code 0 = PASS, 1 = FAIL.
@@ -84,7 +84,7 @@ async function cleanup(page) {
     assert(ghostProbe, 'ghost probe created');
 
     // ===================================================================
-    // Phase A: drift probe. :env chip should carry effects-chip-drift.
+    // Phase A: drift probe. :env chip should carry gd-canvas-metadata-drift.
     // ===================================================================
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + DRIFT_FN);
     await page.waitForFunction(
@@ -105,14 +105,14 @@ async function cleanup(page) {
     assert(driftState.chipCount >= 1,
            ':env effect chip rendered: ' + driftState.chipCount);
     assert(driftState.hasDrift,
-           ':env chip carries .effects-chip-drift (computed ⊃ declared)');
+           ':env chip carries .gd-canvas-metadata-drift (computed ⊃ declared)');
     assert(/DRIFT|undeclared/i.test(driftState.anyTitle),
            'chip title flags drift / undeclared: '
            + JSON.stringify(driftState.anyTitle).slice(0, 200));
 
     // ===================================================================
     // Phase B: ghost probe. :network chip should carry
-    // effects-chip-ghost.
+    // gd-canvas-metadata-ghost.
     // ===================================================================
     await page.goto('about:blank');
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + GHOST_FN);
@@ -134,7 +134,7 @@ async function cleanup(page) {
     assert(ghostState.chipCount >= 1,
            ':network effect chip rendered: ' + ghostState.chipCount);
     assert(ghostState.hasGhost,
-           ':network chip carries .effects-chip-ghost (declared but not computed)');
+           ':network chip carries .gd-canvas-metadata-ghost (declared but not computed)');
     assert(/declared but not computed|declared/i.test(ghostState.anyTitle),
            'chip title flags over-declared / declared-not-computed: '
            + JSON.stringify(ghostState.anyTitle).slice(0, 200));

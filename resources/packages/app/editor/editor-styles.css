@@ -1842,21 +1842,6 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
   background: var(--hover-bg);
   color: var(--fg);
 }
-/* Refinement variant: stack `(constraint)` under the base in the same
- * spirit as the arg-overlay's stacked refinement chip. Arrow + base sit
- * on the first text run; the constraint span wraps to a second line at
- * smaller weight + reduced opacity. */
-.return-type-strip-refine .return-type-strip-arrow,
-.return-type-strip-refine .return-type-strip-base {
-  display: inline;
-}
-.return-type-strip-refine .return-type-strip-constraint {
-  display: block;
-  padding-left: 1em;
-  font-size: 0.5625rem;
-  opacity: 0.7;
-}
-
 /* Edit-this-type-row strip — peer of `.return-type-strip-editable`,
    surfaces "open the type-edit form" for type-rows on their nav-root
    card. Italic muted text matches the other footer strips; hover
@@ -1925,21 +1910,6 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
 .effects-chip-random  { background: var(--effect-chip-random); }   /* non-determinism */
 .effects-chip-process { background: var(--effect-chip-process); }  /* spawns supervised background work */
 .effects-chip-raw-sql { background: var(--effect-chip-raw-sql); }  /* raw SQL — bypasses org-scoped storage */
-
-/* Drift = computed effect that the author DIDN'T declare in
-   `:expects-effects`. Ring it red so it stands out without changing
-   the category colour. */
-.effects-chip-drift {
-  box-shadow: 0 0 0 1.5px var(--error-fg);
-}
-/* Ghost = declared but not computed yet. Outlined-only — keeps the
-   colour signal but signals "expected, not seen" via the dashed ring. */
-.effects-chip-ghost {
-  background: transparent !important;
-  color: var(--muted-fg);
-  outline: 1px dashed currentcolor;
-  outline-offset: -1px;
-}
 
 /* Pencil at the right of the effects-strip — opens the inline-edit
    popover that toggles `:expects-effects`. Text mode ("declare

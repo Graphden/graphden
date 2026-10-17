@@ -1,7 +1,7 @@
 'use strict';
 const {assert, api, BASE} = require('./edit-test-helpers');
 const {waitTourTitle, clickTourButton} = require('./tutorial-tour-helpers');
-const {components} = require('./selective-copy-errors');
+const {captureLoadedUIComponents, waitForLoadedUIComponents} = require('./ui-component-runtime-test-helpers');
 
 async function settings(page) {
   if (!await page.locator('.auth-menu-item[data-item="Settings"]').isVisible()) {
@@ -148,9 +148,8 @@ async function walkUIComponentsLesson(page, {onReceipt = async () => {}, onStage
   const previous = await page.evaluate(() => ({components: gdPrefRead('components'),
     configuration: gdUIConfigurationState().selection['fn-id'], theme: gdPrefRead('theme'),
     picker: gdUIComponentsRoots()['picker-id'], branch: getCurrentBranchName()}));
-  const loadedComponents = await page.evaluate(names => names.filter(name =>
-    gdUIComponentRuntimeIdentity(name) === gdUIConfigurationState().selection['fn-id']), [...components]);
-  assert(loadedComponents.includes('account-menu') && loadedComponents.includes('tutorial-catalog'),
+  const loadedComponents = await captureLoadedUIComponents(page);
+  assert(loadedComponents.names.includes('account-menu') && loadedComponents.names.includes('tutorial-catalog'),
     'the menu and tutorial catalog use the ordinary configuration before personalization');
   const applyPath = await page.evaluate(() => new URL(API.api_ui_configuration_apply, location.href).pathname);
   const matchesApply = url => url.pathname === applyPath;
@@ -214,9 +213,7 @@ async function walkUIComponentsLesson(page, {onReceipt = async () => {}, onStage
   previous, {timeout: 60000});
   // Configuration publication can precede another component's bounded policy
   // retry. Wait for the actual previously loaded runtimes, not just the picker.
-  await page.waitForFunction(({names, configuration}) => names.every(name =>
-    gdUIComponentRuntimeIdentity(name) === configuration),
-  {names: loadedComponents, configuration: previous.configuration}, {timeout: 60000});
+  await waitForLoadedUIComponents(page, loadedComponents);
   assert(await page.evaluate(() => gdShellMenuGraph.ready && !gdUIComponentsStatus()),
     'cleanup restores the loaded component runtimes without a terminal fallback');
   const after = await page.evaluate(() => ({components: gdPrefRead('components'),

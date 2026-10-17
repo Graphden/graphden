@@ -45,4 +45,4 @@ function unexpectedSelectiveCopyErrors(errors, replies, behaviorVerified) {
     return false;
   });
 }
-module.exports = {unexpectedSelectiveCopyErrors, componentRoots, components};
+module.exports = {unexpectedSelectiveCopyErrors, componentRoots, components, builtinFallback};

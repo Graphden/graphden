@@ -4,6 +4,7 @@ const {chromium} = require('playwright');
 const {assert, newContext, api, BASE, waitForServerHealthy, getEntities, synthArgs} = require('./edit-test-helpers');
 const {undoConfiguration} = require('./configuration-undo-test-helpers');
 const {unexpectedSelectiveCopyErrors} = require('./selective-copy-errors');
+const {captureLoadedUIComponents, waitForLoadedUIComponents, drainUIPlanReplies} = require('./ui-component-runtime-test-helpers');
 (async () => {
   await waitForServerHealthy();
   const {browser, page} = await newContext(chromium, {boot: false});
@@ -54,6 +55,13 @@ const {unexpectedSelectiveCopyErrors} = require('./selective-copy-errors');
       'value=' + encodeURIComponent(JSON.stringify(value)));
     assert(result.ok || result.status === 200, 'ordinary source edit saved');
   }
+  async function settleComponents(snapshot) {
+    // A global refresh starts every catalog component. Wait for this exact
+    // generation's validated runtimes before a later source edit can abort
+    // another component's policy retry or the error audit reads its receipt.
+    await waitForLoadedUIComponents(page, snapshot);
+    await drainUIPlanReplies(sourceRequests, plans, pending);
+  }
   async function select(id) {
     await page.evaluate(async id => { await ensureSubtreeFor(id); await selectFn(id); }, id);
     await page.waitForFunction(id => selectedFnId === id && graphReady() && !graph.animating
@@ -91,6 +99,7 @@ const {unexpectedSelectiveCopyErrors} = require('./selective-copy-errors');
     await page.goto(BASE + '/#web-server');
     await page.waitForFunction(() => gdPrefsReady && gdPrefOwner && gdUIConfigurationState?.()?.revision
       && graphReady() && !graph.animating, null, {timeout: 60000});
+    const originalRuntimes = await captureLoadedUIComponents(page);
     assert((await api(page, 'POST', '/api/ui/configuration/prepare', {home: true})).ok, 'personal home prepared');
     const owner = await page.evaluate(() => gdPrefOwner);
     async function createCopy(component) {
@@ -236,20 +245,30 @@ const {unexpectedSelectiveCopyErrors} = require('./selective-copy-errors');
     // A real authored stylesheet may omit the optional label; the native
     // details affordance, target and focus must survive that source reload.
     phase = 'hidden-personal-metadata';
+    const metadataRuntimes = await captureLoadedUIComponents(page);
     await editLiteral(metadata, '_style-effect', 'vals', 'none', 0);
     await page.evaluate(() => gdRefreshUIConfiguration());
     await page.waitForFunction(() => getComputedStyle(metadataFocusProof.effect.querySelector('.gd-canvas-metadata-effect')).display === 'none',
       null, {timeout: 60000});
-    assert(await page.evaluate(() => {
+    await settleComponents(metadataRuntimes);
+    const hiddenControl = await page.evaluate(() => {
       const effect = metadataFocusProof.effect, rect = effect.getBoundingClientRect();
       const mark = effect.querySelector(':scope > .canvas-metadata-control-mark');
       const box = mark.getBoundingClientRect(), style = getComputedStyle(effect);
       const target = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
-      return effect.isConnected && metadataFocusProof.card.querySelector('.effects-chip-env') === effect
-        && document.activeElement === metadataFocusProof.lambda && !mark.closest('[data-gd-ui-style]')
-        && box.width > 0 && box.height > 0 && rect.width >= parseFloat(style.minWidth)
-        && rect.height >= parseFloat(style.minHeight) && (target === effect || effect.contains(target));
-    }), 'actual stored hidden label retains native details mark, minimum hit area and focused controls');
+      return {retained: effect.isConnected && metadataFocusProof.card.querySelector('.effects-chip-env') === effect,
+        focus: document.activeElement === metadataFocusProof.lambda,
+        mark: !mark.closest('[data-gd-ui-style]') && box.width > 0 && box.height > 0,
+        // Native CSS minimums are layout sizes; the canvas viewport scales
+        // their screen boxes together with every other native control.
+        minimum: effect.offsetWidth >= parseFloat(style.minWidth) && effect.offsetHeight >= parseFloat(style.minHeight),
+        hit: target === effect || effect.contains(target),
+        layout: [effect.offsetWidth, effect.offsetHeight], screen: [rect.width, rect.height],
+        min: [parseFloat(style.minWidth), parseFloat(style.minHeight)], zoom: viewport.zoom};
+    });
+    console.log('bounded hidden native control', JSON.stringify(hiddenControl));
+    assert(hiddenControl.retained && hiddenControl.focus && hiddenControl.mark && hiddenControl.minimum && hiddenControl.hit,
+      'actual stored hidden label retains native details mark, minimum hit area and focused controls');
     if (process.env.GRAPHDEN_CANVAS_SCREENSHOT)
       await page.screenshot({path: process.env.GRAPHDEN_CANVAS_SCREENSHOT + '.hidden.png'});
     // Exercise the actual retained effect anchor, then restore its label.
@@ -260,6 +279,7 @@ const {unexpectedSelectiveCopyErrors} = require('./selective-copy-errors');
     await page.evaluate(() => gdRefreshUIConfiguration());
     await page.waitForFunction(() => getComputedStyle(metadataFocusProof.effect.querySelector('.gd-canvas-metadata-effect')).display === 'inline-flex',
       null, {timeout: 60000});
+    await settleComponents(metadataRuntimes);
     phase = 'restore';
     for (const activation of [...activations].reverse()) {
       const undone = await undoConfiguration(page, activation); assert(undone.ok, 'exact configuration restored');
@@ -267,7 +287,7 @@ const {unexpectedSelectiveCopyErrors} = require('./selective-copy-errors');
     }
     await page.evaluate(() => gdPrefsRefresh());
     await page.waitForFunction(() => !document.querySelector('.gd-canvas-inheritance-personal, .gd-canvas-metadata-personal'), null, {timeout: 60000});
-    await Promise.all(pending);
+    await settleComponents(originalRuntimes);
     for (const [component, activation] of [['canvas-inheritance', inheritedActivation], ['canvas-metadata', metadataActivation]]) {
       assert(plans.some(row => row.component === component && row.status === 200 && row.ok
         && !row.fallback && row.selectionId === activation.receipt.id), 'actual authorized stored plan exported for ' + component);

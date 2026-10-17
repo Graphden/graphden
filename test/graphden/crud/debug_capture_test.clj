@@ -81,6 +81,26 @@
       (finally (dbg/disarm! branch-id)))))
 
 
+(deftest catch-all-excludes-exact-operational-routes-test
+  (let [branch-id (random-uuid)]
+    (try
+      (doseq [uri ["/health" "/metrics" "/metrics/prometheus"]]
+        (testing (str "operational request " uri)
+          (let [trap (dbg/arm! branch-id {})]
+            (is (nil? (dbg/consume-trap! branch-id (req uri))))
+            (is (= trap (dbg/trap-status branch-id)) "a platform probe leaves catch-all armed"))
+          (let [trap (dbg/arm! branch-id {:path-prefix uri})]
+            (is (= trap (dbg/consume-trap! branch-id (req uri)))
+                "an explicit prefix still captures the operational route")
+            (is (nil? (dbg/trap-status branch-id))))))
+      (doseq [uri ["/metrics-shop" "/metrics/prometheus/orders" "/healthcare"]]
+        (testing (str "application lookalike " uri)
+          (let [trap (dbg/arm! branch-id {})]
+            (is (= trap (dbg/consume-trap! branch-id (req uri)))
+                "operational exclusions are exact paths"))))
+      (finally (dbg/disarm! branch-id)))))
+
+
 (deftest consume-branch-and-org-isolation-test
   (let [branch-a (random-uuid)
         branch-b (random-uuid)]

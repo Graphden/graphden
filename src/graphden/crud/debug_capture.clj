@@ -63,6 +63,12 @@
   ["/api/" "/partials/" "/assets/" "/events/" "/auth/" "/version"])
 
 
+(def ^:private operational-paths
+  "Exact platform routes. A scrape or health probe must not consume a
+   catch-all trap; similarly named application routes remain eligible."
+  #{"/health" "/metrics" "/metrics/prometheus"})
+
+
 (defn- now-ms
   []
   (System/currentTimeMillis))
@@ -126,7 +132,8 @@
     (and (< (now-ms) expires-at-ms)
          (if path-prefix
            (str/starts-with? uri path-prefix)
-           (not-any? #(str/starts-with? uri %) infra-path-prefixes)))))
+           (and (not (contains? operational-paths uri))
+                (not-any? #(str/starts-with? uri %) infra-path-prefixes))))))
 
 
 (defn any-traps?

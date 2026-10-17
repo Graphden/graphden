@@ -566,9 +566,10 @@ history/trace UI as any traced run.
 - `POST /api/debug/catch` — arm (replace). Body `{path-prefix?,
   capture-values?, ttl-ms?}`. No prefix = catch-all **minus** the
   editor-infra paths (`/api/`, `/partials/`, `/assets/`, `/events/`,
-  `/auth/`, `/version`) so the editor's own polling can't consume the
-  trap; an explicit prefix targets whatever it names. TTL default
-  10 min, cap 1 h.
+  `/auth/`, `/version`) and exact operational paths (`/health`,
+  `/metrics`, `/metrics/prometheus`). Polling and monitoring leave the trap
+  armed; application paths such as `/metrics-shop` remain eligible. An
+  explicit prefix overrides both exclusions. TTL default 10 min, cap 1 h.
 - `POST /api/debug/catch/cancel` — disarm.
 - `GET /api/debug/catch/status` — `{armed, trap,
   last-captured-execution-id}`.

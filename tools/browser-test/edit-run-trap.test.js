@@ -15,7 +15,7 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext, api} = require('./edit-test-helpers');
+const {assert, newContext, api, nodeApi} = require('./edit-test-helpers');
 
 const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
 
@@ -56,6 +56,10 @@ async function openRuns(page, name) {
     const armed = await page.evaluate(() =>
       document.querySelector('#gd-insp-runs .gd-run-trap .debug-armed-line')?.textContent || '');
     assert(/Armed/.test(armed), 'arming shows the armed line (' + armed.slice(0, 60) + ')');
+    // The suite's sampler (and production monitoring) scrapes this real
+    // platform endpoint. It must leave a catch-all trap for the app request.
+    const metrics = await nodeApi('GET', '/metrics');
+    assert(metrics.status === 200, 'the platform metrics request succeeds (' + metrics.status + ')');
     const status = await api(page, 'GET', '/api/debug/catch/status');
     assert(status && status.armed === true, 'the server reports the trap armed (' + JSON.stringify(status) + ')');
 

@@ -351,14 +351,15 @@ const {
     // ran off the bottom with its Cancel unreachable (a flex column that
     // squeezed its rows instead of scrolling), and opened mid-lesson it kept
     // the previous step's anchored position.
-    const shape = await page.evaluate(async () => {
+    await page.evaluate(() => {
       localStorage.setItem('graphden.tour.done', JSON.stringify(['01']));
       localStorage.setItem('graphden.tour',
         JSON.stringify({lessonId: '04', step: 2, created: []}));
-      location.reload();
     });
-    await page.waitForFunction(() => typeof window.openTutorialMenu === 'function',
-      null, {timeout: 60000});
+    await page.reload();
+    // Script availability precedes initGraph's async saved-lesson restore.
+    // Open the catalogue only after that restore has published its real step.
+    await waitTourTitle(page, 'Make the first child', 60000);
     await page.evaluate(() => window.openTutorialMenu());
     await page.waitForSelector('.gd-tour-lesson-list', {timeout: 30000});
     const cat = await page.evaluate(() => {

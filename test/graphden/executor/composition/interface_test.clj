@@ -11,6 +11,8 @@
     [graphden.executor.composition.parsing :as parsing]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.interface :as registry]
+    [graphden.packages.records :as records]
+    [graphden.packages.records.parse :as record-parse]
     [graphden.schema.graph.schema :as gds]
     [graphden.schema.malli.core :as mds]
     [graphden.storage.postgres.core :as pg]
@@ -205,8 +207,21 @@
     (let [fn-defs [{:name :a :parent :base :args {:x :b}}
                    {:name :b :parent :base :args {:x :c}}
                    {:name :c :parent :base}]
-          graph (#'deps/build-dependency-graph fn-defs (constantly false))]
-      (is (= {:a #{:b} :b #{:c} :c #{}} graph)))))
+          index (record-parse/name->id-index {} fn-defs)
+          graph (#'deps/build-dependency-graph fn-defs (constantly false) index)
+          [a b c] (map #(records/fn-id nil %) [:a :b :c])]
+      (is (= {a #{b} b #{c} c #{}} graph))))
+
+  (testing "same-named dependencies retain their namespace identities"
+    (let [fn-defs [{:name :use :namespace "a" :parent :base :args {:x :helper}}
+                   {:name :helper :namespace "a" :parent :base :args {:x :b/helper}}
+                   {:name :helper :namespace "b" :parent :base}]
+          index (record-parse/name->id-index {} fn-defs)
+          graph (#'deps/build-dependency-graph fn-defs (constantly false) index)
+          use-a (records/fn-id "a" :use)
+          helper-a (records/fn-id "a" :helper)
+          helper-b (records/fn-id "b" :helper)]
+      (is (= {use-a #{helper-a} helper-a #{helper-b} helper-b #{}} graph)))))
 
 
 ;; === topological-sort edge cases ===

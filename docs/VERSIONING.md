@@ -813,6 +813,12 @@ panel keeps its inline 📍 badge on the same rows.
   (`fork-per-org-rich-atom`) and every bind site pairs the two
   overrides, so a tenant's same-named fns on two branches keep separate
   per-org name indexes (`per-org-rich-slice-is-branch-scoped-test`).
+  A merge's targeted type recheck is asynchronous and shares recovery
+  admission with startup sweeps. Its terminal log receipt distinguishes
+  admission delay, checker diagnostics, missing entries, cancellation and
+  exceptions. `:status :checked` means the pass completed; inspect
+  `:outcome` as well, since an old rich entry can remain present after a
+  failed check. Presence alone does not prove a fresh publication.
 
 - ~~Merge is one-hop (non-transitive)~~ — **transitive.** A
   merge record transfers only the versions the source OWNS, so a stacked /

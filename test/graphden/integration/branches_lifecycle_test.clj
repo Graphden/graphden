@@ -22,12 +22,15 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.auth.provider :as auth]
+    [graphden.crud.type-check :as type-check]
     [graphden.executor.compile-runtime :as cr]
+    [graphden.executor.context :as exec-ctx]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
     [graphden.services.reconciler :as recon]
     [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.core :as sp]
+    [graphden.storage.tx :as tx]
     [graphden.system.branch-router :as br]
     [graphden.system.branch-router.epoch :as br-epoch]
     [graphden.system.branch-router.recheck :as br-recheck]
@@ -892,6 +895,104 @@
             "no half-alive server renderer behind the client one")))))
 
 
+(defn- await-type-recovery!
+  "Await this existing generation's completion, not a sleep or a global drain.
+   A completed sweep may legitimately retain invalid-user-fn diagnostics."
+  [ctx]
+  (let [state (:type-recheck-state ctx)
+        generation (:generation @state)
+        completed (promise)
+        watch-key (random-uuid)
+        observe (fn [current]
+                  (when (or (not= generation (:generation current))
+                            (:cancelled? current)
+                            (and (not (:worker-running? current))
+                                 (contains? #{:ready :failed} (:status current))))
+                    (deliver completed (select-keys current
+                                                    [:generation :status :cancelled? :worker-running?]))))]
+    (add-watch state watch-key (fn [_ _ _ current] (observe current)))
+    (try
+      (observe @state)
+      (let [result (deref completed 15000 ::timeout)]
+        (when-not (and (map? result) (= generation (:generation result))
+                       (not (:cancelled? result)) (not (:worker-running? result))
+                       (contains? #{:ready :failed} (:status result)))
+          (throw (ex-info "Merge probe recovery baseline did not complete"
+                          {:type :test/recovery-baseline-unavailable :captured-generation generation
+                           :current (select-keys @state [:generation :status :cancelled? :worker-running?])})))
+        result)
+      (finally (remove-watch state watch-key)))))
+
+
+(defn- await-merge-type-baseline!
+  [source moved]
+  (let [source-ctx (br/ctx-for *router* (br/resolve-branch-id *router* source))
+        main-ctx (br/ctx-for *router* (:default-branch-id *router*))]
+    (doseq [ctx [main-ctx source-ctx]] (await-type-recovery! ctx))
+    (let [row (first (sp/query-entities (:storage source-ctx) :fn {:name moved}))
+          parent-id (first (:parent-ids row))
+          valid? (and (:id row) parent-id
+                      (get-in @(:rich-types-atom source-ctx) [:by-id (:id row)])
+                      (every? (fn [ctx]
+                                (let [rich @(:rich-types-atom ctx)]
+                                  (and (get-in rich [:by-id parent-id])
+                                       (= parent-id (get-in rich [:by-name :core.logic/const])))))
+                              [main-ctx source-ctx]))]
+      (is (boolean valid?) "source probe and canonical const certificates exist before merge")
+      (when-not valid?
+        (throw (ex-info "Merge probe type certificates are unavailable"
+                        {:type :test/merge-type-baseline-unavailable :fn-id (:id row) :parent-id parent-id}))))))
+
+
+(defn- merged-type-snapshot
+  "Bounded failed-probe evidence; never dump the registry or request headers."
+  [name response]
+  (let [branch-id (:default-branch-id *router*)
+        ctx (get-in @(:handlers *router*) [branch-id :ctx])
+        row (first (sp/query-entities (:storage ctx) :fn {:name name}))
+        rich (some-> (:rich-types-atom ctx) deref)
+        reconstructed (when row (type-check/reconstruct-fn-def (:storage ctx) (:id row)))
+        body (try (parse-json response) (catch Exception _ ::invalid-json))
+        error-code (fn [value]
+                     (some (fn [code]
+                             (when (or (= code value) (= (subs (str code) 1) value)) code))
+                           [:types/ambiguous-alias :types/unknown-alias :types/check-failed
+                            :storage/background-retired :execution/forbidden-effect :http/internal-error]))
+        error (:error body)]
+    {:http-status (:status response)
+     :http-error {:ok (when (boolean? (:ok body)) (:ok body))
+                  :type (error-code (:type body))
+                  :kind (cond (nil? error) :none (map? error) :map
+                              (string? error) :text :else :other)
+                  :error-type (error-code (:type error))}
+     :body-kind (cond (= ::invalid-json body) :invalid-json
+                      (map? body) :map (sequential? body) :sequence :else :other)
+     :branch-id branch-id :context (System/identityHashCode ctx)
+     :context-epoch (exec-ctx/invalidation-epoch ctx)
+     :rich-atom (System/identityHashCode (:rich-types-atom ctx))
+     :recheck (select-keys (some-> (:type-recheck-state ctx) deref)
+                           [:generation :cancelled? :status :worker-running?])
+     :merged-row (select-keys row [:id :name :parent-ids :namespace-id])
+     :reconstructed (select-keys reconstructed [:parent :parents])
+     :rich-by-id? (contains? (:by-id rich) (:id row))
+     :rich-name-id (get-in rich [:by-name (keyword name)])
+     :parents (mapv (fn [id]
+                      (let [parent (sp/read-entity (:storage ctx) :fn id)]
+                        {:id id :name (:name parent)
+                         :rich-by-id? (contains? (:by-id rich) id)
+                         :rich-name-id (get-in rich [:by-name (keyword (:name parent))])}))
+                    (:parent-ids row))}))
+
+
+(defn- type-response-has?
+  [name response]
+  (let [body (try (parse-json response) (catch Exception _ nil))]
+    (when-not (and (= 200 (:status response)) (map? body))
+      (throw (ex-info "Merge type probe received an invalid API response"
+                      {:type :test/merge-types-response :snapshot (merged-type-snapshot name response)})))
+    (contains? body (keyword name))))
+
+
 (deftest rich-types-slice-propagation-on-merge-test
   ;; The per-branch slices need a PROPAGATION channel: a merge's
   ;; type-checks ran under the SOURCE's slice, and the default branch's
@@ -900,10 +1001,11 @@
   (let [run-id (str "-" (System/currentTimeMillis))
         feat (str "rtsm" run-id)
         moved (str "rtsm-fn" run-id)
+        latest (atom nil)
         types-has? (fn []
-                     (contains? (parse-json (dispatch {:method :get
-                                                       :path "/api/types"}))
-                                (keyword moved)))]
+                     (let [response (dispatch {:method :get :path "/api/types"})]
+                       (reset! latest response)
+                       (type-response-has? moved response)))]
     (ok-200 (dispatch {:method :post :path "/api/branches"
                        :body {:name feat :base-branch-id "main"}}) "/api/branches")
     (let [const-fn (fn-by-name nil "const")]
@@ -912,6 +1014,7 @@
                          :content-type "application/x-www-form-urlencoded"
                          :body (form-encode {:name moved
                                              :parent-ids (:id const-fn)})}) "/api/entities/fn"))
+    (await-merge-type-baseline! feat moved)
     (is (false? (types-has?)) "pre-merge: main's slice does not know the fn")
     (is (true? (:ok (parse-json (dispatch {:method :post
                                            :path "/api/branches/main/merge"
@@ -923,4 +1026,67 @@
           (types-has?) (is true "post-merge: the merged fn reached main's slice")
           (< (System/currentTimeMillis) deadline) (do (Thread/sleep 300) (recur))
           :else (is (types-has?)
-                    "post-merge: the merged fn reached main's slice (15s deadline)"))))))
+                    (str "post-merge: the merged fn reached main's slice (15s deadline): "
+                         (pr-str (merged-type-snapshot moved @latest)))))))))
+
+
+(deftest merge-type-publication-survives-recovery-admission-contention
+  (let [suffix (str "-" (System/currentTimeMillis))
+        feat (str "admission-merge" suffix)
+        moved (str "admission-child" suffix)
+        ctx (get-in @(:handlers *router*) [(:default-branch-id *router*) :ctx])
+        datasource (tx/datasource (:storage ctx))
+        entered (promise)
+        release (promise)
+        latest (atom nil)
+        present? (fn []
+                   (let [response (dispatch {:method :get :path "/api/types"})]
+                     (reset! latest response)
+                     (type-response-has? moved response)))]
+    (ok-200 (dispatch {:method :post :path "/api/branches"
+                       :body {:name feat :base-branch-id "main"}}) "create admission branch")
+    (ok-200 (dispatch {:method :post :path "/api/entities/fn" :branch feat
+                       :content-type "application/x-www-form-urlencoded"
+                       :body (form-encode {:name moved :parent-ids (:id (fn-by-name nil "const"))})})
+            "create admission child")
+    (await-merge-type-baseline! feat moved)
+    (let [holder (future
+                   (loop []
+                     (if (realized? release)
+                       :released
+                       (or (tx/try-with-background-admission
+                             datasource
+                             #(do (deliver entered true) @release :released))
+                           (do (Thread/sleep 25) (recur))))))]
+      (try
+        (let [acquired? (deref entered 5000 ::timeout)]
+          (is (true? acquired?) "the controlled recovery owns admission")
+          (when-not (true? acquired?)
+            (throw (ex-info "Controlled recovery admission was not acquired"
+                            {:type :test/admission-barrier-unavailable}))))
+        (let [merged (dispatch {:method :post :path "/api/branches/main/merge"
+                                :body {:source feat}})
+              deadline (+ (System/nanoTime) 15000000000)]
+          (ok-200 merged "merge while recovery admission is busy")
+          (is (true? (:ok (parse-json merged))))
+          (is (false? (present?)) "targeted type check cannot publish before admission")
+          (is (= 200 (:status @latest)) "missing publication is distinct from an API failure")
+          (let [snapshot (merged-type-snapshot moved @latest)]
+            (println "merge admission barrier: committed, not admitted" (pr-str snapshot))
+            (is (= moved (get-in snapshot [:merged-row :name])) "the merge is already persisted")
+            (is (false? (:rich-by-id? snapshot)) "the target slice has not recorded the merged id"))
+          (deliver release true)
+          (is (= :released (deref holder 5000 ::timeout)) "the recovery permit was released")
+          (let [published? (loop []
+                             (cond
+                               (present?) true
+                               (>= (System/nanoTime) deadline) false
+                               :else (do (Thread/sleep 25) (recur))))
+                snapshot (merged-type-snapshot moved @latest)]
+            (println "merge admission barrier: after release" (pr-str snapshot))
+            (is published? (str "publication within the original 15s window: " (pr-str snapshot)))
+            (is (= 200 (:status @latest)))
+            (is (:rich-by-id? snapshot))))
+        (finally
+          (deliver release true)
+          (deref holder 5000 ::timeout))))))

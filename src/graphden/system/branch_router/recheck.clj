@@ -121,15 +121,31 @@
     (type-check/call-with-branch-alias-view (:storage ctx) f)))
 
 
+(defn- record-check-outcome!
+  [summary id diagnostic error]
+  (when summary
+    (swap! summary
+           (fn [current]
+             (cond-> (update current :checked-count inc)
+               diagnostic (update :diagnostic-count inc)
+               error (update :exception-count inc)
+               (and (or diagnostic error) (< (count (:issues current)) 10))
+               (update :issues conj
+                       (cond-> {:fn-id id :outcome (if error :exception :diagnostic)}
+                         error (assoc :exception-class (Class/.getName (class error))))))))))
+
+
 (defn- record-fn-types!
-  "Re-run the type-check for exactly `fn-ids`, SYNCHRONOUSLY — the caller
-   binds `branch-ctx`'s slices (`call-with-ctx-slices`) and decides
-   whether to run it inline or on a future. Best-effort per fn."
+  "Re-run exactly these IDs synchronously under the caller's slices.
+   Best-effort per fn. Existing callers return nil; targeted rechecks may
+   collect counts and at most ten identity/class examples, never payloads."
   ([branch-ctx branch-id fn-ids]
    (record-fn-types! branch-ctx branch-id fn-ids nil))
   ([branch-ctx branch-id fn-ids options]
    (when (seq fn-ids)
-     (let [{:keys [ordered cyclic]}
+     (let [summary (when (:collect-outcomes? options)
+                     (atom {:checked-count 0 :diagnostic-count 0 :exception-count 0 :issues []}))
+           {:keys [ordered cyclic]}
            (if (:preserve-order? options)
              {:ordered fn-ids}
              (deps/dependency-order (compile-runtime/ctx-reverse-deps branch-ctx) fn-ids))]
@@ -138,12 +154,16 @@
                    {:branch-id branch-id :cycle-fn-ids cyclic}))
        (doseq [id ordered]
          (try
-           (if options
-             (type-check/type-check-fn-after-mutation! (:storage branch-ctx) id (dissoc options :preserve-order?))
-             (type-check/type-check-fn-after-mutation! (:storage branch-ctx) id))
-           (catch Exception t
-             (log/debug t "slice type re-record failed for fn"
-                        {:branch-id branch-id :fn-id id}))))))))
+           (let [result (if options
+                          (type-check/type-check-fn-after-mutation!
+                            (:storage branch-ctx) id (dissoc options :preserve-order? :collect-outcomes?))
+                          (type-check/type-check-fn-after-mutation! (:storage branch-ctx) id))]
+             (record-check-outcome! summary id result nil))
+           (catch Exception error
+             (record-check-outcome! summary id nil error)
+             (log/debug "slice type re-record failed for fn"
+                        {:branch-id branch-id :fn-id id :exception-class (Class/.getName (class error))}))))
+       (some-> summary deref)))))
 
 
 (defn- call-with-read-snapshot
@@ -233,36 +253,75 @@
     true))
 
 
-(defn recheck-ctx-types!
-  "Re-record rich-types (+ diagnostics) INTO `branch-ctx`'s own
-   rich-types slice — the propagation channel between per-branch
-   slices. `fn-ids` non-empty → re-check exactly that set (a write's
-   blast radius); empty/nil → the bounded full user-fn sweep.
+(defn- check-targeted-types!
+  [ctx branch-id fn-ids]
+  (call-with-ctx-slices
+    ctx
+    (fn []
+      (let [present-count (fn []
+                            (let [rich (registry-core/effective-rich-types)]
+                              (count (filter #(contains? (:by-id rich) %) fn-ids))))
+            before (present-count)
+            summary (record-fn-types! ctx branch-id fn-ids {:collect-outcomes? true})
+            after (present-count)
+            missing (- (count fn-ids) after)]
+        (assoc summary :present-before before :present-after after :missing-count missing
+               :outcome (cond (pos? (:exception-count summary)) :failed
+                              (pos? (:diagnostic-count summary)) :diagnostic
+                              (pos? missing) :missing
+                              :else :present))))))
 
-   Why this exists: a slice only ever learns types from type-checks
-   RUN UNDER ITS BINDING. A merge into a branch, or a base-branch
-   edit inherited by a cached child, changes what the child RESOLVES
-   without any check running on the child — its slice would stay
-   stale forever (the default branch's entry is pinned and never
-   rebuilt; non-default entries heal on rebuild only). Async +
-   best-effort, same contract as the ctx-build recompute."
+
+(defn- run-targeted-recheck!
+  [ctx branch-id fn-ids generation queued-at started]
+  (let [admitted-after (volatile! nil)
+        elapsed #(long (/ (- (System/nanoTime) started) 1e6))
+        report! (fn [status details]
+                  (log/log (if (= status :failed) :warn :info)
+                           (str "targeted branch type recheck "
+                                (pr-str (merge {:branch-id branch-id :generation generation
+                                                :context (System/identityHashCode ctx)
+                                                :rich-atom (System/identityHashCode (:rich-types-atom ctx))
+                                                :requested-count (count fn-ids) :queued-at-ms queued-at
+                                                :admitted-after-ms @admitted-after :elapsed-ms (elapsed)
+                                                :status status}
+                                               details)))))]
+    (try
+      (loop []
+        (if-not (current-recheck-generation? ctx generation)
+          (report! :cancelled {:outcome :cancelled})
+          (when-not (lifecycle/try-with-recovery-admission
+                      (:storage ctx)
+                      (fn []
+                        (vreset! admitted-after (elapsed))
+                        (if (current-recheck-generation? ctx generation)
+                          (report! :checked (check-targeted-types! ctx branch-id fn-ids))
+                          (report! :cancelled {:outcome :cancelled}))
+                        true))
+            (Thread/sleep 50)
+            (recur))))
+      (catch Exception error
+        (report! :failed {:outcome :failed :exception-class (Class/.getName (class error))})
+        (throw error)))))
+
+
+(defn recheck-ctx-types!
+  "Re-record types and diagnostics into this branch's own slice.
+   Explicit IDs retain their existing best-effort asynchronous admission;
+   nil/empty schedules the coalesced full user-fn recovery. One bounded
+   terminal receipt distinguishes admission delay, diagnostics, missing
+   entries, cancellation and exceptions. Presence does not prove a fresh
+   publication, and a diagnostic takes precedence over an old rich entry.
+   Returns nil; no caller waits on the targeted future."
   [branch-ctx branch-id fn-ids]
   (when *recheck-user-fns?*
     (if (seq fn-ids)
-      (let [generation (recheck-state/generation branch-ctx)]
+      (let [generation (recheck-state/generation branch-ctx)
+            queued-at (System/currentTimeMillis)
+            started (System/nanoTime)]
         (future
           (binding [tx/*transaction-context* nil]
-            (loop []
-              (when (current-recheck-generation? branch-ctx generation)
-                (when-not (lifecycle/try-with-recovery-admission
-                            (:storage branch-ctx)
-                            (fn []
-                              (when (current-recheck-generation? branch-ctx generation)
-                                (call-with-ctx-slices branch-ctx
-                                                      #(record-fn-types! branch-ctx branch-id fn-ids)))
-                              true))
-                  (Thread/sleep 50)
-                  (recur)))))))
+            (run-targeted-recheck! branch-ctx branch-id fn-ids generation queued-at started))))
       (call-with-ctx-slices branch-ctx
                             #(lifecycle/schedule! (assoc branch-ctx :storage (or (:compile-storage branch-ctx) (:storage branch-ctx)))
                                                   branch-id ordered-user-fn-ids record-ordered-snapshot!))))

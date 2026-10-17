@@ -177,7 +177,7 @@
     "--exclude=mathx/mathx"]}
 
   :watson
-  {:extra-deps {io.github.clj-holmes/clj-watson {:git/tag "v6.1.0" :git/sha "be98e4d"}}
+  {:extra-deps {io.github.clj-holmes/clj-watson {:git/tag "v6.2.0" :git/sha "c0dcdf3"}}
    ;; Tool aliases resolve the ROOT :deps too, which include the mathx git
    ;; coord. This override resolves it from the in-tree copy so the scan needs
    ;; no network fetch. Same hermetic override the :dev/:test aliases carry.

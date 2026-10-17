@@ -66,7 +66,7 @@ EOF
   git -C "$REPO" config user.email t@example.invalid
   git -C "$REPO" config user.name wtq-test
   mkdir -p "$REPO/dev/wtq"
-  cp "$SRC/wt" "$SRC/GOVERNANCE" "$REPO/dev/wtq/"
+  cp "$SRC/wt" "$SRC/GOVERNANCE" "$SRC/deps_scope.clj" "$REPO/dev/wtq/"
   printf 'base\n' > "$REPO/f.txt"; printf 'g\n' > "$REPO/g.txt"; printf 'rules\n' > "$REPO/CLAUDE.md"
   git -C "$REPO" add -A && git -C "$REPO" commit -q -m base
   Q="$REPO/.git/wtq"
@@ -604,3 +604,4 @@ unset WTQ_KAOCHA
 echo
 echo "train_test: $PASS passed, $FAIL failed"
 [ "$FAIL" = 0 ]
+bash "$SRC/test/scope_test.sh"

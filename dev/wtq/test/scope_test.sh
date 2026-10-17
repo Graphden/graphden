@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# Exercise the production shell classifier on committed EDN blobs, without
+# replacing classify_changes or its Babashka parser with a train stub.
+set -euo pipefail
+SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+T="$(mktemp -d "${TMPDIR:-/tmp}/wtq-scope-test.XXXXXX")"
+trap 'rm -rf "$T"' EXIT
+REPO="$T/repo"
+git init -q -b develop "$REPO"
+git -C "$REPO" config user.email scope@example.invalid
+git -C "$REPO" config user.name wtq-scope-test
+mkdir -p "$REPO/dev/wtq"
+cp "$SRC/wt" "$SRC/deps_scope.clj" "$REPO/dev/wtq/"
+PASS=0; FAIL=0
+
+cat > "$T/before.edn" <<'EDN'
+{:paths ["src"] :deps {example/runtime {:mvn/version "1"}}
+ :aliases {:watson {:extra-deps {io.github.clj-holmes/clj-watson
+                               {:git/tag "v6.1.0" :git/sha "be98e4d"}}
+                    :main-opts ["-m" "clj-watson.cli" "scan"]}
+           :test {:extra-paths ["test"]} :build {:ns-default build}}}
+EDN
+sed 's/v6.1.0/v6.2.0/; s/be98e4d/c0dcdf3/' "$T/before.edn" > "$T/after.edn"
+
+check_scope() { # label, expected flags, before-file, after-file, optional extra path/ref
+  local label="$1" expected="$2" before="$3" after="$4" extra="${5:-}" ref="${6:-}" base actual
+  rm -f "$REPO/deps.edn" "$REPO/src/change.clj"
+  [ "$before" = missing ] || cp "$before" "$REPO/deps.edn"
+  git -C "$REPO" add -A; git -C "$REPO" commit -qm base --allow-empty
+  base="$(git -C "$REPO" rev-parse HEAD)"
+  if [ "$after" = missing ]; then
+    rm -f "$REPO/deps.edn"
+  else
+    cp "$after" "$REPO/deps.edn"
+  fi
+  if [ -n "$extra" ]; then
+    mkdir -p "$REPO/src"; printf '(ns scope-change)\n' > "$REPO/$extra"
+  fi
+  git -C "$REPO" add -A; git -C "$REPO" commit -qm candidate --allow-empty
+  actual="$(
+    # `help` loads the real functions without starting a queue or mock gate.
+    source "$REPO/dev/wtq/wt" help >/dev/null
+    TARGET="${ref:-$base}"
+    classify_changes "$REPO"
+    printf '%s%s%s%s/%s' "$NEED_INTEGRATION" "$NEED_E2E" "$NEED_FLEET" "$NEED_VISUAL" "$DEPS_DEVTOOL_ONLY"
+  )"
+  if [ "$actual" = "$expected" ]; then
+    PASS=$((PASS + 1)); printf '  ok   %s\n' "$label"
+  else
+    FAIL=$((FAIL + 1)); printf '  FAIL %s: expected %s got %s\n' "$label" "$expected" "$actual"
+  fi
+}
+
+check_scope 'audited coordinate: neither runtime nor fleet' 0000/1 "$T/before.edn" "$T/after.edn"
+cat > "$T/reordered.edn" <<'EDN'
+{:aliases {:build {:ns-default build} :test {:extra-paths ["test"]}
+           :watson {:main-opts ["-m" "clj-watson.cli" "scan"]
+                    :extra-deps {io.github.clj-holmes/clj-watson
+                                 {:git/sha "c0dcdf3" :git/tag "v6.2.0"}}}}
+ :deps {example/runtime {:mvn/version "1"}} :paths ["src"]}
+EDN
+check_scope 'comparison uses EDN values rather than text order' 0000/1 "$T/before.edn" "$T/reordered.edn"
+sed 's/:paths \["src"\]/:paths ["src" "other"]/' "$T/after.edn" > "$T/mixed.edn"
+check_scope 'mixed paths change retains full runtime gate' 1110/0 "$T/before.edn" "$T/mixed.edn"
+sed 's/example\/runtime {:mvn\/version "1"}/example\/runtime {:mvn\/version "2"}/' "$T/after.edn" > "$T/mixed.edn"
+check_scope 'mixed root dependency retains full runtime gate' 1110/0 "$T/before.edn" "$T/mixed.edn"
+sed 's/:extra-paths \["test"\]/:extra-paths ["test" "other"]/' "$T/after.edn" > "$T/mixed.edn"
+check_scope 'test alias change retains full runtime gate' 1110/0 "$T/before.edn" "$T/mixed.edn"
+sed 's/:ns-default build/:ns-default other-build/' "$T/after.edn" > "$T/mixed.edn"
+check_scope 'build alias change retains full runtime gate' 1110/0 "$T/before.edn" "$T/mixed.edn"
+sed 's/:watson /:unknown /' "$T/before.edn" > "$T/unknown-before.edn"
+sed 's/:watson /:unknown /' "$T/after.edn" > "$T/unknown-after.edn"
+check_scope 'unknown alias is never exempt' 1110/0 "$T/unknown-before.edn" "$T/unknown-after.edn"
+sed 's/"clj-watson.cli"/"other.cli"/' "$T/after.edn" > "$T/mixed.edn"
+check_scope 'watson entrypoint change is never exempt' 1110/0 "$T/before.edn" "$T/mixed.edn"
+sed 's/:git\/tag "v6.2.0"/:deps\/root "other" :git\/tag "v6.2.0"/' "$T/after.edn" > "$T/mixed.edn"
+check_scope 'new coordinate keys require an audit' 1110/0 "$T/before.edn" "$T/mixed.edn"
+sed 's/c0dcdf3/not-a-sha/' "$T/after.edn" > "$T/mixed.edn"
+check_scope 'invalid git coordinate is never exempt' 1110/0 "$T/before.edn" "$T/mixed.edn"
+check_scope 'new deps file is never exempt' 1110/0 missing "$T/after.edn"
+check_scope 'removed deps file is never exempt' 1110/0 "$T/before.edn" missing
+printf '{:aliases\n' > "$T/malformed.edn"
+check_scope 'malformed candidate keeps full gate' 1110/0 "$T/before.edn" "$T/malformed.edn"
+check_scope 'malformed base keeps full gate' 1110/0 "$T/malformed.edn" "$T/after.edn"
+cat "$T/after.edn" > "$T/multiple.edn"; printf '\n{}\n' >> "$T/multiple.edn"
+check_scope 'second EDN form keeps full gate' 1110/0 "$T/before.edn" "$T/multiple.edn"
+printf '#unregistered/tag {}\n' > "$T/multiple.edn"
+check_scope 'unsupported tagged data keeps full gate' 1110/0 "$T/before.edn" "$T/multiple.edn"
+check_scope 'missing base ref fails closed including visual' 1111/0 "$T/before.edn" "$T/after.edn" '' nonexistent-ref
+check_scope 'ordinary source changes are not hidden' 1100/1 "$T/before.edn" "$T/after.edn" src/change.clj
+
+echo "scope_test: $PASS passed, $FAIL failed"
+[ "$FAIL" = 0 ]

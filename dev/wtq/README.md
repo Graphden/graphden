@@ -247,6 +247,14 @@ bb wt start <name>                     # launch an agent inside an existing work
   `docker-compose*`, `deps.edn`, `build.clj` — and costs ~4 min of cold boots
   when it runs. `--no-fleet` skips it. Before this it ran nowhere at all:
   neither the gate nor GitHub CI called `bb test-fleet-e2e`.
+- **Audited tool coordinates have a semantic scope check.** A `deps.edn`
+  change avoids the runtime and fleet suites only when its sole EDN change is
+  the existing `:watson` alias's `clj-watson` git tag/SHA. The classifier reads
+  exactly one map from each committed base/candidate blob and compares all
+  other values. Unknown aliases, new coordinate keys, malformed input or an
+  unreadable ref retain the full gate. Other changed paths retain their own
+  runtime classification. This does not change the diff-scoped `bb ci` checks,
+  including dependency-triggered unit tests and the official security scan.
 - **Coverage is NOT in the gate.** It has no fail-threshold and re-runs the unit
   suite `bb ci` already ran, so it could only fail where `bb ci` already had —
   ~18 minutes per landing for a number nobody reads at merge time. Measure it

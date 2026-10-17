@@ -249,6 +249,9 @@ governance_drift() {
 #   everything else                  src, .clj/.edn, deps.edn, bb.edn, scripts/,
 #                                    Dockerfile*, compose, and THIS gate's own
 #                                    config -> integration + e2e; unknown
+#   deps.edn has one semantic exception: only the audited :watson tool's git
+#   coordinate changed, with every other EDN value identical. The helper reads
+#   exactly one map from each committed blob; uncertainty keeps the full gate.
 #
 # NEED_FLEET is decided separately and NARROWLY, because the two-container
 # fleet e2e is the one suite whose subject is what happens BETWEEN pods —
@@ -265,11 +268,20 @@ governance_drift() {
 # code there would mean adding it to a classpath, i.e. touching deps.edn or
 # build.clj, which lands in "everything else" and runs the lot.
 classify_changes() {   # <worktree> -> NEED_INTEGRATION / NEED_E2E / NEED_FLEET / NEED_VISUAL / CHANGED_N
-  local wt="$1" f
+  local wt="$1" f changed
   NEED_INTEGRATION=0; NEED_E2E=0; NEED_FLEET=0; NEED_VISUAL=0; CHANGED_N=0
+  DEPS_DEVTOOL_ONLY=0
+  if ! changed="$(git -C "$wt" diff --name-only "$TARGET..HEAD" 2>/dev/null)"; then
+    NEED_INTEGRATION=1; NEED_E2E=1; NEED_FLEET=1; NEED_VISUAL=1; CHANGED_N=unknown
+    return 0
+  fi
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     CHANGED_N=$((CHANGED_N + 1))
+    if [ "$f" = deps.edn ] && bb "$SCRIPT_DIR/deps_scope.clj" "$wt" "$TARGET" HEAD 2>/dev/null; then
+      DEPS_DEVTOOL_ONLY=1
+      continue                     # exempt from BOTH runtime and fleet cases
+    fi
     case "$f" in
       *.md|docs/*|dev/*|.github/*)    : ;;
       tools/browser-test/*)           NEED_E2E=1 ;;
@@ -294,7 +306,7 @@ classify_changes() {   # <worktree> -> NEED_INTEGRATION / NEED_E2E / NEED_FLEET 
       resources/packages/app/*fns.edn|tools/visual-tests/*)
                                       NEED_VISUAL=1 ;;
     esac
-  done < <(git -C "$wt" diff --name-only "$TARGET..HEAD")
+  done <<< "$changed"
 }
 
 # --- per-worktree docker instance -------------------------------------------
@@ -1232,11 +1244,14 @@ gate_suites() {
   [ "$no_fleet" = "1" ] && NEED_FLEET=0
   [ "$no_visual" = "1" ] && NEED_VISUAL=0
   echo "  $CHANGED_N file(s) changed vs $TARGET"
+  if [ "$DEPS_DEVTOOL_ONLY" = 1 ]; then
+    echo "  deps.edn: only the audited :watson devtool coordinate changed"
+  fi
   if [ "$NEED_INTEGRATION" = 1 ]; then echo "  integration: RUN"
-  else echo "  integration: SKIPPED — nothing outside docs / browser-only assets changed"; fi
+  else echo "  integration: SKIPPED — only docs / browser assets / audited devtool coordinates changed"; fi
   if [ "$no_e2e" = "1" ]; then echo "  e2e:         SKIPPED — --no-e2e (every member asked for it)"
   elif [ "$NEED_E2E" = 1 ]; then echo "  e2e:         RUN"
-  else echo "  e2e:         SKIPPED — docs only, no runtime surface"; fi
+  else echo "  e2e:         SKIPPED — docs / audited devtool only, no runtime surface"; fi
   if [ "$no_fleet" = "1" ]; then echo "  fleet e2e:   SKIPPED — --no-fleet (every member asked for it)"
   elif [ "$NEED_FLEET" = 1 ]; then echo "  fleet e2e:   RUN"
   else echo "  fleet e2e:   SKIPPED — nothing touching the cross-pod control plane"; fi

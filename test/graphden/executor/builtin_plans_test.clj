@@ -4,6 +4,7 @@
     [cheshire.core :as json]
     [clojure.edn :as edn]
     [clojure.java.shell :as sh]
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.browser-plan :as plan]
     [graphden.executor.browser-snapshot :as snapshot]
@@ -59,14 +60,14 @@
 
 
 (deftest builtin-script-interns-only-string-values-with-json-semantics
-  (let [text (str (apply str (repeat 40 "long")) "\"\\\n\u2028\u2029😀é" (char 0xd800))
+  (let [text (str (str/join (repeat 40 "long")) "\"\\\n\u2028\u2029😀é" (char 0xd800))
         artifact {"__proto__" {"constructor" "own"} "prototype" "data"
                   "values" [text text "" false nil 9007199254740991]
                   "dupes" [{"__proto__" [1 2]} {"__proto__" [1 2]}]}
         script (tool 'serialize-script artifact)
         result (script-roundtrip artifact script)]
     (is (= script (tool 'serialize-script artifact)))
-    (is (= 0 (:exit result)) (:err result))))
+    (is (zero? (:exit result)) (:err result))))
 
 
 (deftest source-fingerprint-preserves-edn-value-identity
@@ -139,7 +140,7 @@
               script (slurp "resources/packages/app/ui-preview/builtin-plans.js")
               expected-script (tool 'serialize-script artifact)]
           (let [result (script-roundtrip artifact expected-script)]
-            (is (= 0 (:exit result)) (:err result))
+            (is (zero? (:exit result)) (:err result))
             (when (zero? (:exit result))
               (let [metrics (json/parse-string (:out result) true)]
                 (is (< (:bytes metrics) 1048576) "Generated script stays below the existing lint ceiling")

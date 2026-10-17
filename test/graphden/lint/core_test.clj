@@ -389,15 +389,15 @@
 
 (deftest incremental-lint-retires-bare-resolution-when-a-local-twin-appears
   (let [foreign (fd "foreign" :_label :parent :const :args {:value "foreign"})
-        use (fd "local" :use :parent :assoc :args {:map :_label :key {:value :result}})
+        caller (fd "local" :use :parent :assoc :args {:map :_label :key {:value :result}})
         local (fd "local" :_label :parent :const :args {:value "local"})
         options {:base-fn-names base-fns}
-        before (lint/lint-with-state [foreign use] options (lint/empty-state) :all)
-        after (lint/lint-with-state [foreign local use] options (:state before) #{["local" :_label]})
-        removed (lint/lint-with-state [foreign use] options (:state after) #{["local" :_label]})]
+        before (lint/lint-with-state [foreign caller] options (lint/empty-state) :all)
+        after (lint/lint-with-state [foreign local caller] options (:state before) #{["local" :_label]})
+        removed (lint/lint-with-state [foreign caller] options (:state after) #{["local" :_label]})]
     (is (= #{["foreign" :_label]} (get-in before [:state :refs ["local" :use]])))
     (is (= #{["local" :_label]} (get-in after [:state :refs ["local" :use]])))
-    (is (= (lint/lint [foreign local use] options) (:findings after)))
+    (is (= (lint/lint [foreign local caller] options) (:findings after)))
     (is (= (:findings before) (:findings removed)))
     (is (= #{["foreign" :_label]} (get-in removed [:state :refs ["local" :use]])))))
 
@@ -405,9 +405,9 @@
 (deftest root-namespace-twin-resolves-for-root-owner
   (let [root (fd nil :_label :parent :const :args {:value "root"})
         foreign (fd "a" :_label :parent :const :args {:value "foreign"})
-        use (fd nil :use :parent :assoc :args {:map :_label :key {:value :result}})
-        index (lint/build-index [root foreign use] base-fns)
-        result (lint/lint-with-state [root foreign use] {:base-fn-names base-fns}
+        caller (fd nil :use :parent :assoc :args {:map :_label :key {:value :result}})
+        index (lint/build-index [root foreign caller] base-fns)
+        result (lint/lint-with-state [root foreign caller] {:base-fn-names base-fns}
                                      (lint/empty-state) :all)]
     (is (= [:fn-def root] (lint/resolve-ref index :_label nil)))
     (is (= #{[nil :_label]} (get-in result [:state :refs [nil :use]])))))
@@ -417,10 +417,10 @@
   (let [a (fd "a" :_label :parent :const :args {:value "a"})
         b (fd "b" :_label :parent :const :args {:value "b"})
         local (fd "c" :_label :parent :const :args {:value "c"})
-        use (fd "c" :use :parent :assoc :args {:map :_label :key {:value :result}})
+        caller (fd "c" :use :parent :assoc :args {:map :_label :key {:value :result}})
         options {:base-fn-names base-fns}
-        before (lint/lint-with-state [a b use] options (lint/empty-state) :all)
-        after (lint/lint-with-state [a b local use] options (:state before) #{["c" :_label]})]
+        before (lint/lint-with-state [a b caller] options (lint/empty-state) :all)
+        after (lint/lint-with-state [a b local caller] options (:state before) #{["c" :_label]})]
     (is (empty? (get-in before [:state :refs ["c" :use]])))
     (is (= #{["c" :_label]} (get-in after [:state :refs ["c" :use]])))
-    (is (= (lint/lint [a b local use] options) (:findings after)))))
+    (is (= (lint/lint [a b local caller] options) (:findings after)))))

@@ -14,9 +14,11 @@ const {unexpectedSelectiveCopyErrors} = require('./selective-copy-errors');
     window.canvasProofLifecycle = [];
     for (const type of ['gd-auth-changed', 'gd-graph-changed', 'focus', 'visibilitychange'])
       window.addEventListener(type, () => canvasProofLifecycle.push(type));
-    document.addEventListener('DOMContentLoaded', () => gdPrefOnChange(key => {
-      if (key === 'components') canvasProofLifecycle.push('components-preference');
-    }), {once: true});
+    document.addEventListener('DOMContentLoaded', () => {
+      if (typeof gdPrefOnChange === 'function') gdPrefOnChange(key => {
+        if (key === 'components') canvasProofLifecycle.push('components-preference');
+      });
+    }, {once: true});
   });
   page.on('pageerror', error => errors.push({kind: 'pageerror', text: error.message}));
   page.on('console', message => { if (message.type() === 'error') errors.push({kind: 'console', text: message.text(), url: message.location().url}); });
@@ -169,6 +171,12 @@ const {unexpectedSelectiveCopyErrors} = require('./selective-copy-errors');
         const card = metadataFocusProof.card;
         const dims = () => JSON.stringify([...graph.nodes.values()].map(node => [node.id, node.x, node.y, nodeWidth(node), nodeHeight(node)]));
         const stable = dims(), zoom = viewport.zoom;
+        let policyCalls = 0;
+        const policyMethods = ['groups', 'paintBatch'];
+        const originals = policyMethods.map(name => gdCanvasInheritanceGraph[name]);
+        policyMethods.forEach((name, index) => { gdCanvasInheritanceGraph[name] = (...args) => {
+          policyCalls++; return originals[index](...args);
+        }; });
         const layout = () => new Map([...graph.nodes].map(([id, node]) => [id,
           {x: node.x, y: node.y, width: nodeWidth(node), height: nodeHeight(node)}]));
         const converged = !reflowFromMeasuredHeights(layout()) && stable === dims();
@@ -176,6 +184,7 @@ const {unexpectedSelectiveCopyErrors} = require('./selective-copy-errors');
         for (let i = 0; i < 2; i++) await new Promise(requestAnimationFrame);
         const zoomIndependent = stable === dims();
         viewport.zoom = zoom; applyViewportTransform(); updateOverlayPositions();
+        policyMethods.forEach((name, index) => { gdCanvasInheritanceGraph[name] = originals[index]; });
         const controls = [...card.querySelectorAll('button')].filter(button => button.getBoundingClientRect().width > 0);
         const hit = controls.every(button => {
           const rect = button.getBoundingClientRect();
@@ -185,12 +194,13 @@ const {unexpectedSelectiveCopyErrors} = require('./selective-copy-errors');
         const passive = [...card.querySelectorAll('.gd-canvas-body-host')];
         const accessible = controls.every(button => !!(button.getAttribute('aria-label') || button.textContent || button.title).trim())
           && passive.every(host => !host.querySelector('button, input, a, [tabindex]'));
-        return {converged, zoomIndependent, hit, accessible,
+        return {converged, zoomIndependent, policyCalls, hit, accessible,
           fits: card.scrollWidth <= card.clientWidth + 2, coarse: matchMedia('(pointer: coarse)').matches,
           metadata: card.querySelectorAll('.gd-canvas-metadata-personal').length};
       });
       console.log('bounded card geometry', JSON.stringify({dark, ...geometry}));
-      assert(geometry.converged && geometry.zoomIndependent && geometry.hit && geometry.accessible && geometry.fits,
+      assert(geometry.converged && geometry.zoomIndependent && geometry.policyCalls === 0
+        && geometry.hit && geometry.accessible && geometry.fits,
         'native geometry/focus/a11y remain valid in ' + (dark ? 'dark' : 'light') + ' theme');
       if (process.env.GRAPHDEN_CANVAS_SCREENSHOT)
         await page.screenshot({path: process.env.GRAPHDEN_CANVAS_SCREENSHOT + (dark ? '.dark.png' : '.light.png')});

@@ -509,20 +509,15 @@ function buildAncestorLevels(levels, useSite = false) {
       // then expand). For deeper levels (>=1) we still fall back to the
       // nearest named ancestor so each row shows something meaningful.
       let displayName = fn?.name;
-      let displaySource = displayName ? fnId : null;
       if (!displayName && fn && !topLevel) {
         const chain = getInheritanceChain(fnId);
         for (let i = 1; i < chain.length; i++) {
           const ancestor = lookups.fnMap.get(chain[i]);
-          if (ancestor?.name) { displayName = ancestor.name; displaySource = chain[i]; break; }
+          if (ancestor?.name) { displayName = ancestor.name; break; }
         }
       }
       return {
         fnId,
-        displaySource,
-        // An anonymous row with its own namespace, description or bindings
-        // has distinct native actions and must keep its exact owner.
-        suppressible: !fn?.name && !fn?.description && !fn?.['namespace-id'] && !fnSetsArgs(fnId),
         name: displayName || (topLevel ? '' : '(anonymous)'),
         description: fn?.description,
         setsArgs: fnSetsArgs(fnId),
@@ -538,13 +533,11 @@ function buildAncestorLevels(levels, useSite = false) {
     };
   });
 
-  const facts = enriched.map((level, position) => {
-    const fn = level.fns[0];
-    const next = enriched[position + 1];
-    return {position, depth: level.depth, mi: level.isMI, clickable: level.anyClickable,
-      'duplicate-next': !!(next && !level.isMI && !next.isMI && fn?.suppressible
-        && fn.displaySource && fn.displaySource === next.fns[0]?.displaySource)};
-  });
+  // Every real fn row has its own native actions, including anonymous rows
+  // displaying an inherited name. They are never presentation-equivalent:
+  // suppressing one would erase its exact info/open/parent-edit owner.
+  const facts = enriched.map((level, position) => ({position, depth: level.depth,
+    mi: level.isMI, clickable: level.anyClickable, 'duplicate-next': false}));
   const receipts = window.gdCanvasInheritanceGraph.groups(facts, useSite);
   const visible = receipts.filter(row => row.visible);
   const receiptIndex = new Map(visible.map((row, index) => [row.position, index]));

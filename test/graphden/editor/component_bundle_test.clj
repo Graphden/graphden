@@ -154,9 +154,9 @@
       (let [path (str root "." child)
             view-id (ids/fn-id path entry)
             body-id (ids/fn-id path :_body)
-            vals (first (filter #(and (= view-id (:fn-id %))
-                                      (= (ids/slot-id (ids/fn-id "core.collections" :zipmap) :vals) (:slot-id %))) bindings))]
-        (is vals)
-        (is (= body-id (:ref-fn-id (first (filter #(and (= (:id vals) (:binding-id %))
+            values (first (filter #(and (= view-id (:fn-id %))
+                                        (= (ids/slot-id (ids/fn-id "core.collections" :zipmap) :vals) (:slot-id %))) bindings))]
+        (is values)
+        (is (= body-id (:ref-fn-id (first (filter #(and (= (:id values) (:binding-id %))
                                                         (zero? (:position %))) items)))))
         (is (not (contains? (bundle/external-identities records) body-id)))))))

@@ -136,6 +136,24 @@ const {unexpectedSelectiveCopyErrors} = require('./selective-copy-errors');
       return cells.length === 2 && cells.every(cell => cell.querySelector('.gd-canvas-inheritance-personal')
         && cell.querySelector('button.more-actions-trigger'));
     }, mi.id), 'stored authorized personal plan presents both native MI cell owners');
+    const anonymous = await createProbe(inheritance, 'anonymous', [base.env]);
+    const renamed = await api(page, 'PUT', '/api/entities/fn/' + anonymous.id, 'name=');
+    assert(renamed.ok || renamed.status === 200, 'owned row made anonymous through ordinary CRUD');
+    assert(!(await getEntities(page, anonymous.id)).fns.find(row => row.id === anonymous.id)?.name,
+      'exact anonymous row identity retained');
+    const anonymousOwner = await createProbe(inheritance, 'anonymous-owner', [anonymous.id]);
+    await select(anonymousOwner.id);
+    const ancestorCard = '.node-overlay[data-original-fn-id="' + anonymousOwner.id + '"]';
+    for (const [depth, id] of [[1, anonymous.id], [2, base.env]]) {
+      const row = page.locator(ancestorCard + ' .ancestor-line[data-level="' + depth + '"]');
+      assert((await row.textContent()).includes('env'), 'same-source display row remains visible at depth ' + depth);
+      await row.locator('button.more-actions-trigger').click();
+      const description = page.locator('.row-actions-popover [data-fn-id="' + id + '"] [data-action="description"]');
+      await description.waitFor({state: 'visible', timeout: 60000});
+      await description.click();
+      await page.keyboard.press('Escape');
+    }
+    assert(true, 'distinct anonymous/source rows retain usable exact native action owners');
     metadata = await createCopy('canvas-metadata');
     for (const [name, cls] of [['_return-normal', 'gd-canvas-metadata-return-text'],
       ['_return-refine', 'gd-canvas-metadata-refine'], ['_lambda-body', 'gd-canvas-metadata-lambda']]) {

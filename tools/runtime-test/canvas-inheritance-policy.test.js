@@ -54,8 +54,8 @@ ctx.layers = [['a'], ['b']];
 assert.equal(vm.runInContext('buildAncestorLevels(layers).length', ctx), 2);
 ctx.layers = [['root'], ['anonymous'], ['b']];
 ctx.lookups.fnMap.set('root', {id: 'root', name: 'root', 'parent-ids': ['anonymous']});
-assert.equal(vm.runInContext('buildAncestorLevels(layers).length', ctx), 2,
-  'passive anonymous equivalent with no distinct native metadata may collapse');
+assert.equal(vm.runInContext('buildAncestorLevels(layers).length', ctx), 3,
+  'anonymous inherited label retains its distinct native row actions');
 ctx.lookups.bindingsByFn.set('anonymous', [{value: 1}]);
 assert.equal(vm.runInContext('buildAncestorLevels(layers).length', ctx), 3,
   'anonymous clickability/controls are never lost through display equivalence');

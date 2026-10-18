@@ -1,4 +1,5 @@
-(ns graphden.executor.browser-snapshot-test
+(ns ^:serial graphden.executor.browser-snapshot-test
+  "Serial because preview boundary regressions replace process-wide source vars."
   (:require
     [cheshire.core :as json]
     [clojure.edn :as edn]
@@ -6,13 +7,16 @@
     [clojure.test :refer [deftest is testing]]
     [graphden.crud.type-check :as type-check]
     [graphden.executor.browser-plan :as plan]
+    [graphden.executor.browser-preview :as preview]
     [graphden.executor.browser-snapshot :as snapshot]
+    [graphden.executor.browser-source :as source]
     [graphden.executor.compile-runtime :as runtime]
     [graphden.executor.registry.core :as registry]
     [graphden.executor.source-contract :as source-contract]
     [graphden.packages.records :as records]
     [graphden.packages.records.types :as record-types]
     [graphden.storage.remote.core :as remote]
+    [graphden.tenancy.context :as tenancy]
     [graphden.types.check :as check]
     [graphden.types.check.provenance :as provenance]
     [graphden.types.core :as types]
@@ -302,3 +306,48 @@
       (is (= :type-source-mismatch
              (:reason (failure #(export (assoc f :policy (assoc policy :type-recheck recovery))))))))
     (is (map? (export f)) "ordinary completed certificates still govern export")))
+
+
+(deftest preview-collects-only-requested-source-with-the-original-policy
+  (let [{:keys [snapshot rich id] :as f} (fixture [] {})
+        namespace-id (:id (first (:namespaces snapshot)))
+        unrelated (mapv (fn [n]
+                          {:id (random-uuid) :name (str "unrelated-" n)
+                           :namespace-id namespace-id :parent-ids [(random-uuid)]})
+                        (range 500))
+        expanded (-> snapshot
+                     (update-in [:graph :fns] into unrelated)
+                     (update-in [:graph :bindings] into
+                                (mapv (fn [row]
+                                        {:id (random-uuid) :fn-id (:id row)
+                                         :slot-id (random-uuid) :value "unrelated private literal"}) unrelated)))
+        calls (atom [])
+        captured (atom nil)
+        capture snapshot/capture-context-policy
+        export-snapshot snapshot/export-snapshot
+        run (fn [snapshot rich entries]
+              (let [graph (:graph snapshot)
+                    storage (remote/from-bundle {:fn (:fns graph) :slot (:slots graph)
+                                                 :fn-slot (:fn-slots graph) :binding (:bindings graph)
+                                                 :binding-list-item (:list-items graph) :ns (:namespaces snapshot)})]
+                (preview/export-current {:storage storage :rich-types-atom (atom rich) :base-fns {}} entries)))]
+    (with-redefs [tenancy/tenancy-addon-active? (constantly false)
+                  source/with-snapshot (fn [storage f] (swap! calls conj :database) (f storage (constantly nil)))
+                  snapshot/read-snapshot (fn [_] (throw (AssertionError. "Preview read the whole graph")))
+                  snapshot/capture-context-policy (fn [ctx] (swap! calls conj :policy) (capture ctx))
+                  snapshot/export-snapshot (fn [snapshot & args] (reset! captured snapshot) (apply export-snapshot snapshot args))]
+      (is (= (export-snapshot expanded {} {:view id} (policy-of f)) (run expanded rich {:view id})))
+      (is (= [:policy :database] @calls) "original visibility is frozen before database collection")
+      (is (< (count (get-in @captured [:graph :fns])) 10))
+      (is (not-any? (set (map :id unrelated)) (map :id (get-in @captured [:graph :fns]))))
+      (is (not (str/includes? (pr-str @captured) "unrelated private literal")))
+      (is (= :visibility-denied
+             (:reason (failure #(run expanded (assoc-in rich [:by-id id :return] [:secret :text]) {:view id})))))
+      (is (= :type-source-mismatch
+             (:reason (failure #(run (update-in expanded [:graph :bindings]
+                                                (fn [rows]
+                                                  (mapv (fn [row]
+                                                          (cond-> row (= id (:fn-id row))
+                                                                  (assoc :value "changed"))) rows)))
+                                     rich {:view id})))))
+      (is (= :source-missing (:reason (failure #(run expanded rich {:view (random-uuid)}))))))))

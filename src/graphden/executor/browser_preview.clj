@@ -3,6 +3,7 @@
    from one database snapshot. This is deliberately unavailable with tenancy."
   (:require
     [graphden.executor.browser-snapshot :as snapshot]
+    [graphden.executor.browser-source :as source]
     [graphden.tenancy.context :as tenancy]))
 
 
@@ -17,6 +18,10 @@
                  (every? uuid? (vals entries)))
     (throw (ex-info "Valid browser entry identities are required"
                     {:type :browser-plan/unsupported :reason :invalid-entries})))
-  (let [policy (snapshot/capture-context-policy ctx)
-        captured (snapshot/read-snapshot (:storage ctx))]
-    (snapshot/export-snapshot captured (:base-fns ctx) entries policy)))
+  (let [policy (snapshot/capture-context-policy ctx)]
+    (source/with-snapshot
+      (:storage ctx)
+      (fn [storage authorize!]
+        (let [graph (source/collect-closure storage (vals entries) authorize!)
+              captured {:graph graph :namespaces (source/collect-namespaces storage graph)}]
+          (snapshot/export-snapshot captured (:base-fns ctx) entries policy))))))

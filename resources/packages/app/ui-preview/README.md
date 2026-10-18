@@ -110,8 +110,9 @@ sequences are materialized with a bound. Unsupported values/operations fail.
 Arbitrary graph-plan export is unavailable when tenancy is active. This does not
 disable the shipped default plans or server-evaluated personal themes.
 The authenticated export captures
-one read-only database snapshot and derives its type policy from those same
-rows in isolated registries. Original classifications are frozen before that read from already resolved
+one read-only database snapshot of the requested dependency and type closure,
+including its namespace ancestors, and checks those rows in isolated registries.
+Unrelated functions and their literals are not loaded for the export. Original classifications are frozen before that read from already resolved
 built-in type shapes, with fixed built-in secret semantics. Custom marker tags
 and unresolved aliases in cached signatures are refused: separately mutable
 registries cannot safely reinterpret them. Live composed type entries and

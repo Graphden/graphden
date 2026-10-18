@@ -10,6 +10,7 @@
     [graphden.executor.browser-plan :as plan]
     [graphden.executor.browser-preview :as preview]
     [graphden.executor.browser-snapshot :as snapshot]
+    [graphden.executor.browser-source :as source]
     [graphden.executor.registry.core :as registry]
     [graphden.packages.records :as records]
     [graphden.storage.protocol.core :as sp]
@@ -19,7 +20,6 @@
     [graphden.test-infra.golden-app :as ga]
     [graphden.test-infra.impls :as impls]
     [graphden.types.diagnostics :as diag]
-    [graphden.versioning.graph-rows :as graph-rows]
     [graphden.versioning.storage.core :as vs]))
 
 
@@ -66,22 +66,20 @@
                    (if (= :ready (deref first-table-read 30000 :timeout))
                      (edit-value! copy "after")
                      {:error :reader-timeout}))
-          ;; This uses the same five-table protocol as graph-rows/read-all;
-          ;; the sole change is a deterministic scheduling barrier.
+          collect source/collect-closure
+          ;; Pin the actual collector's transaction with its first function
+          ;; read, then commit CRUD before it reads bindings and namespaces.
           read-between-writes
-          (fn [storage]
-            (let [fns (vec (sp/query-entities storage :fn {}))]
-              (deliver first-table-read :ready)
-              (let [result (deref writer 30000 ::timeout)]
-                (when-not (= (:id binding) (:updated result))
-                  (throw (ex-info "Concurrent CRUD did not complete" {:result result}))))
-              {:fns fns
-               :slots (vec (sp/query-entities storage :slot {}))
-               :fn-slots (vec (sp/query-entities storage :fn-slot {}))
-               :bindings (vec (sp/query-entities storage :binding {}))
-               :list-items (vec (sp/query-entities storage :binding-list-item {}))}))]
+          (fn [storage roots authorize!]
+            (when-not (sp/read-entity storage :fn id)
+              (throw (ex-info "Snapshot root missing" {})))
+            (deliver first-table-read :ready)
+            (let [result (deref writer 30000 ::timeout)]
+              (when-not (= (:id binding) (:updated result))
+                (throw (ex-info "Concurrent CRUD did not complete" {:result result}))))
+            (collect storage roots authorize!))]
       (try
-        (let [result (with-redefs [graph-rows/read-all read-between-writes]
+        (let [result (with-redefs [source/collect-closure read-between-writes]
                        (preview/export-current ctx {:view id}))]
           (is (= "before" (exported-value result id))
               "the read transaction and its frozen original policy describe the old graph")

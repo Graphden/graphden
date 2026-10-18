@@ -38,10 +38,13 @@
 (defn- scope
   [output]
   (into {} (keep (fn [line]
-                   (when-let [[_ name verdict]
-                              (re-matches #"\s+(integration|image build|e2e|fleet e2e|visual):\s+(RUN|SKIPPED).*" line)]
+                   (when-let [[_ name verdict reason]
+                              (re-matches #"\s+(integration|image build|e2e|fleet e2e|visual):\s+(RUN|SKIPPED)(.*)" line)]
                      [(keyword (str/replace name " " "-"))
-                      (if (= verdict "RUN") :selected :out-of-scope)])))
+                      (cond
+                        (= verdict "RUN") :selected
+                        (str/includes? reason "--no-") :manual-skip
+                        :else :out-of-scope)])))
         (str/split-lines output)))
 
 
@@ -64,22 +67,39 @@
            :scope (scope output)
            :artifact {:image (image output)
                       :ci-report ci-path
+                      :ci-selection (str/replace ci-path #"\.ci\.edn$" ".ci-expected.edn")
                       :resources resources}
            :ci ci
            :phases (phases output))))
 
 
+(defn- base
+  [sha queue-ms]
+  (let [admission-ms (parse-long (or (System/getenv "WTQ_ADMISSION_MS") "0"))]
+    {:schema 1 :complete false :sha sha
+     :command ["bb" "wt" "merge"]
+     :wait {:reason :merge-train-queue
+            :duration-ms (parse-long queue-ms)
+            :admission (when (pos? admission-ms)
+                         {:reason (keyword (System/getenv "WTQ_ADMISSION_REASON"))
+                          :duration-ms admission-ms})}}))
+
+
 (defn -main
   [& args]
-  (let [[mode path sha queue-ms & rest] args
-        base {:schema 1 :complete false :sha sha
-              :command ["bb" "wt" "merge"]
-              :wait {:reason :merge-train-queue :duration-ms (parse-long queue-ms)}}]
+  (let [[mode path sha queue-ms & remaining] args]
     (case mode
-      "init" (write-atomic! path base)
-      "finish" (let [[gate-output ci-path resources exit] rest]
-                 (write-atomic! path (report base (slurp gate-output)
+      "init" (write-atomic! path (base sha queue-ms))
+      "finish" (let [[gate-output ci-path resources exit] remaining]
+                 (write-atomic! path (report (base sha queue-ms) (slurp gate-output)
                                              ci-path resources (parse-long exit))))
+      "landed" (let [receipt (edn/read-string (slurp path))]
+                 (when-not (and (= 1 (:schema receipt))
+                                (true? (:complete receipt))
+                                (zero? (or (:exit receipt) -1))
+                                (string? (:sha receipt)))
+                   (throw (ex-info "Train did not complete successfully" {:path path})))
+                 (println (:sha receipt)))
       (throw (ex-info "unknown WTQ report mode" {:mode mode})))))
 
 

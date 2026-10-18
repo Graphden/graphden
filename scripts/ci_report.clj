@@ -29,6 +29,7 @@
                          result (get results name)]
                      {:name name
                       :command ["bb" (:bb check)]
+                      :group (:group check)
                       :scope (cond
                                (some #(= name (:name %)) scoped) :out-of-scope
                                (some #(= name (:name %)) manual) :manual-skip
@@ -51,6 +52,46 @@
                              (zero? (or (:exit %) -1)))
                        (:checks report)))
                required)))
+
+
+(defn gate-pass?
+  "Compare a CI receipt with the selection computed before running CI. The
+   report cannot choose its own required set or call a blocking check advisory."
+  [report expected]
+  (let [checks (:checks report)
+        by-name (into {} (map (juxt :name identity)) checks)
+        roster (concat (get-in expected [:scope :selected])
+                       (get-in expected [:scope :out-of-scope])
+                       (get-in expected [:scope :manual-skip]))
+        required (remove #(= :info (get-in expected [:groups %]))
+                         (get-in expected [:scope :selected]))]
+    (and (= 1 (:schema report))
+         (= (:sha expected) (:sha report))
+         (= (:command expected) (:command report))
+         (= (:scope expected) (:scope report))
+         (= (count roster) (count checks) (count by-name))
+         (= (set roster) (set (keys by-name)))
+         (every? (fn [[name group]] (= group (:group (get by-name name))))
+                 (:groups expected))
+         (every? (fn [name]
+                   (let [c (get by-name name)]
+                     (and (number? (:exit c)) (number? (:duration-ms c)))))
+                 (get-in expected [:scope :selected]))
+         (every? (fn [name]
+                   (let [c (get by-name name)]
+                     (and (= :selected (:scope c))
+                          (#{:passed :retried :warning} (:status c)))))
+                 (filter #(= :info (get-in expected [:groups %]))
+                         (get-in expected [:scope :selected])))
+         (every? (fn [name]
+                   (let [c (get by-name name)]
+                     (and (= :out-of-scope (:scope c)) (= :scoped (:status c)))))
+                 (get-in expected [:scope :out-of-scope]))
+         (every? (fn [name]
+                   (let [c (get by-name name)]
+                     (and (= :manual-skip (:scope c)) (= :manual-skip (:status c)))))
+                 (get-in expected [:scope :manual-skip]))
+         (complete-pass? report required))))
 
 
 (defn write-atomic!

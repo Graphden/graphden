@@ -136,11 +136,14 @@ Details that are deliberate:
   log per train, so a culprit's newest log is its own one-member run.
 - **Machine receipts.** The same directory holds `_train-<ts>.report.edn`
   (exact assembled SHA, scope, exit, phase durations, queue wait, image ID and
-  jar hash), `_train-<ts>.ci.edn` (selected checks, exits and durations), and
+  jar hash), `_train-<ts>.ci-expected.edn` (check roster computed before CI),
+  `_train-<ts>.ci.edn` (selected checks, exits and durations), and
   `_train-<ts>.resources.csv`. A killed train leaves `:complete false`; a
-  selected CI check without a successful receipt blocks landing. Before the
-  gate tests or promotes an image, it compares the jar inside its immutable
-  image ID byte for byte with the newly built jar.
+  selected blocking CI check without a successful receipt blocks landing;
+  advisory checks may warn. Recovery after a landed but incomplete train gives
+  `LANDED_STALE`, never GREEN by ancestry alone. Before the gate tests or
+  promotes an image, it compares the jar inside its immutable image ID byte
+  for byte with the newly built jar, then supplies that ID to every suite.
 - **`bb wt list` / `status`** show `QUEUED`, `IN-TRAIN`, `SPLITTING` and the
   final verdicts, the running train (id, members, log), the queue order and
   live soon-markers.

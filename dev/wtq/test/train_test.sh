@@ -130,6 +130,36 @@ check "wt drop accepts the landed member" eval "wt_main drop solo-wtqtest >/dev/
 check "_train is not a droppable feature" eval "! wt_main drop _train >/dev/null 2>&1"
 check "wt list hides the train worktree" eval "! list_has '^_train'"
 
+echo "== interrupted post-land train cannot recover as GREEN by ancestry alone"
+new_world interrupted-land
+feature interrupted interrupted.txt landed
+hold_lock
+enqueue_in_order interrupted
+git -C "$REPO" merge -q --ff-only feature/interrupted
+printf 'train_ts=old\nstate=train\n' >> "$Q/queue/interrupted"
+printf '{:schema 1 :complete false :sha "%s" :exit nil}\n' \
+  "$(git -C "$REPO" rev-parse HEAD)" > "$Q/logs/_train-old.report.edn"
+release_lock
+finish interrupted
+check "interrupted landing reports LANDED_STALE" eq "$(verdict interrupted)" LANDED_STALE
+check "interrupted landing exits 4" eq "$(rc_of interrupted)" 4
+check "no second gate was run" test ! -s "$STUB_LOG"
+
+echo "== completed receipt permits recovery of an already landed train"
+new_world recovered-land
+feature recovered recovered.txt landed
+hold_lock
+enqueue_in_order recovered
+git -C "$REPO" merge -q --ff-only feature/recovered
+printf 'train_ts=old\nstate=train\n' >> "$Q/queue/recovered"
+printf '{:schema 1 :complete true :sha "%s" :exit 0}\n' \
+  "$(git -C "$REPO" rev-parse HEAD)" > "$Q/logs/_train-old.report.edn"
+release_lock
+finish recovered
+check "completed landing reports GREEN" eq "$(verdict recovered)" GREEN
+check "completed landing exits 0" eq "$(rc_of recovered)" 0
+check "recovery does not rerun the gate" test ! -s "$STUB_LOG"
+
 echo "== three ready branches ride ONE train; non-conductors read their verdict"
 new_world three
 feature b b.txt b; feature c c.txt c; feature d d.txt d

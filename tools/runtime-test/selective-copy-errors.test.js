@@ -69,3 +69,14 @@ test('partial-manifest fallback and recovered policy replies have separate bound
     [missing, {...missing, component: 'unknown'}], true), [error, error]);
   assert.deepEqual(unexpectedSelectiveCopyErrors([error], [missing, retry], true), [error]);
 });
+
+test('observed policy recovery requires the same nonmissing loader identity', () => {
+  const retry = {kind: 'plan', url, component: 'canvas-type-structure', status: 422,
+    code: 'policy-refresh-required', retryable: true, sequence: 1, loadId: 4, configuration: 'same-root'};
+  const success = {...retry, status: 200, ok: true, sequence: 2};
+  assert.deepEqual(unexpectedSelectiveCopyErrors([error], [retry, success], true, true), []);
+  for (const changed of [{loadId: 5}, {loadId: null}, {loadId: undefined}, {component: 'canvas-bindings'}])
+    assert.deepEqual(unexpectedSelectiveCopyErrors([error], [retry, {...success, ...changed}], true, true), [error]);
+  assert.deepEqual(unexpectedSelectiveCopyErrors([error], [retry], true, true), [error]);
+  assert.deepEqual(unexpectedSelectiveCopyErrors([error], [{...retry, code: null}, success], true, true), [error]);
+});

@@ -1485,7 +1485,30 @@ async function bindNamedPlaceholder(page, argName, kind, text) {
 async function bindPlaceholderOn(page, ownerName, argName, kind, text) {
   const sel = '.placeholder-binder[data-fn-name="' + ownerName + '"][data-arg-name="' + argName + '"]';
   await page.waitForSelector(sel, {timeout: 60000});
-  await page.click(sel);
+  try { await page.click(sel); }
+  catch (error) {
+    const hit = await page.evaluate(selector => {
+      const binder = document.querySelector(selector);
+      const rect = element => {
+        if (!element) return null;
+        const {x, y, width, height} = element.getBoundingClientRect();
+        return {x, y, width, height};
+      };
+      const bounds = binder?.getBoundingClientRect();
+      const blocker = bounds && document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+      const label = blocker?.closest('.edge-label-overlay');
+      const edge = graph.edges.get(label?.dataset.edgeId);
+      const grid = lastGridPos();
+      return {selectedFnId, renderGeneration: _renderGen, animating: graph.animating,
+        binder: {nodeId: binder?.dataset.nodeId, connected: !!binder?.isConnected, rect: rect(binder)},
+        hit: {binderOwnsHit: !!binder && (blocker === binder || binder.contains(blocker)),
+          edgeId: label?.dataset.edgeId, rect: rect(label), sourceId: edge?.sourceId, targetId: edge?.targetId,
+          sourceGrid: grid?.[edge?.sourceId], targetGrid: grid?.[edge?.targetId]},
+        viewport: {zoom: viewport.zoom, x: viewport.pan.x, y: viewport.pan.y}};
+    }, sel).catch(() => ({snapshotUnavailable: true}));
+    console.error('Native binder hit diagnostic:', JSON.stringify(hit));
+    throw error;
+  }
   if (kind === 'fn-ref' || kind === 'whole-list') {
     const btnLabel = kind === 'whole-list' ? 'Bind fn-ref (whole list)' : 'Bind fn-ref';
     await page.waitForFunction((label) => {

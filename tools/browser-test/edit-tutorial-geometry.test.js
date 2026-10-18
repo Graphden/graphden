@@ -218,18 +218,32 @@ const {assert, newContext} = require('./edit-test-helpers');
     const layoutChanged = idle.mutations > 0 || idle.resizes.length > 0;
     assert(idle.ticks >= 2 && (layoutChanged || idle.calls === 0),
       'completion polling performs no geometry scans without layout signals: ' + JSON.stringify(idle));
-    await page.evaluate(() => selectFnByName('const'));
-    await page.waitForSelector('.node-overlay', {timeout: 60000});
-    await page.waitForFunction(() => !graph.animating, null, {timeout: 30000});
-    await page.evaluate(() => {
+    const graphTarget = await page.evaluate(async () => {
+      const original = renderGraph;
+      let pending;
+      renderGraph = function(...args) { pending = original.apply(this, args); return pending; };
+      try {
+        await selectFnByName('const');
+        if (!pending) throw Error('Selection did not request a graph render');
+        await pending;
+        return {id: selectedFnId, selector: '.node-overlay[data-original-fn-id="' + selectedFnId + '"]'};
+      } finally { renderGraph = original; }
+    });
+    await page.waitForFunction(({id, selector}) => selectedFnId === id && !graph.animating
+      && document.querySelector(selector)?.isConnected, graphTarget, {timeout: 30000});
+    await page.evaluate(({selector}) => {
+      window.geometryGraphTarget = document.querySelector(selector);
       const step = _tourStep();
-      step.target = '.node-overlay';
-      step.targets = ['.node-overlay'];
+      step.target = selector;
+      step.targets = [selector];
       _tourRenderStep();
       setViewportPan(viewport.pan.x + 24, viewport.pan.y + 16);
-    });
+    }, graphTarget);
     await frames();
-    assert(await aligned('.node-overlay') <= 1, 'actual graph viewport pan updates the spotlight');
+    assert(await page.evaluate(({id, selector}) => selectedFnId === id && !graph.animating
+      && geometryGraphTarget.isConnected && document.querySelector(selector) === geometryGraphTarget, graphTarget),
+    'viewport pan retains the completed render target');
+    assert(await aligned(graphTarget.selector) <= 1, 'actual graph viewport pan updates the spotlight');
     await page.evaluate(() => { window.geometryBaselineListeners = _viewportListeners.length - 1; });
     await page.screenshot({path: '/tmp/graphden-tour-geometry.png'});
     await page.evaluate(() => {

@@ -6,6 +6,7 @@ const {chromium} = require('playwright');
 const {assert, newContext, api} = require('./edit-test-helpers');
 const {undoConfiguration} = require('./configuration-undo-test-helpers');
 const {selectCreatedLeaf, editOwnValue} = require('./tutorial-ui-components-helpers');
+const {observeUIPlanLoads, captureLoadedUIComponents, waitForLoadedUIComponents, drainUIPlanReplies} = require('./ui-component-runtime-test-helpers');
 
 function themeSelection(value) {
   const normalize = item => Array.isArray(item) ? item.map(normalize)
@@ -25,8 +26,9 @@ async function appearance(page) {
   }
   await page.locator('#gd-ui-components-root').waitFor({state: 'visible'});
 }
-async function activate(page, selectionId) {
-  await page.evaluate(() => gdCaptureUIConfiguration());
+async function activate(page, selectionId, settle) {
+  await settle();
+  await page.evaluate(() => gdCaptureUIConfiguration(new AbortController().signal));
   const state = await page.evaluate(() => gdUIConfigurationState());
   const proposal = await api(page, 'POST', '/api/ui/configuration/preview', {operation: 'activate',
     command: {'selection-id': selectionId, 'expected-preference': state.preference,
@@ -37,7 +39,8 @@ async function activate(page, selectionId) {
   await page.evaluate(async () => { await loadGraphData(); gdRefreshUIConfiguration(); });
   return proposal;
 }
-async function copy(page, component, receipts) {
+async function copy(page, component, receipts, settle) {
+  await settle();
   const owner = await page.evaluate(() => gdPrefOwner);
   const proposed = await api(page, 'POST', '/api/ui/components/create/preview',
     {owner, 'namespace-id': null, component});
@@ -47,10 +50,11 @@ async function copy(page, component, receipts) {
   const result = await api(page, 'POST', '/api/ui/components/create/apply', proposed.request);
   assert(result.ok && result.committed && JSON.stringify(result.manifest) === JSON.stringify(proposed.manifest),
     'apply confirms the exact create-only receipt');
-  receipt.activation = await activate(page, proposed.manifest.roots['configuration-id']);
+  receipt.activation = await activate(page, proposed.manifest.roots['configuration-id'], settle);
   await page.waitForFunction(({root, component}) => gdUIComponentRuntimeIdentity(component) === root
     && gdUIComponentRuntimeIdentity('account-menu') === root && gdShellMenuGraph.ready,
   {root: receipt.activation.receipt.id, component});
+  await settle();
   return {...proposed.manifest, activationId: receipt.activation.receipt.id};
 }
 async function editPickerAndSettle(page, leaf, value) {
@@ -108,9 +112,17 @@ async function cleanup(page, receipts) {
 }
 (async () => {
   const {browser, page} = await newContext(chromium, {boot: false});
+  const planLoads = await observeUIPlanLoads(page);
   const receipts = [];
   const failures = [];
-  const replies = [], themeReplies = [], pendingReplies = [], requestSequences = new WeakMap();
+  const replies = planLoads.replies, themeReplies = [], pendingReplies = [], requestSequences = new WeakMap();
+  async function settle() {
+    await planLoads.flush();
+    const loaded = await captureLoadedUIComponents(page);
+    await waitForLoadedUIComponents(page, loaded);
+    await drainUIPlanReplies(planLoads.requests, replies, [], true);
+    await planLoads.flush();
+  }
   let sequence = 0;
   page.on('pageerror', error => failures.push({kind: 'pageerror', text: error.message}));
   page.on('console', message => { if (message.type() === 'error') failures.push({kind: 'console', text: message.text(), url: message.location().url}); });
@@ -127,11 +139,6 @@ async function cleanup(page, receipts) {
         retryable: body?.retryable === true, ok: body?.ok === true, payload: !!body?.payload});
       return;
     }
-    if (response.request().method() !== 'POST' || !path.endsWith('/ui/configuration/plan')) return;
-    const body = await response.json().catch(() => null);
-    replies.push({kind: 'plan', url: response.url(), component: response.request().postDataJSON()?.component,
-      sequence: requestSequences.get(response.request()), status: response.status(), code: body?.code,
-      fallback: body?.fallback, retryable: body?.retryable === true, ok: body?.ok === true});
   })()));
   let previous;
   let phase = 'boot';
@@ -142,11 +149,12 @@ async function cleanup(page, receipts) {
     await page.goto(require('./edit-test-helpers').BASE);
     await page.waitForFunction(() => window.gdPrefsReady && window.gdPrefOwner);
     await page.waitForFunction(() => gdUIConfigurationState()?.revision);
+    await settle();
     assert((await api(page, 'POST', '/api/ui/configuration/prepare', {home: true})).ok, 'explicit home setup succeeds');
     previous = await page.evaluate(() => ({components: gdPrefRead('components'), theme: gdPrefRead('theme'), owner: gdPrefOwner}));
     await appearance(page);
     phase = 'copy-picker';
-    const picker = await copy(page, 'fn-picker', receipts);
+    const picker = await copy(page, 'fn-picker', receipts, settle);
     phase = 'runtime-picker';
     await page.waitForFunction(id => gdUIComponentRuntimeIdentity('fn-picker') === id, picker.activationId);
     assert(await page.evaluate(() => gdShellMenuGraph.ready && gdUIComponentsRoots()['menu-id']),
@@ -155,8 +163,9 @@ async function cleanup(page, receipts) {
     await page.waitForFunction(id => selectedFnId === id, picker.roots['picker-id']);
     const leaf = await selectCreatedLeaf(page, picker, 'picker', 'picker-active-background');
     await editPickerAndSettle(page, leaf, 'rgb(254, 215, 170)');
+    await settle();
     phase = 'copy-recents';
-    const recents = await copy(page, 'recents', receipts);
+    const recents = await copy(page, 'recents', receipts, settle);
     phase = 'runtime-recents';
     await page.waitForFunction(id => gdUIComponentRuntimeIdentity('recents') === id, recents.activationId);
     assert(await page.evaluate(id => gdUIComponentsRoots()['picker-id'] === id, picker.roots['picker-id']),
@@ -169,7 +178,7 @@ async function cleanup(page, receipts) {
       'selective copies do not activate a theme');
 
     phase = 'copy-inspector';
-    const inspector = await copy(page, 'inspector', receipts);
+    const inspector = await copy(page, 'inspector', receipts, settle);
     phase = 'runtime-inspector';
     await page.waitForFunction(id => gdUIComponentRuntimeIdentity('inspector') === id, inspector.activationId);
     assert(await page.evaluate(id => gdUIComponentsRoots()['picker-id'] === id, picker.roots['picker-id']),
@@ -182,7 +191,7 @@ async function cleanup(page, receipts) {
       'Inspector copy leaves the active theme unchanged');
 
     phase = 'copy-explorer';
-    const explorer = await copy(page, 'explorer', receipts);
+    const explorer = await copy(page, 'explorer', receipts, settle);
     phase = 'runtime-explorer';
     await page.waitForFunction(id => gdUIComponentRuntimeIdentity('explorer') === id, explorer.activationId);
     assert(await page.evaluate(id => gdUIComponentsRoots()['picker-id'] === id, picker.roots['picker-id']),
@@ -202,6 +211,7 @@ async function cleanup(page, receipts) {
     assert(await page.evaluate(() => !gdFiltersActive()), 'the stored personal All request preserves the native clear semantics');
 
     phase = 'copy-menu-conflict';
+    await settle();
     const owner = previous.owner;
     const proposed = await api(page, 'POST', '/api/ui/components/create/preview',
       {owner, 'namespace-id': null, component: 'account-menu'});
@@ -211,13 +221,13 @@ async function cleanup(page, receipts) {
     const created = await api(page, 'POST', '/api/ui/components/create/apply', proposed.request);
     assert(created.ok && created.committed, 'menu graphs exist before activation');
     const menu = proposed.manifest;
-    await page.evaluate(() => gdCaptureUIConfiguration());
+    await page.evaluate(() => gdCaptureUIConfiguration(new AbortController().signal));
     const current = await page.evaluate(() => gdUIConfigurationState());
     const stale = await api(page, 'POST', '/api/ui/configuration/preview', {operation: 'activate', command: {
       'selection-id': menu.roots['configuration-id'], 'expected-preference': current.preference,
       'expected-configuration-revision': current.revision}});
     assert(stale.ok, 'the first tab previews menu activation');
-    const external = await activate(page, picker.roots['configuration-id']);
+    const external = await activate(page, picker.roots['configuration-id'], settle);
     menuReceipt.activation = external;
     const rejected = await api(page, 'POST', '/api/ui/configuration/apply', stale.request);
     assert(rejected.status === 409, 'a stale ordinary-root activation cannot overwrite the second tab');
@@ -231,12 +241,13 @@ async function cleanup(page, receipts) {
     const remainingIds = new Set(remaining.fns.map(row => row.id));
     assert([...picker.functions, ...recents.functions, ...inspector.functions, ...explorer.functions].every(row => remainingIds.has(row.id)),
       'cleaning the new receipt preserves all previously authored copies');
+    await settle();
     await Promise.all(pendingReplies);
-    const unexpected = unexpectedSelectiveCopyErrors(unexpectedThemeRetryErrors(failures, themeReplies, true), replies, true);
+    const unexpected = unexpectedSelectiveCopyErrors(unexpectedThemeRetryErrors(failures, themeReplies, true), replies, true, true);
     if (unexpected.length) console.error('Unclassified selective errors:', JSON.stringify({
       errors: unexpected.map(error => ({kind: error.kind, status: Number(error.text?.match(/status of (\d+)/)?.[1]) || null,
         path: error.url ? new URL(error.url).pathname : null})),
-      replies: replies.map(({kind, component, status, code, retryable, ok, sequence}) => ({kind, component, status, code, retryable, ok, sequence})),
+      replies: replies.map(({kind, component, status, code, retryable, ok, sequence, loadId}) => ({kind, component, status, code, retryable, ok, sequence, loadId})),
     }));
     assert(unexpected.length === 0, 'no unclassified browser errors');
     console.log('PASS selective UI choices, authored retention, builtin fallback, real CAS conflict, exact cleanup');

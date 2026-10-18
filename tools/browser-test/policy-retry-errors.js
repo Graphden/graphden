@@ -1,12 +1,17 @@
 'use strict';
 // A classified transient refusal can emit a browser network-console error even
 // when the host retries successfully. Never waive a terminal or unknown reply.
-function unexpectedPolicyRetryErrors(errors, replies, behaviorVerified) {
+function samePlanLoad(reply, success, required = false) {
+  if (!required && reply.loadId === undefined && success.loadId === undefined) return true;
+  return Number.isSafeInteger(reply.loadId) && reply.loadId > 0 && reply.loadId === success.loadId;
+}
+function unexpectedPolicyRetryErrors(errors, replies, behaviorVerified, requireLoadIdentity = false) {
   if (!behaviorVerified) return errors;
   const relevant = replies.filter(reply => reply.status === 422);
   if (relevant.some(reply => reply.code !== 'policy-refresh-required' || reply.retryable !== true
     || typeof reply.component !== 'string' || !reply.component || !replies.some(success => success.sequence > reply.sequence
       && success.url === reply.url && success.component === reply.component
+      && samePlanLoad(reply, success, requireLoadIdentity)
       && success.status === 200 && success.ok === true))) return errors;
   const allowed = new Map();
   for (const reply of relevant) allowed.set(reply.url, (allowed.get(reply.url) || 0) + 1);
@@ -18,4 +23,4 @@ function unexpectedPolicyRetryErrors(errors, replies, behaviorVerified) {
     return false;
   });
 }
-module.exports = {unexpectedPolicyRetryErrors};
+module.exports = {unexpectedPolicyRetryErrors, samePlanLoad};

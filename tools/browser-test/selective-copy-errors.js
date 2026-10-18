@@ -1,5 +1,5 @@
 'use strict';
-const {unexpectedPolicyRetryErrors} = require('./policy-retry-errors');
+const {unexpectedPolicyRetryErrors, samePlanLoad} = require('./policy-retry-errors');
 // Keep the finite console-recovery contract in sync with the shipped graph
 // component catalog. The runtime test checks these exact names and root keys.
 const componentRoots = Object.freeze({'account-menu': 'menu-id', 'fn-picker': 'picker-id',
@@ -8,26 +8,29 @@ const componentRoots = Object.freeze({'account-menu': 'menu-id', 'fn-picker': 'p
 const components = new Set(Object.keys(componentRoots));
 const builtinFallback = reply => reply.kind === 'plan' && reply.status === 422
   && reply.code === 'component-missing' && reply.fallback === 'builtin' && components.has(reply.component);
-const fallbackRecovery = (reply, replies) => reply.kind === 'plan' && reply.status === 422
+const fallbackRecovery = (reply, replies, requireLoadIdentity) => reply.kind === 'plan' && reply.status === 422
   && reply.code === 'policy-refresh-required' && reply.retryable === true && components.has(reply.component)
   && replies.some(success => builtinFallback(success) && success.sequence > reply.sequence
-    && success.url === reply.url && success.component === reply.component);
+    && success.url === reply.url && success.component === reply.component
+    && samePlanLoad(reply, success, requireLoadIdentity));
 
 // These refusals are expected only after the matching real host behavior
 // has been verified: builtin fallback or stale-selection preservation.
-function unexpectedSelectiveCopyErrors(errors, replies, behaviorVerified) {
+function unexpectedSelectiveCopyErrors(errors, replies, behaviorVerified, requireLoadIdentity = false) {
   if (replies.some(reply => reply.kind === 'plan' && reply.status === 422
-    && !builtinFallback(reply) && !fallbackRecovery(reply, replies)
+    && !builtinFallback(reply) && !fallbackRecovery(reply, replies, requireLoadIdentity)
     && !(reply.code === 'policy-refresh-required' && reply.retryable === true && components.has(reply.component)
       && replies.some(success => success.kind === 'plan' && success.sequence > reply.sequence
         && success.url === reply.url && success.component === reply.component
+        && samePlanLoad(reply, success, requireLoadIdentity)
         && success.status === 200 && success.ok === true)))) return errors;
   const remaining = unexpectedPolicyRetryErrors(errors, replies.filter(reply => reply.kind === 'plan'
-    && (reply.status === 200 || reply.code === 'policy-refresh-required') && !fallbackRecovery(reply, replies)), behaviorVerified);
+    && (reply.status === 200 || reply.code === 'policy-refresh-required') && !fallbackRecovery(reply, replies, requireLoadIdentity)),
+  behaviorVerified, requireLoadIdentity);
   if (!behaviorVerified) return remaining;
   const allowed = new Map();
   for (const reply of replies) {
-    const fallback = builtinFallback(reply) || fallbackRecovery(reply, replies);
+    const fallback = builtinFallback(reply) || fallbackRecovery(reply, replies, requireLoadIdentity);
     const conflict = reply.kind === 'activation' && reply.status === 409 && reply.code === 'stale-preference'
       && reply.noValue === true;
     if (fallback || conflict) {

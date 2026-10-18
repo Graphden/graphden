@@ -169,7 +169,17 @@ check "recovery does not rerun the gate" test ! -s "$STUB_LOG"
 echo "== a completed descendant train recovers an earlier failed ancestor"
 new_world successor-land
 feature parent parent.txt parent
-sed -i '/if \[ -e BAD \]/i [ "$*" = parent ] \&\& exit 1' "$WTQ_GATE_STUB"
+cat > "$WTQ_GATE_STUB" <<'EOF'
+#!/usr/bin/env bash
+echo "$*" >> "$STUB_LOG"
+[ "$*" = parent ] && exit 1
+if [ "$*" = runtime ]; then
+  echo "  image build: RUN"
+  printf 'verified candidate image sha256:%064d: executor-server.jar sha256 %064d\n' 0 0
+fi
+exit 0
+EOF
+chmod +x "$WTQ_GATE_STUB"
 merge_bg parent
 finish parent
 check "parent's original gate failed" eq "$(verdict parent)" FAIL
@@ -177,11 +187,18 @@ feature child child.txt child
 git -C "$WTQ_ROOT/child" merge -q --no-ff feature/parent -m 'include parent'
 merge_bg child
 finish child
-check "descendant landed with a completed receipt" eq "$(verdict child)" GREEN
+check "docs descendant landed with a completed receipt" eq "$(verdict child)" GREEN
 merge_bg parent
 finish parent
-check "ancestor requeue sees successor receipt" eq "$(verdict parent)" GREEN
-check "ancestor requeue does not rerun gate" eq "$(gates | tr '\n' '|')" "parent|child|"
+check "docs successor cannot recover failed image promotion" eq "$(verdict parent)" LANDED_STALE
+feature runtime runtime.txt runtime
+merge_bg runtime
+finish runtime
+check "runtime descendant landed with image proof" eq "$(verdict runtime)" GREEN
+merge_bg parent
+finish parent
+check "ancestor requeue sees runtime successor receipt" eq "$(verdict parent)" GREEN
+check "ancestor requeue does not rerun gate" eq "$(gates | tr '\n' '|')" "parent|child|runtime|"
 
 echo "== prior train mapping write failure blocks the gate before landing"
 new_world mapping-failure

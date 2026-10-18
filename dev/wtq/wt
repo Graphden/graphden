@@ -1134,7 +1134,7 @@ prior_train_complete() {
   # image was promoted. This also survives a crash before a mapping update.
   for receipt in "$LOG_DIR"/_train-*.report.edn; do
     [ -f "$receipt" ] || continue
-    validated_sha="$(bb "$SCRIPT_DIR/report.clj" landed "$receipt" 2>/dev/null)" || continue
+    validated_sha="$(bb "$SCRIPT_DIR/report.clj" landed-image "$receipt" 2>/dev/null)" || continue
     if git -C "$MAIN_WT" merge-base --is-ancestor "${M_SHA[$name]}" "$validated_sha" \
       && git -C "$MAIN_WT" merge-base --is-ancestor "$validated_sha" "$TARGET"; then
       return 0

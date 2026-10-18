@@ -93,13 +93,20 @@
       "finish" (let [[gate-output ci-path resources exit] remaining]
                  (write-atomic! path (report (base sha queue-ms) (slurp gate-output)
                                              ci-path resources (parse-long exit))))
-      "landed" (let [receipt (edn/read-string (slurp path))]
-                 (when-not (and (= 1 (:schema receipt))
-                                (true? (:complete receipt))
-                                (zero? (or (:exit receipt) -1))
-                                (string? (:sha receipt)))
-                   (throw (ex-info "Train did not complete successfully" {:path path})))
-                 (println (:sha receipt)))
+      ("landed" "landed-image") (let [receipt (edn/read-string (slurp path))]
+                                  (when-not (and (= 1 (:schema receipt))
+                                                 (true? (:complete receipt))
+                                                 (zero? (or (:exit receipt) -1))
+                                                 (string? (:sha receipt)))
+                                    (throw (ex-info "Train did not complete successfully" {:path path})))
+                                  (when (and (= mode "landed-image")
+                                             (not (and (= :selected (get-in receipt [:scope :image-build]))
+                                                       (re-matches #"sha256:[a-f0-9]{64}"
+                                                                   (or (get-in receipt [:artifact :image :id]) ""))
+                                                       (re-matches #"[a-f0-9]{64}"
+                                                                   (or (get-in receipt [:artifact :image :jar-sha256]) "")))))
+                                    (throw (ex-info "Train did not verify and promote an image" {:path path})))
+                                  (println (:sha receipt)))
       (throw (ex-info "unknown WTQ report mode" {:mode mode})))))
 
 

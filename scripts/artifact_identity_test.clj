@@ -26,11 +26,14 @@
 
 
 (defn- jar!
-  [path manifest]
-  (with-open [zip (ZipOutputStream. (java.io.FileOutputStream. path))]
-    (ZipOutputStream/.putNextEntry zip (ZipEntry. artifact-identity/manifest-path))
-    (ZipOutputStream/.write zip (String/.getBytes (str (pr-str manifest) "\n") "UTF-8"))
-    (ZipOutputStream/.closeEntry zip)))
+  ([path manifest] (jar! path manifest {}))
+  ([path manifest extra]
+   (with-open [zip (ZipOutputStream. (java.io.FileOutputStream. path))]
+     (doseq [[entry content] (assoc extra artifact-identity/manifest-path
+                                    (str (pr-str manifest) "\n"))]
+       (ZipOutputStream/.putNextEntry zip (ZipEntry. entry))
+       (ZipOutputStream/.write zip (String/.getBytes content "UTF-8"))
+       (ZipOutputStream/.closeEntry zip)))))
 
 
 (deftest shipped-docs-and-deps-invalidate-old-jar
@@ -72,6 +75,18 @@
         (ZipOutputStream/.closeEntry zip))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"exactly one"
             (artifact-identity/read-jar-manifest path)))
+      (finally (fs/delete-if-exists path)))))
+
+
+(deftest versioned-shipped-resource-cannot-hide-behind-current-base
+  (let [path (str (fs/create-temp-file {:prefix "artifact-overlay-" :suffix ".jar"}))
+        inputs {:schema 1 :core-sha "current" :source-digest "source" :deps-digest "deps"}
+        resource "packages/mcp/mcp/ai-context.md"]
+    (try
+      (jar! path inputs {resource "current\n"
+                         (str "META-INF/versions/21/" resource) "stale\n"})
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Versioned shipped resource"
+            (artifact-identity/verify-jar! path inputs)))
       (finally (fs/delete-if-exists path)))))
 
 

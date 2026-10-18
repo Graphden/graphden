@@ -145,5 +145,14 @@
     (when-not (= expected actual)
       (throw (ex-info "Jar artifact inputs differ from source revision"
                       {:expected expected :actual actual})))
+    ;; Java multi-release lookup can select a versioned resource even when the
+    ;; base Markdown/JSON and our identity manifest look current. These paths
+    ;; are owned by this build; no dependency may overlay them at Java 9+.
+    (with-open [zip (ZipFile. jar)]
+      (doseq [entry (enumeration-seq (ZipFile/.entries zip))
+              :let [path (java.util.zip.ZipEntry/.getName entry)]
+              :when (re-matches #"META-INF/versions/[0-9]+/packages/.*\.(?:md|json)" path)]
+        (throw (ex-info "Versioned shipped resource overrides source identity"
+                        {:entry path}))))
     {:inputs actual
      :jar-sha256 (sha256 (Files/readAllBytes (Paths/get jar (make-array String 0))))}))

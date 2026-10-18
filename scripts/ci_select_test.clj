@@ -157,6 +157,66 @@
   (is (thrown? Exception (ci-select/select-checks real-registry ["--groups" " , "]))))
 
 
+(deftest full-run-batching-is-unchanged
+  (let [selected (mapv #(assoc % :cmd ["bb" (:bb %)]) real-registry)
+        batches (ci-select/canonical-batches real-registry selected)
+        pre (remove #(#{:test :post-test} (:group %)) selected)]
+    (is (= (mapv vec (partition-all 8 pre)) (:pre batches)))
+    (doseq [wave [:test :post-test]]
+      (is (= (mapv vec (partition-all 8 (filter #(= wave (:group %)) selected)))
+             (get batches wave))))))
+
+
+(deftest deps-scope-does-not-compress-heavy-checks
+  (let [selected (->> (:run (ci-select/partition-checks real-registry {:changed #{"deps.edn"}}))
+                      (mapv #(assoc % :cmd ["bb" (:bb %)])))
+        batches (ci-select/canonical-batches real-registry selected)
+        first-names (mapv :name (first (:pre batches)))
+        emitted (mapcat identity (mapcat batches [:pre :test :post-test]))]
+    (is (= ["clj-kondo" "splint" "cljstyle"] first-names))
+    (is (not-any? #{"compile-dev" "gitleaks"} first-names))
+    (is (= (frequencies (map :name selected)) (frequencies (map :name emitted))))
+    (doseq [check emitted]
+      (is (identical? check (first (filter #(= (:name check) (:name %)) selected)))
+          "the selected object, including its runnable :cmd, survives batching"))))
+
+
+(deftest empty-canonical-batches-do-not-merge-their-neighbours
+  (let [entries (fn [group n] (mapv #(hash-map :name (str (name group) %) :group group) (range n)))
+        registry (vec (concat (entries :clj 24) (entries :test 10) (entries :post-test 9)))
+        keep-names #{"clj0" "clj17" "test0" "test9" "post-test0" "post-test8"}
+        selected (mapv #(assoc % :cmd ["bb" (:name %)])
+                       (filter #(keep-names (:name %)) registry))
+        batches (ci-select/canonical-batches registry selected)
+        names (fn [wave] (mapv #(mapv :name %) (get batches wave)))]
+    (is (= [["clj0"] ["clj17"]] (names :pre)))
+    (is (= [["test0"] ["test9"]] (names :test)))
+    (is (= [["post-test0"] ["post-test8"]] (names :post-test)))))
+
+
+(deftest grouped-and-manually-skipped-checks-stay-within-canonical-batches
+  (let [full (ci-select/canonical-batches real-registry real-registry)]
+    (doseq [options [{:wanted #{:clj :sec}}
+                     {:skip-set #{"clj-kondo" "compile-dev" "tests-unit"}}
+                     {:changed #{"docs/tutorial/01-intro.md"}}]
+            :let [selected (:run (ci-select/partition-checks real-registry options))
+                  batches (ci-select/canonical-batches real-registry selected)]
+            wave [:pre :test :post-test]
+            batch (get batches wave)]
+      (is (some (fn [canonical]
+                  (= batch (filterv (set batch) canonical)))
+                (get full wave))
+          "each selected batch is an ordered subset of one original wave/batch"))))
+
+
+(deftest batching-refuses-unregistered-or-duplicate-selected-checks
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"unique registered names"
+        (ci-select/canonical-batches real-registry [{:name "unknown"}])))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"unique registered names"
+        (ci-select/canonical-batches real-registry
+                                     [(first real-registry) (first real-registry)]))))
+
+
 (let [{:keys [fail error]} (run-tests 'ci-select-test)]
   (when (pos? (+ fail error))
     (System/exit 1)))

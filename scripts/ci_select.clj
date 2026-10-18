@@ -63,6 +63,28 @@
   (second (drop-while #(not= flag %) args)))
 
 
+(defn canonical-batches
+  "Preserve full-registry wave/batch boundaries when selecting fewer checks.
+   Scoping must not pack formerly separate heavy checks into one batch. Return
+   selected objects (including :cmd), not the registry's command-less entries."
+  [registry checks]
+  (let [selected (into {} (map (juxt :name identity)) checks)
+        names (set (map :name registry))
+        wave-key #(case (:group %) :test :test :post-test :post-test :pre)]
+    (when (or (not= (count checks) (count selected))
+              (some #(not (contains? names %)) (keys selected)))
+      (throw (ex-info "Selected checks must have unique registered names" {})))
+    (into {}
+          (for [wave [:pre :test :post-test]]
+            [wave (->> registry
+                       (filter #(= wave (wave-key %)))
+                       (partition-all 8)
+                       (keep (fn [batch]
+                               (let [members (into [] (keep #(get selected (:name %))) batch)]
+                                 (when (seq members) members))))
+                       vec)]))))
+
+
 (defn changed-files
   "Repo-relative paths that differ from `since` — committed AND uncommitted
    (`git diff`) plus untracked (`git ls-files --others`), so a scoped local run

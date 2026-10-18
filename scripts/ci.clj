@@ -403,28 +403,28 @@
         ;; Past ~12 in flight on this host a child comes back with its
         ;; stream already closed (`clj-kondo FAILED 0.0s`, reproducible),
         ;; and before the guard in `run-check` that exception escaped and
-        ;; took the whole runner down with no verdict. A batch keeps the
-        ;; long poles (kondo / cljstyle / splint, ~100 s each) running
-        ;; together, so the wall time is unchanged in practice.
-        max-in-flight 8
-        wave (fn [cs]
-               (doseq [batch (partition-all max-in-flight cs)]
+        ;; took the whole runner down with no verdict. Preserve canonical
+        ;; batches BEFORE selection: a scoped run must not pack compile-dev
+        ;; and gitleaks beside the three JVM linters merely by omitting web
+        ;; checks that separated them in the healthy full run.
+        batches (ci-select/canonical-batches registry checks)
+        wave (fn [bs]
+               (doseq [batch bs]
                  (doseq [f (mapv (fn [c] (future (run-check c status results failed))) batch)]
                    @f)))
-        by-group (group-by :group checks)
-        test-checks (:test by-group)
-        post-checks (:post-test by-group)
-        pre-checks (remove #(#{:test :post-test} (:group %)) checks)
+        test-checks (mapcat identity (:test batches))
+        post-checks (mapcat identity (:post-test batches))
+        pre-checks (mapcat identity (:pre batches))
         skip-all! (fn [cs] (doseq [c cs] (swap! status assoc (:name c) :skipped)))]
-    (wave pre-checks)
+    (wave (:pre batches))
     (when (and retry-solo? @failed)
       (ci-proc/retry-solo! pre-checks status results failed run-check))
     (if @failed
       (skip-all! (concat test-checks post-checks))
-      (do (wave test-checks)
+      (do (wave (:test batches))
           (if @failed
             (skip-all! post-checks)
-            (wave post-checks))))))
+            (wave (:post-test batches)))))))
 
 
 (defn- print-check-result!

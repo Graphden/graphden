@@ -84,6 +84,7 @@ HOLDER="$WTQ_DIR/holder"
 LOG_DIR="$WTQ_DIR/logs"
 TASKS_DIR="$WTQ_DIR/tasks"       # task specs — live under .git, never in the working tree
 RESULT_DIR="$WTQ_DIR/results"    # machine-readable last gate outcome per feature
+PRIOR_TRAIN_DIR="$WTQ_DIR/prior-train" # durable SHA → train receipt, survives requeue/verdict
 QUEUE_DIR="$WTQ_DIR/queue"       # one entry per branch waiting for a train (see "merge train")
 SOON_DIR="$WTQ_DIR/soon"         # "I will enqueue within N minutes" markers
 BISECT_DIR="$WTQ_DIR/bisect"     # per red-train bisection budget
@@ -93,7 +94,7 @@ LINT_LOCK="$WTQ_DIR/lint.lock"   # one pre-queue lint at a time (see cmd_merge)
 LINT_HOLDER="$WTQ_DIR/lint.holder"
 E2E_RUNS_DIR="$WTQ_DIR/e2e-runs" # the e2e output of the last green gates (rolling baseline)
 E2E_BASELINE_LOCAL="$WTQ_DIR/e2e-baseline.tsv"
-mkdir -p "$LOG_DIR" "$TASKS_DIR" "$RESULT_DIR" "$QUEUE_DIR" "$SOON_DIR" "$BISECT_DIR"
+mkdir -p "$LOG_DIR" "$TASKS_DIR" "$RESULT_DIR" "$PRIOR_TRAIN_DIR" "$QUEUE_DIR" "$SOON_DIR" "$BISECT_DIR"
 
 TARGET="${WTQ_TARGET:-develop}"
 
@@ -1116,11 +1117,30 @@ load_entry() {
 # must never be recovered as GREEN merely because its branch is now an ancestor.
 prior_train_complete() {
   local name="$1" ts="${M_TRAIN_TS[$1]}" receipt validated_sha
+  # Queue entries disappear on verdict and are replaced by a fresh `wt merge`.
+  # The SHA's prior train must still be checked after either event.
+  if [ -f "$PRIOR_TRAIN_DIR/${M_SHA[$name]}" ]; then
+    ts="$(cat "$PRIOR_TRAIN_DIR/${M_SHA[$name]}")"
+  fi
   [ -n "$ts" ] || return 1
   receipt="$LOG_DIR/_train-$ts.report.edn"
-  validated_sha="$(bb "$SCRIPT_DIR/report.clj" landed "$receipt" 2>/dev/null)" || return 1
-  git -C "$MAIN_WT" merge-base --is-ancestor "${M_SHA[$name]}" "$validated_sha" || return 1
-  git -C "$MAIN_WT" merge-base --is-ancestor "$validated_sha" "$TARGET"
+  if validated_sha="$(bb "$SCRIPT_DIR/report.clj" landed "$receipt" 2>/dev/null)" \
+    && git -C "$MAIN_WT" merge-base --is-ancestor "${M_SHA[$name]}" "$validated_sha" \
+    && git -C "$MAIN_WT" merge-base --is-ancestor "$validated_sha" "$TARGET"; then
+    return 0
+  fi
+  # A failed train may be superseded by a successful train of a descendant.
+  # Search completed receipts rather than assuming ancestry alone proves the
+  # image was promoted. This also survives a crash before a mapping update.
+  for receipt in "$LOG_DIR"/_train-*.report.edn; do
+    [ -f "$receipt" ] || continue
+    validated_sha="$(bb "$SCRIPT_DIR/report.clj" landed "$receipt" 2>/dev/null)" || continue
+    if git -C "$MAIN_WT" merge-base --is-ancestor "${M_SHA[$name]}" "$validated_sha" \
+      && git -C "$MAIN_WT" merge-base --is-ancestor "$validated_sha" "$TARGET"; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 # Live soon-markers (expired and already-enqueued ones are removed on sight).
@@ -1826,7 +1846,8 @@ train_run() {
       decide "$m" PRECOND "$ts" "no green 'bb lint' stamp for the queued sha — re-run 'bb wt merge' (it lints first)"; continue
     fi
     if git -C "$MAIN_WT" merge-base --is-ancestor "${M_SHA[$m]}" "$TARGET"; then
-      if [ -n "${M_TRAIN_TS[$m]}" ] && ! prior_train_complete "$m"; then
+      if { [ -n "${M_TRAIN_TS[$m]}" ] || [ -f "$PRIOR_TRAIN_DIR/${M_SHA[$m]}" ]; } \
+        && ! prior_train_complete "$m"; then
         decide "$m" LANDED_STALE "$ts" "already in $TARGET, but its prior train did not complete promotion/receipt — repair the release state; do not re-gate"; continue
       fi
       decide "$m" GREEN "$ts" "already contained in $TARGET — prior train complete"; continue
@@ -1886,9 +1907,26 @@ train_run() {
     [ "${M_RELEASE[$m]}" = 1 ] && release=1
   done
   state_lock
-  for m in "${gated[@]}"; do qset "$m" state train; qset "$m" train_ts "$ts"; done
-  printf 'id=%s\nts=%s\nmembers=%s\nlog=%s\npid=%s\n' "$id" "$ts" "${gated[*]}" "$log" "$$" > "$TRAIN_FILE"
+  local prior_fail=0 prior_tmp
+  for m in "${gated[@]}"; do
+    prior_tmp="$PRIOR_TRAIN_DIR/.${M_SHA[$m]}.$$"
+    if ! { printf '%s\n' "$ts" > "$prior_tmp" && mv -f "$prior_tmp" "$PRIOR_TRAIN_DIR/${M_SHA[$m]}"; }; then
+      rm -f "$prior_tmp"
+      prior_fail=1
+      break
+    fi
+    qset "$m" state train
+    qset "$m" train_ts "$ts"
+  done
+  if [ "$prior_fail" = 0 ]; then
+    printf 'id=%s\nts=%s\nmembers=%s\nlog=%s\npid=%s\n' "$id" "$ts" "${gated[*]}" "$log" "$$" > "$TRAIN_FILE"
+  fi
   state_unlock
+  if [ "$prior_fail" = 1 ]; then
+    echo "ABORT: cannot persist prior train mapping"
+    for m in "${gated[@]}"; do decide "$m" PRECOND "$ts" "cannot persist prior train mapping"; done
+    return 20
+  fi
   printf 'train %s [%s] (pid %s) since %s' "$ts" "${gated[*]}" "$$" "$ts" > "$HOLDER"
 
   local resources="$LOG_DIR/_train-$ts.resources.csv" grc=0

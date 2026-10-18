@@ -137,6 +137,7 @@ hold_lock
 enqueue_in_order interrupted
 git -C "$REPO" merge -q --ff-only feature/interrupted
 printf 'train_ts=old\nstate=train\n' >> "$Q/queue/interrupted"
+printf 'old\n' > "$Q/prior-train/$(git -C "$REPO" rev-parse feature/interrupted)"
 printf '{:schema 1 :complete false :sha "%s" :exit nil}\n' \
   "$(git -C "$REPO" rev-parse HEAD)" > "$Q/logs/_train-old.report.edn"
 release_lock
@@ -144,6 +145,11 @@ finish interrupted
 check "interrupted landing reports LANDED_STALE" eq "$(verdict interrupted)" LANDED_STALE
 check "interrupted landing exits 4" eq "$(rc_of interrupted)" 4
 check "no second gate was run" test ! -s "$STUB_LOG"
+merge_bg interrupted
+finish interrupted
+check "requeue after LANDED_STALE still reports LANDED_STALE" eq "$(verdict interrupted)" LANDED_STALE
+check "requeue after LANDED_STALE exits 4" eq "$(rc_of interrupted)" 4
+check "requeue did not rerun the gate" test ! -s "$STUB_LOG"
 
 echo "== completed receipt permits recovery of an already landed train"
 new_world recovered-land
@@ -159,6 +165,36 @@ finish recovered
 check "completed landing reports GREEN" eq "$(verdict recovered)" GREEN
 check "completed landing exits 0" eq "$(rc_of recovered)" 0
 check "recovery does not rerun the gate" test ! -s "$STUB_LOG"
+
+echo "== a completed descendant train recovers an earlier failed ancestor"
+new_world successor-land
+feature parent parent.txt parent
+sed -i '/if \[ -e BAD \]/i [ "$*" = parent ] \&\& exit 1' "$WTQ_GATE_STUB"
+merge_bg parent
+finish parent
+check "parent's original gate failed" eq "$(verdict parent)" FAIL
+feature child child.txt child
+git -C "$WTQ_ROOT/child" merge -q --no-ff feature/parent -m 'include parent'
+merge_bg child
+finish child
+check "descendant landed with a completed receipt" eq "$(verdict child)" GREEN
+merge_bg parent
+finish parent
+check "ancestor requeue sees successor receipt" eq "$(verdict parent)" GREEN
+check "ancestor requeue does not rerun gate" eq "$(gates | tr '\n' '|')" "parent|child|"
+
+echo "== prior train mapping write failure blocks the gate before landing"
+new_world mapping-failure
+feature mapping mapping.txt mapping
+hold_lock
+enqueue_in_order mapping
+rm -rf "$Q/prior-train"
+touch "$Q/prior-train"
+release_lock
+finish mapping
+check "missing durable mapping is PRECOND" eq "$(verdict mapping)" PRECOND
+check "missing durable mapping never ran the gate" test ! -s "$STUB_LOG"
+check "missing durable mapping did not land" eval '! on_develop mapping.txt'
 
 echo "== three ready branches ride ONE train; non-conductors read their verdict"
 new_world three

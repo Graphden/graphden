@@ -267,12 +267,12 @@ governance_drift() {
 # and the gate is itself the script executing — that IS its test. Putting app
 # code there would mean adding it to a classpath, i.e. touching deps.edn or
 # build.clj, which lands in "everything else" and runs the lot.
-classify_changes() {   # <worktree> -> NEED_INTEGRATION / NEED_E2E / NEED_FLEET / NEED_VISUAL / CHANGED_N
+classify_changes() {   # <worktree> -> NEED_BUILD / NEED_INTEGRATION / NEED_E2E / NEED_FLEET / NEED_VISUAL / CHANGED_N
   local wt="$1" f changed
-  NEED_INTEGRATION=0; NEED_E2E=0; NEED_FLEET=0; NEED_VISUAL=0; CHANGED_N=0
+  NEED_BUILD=0; NEED_INTEGRATION=0; NEED_E2E=0; NEED_FLEET=0; NEED_VISUAL=0; CHANGED_N=0
   DEPS_DEVTOOL_ONLY=0
   if ! changed="$(git -C "$wt" diff --name-only "$TARGET..HEAD" 2>/dev/null)"; then
-    NEED_INTEGRATION=1; NEED_E2E=1; NEED_FLEET=1; NEED_VISUAL=1; CHANGED_N=unknown
+    NEED_BUILD=1; NEED_INTEGRATION=1; NEED_E2E=1; NEED_FLEET=1; NEED_VISUAL=1; CHANGED_N=unknown
     return 0
   fi
   while IFS= read -r f; do
@@ -283,12 +283,13 @@ classify_changes() {   # <worktree> -> NEED_INTEGRATION / NEED_E2E / NEED_FLEET 
       continue                     # exempt from BOTH runtime and fleet cases
     fi
     case "$f" in
+      resources/*.md|src/*.md)        NEED_BUILD=1 ;;
       *.md|docs/*|dev/*|.github/*)    : ;;
       tools/browser-test/*)           NEED_E2E=1 ;;
       resources/packages/*.js|resources/packages/*.css|\
       resources/packages/*.html|resources/packages/*.svg)
                                       NEED_E2E=1 ;;
-      *)                              NEED_INTEGRATION=1; NEED_E2E=1 ;;
+      *)                              NEED_BUILD=1; NEED_INTEGRATION=1; NEED_E2E=1 ;;
     esac
     case "$f" in
       src/graphden/fleet/*|src/graphden/system/*|src/graphden/storage/remote/*|\
@@ -1249,6 +1250,8 @@ gate_suites() {
   fi
   if [ "$NEED_INTEGRATION" = 1 ]; then echo "  integration: RUN"
   else echo "  integration: SKIPPED — only docs / browser assets / audited devtool coordinates changed"; fi
+  if [ "$NEED_BUILD" = 1 ]; then echo "  image build: RUN"
+  else echo "  image build: SKIPPED — no shipped runtime inputs changed"; fi
   if [ "$no_e2e" = "1" ]; then echo "  e2e:         SKIPPED — --no-e2e (every member asked for it)"
   elif [ "$NEED_E2E" = 1 ]; then echo "  e2e:         RUN"
   else echo "  e2e:         SKIPPED — docs / audited devtool only, no runtime surface"; fi
@@ -1269,7 +1272,7 @@ gate_suites() {
     ( cd "$wt" && bb ci --since "$TARGET" ) || { echo "FAIL: bb ci"; return 1; }
   fi
 
-  if [ "$NEED_INTEGRATION" = 0 ] && [ "$NEED_E2E" = 0 ] && [ "$NEED_FLEET" = 0 ] \
+  if [ "$NEED_BUILD" = 0 ] && [ "$NEED_INTEGRATION" = 0 ] && [ "$NEED_E2E" = 0 ] && [ "$NEED_FLEET" = 0 ] \
      && [ "$NEED_VISUAL" = 0 ]; then
     step "no runtime surface changed — skipping image build + suites"
     echo "ok"

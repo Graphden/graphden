@@ -17,6 +17,7 @@
   (:require
     [babashka.process :as p]
     [ci-proc]
+    [ci-report]
     [ci-select]
     [clojure.string :as str])
   (:import
@@ -152,7 +153,7 @@
 
 
 (defn- acquire-lock!
-  "Returns `[channel lock]`, WAITING for the machine-wide lock if another
+  "Returns `[channel lock wait-ms]`, WAITING for the machine-wide lock if another
    run holds it.
 
    Contention is now the normal case, not an error: several agents share
@@ -162,6 +163,7 @@
    announce who we are waiting for, and take our turn."
   []
   (let [path (lock-path)
+        started (System/nanoTime)
         channel (FileChannel/open path
                                   (into-array StandardOpenOption
                                               [StandardOpenOption/CREATE
@@ -177,7 +179,7 @@
     (let [pid (java.lang.ProcessHandle/.pid (java.lang.ProcessHandle/current))
           buf (java.nio.ByteBuffer/wrap (String/.getBytes (str pid "\n") "UTF-8"))]
       (FileChannel/.write channel buf))
-    [channel lock]))
+    [channel lock (quot (- (System/nanoTime) started) 1000000)]))
 
 
 (defn- release-lock!
@@ -187,7 +189,7 @@
    lets the next run CREATE a fresh file and lock that instead, so two runs
    would believe they hold the lock. The empty file is 0 bytes and costs
    nothing to keep."
-  [[channel _lock]]
+  [[channel _lock _wait-ms]]
   (try (FileChannel/.close channel) (catch Exception _ nil)))
 
 
@@ -522,6 +524,12 @@
         ;; lint-only run (`bb lint`, `bb lint-clj`) skips it and never waits on a
         ;; gate's `bb ci`.
         needs-lock? (some #(= :test (:group %)) checks)
+        report-path (System/getenv "GRAPHDEN_CI_REPORT")
+        ;; An old green receipt must not survive a crash in a new invocation.
+        _ (when report-path
+            (ci-report/write-atomic! report-path
+                                     {:schema 1 :complete false :sha (str/trim (:out (p/shell {:out :string} "git" "rev-parse" "HEAD")))
+                                      :command (into ["bb" "ci"] *command-line-args*) :exit nil}))
         lock-handle (do (report-skips! scoped manual since)
                         (when needs-lock? (acquire-lock!)))]
     (Runtime/.addShutdownHook
@@ -557,6 +565,17 @@
         @progress-thread
         (println)                     ; close the progress row
         (print-report! checks scoped manual @status @results since)
+        (when report-path
+          (ci-report/write-atomic! report-path
+                                   (ci-report/receipt
+                                     {:sha (str/trim (:out (p/shell {:out :string} "git" "rev-parse" "HEAD")))
+                                      :command (into ["bb" "ci"] *command-line-args*)
+                                      :since since :checks checks :scoped scoped :manual manual
+                                      :status @status :results @results
+                                      :elapsed-ms (- (System/currentTimeMillis) start-time)
+                                      :exit (if @failed 1 0)
+                                      :wait-ms (or (nth lock-handle 2 nil) 0)
+                                      :path report-path})))
         (print-verdict! checks scoped manual @status @failed (elapsed-s)))
       (finally
         (when lock-handle (release-lock! lock-handle))))))

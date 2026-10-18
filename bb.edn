@@ -1033,9 +1033,11 @@
    :task (p/shell "bash" "dev/wtq/test/train_test.sh")}
 
   ci-test
-  {:doc "Self-test of the CI runner core — the selection (scripts/ci_select.clj) + checks.edn validation, and killing a timed-out check (scripts/ci_proc.clj). Runs inside bb ci as the ci-selftest check."
-   :task (do (load-file "scripts/ci_proc_test.clj")
-             (load-file "scripts/ci_select_test.clj"))}
+  {:doc "Self-test of CI selection, process cleanup and machine receipts. Runs inside bb ci as the ci-selftest check."
+   :task (do (load-file "scripts/artifact_identity_test.clj")
+             (load-file "scripts/ci_proc_test.clj")
+             (load-file "scripts/ci_select_test.clj")
+             (load-file "scripts/ci_report_test.clj"))}
 
   lint
   {:doc "Every linter, parallel, NO unit tests — the fast pre-gate check (~1 min). `--retry-solo` re-runs each red check alone before it counts (wt merge's pre-queue lint)."

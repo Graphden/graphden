@@ -5,6 +5,7 @@
      clojure -T:build clean
      clojure -T:build uber"
   (:require
+    [artifact-identity]
     [clojure.edn :as edn]
     [clojure.java.io :as io]
     [clojure.string :as str]
@@ -137,25 +138,28 @@
 
 (defn uber
   [_]
-  (clean nil)
-  (b/copy-dir {:src-dirs ["src" "resources"]
-               :target-dir class-dir})
-  (let [hashes (compute-section-hashes class-dir)]
-    (println "Build hashes:")
-    (doseq [[k h] hashes]
-      (println (format "  %-9s %s" (str (name k) ":") h)))
-    ;; Plain JSON (just three string keys → string values) so the
-    ;; build alias doesn't need cheshire on its classpath.
-    (spit (str class-dir "/" build-hashes-file)
-          (str "{"
-               (str/join ","
-                         (for [[k v] hashes]
-                           (str \" (name k) "\":\"" v \")))
-               "}")))
-  (b/compile-clj {:basis basis
-                  :ns-compile '[graphden.executor-runtime.core]
-                  :class-dir class-dir})
-  (b/uber {:class-dir class-dir
-           :uber-file uber-file
-           :basis basis
-           :main 'graphden.executor-runtime.core}))
+  (let [inputs (artifact-identity/core-inputs)]
+    (clean nil)
+    (b/copy-dir {:src-dirs ["src" "resources"]
+                 :target-dir class-dir})
+    (let [hashes (compute-section-hashes class-dir)]
+      (println "Build hashes:")
+      (doseq [[k h] hashes]
+        (println (format "  %-9s %s" (str (name k) ":") h)))
+      ;; Plain JSON (just three string keys → string values) so the
+      ;; build alias doesn't need cheshire on its classpath.
+      (spit (str class-dir "/" build-hashes-file)
+            (str "{"
+                 (str/join ","
+                           (for [[k v] hashes]
+                             (str \" (name k) "\":\"" v \")))
+                 "}")))
+    (artifact-identity/write-manifest! class-dir inputs)
+    (b/compile-clj {:basis basis
+                    :ns-compile '[graphden.executor-runtime.core]
+                    :class-dir class-dir})
+    (b/uber {:class-dir class-dir
+             :uber-file uber-file
+             :basis basis
+             :main 'graphden.executor-runtime.core})
+    (artifact-identity/verify-jar! uber-file (artifact-identity/core-inputs))))

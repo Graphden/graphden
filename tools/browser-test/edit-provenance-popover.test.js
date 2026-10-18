@@ -98,7 +98,7 @@ async function cleanup(page) {
       const first = badges[0];
       return {
         badgeCount: badges.length,
-        text: first?.textContent?.trim(),
+        text: first?.querySelector(':scope > .canvas-bindings-control-mark')?.textContent?.trim(),
         ariaExpanded: first?.getAttribute('aria-expanded'),
       };
     });

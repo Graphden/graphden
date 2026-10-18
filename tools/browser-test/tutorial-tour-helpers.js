@@ -1216,9 +1216,11 @@ async function appendFnRefViaChip(page, chipName, fnName) {
 // beside it. The rename writes a `:rename-to` binding, which mints the
 // rename-view slot; the label on the edge changes to the new name.
 async function renameArgViaEdgeLabel(page, currentName, newName) {
+  const rename = page.getByRole('button', {name: 'Rename slot ' + currentName, exact: true});
   await page.waitForFunction((name) => Array.from(
-    document.querySelectorAll('.edge-label-overlay span'))
-    .some((sp) => sp.textContent.trim() === name && sp.title === 'Click to rename arg'),
+    document.querySelectorAll('.edge-label-overlay [role="button"]'))
+    .some(owner => owner.getAttribute('aria-label') === 'Rename slot ' + name
+      && owner.querySelector(':scope > .canvas-bindings-body-frame > .gd-canvas-body-host')?.textContent.trim() === name),
   currentName, {timeout: 30000, polling: 150});
   // A row-actions popover left open from an earlier step sits over the
   // label. Close it the way a user does — Escape — and NOT by removing the
@@ -1229,12 +1231,7 @@ async function renameArgViaEdgeLabel(page, currentName, newName) {
     const pop = document.querySelector('.row-actions-popover');
     return !pop || pop.offsetParent === null;
   }, null, {timeout: 10000, polling: 50});
-  await page.evaluate((name) => {
-    Array.from(document.querySelectorAll('.edge-label-overlay span'))
-      .find((sp) => sp.textContent.trim() === name
-                 && sp.title === 'Click to rename arg')
-      .dispatchEvent(new MouseEvent('click', {bubbles: true}));
-  }, currentName);
+  await rename.click();
   await page.waitForFunction(() => {
     const pop = document.querySelector('.arg-value-edit-popover');
     return pop && pop.getAttribute('aria-label') === 'Rename arg';

@@ -67,7 +67,8 @@ async function openCanvas(page, name, waitSelector) {
 async function badgeOf(page, argName) {
   return page.evaluate((n) => {
     const b = document.querySelector('.edge-label-overlay[data-arg-name="' + n + '"] .seal-badge');
-    return b ? {glyph: b.textContent, seal: b.dataset.seal, on: b.classList.contains('seal-badge-on'),
+    return b ? {glyph: b.querySelector(':scope > .canvas-bindings-control-mark')?.textContent,
+                seal: b.dataset.seal, on: b.classList.contains('seal-badge-on'),
                 title: b.title} : null;
   }, argName);
 }

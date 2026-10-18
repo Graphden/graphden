@@ -63,36 +63,23 @@ async function cleanup(page) {
       null,
       {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
-    // The edge-label name span has class .edge-label-name (label-span
-    // wraps the arg's current display name).
-    await page.waitForFunction(
-      () => Array.from(document.querySelectorAll('.edge-label-overlay, [class*="edge-label"]'))
-        .some((el) => /nums/.test(el.textContent || '')),
-      null,
-      {timeout: 15000});
-    const initialLabel = await page.evaluate(() => {
-      // Find the label span containing "nums".
-      const all = Array.from(document.querySelectorAll('span, div'));
-      const match = all.find(
-        (el) => el.textContent?.trim() === 'nums' && el.style.cursor === 'pointer');
-      return {
-        labelText: match?.textContent?.trim(),
-        labelCount: all.filter((el) =>
-          el.textContent?.trim() === 'nums' && el.style.cursor === 'pointer').length,
-      };
-    });
+    // The native rename owner and its optional passive label have separate
+    // contracts. The owner's irreducible edit mark is not label text.
+    const rename = page.getByRole('button', {name: 'Rename slot nums', exact: true});
+    await rename.waitFor({timeout: 15000});
+    assert(await rename.count() === 1, 'exact native nums rename owner');
+    const initialLabel = await rename.evaluate(owner => ({
+      labelText: owner.querySelector(':scope > .canvas-bindings-body-frame > .gd-canvas-body-host')?.textContent.trim(),
+      mark: owner.querySelector(':scope > .canvas-bindings-control-mark')?.textContent,
+    }));
     assert(initialLabel.labelText === 'nums',
            'edge label reads "nums": ' + JSON.stringify(initialLabel.labelText));
+    assert(initialLabel.mark === '✎', 'native edit mark is separate from the passive label');
 
     // ===================================================================
     // Phase B: click the label → rename popover.
     // ===================================================================
-    await page.evaluate(() => {
-      const all = Array.from(document.querySelectorAll('span, div'));
-      const match = all.find(
-        (el) => el.textContent?.trim() === 'nums' && el.style.cursor === 'pointer');
-      match?.click();
-    });
+    await rename.click();
     await page.waitForSelector(
       '.arg-value-edit-popover .arg-value-edit-input',
       {timeout: 5000});
@@ -130,9 +117,10 @@ async function cleanup(page) {
       (newName) => {
         const popoverGone = !document.querySelector('.arg-value-edit-popover');
         if (!popoverGone) return false;
-        const all = Array.from(document.querySelectorAll('span, div'));
-        return all.some(
-          (el) => el.textContent?.trim() === newName && el.style.cursor === 'pointer');
+        const owners = Array.from(document.querySelectorAll('.edge-label-overlay [role="button"]'))
+          .filter(el => el.getAttribute('aria-label') === 'Rename slot ' + newName);
+        return owners.length === 1 && owners[0]
+          .querySelector(':scope > .canvas-bindings-body-frame > .gd-canvas-body-host')?.textContent.trim() === newName;
       },
       NEW_NAME,
       {timeout: 10000});

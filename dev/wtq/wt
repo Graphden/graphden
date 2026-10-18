@@ -1031,6 +1031,7 @@ cmd_drop() {
 # untouched, which is the whole point.
 CANONICAL_IMAGE="graphden-executor:latest"
 CANDIDATE_IMAGE="graphden-executor:candidate"
+VERIFIED_IMAGE_ID=""
 
 # gate_body's "not a verdict" exit: $TARGET moved under the gate, re-queue.
 RC_TARGET_MOVED=6
@@ -1220,6 +1221,31 @@ stop_sampler() {
   SAMPLER_PID=""
 }
 
+# The image tag is mutable. Pin the image ID and compare the jar actually inside
+# it with the jar that build.clj just verified, before any suite or promotion.
+verify_candidate_image() {
+  local wt="$1" image_id container_id extracted actual jar_expected
+  image_id="$(docker image inspect --format '{{.Id}}' "$CANDIDATE_IMAGE")" || return 1
+  [ -n "$image_id" ] || { echo "FAIL: candidate image has no immutable ID"; return 1; }
+  jar_expected="$(sha256sum "$wt/target/executor-server.jar" | cut -d' ' -f1)" || return 1
+  extracted="$(mktemp "${TMPDIR:-/tmp}/graphden-image-jar.XXXXXX")" || return 1
+  container_id="$(docker create "$image_id")" || { rm -f "$extracted"; return 1; }
+  if ! docker cp "$container_id:/app/executor-server.jar" "$extracted"; then
+    docker rm -f "$container_id" >/dev/null 2>&1 || true
+    rm -f "$extracted"
+    return 1
+  fi
+  docker rm -f "$container_id" >/dev/null || { rm -f "$extracted"; return 1; }
+  actual="$(sha256sum "$extracted" | cut -d' ' -f1)" || { rm -f "$extracted"; return 1; }
+  rm -f "$extracted"
+  [ "$actual" = "$jar_expected" ] || {
+    echo "FAIL: jar in candidate image $image_id differs from verified build ($actual != $jar_expected)"
+    return 1
+  }
+  VERIFIED_IMAGE_ID="$image_id"
+  echo "verified candidate image $image_id: executor-server.jar sha256 $actual"
+}
+
 # The heavy part of the gate: scope, bb ci, image build, the suites. Called by
 # gate_body (same shell — it sets built_candidate there and uses its `step`).
 gate_suites() {
@@ -1267,10 +1293,27 @@ gate_suites() {
   step "bb ci (diff-scoped lint + tests, on merged result)"
   if [ -n "${WTQ_CI_SKIP:-}" ]; then
     echo "  ⚠ MANUAL SKIP (WTQ_CI_SKIP): $WTQ_CI_SKIP — a GREEN below is a SCOPED result"
-    ( cd "$wt" && bb ci --since "$TARGET" --skip "$WTQ_CI_SKIP" ) || { echo "FAIL: bb ci"; return 1; }
+    ( cd "$wt" && GRAPHDEN_CI_REPORT="$LOG_DIR/_train-$WTQ_REPORT_TS.ci.edn" bb ci --since "$TARGET" --skip "$WTQ_CI_SKIP" ) || { echo "FAIL: bb ci"; return 1; }
   else
-    ( cd "$wt" && bb ci --since "$TARGET" ) || { echo "FAIL: bb ci"; return 1; }
+    ( cd "$wt" && GRAPHDEN_CI_REPORT="$LOG_DIR/_train-$WTQ_REPORT_TS.ci.edn" bb ci --since "$TARGET" ) || { echo "FAIL: bb ci"; return 1; }
   fi
+  # An interrupted or missing report is not a successful CI run even if a
+  # wrapper returned zero. The selected set must all have real pass results.
+  local ci_receipt="$LOG_DIR/_train-$WTQ_REPORT_TS.ci.edn" ci_sha
+  ci_sha="$(git -C "$wt" rev-parse HEAD)"
+  bb -e '(require (quote clojure.edn))
+          (let [[path sha] *command-line-args*
+                r (clojure.edn/read-string (slurp path))
+                selected (set (get-in r [:scope :selected]))
+                passed (set (for [c (:checks r)
+                                  :when (and (selected (:name c))
+                                             (#{:passed :retried} (:status c))
+                                             (zero? (:exit c)))]
+                              (:name c)))]
+            (when-not (and (:complete r) (= 0 (:exit r)) (= sha (:sha r))
+                           (= selected passed))
+              (throw (ex-info "incomplete or stale CI receipt" {:path path}))))' \
+    -- "$ci_receipt" "$ci_sha" || { echo "FAIL: missing, partial or stale CI receipt"; return 1; }
 
   if [ "$NEED_BUILD" = 0 ] && [ "$NEED_INTEGRATION" = 0 ] && [ "$NEED_E2E" = 0 ] && [ "$NEED_FLEET" = 0 ] \
      && [ "$NEED_VISUAL" = 0 ]; then
@@ -1294,6 +1337,7 @@ gate_suites() {
   ( cd "$wt" && clojure -T:build uber ) || { echo "FAIL: uberjar"; return 1; }
   ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" docker-compose build executor ) \
     || { echo "FAIL: docker build"; return 1; }
+  verify_candidate_image "$wt" || { echo "FAIL: candidate image identity"; return 1; }
 
   # e2e runs BEFORE integration: the browser suite is timing-sensitive (a
   # slow-server window trips a test's 10s waitForFunction), and running it
@@ -1502,7 +1546,9 @@ gate_body() {
   # by construction the last landed build.
   if [ "${built_candidate:-0}" = 1 ]; then
     step "promote the candidate to $CANONICAL_IMAGE"
-    docker tag "$CANDIDATE_IMAGE" "$CANONICAL_IMAGE" \
+    [ "$(docker image inspect --format '{{.Id}}' "$CANDIDATE_IMAGE")" = "$VERIFIED_IMAGE_ID" ] \
+      || { echo "FAIL(post-land): candidate tag moved after verification — $TARGET landed; refusing promotion"; return 4; }
+    docker tag "$VERIFIED_IMAGE_ID" "$CANONICAL_IMAGE" \
       || { echo "FAIL(post-land): $TARGET ADVANCED but the canonical tag was NOT promoted — demo/tag stale, fix manually; do NOT naively re-run the gate"; return 4; }
     echo "ok"
   fi
@@ -1835,13 +1881,33 @@ train_run() {
   printf 'train %s [%s] (pid %s) since %s' "$ts" "${gated[*]}" "$$" "$ts" > "$HOLDER"
 
   local resources="$LOG_DIR/_train-$ts.resources.csv" grc=0
+  local report="$LOG_DIR/_train-$ts.report.edn" ci_report="$LOG_DIR/_train-$ts.ci.edn"
+  local earliest queued queue_ms
+  earliest="$(date +%s%N)"
+  for m in "${gated[@]}"; do
+    queued="$(qget "$m" ts)"
+    case "$queued" in ''|*[!0-9]*) continue ;; esac
+    [ "$queued" -lt "$earliest" ] && earliest="$queued"
+  done
+  queue_ms=$(( ($(date +%s%N) - earliest) / 1000000 ))
+  bb "$SCRIPT_DIR/report.clj" init "$report" "$(git -C "$TRAIN_WT" rev-parse HEAD)" "$queue_ms" \
+    || {
+      echo "ABORT: cannot initialize train receipt"
+      for m in "${gated[@]}"; do decide "$m" PRECOND "$ts" "cannot initialize train receipt"; done
+      return 20
+    }
   # The gate's own output is also kept apart (the outer tee may not have
   # flushed it to $log yet when we read the failing step back).
   local gate_out="$LOG_DIR/.gate-$ts.out"
   start_sampler "$resources"
-  ( gate_body "$TRAIN_WT" "$no_e2e" "$deploy" "$no_fleet" "$no_visual" "${gated[@]}" ) 2>&1 | tee "$gate_out"
+  ( WTQ_REPORT_TS="$ts" gate_body "$TRAIN_WT" "$no_e2e" "$deploy" "$no_fleet" "$no_visual" "${gated[@]}" ) 2>&1 | tee "$gate_out"
   grc="${PIPESTATUS[0]}"
   stop_sampler
+  if ! bb "$SCRIPT_DIR/report.clj" finish "$report" "$(git -C "$TRAIN_WT" rev-parse HEAD)" "$queue_ms" "$gate_out" "$ci_report" "$resources" "$grc"; then
+    warn "train receipt could not be completed: $report (incomplete is never pass)"
+    [ "$grc" = 0 ] && grc=4
+  fi
+  printf 'train receipt: %s\n' "$report"
   # Point at it explicitly. A CSV nobody knows exists is not instrumentation.
   printf '\nresource timeline: %s\n' "$resources"
 

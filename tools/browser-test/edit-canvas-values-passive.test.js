@@ -39,6 +39,7 @@ const source = process.env.GRAPHDEN_CANVAS_SOURCE_ROOT || path.join(__dirname, '
       };
     });
     for (const file of ['editor-passive-canvas.js', 'editor-canvas-graph.js', 'editor-canvas-values-graph.js',
+      'editor-canvas-type-structure-graph.js', 'editor-canvas-bindings-graph.js',
       'editor-overlay-manager.js', 'editor-drag.js', 'editor-overlay-arg.js', 'editor-overlay-edge-label.js']) {
       await page.addScriptTag({path: path.join(source, 'resources/packages/app/editor', file)});
     }
@@ -65,20 +66,26 @@ const source = process.env.GRAPHDEN_CANVAS_SOURCE_ROOT || path.join(__dirname, '
       fixture.edge = buildEdgeLabelOverlay({id: () => 'edge', data: key => key === undefined ? edge : edge[key]},
         container, 'value', 'edge');
       fixture.historyHost = fixture.edge.querySelector('.edge-type-chain .gd-canvas-body-host');
-      const hosts = [...container.querySelectorAll('.gd-canvas-body-host')];
+      const hosts = [...container.querySelectorAll('.gd-canvas-body-host')]
+        .filter(host => host.querySelector('.gd-canvas-values-label, .gd-canvas-values-primary, .gd-canvas-values-history'));
+      fixture.valueSheetCount = () => [...document.querySelectorAll('style[data-gd-ui-styles]')]
+        .filter(sheet => sheet.dataset.gdUiStyles === fixture.historyHost.dataset.gdUiStyle).length;
       check(fixture.valueHost.textContent === '"␣"', 'real literal projection preserves whitespace glyphs');
       check(fixture.preview.querySelector('rect').getAttribute('fill') === '#1234', 'typed SVG repr is preserved');
       check(!GraphdenRenderer.ownsTarget(fixture.preview) && GraphdenRenderer.ownsTarget(fixture.valueHost),
         'repr and graph body have separate ownership');
-      check(fixture.chip.textContent === 'text' && fixture.chip.getAttribute('aria-label').includes('Type: text'),
+      check(fixture.chip.querySelector(':scope > .gd-canvas-body-host').textContent === 'text' && fixture.chip.getAttribute('aria-label').includes('Type: text'),
         'real native type chip wraps graph presentation');
       check(fixture.historyHost.querySelectorAll('.gd-canvas-values-history-row').length === 2
         && fixture.historyHost.textContent.includes('override'), 'real edge owner projects nested history records');
       check(!fixture.secret.querySelector('.arg-literal-preview, .gd-canvas-values-label')
         && fixture.secret.textContent.includes('🔒 /vault/native-path'), 'secret path stays entirely native without repr');
       check(new Set(hosts.map(host => host.dataset.gdUiStyle)).size === 1
-        && hosts.every(host => host.dataset.gdUiStyle) && document.querySelectorAll('style[data-gd-ui-styles]').length === 1,
-      'node and edge bodies share one stylesheet after real render');
+        && hosts.every(host => host.dataset.gdUiStyle) && fixture.valueSheetCount() === 1
+        && document.querySelectorAll('style[data-gd-ui-styles]').length === 2
+        && fixture.edge.querySelector('.canvas-bindings-body-frame > .gd-canvas-body-host').dataset.gdUiStyle
+          !== fixture.historyHost.dataset.gdUiStyle,
+      'node and edge value bodies share one stylesheet after real render');
       fixture.k = GraphdenBrowser.keyword;
       fixture.record = object => new Map(Object.entries(object).map(([key, value]) => [fixture.k(key), value]));
       // A real const graph evaluates adversarial personal presentation. Borrow
@@ -135,7 +142,7 @@ const source = process.env.GRAPHDEN_CANVAS_SOURCE_ROOT || path.join(__dirname, '
         await Promise.resolve();
         check(fixture.failures.length === failures + 1 && fixture.failures.at(-1) === 'canvas-values',
           'invalid flow plan is classified as component fallback: ' + property);
-        check(fixture.valueHost.textContent === '"␣"' && fixture.chip.textContent === 'text'
+        check(fixture.valueHost.textContent === '"␣"' && fixture.chip.querySelector(':scope > .gd-canvas-body-host').textContent === 'text'
           && !fixture.node.querySelector('.gd-canvas-values-custom'), 'fallback updates every body');
       }
     });
@@ -146,7 +153,8 @@ const source = process.env.GRAPHDEN_CANVAS_SOURCE_ROOT || path.join(__dirname, '
       unregisterNodeOverlay('literal');
       check(!fixture.node.isConnected && nodeHosts.every(host => !host.childNodes.length
         && !GraphdenRenderer.ownsTarget(host) && !host.dataset.gdUiStyle), 'actual node removal disposes all bodies');
-      check(GraphdenRenderer.ownsTarget(fixture.historyHost) && document.querySelectorAll('style[data-gd-ui-styles]').length === 1,
+      check(GraphdenRenderer.ownsTarget(fixture.historyHost) && fixture.valueSheetCount() === 1
+        && document.querySelectorAll('style[data-gd-ui-styles]').length === 2,
         'edge retains shared stylesheet after node disposal');
       unregisterNodeOverlay('secret');
       _removeAllEdgeOverlays();
@@ -206,6 +214,7 @@ const source = process.env.GRAPHDEN_CANVAS_SOURCE_ROOT || path.join(__dirname, '
       } finally {
         window.expectedSlotType = previous;
         window.enterArgTypeEditMode = oldEdit;
+        gdCanvasTypeStructureGraph.dispose(owner);
         gdCanvasValuesGraph.dispose(owner);
       }
       const host = document.createElement('span');

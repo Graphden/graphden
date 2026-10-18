@@ -661,21 +661,40 @@ async function pickAnyway(page) {
 // Remove a use-site binding through the arg node's ⋯ menu. Fires a native
 // confirm() — the caller must have a dialog handler installed.
 async function removeUseSiteBinding(page, ownerText) {
-  await page.evaluate((txt) => {
-    const btns = Array.from(document.querySelectorAll('button.more-actions-trigger'));
-    const target = btns.find((b) => {
-      const ov = b.closest('.node-overlay');
-      return ov && ov.textContent.trim().startsWith(txt);
-    }) || btns[btns.length - 1];
-    target.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
-  }, ownerText);
-  await page.waitForFunction(() => !!document.querySelector(
-    '.row-actions-popover [data-action="remove-use-site-binding"]'),
-  null, {timeout: 15000, polling: 100});
-  await page.evaluate(() => {
-    document.querySelector('.row-actions-popover [data-action="remove-use-site-binding"]')
-      .dispatchEvent(new MouseEvent('click', {bubbles: true}));
-  });
+  // Shell readiness precedes graph layout. Select a unique native use-site
+  // owner, not the card's optional display text or an arbitrary last button.
+  const target = await page.waitForFunction((name) => {
+    if (typeof _singleEditableIncomingArg !== 'function' || !gv.ready() || graph.animating) return false;
+    const candidates = [];
+    for (const overlay of document.querySelectorAll('.node-overlay[data-original-fn-id]')) {
+      const fn = lookups.fnMap.get(overlay.dataset.originalFnId);
+      if (fn?.name !== name) continue;
+      const arg = _singleEditableIncomingArg(overlay.dataset.nodeId);
+      const binding = arg && lookups.bindingMap.get(arg['binding-id']);
+      const trigger = overlay.querySelector('.ancestor-line[data-level="0"] button.more-actions-trigger');
+      if (trigger && binding && binding['fn-id'] === arg['fn-id'] && binding['slot-id'] === arg['slot-id']) {
+        candidates.push({nodeId: overlay.dataset.nodeId, bindingId: binding.id});
+      }
+    }
+    return candidates.length === 1 ? candidates[0] : false;
+  }, ownerText, {timeout: 15000, polling: 100});
+  const identity = await target.jsonValue();
+  await target.dispose();
+  await page.evaluate(({nodeId, bindingId}) => {
+    const overlay = [...document.querySelectorAll('.node-overlay')].find(node => node.dataset.nodeId === nodeId);
+    const arg = overlay && _singleEditableIncomingArg(nodeId);
+    const trigger = overlay?.querySelector('.ancestor-line[data-level="0"] button.more-actions-trigger');
+    if (!trigger || arg?.['binding-id'] !== bindingId) throw new Error('Use-site action owner changed');
+    trigger.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
+  }, identity);
+  const action = await page.waitForFunction(({bindingId}) => {
+    const matches = [...document.querySelectorAll('.row-actions-popover [data-action="remove-use-site-binding"]')]
+      .filter(button => button.closest('[data-binding-id]')?.dataset.bindingId === bindingId);
+    return matches.length === 1 ? matches[0] : false;
+  }, identity, {timeout: 15000, polling: 100});
+  try {
+    await action.evaluate(button => button.dispatchEvent(new MouseEvent('click', {bubbles: true})));
+  } finally { await action.dispose(); }
 }
 
 

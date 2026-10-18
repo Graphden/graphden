@@ -167,7 +167,7 @@ const branch = 'account-menu-' + process.pid + '-' + Date.now().toString(36);
     graphUrl.hash = prepared.namespace + '.theme-canvas-background';
     await page.goto(graphUrl.toString());
     await page.waitForSelector('.arg-value-editable', {timeout: 120000});
-    await removeUseSiteBinding(page, 'theme-base-canvas-background');
+    await removeUseSiteBinding(page, '_theme-base-canvas-background');
     const [savedTheme] = await Promise.all([
       page.waitForResponse((response) => response.request().method() === 'POST'
         && new URL(response.url()).pathname === '/api/entities/binding', {timeout: 120000}),

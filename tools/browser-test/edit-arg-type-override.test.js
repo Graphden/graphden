@@ -73,7 +73,7 @@ async function cleanup(page) {
 
     const initialChip = await page.evaluate(() => {
       const chip = document.querySelector('.arg-type-chip');
-      return {chipText: chip?.textContent?.trim()};
+      return {chipText: chip?.querySelector(':scope > .gd-canvas-body-host')?.textContent?.trim()};
     });
     assert(/any/i.test(initialChip.chipText || ''),
            'type chip reads "any": '

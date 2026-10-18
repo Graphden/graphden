@@ -82,7 +82,7 @@ const ANY = 'vcd-any' + RUN;
     const textFn = (await getEntities(page, 'text')).fns.find((f) => f.name === 'text' && !(f['parent-ids'] || []).length);
     assert(b && b.value === 'tick', 'the value landed as the text "tick": ' + JSON.stringify(b && b.value));
     assert(b && textFn && b['type-override-fn-id'] === textFn.id, 'Save narrowed the slot to :text at this use-site (type-override-fn-id)');
-    const chip = await page.evaluate(() => document.querySelector('.arg-type-chip')?.textContent || '');
+    const chip = await page.evaluate(() => document.querySelector('.arg-type-chip > .gd-canvas-body-host')?.textContent || '');
     assert(/text/.test(chip), 'the card\'s type chip reads the narrowed type: ' + chip);
     console.log('  cards: glyph / one line / no clipping — as: text → narrowed');
   } catch (e) {

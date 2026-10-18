@@ -183,7 +183,7 @@ const {
     await appendSeqItemViaEdge(page, 'den');
     await waitTourTitle(page, 'Watch the other slot', 150000);
     assert(await page.waitForFunction(() => Array.from(document.querySelectorAll('.arg-type-chip'))
-      .some((c) => /item:text/.test((c.textContent || '').replace(/\s+/g, ''))), null,
+      .some((c) => /item:text/.test((c.querySelector(':scope > .gd-canvas-body-host')?.textContent || '').replace(/\s+/g, ''))), null,
       {timeout: 60000, polling: 200}).then(() => true, () => false),
       ':func\'s chip reads (item:text) once :coll holds text');
     assert(await clickTourButton(page, 'Next'), 'lesson 09 chip-step Next');

@@ -71,9 +71,13 @@ const TEST_NAME = 'test-arg-type-flip';
       if (!overlay) return {error: 'arg-overlay for "hello" not found'};
       const chip = overlay.querySelector('.arg-type-chip');
       if (!chip) return {error: 'no .arg-type-chip on arg-overlay'};
-      return {clicked: (chip.click(), true), chipText: chip.textContent.trim()};
+      // The passive body owns the label; the sibling native mark owns edit affordance.
+      const chipText = chip.querySelector(':scope > .gd-canvas-body-host')?.textContent.trim();
+      const editMark = chip.querySelector('.canvas-type-structure-control-mark')?.textContent;
+      return {clicked: (chip.click(), true), chipText, editMark};
     });
     assert(!chipClicked.error, chipClicked.error || 'chip clicked');
+    assert(chipClicked.editMark === '✎', 'native edit affordance remains outside the passive label');
     assert(chipClicked.chipText === 'text',
            'chip shows "text" before flip: ' + JSON.stringify(chipClicked));
     // Type-edit popover opens after the chip click.

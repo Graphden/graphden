@@ -100,6 +100,7 @@ const {captureLoadedUIComponents, waitForLoadedUIComponents, drainUIPlanReplies}
     await page.waitForFunction(() => gdPrefsReady && gdPrefOwner && gdUIConfigurationState?.()?.revision
       && graphReady() && !graph.animating, null, {timeout: 60000});
     const originalRuntimes = await captureLoadedUIComponents(page);
+    await settleComponents(originalRuntimes);
     assert((await api(page, 'POST', '/api/ui/configuration/prepare', {home: true})).ok, 'personal home prepared');
     const owner = await page.evaluate(() => gdPrefOwner);
     async function createCopy(component) {
@@ -246,6 +247,7 @@ const {captureLoadedUIComponents, waitForLoadedUIComponents, drainUIPlanReplies}
     // details affordance, target and focus must survive that source reload.
     phase = 'hidden-personal-metadata';
     const metadataRuntimes = await captureLoadedUIComponents(page);
+    await settleComponents(metadataRuntimes);
     await editLiteral(metadata, '_style-effect', 'vals', 'none', 0);
     await page.evaluate(() => gdRefreshUIConfiguration());
     await page.waitForFunction(() => getComputedStyle(metadataFocusProof.effect.querySelector('.gd-canvas-metadata-effect')).display === 'none',

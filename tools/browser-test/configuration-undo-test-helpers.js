@@ -8,8 +8,7 @@ function undoRequest(receipt) {
     functions: receipt['function-receipts']};
 }
 
-async function undoConfiguration(page, proposal) {
-  const command = undoRequest(proposal.receipt);
+async function undoConfiguration(page, proposal, command = undoRequest(proposal.receipt)) {
   const headers = {'X-Graphden-Branch': proposal.request.scope['branch-id']};
   let result;
   for (let attempt = 0; attempt < 3; attempt++) {

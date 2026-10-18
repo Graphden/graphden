@@ -6,14 +6,15 @@ const fs = require('node:fs');
 const assert = require('node:assert/strict');
 const {unexpectedSelectiveCopyErrors, components} = require('./selective-copy-errors');
 const {unexpectedThemeRetryErrors} = require('./theme-retry-errors');
-const {preparePickerOnlySelection, restorePickerOnlySelection} = require('./partial-ui-components-fixture');
+const {preparePickerOnlySelection, restorePickerOnlySelection, restoreLessonSelection} = require('./partial-ui-components-fixture');
 const {unexpectedCleanupErrors} = require('./owned-cleanup-errors');
 const {chromium} = require('playwright');
 const {newContext} = require('./edit-test-helpers');
 const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
+const {waitForLoadedUIComponents, drainUIPlanReplies, observeUIPlanLoads} = require('./ui-component-runtime-test-helpers');
 (async () => {
   const {browser, page} = await newContext(chromium, {boot: false});
-  let priorFixture;
+  let priorFixture, lessonReceipt;
   try {
     await preparePickerOnlySelection(page, fixture => {
       priorFixture = fixture;
@@ -34,7 +35,6 @@ const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
     throw error;
   }
   const errors = [];
-  const planReplies = [];
   const themeReplies = [];
   const pendingReplies = [];
   const requestSequences = new WeakMap();
@@ -64,20 +64,16 @@ const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
       catch (_) { batches.push(null); }
     }
   });
+  const plans = await observeUIPlanLoads(page);
+  const planReplies = plans.replies;
   const captureResponse = async response => {
     if (response.request().method() === 'DELETE') deletes.push({url: response.url(), status: response.status()});
     if (new URL(response.url()).pathname === '/api/ui/configuration/undo' && response.ok()) cleanupCommitted = true;
     const stage = stages.get(new URL(response.url()).pathname);
-    if (!stage) return;
+    if (!stage || stage === 'component-plan' && !requestSequences.has(response.request())) return;
     const attempt = (attempts.get(stage) || 0) + 1;
     attempts.set(stage, attempt);
     const body = await response.json().catch(() => null);
-    if (stage === 'component-plan') {
-      const command = response.request().postDataJSON();
-      planReplies.push({kind: 'plan', url: response.url(), component: command?.component,
-        sequence: requestSequences.get(response.request()), status: response.status(),
-        code: body?.code, fallback: body?.fallback, retryable: body?.retryable === true, ok: body?.ok === true});
-    }
     if (stage === 'theme-evaluate') {
       const command = response.request().postDataJSON();
       themeReplies.push({url: response.url(), sequence: requestSequences.get(response.request()),
@@ -122,12 +118,34 @@ const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
   });
   try {
     await walkUIComponentsLesson(page, {cleanupOnly: process.env.GRAPHDEN_COMPONENT_CLEANUP_ONLY === '1',
+      settleComponents: async snapshot => {
+        await plans.flush();
+        await waitForLoadedUIComponents(page, snapshot);
+        try {
+          const terminal = await drainUIPlanReplies(plans.requests, planReplies, pendingReplies, true, async names => {
+            await waitForLoadedUIComponents(page, {...snapshot, names});
+            await plans.flush();
+          });
+          console.log(JSON.stringify({diagnostic: 'terminal-ui-loads', superseded: terminal.superseded}));
+        }
+        catch (error) {
+          const kind = error.message === 'UI plan request failed before receipt drain' ? 'failed-request'
+            : error.message === 'UI plan has no known terminal receipt' ? 'unknown-receipt' : 'other';
+          console.error(JSON.stringify({diagnostic: 'plan-drain-failure', kind,
+            requests: plans.requests.slice(-64).map(({sequence, component, status, loadId, documentId, abortError, signalAborted}) => ({
+              sequence, component, status, loadId, documentId, abortError, signalAborted,
+            }))}));
+          throw error;
+        }
+      },
       onStagedReceipt: async receipt => {
+        lessonReceipt = receipt;
         const path = '/tmp/graphden-native25-staged-ledger-' + process.pid + '.json';
         fs.writeFileSync(path, JSON.stringify(receipt), {mode: 0o600, flag: 'wx'});
         console.log(JSON.stringify({diagnostic: 'staged-creation-receipt', path}));
       },
       onReceipt: async receipt => {
+        lessonReceipt = receipt;
         const path = '/tmp/graphden-native25-ledger-' + process.pid + '.json';
         fs.writeFileSync(path, JSON.stringify(receipt), {mode: 0o600, flag: 'wx'});
         ownedIds = new Set(receipt.manifest.functions.map(row => row.id));
@@ -173,7 +191,19 @@ const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
     console.error('FAIL personal UI component walkthrough; error details withheld to avoid DOM dumps');
     process.exitCode = 1;
   } finally {
-    try { await restorePickerOnlySelection(page, priorFixture); }
-    finally { await browser.close(); }
+    // Report each cleanup failure independently; none can erase the original
+    // walkthrough failure or prevent the other exact owned cleanup attempt.
+    const cleanupFailures = [];
+    for (const [stage, cleanup] of [
+      ['lesson', () => restoreLessonSelection(page, lessonReceipt)],
+      ['picker', () => restorePickerOnlySelection(page, priorFixture)],
+      ['browser', () => browser.close()],
+    ]) {
+      try { await cleanup(); } catch (_) { cleanupFailures.push(stage); }
+    }
+    if (cleanupFailures.length) {
+      console.error(JSON.stringify({diagnostic: 'ui-fixture-cleanup-failure', stages: cleanupFailures}));
+      process.exitCode = 1;
+    }
   }
 })().catch(() => { console.error('FAIL personal UI fixture; details withheld'); process.exitCode = 1; });

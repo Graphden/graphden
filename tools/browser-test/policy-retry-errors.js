@@ -2,6 +2,9 @@
 // A classified transient refusal can emit a browser network-console error even
 // when the host retries successfully. Never waive a terminal or unknown reply.
 function samePlanLoad(reply, success, required = false) {
+  if (reply.documentId !== undefined || success.documentId !== undefined) {
+    if (typeof reply.documentId !== 'string' || !reply.documentId || reply.documentId !== success.documentId) return false;
+  }
   if (!required && reply.loadId === undefined && success.loadId === undefined) return true;
   return Number.isSafeInteger(reply.loadId) && reply.loadId > 0 && reply.loadId === success.loadId;
 }

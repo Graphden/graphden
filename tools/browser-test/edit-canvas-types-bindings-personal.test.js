@@ -81,6 +81,7 @@ const {captureLoadedUIComponents, waitForLoadedUIComponents, drainUIPlanReplies}
     await page.waitForFunction(() => gdPrefsReady && gdPrefOwner && gdUIConfigurationState?.()?.revision
       && graphReady() && !graph.animating, null, {timeout: 60000});
     original = await captureLoadedUIComponents(page);
+    await settle(original);
     assert((await api(page, 'POST', '/api/ui/configuration/prepare', {home: true})).ok, 'personal home prepared');
     const owner = await page.evaluate(() => gdPrefOwner);
     const types = await createCopy('canvas-type-structure', owner);
@@ -126,6 +127,7 @@ const {captureLoadedUIComponents, waitForLoadedUIComponents, drainUIPlanReplies}
         label: box.getAttribute('aria-label'), dialog: box.closest('[role="dialog"]')};
     });
     const selected = await captureLoadedUIComponents(page);
+    await settle(selected);
     const bindingActivation = await activate(bindings);
     await page.waitForFunction(() => bindingProof.dialog.querySelector('.gd-canvas-bindings-personal'), null, {timeout: 60000});
     assert(await page.evaluate(expected => gdUIComponentsRoots()['canvas-type-structure-id'] === expected,
@@ -168,6 +170,7 @@ const {captureLoadedUIComponents, waitForLoadedUIComponents, drainUIPlanReplies}
     }
     phase = 'hidden-personal-bindings';
     const loaded = await captureLoadedUIComponents(page);
+    await settle(loaded);
     await editLiteral(bindings, '_style-seal-checkbox', 'keys', 'display', 0);
     await editLiteral(bindings, '_style-seal-checkbox', 'vals', 'none', 0);
     await page.evaluate(() => gdRefreshUIConfiguration());

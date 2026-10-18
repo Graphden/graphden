@@ -138,7 +138,8 @@ async function bindPersonalMenuTheme(page, entry, accent, background) {
   await form.waitFor({state: 'detached'});
 }
 
-async function walkUIComponentsLesson(page, {onReceipt = async () => {}, onStagedReceipt = async () => {}, cleanupOnly = false} = {}) {
+async function walkUIComponentsLesson(page, {onReceipt = async () => {}, onStagedReceipt = async () => {}, cleanupOnly = false, settleComponents} = {}) {
+  if (typeof settleComponents !== 'function') throw Error('UI lesson proof requires runtime settlement');
   await page.goto(BASE + '/?tutorial=25');
   await waitTourTitle(page, 'Personal graphs, shared definitions', 150000);
   assert(await clickTourButton(page, 'Next'), 'lesson 25 starts');
@@ -149,6 +150,7 @@ async function walkUIComponentsLesson(page, {onReceipt = async () => {}, onStage
     configuration: gdUIConfigurationState().selection['fn-id'], theme: gdPrefRead('theme'),
     picker: gdUIComponentsRoots()['picker-id'], branch: getCurrentBranchName()}));
   const loadedComponents = await captureLoadedUIComponents(page);
+  await settleComponents(loadedComponents);
   assert(loadedComponents.names.includes('account-menu') && loadedComponents.names.includes('tutorial-catalog'),
     'the menu and tutorial catalog use the ordinary configuration before personalization');
   const applyPath = await page.evaluate(() => new URL(API.api_ui_configuration_apply, location.href).pathname);
@@ -178,6 +180,7 @@ async function walkUIComponentsLesson(page, {onReceipt = async () => {}, onStage
   assert(selectionWaitedForPersistence, 'selection publication waits for the actual APPLY commit');
   assert(await page.evaluate(theme => JSON.stringify(gdPrefRead('theme')) === JSON.stringify(theme), previous.theme),
     'personalization keeps the theme preference');
+  await settleComponents(await captureLoadedUIComponents(page));
   if (cleanupOnly) {
     await page.keyboard.press('Escape');
   } else {
@@ -194,6 +197,7 @@ async function walkUIComponentsLesson(page, {onReceipt = async () => {}, onStage
     await waitTourTitle(page, 'The boundary and cleanup');
     assert(await page.evaluate(id => selectedFnId === id, previous.picker), 'the picker identity remains unchanged');
     await page.screenshot({path: '/tmp/graphden-personal-ui-components.png'});
+    await settleComponents(await captureLoadedUIComponents(page));
     assert(await clickTourButton(page, 'Finish'), 'Finish button');
   }
   await reviewEditorConfigurationCleanup(page, 120000);
@@ -214,6 +218,7 @@ async function walkUIComponentsLesson(page, {onReceipt = async () => {}, onStage
   // Configuration publication can precede another component's bounded policy
   // retry. Wait for the actual previously loaded runtimes, not just the picker.
   await waitForLoadedUIComponents(page, loadedComponents);
+  await settleComponents(loadedComponents);
   assert(await page.evaluate(() => gdShellMenuGraph.ready && !gdUIComponentsStatus()),
     'cleanup restores the loaded component runtimes without a terminal fallback');
   const after = await page.evaluate(() => ({components: gdPrefRead('components'),

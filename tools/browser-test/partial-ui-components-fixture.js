@@ -51,6 +51,46 @@ async function preparePickerOnlySelection(page, remember) {
   } finally { page.off('pageerror', capturePageError); }
 }
 
+// A failed lesson can still own the active selection. Restore its exact
+// committed cohort before undoing the outer picker fixture that it replaced.
+async function restoreLessonSelection(page, lesson) {
+  if (!lesson) return;
+  const {request, original} = lesson;
+  const rows = original['function-receipts'];
+  assert(original.created === true && rows.length > 0
+    && new Set(rows.map(row => row.id)).size === rows.length
+    && rows.some(row => row.id === original.id), 'lesson cleanup has an exact created cohort');
+  const context = await page.evaluate(() => ({owner: gdPrefOwner,
+    org: typeof graphdenCurrentOrg === 'string' && graphdenCurrentOrg ? graphdenCurrentOrg : 'public',
+    branch: getCurrentBranchName()}));
+  assert(request.scope['principal-id'] === context.owner && request.scope.org === context.org
+    && lesson['branch-name'] === context.branch, 'lesson cleanup retains its owner, organization and branch');
+  const entities = await api(page, 'GET', '/api/graph/entities?scope=index', undefined,
+    {'X-Graphden-Branch': request.scope['branch-id']});
+  const byId = new Map(entities.fns.map(row => [row.id, row]));
+  const command = {'current-id': original.id,
+    'expected-configuration-revision': original['configuration-revision'],
+    'cohort-revision': original['cohort-revision'], previous: original.previous, functions: rows};
+  const proof = {receipt: command, scope: request.scope, 'restore-revision': original['restore-revision']};
+  const headers = {'X-Graphden-Branch': request.scope['branch-id']};
+  if (rows.every(row => !byId.has(row.id))) {
+    const confirmed = await api(page, 'POST', '/api/ui/configuration/reconcile-undo', proof, headers);
+    assert(confirmed.ok && confirmed.confirmed === true && confirmed.undone === true,
+      'completed lesson cleanup retains the exact original restore witness');
+    return;
+  }
+  assert(rows.every(row => byId.get(row.id)?.name === row.name
+    && byId.get(row.id)?.['namespace-id'] === row['namespace-id']), 'lesson cleanup matches every exact owned function');
+  const review = await api(page, 'POST', '/api/ui/configuration/cleanup-preview', proof, headers);
+  assert(review.ok && review.kind === 'editor-configuration-cleanup-review'
+    && review.request?.['current-id'] === original.id
+    && JSON.stringify(review.request.previous) === JSON.stringify(original.previous)
+    && JSON.stringify(review.delete.map(row => row.id).sort()) === JSON.stringify(rows.map(row => row.id).sort()),
+  'lesson cleanup review contains exactly its owned cohort and original restore anchor');
+  const result = await undoConfiguration(page, {request, receipt: original}, review.request);
+  assert(result.ok, 'failed lesson restores its exact previous configuration atomically');
+}
+
 async function restorePickerOnlySelection(page, fixture) {
   if (!fixture) return;
   if (fixture.activation) {
@@ -72,4 +112,4 @@ async function restorePickerOnlySelection(page, fixture) {
   }
 }
 
-module.exports = {preparePickerOnlySelection, restorePickerOnlySelection};
+module.exports = {preparePickerOnlySelection, restorePickerOnlySelection, restoreLessonSelection};

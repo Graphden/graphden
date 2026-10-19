@@ -156,7 +156,9 @@
                  [:fn {} :int #{:db}]
                  [:fn {} :int #{} #{}]
                  [:fn {} [:list [:map :text :int]] #{:db} #{:browser-main}]
-                 [:fn {} :int :any [:execution-var 'E]]]]
+                 [:fn {} :int :any [:execution-var 'E]]
+                 [:map :keyword [:fn {} :int #{} #{:browser-main}]]
+                 [:list [:map :keyword [:fn {} :int #{:db} [:execution-var 'E]]]]]]
     (binding [diag/*diagnostics-override* (atom {})]
       (let [storage (setup/create-test-storage)]
         (try

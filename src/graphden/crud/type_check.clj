@@ -260,7 +260,7 @@
          (= :variant (first (:constraint tfn))))
     (types/desugar-variant (:constraint tfn))
     (and (vector? (:constraint tfn))
-         (#{:fn :map :tuple} (first (:constraint tfn))))
+         (#{:fn :map :list :tuple} (first (:constraint tfn))))
     (:constraint tfn)
     (and (empty? (:parent-ids tfn))
          (nil? (:return-type-fn-id tfn))
@@ -321,9 +321,9 @@
   ;; registration, including root/materialized aliases and bare primitives.
   (or (cr/qualified-type-name {(:namespace-id row) (::ns-path row)} row)
       (some-> (:name row) keyword)
-      ;; Anonymous callable type rows have no alias name. Their complete
+      ;; Anonymous callable/collection rows have no alias name. Their complete
       ;; stored constraint is the reference, including legacy arity/identity.
-      (when (and (vector? (:constraint row)) (= :fn (first (:constraint row))))
+      (when (and (vector? (:constraint row)) (#{:fn :map :list} (first (:constraint row))))
         (:constraint row))))
 
 

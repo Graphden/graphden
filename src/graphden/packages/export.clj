@@ -181,7 +181,7 @@
       (cond
         (nil? fnr) :any
         (:name fnr) (ref-kw id ctx)
-        (and (vector? (:constraint fnr)) (= :fn (first (:constraint fnr))))
+        (and (vector? (:constraint fnr)) (#{:fn :map :list} (first (:constraint fnr))))
         (:constraint fnr)
         (seq (slots-of id ctx)) (reconstruct-record-shape id ctx)
         :else :any))))

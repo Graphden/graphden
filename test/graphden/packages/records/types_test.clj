@@ -198,3 +198,33 @@
     (is (thrown? clojure.lang.ExceptionInfo (types/inline-fn-type-rows-from-form bad))))
   (is (thrown? clojure.lang.ExceptionInfo
         (types/fn-type-declaration [{} :int #{} :unknown :extra]))))
+
+
+(deftest execution-collection-references-retain-their-outer-structure
+  (doseq [execution [:unknown #{} #{:browser-main} [:execution-var 'E]]
+          shape [[:map :keyword [:fn {} :int #{:db} execution]]
+                 [:list [:fn {} :int :any execution]]
+                 [:list [:map :keyword [:fn {} :int #{} execution]]]]]
+    (let [id (ids/anonymous-fn-id (ids/digest-hex "SHA-1" (pr-str shape)))
+          source {:name :contracts :namespace "wire" :args {:handlers {:type shape}}}
+          rows (parse/parse-module [source])
+          type-row (first (filter #(= id (:id %)) rows))
+          slot (first (filter #(= :slot (:kind %)) rows))]
+      (is (= id (types/resolve-type-ref shape {})))
+      (is (= shape (:constraint type-row)))
+      (is (= id (:type-fn-id slot)))
+      (is (= (ids/slot-id (ids/fn-id "wire" :contracts) :handlers) (:id slot))))))
+
+
+(deftest legacy-collection-reimport-retains-historical-slot-identities-and-type-fks
+  (doseq [[shape primitive] [[[:list :int] :sequence]
+                             [[:map :keyword :int] :jsonb]
+                             [[:list [:fn {} :int]] :sequence]
+                             [[:map :keyword [:fn {} :int #{:db}]] :jsonb]]]
+    (let [source [{:name :legacy :namespace "wire" :args {:handlers {:type shape}}}]
+          rows (parse/parse-module source)
+          repeated (parse/parse-module source)
+          slot (first (filter #(= :slot (:kind %)) rows))]
+      (is (= rows repeated))
+      (is (= (ids/primitive-fn-id primitive) (:type-fn-id slot)))
+      (is (= (ids/slot-id (ids/fn-id "wire" :legacy) :handlers) (:id slot))))))

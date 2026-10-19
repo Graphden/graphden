@@ -66,6 +66,35 @@
   (shapes/normalise-fn-type (checked-fn-shape (into [:fn] declaration))))
 
 
+(defn- execution-collection?
+  "New collection contracts retain canonical callable execution facts in DB.
+   Legacy collections keep their historical primitive FK and identity."
+  [form]
+  (and (vector? form) (#{:list :map} (first form))
+       (shapes/type-any? #(and (vector? %) (= :fn (first %)) (= 5 (count %))) form)))
+
+
+(defn- inline-type-id
+  [shape]
+  (ids/anonymous-fn-id (ids/digest-hex "SHA-1" (pr-str shape))))
+
+
+(defn- inline-type-row
+  [shape]
+  (let [h (ids/digest-hex "SHA-1" (pr-str shape))]
+    {:kind :fn
+     :id (ids/anonymous-fn-id h)
+     :name nil
+     :namespace-id nil
+     :parent-ids []
+     :base-fn-id nil
+     :element-fn-id nil
+     :return-type-fn-id nil
+     :anonymous-hash h
+     :constraint shape
+     :description nil}))
+
+
 (defn resolve-type-ref
   "Resolve a `:type T` reference in EDN to a fn-id. T is one of:
    - primitive keyword (e.g. `:int`) → primitive's fn-id
@@ -75,8 +104,9 @@
    - inline composite map `{:foo :int :bar :text}` → anonymous fn-id
      by shape-hash (caller is expected to also emit the anonymous
      fn / slot / fn-slot records elsewhere)
-   - structural fn type `[:fn args ret]` → primitive `:fn`
-   - structural list type `[:list T]` → primitive `:sequence`
+   - structural fn type `[:fn args ret …]` → anonymous constraint row
+   - map/list containing canonical callable types → anonymous constraint row
+   - legacy structural list type `[:list T]` → primitive `:sequence`
    - structural refinement `[:refine B C]` → recurse on base
    - structural union `[:union …]` → primitive `:any`
    - type-var symbol `'a` → primitive `:any`
@@ -125,12 +155,12 @@
       ;; module pass. Slot's `:type-fn-id` lands on this id instead
       ;; of the primitive `:fn` UUID, so the editor recovers the
       ;; structural form via the row's `:constraint`.
-      :fn     (ids/anonymous-fn-id (ids/digest-hex "SHA-1" (pr-str (checked-fn-shape t))))
-      :list   (ids/primitive-fn-id :sequence)
+      :fn     (inline-type-id (checked-fn-shape t))
+      :list   (if (execution-collection? t) (inline-type-id t) (ids/primitive-fn-id :sequence))
       ;; A homogeneous `[:map K V]` is jsonb-shaped on the wire — same
       ;; storage kind as a record. A `[:tuple …]` is a fixed-length
       ;; sequence. The rich shape is kept in the rich-types registry.
-      :map    (ids/primitive-fn-id :jsonb)
+      :map    (if (execution-collection? t) (inline-type-id t) (ids/primitive-fn-id :jsonb))
       :tuple  (ids/primitive-fn-id :sequence)
       :refine (recur (second t) name->id)
       ;; `[:secret <inner>]` is an information-flow marker — at storage
@@ -182,35 +212,23 @@
    inside a compound shape still gets a row.
 
    Returns a vector of {:kind :fn …} maps; caller appends to its
-   own records output."
+   own records output. Collections containing canonical5 callables also
+   receive a row so their outer structure survives a slot/type override FK."
   [form]
   (cond
     (and (vector? form) (= :fn (first form)))
     (let [shape (checked-fn-shape form)
-          ;; `shape-hash` expects a MAP; `[:fn args ret]` is a vector,
-          ;; so hash the printed form directly. Same shape → same id
-          ;; via SHA-1 of canonical pr-str (keyword args / nested
-          ;; types serialise deterministically because clojure
-          ;; orders map keys in pr-str when keys are simple).
-          h (ids/digest-hex "SHA-1" (pr-str shape))
-          id (ids/anonymous-fn-id h)
-          self-row {:kind :fn
-                    :id id
-                    :name nil
-                    :namespace-id nil
-                    :parent-ids []
-                    :base-fn-id nil
-                    :element-fn-id nil
-                    :return-type-fn-id nil
-                    :anonymous-hash h
-                    :constraint shape
-                    :description nil}
+          self-row (inline-type-row shape)
           ;; Args / ret may themselves contain inline fn-types
           ;; (a HOF's `:f :next-handler` returning another fn).
           inner (concat (mapcat inline-fn-type-rows-from-form
                                 (vals (or (nth shape 1 nil) {})))
                         (inline-fn-type-rows-from-form (nth shape 2 nil)))]
       (into [self-row] inner))
+
+    (execution-collection? form)
+    (into [(inline-type-row form)]
+          (mapcat inline-fn-type-rows-from-form (rest form)))
 
     ;; Compound forms — recurse into the relevant branch(es).
     (and (vector? form) (#{:list :refine} (first form)))

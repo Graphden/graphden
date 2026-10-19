@@ -1,8 +1,10 @@
 (ns graphden.crud.callable-persistence-test
   "Real PostgreSQL JSONB codec at source/export and anonymous override seams."
   (:require
+    [cheshire.core :as json]
     [clojure.test :refer [deftest is]]
     [graphden.crud.type-check :as tc]
+    [graphden.crud.types-api :as ta]
     [graphden.packages.export :as export]
     [graphden.packages.records.parse :as parse]
     [graphden.storage.postgres.codec :as codec]
@@ -60,3 +62,26 @@
                                         :fn-type (vec (rest decoded))}])
                   (catch clojure.lang.ExceptionInfo e e))]
       (is (= :records/unsupported-type-ref (:type (ex-data error)))))))
+
+
+(deftest standalone-execution-collections-survive-source-storage-wire-and-reimport
+  (doseq [execution [:unknown #{} #{:browser-main} [:execution-var 'E]]
+          shape [[:map :keyword [:fn {} :int #{:db} execution]]
+                 [:list [:fn {} :int :any execution]]
+                 [:list [:map :keyword [:fn {} :int #{} execution]]]]]
+    (let [source [{:name :contracts :namespace "wire" :args {:handlers {:type shape}}}]
+          rows (parse/parse-module source)
+          saved (mapv #(cond-> % (:constraint %) (update :constraint persisted-constraint)) rows)
+          exported (export/records->fn-defs saved)
+          reimported (parse/parse-module exported)
+          type-row (first (filter #(= shape (:constraint %)) saved))
+          slot (first (filter #(= :slot (:kind %)) saved))
+          binding {:slot-id (:id slot) :type-override-fn-id (:id type-row)}
+          decoded (tc/binding-shape-for-edn nil {(:id type-row) type-row} {} {} binding)
+          wire (ta/json->type (json/parse-string (json/generate-string (:type decoded))))]
+      (is (= rows saved))
+      (is (= (set rows) (set reimported)))
+      (is (= (set (map :id rows)) (set (map :id reimported))))
+      (is (= {:type shape} decoded))
+      (is (= shape wire))
+      (is (= shape (tc/rich-type-from-row type-row {(:id type-row) type-row}))))))

@@ -38,15 +38,18 @@ const TARGET_FN = 'assoc-fn';
       null,
       {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
-    await page.waitForSelector('.type-chip-expandable', {timeout: 15000});
-    // The arg-overlay strip is painted once graphData lands; wait for
-    // both a type chip AND its provenance badge to render so phase A's
-    // counts are stable.
+    // initGraph awaits data, while the layout can still replace an old
+    // disabled chip. Wait for the selected action and its provenance.
     await page.waitForFunction(
-      () => document.querySelectorAll('.type-chip-expandable').length >= 1
-            && document.querySelectorAll('.arg-type-provenance').length >= 1,
+      () => {
+        const chip = document.querySelector('.type-chip-expandable');
+        return graphTypesReady() && !graph.animating && chip
+          && chip.getAttribute('aria-disabled') !== 'true'
+          && chip.getAttribute('tabindex') === '0'
+          && document.querySelectorAll('.arg-type-provenance').length >= 1;
+      },
       null,
-      {timeout: 5000, polling: 100});
+      {timeout: 20000, polling: 100});
 
     // ===================================================================
     // Phase A: at least one expandable chip + one provenance badge.
@@ -69,9 +72,7 @@ const TARGET_FN = 'assoc-fn';
     // ===================================================================
     // Phase B: click the first expandable chip → inline panel appears.
     // ===================================================================
-    await page.evaluate(() => {
-      document.querySelector('.type-chip-expandable')?.click();
-    });
+    await page.locator('.type-chip-expandable').first().click();
     await page.waitForFunction(
       () => Array.from(document.querySelectorAll('.type-inline-host'))
               .some((h) => h.style.display !== 'none'),
@@ -102,10 +103,7 @@ const TARGET_FN = 'assoc-fn';
     // ===================================================================
     // Phase C: click again → panel hides (toggle).
     // ===================================================================
-    await page.evaluate(() => {
-      document.querySelector(
-        '.type-chip-expandable[aria-expanded="true"]')?.click();
-    });
+    await page.locator('.type-chip-expandable[aria-expanded="true"]').first().click();
     await page.waitForFunction(
       () => Array.from(document.querySelectorAll('.type-inline-host'))
               .every((h) => h.style.display === 'none'),

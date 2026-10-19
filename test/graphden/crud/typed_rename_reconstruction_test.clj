@@ -181,7 +181,12 @@
             (is (= {:input {:as :event :type shape}}
                    (:args (tc/reconstruct-fn-def storage (:id child)))))
             (is (nil? (tc/type-check-fn-after-mutation! storage (:id child))))
-            (is (= shape (get-in (registry/rich-type-of-id (:id child)) [:args :event])))
+            ;; The checker view canonicalizes legacy callable signatures;
+            ;; source/storage payloads and identity below stay historical.
+            (is (= (get {[:fn {:x :int} :int] [:fn {:x :int} :int :any :unknown]
+                         [:fn {} :int #{:db}] [:fn {} :int #{:db} :unknown]}
+                        shape shape)
+                   (get-in (registry/rich-type-of-id (:id child)) [:args :event])))
             (is (= (:id source-type)
                    (:id (sp/read-entity storage :fn (:id source-type)))))
             (let [stored-shape (:constraint (sp/read-entity storage :fn (:id source-type)))

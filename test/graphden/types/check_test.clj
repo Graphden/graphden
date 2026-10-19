@@ -2420,7 +2420,8 @@
 
 
 (deftest inherited-callable-slot-informs-polymorphic-return-rules
-  (let [signature [:fn {:input :int} [:secret :text] #{:db}]]
+  (let [signature [:fn {:input :int} [:secret :text] #{:db}]
+        canonical-signature [:fn {:input :int} [:secret :text] #{:db} :unknown]]
     (registry/record-rich-types! :configured-body
                                  {:args {:input :int :config :text}
                                   :lambda-params [:input]
@@ -2431,9 +2432,9 @@
     (check/check-fn-def! {:name :configured-constructor :parent :callable-constant
                           :args {:value :configured-body}})
     (let [result (:return (registry/rich-type-of :configured-constructor))]
-      (is (= [:secret signature] result)
+      (is (= [:secret canonical-signature] result)
           "Returning the callable does not substitute its future evaluated result")
-      (is (= signature (check/assemble-fn-type :configured-constructor)))
+      (is (= canonical-signature (check/assemble-fn-type :configured-constructor)))
       (is (not (types-core/subtype? result signature)))
       (is (thrown? clojure.lang.ExceptionInfo
             (check/check-fn-def! {:name :declassified-constructor :parent :const

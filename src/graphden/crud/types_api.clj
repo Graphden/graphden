@@ -347,7 +347,7 @@
         ;; `record-shape` would misclassify them. Fall back to
         ;; `record-shape` only when no marker FK / tag is present.
         stored (record-types/stored-type-ref
-                 (:id f) {:fn-by-id (assoc fns-by-id (:id f) (dissoc f :name))
+                 (:id f) {:fn-by-id fns-by-id :unfold-root? true
                           :slot-by-id slot-by-id :slots-by-fn slots-by-fn
                           :named-ref #(some-> (:name %) keyword)})
         structural (if (constraint-tagged? f :variant) (types/desugar-variant stored) stored)

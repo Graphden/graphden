@@ -87,15 +87,16 @@
     (is (false? (execution/claim-compatible? shape [:list callback])))))
 
 
-(deftest cold-cyclic-list-is-unknown-in-registry-and-type-api
-  (let [id (random-uuid)
-        graph {:fns [{:id id :name "cycle" :element-fn-id id}]
-               :slots [] :fn-slots [] :bindings [] :list-items []}]
-    (cr/register-type-aliases-from-db! graph ::cycle)
-    (is (= [:list :jsonb] (types/resolve-alias :cycle)))
-    (is (= [:list :jsonb]
-           (get-in (types-api/rich-types-with-type-rows {:graph-cache (atom graph)}) [:cycle :return])))
-    (is (false? (execution/claim-compatible? (types/resolve-alias :cycle) [:list callback])))))
+(deftest cold-named-self-references-retain-their-identity
+  (let [graph (graph-of [{:name :node :namespace "user" :type {:next :node}}
+                         {:name :node-list :namespace "user" :list :node-list}])
+        ctx {:graph-cache (atom graph)}]
+    (cr/register-type-aliases-from-db! graph ::recursive {"user" "user"})
+    (is (= {:next :user/node} (get (types/aliases-snapshot) :user/node)))
+    (is (= [:list :user/node-list] (get (types/aliases-snapshot) :user/node-list)))
+    (is (= {:next :node} (get-in (types-api/rich-types-with-type-rows ctx) [:node :return])))
+    (is (= [:list :node-list] (get-in (types-api/rich-types-with-type-rows ctx) [:node-list :return])))
+    (is (false? (execution/claim-compatible? (types/resolve-alias :user/node-list) [:list callback])))))
 
 
 (deftest legacy-collection-fields-keep-their-primitive-contracts-after-cold-registration

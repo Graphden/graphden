@@ -304,33 +304,34 @@
 
 
 (defn stored-type-ref
-  "Resolve a type identity from indexed stored rows. `named-ref`, when
-   supplied, preserves named aliases; anonymous constraints remain structural.
-   Missing/cyclic rows remain jsonb-shaped unknowns, never callable proof."
-  [type-id {:keys [fn-by-id slot-by-id slots-by-fn named-ref]}]
+  "Resolve a stored type identity. Named references retain their name, even
+   through recursive links; `unfold-root?` expands only the requested root.
+   Missing/anonymous cyclic rows remain unknown, never callable proof."
+  [type-id {:keys [fn-by-id slot-by-id slots-by-fn named-ref unfold-root?]}]
   (letfn [(walk
-            [id seen]
-            (if (contains? seen id)
-              :jsonb
-              (if-let [row (get fn-by-id id)]
-                (or (when (and named-ref (:name row)) (named-ref row))
+            [id seen root?]
+            (if-let [row (get fn-by-id id)]
+              (or (when (and named-ref (:name row) (not (and root? unfold-root?)))
+                    (named-ref row))
+                  (if (contains? seen id)
+                    :jsonb
                     (let [seen (conj seen id)
                           c (:constraint row)
                           own (get slots-by-fn id)]
                       (cond
-                        (:base-fn-id row) [:refine (walk (:base-fn-id row) seen) c]
-                        (:element-fn-id row) [:list (walk (:element-fn-id row) seen)]
+                        (:base-fn-id row) [:refine (walk (:base-fn-id row) seen false) c]
+                        (:element-fn-id row) [:list (walk (:element-fn-id row) seen false)]
                         (and (vector? c) (#{:fn :list :map :tuple :union :variant} (first c))) c
                         (and (empty? (:parent-ids row)) (nil? (:return-type-fn-id row)) (seq own))
                         (into {} (keep (fn [fs]
                                          (when-let [slot (get slot-by-id (:slot-id fs))]
-                                           [(keyword (:name slot)) (walk (:type-fn-id slot) seen)])))
+                                           [(keyword (:name slot)) (walk (:type-fn-id slot) seen false)])))
                               (sort-by :position own))
                         (and (empty? (:parent-ids row)) (nil? (:return-type-fn-id row)) (:name row))
                         (keyword (:name row))
-                        :else :jsonb)))
-                :jsonb)))]
-    (walk type-id #{})))
+                        :else :jsonb))))
+              :jsonb))]
+    (walk type-id #{} true)))
 
 
 (defn storage-kind

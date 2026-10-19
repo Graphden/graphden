@@ -276,7 +276,7 @@
                      body (case role
                             (:record :refinement :list)
                             (record-types/stored-type-ref
-                              (:id f) (assoc-in type-index [:fn-by-id (:id f)] (dissoc f :name)))
+                              (:id f) (assoc type-index :unfold-root? true))
 
                             (:union :fn-type)
                             (:constraint f)

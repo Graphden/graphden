@@ -2,12 +2,15 @@
   "Stored rename views must retain their declared type when CRUD rebuilds
    the fn-def for a check, independently of unrelated binding references."
   (:require
+    [cheshire.core :as json]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.type-check :as tc]
+    [graphden.crud.types-api :as ta]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
+    [graphden.packages.records.parse :as parse]
     [graphden.storage.protocol.core :as sp]
     [graphden.types.core :as types]
     [graphden.types.diagnostics :as diag]))
@@ -146,3 +149,34 @@
                  (types/resolve-alias
                    (get-in (registry/rich-type-of-id (:id child)) [:args :event])))))
         (finally (sp/close storage))))))
+
+
+(deftest anonymous-callable-rename-survives-source-wire-and-stored-recheck
+  (doseq [shape [[:fn {:x :int} :int]
+                 [:fn {} :int #{:db}]
+                 [:fn {} :int #{} #{}]
+                 [:fn {} [:list [:map :text :int]] #{:db} #{:browser-main}]
+                 [:fn {} :int :any [:execution-var 'E]]]]
+    (binding [diag/*diagnostics-override* (atom {})]
+      (let [storage (setup/create-test-storage)]
+        (try
+          (let [rows (parse/parse-module
+                       [{:name :wire-source :namespace "wire"
+                         :args {:callback {:type shape}} :return-type :int}])
+                source-type (first (filter #(= shape (:constraint %)) rows))
+                ;; Exercise the public wire decoder before persistence; its
+                ;; output must keep the source shape's anonymous row identity.
+                decoded (ta/json->type (json/parse-string (json/generate-string shape)))
+                stored-type (sp/create-entity storage :fn
+                                              (-> source-type (dissoc :kind)
+                                                  (assoc :constraint decoded)))
+                child (renamed-child! storage (:id stored-type))]
+            (is (= (:id source-type) (:id stored-type)))
+            (is (= {:input {:as :event :type shape}}
+                   (:args (tc/reconstruct-fn-def storage (:id child)))))
+            (is (nil? (tc/type-check-fn-after-mutation! storage (:id child))))
+            (is (= shape (get-in (registry/rich-type-of-id (:id child)) [:args :event])))
+            (is (= (:id source-type)
+                   (:id (sp/read-entity storage :fn (:id source-type)))))
+            (is (= shape (:constraint (sp/read-entity storage :fn (:id source-type))))))
+          (finally (sp/close storage)))))))

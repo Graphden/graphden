@@ -320,7 +320,11 @@
   ;; Type references share the exact qualification rule used at alias
   ;; registration, including root/materialized aliases and bare primitives.
   (or (cr/qualified-type-name {(:namespace-id row) (::ns-path row)} row)
-      (some-> (:name row) keyword)))
+      (some-> (:name row) keyword)
+      ;; Anonymous callable type rows have no alias name. Their complete
+      ;; stored constraint is the reference, including legacy arity/identity.
+      (when (and (vector? (:constraint row)) (= :fn (first (:constraint row))))
+        (:constraint row))))
 
 
 (defn- row->ref
@@ -341,7 +345,9 @@
         ;; sibling in the EDN `{:as :name :type T}` shape).
         renamed-view (get renamed-view-by-source (:slot-id b))
         ref-id (:ref-fn-id b)
-        ref-shape (when ref-id (some-> (get fn-by-id ref-id) row->ref))]
+        ref-shape (when ref-id (some-> (get fn-by-id ref-id) row->ref))
+        override-id (:type-override-fn-id b)
+        override-type (when override-id (some-> (get fn-by-id override-id) row->type-kw))]
     (cond
       (some? items)
       (mapv (fn [it]
@@ -357,18 +363,20 @@
       ;; the checker input rather than reconstructing an ordinary value call.
       (and ref-shape (= ids/fn-ref-type-id (:type-override-fn-id b)))
       (assoc (if (map? ref-shape) ref-shape {:ref ref-shape}) :type :fn-ref)
-      ref-shape ref-shape
+      ref-shape (if override-id
+                  (assoc (if (map? ref-shape) ref-shape {:ref ref-shape}) :type override-type)
+                  ref-shape)
       ;; `:value-present` flag (intent), not `(some? :value)` —
       ;; `{:value nil}` is a legitimate pinned-nil binding that must
       ;; round-trip through reconstruct → type-check, otherwise it
       ;; vanishes and the type-checker sees the slot as free.
-      (true? (:value-present b)) {:value (:value b)}
+      (true? (:value-present b)) (cond-> {:value (:value b)}
+                                   override-id (assoc :type override-type))
       renamed-view {:as (keyword (:name renamed-view))
                     :type (some-> (:type-fn-id renamed-view)
                                   (->> (get fn-by-id))
                                   row->type-kw)}
-      (:type-override-fn-id b)
-      {:type (some-> (get fn-by-id (:type-override-fn-id b)) row->type-kw)}
+      override-id {:type override-type}
       :else nil)))
 
 

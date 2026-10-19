@@ -11,7 +11,8 @@
    can REJECT impure callbacks at sync time. There was no UI to set
    the constraint, so it lived only in EDN-side declarations. This
    endpoint exposes it: the editor sends `{effects: [\"io\" \"db\"]}`,
-   the server constructs the 4-arity constraint, dedupes via
+   the server constructs a canonical five-element constraint while preserving
+   execution support (unknown for legacy shapes), dedupes via
    deterministic `anonymous-fn-id` (same shape collapses to one row),
    and writes the binding's `:type-override-fn-id`.
 
@@ -111,9 +112,9 @@
   "Compute a narrower fn-type constraint by selectively replacing
    `args`, `ret`, or `effects` from the current effective type.
    `delta` is `{:args {…} :ret T :effects [\"io\" …]}` — any subset.
-   Defaults preserve the current value: 3-arity gets a 4th element
-   only when `:effects` is supplied, and `:args` / `:ret` keep
-   whatever the current shape carries when omitted.
+   Defaults preserve the current values, including execution support.
+   Writes use the canonical five-element callable shape; legacy execution
+   remains unknown and omitted legacy effects remain unconstrained.
 
    Subtype-checks the new constraint against the current; rejects
    widenings. Then runs the bound-callable safety check (effects
@@ -138,7 +139,7 @@
              cur-tfn (when cur-tfn-id (sp/read-entity storage :fn cur-tfn-id))
              cur-c (:constraint cur-tfn)]
          (cond
-           (or (not (vector? cur-c)) (not= :fn (first cur-c)))
+           (not (types/fn-type? cur-c))
            {:status 400
             :reason (str "Slot's effective type is not an fn-type ("
                          (pr-str cur-c) "); can't tighten.")}
@@ -146,7 +147,7 @@
            :else
            (let [cur-args (or (nth cur-c 1) {})
                  cur-ret (nth cur-c 2)
-                 cur-eff (when (= 4 (count cur-c)) (nth cur-c 3))
+                 cur-eff (types/fn-effects cur-c)
                  {:keys [args ret effects]} delta
                  ;; Args delta is a per-name override map. Merge so
                  ;; unmentioned arg names keep their current type.
@@ -160,7 +161,8 @@
                            (some? effects) (into #{} (map keyword) effects)
                            cur-eff         cur-eff
                            :else           nil)
-                 new-c (cond-> [:fn new-args new-ret] new-eff (conj new-eff))
+                 new-c (types/make-fn-type new-args new-ret new-eff
+                                           (types/fn-execution cur-c))
                  ok? (types/subtype? new-c cur-c)]
              (if-not ok?
                {:status 400
@@ -172,13 +174,13 @@
                ;; effect-only path. Args / ret narrowings don't
                ;; introduce new escape paths beyond what
                ;; `check-fn-def!` covers.
-               (let [eff-set (or new-eff #{})
+               (let [eff-set (if (set? new-eff) new-eff #{})
                      ref-fn-id (:ref-fn-id b)
                      ref-row (when ref-fn-id (sp/read-entity storage :fn ref-fn-id))
                      ref-info (some-> (:id ref-row)
                                       (registry/rich-type-of-id))
                      ref-effects (or (:effects ref-info) #{})
-                     escapes (when (and (some? new-eff) (seq ref-effects))
+                     escapes (when (and (set? new-eff) (seq ref-effects))
                                (clojure.set/difference (set ref-effects) eff-set))]
                  (if (seq escapes)
                    {:status 400

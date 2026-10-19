@@ -991,6 +991,21 @@
       (finally (sp/close storage)))))
 
 
+(deftest tighten-preserves-callable-execution-contract
+  (let [storage (setup/create-test-storage)]
+    (try
+      (doseq [[suffix current expected-execution]
+              [["browser-profile" [:fn {} :any #{:io :db} #{:browser-main}] #{:browser-main}]
+               ["empty-profile" [:fn {} :any #{:io :db} #{}] #{}]
+               ["legacy-profile" [:fn {} :any #{:io :db}] :unknown]]]
+        (let [[bid] (make-binding-on-fn-typed-slot! storage suffix current)
+              r (entities/tighten-fn-type-impl! storage bid {:effects ["io"]})
+              constraint (get-in r [:result :constraint])]
+          (is (= 200 (:status r)))
+          (is (= [:fn {} :any #{:io} expected-execution] constraint))))
+      (finally (sp/close storage)))))
+
+
 (deftest tighten-effects-impl-thin-wrapper-test
   ;; tighten-effects-impl! just forwards to tighten-fn-type-impl! with
   ;; only :effects filled in — covers the wrapper line.

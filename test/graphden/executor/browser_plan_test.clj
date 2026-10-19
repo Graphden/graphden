@@ -22,7 +22,8 @@
     [graphden.test-infra.account-menu-cases :as account-menu]
     [graphden.test-infra.browser-map-cases :as browser-map]
     [graphden.test-infra.browser-picker-cases :as browser-picker]
-    [graphden.test-infra.browser-recents-cases :as recents]))
+    [graphden.test-infra.browser-recents-cases :as recents]
+    [graphden.types.check :as check]))
 
 
 (use-fixtures :each
@@ -1291,3 +1292,22 @@
                                     "toggle-diff-lens"]]]]
       (is (= :zipmap (:parent (get by-name name))) (str name " must retain string keys through PG"))
       (is (= expected-keys (get-in by-name [name :args :keys]))))))
+
+
+(deftest stored-const-of-callback-has-no-browser-proof-and-export-rejects-it
+  (let [callback-type [:fn {} :int #{} #{:jvm-server :browser-main}]
+        primitives [{:name :const :namespace "core.logic"
+                     :args {:value {:type callback-type}} :return-type callback-type}
+                    {:name :add :namespace "core.arithmetic"
+                     :args {:nums {:type [:list :int]}} :return-type :int}]
+        definitions [{:name :callback :parent :add :args {:nums [1]}}
+                     {:name :boxed-callback :parent :const :args {:value :callback}}]
+        fixture (graph-of primitives definitions)]
+    (doseq [{name :name :as primitive} primitives]
+      (registry/record-rich-types! name (assoc primitive :impl (fn [_ _] nil))))
+    (doseq [definition definitions]
+      (check/check-fn-def! (assoc definition :namespace "preview")))
+    (is (= #{:jvm-server :browser-main}
+           (:execution (registry/rich-type-of :callback))))
+    (is (= :unknown (:execution (registry/rich-type-of :boxed-callback))))
+    (is (= :callable-binding (:reason (failure #(export-fixture fixture :boxed-callback)))))))

@@ -39,8 +39,11 @@
         (intersect-support [(if callback (types/fn-execution callback) :unknown)
                             (if constructor? (reference-support ref-info target)
                                 types/execution-profiles)])
-        constructor? (reference-support ref-info target)
-        :else types/execution-profiles)
+        ;; The browser ABI currently implements callable bindings only at
+        ;; its declared invocation slots. Passing a callback does not call
+        ;; it, but cannot establish browser support for an unsupported
+        ;; closure/capture representation (for example const/value).
+        :else :unknown)
       target (reference-support ref-info target)
       (seq (:execution-refs binding))
       (intersect-support (map #(reference-support ref-info %) (:execution-refs binding)))

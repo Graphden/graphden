@@ -24,7 +24,7 @@
         map-root (root "core.hof" :map {:func (callable :unknown) :coll [:list :int]})
         const-root (root "core.logic" :const {:value 'a})]
     (is (= #{:browser-main} (execution/derive map-root bindings refs)))
-    (is (= #{:jvm-server :browser-main}
+    (is (= :unknown
            (execution/derive const-root
                              {:value {:bound-ref :browser :type browser}} refs)))
     (is (= :unknown (execution/derive map-root {} refs)))))
@@ -49,8 +49,8 @@
         const-root (root "core.logic" :const {:value 'a})]
     (is (= #{} (execution/derive map-root
                                  {:func {:bound-ref :constructor :type cb}} refs)))
-    (is (= #{:jvm-server} (execution/derive const-root
-                                            {:value {:ref :constructor :type cb}} refs)))
+    (is (= :unknown (execution/derive const-root
+                                      {:value {:ref :constructor :type cb}} refs)))
     (is (= #{:jvm-server} (execution/derive const-root
                                             {:value {:ref :server-value :type :text}} refs)))))
 
@@ -63,3 +63,19 @@
     (is (= :unknown (execution/derive const-root
                                       {:renamed-value {:type :text}} {})))
     (is (= :unknown (execution/derive const-root {:value {:ref :missing}} {})))))
+
+
+(deftest literal-vector-payloads-do-not-contribute-execution-references
+  (let [const-root (root "core.logic" :const {:value 'a})
+        refs {:red {:execution #{:jvm-server}}
+              :blue {:execution :unknown}
+              :server {:execution #{:jvm-server}}}]
+    (doseq [payload [[:red :blue] [{:ref :server}]]]
+      (is (= #{:jvm-server :browser-main}
+             (execution/derive const-root
+                               {:value {:type [:list :any] :value payload :value-present true}} refs))))
+    (is (= #{:jvm-server}
+           (execution/derive const-root
+                             {:value {:type [:list :any] :value [:server] :value-present true
+                                      :execution-refs [:server]}}
+                             refs)))))

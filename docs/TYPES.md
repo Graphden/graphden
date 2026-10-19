@@ -929,7 +929,11 @@ An invoked callback contributes its invocation support; passing a callback as
 an uninvoked value does not execute it. Callable constructors contribute their
 construction stage separately. Effective bindings replace inherited bindings
 before support is intersected. Unknown invocation-stage contracts and unresolved
-slot provenance keep the derived result unknown.
+slot provenance keep the derived result unknown. A noninvoked callback also
+needs a supported backend representation: the current browser ABI rejects
+callable bindings at `const/value`, so those compositions have no browser proof.
+Literal payloads are not binding grammar; keywords or `:ref` maps inside an
+explicit literal vector do not contribute execution dependencies.
 
 Execution variables have a separate sort and substitutions from value-type
 variables. Each call freshens their local scope. Multiple callbacks constrain

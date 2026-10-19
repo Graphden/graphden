@@ -148,3 +148,19 @@
 (deftest synthesised-type-implementation-proves-native-host-support
   (registry/record-rich-types! :record-probe {:type {:value :text}})
   (is (= #{:jvm-server} (:execution (registry/rich-type-of :record-probe)))))
+
+
+(deftest literal-vectors-do-not-acquire-binding-grammar-execution-refs
+  (registry/record-rich-types! :const
+                               {:namespace "core.logic" :args {:value {:type 'a}}
+                                :return-type 'a :impl (fn [_ _] nil)})
+  (registry/record-rich-types-raw! :red
+                                   {:args {} :return :keyword :effects #{} :execution #{:jvm-server}})
+  (registry/record-rich-types-raw! :blue
+                                   {:args {} :return :keyword :effects #{} :execution :unknown})
+  (registry/record-rich-types-raw! :server
+                                   {:args {} :return :text :effects #{} :execution #{:jvm-server}})
+  (doseq [[name payload] [[:literal-keyword-vector [:red :blue]]
+                          [:literal-ref-map-vector [{:ref :server}]]]]
+    (check/check-fn-def! {:name name :parent :const :args {:value {:value payload}}})
+    (is (= #{:jvm-server :browser-main} (:execution (registry/rich-type-of name))))))

@@ -1934,7 +1934,10 @@
       {:type [:list (types/coarse-lub et)]
        :elem-types et
        :value b-form
-       :value-present true})
+       :value-present true
+       ;; This branch is binding grammar (a sequence chain), unlike the
+       ;; explicit {:value ...} branch, whose payload remains literal data.
+       :execution-refs (vec (ref-targets b-form))})
 
     (keyword? b-form)
     {:type :any :value b-form :value-present true}
@@ -2153,13 +2156,7 @@
   (let [expected (some-> fn-def :expects-effects set)
         resolved (merge (:resolved-bindings parent-info {}) own-resolved)
         root-info (registry/rich-type-of (registry/root-base-fn-name primary-parent))
-        execution-bindings (into {}
-                                 (map (fn [[arg info]]
-                                        [arg (cond-> info
-                                               (vector? (:value info))
-                                               (assoc :execution-refs (ref-targets (:value info))))]))
-                                 resolved)
-        execution-support (execution/derive root-info execution-bindings registry/rich-type-of)
+        execution-support (execution/derive root-info resolved registry/rich-type-of)
         call-time-effects (compute-call-time-effects arg-effects
                                                      parent-info
                                                      (keys free-args))]

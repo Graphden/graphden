@@ -339,9 +339,9 @@
 
 
 (defn- identity-memo!
-  "Look `k` up by IDENTITY in the bounded LRU `state` (a vector of
-   `[k v]`, most recent last); on a miss compute `(f k)`, remember it
-   (evicting the oldest past `cap`) and return it."
+  "Look `k` up by IDENTITY in bounded FIFO `state` (a vector of
+   `[k v]`, newest last); on a miss compute `(f k)`, remember it
+   (evicting the oldest past `cap`) and return it. Hits do not promote."
   [state cap k f]
   (or (some (fn [[g v]] (when (identical? g k) v)) @state)
       (let [v (f k)]
@@ -350,6 +350,11 @@
                                              (remove #(identical? (first %) k) entries)))
                              [k v])))
         v)))
+
+
+;; Each entry retains a whole graph plus its derived rows/indices. Keep the
+;; current snapshot and one alternating scoped snapshot, not a write history.
+(def ^:private layout-snapshot-cache-size 2)
 
 
 (defonce ^:private synth-args-state (atom []))
@@ -366,7 +371,7 @@
   [graph]
   (if (contains? graph :args)
     graph
-    (identity-memo! synth-args-state 16 graph
+    (identity-memo! synth-args-state layout-snapshot-cache-size graph
                     #(assoc % :args (derive-fn-slot-views %)))))
 
 
@@ -381,7 +386,7 @@
    copy's identity like `ensure-synth-args`, so `cached-build-lookups`
    downstream keeps hitting for the same copy."
   [graph]
-  (identity-memo! resynth-args-state 16 graph
+  (identity-memo! resynth-args-state layout-snapshot-cache-size graph
                   #(assoc % :args (derive-fn-slot-views %))))
 
 
@@ -414,9 +419,6 @@
          :fns-by-name (group-by #(keyword (:name %)) (filter :name fns))))
 
 
-(def ^:private cached-build-lookups-max-size 16)
-
-
 (defonce ^:private cached-build-lookups-state (atom []))
 
 
@@ -424,8 +426,8 @@
   "Reference-identity-memoised wrapper over `build-lookups`. Layout
    recomputes ~8 in-memory indexes per request (~5-10ms each); when
    the same graph map is passed (cached-or-load-graph between
-   mutations), reuses the result. Bounded LRU; identical to the
-   policy used in `graphden.executor.compile.lookups`."
+   mutations), reuses the result. Keeps the two most recently installed
+   snapshots, like the synthesis caches above."
   [graph]
-  (identity-memo! cached-build-lookups-state cached-build-lookups-max-size
+  (identity-memo! cached-build-lookups-state layout-snapshot-cache-size
                   graph build-lookups))

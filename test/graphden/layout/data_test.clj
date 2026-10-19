@@ -60,6 +60,50 @@
         "a replaced snapshot is synthesised afresh")))
 
 
+(deftest layout-caches-retain-only-two-correct-snapshots
+  (let [fn-id (random-uuid)
+        slot-id (random-uuid)
+        graph {:fns [{:id fn-id :name "root" :parent-ids []}]
+               :slots [{:id slot-id :name "value"}]
+               :fn-slots [{:fn-id fn-id :slot-id slot-id :position 0}]
+               :bindings [] :list-items []}
+        bound (assoc graph :bindings [{:id (random-uuid) :fn-id fn-id
+                                       :slot-id slot-id :value "bound" :value-present true}])
+        cleaned (assoc graph :namespaces [])]
+    (doseq [{:keys [label run cache prepare rows]}
+            [{:label "synthesis" :run data/ensure-synth-args
+              :cache #'data/synth-args-state :prepare identity :rows :args}
+             {:label "concealed-view synthesis" :run data/resynth-args
+              :cache #'data/resynth-args-state :prepare identity :rows :args}
+             {:label "lookups" :run data/cached-build-lookups
+              :cache #'data/cached-build-lookups-state
+              :prepare #(assoc % :args (data/derive-fn-slot-views %))
+              :rows #(vals (:arg-map %))}]]
+      (testing label
+        (with-redefs-fn {cache (atom [])}
+          (fn []
+            (let [before (prepare graph)
+                  changed (prepare bound)
+                  after (prepare cleaned)
+                  original (run before)
+                  changed-result (run changed)]
+              (testing "same and alternating snapshots reuse their results"
+                (dotimes [_ 3]
+                  (is (identical? original (run before)))
+                  (is (identical? changed-result (run changed)))))
+              (testing "cleanup installs a third snapshot and evicts the oldest"
+                (let [clean-result (run after)]
+                  (is (= 2 (count @(var-get cache))))
+                  (is (identical? changed-result (run changed))
+                      "the second snapshot survives installing the third")
+                  (let [recomputed (run before)]
+                    (is (not (identical? original recomputed)))
+                    (is (nil? (:value (first (rows recomputed))))))
+                  (is (nil? (:value (first (rows clean-result)))))
+                  (is (= "bound" (:value (first (rows changed-result))))
+                      "older immutable results do not contaminate cleanup"))))))))))
+
+
 (deftest lookups-carry-the-children-index
   ;; The executor's descendant walks (`renames/inheritance-descendants`)
   ;; read `:children-by-fn` off the lookups they are handed; layout's lookups

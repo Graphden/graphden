@@ -66,13 +66,13 @@ Requests grid layout from ~/api/graph/layout~ using the selected root and expans
 :PROPERTIES:
 :CUSTOM_ID: editor/renderGraph
 :FILE: resources/packages/app/editor/editor-render.js
-:LINE: 96
-:MINS: 9.9
+:LINE: 103
+:MINS: 10.0
 :END:
 
 Coordinates one asynchronous render. A generation counter prevents an older render from replacing a newer one; a remembered anchor preserves the user's position while data loads. After applying layout changes, it measures [[file:glossary.org::#term/hiccup][DOM]] cards and adjusts positions to their actual sizes.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-render.js::async function renderGraph(shouldFit = true) {][resources/packages/app/editor/editor-render.js:96]]
+- source :: [[file:../../../resources/packages/app/editor/editor-render.js::async function renderGraph(shouldFit = true) {][resources/packages/app/editor/editor-render.js:103]]
 
 * 6. createFnOverlay
 :PROPERTIES:
@@ -121,13 +121,13 @@ Loads a [[file:glossary.org::#term/htmx][server-rendered HTML fragment]] into a 
 :PROPERTIES:
 :CUSTOM_ID: editor/loadRowActionsContent
 :FILE: resources/packages/app/editor/editor-row-actions.js
-:LINE: 421
+:LINE: 441
 :MINS: 3.8
 :END:
 
 Loads the row-action menu as a server fragment, caching HTML by request URL. Compatibility for adding a parent is recalculated against current client lookups rather than trusted from stale HTML. See [[file:../../../docs/EDITOR_ROW_ACTIONS.md][row actions]].
 
-- source :: [[file:../../../resources/packages/app/editor/editor-row-actions.js::async function loadRowActionsContent(host, fnId, context, opts) {][resources/packages/app/editor/editor-row-actions.js:421]]
+- source :: [[file:../../../resources/packages/app/editor/editor-row-actions.js::async function loadRowActionsContent(host, fnId, context, opts) {][resources/packages/app/editor/editor-row-actions.js:441]]
 
 * 10. publishHttpHost
 :PROPERTIES:

@@ -337,10 +337,10 @@ Resolves a request's branch reference from a header or query parameter and invok
 :PROPERTIES:
 :CUSTOM_ID: versioning/validate-graph-epoch!
 :FILE: src/graphden/system/branch_router/epoch.clj
-:LINE: 292
+:LINE: 306
 :MINS: 3.3
 :END:
 
 Checks graph [[file:glossary.org::#term/invalidation][epochs]] since the context's last recorded position and distinguishes applied, notified, in-progress, and missed changes. Missed changes trigger a background rebuild for the base context and eviction of other cached branch contexts, which rebuild on demand.
 
-- source :: [[file:../../../src/graphden/system/branch_router/epoch.clj::(defn validate-graph-epoch!][src/graphden/system/branch_router/epoch.clj:292]]
+- source :: [[file:../../../src/graphden/system/branch_router/epoch.clj::(defn validate-graph-epoch!][src/graphden/system/branch_router/epoch.clj:306]]

@@ -58,7 +58,16 @@ async function createPublication(page, name, body) {
   await waitTourTitle(page, 'Make your own handler');
   await extendViaRowActions(page, name, 'text-ok-response');
   await waitTourTitle(page, 'Set the response', 150000);
+  const ownerId = await page.evaluate(() => selectedFnId);
   await bindPlaceholderOn(page, name, 'body', 'literal', body);
+  // Save closes its form before the new layout arrives. A replaced button can
+  // also come from an older hover preview, so require the actual bound value.
+  await page.waitForFunction(({id, name, value}) => selectedFnId === id
+    && graphTypesReady() && !graph.animating
+    && !document.querySelector('.placeholder-binder[data-fn-name="' + name + '"][data-arg-name="body"]')
+    && [...graph.nodes.values()].some(node => node.data.type === 'arg'
+      && node.data.fnId === id && node.data.value === value),
+  {id: ownerId, name, value: body}, {timeout: 30000, polling: 100});
   await waitTourTitle(page, 'Open HTTP publication');
   await openHttpHost(page, name);
   await waitTourTitle(page, 'Publish for 30 minutes');

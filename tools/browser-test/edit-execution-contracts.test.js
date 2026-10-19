@@ -112,6 +112,14 @@ async function candidate(page, name, compatible) {
     await staleChip.dispatchEvent('click');
     assert(await page.locator('.type-inline-host:visible').count() === 0,
       'stale E chip cannot reopen an editable panel during the held type refresh');
+    await page.evaluate(async () => {
+      await ensureSubtreeFor(selectedFnId);
+      await renderGraph(true);
+    });
+    await page.waitForSelector('.edge-label-overlay[data-arg-name="events"] .arg-type-chip');
+    await page.locator('.edge-label-overlay[data-arg-name="events"] .arg-type-chip').dispatchEvent('click');
+    assert(await page.locator('.type-inline-host:visible').count() === 0,
+      'selection/repaint cannot make stale rich types editable while /api/types is held');
     releaseTypeRefresh(); releaseTypeRefresh = null;
     await page.waitForFunction(() => {
       const e = richTypeEntryOf(lookups.fnMap.get(selectedFnId));

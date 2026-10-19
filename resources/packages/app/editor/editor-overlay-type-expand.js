@@ -622,6 +622,11 @@ function attachInlineExpand(chipEl, rich, path, ctx) {
   const c = ctx || {};
   const editable = !!c.editable && typeof c.onEdit === 'function';
   const generation = typeof graphTypeGeneration === 'function' ? graphTypeGeneration() : null;
+  const pending = generation != null && !graphTypesReady();
+  if (pending) {
+    chipEl.setAttribute('aria-disabled', 'true');
+    chipEl.title = 'Updating type contract…';
+  }
   const actionReady = () => chipEl.getAttribute('aria-disabled') !== 'true'
     && (generation == null || (generation === graphTypeGeneration() && graphTypesReady()))
     && (!c.arg || (typeof expectedSlotType === 'function' && typeof structEq === 'function'
@@ -633,7 +638,7 @@ function attachInlineExpand(chipEl, rich, path, ctx) {
     if (editable) {
       window.gdAppendTypeControlMark(chipEl, '✎');
       chipEl.setAttribute('role', 'button');
-      chipEl.setAttribute('tabindex', '0');
+      chipEl.setAttribute('tabindex', pending ? '-1' : '0');
       chipEl.style.cursor = 'pointer';
       chipEl.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -656,12 +661,12 @@ function attachInlineExpand(chipEl, rich, path, ctx) {
   // keyboard-operable — so set the role, make it focusable, and
   // mirror Enter / Space onto the click handler below.
   chipEl.setAttribute('role', 'button');
-  chipEl.setAttribute('tabindex', '0');
+  chipEl.setAttribute('tabindex', pending ? '-1' : '0');
   chipEl.setAttribute('aria-expanded', expandedTypePaths.has(path) ? 'true' : 'false');
 
   // If the path is already expanded (e.g. user toggled it on, then
   // navigated / rebuilt overlays), re-render and re-anchor the host.
-  if (expandedTypePaths.has(path)) {
+  if (expandedTypePaths.has(path) && actionReady()) {
     const host = ensureInlineHost(path);
     renderInlineExpansionInto(host, rich, path, c);
     positionInlineHost(host, chipEl);

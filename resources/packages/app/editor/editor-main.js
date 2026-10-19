@@ -42,6 +42,7 @@ const _subtreeFetchInFlight = new Map();
 // (they are as current as any), one from before a reload contributes nothing.
 let _subtreeEpoch = 0;
 let _subtreeResetEpoch = 0;
+let _typesReadyEpoch = -1;
 // Authentication changes invalidate every server-fed graph reply, including
 // requests already in flight under the previous account.
 let _graphAuthEpoch = 0;
@@ -263,7 +264,7 @@ function graphShellFromTree(tree) {
 // still-expanded namespaces on its next render, and ensureSubtreeFor
 // re-primes the selected fn.
 function graphTypeGeneration() { return _subtreeResetEpoch; }
-function graphTypesReady() { return _subtreeRootId != null; }
+function graphTypesReady() { return _typesReadyEpoch === _subtreeResetEpoch && _subtreeRootId != null; }
 
 function resetGraphCaches() {
   if (typeof hideAllInlineHosts === 'function') hideAllInlineHosts();
@@ -298,8 +299,8 @@ window.addEventListener('gd-auth-changed', () => {
 // `typeResp` is the GET /api/types response (null / not-ok → the registry
 // is left as it was); `onTypesUnparseable(err)` decides what a broken body
 // means for the caller.
-async function installGraphShell(tree, typeResp, onTypesUnparseable, authEpoch) {
-  if (authEpoch !== _graphAuthEpoch) return false;
+async function installGraphShell(tree, typeResp, onTypesUnparseable, authEpoch, typesEpoch) {
+  if (authEpoch !== _graphAuthEpoch || typesEpoch !== _subtreeResetEpoch) return false;
   graphData = graphShellFromTree(tree);
   // The shell has NO subtree — say so again. A selection's `ensureSubtreeFor`
   // that landed during the caller's awaits set `_subtreeRootId` to its fn and
@@ -321,9 +322,13 @@ async function installGraphShell(tree, typeResp, onTypesUnparseable, authEpoch) 
   if (typeResp?.ok) {
     try {
       const parsed = await typeResp.json();
-      if (authEpoch !== _graphAuthEpoch) return false;
+      if (authEpoch !== _graphAuthEpoch || typesEpoch !== _subtreeResetEpoch) return false;
       richTypes = parsed;
-    } catch (err) { onTypesUnparseable(err); }
+      _typesReadyEpoch = typesEpoch;
+    } catch (err) {
+      if (authEpoch !== _graphAuthEpoch || typesEpoch !== _subtreeResetEpoch) return false;
+      onTypesUnparseable(err);
+    }
     // Server-partial popovers key rich args by binding-id in
     // `_rowActionsUseSiteArgs`; entries staled by this refresh would
     // otherwise accumulate for the whole session.
@@ -370,6 +375,7 @@ async function initGraph() {
   // `?scope=tree` — namespaces + counts only. Fn leaves load lazily per
   // expanded namespace; per-fn slots/bindings load via ensureSubtreeFor().
   resetGraphCaches();
+  const typesEpoch = _subtreeResetEpoch;
   // Tree first, alone: on an auth-gated deployment an anonymous boot
   // used to fire all four fetches and paint FOUR red 401s into the
   // console before the sign-in prompt. The tree's status answers the
@@ -425,7 +431,7 @@ async function initGraph() {
   const installed = await installGraphShell(tree, typeResp, (err) => {
     console.error(API.api_types + ' JSON parse failed — type tooltips will be empty', err);
     richTypes = {};
-  }, authEpoch);
+  }, authEpoch, typesEpoch);
   if (!installed) return;
   repaintExplorer();
   // Proactive plan-usage badge — the fn count just (re)loaded, so refresh it
@@ -459,6 +465,7 @@ async function loadGraphData() {
   // create/delete/rename) AND re-prime the current subtree.
   const prevRoot = _subtreeRootId;
   resetGraphCaches();
+  const typesEpoch = _subtreeResetEpoch;
   let treeResp;
   let typeResp;
   try {
@@ -484,7 +491,7 @@ async function loadGraphData() {
     return;
   }
   // A broken types body keeps the prior richTypes rather than blanking chips.
-  const installed = await installGraphShell(await treeResp.json(), typeResp, () => {}, authEpoch);
+  const installed = await installGraphShell(await treeResp.json(), typeResp, () => {}, authEpoch, typesEpoch);
   if (!installed) return;
   // Re-fetch subtree for the previously-rendered fn so overlays /
   // type-chips reflect the mutation. `renderGraph` would do this

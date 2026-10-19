@@ -13,13 +13,13 @@ after: web, layout
 :PROPERTIES:
 :CUSTOM_ID: editor/initGraph
 :FILE: resources/packages/app/editor/editor-main.js
-:LINE: 360
-:MINS: 5.0
+:LINE: 365
+:MINS: 5.1
 :END:
 
 Initializes the editor's plain JavaScript modules, concatenated in a fixed order. It first requests the namespace tree to determine [[file:glossary.org::#term/auth][authentication]] state, then starts secondary loads; function details load on demand. A 401 opens sign-in. See the [[file:../../../docs/EDITOR_MODULES.md][module map]].
 
-- source :: [[file:../../../resources/packages/app/editor/editor-main.js::async function initGraph() {][resources/packages/app/editor/editor-main.js:360]]
+- source :: [[file:../../../resources/packages/app/editor/editor-main.js::async function initGraph() {][resources/packages/app/editor/editor-main.js:365]]
 - see also :: [[file:editor.org::#editor/authFetch][authFetch]]
 
 * 2. buildLookups

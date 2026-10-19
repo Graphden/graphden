@@ -130,6 +130,39 @@ function racingRoutes(ctxRef, typesBody) {
     assert(b.oldChip.attrs['aria-disabled'] === 'true', 'old actions are never reenabled after refresh');
   }
 
+  {
+    let finishTypes;
+    const sub = {fns: [{id: 'f1'}], bindings: [], slots: [], 'fn-slots': [], 'list-items': []};
+    const b = boot({routes: url => url === '/api/types'
+      ? new Promise(resolve => { finishTypes = resolve; })
+      : json(url.includes('scope=subtree') ? sub : TREE)});
+    b.ctx.location.hash = '';
+    vm.runInContext('graphData = {fns: [], bindings: []}', b.ctx);
+    const refresh = b.ctx.loadGraphData();
+    await b.ctx.ensureSubtreeFor('f1');
+    assert(!b.ctx.graphTypesReady(), 'selection/repaint cannot certify stale rich types while /api/types is held');
+    finishTypes(json({fresh: true}));
+    await refresh;
+    await b.ctx.ensureSubtreeFor('f1');
+    assert(b.ctx.graphTypesReady(), 'fresh registry and subtree certify the same generation');
+  }
+  {
+    const pending = [];
+    const b = boot({routes: url => url === '/api/types'
+      ? new Promise(resolve => pending.push(resolve)) : json(TREE)});
+    b.ctx.location.hash = '';
+    const old = b.ctx.loadGraphData();
+    const latest = b.ctx.loadGraphData();
+    pending[1](json({latest: true}));
+    await latest;
+    pending[0](json({obsolete: true}));
+    await old;
+    assert(vm.runInContext('richTypes.latest && !richTypes.obsolete', b.ctx),
+      'late older refresh cannot replace the current type registry at the same auth epoch');
+    assert(vm.runInContext('_typesReadyEpoch === _subtreeResetEpoch', b.ctx),
+      'older response does not certify a different type generation');
+  }
+
   console.log(' unparseable /api/types: initGraph blanks, loadGraphData keeps the prior registry');
   const badTypes = (u) => (u === '/api/types' ? json(new Error('bad json'))
     : u.includes('scope=tree') ? json(TREE) : json(['int']));
@@ -144,6 +177,7 @@ function racingRoutes(ctxRef, typesBody) {
   console.error = origError;
   assert(vm.runInContext('Object.keys(richTypes).length === 0', i.ctx), 'initGraph: {} on a broken body');
   assert(vm.runInContext('richTypes.stale === true', l.ctx), 'loadGraphData: prior registry kept');
+  assert(!l.ctx.graphTypesReady(), 'unparseable types fail closed for edit actions');
 
   console.log(' 401 at boot: accounts → /login?next=…, otherwise the admin popover');
   const unauthorized = () => json({}, 401);

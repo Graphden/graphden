@@ -40,9 +40,10 @@ async function openPicker(page, owner) {
   await binder.waitFor({timeout: 30000});
   await binder.click();
   const choose = page.getByRole('button', {name: 'Bind fn-ref', exact: true});
-  await choose.waitFor({timeout: 15000});
-  await choose.click();
-  await page.locator('.fn-picker-popover').waitFor();
+  const picker = page.locator('.fn-picker-popover');
+  await Promise.race([choose.waitFor({timeout: 15000}), picker.waitFor({timeout: 15000})]);
+  if (await choose.isVisible()) await choose.click();
+  await picker.waitFor();
 }
 async function candidate(page, name, compatible) {
   await page.locator('.fn-picker-popover input').fill(names[name]);

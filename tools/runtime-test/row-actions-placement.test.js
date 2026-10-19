@@ -21,7 +21,7 @@ for (const zoom of [0.9, 1, 1.1]) {
     const {ctx, el} = harness(390, 240, zoom);
     const rect = {left: 175, right: 195, top, bottom: top + 20, height: 20};
     const card = {getBoundingClientRect: () => ({left: 120, right: 420})};
-    const anchor = {getBoundingClientRect: () => rect, closest: () => card};
+    const anchor = {isConnected: true, getBoundingClientRect: () => rect, closest: () => card};
     ctx.positionRowActionsPopover(el, anchor);
     const placedTop = parseFloat(el.style.top);
     const placedBottom = placedTop + el.offsetHeight * zoom;
@@ -44,3 +44,25 @@ for (const zoom of [0.9, 1, 1.1]) {
   }
 }
 console.log('✓ row-actions geometry: narrow top/middle/bottom, zoom, scroll bounds, wide reset');
+
+// A late partial cannot reveal a menu after its owning overlay was removed.
+{
+  const {ctx, el} = harness(1600, 900, 1);
+  let complete;
+  const anchor = {isConnected: true, setAttribute() {}, contains: other => other === anchor};
+  ctx.anchor = anchor;
+  ctx.host = el;
+  vm.runInContext('rowActionsPopoverEl = host;', ctx);
+  ctx.ensureRowActionsPopover = () => el;
+  ctx.ensureRowActionsCyHandlers = () => {};
+  ctx.requestAnimationFrame = callback => callback();
+  ctx.clearTimeout = () => {};
+  ctx.showRowActionsPopover(anchor, () => ({then(resolve) { complete = resolve; }}));
+  ctx.dismissRowActionsPopoverWithin(anchor);
+  anchor.isConnected = false;
+  complete();
+  assert.equal(el.style.display, 'none', 'late reply never reveals orphan menu');
+  assert.equal(vm.runInContext('rowActionsPopoverAnchor', ctx), null);
+  ctx.positionRowActionsPopover(el, anchor);
+  assert.equal(el.style.display, 'none', 'detached geometry never positions at viewport origin');
+}

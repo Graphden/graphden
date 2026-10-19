@@ -117,7 +117,24 @@ function ensureRowActionsPopover() {
 // read at UI scale, and a 1:1 match made it fill half the canvas at
 // high zoom and become unreadable at low zoom. The residual clamp
 // keeps it from visually detaching from very small / large cards.
+// Overlay replacement ends the action menu's ownership; an old async partial
+// may finish later, but it must never reveal actions for a detached row.
+function dismissRowActionsPopoverWithin(root) {
+  if (!rowActionsPopoverAnchor || !root.contains(rowActionsPopoverAnchor)) return;
+  rowActionsPopoverAnchor.setAttribute('aria-expanded', 'false');
+  rowActionsPopoverAnchor = null;
+  rowActionsPopoverSticky = false;
+  if (rowActionsPopoverEl) {
+    rowActionsPopoverEl.style.display = 'none';
+    rowActionsPopoverEl.style.opacity = '0';
+  }
+}
+
 function positionRowActionsPopover(el, anchor) {
+  if (!anchor?.isConnected) {
+    if (anchor) dismissRowActionsPopoverWithin(anchor);
+    return;
+  }
   const ar = anchor.getBoundingClientRect();
   // Anchor X to the card's edge, not the trigger's — see comment above.
   // Falls back to the trigger if no card ancestor (defensive; the
@@ -186,7 +203,7 @@ function positionRowActionsPopover(el, anchor) {
 // (and is free to use the same factories the inline rows used to use,
 // just without the `pinRight: true` flag).
 function showRowActionsPopover(anchorEl, build) {
-  if (!anchorEl || typeof build !== 'function') return;
+  if (!anchorEl?.isConnected || typeof build !== 'function') return;
   if (rowActionsPopoverHideTimer) {
     clearTimeout(rowActionsPopoverHideTimer);
     rowActionsPopoverHideTimer = null;
@@ -220,10 +237,13 @@ function showRowActionsPopover(anchorEl, build) {
   // microtask, so a warm popover still feels instant.
   const reveal = () => {
     if (rowActionsPopoverAnchor !== anchorEl) return; // hover moved on mid-load
+    if (!anchorEl.isConnected) { dismissRowActionsPopoverWithin(anchorEl); return; }
     // Position (flips display to inline-block to read offsetWidth) then unfade
     // next frame so the transition catches.
     positionRowActionsPopover(el, anchorEl);
-    requestAnimationFrame(() => { el.style.opacity = '1'; });
+    requestAnimationFrame(() => {
+      if (rowActionsPopoverAnchor === anchorEl && anchorEl.isConnected) el.style.opacity = '1';
+    });
     // Move focus into the popover on keyboard/sticky open (hover-show must not
     // grab focus from whatever the user was looking at).
     if (rowActionsPopoverSticky) {

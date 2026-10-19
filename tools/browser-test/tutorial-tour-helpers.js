@@ -505,12 +505,24 @@ async function openRowActionsFor(page, ownerName, timeoutMs, opts = {}) {
   await page.waitForFunction(({name, root, src}) =>
     !!(new Function('return (' + src + ')')())({name, root}),
   arg, {timeout: timeoutMs || 90000, polling: 200});
-  await page.evaluate(({name, root, src}) => {
-    const ov = (new Function('return (' + src + ')')())({name, root});
-    ov.querySelector('button.more-actions-trigger')
-      .dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
-  }, arg);
-  await page.waitForSelector('.row-actions-popover', {timeout: 15000});
+  if (opts.root) {
+    await page.waitForFunction(() => graphTypesReady() && !graph.animating,
+      null, {timeout: timeoutMs || 90000, polling: 100});
+    const id = await page.evaluate(() => selectedFnId);
+    await page.locator('.node-overlay[data-node-id="fn-' + id
+      + '"] button.more-actions-trigger[data-root-fn-id="' + id + '"]').click();
+    await page.waitForFunction(expected => rowActionsPopoverAnchor?.isConnected
+      && rowActionsPopoverAnchor.dataset.rootFnId === expected
+      && rowActionsPopoverEl?.getBoundingClientRect().width > 0,
+    id, {timeout: 15000, polling: 100});
+  } else {
+    await page.evaluate(({name, root, src}) => {
+      const ov = (new Function('return (' + src + ')')())({name, root});
+      ov.querySelector('button.more-actions-trigger')
+        .dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
+    }, arg);
+    await page.waitForSelector('.row-actions-popover', {timeout: 15000});
+  }
 }
 
 

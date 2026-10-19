@@ -63,6 +63,7 @@ function registerEdgeOverlay(el) {
 function unregisterNodeOverlay(nodeId) {
   const el = _overlaysByNodeId.get(nodeId);
   if (el) {
+    if (typeof dismissRowActionsPopoverWithin === 'function') dismissRowActionsPopoverWithin(el);
     window.gdCanvasGraph?.dispose(el);
     window.gdCanvasValuesGraph?.dispose(el);
     window.gdCanvasInheritanceGraph?.dispose(el);
@@ -81,6 +82,7 @@ function getNodeOverlay(nodeId) {
 function _removeAllNodeOverlays(preservedNodeId) {
   for (const [nodeId, el] of _overlaysByNodeId) {
     if (nodeId === preservedNodeId) continue;
+    if (typeof dismissRowActionsPopoverWithin === 'function') dismissRowActionsPopoverWithin(el);
     window.gdCanvasGraph?.dispose(el);
     window.gdCanvasValuesGraph?.dispose(el);
     window.gdCanvasInheritanceGraph?.dispose(el);
@@ -273,7 +275,8 @@ function createPlaceholderOverlay(node, container) {
   Object.assign(wrap.style, {
     position: 'absolute',
     pointerEvents: 'none',  // children opt back in
-    zIndex: '10',
+    // Keep the bind button reachable when a short edge label reaches its endpoint.
+    zIndex: '12',
     background: 'transparent',
     border: 'none',
     overflow: 'visible'

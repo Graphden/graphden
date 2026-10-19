@@ -44,7 +44,10 @@ const branch = 'account-menu-' + process.pid + '-' + Date.now().toString(36);
     });
     assert(themed.accent === '#aabbcc' && themed.canvas === '#112233',
       'graph defaults follow an existing custom theme without overwriting it');
-    await page.waitForFunction(() => window.gdFnPickerGraph?.ready, null, {timeout: 120000});
+    // The review plan can load before initGraph installs its candidate shell.
+    // searchFns cannot populate graphData while that shell is still absent.
+    await page.waitForFunction(() => window.gdFnPickerGraph?.ready
+      && typeof graphData !== 'undefined' && Array.isArray(graphData?.fns), null, {timeout: 120000});
     await page.evaluate(async () => {
       await searchFns('const');
       window.openFnPicker({anchorEl: document.getElementById('auth-lock-btn'), onPick() {}});

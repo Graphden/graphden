@@ -506,7 +506,7 @@ async function openRowActionsFor(page, ownerName, timeoutMs, opts = {}) {
     !!(new Function('return (' + src + ')')())({name, root}),
   arg, {timeout: timeoutMs || 90000, polling: 200});
   if (opts.root) {
-    await page.waitForFunction(() => graphTypesReady() && !graph.animating,
+    await page.waitForFunction(() => graphTypesReady() && graphRenderReady(),
       null, {timeout: timeoutMs || 90000, polling: 100});
     const id = await page.evaluate(() => selectedFnId);
     await page.locator('.node-overlay[data-node-id="fn-' + id

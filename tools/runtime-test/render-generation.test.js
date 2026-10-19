@@ -128,11 +128,30 @@ function bootRender() {
     const rb = r.ctx.renderGraph(true);
     await flush();
     assert(r.layouts.length === 2, 'two layout requests');
+    assert(!r.ctx.graphRenderReady(), 'idle animation is not ready while current layout is pending');
     r.layouts[1](r.layoutFor('B'));
     await rb;
+    assert(r.ctx.graphRenderReady(), 'installed current first graph is ready');
     r.layouts[0](r.layoutFor('A'));
     await ra;
     assert(r.drawn.join('|') === 'B', 'only B drawn, got ' + r.drawn.join('|'));
+    assert(r.ctx.graphRenderReady(), 'older response cannot replace the completed generation');
+  }
+
+  console.log(' render readiness: failed layout stays unready; successful empty graph completes');
+  {
+    const r = bootRender();
+    r.ctx.console = {error() {}};
+    r.ctx.selectedFnId = 'A';
+    assert(!r.ctx.graphRenderReady(), 'no render has completed initially');
+    const failed = r.ctx.renderGraph(false);
+    await flush(); r.layouts[0](null); await failed;
+    assert(!r.ctx.graphRenderReady(), 'failed layout never certifies readiness');
+    let installed = 0;
+    r.ctx.createNodeOverlays = () => { installed++; };
+    const empty = r.ctx.renderGraph(false);
+    await flush(); r.layouts[1]({nodes: [], edges: [], layout: new Map()}); await empty;
+    assert(installed === 1 && r.ctx.graphRenderReady(), 'empty first graph completes only after overlays installed');
   }
 
   console.log(' renderGraph: a superseded subtree is asked for again');
@@ -147,6 +166,36 @@ function bootRender() {
     await ra;
     assert(calls === 2, 'retried once, got ' + calls);
     assert(r.drawn.join() === 'A', 'then drawn');
+  }
+
+  console.log(' render readiness: updates wait for their final animation callback');
+  {
+    const r = bootRender(), c = r.ctx;
+    c.graph.nodes.set('same', {x: 0, y: 0});
+    c.userMovedNodes = new Set(); c.savedUserPositions = new Map();
+    c.ANIM_DURATION = 1;
+    c.graphStopAnimation = () => {};
+    c.graphNodeIds = () => [...c.graph.nodes.keys()];
+    c.graphSetNodeData = () => {}; c.graphSetEdgeData = () => {};
+    c.createNodeOverlays = () => {};
+    c.reflowFromMeasuredHeights = () => false;
+    c.updateOverlayPositions = () => {};
+    let finish;
+    c.graphAnimateNodes = () => {
+      c.graph.animating = true;
+      return new Promise(resolve => { finish = () => { c.graph.animating = false; resolve(); }; });
+    };
+    const update = c.renderGraph(false);
+    await flush(); r.layouts[0](r.layoutFor('same')); await update;
+    assert(!c.graphRenderReady(), 'installed overlays alone do not complete the update');
+    finish();
+    assert(!c.graphRenderReady(), 'idle animation alone still lacks the final callback receipt');
+    await flush();
+    assert(c.graphRenderReady(), 'completed current update is ready');
+    c.console = {error() {}};
+    const failed = c.renderGraph(false);
+    await flush(); r.layouts[1](null); await failed;
+    assert(!c.graphRenderReady(), 'failed newer layout cannot reuse previous readiness');
   }
 
   console.log(' renderGraph: old removal animation cannot resurrect a cleared graph');
@@ -177,12 +226,14 @@ function bootRender() {
     const previous = c.renderGraph(false);
     await flush(); r.layouts[0](r.layoutFor('replacement')); await previous;
     assert(animations.length === 1, 'old removal is still animating');
+    assert(!c.graphRenderReady(), 'removal animation has not installed a coherent graph');
     c.graph.nodes.clear(); c.selectedFnId = null;
     const cleared = c.renderGraph(false);
     await flush(); r.layouts[1]({nodes: [], edges: [], layout: new Map()}); await cleared;
     assert(c.graph.edges.size === 0, 'empty first-render path removes orphan edges');
     animations[0](); await flush();
     assert(c.graph.nodes.size === 0, 'late animation does not restore replacement nodes');
+    assert(c.graphRenderReady(), 'late superseded animation cannot unset the empty graph receipt');
   }
 
   console.log(' empty overlay rebuild clears cards, edge labels and SVG');

@@ -92,6 +92,13 @@ function createGraph(nodes, edges, layout, shouldFit) {
 // of its awaits, so the LAST call wins. Without it, select A then B fast drew
 // whichever layout answered last: A's graph under B's sidebar and Inspector.
 let _renderGen = 0;
+let _renderedGen = -1;
+
+// Data readiness and an idle animation do not imply that a pending backend
+// layout has been installed. Only the completed current render certifies it.
+function graphRenderReady() {
+  return _renderedGen === _renderGen && !graph.animating;
+}
 
 async function renderGraph(shouldFit = true) {
   const gen = ++_renderGen;
@@ -161,6 +168,7 @@ async function renderGraph(shouldFit = true) {
       for (const id of [...graph.edges.keys()]) graphRemoveEdge(id);
       createNodeOverlays();
     }
+    if (!superseded()) _renderedGen = gen;
     return;
   }
 
@@ -273,6 +281,7 @@ async function renderGraph(shouldFit = true) {
         fitInVisibleArea(50);
         updateZoomSlider();
       }
+      if (!superseded()) _renderedGen = gen;
     });
   }
 

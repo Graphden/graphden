@@ -1,6 +1,7 @@
 (ns graphden.storage.postgres.codec-test
   "Unit tests for PostgreSQL value codec."
   (:require
+    [cheshire.core :as json]
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [graphden.storage.postgres.codec :as codec]
@@ -346,3 +347,14 @@
                     :symbol [:execution-var 'E]
                     :tuple ["E" [:execution-var "E"]]}]]
     (is (= literal (jsonb-roundtrip literal)))))
+
+
+(deftest mixed-json-key-execution-sentinels-retain-map-structure
+  (doseq [literal [{:_execution_var "E" "_execution_var" "F"}
+                   {:_execution_escape {:value "red"} "_execution_escape" {:value "blue"}}]]
+    ;; JSON itself collapses keyword/string spellings of the same key.
+    ;; Match that existing loss while preserving the resulting map shape.
+    (let [json-normalized (json/parse-string (json/generate-string literal) true)
+          decoded (jsonb-roundtrip literal)]
+      (is (map? decoded))
+      (is (= json-normalized decoded)))))

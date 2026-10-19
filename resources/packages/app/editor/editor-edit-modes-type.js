@@ -186,9 +186,17 @@ function enterArgTypeEditMode(arg, anchorEl) {
     }
   });
 }
-function enterFreeArgBindEditMode(arg, anchorEl) {
+async function enterFreeArgBindEditMode(arg, anchorEl) {
   if (!arg) return;
   closeInlineEdit();
+  // A mutation refreshes rich facts before the previous canvas is replaced.
+  // Await its relational rows before capturing a picker's expected contract.
+  if (typeof ensureSubtreeFor === 'function') {
+    try { if (!await ensureSubtreeFor(arg['fn-id'])) return; }
+    catch (_) { alert('The argument is still loading. Please try again.'); return; }
+  }
+  if (!lookups?.slotMap?.has(arg['slot-id'])) return;
+  const expected = expectedSlotType(arg);
 
   // Slot-level type drives the default action.
   const effType = arg.type ? String(arg.type).replace(/^:/, '') : null;
@@ -202,7 +210,7 @@ function enterFreeArgBindEditMode(arg, anchorEl) {
         excludeIds: arg['fn-id'] ? [arg['fn-id']] : [],
         // The slot's structural type from /api/types — picker uses
         // it to highlight type-compatible fns.
-        expectedType: expectedSlotType(arg),
+        expectedType: expected,
         onPick: async (fn) => { await saveArgRef(arg, fn.id); }
       });
     }
@@ -227,7 +235,7 @@ function enterFreeArgBindEditMode(arg, anchorEl) {
         openFnPicker({
           anchorEl,
           excludeIds: arg['fn-id'] ? [arg['fn-id']] : [],
-          expectedType: expectedSlotType(arg),
+          expectedType: expected,
           onPick: async (fn) => { await saveArgRef(arg, fn.id); }
         });
       }

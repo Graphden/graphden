@@ -109,7 +109,9 @@ async function promptRenameFnTypeArg(bindingId, currentFnType, oldArgName, rootT
     }
     // Preserve the complete legacy/canonical tail, including execution vars.
     // A rename is local to this binding; shared anonymous rows stay immutable.
-    const renamed = ['fn', renamedArgs, ...currentFnType.slice(2)];
+    const renamed = ['fn', renamedArgs, currentFnType[2],
+      currentFnType.length >= 4 ? currentFnType[3] : 'any',
+      currentFnType.length >= 5 ? currentFnType[4] : 'unknown'];
     const r = await postBindingContract(bindingId, {
       type: replaceContractType(rootType, typePath, renamed),
     });

@@ -105,6 +105,9 @@ async function candidate(page, name, compatible) {
     }, null, {timeout: 60000});
     const browserEntry = await entry(page);
     assert(browserEntry.args.handler[4].includes('browser-main'), 'map pin specializes sibling callback expectation');
+    const reopened = await expandMapValue(page, 'events');
+    assert(await reopened.getByRole('combobox', {name: 'Execution profile', exact: true}).inputValue() === 'browser',
+      'saved anonymous override reopens with its exact Browser contract');
     await openPicker(page, 'browser-child');
     const rejected = await candidate(page, 'server-callback', false);
     await rejected.click();
@@ -147,6 +150,8 @@ async function candidate(page, name, compatible) {
           title: chip.title, expanded: chip.getAttribute('aria-expanded'), text: chip.textContent})),
         panels: [...document.querySelectorAll('.type-inline-host')].map(panel => ({display: panel.style.display,
           text: panel.textContent.slice(0, 800)})),
+        picker: [...document.querySelectorAll('.fn-picker-row')].map(row => ({className: row.className, name: row.dataset.fnName})),
+        pickerExpected: document.querySelector('.fn-picker-expected')?.textContent,
         popovers: [...document.querySelectorAll('.arg-value-edit-popover')].map(panel => panel.getAttribute('aria-label'))};
     }).catch(() => ({snapshotUnavailable: true}));
     console.log('execution finite DOM/type snapshot', JSON.stringify(snapshot));

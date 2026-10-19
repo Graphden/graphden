@@ -66,6 +66,16 @@ const {createDocument} = require('./mini-dom');
     }});
     assert.deepEqual(shared, ['map', 'keyword', callable], 'rename leaves the shared contract unchanged');
   }
+  for (const legacy of [['fn', {value: 'int'}, 'text'], ['fn', {value: 'int'}, 'text', ['io']]]) {
+    const original = JSON.stringify(legacy);
+    assert.match(ctx.formatTypeHint(legacy), /execution unknown/);
+    assert.equal(ctx.formatTypeHint(legacy).includes(' pure'), false, 'missing effects are not a pure proof');
+    ctx.prompt = () => 'renamed';
+    await ctx.promptRenameFnTypeArg('legacy-local', legacy, 'value', legacy, []);
+    assert.deepEqual(submissions.at(-1).body, {type: ['fn', {renamed: 'int'}, 'text',
+      legacy.length === 4 ? ['io'] : 'any', 'unknown']});
+    assert.equal(JSON.stringify(legacy), original, 'legacy reads never mutate a persisted source contract');
+  }
   ctx.prompt = () => 'taken';
   const prior = submissions.length;
   await ctx.promptRenameFnTypeArg('rename-local', ['fn', {value: 'int', taken: 'text'}, 'text', ['io'], ['browser-main']],
@@ -125,5 +135,25 @@ const {createDocument} = require('./mini-dom');
     assert.equal(ctx.getEffectiveSlotName('parent', 'root'), 'renamed-again');
     assert.equal(ctx.getEffectiveSlotName('grandchild', 'root'), 'renamed-again');
   }
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../../resources/packages/app/editor/editor-edit-modes-type.js'), 'utf8'), ctx);
+  let ready, chooser, pickedExpected;
+  ctx.ensureSubtreeFor = () => new Promise(resolve => { ready = resolve; });
+  ctx.closeInlineEdit = () => {};
+  ctx.slotMarkerName = () => null;
+  ctx.openLiteralVsRefChooser = options => { chooser = options; };
+  ctx.openFnPicker = options => { pickedExpected = options.expectedType; };
+  ctx.lookups = {fnMap: new Map(), slotMap: new Map()};
+  const bind = ctx.enterFreeArgBindEditMode({'fn-id': 'child', 'slot-id': 'handler', type: 'jsonb'}, {});
+  assert.equal(chooser, undefined, 'an old canvas binder cannot open an untyped picker during subtree reload');
+  ctx.lookups.slotMap.set('handler', {name: 'handler', 'type-fn-id': 'callback'});
+  const expectedCallback = ['fn', {item: 'text'}, 'int', [], ['browser-main']];
+  ctx.lookups.fnMap.set('callback', {constraint: expectedCallback});
+  ready(true);
+  await bind;
+  assert.ok(chooser, 'binding starts after relational rows arrive');
+  // A subsequent background reset must not erase the contract captured at readiness.
+  ctx.lookups.slotMap.clear();
+  chooser.onRef();
+  assert.equal(pickedExpected, expectedCallback, 'the picker retains the exact ready execution contract');
   console.log('✓ execution authoring preserves nested contracts, effects and local identity');
 })().catch(error => {console.error(error); process.exit(1);});

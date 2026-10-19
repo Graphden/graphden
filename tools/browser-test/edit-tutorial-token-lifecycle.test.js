@@ -57,7 +57,7 @@ async function tokens(page) {
     if (!before) {
       assert(!REQUIRED, 'required token listing is available to this account');
       finished = true;
-      console.log('SKIP token lesson: authenticated account/token addon unavailable');
+      console.log('SKIP: token lesson unavailable without authenticated account/token addon');
       return;
     }
     const baselineIds = before.map(row => row.id).sort();

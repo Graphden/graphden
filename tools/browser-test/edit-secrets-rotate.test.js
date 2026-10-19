@@ -52,7 +52,7 @@ async function cleanup(page) {
       if (process.env.GRAPHDEN_VAULT_OPTIONAL === '1') {
         console.log('  (Vault unreachable, GRAPHDEN_VAULT_OPTIONAL=1 — skipping happy-path: '
                     + JSON.stringify(seed).slice(0, 200) + ')');
-        console.log('✓ SKIPPED — opt-in skip; see edit-secrets-panel.test.js for form-only coverage');
+        console.log('SKIP: secret rotation unavailable (GRAPHDEN_VAULT_OPTIONAL=1)');
         return;
       }
       assert(false,

@@ -59,7 +59,7 @@ async function cleanup(page) {
       if (process.env.GRAPHDEN_VAULT_OPTIONAL === '1') {
         console.log('  (Vault unreachable, GRAPHDEN_VAULT_OPTIONAL=1 — skipping: '
                     + JSON.stringify(seed).slice(0, 200) + ')');
-        console.log('✓ SKIPPED — opt-in skip');
+        console.log('SKIP: secret list unavailable (GRAPHDEN_VAULT_OPTIONAL=1)');
         return;
       }
       assert(false,

@@ -11,8 +11,8 @@
 //     at the path.
 //   • Delete in that form drops the binding — the `+` is back.
 //
-// Skips gracefully when the stand has no vault (POST answers a vault error):
-// the form-only assertions are covered by the lesson 16 walk.
+// The CI stack requires Vault. Local hosts may opt into a whole-file skip with
+// GRAPHDEN_VAULT_OPTIONAL=1; form-only assertions live in lesson 16.
 //
 // Run from this directory:  node edit-secret-inline.test.js
 // Exit code 0 = PASS, 1 = FAIL.
@@ -77,10 +77,14 @@ async function cleanup(page) {
     const bound = await api(page, 'POST', '/api/secret-bindings',
       {'fn-id': fn.id, 'slot-id': pwSlot.id, path: PATH, value: SECRET_INITIAL});
     if (!bound || bound.ok !== true) {
-      console.log('  SKIP — no vault on this stand');
-      await cleanup(page);
-      await browser.close();
-      process.exit(0);
+      if (process.env.GRAPHDEN_VAULT_OPTIONAL === '1') {
+        await cleanup(page);
+        console.log('SKIP: inline secret binding unavailable (GRAPHDEN_VAULT_OPTIONAL=1)');
+        await browser.close();
+        process.exit(0);
+      }
+      assert(false, 'POST /api/secret-bindings requires Vault in the CI stack: '
+        + JSON.stringify(bound).slice(0, 200));
     }
     const bindingId = bound.binding.id;
     console.log('  inline secret bound: ' + bindingId);

@@ -6,7 +6,8 @@
 // Reads the runner's own output (the gate logs under .git/wtq/logs/ carry it
 // verbatim): a `─── <file> ───` header, then the `[ Ns  executor=…]` line the
 // file ends on. Only first-attempt passes count — a retried file's seconds
-// span every attempt. Prints `<median seconds>\t<file>` per file, slowest
+// span every attempt, and an explicit SKIP did not exercise the file at all.
+// Prints `<median seconds>\t<file>` per file, slowest
 // first. A file absent from the logs has no line, and the runner judges it
 // against the absolute THRASH_FILE_SECS until a refresh picks it up.
 //
@@ -27,12 +28,18 @@ const per = new Map();
 for (const log of logs) {
   const lines = fs.readFileSync(log, 'utf8').replace(/\r/g, '\n').split('\n');
   let cur = null;
+  let skipped = false;
   for (const line of lines) {
     const h = line.match(/^─── (edit-\S+\.test\.js) ───/);
-    if (h) { cur = h[1]; continue; }
+    if (h) { cur = h[1]; skipped = false; continue; }
+    // Older green logs predate the single whole-file marker. Keep their
+    // already-known skip spellings out of the duration sample as well.
+    if (cur && /^(?:SKIP:|SKIP token lesson:|SKIP lesson 39:|  SKIP — no vault|✓ SKIPPED — opt-in)/.test(line)) {
+      skipped = true; continue;
+    }
     const t = line.match(/^\s+\[\s*(\d+)s\s+executor=\S*?(\s+attempts=\d+)?\]/);
     if (t && cur) {
-      if (!t[2]) {
+      if (!t[2] && !skipped) {
         if (!per.has(cur)) per.set(cur, []);
         per.get(cur).push(Number(t[1]));
       }

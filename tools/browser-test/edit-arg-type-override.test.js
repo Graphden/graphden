@@ -18,12 +18,27 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext, api, getEntities, deleteFnByName, waitFor} =
+const {assert, newContext, api, getEntities, deleteFnByName} =
   require('./edit-test-helpers');
 
 
 const RUN_ID = '-' + process.pid + '-' + Date.now().toString(36);
 const PROBE_FN = 'arg-type-override-probe' + RUN_ID;
+
+
+const TYPE_CHIP = '.edge-label-overlay[data-arg-name="value"] .arg-type-chip';
+
+async function freshTypeChip(page) {
+  // initGraph awaits the subtree; the layout can replace the old disabled
+  // chip afterwards. Presence alone is not an actionable current contract.
+  await page.waitForFunction(selector => {
+    const chip = document.querySelector(selector);
+    return graphTypesReady() && !graph.animating && chip
+      && chip.getAttribute('aria-disabled') !== 'true'
+      && chip.getAttribute('tabindex') === '0';
+  }, TYPE_CHIP, {timeout: 20000});
+  return page.locator(TYPE_CHIP).first();
+}
 
 
 async function cleanup(page) {
@@ -33,6 +48,9 @@ async function cleanup(page) {
 
 (async () => {
   const {browser, page} = await newContext(chromium, {boot: false});
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  let releaseSubtree;
   page.on('dialog', (d) => {
     console.log('  [dialog]:', d.message().slice(0, 200));
     d.accept();
@@ -69,7 +87,7 @@ async function cleanup(page) {
       null,
       {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
-    await page.waitForSelector('.arg-type-chip', {timeout: 15000});
+    await freshTypeChip(page);
 
     const initialChip = await page.evaluate(() => {
       const chip = document.querySelector('.arg-type-chip');
@@ -82,9 +100,7 @@ async function cleanup(page) {
     // ===================================================================
     // Phase B: click chip → type-edit popover with <select>.
     // ===================================================================
-    await page.evaluate(() => {
-      document.querySelector('.arg-type-chip')?.click();
-    });
+    await (await freshTypeChip(page)).click();
     await page.waitForSelector(
       '.arg-value-edit-popover select.arg-value-edit-input',
       {timeout: 5000});
@@ -118,81 +134,48 @@ async function cleanup(page) {
       {timeout: 30000});
 
     // ===================================================================
-    // Phase B2 (regression): the picker inside the graph-refresh window.
+    // Phase B2: stale chips stay unavailable until the fresh subtree lands.
     // ===================================================================
-    // `initGraph()` rebuilds `lookups` from `?scope=index` — fns and namespaces,
-    // and NO slots. The slot rows arrive afterwards, per view, via
-    // `ensureSubtreeFor()`. Open the type popover inside that window — the chip on
-    // screen is still the previous render's — and the slot is unknown, which the
-    // picker used to read as "nothing is compatible": it dropped its "loading…"
-    // placeholder, offered the current type alone, and nothing ever re-ran it when
-    // the subtree landed. A type picker that cannot change the type, with no error
-    // to explain it.
-    //
-    // The suite hit this window for real whenever the host was busy — 5 failures in
-    // 8 concurrent runs — and it had been "fixed" twice by raising the timeout it
-    // was waiting on, for options that were never coming.
-    //
-    // Hold the subtree fetch back so the window is wide and this is a proof rather
-    // than a race, then open the picker inside it. It must still fill.
-    await page.route('**/api/graph/entities?scope=subtree*', async (route) => {
-      await new Promise((r) => setTimeout(r, 3000));
+    const heldSubtree = new Promise(resolve => { releaseSubtree = resolve; });
+    await page.route('**/api/graph/entities?scope=subtree*', async route => {
+      await heldSubtree;
       await route.continue();
+    }, {times: 1});
+    const requested = page.waitForRequest(request => {
+      const url = new URL(request.url());
+      return url.pathname === '/api/graph/entities' && url.searchParams.get('scope') === 'subtree';
     });
     await page.evaluate(() => {
-      document.querySelector('.arg-value-edit-popover')?.remove();
-      initGraph();                      // deliberately NOT awaited
+      closeInlineEdit();
+      void initGraph();
     });
-    // Wait for the window to actually OPEN — `lookups` rebuilt from the index
-    // payload, so the slot map is empty — otherwise the click lands before the
-    // rebuild, the old slots are still there, and the test proves nothing. (It
-    // passed against the un-fixed build until this wait was added.)
-    await page.waitForFunction(() => (lookups?.slotMap?.size ?? 1) === 0,
-                               null, {timeout: 20000, polling: 20});
-    // Poll instead of a blind chip click + wait: the chip can be
-    // momentarily absent during the in-flight re-render this phase
-    // deliberately provokes. Click only while no popover is up.
-    assert(await waitFor(() => page.evaluate(() => {
-      if (document.querySelector(
-        '.arg-value-edit-popover select.arg-value-edit-input')) return true;
-      if (!document.querySelector('.arg-value-edit-popover')) {
-        document.querySelector('.arg-type-chip')?.click();
-      }
-      return false;
-    }), 30000), 'type picker opened mid-refresh');
-    await page.waitForFunction(
-      () => {
-        const sel = document.querySelector(
-          '.arg-value-edit-popover select.arg-value-edit-input');
-        return Array.from(sel?.options || []).some((o) => o.value === 'int');
-      },
-      null,
-      {timeout: 20000});
-    console.log('  ✓ picker still fills when opened during a graph refresh');
-    await page.unroute('**/api/graph/entities?scope=subtree*');
-
-    // Re-open on a settled graph for Phase C.
-    await page.evaluate(() => document.querySelector('.arg-value-edit-popover')?.remove());
-    await page.waitForFunction(() => (lookups?.slotMap?.size ?? 0) > 0,
+    await requested;
+    await page.waitForFunction(() => !graphTypesReady() && lookups?.slotMap?.size === 0,
                                null, {timeout: 20000});
-    // Same click-poll as above — the settled graph can still re-render
-    // overlays under the cursor while the chip is being clicked.
-    assert(await waitFor(() => page.evaluate(() => {
-      if (document.querySelector(
-        '.arg-value-edit-popover select.arg-value-edit-input')) return true;
-      if (!document.querySelector('.arg-value-edit-popover')) {
-        document.querySelector('.arg-type-chip')?.click();
-      }
-      return false;
-    }), 30000), 'type picker opened on the settled graph');
-    await page.waitForFunction(
-      () => {
-        const sel = document.querySelector(
-          '.arg-value-edit-popover select.arg-value-edit-input');
-        return Array.from(sel?.options || []).some((o) => o.value === 'int');
-      },
-      null,
-      {timeout: 20000});
+    const staleChip = page.locator(TYPE_CHIP).first();
+    assert(await staleChip.getAttribute('aria-disabled') === 'true', 'the stale type action is disabled during refresh');
+    assert(await staleChip.getAttribute('tabindex') === '-1', 'the stale type action leaves keyboard tab order');
+    await staleChip.dispatchEvent('click');
+    assert(await page.locator('.arg-value-edit-popover').count() === 0,
+      'the stale chip cannot open a type picker while its subtree is held');
+    releaseSubtree(); releaseSubtree = null;
+
+    const freshChip = await freshTypeChip(page);
+    await freshChip.focus();
+    await freshChip.press('Enter');
+    await page.waitForFunction(() => {
+      const select = document.querySelector('.arg-value-edit-popover select.arg-value-edit-input');
+      return Array.from(select?.options || []).some(option => option.value === 'int');
+    }, null, {timeout: 20000});
+    console.log('  ✓ fresh type picker opens by keyboard and fills after the held refresh');
+
+    // Reopen through the same lifecycle on a coherent graph for the save.
+    await page.evaluate(() => closeInlineEdit());
+    await (await freshTypeChip(page)).click();
+    await page.waitForFunction(() => {
+      const select = document.querySelector('.arg-value-edit-popover select.arg-value-edit-input');
+      return Array.from(select?.options || []).some(option => option.value === 'int');
+    }, null, {timeout: 20000});
 
     // ===================================================================
     // Phase C: pick "int" → save → binding gets :type-override-fn-id.
@@ -243,11 +226,13 @@ async function cleanup(page) {
            + JSON.stringify(binding['type-override-fn-id'])
            + ' (expected ' + intFn.id + ')');
 
+    assert(errors.length === 0, 'type-override editing has no browser exceptions');
     console.log('✓ arg type-override verified — chip → select → save → storage');
   } catch (e) {
     process.exitCode = 1;
     console.error('✗ test failed:', e.message);
   } finally {
+    releaseSubtree?.();
     await cleanup(page).catch(() => {});
     await browser.close();
   }

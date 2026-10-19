@@ -14,7 +14,7 @@ const {assert, newContext, api, submitInlineRow} = require('./edit-test-helpers'
 const {
   NS_NAME, FN_NAME, hardCleanup, waitTourTitle, clickTourButton,
   filterAndSelect, extendViaRowActions, bindFirstPlaceholder,
-  renameArgViaEdgeLabel,
+  renameArgViaEdgeLabel, openRowActionsFor,
   pickIncompatFnRef, pickAnyway, removeUseSiteBinding,
   createBranchViaChip, switchBranchViaChip, editBoundValue, runViaRowActions, runFromOpenPane,
   appendSeqItemViaEdge,
@@ -99,18 +99,11 @@ const {
     console.log('  steps 5-6: 1, 1 appended, tour advanced');
 
     // Step 6 — run the fn via ⋯ → ▶ → Run.
-    await page.waitForSelector('button.more-actions-trigger', {timeout: 15000});
-    await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
-    await page.waitForSelector('.row-actions-popover button', {timeout: 15000});
-    const ranOpen = await page.evaluate(() => {
-      const runBtn = Array.from(
-        document.querySelectorAll('.row-actions-popover button'))
-        .find((b) => b.textContent.trim() === '▶');
-      if (!runBtn) return false;
-      runBtn.dispatchEvent(new MouseEvent('click', {bubbles: true}));
-      return true;
-    });
-    assert(ranOpen, '▶ surfaced in row-actions popover');
+    await openRowActionsFor(page, null, 15000, {root: true});
+    const runAction = page.locator('.row-actions-popover [data-action="run-fn"]');
+    await runAction.waitFor({state: 'visible', timeout: 15000});
+    assert(await runAction.count() === 1, 'Run surfaced in the selected root row-actions');
+    await runAction.click();
     await page.waitForSelector('.execute-popover.visible .execute-run-btn',
       {timeout: 10000});
     await page.click('.execute-popover.visible .execute-run-btn');
@@ -259,18 +252,7 @@ const {
     assert(await clickTourButton(page, 'Next'), 'lesson 03 look-step Next');
     await waitTourTitle(page, 'Now wrap it', 150000);
     // Wrap: ⋯ on the add-10 card → ⬆ Wrap → pick :to-str as the parent.
-    await page.waitForFunction(() => {
-      return Array.from(document.querySelectorAll('.node-overlay')).some((ov) =>
-        ov.textContent.trim().startsWith('add-10')
-        && ov.querySelector('button.more-actions-trigger'));
-    }, null, {timeout: 60000, polling: 200});
-    await page.evaluate(() => {
-      const ov = Array.from(document.querySelectorAll('.node-overlay')).find((o) =>
-        o.textContent.trim().startsWith('add-10')
-        && o.querySelector('button.more-actions-trigger'));
-      ov.querySelector('button.more-actions-trigger')
-        .dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
-    });
+    await openRowActionsFor(page, 'add-10', 60000, {root: true});
     await page.waitForSelector('.row-actions-popover [data-action="wrap-fn"]',
       {timeout: 15000});
     await page.evaluate(() => {

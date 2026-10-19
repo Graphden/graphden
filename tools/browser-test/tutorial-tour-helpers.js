@@ -496,7 +496,13 @@ async function filterAndSelect(page, filterText, fnName) {
 // ⋯ → Extend is extend-IN-PLACE — a swap inside tutorial-map, not a new
 // child of str-upper. Masked until 2026-09-24 by a flat 650 ms sleep after
 // every tour title; `ownerName` null + `root` = whatever the root card is.
+async function waitForRenderedCanvas(page, timeout = 90000) {
+  await page.waitForFunction(() => graphTypesReady() && graphRenderReady(),
+    null, {timeout, polling: 100});
+}
+
 async function openRowActionsFor(page, ownerName, timeoutMs, opts = {}) {
+  await waitForRenderedCanvas(page, timeoutMs || 90000);
   const pick = ({name, root}) => Array.from(document.querySelectorAll('.node-overlay')).find((ov) =>
     (!name || ov.textContent.trim().startsWith(name))
     && ov.querySelector('button.more-actions-trigger')
@@ -506,14 +512,13 @@ async function openRowActionsFor(page, ownerName, timeoutMs, opts = {}) {
     !!(new Function('return (' + src + ')')())({name, root}),
   arg, {timeout: timeoutMs || 90000, polling: 200});
   if (opts.root) {
-    await page.waitForFunction(() => graphTypesReady() && graphRenderReady(),
-      null, {timeout: timeoutMs || 90000, polling: 100});
     const id = await page.evaluate(() => selectedFnId);
     await page.locator('.node-overlay[data-node-id="fn-' + id
       + '"] button.more-actions-trigger[data-root-fn-id="' + id + '"]').click();
     await page.waitForFunction(expected => rowActionsPopoverAnchor?.isConnected
       && rowActionsPopoverAnchor.dataset.rootFnId === expected
-      && rowActionsPopoverEl?.getBoundingClientRect().width > 0,
+      && rowActionsPopoverEl?.style.opacity === '1'
+      && rowActionsPopoverEl.getBoundingClientRect().width > 0,
     id, {timeout: 15000, polling: 100});
   } else {
     await page.evaluate(({name, root, src}) => {
@@ -673,6 +678,7 @@ async function pickAnyway(page) {
 // Remove a use-site binding through the arg node's ⋯ menu. Fires a native
 // confirm() — the caller must have a dialog handler installed.
 async function removeUseSiteBinding(page, ownerText) {
+  await waitForRenderedCanvas(page, 30000);
   // Shell readiness precedes graph layout. Select a unique native use-site
   // owner, not the card's optional display text or an arbitrary last button.
   const target = await page.waitForFunction((name) => {
@@ -866,14 +872,8 @@ async function editBoundValue(page, text) {
 
 
 async function runViaRowActions(page, formValue) {
-  await page.waitForSelector('button.more-actions-trigger', {timeout: 15000});
-  await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
-  await page.waitForSelector('.row-actions-popover button', {timeout: 15000});
-  await page.evaluate(() => {
-    Array.from(document.querySelectorAll('.row-actions-popover button'))
-      .find((b) => b.textContent.trim() === '▶')
-      .dispatchEvent(new MouseEvent('click', {bubbles: true}));
-  });
+  await openRowActionsFor(page, null, 15000, {root: true});
+  await page.locator('.row-actions-popover [data-action="run-fn"]').click();
   await page.waitForSelector('.execute-popover.visible .execute-run-btn',
     {timeout: 10000});
   if (formValue !== undefined) {
@@ -1001,21 +1001,11 @@ async function setParentViaStrip(page, parentName) {
 
 // --- lesson 16 (effects) helper ---------------------------------------------
 // Run a fn whose effects force the acknowledgement checkbox first.
-// `ownerName` (optional) pins the ⋯ to THAT card's own row — with a child
-// card on the canvas (a fn built from the outside in) the first ⋯ in the
-// DOM may be the child's use-site menu, which has no ▶ Run.
+// `ownerName` optionally pins the selected root's name as well as its exact
+// identity; a use-site menu on another card is not a root Run action.
 async function runWithEffectAck(page, formValue, ownerName) {
-  const trig = ownerName
-    ? '.node-overlay[data-fn-name="' + ownerName + '"] .ancestor-line[data-level="0"] button.more-actions-trigger'
-    : 'button.more-actions-trigger';
-  await page.waitForSelector(trig, {timeout: 15000});
-  await page.dispatchEvent(trig, 'mousedown');
-  await page.waitForSelector('.row-actions-popover button', {timeout: 15000});
-  await page.evaluate(() => {
-    Array.from(document.querySelectorAll('.row-actions-popover button'))
-      .find((b) => b.textContent.trim() === '▶')
-      .dispatchEvent(new MouseEvent('click', {bubbles: true}));
-  });
+  await openRowActionsFor(page, ownerName || null, 15000, {root: true});
+  await page.locator('.row-actions-popover [data-action="run-fn"]').click();
   await page.waitForSelector('.execute-popover.visible .execute-run-btn', {timeout: 15000});
   await page.waitForSelector('.execute-effects-warning', {timeout: 15000});
   const wasDisabled = await page.evaluate(
@@ -1582,6 +1572,7 @@ async function bindPlaceholderOn(page, ownerName, argName, kind, text) {
 // the canvas it is on, so the helper waits for the CHILD's card, not for a
 // navigation. Pinned to the card's own (depth-0) ⋯, not the first ⋯ painted.
 async function extendInPlace(page, cardName, childName) {
+  await waitForRenderedCanvas(page, 60000);
   const trig = '.node-overlay[data-fn-name="' + cardName + '"] .ancestor-line[data-level="0"] button.more-actions-trigger';
   await page.waitForSelector(trig, {timeout: 60000});
   await page.evaluate((sel) => {
@@ -1767,6 +1758,7 @@ async function setBranchLocalViaStrip(page, fnName, on) {
 // parent) → type `parentName` in the picker and click its row (lesson 03).
 // Resolves when the card's fn carries two parents.
 async function addMiParentViaParentRow(page, cardFnName, parentName) {
+  await waitForRenderedCanvas(page, 60000);
   const trigger = '.node-overlay[data-fn-name="' + cardFnName + '"] .ancestor-line[data-level="1"] button.more-actions-trigger';
   await page.waitForSelector(trigger, {timeout: 60000});
   await page.evaluate((s) => {

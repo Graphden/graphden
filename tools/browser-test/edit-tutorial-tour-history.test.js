@@ -33,7 +33,7 @@ async function setDescription(page, text) {
 async function openVersionHistory(page) {
   // The lesson fn's ⋯ — `const`'s history has rows enough to satisfy the
   // ">= 3 rows" check below for the wrong fn.
-  await openRowActionsFor(page, 'tutorial-versioned', 30000);
+  await openRowActionsFor(page, 'tutorial-versioned', 30000, {root: true});
   await page.waitForSelector('.row-actions-popover [data-action="fn-versions"]',
                              {timeout: 15000});
   await page.evaluate(() => {
@@ -64,7 +64,7 @@ async function openVersionHistory(page) {
     await filterAndSelect(page, 'const', 'const');
     await waitTourTitle(page, 'Extend it', 150000);
     await page.evaluate(() => applyTheme(true));
-    await openRowActionsFor(page, 'const', 30000);
+    await openRowActionsFor(page, 'const', 30000, {root: true});
     const menu = await page.evaluate(() => {
       const host = document.querySelector('.row-actions-popover');
       return {width: host.getBoundingClientRect().width};
@@ -200,24 +200,8 @@ async function openVersionHistory(page) {
     // the card carries a row per fn in the inheritance chain, and running
     // the parent records the failure against `parse-json` — a package fn the
     // reader cannot edit, in a panel that is supposed to point at theirs.
-    await page.waitForFunction(() => {
-      return Array.from(document.querySelectorAll('.node-overlay-row, .node-overlay'))
-        .some((r) => r.textContent.trim().startsWith('tutorial-bad-json')
-                  && r.querySelector('button.more-actions-trigger'));
-    }, null, {timeout: 60000, polling: 200});
-    await page.evaluate(() => {
-      const row = Array.from(document.querySelectorAll('.node-overlay-row, .node-overlay'))
-        .find((r) => r.textContent.trim().startsWith('tutorial-bad-json')
-                  && r.querySelector('button.more-actions-trigger'));
-      row.querySelector('button.more-actions-trigger')
-        .dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
-    });
-    await page.waitForSelector('.row-actions-popover button', {timeout: 15000});
-    await page.evaluate(() => {
-      Array.from(document.querySelectorAll('.row-actions-popover button'))
-        .find((b) => b.textContent.trim() === '▶')
-        .dispatchEvent(new MouseEvent('click', {bubbles: true}));
-    });
+    await openRowActionsFor(page, 'tutorial-bad-json', 60000, {root: true});
+    await page.locator('.row-actions-popover [data-action="run-fn"]').click();
     await page.waitForSelector('.execute-popover.visible .execute-run-btn', {timeout: 20000});
     // The free-arg form arrives from /api/value-form AFTER the popover — set
     // the field only once it exists, or the run goes out with `string` unset

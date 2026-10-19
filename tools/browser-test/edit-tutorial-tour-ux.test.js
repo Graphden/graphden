@@ -52,13 +52,8 @@ const {
     // The step now completes on a REAL persisted run (the
     // body[data-gd-persisted-run] marker) — do what the lesson says:
     // reopen Run, tick "Save to history", enter graphden, Run.
-    await page.waitForSelector('button.more-actions-trigger', {timeout: 30000});
-    await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
-    await page.waitForSelector('.row-actions-popover button', {timeout: 15000});
-    await page.evaluate(() => {
-      document.querySelector('.row-actions-popover [data-action="run-fn"]')
-        .dispatchEvent(new MouseEvent('click', {bubbles: true}));
-    });
+    await openRowActionsFor(page, 'str-len', 30000, {root: true});
+    await page.locator('.row-actions-popover [data-action="run-fn"]').click();
     await page.waitForSelector('.execute-popover.visible .execute-run-btn',
       {timeout: 10000});
     await page.waitForFunction(() => {
@@ -402,7 +397,7 @@ const {
     await waitTourTitle(page, 'Run it', 150000);
     // Writing to a cell is the :state effect, so Run is gated behind the
     // acknowledgement checkbox — the same gate lesson 16 teaches.
-    await openRowActionsFor(page, 'tutorial-bump', 30000);
+    await openRowActionsFor(page, 'tutorial-bump', 30000, {root: true});
     await page.click('.row-actions-popover [data-action="run-fn"]');
     await waitTourTitle(page, 'Choose the item', 150000);
     const itemField = '.execute-popover.visible .execute-arg-form[data-slot-name="value"] .cm-content';

@@ -2392,44 +2392,45 @@
    when any input was tainted."
   [fn-name fn-def computed-return]
   (let [declared (some-> fn-def :return-type types/resolve-alias)
-        computed-ok? (or (types/subtype? computed-return declared)
-                         (and (types/secret-type? computed-return)
-                              (types/subtype? (types/secret-inner computed-return)
-                                              declared))
-                         ;; Author-assertion mode: when the AUTHOR
-                         ;; declares a structural T (record, list,
-                         ;; map, fn, refinement, …) but the rule
-                         ;; chain bottoms out at `:any` /
-                         ;; `[:map :any :any]` / friends, accept the
-                         ;; assertion. Primitive declared types
-                         ;; (`:int`, `:text`, …) DON'T get this hatch
-                         ;; — those are typo-prone and the rejection
-                         ;; protects against "I said :int but my
-                         ;; computed is unconstrained". Structural
-                         ;; declared types are the contract-by-shape
-                         ;; case the author owns at runtime.
-                         (and (gradual/any-shape? computed-return)
-                              declared
-                              (not (types/primitive? declared)))
-                         ;; Author NARROWING-assertion mode: declared
-                         ;; is strictly MORE specific than computed
-                         ;; (declared ⊆ computed). The author commits
-                         ;; to a runtime-guaranteed contract that the
-                         ;; rule chain couldn't prove without help —
-                         ;; the classic case is `:_create-parsed`
-                         ;; whose `:entity-type` is non-null at apply
-                         ;; time because validation upstream rejects
-                         ;; null first. Same guardrail as any-shape
-                         ;; mode: only structural declared types
-                         ;; qualify; primitives stay strict to catch
-                         ;; typos. `subtype? declared computed`
-                         ;; verifies the relation is sound — declared
-                         ;; values are a subset of what computed
-                         ;; admits, so the author's narrower view is
-                         ;; never wider than the rule could prove.
-                         (and declared
-                              (not (types/primitive? declared))
-                              (types/subtype? declared computed-return)))
+        computed-ok? (and (execution/return-compatible? computed-return declared)
+                          (or (types/subtype? computed-return declared)
+                              (and (types/secret-type? computed-return)
+                                   (types/subtype? (types/secret-inner computed-return)
+                                                   declared))
+                              ;; Author-assertion mode: when the AUTHOR
+                              ;; declares a structural T (record, list,
+                              ;; map, fn, refinement, …) but the rule
+                              ;; chain bottoms out at `:any` /
+                              ;; `[:map :any :any]` / friends, accept the
+                              ;; assertion. Primitive declared types
+                              ;; (`:int`, `:text`, …) DON'T get this hatch
+                              ;; — those are typo-prone and the rejection
+                              ;; protects against "I said :int but my
+                              ;; computed is unconstrained". Structural
+                              ;; declared types are the contract-by-shape
+                              ;; case the author owns at runtime.
+                              (and (gradual/any-shape? computed-return)
+                                   declared
+                                   (not (types/primitive? declared)))
+                              ;; Author NARROWING-assertion mode: declared
+                              ;; is strictly MORE specific than computed
+                              ;; (declared ⊆ computed). The author commits
+                              ;; to a runtime-guaranteed contract that the
+                              ;; rule chain couldn't prove without help —
+                              ;; the classic case is `:_create-parsed`
+                              ;; whose `:entity-type` is non-null at apply
+                              ;; time because validation upstream rejects
+                              ;; null first. Same guardrail as any-shape
+                              ;; mode: only structural declared types
+                              ;; qualify; primitives stay strict to catch
+                              ;; typos. `subtype? declared computed`
+                              ;; verifies the relation is sound — declared
+                              ;; values are a subset of what computed
+                              ;; admits, so the author's narrower view is
+                              ;; never wider than the rule could prove.
+                              (and declared
+                                   (not (types/primitive? declared))
+                                   (types/subtype? declared computed-return))))
         ;; When declared is plain `T` but computed carries a `:secret`
         ;; anywhere (top-level OR nested in a list/record/tuple), record
         ;; the tainted form — that's what downstream consumers need to

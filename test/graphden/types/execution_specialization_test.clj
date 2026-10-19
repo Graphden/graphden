@@ -172,3 +172,33 @@
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Type-check failed"
         (check-entry! {:name :unsupported-browser :parent :browser-invoke
                        :args {:func :unsupported-native}}))))
+
+
+(deftest return-annotations-cannot-manufacture-execution-proof
+  (doseq [wrap [identity #(vector :list %) #(vector :map :keyword %)
+                #(hash-map :handler % :label :text)
+                #(vector :union :null %) #(vector :secret %)]
+          execution [:unknown #{:jvm-server} [:execution-var 'Unsolved]]]
+    (registry/record-rich-types-raw! :producer
+                                     {:args {} :return (wrap (callback execution))})
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"computed return is not a subtype"
+          (check-entry! {:name :claimed-browser :parent :producer
+                         :return-type (wrap (callback #{:browser-main}))})))))
+
+
+(deftest return-value-assertions-retain-existing-narrowing-when-execution-is-proven
+  (doseq [wrap [identity #(vector :list %) #(vector :map :keyword %)
+                #(hash-map :handler % :label :text)]]
+    (registry/record-rich-types-raw! :producer
+                                     {:args {} :return (wrap [:fn {} :any :any portable])})
+    (let [declared (wrap [:fn {} :int #{} portable])]
+      (is (= declared (:return (check-entry! {:name :narrowed :parent :producer
+                                              :return-type declared})))))))
+
+
+(deftest return-annotation-respects-higher-order-execution-contravariance
+  (registry/record-rich-types-raw! :producer
+                                   {:args {} :return [:fn {:handler (callback portable)} :int #{} portable]})
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"computed return is not a subtype"
+        (check-entry! {:name :changed-input :parent :producer
+                       :return-type [:fn {:handler (callback #{:browser-main})} :int #{} portable]}))))

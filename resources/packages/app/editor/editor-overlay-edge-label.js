@@ -231,6 +231,7 @@ function buildEdgeLabelOverlay(edge, container, label, overlayId) {
       editable: argEditable,
       onEdit: argEditable ? () => enterArgTypeEditMode(editArg, leafChip) : null,
       bindingId: editArg?.['binding-id'],
+      arg: editArg,
       anonymousFnId: (typeof findAnonymousTypeFnId === 'function')
                      ? findAnonymousTypeFnId(editArg) : null,
     });

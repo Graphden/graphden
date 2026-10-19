@@ -407,10 +407,10 @@ function makeExecutionRow(current) {
     value: () => choices.find(choice => choice[0] === select.value)?.[2] ?? raw};
 }
 
-function makeExecutionReadOnly(raw) {
+function makeExecutionReadOnly(raw, reason) {
   const wrap = document.createElement('div');
   wrap.className = 'type-inline-effects-readonly';
-  window.gdMountTypeStructureBody(wrap, wrap, 'effects', {label: 'Execution: ' + formatExecutionConstraint(raw)});
+  window.gdMountTypeStructureBody(wrap, wrap, 'effects', {label: 'Execution: ' + formatExecutionConstraint(raw) + (reason ? ' — ' + reason : '')});
   return wrap;
 }
 

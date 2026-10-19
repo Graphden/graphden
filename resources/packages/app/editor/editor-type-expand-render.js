@@ -573,7 +573,9 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
         });
         actionHost.appendChild(btn);
       } else {
-        host.appendChild(makeExecutionReadOnly(effective[4]));
+        host.appendChild(makeExecutionReadOnly(effective[4], c.editable && !c.bindingId
+          ? 'Inherited constraint; add a local type override to edit'
+          : 'Computed contract'));
         if (currentEff != null) {
           // Read-only callers see the same effects/execution contract.
           host.appendChild(makeEffectsReadOnly(currentEff));

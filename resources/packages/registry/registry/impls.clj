@@ -19,6 +19,7 @@
     [graphden.packages.registry-shared :as shared]
     [graphden.packages.semver :as semver]
     [graphden.packages.sync :as pkg-sync]
+    [graphden.storage.graph-writer :as writer]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.sql.pg :as pg]
     [graphden.system.branch-router :as br]
@@ -660,10 +661,15 @@
    convention) when a user is bound. Returns the row."
   [branch-name]
   (cr/record-effect! :db)
-  (let [uid (str (:user-id tc/*current-principal*))]
-    (vs/create-branch! (request/require-storage ctx) branch-name
-                       (cond-> {}
-                         (seq uid) (assoc :owner-id uid :write-policy "owner")))))
+  (let [storage (request/require-storage ctx)
+        uid (str (:user-id tc/*current-principal*))
+        requested-name branch-name]
+    ;; A fresh branch builds lazily; its committed epoch still needs a note.
+    (br-epoch/call-with-published-write!
+      storage
+      #(vs/create-branch! storage requested-name
+                          (cond-> {}
+                            (seq uid) (assoc :owner-id uid :write-policy "owner"))))))
 
 
 (defbase drop-orphan-anon-defs
@@ -695,13 +701,20 @@
    away on THAT branch's registry. Returns `{:pruned :kept-referenced}`."
   [branch-id fn-defs]
   (cr/record-effect! :db)
-  (let [{:keys [pruned-ids] :as result}
-        (pkg-sync/reconcile-bundle-scope! (branch-storage ctx branch-id) (vec fn-defs))
-        target-ctx (when-let [router (br/current-router)] (br/ctx-for router branch-id))]
-    ;; The tombstoned fns had no inbound refs (a referenced one is kept),
-    ;; so the delta is exactly those fns; `#{}` when nothing went away.
-    (exec-ctx/invalidate-graph-cache! (or target-ctx ctx) pruned-ids)
-    (dissoc result :pruned-ids)))
+  (let [storage (branch-storage ctx branch-id)
+        defs (vec fn-defs)]
+    (br-epoch/call-with-published-write!
+      storage
+      #(let [{:keys [pruned-ids] :as result}
+             (writer/with-write [storage :graph]
+                                (pkg-sync/reconcile-bundle-scope! storage defs))
+             target-ctx (when-let [router (br/current-router)] (br/ctx-for router branch-id))]
+         ;; The tombstoned fns had no inbound refs (a referenced one is kept),
+         ;; so the delta is exactly those fns; `#{}` when nothing went away.
+         (exec-ctx/invalidate-graph-cache! (or target-ctx ctx) pruned-ids)
+         (when-let [router (br/current-router)]
+           (br/invalidate-affected-ctxs! router branch-id pruned-ids))
+         (dissoc result :pruned-ids)))))
 
 
 ;; ---------------------------------------------------------------------------

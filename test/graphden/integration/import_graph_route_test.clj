@@ -11,12 +11,16 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.auth.provider :as auth]
     [graphden.clients.egress :as egress]
+    [graphden.editor.components :as components]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry-core]
     [graphden.executor.test-setup :as setup]
+    [graphden.packages.records :as records]
+    [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
+    [graphden.system.branch-router.epoch :as br-epoch]
     [graphden.test-infra.shared-bootstrap :as sb]
     [graphden.versioning.storage.core :as vs]
     [org.httpkit.server :as hk]))
@@ -446,3 +450,59 @@
     (is (contains? (branch-fn-names branch) "wt-user")
         "the fn whose arg carries a wire-tag ref landed")
     (is (contains? (branch-fn-names branch) "wt-root"))))
+
+
+(deftest imported-branch-and-prune-publish-policy-before-returning
+  (binding [br-epoch/*epoch-state-override* (atom (br-epoch/epoch-state-seed))
+            br-epoch/*epoch-check-ttl-ms* 0
+            br/*active-router-override* (atom *router*)]
+    (br-epoch/seed-watermark! *storage*)
+    (let [branch (str "imp/epoch-" (random-uuid))
+          both "[{:name :keep :namespace \"imp.epoch\" :parent :const :args {:value 1}} {:name :drop :namespace \"imp.epoch\" :parent :const :args {:value 2}}]"
+          only-keep "[{:name :keep :namespace \"imp.epoch\" :parent :const :args {:value 3}}]"
+          child-ctx (atom nil)]
+      (doseq [[query bundle] [[(str "target=" branch "&create=true") both]
+                              [(str "target=" branch "&prune=true") only-keep]]]
+        (let [before (epoch/current (epoch/epoch-handle *storage*))
+              response (import! query bundle)
+              after (epoch/current (epoch/epoch-handle *storage*))]
+          (is (= 200 (:status response)))
+          (is (true? (get-in response [:json :ok])))
+          (is (> after before))
+          (is (= #{:applied} (epoch/classify-range *storage* before after 45000))
+              "all branch/namespace/function/slot/binding writes are already published")
+          (br-epoch/validate-graph-epoch! *router*)
+          (is (= after (br-epoch/validated-watermark)) "no grace expiry or full heal is needed")
+          (is (nil? (components/assert-current-policy! *storage*)))
+          (if-let [child @child-ctx]
+            (do (is (= 3 (exec/execute child (records/fn-id "imp.epoch" :keep) {})))
+                (is (thrown? Exception (exec/execute child (records/fn-id "imp.epoch" :drop) {}))
+                    "a cached descendant no longer executes the pruned closure"))
+            (let [child (br-epoch/call-with-published-write!
+                          *storage*
+                          #(vs/create-branch! *storage* (str branch "-child")
+                                              {:base-branch-id (:id (first (sp/query-entities (:base-storage *storage*)
+                                                                                              :branch {:name branch})))}))
+                  child (br/ctx-for *router* (:id child))]
+              (reset! child-ctx child)
+              (is (= 1 (exec/execute child (records/fn-id "imp.epoch" :keep) {})))
+              (is (= 2 (exec/execute child (records/fn-id "imp.epoch" :drop) {}))))))))))
+
+
+(deftest import-branch-create-does-not-certify-argument-writes-or-failed-create
+  (let [create! (requiring-resolve 'graphden.packages.app.registry.impls/create-owned-branch!)
+        branch-name (str "imp/scoped-" (random-uuid))
+        argument-epoch (atom nil)
+        caller-log (atom [])]
+    (binding [epoch/*request-bump-log* caller-log]
+      (let [row (create! {:branch-name (delay (reset! argument-epoch (epoch/bump! *storage* :fn))
+                                              branch-name)} *ctx*)
+            branch-epoch (epoch/current (epoch/epoch-handle *storage*))
+            ledger (:graph-epoch-local (epoch/epoch-handle *storage*))]
+        (is (= branch-name (:name row)))
+        (is (= [@argument-epoch] @caller-log))
+        (is (false? (:noted? (get @ledger @argument-epoch))))
+        (is (true? (:noted? (get @ledger branch-epoch))))
+        (is (thrown? Exception (create! {:branch-name branch-name} *ctx*)))
+        (is (false? (:noted? (get @ledger @argument-epoch)))
+            "even the failed create must not drain the caller's earlier writes")))))

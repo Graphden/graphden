@@ -18,6 +18,7 @@
     [graphden.executor.registry.core :as registry-core]
     [graphden.packages.sync :as pkg-sync]
     [graphden.system.branch-router :as br]
+    [graphden.system.branch-router.epoch :as br-epoch]
     [graphden.system.branch-router.recheck :as recheck]
     [graphden.versioning.storage.core :as vs]))
 
@@ -68,12 +69,17 @@
   (let [storage (vs/switch-branch (request/require-storage ctx) branch-id)
         defs (vec fn-defs)
         target-ctx (import-context ctx storage branch-id)]
-    (recheck/call-with-ctx-slices
-      target-ctx
-      #(let [fn-ids (pkg-sync/sync-bundle! storage defs)]
-         (exec-ctx/invalidate-graph-cache! target-ctx fn-ids)
-         (recheck/record-imported-fn-types! target-ctx branch-id fn-ids)
-         (mapv str fn-ids)))))
+    (br-epoch/call-with-published-write!
+      storage
+      #(recheck/call-with-ctx-slices
+         target-ctx
+         (fn []
+           (let [fn-ids (pkg-sync/sync-bundle! storage defs)]
+             (exec-ctx/invalidate-graph-cache! target-ctx fn-ids)
+             (recheck/record-imported-fn-types! target-ctx branch-id fn-ids)
+             (when-let [router (br/current-router)]
+               (br/invalidate-affected-ctxs! router branch-id fn-ids))
+             (mapv str fn-ids)))))))
 
 
 (def impls

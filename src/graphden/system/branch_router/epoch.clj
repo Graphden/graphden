@@ -17,6 +17,7 @@
     [graphden.executor.registry.core :as registry-core]
     [graphden.storage.postgres.graph-epoch :as pg-epoch]
     [graphden.storage.protocol.core :as sp]
+    [graphden.storage.tx :as tx]
     [graphden.system.branch-router.cache :as cache]
     [graphden.system.branch-router.recheck :as recheck]
     [graphden.tenancy.context :as tc]
@@ -120,6 +121,19 @@
    (pg-epoch/note-applied! (or (:base-storage storage) storage)))
   ([storage vs]
    (pg-epoch/note-applied! (or (:base-storage storage) storage) vs)))
+
+
+(defn call-with-published-write!
+  "Run a committed write and its eager publication with an isolated epoch log.
+   Only this operation's successful bumps are noted; caller writes and foreign
+   gaps remain pending. A pooled writer must own its commit before it starts."
+  [storage f]
+  (when (tx/datasource storage) (tx/assert-owns-commit! storage))
+  (let [bumps (atom [])]
+    (binding [pg-epoch/*request-bump-log* bumps]
+      (let [result (f)]
+        (note-graph-epoch-validated! storage @bumps)
+        result))))
 
 
 (defn note-graph-epoch-covered!

@@ -2,8 +2,10 @@
   "Bundle imports publish checked types before any imported function runs."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.executor.composition.interface :as composition]
     [graphden.executor.registry.core :as registry]
     [graphden.packages.records :as records]
+    [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
     [graphden.system.branch-router.recheck :as recheck]
@@ -104,3 +106,24 @@
                                  :fn (records/fn-id ns-path :child))))
       (is (empty? (diag/errors-for-fn branch-id (records/fn-id ns-path :child))))
       (is (seq (diag/errors-for-fn branch-id (records/fn-id ns-path :invalid)))))))
+
+
+(deftest direct-branch-sync-notes-only-successfully-published-bumps
+  (binding [br/*active-router-override* (atom nil)
+            diag/*diagnostics-override* (atom {})]
+    (let [ctx (request-context)
+          storage (:storage ctx)
+          base (epoch/epoch-handle storage)
+          branch-id (vs/current-branch-id storage)
+          before (epoch/current base)]
+      (import! ctx branch-id "import.epochs")
+      (is (= #{:applied} (epoch/classify-range storage before (epoch/current base) 45000)))
+      (testing "a failed partial sync must not certify its namespace writes"
+        (let [before-failure (epoch/current base)]
+          (binding [composition/*sync-fns-override*
+                    (fn [& _] (throw (ex-info "partial import failed" {})))]
+            (is (thrown-with-msg? clojure.lang.ExceptionInfo #"partial import failed"
+                  (import! ctx branch-id "import.failed"))))
+          (is (> (epoch/current base) before-failure))
+          (is (contains? (epoch/classify-range storage before-failure (epoch/current base) 45000)
+                         :pending)))))))

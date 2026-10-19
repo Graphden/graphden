@@ -26,6 +26,7 @@
     [graphden.storage.postgres.notify :as notify]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as th]
+    [graphden.storage.tx :as tx]
     [graphden.system.branch-router :as br]
     [graphden.system.branch-router.cache :as br-cache]
     [graphden.system.branch-router.epoch :as br-epoch]
@@ -538,4 +539,36 @@
             (is (= #{:applied}
                    (epoch/classify-range base (dec before) after 0))
                 "the validator sees a fully applied range even with zero grace"))))
+      (finally (sp/close base)))))
+
+
+(deftest published-write-notes-only-its-committed-epochs
+  (let [base (storage)
+        caller-log (atom [])]
+    (try
+      (binding [epoch/*request-bump-log* caller-log]
+        (let [unrelated (epoch/bump! base :fn)
+              foreign (foreign-bump! base)
+              published (br-epoch/call-with-published-write! base #(epoch/bump! base :branch))]
+          (is (= [unrelated] @caller-log) "the caller's log is neither drained nor extended")
+          (is (false? (:noted? (get @(:graph-epoch-local base) unrelated))))
+          (is (nil? (get @(:graph-epoch-local base) foreign)))
+          (is (true? (:noted? (get @(:graph-epoch-local base) published))))
+          (is (= #{:pending :foreign :applied}
+                 (epoch/classify-range base (dec unrelated) published 45000))))
+        (testing "failed publication retains its pending epoch for recovery"
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"publication failed"
+                (br-epoch/call-with-published-write!
+                  base #(do (epoch/bump! base :binding)
+                            (throw (ex-info "publication failed" {}))))))
+          (is (false? (:noted? (get @(:graph-epoch-local base) (epoch/current base))))))
+        (testing "an outer transaction cannot publish before commit or rollback"
+          (let [called? (atom false)
+                before (epoch/current base)]
+            (is (thrown-with-msg? clojure.lang.ExceptionInfo #"own database transaction"
+                  (tx/in-transaction base
+                                     #(br-epoch/call-with-published-write!
+                                        % (fn [] (reset! called? true))))))
+            (is (false? @called?))
+            (is (= before (epoch/current base))))))
       (finally (sp/close base)))))

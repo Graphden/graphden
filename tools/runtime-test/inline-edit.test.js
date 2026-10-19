@@ -78,6 +78,9 @@ function boot(files) {
     const err = pop.querySelector('.arg-value-edit-error');
     assert(err.classList.contains('visible') && err.textContent.includes('Failed to fetch'),
       'error visible, got "' + err.textContent + '"');
+    pop.dispatchEvent(new t.ctx.Event('input', {bubbles: true}));
+    assert(!err.classList.contains('visible') && err.textContent === '',
+      'editing clears the previous submission error and live alert text');
   }
 
   console.log(' closing the popover destroys its CodeMirror views');

@@ -112,6 +112,12 @@ function openInlineEditPopover(opts) {
   errorEl.className = 'arg-value-edit-error';
   errorEl.setAttribute('role', 'alert');
   errorEl.setAttribute('aria-live', 'polite');
+  const clearSaveError = () => {
+    errorEl.classList.remove('visible');
+    errorEl.textContent = '';
+  };
+  el.addEventListener('input', clearSaveError);
+  el.addEventListener('change', clearSaveError);
 
   const buttons = document.createElement('div');
   buttons.className = 'arg-value-edit-buttons';

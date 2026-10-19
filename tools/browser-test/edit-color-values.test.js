@@ -79,6 +79,12 @@ const branch = 'color-values-' + process.pid + '-' + Date.now().toString(36);
     if (await save.isEnabled()) await save.click();
     assert(await widget.count() === 1, 'invalid value is not saved through the form');
     await text.fill('#11223380');
+    const saveError = popover.locator('.arg-value-edit-error');
+    assert(await saveError.getAttribute('role') === 'alert' && await saveError.getAttribute('aria-live') === 'polite',
+      'save feedback retains its live alert semantics');
+    assert(await saveError.innerText() === '' && !await saveError.evaluate(el => el.classList.contains('visible')),
+      'corrected input clears the previous failed-save announcement');
+    assert(!await text.evaluate(el => el.validity.customError), 'corrected Color has no native invalid state');
     assert(await alpha.inputValue() === '128', 'manual alpha reaches its control');
     await widget.locator('input[type=color]').evaluate(el => {
       el.value = '#aabbcc';

@@ -1564,6 +1564,22 @@
                    subst)) init-subst groups)))
 
 
+(defn- type-pin-subst
+  "Author pins constrain this call's shared variables before value checking.
+   A free/renamed input is still a contract: its nested callable, map and
+   list constraints must specialize sibling inputs and the result locally."
+  [fn-def primary-parent parent-args subst]
+  (reduce-kv
+    (fn [s arg-name b-form]
+      (if-let [override (and (map? b-form) (:type b-form))]
+        (if-let [expected (get parent-args arg-name)]
+          (check-binding! primary-parent arg-name expected
+                          (types/resolve-alias override) s (:name fn-def) b-form)
+          s)
+        s))
+    subst (:args fn-def)))
+
+
 (defn- type-check-bindings
   "Reduce over the fn-def's args; for each, type-check the binding
    against the parent's expected type. Returns the final substitution.
@@ -1576,7 +1592,8 @@
   (reduce-kv (fn [subst arg-name b-form]
                (check-one-binding primary-parent (:name fn-def)
                                   parent-args subst arg-name b-form))
-             (shared-scalar-input-subst (:args fn-def) parent-args (or init-subst {}))
+             (type-pin-subst fn-def primary-parent parent-args
+                             (shared-scalar-input-subst (:args fn-def) parent-args (or init-subst {})))
              (:args fn-def)))
 
 
@@ -1716,15 +1733,16 @@
           (fn [acc a b]
             (cond
               (rename-binding? b)
-              (let [t (or (some-> (:type b) types/resolve-alias)
-                          (some-> *caller-narrowings* (get (:as b)))
-                          (types/resolve subst (or (get parent-args a) :any)))]
+              (let [t (types/resolve subst
+                                     (or (some-> (:type b) types/resolve-alias)
+                                         (some-> *caller-narrowings* (get (:as b)))
+                                         (get parent-args a) :any))]
                 (-> acc
                     (update :renamed-original-names conj a)
                     (update :renamed assoc (:as b) t)))
 
               (type-only-binding? b)
-              (update acc :type-pinned assoc a (some-> (:type b) types/resolve-alias))
+              (update acc :type-pinned assoc a (types/resolve subst (types/resolve-alias (:type b))))
 
               :else
               (update acc :real-bound conj a)))
@@ -2655,8 +2673,9 @@
                 static-ret (types/resolve subst (or (:return parent-info) :any))
                 own-bindings (resolve-bindings-info
                                (own-bindings-info-for-rule (:args fn-def) effective-parent))
-                computed-return (compute-return-type fn-def primary-parent
-                                                     effective-parent static-ret)
+                computed-return (types/resolve subst
+                                               (compute-return-type fn-def primary-parent
+                                                                    effective-parent static-ret))
                 recorded-return (enforce-declared-return! fn-name fn-def computed-return)
                 drift (return-type-drift fn-def computed-return)
                 ;; Once per fn-def: both the total effects and the

@@ -333,6 +333,27 @@
         (inheritance-chain* fn-id lookups)))
 
 
+(defn scoped-source-slot-ids
+  "Rename sources up to the first captured reader outside the owner closure."
+  [view slot-map owned-slot-ids]
+  (loop [ids [] source (:source-slot-id view) seen #{(:id view)}]
+    (cond
+      (or (nil? source) (contains? seen source) (>= (count seen) 32)) ids
+      (not (contains? owned-slot-ids source)) (conj ids source)
+      :else (recur (conj ids source) (:source-slot-id (get slot-map source)) (conj seen source)))))
+
+
+(defn active-fn-slots
+  "Own junctions whose slots are not the direct source of another own view.
+   Historical rename rows retain their identity but cease to expose inputs.
+   Only direct OWN links hide a row; captured readers stay independent."
+  [fn-slots slot-map]
+  (let [own-ids (into #{} (map :slot-id) fn-slots)
+        hidden (into #{} (comp (keep #(get-in slot-map [(:slot-id %) :source-slot-id]))
+                               (filter own-ids)) fn-slots)]
+    (remove #(contains? hidden (:slot-id %)) fn-slots)))
+
+
 (defn- rename-chain-reaches?
   "True iff `candidate-slot`'s `:source-slot-id` chain transitively
    reaches `target-slot-id`. `candidate-slot` may rename a renamed
@@ -360,7 +381,7 @@
    falling back to it."
   [fn-id slot-id {:keys [slot-map fn-slots-by-fn] :as lookups}]
   (some (fn [fid]
-          (let [own-slots (->> (get fn-slots-by-fn fid [])
+          (let [own-slots (->> (active-fn-slots (get fn-slots-by-fn fid []) slot-map)
                                (keep #(get slot-map (:slot-id %))))]
             (some-> (first (filter #(rename-chain-reaches?
                                       % slot-id slot-map)
@@ -424,7 +445,7 @@
    `:name`."
   [fn-id slot-id {:keys [slot-map fn-slots-by-fn] :as lookups}]
   (or (some (fn [fid]
-              (let [own-slots (->> (get fn-slots-by-fn fid [])
+              (let [own-slots (->> (active-fn-slots (get fn-slots-by-fn fid []) slot-map)
                                    (keep #(get slot-map (:slot-id %))))]
                 (some-> (first (filter #(rename-chain-reaches?
                                           % slot-id slot-map)

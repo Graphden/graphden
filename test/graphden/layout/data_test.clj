@@ -2,6 +2,7 @@
   "The derived arg rows a card is drawn from (`derive-fn-slot-views`)."
   (:require
     [clojure.test :refer [deftest is testing]]
+    [clojure.walk :as walk]
     [graphden.executor.compile.bindings :as bindings]
     [graphden.executor.compile.lookups :as lookups]
     [graphden.layout.data :as data]))
@@ -101,3 +102,23 @@
                  (select-keys (first bound) [:kind :value])))
           (is (= 2 @scans))
           (is (= :free (:kind (first (bindings/collect-bindings root-id lk))))))))))
+
+
+(deftest repeated-rename-renders-only-the-most-specific-source-view
+  (let [identities (zipmap [:base :child :text :root :old :new :binding] (repeatedly random-uuid))
+        fns [{:id :base :name "base"} {:id :child :name "child" :parent-ids [:base]}
+             {:id :text :name "text"}]
+        slots [{:id :root :name "root" :type-fn-id :text}
+               {:id :old :name "old" :type-fn-id :text :source-slot-id :root}
+               {:id :new :name "new" :type-fn-id :text :source-slot-id :old}]]
+    (doseq [ids [[:old :new] [:new :old]]]
+      (let [rows (data/derive-fn-slot-views
+                   (walk/postwalk-replace identities
+                                          {:fns fns :slots slots
+                                           :fn-slots (into [{:fn-id :base :slot-id :root :position 0}]
+                                                           (map #(hash-map :fn-id :child :slot-id % :position 0)) ids)
+                                           :bindings [{:id :binding :fn-id :child :slot-id :root}]
+                                           :list-items []}))
+            own (filter #(= (:child identities) (:fn-id %)) rows)]
+        (is (= ["new"] (mapv :name own)))
+        (is (= [(:binding identities)] (mapv :binding-id own)))))))

@@ -105,13 +105,13 @@ On failure, traverses the creation journal backward and attempts to delete each 
 :PROPERTIES:
 :CUSTOM_ID: crud/apply-create-core
 :FILE: src/graphden/crud/entities.clj
-:LINE: 850
+:LINE: 900
 :MINS: 1.4
 :END:
 
 Repeats structural validation under the semantic writer guard, then creates the row, optional rename view, and checks the resulting function in one SQL transaction. Binding writes follow rename views only within the edited function's inheritance. A view belonging to a separately captured call retains its slot UUID and argument name; following it into that call would bind a different argument. See the [[file:../../../docs/adr/ADR-inherited-rename-surface.md][inherited rename design]]. Ordinary type errors keep the edit and return ~:type-warnings~; an optional rename failure rolls back its savepoint without losing the binding. [[file:glossary.org::#term/secret][Secret-flow]] rejection rolls back the whole SQL change, independently of the diagnostics store. See [[file:../../../docs/SECRETS.md][secrets]].
 
-- source :: [[file:../../../src/graphden/crud/entities.clj::(defn apply-create-core][src/graphden/crud/entities.clj:850]]
+- source :: [[file:../../../src/graphden/crud/entities.clj::(defn apply-create-core][src/graphden/crud/entities.clj:900]]
 - same file :: [[file:crud.org::#crud/create-entity][create-entity]]
 - referenced from :: [[file:web.org::#web/write-rej][write-rej]]
 
@@ -119,13 +119,13 @@ Repeats structural validation under the semantic writer guard, then creates the 
 :PROPERTIES:
 :CUSTOM_ID: crud/type-check-fn-after-mutation!
 :FILE: src/graphden/crud/type_check.clj
-:LINE: 648
+:LINE: 685
 :MINS: 4.9
 :END:
 
 Reconstructs and checks the changed function, updating branch-specific diagnostics. ~:reject-secret?~ marks secret-related failures for the caller to reject instead of storing them as ordinary warnings. The following ~type-check-fn-and-dependents!~ also checks direct callers using the compiler's reverse dependency index.
 
-- source :: [[file:../../../src/graphden/crud/type_check.clj::(defn type-check-fn-after-mutation!][src/graphden/crud/type_check.clj:648]]
+- source :: [[file:../../../src/graphden/crud/type_check.clj::(defn type-check-fn-after-mutation!][src/graphden/crud/type_check.clj:685]]
 - see also :: [[file:types.org::#types/check-fn-def!][check-fn-def!]]
 - referenced from :: [[file:editor.org::#editor/writeBindingFields][writeBindingFields]]
 

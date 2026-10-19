@@ -263,23 +263,30 @@ function buildLookups(data) {
 // parser + Phase 6b's ensure-rename-slot! emit them in lock-step.
 function getEffectiveSlotName(fnId, slotId) {
   if (!lookups?.fnMap) return null;
-  const visited = new Set();
-  const queue = [fnId];
-  while (queue.length) {
-    const fid = queue.shift();
-    if (visited.has(fid)) continue;
-    visited.add(fid);
-    const renamed = lookups.slotByFnSourceSlot?.get(fid + '|' + slotId);
-    if (renamed) return renamed.name;
-    const fn = lookups.fnMap.get(fid);
-    if (fn && Array.isArray(fn['parent-ids'])) {
-      for (const pid of fn['parent-ids']) {
-        if (!visited.has(pid)) queue.push(pid);
+  const chain = getInheritanceChain(fnId);
+  const owned = new Set(chain.flatMap(id => (lookups.fnSlotsByFn?.get(id) || []).map(fs => fs['slot-id'])));
+  for (const fid of chain) {
+    const junctions = lookups.fnSlotsByFn?.get(fid) || [];
+    const own = new Set(junctions.map(fs => fs['slot-id']));
+    const hidden = new Set(junctions.map(fs => lookups.slotMap.get(fs['slot-id'])?.['source-slot-id'])
+      .filter(id => own.has(id)));
+    const matches = [];
+    for (const fs of junctions) {
+      if (hidden.has(fs['slot-id'])) continue;
+      const view = lookups.slotMap.get(fs['slot-id']);
+      let source = view?.['source-slot-id'];
+      const seen = new Set([view?.id]);
+      while (source && !seen.has(source) && seen.size < 32) {
+        if (source === slotId) { matches.push(view); break; }
+        if (!owned.has(source)) break;
+        seen.add(source);
+        source = lookups.slotMap.get(source)?.['source-slot-id'];
       }
     }
+    if (matches.length === 1) return matches[0].name;
+    if (matches.length > 1) return null;
   }
-  const slot = lookups.slotMap?.get(slotId);
-  return slot ? slot.name : null;
+  return lookups.slotMap?.get(slotId)?.name || null;
 }
 
 // Build an arg-shape row from a graph node's `data` plus the

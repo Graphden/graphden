@@ -56,7 +56,7 @@
                           chain))
                 acc)))
           {}
-          (get fn-slots-by-fn fid [])))
+          (l/active-fn-slots (get fn-slots-by-fn fid []) slot-map)))
 
 
 (defn- merge-keep-outer

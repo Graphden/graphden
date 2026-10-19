@@ -605,3 +605,29 @@
                       (fn [_ id] (swap! seen conj id) nil)]
           (is (= ids (tc/recheck-dependents! ctx nil :seed)))
           (is (= ids @seen)))))))
+
+
+(deftest rename-reconstruction-preserves-scoped-identities-and-leaf-precedence
+  (let [slots {:root {:id :root}
+               :parent {:id :parent :source-slot-id :root}
+               :old {:id :old :source-slot-id :parent}
+               :new {:id :new :source-slot-id :old}
+               :reader-a {:id :reader-a :source-slot-id :root}
+               :reader-b {:id :reader-b :source-slot-id :root}
+               :capture-a {:id :capture-a :source-slot-id :reader-a}
+               :capture-b {:id :capture-b :source-slot-id :reader-b}}
+        index #'tc/renamed-views-by-source
+        owned #{:root :parent :old :new}]
+    (doseq [ids [[:old :new] [:new :old]]]
+      (let [result (index (mapv #(hash-map :slot-id %) ids) slots owned)]
+        (is (= :new (get-in result [:root :id])))
+        (is (= :new (get-in result [:parent :id])))
+        (is (= :new (get-in result [:old :id])))))
+    (let [result (index [{:slot-id :capture-a} {:slot-id :capture-b}] slots #{:root :capture-a :capture-b})]
+      (is (= :capture-a (get-in result [:reader-a :id])))
+      (is (= :capture-b (get-in result [:reader-b :id])))
+      (is (not (contains? result :root)) "captured readers do not leak into a shared primitive source"))
+    (is (thrown? clojure.lang.ExceptionInfo
+          (index [{:slot-id :reader-a} {:slot-id :reader-b}] slots #{:root :reader-a :reader-b}))))
+  (let [slots {:a {:id :a :source-slot-id :b} :b {:id :b :source-slot-id :a}}]
+    (is (= [:b] (#'tc/scoped-rename-sources (:a slots) slots #{:a :b})))))

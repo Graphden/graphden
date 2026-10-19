@@ -13,26 +13,26 @@ after: web
 :PROPERTIES:
 :CUSTOM_ID: layout/load-graph-entities-uncached
 :FILE: src/graphden/layout/data.clj
-:LINE: 330
+:LINE: 332
 :MINS: 1.0
 :END:
 
 Loads the graph entity rows needed for layout as a snapshot. Versioned storage can supply a branch-cached batch; ordinary storage uses separate entity queries. Later layout stages transform this snapshot, while the context cache avoids repeated database reads.
 
-- source :: [[file:../../../src/graphden/layout/data.clj::(defn load-graph-entities-uncached][src/graphden/layout/data.clj:330]]
+- source :: [[file:../../../src/graphden/layout/data.clj::(defn load-graph-entities-uncached][src/graphden/layout/data.clj:332]]
 - same file :: [[file:layout.org::#layout/derive-fn-slot-views][derive-fn-slot-views]]
 
 * 2. derive-fn-slot-views
 :PROPERTIES:
 :CUSTOM_ID: layout/derive-fn-slot-views
 :FILE: src/graphden/layout/data.clj
-:LINE: 264
+:LINE: 266
 :MINS: 4.6
 :END:
 
 Derives each function's visible argument rows from inherited [[file:glossary.org::#term/slot][slots]] and effective [[file:glossary.org::#term/binding][bindings]]. Nearer [[file:glossary.org::#term/binding][bindings]] override more distant ones. ~:source-id~ retains the declaring ancestor's provenance for inherited [[file:glossary.org::#term/slot][slots]]; it is not simply the current displayed function ID.
 
-- source :: [[file:../../../src/graphden/layout/data.clj::(defn derive-fn-slot-views][src/graphden/layout/data.clj:264]]
+- source :: [[file:../../../src/graphden/layout/data.clj::(defn derive-fn-slot-views][src/graphden/layout/data.clj:266]]
 - same file :: [[file:layout.org::#layout/load-graph-entities-uncached][load-graph-entities-uncached]]
 - referenced from :: [[file:editor.org::#editor/createFnOverlay][createFnOverlay]]
 

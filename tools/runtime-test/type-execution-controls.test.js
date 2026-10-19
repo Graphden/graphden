@@ -114,5 +114,16 @@ const {createDocument} = require('./mini-dom');
   assert.equal(ctx.expectedSlotType(renamedArg), null, 'another slot cannot supply the rich declaration');
   const list = ['list', callback];
   assert.equal(ctx.computeSlotType({constraint: list}), list, 'anonymous list rows retain their full callable contract');
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../../resources/packages/app/editor/editor-data.js'), 'utf8'), ctx);
+  for (const order of [['old', 'new'], ['new', 'old']]) {
+    ctx.lookups = {fnMap: new Map([['base', {id: 'base'}], ['parent', {id: 'parent', 'parent-ids': ['base']}],
+      ['grandchild', {id: 'grandchild', 'parent-ids': ['parent']}]]),
+      fnSlotsByFn: new Map([['base', [{'slot-id': 'root'}]], ['parent', order.map(id => ({'slot-id': id}))]]),
+      slotMap: new Map([['root', {id: 'root', name: 'root'}],
+        ['old', {id: 'old', name: 'events', 'source-slot-id': 'root'}],
+        ['new', {id: 'new', name: 'renamed-again', 'source-slot-id': 'old'}]])};
+    assert.equal(ctx.getEffectiveSlotName('parent', 'root'), 'renamed-again');
+    assert.equal(ctx.getEffectiveSlotName('grandchild', 'root'), 'renamed-again');
+  }
   console.log('✓ execution authoring preserves nested contracts, effects and local identity');
 })().catch(error => {console.error(error); process.exit(1);});

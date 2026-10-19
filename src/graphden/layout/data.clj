@@ -222,7 +222,9 @@
                  (vswap! rows conj
                          (build-anchor-row fn-id sid inherits-from-fid anchor-ctx))))]
     (doseq [fid chain
-            fs (get own-fn-slots fid [])]
+            ;; A repeated rename leaves its historical view rows intact.
+            ;; Emit the newest source-chain leaf first so it hides them.
+            fs (compile.lookups/active-fn-slots (get own-fn-slots fid []) slot-by-id)]
       (emit fid (:slot-id fs)))
     (doseq [b (get binding-extra-by-fn fn-id [])]
       (emit nil (:slot-id b)))

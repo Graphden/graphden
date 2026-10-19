@@ -21,6 +21,7 @@
     [graphden.crud.entities :as entities]
     [graphden.crud.entities.list :as entity-list]
     [graphden.crud.entities.views :as views]
+    [graphden.crud.type-check :as tc]
     [graphden.crud.validation :as validation]
     [graphden.executor.context :as ctx]
     [graphden.executor.interface :as exec]
@@ -1734,4 +1735,90 @@
         (is (= 200 (:status response)))
         (is (= (:id exact) (get-in response [:result :type-override-fn-id])))
         (is (= proposal (:constraint (sp/read-entity storage :fn (:id legacy))))))
+      (finally (sp/close storage)))))
+
+
+(deftest inherited-rename-preserves-local-map-contract-and-canonical-binding
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [shape [:map :keyword [:fn {:item :text} :int #{} [:execution-var 'E]]]
+            browser [:map :keyword [:fn {:item :text} :int #{} #{:browser-main}]]
+            rows (record-types/inline-fn-type-rows-from-form shape)
+            _ (doseq [row rows] (sp/create-entity storage :fn (dissoc row :kind)))
+            type-id (:id (first (filter #(= shape (:constraint %)) rows)))
+            base (setup/create-base-fn! storage "rename-map-base")
+            original (setup/create-slot! storage "map" :any)
+            _ (setup/attach-slot! storage (:id base) (:id original) 0)
+            wrapper (setup/create-composed-fn! storage "rename-map-wrapper" (:id base))
+            handlers (sp/create-entity storage :slot {:name "handlers" :type-fn-id type-id
+                                                      :source-slot-id (:id original)})
+            _ (setup/attach-slot! storage (:id wrapper) (:id handlers) 0)
+            _ (sp/create-entity storage :binding {:fn-id (:id wrapper) :slot-id (:id original)})
+            sibling (setup/create-composed-fn! storage "rename-map-sibling" (:id wrapper))]
+        (doseq [tighten-first? [false true]]
+          (let [child (setup/create-composed-fn! storage (str "rename-map-child-" tighten-first?) (:id wrapper))
+                initial (when tighten-first?
+                          (sp/create-entity storage :binding {:fn-id (:id child) :slot-id (:id original)}))
+                _ (when initial
+                    (is (= 200 (:status (entities/tighten-fn-type-impl! storage (:id initial) {:type browser})))))
+                response (if initial
+                           (entities/apply-update-core
+                             {:entity-type :binding :type-str "binding" :id-uuid (:id initial)
+                              :form-data {:rename-to "events"} :entity-data {}} (test-ctx storage))
+                           (entities/apply-create-core
+                             {:entity-type :binding :type-str "binding" :form-data {:rename-to "events"}
+                              :entity-data {:fn-id (:id child) :slot-id (:id handlers)}} (test-ctx storage)))
+                binding-id (or (:id initial) (:created response))
+                binding (sp/read-entity storage :binding binding-id)
+                view (sp/read-entity storage :slot (graphden.packages.records/slot-id (:id child) "events"))]
+            (is (nil? (:error response)))
+            (is (= (:id original) (:slot-id binding)) "binding identity remains canonical")
+            (is (= (:id handlers) (:source-slot-id view)) "view retains inherited source identity")
+            (is (= type-id (:type-fn-id view)))
+            (is (= {:as :events :type (if tighten-first? browser shape)}
+                   (get-in (tc/reconstruct-fn-def storage (:id child)) [:args :handlers])))
+            (when-not tighten-first?
+              (is (= 200 (:status (entities/tighten-fn-type-impl! storage binding-id {:type browser})))))
+            (is (= {:as :events :type browser}
+                   (get-in (tc/reconstruct-fn-def storage (:id child)) [:args :handlers])))
+            (let [again (entities/apply-update-core
+                          {:entity-type :binding :type-str "binding" :id-uuid binding-id
+                           :form-data {:rename-to "renamed-again"} :entity-data {}} (test-ctx storage))
+                  next-view (sp/read-entity storage :slot (graphden.packages.records/slot-id (:id child) "renamed-again"))]
+              (is (nil? (:error again)))
+              (is (= (:id view) (:source-slot-id next-view)))
+              (is (= (:id original) (:slot-id (sp/read-entity storage :binding binding-id))))
+              (is (= {:as :renamed-again :type browser}
+                     (get-in (tc/reconstruct-fn-def storage (:id child)) [:args :handlers])))
+              (let [snapshot (fn []
+                               {:binding (sp/read-entity storage :binding binding-id)
+                                :old (sp/read-entity storage :slot (:id view))
+                                :latest (sp/read-entity storage :slot (:id next-view))
+                                :junctions (set (sp/query-entities storage :fn-slot {:fn-id (:id child)}))})
+                    before (snapshot)
+                    refused (entities/apply-update-core
+                              {:entity-type :binding :type-str "binding" :id-uuid binding-id
+                               :form-data {:rename-to "events"} :entity-data {}} (test-ctx storage))
+                    refused-create (entities/apply-create-core
+                                     {:entity-type :binding :type-str "binding" :form-data {:rename-to "events"}
+                                      :entity-data {:fn-id (:id child) :slot-id (:id handlers)}} (test-ctx storage))]
+                (doseq [response [refused refused-create]]
+                  (is (= 409 (:http-status response)))
+                  (is (re-find #"earlier rename" (:error response))))
+                (is (= before (snapshot)) "historical-name conflict changes no binding, slot or junction")
+                (let [idempotent (entities/apply-update-core
+                                   {:entity-type :binding :type-str "binding" :id-uuid binding-id
+                                    :form-data {:rename-to "renamed-again"} :entity-data {}} (test-ctx storage))]
+                  (is (nil? (:error idempotent)))
+                  (is (= before (snapshot))))
+                (is (= {:as :renamed-again :type browser}
+                       (get-in (tc/reconstruct-fn-def storage (:id child)) [:args :handlers]))))
+              (let [grandchild (setup/create-composed-fn! storage (str "rename-map-grandchild-" tighten-first?) (:id child))]
+                (sp/create-entity storage :binding {:fn-id (:id grandchild) :slot-id (:id original)
+                                                    :value {} :value-present true})
+                (is (= {:value {}}
+                       (get-in (tc/reconstruct-fn-def storage (:id grandchild)) [:args :renamed-again])))))
+            (is (= handlers (sp/read-entity storage :slot (:id handlers))))
+            (is (empty? (sp/query-entities storage :binding {:fn-id (:id sibling)})))
+            (is (empty? (:args (tc/reconstruct-fn-def storage (:id sibling))))))))
       (finally (sp/close storage)))))

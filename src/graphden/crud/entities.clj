@@ -323,6 +323,9 @@
 ;; a submitted-empty `description=` clears the field rather than
 ;; leaving the old value).
 
+(declare rename-rejection)
+
+
 (defn ensure-rename-slot!
   "Phase 6b — keep UI rename atomically consistent with EDN parser
    output. When a binding write carries a non-blank `:rename-to=X`
@@ -344,6 +347,8 @@
    caller can surface to the user."
   [storage fn-id source-slot-id rename-to]
   (when (and fn-id source-slot-id rename-to (not (str/blank? rename-to)))
+    (when-let [rejection (rename-rejection storage fn-id source-slot-id rename-to)]
+      (throw (ex-info (:reason rejection) (assoc rejection :type :validation/rename-conflict))))
     (let [fn-row (sp/read-entity storage :fn fn-id)
           parent-ids (:parent-ids fn-row)
           source-slot (sp/read-entity storage :slot source-slot-id)]
@@ -554,6 +559,43 @@
      entity-data)))
 
 
+(defn- effective-rename-source-slot-id
+  "Recover the nearest owned view for clients writing a canonical binding.
+   Source links outside the inheritance closure belong to captured readers."
+  [storage fn-id source-id]
+  (let [owners (inheritance/closure storage [fn-id])
+        junctions (sp/query-entities storage :fn-slot {:fn-id (vec (keys owners))})
+        slots (sp/read-entities storage :slot (vec (distinct (map :slot-id junctions))))
+        by-owner (group-by :fn-id junctions)
+        reaches? (fn [id]
+                   (loop [id id seen #{}]
+                     (cond (= id source-id) true
+                           (or (nil? id) (contains? seen id) (not (contains? slots id))) false
+                           :else (recur (:source-slot-id (get slots id)) (conj seen id)))))]
+    (loop [frontier [fn-id] seen #{}]
+      (if (empty? frontier) source-id
+          (let [candidates (into #{} (comp (mapcat #(get by-owner %))
+                                           (map :slot-id) (filter reaches?)) frontier)
+                sources (into #{} (keep #(get-in slots [% :source-slot-id])) candidates)
+                leaves (remove sources candidates)]
+            (cond
+              (= 1 (count leaves)) (first leaves)
+              (seq leaves) (throw (ex-info "The rename source is ambiguous" {:type :validation/ambiguous-rename}))
+              :else (recur (into [] (comp (mapcat #(get-in owners [% :parent-ids]))
+                                          (remove seen) (distinct)) frontier)
+                           (into seen frontier))))))))
+
+
+(defn- rename-rejection
+  [storage fn-id source-slot-id rename-to]
+  (when (and fn-id source-slot-id rename-to (not (str/blank? rename-to)))
+    (let [target-id (records/slot-id fn-id rename-to)]
+      (when (and (sp/read-entity storage :slot target-id)
+                 (not= target-id (effective-rename-source-slot-id storage fn-id source-slot-id)))
+        {:reason "This argument name is already used by an earlier rename or another argument. Choose a new name."
+         :http-status 409}))))
+
+
 (defn- try-rename!
   "An optional rename may fail without rejecting its binding. A savepoint
    prevents a SQL error or half-created view from poisoning the outer write."
@@ -582,7 +624,8 @@
   (try-rename! storage
                #(ensure-rename-slot! storage
                                      (:fn-id entity-data)
-                                     (:slot-id entity-data)
+                                     (effective-rename-source-slot-id storage (:fn-id entity-data)
+                                                                      (:slot-id entity-data))
                                      (when-not (str/blank? (:rename-to form-data))
                                        (str (:rename-to form-data))))))
 
@@ -662,11 +705,15 @@
    on the derived diagnostics store (docs/SECRETS.md)."
   [{:keys [entity-type type-str form-data entity-data]} ctx]
   (let [storage (request/require-storage ctx)
+        rename-source-slot-id (:slot-id entity-data)
         entity-data (normalize-binding-slot storage entity-type entity-data)
+        rename-rej (when (= entity-type :binding)
+                     (rename-rejection storage (:fn-id entity-data) rename-source-slot-id (:rename-to form-data)))
         pkg-reason (pkg-guard/write-rejection storage entity-type entity-data)
         rej (validation/write-rej storage entity-type entity-data)
         create-result (cond
                         pkg-reason {:error pkg-reason :http-status 403}
+                        rename-rej {:error (:reason rename-rej) :http-status (:http-status rename-rej)}
                         rej {:error (:reason rej) :http-status 400}
                         :else (try-create-or-error storage entity-type entity-data type-str))]
     (if (:created create-result)
@@ -678,7 +725,7 @@
       ;; secret carve-out below rolls the view rows back with the binding.
       (let [renamed (when (and (= type-str "binding")
                                (contains? form-data :rename-to))
-                      (forward-rename-slot! storage form-data entity-data))
+                      (forward-rename-slot! storage form-data (assoc entity-data :slot-id rename-source-slot-id)))
             rej (post-write-type-rej ctx storage type-str entity-data
                                      (:created create-result))]
         (if (:secret? rej)
@@ -717,7 +764,8 @@
                #(when-let [existing (sp/read-entity storage :binding id-uuid)]
                   (ensure-rename-slot! storage
                                        (:fn-id existing)
-                                       (:slot-id existing)
+                                       (effective-rename-source-slot-id storage (:fn-id existing)
+                                                                        (:slot-id existing))
                                        (when-not (str/blank? (:rename-to form-data))
                                          (str (:rename-to form-data)))))))
 
@@ -776,7 +824,9 @@
                      (when pre-row
                        (pkg-guard/write-rejection storage entity-type pre-row)))
         check-data (merge pre-row entity-data {:id id-uuid})
-        rej (or (when (= entity-type :fn)
+        rej (or (when (= entity-type :binding)
+                  (rename-rejection storage (:fn-id check-data) (:slot-id check-data) (:rename-to form-data)))
+                (when (= entity-type :fn)
                   (secret-leaf-capability-rej storage entity-data))
                 (when entity-data (validation/write-rej storage entity-type check-data)))
         updated (when-not (or pkg-reason rej)
@@ -798,7 +848,7 @@
       {:error (or pkg-reason (:reason rej) @error-msg "Failed to update entity")
        :http-status (cond
                       (or pkg-reason (= :capability/secret-leaf-restricted (:type rej))) 403
-                      rej 400
+                      rej (or (:http-status rej) 400)
                       :else @error-status)}
       (let [;; Renamed-view slot BEFORE the type check — same reason as in
             ;; `apply-create-core`: the checker must see the rename it is

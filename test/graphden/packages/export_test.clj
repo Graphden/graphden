@@ -462,3 +462,37 @@
       (is (= "ext.lib" (resolve* name->nss root :mixed "other.pkg"))))
     (testing "unknown / qualified names resolve to nil (classified non-external, as before)"
       (is (nil? (resolve* name->nss root :absent "dup.pkg"))))))
+
+
+(deftest export-canonical-bindings-through-historical-rename-views
+  (let [callback [:fn {:item :text} :int #{} [:execution-var 'E]]
+        shape [:map :keyword callback]
+        definitions [{:name :rename-root :args {:map :any} :return-type :any}
+                     {:name :rename-wrapper :parent :rename-root :args {:map {:as :handlers :type shape}}}
+                     {:name :rename-child :parent :rename-wrapper :args {:handlers {:as :events}}}
+                     {:name :rename-grandchild :parent :rename-child :args {:events {:value {}}}}]
+        initial (parse/parse-module definitions)
+        by-name (into {} (keep #(when (and (= :fn (:kind %)) (:name %)) [(:name %) (:id %)])) initial)
+        child (get by-name "rename-child")
+        grandchild (get by-name "rename-grandchild")
+        root-slot (records/slot-id (get by-name "rename-root") "map")
+        old-slot (records/slot-id child "events")
+        new-slot (records/slot-id child "renamed-again")
+        old-view (first (filter #(and (= :slot (:kind %)) (= old-slot (:id %))) initial))
+        persisted (into (mapv (fn [row]
+                                (if (and (= :binding (:kind row)) (contains? #{child grandchild} (:fn-id row)))
+                                  (assoc row :slot-id root-slot)
+                                  row)) initial)
+                        [(assoc old-view :id new-slot :name "renamed-again" :source-slot-id old-slot)
+                         {:kind :fn-slot :id (records/fn-slot-id child new-slot)
+                          :fn-id child :slot-id new-slot :position 0}])]
+    (doseq [rows [persisted (vec (reverse persisted))]]
+      (let [exported (export/records->fn-defs rows)
+            defs (into {} (map (juxt :name identity)) exported)
+            reparsed (parse/parse-module exported)]
+        (is (= {:handlers {:as :renamed-again}} (get-in defs [:rename-child :args])))
+        (is (= {:renamed-again {:value {}}} (get-in defs [:rename-grandchild :args])))
+        (is (= shape (get-in defs [:rename-wrapper :args :map :type])))
+        (is (= child (:id (first (filter #(= "rename-child" (:name %)) reparsed)))))
+        (is (some #(and (= :slot (:kind %)) (= new-slot (:id %))) reparsed))
+        (is (= exported (export/records->fn-defs reparsed)))))))

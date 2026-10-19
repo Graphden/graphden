@@ -6,6 +6,7 @@
    layer is built on."
   (:require
     [clojure.test :refer [deftest is testing]]
+    [graphden.executor.compile.lookups :as l]
     [graphden.executor.compile.renames :as r]))
 
 
@@ -78,3 +79,22 @@
              {:item 7}
              [{:chain-name :coll       :rename-name :item}
               {:chain-name :branch-row :rename-name :item}])))))
+
+
+(deftest repeated-renames-have-one-runtime-leaf-in-either-row-order
+  (doseq [ids [[:old :new] [:new :old]]]
+    (let [graph {:fns [{:id :base} {:id :parent :parent-ids [:base]} {:id :grandchild :parent-ids [:parent]}]
+                 :slots [{:id :root :name "root"} {:id :old :name "events" :source-slot-id :root}
+                         {:id :new :name "renamed-again" :source-slot-id :old}]
+                 :fn-slots (into [{:fn-id :base :slot-id :root :position 0}]
+                                 (map #(hash-map :fn-id :parent :slot-id % :position 0)) ids)}
+          lookup (l/build-lookups graph)]
+      (doseq [fid [:parent :grandchild]]
+        (is (= :renamed-again (l/chain-rename-for-slot fid :root lookup)))
+        (is (= :new (l/effective-reader-slot-id fid :root lookup))))
+      (is (= :renamed-again (get (#'r/own-rename-chain-map :parent lookup) :root)))))
+  (let [slots {:root {:id :root} :foreign {:id :foreign :source-slot-id :root}
+               :capture {:id :capture :source-slot-id :foreign}}
+        junctions [{:slot-id :root} {:slot-id :capture}]]
+    (is (= junctions (vec (l/active-fn-slots junctions slots)))
+        "a captured reader does not hide an independent own root slot")))

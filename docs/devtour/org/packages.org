@@ -230,26 +230,26 @@ Synchronizes packaged definitions into storage, repairs moved identities, remove
 :PROPERTIES:
 :CUSTOM_ID: packages/records->fn-defs
 :FILE: src/graphden/packages/export.clj
-:LINE: 559
+:LINE: 567
 :MINS: 1.8
 :END:
 
 Converts stored graph records back into function definitions for export and distribution. Parsing the exported definitions must reconstruct the same graph: ~parse(export(parse(x))) == parse(x)~. The corpus test verifies this property on actual packages.
 
-- source :: [[file:../../../src/graphden/packages/export.clj::(defn records->fn-defs][src/graphden/packages/export.clj:559]]
+- source :: [[file:../../../src/graphden/packages/export.clj::(defn records->fn-defs][src/graphden/packages/export.clj:567]]
 - same file :: [[file:packages.org::#packages/ref-kw][ref-kw]], [[file:packages.org::#packages/external-deps][external-deps]], [[file:packages.org::#packages/strip-secret-paths][strip-secret-paths]]
 
 * 18. ref-kw
 :PROPERTIES:
 :CUSTOM_ID: packages/ref-kw
 :FILE: src/graphden/packages/export.clj
-:LINE: 106
+:LINE: 107
 :MINS: 1.9
 :END:
 
 Chooses an unqualified [[file:glossary.org::#term/edn][keyword]] for a unique reference name and a namespace-qualified [[file:glossary.org::#term/edn][keyword]] when names repeat. Some version-qualified namespaces produce valid in-memory [[file:glossary.org::#term/edn][keywords]] whose printed form is not valid [[file:glossary.org::#term/edn][EDN]]; the next step handles that text boundary.
 
-- source :: [[file:../../../src/graphden/packages/export.clj::(defn- ref-kw][src/graphden/packages/export.clj:106]]
+- source :: [[file:../../../src/graphden/packages/export.clj::(defn- ref-kw][src/graphden/packages/export.clj:107]]
 - same file :: [[file:packages.org::#packages/records->fn-defs][records->fn-defs]], [[file:packages.org::#packages/external-deps][external-deps]], [[file:packages.org::#packages/strip-secret-paths][strip-secret-paths]]
 
 * 19. encode-unreadable-kws
@@ -268,26 +268,26 @@ Before writing [[file:glossary.org::#term/edn][EDN]] text, replaces otherwise un
 :PROPERTIES:
 :CUSTOM_ID: packages/external-deps
 :FILE: src/graphden/packages/export.clj
-:LINE: 917
+:LINE: 925
 :MINS: 4.8
 :END:
 
 Finds references leaving an exported namespace subtree and records them as dependencies. References into version-qualified package namespaces also produce package dependencies. The surrounding ~:export-namespace~ [[file:glossary.org::#term/graph-function][graph function]] assembles the final bundle.
 
-- source :: [[file:../../../src/graphden/packages/export.clj::(defn external-deps][src/graphden/packages/export.clj:917]]
+- source :: [[file:../../../src/graphden/packages/export.clj::(defn external-deps][src/graphden/packages/export.clj:925]]
 - same file :: [[file:packages.org::#packages/records->fn-defs][records->fn-defs]], [[file:packages.org::#packages/ref-kw][ref-kw]], [[file:packages.org::#packages/strip-secret-paths][strip-secret-paths]]
 
 * 21. strip-secret-paths
 :PROPERTIES:
 :CUSTOM_ID: packages/strip-secret-paths
 :FILE: src/graphden/packages/export.clj
-:LINE: 773
+:LINE: 781
 :MINS: 1.9
 :END:
 
 Removes vault paths from shared bundles by default and leaves the corresponding secret arguments free. The ~:secrets~ manifest tells the installer which values need to be defined locally; publishing a function therefore does not publish its secret locations.
 
-- source :: [[file:../../../src/graphden/packages/export.clj::(defn strip-secret-paths][src/graphden/packages/export.clj:773]]
+- source :: [[file:../../../src/graphden/packages/export.clj::(defn strip-secret-paths][src/graphden/packages/export.clj:781]]
 - same file :: [[file:packages.org::#packages/records->fn-defs][records->fn-defs]], [[file:packages.org::#packages/ref-kw][ref-kw]], [[file:packages.org::#packages/external-deps][external-deps]]
 
 * 22. publish-package-apply

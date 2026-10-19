@@ -68,6 +68,7 @@
    should eventually converge on this core."
   (:require
     [clojure.string :as str]
+    [graphden.executor.compile.lookups :as compile-lookups]
     [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]
     [graphden.types.core :as types]
@@ -461,7 +462,12 @@
      3. bindings on inherited slots — keyed by the target slot's name."
   [fnr ctx]
   (let [own-id (:id fnr)
-        own-slots (slots-of own-id ctx)
+        lookup {:fn-map (:fns ctx) :slot-map (:slots ctx) :fn-slots-by-fn (:fn-slots ctx)}
+        active-junctions (compile-lookups/active-fn-slots (get-in ctx [:fn-slots own-id]) (:slots ctx))
+        own-slots (keep #(get-in ctx [:slots (:slot-id %)]) active-junctions)
+        owned-slot-ids (into #{} (comp (mapcat #(get-in ctx [:fn-slots %])) (map :slot-id))
+                             (compile-lookups/inheritance-chain* own-id lookup))
+        source-ids #(compile-lookups/scoped-source-slot-ids % (:slots ctx) owned-slot-ids)
         bindings (get-in ctx [:bindings own-id])
         binding-by-slot (into {} (map (juxt :slot-id identity)) bindings)
         ;; rename slots: own slot whose source-slot-id has a companion
@@ -471,10 +477,10 @@
         ;; two. `rename-by-source` maps source-slot-id → exposed name.
         rename-slot? (fn [s]
                        (and (:source-slot-id s)
-                            (contains? binding-by-slot (:source-slot-id s))))
+                            (some #(contains? binding-by-slot %) (source-ids s))))
         rename-slots (filter rename-slot? own-slots)
         rename-by-source (into {}
-                               (map (fn [s] [(:source-slot-id s) (keyword (:name s))]))
+                               (mapcat (fn [s] (map #(vector % (keyword (:name s))) (source-ids s))))
                                rename-slots)
         ;; Positional-rename slots: own slots exposed by an `{:as X}`
         ;; INSIDE a list binding's items (source-slot-id nil — the source
@@ -508,7 +514,9 @@
         (into {}
               (keep (fn [b]
                       (when-let [slot (get-in ctx [:slots (:slot-id b)])]
-                        (let [arg-name (keyword (:name slot))]
+                        (let [arg-name (or (some #(compile-lookups/chain-rename-for-slot % (:slot-id b) lookup)
+                                                 (:parent-ids fnr))
+                                           (keyword (:name slot)))]
                           (if-let [exposed (get rename-by-source (:slot-id b))]
                             [arg-name (assoc (binding-field-map b ctx) :as exposed)]
                             ;; A non-meaningful binding is the empty row a

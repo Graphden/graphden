@@ -21,6 +21,7 @@
     [graphden.crud.request :as request]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.compile.deps :as deps]
+    [graphden.executor.compile.lookups :as compile-lookups]
     [graphden.executor.context :as exec-ctx]
     [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]
@@ -373,9 +374,10 @@
       (true? (:value-present b)) (cond-> {:value (:value b)}
                                    override-id (assoc :type override-type))
       renamed-view {:as (keyword (:name renamed-view))
-                    :type (some-> (:type-fn-id renamed-view)
-                                  (->> (get fn-by-id))
-                                  row->type-kw)}
+                    :type (or override-type
+                              (some-> (:type-fn-id renamed-view)
+                                      (->> (get fn-by-id))
+                                      row->type-kw))}
       override-id {:type override-type}
       :else nil)))
 
@@ -435,6 +437,42 @@
                    row))))
 
 
+(defn- rename-source-slots
+  "Load intermediate rename identities in bounded batches for reconstruction."
+  [storage slots]
+  (loop [slots slots depth 0]
+    (let [missing (into #{} (comp (keep :source-slot-id) (remove #(contains? slots %))) (vals slots))]
+      (if (or (empty? missing) (>= depth 32))
+        slots
+        (let [rows (reconstruction-read storage :many :slot (vec missing))]
+          (if (empty? rows) slots (recur (merge slots rows) (inc depth))))))))
+
+
+(defn- scoped-rename-sources
+  [view slots owned-slot-ids]
+  (compile-lookups/scoped-source-slot-ids view slots owned-slot-ids))
+
+
+(defn- renamed-views-by-source
+  "Index owned views without merging distinct captured readers. A newer
+   view shadows its own source view independently of junction row order."
+  [own-fn-slots slots owned-slot-ids]
+  (let [views (keep #(get slots (:slot-id %)) own-fn-slots)
+        chains (into {} (map (fn [view] [(:id view) (set (scoped-rename-sources view slots owned-slot-ids))])) views)]
+    (reduce (fn [index view]
+              (reduce (fn [index source]
+                        (let [previous (get index source)]
+                          (cond
+                            (or (nil? previous) (= (:id previous) (:id view))
+                                (contains? (get chains (:id view)) (:id previous)))
+                            (assoc index source view)
+                            (contains? (get chains (:id previous)) (:id view)) index
+                            :else (throw (ex-info "The rename source is ambiguous"
+                                                  {:type :type-error :code :ambiguous-rename})))))
+                      index (get chains (:id view))))
+            {} views)))
+
+
 (defn- reconstruct-fn-def*
   "Reconstruct against optional snapshot-local namespace metadata."
   [storage fn-id namespace-paths]
@@ -476,18 +514,11 @@
                              (concat own-bindings own-fn-slots fn-slots))
               slot-rows (when (seq slot-ids)
                           (reconstruction-read storage :many :slot slot-ids))
-              slot-by-id (or slot-rows {})
+              slot-by-id (rename-source-slots storage (or slot-rows {}))
               ;; Map source-slot-id → renamed-view slot row, restricted
               ;; to renames owned by `fn-id` (since binding-shape-for-
               ;; edn always asks about the owner's renames). One pass
               ;; over own-fn-slots; no per-binding query.
-              renamed-view-by-source
-              (into {}
-                    (keep (fn [fs]
-                            (when-let [s (get slot-by-id (:slot-id fs))]
-                              (when-let [src (:source-slot-id s)]
-                                [src s]))))
-                    own-fn-slots)
               ;; The PUBLIC name of an own binding's slot — what the
               ;; checker matches against the parent's args. The editor
               ;; writes a renamed arg's binding on the rename chain's
@@ -503,7 +534,7 @@
               ;; own rename is the `{:as …}` shape below). Skipped when
               ;; nothing is bound, so the bare :fn create keeps its
               ;; round-trip budget.
-              public-name-by-slot
+              inherited-surface
               (when (seq own-bindings)
                 (let [levels (loop [acc [] seen (conj (set parent-ids) fn-id)
                                     frontier (vec parent-ids)]
@@ -540,13 +571,19 @@
                                                    (when (and s (:source-slot-id s)
                                                               (reaches? s slot-id))
                                                      (keyword (:name s)))))
-                                               (get views-by-fn fid)))
+                                               (compile-lookups/active-fn-slots (get views-by-fn fid) slots-all)))
                                        anc-ids))]
-                  (into {}
-                        (keep (fn [b]
-                                (when-let [n (name-for (:slot-id b))]
-                                  [(:slot-id b) n])))
-                        own-bindings)))
+                  {:slot-ids (into #{} (map :slot-id) anc-fn-slots)
+                   :names (into {}
+                                (keep (fn [b]
+                                        (when-let [n (name-for (:slot-id b))]
+                                          [(:slot-id b) n])))
+                                own-bindings)}))
+              public-name-by-slot (:names inherited-surface)
+              renamed-view-by-source
+              (renamed-views-by-source own-fn-slots slot-by-id
+                                       (into (or (:slot-ids inherited-surface) #{})
+                                             (map :slot-id) own-fn-slots))
               ;; Resolve binding/list refs AND the types of rename views
               ;; into fn-by-id so binding-shape-for-edn can name them.
               ;; A rename-only type need not occur in a parent, return or

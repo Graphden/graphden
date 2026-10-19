@@ -278,7 +278,10 @@
         ;; subtype of some other non-typevar sibling. Type-vars
         ;; are KEPT (they're polymorphic — `'a` may bind to
         ;; anything, so we can't reason about subtype here) but
-        ;; can't absorb others either. Without this the checker
+        ;; can't absorb others either. Nested execution variables have
+        ;; the same protection: provisional subtype success must not
+        ;; discard an arm's separate execution constraints.
+        ;; Without this the checker
         ;; surfaces redundant unions like
         ;; `[:union :int :positive-int]` (where `:positive-int ⊆
         ;; :int` makes the wider `:int` cover everything) — UI
@@ -287,11 +290,12 @@
         absorbed (vec
                    (keep-indexed
                      (fn [i m]
-                       (if (type-var? m)
+                       (if (or (type-var? m) (has-execution-vars? m))
                          m
                          (when-not (some (fn [[j other]]
                                            (and (not= i j)
                                                 (not (type-var? other))
+                                                (not (has-execution-vars? other))
                                                 (not= m other)
                                                 (subtype? m other)
                                                 ;; If two members are
@@ -1650,11 +1654,38 @@
      :a-rest-tvs a-rest-tvs :b-rest-tvs b-rest-tvs}))
 
 
+(defn- unify-execution-unions
+  "Collect bounds through every actual arm. Ambiguous arms that produce
+   different substitutions fail conservatively; choosing the first could
+   invent an execution proof when a later binding narrows the shared vars."
+  [expected actual subst]
+  (let [contravariant? (neg? *execution-variance*)
+        required (if contravariant? actual expected)
+        supported (if contravariant? expected actual)
+        required-members (if (union-type? required) (union-members required) [required])
+        supported-members (if (union-type? supported) (union-members supported) [supported])]
+    (reduce (fn [s supported-member]
+              (if (= s ::fail)
+                (reduced ::fail)
+                (let [solutions (into #{}
+                                      (remove #(= ::fail %))
+                                      (map #(if contravariant?
+                                              (unify supported-member % s)
+                                              (unify % supported-member s))
+                                           required-members))]
+                  (if (= 1 (count solutions)) (first solutions) (reduced ::fail)))))
+            subst supported-members)))
+
+
 (defn- try-unify-unions
   "Unify two types when one or both sides is a union. HM unifier
    doesn't naturally pick a branch (multiple valid choices), so this
    runs a documented fallback chain and returns the first successful
    substitution — or `::fail` if every arm fails:
+
+   Execution-variable unions first collect constraints through every actual
+   arm; multiple distinct solutions fail rather than guess an assignment.
+   The legacy fallback chain below applies without execution variables.
 
    1. **Subtype-direction success** — `:null ⊆ [:union :null T]` etc.;
       matches the lenient `:any` handling in `unify`.
@@ -1668,34 +1699,36 @@
       polymorphic chains like `:first` ↦ `[:union :null a]`).
    5. **Mirror of (4)** with sides swapped."
   [a b subst]
-  (or
-    (when (or (subtype? a b) (subtype? b a)) subst)
-    (let [{:keys [common a-rest b-rest]} (union-rest-and-tv a b)]
-      (when (and (seq common) (= 1 (count a-rest)) (= 1 (count b-rest)))
-        (let [s (unify (first a-rest) (first b-rest) subst)]
-          (when-not (= s ::fail) s))))
-    (let [concrete   (if (union-type? a) b a)
-          union-side (if (union-type? a) a b)
-          tv-members (filter type-var? (union-members union-side))]
-      (when (and (not (union-type? concrete))
-                 (= 1 (count tv-members)))
-        (let [s (unify concrete (first tv-members) subst)]
-          (when-not (= s ::fail) s))))
-    (let [{:keys [common a-rest b-rest a-rest-tvs b-rest-tvs]}
-          (union-rest-and-tv a b)]
-      (when (and (seq common)
-                 (= 1 (count a-rest)) (= 1 (count a-rest-tvs))
-                 (seq b-rest) (empty? b-rest-tvs))
-        (let [s (unify (first a-rest-tvs) (make-union b-rest) subst)]
-          (when-not (= s ::fail) s))))
-    (let [{:keys [common a-rest b-rest a-rest-tvs b-rest-tvs]}
-          (union-rest-and-tv a b)]
-      (when (and (seq common)
-                 (= 1 (count b-rest)) (= 1 (count b-rest-tvs))
-                 (seq a-rest) (empty? a-rest-tvs))
-        (let [s (unify (first b-rest-tvs) (make-union a-rest) subst)]
-          (when-not (= s ::fail) s))))
-    ::fail))
+  (if (or (has-execution-vars? a) (has-execution-vars? b))
+    (unify-execution-unions a b subst)
+    (or
+      (when (or (subtype? a b) (subtype? b a)) subst)
+      (let [{:keys [common a-rest b-rest]} (union-rest-and-tv a b)]
+        (when (and (seq common) (= 1 (count a-rest)) (= 1 (count b-rest)))
+          (let [s (unify (first a-rest) (first b-rest) subst)]
+            (when-not (= s ::fail) s))))
+      (let [concrete   (if (union-type? a) b a)
+            union-side (if (union-type? a) a b)
+            tv-members (filter type-var? (union-members union-side))]
+        (when (and (not (union-type? concrete))
+                   (= 1 (count tv-members)))
+          (let [s (unify concrete (first tv-members) subst)]
+            (when-not (= s ::fail) s))))
+      (let [{:keys [common a-rest b-rest a-rest-tvs b-rest-tvs]}
+            (union-rest-and-tv a b)]
+        (when (and (seq common)
+                   (= 1 (count a-rest)) (= 1 (count a-rest-tvs))
+                   (seq b-rest) (empty? b-rest-tvs))
+          (let [s (unify (first a-rest-tvs) (make-union b-rest) subst)]
+            (when-not (= s ::fail) s))))
+      (let [{:keys [common a-rest b-rest a-rest-tvs b-rest-tvs]}
+            (union-rest-and-tv a b)]
+        (when (and (seq common)
+                   (= 1 (count b-rest)) (= 1 (count b-rest-tvs))
+                   (seq a-rest) (empty? a-rest-tvs))
+          (let [s (unify (first b-rest-tvs) (make-union a-rest) subst)]
+            (when-not (= s ::fail) s))))
+      ::fail)))
 
 
 (defn unify
@@ -1745,6 +1778,19 @@
          ;; `:never` (letting `make-union` later absorb it) rather than
          ;; merely succeeding without a binding.
          (or (= a :never) (= b :never)) subst
+         ;; Mirror monotone marker subtyping without stripping the actual
+         ;; label. Callable input variance reverses the promotion direction.
+         (and (or (marker-type? a) (marker-type? b))
+              (not (or (union-type? a) (union-type? b))))
+         (cond
+           (and (marker-type? a) (marker-type? b)
+                (= (marker-tag a) (marker-tag b)))
+           (unify (marker-inner a) (marker-inner b) subst)
+           (and (pos? *execution-variance*) (marker-type? a) (not (marker-type? b)))
+           (unify (marker-inner a) b subst)
+           (and (neg? *execution-variance*) (marker-type? b) (not (marker-type? a)))
+           (unify a (marker-inner b) subst)
+           :else ::fail)
          ;; Unions: HM unifier doesn't naturally pick a branch (multiple
          ;; valid choices), so `try-unify-unions` runs the documented
          ;; fallback chain (subtype-direction success, common-member

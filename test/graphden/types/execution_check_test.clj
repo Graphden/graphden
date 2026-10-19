@@ -70,3 +70,36 @@
                                         :second {:type (callable #{:browser-main})}}
                                        :any)]
     (is (= #{:browser-main} (types/fn-execution result)))))
+
+
+(deftest marked-callable-producer-through-checker
+  (let [e [:execution-var 'E]
+        expected [:secret (callable e)]
+        actual [:secret (callable #{:browser-main})]]
+    (registry/record-rich-types-raw! :marked-producer
+                                     {:args {} :return actual :effects #{}})
+    (registry/record-rich-types-raw! :marked-consumer
+                                     {:args {:value expected} :return expected :effects #{}})
+    (check/check-fn-def! {:name :marked-binding :parent :marked-consumer
+                          :args {:value :marked-producer}})
+    (is (= actual (:return (registry/rich-type-of :marked-binding))))))
+
+
+(deftest broad-callable-producer-cannot-invent-browser-proof
+  (doseq [wrap [identity #(vector :list %) #(vector :map :text %)]]
+    (registry/record-rich-types-raw! :unknown-producer
+                                     {:args {} :return (wrap [:fn {} :any :any :unknown]) :effects #{}})
+    (registry/record-rich-types-raw! :browser-value-consumer
+                                     {:args {:value (wrap [:fn {} :int :any #{:browser-main}])}
+                                      :return :int :effects #{}})
+    (is (thrown? clojure.lang.ExceptionInfo
+          (check/check-fn-def! {:name :unknown-browser-binding
+                                :parent :browser-value-consumer
+                                :args {:value :unknown-producer}}))))
+  (registry/record-rich-types-raw! :unknown-producer
+                                   {:args {} :return [:fn {} :any :any :unknown] :effects #{}})
+  (registry/record-rich-types-raw! :unknown-value-consumer
+                                   {:args {:value [:fn {} :int :any :unknown]} :return :int :effects #{}})
+  (check/check-fn-def! {:name :gradual-value-binding :parent :unknown-value-consumer
+                        :args {:value :unknown-producer}})
+  (is (= :int (:return (registry/rich-type-of :gradual-value-binding)))))

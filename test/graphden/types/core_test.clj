@@ -1367,3 +1367,56 @@
          (literals/fn-type-bound-effects [:fn {} :int #{:db} #{:browser-main}])))
   (is (= [] (literals/fn-type-bound-effects [:fn {} :int #{} :unknown])))
   (is (nil? (literals/fn-type-bound-effects [:fn {} :int]))))
+
+
+(deftest nullable-callables-retain-execution-bounds
+  (let [e [:execution-var 'E]
+        cb (fn [execution] [:fn {} :int #{} execution])
+        nullable (fn [t] [:union :null t])
+        browser (cb #{:browser-main})
+        server (cb #{:jvm-server})]
+    (doseq [browser-type [browser (nullable browser)]]
+      (let [s (t/unify (nullable (cb e)) browser-type)
+            s (t/unify (cb e) server s)]
+        (is (t/unified? s))
+        (is (= #{} (t/fn-execution (t/resolve s (cb e))))))
+      (let [s (t/unify (cb e) server)
+            s (t/unify (nullable (cb e)) browser-type s)]
+        (is (t/unified? s))
+        (is (= #{} (t/fn-execution (t/resolve s (cb e)))))))
+    (is (t/fail? (t/unify [:union (cb e) (cb [:execution-var 'F])] browser)))
+    (is (t/fail? (t/unify (cb e) (nullable browser))))
+    (let [expected [:fn {:callback (nullable (cb e))} :int #{} :unknown]
+          actual [:fn {:callback (nullable browser)} :int #{} :unknown]
+          s (t/unify expected actual)]
+      (is (t/unified? s))
+      (is (t/fail? (t/unify (cb e) server s))))))
+
+
+(deftest marker-callable-unification-retains-execution-and-labels
+  (let [e [:execution-var 'E]
+        cb (fn [execution] [:fn {} :int #{} execution])
+        expected [:secret (cb e)]
+        actual [:secret (cb #{:browser-main})]
+        s (t/unify expected actual)]
+    (is (t/subtype? actual expected))
+    (is (t/unified? s))
+    (is (= actual (t/resolve s expected)))
+    (is (t/unified? (t/unify expected (cb #{:browser-main}))))
+    (is (t/fail? (t/unify (cb e) actual)))
+    (is (t/unified? (t/unify [:union :null expected] actual)))
+    (is (t/fail? (t/unify (cb #{:jvm-server}) (cb e) s)))))
+
+
+(deftest unknown-callable-cannot-acquire-execution-through-value-holes
+  (let [unknown [:fn {} :any :any :unknown]
+        browser [:fn {} :int :any #{:browser-main}]]
+    (doseq [[actual expected]
+            [[unknown browser]
+             [[:list unknown] [:list browser]]
+             [[:map :any unknown] [:map :text browser]]]]
+      (is (not (gradual/any-shape? actual)))
+      (is (gradual/any-value-shape? actual))
+      (is (not (gradual/fits? actual expected []))))
+    (is (gradual/fits? unknown [:fn {} :int :any :unknown] []))
+    (is (gradual/fits? [:list unknown] [:list [:fn {} :int :any :unknown]] []))))

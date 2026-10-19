@@ -926,6 +926,9 @@ a shared execution variable by intersecting their supported profiles; the
 first callback does not fix the variable by equality. A portable callback
 and a browser callback can therefore share the browser profile. Nested
 callable transformations preserve both effects and execution support.
+Nullable callable unions also contribute execution bounds. When multiple
+matching union arms infer different execution solutions, checking rejects
+the ambiguous connection rather than selecting an arbitrary proof.
 
 ---
 

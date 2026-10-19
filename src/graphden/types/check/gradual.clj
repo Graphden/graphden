@@ -36,8 +36,9 @@
 
 (defn any-shape?
   "True iff `t` is `:any` OR a structural form whose every reasoned
-   position is `:any` — `[:map :any :any]`, `[:list :any]`, a fn-type
-   of `:any`s. Such a value carries no more information than the bare
+   position is `:any` — `[:map :any :any]`, `[:list :any]`. Callable
+   contracts retain execution/effect information and are never whole holes.
+   A value satisfying this predicate carries no more information than the bare
    `:any` does, so the `(= actual :any) → silent pass` escape hatch
    extends to it: a `:get`'s `:any` return propagates through `:merge`
    / `:update-in` to `[:map :any :any]` / `:any` returns, which would
@@ -49,11 +50,25 @@
     (types/map-type? t)    (and (any-shape? (types/map-key t))
                                 (any-shape? (types/map-val t)))
     (types/tuple-type? t)  (every? any-shape? (types/tuple-elems t))
-    (types/fn-type? t)     (and (= :unknown (types/fn-execution t))
-                                (= :any (types/fn-effects t))
-                                (every? any-shape? (vals (types/fn-args t)))
-                                (any-shape? (types/fn-ret t)))
+    ;; A callable's execution/effect contract survives even when every
+    ;; value position is :any. Erase value holes inside the callable.
+    (types/fn-type? t)     false
     :else                  false))
+
+
+(defn any-value-shape?
+  "Value positions carry only :any, ignoring callable contracts. Unlike
+   `any-shape?`, this never authorizes erasing an entire callable contract."
+  [t]
+  (cond
+    (= t :any) true
+    (types/list-type? t) (any-value-shape? (types/list-elem t))
+    (types/map-type? t) (and (any-value-shape? (types/map-key t))
+                             (any-value-shape? (types/map-val t)))
+    (types/tuple-type? t) (every? any-value-shape? (types/tuple-elems t))
+    (types/fn-type? t) (and (every? any-value-shape? (vals (types/fn-args t)))
+                            (any-value-shape? (types/fn-ret t)))
+    :else false))
 
 
 (defn- hole?

@@ -509,6 +509,14 @@
     (let [next-subst (types/unify expected actual subst)]
       (if (types/fail? next-subst) subst next-subst))
 
+    ;; Broad callable values retain their execution/effect evidence. Fill
+    ;; value holes inside them, then judge the surviving contracts.
+    (and (gradual/any-value-shape? actual)
+         (not (gradual/any-shape? actual)))
+    (unify-binding! (mismatch-context parent-name fn-name arg-name
+                                      b-form expected actual)
+                    subst)
+
     ;; `:any` (or structural-`:any` like `[:map :any :any]` /
     ;; `[:list :any]`) — the doc's static escape hatch. Carries no
     ;; static information either way, so silent-pass. (`:null` used

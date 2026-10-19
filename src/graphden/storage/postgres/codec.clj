@@ -67,8 +67,9 @@
    back as one — accepted on the same rarity grounds.
 
    Scoped `[:execution-var E]` symbols use `{:_execution_var \"E\"}`;
-   ordinary symbol values keep their previous JSON behavior. Like the
-   existing carriers, this one-key map is reserved for the codec.
+   ordinary symbol values keep their previous JSON behavior. Literal maps
+   using this carrier or `:_execution_escape` are escaped so they remain
+   maps on read. The older `:_kw` / `:_set` conventions stay unchanged.
 
    Map keys are left as-is (cheshire handles key serialisation
    separately)."
@@ -81,7 +82,13 @@
          (= :execution-var (first v)) (symbol? (second v)))
     {:_execution_var (str (second v))}
     (set? v) {:_set (mapv preserve-keywords (vec v))}
-    (map? v) (persistent! (reduce-kv (fn [m k v2] (assoc! m k (preserve-keywords v2))) (transient {}) v))
+    (map? v)
+    (let [encoded (persistent! (reduce-kv (fn [m k v2] (assoc! m k (preserve-keywords v2))) (transient {}) v))]
+      (if (and (= 1 (count v))
+               (contains? #{:_execution_var "_execution_var" :_execution_escape "_execution_escape"}
+                          (ffirst v)))
+        {:_execution_escape encoded}
+        encoded))
     (sequential? v) (mapv preserve-keywords v)
     :else v))
 
@@ -124,6 +131,14 @@
          (let [[k v] (first x)]
            (and (or (= k :_set) (= k "_set")) (sequential? v))))
     (into #{} (map normalize-parsed-json) (val (first x)))
+
+    ;; Remove exactly one literal-map escape. Decode its values recursively
+    ;; without interpreting the restored map itself as another carrier.
+    (and (map? x) (= 1 (count x))
+         (let [[k v] (first x)]
+           (and (or (= k :_execution_escape) (= k "_execution_escape")) (map? v))))
+    (persistent! (reduce-kv (fn [m k v] (assoc! m k (normalize-parsed-json v)))
+                            (transient {}) (val (first x))))
 
     ;; A dedicated carrier distinguishes a scoped symbol from a string
     ;; in an otherwise identical execution-var-shaped user value.

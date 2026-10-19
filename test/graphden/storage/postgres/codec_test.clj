@@ -332,3 +332,17 @@
   (let [pg (make-pgobject "jsonb" "[{\"_kw\":\"execution-var\"},\"E\"]")]
     (is (= [:execution-var "E"]
            (sp/decode-value test-codec pg {:type :jsonb})))))
+
+
+(deftest jsonb-execution-carriers-do-not-collide-with-literal-maps
+  (doseq [literal [{:_execution_var "E"}
+                   {:data {:_execution_var "E"}}
+                   {:_execution_escape {:_execution_var "E"}}
+                   {:_execution_escape {:_execution_escape {:_execution_var "E"}}}
+                   {:_execution_escape "E"}
+                   {:_execution_escape nil}
+                   {:_execution_var {:nested [:execution-var 'E]}}
+                   {:data [{:_execution_var "E"} {:_execution_escape {:label :red}}]
+                    :symbol [:execution-var 'E]
+                    :tuple ["E" [:execution-var "E"]]}]]
+    (is (= literal (jsonb-roundtrip literal)))))

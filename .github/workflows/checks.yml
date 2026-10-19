@@ -29,9 +29,8 @@ on:
 
 env:
   JAVA_VERSION: '21'
-  # Exact-SHA proof needs a fixed toolchain; bump with local gate verification.
-  CLOJURE_CLI_VERSION: '1.12.5.1654'
-  BABASHKA_VERSION: '1.12.213'
+  # Keep setup-clojure cli/bb inputs literal below: antq cannot resolve
+  # GitHub env expressions, so bb outdated would report them as stale.
 
 jobs:
   release-proof-guard:
@@ -63,7 +62,7 @@ jobs:
       - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
           clj-kondo: '2026.08.04'
-          bb: ${{ env.BABASHKA_VERSION }}
+          bb: '1.13.226'
 
       # Delegate: the path set lives ONCE, in bb.edn's `all-paths`. When this
       # job spelled its own `src test development`, CI linted a set `bb ci`
@@ -86,8 +85,8 @@ jobs:
 
       - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
-          cli: ${{ env.CLOJURE_CLI_VERSION }}
-          bb: ${{ env.BABASHKA_VERSION }}
+          cli: '1.12.6.1673'
+          bb: '1.13.226'
 
       - uses: actions/cache@v6
         with:
@@ -110,7 +109,7 @@ jobs:
 
       - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
-          bb: ${{ env.BABASHKA_VERSION }}
+          bb: '1.13.226'
 
       - name: Check formatting
         run: bb cljstyle
@@ -129,8 +128,8 @@ jobs:
 
       - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
-          cli: ${{ env.CLOJURE_CLI_VERSION }}
-          bb: ${{ env.BABASHKA_VERSION }}
+          cli: '1.12.6.1673'
+          bb: '1.13.226'
 
       - uses: actions/cache@v6
         with:
@@ -186,8 +185,8 @@ jobs:
 
       - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
-          cli: ${{ env.CLOJURE_CLI_VERSION }}
-          bb: ${{ env.BABASHKA_VERSION }}
+          cli: '1.12.6.1673'
+          bb: '1.13.226'
 
       - uses: actions/cache@v6
         with:
@@ -265,8 +264,8 @@ jobs:
 
       - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
-          cli: ${{ env.CLOJURE_CLI_VERSION }}
-          bb: ${{ env.BABASHKA_VERSION }}
+          cli: '1.12.6.1673'
+          bb: '1.13.226'
 
       - uses: actions/cache@v6
         with:
@@ -303,8 +302,8 @@ jobs:
 
       - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
-          cli: ${{ env.CLOJURE_CLI_VERSION }}
-          bb: ${{ env.BABASHKA_VERSION }}
+          cli: '1.12.6.1673'
+          bb: '1.13.226'
 
       - uses: actions/cache@v6
         with:
@@ -349,8 +348,8 @@ jobs:
 
       - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
-          cli: ${{ env.CLOJURE_CLI_VERSION }}
-          bb: ${{ env.BABASHKA_VERSION }}
+          cli: '1.12.6.1673'
+          bb: '1.13.226'
 
       - uses: actions/cache@v6
         with:
@@ -390,8 +389,8 @@ jobs:
 
       - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
-          cli: ${{ env.CLOJURE_CLI_VERSION }}
-          bb: ${{ env.BABASHKA_VERSION }}
+          cli: '1.12.6.1673'
+          bb: '1.13.226'
 
       - uses: actions/cache@v6
         with:
@@ -466,8 +465,8 @@ jobs:
 
       - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
-          cli: ${{ env.CLOJURE_CLI_VERSION }}
-          bb: ${{ env.BABASHKA_VERSION }}
+          cli: '1.12.6.1673'
+          bb: '1.13.226'
 
       - uses: actions/cache@v6
         with:
@@ -501,7 +500,7 @@ jobs:
 
       - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
-          bb: ${{ env.BABASHKA_VERSION }}
+          bb: '1.13.226'
 
       - name: Run no-stack JS tests
         run: bb test-js
@@ -529,7 +528,7 @@ jobs:
 
       - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
-          bb: ${{ env.BABASHKA_VERSION }}
+          bb: '1.13.226'
 
       - name: CI selector self-test (scripts/ci_select.clj + checks.edn)
         run: bb ci-test
@@ -689,7 +688,7 @@ jobs:
 
       - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
-          bb: ${{ env.BABASHKA_VERSION }}
+          bb: '1.13.226'
 
       - run: npm ci
       # npm ci — the committed lockfiles ARE the pin; a fresh resolve of

@@ -87,6 +87,7 @@ const branch = 'color-values-' + process.pid + '-' + Date.now().toString(36);
     assert(await text.inputValue() === '#aabbcc80', 'RGB picker preserves alpha');
     await alpha.fill('64');
     assert(await text.inputValue() === '#aabbcc40', 'alpha input updates the shared field');
+    await page.screenshot({path: '/tmp/graphden-a3-color-editor.png', fullPage: true});
     checkpoint('valid-save');
     const saved = page.waitForResponse(response => response.request().method() === 'PUT'
       && new URL(response.url()).pathname.startsWith('/api/entities/binding/'));
@@ -127,10 +128,14 @@ const branch = 'color-values-' + process.pid + '-' + Date.now().toString(36);
     await api(page, 'PUT', '/api/entities/binding/' + bindingId,
       'value=' + encodeURIComponent(JSON.stringify('#aabbcc40')), {'X-Graphden-Branch': branch});
     checkpoint('view-is-not-a-color-value');
-    await removeUseSiteBinding(page, '_theme-base-canvas-background');
+    // The initial fn-ref was replaced by this literal; delete its current
+    // use-site binding through the value editor, not the historical ref card.
+    await page.locator('.arg-value-editable').first().click();
+    await page.locator('.arg-value-edit-popover').getByRole('button', {name: 'Delete', exact: true}).click();
     await pickIncompatFnRef(page, 'as-ui-view');
     const mismatch = await page.locator('.mismatch-explainer.visible').innerText();
     assert(/ui-view|UiView/i.test(mismatch), 'a view is rejected by the precise Color sink before execution');
+    await page.screenshot({path: '/tmp/graphden-a3-color-view-refusal.png', fullPage: true});
     const afterRefusal = await api(page, 'GET', '/api/graph/entities?scope=subtree&root-id=' + root,
       undefined, {'X-Graphden-Branch': branch});
     const viewIds = new Set((afterRefusal.fns || []).filter(fn => fn.name === 'as-ui-view').map(fn => fn.id));

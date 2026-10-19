@@ -243,3 +243,66 @@
             (check-entry! {:name :browser-call :parent :browser-consumer
                            :args {:func :generic-child}}))))
   (is (nil? (registry/rich-type-of :generic-child))))
+
+
+(deftest ref-override-cannot-turn-an-unknown-producer-into-a-browser-callable
+  (registry/record-rich-types-raw! :unknown-producer
+                                   {:args {} :return [:fn {} :int #{} :unknown]})
+  (registry/record-rich-types-raw! :browser-consumer
+                                   {:args {:func [:fn {} :int #{} #{:browser-main}]} :return :int})
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"contradicts the ref-return"
+        (check-entry! {:name :claimed-call :parent :browser-consumer
+                       :args {:func {:ref :unknown-producer :type [:fn {} :int #{} e]}}}))))
+
+
+(deftest execution-claims-require-proof-on-ref-value-and-item-overrides
+  (registry/record-rich-types-raw! :claim-root {:args {:input :any :items [:list :any]} :return :int})
+  (doseq [wrap [identity #(vector :list %) #(vector :map :keyword %)]
+          support [:unknown #{} #{:jvm-server}]
+          item? [false true]]
+    (registry/record-rich-types-raw! :producer {:args {} :return (wrap (callback support))})
+    (let [claim {:ref :producer :type (wrap (callback e))}]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"contradicts the ref-return"
+            (check-entry! {:name :claim :parent :claim-root
+                           :args (if item? {:items [claim]} {:input claim})})))))
+  (doseq [claim [e #{:browser-main}]
+          item? [false true]]
+    (let [binding {:value 1 :type (callback claim)}]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"contradicts the literal-value"
+            (check-entry! {:name :literal-claim :parent :claim-root
+                           :args (if item? {:items [binding]} {:input binding})}))))))
+
+
+(deftest authored-value-and-contravariant-claims-retain-safe-narrowing
+  (registry/record-rich-types-raw! :claim-root {:args {:input :any} :return :int})
+  (types/register-type-alias! :positive [:refine :int [:> 0]])
+  (is (= [:refine :int [:> 0]]
+         (get-in (check-entry! {:name :value-claim :parent :claim-root
+                                :args {:input {:value 1 :type :positive}}})
+                 [:resolved-bindings :input :type])))
+  (doseq [required [:unknown #{} #{:jvm-server}]]
+    (let [actual [:fn {:handler (callback required)} :int #{} portable]
+          declared [:fn {:handler (callback e)} :int #{} portable]]
+      (registry/record-rich-types-raw! :producer {:args {} :return actual})
+      (if (#{:unknown #{}} required)
+        (is (= declared
+               (get-in (check-entry! {:name :negative-claim :parent :claim-root
+                                      :args {:input {:ref :producer :type declared}}})
+                       [:resolved-bindings :input :type])))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"contradicts the ref-return"
+              (check-entry! {:name :negative-claim :parent :claim-root
+                             :args {:input {:ref :producer :type declared}}})))))))
+
+
+(deftest correlated-execution-variables-do-not-authorize-stripping-a-known-marker
+  (let [marked [:secret (callback e)]]
+    (registry/record-rich-types-raw! :secret-producer {:args {} :return marked})
+    (registry/record-rich-types-raw! :plain-root {:args {:input :any} :return :int})
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"strips a hide-result marker"
+          (check-entry! {:name :stripped :parent :plain-root
+                         :args {:input {:ref :secret-producer :type (callback e)}}})))
+    (registry/record-rich-types-raw! :marked-root {:args {:input marked} :return :int})
+    (is (= marked
+           (get-in (check-entry! {:name :kept :parent :marked-root
+                                  :args {:input {:ref :secret-producer :type marked}}})
+                   [:resolved-bindings :input :type])))))

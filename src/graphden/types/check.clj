@@ -995,9 +995,8 @@
    \"hello\" :type :int}` previously slipped through because
    monotonicity only checks T vs the inherited slot type.
 
-   Typevar on either side defers — typevars are unification
-   placeholders and can bind to anything; the override pins one
-   specific instantiation, which is monotonic by construction."
+   Value typevars can instantiate locally. Execution claims must first
+   preserve concrete support and correlated execution-variable bounds."
   [{fn-name :name :as fn-def} parent-name]
   (doseq [[arg-name b-form0] (:args fn-def)
           ;; Item-level `{:ref X :type T}` / `{:value V :type T}`
@@ -1042,8 +1041,8 @@
         ;; satisfies a plain-typed sink (e.g. `:http-request/:headers`),
         ;; bypassing the `:auth-value` channel design.
         (when (and actual override actual-src
-                   (not (has-type-var? actual))
-                   (not (has-type-var? override))
+                   ;; Marker presence is already known even when value or
+                   ;; execution variables still await local instantiation.
                    (types/contains-hide-result-marker? actual)
                    (not (types/contains-hide-result-marker? override)))
           (throw (ex-info
@@ -1068,14 +1067,12 @@
                            :type :bindings/type-override-strips-marker}
                           *source-info*))))
         (when (and actual override actual-src
-                   (not (has-type-var? actual))
-                   (not (has-type-var? override))
-                   ;; Narrowing direction: override must be a SUBTYPE
-                   ;; of the actual (more-specific claim about a
-                   ;; less-specific value). Equality is allowed.
-                   ;; Failure here means the author is widening or
-                   ;; making an incompatible claim — error.
-                   (not (types/subtype? override actual)))
+                   (or (not (execution/claim-compatible? actual override))
+                       ;; Value variables may instantiate locally; execution
+                       ;; claims still require evidence before that shortcut.
+                       (and (not (has-type-var? actual))
+                            (not (has-type-var? override))
+                            (not (types/subtype? override actual)))))
           (throw (ex-info
                    (str "Type-check failed in fn-def " (pr-str fn-name)
                         "\n  arg " (pr-str arg-name) " ← " (pr-str b-form)
@@ -2392,7 +2389,7 @@
    when any input was tainted."
   [fn-name fn-def computed-return]
   (let [declared (some-> fn-def :return-type types/resolve-alias)
-        computed-ok? (and (execution/return-compatible? computed-return declared)
+        computed-ok? (and (execution/claim-compatible? computed-return declared)
                           (or (types/subtype? computed-return declared)
                               (and (types/secret-type? computed-return)
                                    (types/subtype? (types/secret-inner computed-return)

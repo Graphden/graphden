@@ -84,7 +84,7 @@
         shape (records-types/stored-type-ref cycle index)]
     (is (= [:list :jsonb] shape))
     (is (= :jsonb (records-types/stored-type-ref (random-uuid) index)))
-    (is (false? (execution/return-compatible? shape [:list callback])))))
+    (is (false? (execution/claim-compatible? shape [:list callback])))))
 
 
 (deftest cold-cyclic-list-is-unknown-in-registry-and-type-api
@@ -95,7 +95,7 @@
     (is (= [:list :jsonb] (types/resolve-alias :cycle)))
     (is (= [:list :jsonb]
            (get-in (types-api/rich-types-with-type-rows {:graph-cache (atom graph)}) [:cycle :return])))
-    (is (false? (execution/return-compatible? (types/resolve-alias :cycle) [:list callback])))))
+    (is (false? (execution/claim-compatible? (types/resolve-alias :cycle) [:list callback])))))
 
 
 (deftest legacy-collection-fields-keep-their-primitive-contracts-after-cold-registration

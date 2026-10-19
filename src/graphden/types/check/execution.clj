@@ -157,7 +157,7 @@
     (view t [] true)))
 
 
-(defn return-compatible?
+(defn claim-compatible?
   "Value narrowing cannot invent concrete support or unbounded execution E.
    Correlated scoped variables retain their relationship; fresh generic claims
    must be safe for every profile assignment, including negative positions."

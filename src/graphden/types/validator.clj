@@ -24,7 +24,7 @@
            (#{:= :not=} op) true
            (= :in op) (or (set? rhs) (vector? rhs))
            (= :matches op) (and (string? rhs)
-                                (try (re-pattern rhs) true (catch Exception _ false)))
+                                (try (boolean (re-pattern rhs)) (catch Exception _ false)))
            :else false))))
 
 

@@ -79,9 +79,9 @@
 
 
 (deftest missing-or-cyclic-type-identities-carry-no-browser-proof
-  (let [cycle (random-uuid)
-        index {:fn-by-id {cycle {:id cycle :element-fn-id cycle}}}
-        shape (records-types/stored-type-ref cycle index)]
+  (let [recursive-id (random-uuid)
+        index {:fn-by-id {recursive-id {:id recursive-id :element-fn-id recursive-id}}}
+        shape (records-types/stored-type-ref recursive-id index)]
     (is (= [:list :jsonb] shape))
     (is (= :jsonb (records-types/stored-type-ref (random-uuid) index)))
     (is (false? (execution/claim-compatible? shape [:list callback])))))

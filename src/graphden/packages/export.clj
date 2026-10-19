@@ -480,7 +480,9 @@
                             (some #(contains? binding-by-slot %) (source-ids s))))
         rename-slots (filter rename-slot? own-slots)
         rename-by-source (into {}
-                               (mapcat (fn [s] (map #(vector % (keyword (:name s))) (source-ids s))))
+                               (mapcat (fn [s]
+                                         (for [source (source-ids s)]
+                                           [source (keyword (:name s))])))
                                rename-slots)
         ;; Positional-rename slots: own slots exposed by an `{:as X}`
         ;; INSIDE a list binding's items (source-slot-id nil — the source

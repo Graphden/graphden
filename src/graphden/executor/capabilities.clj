@@ -46,8 +46,8 @@
 
 (def ^:private browser-callable-slot-ids
   (into #{}
-        (mapcat (fn [[fn-id {:keys [invoked-slots]}]]
-                  (map #(ids/slot-id fn-id %) invoked-slots)))
+        (mapcat (fn [[fn-id {callbacks :invoked-slots}]]
+                  (map #(ids/slot-id fn-id %) callbacks)))
         browser-primitives))
 
 

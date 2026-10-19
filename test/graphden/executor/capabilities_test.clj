@@ -6,7 +6,10 @@
     [clojure.test :refer [deftest is]]
     [graphden.executor.capabilities :as capabilities]
     [graphden.executor.defbase :refer [defbase]]
-    [graphden.packages.records.ids :as ids]))
+    [graphden.packages.records.ids :as ids])
+  (:import
+    (java.io
+      File)))
 
 
 (defbase native-probe [value] value)
@@ -38,9 +41,9 @@
   (let [plan {:format 1 :primitiveAbi capabilities/browser-primitive-abi :functions []
               :primitives (mapv (fn [id] {:id (str id) :op (capabilities/browser-op id)})
                                 (capabilities/browser-primitive-ids))}
-        runtime (str (.getCanonicalPath (io/file "resources/packages/app/ui-preview/browser-runtime.js")))
+        runtime (str (File/.getCanonicalPath (io/file "resources/packages/app/ui-preview/browser-runtime.js")))
         result (sh/sh "node" "-e"
                       "const runtime = require(process.argv[1]); runtime.createRuntime(JSON.parse(process.argv[2]));"
                       runtime (json/generate-string plan))]
     (is (= 28 (count (:primitives plan))))
-    (is (= 0 (:exit result)) (:err result))))
+    (is (zero? (:exit result)) (:err result))))

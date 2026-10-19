@@ -13,9 +13,7 @@
    concrete profile. Variables are solved by `constrain`, never value unify."
   [actual expected]
   (cond
-    (= actual expected) true
-    (= expected :unknown) true
-    (shapes/execution-var? expected) true
+    (or (= actual expected) (= expected :unknown) (shapes/execution-var? expected)) true
     (set? expected) (or (empty? expected)
                         (and (set? actual) (set/subset? expected actual)))
     :else false))

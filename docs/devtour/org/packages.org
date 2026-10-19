@@ -230,13 +230,13 @@ Synchronizes packaged definitions into storage, repairs moved identities, remove
 :PROPERTIES:
 :CUSTOM_ID: packages/records->fn-defs
 :FILE: src/graphden/packages/export.clj
-:LINE: 567
+:LINE: 569
 :MINS: 1.8
 :END:
 
 Converts stored graph records back into function definitions for export and distribution. Parsing the exported definitions must reconstruct the same graph: ~parse(export(parse(x))) == parse(x)~. The corpus test verifies this property on actual packages.
 
-- source :: [[file:../../../src/graphden/packages/export.clj::(defn records->fn-defs][src/graphden/packages/export.clj:567]]
+- source :: [[file:../../../src/graphden/packages/export.clj::(defn records->fn-defs][src/graphden/packages/export.clj:569]]
 - same file :: [[file:packages.org::#packages/ref-kw][ref-kw]], [[file:packages.org::#packages/external-deps][external-deps]], [[file:packages.org::#packages/strip-secret-paths][strip-secret-paths]]
 
 * 18. ref-kw
@@ -268,26 +268,26 @@ Before writing [[file:glossary.org::#term/edn][EDN]] text, replaces otherwise un
 :PROPERTIES:
 :CUSTOM_ID: packages/external-deps
 :FILE: src/graphden/packages/export.clj
-:LINE: 925
+:LINE: 927
 :MINS: 4.8
 :END:
 
 Finds references leaving an exported namespace subtree and records them as dependencies. References into version-qualified package namespaces also produce package dependencies. The surrounding ~:export-namespace~ [[file:glossary.org::#term/graph-function][graph function]] assembles the final bundle.
 
-- source :: [[file:../../../src/graphden/packages/export.clj::(defn external-deps][src/graphden/packages/export.clj:925]]
+- source :: [[file:../../../src/graphden/packages/export.clj::(defn external-deps][src/graphden/packages/export.clj:927]]
 - same file :: [[file:packages.org::#packages/records->fn-defs][records->fn-defs]], [[file:packages.org::#packages/ref-kw][ref-kw]], [[file:packages.org::#packages/strip-secret-paths][strip-secret-paths]]
 
 * 21. strip-secret-paths
 :PROPERTIES:
 :CUSTOM_ID: packages/strip-secret-paths
 :FILE: src/graphden/packages/export.clj
-:LINE: 781
+:LINE: 783
 :MINS: 1.9
 :END:
 
 Removes vault paths from shared bundles by default and leaves the corresponding secret arguments free. The ~:secrets~ manifest tells the installer which values need to be defined locally; publishing a function therefore does not publish its secret locations.
 
-- source :: [[file:../../../src/graphden/packages/export.clj::(defn strip-secret-paths][src/graphden/packages/export.clj:781]]
+- source :: [[file:../../../src/graphden/packages/export.clj::(defn strip-secret-paths][src/graphden/packages/export.clj:783]]
 - same file :: [[file:packages.org::#packages/records->fn-defs][records->fn-defs]], [[file:packages.org::#packages/ref-kw][ref-kw]], [[file:packages.org::#packages/external-deps][external-deps]]
 
 * 22. publish-package-apply

@@ -1341,11 +1341,10 @@
         ;; UiView is a value/view distinction at precise sinks. A broad
         ;; jsonb sink permits representation loss with a checker hint. This
         ;; projection removes only view labels: secrecy still blocks flow.
-        (and (= sup :jsonb) (view/contains-view? sub)
-             (let [data (view/encoded-type sub)]
-               (and (not= data sub) (subtype? data sup)))) true
-
-        (or (and (primitive? sub) (primitive? sup)
+        (or (and (= sup :jsonb) (view/contains-view? sub)
+                 (let [data (view/encoded-type sub)]
+                   (and (not= data sub) (subtype? data sup))))
+            (and (primitive? sub) (primitive? sup)
                  (primitive-subtype? sub sup))
             (and (= sup :jsonb)
                  ;; A compound carrying ANY nested marker must NOT flow

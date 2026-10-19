@@ -81,7 +81,6 @@
       (map? form) (into (sorted-map-by printed-order)
                         (map (fn [[k v]] [k (canonical-type-data v)])) form)
       (set? form) (into (sorted-set-by printed-order) (map canonical-type-data) form)
-      (vector? form) (mapv canonical-type-data form)
       (sequential? form) (mapv canonical-type-data form)
       :else form)))
 

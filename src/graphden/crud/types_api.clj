@@ -10,11 +10,10 @@
    and the higher-level `graphden.crud.entities`, so they live here, at
    the lower level of the crud.* DAG.
 
-   Depends on `graphden.crud.request` and `graphden.crud.type-check`."
+   Depends on `graphden.crud.request` for request context."
   (:require
     [clojure.string :as str]
     [graphden.crud.request :as request]
-    [graphden.crud.type-check :as tc]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.context :as exec-ctx]
     [graphden.executor.registry.core :as registry]
@@ -480,7 +479,7 @@
 (defn- json->effect-constraint
   [value]
   (cond
-    (or (nil? value) (contains? #{:any "any"} value)) (if (nil? value) nil :any)
+    (or (nil? value) (contains? #{:any "any"} value)) (when (some? value) :any)
     (and (or (sequential? value) (set? value))
          (every? #(or (string? %) (keyword? %)) value))
     (into #{} (map #(if (string? %) (keyword %) %)) value)

@@ -2,6 +2,7 @@
   "Execution support for one native-root stage and its effective bindings.
    Resolved bindings use closer-wins semantics before this module runs; an
    overridden parent's callback cannot constrain the child's stage."
+  (:refer-clojure :exclude [derive])
   (:require
     [clojure.set :as set]
     [graphden.executor.capabilities :as capabilities]
@@ -53,13 +54,12 @@
       (= expected :fn-ref) types/execution-profiles
       callable?
       (cond
-        (nil? invoked) :unknown
-        (or (nil? target) (nil? target-info)) :unknown
-        (not (proven-browser-lambda-shape? expected target-info)) :unknown
         ;; Even at an implemented invocation slot the bounded exporter
         ;; rejects :produces-callable? bindings. Construction support is
         ;; insufficient evidence for that unsupported ABI representation.
-        constructor? :unknown
+        (or (nil? invoked) (nil? target) (nil? target-info)
+            (not (proven-browser-lambda-shape? expected target-info))
+            constructor?) :unknown
         (contains? invoked arg-name)
         (if callback (types/fn-execution callback) :unknown)
         ;; The browser ABI currently implements callable bindings only at

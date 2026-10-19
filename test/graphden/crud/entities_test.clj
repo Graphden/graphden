@@ -29,6 +29,7 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
+    [graphden.packages.records :as records]
     [graphden.packages.records.types :as record-types]
     [graphden.packages.sync :as packages]
     [graphden.storage.protocol.core :as sp]
@@ -1773,7 +1774,7 @@
                               :entity-data {:fn-id (:id child) :slot-id (:id handlers)}} (test-ctx storage)))
                 binding-id (or (:id initial) (:created response))
                 binding (sp/read-entity storage :binding binding-id)
-                view (sp/read-entity storage :slot (graphden.packages.records/slot-id (:id child) "events"))]
+                view (sp/read-entity storage :slot (records/slot-id (:id child) "events"))]
             (is (nil? (:error response)))
             (is (= (:id original) (:slot-id binding)) "binding identity remains canonical")
             (is (= (:id handlers) (:source-slot-id view)) "view retains inherited source identity")
@@ -1787,7 +1788,7 @@
             (let [again (entities/apply-update-core
                           {:entity-type :binding :type-str "binding" :id-uuid binding-id
                            :form-data {:rename-to "renamed-again"} :entity-data {}} (test-ctx storage))
-                  next-view (sp/read-entity storage :slot (graphden.packages.records/slot-id (:id child) "renamed-again"))]
+                  next-view (sp/read-entity storage :slot (records/slot-id (:id child) "renamed-again"))]
               (is (nil? (:error again)))
               (is (= (:id view) (:source-slot-id next-view)))
               (is (= (:id original) (:slot-id (sp/read-entity storage :binding binding-id))))

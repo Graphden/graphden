@@ -99,9 +99,9 @@
   (is (= [:fn {} :int #{} :unknown] (shapes/make-fn-type {} :int #{})))
   (doseq [invalid [nil :fn 42 "callable" {} [] [:fn {}] [:fn {} :int #{} :unknown :extra]]]
     (is (false? (shapes/fn-type? invalid)))
-    (doseq [accessor [shapes/fn-args shapes/fn-ret shapes/fn-effects
+    (doseq [get-part [shapes/fn-args shapes/fn-ret shapes/fn-effects
                       shapes/fn-execution shapes/normalise-fn-type]]
-      (is (nil? (accessor invalid)))))
+      (is (nil? (get-part invalid)))))
   (is (= 3 (count (set (map #(shapes/fn-execution [:fn {} :int #{} %])
                             [:unknown #{} #{:jvm-server :browser-main}]))))))
 

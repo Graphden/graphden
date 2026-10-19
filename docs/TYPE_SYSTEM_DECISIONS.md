@@ -223,7 +223,6 @@ Neither changes `subtype?`, `unify` or the registry's shape; the
 ("the fn-def `:args` key is a public name") now also holds for renames
 made in the editor.
 
-
 ## 2026-10-19 — execution proofs and view/value boundaries
 
 Callable contracts now carry execution support independently of effects:

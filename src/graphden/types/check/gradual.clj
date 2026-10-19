@@ -52,7 +52,6 @@
     (types/tuple-type? t)  (every? any-shape? (types/tuple-elems t))
     ;; A callable's execution/effect contract survives even when every
     ;; value position is :any. Erase value holes inside the callable.
-    (types/fn-type? t)     false
     :else                  false))
 
 

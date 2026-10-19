@@ -47,8 +47,8 @@
               :server-value {:execution #{:jvm-server} :return :text}}
         map-root (root "core.hof" :map {:func (callable :unknown) :coll [:list :int]})
         const-root (root "core.logic" :const {:value 'a})]
-    (is (= #{} (execution/derive map-root
-                                 {:func {:bound-ref :constructor :type cb}} refs)))
+    (is (= :unknown (execution/derive map-root
+                                      {:func {:bound-ref :constructor :type cb}} refs)))
     (is (= :unknown (execution/derive const-root
                                       {:value {:ref :constructor :type cb}} refs)))
     (is (= #{:jvm-server} (execution/derive const-root
@@ -79,3 +79,31 @@
                              {:value {:type [:list :any] :value [:server] :value-present true
                                       :execution-refs [:server]}}
                              refs)))))
+
+
+(deftest callable-producer-at-implemented-invocation-slot-has-no-browser-proof
+  (let [cb (callable #{:jvm-server :browser-main})
+        map-root (root "core.hof" :map {:func cb :coll [:list :int]})
+        refs {:constructor {:execution #{:jvm-server :browser-main} :return cb}}]
+    (is (= :unknown (execution/derive map-root
+                                      {:func {:bound-ref :constructor :type cb}} refs)))))
+
+
+(deftest unsupported-free-and-unproven-lambda-bindings-have-no-browser-proof
+  (let [cb (callable #{:jvm-server :browser-main})
+        map-root (root "core.hof" :map {:func cb :coll [:list :int]})
+        binding {:func {:bound-ref :callback :type cb}}]
+    (is (= :unknown (execution/derive map-root {:func {:type cb}} {})))
+    (doseq [target [{:args {:left :any :right :any} :lambda-params [:left :right]}
+                    {:args {:left :any :right :any}}
+                    {:args {:value :int}}
+                    {:args {:value :int} :lambda-params [:missing]}]]
+      (is (= :unknown (execution/derive map-root binding
+                                        {:callback (assoc target :return :int
+                                                          :execution #{:jvm-server :browser-main})}))))
+    (doseq [target [{:args {:item :int :captured :text}}
+                    {:args {:value :int} :lambda-params [:value]}]]
+      (is (= #{:jvm-server :browser-main}
+             (execution/derive map-root binding
+                               {:callback (assoc target :return :int
+                                                 :execution #{:jvm-server :browser-main})}))))))

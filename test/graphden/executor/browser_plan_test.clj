@@ -23,7 +23,8 @@
     [graphden.test-infra.browser-map-cases :as browser-map]
     [graphden.test-infra.browser-picker-cases :as browser-picker]
     [graphden.test-infra.browser-recents-cases :as recents]
-    [graphden.types.check :as check]))
+    [graphden.types.check :as check]
+    [graphden.types.check.execution :as execution]))
 
 
 (use-fixtures :each
@@ -699,18 +700,47 @@
         (is (= :concealed-function (:reason (failure #(export hidden)))))))
     (testing "a free callback cannot arrive as a supplied JS callable or id"
       (is (= :callable-binding (:reason (failure #(export-fixture fixture :map))))))
-    (testing "a callback whose result is callable is never double-wrapped"
-      (registry/record-rich-types-raw! callback :read-item
-                                       {:return [:fn {:item :any} :any] :args {:item :any}})
-      (is (= :callable-binding (:reason (failure #(export graph))))))))
+    (testing "a callable producer at an invoked slot has no browser proof"
+      (let [callback-type [:fn {:item :any} :any :any #{:jvm-server :browser-main}]
+            constructor {:return callback-type :args {:item :any}
+                         :execution #{:jvm-server :browser-main}}
+            root {:fn-id (:map ids) :execution #{:jvm-server :browser-main}
+                  :args {:func callback-type :coll [:list :any]}}]
+        (registry/record-rich-types-raw! callback :read-item constructor)
+        (is (= :unknown
+               (execution/derive root {:func {:bound-ref callback :type callback-type}}
+                                 {callback (registry/rich-type-of-id callback)})))
+        (is (= :callable-binding (:reason (failure #(export graph)))))))))
 
 
 (deftest browser-map-rejects-multiple-parameters-and-callable-environments
-  (let [definitions [{:name :pair :parent :list :lambda-params [:left :right]
-                      :args {:items [{:as :left} {:as :right}]}}
-                     {:name :mapped :parent :map :args {:func :pair :coll [1]}}]
-        fixture (map-fixture definitions)]
-    (is (= :callable-arity (:reason (failure #(export-fixture fixture :mapped))))))
+  (doseq [authored? [true false]]
+    (let [definitions [(cond-> {:name :pair :parent :list
+                                :args {:items [{:as :left} {:as :right}]}}
+                         authored? (assoc :lambda-params [:left :right]))
+                       {:name :mapped :parent :map :args {:func :pair :coll [1]}}]
+          {:keys [ids] :as fixture} (map-fixture definitions)
+          cb [:fn {:item :any} :any :any #{:jvm-server :browser-main}]]
+      (registry/record-rich-types-raw! (:list ids) :list
+                                       {:args {:items [:list :any]} :return [:list :any] :effects #{}
+                                        :execution #{:jvm-server :browser-main}})
+      (registry/record-rich-types-raw! (:map ids) :map
+                                       {:args {:func cb :coll [:list :any]} :return [:list :any] :effects #{}
+                                        :execution #{:jvm-server :browser-main}})
+      (doseq [definition definitions]
+        (check/check-fn-def! (assoc definition :namespace "preview")))
+      (is (= :unknown (:execution (registry/rich-type-of :mapped))))
+      (let [error (failure #(export-fixture fixture :mapped))]
+        (is (= (if authored? :callable-arity :normalization-failed) (:reason error))))))
+  (let [cb [:fn {:item :any} :any :any #{:jvm-server :browser-main}]
+        definition {:name :free-portable :parent :map :args {:func {:type cb}}}
+        {:keys [ids] :as fixture} (map-fixture [definition])]
+    (registry/record-rich-types-raw! (:map ids) :map
+                                     {:args {:func cb :coll [:list :any]} :return [:list :any] :effects #{}
+                                      :execution #{:jvm-server :browser-main}})
+    (check/check-fn-def! (assoc definition :namespace "preview"))
+    (is (= :unknown (:execution (registry/rich-type-of :free-portable))))
+    (is (= :callable-binding (:reason (failure #(export-fixture fixture :free-portable))))))
   (let [definitions [{:name :read-item :parent :const :lambda-params [:item]
                       :args {:value {:as :item}}}
                      {:name :rows :parent :map :args {:coll [1 2]}}

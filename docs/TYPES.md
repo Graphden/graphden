@@ -932,6 +932,11 @@ before support is intersected. Unknown invocation-stage contracts and unresolved
 slot provenance keep the derived result unknown. A noninvoked callback also
 needs a supported backend representation: the current browser ABI rejects
 callable bindings at `const/value`, so those compositions have no browser proof.
+Callable-producing bindings also lack browser proof, including at implemented
+invocation slots, until the exporter supports their construction representation.
+A browser callback binding must also be a statically bound reference with a
+proven nullary or unary lambda projection. Free callback slots, multiple authored
+parameters, and unresolved parameter/capture projections retain unknown support.
 Literal payloads are not binding grammar; keywords or `:ref` maps inside an
 explicit literal vector do not contribute execution dependencies.
 

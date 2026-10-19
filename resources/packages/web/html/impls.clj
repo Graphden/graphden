@@ -2,6 +2,7 @@
   "Implementations for web/html base functions using Hiccup."
   (:require
     [graphden.executor.defbase :refer [defbase]]
+    [graphden.types.view :as view]
     [hiccup2.core :as h]))
 
 
@@ -29,6 +30,25 @@
     (into (if attrs [tag-kw attrs] [tag-kw]) children)))
 
 
+(defbase as-ui-view
+  "Label checked Hiccup as UiView without changing runtime representation."
+  [hiccup]
+  hiccup)
+
+
+(defbase encode-view
+  "Explicit representation conversion; values keep their runtime identity."
+  [view]
+  view)
+
+
+(defn encode-view-return-rule
+  [bindings-info default-ret]
+  (if-let [t (get-in bindings-info [:view :type])]
+    (view/encoded-type t)
+    default-ret))
+
+
 ;; === Registry ===
 
 (def impls
@@ -39,6 +59,8 @@
   ;; they must propagate the taint so the executor redacts a rendered
   ;; secret at `/api/execute`. `:h-raw` needs no rule — its `:string`
   ;; input can't accept a `[:secret :text]` (taint can't be stripped).
-  {:render-hiccup {:impl render-hiccup :taint-propagate? true}
+  {:as-ui-view {:impl as-ui-view :taint-propagate? true}
+   :encode-view {:impl encode-view :return-type-rule encode-view-return-rule :taint-propagate? true}
+   :render-hiccup {:impl render-hiccup :taint-propagate? true}
    :h-raw h-raw
    :hiccup {:impl hiccup-element :taint-propagate? true}})

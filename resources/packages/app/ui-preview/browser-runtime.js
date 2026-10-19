@@ -304,6 +304,8 @@
     if: (arg) => arg(truth(arg('test')) ? 'then' : 'else'),
     'equal?': (arg) => equal(arg('a'), arg('b')),
     'nil?': (arg) => arg('value') === null,
+    'as-ui-view': (arg) => arg('hiccup'),
+    'encode-view': (arg) => arg('view'),
     coalesce: (arg) => {
       const value = arg('value');
       return truth(value) ? value : arg('default');

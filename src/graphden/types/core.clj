@@ -51,7 +51,8 @@
     [clojure.set]
     [clojure.tools.logging :as log]
     [graphden.types.core.execution :as execution]
-    [graphden.types.core.shapes :as shapes]))
+    [graphden.types.core.shapes :as shapes]
+    [graphden.types.core.view :as view]))
 
 
 ;; -----------------------------------------------------------------------------
@@ -1336,6 +1337,13 @@
         ;; Union RHS: at least one member accepts.
         (union-type? sup)
         (boolean (some #(subtype? sub %) (union-members sup)))
+
+        ;; UiView is a value/view distinction at precise sinks. A broad
+        ;; jsonb sink permits representation loss with a checker hint. This
+        ;; projection removes only view labels: secrecy still blocks flow.
+        (and (= sup :jsonb) (view/contains-view? sub)
+             (let [data (view/encoded-type sub)]
+               (and (not= data sub) (subtype? data sup)))) true
 
         (or (and (primitive? sub) (primitive? sup)
                  (primitive-subtype? sub sup))

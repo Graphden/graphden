@@ -88,7 +88,8 @@
     [graphden.types.check.literals :as lit]
     [graphden.types.check.markers :as markers]
     [graphden.types.check.provenance :as provenance]
-    [graphden.types.core :as types]))
+    [graphden.types.core :as types]
+    [graphden.types.view :as view]))
 
 
 (defn- binding-shape
@@ -2173,6 +2174,7 @@
         resolved (merge (:resolved-bindings parent-info {}) own-resolved)
         root-info (registry/rich-type-of (registry/root-base-fn-name primary-parent))
         execution-support (execution/derive root-info resolved registry/rich-type-of)
+        view-hints (view/broad-sink-hints (:args parent-info) resolved)
         call-time-effects (compute-call-time-effects arg-effects
                                                      parent-info
                                                      (keys free-args))]
@@ -2196,6 +2198,7 @@
           ;; bare (last-write) key.
           (:namespace fn-def)
           (assoc :namespace (:namespace fn-def))
+          (seq view-hints)  (assoc :type-hints view-hints)
           (seq resolved)    (assoc :resolved-bindings resolved)
           (seq slot-types)  (assoc :slot-types slot-types)
           (seq nav-types)   (assoc :nav-types nav-types)

@@ -582,15 +582,19 @@
                                      (:elem-types info))))
                      #{}
                      bindings-info)]
-    (if (seq tags)
-      ;; Carry EVERY marker present on any input — a fn that read a
-      ;; `[:pii …]` and a `[:secret …]` returns a value labelled with
-      ;; both. Deterministic wrap order (sorted) so computed types are
-      ;; stable across runs.
-      (reduce (fn [t tag] (make-marker-type tag t))
-              default-ret
-              (sort tags))
-      default-ret)))
+    ;; UiView describes representation, not content secrecy. Structural
+    ;; passthrough rules retain it; value-producing operations may yield a
+    ;; number/text/etc. without turning that result into another view.
+    (let [tags (disj tags :ui-view)]
+      (if (seq tags)
+        ;; Carry every content label present on any input — a fn that read a
+        ;; `[:pii …]` and a `[:secret …]` returns a value labelled with
+        ;; both. Deterministic wrap order (sorted) so computed types are
+        ;; stable across runs.
+        (reduce (fn [t tag] (make-marker-type tag t))
+                default-ret
+                (sort tags))
+        default-ret))))
 
 
 (defn wrap-with-taint

@@ -29,6 +29,26 @@
    :description "A hiccup tree value — `nil`, a scalar (`:text`/`:int`/`:float`/`:bool`), or a vector `[tag attrs? & children]`. Children are themselves hiccup-nodes; `:any`-typed at the element level so heterogeneous literal vectors like `[:div {:class \"x\"} \"hi\"]` classify cleanly."
    :union [:null :text :int :float :bool [:list :any]]}
 
+  ;; A view is still ordinary Hiccup data at runtime. The marker keeps
+  ;; view(state) distinct from value:T at precise typed connections.
+  {:name :ui-view
+   :description "View representation marker. Encoding removes only this marker; secrecy remains."
+   :marker {:monotone? true :hide-result? false}}
+
+  {:name :UiView
+   :description "Checked Hiccup representation carrying a view marker. A view is not a field's value."
+   :union [[:ui-view :hiccup-node]]}
+
+  {:name :as-ui-view
+   :description "Label checked Hiccup as UiView. Runtime representation stays unchanged."
+   :args {:hiccup {:type :hiccup-node :description "Checked Hiccup representation to label as a view."}}
+   :return-type :UiView}
+
+  {:name :encode-view
+   :description "Explicitly encode view representation as data. Removes only the view marker, preserving secret and other labels. No DOM lookup or implicit extraction of a form value."
+   :args {:view {:type :any :description "View or nested view-bearing data to encode explicitly."}}
+   :return-type :any}
+
   ;; --- Page-asset tag types — nominal narrowings of :hiccup-node.
   ;;
   ;; A `<script>` / `<style>` element is a hiccup node, but not a

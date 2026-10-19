@@ -16,7 +16,7 @@
                                ["core.arithmetic" [:add :mod :lte]]
                                ["core.hof" [:map :filter :group-by :partition-by :sort-by]]
                                ["core.strings" [:str :str-starts-with? :str-lower :str-trim :str-contains? :str-clip]]
-                               ["web.html" [:hiccup]]]
+                               ["web.html" [:hiccup :as-ui-view :encode-view]]]
               n names]
           [(ids/fn-id ns-path n)
            {:browser-op (name n)

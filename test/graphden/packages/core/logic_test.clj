@@ -11,7 +11,8 @@
    value."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.test-infra.impls :as impls]))
+    [graphden.test-infra.impls :as impls]
+    [graphden.types.core :as types]))
 
 
 (use-fixtures :once (impls/impls-fixture "core" "logic"))
@@ -162,3 +163,12 @@
       (is (= {:type :execution-error/type-mismatch
               :errors [{:path [:color] :code :refinement-mismatch}]} (ex-data e)))
       (is (not (re-find #"private-content" (str e (ex-data e))))))))
+
+
+(deftest ensure-type-refuses-a-recursive-alias-before-runtime-expansion
+  (binding [types/*type-aliases-override* (atom {})]
+    (types/register-type-alias! :node [:union :null [:list :node]])
+    (let [f (impls/impl-of :ensure-type)
+          e (try (f {:value (delay nil) :type (delay :node)} nil)
+                 nil (catch clojure.lang.ExceptionInfo e e))]
+      (is (= :types/unsupported-validator (:type (ex-data e)))))))

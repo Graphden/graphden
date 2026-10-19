@@ -59,3 +59,36 @@
   (types/register-type-alias! :node {:next :node})
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Cannot build a validator"
         (validator/build :node))))
+
+
+(deftest checked-types-and-runtime-validators-share-variant-normalization
+  (let [variant [:variant :ok :int :err :text]
+        union (types/desugar-variant variant)]
+    (types/register-type-alias! :outcome union)
+    (doseq [[declaration canonical value]
+            [[variant union {:tag :ok :value 3}]
+             [{:result variant} {:result union} {:result {:tag :err :value "no"}}]
+             [[:list variant] [:list union] [{:tag :ok :value 3}]]
+             [[:map :keyword :outcome] [:map :keyword union] {:x {:tag :ok :value 3}}]]]
+      (is (= canonical (validator/checked-type declaration)))
+      (is (true? (types/well-formed? (validator/checked-type declaration))))
+      (is (= value (validator/validate! declaration value))))))
+
+
+(deftest recursive-unions-refuse-construction-before-alias-normalization
+  (doseq [body [[:union :null [:list :node]]
+                {:next [:list :node]}
+                [:list [:map :keyword :node]]]]
+    (types/register-type-alias! :node body)
+    (doseq [declaration [:node [:union :node :text] {:items [:list :node]}]]
+      (let [e (try (validator/build declaration) nil (catch clojure.lang.ExceptionInfo e e))]
+        (is (= :types/unsupported-validator (:type (ex-data e)))))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Cannot build a validator"
+            (validator/checked-type declaration))))))
+
+
+(deftest variant-normalization-does-not-rewrite-literal-refinement-operands
+  (let [literal [:variant :ok :int :err :text]
+        t [:refine [:list :any] [:= literal]]]
+    (is (= t (validator/checked-type t)))
+    (is (= literal (validator/validate! t literal)))))

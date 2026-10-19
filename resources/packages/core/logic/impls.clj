@@ -90,7 +90,7 @@
         (throw (ex-info "Value does not match the required type"
                         {:type :execution-error/type-mismatch :expected-type type})))
       value)
-    (if (and (keyword? type) (= type (types/resolve-alias type)))
+    (if (and (keyword? type) (not (contains? (types/aliases-snapshot) type)))
       (throw (ex-info "Unknown type tag"
                       {:type :execution-error/unknown-type-tag :type-tag type}))
       (validator/validate! type value))))
@@ -104,7 +104,7 @@
     (cond
       (and (keyword? expected) (types/primitive? expected)) expected
       (nil? expected) default-ret
-      :else (try (validator/build expected) (types/resolve-alias expected)
+      :else (try (validator/checked-type expected)
                  (catch clojure.lang.ExceptionInfo _ default-ret)))))
 
 

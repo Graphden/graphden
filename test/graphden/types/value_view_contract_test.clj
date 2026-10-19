@@ -98,3 +98,27 @@
                          :args {:value {:as :raw-callback} :type {:value callback}}})]
     (is (= :any (:return entry)))
     (is (= #{:jvm-server} (:execution entry)))))
+
+
+(deftest literal-variant-validation-records-a-canonical-static-return
+  (let [variant [:variant :ok :int :err :text]
+        union (types/desugar-variant variant)]
+    (doseq [[declaration expected]
+            [[variant union]
+             [{:result variant} {:result union}]
+             [[:list variant] [:list union]]
+             [:core.refinements/result-int union]
+             [[:list :core.refinements/result-int] [:list union]]]]
+      (let [entry (checked! {:name :checked-variant :parent :ensure-type
+                             :args {:type {:value declaration} :value {:as :input}}})]
+        (is (= expected (:return entry)))
+        (is (true? (types/well-formed? (:return entry))))
+        (is (true? (types/subtype? (:return entry) expected)))))))
+
+
+(deftest recursive-union-declarations-do-not-overflow-static-validation
+  (types/register-type-alias! :node [:union :null [:list :node]])
+  (doseq [declaration [:node [:union :node :text] {:items [:list :node]}]]
+    (let [entry (checked! {:name :recursive-input :parent :ensure-type
+                           :args {:type {:value declaration} :value {:as :input}}})]
+      (is (= :any (:return entry))))))

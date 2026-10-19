@@ -116,13 +116,68 @@
       :else (unsupported! path))))
 
 
+(defn- finite-definition!
+  "Reject alias cycles before core normalization can unfold recursive unions.
+   Bound expansion as well as depth; literal constraint operands are not types."
+  [t]
+  (let [aliases (types/aliases-snapshot)
+        remaining (volatile! 10000)]
+    (letfn [(visit
+              [t path seen depth]
+              (when (or (> depth 64) (neg? (vswap! remaining dec))) (unsupported! path))
+              (if (and (keyword? t) (not (types/primitive? t)) (contains? aliases t))
+                (do (when (contains? seen t) (unsupported! path))
+                    (visit (get aliases t) path (conj seen t) (inc depth)))
+                (let [t (if (and (vector? t) (= :variant (first t)))
+                          (types/desugar-variant t) t)]
+                  (doseq [[i child] (map-indexed vector (types/child-types t))]
+                    (visit child (conj path i) seen (inc depth))))))]
+      (visit t [] #{} 0))))
+
+
+(defn- canonical-type
+  [t path seen]
+  (when (contains? seen t) (unsupported! path))
+  (let [seen (conj seen t)
+        resolved (if (keyword? t) (types/resolve-alias t) t)]
+    (cond
+      (not= t resolved) (canonical-type resolved path seen)
+      (and (vector? t) (= :variant (first t)))
+      (canonical-type (types/desugar-variant t) path seen)
+      (types/record-type? t)
+      (into {} (map (fn [[k v]] [k (canonical-type v (conj path k) seen)])) t)
+      (types/list-type? t) [:list (canonical-type (types/list-elem t) (conj path :element) seen)]
+      (types/map-type? t) [:map (canonical-type (types/map-key t) (conj path :key) seen)
+                           (canonical-type (types/map-val t) (conj path :value) seen)]
+      (types/refine-type? t) [:refine (canonical-type (types/refine-base t) path seen)
+                              (types/refine-constraint t)]
+      (types/marker-type? t) [(types/marker-tag t) (canonical-type (types/marker-inner t) path seen)]
+      (types/union-type? t) (types/make-union (mapv #(canonical-type % (conj path :branch) seen)
+                                                    (types/union-members t)))
+      :else t)))
+
+
+(defn- compile-definition
+  [t]
+  (finite-definition! t)
+  (let [canonical (canonical-type t [] #{})]
+    {:type canonical :check (compile-type canonical [] #{})}))
+
+
+(defn checked-type
+  "The canonical static type established by a supported runtime validator.
+   Uses the same normalization and construction checks as `build`."
+  [t]
+  (:type (compile-definition t)))
+
+
 (defn build
   "Construct a validator returning T unchanged or throwing path-only errors.
    Construction refuses unsupported types/refinements, including structural
    callables: testing a runtime fn cannot prove its execution contract.
    Validation does not grant authority or remove any static secrecy label."
   [t]
-  (let [check (compile-type t [] #{})]
+  (let [{:keys [check]} (compile-definition t)]
     (fn [value]
       (let [errors (check value [])]
         (when (seq errors)

@@ -15,6 +15,7 @@
 const {chromium} = require('playwright');
 const {assert, newContext, api, getEntities, deleteFnByName} =
   require('./edit-test-helpers');
+const {openRowActionsFor} = require('./tutorial-tour-helpers');
 
 
 const RUN_ID = '-' + process.pid + '-' + Date.now().toString(36);
@@ -96,15 +97,13 @@ async function putDescription(page, fnId, branch, desc) {
       null,
       {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
-    // initGraph rebuilds the canvas — wait again for stability.
-    await page.waitForFunction(
-      () => graphReady()
-            && !!document.querySelector('button.more-actions-trigger')
-            && !graph.animating,
-      null,
-      {timeout: 20000, polling: 100});
-    await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
-    await page.waitForSelector('.row-actions-popover button', {timeout: 20000});
+    await openRowActionsFor(page, FN_NAME, 20000, {root: true});
+    assert(await page.evaluate(id => selectedFnId === id
+      && rowActionsPopoverAnchor?.isConnected
+      && rowActionsPopoverAnchor.dataset.rootFnId === id, fn.id),
+    'history actions belong to the selected probe root');
+    await page.locator('.row-actions-popover button[data-action="fn-versions"]')
+      .waitFor({timeout: 20000});
 
     const clicked = await page.evaluate(() => {
       const popover = document.querySelector('.row-actions-popover');

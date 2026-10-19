@@ -19,6 +19,7 @@
 const {chromium} = require('playwright');
 const {assert, newContext, api, getEntities, deleteFnByName} =
   require('./edit-test-helpers');
+const {openRowActionsFor} = require('./tutorial-tour-helpers');
 
 
 const RUN_ID = '-' + process.pid + '-' + Date.now().toString(36);
@@ -91,15 +92,13 @@ async function putDescription(page, fnId, desc) {
             && !graph.animating,
       null, {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
-    await page.waitForSelector('button.more-actions-trigger', {timeout: 15000});
-    // initGraph rebuilds graphData asynchronously; wait for the target
-    // fn to land before opening row-actions on it.
-    await page.waitForFunction((name) => {
-      const fns = (typeof graphData !== 'undefined' && graphData?.fns) || [];
-      return fns.some(f => f.name === name);
-    }, FN_NAME, {timeout: 5000, polling: 100});
-    await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
-    await page.waitForSelector('.row-actions-popover button', {timeout: 20000});
+    await openRowActionsFor(page, FN_NAME, 20000, {root: true});
+    assert(await page.evaluate(id => selectedFnId === id
+      && rowActionsPopoverAnchor?.isConnected
+      && rowActionsPopoverAnchor.dataset.rootFnId === id, fn.id),
+    'history actions belong to the selected probe root');
+    await page.locator('.row-actions-popover button[data-action="fn-versions"]')
+      .waitFor({timeout: 20000});
     // Row-actions popover is HTMX-loaded — the element appears
     // immediately but its button content swaps in async. Wait for the
     // ⌛ history button before dispatching the click.

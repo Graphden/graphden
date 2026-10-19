@@ -28,6 +28,7 @@ const {chromium} = require('playwright');
 const {assert, newContext, api, getEntities, deleteFnByName, waitFor,
        waitForServerHealthy} =
   require('./edit-test-helpers');
+const {openRowActionsFor} = require('./tutorial-tour-helpers');
 
 
 const RUN_ID = '-' + process.pid + '-' + Date.now().toString(36);
@@ -69,26 +70,14 @@ async function openServicePopover(page) {
     null,
     {timeout: 20000, polling: 100});
   await page.evaluate(() => initGraph());
-  // initGraph re-renders overlays; wait again for the post-rebuild
-  // settle before dispatching.
-  await page.waitForFunction(
-    () => graphReady()
-          && !!document.querySelector('button.more-actions-trigger')
-          && !graph.animating,
-    null,
-    {timeout: 20000, polling: 100});
-  await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
-  // Wait for the popover's CONTENT, not its shell. `.row-actions-popover` is an
-  // empty div the moment JS creates it; its body is server-rendered and arrives
-  // over a separate `GET /partials/row-actions`. Waiting on the container
-  // returned instantly, and the `⚙` lookup below then ran against an empty div
-  // — `gear MISSING, buttons: ""`. That is the whole flake: it passed only when
-  // the partial happened to land inside the same tick.
-  //
-  // Anchoring on a rendered button ties the wait to the round-trip that
-  // actually has to finish. Timeout raised to match the sibling
-  // waitForFunction gates: it now covers a network fetch, not a DOM insert.
-  await page.waitForSelector('.row-actions-popover button', {timeout: 20000});
+  await openRowActionsFor(page, PROBE_FN, 20000, {root: true});
+  assert(await page.evaluate(name => lookups.fnMap.get(selectedFnId)?.name === name
+    && rowActionsPopoverAnchor?.isConnected
+    && rowActionsPopoverAnchor.dataset.rootFnId === selectedFnId, PROBE_FN),
+  'service actions belong to the selected probe root');
+  // The partial must contain the actual service action, not only its shell.
+  await page.locator('.row-actions-popover button[data-action="service-settings"]')
+    .waitFor({timeout: 20000});
   const clicked = await page.evaluate(() => {
     const popover = document.querySelector('.row-actions-popover');
     const gear = Array.from(popover?.querySelectorAll('button') || [])

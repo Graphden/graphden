@@ -74,14 +74,36 @@
        (shapes/type-any? #(and (vector? %) (= :fn (first %)) (= 5 (count %))) form)))
 
 
+(defn- canonical-type-data
+  [form]
+  (let [printed-order #(compare (pr-str %1) (pr-str %2))]
+    (cond
+      (map? form) (into (sorted-map-by printed-order)
+                        (map (fn [[k v]] [k (canonical-type-data v)])) form)
+      (set? form) (into (sorted-set-by printed-order) (map canonical-type-data) form)
+      (vector? form) (mapv canonical-type-data form)
+      (sequential? form) (mapv canonical-type-data form)
+      :else form)))
+
+
+(defn- inline-type-hash
+  [shape]
+  ;; JSONB reorders object keys. Only the new canonical5 identity grammar
+  ;; is order-independent; legacy fn3/fn4 hashes remain byte-for-byte stable.
+  (let [shape (if (or (execution-collection? shape)
+                      (and (vector? shape) (= :fn (first shape)) (= 5 (count shape))))
+                (canonical-type-data shape) shape)]
+    (ids/digest-hex "SHA-1" (pr-str shape))))
+
+
 (defn- inline-type-id
   [shape]
-  (ids/anonymous-fn-id (ids/digest-hex "SHA-1" (pr-str shape))))
+  (ids/anonymous-fn-id (inline-type-hash shape)))
 
 
 (defn- inline-type-row
   [shape]
-  (let [h (ids/digest-hex "SHA-1" (pr-str shape))]
+  (let [h (inline-type-hash shape)]
     {:kind :fn
      :id (ids/anonymous-fn-id h)
      :name nil
@@ -279,6 +301,49 @@
     (->> forms
          (mapcat inline-fn-type-rows-from-form)
          (distinct))))
+
+
+(defn stored-type-ref
+  "Resolve a type identity from indexed stored rows. `named-ref`, when
+   supplied, preserves named aliases; anonymous constraints remain structural.
+   Missing/cyclic rows remain jsonb-shaped unknowns, never callable proof."
+  [type-id {:keys [fn-by-id slot-by-id slots-by-fn named-ref]}]
+  (letfn [(walk
+            [id seen]
+            (if (contains? seen id)
+              :jsonb
+              (if-let [row (get fn-by-id id)]
+                (or (when (and named-ref (:name row)) (named-ref row))
+                    (let [seen (conj seen id)
+                          c (:constraint row)
+                          own (get slots-by-fn id)]
+                      (cond
+                        (:base-fn-id row) [:refine (walk (:base-fn-id row) seen) c]
+                        (:element-fn-id row) [:list (walk (:element-fn-id row) seen)]
+                        (and (vector? c) (#{:fn :list :map :tuple :union :variant} (first c))) c
+                        (and (empty? (:parent-ids row)) (nil? (:return-type-fn-id row)) (seq own))
+                        (into {} (keep (fn [fs]
+                                         (when-let [slot (get slot-by-id (:slot-id fs))]
+                                           [(keyword (:name slot)) (walk (:type-fn-id slot) seen)])))
+                              (sort-by :position own))
+                        (and (empty? (:parent-ids row)) (nil? (:return-type-fn-id row)) (:name row))
+                        (keyword (:name row))
+                        :else :jsonb)))
+                :jsonb)))]
+    (walk type-id #{})))
+
+
+(defn storage-kind
+  "Project a rich type to a storage/UI kind without replacing its contract."
+  [shape]
+  (cond
+    (or (shapes/list-type? shape) (shapes/tuple-type? shape)) :sequence
+    (or (shapes/map-type? shape) (shapes/record-type? shape)) :jsonb
+    (shapes/fn-type? shape) :fn
+    (shapes/refine-type? shape) (recur (shapes/refine-base shape))
+    (shapes/marker-type? shape) (recur (shapes/marker-inner shape))
+    (shapes/primitive? shape) shape
+    :else :jsonb))
 
 
 (defn type-row-role

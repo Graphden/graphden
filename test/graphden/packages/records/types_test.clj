@@ -178,13 +178,15 @@
                  [:fn {:x :int} :int #{:db}]
                  [:fn {:x :int} :int #{} #{:jvm-server :browser-main}]
                  [:fn {:x :int} :int :any [:execution-var 'E]]]]
-    (let [id (ids/anonymous-fn-id (ids/digest-hex "SHA-1" (pr-str shape)))
+    (let [id (types/resolve-type-ref shape {})
           source {:name :hof :namespace "wire" :args {:callback {:type shape}}
                   :return-type :int}
           rows (parse/parse-module [source])
           type-row (first (filter #(= id (:id %)) rows))
           slot (first (filter #(and (= :slot (:kind %)) (= "callback" (:name %))) rows))]
       (is (= shape (:constraint type-row)))
+      (when (< (count shape) 5)
+        (is (= (ids/anonymous-fn-id (ids/digest-hex "SHA-1" (pr-str shape))) id)))
       (is (= id (types/resolve-type-ref shape {})))
       (is (= id (:type-fn-id slot)))
       (is (= (ids/slot-id (ids/fn-id "wire" :hof) :callback) (:id slot))))))
@@ -228,3 +230,29 @@
       (is (= rows repeated))
       (is (= (ids/primitive-fn-id primitive) (:type-fn-id slot)))
       (is (= (ids/slot-id (ids/fn-id "wire" :legacy) :handlers) (:id slot))))))
+
+
+(deftest canonical5-collection-and-nested-callable-identities-ignore-map-order
+  (let [left [:fn (array-map :left :int :right :text)
+              {:ok :bool :data [:map :keyword [:fn (array-map :x :int :y :text) :int #{} :unknown]]}
+              #{:db :network} #{:browser-main :jvm-server}]
+        right [:fn (array-map :right :text :left :int)
+               (array-map :data [:map :keyword [:fn (array-map :y :text :x :int) :int #{} :unknown]] :ok :bool)
+               (sorted-set :network :db) (sorted-set :jvm-server :browser-main)]
+        module (fn [callback]
+                 [{:name :stable :namespace "user"
+                   :args {:handlers {:type [:list [:map :keyword callback]]}}}])
+        rows-left (parse/parse-module (module left))
+        rows-right (parse/parse-module (module right))]
+    (is (= left right))
+    (is (= (types/resolve-type-ref left {}) (types/resolve-type-ref right {})))
+    (is (= (set rows-left) (set rows-right)))
+    (is (= (set (map :id rows-left)) (set (map :id rows-right))))))
+
+
+(deftest legacy-callable-identity-retains-the-original-printed-map-order
+  (doseq [args [(array-map :z :int :a :text) (array-map :a :text :z :int)]
+          suffix [[] [#{:db}]]]
+    (let [shape (into [:fn args :int] suffix)]
+      (is (= (ids/anonymous-fn-id (ids/digest-hex "SHA-1" (pr-str shape)))
+             (types/resolve-type-ref shape {}))))))

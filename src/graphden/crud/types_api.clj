@@ -320,6 +320,7 @@
       (constraint-tagged? f :union)
       (constraint-tagged? f :variant)
       (constraint-tagged? f :fn)
+      (constraint-tagged? f :list)
       (constraint-tagged? f :map)
       (constraint-tagged? f :tuple)))
 
@@ -336,24 +337,6 @@
                 (seq (get slots-by-fn (:id f)))))))
 
 
-(defn- record-shape
-  "Project a fn-row's own slots into the record map
-   `{slot-name slot-type-name}`, in `:position` order. Returns nil
-   when the fn-row owns no slots (every other shape is handled by
-   `rich-type-from-row`)."
-  [f slots-by-fn slot-by-id fns-by-id]
-  (when-let [own (seq (get slots-by-fn (:id f)))]
-    (into {}
-          (keep (fn [fs]
-                  (when-let [s (get slot-by-id (:slot-id fs))]
-                    (when-let [tn (some-> (:type-fn-id s)
-                                          fns-by-id
-                                          :name
-                                          keyword)]
-                      [(keyword (:name s)) tn]))))
-          (sort-by :position own))))
-
-
 (defn- type-row-entry
   "Augment-snapshot entry for a single type-row. Returns nil when the
    existing snapshot already has a CALLABLE entry the augmentation
@@ -363,10 +346,11 @@
         ;; …) carry their structural form via `rich-type-from-row` —
         ;; `record-shape` would misclassify them. Fall back to
         ;; `record-shape` only when no marker FK / tag is present.
-        structural (if (marker-type? f)
-                     (tc/rich-type-from-row f fns-by-id)
-                     (or (record-shape f slots-by-fn slot-by-id fns-by-id)
-                         (tc/rich-type-from-row f fns-by-id)))
+        stored (record-types/stored-type-ref
+                 (:id f) {:fn-by-id (assoc fns-by-id (:id f) (dissoc f :name))
+                          :slot-by-id slot-by-id :slots-by-fn slots-by-fn
+                          :named-ref #(some-> (:name %) keyword)})
+        structural (if (constraint-tagged? f :variant) (types/desugar-variant stored) stored)
         n (some-> (:name f) keyword)
         existing (get acc n)
         ;; A real type-row's registry entry (when one exists from a

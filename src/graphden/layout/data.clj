@@ -18,6 +18,7 @@
    `load-graph-entities-uncached` lives in the defbase shim, not here."
   (:require
     [graphden.executor.compile.lookups :as compile.lookups]
+    [graphden.packages.records.types :as record-types]
     [graphden.versioning.graph-rows :as graph-rows]))
 
 
@@ -141,7 +142,7 @@
    binding-owner itself OR for ref-chain-propagated bindings whose
    `:source-id` chain doesn't apply)."
   [fn-id slot-id inherits-from-fid {:keys [fn-by-id slot-by-id binding-by items-by-binding
-                                           slot-by-fn-source-slot]}]
+                                           slot-by-fn-source-slot slots-by-fn]}]
   (let [slot (get slot-by-id slot-id)
         ;; The row is emitted for the VIEW the chain shows first (`body`
         ;; over assoc's :value), but the binding row sits wherever the
@@ -163,25 +164,13 @@
                        (get slot-by-fn-source-slot [fn-id slot-id]))
         eff-tfn (or (some-> b :type-override-fn-id fn-by-id)
                     (some-> (:type-fn-id slot) fn-by-id))
-        type-kw (or (when (and eff-tfn
-                               (empty? (:parent-ids eff-tfn))
-                               (nil? (:base-fn-id eff-tfn))
-                               (nil? (:element-fn-id eff-tfn))
-                               (some? (:name eff-tfn)))
-                      (keyword (:name eff-tfn)))
-                    ;; Anonymous fn-type rows (synthesised for inline
-                    ;; `[:fn args ret]` slot declarations) have nil
-                    ;; `:name` but a `:constraint [:fn …]`. Surface
-                    ;; them as the `:fn` primitive marker so the
-                    ;; flat-type chip / `compute-fn-typed-fn-ids`
-                    ;; both recognise the slot as HOF-callable. The
-                    ;; structural shape is recovered separately via
-                    ;; the rich-types snapshot.
-                    (when (and eff-tfn
-                               (vector? (:constraint eff-tfn))
-                               (= :fn (first (:constraint eff-tfn))))
-                      :fn)
-                    :jsonb)
+        type-kw (if (and (:name eff-tfn) (not (:base-fn-id eff-tfn))
+                         (not (:element-fn-id eff-tfn)) (nil? (:constraint eff-tfn)))
+                  (keyword (:name eff-tfn))
+                  (record-types/storage-kind
+                    (record-types/stored-type-ref (:id eff-tfn)
+                                                  {:fn-by-id fn-by-id :slot-by-id slot-by-id
+                                                   :slots-by-fn slots-by-fn})))
         inherits-from (when (and inherits-from-fid (not= inherits-from-fid fn-id))
                         (synth-arg-id inherits-from-fid slot-id))
         first-item-id (some-> b :id items-by-binding first :id)]
@@ -322,7 +311,7 @@
                                       {}))
         binding-extra-by-fn (substitution-context-bindings-by-fn
                               fn-by-id slot-owner-by-id bindings)
-        anchor-ctx {:fn-by-id fn-by-id :slot-by-id slot-by-id
+        anchor-ctx {:fn-by-id fn-by-id :slot-by-id slot-by-id :slots-by-fn own-fn-slots
                     :binding-by binding-by :items-by-binding items-by-binding}
         anchor-rows (vec (mapcat #(anchor-rows-for-fn (:id %) anchor-ctx
                                                       own-fn-slots binding-extra-by-fn)

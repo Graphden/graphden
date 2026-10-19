@@ -10,6 +10,7 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
+    [graphden.packages.export :as export]
     [graphden.packages.records.parse :as parse]
     [graphden.storage.protocol.core :as sp]
     [graphden.types.core :as types]
@@ -158,7 +159,10 @@
                  [:fn {} [:list [:map :text :int]] #{:db} #{:browser-main}]
                  [:fn {} :int :any [:execution-var 'E]]
                  [:map :keyword [:fn {} :int #{} #{:browser-main}]]
-                 [:list [:map :keyword [:fn {} :int #{:db} [:execution-var 'E]]]]]]
+                 [:list [:map :keyword [:fn {} :int #{:db} [:execution-var 'E]]]]
+                 [:list [:map :keyword [:fn (array-map :z :int :a :text)
+                                        (array-map :z :int :a :text) #{:db :network}
+                                        #{:jvm-server :browser-main}]]]]]
     (binding [diag/*diagnostics-override* (atom {})]
       (let [storage (setup/create-test-storage)]
         (try
@@ -180,5 +184,9 @@
             (is (= shape (get-in (registry/rich-type-of-id (:id child)) [:args :event])))
             (is (= (:id source-type)
                    (:id (sp/read-entity storage :fn (:id source-type)))))
-            (is (= shape (:constraint (sp/read-entity storage :fn (:id source-type))))))
+            (let [stored-shape (:constraint (sp/read-entity storage :fn (:id source-type)))
+                  read-rows (mapv #(cond-> % (= (:id source-type) (:id %)) (assoc :constraint stored-shape)) rows)
+                  reimported (parse/parse-module (export/records->fn-defs read-rows))]
+              (is (= shape stored-shape))
+              (is (= (set (map :id rows)) (set (map :id reimported))))))
           (finally (sp/close storage)))))))

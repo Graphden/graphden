@@ -26,6 +26,7 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
+    [graphden.packages.records.types :as record-types]
     [graphden.storage.protocol.core :as sp]
     [graphden.types.diagnostics :as diag]
     [graphden.versioning.storage.core :as vs]))
@@ -1586,3 +1587,40 @@
       (finally
         (reset! entity-list/view-impl-filter previous)
         (sp/close storage)))))
+
+
+(deftest canonical-callable-list-supports-crud-append-update-and-remove
+  (binding [diag/*diagnostics-override* (atom {})]
+    (let [storage (setup/create-test-storage)
+          c (test-ctx storage)]
+      (try
+        (let [callback [:fn {} :int #{} #{:browser-main}]
+              collection [:list callback]
+              type-row (first (filter #(= collection (:constraint %))
+                                      (record-types/inline-fn-type-rows-from-form collection)))
+              _ (sp/create-entity storage :fn (dissoc type-row :kind))
+              base (setup/create-base-fn! storage "contract-list-source" :sequence)
+              slot (sp/create-entity storage :slot {:name "handlers" :type-fn-id (:id type-row)})
+              _ (setup/attach-slot! storage (:id base) (:id slot) 0)
+              child (setup/create-composed-fn! storage "contract-list-child" (:id base))
+              producer (setup/create-base-fn! storage "contract-callable-value" :any)
+              _ (registry/record-rich-types-raw! (:id base) :contract-list-source
+                                                 {:args {:handlers collection} :return collection})
+              _ (registry/record-rich-types-raw! (:id producer) :contract-callable-value
+                                                 {:args {} :return callback})
+              binding (entities/find-sequence-binding c (:id child))
+              appended (entities/apply-seq-append-core
+                         {:fn-id (:id child) :body {:ref (str (:id producer))}} binding c)
+              item (sp/read-entity storage :binding-list-item (:created appended))]
+          (is (= {:fn-id (:id child) :slot-id (:id slot) :synthetic true} binding))
+          (is (= (:id producer) (:ref-fn-id item)))
+          (is (nil? (:error appended)))
+          (is (nil? (:type-warnings appended)))
+          (let [updated (entities/apply-seq-update-core
+                          {:item-id (:id item) :body {:ref (str (:id producer))}} item c)]
+            (is (= (:id item) (:updated updated)))
+            (is (nil? (:error updated))))
+          (entities/delete-entity "binding-list-item" (:id item) c)
+          (is (nil? (sp/read-entity storage :binding-list-item (:id item))))
+          (is (= (:id type-row) (:type-fn-id (sp/read-entity storage :slot (:id slot))))))
+        (finally (sp/close storage))))))

@@ -262,10 +262,8 @@
    (let [fn-by-id   (into {} (map (juxt :id identity)) fns)
          slot-by-id (into {} (map (juxt :id identity)) slots)
          slots-by-fn (group-by :fn-id fn-slots)
-         name-by-id (fn [id]
-                      (when-let [row (get fn-by-id id)]
-                        (or (qualified-type-name ns-paths row)
-                            (some-> (:name row) keyword))))
+         type-index {:fn-by-id fn-by-id :slot-by-id slot-by-id :slots-by-fn slots-by-fn
+                     :named-ref #(or (qualified-type-name ns-paths %) (some-> (:name %) keyword))}
          candidates
          (mapcat
            (fn [f]
@@ -276,62 +274,26 @@
                                     (keep #(get slot-by-id (:slot-id %))))
                      role (record-types/type-row-role f (seq own-slots))
                      body (case role
-                            :record
-                            (into {}
-                                  (keep (fn [s]
-                                          (when-let [tn (name-by-id (:type-fn-id s))]
-                                            [(keyword (:name s)) tn])))
-                                  own-slots)
+                            (:record :refinement :list)
+                            (record-types/stored-type-ref
+                              (:id f) (assoc-in type-index [:fn-by-id (:id f)] (dissoc f :name)))
 
-                            :refinement
-                            (when-let [base (name-by-id (:base-fn-id f))]
-                              [:refine base (or (:constraint f) [:any])])
-
-                            :list
-                            (when-let [elem (name-by-id (:element-fn-id f))]
-                              [:list elem])
-
-                            :union
-                            ;; Constraint already shaped as [:union T1 T2 …]
-                            ;; by parse-union; re-register verbatim so
-                            ;; resolve-alias sees the same form the EDN
-                            ;; path produces.
+                            (:union :fn-type)
                             (:constraint f)
 
                             :variant
-                            ;; Desugar to the union-of-pinned-records
-                            ;; form so the alias-registry stores the
-                            ;; same structural type the EDN path
-                            ;; produces (see types/desugar-variant).
-                            ;; The constraint payload is
-                            ;; `[:variant tag1 T1 tag2 T2 …]`; we strip
-                            ;; the leading `:variant` and let the
-                            ;; helper rebuild the union. Names embedded
-                            ;; in `Tᵢ` resolve through the batch's
-                            ;; pre-extended `*alias-view*`, so mutual
-                            ;; refs across newly-saved type-rows work
-                            ;; in a single pass — same as records.
                             (types/desugar-variant (:constraint f))
 
-                            ;; marker declaration — register the TAG in
-                            ;; the marker registry (not an alias) and emit
-                            ;; no alias body.
                             :marker
-                            (do (types/register-marker!
-                                  nm (second (:constraint f)))
-                                nil)
+                            (do (types/register-marker! nm (second (:constraint f))) nil)
 
-                            :fn-type
-                            ;; `[:fn args ret]` — already in canonical
-                            ;; structural form, register verbatim. The
-                            ;; row has no name when it came from an
-                            ;; inline reference; alias entry only
-                            ;; lands when the `:name` keyword exists
-                            ;; (the `keep` over `(:name f)` above
-                            ;; filters anonymous rows out anyway).
-                            (:constraint f)
-
-                            nil)
+                            ;; Map/tuple and anonymous-list constraint rows
+                            ;; have no scalar FK discriminator. Their payload
+                            ;; is already a complete stored type expression.
+                            (when (and (empty? (:parent-ids f)) (nil? (:return-type-fn-id f))
+                                       (vector? (:constraint f))
+                                       (#{:map :tuple :list} (first (:constraint f))))
+                              (:constraint f)))
                      ;; Package declarations preserve structural fields that
                      ;; storage cannot reconstruct. An untenanted user row is
                      ;; not a package row, even when its short name matches.

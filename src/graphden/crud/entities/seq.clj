@@ -19,6 +19,7 @@
     [graphden.crud.type-check :as tc]
     [graphden.crud.types-api :as types-api]
     [graphden.crud.validation :as validation]
+    [graphden.packages.records.types :as record-types]
     [graphden.storage.graph-writer :as writer]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.tx :as tx]
@@ -58,15 +59,12 @@
         bindings-by-fn-slot (into {}
                                   (map (fn [b] [[(:fn-id b) (:slot-id b)] b]))
                                   (:bindings graph))
-        ;; Resolve the `:sequence` base-fn's id ONCE (name→id at the
-        ;; boundary), then test each slot's `:type-fn-id` by ID — internal
-        ;; dispatch keys on the stable id, not a per-slot name compare.
-        sequence-type-fn-id (some (fn [f] (when (= "sequence" (:name f)) (:id f)))
-                                  (:fns graph))
-        sequence?
-        (fn [slot]
-          (and sequence-type-fn-id
-               (= sequence-type-fn-id (:type-fn-id slot))))
+        root-slot-id (fn [sid]
+                       (loop [sid sid seen #{}]
+                         (let [source (:source-slot-id (get slots-by-id sid))]
+                           (if (and source (not (contains? seen source)))
+                             (recur source (conj seen sid)) sid))))
+        type-index {:fn-by-id fns-by-id :slot-by-id slots-by-id :slots-by-fn fn-slots-by-fn}
         ;; Walk parent chain in memory.
         chain (loop [acc [], seen #{}, queue [fn-id]]
                 (if (empty? queue)
@@ -79,6 +77,12 @@
                             pids (->> (:parent-ids f) (remove nil?) (remove seen))]
                         (recur (conj acc fid) (conj seen fid)
                                (into rest-q pids)))))))
+        sequence? (fn [slot]
+                    (let [sid (root-slot-id (:id slot))
+                          override (some #(get-in bindings-by-fn-slot
+                                                  [[% sid] :type-override-fn-id]) chain)
+                          shape (record-types/stored-type-ref (or override (:type-fn-id slot)) type-index)]
+                      (= :sequence (record-types/storage-kind shape))))
         sequence-slot
         (some (fn [fid]
                 (some (fn [fs]
@@ -87,8 +91,10 @@
                       (get fn-slots-by-fn fid [])))
               chain)]
     (when sequence-slot
-      (or (get bindings-by-fn-slot [fn-id (:id sequence-slot)])
-          {:fn-id fn-id :slot-id (:id sequence-slot) :synthetic true}))))
+      (let [sid (root-slot-id (:id sequence-slot))]
+        (or (get bindings-by-fn-slot [fn-id sid])
+            (get bindings-by-fn-slot [fn-id (:id sequence-slot)])
+            {:fn-id fn-id :slot-id sid :synthetic true})))))
 
 
 (defn resolve-sequence-payload

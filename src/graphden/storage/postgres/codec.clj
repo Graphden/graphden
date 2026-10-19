@@ -86,7 +86,8 @@
     (let [encoded (persistent! (reduce-kv (fn [m k v2] (assoc! m k (preserve-keywords v2))) (transient {}) v))]
       ;; Keyword/string keys may collapse to the same JSON key. Escape
       ;; every source map carrying a sentinel, including mixed-key maps.
-      (if (some #(contains? v %) [:_execution_var "_execution_var" :_execution_escape "_execution_escape"])
+      (if (some #{:_execution_var "_execution_var" :_execution_escape "_execution_escape"}
+                (keys v))
         {:_execution_escape encoded}
         encoded))
     (sequential? v) (mapv preserve-keywords v)

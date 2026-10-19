@@ -358,3 +358,23 @@
           decoded (jsonb-roundtrip literal)]
       (is (map? decoded))
       (is (= json-normalized decoded)))))
+
+
+(deftest jsonb-execution-sentinel-check-accepts-sorted-maps
+  (let [callable [:fn {} :int #{} [:execution-var 'E]]]
+    (doseq [[literal expected]
+            [[(sorted-map) {}]
+             [(sorted-map :alpha :red :beta :blue) {:alpha :red :beta :blue}]
+             [(sorted-map "alpha" "red" "beta" "blue") {:alpha "red" :beta "blue"}]
+             [{:entries (sorted-map :initial "i" :update "u" :view "v")}
+              {:entries {:initial "i" :update "u" :view "v"}}]
+             [(sorted-map :_execution_var "E") {:_execution_var "E"}]
+             [(sorted-map "_execution_var" "E") {:_execution_var "E"}]
+             [(sorted-map :_execution_escape (sorted-map :_execution_var "E"))
+              {:_execution_escape {:_execution_var "E"}}]
+             [(sorted-map "_execution_escape" (sorted-map "_execution_var" "E"))
+              {:_execution_escape {:_execution_var "E"}}]
+             [{:data (sorted-map :callback callable :literal ["E" [:execution-var "E"]])}
+              {:data {:callback callable :literal ["E" [:execution-var "E"]]}}]
+             [(sorted-map-by #(compare %2 %1) :z :blue :a :red) {:z :blue :a :red}]]]
+      (is (= expected (jsonb-roundtrip literal))))))

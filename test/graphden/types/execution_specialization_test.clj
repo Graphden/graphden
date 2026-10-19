@@ -202,3 +202,44 @@
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"computed return is not a subtype"
         (check-entry! {:name :changed-input :parent :producer
                        :return-type [:fn {:handler (callback #{:browser-main})} :int #{} portable]}))))
+
+
+(deftest generic-return-annotations-cannot-uplift-unproven-execution
+  (doseq [wrap [identity #(vector :list %) #(vector :map :keyword %)
+                #(hash-map :handler %)]
+          execution [:unknown #{} #{:jvm-server}]]
+    (registry/record-rich-types-raw! :producer {:args {} :return (wrap (callback execution))})
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"computed return is not a subtype"
+          (check-entry! {:name :claimed-generic :parent :producer
+                         :return-type (wrap (callback e))})))))
+
+
+(deftest generic-return-annotations-retain-proven-correlation
+  (doseq [shape [(callback e) [:list (callback e)] [:map :keyword (callback e)]]]
+    (registry/record-rich-types-raw! :producer {:args {} :return shape})
+    (is (= shape (:return (check-entry! {:name :same-generic :parent :producer :return-type shape}))))))
+
+
+(deftest generic-execution-inputs-follow-contravariance
+  (doseq [required [:unknown #{} #{:jvm-server} portable]]
+    (let [actual [:fn {:handler (callback required)} :int #{} portable]
+          declared [:fn {:handler (callback e)} :int #{} portable]]
+      (registry/record-rich-types-raw! :producer {:args {} :return actual})
+      (if (#{:unknown #{}} required)
+        (is (= declared (:return (check-entry! {:name :generic-input :parent :producer
+                                                :return-type declared}))))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"computed return is not a subtype"
+              (check-entry! {:name :generic-input :parent :producer :return-type declared})))))))
+
+
+(deftest unknown-producer-cannot-reach-browser-consumer-through-generic-return
+  (registry/record-rich-types-raw! :unknown-producer
+                                   {:args {} :return [:fn {} :int #{} :unknown]})
+  (registry/record-rich-types-raw! :browser-consumer
+                                   {:args {:func [:fn {} :int #{} #{:browser-main}]} :return :int})
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"computed return is not a subtype"
+        (do (check-entry! {:name :generic-child :parent :unknown-producer
+                           :return-type [:fn {} :int #{} e]})
+            (check-entry! {:name :browser-call :parent :browser-consumer
+                           :args {:func :generic-child}}))))
+  (is (nil? (registry/rich-type-of :generic-child))))

@@ -89,41 +89,88 @@
                    args))))))
 
 
+(defn- child-positions
+  "Structural positions shared by a return contract and its annotation."
+  [t]
+  (cond
+    (types/fn-type? t)
+    (into [[[:return] (types/fn-ret t)]]
+          (map-indexed (fn [i [k v]]
+                         [[(if (= 1 (count (types/fn-args t))) :arg :args)
+                           (if (= 1 (count (types/fn-args t))) i k)] v]))
+          (sort-by key (types/fn-args t)))
+    (types/list-type? t) [[[:element] (types/list-elem t)]]
+    (types/map-type? t) [[[:key] (types/map-key t)] [[:value] (types/map-val t)]]
+    (types/record-type? t) (mapv (fn [[k v]] [[:field k] v]) t)
+    (types/tuple-type? t) (map-indexed (fn [i v] [[:tuple i] v]) (types/tuple-elems t))
+    (types/union-type? t) (map-indexed (fn [i v] [[:union i] v]) (types/union-members t))
+    (types/refine-type? t) [[[] (types/refine-base t)]]
+    (types/marker-type? t) [[[] (types/marker-inner t)]]
+    :else []))
+
+
+(defn- executions-by-position
+  [t]
+  (letfn [(walk
+            [t path]
+            (reduce (fn [m [position child]] (into m (walk child (into path position))))
+                    (if (types/fn-type? t) {path (types/fn-execution t)} {})
+                    (child-positions t)))]
+    (walk t [])))
+
+
 (defn- execution-view
-  "Discard value assertions while retaining callable positions and variance.
-   The private token cannot be mistaken for a registered user alias."
-  [t token]
-  (letfn [(view [t] (execution-view t token))]
-    (cond
-      (= t :never) :never
-      (not (types/type-any? types/fn-type? t)) token
-      (types/fn-type? t)
-      (types/make-fn-type (into {} (map (fn [[k v]] [k (view v)])) (types/fn-args t))
-                          (view (types/fn-ret t)) :any (types/fn-execution t))
-      (types/list-type? t) [:list (view (types/list-elem t))]
-      (types/map-type? t) [:map (view (types/map-key t)) (view (types/map-val t))]
-      (types/tuple-type? t) (into [:tuple] (map view) (types/tuple-elems t))
-      (types/record-type? t)
-      (into {} (keep (fn [[k v]] (when (types/type-any? types/fn-type? v) [k (view v)]))) t)
-      (types/union-type? t) (types/make-union (mapv view (types/union-members t)))
-      (types/refine-type? t) (view (types/refine-base t))
-      (types/marker-type? t) (view (types/marker-inner t))
-      :else token)))
+  "Ignore value assertions; uncorrelated variables get their worst support
+   for this variance. Only the same scoped variable at the same structural
+   position is correlated between the inferred and declared contracts."
+  [t counterpart token actual?]
+  (letfn [(view
+            [t path positive?]
+            (let [children (child-positions t)
+                  views (mapv (fn [[position child]]
+                                (view child (into path position)
+                                      (if (and (types/fn-type? t) (not= position [:return]))
+                                        (not positive?) positive?))) children)]
+              (cond
+                (= t :never) :never
+                (not (types/type-any? types/fn-type? t)) token
+                (types/fn-type? t)
+                (let [execution (types/fn-execution t)
+                      execution (if (types/execution-var? execution)
+                                  (if (= execution (get counterpart path))
+                                    :unknown
+                                    (if (= actual? positive?) #{} types/execution-profiles))
+                                  execution)
+                      args (into {} (map (fn [[k _] v] [k v])
+                                         (sort-by key (types/fn-args t)) (rest views)))]
+                  (types/make-fn-type args (first views) :any execution))
+                (types/list-type? t) [:list (first views)]
+                (types/map-type? t) (into [:map] views)
+                (types/tuple-type? t) (into [:tuple] views)
+                (types/record-type? t)
+                (into {} (keep (fn [[[[_ k] v] projected]]
+                                 (when (types/type-any? types/fn-type? v) [k projected])))
+                      (map vector children views))
+                (types/union-type? t) (types/make-union views)
+                (or (types/refine-type? t) (types/marker-type? t)) (first views)
+                :else token)))]
+    (view t [] true)))
 
 
 (defn return-compatible?
-  "A return annotation may narrow values, but cannot assert execution proof.
-   Judge only execution contracts through the existing subtype variance rules;
-   value/refinement assertions and the older gradual policy remain separate."
+  "Value narrowing cannot invent concrete support or unbounded execution E.
+   Correlated scoped variables retain their relationship; fresh generic claims
+   must be safe for every profile assignment, including negative positions."
   [actual declared]
   (if-not declared
     true
     (let [actual (types/resolve-alias actual)
           declared (types/resolve-alias declared)
-          concrete? #(types/type-any? (fn [t]
-                                        (and (types/fn-type? t)
-                                             (set? (types/fn-execution t))
-                                             (seq (types/fn-execution t)))) %)]
-      (or (not (or (concrete? actual) (concrete? declared)))
+          informative? (fn [t]
+                         (types/type-any? #(and (types/fn-type? %)
+                                                (not= :unknown (types/fn-execution %))) t))]
+      (or (= actual declared)
+          (not (or (informative? actual) (informative? declared)))
           (let [token (keyword "graphden.types.check.execution" (str (gensym "value-")))]
-            (types/subtype? (execution-view actual token) (execution-view declared token)))))))
+            (types/subtype? (execution-view actual (executions-by-position declared) token true)
+                            (execution-view declared (executions-by-position actual) token false)))))))

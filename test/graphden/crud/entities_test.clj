@@ -1717,3 +1717,21 @@
           ;; Presence of the canonical row proves the foreign row was not reused.
           (is (= (not reuse?) (some? (sp/read-entity storage :fn expected-id))))))
       (finally (sp/close storage)))))
+
+
+(deftest anonymous-contract-reuse-prefers-exact-public-org-over-legacy-nil
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [callback [:fn {:public-preference :text} :int #{} #{:browser-main}]
+            proposal [:list callback]
+            root (first (record-types/inline-fn-type-rows-from-form proposal))
+            legacy (assoc (dissoc root :kind) :id (random-uuid) :org-id nil)
+            exact (assoc (dissoc root :kind) :id (random-uuid) :org-id "public")
+            _ (sp/create-entity storage :fn legacy)
+            _ (sp/create-entity storage :fn exact)
+            [bid] (make-binding-on-fn-typed-slot! storage "prefer-public" [:list [:fn {:public-preference :text} :int #{} :unknown]])
+            response (entities/tighten-fn-type-impl! storage bid {:type proposal})]
+        (is (= 200 (:status response)))
+        (is (= (:id exact) (get-in response [:result :type-override-fn-id])))
+        (is (= proposal (:constraint (sp/read-entity storage :fn (:id legacy))))))
+      (finally (sp/close storage)))))

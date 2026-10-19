@@ -33,7 +33,8 @@
                                           (tenancy/platform-tier? (:org-id %))
                                           (= (tenancy/current-org) (:org-id %))))
                                (map (juxt :anonymous-hash identity)))
-                      (sp/query-entities storage :fn {:anonymous-hash (mapv :anonymous-hash rows)}))
+                      (sort-by #(= (tenancy/current-org) (:org-id %))
+                               (sp/query-entities storage :fn {:anonymous-hash (mapv :anonymous-hash rows)})))
         ;; Historical anonymous rows may have noncanonical IDs. Reuse them
         ;; at every nesting level, not just the outer override identity.
         rows (mapv #(assoc % :id (or (get-in by-hash [(:anonymous-hash %) :id]) (:id %))) rows)

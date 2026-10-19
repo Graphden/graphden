@@ -28,6 +28,7 @@
     [graphden.executor.test-setup :as setup]
     [graphden.packages.records.types :as record-types]
     [graphden.storage.protocol.core :as sp]
+    [graphden.tenancy.context :as tenancy]
     [graphden.types.diagnostics :as diag]
     [graphden.versioning.storage.core :as vs]))
 
@@ -1688,4 +1689,31 @@
             (is (= [(:id historical)] (mapv :id matches)))
             (is (= callback (:constraint (sp/read-entity storage :fn (:id historical)))))
             (is (nil? (sp/read-entity storage :fn (:id canonical)))))))
+      (finally (sp/close storage)))))
+
+
+(deftest nested-anonymous-reuse-keeps-tenant-and-platform-identities-separate
+  (let [storage (setup/create-test-storage)]
+    (try
+      (doseq [[suffix row-org current-org reuse?]
+              [["explicit-public" "public" "public" true]
+               ["same-tenant" "tenant-a" "tenant-a" true]
+               ["foreign-tenant" "tenant-b" "tenant-a" false]]]
+        (let [callback [:fn {(keyword suffix) :text} :int #{} #{:browser-main}]
+              canonical (first (record-types/inline-fn-type-rows-from-form callback))
+              expected-id (binding [tenancy/*current-org* current-org]
+                            (:id (first (record-types/inline-fn-type-rows-from-form callback))))
+              historical (assoc (dissoc canonical :kind) :id (random-uuid) :org-id row-org)
+              _ (sp/create-entity storage :fn historical)
+              wrap #(vector :map :keyword %)
+              [bid] (make-binding-on-fn-typed-slot!
+                      storage suffix (wrap [:fn {(keyword suffix) :text} :int #{} :unknown]))
+              response (binding [tenancy/*current-org* current-org]
+                         (entities/tighten-fn-type-impl! storage bid {:type (wrap callback)}))]
+          (is (= 200 (:status response)))
+          (is (= callback (:constraint (sp/read-entity storage :fn (:id historical)))))
+          ;; Raw core storage does not inject tenant ownership; with the
+          ;; real decorator a newly created row receives current-org.
+          ;; Presence of the canonical row proves the foreign row was not reused.
+          (is (= (not reuse?) (some? (sp/read-entity storage :fn expected-id))))))
       (finally (sp/close storage)))))

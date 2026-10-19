@@ -29,7 +29,9 @@
   (let [rows (vec (distinct (record-types/inline-fn-type-rows-from-form new-c)))
         root (or (first (filter #(= new-c (:constraint %)) rows))
                  (throw (ex-info "Unsupported callable constraint row" {:type :types/unsupported-constraint-row})))
-        by-hash (into {} (comp (filter #(= (tenancy/current-org) (:org-id %)))
+        by-hash (into {} (comp (filter #(if (tenancy/current-platform-tier?)
+                                          (tenancy/platform-tier? (:org-id %))
+                                          (= (tenancy/current-org) (:org-id %))))
                                (map (juxt :anonymous-hash identity)))
                       (sp/query-entities storage :fn {:anonymous-hash (mapv :anonymous-hash rows)}))
         ;; Historical anonymous rows may have noncanonical IDs. Reuse them

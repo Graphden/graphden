@@ -355,3 +355,27 @@
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"strips a hide-result marker"
           (check-entry! {:name :hidden-loss :parent :claim-root
                          :args {:input {:ref :secret-producer :type declared}}})))))
+
+
+(deftest backward-return-refinement-does-not-narrow-a-free-scalar-ingress-pin
+  (types/register-type-alias! :validated-text [:refine :text [:matches "^ok$"]])
+  (registry/record-rich-types-raw! :narrower-template {:args {:value 'a} :return 'a})
+  (doseq [pin [{:type :text} {:as :value :type :text} {:as :input :type :text}]]
+    (let [entry (check-entry! {:name :narrower :parent :narrower-template
+                               :args {:value pin} :return-type :validated-text})]
+      (is (= :text (get-in entry [:args (or (:as pin) :value)])))
+      (is (= (types/resolve-alias :validated-text) (:return entry)))))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Type-check failed"
+        (check-entry! {:name :wrong-free-input :parent :narrower-template
+                       :args {:value {:type :int}} :return-type :validated-text})))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Refinement constraint failed"
+        (check-entry! {:name :wrong-literal-input :parent :narrower-template
+                       :args {:value {:value "bad" :type :text}} :return-type :validated-text})))
+  (registry/record-rich-types-raw! :concrete-input {:args {:value :int} :return :int})
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Type-check failed"
+        (check-entry! {:name :wrong-concrete-input :parent :concrete-input :args {:value {:type :text}}})))
+  (let [required (callback #{:browser-main})]
+    (doseq [execution [:unknown #{} #{:jvm-server}]]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Type-check failed"
+            (check-entry! {:name :wrong-callable-input :parent :narrower-template
+                           :return-type required :args {:value {:type (callback execution)}}}))))))

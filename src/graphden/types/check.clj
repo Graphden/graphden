@@ -1563,6 +1563,20 @@
                    subst)) init-subst groups)))
 
 
+(defn- backward-refinement-input-pin?
+  "A free scalar input may retain a refinement's wider base representation.
+   The declared return is an authored runtime narrowing, not an ingress value.
+   Concrete inputs and callable/execution/marker contracts still check normally."
+  [expected override subst binding]
+  (let [resolved (types/resolve-alias (types/resolve subst expected))]
+    (and (metadata-only-binding? binding)
+         (types/type-var? expected)
+         (types/refine-type? resolved)
+         (types/primitive? override)
+         (not (contains? #{:any :jsonb :sequence :fn :fn-ref :input-stream :never} override))
+         (types/subtype? resolved override))))
+
+
 (defn- type-pin-subst
   "Author pins constrain this call's shared variables before value checking.
    A free/renamed input is still a contract: its nested callable, map and
@@ -1572,8 +1586,10 @@
     (fn [s arg-name b-form]
       (if-let [override (and (map? b-form) (:type b-form))]
         (if-let [expected (get parent-args arg-name)]
-          (check-binding! primary-parent arg-name expected
-                          (types/resolve-alias override) s (:name fn-def) b-form)
+          (let [override (types/resolve-alias override)]
+            (if (backward-refinement-input-pin? expected override s b-form)
+              s
+              (check-binding! primary-parent arg-name expected override s (:name fn-def) b-form)))
           s)
         s))
     subst (:args fn-def)))

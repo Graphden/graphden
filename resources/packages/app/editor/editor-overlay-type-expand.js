@@ -63,7 +63,7 @@ let inlinePositionListenersInstalled = false;
 
 // Effect categories — drive the effect-tightening rows in the
 // inline-expand panel.
-const EFFECT_CATEGORIES = ['db', 'env', 'io', 'network', 'time', 'random'];
+const EFFECT_CATEGORIES = ['cross-org', 'db', 'env', 'io', 'network', 'process', 'random', 'raw-sql', 'state', 'time'];
 
 // Render a structural type as the SAME wire-shape `/api/types/
 // compatible` accepts — keyword names stripped of leading `:`,
@@ -344,9 +344,7 @@ function makeEffectsReadOnly(currentEff) {
 
 
 function makeEffectsRow(currentEff) {
-  const cats = (typeof EFFECT_CATEGORIES !== 'undefined')
-               ? EFFECT_CATEGORIES
-               : ['db', 'env', 'io', 'network', 'time', 'random'];
+  const cats = [...new Set([...EFFECT_CATEGORIES, ...(currentEff || [])])];
   const wrap = document.createElement('div');
   wrap.className = 'type-explainer-tighten-row';
   const checkboxes = {};
@@ -368,12 +366,71 @@ function makeEffectsRow(currentEff) {
   return { el: wrap, checkboxes };
 }
 
+// Native authoring controls edit the type AST. Every submitted proposal is
+// checked by the server and becomes a binding-local immutable contract.
+function makeExecutionRow(current) {
+  const raw = current ?? 'unknown';
+  const finite = Array.isArray(raw) && raw[0] !== 'execution-var' ? raw : null;
+  const choices = [
+    ['unknown', 'Any runtime (no proof required)', 'unknown'],
+    ['browser', 'Browser', ['browser-main']],
+    ['jvm', 'JVM', ['jvm-server']],
+    ['both', 'Browser + JVM', ['browser-main', 'jvm-server']],
+  ];
+  const equal = value => Array.isArray(value) && finite
+    ? setsEqual(new Set(value), new Set(finite)) : value === raw;
+  const initial = choices.find(choice => equal(choice[2]))?.[0] ?? 'current';
+  const wrap = document.createElement('label');
+  wrap.className = 'type-explainer-tighten-row';
+  const title = document.createElement('span');
+  title.textContent = 'Execution';
+  wrap.appendChild(title);
+  const select = document.createElement('select');
+  select.className = 'arg-value-edit-input type-execution-select';
+  select.setAttribute('aria-label', 'Execution profile');
+  if (initial === 'current') choices.unshift(['current', formatExecutionConstraint(raw), raw]);
+  for (const [key, label, value] of choices) {
+    const option = document.createElement('option');
+    option.value = key; option.textContent = label; option.selected = key === initial;
+    if (finite && Array.isArray(value) && key !== initial) {
+      option.disabled = finite.some(profile => !value.includes(profile));
+    } else if (finite && key === 'unknown') option.disabled = true;
+    select.appendChild(option);
+  }
+  select.value = initial;
+  select.addEventListener('click', e => e.stopPropagation());
+  wrap.appendChild(select);
+  return {el: wrap, select, changed: () => select.value !== initial,
+    value: () => choices.find(choice => choice[0] === select.value)?.[2] ?? raw};
+}
+
+function makeExecutionReadOnly(raw) {
+  const wrap = document.createElement('div');
+  wrap.className = 'type-inline-effects-readonly';
+  window.gdMountTypeStructureBody(wrap, wrap, 'effects', {label: 'Execution: ' + formatExecutionConstraint(raw)});
+  return wrap;
+}
+
+function replaceContractType(root, path, replacement) {
+  if (!path.length) return replacement;
+  const current = resolveOneHop(root);
+  const key = path[0];
+  if (!current || typeof current !== 'object' || !Object.hasOwn(current, key)) {
+    throw new Error('Type contract changed; reload the graph before editing');
+  }
+  const copy = Array.isArray(current) ? current.slice() : {...current};
+  copy[key] = replaceContractType(current[key], path.slice(1), replacement);
+  return copy;
+}
+
+function selectedContractType(value) {
+  return (value.startsWith('[') || value.startsWith('{')) ? JSON.parse(value) : value;
+}
+
 function makeTightenButton(opts) {
   const { argSelects, retSelect, curRet, checkboxes, currentEff,
-          bindingId, errEl } = opts;
-  const cats = (typeof EFFECT_CATEGORIES !== 'undefined')
-               ? EFFECT_CATEGORIES
-               : ['db', 'env', 'io', 'network', 'time', 'random'];
+          bindingId, errEl, currentType, rootType, typePath, execution } = opts;
+  const cats = Object.keys(checkboxes);
 
   // Build the body delta from current control state. Used both by
   // the submit handler and by the change-detector that gates the
@@ -381,11 +438,11 @@ function makeTightenButton(opts) {
   // "no changes" so the button only enables when the submit would
   // actually send something.
   const buildBody = () => {
-    const argDelta = {};
+    const argDelta = Object.create(null);
     let argsChanged = false;
     for (const [name, { sel, current }] of Object.entries(argSelects || {})) {
       if (sel.value && sel.value !== compactTypeAsValue(current)) {
-        argDelta[name] = sel.value;
+        argDelta[name] = selectedContractType(sel.value);
         argsChanged = true;
       }
     }
@@ -393,17 +450,19 @@ function makeTightenButton(opts) {
     if (argsChanged) body.args = argDelta;
     if (retSelect?.value
         && retSelect.value !== compactTypeAsValue(curRet)) {
-      body.ret = retSelect.value;
+      body.ret = selectedContractType(retSelect.value);
     }
     const effects = cats.filter(c => checkboxes[c].checked);
-    // Send `effects` when: any checkbox is checked, OR the slot
-    // already has an effect constraint AND it now differs from
-    // what's checked (so user CAN clear back to "none allowed").
-    if (effects.length > 0
-        || (currentEff && !setsEqual(currentEff, new Set(effects)))) {
+    // Preserve every existing category and submit only actual changes.
+    if (currentEff ? !setsEqual(currentEff, new Set(effects)) : effects.length > 0) {
       body.effects = effects;
     }
-    return body;
+    if (execution.changed()) body.execution = execution.value();
+    if (!Object.keys(body).length) return {};
+    const updated = ['fn', Object.assign(Object.create(null), currentType[1] || {}, body.args || {}),
+      body.ret ?? currentType[2], body.effects ?? currentType[3] ?? 'any',
+      body.execution ?? currentType[4] ?? 'unknown'];
+    return {type: replaceContractType(rootType, typePath, updated)};
   };
 
   const btn = document.createElement('button');
@@ -411,7 +470,7 @@ function makeTightenButton(opts) {
   btn.className = 'type-explainer-btn';
   btn.textContent = 'Tighten';
   btn.disabled = true;
-  btn.title = 'Pick a narrower type or change an effect to enable';
+  btn.title = 'Change a type, effect or execution requirement to enable';
 
   // Refresh disabled state from current control values. Wired
   // below as a `change` listener on each select + checkbox so the
@@ -424,6 +483,7 @@ function makeTightenButton(opts) {
     sel.addEventListener('change', refreshDisabled);
   }
   if (retSelect) retSelect.addEventListener('change', refreshDisabled);
+  execution.select.addEventListener('change', refreshDisabled);
   for (const cb of Object.values(checkboxes || {})) {
     cb.addEventListener('change', refreshDisabled);
   }

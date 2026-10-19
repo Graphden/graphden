@@ -24,6 +24,13 @@ function constraintHuman(constraint) {
 // Render a structural type as a compact human-readable string —
 // `[refine, int, [>, 0]]` becomes `:int (> 0)`, `[fn, {…}, b]`
 // becomes `(args) → b`, etc. Keeps the popover hint readable.
+function formatExecutionConstraint(raw) {
+  if (Array.isArray(raw) && raw[0] === 'execution-var') return 'inferred ' + raw[1];
+  if (!Array.isArray(raw)) return 'execution unknown';
+  if (!raw.length) return 'no proven runtime';
+  return raw.map(p => p === 'browser-main' ? 'Browser' : p === 'jvm-server' ? 'JVM' : String(p)).sort().join(' + ');
+}
+
 function formatTypeHint(t) {
   if (t == null) return '';
   if (typeof t === 'string') return t;
@@ -53,7 +60,7 @@ function formatTypeHint(t) {
           effSuffix = eff.length === 0 ? ' pure' : ' eff:' + eff.join(',');
         }
       }
-      return '(' + args + ') → ' + ret + effSuffix;
+      return '(' + args + ') → ' + ret + effSuffix + ' [' + formatExecutionConstraint(t[4]) + ']';
     }
     // Marker head ([:secret T], …) — wraps an inner type; render as
     // `secret text` instead of falling through to raw JSON.

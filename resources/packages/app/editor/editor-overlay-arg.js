@@ -570,6 +570,15 @@ function typeChipPresentation(arg) {
     secondary, secondaryKind, secondaryTitle};
 }
 
+// Diagnostics belong to the owning row identity, including consumed bindings.
+function bindingTypeHints(arg) {
+  const owner = lookups?.fnMap?.get(arg?.['fn-id']);
+  const slot = lookups?.slotMap?.get(arg?.['slot-id']);
+  const name = slot?.name;
+  if (!owner || !name) return [];
+  return (richTypeEntryOf(owner)?.['type-hints'] || []).filter(hint => hint['arg-name'] === name);
+}
+
 function createTypeChip(arg, options) {
   if (!options?.owner) throw new Error('A type chip needs its native overlay owner');
   const readOnly = !!(options?.readOnly)
@@ -615,6 +624,12 @@ function createTypeChip(arg, options) {
   // createTypeChip avoids two competing handlers on the same chip.
   chip.title = 'Type: ' + hint
              + (readOnly ? '' : ' — tap to expand or change');
+  const hints = bindingTypeHints(arg);
+  if (hints.length) {
+    const diagnostic = hints.map(h => ([h['arg-name'], ...(h.path || [])].join('.') + ': ' + h.message)).join('\n');
+    chip.title += '\n' + diagnostic;
+    chip.setAttribute('aria-description', diagnostic);
+  }
   chip.setAttribute('aria-label', chip.title);
   return chip;
 }

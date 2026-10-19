@@ -53,7 +53,7 @@ function isTypeExpandable(rich) {
 // Render one mini-chip wrapped in a row that may carry a left
 // affordance (field-name / tag) plus a recursive child slot. Returns
 // the row element.
-function buildInlineTypeRow(label, rich, path, parentAncestors) {
+function buildInlineTypeRow(label, rich, path, parentAncestors, editContext) {
   const row = document.createElement('div');
   row.className = 'type-inline-row';
 
@@ -115,9 +115,8 @@ function buildInlineTypeRow(label, rich, path, parentAncestors) {
     const childAncestors = richName
       ? new Set([...ancestors, richName])
       : ancestors;
-    const childCtx = richName
-      ? { typeName: richName, ancestorTypes: childAncestors }
-      : { ancestorTypes: childAncestors };
+    const childCtx = {...(editContext || {}), ancestorTypes: childAncestors};
+    if (richName) childCtx.typeName = richName;
     chip.addEventListener('click', (e) => {
       e.stopPropagation();
       const willOpen = !expandedTypePaths.has(path);
@@ -401,6 +400,15 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
     window.gdMountTypeStructureBody(host, descEl, 'description', {label: description});
     host.appendChild(descEl);
   }
+  if (c.arg && typeof bindingTypeHints === 'function') {
+    for (const hint of bindingTypeHints(c.arg)) {
+      const diagnostic = document.createElement('div');
+      diagnostic.className = 'type-inline-description type-binding-hint';
+      const label = [hint['arg-name'], ...(hint.path || [])].join('.') + ': ' + hint.message;
+      window.gdMountTypeStructureBody(host, diagnostic, 'description', {label});
+      host.appendChild(diagnostic);
+    }
+  }
   // Promote-anonymous affordance — when the expansion is on an
   // anonymous structural type-row (no name), offer a "Name this
   // type…" action. Backed by PUT /api/entities/fn/:id with the new
@@ -417,6 +425,8 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
   }
   if (!isTypeExpandable(rich)) return;
   const effective = resolveOneHop(rich);
+  const childEdit = parts => ({editable: c.editable, bindingId: c.bindingId,
+    rootType: c.rootType ?? effective, typePath: [...(c.typePath || []), ...parts]});
 
   if (Array.isArray(effective)) {
     const head = effective[0];
@@ -437,7 +447,7 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
       // The structural one-hop rows STAY — they're the click-to-drill
       // surface (rename / tighten / promote-anonymous) and the
       // breadcrumb is read-only. Two views, same data.
-      host.appendChild(buildInlineTypeRow('base', effective[1], path + '/base', c.ancestorTypes));
+      host.appendChild(buildInlineTypeRow('base', effective[1], path + '/base', c.ancestorTypes, childEdit([1])));
       const consRow = document.createElement('div');
       consRow.className = 'type-inline-row type-inline-constraint';
       const lab = document.createElement('span');
@@ -452,41 +462,43 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
       return;
     }
     if (head === 'list') {
-      host.appendChild(buildInlineTypeRow('element', effective[1], path + '/element', c.ancestorTypes));
+      host.appendChild(buildInlineTypeRow('element', effective[1], path + '/element', c.ancestorTypes, childEdit([1])));
       return;
     }
     if (head === 'map') {
-      host.appendChild(buildInlineTypeRow('key', effective[1], path + '/key', c.ancestorTypes));
-      host.appendChild(buildInlineTypeRow('value', effective[2], path + '/value', c.ancestorTypes));
+      host.appendChild(buildInlineTypeRow('key', effective[1], path + '/key', c.ancestorTypes, childEdit([1])));
+      host.appendChild(buildInlineTypeRow('value', effective[2], path + '/value', c.ancestorTypes, childEdit([2])));
       return;
     }
     if (head === 'tuple') {
       effective.slice(1).forEach((el, idx) => {
-        host.appendChild(buildInlineTypeRow('#' + idx, el, path + '/t' + idx, c.ancestorTypes));
+        host.appendChild(buildInlineTypeRow('#' + idx, el, path + '/t' + idx, c.ancestorTypes, childEdit([idx + 1])));
       });
       return;
     }
     if (head === 'union') {
       effective.slice(1).forEach((branch, idx) => {
-        host.appendChild(buildInlineTypeRow('', branch, path + '/u' + idx, c.ancestorTypes));
+        host.appendChild(buildInlineTypeRow('', branch, path + '/u' + idx, c.ancestorTypes, childEdit([idx + 1])));
       });
       return;
     }
     if (head === 'fn') {
       const argMap = effective[1] || {};
+      const rootType = resolveOneHop(c.rootType ?? effective);
       const tighten = !!(c.editable && c.bindingId
+                          && Array.isArray(rootType) && ['fn', 'list', 'map'].includes(rootType[0])
                           && typeof populateNarrowerOptions === 'function');
       const renameable = !!(c.editable && c.anonymousFnId);
       const argSelects = {};
       let retSelect = null;
-      // Effects slot — 4th element. Post-T4 canonical form is always
-      // 4-elem with either `:any` (string 'any', no constraint) or a
+      // Effects slot — 4th element in legacy and canonical5 forms,
+      // with either `:any` (string 'any', no constraint) or a
       // concrete set/array.
-      const effRaw = (effective.length === 4) ? effective[3] : null;
+      const effRaw = (effective.length >= 4) ? effective[3] : null;
       const effIsAny = effRaw == null || effRaw === 'any' || effRaw === ':any';
       const currentEff = (!effIsAny && Array.isArray(effRaw))
         ? new Set(effRaw.map(e => typeof e === 'string' ? e.replace(/^:/, '') : String(e)))
-        : (!effIsAny && effective.length === 4)
+        : (!effIsAny && effective.length >= 4)
           ? new Set([])
           : null;
 
@@ -496,7 +508,7 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
       // right beside it. No separate Tighten section listing the
       // same arg-names again.
       Object.entries(argMap).forEach(([k, v]) => {
-        const row = buildInlineTypeRow(k, v, path + '/a/' + k, c.ancestorTypes);
+        const row = buildInlineTypeRow(k, v, path + '/a/' + k, c.ancestorTypes, childEdit([1, k]));
         if (renameable) {
           // The arg-name label becomes click-to-rename — backed by an
           // in-place PUT on the anonymous fn-row's constraint (the
@@ -529,7 +541,7 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
       // `→` instead of the word "returns" — the arrow is already the
       // canonical return marker in the compact chip form
       // (`(request)→ring-res…`) and in standard fn-type notation.
-      const retRow = buildInlineTypeRow('→', effective[2], path + '/ret', c.ancestorTypes);
+      const retRow = buildInlineTypeRow('→', effective[2], path + '/ret', c.ancestorTypes, childEdit([2]));
       if (tighten) {
         retSelect = makeInlineNarrowerSelect(effective[2], 'Narrower return type');
         retRow.insertBefore(retSelect, retRow.querySelector('.type-inline-child'));
@@ -537,8 +549,15 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
       host.appendChild(retRow);
 
       if (tighten) {
+        const execution = makeExecutionRow(effective[4]);
+        host.appendChild(execution.el);
         const effects = makeEffectsRow(currentEff);
-        host.appendChild(effects.el);
+        const additional = document.createElement('details');
+        const summary = document.createElement('summary');
+        summary.textContent = 'Additional constraints';
+        additional.appendChild(summary);
+        additional.appendChild(effects.el);
+        host.appendChild(additional);
         const errEl = document.createElement('div');
         errEl.className = 'type-explainer-tighten-err';
         errEl.style.display = 'none';
@@ -546,6 +565,7 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
         actionHost.appendChild(errEl);
         const btn = makeTightenButton({
           argSelects,
+          currentType: effective, rootType, typePath: c.typePath || [], execution,
           retSelect,
           curRet: effective[2],
           checkboxes: effects.checkboxes,
@@ -554,20 +574,19 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
           errEl,
         });
         actionHost.appendChild(btn);
-      } else if (currentEff != null) {
-        // Read-only callers: always show the slot's effect contract
-        // so a reader knows whether the bound callable must be pure
-        // (#{}) or limited to specific categories — without opening
-        // edit mode. Skipped only when the 4th element is `:any`
-        // (no constraint, the default).
-        host.appendChild(makeEffectsReadOnly(currentEff));
+      } else {
+        host.appendChild(makeExecutionReadOnly(effective[4]));
+        if (currentEff != null) {
+          // Read-only callers see the same effects/execution contract.
+          host.appendChild(makeEffectsReadOnly(currentEff));
+        }
       }
       return;
     }
   }
   if (typeof effective === 'object' && effective !== null) {
     Object.entries(effective).forEach(([k, v]) => {
-      host.appendChild(buildInlineTypeRow(k, v, path + '/f/' + k, c.ancestorTypes));
+      host.appendChild(buildInlineTypeRow(k, v, path + '/f/' + k, c.ancestorTypes, childEdit([k])));
     });
   }
 }

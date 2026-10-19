@@ -1668,3 +1668,24 @@
           (is (= 400 (:status (entities/tighten-fn-type-impl! storage bid delta))))
           (is (= before (sp/read-entity storage :binding bid)))))
       (finally (sp/close storage)))))
+
+
+(deftest nested-callable-tightening-reuses-historical-anonymous-identities
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [callback [:fn {:item :text} :int #{:io} #{:browser-main}]
+            canonical (first (record-types/inline-fn-type-rows-from-form callback))
+            historical (assoc (dissoc canonical :kind) :id (random-uuid))
+            _ (sp/create-entity storage :fn historical)]
+        (doseq [[suffix wrap] [["historical-map" #(vector :map :keyword %)]
+                               ["historical-list" #(vector :list %)]]]
+          (let [[bid] (make-binding-on-fn-typed-slot!
+                        storage suffix (wrap [:fn {:item :text} :int #{:io} :unknown]))
+                response (entities/tighten-fn-type-impl! storage bid {:type (wrap callback)})
+                matches (sp/query-entities storage :fn {:anonymous-hash (:anonymous-hash historical)})]
+            (is (= 200 (:status response)))
+            (is (= (wrap callback) (get-in response [:result :constraint])))
+            (is (= [(:id historical)] (mapv :id matches)))
+            (is (= callback (:constraint (sp/read-entity storage :fn (:id historical)))))
+            (is (nil? (sp/read-entity storage :fn (:id canonical)))))))
+      (finally (sp/close storage)))))

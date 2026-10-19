@@ -29,10 +29,13 @@
   (let [rows (vec (distinct (record-types/inline-fn-type-rows-from-form new-c)))
         root (or (first (filter #(= new-c (:constraint %)) rows))
                  (throw (ex-info "Unsupported callable constraint row" {:type :types/unsupported-constraint-row})))
-        root-id (or (some->> (sp/query-entities storage :fn {:anonymous-hash (:anonymous-hash root)})
-                             (filter #(= (tenancy/current-org) (:org-id %))) first :id)
-                    (:id root))
-        rows (mapv #(cond-> % (= (:id root) (:id %)) (assoc :id root-id)) rows)
+        by-hash (into {} (comp (filter #(= (tenancy/current-org) (:org-id %)))
+                               (map (juxt :anonymous-hash identity)))
+                      (sp/query-entities storage :fn {:anonymous-hash (mapv :anonymous-hash rows)}))
+        ;; Historical anonymous rows may have noncanonical IDs. Reuse them
+        ;; at every nesting level, not just the outer override identity.
+        rows (mapv #(assoc % :id (or (get-in by-hash [(:anonymous-hash %) :id]) (:id %))) rows)
+        root-id (or (get-in by-hash [(:anonymous-hash root) :id]) (:id root))
         existing (into #{} (map :id) (sp/query-entities storage :fn {:id (mapv :id rows)}))
         missing (filterv #(not (contains? existing (:id %))) rows)]
     (doseq [row missing] (sp/create-entity storage :fn (dissoc row :kind)))

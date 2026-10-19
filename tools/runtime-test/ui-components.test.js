@@ -14,12 +14,12 @@ function fixture() {
   const events = new Map();
   const calls = [];
   const timers = new Map();
-  let timerId = 0;
+  let timerId = 0, clock = 0, currentBranch = 'main';
   const window = {
     gdPrefsReady: true, gdPrefOwner: 'owner-a', API: {api_ui_configuration_plan: '/api/ui/configuration/plan'},
     gdPrefRead: () => null,
     gdPrefOnChange(callback) { window.changed = callback; },
-    authFetch: (route, options) => new Promise(resolve => requests.push({route, options, resolve})),
+    authFetch: (route, options) => new Promise((resolve, reject) => requests.push({route, options, resolve, reject})),
     addEventListener: (name, callback) => events.set(name, callback), dispatchEvent() {},
     GraphdenBrowser: {createRuntime(value) { return {run(entry, args) {
       const fields = value.inputs[value.entries[entry]];
@@ -27,16 +27,20 @@ function fixture() {
       calls.push({entry, args}); return args;
     }}; }},
   };
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../resources/packages/app/editor/editor-ui-policy.js'), 'utf8') + '\n' + source, {window, document: {addEventListener() {}}, graphdenCurrentOrg: 'org-a',
-    Event, DOMException,
+  const globals = {window, document: {addEventListener() {}}, graphdenCurrentOrg: 'org-a',
+    getCurrentBranchName: () => currentBranch, performance: {now: () => clock}, Event, DOMException,
     setTimeout(callback, delay) { const id = ++timerId; timers.set(id, {callback, delay}); return id; },
-    clearTimeout(id) { timers.delete(id); }});
+    clearTimeout(id) { timers.delete(id); }};
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../resources/packages/app/editor/editor-ui-policy.js'), 'utf8') + '\n' + source, globals);
   return {window, requests, events, calls, timers,
+    elapse(ms) { clock += ms; },
+    scope({org, branch: name}) { if (org) globals.graphdenCurrentOrg = org; if (name) currentBranch = name; },
     async advance() {
       assert.equal(timers.size, 1, 'only one bounded retry wait is queued');
       const [id, timer] = timers.entries().next().value;
       assert.equal(timer.delay, 1000);
       timers.delete(id);
+      clock += timer.delay;
       timer.callback();
       await new Promise(resolve => setImmediate(resolve));
     }, choose: () => { window.gdRefreshUIConfiguration();
@@ -90,28 +94,98 @@ function fixture() {
     assert.equal(f.window.gdUIComponentRuntimeIdentity('account-menu'), first);
     assert.equal(f.timers.size, 0);
   }
+  for (const capture of [false, true]) {
+    const f = fixture();
+    const controller = new AbortController();
+    const loading = capture ? f.window.gdCaptureUIConfiguration(controller.signal)
+      : f.window.gdLoadUIComponentRuntime('fn-picker', plan, {}, controller.signal);
+    for (let attempt = 0; attempt < 4; attempt++) {
+      f.finish(f.requests[attempt], waiting, false);
+      await settle();
+      await f.advance();
+    }
+    f.finish(f.requests[4], {ok: true, 'selection-id': first, plan});
+    await loading;
+    assert.equal(capture ? f.window.gdUIConfigurationState().selection['fn-id']
+      : f.window.gdUIComponentRuntimeIdentity('fn-picker'), first,
+      'one current load recovers when a write burst outlasts three attempts');
+    assert(f.requests.every(request => request.options.signal === controller.signal),
+      'all retries retain the same owned AbortSignal');
+  }
+  for (const capture of [false, true]) {
+    const f = fixture();
+    const loading = capture ? f.window.gdCaptureUIConfiguration()
+      : f.window.gdLoadUIComponentRuntime('fn-picker', plan);
+    const rejected = capture ? assert.rejects(loading, /unavailable/) : null;
+    f.elapse(29500);
+    f.finish(f.requests[0], waiting, false);
+    await settle();
+    await f.advance();
+    if (rejected) await rejected; else await loading;
+    assert.equal(f.requests.length, 1, 'crossing the retry deadline during the wait starts no request');
+    assert.equal(f.timers.size, 0);
+    assert.equal(f.window.gdUIComponentRuntimeIdentity('fn-picker'), null);
+    if (!capture) assert.match(f.window.gdUIComponentsStatus(), /Using built-in/);
+    assert.equal(f.window.gdUIConfigurationState(), null, 'expiry never installs a configuration');
+  }
   {
     const f = fixture();
     const loading = f.window.gdLoadUIComponentRuntime('fn-picker', plan);
-    for (let attempt = 0; attempt < 3; attempt++) {
-      f.finish(f.requests[attempt], waiting, false);
-      await settle();
-      if (attempt < 2) await f.advance();
-    }
+    f.elapse(31000);
+    f.finish(f.requests[0], {ok: true, 'selection-id': first, plan});
     await loading;
-    assert.equal(f.requests.length, 3, 'the complete load makes at most three attempts');
-    assert.equal(f.timers.size, 0);
-    assert.equal(f.window.gdUIComponentRuntimeIdentity('fn-picker'), null);
+    assert.equal(f.window.gdUIComponentRuntimeIdentity('fn-picker'), first,
+      'a current successful response remains valid after the retry admission window');
+  }
+  {
+    const f = fixture();
+    const loading = f.window.gdLoadUIComponentRuntime('fn-picker', plan);
+    f.elapse(30000);
+    f.finish(f.requests[0], waiting, false);
+    await loading;
+    assert.equal(f.requests.length, 1);
+    assert.equal(f.timers.size, 0, 'an already expired retry window schedules no wait');
     assert.match(f.window.gdUIComponentsStatus(), /Using built-in/);
   }
+  {
+    const f = fixture();
+    const loading = f.window.gdCaptureUIConfiguration();
+    const rejected = assert.rejects(loading, {name: 'AbortError'});
+    f.elapse(31000);
+    f.window.gdPrefOwner = 'owner-b';
+    f.finish(f.requests[0], {ok: true, 'selection-id': first, plan});
+    await rejected;
+    assert.equal(f.window.gdUIConfigurationState(), null, 'late capture never adopts an old owner');
+  }
   for (const [body, status] of [[{ok: false}, 422], [{...waiting, code: 'invalid-selection'}, 422],
-    [{...waiting, retryable: false}, 422], [waiting, 403], [waiting, 500]]) {
+    [{...waiting, retryable: false}, 422], [waiting, 401], [waiting, 403], [waiting, 500]]) {
     const f = fixture();
     const loading = f.window.gdLoadUIComponentRuntime('fn-picker', plan);
     f.finish(f.requests[0], body, false, status);
     await loading;
     assert.equal(f.requests.length, 1, 'permanent or unclassified refusals never retry');
     assert.equal(f.timers.size, 0);
+  }
+  for (const change of [{branch: 'other'}, {org: 'org-b'}]) {
+    const f = fixture();
+    const loading = f.window.gdLoadUIComponentRuntime('account-menu', plan);
+    const rejected = assert.rejects(loading, {name: 'AbortError'});
+    f.finish(f.requests[0], waiting, false);
+    await settle();
+    f.scope(change);
+    await f.advance();
+    await rejected;
+    assert.equal(f.requests.length, 1, 'branch/org change never starts a stale retry');
+  }
+  for (const malformed of [false, true]) {
+    const f = fixture();
+    const loading = f.window.gdLoadUIComponentRuntime('fn-picker', plan);
+    if (malformed) f.requests[0].resolve({json: async () => { throw new SyntaxError('invalid JSON'); }});
+    else f.requests[0].reject(new TypeError('network failure'));
+    await loading;
+    assert.equal(f.requests.length, 1, 'network or JSON failures are not policy retries');
+    assert.equal(f.timers.size, 0);
+    assert.match(f.window.gdUIComponentsStatus(), /Using built-in/);
   }
   {
     const f = fixture();

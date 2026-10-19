@@ -61,7 +61,10 @@
     }};
   }
   async function loadPlan(component, started, signal) {
-    for (let attempt = 0; attempt < 3; attempt++) {
+    // Retry admission is bounded per owned load. A successful current reply
+    // remains usable even if its in-flight request finishes after this window.
+    const retryDeadline = performance.now() + 30000;
+    while (true) {
       if (started !== stamp() || signal?.aborted) throw new DOMException('Selection changed', 'AbortError');
       const response = await window.authFetch(window.API.api_ui_configuration_plan, {
         method: 'POST', signal, cache: 'no-store',
@@ -70,10 +73,11 @@
       });
       const result = await response.json();
       if (started !== stamp() || signal?.aborted) throw new DOMException('Selection changed', 'AbortError');
-      if (attempt < 2 && response.status === 422 && !response.ok && result.ok === false
+      if (performance.now() < retryDeadline && response.status === 422 && !response.ok && result.ok === false
         && result.code === 'policy-refresh-required' && result.retryable === true) {
         await window.gdWaitForGraphPolicy(signal);
-        continue;
+        if (started !== stamp() || signal?.aborted) throw new DOMException('Selection changed', 'AbortError');
+        if (performance.now() < retryDeadline) continue;
       }
       return {response, result};
     }

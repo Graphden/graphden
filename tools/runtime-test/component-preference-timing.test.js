@@ -33,7 +33,7 @@ function fixture(initial = null) {
   };
   const context = vm.createContext({window, graphdenCurrentOrg: 'org-a', document: {addEventListener() {}},
     localStorage: {getItem: () => mirror, setItem: (_, value) => { mirror = value; }},
-    setTimeout, clearTimeout, Event, DOMException});
+    setTimeout, clearTimeout, performance, Event, DOMException});
   vm.runInContext(prefsSource, context);
   window.gdPrefsReady = true;
   window.gdPrefOwner = 'owner-a';

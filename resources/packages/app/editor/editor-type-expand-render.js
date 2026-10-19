@@ -488,7 +488,7 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
       const tighten = !!(c.editable && c.bindingId
                           && Array.isArray(rootType) && ['fn', 'list', 'map'].includes(rootType[0])
                           && typeof populateNarrowerOptions === 'function');
-      const renameable = !!(c.editable && c.anonymousFnId);
+      const renameable = tighten;
       const argSelects = {};
       let retSelect = null;
       // Effects slot — 4th element in legacy and canonical5 forms,
@@ -510,10 +510,8 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
       Object.entries(argMap).forEach(([k, v]) => {
         const row = buildInlineTypeRow(k, v, path + '/a/' + k, c.ancestorTypes, childEdit([1, k]));
         if (renameable) {
-          // The arg-name label becomes click-to-rename — backed by an
-          // in-place PUT on the anonymous fn-row's constraint (the
-          // shape changes but the fn-id stays, so every callsite
-          // keeps its `slot.type-fn-id` pointer intact).
+          // Renaming a callable parameter writes a binding-local contract.
+          // The server still checks positional/map calling-convention safety.
           const labelEl = row.querySelector('.type-inline-label');
           if (labelEl) {
             labelEl.classList.add('type-inline-label-renameable');
@@ -524,7 +522,7 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
             labelEl.title = 'Click to rename this arg';
             labelEl.addEventListener('click', (ev) => {
               ev.stopPropagation();
-              promptRenameFnTypeArg(c.anonymousFnId, effective, k);
+              promptRenameFnTypeArg(c.bindingId, effective, k, rootType, c.typePath || []);
             });
             labelEl.addEventListener('keydown', ev => {
               if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); labelEl.click(); }

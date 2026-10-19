@@ -53,6 +53,25 @@ const {createDocument} = require('./mini-dom');
   assert.equal(ctx.formatExecutionConstraint([]), 'no proven runtime');
   assert.equal(ctx.formatExecutionConstraint('unknown'), 'execution unknown');
   assert.equal(ctx.formatExecutionConstraint(['execution-var', 'E']), 'inferred E');
+  const alerts = [];
+  ctx.alert = text => alerts.push(text);
+  for (const execution of [['browser-main'], ['execution-var', 'E']]) {
+    const callable = ['fn', {value: 'int'}, 'text', ['io'], execution];
+    const shared = ['map', 'keyword', callable];
+    ctx.prompt = () => 'renamed';
+    await ctx.promptRenameFnTypeArg('rename-local', callable, 'value', shared, [2]);
+    const submission = submissions.at(-1);
+    assert.deepEqual(submission, {url: '/bindings/rename-local', body: {
+      type: ['map', 'keyword', ['fn', {renamed: 'int'}, 'text', ['io'], execution]],
+    }});
+    assert.deepEqual(shared, ['map', 'keyword', callable], 'rename leaves the shared contract unchanged');
+  }
+  ctx.prompt = () => 'taken';
+  const prior = submissions.length;
+  await ctx.promptRenameFnTypeArg('rename-local', ['fn', {value: 'int', taken: 'text'}, 'text', ['io'], ['browser-main']],
+    'value', callback, []);
+  assert.equal(submissions.length, prior, 'duplicate parameter name cannot overwrite another parameter');
+  assert.match(alerts[0], /already has that name/);
   for (const filename of ['editor-literal-types.js', 'editor-overlay-arg.js']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, '../../resources/packages/app/editor', filename), 'utf8'), ctx);
   }

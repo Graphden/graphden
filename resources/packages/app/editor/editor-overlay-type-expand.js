@@ -90,27 +90,30 @@ async function populateNarrowerOptions(select, currentType) {
   }
 }
 
-async function promptRenameFnTypeArg(fnId, currentFnType, oldArgName) {
+async function postBindingContract(bindingId, body) {
+  const fetchFn = (typeof authFetch === 'function') ? authFetch : fetch;
+  return fetchFn(API.api_bindings_binding_id_tighten_fn_effects(bindingId), {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+  });
+}
+
+async function promptRenameFnTypeArg(bindingId, currentFnType, oldArgName, rootType, typePath) {
   const newName = prompt('Rename `' + oldArgName + '` to:', oldArgName);
   if (!newName?.trim() || newName.trim() === oldArgName) return;
   const trimmed = newName.trim();
-  // Rebuild the constraint vector with the arg map's key renamed.
-  // currentFnType is the rich shape `["fn", {arg: type, …}, ret, eff?]`;
-  // serialise it back to the constraint wire format keywords expect.
   try {
-    const renamedArgs = {};
+    if (Object.hasOwn(currentFnType[1] || {}, trimmed)) throw new Error('An argument already has that name');
+    const renamedArgs = Object.create(null);
     for (const [k, v] of Object.entries(currentFnType[1] || {})) {
       renamedArgs[k === oldArgName ? trimmed : k] = v;
     }
-    // The on-disk constraint uses Clojure-side names — strings here
-    // (parse-fn-from-form keywordises on read). Keep the head as
-    // "fn" so the JSON re-parse hits the :fn branch.
-    const newConstraint = ['fn', renamedArgs, currentFnType[2]];
-    if (currentFnType.length === 4) newConstraint.push(currentFnType[3] || []);
-    const r = await authMutate('PUT',
-      API.api_entities_type_id('fn', fnId),
-      { constraint: JSON.stringify(newConstraint) });
-    if (!(r.status >= 200 && r.status < 300)) {
+    // Preserve the complete legacy/canonical tail, including execution vars.
+    // A rename is local to this binding; shared anonymous rows stay immutable.
+    const renamed = ['fn', renamedArgs, ...currentFnType.slice(2)];
+    const r = await postBindingContract(bindingId, {
+      type: replaceContractType(rootType, typePath, renamed),
+    });
+    if (!r.ok) {
       const text = await r.text().catch(() => '');
       throw new Error((text || '').slice(0, 200) || ('HTTP ' + r.status));
     }
@@ -498,12 +501,7 @@ function makeTightenButton(opts) {
     btn.disabled = true;
     errEl.style.display = 'none';
     try {
-      const fetchFn = (typeof authFetch === 'function') ? authFetch : fetch;
-      const resp = await fetchFn(
-        API.api_bindings_binding_id_tighten_fn_effects(bindingId),
-        { method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body) });
+      const resp = await postBindingContract(bindingId, body);
       if (!resp.ok) {
         const text = await resp.text();
         const m = text?.match(/<p class="error">([^<]+)<\/p>/);

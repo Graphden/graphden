@@ -118,6 +118,9 @@ const source = process.env.GRAPHDEN_CANVAS_SOURCE_ROOT || path.join(__dirname, '
         fixture.check(fixture.chip === fixture.identity && document.activeElement === fixture.chip, 'runtime swap retains focus');
         fixture.failTighten = true;
         fixture.openTop();
+      });
+      await page.getByText('Additional constraints', {exact: true}).click();
+      await page.evaluate(() => {
         const calls = fixture.formats;
         for (const zoom of [.75, 1.25, 1]) {
           fixture.zoom = zoom; repositionAllInlineHosts();
@@ -127,7 +130,10 @@ const source = process.env.GRAPHDEN_CANVAS_SOURCE_ROOT || path.join(__dirname, '
         }
         fixture.check(fixture.formats === calls, 'pan/zoom reanchors without formatting');
         const effectInputs = [...fixture.top.querySelectorAll('input[type="checkbox"]')];
-        fixture.check(effectInputs.length === 6, 'every native effect category remains available');
+        const expectedEffects = ['cross-org', 'db', 'env', 'io', 'network', 'process', 'random', 'raw-sql', 'state', 'time'];
+        fixture.check(JSON.stringify(effectInputs.map(input => input.value)) === JSON.stringify(expectedEffects)
+          && effectInputs.every(input => input.getAttribute('aria-label') === 'Allow effect ' + input.value),
+        'every canonical native effect category remains uniquely available with its accessible label');
         for (const input of effectInputs) {
           input.scrollIntoView({block: 'nearest'});
           const r = input.getBoundingClientRect();
@@ -166,7 +172,7 @@ const source = process.env.GRAPHDEN_CANVAS_SOURCE_ROOT || path.join(__dirname, '
       await page.evaluate(() => {
         const call = fixture.tightens.at(-1);
         fixture.check(call?.url === '/native-tighten/binding'
-          && JSON.stringify(call.body) === JSON.stringify({effects: ['db']})
+          && JSON.stringify(call.body) === JSON.stringify({type: ['fn', {request: 'text'}, 'text', ['db'], 'unknown']})
           && fixture.top.style.display === 'none', 'visible Tighten retains the original native request handler');
         fixture.openTop();
       });

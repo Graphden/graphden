@@ -117,3 +117,34 @@
   (registry/record-rich-types! :unproven
                                {:args {} :return-type :int :execution #{:jvm-server :browser-main}})
   (is (= :unknown (:execution (registry/rich-type-of :unproven)))))
+
+
+(deftest composed-callable-execution-is-derived-from-invoked-callbacks
+  (registry/record-rich-types! :map
+                               {:namespace "core.hof"
+                                :args {:func {:type (callable :unknown)} :coll {:type [:list :int]}}
+                                :return-type [:list :int] :impl (fn [_ _] [])})
+  (record-callback! :browser-stage-callback #{:browser-main})
+  (record-callback! :server-stage-callback #{:jvm-server})
+  (doseq [[name callback expected]
+          [[:browser-stage-map :browser-stage-callback #{:browser-main}]
+           [:server-stage-map :server-stage-callback #{:jvm-server}]]]
+    (check/check-fn-def! {:name name :parent :map
+                          :args {:func callback :coll [1]}})
+    (is (= expected (:execution (registry/rich-type-of name))))))
+
+
+(deftest ordinary-stage-dependencies-constrain-native-root-support
+  (registry/record-rich-types! :const
+                               {:namespace "core.logic" :args {:value {:type :text}}
+                                :return-type :text :impl (fn [_ _] "")})
+  (registry/record-rich-types-raw! :server-text
+                                   {:args {} :return :text :effects #{} :execution #{:jvm-server}})
+  (check/check-fn-def! {:name :constant-server-text :parent :const
+                        :args {:value :server-text}})
+  (is (= #{:jvm-server} (:execution (registry/rich-type-of :constant-server-text)))))
+
+
+(deftest synthesised-type-implementation-proves-native-host-support
+  (registry/record-rich-types! :record-probe {:type {:value :text}})
+  (is (= #{:jvm-server} (:execution (registry/rich-type-of :record-probe)))))

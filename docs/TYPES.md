@@ -924,6 +924,12 @@ Browser support comes from the identity-keyed trusted primitive capability
 registry, also used by the exporter for its ABI and callback-slot support.
 An authored execution field or a matching function name cannot add support;
 an implementation missing from the supported browser ABI remains unsupported.
+Composition derives support from the native root and its effective bindings.
+An invoked callback contributes its invocation support; passing a callback as
+an uninvoked value does not execute it. Callable constructors contribute their
+construction stage separately. Effective bindings replace inherited bindings
+before support is intersected. Unknown invocation-stage contracts and unresolved
+slot provenance keep the derived result unknown.
 
 Execution variables have a separate sort and substitutions from value-type
 variables. Each call freshens their local scope. Multiple callbacks constrain

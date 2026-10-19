@@ -83,6 +83,7 @@
     [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.executor.registry.core :as registry]
+    [graphden.types.check.execution :as execution]
     [graphden.types.check.gradual :as gradual]
     [graphden.types.check.literals :as lit]
     [graphden.types.check.provenance :as provenance]
@@ -2151,6 +2152,14 @@
    computed-return {:keys [effects arg-effects]} own-resolved slot-types nav-types drift]
   (let [expected (some-> fn-def :expects-effects set)
         resolved (merge (:resolved-bindings parent-info {}) own-resolved)
+        root-info (registry/rich-type-of (registry/root-base-fn-name primary-parent))
+        execution-bindings (into {}
+                                 (map (fn [[arg info]]
+                                        [arg (cond-> info
+                                               (vector? (:value info))
+                                               (assoc :execution-refs (ref-targets (:value info))))]))
+                                 resolved)
+        execution-support (execution/derive root-info execution-bindings registry/rich-type-of)
         call-time-effects (compute-call-time-effects arg-effects
                                                      parent-info
                                                      (keys free-args))]
@@ -2161,7 +2170,7 @@
       (registry/fn-def-registry-id fn-name fn-def)
       fn-name
       (provenance/stamp
-        (cond-> (merge {:return computed-return :args free-args}
+        (cond-> (merge {:return computed-return :args free-args :execution execution-support}
                        (source-info-for fn-def))
           ;; `:lambda-params` — authored HOF call-site parameter list;
           ;; must survive into the registry entry the runtime's

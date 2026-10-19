@@ -498,7 +498,7 @@
                           ;; explicitly drops the asymmetry.
                           :effects final-effects
                           :execution (capabilities/native-execution
-                                       fn-id (:impl fn-def))}
+                                       fn-id (synthesised-impl-for fn-def))}
                    (and desc (seq desc))      (assoc :description desc)
                    (:return-type-rule fn-def) (assoc :return-type-rule
                                                      (:return-type-rule fn-def))

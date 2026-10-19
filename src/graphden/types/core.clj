@@ -50,6 +50,7 @@
   (:require
     [clojure.set]
     [clojure.tools.logging :as log]
+    [graphden.types.core.execution :as execution]
     [graphden.types.core.shapes :as shapes]))
 
 
@@ -97,6 +98,23 @@
 (def fn-args                       shapes/fn-args)
 (def fn-ret                        shapes/fn-ret)
 (def fn-effects                    shapes/fn-effects)
+(def fn-execution                  shapes/fn-execution)
+(def execution-profiles            shapes/execution-profiles)
+(def execution-var?                shapes/execution-var?)
+(def execution-constraint?         shapes/execution-constraint?)
+(def value-substitutions           execution/value-substitutions)
+(def merge-execution-constraints   execution/merge-constraints)
+
+
+(defn has-execution-vars?
+  "True when a callable anywhere in a type carries an execution variable."
+  [t]
+  (shapes/type-any? (fn [t]
+                      (and (shapes/fn-type? t)
+                           (shapes/execution-var? (shapes/fn-execution t))))
+                    t))
+
+
 (def list-elem                     shapes/list-elem)
 (def map-type?                     shapes/map-type?)
 (def map-key                       shapes/map-key)
@@ -576,14 +594,10 @@
                                             :candidates (sort (vals owners))})))))
                             (resolve-alias target (conj seen t)))
                           t))
-     (fn-type? t)     (let [base [:fn
-                                  (into {} (map (fn [[k v]] [k (resolve-alias v seen)])) (fn-args t))
-                                  (resolve-alias (fn-ret t) seen)]
-                            eff (fn-effects t)]
-                        ;; Effect constraint passes through verbatim —
-                        ;; it's a set of category keywords, not types
-                        ;; that need resolution.
-                        (if eff (conj base eff) base))
+     (fn-type? t)     (make-fn-type
+                        (into {} (map (fn [[k v]] [k (resolve-alias v seen)])) (fn-args t))
+                        (resolve-alias (fn-ret t) seen)
+                        (fn-effects t) (fn-execution t))
      (list-type? t)   [:list (resolve-alias (list-elem t) seen)]
      (map-type? t)    [:map (resolve-alias (map-key t) seen)
                        (resolve-alias (map-val t) seen)]
@@ -782,6 +796,9 @@
 ;; -----------------------------------------------------------------------------
 ;; Substitutions — type-var → type binding map
 
+(def ^:private ^:dynamic *preserve-execution-vars* false)
+
+
 (defn resolve
   "Walk a substitution chain to a fixed point. If `t` is a type
    variable bound in `subst`, follow the binding; recurse on compound
@@ -791,16 +808,12 @@
     (type-var? t) (if-let [v (get subst t)]
                     (if (= v t) t (resolve subst v))
                     t)
-    (fn-type? t) (let [base [:fn
-                             (into {} (map (fn [[k v]] [k (resolve subst v)])) (fn-args t))
-                             (resolve subst (fn-ret t))]
-                       eff (fn-effects t)]
-                   ;; Preserve the effect constraint when present.
-                   ;; Without this, type-var substitution silently
-                   ;; drops the 4th element and the slot-effect-
-                   ;; constraint check at unify-time gets nil instead
-                   ;; of the declared set.
-                   (if eff (conj base eff) base))
+    (fn-type? t) (make-fn-type
+                   (into {} (map (fn [[k v]] [k (resolve subst v)])) (fn-args t))
+                   (resolve subst (fn-ret t)) (fn-effects t)
+                   (if *preserve-execution-vars*
+                     (fn-execution t)
+                     (execution/resolve-constraint subst (fn-execution t))))
     (list-type? t)   [:list (resolve subst (list-elem t))]
     (map-type? t)    [:map (resolve subst (map-key t)) (resolve subst (map-val t))]
     (tuple-type? t)  (into [:tuple] (map #(resolve subst %)) (tuple-elems t))
@@ -1022,6 +1035,7 @@
   (let [sub-ret (fn-ret sub) sup-ret (fn-ret sup)]
     (and (or (type-var? sup-ret) (subtype? sub-ret sup-ret))
          (effects-compatible? (fn-effects sub) (fn-effects sup))
+         (execution/compatible? (fn-execution sub) (fn-execution sup))
          (fn-args-subtype? (fn-args sub) (fn-args sup)))))
 
 
@@ -1052,15 +1066,7 @@
    `resolve-alias` recurses into compound types and is idempotent on
    already-structural inputs, so chaining the two passes is safe."
   [t]
-  (let [t (cond
-            (= t :sequence) [:list :any]
-            ;; Canonicalise the 3-element fn-type form (the authoring shorthand) to 4-element
-            ;; with `:any` (unconstrained slot). Internal code can rely on
-            ;; the 4th slot always being present.
-            (and (vector? t) (= :fn (first t)) (= 3 (count t)))
-            (conj t :any)
-            :else t)]
-    (resolve-alias t)))
+  (resolve-alias (if (= t :sequence) [:list :any] t)))
 
 
 ;; Primitive subtype hierarchy. Doc-aligned:
@@ -1494,6 +1500,9 @@
     :else (assoc subst v t)))
 
 
+(def ^:private ^:dynamic *execution-variance* 1)
+
+
 (defn- unify-fn
   "Unify two function types positionally — argument NAMES are
    documentation only, what matters at the type level is arity and
@@ -1529,7 +1538,8 @@
             arg-step (reduce (fn [s i]
                                (if (= s ::fail)
                                  (reduced ::fail)
-                                 (unify (get a-types i) (get b-types i) s)))
+                                 (binding [*execution-variance* (- *execution-variance*)]
+                                   (unify (get a-types i) (get b-types i) s))))
                              subst
                              (range (count a-types)))
             ret-step (when-not (= arg-step ::fail)
@@ -1544,7 +1554,10 @@
                 (= ret-step ::fail)
                 (not effects-ok?))
           ::fail
-          ret-step)))))
+          (or (if (pos? *execution-variance*)
+                (execution/constrain ret-step (fn-execution a) (fn-execution b))
+                (execution/constrain ret-step (fn-execution b) (fn-execution a)))
+              ::fail))))))
 
 
 (defn- unify-record
@@ -1701,8 +1714,9 @@
   ([t1 t2 subst]
    (check-type-compare-depth! "unify" t1 t2)
    (binding [*type-compare-depth* (inc (long *type-compare-depth*))]
-     (let [a (normalise (resolve subst t1))
-           b (normalise (resolve subst t2))]
+     (let [[a b] (binding [*preserve-execution-vars* true]
+                   [(normalise (resolve subst t1))
+                    (normalise (resolve subst t2))])]
        (cond
          ;; Equality OR universal `:any` accept on the OTHER side when
          ;; neither is a type-var. With a type-var on the other side we
@@ -1858,6 +1872,21 @@
 (declare freshen)
 
 
+(def ^:private ^:dynamic *execution-freshening* nil)
+
+
+(defn- freshen-execution
+  "Execution symbols share a local scope with each other, never value vars."
+  [execution]
+  (if (execution-var? execution)
+    (or (get @*execution-freshening* execution)
+        (let [fresh [:execution-var
+                     (symbol (str (name (second execution)) "-" (next-fresh-suffix)))]]
+          (swap! *execution-freshening* assoc execution fresh)
+          fresh))
+    execution))
+
+
 (defn- freshen*
   "Walk `t`, renaming each type-var via the `subst` atom (filled
    on demand). Recurse into compound shapes."
@@ -1875,9 +1904,10 @@
               fresh (symbol (str base "-" (next-fresh-suffix)))]
           (swap! subst assoc t fresh)
           fresh))
-    (fn-type? t)     [:fn
-                      (into {} (map (fn [[k v]] [k (freshen* v subst)])) (fn-args t))
-                      (freshen* (fn-ret t) subst)]
+    (fn-type? t)     (make-fn-type
+                       (into {} (map (fn [[k v]] [k (freshen* v subst)])) (fn-args t))
+                       (freshen* (fn-ret t) subst) (fn-effects t)
+                       (freshen-execution (fn-execution t)))
     (list-type? t)   [:list (freshen* (list-elem t) subst)]
     (map-type? t)    [:map (freshen* (map-key t) subst) (freshen* (map-val t) subst)]
     (tuple-type? t)  (into [:tuple] (map #(freshen* % subst)) (tuple-elems t))
@@ -1896,8 +1926,9 @@
    different calls to `freshen-args` produce DIFFERENT vars (the
    essential let-polymorphism move)."
   [args-map]
-  (let [subst (atom {})]
-    (into {} (map (fn [[k v]] [k (freshen* v subst)])) args-map)))
+  (binding [*execution-freshening* (atom {})]
+    (let [subst (atom {})]
+      (into {} (map (fn [[k v]] [k (freshen* v subst)])) args-map))))
 
 
 (defn freshen
@@ -1906,59 +1937,14 @@
    own scope of `'a`/`'b` so the caller's free typevars can't
    accidentally collide with the callee's.
 
-   NOTE: `freshen*` rebuilds fn-types as 3-element forms — the 4th
-   (effects) element is dropped at EVERY nesting level (a deliberate
-   historical contract other call sites rely on). Callers that need
-   effects preserved use `freshen-with-effects` below."
+   Effects and execution contracts survive at every nesting level;
+   execution variables receive a separate per-call scope."
   [t]
-  (freshen* t (atom {})))
-
-
-(defn- restore-fn-effects
-  "Walk `fresh` alongside the ORIGINAL `t`, re-attaching each fn-type's
-   effects element that `freshen*` dropped — at every nesting level.
-   The two trees are structurally parallel for every shape except
-   unions (freshen* renames vars only), so keyed/positional descent
-   is safe there."
-  [t fresh]
-  (cond
-    (and (fn-type? t) (fn-type? fresh))
-    (let [args (into {}
-                     (map (fn [[k v]]
-                            [k (restore-fn-effects (get (fn-args t) k) v)]))
-                     (fn-args fresh))
-          ret (restore-fn-effects (fn-ret t) (fn-ret fresh))
-          eff (fn-effects t)]
-      (if (and eff (not= eff :any))
-        [:fn args ret eff]
-        [:fn args ret]))
-    (and (list-type? t) (list-type? fresh))
-    [:list (restore-fn-effects (list-elem t) (list-elem fresh))]
-    (and (map-type? t) (map-type? fresh))
-    [:map (restore-fn-effects (map-key t) (map-key fresh))
-     (restore-fn-effects (map-val t) (map-val fresh))]
-    (and (tuple-type? t) (tuple-type? fresh))
-    (into [:tuple] (map restore-fn-effects (tuple-elems t) (tuple-elems fresh)))
-    (and (record-type? t) (record-type? fresh))
-    (into {} (map (fn [[k v]] [k (restore-fn-effects (get t k) v)])) fresh)
-    (and (refine-type? t) (refine-type? fresh))
-    [:refine (restore-fn-effects (refine-base t) (refine-base fresh))
-     (refine-constraint fresh)]
-    (and (marker-type? t) (marker-type? fresh))
-    [(marker-tag fresh) (restore-fn-effects (marker-inner t) (marker-inner fresh))]
-    ;; Unions: freshen* runs make-union which may reorder/merge
-    ;; members — positional descent is unsafe; effects inside union
-    ;; members stay dropped (conservative; a union rarely sits in
-    ;; slot-constraint position).
-    :else fresh))
+  (binding [*execution-freshening* (atom {})]
+    (freshen* t (atom {}))))
 
 
 (defn freshen-with-effects
-  "`freshen`, but fn-type effects elements survive at EVERY nesting
-   level — for the checker's assembled-callee path, where a nested
-   fn-typed arg's concrete effect set participates in the
-   slot-effect-constraint check (a dropped set normalises to `:any`
-   on the sub side, which `effects-compatible?` reads as cannot-
-   satisfy — flipping would-pass into fail)."
+  "Compatibility name for `freshen`, which preserves all callable contracts."
   [t]
-  (restore-fn-effects t (freshen t)))
+  (freshen t))

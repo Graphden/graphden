@@ -49,7 +49,9 @@
     (types/map-type? t)    (and (any-shape? (types/map-key t))
                                 (any-shape? (types/map-val t)))
     (types/tuple-type? t)  (every? any-shape? (types/tuple-elems t))
-    (types/fn-type? t)     (and (every? any-shape? (vals (types/fn-args t)))
+    (types/fn-type? t)     (and (= :unknown (types/fn-execution t))
+                                (= :any (types/fn-effects t))
+                                (every? any-shape? (vals (types/fn-args t)))
                                 (any-shape? (types/fn-ret t)))
     :else                  false))
 
@@ -123,8 +125,8 @@
         pairs (mapv (fn [[_ a] [_ e]] (erase a e values)) a-args e-args)
         [ret-a ret-e] (erase (types/fn-ret actual) (types/fn-ret expected) [])
         rebuild (fn [t args ret]
-                  (let [base [:fn args ret]]
-                    (if-let [eff (types/fn-effects t)] (conj base eff) base)))]
+                  (types/make-fn-type args ret (types/fn-effects t)
+                                      (types/fn-execution t)))]
     [(rebuild actual (into {} (map (fn [[k _] [a' _]] [k a']) a-args pairs)) ret-a)
      (rebuild expected (into {} (map (fn [[k _] [_ e']] [k e']) e-args pairs)) ret-e)]))
 

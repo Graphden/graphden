@@ -84,7 +84,7 @@
 
 
 (defn fn-type-bound-effects
-  "When `expected` resolves to a 4-arity fn-type `[:fn args ret eff]`
+  "When `expected` resolves to a callable with an effect constraint
    with a CONCRETE `eff` set (not `:any`), return the eff entries as
    a vec of plain strings (lower-case, no leading colon — same
    convention the editor's effect-chip CSS classes use). Returns nil
@@ -96,8 +96,8 @@
    re-implement the `[:fn …]`-shape parse in JS."
   [expected]
   (let [t (types/resolve-alias expected)]
-    (when (and (vector? t) (= :fn (first t)) (= 4 (count t)))
-      (let [eff (nth t 3)]
+    (when (types/fn-type? t)
+      (let [eff (types/fn-effects t)]
         (when-not (#{:any "any" :_any} eff)
           (cond
             (sequential? eff)

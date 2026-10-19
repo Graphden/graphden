@@ -3,6 +3,8 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [clojure.tools.logging]
+    [graphden.types.check.gradual :as gradual]
+    [graphden.types.check.literals :as literals]
     [graphden.types.core :as t]
     [graphden.types.core.shapes :as shapes]))
 
@@ -730,9 +732,8 @@
   (let [subst {'a :int 'b [:list 'a]}]
     (is (= :int (t/resolve subst 'a)))
     (is (= [:list :int] (t/resolve subst 'b)))
-    ;; resolve canonicalises fn-types to the 4-element form with `:any`
-    ;; in the effects slot (unconstrained) — see `fn-type?` docstring.
-    (is (= [:fn {:x :int} :int :any] (t/resolve subst [:fn {:x 'a} 'a])))))
+    ;; Legacy callable execution support remains unknown after resolution.
+    (is (= [:fn {:x :int} :int :any :unknown] (t/resolve subst [:fn {:x 'a} 'a])))))
 
 
 ;; -----------------------------------------------------------------------------
@@ -1230,7 +1231,7 @@
         marked [:secret plain]
         signature (t/callable-signature marked)]
     (is (= plain (t/callable-signature plain)))
-    (is (= [:fn {:request :text} [:secret :int] #{:db :network}] signature))
+    (is (= [:fn {:request :text} [:secret :int] #{:db :network} :unknown] signature))
     (is (not (t/subtype? marked plain)) "The value's outer marker is never stripped")
     (is (not (t/subtype? signature plain)) "Invocation cannot claim a public result")
     (is (not (t/subtype? signature [:fn {:request :text} [:secret :int] #{}]))
@@ -1239,3 +1240,130 @@
     (is (nil? (t/callable-signature :int)))
     (is (= signature (t/callable-signature [:secret signature]))
         "The same marker is not multiplied on the result")))
+
+
+(deftest callable-execution-subtyping-and-unification-test
+  (let [callable (fn [execution] [:fn {:x :int} :bool #{} execution])]
+    (doseq [[actual expected accepted?]
+            [[#{:jvm-server} #{:browser-main} false]
+             [#{:browser-main} #{:jvm-server} false]
+             [#{:jvm-server :browser-main} #{:browser-main} true]
+             [#{:browser-main} #{:jvm-server :browser-main} false]
+             [:unknown #{:browser-main} false]
+             [#{} #{:browser-main} false]
+             [#{:browser-main} #{} true]
+             [:unknown #{} true]
+             [#{:jvm-server} :unknown true]
+             [:unknown :unknown true]]]
+      (is (= accepted? (boolean (t/subtype? (callable actual) (callable expected))))
+          (pr-str [actual expected]))
+      (is (= accepted? (t/unified? (t/unify (callable expected) (callable actual))))
+          (pr-str [expected actual])))
+    (is (not (t/subtype? [:fn {:x :int} :bool] (callable #{:browser-main}))))))
+
+
+(deftest callable-execution-transformations-test
+  (let [inner [:fn {:x 'a} 'a #{:db} #{:browser-main}]
+        nested {:handlers [:map :text [:secret inner]]
+                :callbacks [:list inner]
+                :pair [:tuple inner :int]}]
+    (doseq [transform [t/resolve-alias #(t/resolve {'a :int} %) t/freshen t/freshen-with-effects]]
+      (let [result (transform nested)]
+        (is (= #{:browser-main} (t/fn-execution (t/marker-inner (t/map-val (:handlers result))))))
+        (is (= #{:db} (t/fn-effects (t/list-elem (:callbacks result)))))
+        (is (= #{:browser-main} (t/fn-execution (first (t/tuple-elems (:pair result))))))))))
+
+
+(deftest execution-vars-intersect-support-without-first-callback-equality
+  (let [e [:execution-var 'E]
+        callable (fn [execution] [:fn {} :int #{} execution])
+        portable (callable #{:jvm-server :browser-main})
+        browser (callable #{:browser-main})
+        server (callable #{:jvm-server})]
+    (doseq [actuals [[portable browser] [browser portable]]]
+      (let [s (reduce (fn [s actual] (t/unify (callable e) actual s)) {} actuals)]
+        (is (t/unified? s))
+        (is (= #{:browser-main} (t/fn-execution (t/resolve s (callable e)))))
+        (is (t/unified? (t/unify browser (callable e) s)))
+        (is (t/fail? (t/unify server (callable e) s)))))
+    (let [s (t/unify (callable e) portable)
+          s (t/unify (callable e) browser s)]
+      (is (not (contains? s 'E)))
+      (is (= :text (get (t/unify 'E :text s) 'E)))
+      (is (= #{:browser-main} (t/fn-execution (t/resolve (assoc s 'E :text) (callable e))))))
+    (let [s (t/unify (callable e) browser)
+          s (t/unify (callable e) server s)]
+      (is (= #{} (t/fn-execution (t/resolve s (callable e)))))
+      (is (t/fail? (t/unify browser (callable e) s))))))
+
+
+(deftest execution-variable-edges-and-call-scopes-test
+  (let [callable (fn [execution] [:fn {} :int #{} execution])
+        e [:execution-var 'E]
+        f [:execution-var 'F]
+        template [:fn {:callback (callable e)} (callable e) #{} e]
+        a (t/freshen template)
+        b (t/freshen template)]
+    (is (= (t/fn-execution a) (t/fn-execution (t/fn-ret a))))
+    (is (= (t/fn-execution a) (t/fn-execution (:callback (t/fn-args a)))))
+    (is (not= (t/fn-execution a) (t/fn-execution b)))
+    (let [s (t/unify (callable e) (callable f))
+          s (t/unify (callable f) (callable #{:browser-main}) s)]
+      (is (= #{:browser-main} (t/fn-execution (t/resolve s (callable e)))))
+      (is (t/fail? (t/unify (callable #{:jvm-server}) (callable e) s)))))
+  (let [fresh (t/freshen [:fn {:value 'E} :int #{} [:execution-var 'E]])]
+    (is (not= (get (t/fn-args fresh) :value) (second (t/fn-execution fresh))))))
+
+
+(deftest execution-contract-survives-gradual-erasure
+  (let [server [:fn {:x :any} :any #{} #{:jvm-server}]
+        browser [:fn {:x :any} :any #{} #{:browser-main}]
+        [actual expected] (gradual/erase server browser [])]
+    (is (not (gradual/any-shape? server)))
+    (is (= #{:jvm-server} (t/fn-execution actual)))
+    (is (= #{:browser-main} (t/fn-execution expected)))
+    (is (not (gradual/fits? server browser []))))
+  (let [server [:fn {:x 'a} :int #{} #{:jvm-server}]
+        browser [:fn {:x :int} :int #{} #{:browser-main}]]
+    (is (not (gradual/fits? server browser [])))))
+
+
+(deftest execution-variable-constraints-respect-callable-input-variance
+  (let [e [:execution-var 'E]
+        callback (fn [execution] [:fn {} :int #{} execution])
+        wrapper (fn [execution] [:fn {:callback (callback execution)} :int #{} :unknown])
+        expected (wrapper e)
+        browser (callback #{:browser-main})
+        portable (callback #{:jvm-server :browser-main})]
+    ;; A wrapper requiring a portable callback cannot consume browser-only
+    ;; callbacks. Input variance contributes a LOWER bound on E here.
+    (let [s (t/unify expected (wrapper #{:jvm-server :browser-main}))]
+      (is (t/unified? s))
+      (is (t/fail? (t/unify (callback e) browser s)))
+      (is (t/unified? (t/unify (callback e) portable s))))
+    ;; A wrapper requiring only browser support accepts a portable callback;
+    ;; together with a browser handler it solves E=browser in either order.
+    (let [s (t/unify expected (wrapper #{:browser-main}))
+          s (t/unify (callback e) portable s)
+          s (t/unify (callback e) browser s)]
+      (is (t/unified? s))
+      (is (= #{:browser-main} (t/fn-execution (t/resolve s (callback e))))))))
+
+
+(deftest independent-execution-solutions-merge-by-intersection
+  (let [e [:execution-var 'E]
+        callable (fn [execution] [:fn {} :int #{} execution])
+        left (t/unify (callable e) (callable #{:jvm-server :browser-main}))
+        right (t/unify (callable e) (callable #{:browser-main}))
+        joined (t/merge-execution-constraints (assoc left 'a :int) right)]
+    (is (= #{:browser-main} (t/fn-execution (t/resolve joined (callable e)))))
+    (is (= {'a :int} (t/value-substitutions joined)))
+    (is (nil? (t/merge-execution-constraints right
+                                             (t/unify (callable #{:jvm-server}) (callable e)))))))
+
+
+(deftest five-element-callable-keeps-effect-bound-surface
+  (is (= ["db"]
+         (literals/fn-type-bound-effects [:fn {} :int #{:db} #{:browser-main}])))
+  (is (= [] (literals/fn-type-bound-effects [:fn {} :int #{} :unknown])))
+  (is (nil? (literals/fn-type-bound-effects [:fn {} :int]))))

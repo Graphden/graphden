@@ -1,0 +1,72 @@
+(ns graphden.types.execution-check-test
+  "Execution contracts through the real checker without package-wide sweeps."
+  (:require
+    [clojure.test :refer [deftest is use-fixtures]]
+    [graphden.executor.registry.core :as registry]
+    [graphden.types.check :as check]
+    [graphden.types.core :as types]))
+
+
+(use-fixtures :each
+  (fn [test-fn]
+    (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
+              registry/*per-org-rich-override* (atom {})]
+      (test-fn))))
+
+
+(defn- callable
+  [execution]
+  [:fn {} :int #{} execution])
+
+
+(defn- record-callback!
+  [name execution]
+  (registry/record-rich-types-raw! name
+                                   {:args {} :return :int :effects #{} :execution execution}))
+
+
+(deftest concrete-execution-contract-through-checker
+  (registry/record-rich-types-raw! :browser-consumer
+                                   {:args {:callback (callable #{:browser-main})} :return :int :effects #{}})
+  (record-callback! :server-callback #{:jvm-server})
+  (record-callback! :portable-callback #{:jvm-server :browser-main})
+  (record-callback! :unknown-callback :unknown)
+  (doseq [ref [:server-callback :unknown-callback]]
+    (is (thrown? clojure.lang.ExceptionInfo
+          (check/check-fn-def! {:name :bad-binding :parent :browser-consumer
+                                :args {:callback ref}}))))
+  (check/check-fn-def! {:name :portable-binding :parent :browser-consumer
+                        :args {:callback :portable-callback}})
+  (is (= :int (:return (registry/rich-type-of :portable-binding))))
+  (is (= #{:jvm-server :browser-main}
+         (types/fn-execution (check/assemble-fn-type :portable-callback)))))
+
+
+(deftest shared-execution-variable-through-checker
+  (let [e [:execution-var 'E]]
+    (registry/record-rich-types-raw! :shared-profile-consumer
+                                     {:args {:first (callable e) :second (callable e)}
+                                      :return (callable e) :effects #{}})
+    (record-callback! :portable-callback #{:jvm-server :browser-main})
+    (record-callback! :browser-callback #{:browser-main})
+    (record-callback! :server-callback #{:jvm-server})
+    (doseq [[name first-ref second-ref]
+            [[:portable-first :portable-callback :browser-callback]
+             [:browser-first :browser-callback :portable-callback]
+             [:server-only :server-callback :server-callback]]]
+      (check/check-fn-def! {:name name :parent :shared-profile-consumer
+                            :args {:first first-ref :second second-ref}}))
+    (is (= #{:browser-main} (types/fn-execution (:return (registry/rich-type-of :portable-first)))))
+    (is (= #{:browser-main} (types/fn-execution (:return (registry/rich-type-of :browser-first)))))
+    (is (= #{:jvm-server} (types/fn-execution (:return (registry/rich-type-of :server-only)))))))
+
+
+(deftest signature-refire-intersects-execution-solutions
+  (let [e [:execution-var 'E]
+        root {:args {:first (callable e) :second (callable e)}
+              :return (callable e)}
+        result (check/signature-return root
+                                       {:first {:type (callable #{:jvm-server :browser-main})}
+                                        :second {:type (callable #{:browser-main})}}
+                                       :any)]
+    (is (= #{:browser-main} (types/fn-execution result)))))

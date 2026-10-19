@@ -906,6 +906,29 @@ allowed to read time but not the DB).
 
 ---
 
+## Callable execution contracts
+
+The canonical callable shape is `[:fn args ret effects execution]`.
+`execution` is `:unknown`, a set drawn from `#{:jvm-server :browser-main}`,
+including the empty set, or `[:execution-var E]`. Legacy three- and
+four-element shapes decode with unknown execution support. Unknown support
+is distinct from an empty set (no supported profile) and a two-profile set
+(proven support for both). Missing legacy effects remain `:any`, not pure.
+
+A callable supporting profiles S satisfies a requirement R when `R ⊆ S`.
+Thus a callable supporting both profiles satisfies a browser requirement;
+a server-only callable does not. Execution profiles are separate from effect
+permissions, access control, and the portability of captured runtime values.
+
+Execution variables have a separate sort and substitutions from value-type
+variables. Each call freshens their local scope. Multiple callbacks constrain
+a shared execution variable by intersecting their supported profiles; the
+first callback does not fix the variable by equality. A portable callback
+and a browser callback can therefore share the browser profile. Nested
+callable transformations preserve both effects and execution support.
+
+---
+
 ## Required Narrowing
 
 Slots carry an optional `:required` flag (default `true`). A

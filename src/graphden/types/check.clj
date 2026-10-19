@@ -190,7 +190,9 @@
    `callable-signature` projection. A marked callable keeps its stored value
    type; invocation carries the outer markers onto its result.
 
-   Always emits the canonical 4-element form. `compute-effects` is
+   Emits the canonical five-element form. Execution support comes from the
+   registry's proven `:execution` entry or remains `:unknown`; purity alone
+   does not prove portability. `compute-effects` is
    total — every fn-def has a computed set, possibly `#{}` (pure) —
    so the 4th element is always the registry's `:effects` (or `#{}`
    if absent, which is the same as computed-pure). Producing 3-elem
@@ -229,7 +231,8 @@
         ;; whatever effects-constraint the slot declared. We can't
         ;; meaningfully inject the producer's own effects here.
         signature
-        (types/make-fn-type (or (:args info) {}) ret eff)))))
+        (types/make-fn-type (or (:args info) {}) ret eff
+                            (get info :execution :unknown))))))
 
 
 (defn- has-type-var?
@@ -242,7 +245,8 @@
    that shape and reject a binding whose unification would have
    succeeded (e.g. record ↔ `[:map a :any]`)."
   [t]
-  (types/type-any? types/type-var? t))
+  (or (types/type-any? types/type-var? t)
+      (types/has-execution-vars? t)))
 
 
 (defn- describe-binding
@@ -551,7 +555,13 @@
     (types/subtype? actual expected)
     (if (or (has-type-var? expected) (has-type-var? actual))
       (let [s (types/unify expected actual subst)]
-        (if (types/fail? s) subst s))
+        (if (types/fail? s)
+          (if (or (types/has-execution-vars? expected)
+                  (types/has-execution-vars? actual))
+            (throw-mismatch! (mismatch-context parent-name fn-name arg-name
+                                               b-form expected actual))
+            subst)
+          s))
       subst)
 
     ;; A concrete record/list literal may satisfy refinements nested below
@@ -1337,7 +1347,8 @@
     (if (and (= final-args raw-args)
              (= final-effects actual-effects))
       actual
-      (types/make-fn-type final-args (types/fn-ret actual) final-effects))))
+      (types/make-fn-type final-args (types/fn-ret actual) final-effects
+                          (types/fn-execution actual)))))
 
 
 (defn- throw-literal-bound-to-fn-slot!
@@ -2231,15 +2242,18 @@
                                        (when-not (types/fail? s) s))))))
                          (:args root-entry))
             joined (reduce (fn [acc s]
-                             (reduce-kv
-                               (fn [m v t]
-                                 (let [prev (get m v)]
-                                   (cond
-                                     (nil? prev) (assoc m v t)
-                                     (= prev t)  m
-                                     :else (assoc m v (types/make-union
-                                                        [prev t])))))
-                               acc s))
+                             (when acc
+                               (types/merge-execution-constraints
+                                 (reduce-kv
+                                   (fn [m v t]
+                                     (let [prev (get m v)]
+                                       (cond
+                                         (nil? prev) (assoc m v t)
+                                         (= prev t)  m
+                                         :else (assoc m v (types/make-union
+                                                            [prev t])))))
+                                   acc (types/value-substitutions s))
+                                 s)))
                            {} substs)
             resolved (when (seq joined)
                        (types/resolve joined decl-ret))]

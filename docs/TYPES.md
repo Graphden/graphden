@@ -1106,26 +1106,40 @@ For a primitive value that should already have the right representation, use
 ;; result type is :uuid; execution throws if :raw-id is not a UUID
 ```
 
-The literal `:type` tag drives both the runtime predicate and the static result
-type. A dynamic tag leaves the static result at `:any`; the checker does not
-guess. Failures include the expected tag but never echo the rejected value.
-`:ensure-type` covers primitive tags only. Structural records, lists, and
-refinements still need their explicit validators; this does not automatically
-validate every graph output or external input.
+The literal supported `:type` definition drives runtime checking and the static
+result type. A dynamic declaration leaves the static result at `:any`.
+Failures never echo rejected values. Existing primitive runtime predicates keep
+their behavior; structural data uses the generated validator below.
 
 ---
 
 ## Runtime Validation from Types
 
-**Not shipped.** There is no `type-schema` base-fn and nothing turns a
-`computed-type` into a malli / JSON Schema at execution time. Types are
-checked at SAVE time only (previous sections); at runtime a value is what the
-base-fn impl returns, and the only checks that run are the explicit converters
-at the boundary (`:parse-int`, `:ensure-type`, and the `:ensure-*` narrowers —
-[Typed and Untyped Boundary](#typed-and-untyped-boundary)) and whatever a base-fn validates
-itself. The idea — one definition, static check at save + generated validator
-at the boundary — remains [Phase 5](#phase-5-runtime-validation-generation--not-shipped) of
-the implementation plan.
+`:ensure-type` accepts a named alias or structural data definition as its literal
+`:type`: data primitives, records, lists, homogeneous maps, unions/variants and
+safe declarative refinements. It returns the original value or throws
+`:execution-error/type-mismatch` with `:errors [{:path [...] :code ...}]`.
+Paths identify fields and element positions; dynamic map keys and rejected
+contents are omitted. Validation preserves secrecy and grants no ACL rights.
+
+```edn
+{:name :checked-colors
+ :parent :ensure-type
+ :args {:value {:as :external-data}
+        :type {:value {:colors [:list :core.refinements/color]}}}}
+```
+
+The pure `graphden.types.validator/build` API constructs the same validator.
+Unsupported definitions fail construction with `:types/unsupported-validator`:
+there is no successful fallback for arbitrary predicates, unresolved variables,
+recursive aliases, opaque native values or structural callable contracts.
+Supported refinement operations are numeric comparisons, equality, membership,
+text regex matching and `:and`/`:or`; no arbitrary graph callback is executed.
+A runtime fn test cannot establish a browser execution proof.
+
+Wire an explicit `ensure-type` at ingress/RPC/persistence boundaries after
+parsing. This does not walk every internal graph edge or automatically install
+HTTP validators. Malli/JSON Schema export remains outside this initial subset.
 
 ---
 
@@ -1424,14 +1438,12 @@ error-tolerant interactive writes. Phase 5 remains unshipped.
 
 **Catches:** missing boundary validation, invalid narrowing in inheritance.
 
-### Phase 5: Runtime validation generation — not shipped
+### Phase 5: Runtime validation generation — initial explicit boundary subset
 
-**Goal:** one definition, static + runtime checking. Nothing below exists
-yet; see [Runtime Validation from Types](#runtime-validation-from-types).
-
-- `type-schema` base-fn: introspect `computed-type`, generate malli schema
-- Integration with `json-handler` for automatic request body validation
-- Validation error messages derived from type structure
+The original goal was one definition for static and runtime checking. The
+[initial validator](#runtime-validation-from-types) now provides that through
+explicit `ensure-type` nodes and a pure builder. Automatic `json-handler`
+installation and malli/JSON Schema export remain future work.
 
 ### Phase 6: Effect categories ✅
 

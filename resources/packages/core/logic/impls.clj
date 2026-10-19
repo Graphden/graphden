@@ -24,7 +24,8 @@
     [graphden.auth.provider :as auth]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.executor.registry.core :as registry]
-    [graphden.types.core :as types]))
+    [graphden.types.core :as types]
+    [graphden.types.validator :as validator]))
 
 
 ;; === Logic ===
@@ -80,30 +81,31 @@
 
 
 (defbase ensure-type-fn
-  "Check a value against a primitive runtime type and return it unchanged.
-   Failures identify only the expected type; they never include the value."
+  "Validate a boundary value against a primitive or a declarative data type.
+   Errors never include input values; structural failures carry safe paths."
   [value type]
-  (let [pred (get types/runtime-predicates type)]
-    (when-not pred
+  (if-let [pred (get types/runtime-predicates type)]
+    (do
+      (when-not (pred value)
+        (throw (ex-info "Value does not match the required type"
+                        {:type :execution-error/type-mismatch :expected-type type})))
+      value)
+    (if (and (keyword? type) (= type (types/resolve-alias type)))
       (throw (ex-info "Unknown type tag"
-                      {:type :execution-error/unknown-type-tag
-                       :type-tag type})))
-    (when-not (pred value)
-      (throw (ex-info "Value does not match the required type"
-                      {:type :execution-error/type-mismatch
-                       :expected-type type})))
-    value))
+                      {:type :execution-error/unknown-type-tag :type-tag type}))
+      (validator/validate! type value))))
 
 
 (defn ensure-type-return-rule
-  "A literal primitive `:type` binding is a checked cast: the runtime impl
-   throws unless the value satisfies the same primitive predicate. A dynamic
-   type tag carries no static narrowing, so retain the declared return type."
+  "A supported literal type definition gives a checked result type. Dynamic
+   declarations retain the broad return; runtime validation grants no ACL."
   [bindings-info default-ret]
   (let [expected (get-in bindings-info [:type :value])]
-    (if (and (keyword? expected) (types/primitive? expected))
-      expected
-      default-ret)))
+    (cond
+      (and (keyword? expected) (types/primitive? expected)) expected
+      (nil? expected) default-ret
+      :else (try (validator/build expected) (types/resolve-alias expected)
+                 (catch clojure.lang.ExceptionInfo _ default-ret)))))
 
 
 ;; === Conditionals ===

@@ -150,3 +150,15 @@
                 nil
                 (catch clojure.lang.ExceptionInfo e e))]
     (is (= :execution-error/unknown-type-tag (:type (ex-data error))))))
+
+
+(deftest ensure-type-validates-a-structural-boundary-with-safe-paths
+  (let [f (impls/impl-of :ensure-type)
+        declaration {:color [:refine :text [:matches "^#[0-9a-fA-F]{6}$"]]}
+        value {:color "#aabbcc"}]
+    (is (= value (f {:value (delay value) :type (delay declaration)} nil)))
+    (let [e (try (f {:value (delay {:color "private-content"}) :type (delay declaration)} nil)
+                 nil (catch clojure.lang.ExceptionInfo e e))]
+      (is (= {:type :execution-error/type-mismatch
+              :errors [{:path [:color] :code :refinement-mismatch}]} (ex-data e)))
+      (is (not (re-find #"private-content" (str e (ex-data e))))))))

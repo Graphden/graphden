@@ -20,7 +20,7 @@ The same source generates this standalone page, the Emacs data, and the Org read
 - [[file:executor.org][Executor — running graph functions]] (25 · ~90 min) :: From stored definitions to callable code and results.
 - [[file:storage.org][Storage — schemas and graph reads]] (19 · ~65 min) :: Protocols, rows, traversal, and change notifications.
 - [[file:versioning.org][Branches — versions and merges]] (26 · ~104 min) :: Branch-specific reads, conflict detection, and cache refresh.
-- [[file:types.org][Types — validation and inference]] (19 · ~85 min) :: Type expressions, compatibility, inference, and secret markings.
+- [[file:types.org][Types — validation and inference]] (24 · ~95 min) :: Type expressions, compatibility, inference, and secret markings.
 - [[file:crud.org][Graph API — reads, writes, and execution]] (25 · ~68 min) :: Request validation, stored edits, execution results, and views.
 - [[file:packages.org][Packages — loading and distribution]] (31 · ~99 min) :: Declarations, implementations, synchronization, import, and lint.
 - [[file:boot.org][Boot — starting the system]] (12 · ~21 min) :: Configuration, component dependencies, startup, and shutdown.

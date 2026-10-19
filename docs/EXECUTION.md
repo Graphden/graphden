@@ -590,6 +590,32 @@ lands the tab re-mounts, so the request is a run row with its tree.
 (Until 2026-09-04 this was the diagnostics drawer's Debug tab; the
 drawer under the canvas is gone.)
 
+## Execution support and boundary validation
+
+The callable type's fifth element records supported execution profiles, separate
+from its fourth-element effect ceiling. `#{:browser-main}` requires a browser
+implementation; `#{:jvm-server}` requires a JVM implementation; the two-profile
+set proves both. `:unknown` grants no profile proof and `#{}` proves none.
+Legacy callable declarations retain unknown support. Scoped execution variables
+are solved per call, including nested map/list callback contracts.
+
+The trusted primitive capability registry is shared by checker derivation and
+the browser exporter. Purity alone does not establish browser support: an
+unsupported native primitive, unsupported capture/lambda projection or callable
+construction stays unproven. Authored type overrides can require support but
+cannot manufacture it. Invalid saved drafts remain diagnostic and do not gain
+execution or export permission. These rules do not replace ACL checks or
+runtime effect authorization.
+
+Use explicit `core.logic/ensure-type` at an ingress, RPC or persistence boundary
+to validate a supported data definition after parsing. Success returns the
+original value; safe path/code diagnostics report failure without its contents.
+It preserves secrecy and does not validate every internal graph edge. A
+`web.html/UiView` is a presentation result, not the field's saved value; intentional
+serialization uses `web.html/encode-view`, which retains secrecy labels.
+See [the type contracts](TYPES.md#callable-execution-contracts) and
+[validator subset](TYPES.md#runtime-validation-from-types).
+
 ## Runtime effect tracing
 
 Each `apply-execute` future binds a fresh `*effect-trace*` atom-set

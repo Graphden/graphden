@@ -222,3 +222,29 @@ Neither changes `subtype?`, `unify` or the registry's shape; the
 [inherited-rename ADR](adr/ADR-inherited-rename-surface.md) contract
 ("the fn-def `:args` key is a public name") now also holds for renames
 made in the editor.
+
+
+## 2026-10-19 — execution proofs and view/value boundaries
+
+Callable contracts now carry execution support independently of effects:
+`[:fn args return effects execution]`. The checker derives support from trusted
+native capabilities and effective bindings. Legacy shapes keep unknown support;
+a value annotation, gradual hole or declared generic execution variable cannot
+turn unknown or server-only code into a browser proof. Local HOF specialization
+retains correlations without changing shared slot identities or sibling types.
+This extends the existing call-local approach; the historical row-polymorphism
+decision above remains unchanged.
+
+UI representation has its own `:ui-view` marker. Precise data sinks reject a
+view, broad data sinks report a hint, and explicit `web.html/encode-view` removes
+only the view representation label in data positions. Secrecy remains in force.
+Value-producing operations may compute ordinary data; passthrough may not erase
+a representation label merely because a child call recomputes its result.
+
+Runtime boundary validation reuses the same type definition through
+`graphden.types.validator`. Its builder and static `ensure-type` rule share a
+canonical type, including variants. Expansion is bounded before alias/union
+normalization so recursive definitions fail explicitly. The initial supported
+subset is data types and safe declarative refinements, not arbitrary graph
+predicates or callable portability validation. Failure paths omit rejected
+values and dynamic map keys. See [TYPES.md](TYPES.md) for the supported subset.

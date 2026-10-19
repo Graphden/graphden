@@ -692,6 +692,20 @@
      :say "Validates the syntax of type expressions before later checker stages use them. Cases verify
            the required shape of function arguments, [effects](#term/effect), refinements, secret
            wrappers, and other supported types."}
+    {:ns graphden.types.expansion :defn assert-finite!
+     :say "Bounds source type expansion before alias resolution or variant/union normalization.
+           Recursive aliases and excessive expansion are explicit failures. Literal refinement
+           operands are data and do not count as nested type references."}
+    {:ns graphden.types.validator :defn build
+     :say "Builds a pure boundary validator from the same supported data declaration used by
+           static checking. Success returns the original value. Failure reports safe path/code
+           diagnostics without rejected contents; unsupported definitions fail construction.
+           The companion checked-type returns the same canonical variant/alias shape used by
+           the ensure-type return rule."}
+    {:ns graphden.executor.capabilities :defn native-execution
+     :say "A real JVM implementation proves JVM support; the canonical identity-keyed browser
+           primitive ABI adds browser support only for implemented operations. Purity, a familiar
+           name and authored type annotations cannot manufacture execution support."}
     {:ns graphden.types.core :defn make-union
      :say "Normalizes a union type: flattens nested unions, removes duplicates and `:never`, and
            removes alternatives already covered by another member. A union means that a value may have
@@ -727,6 +741,14 @@
            type checks and result [redaction](#term/secret); it does not itself store the secret
            value."
      :see [[:types "subtype?"]]}
+    {:ns graphden.types.core.view :defn encoded-type
+     :say "Projects explicit encode-view results in data positions: remove only the non-hidden
+           ui-view representation label, preserving secret and other markers. Function signatures
+           remain unchanged because encoding a present value cannot rewrite future callback calls."}
+    {:ns graphden.types.view :defn broad-sink-hints
+     :say "Reports where a UiView enters an intentionally broad any/jsonb data sink, including
+           nested record/list/map paths. The checker retains consumed binding expectations so
+           an inherited, already-bound argument keeps the same diagnostic in its descendants."}
     {:ns graphden.types.check.literals :defn classify-literal
      :say "Infers a structural type from a literal Clojure value, including collections, records, and
            primitive values. [Binding](#term/binding) checks use this inferred type when checking

@@ -1113,6 +1113,28 @@ their behavior; structural data uses the generated validator below.
 
 ---
 
+## Values and UI Views
+
+A field value, form state and its rendered view have separate contracts:
+`value: T`, `view(state): web.html/UiView`, `save(value: T)`.
+`web.html/UiView` carries the `:ui-view` representation marker around a checked
+Hiccup value. `web.html/as-ui-view` constructs that boundary; no new runtime
+class or automatic DOM-to-value conversion is involved.
+
+A precise Color or Text sink rejects a view even when its underlying
+representation would fit. Structural passthrough preserves the marker through
+records, lists and maps. Operations that actually compute a new value infer
+that value's type. Broad `:any` and `:jsonb` sinks remain available and produce
+`:types/view-to-broad-sink` hints, with the nested path where applicable; the
+hint also survives inherited bindings after their arguments are consumed.
+
+`web.html/encode-view` explicitly projects a view back to data. It removes only
+non-hidden `:ui-view` markers in data positions, preserving `:secret` and every
+other marker. It does not rewrite a callable's future argument or return types.
+Encoding grants neither execute permission nor a browser execution proof.
+
+---
+
 ## Runtime Validation from Types
 
 `:ensure-type` accepts a named alias or structural data definition as its literal
@@ -1281,13 +1303,27 @@ across the UI.
   each link clickable to navigate to its type-row).
 - Constituents: refine → base+constraint, list → element, map → key+value,
   tuple → #idx slots, record → field rows, union → branches,
-  fn → args+ret+effect-row.
+  fn → args+ret+execution, with effects under Additional constraints.
 - Kind tag in header (Map / Record / Tuple / Refinement / Union /
   Function) so anonymous structural types are distinguishable.
 - A small `↳ provenance` link in the header opens the popover below
   when the panel was opened on a slot-bound arg with non-null
   provenance — single click to switch from "what's the shape?" to
   "where did it come from?".
+
+On an editable binding, the callable's **Execution** requirement can be
+narrowed to Browser, JVM or both. Unknown means no runtime proof is required;
+an empty set means no runtime has been proven. Computed contracts remain
+read-only. For a map, expand its value type; for a list, expand its element.
+The same control edits a nested callable leaf. Effects stay in the collapsed
+**Additional constraints** section.
+
+The submit replaces this binding's whole contract after a server narrowing
+check. It preserves unchanged effects, return types and sibling fields, and
+materializes anonymous nested callable rows with canonical identities. Shared
+slots, named type rows and neighboring descendants keep their existing IDs and
+contracts. Existing per-argument/return/effects API deltas remain supported;
+a complete `:type` proposal cannot be mixed with them.
 
 **2. Provenance popover** (↳ badge click, OR ↳ link from inline
 panel): the canonical answer to "where did this type come from?".

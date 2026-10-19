@@ -66,11 +66,20 @@
    vector value is indistinguishable from an encoded set and reads
    back as one — accepted on the same rarity grounds.
 
+   Scoped `[:execution-var E]` symbols use `{:_execution_var \"E\"}`;
+   ordinary symbol values keep their previous JSON behavior. Like the
+   existing carriers, this one-key map is reserved for the codec.
+
    Map keys are left as-is (cheshire handles key serialisation
    separately)."
   [v]
   (cond
     (keyword? v) {:_kw (subs (str v) 1)}
+    ;; Preserve only this grammar's scoped symbol sort, rather than
+    ;; interpreting arbitrary strings as symbols when JSONB is read.
+    (and (vector? v) (= 2 (count v))
+         (= :execution-var (first v)) (symbol? (second v)))
+    {:_execution_var (str (second v))}
     (set? v) {:_set (mapv preserve-keywords (vec v))}
     (map? v) (persistent! (reduce-kv (fn [m k v2] (assoc! m k (preserve-keywords v2))) (transient {}) v))
     (sequential? v) (mapv preserve-keywords v)
@@ -87,7 +96,8 @@
 (defn- normalize-parsed-json
   "Post-processes parsed JSON: converts lazy seqs to vectors and unwraps
    the codec's tagged carriers — `{:_kw \"name\"}` → keyword, `{:_set
-   [...]}` → Clojure set. Mirror of `preserve-keywords`."
+   [...]}` → Clojure set, `{:_execution_var \"E\"}` → scoped execution var.
+   Other symbols retain their existing JSON behavior."
   [x]
   (cond
     ;; Tagged-keyword unwrap. The single-key `:_kw`/`\"_kw\"` shape is
@@ -114,6 +124,14 @@
          (let [[k v] (first x)]
            (and (or (= k :_set) (= k "_set")) (sequential? v))))
     (into #{} (map normalize-parsed-json) (val (first x)))
+
+    ;; A dedicated carrier distinguishes a scoped symbol from a string
+    ;; in an otherwise identical execution-var-shaped user value.
+    (and (map? x) (= 1 (count x))
+         (let [[k v] (first x)]
+           (and (or (= k :_execution_var) (= k "_execution_var"))
+                (string? v))))
+    [:execution-var (symbol (val (first x)))]
 
     (map? x)
     (persistent! (reduce-kv (fn [m k v] (assoc! m k (normalize-parsed-json v))) (transient {}) x))

@@ -4,7 +4,8 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [graphden.storage.postgres.codec :as codec]
-    [graphden.storage.protocol.core :as sp])
+    [graphden.storage.protocol.core :as sp]
+    [graphden.types.core.shapes :as shapes])
   (:import
     (org.postgresql.util
       PGobject)))
@@ -300,3 +301,34 @@
   (testing "returns primitive unchanged when no field-spec"
     (is (= 42 (codec/encode-value 42 nil)))
     (is (= "hello" (codec/encode-value "hello" nil)))))
+
+
+(deftest canonical-callable-execution-vars-survive-jsonb
+  (doseq [execution [:unknown #{} #{:jvm-server :browser-main}
+                     [:execution-var 'E] [:execution-var 'E-17]
+                     [:execution-var 'scope/E] [:execution-var (symbol "")]]]
+    (let [inner [:fn {} :int #{:db} execution]
+          shape [:fn {:callback inner} [:list [:map :text inner]] #{} execution]
+          encoded (sp/encode-value test-codec shape {:type :jsonb})
+          decoded (sp/decode-value test-codec encoded {:type :jsonb})]
+      (is (= shape decoded))
+      (is (shapes/fn-type? decoded)))))
+
+
+(deftest jsonb-execution-var-carrier-does-not-reinterpret-strings
+  (let [literal {:name "E" :tuple ["E" [:execution-var "E"]] :var [:execution-var "E"]
+                 :callback [:fn {:label "E"} "E" #{:db} [:execution-var 'E]]
+                 :legacy [:fn {} [:execution-var "E"] #{}]
+                 :callable-shaped-literal [:fn {} :int #{} [:execution-var "E"]]}
+        decoded (sp/decode-value test-codec
+                                 (sp/encode-value test-codec literal {:type :jsonb})
+                                 {:type :jsonb})]
+    (is (= literal decoded)))
+  ;; Only the dedicated carrier restores a symbol; untagged execution
+  ;; names in ordinary JSON remain strings, even in callable-shaped data.
+  (let [pg (make-pgobject "jsonb" "{\"_execution_var\":\"E\"}")]
+    (is (= [:execution-var 'E]
+           (sp/decode-value test-codec pg {:type :jsonb}))))
+  (let [pg (make-pgobject "jsonb" "[{\"_kw\":\"execution-var\"},\"E\"]")]
+    (is (= [:execution-var "E"]
+           (sp/decode-value test-codec pg {:type :jsonb})))))

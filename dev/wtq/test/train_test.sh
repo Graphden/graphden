@@ -110,6 +110,44 @@ log_has()  { local out; out="$(wt_main log "$1" 2>/dev/null | plain)"; grep -Fq 
 on_develop() { git -C "$REPO" cat-file -e "develop:$1" 2>/dev/null; }
 
 # --- scenarios ----------------------------------------------------------------
+echo "== timing receipt reads the gate summary, not a nested E2E summary"
+timing_report="$ROOT_T/timing.report.edn"
+timing_log="$ROOT_T/timing.log"
+cat > "$timing_log" <<'EOF'
+── where the time went ──
+   219s  3.060GiB   edit-tutorial-tour-ux.test.js
+  4676s  TOTAL (143 files)
+── where the gate spent its time ──
+     12s  bb test-e2e
+      8s  bb test-integration
+  ------
+     21s  TOTAL
+EOF
+bb "$SRC/report.clj" init "$timing_report" "$(printf '%040d' 0)" 0
+bb "$SRC/report.clj" finish "$timing_report" "$(printf '%040d' 0)" 0 \
+  "$timing_log" "$ROOT_T/missing.ci.edn" "$ROOT_T/resources.csv" 0
+check "receipt uses the gate's 21s total and its two phases" \
+  env WTQ_REPORT_TEST="$timing_report" bb -e \
+  '(require (quote clojure.edn))
+   (let [r (clojure.edn/read-string (slurp (System/getenv "WTQ_REPORT_TEST")))]
+     (when-not (and (= 21000 (:duration-ms r))
+                    (= ["bb test-e2e" "bb test-integration"] (mapv :name (:phases r)))
+                    (= [12000 8000] (mapv :duration-ms (:phases r))))
+       (System/exit 1)))'
+bb "$SRC/report.clj" init "$timing_report" "$(printf '%040d' 0)" 0
+printf '── where the gate spent its time ──\n  12s  bb test-e2e\n' > "$timing_log"
+if bb "$SRC/report.clj" finish "$timing_report" "$(printf '%040d' 0)" 0 \
+  "$timing_log" "$ROOT_T/missing.ci.edn" "$ROOT_T/resources.csv" 0 >/dev/null 2>&1; then
+  fail "a truncated timing summary cannot complete a receipt"
+else
+  pass "a truncated timing summary cannot complete a receipt"
+fi
+check "the interrupted receipt remains incomplete" \
+  env WTQ_REPORT_TEST="$timing_report" bb -e \
+  '(require (quote clojure.edn))
+   (when (:complete (clojure.edn/read-string (slurp (System/getenv "WTQ_REPORT_TEST"))))
+     (System/exit 1))'
+
 echo "== single branch: a train of one behaves like the old gate"
 new_world single
 feature solo-wtqtest a.txt a
@@ -415,6 +453,8 @@ cat > "$WTQ_GATE_STUB" <<'STUB'
 echo "$*" >> "$STUB_LOG"
 secs="$(cat "$E2E_SECS")"
 printf '─── edit-a.test.js ───\n  [ %ss  executor=ok]\n' "$secs"
+printf '─── edit-tutorial-tour-org.test.js ───\nSKIP: tenancy unavailable\n  [ 1s  executor=ok]\n'
+printf 'diagnostic payload that the baseline does not need\n'
 [ -e DEGRADED ] && echo "  ⚠ ENVIRONMENT DEGRADED: 3 file(s) ran past 2.5x their baseline"
 exit 0
 STUB
@@ -425,6 +465,8 @@ for i in 1 2 3; do
 done
 check "three green runs recorded" eq "$(find "$Q/e2e-runs" -name '*.log' | wc -l)" 3
 check "the local baseline holds their median" grep -qP '^20\tedit-a\.test\.js$' "$Q/e2e-baseline.tsv"
+check "known skipped browser file is absent from the duration baseline" eval "! grep -q 'edit-tutorial-tour-org.test.js' '$Q/e2e-baseline.tsv'"
+check "retained baseline omits unrelated gate output" eval "! grep -q 'diagnostic payload' '$Q/e2e-runs/'*.log"
 echo 500 > "$E2E_SECS"
 feature e4 DEGRADED e4; merge_bg e4; finish e4
 check "a DEGRADED green run is not recorded" eq "$(find "$Q/e2e-runs" -name '*.log' | wc -l)" 3

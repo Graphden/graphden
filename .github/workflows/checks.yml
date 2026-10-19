@@ -29,6 +29,9 @@ on:
 
 env:
   JAVA_VERSION: '21'
+  # Exact-SHA proof needs a fixed toolchain; bump with local gate verification.
+  CLOJURE_CLI_VERSION: '1.12.5.1654'
+  BABASHKA_VERSION: '1.12.213'
 
 jobs:
   release-proof-guard:
@@ -60,7 +63,7 @@ jobs:
       - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
           clj-kondo: '2026.08.04'
-          bb: latest
+          bb: ${{ env.BABASHKA_VERSION }}
 
       # Delegate: the path set lives ONCE, in bb.edn's `all-paths`. When this
       # job spelled its own `src test development`, CI linted a set `bb ci`
@@ -83,8 +86,8 @@ jobs:
 
       - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
-          cli: latest
-          bb: latest
+          cli: ${{ env.CLOJURE_CLI_VERSION }}
+          bb: ${{ env.BABASHKA_VERSION }}
 
       - uses: actions/cache@v6
         with:
@@ -107,7 +110,7 @@ jobs:
 
       - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
-          bb: latest
+          bb: ${{ env.BABASHKA_VERSION }}
 
       - name: Check formatting
         run: bb cljstyle
@@ -126,8 +129,8 @@ jobs:
 
       - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
-          cli: latest
-          bb: latest
+          cli: ${{ env.CLOJURE_CLI_VERSION }}
+          bb: ${{ env.BABASHKA_VERSION }}
 
       - uses: actions/cache@v6
         with:
@@ -183,8 +186,8 @@ jobs:
 
       - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
-          cli: latest
-          bb: latest
+          cli: ${{ env.CLOJURE_CLI_VERSION }}
+          bb: ${{ env.BABASHKA_VERSION }}
 
       - uses: actions/cache@v6
         with:
@@ -205,11 +208,11 @@ jobs:
           set -euo pipefail
           # Keep in sync with the fixtures: postgres:16.11-alpine is pinned in
           # test-infra/shared-container + storage.postgres/test-setup, and
-          # vault-test asks for openbao. Ryuk is testcontainers' own reaper and
+          # test_infra/openbao pins OpenBao 2.5.4. Ryuk is testcontainers' own reaper and
           # picks its tag from the library version, so let IT pull that one —
           # naming a tag here would rot the moment deps.edn bumps.
           docker pull -q postgres:16.11-alpine
-          docker pull -q quay.io/openbao/openbao:latest
+          docker pull -q quay.io/openbao/openbao:2.5.4
 
       - name: Run integration tests
         run: bb test-integration
@@ -262,8 +265,8 @@ jobs:
 
       - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
-          cli: latest
-          bb: latest
+          cli: ${{ env.CLOJURE_CLI_VERSION }}
+          bb: ${{ env.BABASHKA_VERSION }}
 
       - uses: actions/cache@v6
         with:
@@ -300,8 +303,8 @@ jobs:
 
       - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
-          cli: latest
-          bb: latest
+          cli: ${{ env.CLOJURE_CLI_VERSION }}
+          bb: ${{ env.BABASHKA_VERSION }}
 
       - uses: actions/cache@v6
         with:
@@ -346,8 +349,8 @@ jobs:
 
       - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
-          cli: latest
-          bb: latest
+          cli: ${{ env.CLOJURE_CLI_VERSION }}
+          bb: ${{ env.BABASHKA_VERSION }}
 
       - uses: actions/cache@v6
         with:
@@ -387,8 +390,8 @@ jobs:
 
       - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
-          cli: latest
-          bb: latest
+          cli: ${{ env.CLOJURE_CLI_VERSION }}
+          bb: ${{ env.BABASHKA_VERSION }}
 
       - uses: actions/cache@v6
         with:
@@ -445,11 +448,10 @@ jobs:
   # same number on a busy box as on an idle one, so this job cannot flake on its
   # neighbours the way a wall-clock assertion would.
   #
-  # It re-runs the unit suite rather than reusing the `test` job's: budgets are
-  # scoped to the suite that produced their report, and `test` runs `bb test`
-  # (unit AND integration in one invocation), whose counters are a different
-  # population. Jobs run in parallel, so this costs compute minutes, not wall
-  # time.
+  # It re-runs the unit suite to produce perf/runs/unit.edn. The separate
+  # `test` job also runs bb test-unit, but does not publish that report as an
+  # exact-SHA artifact. These jobs run in parallel, so the duplicate costs
+  # compute minutes rather than adding to the critical path.
   perf:
     needs: release-proof-guard
     name: perf (structural budgets)
@@ -464,8 +466,8 @@ jobs:
 
       - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
-          cli: latest
-          bb: latest
+          cli: ${{ env.CLOJURE_CLI_VERSION }}
+          bb: ${{ env.BABASHKA_VERSION }}
 
       - uses: actions/cache@v6
         with:
@@ -499,7 +501,7 @@ jobs:
 
       - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
-          bb: latest
+          bb: ${{ env.BABASHKA_VERSION }}
 
       - name: Run no-stack JS tests
         run: bb test-js
@@ -527,7 +529,7 @@ jobs:
 
       - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
-          bb: latest
+          bb: ${{ env.BABASHKA_VERSION }}
 
       - name: CI selector self-test (scripts/ci_select.clj + checks.edn)
         run: bb ci-test
@@ -687,7 +689,7 @@ jobs:
 
       - uses: DeLaGuardo/setup-clojure@13.7.0
         with:
-          bb: latest
+          bb: ${{ env.BABASHKA_VERSION }}
 
       - run: npm ci
       # npm ci — the committed lockfiles ARE the pin; a fresh resolve of

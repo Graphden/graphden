@@ -26,13 +26,31 @@
       (finally (Files/deleteIfExists temp)))))
 
 
-(defn- phases
+(def ^:private gate-summary-header "── where the gate spent its time ──")
+
+
+(defn- gate-timings
   [output]
-  (into [] (keep (fn [line]
-                   (when-let [[_ seconds name] (re-matches #"\s+(\d+)s\s+(.+)" line)]
-                     (when (not= name "TOTAL")
-                       {:name name :duration-ms (* 1000 (parse-long seconds))}))))
-        (str/split-lines output)))
+  (let [lines (str/split-lines output)
+        header (last (keep-indexed (fn [index line]
+                                     (when (= gate-summary-header line) index))
+                                   lines))]
+    (when-not header
+      (throw (ex-info "Gate timing summary missing" {})))
+    (let [[phase-lines after] (split-with #(not (re-matches #"\s+------" %))
+                                          (drop (inc header) lines))
+          total (some->> (second after)
+                         (re-matches #"\s+(\d+)s\s+TOTAL")
+                         second
+                         parse-long)
+          phases (into [] (keep (fn [line]
+                                  (when-let [[_ seconds name]
+                                             (re-matches #"\s+(\d+)s\s+(.+)" line)]
+                                    {:name name :duration-ms (* 1000 (parse-long seconds))})))
+                       phase-lines)]
+      (when-not (and total (seq phases))
+        (throw (ex-info "Gate timing summary incomplete" {})))
+      {:duration-ms (* 1000 total) :phases phases})))
 
 
 (defn- scope
@@ -59,18 +77,19 @@
   [base output ci-path resources exit]
   (let [ci (when (java.io.File/.exists (io/file ci-path))
              (select-keys (edn/read-string (slurp ci-path))
-                          [:complete :sha :exit :scope]))]
+                          [:complete :sha :exit :scope]))
+        timings (gate-timings output)]
     (assoc base
            :complete true
            :exit exit
-           :duration-ms (reduce + (map :duration-ms (phases output)))
+           :duration-ms (:duration-ms timings)
            :scope (scope output)
            :artifact {:image (image output)
                       :ci-report ci-path
                       :ci-selection (str/replace ci-path #"\.ci\.edn$" ".ci-expected.edn")
                       :resources resources}
            :ci ci
-           :phases (phases output))))
+           :phases (:phases timings))))
 
 
 (defn- base

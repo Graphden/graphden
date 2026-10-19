@@ -37,7 +37,7 @@ echo 'image_test: exact jar accepted, stale image rejected'
 REPORT="$T/train.edn"
 bb "$SRC/report.clj" init "$REPORT" abc123 42
 bb -e '(require (quote clojure.edn)) (let [r (clojure.edn/read-string (slurp (first *command-line-args*)))] (assert (false? (:complete r))))' -- "$REPORT"
-printf '  image build: RUN\n  e2e: SKIPPED — --no-e2e (manual override)\nverified candidate image sha256:test: executor-server.jar sha256 %064d\n  12s  build the CANDIDATE image\n  12s  TOTAL\n' 0 > "$T/gate.log"
+printf '  image build: RUN\n  e2e: SKIPPED — --no-e2e (manual override)\nverified candidate image sha256:test: executor-server.jar sha256 %064d\n── where the gate spent its time ──\n  12s  build the CANDIDATE image\n  ------\n  12s  TOTAL\n' 0 > "$T/gate.log"
 bb "$SRC/report.clj" finish "$REPORT" abc123 42 "$T/gate.log" "$T/ci.edn" "$T/resources.csv" 0
 bb -e '(require (quote clojure.edn)) (let [r (clojure.edn/read-string (slurp (first *command-line-args*)))] (assert (true? (:complete r))) (assert (= 0 (:exit r))) (assert (= 12000 (:duration-ms r))) (assert (= :selected (get-in r [:scope :image-build]))) (assert (= :manual-skip (get-in r [:scope :e2e]))) (assert (= "sha256:test" (get-in r [:artifact :image :id]))))' -- "$REPORT"
 echo 'image_test: partial and finished train receipts verified'

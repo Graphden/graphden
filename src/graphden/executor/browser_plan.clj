@@ -3,11 +3,11 @@
    Authorization and the branch-consistent visibility policy belong to the
    caller. This module performs no execution, storage reads or registry writes."
   (:require
+    [graphden.executor.capabilities :as capabilities]
     [graphden.executor.compile.bindings :as b]
     [graphden.executor.compile.lookups :as l]
     [graphden.executor.compile.renames :as r]
-    [graphden.executor.compile.surface :as surface]
-    [graphden.packages.records.ids :as ids]))
+    [graphden.executor.compile.surface :as surface]))
 
 
 (def ^:private max-safe-integer 9007199254740991)
@@ -145,22 +145,10 @@
   (decode* wire 0 (volatile! max-value-nodes)))
 
 
-(def ^:private primitive-ops
-  (into {}
-        (for [[ns-path names] [["core.logic" [:const :if :equal? :nil? :coalesce]]
-                               ["core.collections" [:list :get :assoc :zipmap :count :take :concat :vals]]
-                               ["core.arithmetic" [:add :mod :lte]]
-                               ["core.hof" [:map :filter :group-by :partition-by :sort-by]]
-                               ["core.strings" [:str :str-starts-with? :str-lower :str-trim :str-contains? :str-clip]]
-                               ["web.html" [:hiccup]]]
-              n names]
-          [(ids/fn-id ns-path n) (name n)])))
-
-
 (defn supported-primitive-ids
   "Canonical package identities implemented by this bounded backend."
   []
-  (set (keys primitive-ops)))
+  (capabilities/browser-primitive-ids))
 
 
 (defn- wire-name
@@ -212,11 +200,7 @@
    Reuse the JVM's parameter/capture decisions; callable producers and env HOFs stay closed."
   [{:keys [kind slot-id ref-id] :as binding} fid lookups context]
   (when-not (and (= :ref kind)
-                 (contains? #{(ids/slot-id (ids/fn-id "core.hof" :map) :func)
-                              (ids/slot-id (ids/fn-id "core.hof" :filter) :pred)
-                              (ids/slot-id (ids/fn-id "core.hof" :group-by) :key-fn)
-                              (ids/slot-id (ids/fn-id "core.hof" :partition-by) :key-fn)
-                              (ids/slot-id (ids/fn-id "core.hof" :sort-by) :key-fn)} slot-id)
+                 (capabilities/browser-callable-slot? slot-id)
                  (not (:env-binding? context)))
     (reject! :callable-binding context))
   (let [params (r/hof-lambda-params ref-id slot-id binding fid lookups)
@@ -272,7 +256,7 @@
         primitive (:id root)
         bindings (b/collect-bindings fid lookups)
         env (b/collect-env-bindings fid lookups)]
-    (when-not (contains? primitive-ops primitive)
+    (when-not (capabilities/browser-op primitive)
       (reject! :unsupported-primitive context))
     {:plan {:id (str fid) :primitive (str primitive)
             :aliases (mapv (fn [{:keys [rename-name chain-name]}]
@@ -333,7 +317,7 @@
                     (vswap! primitives conj primitive)))))]
       (doseq [fid roots] (visit fid []))
       {:functions @order
-       :primitives (mapv (fn [id] {:id (str id) :op (get primitive-ops id)})
+       :primitives (mapv (fn [id] {:id (str id) :op (capabilities/browser-op id)})
                          (sort @primitives))})))
 
 
@@ -358,7 +342,7 @@
          entries (into (sorted-map) (map (fn [[k v]] [(wire-name k) (str v)])) entry-ids)
          roots (mapv val (sort-by (comp str key) entry-ids))
          plans (collect-plans roots lookups allow-fn?)]
-     (merge {:format 1 :primitiveAbi 1 :entries entries
+     (merge {:format 1 :primitiveAbi capabilities/browser-primitive-abi :entries entries
              :inputs (into {} (map (fn [fid]
                                      [(str fid) (derive! {:fn-id fid :path [fid]}
                                                          #(input-plan fid lookups))])) roots)}

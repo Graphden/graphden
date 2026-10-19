@@ -919,6 +919,11 @@ A callable supporting profiles S satisfies a requirement R when `R ⊆ S`.
 Thus a callable supporting both profiles satisfies a browser requirement;
 a server-only callable does not. Execution profiles are separate from effect
 permissions, access control, and the portability of captured runtime values.
+Native JVM support is derived from the registered Clojure implementation.
+Browser support comes from the identity-keyed trusted primitive capability
+registry, also used by the exporter for its ABI and callback-slot support.
+An authored execution field or a matching function name cannot add support;
+an implementation missing from the supported browser ABI remains unsupported.
 
 Execution variables have a separate sort and substitutions from value-type
 variables. Each call freshens their local scope. Multiple callbacks constrain

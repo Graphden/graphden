@@ -20,6 +20,7 @@
      primitive `value-kind`."
   (:require
     [clojure.tools.logging :as log]
+    [graphden.executor.capabilities :as capabilities]
     [graphden.executor.composition.core :as composition]
     [graphden.executor.registry :as base-registry]
     [graphden.packages.records :as records]
@@ -495,7 +496,9 @@
                           ;; consumer downstream to write (or (:effects info)
                           ;; #{}) to recover the pure case. Storing #{}
                           ;; explicitly drops the asymmetry.
-                          :effects final-effects}
+                          :effects final-effects
+                          :execution (capabilities/native-execution
+                                       fn-id (:impl fn-def))}
                    (and desc (seq desc))      (assoc :description desc)
                    (:return-type-rule fn-def) (assoc :return-type-rule
                                                      (:return-type-rule fn-def))

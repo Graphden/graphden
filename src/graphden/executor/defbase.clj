@@ -146,7 +146,11 @@
    The arg-syms vector names the args referenced in the body; their types
    live in the package's `fns.edn`. The body refers to args as bare symbols
    and to `ctx` for the execution context. Everything else works like
-   normal Clojure — `if`/`and`/`or` short-circuit naturally."
+   normal Clojure — `if`/`and`/`or` short-circuit naturally.
+
+   The implementation proves native JVM support when registered. Additional
+   backend support comes from the trusted identity-keyed capability registry;
+   an implementation's purity does not establish browser support."
   {:arglists '([fn-name docstring? [arg-syms] & body])}
   [fn-name & macro-args]
   (let [[docstring args-vec & body] (if (string? (first macro-args))

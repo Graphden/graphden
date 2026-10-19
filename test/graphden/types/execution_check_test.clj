@@ -103,3 +103,17 @@
   (check/check-fn-def! {:name :gradual-value-binding :parent :unknown-value-consumer
                         :args {:value :unknown-producer}})
   (is (= :int (:return (registry/rich-type-of :gradual-value-binding)))))
+
+
+(deftest registry-derives-native-execution-from-implementation-and-identity
+  (doseq [[name ns-path expected]
+          [[:add "core.arithmetic" #{:jvm-server :browser-main}]
+           [:add "user.arithmetic" #{:jvm-server}]
+           [:reduce "core.hof" #{:jvm-server}]]]
+    (registry/record-rich-types! name
+                                 {:namespace ns-path :args {} :return-type :int :impl (fn [_ _] 1)
+                                  :execution #{:browser-main}})
+    (is (= expected (:execution (registry/rich-type-of (keyword ns-path (clojure.core/name name)))))))
+  (registry/record-rich-types! :unproven
+                               {:args {} :return-type :int :execution #{:jvm-server :browser-main}})
+  (is (= :unknown (:execution (registry/rich-type-of :unproven)))))

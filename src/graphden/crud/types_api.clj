@@ -485,6 +485,43 @@
               (rest c))))))
 
 
+(defn- invalid-callable-wire!
+  [position value]
+  (throw (ex-info "Invalid callable type expression"
+                  {:type :validation-error/invalid-type-expression
+                   :position position :value value})))
+
+
+(defn- json->effect-constraint
+  [value]
+  (cond
+    (or (nil? value) (contains? #{:any "any"} value)) (if (nil? value) nil :any)
+    (and (or (sequential? value) (set? value))
+         (every? #(or (string? %) (keyword? %)) value))
+    (into #{} (map #(if (string? %) (keyword %) %)) value)
+    :else (invalid-callable-wire! :effects value)))
+
+
+(defn- json->execution-constraint
+  [value]
+  (let [execution
+        (cond
+          (contains? #{:unknown "unknown"} value) :unknown
+          (and (vector? value) (contains? #{:execution-var "execution-var"} (first value)))
+          (if (and (= 2 (count value))
+                   (or (symbol? (second value))
+                       (and (string? (second value)) (seq (second value)))))
+            [:execution-var (symbol (second value))]
+            (invalid-callable-wire! :execution value))
+          (and (or (sequential? value) (set? value))
+               (every? #(or (string? %) (keyword? %)) value))
+          (into #{} (map #(if (string? %) (keyword %) %)) value)
+          :else (invalid-callable-wire! :execution value))]
+    (when-not (types/execution-constraint? execution)
+      (invalid-callable-wire! :execution value))
+    execution))
+
+
 (defn json->type
   "Inverse of cheshire's default Clojure→JSON encoding for type
    expressions. The wire format is whatever `(rich-types-with-type-rows)`
@@ -522,9 +559,24 @@
           (map (fn [[k v]] [(if (string? k) (keyword k) k) (json->type v)]))
           x)
 
+    ;; Callable contract positions are not value types: JSON arrays encode
+    ;; effect/profile sets, and an execution variable has its own symbol sort.
+    ;; Preserve legacy arity so anonymous storage identities do not change.
+    (and (sequential? x) (contains? #{:fn "fn"} (first x)))
+    (do
+      (when-not (contains? #{3 4 5} (count x))
+        (invalid-callable-wire! :shape x))
+      (let [args (json->type (nth x 1))
+            ret (json->type (nth x 2))]
+        (when-not (or (nil? args) (map? args))
+          (invalid-callable-wire! :args args))
+        (cond-> [:fn args ret]
+          (>= (count x) 4) (conj (json->effect-constraint (nth x 3)))
+          (= (count x) 5) (conj (json->execution-constraint (nth x 4))))))
+
     ;; Refinement — decode `base` as a type, then hand the constraint
     ;; to `json->constraint` with the base as the disambiguating
-    ;; context. Everything else (union / variant / fn / list / record)
+    ;; context. Other compound value types (union / variant / list / record)
     ;; carries only types and recurses uniformly below.
     (and (vector? x) (#{:refine "refine"} (first x)))
     (let [base (json->type (second x))]

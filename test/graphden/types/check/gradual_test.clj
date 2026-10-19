@@ -67,9 +67,19 @@
 
 
 (deftest erase-keeps-shape-test
-  (testing "fn effects survive the walk on both sides"
-    (is (= [[:fn {:item :int} :text #{:io}] [:fn {:item :int} :text #{}]]
+  (testing "legacy callable effects survive canonicalization without execution proof"
+    (is (= [[:fn {:item :int} :text #{:io} :unknown] [:fn {:item :int} :text #{} :unknown]]
            (gradual/erase [:fn {:item :int} :text #{:io}] [:fn {:item :any} :text #{}] []))))
+  (testing "canonical callable execution is retained independently on both sides"
+    (doseq [[actual-execution expected-execution]
+            [[:unknown #{:browser-main}]
+             [#{} #{:jvm-server}]
+             [#{:jvm-server :browser-main} #{}]
+             [[:execution-var 'E] [:execution-var 'F]]]]
+      (is (= [[:fn {:item :int} :text #{:io} actual-execution]
+              [:fn {:item :int} :text #{} expected-execution]]
+             (gradual/erase [:fn {:item :int} :text #{:io} actual-execution]
+                            [:fn {:item :any} :text #{} expected-execution] [])))))
   (testing "a union expected keeps the member that fit and the rest"
     (is (= [{:k :int} [:union :null {:k :int}]]
            (gradual/erase {:k :any} [:union :null {:k :int}] []))))

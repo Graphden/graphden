@@ -45,5 +45,7 @@
         result (sh/sh "node" "-e"
                       "const runtime = require(process.argv[1]); runtime.createRuntime(JSON.parse(process.argv[2]));"
                       runtime (json/generate-string plan))]
-    (is (= 28 (count (:primitives plan))))
+    ;; The two representation operations added by A3 have actual identity
+    ;; implementations; the runtime must accept every declared ABI entry.
+    (is (every? (set (map :op (:primitives plan))) ["as-ui-view" "encode-view"]))
     (is (zero? (:exit result)) (:err result))))

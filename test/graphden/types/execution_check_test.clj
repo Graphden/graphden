@@ -3,6 +3,7 @@
   (:require
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.executor.registry.core :as registry]
+    [graphden.packages.records.ids :as ids]
     [graphden.types.check :as check]
     [graphden.types.core :as types]))
 
@@ -106,14 +107,20 @@
 
 
 (deftest registry-derives-native-execution-from-implementation-and-identity
-  (doseq [[name ns-path expected]
-          [[:add "core.arithmetic" #{:jvm-server :browser-main}]
-           [:add "user.arithmetic" #{:jvm-server}]
-           [:reduce "core.hof" #{:jvm-server}]]]
-    (registry/record-rich-types! name
-                                 {:namespace ns-path :args {} :return-type :int :impl (fn [_ _] 1)
-                                  :execution #{:browser-main}})
-    (is (= expected (:execution (registry/rich-type-of (keyword ns-path (clojure.core/name name)))))))
+  (let [cases [[:add "core.arithmetic" #{:jvm-server :browser-main}]
+               [:add "user.arithmetic" #{:jvm-server}]
+               [:reduce "core.hof" #{:jvm-server}]]]
+    (doseq [ordered [cases (reverse cases)]]
+      (doseq [[name ns-path _] ordered]
+        ;; Production records supply their exact row identity. Bare-name
+        ;; two-arity re-records deliberately target the existing name entry.
+        (registry/record-rich-types! (ids/fn-id ns-path name) name
+                                     {:namespace ns-path :args {} :return-type :int :impl (fn [_ _] 1)
+                                      :execution #{:browser-main}}))
+      (doseq [[name ns-path expected] cases]
+        (let [entry (registry/rich-type-of (keyword ns-path (clojure.core/name name)))]
+          (is (= (ids/fn-id ns-path name) (:fn-id entry)))
+          (is (= expected (:execution entry)))))))
   (registry/record-rich-types! :unproven
                                {:args {} :return-type :int :execution #{:jvm-server :browser-main}})
   (is (= :unknown (:execution (registry/rich-type-of :unproven)))))

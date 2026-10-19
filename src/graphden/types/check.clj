@@ -488,6 +488,21 @@
       :else next-subst)))
 
 
+(defn- bind-subtype-variables!
+  "Extract substitutions after subtype succeeds. Containers can fit :jsonb
+   without value unification, but execution variables still require bounds."
+  [{:keys [expected actual] :as ctx} subst]
+  (if (or (has-type-var? expected) (has-type-var? actual))
+    (let [next-subst (types/unify expected actual subst)]
+      (if (types/fail? next-subst)
+        (if (or (types/has-execution-vars? expected)
+                (types/has-execution-vars? actual))
+          (throw-mismatch! ctx)
+          subst)
+        next-subst))
+    subst))
+
+
 (defn- check-binding!
   "For a single binding, verify `actual ⊆ expected`. When `expected`
    carries type variables, bind them with unify, then check direction.
@@ -498,101 +513,85 @@
    `:actual`) so callers can format their own diagnostics if
    needed."
   [parent-name arg-name expected actual subst fn-name b-form]
-  (cond
-    ;; Type-var on EITHER side + `:any`-shaped actual — bind the var
-    ;; via unify FIRST. Without this, `:if`'s `:then a` slot bound to
-    ;; an actual `[:map :any :any]` would fall into the silent-pass
-    ;; below, leaving `a` unbound; `:if`'s declared `[:union a b]`
-    ;; return then surfaces a literal `"a"` typevar string in the
-    ;; registry, polluting downstream consumers (the structural-any
-    ;; from the binding IS information — that's the bind path, not
-    ;; a no-op).
-    (and (or (has-type-var? expected) (has-type-var? actual))
-         (gradual/any-shape? actual))
-    (let [next-subst (types/unify expected actual subst)]
-      (if (types/fail? next-subst) subst next-subst))
+  (let [ctx (mismatch-context parent-name fn-name arg-name b-form expected actual)]
+    (cond
+      ;; Type-var on EITHER side + `:any`-shaped actual — bind the var
+      ;; via unify FIRST. Without this, `:if`'s `:then a` slot bound to
+      ;; an actual `[:map :any :any]` would fall into the silent-pass
+      ;; below, leaving `a` unbound; `:if`'s declared `[:union a b]`
+      ;; return then surfaces a literal `"a"` typevar string in the
+      ;; registry, polluting downstream consumers (the structural-any
+      ;; from the binding IS information — that's the bind path, not
+      ;; a no-op).
+      (and (or (has-type-var? expected) (has-type-var? actual))
+           (gradual/any-shape? actual))
+      (let [next-subst (types/unify expected actual subst)]
+        (if (types/fail? next-subst) subst next-subst))
 
-    ;; Broad callable values retain their execution/effect evidence. Fill
-    ;; value holes inside them, then judge the surviving contracts.
-    (and (gradual/any-value-shape? actual)
-         (not (gradual/any-shape? actual)))
-    (unify-binding! (mismatch-context parent-name fn-name arg-name
-                                      b-form expected actual)
-                    subst)
+      ;; Broad callable values retain their execution/effect evidence. Fill
+      ;; value holes inside them, then judge the surviving contracts.
+      (and (gradual/any-value-shape? actual)
+           (not (gradual/any-shape? actual)))
+      (unify-binding! ctx subst)
 
-    ;; `:any` (or structural-`:any` like `[:map :any :any]` /
-    ;; `[:list :any]`) — the doc's static escape hatch. Carries no
-    ;; static information either way, so silent-pass. (`:null` used
-    ;; to pass too, as a blanket runtime escape hatch. Now that
-    ;; nil-producing base-fns are typed `[:union :null T]`, a bare
-    ;; `:null` actual is checked normally: it satisfies a nullable /
-    ;; `:any` / type-var slot via subtype? / unify, and is correctly
-    ;; REJECTED by a concrete non-null slot.)
-    (gradual/any-shape? actual)
-    subst
+      ;; `:any` (or structural-`:any` like `[:map :any :any]` /
+      ;; `[:list :any]`) — the doc's static escape hatch. Carries no
+      ;; static information either way, so silent-pass. (`:null` used
+      ;; to pass too, as a blanket runtime escape hatch. Now that
+      ;; nil-producing base-fns are typed `[:union :null T]`, a bare
+      ;; `:null` actual is checked normally: it satisfies a nullable /
+      ;; `:any` / type-var slot via subtype? / unify, and is correctly
+      ;; REJECTED by a concrete non-null slot.)
+      (gradual/any-shape? actual)
+      subst
 
-    ;; `:never` (bottom) actual — a divergent `:throw` branch. It fits
-    ;; any expected type, but we unify rather than pass silently so a
-    ;; type-var expected (e.g. `:if`'s `:then` slot) BINDS to `:never`.
-    ;; Without the binding the branch union keeps a free var instead
-    ;; of letting `make-union` absorb the bottom. `unify` with a
-    ;; `:never` operand always succeeds, so the result is never a fail.
-    (= actual :never)
-    (let [s (types/unify expected actual subst)]
-      (if (types/fail? s) subst s))
-
-    ;; Refinement on a LITERAL value: if we know the literal AND
-    ;; can evaluate the constraint, accept-or-reject inline. The
-    ;; expected is read THROUGH `subst`: a slot typed by a variable an
-    ;; earlier binding (or a declared `:return-type`) pinned to a
-    ;; refinement — `:const`'s `:value a` under `:return-type
-    ;; :positive-int`, `:coalesce`'s `:default a` — is that refinement
-    ;; here, and the literal decides it, instead of falling through to
-    ;; the var fallback where its classified `:int` is only wider. A
-    ;; declared alias (`:non-negative-int`) is read through to its
-    ;; `[:refine …]` body the same way.
-    (and (types/refine-type? (types/resolve-alias (types/resolve subst expected)))
-         (some? b-form)
-         (literal-binding? b-form))
-    (check-refinement-on-literal parent-name arg-name
-                                 (types/resolve-alias (types/resolve subst expected))
-                                 actual subst fn-name b-form
-                                 (literal-binding-value b-form))
-
-    ;; Check subtype before unify: containers fit :jsonb regardless of
-    ;; inner variables, while unify may reject the same pair. On success,
-    ;; still extract any variable bindings so a callback returning a map
-    ;; does not leave :try's return variable unresolved downstream.
-    (types/subtype? actual expected)
-    (if (or (has-type-var? expected) (has-type-var? actual))
+      ;; `:never` (bottom) actual — a divergent `:throw` branch. It fits
+      ;; any expected type, but we unify rather than pass silently so a
+      ;; type-var expected (e.g. `:if`'s `:then` slot) BINDS to `:never`.
+      ;; Without the binding the branch union keeps a free var instead
+      ;; of letting `make-union` absorb the bottom. `unify` with a
+      ;; `:never` operand always succeeds, so the result is never a fail.
+      (= actual :never)
       (let [s (types/unify expected actual subst)]
-        (if (types/fail? s)
-          (if (or (types/has-execution-vars? expected)
-                  (types/has-execution-vars? actual))
-            (throw-mismatch! (mismatch-context parent-name fn-name arg-name
-                                               b-form expected actual))
-            subst)
-          s))
-      subst)
+        (if (types/fail? s) subst s))
 
-    ;; A concrete record/list literal may satisfy refinements nested below
-    ;; its top-level shape. The directional literal check validates every
-    ;; nested value and keeps markers closed; references have no samples.
-    (and (some? b-form) (literal-binding? b-form)
-         (not (has-type-var? expected)) (not (has-type-var? actual))
-         (gradual/fits? actual expected [(literal-binding-value b-form)]))
-    subst
+      ;; Refinement on a LITERAL value: if we know the literal AND
+      ;; can evaluate the constraint, accept-or-reject inline. The
+      ;; expected is read THROUGH `subst`: a slot typed by a variable an
+      ;; earlier binding (or a declared `:return-type`) pinned to a
+      ;; refinement — `:const`'s `:value a` under `:return-type
+      ;; :positive-int`, `:coalesce`'s `:default a` — is that refinement
+      ;; here, and the literal decides it, instead of falling through to
+      ;; the var fallback where its classified `:int` is only wider. A
+      ;; declared alias (`:non-negative-int`) is read through to its
+      ;; `[:refine …]` body the same way.
+      (and (types/refine-type? (types/resolve-alias (types/resolve subst expected)))
+           (some? b-form)
+           (literal-binding? b-form))
+      (check-refinement-on-literal parent-name arg-name
+                                   (types/resolve-alias (types/resolve subst expected))
+                                   actual subst fn-name b-form
+                                   (literal-binding-value b-form))
 
-    ;; Unification binds variables; gradual/fits? then enforces direction
-    ;; on the concrete structure, retaining the literal/refinement escape.
-    (or (has-type-var? expected) (has-type-var? actual))
-    (unify-binding! (mismatch-context parent-name fn-name arg-name
-                                      b-form expected actual)
-                    subst)
+      ;; Preserve substitutions even when subtype alone already accepts.
+      (types/subtype? actual expected)
+      (bind-subtype-variables! ctx subst)
 
-    :else
-    (throw-mismatch! (mismatch-context parent-name fn-name arg-name
-                                       b-form expected actual))))
+      ;; A concrete record/list literal may satisfy refinements nested below
+      ;; its top-level shape. The directional literal check validates every
+      ;; nested value and keeps markers closed; references have no samples.
+      (and (some? b-form) (literal-binding? b-form)
+           (not (has-type-var? expected)) (not (has-type-var? actual))
+           (gradual/fits? actual expected [(literal-binding-value b-form)]))
+      subst
+
+      ;; Unification binds variables; gradual/fits? then enforces direction
+      ;; on the concrete structure, retaining the literal/refinement escape.
+      (or (has-type-var? expected) (has-type-var? actual))
+      (unify-binding! ctx subst)
+
+      :else
+      (throw-mismatch! ctx))))
 
 
 ;; -----------------------------------------------------------------------------

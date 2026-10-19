@@ -14,7 +14,7 @@
   "Every :group a checks.edn entry may carry. A typo'd group would silently
    misclassify a check (e.g. the unit suite running in the lint wave, without
    the machine-wide lock) — validate-registry! rejects it instead."
-  #{:clj :web :infra :docs :sec :commit :test :post-test :info})
+  #{:clj :web :infra :docs :sec :commit :priority :test :post-test :info})
 
 
 (defn read-registry
@@ -70,12 +70,12 @@
   [registry checks]
   (let [selected (into {} (map (juxt :name identity)) checks)
         names (set (map :name registry))
-        wave-key #(case (:group %) :test :test :post-test :post-test :pre)]
+        wave-key #(case (:group %) :priority :priority :test :test :post-test :post-test :pre)]
     (when (or (not= (count checks) (count selected))
               (some #(not (contains? names %)) (keys selected)))
       (throw (ex-info "Selected checks must have unique registered names" {})))
     (into {}
-          (for [wave [:pre :test :post-test]]
+          (for [wave [:pre :priority :test :post-test]]
             [wave (->> registry
                        (filter #(= wave (wave-key %)))
                        (partition-all 8)

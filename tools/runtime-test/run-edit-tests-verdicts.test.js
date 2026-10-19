@@ -34,7 +34,7 @@ function assert(cond, msg, out) {
 
 // Stub tests are bash scripts run by the fake `node`. Each gets its attempt
 // number from a counter file and does what its `plan` line says:
-//   pass | fail:<msg> | envfail:<msg> (the probe is dead at failure time)
+//   pass | skip:<msg> | fail:<msg> | envfail:<msg> (the probe is dead at failure time)
 function stubTest(dir, name, plan) {
   const body = `#!/usr/bin/env bash
 n_file="$STUB_STATE/${name}.n"; n=$(( $(cat "$n_file" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$n_file"
@@ -42,6 +42,7 @@ plan=(${plan.map((p) => `'${p}'`).join(' ')})
 step="\${plan[$((n-1))]:-\${plan[\${#plan[@]}-1]}}"
 case "$step" in
   pass) echo "  ✓ ok"; exit 0 ;;
+  skip:*) echo "SKIP: \${step#skip:}"; exit 0 ;;
   fail:*) echo "  ✗ \${step#fail:}" >&2; exit 1 ;;
   rebuildfail:*) echo 1 > "$STUB_STATE/rebuilds"; echo 300 > "$STUB_STATE/clock"; echo "  ✗ late cleanup" >&2; exit 1 ;;
   recentfail:*) echo 1 > "$STUB_STATE/rebuilds"; echo 140 > "$STUB_STATE/clock"; echo "  ✗ compilation window" >&2; exit 1 ;;
@@ -107,6 +108,37 @@ if [ -n "$out" ]; then [ "$out" = /dev/null ] || printf '%s' "$body" > "$out"; e
 }
 
 console.log(' two REAL races in one run are two red files, not host jitter');
+
+console.log(' declared skips are visible and an unregistered skip is red');
+{
+  const declared = runSuite({'edit-tutorial-tour-org.test.js': ['skip:tenancy unavailable']});
+  assert(declared.code === 0
+         && /edit suite: 0 pass \/ 1 skip \/ 0 fail \/ 1 total/.test(declared.out)
+         && /skipped: edit-tutorial-tour-org\.test\.js/.test(declared.out),
+         'known environment skip is counted separately from pass', declared.out);
+  const tokenAddon = runSuite({'edit-tutorial-token-lifecycle.test.js': ['skip:account addon unavailable']});
+  assert(tokenAddon.code === 0
+         && /edit suite: 0 pass \/ 1 skip \/ 0 fail \/ 1 total/.test(tokenAddon.out),
+         'token lesson skip is counted separately from pass', tokenAddon.out);
+  const sharedCloud = runSuite({'edit-tutorial-tour-queues.test.js': ['skip:shared cloud has no persistent worker']});
+  assert(sharedCloud.code === 0
+         && /edit suite: 0 pass \/ 1 skip \/ 0 fail \/ 1 total/.test(sharedCloud.out),
+         'shared-cloud queue lesson skip is counted separately from pass', sharedCloud.out);
+  const optionalVault = runSuite({'edit-secret-inline.test.js': ['skip:Vault unavailable']},
+    {GRAPHDEN_VAULT_OPTIONAL: '1'});
+  assert(optionalVault.code === 0
+         && /edit suite: 0 pass \/ 1 skip \/ 0 fail \/ 1 total/.test(optionalVault.out),
+         'explicit local Vault opt-out is counted separately', optionalVault.out);
+  const requiredVault = runSuite({'edit-secret-inline.test.js': ['skip:Vault unavailable']},
+    {GRAPHDEN_VAULT_OPTIONAL: '0'});
+  assert(requiredVault.code !== 0
+         && /edit-secret-inline\.test\.js\(unexpected-skip\)/.test(requiredVault.out),
+         'CI cannot silently skip required Vault coverage', requiredVault.out);
+  const unexpected = runSuite({'edit-a.test.js': ['skip:missing fixture']});
+  assert(unexpected.code !== 0 && /edit-a\.test\.js\(unexpected-skip\)/.test(unexpected.out),
+         'new silent skip fails the suite', unexpected.out);
+}
+
 {
   const r = runSuite({
     'edit-a.test.js': ['fail:race A', 'pass'],

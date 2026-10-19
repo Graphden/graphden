@@ -105,7 +105,7 @@ async function cleanup(page, finish) {
     if (plan && plan !== 'dedicated') {
       assert(!REQUIRED, 'required service gate has a dedicated executor');
       finished = true;
-      console.log('SKIP lesson 39: shared-cloud plan has no persistent worker');
+      console.log('SKIP: lesson 39 requires a persistent worker (shared-cloud plan)');
       return;
     }
     await page.goto(BASE + '/');

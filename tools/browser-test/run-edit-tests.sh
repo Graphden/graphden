@@ -88,6 +88,18 @@ if [ -z "$FILES" ]; then
   echo "no edit-*.test.js files found" >&2
   exit 2
 fi
+if [ -n "${GRAPHDEN_E2E_PRIORITY_BASE:-}" ]; then
+  # The planner returns a permutation of this exact glob, with explicitly
+  # related files first. A planner error must fail the run, not omit tests.
+  ORIGINAL_FILES="$FILES"
+  FILES="$(cd ../.. && bb scripts/ci_priority.clj browser-order "$GRAPHDEN_E2E_PRIORITY_BASE")" || exit 2
+  [ -n "$FILES" ] || { echo "empty prioritized browser list" >&2; exit 2; }
+  if [ "$(printf '%s\n' "$FILES" | sort)" != "$(printf '%s\n' "$ORIGINAL_FILES" | sort)" ]; then
+    echo "prioritized browser list is not the complete suite" >&2
+    exit 2
+  fi
+  echo "browser order: $(printf '%s\n' "$FILES" | head -n 5 | tr '\n' ' ') ..."
+fi
 
 # Playwright does NOT await an async `waitForFunction` predicate: the pending
 # Promise is truthy, the wait returns on its first tick, and the "wait" is
@@ -447,6 +459,8 @@ SLOW_FILES=""       # "file(secs>limit)" for the DEGRADED banner
 WORST=0
 PASS=0
 FAIL=0
+SKIP=0
+SKIPPED_NAMES=""
 FAILED_NAMES=""
 # --- run-level thrash detection (decided in the escalation block after the loop) ---
 # A strict-flake (a file that fails once then PASSES on retry) and a leak-in-a-
@@ -578,6 +592,7 @@ for f in $FILES; do
   deterministic=0     # stopped early: the same REAL assertion failure twice in a row
   prev_real_sig=""    # the previous attempt's REAL assertion signature, if it was one
   judged_secs=""      # the passing attempt's seconds, else the fastest failed one
+  skip_reason=""
   for attempt in 1 2 3 4 5; do
     if [ "$attempt" -gt 1 ]; then
       echo "  (attempt $((attempt - 1)) rc=$rc — sleeping 10s, retry $attempt/5)" >&2
@@ -593,6 +608,7 @@ for f in $FILES; do
     if timeout -k 5 "${PER_TEST_TIMEOUT:-300}" node "$f" >"$attempt_out" 2>&1; then
       judged_secs=$((SECONDS - ATTEMPT_START))
       stop_counter_sampler
+      skip_reason="$(grep -m1 '^SKIP:' "$attempt_out" || true)"
       cat "$attempt_out"; rm -f "$attempt_out"
       passed=1
       [ -d "$GRAPHDEN_TOUR_AUDIT" ] && AUDIT_DIRS="$AUDIT_DIRS $GRAPHDEN_TOUR_AUDIT"
@@ -665,8 +681,32 @@ for f in $FILES; do
     fi
   done
   if [ "$passed" = 1 ]; then
-    PASS=$((PASS+1))
-    if [ "$attempt" -gt 1 ]; then
+    if [ -n "$skip_reason" ]; then
+      case "$f" in
+        edit-auth-login.test.js|edit-tutorial-tour-org.test.js|edit-tutorial-token-lifecycle.test.js|edit-tutorial-tour-queues.test.js)
+          SKIP=$((SKIP+1))
+          SKIPPED_NAMES="$SKIPPED_NAMES $f"
+          echo "  (declared SKIP, not counted as PASS: $skip_reason)" >&2 ;;
+        edit-secret-inline.test.js|edit-secrets-list.test.js|edit-secrets-rotate.test.js)
+          if [ "${GRAPHDEN_VAULT_OPTIONAL:-0}" = "1" ]; then
+            SKIP=$((SKIP+1))
+            SKIPPED_NAMES="$SKIPPED_NAMES $f"
+            echo "  (declared SKIP, not counted as PASS: $skip_reason)" >&2
+          else
+            FAIL=$((FAIL+1)); WORST=1; passed=0
+            FAILED_NAMES="$FAILED_NAMES $f(unexpected-skip)"
+            echo "  (Vault SKIP requires GRAPHDEN_VAULT_OPTIONAL=1: $skip_reason)" >&2
+          fi
+          ;;
+        *)
+          FAIL=$((FAIL+1)); WORST=1; passed=0
+          FAILED_NAMES="$FAILED_NAMES $f(unexpected-skip)"
+          echo "  (unexpected SKIP is a failure: $skip_reason)" >&2 ;;
+      esac
+    else
+      PASS=$((PASS+1))
+    fi
+    if [ "$passed" = 1 ] && [ "$attempt" -gt 1 ]; then
       FLAKED="$FLAKED $f"
       # Only a retry some failure of which was ENVIRONMENT-signed counts toward
       # the run-level thrash trigger. A file whose every failure was a real
@@ -846,7 +886,12 @@ if [ -n "$AUDIT_DIRS" ]; then
 fi
 
 echo "============================================================"
-echo "edit suite: $PASS pass / $FAIL fail / $((PASS+FAIL)) total"
+if [ "$SKIP" -gt 0 ]; then
+  echo "edit suite: $PASS pass / $SKIP skip / $FAIL fail / $((PASS+SKIP+FAIL)) total"
+  echo "  skipped:$SKIPPED_NAMES"
+else
+  echo "edit suite: $PASS pass / $FAIL fail / $((PASS+FAIL)) total"
+fi
 if [ -n "$UNRUN_AFTER_RED" ]; then
   echo "  NOT RUN after gate failure:$UNRUN_AFTER_RED" >&2
 fi
@@ -882,7 +927,7 @@ echo "── where the time went ──"
 printf '%s' "$TIMINGS" | sort -rn | head -12 \
   | awk -F'\t' '{printf "  %4ds  %-10s %s\n", $1, $2, $3}'
 TOTAL_SECS=$((SECONDS - SUITE_START))
-FILE_COUNT=$((PASS + FAIL))
+FILE_COUNT=$((PASS + SKIP + FAIL))
 [ "$FILE_COUNT" -gt 0 ] && echo "  ---" \
   && printf '  %4ds  TOTAL (%d files, %ds median-ish avg)\n' \
        "$TOTAL_SECS" "$FILE_COUNT" "$((TOTAL_SECS / FILE_COUNT))"

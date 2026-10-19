@@ -1,10 +1,10 @@
 ;; The runtime classifier may exempt only coordinates whose alias has been
 ;; audited as tooling-only. Keep every other deps.edn value byte-independent
 ;; but semantically identical; any unreadable ref/form stays on the full gate.
-(ns deps-scope
+(ns wtq.deps-scope
   (:require
     [clojure.edn :as edn]
-    [clojure.java.shell :as shell]
+    [clojure.java.shell :as sh]
     [clojure.string :as str])
   (:import
     (java.io
@@ -18,7 +18,7 @@
 
 (defn read-deps
   [repo ref]
-  (let [{:keys [exit out]} (shell/sh "git" "-C" repo "show" (str ref ":deps.edn"))]
+  (let [{:keys [exit out]} (sh/sh "git" "-C" repo "show" (str ref ":deps.edn"))]
     (when (zero? exit)
       (with-open [reader (PushbackReader. (StringReader. out))]
         (let [eof (Object.)

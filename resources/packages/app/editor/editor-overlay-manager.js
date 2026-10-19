@@ -275,7 +275,9 @@ function createPlaceholderOverlay(node, container) {
   Object.assign(wrap.style, {
     position: 'absolute',
     pointerEvents: 'none',  // children opt back in
-    // Keep the bind button reachable when a short edge label reaches its endpoint.
+    // A long edge label can reach the target and overlap this small button.
+    // Keep the binder clickable above edge labels (11), while its wrapper
+    // remains transparent to pointer events outside the button.
     zIndex: '12',
     background: 'transparent',
     border: 'none',

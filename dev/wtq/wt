@@ -84,6 +84,7 @@ HOLDER="$WTQ_DIR/holder"
 LOG_DIR="$WTQ_DIR/logs"
 TASKS_DIR="$WTQ_DIR/tasks"       # task specs — live under .git, never in the working tree
 RESULT_DIR="$WTQ_DIR/results"    # machine-readable last gate outcome per feature
+PRIOR_TRAIN_DIR="$WTQ_DIR/prior-train" # durable SHA → train receipt, survives requeue/verdict
 QUEUE_DIR="$WTQ_DIR/queue"       # one entry per branch waiting for a train (see "merge train")
 SOON_DIR="$WTQ_DIR/soon"         # "I will enqueue within N minutes" markers
 BISECT_DIR="$WTQ_DIR/bisect"     # per red-train bisection budget
@@ -93,7 +94,7 @@ LINT_LOCK="$WTQ_DIR/lint.lock"   # one pre-queue lint at a time (see cmd_merge)
 LINT_HOLDER="$WTQ_DIR/lint.holder"
 E2E_RUNS_DIR="$WTQ_DIR/e2e-runs" # the e2e output of the last green gates (rolling baseline)
 E2E_BASELINE_LOCAL="$WTQ_DIR/e2e-baseline.tsv"
-mkdir -p "$LOG_DIR" "$TASKS_DIR" "$RESULT_DIR" "$QUEUE_DIR" "$SOON_DIR" "$BISECT_DIR"
+mkdir -p "$LOG_DIR" "$TASKS_DIR" "$RESULT_DIR" "$PRIOR_TRAIN_DIR" "$QUEUE_DIR" "$SOON_DIR" "$BISECT_DIR"
 
 TARGET="${WTQ_TARGET:-develop}"
 
@@ -267,12 +268,12 @@ governance_drift() {
 # and the gate is itself the script executing — that IS its test. Putting app
 # code there would mean adding it to a classpath, i.e. touching deps.edn or
 # build.clj, which lands in "everything else" and runs the lot.
-classify_changes() {   # <worktree> -> NEED_INTEGRATION / NEED_E2E / NEED_FLEET / NEED_VISUAL / CHANGED_N
+classify_changes() {   # <worktree> -> NEED_BUILD / NEED_INTEGRATION / NEED_E2E / NEED_FLEET / NEED_VISUAL / CHANGED_N
   local wt="$1" f changed
-  NEED_INTEGRATION=0; NEED_E2E=0; NEED_FLEET=0; NEED_VISUAL=0; CHANGED_N=0
+  NEED_BUILD=0; NEED_INTEGRATION=0; NEED_E2E=0; NEED_FLEET=0; NEED_VISUAL=0; CHANGED_N=0
   DEPS_DEVTOOL_ONLY=0
   if ! changed="$(git -C "$wt" diff --name-only "$TARGET..HEAD" 2>/dev/null)"; then
-    NEED_INTEGRATION=1; NEED_E2E=1; NEED_FLEET=1; NEED_VISUAL=1; CHANGED_N=unknown
+    NEED_BUILD=1; NEED_INTEGRATION=1; NEED_E2E=1; NEED_FLEET=1; NEED_VISUAL=1; CHANGED_N=unknown
     return 0
   fi
   while IFS= read -r f; do
@@ -283,12 +284,13 @@ classify_changes() {   # <worktree> -> NEED_INTEGRATION / NEED_E2E / NEED_FLEET 
       continue                     # exempt from BOTH runtime and fleet cases
     fi
     case "$f" in
+      resources/*.md|src/*.md)        NEED_BUILD=1 ;;
       *.md|docs/*|dev/*|.github/*)    : ;;
       tools/browser-test/*)           NEED_E2E=1 ;;
       resources/packages/*.js|resources/packages/*.css|\
       resources/packages/*.html|resources/packages/*.svg)
                                       NEED_E2E=1 ;;
-      *)                              NEED_INTEGRATION=1; NEED_E2E=1 ;;
+      *)                              NEED_BUILD=1; NEED_INTEGRATION=1; NEED_E2E=1 ;;
     esac
     case "$f" in
       src/graphden/fleet/*|src/graphden/system/*|src/graphden/storage/remote/*|\
@@ -1030,6 +1032,7 @@ cmd_drop() {
 # untouched, which is the whole point.
 CANONICAL_IMAGE="graphden-executor:latest"
 CANDIDATE_IMAGE="graphden-executor:candidate"
+VERIFIED_IMAGE_ID=""
 
 # gate_body's "not a verdict" exit: $TARGET moved under the gate, re-queue.
 RC_TARGET_MOVED=6
@@ -1100,13 +1103,44 @@ decide() {   # <name> <verdict> <train> <detail>
 }
 
 # Load an entry into the M_* maps the conductor works from.
-declare -A M_SHA M_BRANCH M_WT M_NO_E2E M_NO_FLEET M_NO_VISUAL M_DEPLOY M_RELEASE
+declare -A M_SHA M_BRANCH M_WT M_NO_E2E M_NO_FLEET M_NO_VISUAL M_DEPLOY M_RELEASE M_TRAIN_TS
 load_entry() {
   local n="$1"
   M_SHA[$n]="$(qget "$n" sha)";            M_BRANCH[$n]="$(qget "$n" branch)"
   M_WT[$n]="$(qget "$n" wt)";              M_NO_E2E[$n]="$(qget "$n" no_e2e)"
   M_NO_FLEET[$n]="$(qget "$n" no_fleet)";  M_NO_VISUAL[$n]="$(qget "$n" no_visual)"
   M_DEPLOY[$n]="$(qget "$n" deploy)";      M_RELEASE[$n]="$(qget "$n" release)"
+  M_TRAIN_TS[$n]="$(qget "$n" train_ts)"
+}
+
+# A process killed after fast-forward but before promotion/receipt completion
+# must never be recovered as GREEN merely because its branch is now an ancestor.
+prior_train_complete() {
+  local name="$1" ts="${M_TRAIN_TS[$1]}" receipt validated_sha
+  # Queue entries disappear on verdict and are replaced by a fresh `wt merge`.
+  # The SHA's prior train must still be checked after either event.
+  if [ -f "$PRIOR_TRAIN_DIR/${M_SHA[$name]}" ]; then
+    ts="$(cat "$PRIOR_TRAIN_DIR/${M_SHA[$name]}")"
+  fi
+  [ -n "$ts" ] || return 1
+  receipt="$LOG_DIR/_train-$ts.report.edn"
+  if validated_sha="$(bb "$SCRIPT_DIR/report.clj" landed "$receipt" 2>/dev/null)" \
+    && git -C "$MAIN_WT" merge-base --is-ancestor "${M_SHA[$name]}" "$validated_sha" \
+    && git -C "$MAIN_WT" merge-base --is-ancestor "$validated_sha" "$TARGET"; then
+    return 0
+  fi
+  # A failed train may be superseded by a successful train of a descendant.
+  # Search completed receipts rather than assuming ancestry alone proves the
+  # image was promoted. This also survives a crash before a mapping update.
+  for receipt in "$LOG_DIR"/_train-*.report.edn; do
+    [ -f "$receipt" ] || continue
+    validated_sha="$(bb "$SCRIPT_DIR/report.clj" landed-image "$receipt" 2>/dev/null)" || continue
+    if git -C "$MAIN_WT" merge-base --is-ancestor "${M_SHA[$name]}" "$validated_sha" \
+      && git -C "$MAIN_WT" merge-base --is-ancestor "$validated_sha" "$TARGET"; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 # Live soon-markers (expired and already-enqueued ones are removed on sight).
@@ -1219,8 +1253,48 @@ stop_sampler() {
   SAMPLER_PID=""
 }
 
+# The image tag is mutable. Pin the image ID and compare the jar actually inside
+# it with the jar that build.clj just verified, before any suite or promotion.
+verify_candidate_image() {
+  local wt="$1" image_id container_id extracted actual jar_expected
+  image_id="$(docker image inspect --format '{{.Id}}' "$CANDIDATE_IMAGE")" || return 1
+  [ -n "$image_id" ] || { echo "FAIL: candidate image has no immutable ID"; return 1; }
+  jar_expected="$(sha256sum "$wt/target/executor-server.jar" | cut -d' ' -f1)" || return 1
+  extracted="$(mktemp "${TMPDIR:-/tmp}/graphden-image-jar.XXXXXX")" || return 1
+  container_id="$(docker create "$image_id")" || { rm -f "$extracted"; return 1; }
+  if ! docker cp "$container_id:/app/executor-server.jar" "$extracted"; then
+    docker rm -f "$container_id" >/dev/null 2>&1 || true
+    rm -f "$extracted"
+    return 1
+  fi
+  docker rm -f "$container_id" >/dev/null || { rm -f "$extracted"; return 1; }
+  actual="$(sha256sum "$extracted" | cut -d' ' -f1)" || { rm -f "$extracted"; return 1; }
+  rm -f "$extracted"
+  [ "$actual" = "$jar_expected" ] || {
+    echo "FAIL: jar in candidate image $image_id differs from verified build ($actual != $jar_expected)"
+    return 1
+  }
+  VERIFIED_IMAGE_ID="$image_id"
+  echo "verified candidate image $image_id: executor-server.jar sha256 $actual"
+}
+
 # The heavy part of the gate: scope, bb ci, image build, the suites. Called by
 # gate_body (same shell — it sets built_candidate there and uses its `step`).
+run_scoped_ci_gate() {
+  local wt="$1" base_sha="$2" ci_receipt="$3" ci_expected="$4"
+  step "bb ci (diff-scoped lint + tests, on merged result)"
+  if [ -n "${WTQ_CI_SKIP:-}" ]; then
+    echo "  ⚠ MANUAL SKIP (WTQ_CI_SKIP): $WTQ_CI_SKIP — a GREEN below is a SCOPED result"
+    ( cd "$wt" && GRAPHDEN_CI_REPORT="$ci_receipt" bb ci --since "$base_sha" --skip "$WTQ_CI_SKIP" ) || { echo "FAIL: bb ci"; return 1; }
+  else
+    ( cd "$wt" && GRAPHDEN_CI_REPORT="$ci_receipt" bb ci --since "$base_sha" ) || { echo "FAIL: bb ci"; return 1; }
+  fi
+  # A report cannot define its own roster. Compare against the independent
+  # selector result fixed before the build/browser phases.
+  ( cd "$wt" && bb scripts/ci_gate.clj verify "$ci_expected" "$ci_receipt" ) \
+    || { echo "FAIL: missing, partial or stale CI receipt"; return 1; }
+}
+
 gate_suites() {
   local wt="$1" no_e2e="$2" no_fleet="$3" no_visual="$4"
 
@@ -1249,6 +1323,10 @@ gate_suites() {
   fi
   if [ "$NEED_INTEGRATION" = 1 ]; then echo "  integration: RUN"
   else echo "  integration: SKIPPED — only docs / browser assets / audited devtool coordinates changed"; fi
+  if [ "$NEED_BUILD" = 1 ] || [ "$NEED_INTEGRATION" = 1 ] || [ "$NEED_E2E" = 1 ] \
+     || [ "$NEED_FLEET" = 1 ] || [ "$NEED_VISUAL" = 1 ]; then
+    echo "  image build: RUN"
+  else echo "  image build: SKIPPED — no stage needs an image"; fi
   if [ "$no_e2e" = "1" ]; then echo "  e2e:         SKIPPED — --no-e2e (every member asked for it)"
   elif [ "$NEED_E2E" = 1 ]; then echo "  e2e:         RUN"
   else echo "  e2e:         SKIPPED — docs / audited devtool only, no runtime surface"; fi
@@ -1261,15 +1339,24 @@ gate_suites() {
   echo "  (bb ci runs diff-scoped: checks whose scripts/checks.edn :relevant"
   echo "   paths saw no change are skipped visibly. Unrecognised -> everything.)"
 
-  step "bb ci (diff-scoped lint + tests, on merged result)"
-  if [ -n "${WTQ_CI_SKIP:-}" ]; then
-    echo "  ⚠ MANUAL SKIP (WTQ_CI_SKIP): $WTQ_CI_SKIP — a GREEN below is a SCOPED result"
-    ( cd "$wt" && bb ci --since "$TARGET" --skip "$WTQ_CI_SKIP" ) || { echo "FAIL: bb ci"; return 1; }
-  else
-    ( cd "$wt" && bb ci --since "$TARGET" ) || { echo "FAIL: bb ci"; return 1; }
+  local base_sha ci_sha ci_receipt ci_expected frontend_first=0
+  base_sha="$(git -C "$wt" rev-parse "$TARGET")"
+  ci_sha="$(git -C "$wt" rev-parse HEAD)"
+  ci_receipt="$LOG_DIR/_train-$WTQ_REPORT_TS.ci.edn"
+  ci_expected="$LOG_DIR/_train-$WTQ_REPORT_TS.ci-expected.edn"
+  ( cd "$wt" && bb scripts/ci_gate.clj expect "$ci_expected" "$ci_sha" "$base_sha" "${WTQ_CI_SKIP:-}" ) \
+    || { echo "FAIL: cannot calculate required CI checks"; return 1; }
+  # Frontend-only trains reveal DOM/layout failures before the long unit wave.
+  # Every successful train still runs the exact same complete CI roster once.
+  if [ "$NEED_INTEGRATION" = 0 ] && [ "$NEED_E2E" = 1 ]; then
+    frontend_first=1
+    echo "  order: browser and visual before full CI"
+  fi
+  if [ "$frontend_first" = 0 ]; then
+    run_scoped_ci_gate "$wt" "$base_sha" "$ci_receipt" "$ci_expected" || return 1
   fi
 
-  if [ "$NEED_INTEGRATION" = 0 ] && [ "$NEED_E2E" = 0 ] && [ "$NEED_FLEET" = 0 ] \
+  if [ "$NEED_BUILD" = 0 ] && [ "$NEED_INTEGRATION" = 0 ] && [ "$NEED_E2E" = 0 ] && [ "$NEED_FLEET" = 0 ] \
      && [ "$NEED_VISUAL" = 0 ]; then
     step "no runtime surface changed — skipping image build + suites"
     echo "ok"
@@ -1291,6 +1378,7 @@ gate_suites() {
   ( cd "$wt" && clojure -T:build uber ) || { echo "FAIL: uberjar"; return 1; }
   ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" docker-compose build executor ) \
     || { echo "FAIL: docker build"; return 1; }
+  verify_candidate_image "$wt" || { echo "FAIL: candidate image identity"; return 1; }
 
   # e2e runs BEFORE integration: the browser suite is timing-sensitive (a
   # slow-server window trips a test's 10s waitForFunction), and running it
@@ -1320,7 +1408,8 @@ gate_suites() {
     #   reds (you can't land what didn't pass); the banner then says to free
     #   RAM and re-run on a quiet host. Real races reproduce on a healthy host
     #   (DEGRADED=0), where strict stays on.
-    ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" WTQ_FLAKE_STRICT=1 E2E_BASELINE_LOCAL="$E2E_BASELINE_LOCAL" bb test-e2e ) || { echo "FAIL: e2e"; return 1; }
+    ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" WTQ_FLAKE_STRICT=1 E2E_BASELINE_LOCAL="$E2E_BASELINE_LOCAL" \
+        GRAPHDEN_E2E_PRIORITY_BASE="$base_sha" bb test-e2e ) || { echo "FAIL: e2e"; return 1; }
   fi
 
   # Visual goes here — after e2e, before integration. It is ~2.5 min against
@@ -1334,12 +1423,16 @@ gate_suites() {
     # Pixel diff over 24 snapshots × 3 viewports against an isolated stack.
     # It can only run here because every baseline is instance-independent —
     # tools/visual-tests/run-visual.sh says what that costs to keep true.
-    ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" bb test-visual ) || { echo "FAIL: visual"; return 1; }
+    ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" bb test-visual ) || { echo "FAIL: visual"; return 1; }
+  fi
+
+  if [ "$frontend_first" = 1 ]; then
+    run_scoped_ci_gate "$wt" "$base_sha" "$ci_receipt" "$ci_expected" || return 1
   fi
 
   if [ "$NEED_INTEGRATION" = 1 ]; then
     step "bb test-integration"
-    ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" bb test-integration ) || { echo "FAIL: integration"; return 1; }
+    ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" bb test-integration ) || { echo "FAIL: integration"; return 1; }
   fi
 
   if [ "$NEED_FLEET" = 1 ]; then
@@ -1348,7 +1441,7 @@ gate_suites() {
     # Postgres. Everything else in the gate runs a single container, so this
     # is the only place a broken /internal/fleet contract, a placement view
     # the two pods disagree on, or a boot that only works alone can fail.
-    ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" bb test-fleet-e2e ) || { echo "FAIL: fleet e2e"; return 1; }
+    ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" bb test-fleet-e2e ) || { echo "FAIL: fleet e2e"; return 1; }
   fi
 
   built_candidate=1
@@ -1499,7 +1592,9 @@ gate_body() {
   # by construction the last landed build.
   if [ "${built_candidate:-0}" = 1 ]; then
     step "promote the candidate to $CANONICAL_IMAGE"
-    docker tag "$CANDIDATE_IMAGE" "$CANONICAL_IMAGE" \
+    [ "$(docker image inspect --format '{{.Id}}' "$CANDIDATE_IMAGE")" = "$VERIFIED_IMAGE_ID" ] \
+      || { echo "FAIL(post-land): candidate tag moved after verification — $TARGET landed; refusing promotion"; return 4; }
+    docker tag "$VERIFIED_IMAGE_ID" "$CANONICAL_IMAGE" \
       || { echo "FAIL(post-land): $TARGET ADVANCED but the canonical tag was NOT promoted — demo/tag stale, fix manually; do NOT naively re-run the gate"; return 4; }
     echo "ok"
   fi
@@ -1769,7 +1864,11 @@ train_run() {
       decide "$m" PRECOND "$ts" "no green 'bb lint' stamp for the queued sha — re-run 'bb wt merge' (it lints first)"; continue
     fi
     if git -C "$MAIN_WT" merge-base --is-ancestor "${M_SHA[$m]}" "$TARGET"; then
-      decide "$m" GREEN "$ts" "already contained in $TARGET — nothing left to gate"; continue
+      if { [ -n "${M_TRAIN_TS[$m]}" ] || [ -f "$PRIOR_TRAIN_DIR/${M_SHA[$m]}" ]; } \
+        && ! prior_train_complete "$m"; then
+        decide "$m" LANDED_STALE "$ts" "already in $TARGET, but its prior train did not complete promotion/receipt — repair the release state; do not re-gate"; continue
+      fi
+      decide "$m" GREEN "$ts" "already contained in $TARGET — prior train complete"; continue
     fi
     ok_members+=("$m")
   done
@@ -1826,19 +1925,56 @@ train_run() {
     [ "${M_RELEASE[$m]}" = 1 ] && release=1
   done
   state_lock
-  for m in "${gated[@]}"; do qset "$m" state train; done
-  printf 'id=%s\nts=%s\nmembers=%s\nlog=%s\npid=%s\n' "$id" "$ts" "${gated[*]}" "$log" "$$" > "$TRAIN_FILE"
+  local prior_fail=0 prior_tmp
+  for m in "${gated[@]}"; do
+    prior_tmp="$PRIOR_TRAIN_DIR/.${M_SHA[$m]}.$$"
+    if ! { printf '%s\n' "$ts" > "$prior_tmp" && mv -f "$prior_tmp" "$PRIOR_TRAIN_DIR/${M_SHA[$m]}"; }; then
+      rm -f "$prior_tmp"
+      prior_fail=1
+      break
+    fi
+    qset "$m" state train
+    qset "$m" train_ts "$ts"
+  done
+  if [ "$prior_fail" = 0 ]; then
+    printf 'id=%s\nts=%s\nmembers=%s\nlog=%s\npid=%s\n' "$id" "$ts" "${gated[*]}" "$log" "$$" > "$TRAIN_FILE"
+  fi
   state_unlock
+  if [ "$prior_fail" = 1 ]; then
+    echo "ABORT: cannot persist prior train mapping"
+    for m in "${gated[@]}"; do decide "$m" PRECOND "$ts" "cannot persist prior train mapping"; done
+    return 20
+  fi
   printf 'train %s [%s] (pid %s) since %s' "$ts" "${gated[*]}" "$$" "$ts" > "$HOLDER"
 
   local resources="$LOG_DIR/_train-$ts.resources.csv" grc=0
+  local report="$LOG_DIR/_train-$ts.report.edn" ci_report="$LOG_DIR/_train-$ts.ci.edn"
+  local earliest queued queue_ms
+  earliest="$(date +%s%N)"
+  for m in "${gated[@]}"; do
+    queued="$(qget "$m" ts)"
+    case "$queued" in ''|*[!0-9]*) continue ;; esac
+    [ "$queued" -lt "$earliest" ] && earliest="$queued"
+  done
+  queue_ms=$(( ($(date +%s%N) - earliest) / 1000000 ))
+  bb "$SCRIPT_DIR/report.clj" init "$report" "$(git -C "$TRAIN_WT" rev-parse HEAD)" "$queue_ms" \
+    || {
+      echo "ABORT: cannot initialize train receipt"
+      for m in "${gated[@]}"; do decide "$m" PRECOND "$ts" "cannot initialize train receipt"; done
+      return 20
+    }
   # The gate's own output is also kept apart (the outer tee may not have
   # flushed it to $log yet when we read the failing step back).
   local gate_out="$LOG_DIR/.gate-$ts.out"
   start_sampler "$resources"
-  ( gate_body "$TRAIN_WT" "$no_e2e" "$deploy" "$no_fleet" "$no_visual" "${gated[@]}" ) 2>&1 | tee "$gate_out"
+  ( WTQ_REPORT_TS="$ts" gate_body "$TRAIN_WT" "$no_e2e" "$deploy" "$no_fleet" "$no_visual" "${gated[@]}" ) 2>&1 | tee "$gate_out"
   grc="${PIPESTATUS[0]}"
   stop_sampler
+  if ! bb "$SCRIPT_DIR/report.clj" finish "$report" "$(git -C "$TRAIN_WT" rev-parse HEAD)" "$queue_ms" "$gate_out" "$ci_report" "$resources" "$grc"; then
+    warn "train receipt could not be completed: $report (incomplete is never pass)"
+    [ "$grc" = 0 ] && grc=4
+  fi
+  printf 'train receipt: %s\n' "$report"
   # Point at it explicitly. A CSV nobody knows exists is not instrumentation.
   printf '\nresource timeline: %s\n' "$resources"
 
@@ -1913,7 +2049,9 @@ train_run() {
 # .git/wtq/e2e-baseline.tsv, which the runner reads OVER the tracked file. The
 # gate never commits: the tracked file stays the reviewed default, this is the
 # machine's own fresher view. A DEGRADED run (the host starved the stack) is
-# not kept — its durations would raise every limit.
+# not kept — its durations would raise every limit. Each retained run contains
+# only the file headers, skip markers and timing lines the baseline parser reads; the full
+# diagnostic log remains in LOG_DIR. Copying it here used ~40 MB per run.
 E2E_RUNS_KEEP="$(int_or "${WTQ_E2E_RUNS_KEEP:-}" 9)"
 record_e2e_baseline() {   # <gate output> <train ts>
   local out="$1" ts="$2" script="$MAIN_WT/tools/browser-test/e2e-baseline.js"
@@ -1923,7 +2061,11 @@ record_e2e_baseline() {   # <gate output> <train ts>
   fi
   [ -f "$script" ] || return 0
   mkdir -p "$E2E_RUNS_DIR"
-  cp "$out" "$E2E_RUNS_DIR/$ts.log"
+  # Preserve exactly the line kinds e2e-baseline.js consumes. Write to a
+  # temporary file so an interrupted extraction cannot enter the median pool.
+  grep -E '^─── edit-[^[:space:]]+\.test\.js ───|^SKIP:|^SKIP token lesson:|^SKIP lesson 39:|^  SKIP — no vault|^✓ SKIPPED — opt-in|^[[:space:]]+\[[[:space:]]*[0-9]+s[[:space:]]+executor=' \
+    "$out" > "$E2E_RUNS_DIR/$ts.log.tmp" || { rm -f "$E2E_RUNS_DIR/$ts.log.tmp"; return 1; }
+  mv -f "$E2E_RUNS_DIR/$ts.log.tmp" "$E2E_RUNS_DIR/$ts.log"
   # shellcheck disable=SC2012  # names are our own <ts>.log, sortable
   ls -1t "$E2E_RUNS_DIR"/*.log | tail -n +"$((E2E_RUNS_KEEP + 1))" | xargs -r rm -f
   if node "$script" "$E2E_RUNS_DIR"/*.log > "$E2E_BASELINE_LOCAL.tmp" 2>/dev/null; then
@@ -2016,7 +2158,9 @@ yield_to_lint() {
 # Memory is admitted the same way: WTQ_MEM_MIN_MB of MemAvailable (see "host
 # memory" above for where the default comes from).
 wait_for_headroom() {
-  local max_load="${WTQ_LOAD_MAX:-8}" load1 mem_min avail
+  local max_load="${WTQ_LOAD_MAX:-8}" load1 mem_min avail started waited=0
+  started="$(date +%s%N)"
+  WTQ_ADMISSION_REASON="none"
   case "$max_load" in
     ''|*[!0-9]*) warn "WTQ_LOAD_MAX='$max_load' is not an integer — using 8"; max_load=8 ;;
   esac
@@ -2025,6 +2169,14 @@ wait_for_headroom() {
     load1="$(cut -d' ' -f1 /proc/loadavg | cut -d. -f1)"
     avail="$(mem_avail_mb)"
     [ "$load1" -lt "$max_load" ] && [ "$avail" -ge "$mem_min" ] && break
+    waited=1
+    if [ "$load1" -ge "$max_load" ] && [ "$avail" -lt "$mem_min" ]; then
+      WTQ_ADMISSION_REASON="host-load-and-memory"
+    elif [ "$load1" -ge "$max_load" ]; then
+      WTQ_ADMISSION_REASON="host-load"
+    else
+      WTQ_ADMISSION_REASON="low-memory"
+    fi
     if [ "$load1" -ge "$max_load" ]; then
       warn "host load $(cut -d' ' -f1-3 /proc/loadavg) >= $max_load — waiting for headroom before starting the gate ..."
     else
@@ -2032,6 +2184,9 @@ wait_for_headroom() {
     fi
     sleep "$(int_or "${WTQ_HEADROOM_POLL:-}" 120)"
   done
+  WTQ_ADMISSION_MS=0
+  [ "$waited" = 0 ] || WTQ_ADMISSION_MS=$(( ($(date +%s%N) - started) / 1000000 ))
+  export WTQ_ADMISSION_MS WTQ_ADMISSION_REASON
 }
 
 # --release: chain the prod release AFTER the queue lock is released, so the

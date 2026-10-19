@@ -54,12 +54,12 @@
         sh (run-names #{"dev/new-script.sh"})
         wtq (run-names #{"dev/wtq/wt"})
         tour (run-names #{"docs/devtour/tour.edn"})]
-    (is (every? src ["clj-kondo" "splint" "cljstyle" "tests-unit" "tests-perf" "perf"
+    (is (every? src ["clj-kondo" "splint" "cljstyle" "tests-focused" "tests-unit" "tests-perf" "perf"
                      "devtour" "devtour-emacs"])
         "a toured form lives in src/ — the bake AND the emacs anchor path must re-check")
     (is (not-any? docs ["tests-unit" "tests-perf" "perf" "clj-kondo" "biome"]))
     (is (every? docs ["markdownlint" "lychee" "typos" "gitleaks" "commitlint"]))
-    (is (every? js ["biome" "tests-js" "tests-unit"]))
+    (is (every? js ["biome" "tests-focused" "tests-js" "tests-unit"]))
     (is (contains? iac "trivy") "deploy/ IaC manifests are trivy-scanned — must stay relevant")
     (is (contains? compose "trivy") "docker-compose is trivy-scanned — must stay relevant")
     (is (contains? sh "shellcheck"))
@@ -160,9 +160,9 @@
 (deftest full-run-batching-is-unchanged
   (let [selected (mapv #(assoc % :cmd ["bb" (:bb %)]) real-registry)
         batches (ci-select/canonical-batches real-registry selected)
-        pre (remove #(#{:test :post-test} (:group %)) selected)]
+        pre (remove #(#{:priority :test :post-test} (:group %)) selected)]
     (is (= (mapv vec (partition-all 8 pre)) (:pre batches)))
-    (doseq [wave [:test :post-test]]
+    (doseq [wave [:priority :test :post-test]]
       (is (= (mapv vec (partition-all 8 (filter #(= wave (:group %)) selected)))
              (get batches wave))))))
 
@@ -172,7 +172,7 @@
                       (mapv #(assoc % :cmd ["bb" (:bb %)])))
         batches (ci-select/canonical-batches real-registry selected)
         first-names (mapv :name (first (:pre batches)))
-        emitted (mapcat identity (mapcat batches [:pre :test :post-test]))]
+        emitted (mapcat identity (mapcat batches [:pre :priority :test :post-test]))]
     (is (= ["clj-kondo" "splint" "cljstyle"] first-names))
     (is (not-any? #{"compile-dev" "gitleaks"} first-names))
     (is (= (frequencies (map :name selected)) (frequencies (map :name emitted))))

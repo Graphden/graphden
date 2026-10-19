@@ -306,3 +306,52 @@
            (get-in (check-entry! {:name :kept :parent :marked-root
                                   :args {:input {:ref :secret-producer :type marked}}})
                    [:resolved-bindings :input :type])))))
+
+
+(deftest authored-claims-cannot-relocate-secret-to-a-sibling-path
+  (registry/record-rich-types-raw! :claim-root {:args {:input :any} :return :int})
+  (let [actual {:s [:secret (callback e)] :decoy :int}
+        relocated {:s (callback e) :decoy [:secret :int]}]
+    (doseq [wrap [identity #(vector :list %) #(vector :map :keyword %)
+                  #(hash-map :nested %)
+                  #(vector :union :null %)
+                  #(vector :refine % [:not= nil])
+                  #(vector :fn {:arg %} :int #{} portable)
+                  #(vector :fn {} % #{} portable)
+                  #(vector :tuple :int %)]]
+      (registry/record-rich-types-raw! :secret-producer {:args {} :return (wrap actual)})
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"strips a hide-result marker"
+            (check-entry! {:name :relocated :parent :claim-root
+                           :args {:input {:ref :secret-producer :type (wrap relocated)}}})))
+      (is (= (wrap actual)
+             (get-in (check-entry! {:name :correlated :parent :claim-root
+                                    :args {:input {:ref :secret-producer :type (wrap actual)}}})
+                     [:resolved-bindings :input :type]))))))
+
+
+(deftest secret-field-cannot-be-extracted-through-a-relocated-any-sink-claim
+  (let [actual {:s [:secret (callback e)] :decoy :int}
+        relocated {:s (callback e) :decoy [:secret :int]}]
+    (registry/record-rich-types-raw! :secret-producer {:args {} :return actual})
+    (registry/record-rich-types-raw! :copy {:args {:input 'a} :return 'a})
+    (registry/record-rich-types-raw! :extract {:args {:record {:s 'a}} :return 'a})
+    (registry/record-rich-types-raw! :browser-consumer
+                                     {:args {:func (callback #{:browser-main})} :return :int})
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"strips a hide-result marker"
+          (do (check-entry! {:name :plain-copy :parent :copy
+                             :args {:input {:ref :secret-producer :type relocated}}})
+              (check-entry! {:name :extracted :parent :extract :args {:record :plain-copy}})
+              (check-entry! {:name :leaked :parent :browser-consumer :args {:func :extracted}}))))
+    (is (nil? (registry/rich-type-of :plain-copy)))))
+
+
+(deftest union-arms-and-missing-fields-cannot-conceal-known-secret-paths
+  (registry/record-rich-types-raw! :claim-root {:args {:input :any} :return :int})
+  (doseq [[actual declared]
+          [[{:s [:secret (callback e)] :decoy :int} {:decoy [:secret :int]}]
+           [[:secret (callback e)] [:union [:secret (callback e)] (callback e)]]
+           [[:union :null [:secret (callback e)]] [:union :null (callback e)]]]]
+    (registry/record-rich-types-raw! :secret-producer {:args {} :return actual})
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"strips a hide-result marker"
+          (check-entry! {:name :hidden-loss :parent :claim-root
+                         :args {:input {:ref :secret-producer :type declared}}})))))

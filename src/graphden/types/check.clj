@@ -86,6 +86,7 @@
     [graphden.types.check.execution :as execution]
     [graphden.types.check.gradual :as gradual]
     [graphden.types.check.literals :as lit]
+    [graphden.types.check.markers :as markers]
     [graphden.types.check.provenance :as provenance]
     [graphden.types.core :as types]))
 
@@ -1044,7 +1045,7 @@
                    ;; Marker presence is already known even when value or
                    ;; execution variables still await local instantiation.
                    (types/contains-hide-result-marker? actual)
-                   (not (types/contains-hide-result-marker? override)))
+                   (not (markers/preserved? actual override)))
           (throw (ex-info
                    (str "Type-check failed in fn-def " (pr-str fn-name)
                         "\n  arg " (pr-str arg-name) " ← " (pr-str b-form)

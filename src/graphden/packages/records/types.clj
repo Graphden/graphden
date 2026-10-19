@@ -3,7 +3,8 @@
    `:type T` references to fn-ids and collects anonymous fn-rows for
    nested structural `[:fn args ret]` shapes."
   (:require
-    [graphden.packages.records.ids :as ids]))
+    [graphden.packages.records.ids :as ids]
+    [graphden.types.core.shapes :as shapes]))
 
 
 ;; =============================================================================
@@ -39,6 +40,30 @@
                            "qualify it as :<the.namespace>/" (name kw))
                       {:type :packages/ambiguous-ref :ref kw}))
       v)))
+
+
+(defn- checked-fn-shape
+  "Validate structural callable grammar without changing its stored identity."
+  [shape]
+  (let [effects (shapes/fn-effects shape)]
+    (when-not (and (shapes/fn-type? shape)
+                   (or (nil? (shapes/fn-args shape)) (map? (shapes/fn-args shape)))
+                   (or (nil? effects) (= :any effects)
+                       (and (set? effects) (every? keyword? effects))))
+      (throw (ex-info "Invalid structural callable type"
+                      {:type :records/unsupported-type-ref :ref shape})))
+    shape))
+
+
+(defn fn-type-declaration
+  "Decode named :fn-type [args ret effects? execution?] to canonical5.
+   Named row IDs depend on namespace/name, so retaining all contract fields
+   does not change their identity. Missing legacy execution remains unknown."
+  [declaration]
+  (when-not (and (sequential? declaration) (contains? #{2 3 4} (count declaration)))
+    (throw (ex-info "Invalid named callable type declaration"
+                    {:type :records/unsupported-type-ref :ref declaration})))
+  (shapes/normalise-fn-type (checked-fn-shape (into [:fn] declaration))))
 
 
 (defn resolve-type-ref
@@ -100,7 +125,7 @@
       ;; module pass. Slot's `:type-fn-id` lands on this id instead
       ;; of the primitive `:fn` UUID, so the editor recovers the
       ;; structural form via the row's `:constraint`.
-      :fn     (ids/anonymous-fn-id (ids/digest-hex "SHA-1" (pr-str t)))
+      :fn     (ids/anonymous-fn-id (ids/digest-hex "SHA-1" (pr-str (checked-fn-shape t))))
       :list   (ids/primitive-fn-id :sequence)
       ;; A homogeneous `[:map K V]` is jsonb-shaped on the wire — same
       ;; storage kind as a record. A `[:tuple …]` is a fixed-length
@@ -160,8 +185,8 @@
    own records output."
   [form]
   (cond
-    (and (vector? form) (= :fn (first form)) (>= (count form) 3))
-    (let [shape form
+    (and (vector? form) (= :fn (first form)))
+    (let [shape (checked-fn-shape form)
           ;; `shape-hash` expects a MAP; `[:fn args ret]` is a vector,
           ;; so hash the printed form directly. Same shape → same id
           ;; via SHA-1 of canonical pr-str (keyword args / nested
@@ -229,10 +254,10 @@
                         [(:key m) (:value m)])
                       (:tuple fn-def)
                       (when-let [ft (:fn-type fn-def)]
-                        ;; `:fn-type [args ret]` shape — wrap so the
-                        ;; recursion sees the inner args / ret.
-                        (when (and (sequential? ft) (= 2 (count ft)))
-                          [(into [:fn] ft)])))]
+                        ;; Keep the source shape for anonymous hashes/IDs,
+                        ;; while validating all optional contract fields.
+                        (let [canonical (fn-type-declaration ft)]
+                          [(if (= 2 (count ft)) (into [:fn] ft) canonical)])))]
     (->> forms
          (mapcat inline-fn-type-rows-from-form)
          (distinct))))

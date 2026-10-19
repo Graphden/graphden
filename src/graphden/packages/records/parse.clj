@@ -901,8 +901,7 @@
          ;; both EDN and DB-driven paths.
          (:fn-type fn-def)
          (let [{fn-name :name ns-id :namespace
-                description :description ft :fn-type} fn-def
-               [args ret] ft]
+                description :description ft :fn-type} fn-def]
            [{:kind :fn
              :id (ids/fn-id ns-id fn-name)
              :name (clojure.core/name fn-name)
@@ -912,12 +911,11 @@
              :element-fn-id nil
              :return-type-fn-id nil
              :anonymous-hash nil
-             ;; Canonical 4-element form: 4th = `:any` means "no
-             ;; effect constraint declared" (any callable passes the
-             ;; slot's subtype check). Authors that need a tighter
-             ;; bound write `[:fn {…} ret #{:pure-or-whatever}]`
-             ;; explicitly and parse-fn-type-decl preserves it.
-             :constraint [:fn (or args {}) ret :any]
+             ;; Preserve the historical payload2 storage shape and its
+             ;; companion anonymous row identities; extended declarations
+             ;; carry the complete canonical contract.
+             :constraint (let [canonical (types/fn-type-declaration ft)]
+                           (if (= 2 (count ft)) (pop canonical) canonical))
              :description description}])
          :else             (parse-base-fn fn-def name->id))
        (attach-fn-meta fn-def))))

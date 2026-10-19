@@ -84,6 +84,30 @@
     (is (roundtrips-exactly? fns) (pr-str (diff-report fns)))))
 
 
+(deftest legacy-named-callable-roundtrip-retains-row-and-slot-identities
+  (let [shape [:fn {:request :int} :text]
+        fns [{:name :handler :namespace "ex" :fn-type (vec (rest shape))}]
+        rows (parse/parse-module fns)
+        exported (export/records->fn-defs rows)
+        reparsed (parse/parse-module exported)
+        anonymous-id (records/anonymous-fn-id
+                       (records/digest-hex "SHA-1" (pr-str shape)))]
+    (is (roundtrips-exactly? fns) (pr-str (diff-report fns)))
+    (is (= (set (map :id rows)) (set (map :id reparsed))))
+    (is (some #(= anonymous-id (:id %)) rows))
+    (is (= (vec (rest shape)) (:fn-type (first exported))))))
+
+
+(deftest callable-source-export-retains-execution-contracts
+  (doseq [execution [:unknown #{} #{:jvm-server :browser-main} [:execution-var 'E]]]
+    (let [fns [{:name :callback :namespace "ex"
+                :fn-type [{:x 'a} 'a #{:db} execution]}]
+          rows (parse/parse-module fns)
+          exported (export/records->fn-defs rows)]
+      (is (roundtrips-exactly? fns) (pr-str (diff-report fns)))
+      (is (= [{:x 'a} 'a #{:db} execution] (:fn-type (first exported)))))))
+
+
 ;; =============================================================================
 ;; Base-fns + composed binding shapes
 ;; =============================================================================

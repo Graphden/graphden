@@ -34,6 +34,7 @@
     [graphden.packages.records :as records]
     [graphden.packages.records.parse :as records-parse]
     [graphden.packages.records.slot-resolution :as slot-res]
+    [graphden.packages.records.types :as record-types]
     [graphden.services.port-check :as port-check]
     [graphden.storage.graph-writer :as writer]
     [graphden.storage.postgres.graph-epoch :as epoch]
@@ -139,8 +140,7 @@
     (types/desugar-variant (:variant fd))
 
     (:fn-type fd)
-    (let [[args ret] (:fn-type fd)]
-      [:fn (or args {}) ret])))
+    (record-types/fn-type-declaration (:fn-type fd))))
 
 
 (defn register-type-aliases!

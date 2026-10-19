@@ -5,6 +5,7 @@
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.packages.records.ids :as ids]
+    [graphden.packages.records.parse :as parse]
     [graphden.packages.records.types :as types]))
 
 
@@ -155,3 +156,45 @@
   (testing "a fn-def with no inline fn-types → empty"
     (is (empty? (types/inline-fn-type-rows-from-fn-def
                   {:args {:a :int :b :text} :return-type :int})))))
+
+
+(deftest named-callable-declarations-preserve-effects-and-execution
+  (doseq [[declaration expected]
+          [[[{:x :int} :int] [:fn {:x :int} :int :any :unknown]]
+           [[{} :int #{:db}] [:fn {} :int #{:db} :unknown]]
+           [[{} :int #{} #{}] [:fn {} :int #{} #{}]]
+           [[{} :int #{} #{:browser-main}] [:fn {} :int #{} #{:browser-main}]]
+           [[{} :int :any [:execution-var 'E]] [:fn {} :int :any [:execution-var 'E]]]]]
+    (let [definition {:name :callable :namespace "wire" :fn-type declaration}
+          row (first (filter #(= (ids/fn-id "wire" :callable) (:id %))
+                             (parse/parse-module [definition])))]
+      (is (= expected (types/fn-type-declaration declaration)))
+      (is (= (if (= 2 (count declaration)) (pop expected) expected) (:constraint row)))
+      (is (= (ids/fn-id "wire" :callable) (:id row))))))
+
+
+(deftest callable-row-and-slot-identities-retain-the-source-shape
+  (doseq [shape [[:fn {:x :int} :int]
+                 [:fn {:x :int} :int #{:db}]
+                 [:fn {:x :int} :int #{} #{:jvm-server :browser-main}]
+                 [:fn {:x :int} :int :any [:execution-var 'E]]]]
+    (let [id (ids/anonymous-fn-id (ids/digest-hex "SHA-1" (pr-str shape)))
+          source {:name :hof :namespace "wire" :args {:callback {:type shape}}
+                  :return-type :int}
+          rows (parse/parse-module [source])
+          type-row (first (filter #(= id (:id %)) rows))
+          slot (first (filter #(and (= :slot (:kind %)) (= "callback" (:name %))) rows))]
+      (is (= shape (:constraint type-row)))
+      (is (= id (types/resolve-type-ref shape {})))
+      (is (= id (:type-fn-id slot)))
+      (is (= (ids/slot-id (ids/fn-id "wire" :hof) :callback) (:id slot))))))
+
+
+(deftest callable-grammar-errors-fail-before-emitting-rows
+  (doseq [bad [[:fn {}] [:fn {} :int #{} #{:worker}]
+               [:fn {} :int #{} [:execution-var :E]]
+               [:fn {} :int [] :unknown] [:fn :bad :int #{} :unknown]]]
+    (is (thrown? clojure.lang.ExceptionInfo (types/resolve-type-ref bad {})))
+    (is (thrown? clojure.lang.ExceptionInfo (types/inline-fn-type-rows-from-form bad))))
+  (is (thrown? clojure.lang.ExceptionInfo
+        (types/fn-type-declaration [{} :int #{} :unknown :extra]))))

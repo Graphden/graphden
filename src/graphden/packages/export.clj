@@ -272,7 +272,11 @@
       (and (vector? c) (= :map (first c)))
       {:map {:key (nth c 1) :value (nth c 2)}}
       (and (vector? c) (= :fn (first c)))
-      {:fn-type [(nth c 1 {}) (nth c 2 nil)]}
+      {:fn-type (if (and (= 4 (count c)) (= :any (nth c 3)))
+                  ;; Historical payload2 declarations wrote constraint4
+                  ;; and an anonymous row3. Retain that exact roundtrip.
+                  [(nth c 1 {}) (nth c 2 nil)]
+                  (vec (rest c)))}
 
       ;; base-fn: has a return-type-fn-id (type-rows never do). Args from slots.
       (:return-type-fn-id fnr)

@@ -275,3 +275,11 @@
                    :args {:handler :h}}
                   {:name :h :namespace "a"
                    :lambda-params [:request :body]}))))))
+
+
+(deftest named-callable-alias-body-retains-effects-and-execution
+  (doseq [execution [:unknown #{} #{:browser-main} [:execution-var 'E]]]
+    (is (= [:fn {:x 'a} 'a #{:db} execution]
+           (sync/type-row-alias-body {:fn-type [{:x 'a} 'a #{:db} execution]}))))
+  (is (= [:fn {} :int :any :unknown]
+         (sync/type-row-alias-body {:fn-type [{} :int]}))))

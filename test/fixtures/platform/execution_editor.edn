@@ -1,0 +1,19 @@
+{:fns
+ [{:name :pure-callback :namespace "user.execution-contract"
+   :parent :count
+   :args {:coll {:as :item :type :text}}
+   :lambda-params [:item]}
+  {:name :server-callback :namespace "user.execution-contract"
+   :parent :parse-int
+   :args {:s {:as :item}}
+   :lambda-params [:item]}
+  {:name :wrapper :namespace "user.execution-contract"
+   :parent :assoc
+   :args {:map {:as :handlers
+                :type [:map :keyword [:fn {:item :text} :int #{} [:execution-var E]]]}
+          :key {:value :submit}
+          :value {:as :handler
+                  :type [:fn {:item :text} :int #{} [:execution-var E]]}}}
+  {:name :browser-child :namespace "user.execution-contract" :parent :wrapper}
+  {:name :server-child :namespace "user.execution-contract" :parent :wrapper
+   :args {:handlers {:type [:map :keyword [:fn {:item :text} :int #{} #{:jvm-server}]]}}}]}

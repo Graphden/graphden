@@ -1,6 +1,7 @@
 (ns graphden.types.value-view-contract-test
   "Actual package/checker contract for field values, views and boundary validation."
   (:require
+    [clojure.edn :as edn]
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.executor.registry.core :as registry]
     [graphden.packages.loader :as loader]
@@ -139,3 +140,23 @@
              (mapv #(select-keys % [:arg-name :path :code]) (:type-hints parent))))
       (is (= (:type-hints parent) (:type-hints child)))
       (is (= actual (get-in child [:resolved-bindings :input :type]))))))
+
+
+(deftest editor-wrapper-fixture-specializes-real-package-callbacks
+  (let [definitions (:fns (edn/read-string (slurp "test/fixtures/platform/execution_editor.edn")))
+        cb (fn [execution] [:fn {:item :text} :int #{} execution])]
+    (doseq [definition definitions] (checked! definition))
+    (is (= #{:browser-main :jvm-server} (:execution (registry/rich-type-of :pure-callback))))
+    (is (= #{:jvm-server} (:execution (registry/rich-type-of :server-callback))))
+    (is (= (cb [:execution-var 'E]) (get-in (registry/rich-type-of :wrapper) [:args :handler])))
+    (let [browser (checked! {:name :browser-child :parent :wrapper
+                             :args {:handlers {:as :events :type [:map :keyword (cb #{:browser-main})]}}})
+          server (registry/rich-type-of :server-child)]
+      (is (= (cb #{:browser-main}) (get-in browser [:args :handler])))
+      (is (= [:map :keyword (cb #{:browser-main})] (get-in browser [:args :events])))
+      (is (= (cb #{:jvm-server}) (get-in server [:args :handler])))
+      (doseq [parent [:browser-child :server-child]]
+        (is (map? (checked! {:name :pure-use :parent parent :args {:handler :pure-callback}}))))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Type-check failed"
+            (checked! {:name :bad-browser-use :parent :browser-child :args {:handler :server-callback}})))
+      (is (map? (checked! {:name :server-use :parent :server-child :args {:handler :server-callback}}))))))

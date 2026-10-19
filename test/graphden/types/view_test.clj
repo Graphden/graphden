@@ -54,3 +54,11 @@
   (is (= :bool (types/taint-with-secret-if-tainted {:x {:type [:ui-view :text]}} :bool)))
   (is (= [:secret :bool]
          (types/taint-with-secret-if-tainted {:x {:type [:ui-view [:secret :text]]}} :bool))))
+
+
+(deftest a-hidden-marker-cannot-use-the-view-name-to-bypass-content-protection
+  (types/register-marker! :ui-view {:monotone? true :hide-result? true})
+  (is (= [:ui-view :text] (view/encoded-type [:ui-view :text])))
+  (is (false? (types/subtype? [:ui-view :text] :jsonb)))
+  (is (= [:ui-view :bool]
+         (types/taint-with-secret-if-tainted {:value {:type [:ui-view :text]}} :bool))))

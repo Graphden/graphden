@@ -11,7 +11,8 @@
   (cond
     (shapes/marker-type? t)
     (let [inner (encoded-type (shapes/marker-inner t))]
-      (if (= :ui-view (shapes/marker-tag t)) inner [(shapes/marker-tag t) inner]))
+      (if (and (= :ui-view (shapes/marker-tag t)) (not (shapes/hide-result-marker-type? t)))
+        inner [(shapes/marker-tag t) inner]))
     (shapes/refine-type? t) [:refine (encoded-type (shapes/refine-base t)) (shapes/refine-constraint t)]
     ;; Encoding a value does not rewrite a callable's future inputs or
     ;; results. Those still carry the callback's original view contract.

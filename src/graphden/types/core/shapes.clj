@@ -585,7 +585,7 @@
     ;; UiView describes representation, not content secrecy. Structural
     ;; passthrough rules retain it; value-producing operations may yield a
     ;; number/text/etc. without turning that result into another view.
-    (let [tags (disj tags :ui-view)]
+    (let [tags (if (:hide-result? (marker-flags :ui-view)) tags (disj tags :ui-view))]
       (if (seq tags)
         ;; Carry every content label present on any input — a fn that read a
         ;; `[:pii …]` and a `[:secret …]` returns a value labelled with

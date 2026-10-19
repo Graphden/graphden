@@ -92,3 +92,12 @@
         t [:refine [:list :any] [:= literal]]]
     (is (= t (validator/checked-type t)))
     (is (= literal (validator/validate! t literal)))))
+
+
+(deftest raw-variants-visit-recursive-payloads-before-desugaring
+  (types/register-type-alias! :node [:union :null [:list :node]])
+  (doseq [declaration [[:variant :ok :node :err :text]
+                       {:result [:variant :ok :node :err :text]}
+                       [:list [:variant :ok :node :err :text]]]]
+    (let [e (try (validator/build declaration) nil (catch clojure.lang.ExceptionInfo e e))]
+      (is (= :types/unsupported-validator (:type (ex-data e)))))))

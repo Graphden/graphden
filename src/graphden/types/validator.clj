@@ -128,9 +128,13 @@
               (if (and (keyword? t) (not (types/primitive? t)) (contains? aliases t))
                 (do (when (contains? seen t) (unsupported! path))
                     (visit (get aliases t) path (conj seen t) (inc depth)))
-                (let [t (if (and (vector? t) (= :variant (first t)))
-                          (types/desugar-variant t) t)]
-                  (doseq [[i child] (map-indexed vector (types/child-types t))]
+                (let [children (if (and (vector? t) (= :variant (first t)))
+                                 ;; Variant operands are alternating literal
+                                 ;; tags and type payloads. Desugaring calls
+                                 ;; union normalization, so visit payloads first.
+                                 (take-nth 2 (drop 2 t))
+                                 (types/child-types t))]
+                  (doseq [[i child] (map-indexed vector children)]
                     (visit child (conj path i) seen (inc depth))))))]
       (visit t [] #{} 0))))
 

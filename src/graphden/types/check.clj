@@ -2174,7 +2174,9 @@
         resolved (merge (:resolved-bindings parent-info {}) own-resolved)
         root-info (registry/rich-type-of (registry/root-base-fn-name primary-parent))
         execution-support (execution/derive root-info resolved registry/rich-type-of)
-        view-hints (view/broad-sink-hints (:args parent-info) resolved)
+        binding-expectations (select-keys (merge (:binding-expectations parent-info) (:args parent-info))
+                                          (keys resolved))
+        view-hints (view/broad-sink-hints binding-expectations resolved)
         call-time-effects (compute-call-time-effects arg-effects
                                                      parent-info
                                                      (keys free-args))]
@@ -2198,6 +2200,7 @@
           ;; bare (last-write) key.
           (:namespace fn-def)
           (assoc :namespace (:namespace fn-def))
+          (seq binding-expectations) (assoc :binding-expectations binding-expectations)
           (seq view-hints)  (assoc :type-hints view-hints)
           (seq resolved)    (assoc :resolved-bindings resolved)
           (seq slot-types)  (assoc :slot-types slot-types)

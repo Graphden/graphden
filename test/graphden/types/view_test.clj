@@ -62,3 +62,13 @@
   (is (false? (types/subtype? [:ui-view :text] :jsonb)))
   (is (= [:ui-view :bool]
          (types/taint-with-secret-if-tainted {:value {:type [:ui-view :text]}} :bool))))
+
+
+(deftest nested-broad-sinks-carry-their-value-paths
+  (doseq [[a e path]
+          [[{:payload [:ui-view :text]} {:payload :jsonb} [:payload]]
+           [[:list [:ui-view :text]] [:list :any] [:element]]
+           [[:map :keyword [:ui-view :text]] [:map :keyword :jsonb] [:value]]]]
+    (is (= [{:arg-name :input :path path :code :types/view-to-broad-sink
+             :message "This broad data input accepts a view representation; connect the field value to save data, or use encode-view to encode the view explicitly."}]
+           (view/broad-sink-hints {:input e} {:input {:type a}})))))

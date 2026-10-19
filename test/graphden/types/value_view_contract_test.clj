@@ -118,7 +118,24 @@
 
 (deftest recursive-union-declarations-do-not-overflow-static-validation
   (types/register-type-alias! :node [:union :null [:list :node]])
-  (doseq [declaration [:node [:union :node :text] {:items [:list :node]}]]
+  (doseq [declaration [:node [:union :node :text] {:items [:list :node]}
+                       [:variant :ok :node :err :text]
+                       {:result [:variant :ok :node :err :text]}]]
     (let [entry (checked! {:name :recursive-input :parent :ensure-type
                            :args {:type {:value declaration} :value {:as :input}}})]
       (is (= :any (:return entry))))))
+
+
+(deftest nested-and-inherited-broad-sinks-retain-derived-hints
+  (doseq [[actual expected path]
+          [[{:payload [:ui-view :text]} {:payload :jsonb} [:payload]]
+           [[:list [:ui-view :text]] [:list :any] [:element]]
+           [[:map :keyword [:ui-view :text]] [:map :keyword :jsonb] [:value]]]]
+    (registry/record-rich-types! :data-sink {:args {:input expected} :return-type :bool})
+    (registry/record-rich-types-raw! :view-data {:args {} :return actual})
+    (let [parent (checked! {:name :bound-view-parent :parent :data-sink :args {:input :view-data}})
+          child (checked! {:name :bound-view-child :parent :bound-view-parent})]
+      (is (= [{:arg-name :input :path path :code :types/view-to-broad-sink}]
+             (mapv #(select-keys % [:arg-name :path :code]) (:type-hints parent))))
+      (is (= (:type-hints parent) (:type-hints child)))
+      (is (= actual (get-in child [:resolved-bindings :input :type]))))))

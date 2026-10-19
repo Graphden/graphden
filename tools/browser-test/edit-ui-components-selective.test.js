@@ -5,6 +5,7 @@ const {unexpectedThemeRetryErrors} = require('./theme-retry-errors');
 const {chromium} = require('playwright');
 const {assert, newContext, api} = require('./edit-test-helpers');
 const {undoConfiguration} = require('./configuration-undo-test-helpers');
+const {trackHomeSetup} = require('./configuration-home-test-helpers');
 const {selectCreatedLeaf, editOwnValue} = require('./tutorial-ui-components-helpers');
 const {observeUIPlanLoads, captureLoadedUIComponents, waitForLoadedUIComponents, drainUIPlanReplies} = require('./ui-component-runtime-test-helpers');
 
@@ -140,7 +141,7 @@ async function cleanup(page, receipts) {
       return;
     }
   })()));
-  let previous;
+  let previous, homeSetup;
   let phase = 'boot';
   page.on('request', request => {
     requestSequences.set(request, ++sequence);
@@ -150,7 +151,8 @@ async function cleanup(page, receipts) {
     await page.waitForFunction(() => window.gdPrefsReady && window.gdPrefOwner);
     await page.waitForFunction(() => gdUIConfigurationState()?.revision);
     await settle();
-    assert((await api(page, 'POST', '/api/ui/configuration/prepare', {home: true})).ok, 'explicit home setup succeeds');
+    homeSetup = await trackHomeSetup(page);
+    assert((await homeSetup.prepare()).ok, 'explicit home setup succeeds');
     previous = await page.evaluate(() => ({components: gdPrefRead('components'), theme: gdPrefRead('theme'), owner: gdPrefOwner}));
     await appearance(page);
     phase = 'copy-picker';
@@ -264,6 +266,7 @@ async function cleanup(page, receipts) {
     try {
       await page.unrouteAll({behavior: 'wait'});
       await cleanup(page, receipts);
+      if (homeSetup) await homeSetup.cleanup();
     } finally {
       await browser.close();
     }

@@ -4,7 +4,7 @@ const {undoConfiguration} = require('./configuration-undo-test-helpers');
 
 // A controlled prior partial manifest makes lesson25's restore/fallback
 // contract independent of which editor spec happened to run before it.
-async function preparePickerOnlySelection(page, remember) {
+async function preparePickerOnlySelection(page, remember, homeSetup) {
   const pageErrors = [];
   const capturePageError = () => pageErrors.push(true);
   page.on('pageerror', capturePageError);
@@ -15,7 +15,7 @@ async function preparePickerOnlySelection(page, remember) {
       menu: gdUIComponentsRoots()['menu-id']}));
     const fixture = {previous};
     remember(fixture);
-    assert((await api(page, 'POST', '/api/ui/configuration/prepare', {home: true})).ok, 'fixture home setup succeeds');
+    assert((await homeSetup.prepare()).ok, 'fixture home setup succeeds');
     await page.evaluate(() => gdCaptureUIConfiguration());
     const destinationPath = process.env.GRAPHDEN_COMPONENT_NAMESPACE || '(root)';
     const destinationIds = await page.evaluate(path => path === '(root)' ? [null]

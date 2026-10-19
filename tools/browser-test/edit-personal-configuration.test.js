@@ -1,7 +1,8 @@
 'use strict';
 const {chromium} = require('playwright');
-const {assert, newContext, api, nodeApi} = require('./edit-test-helpers');
+const {assert, newContext, api} = require('./edit-test-helpers');
 const {undoConfiguration} = require('./configuration-undo-test-helpers');
+const {trackHomeSetup} = require('./configuration-home-test-helpers');
 let phase = 'boot';
 const fs = require('node:fs');
 function saveReceipts(receipts) {
@@ -35,22 +36,12 @@ async function personalize(page, component, receipts) {
 }
 (async () => {
   const {browser, page} = await newContext(chromium);
-  const receipts = [], pageErrors = [], homeSetups = [], pendingHomeSetups = [];
-  const baselineNamespaces = new Set();
-  page.on('response', response => {
-    if (response.request().method() !== 'POST'
-      || new URL(response.url()).pathname !== '/api/ui/configuration/prepare'
-      || response.request().postDataJSON()?.home !== true) return;
-    pendingHomeSetups.push(response.json().then(body => homeSetups.push({
-      ok: response.ok() && body.ok === true && body.setup === true,
-      id: body.home?.id, created: body['changed-namespaces'] || [],
-    }), () => homeSetups.push({ok: false})));
-  });
+  const receipts = [], pageErrors = [];
+  let homeSetup;
   let originalId;
   page.on('pageerror', () => pageErrors.push(true));
   try {
-    const beforeIndex = await api(page, 'GET', '/api/graph/entities?scope=index');
-    for (const row of beforeIndex.namespaces) baselineNamespaces.add(row.id);
+    homeSetup = await trackHomeSetup(page);
     assert(await page.evaluate(() => ['plan', 'prepare', 'preview', 'apply', 'undo'].every(name =>
       typeof API['api_ui_configuration_' + name] === 'string')),
     'real generated route URLs expose the configuration host contract');
@@ -116,25 +107,7 @@ async function personalize(page, component, receipts) {
         'cleanup restores the original shared or authored configuration without a mandatory baseline editor');
     }
     phase = 'home cleanup';
-    await Promise.all(pendingHomeSetups);
-    const createdHomes = new Set();
-    for (const setup of homeSetups) {
-      assert(setup.ok && Array.isArray(setup.created), 'explicit home setup returned its cleanup receipt');
-      for (const id of setup.created) {
-        assert(id === setup.id && !baselineNamespaces.has(id), 'only an exact newly created home belongs to this fixture');
-        createdHomes.add(id);
-      }
-    }
-    for (const id of createdHomes) {
-      const result = await nodeApi('DELETE', '/api/entities/ns/' + encodeURIComponent(id));
-      await result.text();
-      assert(result.ok, 'empty home created by this fixture is removed through authorized CRUD');
-    }
-    const afterNamespaces = new Set((await api(page, 'GET', '/api/graph/entities?scope=index'))
-      .namespaces.map(row => row.id));
-    assert(afterNamespaces.size === baselineNamespaces.size
-      && [...baselineNamespaces].every(id => afterNamespaces.has(id)),
-    'namespace identities return to baseline, preserving every pre-existing home');
+    if (homeSetup) await homeSetup.cleanup();
     phase = 'pageerrors';
     assert(pageErrors.length === 0, 'native personalization and cleanup have no page errors');
     } finally { await browser.close(); }

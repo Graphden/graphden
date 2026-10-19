@@ -10,16 +10,18 @@ const {preparePickerOnlySelection, restorePickerOnlySelection, restoreLessonSele
 const {unexpectedCleanupErrors} = require('./owned-cleanup-errors');
 const {chromium} = require('playwright');
 const {newContext} = require('./edit-test-helpers');
+const {trackHomeSetup} = require('./configuration-home-test-helpers');
 const {walkUIComponentsLesson} = require('./tutorial-ui-components-helpers');
 const {waitForLoadedUIComponents, drainUIPlanReplies, observeUIPlanLoads} = require('./ui-component-runtime-test-helpers');
 (async () => {
   const {browser, page} = await newContext(chromium, {boot: false});
-  let priorFixture, lessonReceipt;
+  let priorFixture, lessonReceipt, homeSetup;
   try {
+    homeSetup = await trackHomeSetup(page);
     await preparePickerOnlySelection(page, fixture => {
       priorFixture = fixture;
       fs.writeFileSync('/tmp/graphden-native25-prior-ledger-' + process.pid + '.json', JSON.stringify(fixture), {mode: 0o600});
-    });
+    }, homeSetup);
     const boot = await page.evaluate(() => {
       const scripts = [...document.scripts].map(script => script.src);
       return {limit: window.GraphdenAtomicFunctionBatchMax,
@@ -31,7 +33,10 @@ const {waitForLoadedUIComponents, drainUIPlanReplies, observeUIPlanLoads} = requ
       'the generated API/budget script loads before its editor consumers');
   } catch (error) {
     try { await restorePickerOnlySelection(page, priorFixture); }
-    finally { await browser.close(); }
+    finally {
+      try { if (homeSetup) await homeSetup.cleanup(); }
+      finally { await browser.close(); }
+    }
     throw error;
   }
   const errors = [];
@@ -197,6 +202,7 @@ const {waitForLoadedUIComponents, drainUIPlanReplies, observeUIPlanLoads} = requ
     for (const [stage, cleanup] of [
       ['lesson', () => restoreLessonSelection(page, lessonReceipt)],
       ['picker', () => restorePickerOnlySelection(page, priorFixture)],
+      ['home', () => homeSetup.cleanup()],
       ['browser', () => browser.close()],
     ]) {
       try { await cleanup(); } catch (_) { cleanupFailures.push(stage); }

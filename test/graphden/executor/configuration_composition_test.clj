@@ -137,8 +137,9 @@
         (is (= "jdbc:fixture:prod"
                (:url (first (prod {:sql "extra-key" :params [] :url "must-not-reconfigure"}))))))
       (testing "the constructor and consumer retain structural types and effects"
-        (is (= [:secret query-type] (:return (registry/rich-type-of :cfg-make-query))))
-        (is (= query-type (types/callable-signature (:return (registry/rich-type-of :cfg-make-query)))))
+        (is (= [:secret (conj query-type :unknown)] (:return (registry/rich-type-of :cfg-make-query))))
+        (is (= (conj query-type :unknown)
+               (types/callable-signature (:return (registry/rich-type-of :cfg-make-query)))))
         (is (= [:secret [:list :jsonb]] (:return (registry/rich-type-of :cfg-application))))
         (is (= {:url :text :user :text :password [:secret :text]}
                (:args (registry/rich-type-of :cfg-make-query))))

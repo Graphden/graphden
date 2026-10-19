@@ -2398,6 +2398,49 @@
     (is (= :text (:return (registry/rich-type-of :dir-ok))))))
 
 
+(deftest pinned-call-domain-accepts-narrower-jsonb-reference
+  (let [domain {:sql :text :params [:list :jsonb] :limit :int}
+        callable [:fn {:request domain} :text #{} #{:jvm-server}]]
+    (doseq [[actual accepted?]
+            [[{:sql :text :params [:list :int] :limit :int} true]
+             [{:sql :text :params [:list :jsonb] :limit :int} true]
+             [{:sql :text :params [:list :int] :limit :numeric} false]
+             [{:sql :text :params [:list [:secret :int]] :limit :int} false]
+             [{:sql :bool :params [:list :int] :limit :int} false]]
+            reverse-bindings? [false true]]
+      (registry/record-rich-types! :pinned-request {:args {} :return-type actual})
+      (let [bindings [[:func {:as :query :type callable}] [:arg :pinned-request]]
+            definition {:name :pinned-application :parent :call
+                        :args (into (array-map) (if reverse-bindings? (reverse bindings) bindings))}]
+        (if accepted?
+          (do
+            (is (some? (check/check-fn-def! definition)))
+            (is (= :text (:return (registry/rich-type-of :pinned-application)))))
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Type-check failed"
+                (check/check-fn-def! definition)))))))
+  (testing "new jsonb compatibility does not relax callable inputs or execution"
+    (let [domain {:params [:list :jsonb] :limit :numeric}
+          expected [:fn {:request domain} :text #{} #{:browser-main}]]
+      (registry/record-rich-types! :jsonb-callback-consumer
+                                   {:args {:func {:type expected}} :return-type :text})
+      (doseq [[actual-domain execution accepted?]
+              [[domain #{:browser-main} true]
+               [{:params [:list :int] :limit :int} #{:browser-main} false]
+               [domain :unknown false]]]
+        ;; This synthetic callable needs exact evidence, not native-capability
+        ;; derivation for an unregistered primitive implementation.
+        (registry/record-rich-types-raw! :jsonb-callback
+                                         {:args {:request actual-domain} :return :text
+                                          :effects #{} :execution execution})
+        (is (= execution (:execution (registry/rich-type-of :jsonb-callback))))
+        (let [definition {:name :checked-jsonb-callback :parent :jsonb-callback-consumer
+                          :args {:func :jsonb-callback}}]
+          (if accepted?
+            (is (some? (check/check-fn-def! definition)))
+            (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Type-check failed"
+                  (check/check-fn-def! definition)))))))))
+
+
 (deftest zipmap-string-keys-keep-their-type-through-literal-wrapping
   (doseq [[keys-form vals-form]
           [[["up" "down"] ["before" "after"]]

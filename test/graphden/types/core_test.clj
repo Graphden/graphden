@@ -713,6 +713,23 @@
     (is (= :int (t/resolve s 'a)))))
 
 
+(deftest unify-jsonb-primitives-preserves-existing-bindings
+  (doseq [primitive [:int :float :decimal :numeric :text :bool :keyword :uuid :null]
+          [expected actual] [[:jsonb primitive] [primitive :jsonb]]]
+    (is (= {} (t/unify expected actual)) (pr-str [expected actual])))
+  (let [expected {:sql :text :params [:list :jsonb]}
+        actual {:sql :text :params [:list :int]}
+        subst {'a expected}]
+    (is (t/subtype? actual expected))
+    (is (= subst (t/unify 'a actual subst)))
+    (is (= expected (t/resolve subst 'a)) "A narrower argument does not rebind the callable domain"))
+  (doseq [actual [[:secret :int] [:list [:secret :int]] {:params [:secret :int]}]]
+    (is (t/fail? (t/unify :jsonb actual)) (pr-str actual)))
+  (let [callable [:fn {} :int #{} :unknown]]
+    (is (t/fail? (t/unify :jsonb callable)))
+    (is (t/fail? (t/unify callable :jsonb)))))
+
+
 (deftest unify-record-test
   (let [s (t/unify {:name 'a :age :int} {:name :text :age :int})]
     (is (t/unified? s))

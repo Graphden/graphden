@@ -1811,7 +1811,7 @@
          ;;
          ;; - Primitive subtype within the numeric hierarchy
          ;;   (`:int ↔ :numeric` is fine because `:int ⊆ :numeric`).
-         ;; - Records / lists / refinements ↔ `:jsonb`. They ARE
+         ;; - Primitives / records / lists / refinements ↔ `:jsonb`. They ARE
          ;;   jsonb-shaped on the wire (matches the subtype rule
          ;;   `record ⊆ :jsonb`). A slot whose declared type narrowed
          ;;   from a type-var to `:jsonb` (because earlier in the chain
@@ -1830,11 +1830,11 @@
              ;; drift between the two relations.
              (and (= a :jsonb)
                   (not (contains-marker? b))
-                  (or (record-type? b) (list-type? b) (map-type? b)
+                  (or (primitive? b) (record-type? b) (list-type? b) (map-type? b)
                       (tuple-type? b) (refine-type? b)))
              (and (= b :jsonb)
                   (not (contains-marker? a))
-                  (or (record-type? a) (list-type? a) (map-type? a)
+                  (or (primitive? a) (record-type? a) (list-type? a) (map-type? a)
                       (tuple-type? a) (refine-type? a)))
              ;; Refinement ↔ (primitive OR refinement) — defer to
              ;; `subtype?`, which already understands

@@ -130,21 +130,41 @@
   (and (map? t) (every? keyword? (keys t))))
 
 
-(defn fn-type?
-  "`[:fn args ret effects]` — canonical four-element form. `effects`
-   is either:
-     - `:any` — the slot declares no constraint; callable may have
-       any effects.
-     - a set of effect-category keywords (`#{}` pure-only,
-       `#{:io :time}` read-only system state, …) — the bound fn's
-       `:effects` must be a subset.
+(def execution-profiles
+  "The finite execution-profile vocabulary. Profiles are capabilities,
+   separate from effect permissions and value types."
+  #{:jvm-server :browser-main})
 
-   `[:fn args ret]` — the three-element authoring shorthand, equivalent to the
-   four-element form with `:any` as the 4th element. Accepted on
-   read (storage / EDN authors may still write it); `normalise`
-   canonicalises to four-element before any subtype/unify check."
+
+(defn execution-var?
+  "An execution-sort variable, scoped and freshened by the checker at each
+   call. Its symbol is a name within that sort, never a value-type variable."
+  [execution]
+  (and (vector? execution)
+       (= 2 (count execution))
+       (= :execution-var (first execution))
+       (symbol? (second execution))))
+
+
+(defn execution-constraint?
+  "Unknown support, a finite profile set (including impossible `#{}`), or
+   an execution-sort variable. A bare symbol is not an execution contract."
+  [execution]
+  (or (= :unknown execution)
+      (and (set? execution) (every? execution-profiles execution))
+      (execution-var? execution)))
+
+
+(defn fn-type?
+  "Structural callable shape: canonical `[:fn args ret effects execution]`
+   or a legacy three-/four-element form. Legacy execution support is unknown.
+   Validates the execution grammar; value-type/effect validation belongs to
+   `well-formed?`, which also resolves the named value-type vocabulary."
   [t]
-  (and (vector? t) (= :fn (first t)) (#{3 4} (count t))))
+  (and (vector? t)
+       (= :fn (first t))
+       (contains? #{3 4 5} (count t))
+       (or (< (count t) 5) (execution-constraint? (nth t 4)))))
 
 
 (defn callable-type?
@@ -159,12 +179,16 @@
 
 
 (defn make-fn-type
-  "Canonical constructor for a function type. Always produces the
-   four-element form; `eff` defaults to `:any` (unconstrained slot)
-   when omitted. New code should prefer this over hand-rolled
-   `[:fn args ret …]` vectors so the wire format stays consistent."
-  ([args ret]      (make-fn-type args ret :any))
-  ([args ret eff]  [:fn (or args {}) ret eff]))
+  "Canonical five-element callable constructor. Omitted effects are `:any`
+   (unconstrained, not pure); omitted execution support is `:unknown`.
+   Explicit execution must satisfy the execution-sort grammar."
+  ([args ret] (make-fn-type args ret :any))
+  ([args ret eff] (make-fn-type args ret eff :unknown))
+  ([args ret eff execution]
+   (when-not (execution-constraint? execution)
+     (throw (ex-info "Invalid callable execution constraint"
+                     {:type :types/invalid-execution :execution execution})))
+   [:fn (or args {}) ret eff execution]))
 
 
 (defn list-type?
@@ -211,7 +235,7 @@
 (def ^:private structural-heads
   "Vector heads owned by the structural grammar — a marker tag must
    never shadow one."
-  #{:fn :list :map :tuple :union :refine :variant :marker-def :secret})
+  #{:fn :list :map :tuple :union :refine :variant :marker-def :secret :execution-var})
 
 
 (defonce ^:private marker-registry
@@ -374,20 +398,28 @@
 
 
 (defn fn-effects
-  "Slot-level effect constraint of a fn-type. Always returns a value
-   for fn-types: the declared 4th element if present, else `:any`
-   (the three-element shorthand is treated as the canonical
-   four-element form with `:any` as the slot meaning — unconstrained,
-   any callable passes). nil for non-fn-types.
-
-   `effects-compatible?` reads this and handles `:any` (sup-side =
-   unconstrained, sub-side = can't satisfy concrete) — see its
-   docstring for the directional rule."
+  "Effect constraint of a callable, or nil for a non-callable. Legacy
+   three-element forms have `:any` effects: unconstrained, never pure."
   [t]
-  (cond
-    (not (fn-type? t)) nil
-    (= 4 (count t))    (nth t 3)
-    :else              :any))
+  (when (fn-type? t)
+    (if (>= (count t) 4) (nth t 3) :any)))
+
+
+(defn fn-execution
+  "Execution support of a callable, or nil for a non-callable. Legacy
+   forms decode to `:unknown`, never the portable two-profile set."
+  [t]
+  (when (fn-type? t)
+    (if (= 5 (count t)) (nth t 4) :unknown)))
+
+
+(defn normalise-fn-type
+  "Decode a callable's outer shape to canonical five-element form. Nested
+   value-type normalization belongs to `types.core/normalise`. Invalid shapes
+   and non-callables return nil. Does not infer execution support."
+  [t]
+  (when (fn-type? t)
+    (make-fn-type (fn-args t) (fn-ret t) (fn-effects t) (fn-execution t))))
 
 
 (defn callable-signature
@@ -403,7 +435,8 @@
                          (make-fn-type (fn-args inner)
                                        (reduce (fn [ret tag] (make-marker-type tag ret))
                                                (fn-ret inner) (rseq tags))
-                                       (fn-effects inner))
+                                       (fn-effects inner)
+                                       (fn-execution inner))
                          inner)
       :else nil)))
 

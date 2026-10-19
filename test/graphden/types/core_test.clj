@@ -3,7 +3,8 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [clojure.tools.logging]
-    [graphden.types.core :as t]))
+    [graphden.types.core :as t]
+    [graphden.types.core.shapes :as shapes]))
 
 
 ;; Built-in refinements are now loaded from the package loader's
@@ -47,6 +48,68 @@
   (is (t/list-type? [:list :int]))
   (is (t/record-type? {:a :int :b :text}))
   (is (not (t/record-type? [:list :int]))))
+
+
+(deftest callable-execution-grammar-test
+  (testing "finite execution contracts retain their distinct meanings"
+    (doseq [execution [:unknown #{} #{:jvm-server} #{:browser-main}
+                       #{:jvm-server :browser-main} [:execution-var 'E]]]
+      (let [callable [:fn {:x :int} :bool #{} execution]]
+        (is (true? (shapes/execution-constraint? execution)) (pr-str execution))
+        (is (true? (shapes/fn-type? callable)) (pr-str callable))
+        (is (= execution (shapes/fn-execution callable)))
+        (is (= callable (shapes/normalise-fn-type callable)))
+        (is (= callable (shapes/make-fn-type {:x :int} :bool #{} execution))))))
+  (testing "execution variables have their own sort"
+    (let [execution [:execution-var 'E]
+          callable [:fn {:x :int} :bool #{} execution]]
+      (is (shapes/execution-var? execution))
+      (is (not (shapes/type-var? execution)))
+      (is (not (shapes/execution-var? 'E)))
+      (is (shapes/type-var? 'E))
+      (is (thrown? clojure.lang.ExceptionInfo
+            (shapes/register-marker! :execution-var {})))
+      (is (not (shapes/type-any? shapes/type-var? callable)))
+      (is (not= (shapes/fn-execution callable) :unknown))))
+  (testing "malformed or unknown profiles are rejected without throwing predicates"
+    (doseq [execution [nil :jvm-server :any 'E [:execution-var] [:execution-var :E]
+                       [:execution-var 'E 'F] [:execution-var nil]
+                       [:intersection #{:jvm-server} #{:browser-main}]
+                       #{:jvm-server :worker} [:jvm-server] {}]]
+      (let [callable [:fn {} :int #{} execution]]
+        (is (false? (shapes/execution-constraint? execution)) (pr-str execution))
+        (is (false? (shapes/fn-type? callable)))
+        (is (nil? (shapes/normalise-fn-type callable)))
+        (is (thrown? clojure.lang.ExceptionInfo
+              (shapes/make-fn-type {} :int #{} execution)))))))
+
+
+(deftest callable-execution-legacy-decoding-test
+  (doseq [[legacy effects] [[[:fn {:x :int} :bool] :any]
+                            [[:fn {:x :int} :bool :any] :any]
+                            [[:fn {:x :int} :bool #{}] #{}]
+                            [[:fn {:x :int} :bool #{:db}] #{:db}]]]
+    (is (true? (shapes/fn-type? legacy)))
+    (is (= :unknown (shapes/fn-execution legacy)))
+    (is (= [:fn {:x :int} :bool effects :unknown]
+           (shapes/normalise-fn-type legacy))))
+  (is (= [:fn {} :int :any :unknown] (shapes/make-fn-type nil :int)))
+  (is (= [:fn {} :int #{} :unknown] (shapes/make-fn-type {} :int #{})))
+  (doseq [invalid [nil :fn 42 "callable" {} [] [:fn {}] [:fn {} :int #{} :unknown :extra]]]
+    (is (false? (shapes/fn-type? invalid)))
+    (doseq [accessor [shapes/fn-args shapes/fn-ret shapes/fn-effects
+                      shapes/fn-execution shapes/normalise-fn-type]]
+      (is (nil? (accessor invalid)))))
+  (is (= 3 (count (set (map #(shapes/fn-execution [:fn {} :int #{} %])
+                            [:unknown #{} #{:jvm-server :browser-main}]))))))
+
+
+(deftest marked-callable-retains-execution-contract-test
+  (doseq [execution [:unknown #{} #{:browser-main} #{:jvm-server :browser-main}
+                     [:execution-var 'E]]]
+    (let [callable [:fn {:x :int} :bool #{:db} execution]]
+      (is (= [:fn {:x :int} [:secret :bool] #{:db} execution]
+             (shapes/callable-signature [:secret callable]))))))
 
 
 (deftest well-formed-test

@@ -1280,6 +1280,21 @@ verify_candidate_image() {
 
 # The heavy part of the gate: scope, bb ci, image build, the suites. Called by
 # gate_body (same shell — it sets built_candidate there and uses its `step`).
+run_scoped_ci_gate() {
+  local wt="$1" base_sha="$2" ci_receipt="$3" ci_expected="$4"
+  step "bb ci (diff-scoped lint + tests, on merged result)"
+  if [ -n "${WTQ_CI_SKIP:-}" ]; then
+    echo "  ⚠ MANUAL SKIP (WTQ_CI_SKIP): $WTQ_CI_SKIP — a GREEN below is a SCOPED result"
+    ( cd "$wt" && GRAPHDEN_CI_REPORT="$ci_receipt" bb ci --since "$base_sha" --skip "$WTQ_CI_SKIP" ) || { echo "FAIL: bb ci"; return 1; }
+  else
+    ( cd "$wt" && GRAPHDEN_CI_REPORT="$ci_receipt" bb ci --since "$base_sha" ) || { echo "FAIL: bb ci"; return 1; }
+  fi
+  # A report cannot define its own roster. Compare against the independent
+  # selector result fixed before the build/browser phases.
+  ( cd "$wt" && bb scripts/ci_gate.clj verify "$ci_expected" "$ci_receipt" ) \
+    || { echo "FAIL: missing, partial or stale CI receipt"; return 1; }
+}
+
 gate_suites() {
   local wt="$1" no_e2e="$2" no_fleet="$3" no_visual="$4"
 
@@ -1324,24 +1339,22 @@ gate_suites() {
   echo "  (bb ci runs diff-scoped: checks whose scripts/checks.edn :relevant"
   echo "   paths saw no change are skipped visibly. Unrecognised -> everything.)"
 
-  local base_sha ci_sha ci_receipt ci_expected
+  local base_sha ci_sha ci_receipt ci_expected frontend_first=0
   base_sha="$(git -C "$wt" rev-parse "$TARGET")"
   ci_sha="$(git -C "$wt" rev-parse HEAD)"
   ci_receipt="$LOG_DIR/_train-$WTQ_REPORT_TS.ci.edn"
   ci_expected="$LOG_DIR/_train-$WTQ_REPORT_TS.ci-expected.edn"
   ( cd "$wt" && bb scripts/ci_gate.clj expect "$ci_expected" "$ci_sha" "$base_sha" "${WTQ_CI_SKIP:-}" ) \
     || { echo "FAIL: cannot calculate required CI checks"; return 1; }
-  step "bb ci (diff-scoped lint + tests, on merged result)"
-  if [ -n "${WTQ_CI_SKIP:-}" ]; then
-    echo "  ⚠ MANUAL SKIP (WTQ_CI_SKIP): $WTQ_CI_SKIP — a GREEN below is a SCOPED result"
-    ( cd "$wt" && GRAPHDEN_CI_REPORT="$ci_receipt" bb ci --since "$base_sha" --skip "$WTQ_CI_SKIP" ) || { echo "FAIL: bb ci"; return 1; }
-  else
-    ( cd "$wt" && GRAPHDEN_CI_REPORT="$ci_receipt" bb ci --since "$base_sha" ) || { echo "FAIL: bb ci"; return 1; }
+  # Frontend-only trains reveal DOM/layout failures before the long unit wave.
+  # Every successful train still runs the exact same complete CI roster once.
+  if [ "$NEED_INTEGRATION" = 0 ] && [ "$NEED_E2E" = 1 ]; then
+    frontend_first=1
+    echo "  order: browser and visual before full CI"
   fi
-  # A report cannot define its own roster. Compare it with the independent
-  # selector result saved before CI, including advisory vs blocking groups.
-  ( cd "$wt" && bb scripts/ci_gate.clj verify "$ci_expected" "$ci_receipt" ) \
-    || { echo "FAIL: missing, partial or stale CI receipt"; return 1; }
+  if [ "$frontend_first" = 0 ]; then
+    run_scoped_ci_gate "$wt" "$base_sha" "$ci_receipt" "$ci_expected" || return 1
+  fi
 
   if [ "$NEED_BUILD" = 0 ] && [ "$NEED_INTEGRATION" = 0 ] && [ "$NEED_E2E" = 0 ] && [ "$NEED_FLEET" = 0 ] \
      && [ "$NEED_VISUAL" = 0 ]; then
@@ -1395,7 +1408,8 @@ gate_suites() {
     #   reds (you can't land what didn't pass); the banner then says to free
     #   RAM and re-run on a quiet host. Real races reproduce on a healthy host
     #   (DEGRADED=0), where strict stays on.
-    ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" WTQ_FLAKE_STRICT=1 E2E_BASELINE_LOCAL="$E2E_BASELINE_LOCAL" bb test-e2e ) || { echo "FAIL: e2e"; return 1; }
+    ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" WTQ_FLAKE_STRICT=1 E2E_BASELINE_LOCAL="$E2E_BASELINE_LOCAL" \
+        GRAPHDEN_E2E_PRIORITY_BASE="$base_sha" bb test-e2e ) || { echo "FAIL: e2e"; return 1; }
   fi
 
   # Visual goes here — after e2e, before integration. It is ~2.5 min against
@@ -1410,6 +1424,10 @@ gate_suites() {
     # It can only run here because every baseline is instance-independent —
     # tools/visual-tests/run-visual.sh says what that costs to keep true.
     ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" bb test-visual ) || { echo "FAIL: visual"; return 1; }
+  fi
+
+  if [ "$frontend_first" = 1 ]; then
+    run_scoped_ci_gate "$wt" "$base_sha" "$ci_receipt" "$ci_expected" || return 1
   fi
 
   if [ "$NEED_INTEGRATION" = 1 ]; then
@@ -2031,7 +2049,9 @@ train_run() {
 # .git/wtq/e2e-baseline.tsv, which the runner reads OVER the tracked file. The
 # gate never commits: the tracked file stays the reviewed default, this is the
 # machine's own fresher view. A DEGRADED run (the host starved the stack) is
-# not kept — its durations would raise every limit.
+# not kept — its durations would raise every limit. Each retained run contains
+# only the file headers, skip markers and timing lines the baseline parser reads; the full
+# diagnostic log remains in LOG_DIR. Copying it here used ~40 MB per run.
 E2E_RUNS_KEEP="$(int_or "${WTQ_E2E_RUNS_KEEP:-}" 9)"
 record_e2e_baseline() {   # <gate output> <train ts>
   local out="$1" ts="$2" script="$MAIN_WT/tools/browser-test/e2e-baseline.js"
@@ -2041,7 +2061,11 @@ record_e2e_baseline() {   # <gate output> <train ts>
   fi
   [ -f "$script" ] || return 0
   mkdir -p "$E2E_RUNS_DIR"
-  cp "$out" "$E2E_RUNS_DIR/$ts.log"
+  # Preserve exactly the line kinds e2e-baseline.js consumes. Write to a
+  # temporary file so an interrupted extraction cannot enter the median pool.
+  grep -E '^─── edit-[^[:space:]]+\.test\.js ───|^SKIP:|^SKIP token lesson:|^SKIP lesson 39:|^  SKIP — no vault|^✓ SKIPPED — opt-in|^[[:space:]]+\[[[:space:]]*[0-9]+s[[:space:]]+executor=' \
+    "$out" > "$E2E_RUNS_DIR/$ts.log.tmp" || { rm -f "$E2E_RUNS_DIR/$ts.log.tmp"; return 1; }
+  mv -f "$E2E_RUNS_DIR/$ts.log.tmp" "$E2E_RUNS_DIR/$ts.log"
   # shellcheck disable=SC2012  # names are our own <ts>.log, sortable
   ls -1t "$E2E_RUNS_DIR"/*.log | tail -n +"$((E2E_RUNS_KEEP + 1))" | xargs -r rm -f
   if node "$script" "$E2E_RUNS_DIR"/*.log > "$E2E_BASELINE_LOCAL.tmp" 2>/dev/null; then

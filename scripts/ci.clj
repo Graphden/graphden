@@ -221,7 +221,8 @@
         cmd (:cmd c)
         timeout-ms (:timeout c)
         started (System/nanoTime)
-        proc (p/process {:cmd cmd :out :string :err :string})
+        proc (p/process (cond-> {:cmd cmd :out :string :err :string}
+                          (:extra-env c) (assoc :extra-env (:extra-env c))))
         _ (swap! live-procs conj proc)
         result (deref proc timeout-ms ::timeout)
         ;; Wall time of THIS check, recorded whatever the outcome. The run used
@@ -379,10 +380,11 @@
 
 
 (defn- run-waves!
-  "Three waves, fail-fast.
+  "Four waves, fail-fast.
 
    The lint / commit / info checks run in parallel first (~1 min); the
-   unit suite (`:test`, ~3 min) runs ONLY if they all pass. A formatting
+   directly-related `:priority` tests run before the broad unit suite. The
+   unit suite (`:test`) runs ONLY if both earlier waves pass. A formatting
    slip should not cost the unit suite — the exact waste that prompted
    this. When `--groups` selects no `:test` check (e.g. `bb lint`), the
    later waves are empty and this is just a lint run.
@@ -414,6 +416,7 @@
                (doseq [batch bs]
                  (doseq [f (mapv (fn [c] (future (run-check c status results failed))) batch)]
                    @f)))
+        priority-checks (mapcat identity (:priority batches))
         test-checks (mapcat identity (:test batches))
         post-checks (mapcat identity (:post-test batches))
         pre-checks (mapcat identity (:pre batches))
@@ -422,11 +425,14 @@
     (when (and retry-solo? @failed)
       (ci-proc/retry-solo! pre-checks status results failed run-check))
     (if @failed
-      (skip-all! (concat test-checks post-checks))
-      (do (wave (:test batches))
+      (skip-all! (concat priority-checks test-checks post-checks))
+      (do (wave (:priority batches))
           (if @failed
-            (skip-all! post-checks)
-            (wave (:post-test batches)))))))
+            (skip-all! (concat test-checks post-checks))
+            (do (wave (:test batches))
+                (if @failed
+                  (skip-all! post-checks)
+                  (wave (:post-test batches)))))))))
 
 
 (defn- print-check-result!
@@ -517,13 +523,18 @@
   (let [;; The check set + its metadata (bb task, timeout, group, relevant
         ;; paths) come from the registry in `scripts/checks.edn`; `--groups`
         ;; narrows it, `--since` diff-scopes it, `--skip` force-skips.
-        {checks :run scoped :scoped manual :manual since :since}
+        {selected-checks :run scoped :scoped manual :manual since :since}
         (select-checks *command-line-args*)
+        checks (mapv (fn [check]
+                       (if (= "tests-focused" (:name check))
+                         (assoc check :extra-env {"GRAPHDEN_CI_SINCE" (or since "")})
+                         check))
+                     selected-checks)
         ;; The host-wide lock exists to keep two testcontainer stacks off one
         ;; Docker daemon — so it is only needed when the unit suite runs. A
         ;; lint-only run (`bb lint`, `bb lint-clj`) skips it and never waits on a
         ;; gate's `bb ci`.
-        needs-lock? (some #(= :test (:group %)) checks)
+        needs-lock? (some #(#{:priority :test} (:group %)) checks)
         report-path (System/getenv "GRAPHDEN_CI_REPORT")
         ;; An old green receipt must not survive a crash in a new invocation.
         _ (when report-path

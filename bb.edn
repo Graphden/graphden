@@ -793,6 +793,10 @@
                                      "GDCLOUD_SCRIPT" (str (fs/canonicalize script))}}
                         "node" "cloud-membership-authz-e2e.js"))))}
 
+  ci-priority
+  {:doc "Run exact source-related unit and JS tests before the broad CI test wave. The full suite still follows. GRAPHDEN_CI_SINCE is set by bb ci."
+   :task (load-file "scripts/ci_priority.clj")}
+
   test-js
   {:doc "JS tests that need NO graphden stack — tools/runtime-test/*.test.js, run under node's vm with no browser at all: the shared client runtime, and (since 2026-08-22) the editor's type helpers + the resolution-section renderer.
 
@@ -1029,8 +1033,9 @@
    :task (load-file "scripts/ci.clj")}
 
   wtq-test
-  {:doc "End-to-end test of the merge train (dev/wtq/wt) in throwaway git repos — real `wt merge` waiters, conductor, assembly, bisection; only the heavy suites are stubbed (WTQ_GATE_STUB). ~30 s, no docker, no network. Runs inside bb lint / bb ci as the wtq-train check."
+  {:doc "Merge train tests: image identity, stubbed gate order, and real queue/landing in throwaway repos. No docker or network. Runs inside bb lint / bb ci as wtq-train."
    :task (do (p/shell "bash" "dev/wtq/test/image_test.sh")
+             (p/shell "bash" "dev/wtq/test/gate_order_test.sh")
              (p/shell "bash" "dev/wtq/test/train_test.sh"))}
 
   ci-test
@@ -1038,7 +1043,8 @@
    :task (do (load-file "scripts/artifact_identity_test.clj")
              (load-file "scripts/ci_proc_test.clj")
              (load-file "scripts/ci_select_test.clj")
-             (load-file "scripts/ci_report_test.clj"))}
+             (load-file "scripts/ci_report_test.clj")
+             (load-file "scripts/ci_priority_core_test.clj"))}
 
   lint
   {:doc "Every linter, parallel, NO unit tests — the fast pre-gate check (~1 min). `--retry-solo` re-runs each red check alone before it counts (wt merge's pre-queue lint)."

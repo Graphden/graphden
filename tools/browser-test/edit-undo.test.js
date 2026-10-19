@@ -12,7 +12,7 @@
 const {chromium} = require('playwright');
 const {assert, newContext, api, getEntities, deleteFnByName, waitForServerHealthy, submitInlineRow, BASE}
   = require('./edit-test-helpers');
-const {bindNamedPlaceholder} = require('./tutorial-tour-helpers');
+const {bindNamedPlaceholder, openRowActionsFor} = require('./tutorial-tour-helpers');
 
 const RUN_ID = String(Date.now()).slice(-6);
 const CHILD = 'undo-child' + RUN_ID;
@@ -41,18 +41,10 @@ async function cleanup(page) {
   } catch (_) {}
 }
 
+// All callers act on the selected graph, including immediately after a binding
+// save. Wait for its completed render before clicking the current root trigger.
 async function openRowActionsOn(page, ownerName) {
-  await page.waitForFunction((name) =>
-    Array.from(document.querySelectorAll('.node-overlay')).some((ov) =>
-      ov.textContent.trim().startsWith(name) && ov.querySelector('button.more-actions-trigger')),
-  ownerName, {timeout: 30000, polling: 200});
-  await page.evaluate((name) => {
-    const ov = Array.from(document.querySelectorAll('.node-overlay')).find((o) =>
-      o.textContent.trim().startsWith(name) && o.querySelector('button.more-actions-trigger'));
-    ov.querySelector('button.more-actions-trigger')
-      .dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
-  }, ownerName);
-  await page.waitForSelector('.row-actions-popover', {timeout: 15000});
+  await openRowActionsFor(page, ownerName, 30000, {root: true});
 }
 
 async function extendVia(page, ownerName, childName) {

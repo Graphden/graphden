@@ -5,7 +5,7 @@ const {chromium} = require('playwright');
 const {execFileSync} = require('node:child_process');
 const path = require('node:path');
 const {assert, newContext, api, waitForServerHealthy, AUTH, BASE} = require('./edit-test-helpers');
-const {removeUseSiteBinding, bindPlaceholderOn} = require('./tutorial-tour-helpers');
+const {removeUseSiteBinding, bindPlaceholderOn, pickIncompatFnRef} = require('./tutorial-tour-helpers');
 const {captureFixtureNamespaces, cleanupGraphFixture} = require('./ui-graph-fixture-cleanup');
 const {components} = require('./selective-copy-errors');
 const branch = 'color-values-' + process.pid + '-' + Date.now().toString(36);
@@ -126,6 +126,16 @@ const branch = 'color-values-' + process.pid + '-' + Date.now().toString(36);
     assert(rejectedPlan.status() === 422, 'an invalid typed graph is rejected by browser-plan export');
     await api(page, 'PUT', '/api/entities/binding/' + bindingId,
       'value=' + encodeURIComponent(JSON.stringify('#aabbcc40')), {'X-Graphden-Branch': branch});
+    checkpoint('view-is-not-a-color-value');
+    await removeUseSiteBinding(page, '_theme-base-canvas-background');
+    await pickIncompatFnRef(page, 'as-ui-view');
+    const mismatch = await page.locator('.mismatch-explainer.visible').innerText();
+    assert(/ui-view|UiView/i.test(mismatch), 'a view is rejected by the precise Color sink before execution');
+    const afterRefusal = await api(page, 'GET', '/api/graph/entities?scope=subtree&root-id=' + root,
+      undefined, {'X-Graphden-Branch': branch});
+    const viewIds = new Set((afterRefusal.fns || []).filter(fn => fn.name === 'as-ui-view').map(fn => fn.id));
+    assert(!(afterRefusal.bindings || []).some(binding => binding['fn-id'] === root && viewIds.has(binding['ref-fn-id'])),
+      'the refused view connection does not become a saved Color binding');
     assert(errors.length === 0, 'color editing has no browser exceptions');
   } catch (error) {
     await Promise.all(pendingReceipts);

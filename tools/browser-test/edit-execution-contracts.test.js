@@ -1,0 +1,129 @@
+// Two ordinary wrapper descendants specialize shared E through map values.
+// The real editor saves a local override and ranks callbacks from checker facts.
+const fs = require('node:fs');
+const path = require('node:path');
+const {chromium} = require('playwright');
+const {assert, newContext, api, BASE, AUTH, waitForServerHealthy} = require('./edit-test-helpers');
+const {captureFixtureNamespaces, cleanupGraphFixture} = require('./ui-graph-fixture-cleanup');
+const {renameArgViaEdgeLabel} = require('./tutorial-tour-helpers');
+const run = process.pid + '-' + Date.now().toString(36);
+const branch = 'execution-editor-' + run;
+const namespace = 'user.execution_contract_' + run.replaceAll('-', '_');
+const names = Object.fromEntries(['wrapper', 'browser-child', 'server-child', 'pure-callback', 'server-callback']
+  .map(name => [name, name + '-' + run]));
+
+async function goto(page, name) {
+  await page.goto(BASE + '/?branch=' + branch + '#' + namespace + '.' + names[name]);
+  await page.waitForFunction(expected => graphReady() && !graph.animating
+    && lookups.fnMap.get(selectedFnId)?.name === expected, names[name], {timeout: 60000});
+  await page.waitForSelector('.edge-label-overlay', {timeout: 30000});
+}
+async function expandMapValue(page, argName) {
+  const chip = page.locator('.edge-label-overlay[data-arg-name="' + argName + '"] .arg-type-chip').first();
+  await chip.waitFor({timeout: 30000});
+  await chip.click();
+  const panel = page.locator('.type-inline-host:visible');
+  await panel.waitFor();
+  const values = panel.locator('.type-inline-row').filter({has: page.locator('.type-inline-label', {hasText: /^value$/})}).first();
+  await values.locator(':scope > .arg-type-chip').click();
+  return panel;
+}
+
+async function entry(page) {
+  return page.evaluate(() => richTypeEntryOf(lookups.fnMap.get(selectedFnId)));
+}
+async function openPicker(page, owner) {
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+  const binder = page.locator('.placeholder-binder[data-fn-name="' + names[owner] + '"][data-arg-name="handler"]');
+  await binder.waitFor({timeout: 30000});
+  await binder.click();
+  const choose = page.getByRole('button', {name: 'Bind fn-ref', exact: true});
+  await choose.waitFor({timeout: 15000});
+  await choose.click();
+  await page.locator('.fn-picker-popover').waitFor();
+}
+async function candidate(page, name, compatible) {
+  await page.locator('.fn-picker-popover input').fill(names[name]);
+  const row = page.locator('.fn-picker-popover .fn-picker-row-' + (compatible ? 'compat' : 'incompat')
+    + '[data-fn-name$="' + names[name] + '"]');
+  await row.waitFor({timeout: 30000});
+  return row;
+}
+
+(async () => {
+  await waitForServerHealthy();
+  const {browser, page} = await newContext(chromium, {boot: false});
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('dialog', dialog => dialog.accept());
+  let prepared, baseline;
+  try {
+    baseline = await captureFixtureNamespaces(page);
+    let source = fs.readFileSync(path.join(__dirname, '../../test/fixtures/platform/execution_editor.edn'), 'utf8')
+      .replaceAll('user.execution-contract', namespace);
+    for (const [name, unique] of Object.entries(names)) {
+      source = source.replace(new RegExp(':' + name + '(?=[\\s}\\]])', 'g'), ':' + unique);
+    }
+    const imported = await page.request.post(BASE + '/api/import/graph?target=' + branch + '&create=true', {
+      headers: {Authorization: 'Bearer ' + AUTH, 'Content-Type': 'application/edn'}, data: source, timeout: 120000,
+    });
+    assert(imported.ok(), 'ordinary graph source imported into isolated branch');
+    const receipt = await imported.json();
+    assert(receipt.ok !== false && receipt.status !== 'failed', 'fixture import accepted');
+    prepared = {branch, namespace};
+    await goto(page, 'browser-child');
+    const inherited = await expandMapValue(page, 'handlers');
+    assert(await inherited.getByRole('combobox', {name: 'Execution profile', exact: true}).count() === 0,
+      'inherited constraint is read-only until a local override exists');
+    assert((await inherited.innerText()).includes('Inherited constraint'), 'inherited control explains its read-only state');
+    await page.keyboard.press('Escape');
+    await renameArgViaEdgeLabel(page, 'handlers', 'events');
+    const panel = await expandMapValue(page, 'events');
+    const execution = panel.getByRole('combobox', {name: 'Execution profile', exact: true});
+    await execution.waitFor();
+    await execution.selectOption('browser');
+    const saved = page.waitForResponse(response => response.request().method() === 'POST'
+      && response.url().includes('/tighten-fn-effects'));
+    await panel.getByRole('button', {name: 'Tighten', exact: true}).click();
+    const savedResponse = await saved;
+    assert(savedResponse.ok(), 'map value execution requirement saved through production control');
+    const proposal = savedResponse.request().postDataJSON();
+    assert(JSON.stringify(proposal.type[2][4]) === JSON.stringify(['browser-main']), 'submitted map values require Browser');
+    assert(Array.isArray(proposal.type[2][3]) && proposal.type[2][3].length === 0, 'pure effect ceiling survived execution edit');
+    await page.waitForFunction(() => {
+      const e = richTypeEntryOf(lookups.fnMap.get(selectedFnId));
+      return e?.args?.handler?.[4]?.includes('browser-main') && e?.args?.events?.[0] === 'map';
+    }, null, {timeout: 60000});
+    const browserEntry = await entry(page);
+    assert(browserEntry.args.handler[4].includes('browser-main'), 'map pin specializes sibling callback expectation');
+    await openPicker(page, 'browser-child');
+    const rejected = await candidate(page, 'server-callback', false);
+    await rejected.click();
+    const mismatch = page.locator('.mismatch-explainer.visible');
+    await mismatch.waitFor();
+    const reason = await mismatch.innerText();
+    assert(/Browser/.test(reason) && /JVM/.test(reason), 'server-only callback rejection explains the two execution profiles');
+    await page.screenshot({path: '/tmp/graphden-a3-execution-refusal.png', fullPage: true});
+    await openPicker(page, 'browser-child');
+    await (await candidate(page, 'pure-callback', true)).click();
+    await page.locator('.fn-picker-popover').waitFor({state: 'hidden', timeout: 30000});
+    await goto(page, 'server-child');
+    const serverEntry = await entry(page);
+    assert(serverEntry.args.handler[4].includes('jvm-server') && !serverEntry.args.handler[4].includes('browser-main'),
+      'neighboring descendant retains JVM requirement');
+    await openPicker(page, 'server-child');
+    await candidate(page, 'server-callback', true);
+    await (await candidate(page, 'pure-callback', true)).click();
+    await page.locator('.fn-picker-popover').waitFor({state: 'hidden', timeout: 30000});
+    await goto(page, 'wrapper');
+    const root = await entry(page);
+    assert(root.args.handlers[2][4][0] === 'execution-var', 'shared root retains generic execution variable');
+    assert(root.args.handler[4][0] === 'execution-var', 'shared callback slot remains generic');
+    assert(errors.length === 0, 'execution editing produces no browser exceptions');
+    console.log('✓ execution contracts: rename, local map pin, sibling isolation and callback filtering');
+  } finally {
+    try { if (prepared) await cleanupGraphFixture(page, prepared, baseline); }
+    finally { await browser.close(); }
+  }
+})().catch(error => {console.error(error); process.exitCode = 1;});

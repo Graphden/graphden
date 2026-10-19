@@ -35,6 +35,7 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.context :as tenancy]
     [graphden.types.diagnostics :as diag]
+    [graphden.util.counters :as counters]
     [graphden.versioning.storage.core :as vs]))
 
 
@@ -1743,7 +1744,8 @@
 
 
 (deftest inherited-rename-preserves-local-map-contract-and-canonical-binding
-  (let [storage (setup/create-test-storage)]
+  (let [storage (setup/create-test-storage)
+        c (test-ctx storage)]
     (try
       (let [shape [:map :keyword [:fn {:item :text} :int #{} [:execution-var 'E]]]
             browser [:map :keyword [:fn {:item :text} :int #{} #{:browser-main}]]
@@ -1758,20 +1760,46 @@
                                                       :source-slot-id (:id original)})
             _ (setup/attach-slot! storage (:id wrapper) (:id handlers) 0)
             _ (sp/create-entity storage :binding {:fn-id (:id wrapper) :slot-id (:id original)})
-            sibling (setup/create-composed-fn! storage "rename-map-sibling" (:id wrapper))]
+            sibling (setup/create-composed-fn! storage "rename-map-sibling" (:id wrapper))
+            children (into {} (for [tighten-first? [false true]]
+                                [tighten-first? (setup/create-composed-fn!
+                                                  storage (str "rename-map-child-" tighten-first?) (:id wrapper))]))
+            ;; Opening the editor loads this branch context's real graph cache.
+            ;; Subsequent HTTP writes reuse it through BranchRouter.entry-for.
+            _ (is (nil? (ctx/cached-graph c)))
+            opened (entity-list/graph-subtree c (:id (get children false)))
+            _ (is (some #(= (:id (get children false)) (:id %)) (:fns opened)))
+            _ (is (some? (ctx/cached-graph c)))
+            before-writes (counters/snapshot)
+            publish-rename! (fn [response]
+                              ;; The route publishes only successful creates/
+                              ;; updates; rejected historical names write nothing.
+                              (when-not (:error response)
+                                (let [binding-id (or (:created response) (:updated response))
+                                      row (when binding-id (sp/read-entity storage :binding binding-id))]
+                                  (is (uuid? binding-id) "a successful rename returns its binding identity")
+                                  (is (some? row) "a successful rename has a persisted binding to publish")
+                                  (when row (entities/invalidate! c storage :binding row))))
+                              response)
+            tighten! (fn [binding-id]
+                       (let [response (entities/tighten-fn-type-impl! c storage binding-id {:type browser})]
+                         (is (= 200 (:status response)))
+                         ;; Match _tighten-apply-success: publish the receipt
+                         ;; into the same context before the next request.
+                         (entities/invalidate! c storage :binding (:result response))))]
         (doseq [tighten-first? [false true]]
-          (let [child (setup/create-composed-fn! storage (str "rename-map-child-" tighten-first?) (:id wrapper))
+          (let [child (get children tighten-first?)
                 initial (when tighten-first?
                           (sp/create-entity storage :binding {:fn-id (:id child) :slot-id (:id original)}))
                 _ (when initial
-                    (is (= 200 (:status (entities/tighten-fn-type-impl! storage (:id initial) {:type browser})))))
+                    (tighten! (:id initial)))
                 response (if initial
-                           (entities/apply-update-core
-                             {:entity-type :binding :type-str "binding" :id-uuid (:id initial)
-                              :form-data {:rename-to "events"} :entity-data {}} (test-ctx storage))
-                           (entities/apply-create-core
-                             {:entity-type :binding :type-str "binding" :form-data {:rename-to "events"}
-                              :entity-data {:fn-id (:id child) :slot-id (:id handlers)}} (test-ctx storage)))
+                           (publish-rename! (entities/apply-update-core
+                                              {:entity-type :binding :type-str "binding" :id-uuid (:id initial)
+                                               :form-data {:rename-to "events"} :entity-data {}} c))
+                           (publish-rename! (entities/apply-create-core
+                                              {:entity-type :binding :type-str "binding" :form-data {:rename-to "events"}
+                                               :entity-data {:fn-id (:id child) :slot-id (:id handlers)}} c)))
                 binding-id (or (:id initial) (:created response))
                 binding (sp/read-entity storage :binding binding-id)
                 view (sp/read-entity storage :slot (records/slot-id (:id child) "events"))]
@@ -1782,12 +1810,12 @@
             (is (= {:as :events :type (if tighten-first? browser shape)}
                    (get-in (tc/reconstruct-fn-def storage (:id child)) [:args :handlers])))
             (when-not tighten-first?
-              (is (= 200 (:status (entities/tighten-fn-type-impl! storage binding-id {:type browser})))))
+              (tighten! binding-id))
             (is (= {:as :events :type browser}
                    (get-in (tc/reconstruct-fn-def storage (:id child)) [:args :handlers])))
-            (let [again (entities/apply-update-core
-                          {:entity-type :binding :type-str "binding" :id-uuid binding-id
-                           :form-data {:rename-to "renamed-again"} :entity-data {}} (test-ctx storage))
+            (let [again (publish-rename! (entities/apply-update-core
+                                           {:entity-type :binding :type-str "binding" :id-uuid binding-id
+                                            :form-data {:rename-to "renamed-again"} :entity-data {}} c))
                   next-view (sp/read-entity storage :slot (records/slot-id (:id child) "renamed-again"))]
               (is (nil? (:error again)))
               (is (= (:id view) (:source-slot-id next-view)))
@@ -1800,19 +1828,19 @@
                                 :latest (sp/read-entity storage :slot (:id next-view))
                                 :junctions (set (sp/query-entities storage :fn-slot {:fn-id (:id child)}))})
                     before (snapshot)
-                    refused (entities/apply-update-core
-                              {:entity-type :binding :type-str "binding" :id-uuid binding-id
-                               :form-data {:rename-to "events"} :entity-data {}} (test-ctx storage))
-                    refused-create (entities/apply-create-core
-                                     {:entity-type :binding :type-str "binding" :form-data {:rename-to "events"}
-                                      :entity-data {:fn-id (:id child) :slot-id (:id handlers)}} (test-ctx storage))]
+                    refused (publish-rename! (entities/apply-update-core
+                                               {:entity-type :binding :type-str "binding" :id-uuid binding-id
+                                                :form-data {:rename-to "events"} :entity-data {}} c))
+                    refused-create (publish-rename! (entities/apply-create-core
+                                                      {:entity-type :binding :type-str "binding" :form-data {:rename-to "events"}
+                                                       :entity-data {:fn-id (:id child) :slot-id (:id handlers)}} c))]
                 (doseq [response [refused refused-create]]
                   (is (= 409 (:http-status response)))
                   (is (re-find #"earlier rename" (:error response))))
                 (is (= before (snapshot)) "historical-name conflict changes no binding, slot or junction")
-                (let [idempotent (entities/apply-update-core
-                                   {:entity-type :binding :type-str "binding" :id-uuid binding-id
-                                    :form-data {:rename-to "renamed-again"} :entity-data {}} (test-ctx storage))]
+                (let [idempotent (publish-rename! (entities/apply-update-core
+                                                    {:entity-type :binding :type-str "binding" :id-uuid binding-id
+                                                     :form-data {:rename-to "renamed-again"} :entity-data {}} c))]
                   (is (nil? (:error idempotent)))
                   (is (= before (snapshot))))
                 (is (= {:as :renamed-again :type browser}
@@ -1824,7 +1852,9 @@
                        (get-in (tc/reconstruct-fn-def storage (:id grandchild)) [:args :renamed-again])))))
             (is (= handlers (sp/read-entity storage :slot (:id handlers))))
             (is (empty? (sp/query-entities storage :binding {:fn-id (:id sibling)})))
-            (is (empty? (:args (tc/reconstruct-fn-def storage (:id sibling))))))))
+            (is (empty? (:args (tc/reconstruct-fn-def storage (:id sibling)))))))
+        (is (zero? (get (counters/delta-since before-writes) :registry/delta-read-graph 0))
+            "rename, tightening, conflict and idempotent writes reuse the editor's warm graph cache"))
       (finally (sp/close storage)))))
 
 

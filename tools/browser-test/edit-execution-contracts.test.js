@@ -55,7 +55,15 @@ async function candidate(page, name, compatible) {
   await waitForServerHealthy();
   const {browser, page} = await newContext(chromium, {boot: false});
   const errors = [];
-  page.on('pageerror', error => errors.push(error.message));
+  page.on('pageerror', error => { errors.push(error.message); console.log('execution pageerror', error.message.slice(0, 400)); });
+  let consoleErrors = 0;
+  page.on('console', message => { if (message.type() === 'error' && consoleErrors++ < 3) console.log('execution console.error', message.text().slice(0, 600)); });
+  page.on('response', async response => {
+    if (response.status() !== 422) return;
+    const url = new URL(response.url());
+    const body = await response.text().catch(() => 'unavailable');
+    console.log('execution HTTP422', url.pathname + url.search, body.slice(0, 1200));
+  });
   page.on('dialog', dialog => dialog.accept());
   let prepared, baseline;
   try {
@@ -122,6 +130,28 @@ async function candidate(page, name, compatible) {
     assert(root.args.handler[4][0] === 'execution-var', 'shared callback slot remains generic');
     assert(errors.length === 0, 'execution editing produces no browser exceptions');
     console.log('✓ execution contracts: rename, local map pin, sibling isolation and callback filtering');
+  } catch (error) {
+    const snapshot = await page.evaluate(() => {
+      const row = lookups.fnMap.get(selectedFnId);
+      const args = [...document.querySelectorAll('.edge-label-overlay')].map(overlay => {
+        const edge = graph.edges.get(overlay.dataset.edgeId);
+        const data = typeof edge?.data === 'function' ? edge.data() : edge?.data;
+        return data && argRowFromNode(data);
+      }).filter(Boolean);
+      return {url: location.href, selected: {id: row?.id, name: row?.name},
+        rich: richTypeEntryOf(row),
+        args: args.map(arg => ({name: arg.name, slot: lookups.slotMap.get(arg['slot-id']),
+          binding: arg['binding-id'], expected: expectedSlotType(arg)})),
+        chips: [...document.querySelectorAll('.edge-label-overlay .arg-type-chip')].map(chip => ({
+          arg: chip.closest('.edge-label-overlay')?.dataset.argName, className: chip.className,
+          title: chip.title, expanded: chip.getAttribute('aria-expanded'), text: chip.textContent})),
+        panels: [...document.querySelectorAll('.type-inline-host')].map(panel => ({display: panel.style.display,
+          text: panel.textContent.slice(0, 800)})),
+        popovers: [...document.querySelectorAll('.arg-value-edit-popover')].map(panel => panel.getAttribute('aria-label'))};
+    }).catch(() => ({snapshotUnavailable: true}));
+    console.log('execution finite DOM/type snapshot', JSON.stringify(snapshot));
+    await page.screenshot({path: '/tmp/graphden-a3-execution-panel-failure.png', fullPage: true}).catch(() => {});
+    throw error;
   } finally {
     try { if (prepared) await cleanupGraphFixture(page, prepared, baseline); }
     finally { await browser.close(); }

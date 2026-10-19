@@ -71,7 +71,9 @@ function slotRichType(arg) {
   if (!slotName) return null;
   for (const fid of getInheritanceChain(arg['fn-id'])) {
     const fn = lookups?.fnMap?.get(fid);
-    const t = richTypeEntryOf(fn)?.args?.[slotName] ?? null;
+    const effectiveName = typeof getEffectiveSlotName === 'function'
+      ? getEffectiveSlotName(fid, arg['slot-id']) : slotName;
+    const t = richTypeEntryOf(fn)?.args?.[effectiveName || slotName] ?? null;
     if (t != null) return t;
   }
   return null;
@@ -176,7 +178,6 @@ function expectedSlotType(arg) {
                 || refFn?.['return-type-fn-id']
                 || slot['type-fn-id'];
   const tfn = lookups.fnMap.get(tfnId);
-  if (!tfn) return null;
   const slotType = computeSlotType(tfn);
   // Priority 4 — slot's declared type. `[:list T]` / `[:map K V]` /
   // `[:tuple …]` degrade to the bare `:sequence` / `:jsonb` primitive
@@ -193,7 +194,9 @@ function expectedSlotType(arg) {
   // already produced a structural form (e.g. `[:fn …]` recovered from
   // the slot's anonymous-row `:constraint`), THAT is the precise one
   // — a coarser rich-types entry must not clobber it.
-  const degraded = slotType === 'sequence' || slotType === 'jsonb'
+  // Layout may omit anonymous type rows from the loaded fn-map. The
+  // checker declaration is still available under the owning row identity.
+  const degraded = (!tfn && usingSlotDecl) || slotType === 'sequence' || slotType === 'jsonb'
                    || slotType === 'any';
   const effective = (degraded && Array.isArray(declRich))
                     ? declRich : slotType;
@@ -366,7 +369,7 @@ function computeSlotType(tfn) {
   // the chip / explainer / mismatch logic see the structural form
   // rather than the flat fallback "fn" / "jsonb".
   const c = tfn.constraint;
-  if (Array.isArray(c) && (c[0] === 'fn' || c[0] === 'map' || c[0] === 'tuple')) return c;
+  if (Array.isArray(c) && (c[0] === 'fn' || c[0] === 'map' || c[0] === 'list' || c[0] === 'tuple')) return c;
   if (!tfn.name) return null;
   const rich = richTypeEntryOf(tfn);
   // For NAMED type-rows (record-shapes, list/union/variant aliases,

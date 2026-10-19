@@ -86,5 +86,33 @@ const {createDocument} = require('./mini-dom');
   ctx.richTypes.local['fn-id'] = 'sibling-with-same-name';
   assert.equal(ctx.bindingTypeHints({'fn-id': 'child', 'slot-id': 'renamed'}).length, 0,
     'a same-name sibling cannot supply diagnostic provenance');
+  const inheritedMap = ['map', 'keyword', callback];
+  ctx.lookups = {fnMap: new Map([['child', {id: 'child', name: 'child'}],
+    ['parent', {id: 'parent', name: 'parent'}]]),
+    bindingMap: new Map(), slotMap: new Map([['source', {name: 'map', 'type-fn-id': 'omitted-anonymous'}]])};
+  ctx.getInheritanceChain = () => ['child', 'parent'];
+  ctx.getEffectiveSlotName = id => id === 'child' ? 'events' : 'handlers';
+  ctx.richTypes = {child: {'fn-id': 'child', args: {events: inheritedMap}},
+    parent: {'fn-id': 'parent', args: {handlers: inheritedMap}}};
+  const renamedArg = {'fn-id': 'child', 'slot-id': 'source', name: 'events'};
+  assert.equal(ctx.expectedSlotType(renamedArg), inheritedMap,
+    'inherited renamed slot recovers its rich contract when anonymous row is not loaded');
+  ctx.richTypes.child['fn-id'] = 'unrelated-sibling';
+  assert.equal(ctx.expectedSlotType(renamedArg), inheritedMap,
+    'parent declaration uses its own effective slot name when child entry belongs to a sibling');
+  ctx.richTypes.parent['fn-id'] = 'another-sibling';
+  assert.equal(ctx.expectedSlotType(renamedArg), null, 'same-name siblings cannot supply a contract');
+  ctx.richTypes.child['fn-id'] = 'child';
+  ctx.lookups.bindingMap.set('local', {'type-override-fn-id': 'missing-explicit'});
+  assert.equal(ctx.expectedSlotType({...renamedArg, 'binding-id': 'local'}), null,
+    'missing explicit override cannot silently fall back to a broader declaration');
+  ctx.lookups.fnMap.set('producer', {id: 'producer', name: 'producer', 'return-type-fn-id': 'missing-return'});
+  ctx.lookups.bindingMap.set('ref', {'ref-fn-id': 'producer'});
+  assert.equal(ctx.expectedSlotType({...renamedArg, 'binding-id': 'ref'}), null,
+    'missing ref return type cannot silently fall back to the declaration');
+  ctx.getEffectiveSlotName = () => 'unrelated-slot';
+  assert.equal(ctx.expectedSlotType(renamedArg), null, 'another slot cannot supply the rich declaration');
+  const list = ['list', callback];
+  assert.equal(ctx.computeSlotType({constraint: list}), list, 'anonymous list rows retain their full callable contract');
   console.log('✓ execution authoring preserves nested contracts, effects and local identity');
 })().catch(error => {console.error(error); process.exit(1);});

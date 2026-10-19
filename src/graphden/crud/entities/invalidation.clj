@@ -64,7 +64,10 @@
       (when-let [id (:id entity-data)] #{id}))
 
     (:fn-slot :binding)
-    (when-let [fid (:fn-id entity-data)] #{fid})
+    ;; Compound writers may also materialize anonymous type rows. Their
+    ;; server-produced receipt includes those identities; HTTP parsers do
+    ;; not accept this field from binding input.
+    (when-let [fid (:fn-id entity-data)] (into #{fid} (:ids entity-data)))
 
     :binding-list-item
     ;; Items live under a binding; the binding's fn-id is the owner.

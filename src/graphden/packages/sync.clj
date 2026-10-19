@@ -535,7 +535,8 @@
                                (into (mapv #(records/fn-id (:namespace %) (:name %)) fn-defs)
                                      (comp (remove (set (map #(records/fn-id (:namespace %) (:name %)) fn-defs)))
                                            (distinct))
-                                     (vals name->id))
+                                     (or (::fn-core/written-fn-ids (meta name->id))
+                                         (vals name->id)))
                                (select-keys (meta ns-id-map) [:created-namespaces]))))))))
 
 

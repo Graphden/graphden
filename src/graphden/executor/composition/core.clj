@@ -281,7 +281,8 @@
                                            (when-let [n (:name fr)]
                                              [(keyword n) (:id fr)])))
                                    fns)
-                             {::source-fingerprints (when canonical-prepared
+                             {::written-fn-ids (mapv :id fns)
+                              ::source-fingerprints (when canonical-prepared
                                                       (source-contract/fingerprints canonical-prepared))}))))))
 
 

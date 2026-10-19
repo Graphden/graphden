@@ -17,17 +17,20 @@
    cap is a thread-local `binding` of the now-dynamic
    `entity-list/*default-search-limit*`."
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.entities :as entities]
     [graphden.crud.entities.list :as entity-list]
     [graphden.crud.entities.views :as views]
     [graphden.crud.type-check :as tc]
+    [graphden.crud.types-api :as types-api]
     [graphden.crud.validation :as validation]
     [graphden.executor.context :as ctx]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
     [graphden.packages.records.types :as record-types]
+    [graphden.packages.sync :as packages]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.context :as tenancy]
     [graphden.types.diagnostics :as diag]
@@ -1821,4 +1824,63 @@
             (is (= handlers (sp/read-entity storage :slot (:id handlers))))
             (is (empty? (sp/query-entities storage :binding {:fn-id (:id sibling)})))
             (is (empty? (:args (tc/reconstruct-fn-def storage (:id sibling))))))))
+      (finally (sp/close storage)))))
+
+
+(deftest bundle-type-writes-publish-exact-identities-to-warm-graph-cache
+  (let [storage (setup/create-test-storage)
+        c (test-ctx storage)
+        callback [:fn {:item :text} :int #{} #{:browser-main}]
+        shape [:map :keyword callback]]
+    (try
+      (reset! (:graph-cache c) (types-api/load-graph-entities-uncached storage))
+      (let [ids (packages/sync-bundle! storage [{:name :cache-type-record :namespace "cache.types"
+                                                 :type {:callbacks shape}}])
+            anonymous (filterv #(and (nil? (:name %)) (contains? #{shape callback} (:constraint %)))
+                               (sp/query-entities storage :fn {}))
+            owner (graphden.packages.records/fn-id "cache.types" :cache-type-record)]
+        (is (= 2 (count anonymous)))
+        (is (every? (set ids) (map :id anonymous)))
+        (ctx/invalidate-graph-cache! c (set ids))
+        (is (every? (set (map :id (:fns @(:graph-cache c)))) (map :id anonymous)))
+        (is (some #(= shape (:constraint %)) (:fns (entity-list/graph-subtree c owner))))
+        (testing "namespace denial removes type rows without a binding payload bypass"
+          (let [private-ns (sp/create-entity storage :ns {:name "private-types"})
+                hidden (sp/create-entity storage :fn {:name "hidden-constraint" :namespace-id (:id private-ns)
+                                                      :base-fn-id (graphden.packages.records/primitive-fn-id :text)
+                                                      :constraint [:= "private-value"]})
+                slot (first (sp/query-entities storage :fn-slot {:fn-id owner}))]
+            (sp/create-entity storage :binding {:fn-id owner :slot-id (:slot-id slot)
+                                                :type-override-fn-id (:id hidden)})
+            (ctx/invalidate-graph-cache! c #{owner (:id hidden)})
+            (is (some #(= (:id hidden) (:id %)) (:fns (entity-list/graph-subtree c owner))))
+            (binding [tenancy/*seams-override*
+                      (atom {:graph-read-filter-fn
+                             #(update % :fns (fn [rows] (filterv (fn [row] (not= (:id private-ns) (:namespace-id row))) rows)))})]
+              (let [visible (tenancy/apply-graph-read-filter (entity-list/graph-subtree c owner))]
+                (is (not-any? #(= (:id hidden) (:id %)) (:fns visible)))
+                (is (not (str/includes? (pr-str visible) "private-value")))
+                (is (every? #(not (contains? % :type-override)) (:bindings visible))))))))
+      (finally (sp/close storage)))))
+
+
+(deftest tightened-type-writes-publish-exact-identities-to-warm-graph-cache
+  (let [storage (setup/create-test-storage)
+        c (test-ctx storage)
+        shape [:map :keyword [:fn {:cache-item :text} :int #{} #{:browser-main}]]]
+    (try
+      (let [[bid owner] (make-binding-on-fn-typed-slot! storage "cache-type-tighten"
+                                                        [:map :keyword [:fn {:cache-item :text} :int #{} :unknown]])]
+        (reset! (:graph-cache c) (types-api/load-graph-entities-uncached storage))
+        (let [result (entities/tighten-fn-type-impl! storage bid {:type shape})
+              expected (into #{} (map :id) (record-types/inline-fn-type-rows-from-form shape))
+              seeds (entities/affected-fn-ids storage :binding (:result result))]
+          (is (= 200 (:status result)))
+          (is (every? seeds expected))
+          (is (contains? seeds owner))
+          (ctx/invalidate-graph-cache! c seeds)
+          (is (every? (set (map :id (:fns @(:graph-cache c)))) expected))
+          (let [sub (entity-list/graph-subtree c owner)]
+            (is (some #(= (get-in result [:result :type-override-fn-id]) (:id %)) (:fns sub)))
+            (is (= shape (:constraint (first (filter #(= (get-in result [:result :type-override-fn-id]) (:id %)) (:fns sub)))))))))
       (finally (sp/close storage)))))

@@ -42,14 +42,14 @@
         existing (into #{} (map :id) (sp/query-entities storage :fn {:id (mapv :id rows)}))
         missing (filterv #(not (contains? existing (:id %))) rows)]
     (doseq [row missing] (sp/create-entity storage :fn (dissoc row :kind)))
-    {:id root-id :created (mapv :id missing)}))
+    {:id root-id :created (mapv :id missing) :ids (mapv :id rows)}))
 
 
 (defn commit-tighten!
   "Write a binding-local contract with canonical nested identities. A secret
    rejection restores the binding and removes only this call's new type rows."
   [ctx storage binding-id b new-c _effects-vec]
-  (let [{new-id :id created :created} (materialize-constraint! storage new-c)
+  (let [{new-id :id created :created type-ids :ids} (materialize-constraint! storage new-c)
         pre-override (:type-override-fn-id b)]
     (sp/update-entity storage :binding binding-id
                       {:type-override-fn-id new-id})
@@ -81,7 +81,8 @@
         {:status 200
          :result (cond-> {:type-override-fn-id new-id
                           :constraint new-c
-                          :fn-id (:fn-id b)}
+                          :fn-id (:fn-id b)
+                          :ids (into [(:fn-id b)] type-ids)}
                    post-rej (assoc :type-warnings [(:diagnostic post-rej)]))}))))
 
 

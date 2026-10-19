@@ -262,7 +262,16 @@ function graphShellFromTree(tree) {
 // deleted rows don't linger. The sidebar re-fetches leaves for
 // still-expanded namespaces on its next render, and ensureSubtreeFor
 // re-primes the selected fn.
+function graphTypeGeneration() { return _subtreeResetEpoch; }
+function graphTypesReady() { return _subtreeRootId != null; }
+
 function resetGraphCaches() {
+  if (typeof hideAllInlineHosts === 'function') hideAllInlineHosts();
+  for (const chip of document.querySelectorAll?.('.arg-type-chip[role="button"]') || []) {
+    chip.setAttribute('aria-disabled', 'true');
+    chip.setAttribute('tabindex', '-1');
+    chip.title = 'Updating type contract…';
+  }
   _subtreeRootId = null;
   _subtreeEpoch += 1;
   _subtreeResetEpoch += 1;

@@ -35,14 +35,16 @@ const json = (body, status = 200) => ({
 // A fresh editor-main per case. `routes(url)` answers fetches; a route may
 // return a function (called at fetch time) to act mid-flight.
 function boot({ routes, accounts = false, tenancyClass = false }) {
-  const calls = { popover: [], entityList: 0, href: null, requery: 0, events: [] };
+  const calls = { popover: [], entityList: 0, href: null, requery: 0, events: [], inlineClosed: 0 };
+  const oldChip = {attrs: {}, setAttribute(key, value) { this.attrs[key] = value; }};
   const rowActions = new Map([['b1', {}]]);
   const ctx = vm.createContext({
     console, Event,
     API: { api_graph_entities: '/api/graph/entities', api_types: '/api/types', api_value_kinds: '/api/value-kinds' },
     location: { pathname: '/', search: '', hash: '#app.x',
                 set href(v) { calls.href = v; }, get href() { return calls.href; } },
-    document: { addEventListener() {}, body: { classList: { contains: (c) => tenancyClass && c === 'gd-tenancy' } } },
+    document: { addEventListener() {}, querySelectorAll: () => [oldChip], body: { classList: { contains: (c) => tenancyClass && c === 'gd-tenancy' } } },
+    hideAllInlineHosts: () => { calls.inlineClosed += 1; },
     buildLookups: (g) => ({ fnMap: new Map(g.fns.map((f) => [f.id, f])) }),
     updateEntityList: () => { calls.entityList += 1; },
     requerySearch: () => { calls.requery += 1; },
@@ -68,7 +70,7 @@ function boot({ routes, accounts = false, tenancyClass = false }) {
     return Promise.resolve(typeof r === 'function' ? r() : r);
   };
   vm.runInContext(SRC, ctx, { filename: 'editor-main.js' });
-  return { ctx, calls, rowActions };
+  return { ctx, calls, rowActions, oldChip };
 }
 
 const TREE = { namespaces: [{ id: 'ns1', name: 'app' }], counts: [] };
@@ -111,6 +113,21 @@ function racingRoutes(ctxRef, typesBody) {
     assert(b.calls.requery >= 1, which + ': an active search is asked again');
     assert(b.calls.events.includes('gd-graph-changed') === (which === 'loadGraphData'),
       which + ': only a completed mutation refresh announces changed graph data');
+  }
+
+  {
+    let finishTree;
+    const b = boot({routes: url => url.includes('scope=tree')
+      ? new Promise(resolve => { finishTree = resolve; }) : json({})});
+    b.ctx.location.hash = '';
+    const refresh = b.ctx.loadGraphData();
+    assert(b.oldChip.attrs['aria-disabled'] === 'true', 'refresh immediately disables existing type actions');
+    assert(b.oldChip.attrs.tabindex === '-1', 'stale actions leave the keyboard tab order');
+    assert(b.calls.inlineClosed === 1, 'refresh closes stale editable type panels before fetching');
+    assert(b.ctx.graphTypeGeneration() === 1 && !b.ctx.graphTypesReady(), 'type generation is pending during refresh');
+    finishTree(json(TREE));
+    await refresh;
+    assert(b.oldChip.attrs['aria-disabled'] === 'true', 'old actions are never reenabled after refresh');
   }
 
   console.log(' unparseable /api/types: initGraph blanks, loadGraphData keeps the prior registry');

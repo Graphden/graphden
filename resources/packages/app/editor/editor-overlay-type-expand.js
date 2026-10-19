@@ -621,6 +621,11 @@ function attachInlineExpand(chipEl, rich, path, ctx) {
   const expandable = isTypeExpandable(rich);
   const c = ctx || {};
   const editable = !!c.editable && typeof c.onEdit === 'function';
+  const generation = typeof graphTypeGeneration === 'function' ? graphTypeGeneration() : null;
+  const actionReady = () => chipEl.getAttribute('aria-disabled') !== 'true'
+    && (generation == null || (generation === graphTypeGeneration() && graphTypesReady()))
+    && (!c.arg || (typeof expectedSlotType === 'function' && typeof structEq === 'function'
+      && structEq(expectedSlotType(c.arg), rich)));
 
   if (!expandable) {
     // No structure to reveal. Editable: clicking the chip opens the
@@ -632,7 +637,7 @@ function attachInlineExpand(chipEl, rich, path, ctx) {
       chipEl.style.cursor = 'pointer';
       chipEl.addEventListener('click', (e) => {
         e.stopPropagation();
-        c.onEdit();
+        if (actionReady()) c.onEdit();
       });
       chipEl.addEventListener('keydown', e => {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); chipEl.click(); }
@@ -664,6 +669,7 @@ function attachInlineExpand(chipEl, rich, path, ctx) {
 
   chipEl.addEventListener('click', (e) => {
     e.stopPropagation();
+    if (!actionReady()) return;
     const willOpen = !expandedTypePaths.has(path);
     if (willOpen) expandedTypePaths.add(path);
     else expandedTypePaths.delete(path);

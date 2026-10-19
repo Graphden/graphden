@@ -21,11 +21,12 @@ async function goto(page, name) {
 async function expandMapValue(page, argName) {
   const chip = page.locator('.edge-label-overlay[data-arg-name="' + argName + '"] .arg-type-chip').first();
   await chip.waitFor({timeout: 30000});
-  await chip.click();
+  if (await chip.getAttribute('aria-expanded') !== 'true') await chip.click();
   const panel = page.locator('.type-inline-host:visible');
   await panel.waitFor();
   const values = panel.locator('.type-inline-row').filter({has: page.locator('.type-inline-label', {hasText: /^value$/})}).first();
-  await values.locator(':scope > .arg-type-chip').click();
+  const valueChip = values.locator(':scope > .arg-type-chip');
+  if (await valueChip.getAttribute('aria-expanded') !== 'true') await valueChip.click();
   return panel;
 }
 
@@ -65,7 +66,7 @@ async function candidate(page, name, compatible) {
     console.log('execution HTTP422', url.pathname + url.search, body.slice(0, 1200));
   });
   page.on('dialog', dialog => dialog.accept());
-  let prepared, baseline;
+  let prepared, baseline, releaseTypeRefresh;
   try {
     baseline = await captureFixtureNamespaces(page);
     let source = fs.readFileSync(path.join(__dirname, '../../test/fixtures/platform/execution_editor.edn'), 'utf8')
@@ -91,6 +92,11 @@ async function candidate(page, name, compatible) {
     const execution = panel.getByRole('combobox', {name: 'Execution profile', exact: true});
     await execution.waitFor();
     await execution.selectOption('browser');
+    const typeRefresh = new Promise(resolve => { releaseTypeRefresh = resolve; });
+    await page.route(BASE + '/api/types', async route => {
+      await typeRefresh;
+      await route.continue();
+    }, {times: 1});
     const saved = page.waitForResponse(response => response.request().method() === 'POST'
       && response.url().includes('/tighten-fn-effects'));
     await panel.getByRole('button', {name: 'Tighten', exact: true}).click();
@@ -99,12 +105,29 @@ async function candidate(page, name, compatible) {
     const proposal = savedResponse.request().postDataJSON();
     assert(JSON.stringify(proposal.type[2][4]) === JSON.stringify(['browser-main']), 'submitted map values require Browser');
     assert(Array.isArray(proposal.type[2][3]) && proposal.type[2][3].length === 0, 'pure effect ceiling survived execution edit');
+    await page.waitForFunction(() => document.querySelector(
+      '.edge-label-overlay[data-arg-name="events"] .arg-type-chip')?.getAttribute('aria-disabled') === 'true');
+    const staleChip = page.locator('.edge-label-overlay[data-arg-name="events"] .arg-type-chip');
+    assert(await staleChip.getAttribute('tabindex') === '-1', 'refresh removes the stale type action from keyboard focus');
+    await staleChip.dispatchEvent('click');
+    assert(await page.locator('.type-inline-host:visible').count() === 0,
+      'stale E chip cannot reopen an editable panel during the held type refresh');
+    releaseTypeRefresh(); releaseTypeRefresh = null;
     await page.waitForFunction(() => {
       const e = richTypeEntryOf(lookups.fnMap.get(selectedFnId));
       return e?.args?.handler?.[4]?.includes('browser-main') && e?.args?.events?.[0] === 'map';
     }, null, {timeout: 60000});
     const browserEntry = await entry(page);
     assert(browserEntry.args.handler[4].includes('browser-main'), 'map pin specializes sibling callback expectation');
+    await page.waitForFunction(() => {
+      const chip = document.querySelector('.edge-label-overlay[data-arg-name="events"] .arg-type-chip');
+      return chip?.title.includes('Browser') && chip.getAttribute('aria-disabled') !== 'true';
+    }, null, {timeout: 60000});
+    const freshChip = page.locator('.edge-label-overlay[data-arg-name="events"] .arg-type-chip');
+    assert(await freshChip.getAttribute('tabindex') === '0', 'coherent Browser action returns to keyboard focus');
+    await freshChip.focus();
+    if (await freshChip.getAttribute('aria-expanded') !== 'true') await freshChip.press('Enter');
+    assert(await freshChip.getAttribute('aria-expanded') === 'true', 'Enter opens the fresh Browser contract');
     const reopened = await expandMapValue(page, 'events');
     assert(await reopened.getByRole('combobox', {name: 'Execution profile', exact: true}).inputValue() === 'browser',
       'saved anonymous override reopens with its exact Browser contract');
@@ -158,6 +181,7 @@ async function candidate(page, name, compatible) {
     await page.screenshot({path: '/tmp/graphden-a3-execution-panel-failure.png', fullPage: true}).catch(() => {});
     throw error;
   } finally {
+    releaseTypeRefresh?.();
     try { if (prepared) await cleanupGraphFixture(page, prepared, baseline); }
     finally { await browser.close(); }
   }

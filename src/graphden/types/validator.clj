@@ -3,7 +3,8 @@
    Unsupported declarations fail at construction; errors contain paths only."
   (:require
     [graphden.types.check.literals :as literals]
-    [graphden.types.core :as types]))
+    [graphden.types.core :as types]
+    [graphden.types.expansion :as expansion]))
 
 
 (defn- unsupported!
@@ -116,29 +117,6 @@
       :else (unsupported! path))))
 
 
-(defn- finite-definition!
-  "Reject alias cycles before core normalization can unfold recursive unions.
-   Bound expansion as well as depth; literal constraint operands are not types."
-  [t]
-  (let [aliases (types/aliases-snapshot)
-        remaining (volatile! 10000)]
-    (letfn [(visit
-              [t path seen depth]
-              (when (or (> depth 64) (neg? (vswap! remaining dec))) (unsupported! path))
-              (if (and (keyword? t) (not (types/primitive? t)) (contains? aliases t))
-                (do (when (contains? seen t) (unsupported! path))
-                    (visit (get aliases t) path (conj seen t) (inc depth)))
-                (let [children (if (and (vector? t) (= :variant (first t)))
-                                 ;; Variant operands are alternating literal
-                                 ;; tags and type payloads. Desugaring calls
-                                 ;; union normalization, so visit payloads first.
-                                 (take-nth 2 (drop 2 t))
-                                 (types/child-types t))]
-                  (doseq [[i child] (map-indexed vector children)]
-                    (visit child (conj path i) seen (inc depth))))))]
-      (visit t [] #{} 0))))
-
-
 (defn- canonical-type
   [t path seen]
   (when (contains? seen t) (unsupported! path))
@@ -163,7 +141,11 @@
 
 (defn- compile-definition
   [t]
-  (finite-definition! t)
+  (try (expansion/assert-finite! t)
+       (catch clojure.lang.ExceptionInfo e
+         (if (= :types/non-finite-expansion (:type (ex-data e)))
+           (unsupported! (:path (ex-data e)))
+           (throw e))))
   (let [canonical (canonical-type t [] #{})]
     {:type canonical :check (compile-type canonical [] #{})}))
 

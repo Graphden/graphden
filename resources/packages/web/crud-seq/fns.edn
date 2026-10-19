@@ -530,6 +530,17 @@
    :parent :get
    :args {:coll :_tighten-body :key {:value :ret} :default nil}}
 
+  {:name :_tighten-type-val
+   :parent :get
+   :args {:coll :_tighten-body :key {:value :type} :default nil}}
+
+  {:name :_tighten-delta-type-fragment
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_tighten-type-val}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :type}] :vals [:_tighten-type-val]}}
+          :else {:value {}}}}
+
   ;; --- :delta = (cond-> {} (some? effects-val) (assoc :effects ...) …)
   {:name :_tighten-delta-effects-fragment
    :parent :if
@@ -555,6 +566,7 @@
   {:name :_tighten-delta
    :parent :merge
    :args {:maps [{:value {}}
+                 :_tighten-delta-type-fragment
                  :_tighten-delta-effects-fragment
                  :_tighten-delta-args-fragment
                  :_tighten-delta-ret-fragment]}}
@@ -597,7 +609,7 @@
                                           :type {:value :map}}}}}]}}
 
   {:name :_tighten-delta-empty?
-   :description "Guard predicate — true when the body carried none of args / ret / effects. `:empty? (get parsed :delta)`."
+   :description "Guard predicate — true when the body carried none of type / args / ret / effects. `:empty? (get parsed :delta)`."
    :parent :empty?
    :args {:coll {:parent :get :args {:coll {:as :parsed} :key {:value :delta} :default nil}}}}
 
@@ -606,7 +618,7 @@
   ;; invalidate over the binding's owning fn-id, and builds the
   ;; 200 JSON / 400 error response.
   {:name :_tighten-apply
-   :description "Success branch — narrow the fn-typed binding's effective type to a 4-arity `[:fn args ret #{eff-set}]`, dedupe the anonymous constraint fn-row, write the binding's `:type-override-fn-id`, and return the partial Ring response."
+   :description "Success branch — narrow the binding-local callable or map/list contract, dedupe the canonical anonymous type rows, write the binding's `:type-override-fn-id`, and return the partial Ring response."
    :parent :if
    :args {:test :_tighten-apply-ok?
           :then :_tighten-apply-success

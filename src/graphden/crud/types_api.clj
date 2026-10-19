@@ -22,6 +22,7 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.context :as tctx]
     [graphden.types.core :as types]
+    [graphden.types.core.execution :as execution]
     [graphden.util.ns-path :as ns-path]
     [graphden.versioning.graph-rows :as graph-rows]))
 
@@ -571,6 +572,15 @@
     :else x))
 
 
+(defn- profile-label
+  [profiles]
+  (cond
+    (= :unknown profiles) "unknown execution (no runtime proof)"
+    (and (set? profiles) (empty? profiles)) "no proven runtime"
+    (set? profiles) (str/join " + " (sort (map {:browser-main "Browser" :jvm-server "JVM"} profiles)))
+    :else "inferred execution (not yet proven)"))
+
+
 (defn describe-mismatch
   "One-line human-readable explanation for why `candidate` is NOT a
    subtype of `expected`. Best-effort — the type-checker proper
@@ -603,6 +613,11 @@
 
     (and (types/primitive? candidate) (types/primitive? expected))
     (str (pr-str candidate) " is not a primitive subtype of " (pr-str expected))
+
+    (and (types/fn-type? candidate) (types/fn-type? expected)
+         (not (execution/compatible? (types/fn-execution candidate) (types/fn-execution expected))))
+    (str "Execution mismatch: requires " (profile-label (types/fn-execution expected))
+         "; callback has " (profile-label (types/fn-execution candidate)) ".")
 
     (and (types/fn-type? candidate) (types/fn-type? expected))
     (str "function signature mismatch — "

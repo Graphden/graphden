@@ -1,27 +1,8 @@
 (ns graphden.crud.entities.tighten
-  "Tighten-fn-effects CRUD — narrows an `[:fn args ret]` slot type to
-   `[:fn args ret #{eff-set}]` by writing a new anonymous fn-row whose
-   `:constraint` carries the narrower shape, then pointing the
-   binding's `:type-override-fn-id` at it. `apply-tighten-core` is
-   re-exported through `crud.entities` so `web/crud/impls.clj` can
-   call it via the `entities/` alias.
-
-   Phase 8 carved out a 4-arity `[:fn args ret #{eff-set}]` form so a
-   slot whose callable should stay pure (or only do certain effects)
-   can REJECT impure callbacks at sync time. There was no UI to set
-   the constraint, so it lived only in EDN-side declarations. This
-   endpoint exposes it: the editor sends `{effects: [\"io\" \"db\"]}`,
-   the server constructs a canonical five-element constraint while preserving
-   execution support (unknown for legacy shapes), dedupes via
-   deterministic `anonymous-fn-id` (same shape collapses to one row),
-   and writes the binding's `:type-override-fn-id`.
-
-   Subtype safety: the new constraint must be a SUBTYPE of the
-   current effective fn-type. Tightening from a 3-arity (no eff
-   constraint = any effects allowed) to a 4-arity is always a
-   narrowing; tightening across two 4-arities requires the new
-   eff-set ⊆ old. `subtype?` enforces this and we surface the
-   rejection as a 400."
+  "Binding-local callable constraints, including nested map/list positions.
+   Complete type proposals and legacy args/return/effects deltas use the same
+   narrowing guard, canonical identity materialization and serialized writer.
+   Shared type rows and slot identities remain immutable."
   (:require
     [clojure.set]
     [graphden.crud.package-guard :as pkg-guard]
@@ -29,51 +10,41 @@
     [graphden.crud.type-check :as tc]
     [graphden.crud.types-api :as types-api]
     [graphden.executor.registry.core :as registry]
-    [graphden.packages.records :as records]
+    [graphden.packages.records.types :as record-types]
     [graphden.storage.graph-writer :as writer]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.tx :as tx]
     [graphden.tenancy.context :as tenancy]
     [graphden.types.core :as types]
+    [graphden.types.expansion :as expansion]
     [graphden.versioning.branch-local :as branch-local]
     [graphden.versioning.storage.core :as versioned]
     [graphden.versioning.storage.resolution :as resolution]))
 
 
+(defn- materialize-constraint!
+  "Materialize the new contract and nested callable rows using the parser's
+   canonical identities. Existing shared rows retain their identities."
+  [storage new-c]
+  (let [rows (vec (distinct (record-types/inline-fn-type-rows-from-form new-c)))
+        root (or (first (filter #(= new-c (:constraint %)) rows))
+                 (throw (ex-info "Unsupported callable constraint row" {:type :types/unsupported-constraint-row})))
+        root-id (or (some->> (sp/query-entities storage :fn {:anonymous-hash (:anonymous-hash root)})
+                             (filter #(= (tenancy/current-org) (:org-id %))) first :id)
+                    (:id root))
+        rows (mapv #(cond-> % (= (:id root) (:id %)) (assoc :id root-id)) rows)
+        existing (into #{} (map :id) (sp/query-entities storage :fn {:id (mapv :id rows)}))
+        missing (filterv #(not (contains? existing (:id %))) rows)]
+    (doseq [row missing] (sp/create-entity storage :fn (dissoc row :kind)))
+    {:id root-id :created (mapv :id missing)}))
+
+
 (defn commit-tighten!
-  "Helper for `tighten-effects-impl!` — performs the actual write
-   (anon fn-row create + binding update) once the safety checks have
-   passed. Pulled out so the impl's let-and-cond chain stays
-   readable."
+  "Write a binding-local contract with canonical nested identities. A secret
+   rejection restores the binding and removes only this call's new type rows."
   [ctx storage binding-id b new-c _effects-vec]
-  (let [hash-hex (records/digest-hex "SHA-1" (pr-str new-c))
-        ;; The row's identity is its (org, hash): reuse the id this org
-        ;; already holds for the shape (a earlier row keeps its
-        ;; old id), else the deterministic id for a new one.
-        new-id (or (some->> (sp/query-entities storage :fn {:anonymous-hash hash-hex})
-                            (filter #(= (tenancy/current-org) (:org-id %)))
-                            first :id)
-                   (records/anonymous-fn-id hash-hex))
-        pre-override (:type-override-fn-id b)
-        ;; Track whether WE materialised the anon fn-row this call. A
-        ;; pre-existing row is a shared dedup target (some other binding
-        ;; may already point at it), so it must survive a secret-flow
-        ;; rejection here; a freshly-created one is rolled back with
-        ;; the binding revert.
-        created? (nil? (sp/read-entity storage :fn new-id))]
-    ;; Find or create. Storage upsert is the natural fit — same
-    ;; id ⇒ same row, no orphan duplicates.
-    (when created?
-      (sp/create-entity storage :fn
-                        {:id new-id
-                         :name nil
-                         :namespace-id nil
-                         :parent-ids []
-                         :base-fn-id nil
-                         :element-fn-id nil
-                         :return-type-fn-id nil
-                         :anonymous-hash hash-hex
-                         :constraint new-c}))
+  (let [{new-id :id created :created} (materialize-constraint! storage new-c)
+        pre-override (:type-override-fn-id b)]
     (sp/update-entity storage :binding binding-id
                       {:type-override-fn-id new-id})
     ;; Aggregate type-check on the owning fn. The bound-callable
@@ -96,8 +67,8 @@
       (if (:secret? post-rej)
         (do (sp/update-entity storage :binding binding-id
                               {:type-override-fn-id pre-override})
-            (when created?
-              (sp/delete-entity storage :fn new-id))
+            (doseq [id created]
+              (sp/delete-entity storage :fn id))
             {:status 400
              :reason (str "Tightening rejected by post-write type-check "
                           "(secret-flow violation): " (:reason post-rej))})
@@ -108,90 +79,67 @@
                    post-rej (assoc :type-warnings [(:diagnostic post-rej)]))}))))
 
 
+(defn- callable-delta
+  [current {:keys [args ret effects]}]
+  (when-not (types/fn-type? current)
+    (throw (ex-info "Slot's effective type is not an fn-type; use a complete collection contract" {})))
+  (types/make-fn-type
+    (if (map? args) (merge (types/fn-args current) (types-api/json->type args)) (types/fn-args current))
+    (if (some? ret) (types-api/json->type ret) (types/fn-ret current))
+    (if (some? effects) (into #{} (map keyword) effects) (types/fn-effects current))
+    (types/fn-execution current)))
+
+
+(defn- proposed-constraint
+  [current delta]
+  (when (and (contains? delta :type) (some #(contains? delta %) [:args :ret :effects]))
+    (throw (ex-info "Use either a complete type or individual callable changes" {})))
+  (let [proposed (if (contains? delta :type)
+                   (types-api/json->type (:type delta))
+                   (callable-delta current delta))]
+    (expansion/assert-finite! current)
+    (expansion/assert-finite! proposed)
+    ;; Preserve authored alias references in the stored contract.
+    ;; well-formed?/subtype? resolve them only for validation.
+    (when-not (and (types/well-formed? proposed)
+                   (or (types/fn-type? proposed) (types/list-type? proposed) (types/map-type? proposed))
+                   (some #(= proposed (:constraint %))
+                         (record-types/inline-fn-type-rows-from-form proposed)))
+      (throw (ex-info "Choose a callable or a map/list contract containing callables" {})))
+    (when-not (types/subtype? proposed current)
+      (throw (ex-info "Proposed contract is not a narrowing of the current type (args / return / effects / execution)" {})))
+    proposed))
+
+
+(defn- bound-effects-rejection
+  [storage binding proposed]
+  (when (and (types/fn-type? proposed) (set? (types/fn-effects proposed)))
+    (let [ref (some->> (:ref-fn-id binding) (sp/read-entity storage :fn))
+          actual (some-> (:id ref) registry/rich-type-of-id :effects)
+          escaped (clojure.set/difference (set actual) (types/fn-effects proposed))]
+      (when (seq escaped)
+        {:status 400 :reason (str "Bound fn produces effects " (vec (sort escaped))
+                                  " that the requested effect constraint forbids. Rebind to a compatible callable.")}))))
+
+
 (defn- tighten-fn-type!
-  "Compute a narrower fn-type constraint by selectively replacing
-   `args`, `ret`, or `effects` from the current effective type.
-   `delta` is `{:args {…} :ret T :effects [\"io\" …]}` — any subset.
-   Defaults preserve the current values, including execution support.
-   Writes use the canonical five-element callable shape; legacy execution
-   remains unknown and omitted legacy effects remain unconstrained.
-
-   Subtype-checks the new constraint against the current; rejects
-   widenings. Then runs the bound-callable safety check (effects
-   only — narrower args / ret don't introduce new escape paths the
-   way effects do, and the post-write `check-fn-def!` catches deeper
-   structural mismatches).
-
-   `ctx` (the execution context) lets the post-write check re-check
-   the owning fn's direct dependents; the 3-arity — the test-only
-   entry — passes none, and no dependent is re-checked."
-  ([storage binding-id delta]
-   (tighten-fn-type! nil storage binding-id delta))
-  ([ctx storage binding-id delta]
-   (let [b (sp/read-entity storage :binding binding-id)]
-     (cond
-       (nil? b)
-       {:status 404 :reason "Binding not found"}
-
-       :else
-       (let [slot (sp/read-entity storage :slot (:slot-id b))
-             cur-tfn-id (or (:type-override-fn-id b) (:type-fn-id slot))
-             cur-tfn (when cur-tfn-id (sp/read-entity storage :fn cur-tfn-id))
-             cur-c (:constraint cur-tfn)]
-         (cond
-           (not (types/fn-type? cur-c))
-           {:status 400
-            :reason (str "Slot's effective type is not an fn-type ("
-                         (pr-str cur-c) "); can't tighten.")}
-
-           :else
-           (let [cur-args (or (nth cur-c 1) {})
-                 cur-ret (nth cur-c 2)
-                 cur-eff (types/fn-effects cur-c)
-                 {:keys [args ret effects]} delta
-                 ;; Args delta is a per-name override map. Merge so
-                 ;; unmentioned arg names keep their current type.
-                 new-args (if (map? args)
-                            (merge cur-args (types-api/json->type args))
-                            cur-args)
-                 new-ret (if (some? ret)
-                           (types-api/json->type ret)
-                           cur-ret)
-                 new-eff (cond
-                           (some? effects) (into #{} (map keyword) effects)
-                           cur-eff         cur-eff
-                           :else           nil)
-                 new-c (types/make-fn-type new-args new-ret new-eff
-                                           (types/fn-execution cur-c))
-                 ok? (types/subtype? new-c cur-c)]
-             (if-not ok?
-               {:status 400
-                :reason (str "Proposed type " (pr-str new-c)
-                             " is not a narrowing of " (pr-str cur-c)
-                             " — every component (args / ret / effects)"
-                             " must be a subtype of the current value.")}
-               ;; Bound-callable effect check — same as the
-               ;; effect-only path. Args / ret narrowings don't
-               ;; introduce new escape paths beyond what
-               ;; `check-fn-def!` covers.
-               (let [eff-set (if (set? new-eff) new-eff #{})
-                     ref-fn-id (:ref-fn-id b)
-                     ref-row (when ref-fn-id (sp/read-entity storage :fn ref-fn-id))
-                     ref-info (some-> (:id ref-row)
-                                      (registry/rich-type-of-id))
-                     ref-effects (or (:effects ref-info) #{})
-                     escapes (when (and (set? new-eff) (seq ref-effects))
-                               (clojure.set/difference (set ref-effects) eff-set))]
-                 (if (seq escapes)
-                   {:status 400
-                    :reason (str "Bound fn `" (:name ref-row) "`"
-                                 " produces effects " (vec (sort escapes))
-                                 " that the requested constraint "
-                                 (vec (sort eff-set))
-                                 " forbids. Either widen the effect set"
-                                 " or rebind to a fn with effects ⊆ "
-                                 (vec (sort eff-set)) ".")}
-                   (commit-tighten! ctx storage binding-id b new-c nil)))))))))))
+  "Narrow one binding's effective contract. Legacy args/ret/effects deltas
+   remain supported; a complete :type handles nested map/list callable pins.
+   All checks and writes run inside the caller's serialized write unit."
+  [ctx storage binding-id delta]
+  (if-let [b (sp/read-entity storage :binding binding-id)]
+    (let [slot (sp/read-entity storage :slot (:slot-id b))
+          type-id (or (:type-override-fn-id b) (:type-fn-id slot))
+          row (when type-id (sp/read-entity storage :fn type-id))
+          current (record-types/stored-type-ref
+                    type-id {:fn-by-id (tc/chain-fns-by-id storage row)})
+          computed (try {:constraint (proposed-constraint current delta)}
+                        (catch clojure.lang.ExceptionInfo e {:status 400 :reason (ex-message e)}))]
+      (if-not (:constraint computed)
+        computed
+        (or (bound-effects-rejection storage b (:constraint computed))
+            (commit-tighten! ctx storage binding-id b (:constraint computed) nil))))
+    {:status 404 :reason "Binding not found"}))
 
 
 (defn tighten-fn-type-impl!

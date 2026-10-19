@@ -1624,3 +1624,47 @@
           (is (nil? (sp/read-entity storage :binding-list-item (:id item))))
           (is (= (:id type-row) (:type-fn-id (sp/read-entity storage :slot (:id slot))))))
         (finally (sp/close storage))))))
+
+
+(deftest nested-callable-tightening-is-local-and-uses-canonical-identities
+  (let [storage (setup/create-test-storage)]
+    (try
+      (doseq [[suffix wrap] [["map-values" #(vector :map :keyword %)]
+                             ["list-values" #(vector :list %)]
+                             ["nested-values" #(vector :list [:map :keyword %])]]]
+        (let [original (wrap [:fn (array-map :z :int :a :text) :int #{:db :io} [:execution-var 'E]])
+              proposal (wrap [:fn (array-map :a :text :z :int) :int #{:io :db} #{:browser-main}])
+              [bid owner parent] (make-binding-on-fn-typed-slot! storage suffix original)
+              binding (sp/read-entity storage :binding bid)
+              slot (sp/read-entity storage :slot (:slot-id binding))
+              sibling (setup/create-composed-fn! storage (str "sibling-" suffix) parent)
+              sibling-binding (sp/create-entity storage :binding {:fn-id (:id sibling) :slot-id (:id slot)})
+              before (sp/read-entity storage :fn (:type-fn-id slot))
+              response (entities/tighten-fn-type-impl! storage bid {:type proposal})
+              rows (record-types/inline-fn-type-rows-from-form proposal)
+              root (first (filter #(= proposal (:constraint %)) rows))]
+          (is (= 200 (:status response)))
+          (is (= (:id root) (get-in response [:result :type-override-fn-id])))
+          (is (= proposal (:constraint (sp/read-entity storage :fn (:id root)))))
+          (is (= before (sp/read-entity storage :fn (:type-fn-id slot))))
+          (is (= slot (sp/read-entity storage :slot (:id slot))))
+          (is (= sibling-binding (sp/read-entity storage :binding (:id sibling-binding))))
+          (doseq [row rows]
+            (is (= (:constraint row) (:constraint (sp/read-entity storage :fn (:id row))))))
+          (is (= owner (get-in response [:result :fn-id])))))
+      (finally (sp/close storage)))))
+
+
+(deftest nested-execution-tightening-rejects-widening-and-mixed-deltas
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [current [:map :keyword [:fn {} :int #{} #{:browser-main}]]
+            [bid] (make-binding-on-fn-typed-slot! storage "nested-refusal" current)
+            before (sp/read-entity storage :binding bid)]
+        (doseq [delta [{:type [:map :keyword [:fn {} :int #{} :unknown]]}
+                       {:type [:map :keyword [:fn {} :int #{} #{:jvm-server}]]}
+                       {:type current :effects []}
+                       {:type [:map :keyword [:fn {} :int #{} ["execution-var" 42]]]}]]
+          (is (= 400 (:status (entities/tighten-fn-type-impl! storage bid delta))))
+          (is (= before (sp/read-entity storage :binding bid)))))
+      (finally (sp/close storage)))))

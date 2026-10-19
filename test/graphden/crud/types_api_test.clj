@@ -449,3 +449,12 @@
           (is (contains? kinds :union-branch))
           (is (contains? kinds :binding-of))))
       (finally (sp/close storage)))))
+
+
+(deftest execution-mismatch-explains-browser-refusal
+  (is (= "Execution mismatch: requires Browser; callback has JVM."
+         (ta/describe-mismatch [:fn {} :int #{} #{:browser-main}]
+                               [:fn {} :int #{} #{:jvm-server}])))
+  (is (re-find #"no runtime proof"
+               (ta/describe-mismatch [:fn {} :int #{} #{:browser-main}]
+                                     [:fn {} :int #{} :unknown]))))

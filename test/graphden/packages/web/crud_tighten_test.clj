@@ -132,14 +132,14 @@
 ;; ============================================================================
 
 (deftest tighten-fn-effects-happy-path
-  (testing "3-arity → 4-arity with handler's exact effect set succeeds"
+  (testing "Legacy callable tightens to canonical5 with unknown execution"
     (let [storage (setup/create-test-storage)]
       (try
         (let [{:keys [binding-id]}
               (setup-fn-typed-binding! storage "host-1" "handler-1" #{:io :db})
               result (tighten-effects-impl! storage binding-id ["io" "db"])]
           (is (= 200 (:status result)))
-          (is (= [:fn {} :null #{:io :db}]
+          (is (= [:fn {} :null #{:io :db} :unknown]
                  (get-in result [:result :constraint])))
           ;; Binding row now has :type-override-fn-id pointing at the
           ;; new anon row; storage upsert dedupes on subsequent calls.
@@ -260,8 +260,8 @@
                                             {:ret "narrow-resp"})]
           (is (= 200 (:status result)))
           (let [c (get-in result [:result :constraint])]
-            (is (= [:fn {:request :jsonb} :narrow-resp] c)
-                "ret replaced with the narrower alias; args / 3-arity preserved")))
+            (is (= [:fn {:request :jsonb} :narrow-resp :any :unknown] c)
+                "ret alias and args preserved; canonical5 keeps unknown execution")))
         (finally (sp/close storage))))))
 
 

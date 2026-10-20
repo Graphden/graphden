@@ -3,6 +3,7 @@
    before bindings are read; every database read uses one decorated snapshot."
   (:require
     [graphden.executor.browser-contracts :as contracts]
+    [graphden.executor.capabilities :as capabilities]
     [graphden.executor.compile.bindings :as bindings]
     [graphden.executor.compile.lookups :as lookups]
     [graphden.storage.protocol.core :as sp]
@@ -68,7 +69,7 @@
    receives each fn row BEFORE any of its binding/item values are loaded.
    Callers must supply an immutable storage/policy pair; HTTP code uses
    `with-snapshot`, not a live context's whole-graph cache."
-  [storage roots authorize! manifest?]
+  [storage roots authorize! manifest? server?]
   (let [budget (atom 0)]
     (loop [pending (set roots)
            seen #{}
@@ -77,15 +78,21 @@
         (reject! :source-function-limit))
       (if (empty? pending)
         (let [index (lookups/build-lookups graph)
-              classified (when manifest?
+              classified (when (or manifest? server?)
                            (mapcat #(bindings/collect-bindings (:id %) index) (:fns graph)))
-              terminal (into #{} (keep #(when (= :fn-ref (:kind %)) (:ref-id %))) classified)
+              server-bindings (when server?
+                                (filterv #(capabilities/server-call-slot? (:slot-id %)) (:bindings graph)))
+              server-targets (into #{} (keep :ref-fn-id) server-bindings)
+              terminal (into server-targets
+                             (keep #(when (and manifest? (= :fn-ref (:kind %))) (:ref-id %))) classified)
               refs (when manifest?
                      (set (concat (keep :ref-fn-id (:bindings graph))
                                   (keep :ref-fn-id (:list-items graph)))))
               ;; An id used by an ordinary call must still be loaded even if
               ;; another binding names it by identity.
-              ordinary (into #{} (keep #(when (= :ref (:kind %)) (:ref-id %))) classified)
+              ordinary (into #{} (keep #(when (and (= :ref (:kind %))
+                                                   (not (and server? (capabilities/server-call-slot? (:slot-id %)))))
+                                          (:ref-id %))) classified)
               remaining (remove seen (concat ordinary (keep :ref-fn-id (:list-items graph))
                                              (remove terminal refs)))]
           (if (seq remaining)
@@ -103,7 +110,8 @@
                   (authorize! row)))
               (-> graph
                   (update :fns into rows)
-                  (cond-> manifest? (assoc :identity-target-ids targets))
+                  (cond-> (or manifest? server?) (assoc :identity-target-ids targets)
+                          server? (assoc :server-bindings server-bindings))
                   (update :slots #(vec (vals (into {} (map (juxt :id identity)) %))))))))
         (let [ids (set (take batch-size pending))
               fns (vec (read-rows storage :fn ids))]
@@ -120,7 +128,11 @@
                 slots (if (seq slot-ids) (vec (read-rows storage :slot slot-ids)) [])
                 seen (into seen ids)
                 refs (related-ids fns slots
-                                  (if manifest? (map #(dissoc % :ref-fn-id) bindings) bindings)
+                                  (cond
+                                    manifest? (map #(dissoc % :ref-fn-id) bindings)
+                                    server? (map #(if (capabilities/server-call-slot? (:slot-id %))
+                                                    (dissoc % :ref-fn-id) %) bindings)
+                                    :else bindings)
                                   (if manifest? [] items))]
             (when (or (some #(contains? bare-types (:fn-id %)) fn-slots)
                       (some #(contains? bare-types (:fn-id %)) bindings)
@@ -152,7 +164,14 @@
   "Collect the full authorized source closure. Identity targets are included
    in this general-purpose mode, preserving the existing export boundary."
   [storage roots authorize!]
-  (collect-source storage roots authorize! false))
+  (collect-source storage roots authorize! false false))
+
+
+(defn collect-client-closure
+  "Collect browser source with explicit server-call bindings terminal. Their
+   source is separately checked by the server boundary, never exported."
+  [storage roots authorize!]
+  (collect-source storage roots authorize! false true))
 
 
 (defn collect-component-identities
@@ -174,7 +193,7 @@
    retain the normal bounded ACL-before-values collection. Multiple roots
    share the SAME function/row budget; this never installs a caller policy."
   [storage roots authorize!]
-  (collect-source storage roots authorize! true))
+  (collect-source storage roots authorize! true false))
 
 
 (defn collect-manifest

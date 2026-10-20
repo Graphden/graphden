@@ -52,6 +52,13 @@
         callback (types/callable-signature (:type binding))]
     (cond
       (= expected :fn-ref) types/execution-profiles
+      (and (= capabilities/server-call-id (:fn-id root)) (= :func arg-name))
+      (if (and target target-info (not constructor?)
+               (proven-browser-lambda-shape? expected target-info)
+               (set? (:execution target-info))
+               (contains? (:execution target-info #{}) :jvm-server))
+        types/execution-profiles
+        :unknown)
       callable?
       (cond
         ;; Even at an implemented invocation slot the bounded exporter

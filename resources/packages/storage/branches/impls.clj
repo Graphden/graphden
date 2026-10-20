@@ -31,6 +31,14 @@
   (vs/current-branch-id (request/require-storage ctx)))
 
 
+(defbase current-branch-name
+  "Read only the active branch, with no caller-selected identity."
+  []
+  (cr/record-effect! :db)
+  (let [storage (request/require-storage ctx)]
+    (str (:name (vs/get-branch storage (vs/current-branch-id storage))))))
+
+
 (defn- import-context
   "Use the cached target context when routing is installed. Standalone
    imports into another branch get fresh caches and forked type slices;
@@ -84,4 +92,5 @@
 
 (def impls
   {:current-branch-id current-branch-id
+   :current-branch-name current-branch-name
    :sync-fn-defs-branch! {:impl sync-fn-defs-branch! :taint-propagate? true}})

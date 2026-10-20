@@ -8,6 +8,7 @@
     [graphden.editor.config-receipts :as receipts]
     [graphden.editor.config-undo :as undo]
     [graphden.editor.root-plan :as root-plan]
+    [graphden.executor.browser-server :as server]
     [graphden.executor.compile-runtime :as runtime]
     [graphden.executor.defbase :refer [defbase]]))
 
@@ -31,9 +32,15 @@
 
 
 (defbase _editor-root-plan
-  []
+  [request]
   (runtime/record-effect! :db)
-  (root-plan/export-current ctx))
+  (root-plan/export-current ctx request))
+
+
+(defbase _editor-server-call
+  [request input]
+  (runtime/record-effect! :db)
+  (server/invoke-current ctx request input))
 
 
 (defn- configuration-result
@@ -113,6 +120,7 @@
    :_editor-configuration-plan {:impl _editor-configuration-plan :taint-propagate? true}
    ;; No caller values enter this source-authorized, server-selected export.
    :_editor-root-plan _editor-root-plan
+   :_editor-server-call {:impl _editor-server-call :taint-propagate? true}
    :_editor-configuration-prepare {:impl _editor-configuration-prepare :taint-propagate? true}
    :_editor-configuration-preview {:impl _editor-configuration-preview :taint-propagate? true}
    :_editor-configuration-reconcile {:impl _editor-configuration-reconcile :taint-propagate? true}

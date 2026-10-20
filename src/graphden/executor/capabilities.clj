@@ -17,6 +17,7 @@
                                ["core.hof" [:map :filter :group-by :partition-by :sort-by]]
                                ["core.system" [:call]]
                                ["core.strings" [:str :str-starts-with? :str-lower :str-trim :str-contains? :str-clip]]
+                               ["core.system" [:server-call]]
                                ["web.html" [:hiccup :as-ui-view :encode-view]]]
               n names]
           [(ids/fn-id ns-path n)
@@ -67,3 +68,13 @@
   (if (fn? impl)
     (cond-> #{:jvm-server} (browser-op fn-id) (conj :browser-main))
     :unknown))
+
+
+(def server-call-id (ids/fn-id "core.system" :server-call))
+(def server-call-slot-id (ids/slot-id server-call-id :func))
+
+
+(defn server-call-slot?
+  "The sole explicit server invocation slot; authored names confer no support."
+  [slot-id]
+  (= server-call-slot-id slot-id))

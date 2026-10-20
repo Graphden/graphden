@@ -76,6 +76,7 @@
                   ;; click time.
                   "packages/web/vendor/preact.min.js"
                   "packages/app/ui-preview/browser-runtime.js"
+                  "packages/app/ui-preview/browser-server.js"
                   "packages/app/ui-preview/graph-styles.js"
                   "packages/app/ui-preview/graph-renderer.js"
                   "packages/app/ui-preview/graph-component.js"

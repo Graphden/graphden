@@ -194,6 +194,7 @@
           (doseq [id (set/intersection present (structural-contracts/operation-ids))]
             (when-not (structural-contracts/matches? id (:graph snapshot))
               (reject! :structural-operation-source-mismatch {:fn-id id})))))
+      (seed-primitives! (:server-signatures snapshot))
       (seed-primitives! (select-keys (:by-id rich)
                                      (cond-> (conj (plan/supported-primitive-ids)
                                                    (ids/fn-id "app.ui-components" :ui-components))
@@ -236,4 +237,5 @@
   "Derive a fresh policy and plan from the same immutable authorized rows."
   [snapshot base-fns entries policy]
   (checked-source snapshot entries policy false
-                  #(plan/export-plan (:graph snapshot) base-fns entries %)))
+                  #(plan/export-plan (:graph snapshot) base-fns entries
+                                     (merge % (:server-plan-options snapshot)))))

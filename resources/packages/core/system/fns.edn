@@ -803,6 +803,12 @@
    :return-type b
    :effects #{:db}}
 
+  {:name :server-call
+   :description "Explicit typed server invocation. Browser export supports a statically closed, read-only target through an opaque server-issued descriptor; target source and captures stay on the server. Browser callers await the separate async entry."
+   :args {:func {:type [:fn {:arg a} b :any #{:jvm-server}]}
+          :arg {:type a}}
+   :return-type b}
+
   {:name :call
    :description "Invoke a fn-graph (hof-wrap'd into a Clojure callable) with one argument. Use when `:func` IS a callable; for already-built Clojure fns use `:invoke`."
    :args {:func {:type [:fn {:arg a} b] :description "Fn-graph to wrap into a callable. Single-arg slot; positional unify (the callee's leftover free-arg name is alpha-equivalent)."}

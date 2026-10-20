@@ -3,12 +3,21 @@
  :fns
  [{:name :_editor-root-plan
    :description "Export the current editor handler's static root HOF. No client target identity is accepted; every source dependency is authorized in one snapshot."
-   :args {} :return-type :keyword-map :effects #{:db}}
+   :args {:request {:type :ring-request-shape}} :return-type :keyword-map :effects #{:db}}
   {:name :_editor-root-plan-handler :parent :json-envelope-response
-   :lambda-params []
+   :lambda-params [:request]
    :args {:envelope :_editor-root-plan}}
   {:name :api-editor-root-plan :parent :get-auth-required
    :args {:path "/ui/root/plan" :handler :_editor-root-plan-handler}}
+  {:name :_editor-server-call
+   :description "Reauthorize an opaque server descriptor and execute its read-only typed target. No caller-provided target or captures are accepted."
+   :args {:request {:type :ring-request-shape} :input {:type :jsonb}}
+   :return-type :keyword-map :effects #{:db}}
+  {:name :_editor-server-call-handler :parent :json-envelope-response
+   :lambda-params [:request]
+   :args {:envelope {:parent :_editor-server-call :args {:input :parse-json-body}}}}
+  {:name :api-editor-server-call :parent :app.routes.auth/post
+   :args {:path "/ui/server-call" :handler :_editor-server-call-handler}}
   {:name :ui-component-entry
    :type {:role :keyword :fn-id :uuid}}
   {:name :ui-component-entries :list :ui-component-entry}

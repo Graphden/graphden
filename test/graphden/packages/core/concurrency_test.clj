@@ -489,7 +489,11 @@
                   nil
                   (catch clojure.lang.ExceptionInfo e e))]
       (is (= :start-all/duplicate-trigger (:type (ex-data ex))))
-      (Thread/sleep 100)
+      ;; Interrupt requests shutdown; the worker may finish after stop returns.
+      (let [deadline (+ (System/nanoTime) 2000000000)]
+        (while (and ((:alive? (meta stop)))
+                    (< (System/nanoTime) deadline))
+          (Thread/sleep 20)))
       (is (false? ((:alive? (meta stop)))) "the duplicate's loop was interrupted, not leaked")))
   (testing "an empty trigger list is a no-op service: not alive, no exit"
     (let [stop ((impls/impl-of :start-all) {:triggers []} nil)]

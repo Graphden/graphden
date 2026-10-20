@@ -149,6 +149,11 @@ async function walkUIComponentsLesson(page, {onReceipt = async () => {}, onStage
   const previous = await page.evaluate(() => ({components: gdPrefRead('components'),
     configuration: gdUIConfigurationState().selection['fn-id'], theme: gdPrefRead('theme'),
     picker: gdUIComponentsRoots()['picker-id'], branch: getCurrentBranchName()}));
+  // The tour title can advance before the root menu and lazy catalog accept
+  // this selection. Capture only after both actual runtimes are ready.
+  await page.waitForFunction(configuration => window.gdShellMenuGraph?.ready
+    && ['account-menu', 'tutorial-catalog'].every(name => gdUIComponentRuntimeIdentity(name) === configuration),
+  previous.configuration, {timeout: 60000});
   const loadedComponents = await captureLoadedUIComponents(page);
   await settleComponents(loadedComponents);
   assert(loadedComponents.names.includes('account-menu') && loadedComponents.names.includes('tutorial-catalog'),

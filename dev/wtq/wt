@@ -85,6 +85,7 @@ LOG_DIR="$WTQ_DIR/logs"
 TASKS_DIR="$WTQ_DIR/tasks"       # task specs — live under .git, never in the working tree
 RESULT_DIR="$WTQ_DIR/results"    # machine-readable last gate outcome per feature
 PRIOR_TRAIN_DIR="$WTQ_DIR/prior-train" # durable SHA → train receipt, survives requeue/verdict
+FAILURE_DIR="$WTQ_DIR/last-failure" # scheduling hints only; never successful-stage proof
 QUEUE_DIR="$WTQ_DIR/queue"       # one entry per branch waiting for a train (see "merge train")
 SOON_DIR="$WTQ_DIR/soon"         # "I will enqueue within N minutes" markers
 BISECT_DIR="$WTQ_DIR/bisect"     # per red-train bisection budget
@@ -94,7 +95,7 @@ LINT_LOCK="$WTQ_DIR/lint.lock"   # one pre-queue lint at a time (see cmd_merge)
 LINT_HOLDER="$WTQ_DIR/lint.holder"
 E2E_RUNS_DIR="$WTQ_DIR/e2e-runs" # the e2e output of the last green gates (rolling baseline)
 E2E_BASELINE_LOCAL="$WTQ_DIR/e2e-baseline.tsv"
-mkdir -p "$LOG_DIR" "$TASKS_DIR" "$RESULT_DIR" "$PRIOR_TRAIN_DIR" "$QUEUE_DIR" "$SOON_DIR" "$BISECT_DIR"
+mkdir -p "$LOG_DIR" "$TASKS_DIR" "$RESULT_DIR" "$PRIOR_TRAIN_DIR" "$FAILURE_DIR" "$QUEUE_DIR" "$SOON_DIR" "$BISECT_DIR"
 
 TARGET="${WTQ_TARGET:-develop}"
 
@@ -695,6 +696,8 @@ cmd_new() {
   mkdir -p "$WTQ_ROOT"
   info "Creating $branch off $TARGET at $path ..."
   git -C "$MAIN_WT" worktree add -b "$branch" "$path" "$TARGET" >/dev/null
+  # Reusing a completed/discarded task name starts a new hint lifecycle.
+  rm -f "$FAILURE_DIR/$name"
   # Dockerized lint tools (actionlint, lychee, hadolint) run as non-root
   # container users against a bind-mount of this checkout. A restrictive
   # caller umask (e.g. 077) makes the fresh worktree unreadable to them
@@ -1295,6 +1298,69 @@ run_scoped_ci_gate() {
     || { echo "FAIL: missing, partial or stale CI receipt"; return 1; }
 }
 
+# A hint is evidence of a completed failed stage, not a waiver or attribution
+# of blame. Red multi-member trains share it with their bisection children.
+prior_failed_stage() {
+  local m branch sha base stage extra
+  for m in "$@"; do
+    [ -f "$FAILURE_DIR/$m" ] || continue
+    IFS=$'\t' read -r branch sha base stage extra < "$FAILURE_DIR/$m" || continue
+    [ -z "$extra" ] && [ "$branch" = "${M_BRANCH[$m]}" ] || continue
+    case "$stage" in ci|build|e2e|visual|integration|fleet) ;; *) continue ;; esac
+    # Reject reused names, rebases/resets, missing objects and rewritten target.
+    git -C "$MAIN_WT" merge-base --is-ancestor "$sha" "${M_SHA[$m]}" 2>/dev/null || continue
+    git -C "$MAIN_WT" merge-base --is-ancestor "$base" "$TARGET" 2>/dev/null || continue
+    printf '%s\n' "$stage"
+    return 0
+  done
+}
+
+record_failed_stage() {
+  local stage="$1" base="$2"; shift 2
+  local m tmp
+  for m in "$@"; do
+    tmp="$FAILURE_DIR/.$m.$$"
+    if ! { printf '%s\t%s\t%s\t%s\n' "${M_BRANCH[$m]}" "${M_SHA[$m]}" "$base" "$stage" > "$tmp" \
+           && mv -f "$tmp" "$FAILURE_DIR/$m"; }; then
+      rm -f "$tmp"
+      warn "could not save failed-stage scheduling hint for $m"
+    fi
+  done
+}
+
+# The only execution path for each stage. Image consumers always follow build;
+# CI roster selection and verification remain independent of execution order.
+run_gate_stage() {
+  local stage="$1" wt="$2" base_sha="$3" ci_receipt="$4" ci_expected="$5"
+  case "$stage" in
+    ci) run_scoped_ci_gate "$wt" "$base_sha" "$ci_receipt" "$ci_expected" ;;
+    build)
+      step "build the CANDIDATE image from the merged tree"
+      # Never overwrite the canonical tag before all mandatory suites pass.
+      ( cd "$wt" && clojure -T:build uber ) || { echo "FAIL: uberjar"; return 1; }
+      ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" docker-compose build executor ) \
+        || { echo "FAIL: docker build"; return 1; }
+      verify_candidate_image "$wt" || { echo "FAIL: candidate image identity"; return 1; } ;;
+    e2e)
+      step "bb test-e2e"
+      # Preserve strict flake/leak verdicts, server-window triage and the
+      # runner's host-thrash diagnosis. Only scheduling changes here.
+      ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" WTQ_FLAKE_STRICT=1 E2E_BASELINE_LOCAL="$E2E_BASELINE_LOCAL" \
+          GRAPHDEN_E2E_PRIORITY_BASE="$base_sha" bb test-e2e ) || { echo "FAIL: e2e"; return 1; } ;;
+    visual)
+      step "bb test-visual"
+      ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" bb test-visual ) || { echo "FAIL: visual"; return 1; } ;;
+    integration)
+      step "bb test-integration"
+      ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" bb test-integration ) || { echo "FAIL: integration"; return 1; } ;;
+    fleet)
+      step "bb test-fleet-e2e"
+      # This remains the real two-pod shared-Postgres control-plane check.
+      ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" bb test-fleet-e2e ) || { echo "FAIL: fleet e2e"; return 1; } ;;
+    *) echo "ABORT: unknown gate stage: $stage"; return 1 ;;
+  esac
+}
+
 gate_suites() {
   local wt="$1" no_e2e="$2" no_fleet="$3" no_visual="$4"
 
@@ -1339,112 +1405,65 @@ gate_suites() {
   echo "  (bb ci runs diff-scoped: checks whose scripts/checks.edn :relevant"
   echo "   paths saw no change are skipped visibly. Unrecognised -> everything.)"
 
-  local base_sha ci_sha ci_receipt ci_expected frontend_first=0
+  local base_sha ci_sha ci_receipt ci_expected stage priority="${WTQ_FIRST_STAGE:-}"
+  local pending_browser_headroom=0
+  local -a stages=(ci) ordered=()
   base_sha="$(git -C "$wt" rev-parse "$TARGET")"
   ci_sha="$(git -C "$wt" rev-parse HEAD)"
   ci_receipt="$LOG_DIR/_train-$WTQ_REPORT_TS.ci.edn"
   ci_expected="$LOG_DIR/_train-$WTQ_REPORT_TS.ci-expected.edn"
   ( cd "$wt" && bb scripts/ci_gate.clj expect "$ci_expected" "$ci_sha" "$base_sha" "${WTQ_CI_SKIP:-}" ) \
     || { echo "FAIL: cannot calculate required CI checks"; return 1; }
-  # Frontend-only trains reveal DOM/layout failures before the long unit wave.
-  # Every successful train still runs the exact same complete CI roster once.
+
+  if [ "$NEED_BUILD" = 1 ] || [ "$NEED_INTEGRATION" = 1 ] || [ "$NEED_E2E" = 1 ] \
+     || [ "$NEED_FLEET" = 1 ] || [ "$NEED_VISUAL" = 1 ]; then
+    stages+=(build)
+  fi
+  [ "$NEED_E2E" = 1 ] && stages+=(e2e)
+  [ "$NEED_VISUAL" = 1 ] && stages+=(visual)
+  # Keep the established browser-first default for frontend-only trains.
   if [ "$NEED_INTEGRATION" = 0 ] && [ "$NEED_E2E" = 1 ]; then
-    frontend_first=1
-    echo "  order: browser and visual before full CI"
+    stages=("${stages[@]:1}" ci)
   fi
-  if [ "$frontend_first" = 0 ]; then
-    run_scoped_ci_gate "$wt" "$base_sha" "$ci_receipt" "$ci_expected" || return 1
-  fi
+  [ "$NEED_INTEGRATION" = 1 ] && stages+=(integration)
+  [ "$NEED_FLEET" = 1 ] && stages+=(fleet)
 
-  if [ "$NEED_BUILD" = 0 ] && [ "$NEED_INTEGRATION" = 0 ] && [ "$NEED_E2E" = 0 ] && [ "$NEED_FLEET" = 0 ] \
-     && [ "$NEED_VISUAL" = 0 ]; then
-    step "no runtime surface changed — skipping image build + suites"
-    echo "ok"
-    return 0
-  fi
-
-  step "build the CANDIDATE image from the merged tree"
-  # A candidate tag, never the canonical one. `graphden-executor:latest` names
-  # the last SUCCESSFULLY LANDED build, and the demo instance is deployed from
-  # it — so a gate that goes red must not be able to leave its code sitting
-  # there. It could, and it did: a failed gate left its build tagged `:latest`,
-  # and the next gate's deploy served that un-landed code to the demo.
-  # `bb verify` caught it, which is the only reason it was a scare and not an
-  # incident.
-  #
-  # Build only, no `up` — `compose up` from a worktree collides with the
-  # canonical containers anyway. The suites below boot GD_IMAGE, so they test
-  # exactly this candidate and nothing else.
-  ( cd "$wt" && clojure -T:build uber ) || { echo "FAIL: uberjar"; return 1; }
-  ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" docker-compose build executor ) \
-    || { echo "FAIL: docker build"; return 1; }
-  verify_candidate_image "$wt" || { echo "FAIL: candidate image identity"; return 1; }
-
-  # e2e runs BEFORE integration: the browser suite is timing-sensitive (a
-  # slow-server window trips a test's 10s waitForFunction), and running it
-  # AFTER integration's heavy JVM work (~29 min when this ordering was
-  # chosen; ~6 min since the 2026-08-17 fixture-sharing epic) left the host
-  # under residual GC / memory pressure — which surfaced as a DIFFERENT
-  # innocent e2e file AbortError-ing (and leaking a row on the abort) each
-  # gate run. On a fresh host the flake window is far narrower. A real e2e
-  # break still fails here first, before integration's minutes are spent.
-  if [ "$NEED_E2E" = 0 ]; then
-    echo; echo "(e2e skipped — see the scope step above)"
-  else
-    step "bb test-e2e"
-    # WTQ_FLAKE_STRICT=1 — at the LANDING gate a file that passes only on
-    # retry (or leaks entities) is a red result, not a green one. The
-    # retry-masked default stays for ad-hoc runs; here it bounces the
-    # train (and bisection finds whose change it is), because a flake that
-    # lands rides every later gate, and the historical pattern was retries
-    # papering over one file's leak while every investigation chased the
-    # victim file (run-edit-tests.sh documents that case).
-    #   EXCEPTION (run-edit-tests.sh run-level thrash check): when the HOST
-    #   starved the stack this run — several files ran far past their OWN
-    #   baseline (tools/browser-test/e2e-baseline.tsv), or several different
-    #   files needed an ENVIRONMENT-signed retry — a retry-pass is the test
-    #   being slow, not a race, so strict flake/leak verdicts are downgraded
-    #   to report-only and the run stays green. A file that NEVER passed still
-    #   reds (you can't land what didn't pass); the banner then says to free
-    #   RAM and re-run on a quiet host. Real races reproduce on a healthy host
-    #   (DEGRADED=0), where strict stays on.
-    ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" WTQ_FLAKE_STRICT=1 E2E_BASELINE_LOCAL="$E2E_BASELINE_LOCAL" \
-        GRAPHDEN_E2E_PRIORITY_BASE="$base_sha" bb test-e2e ) || { echo "FAIL: e2e"; return 1; }
-  fi
-
-  # Visual goes here — after e2e, before integration. It is ~2.5 min against
-  # the same browser infrastructure e2e just used, and integration is ~6 min
-  # of JVM work that a pixel diff has nothing to do with: failing the cheap
-  # browser check first keeps the feedback loop short. (Learned the hard way:
-  # the landing that introduced this step had integration ahead of it, red on
-  # one assertion, and neither visual nor fleet ever ran.)
-  if [ "$NEED_VISUAL" = 1 ]; then
-    step "bb test-visual"
-    # Pixel diff over 24 snapshots × 3 viewports against an isolated stack.
-    # It can only run here because every baseline is instance-independent —
-    # tools/visual-tests/run-visual.sh says what that costs to keep true.
-    ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" bb test-visual ) || { echo "FAIL: visual"; return 1; }
-  fi
-
-  if [ "$frontend_first" = 1 ]; then
-    run_scoped_ci_gate "$wt" "$base_sha" "$ci_receipt" "$ci_expected" || return 1
-  fi
-
-  if [ "$NEED_INTEGRATION" = 1 ]; then
-    step "bb test-integration"
-    ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" bb test-integration ) || { echo "FAIL: integration"; return 1; }
-  fi
-
-  if [ "$NEED_FLEET" = 1 ]; then
-    step "bb test-fleet-e2e"
-    # The candidate image booted TWICE as a real two-pod fleet over one
-    # Postgres. Everything else in the gate runs a single container, so this
-    # is the only place a broken /internal/fleet contract, a placement view
-    # the two pods disagree on, or a boot that only works alone can fail.
-    ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" bb test-fleet-e2e ) || { echo "FAIL: fleet e2e"; return 1; }
-  fi
-
-  built_candidate=1
+  # A hint only promotes a SELECTED stage. Its build dependency follows the
+  # same verified-image path; all other selected stages retain their order.
+  for stage in "${stages[@]}"; do
+    if [ "$stage" = "$priority" ]; then
+      case "$priority" in
+        e2e|visual|integration|fleet) ordered+=(build) ;;
+      esac
+      ordered+=("$priority")
+      break
+    fi
+  done
+  for stage in "${stages[@]}"; do
+    case " ${ordered[*]} " in *" $stage "*) ;; *) ordered+=("$stage") ;; esac
+  done
+  echo "  stage order: ${ordered[*]}"
+  for stage in "${ordered[@]}"; do
+    case "$stage" in
+      e2e|visual)
+        if [ "$pending_browser_headroom" = 1 ]; then
+          # The old browser-first order avoided host pressure after the heavy
+          # runtime JVMs. Admit this new boundary using measured headroom,
+          # after their synchronous teardown; never kill unrelated processes.
+          # The bb test- prefix keeps the heavy marker live while waiting.
+          step "bb test-$stage: host headroom after integration/fleet"
+          wait_for_headroom || { echo "ABORT: browser headroom admission interrupted"; return 3; }
+          pending_browser_headroom=0
+        fi ;;
+    esac
+    if ! run_gate_stage "$stage" "$wt" "$base_sha" "$ci_receipt" "$ci_expected"; then
+      echo "WTQ_FAILED_STAGE=$stage"
+      return 1
+    fi
+    case "$stage" in integration|fleet) pending_browser_headroom=1 ;; esac
+  done
+  # Only a complete successful runtime roster may promote this candidate.
+  case " ${stages[*]} " in *" build "*) built_candidate=1 ;; esac
 
   # NO coverage step. It cost 15-19 minutes of every landing — a third of the
   # gate — and gated nothing:
@@ -1966,13 +1985,28 @@ train_run() {
   # The gate's own output is also kept apart (the outer tee may not have
   # flushed it to $log yet when we read the failing step back).
   local gate_out="$LOG_DIR/.gate-$ts.out"
+  local first_stage failure_stage gate_base report_complete=0
+  first_stage="$(prior_failed_stage "${gated[@]}")"
+  gate_base="$(git -C "$MAIN_WT" rev-parse "$TARGET")"
   start_sampler "$resources"
-  ( WTQ_REPORT_TS="$ts" gate_body "$TRAIN_WT" "$no_e2e" "$deploy" "$no_fleet" "$no_visual" "${gated[@]}" ) 2>&1 | tee "$gate_out"
+  ( WTQ_FIRST_STAGE="$first_stage" WTQ_REPORT_TS="$ts" gate_body "$TRAIN_WT" "$no_e2e" "$deploy" "$no_fleet" "$no_visual" "${gated[@]}" ) 2>&1 | tee "$gate_out"
   grc="${PIPESTATUS[0]}"
   stop_sampler
   if ! bb "$SCRIPT_DIR/report.clj" finish "$report" "$(git -C "$TRAIN_WT" rev-parse HEAD)" "$queue_ms" "$gate_out" "$ci_report" "$resources" "$grc"; then
     warn "train receipt could not be completed: $report (incomplete is never pass)"
     [ "$grc" = 0 ] && grc=4
+  else
+    report_complete=1
+  fi
+  # Only an explicit suite failure with a completed receipt updates hints.
+  # Killed gates, preconditions, post-land errors and target movement cannot do so.
+  if [ "$grc" = 1 ] && [ "$report_complete" = 1 ]; then
+    failure_stage="$(sed -n 's/^WTQ_FAILED_STAGE=//p' "$gate_out" | tail -n1)"
+    case "$failure_stage" in
+      ci|build|e2e|visual|integration|fleet) record_failed_stage "$failure_stage" "$gate_base" "${gated[@]}" ;;
+    esac
+  elif [ "$grc" = 0 ]; then
+    for m in "${gated[@]}"; do rm -f "$FAILURE_DIR/$m"; done
   fi
   printf 'train receipt: %s\n' "$report"
   # Point at it explicitly. A CSV nobody knows exists is not instrumentation.

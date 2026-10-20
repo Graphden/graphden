@@ -6,6 +6,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 source <(sed -n '/^run_scoped_ci_gate() {/,/^}/p' "$SCRIPT_DIR/wt")
+source <(sed -n '/^run_gate_stage() {/,/^}/p' "$SCRIPT_DIR/wt")
 source <(sed -n '/^gate_suites() {/,/^}/p' "$SCRIPT_DIR/wt")
 
 TEST_DIR="$(mktemp -d)"
@@ -20,6 +21,7 @@ CANDIDATE_IMAGE=graphden-executor:candidate
 E2E_BASELINE_LOCAL="$TEST_DIR/baseline"
 
 step() { :; }
+wait_for_headroom() { echo headroom >> "$TEST_LOG"; [ "${FAIL_HEADROOM:-0}" != 1 ]; }
 git() { printf '%s\n' 00000001; }
 node() { :; }
 clojure() { echo uber >> "$TEST_LOG"; }
@@ -37,8 +39,8 @@ bb() {
     ci) echo ci >> "$TEST_LOG"; [ "${FAIL_CI:-0}" != 1 ] ;;
     test-e2e) echo e2e >> "$TEST_LOG"; [ "${FAIL_E2E:-0}" != 1 ] ;;
     test-visual) echo visual >> "$TEST_LOG"; [ "${FAIL_VISUAL:-0}" != 1 ] ;;
-    test-integration) echo integration >> "$TEST_LOG" ;;
-    test-fleet-e2e) echo fleet >> "$TEST_LOG" ;;
+    test-integration) echo integration >> "$TEST_LOG"; [ "${FAIL_INTEGRATION:-0}" != 1 ] ;;
+    test-fleet-e2e) echo fleet >> "$TEST_LOG"; [ "${FAIL_FLEET:-0}" != 1 ] ;;
     *) echo "unexpected bb $*" >&2; return 1 ;;
   esac
 }
@@ -47,7 +49,7 @@ classify_changes() {
   NEED_INTEGRATION="$CASE_INTEGRATION"
   NEED_E2E="$CASE_E2E"
   NEED_VISUAL="$CASE_VISUAL"
-  NEED_FLEET=0
+  NEED_FLEET="${CASE_FLEET:-0}"
   CHANGED_N=1
   DEPS_DEVTOOL_ONLY=0
 }
@@ -139,4 +141,109 @@ run_case
 assert_events 'expect,ci,verify'
 [ "$built_candidate" = 0 ]
 
-echo 'gate order: 8 cases passed'
+# Every priority preserves the complete mandatory roster, exactly once.
+CASE_BUILD=1 CASE_INTEGRATION=1 CASE_E2E=1 CASE_VISUAL=1 CASE_FLEET=1
+for WTQ_FIRST_STAGE in ci build e2e visual integration fleet; do
+  run_case
+  case "$WTQ_FIRST_STAGE" in
+    ci) assert_events 'expect,ci,verify,uber,build,image,e2e,visual,integration,fleet' ;;
+    build) assert_events 'expect,uber,build,image,ci,verify,e2e,visual,integration,fleet' ;;
+    e2e) assert_events 'expect,uber,build,image,e2e,ci,verify,visual,integration,fleet' ;;
+    visual) assert_events 'expect,uber,build,image,visual,ci,verify,e2e,integration,fleet' ;;
+    integration) assert_events 'expect,uber,build,image,integration,ci,verify,headroom,e2e,visual,fleet' ;;
+    fleet) assert_events 'expect,uber,build,image,fleet,ci,verify,headroom,e2e,visual,integration' ;;
+  esac
+  [ "$built_candidate" = 1 ]
+done
+
+WTQ_FIRST_STAGE=integration
+FAIL_INTEGRATION=1
+: > "$TEST_LOG"
+built_candidate=0
+if gate_suites "$TEST_DIR" 0 0 0 > "$TEST_DIR/failure.out"; then
+  echo 'failed prioritized integration returned success' >&2; exit 1
+fi
+assert_events 'expect,uber,build,image,integration'
+[ "$built_candidate" = 0 ]
+grep -qx 'WTQ_FAILED_STAGE=integration' "$TEST_DIR/failure.out"
+unset FAIL_INTEGRATION
+
+# No E2E selected: visual is the first browser boundary, admitted once.
+CASE_E2E=0
+WTQ_FIRST_STAGE=integration
+run_case
+assert_events 'expect,uber,build,image,integration,ci,verify,headroom,visual,fleet'
+
+# Admission cannot manufacture success or permit candidate promotion.
+FAIL_HEADROOM=1
+: > "$TEST_LOG"
+built_candidate=0
+admission_rc=0
+gate_suites "$TEST_DIR" 0 0 0 > "$TEST_DIR/admission.out" || admission_rc=$?
+[ "$admission_rc" = 3 ]
+assert_events 'expect,uber,build,image,integration,ci,verify,headroom'
+[ "$built_candidate" = 0 ]
+if grep -q '^WTQ_FAILED_STAGE=' "$TEST_DIR/admission.out"; then
+  echo 'interrupted headroom admission was recorded as a suite failure' >&2; exit 1
+fi
+unset FAIL_HEADROOM
+
+# An out-of-scope or unknown hint never adds a stage or suppresses CI.
+CASE_BUILD=0 CASE_INTEGRATION=0 CASE_E2E=0 CASE_VISUAL=0 CASE_FLEET=0
+for WTQ_FIRST_STAGE in integration fleet unknown; do
+  run_case
+  assert_events 'expect,ci,verify'
+  [ "$built_candidate" = 0 ]
+done
+
+# Explicit skip flags win even over an otherwise valid failure hint.
+CASE_BUILD=1 CASE_INTEGRATION=1 CASE_E2E=1 CASE_VISUAL=1 CASE_FLEET=1
+WTQ_FIRST_STAGE=fleet
+: > "$TEST_LOG"
+gate_suites "$TEST_DIR" 1 1 1 >/dev/null
+assert_events 'expect,ci,verify,uber,build,image,integration'
+unset WTQ_FIRST_STAGE
+
+# Validate durable hints against real git ancestry without touching the queue.
+(
+  unset -f git
+  source <(sed -n '/^prior_failed_stage() {/,/^}/p' "$SCRIPT_DIR/wt")
+  source <(sed -n '/^record_failed_stage() {/,/^}/p' "$SCRIPT_DIR/wt")
+  MAIN_WT="$TEST_DIR/repo"
+  FAILURE_DIR="$TEST_DIR/hints"
+  mkdir -p "$FAILURE_DIR"
+  git init -q -b develop "$MAIN_WT"
+  git -C "$MAIN_WT" config user.email t@example.invalid
+  git -C "$MAIN_WT" config user.name wtq-test
+  git -C "$MAIN_WT" commit -q --allow-empty -m root
+  root="$(git -C "$MAIN_WT" rev-parse HEAD)"
+  git -C "$MAIN_WT" commit -q --allow-empty -m base
+  base="$(git -C "$MAIN_WT" rev-parse HEAD)"
+  git -C "$MAIN_WT" checkout -qb feature/test
+  git -C "$MAIN_WT" commit -q --allow-empty -m member
+  member="$(git -C "$MAIN_WT" rev-parse HEAD)"
+  declare -A M_BRANCH=([test]=feature/test) M_SHA=([test]="$member")
+  [ -z "$(prior_failed_stage test)" ]
+  record_failed_stage integration "$base" test
+  [ "$(prior_failed_stage test)" = integration ]
+  git -C "$MAIN_WT" commit -q --allow-empty -m fix
+  M_SHA[test]="$(git -C "$MAIN_WT" rev-parse HEAD)"
+  [ "$(prior_failed_stage test)" = integration ]
+  M_BRANCH[test]=feature/reused
+  [ -z "$(prior_failed_stage test)" ]
+  M_BRANCH[test]=feature/test
+  M_SHA[test]="$root"
+  [ -z "$(prior_failed_stage test)" ]
+  M_SHA[test]="$member"
+  git -C "$MAIN_WT" branch -f develop "$root"
+  [ -z "$(prior_failed_stage test)" ]
+  git -C "$MAIN_WT" branch -f develop "$base"
+  printf 'truncated' > "$FAILURE_DIR/test"
+  [ -z "$(prior_failed_stage test)" ]
+  printf 'feature/test\tmissing-object\t%s\tintegration\n' "$base" > "$FAILURE_DIR/test"
+  [ -z "$(prior_failed_stage test)" ]
+  record_failed_stage invalid "$base" test
+  [ -z "$(prior_failed_stage test)" ]
+)
+
+echo 'gate order: default, all priorities, fail-fast, scope and override cases passed'

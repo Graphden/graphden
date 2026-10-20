@@ -61,7 +61,7 @@
   "Read/check the complete server closure inside the caller's snapshot.
    Returns server-only evidence and a frozen input/output contract."
   [ctx storage authorize! policy target]
-  (let [row (first (sp/query-bounded-entities storage :fn {:id target} 1))
+  (let [row (sp/read-entity storage :fn target)
         _ (when-not row (reject! :server-target-missing))
         ;; Only the target execute grant authorizes this private inspection.
         ;; Dependency rows never enter the browser source/export graph.

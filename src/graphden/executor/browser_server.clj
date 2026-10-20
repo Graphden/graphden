@@ -170,12 +170,15 @@
   [ctx storage authorize! policy issued]
   (let [captured (capture-client ctx storage authorize! policy (:entries issued) (:anchor issued))]
     (when-not (and (= (:evidence issued) (:evidence captured))
-                   (= (:target issued) (get-in captured [:calls (:site issued)]))
-                   (= (:epoch issued) (context/invalidation-epoch ctx)))
+                   (= (:target issued) (get-in captured [:calls (:site issued)])))
       (reject! :server-binding-changed))
     (let [row (some #(when (= (:target issued) (:id %)) %) (get-in captured [:snapshot :graph :fns]))]
       (when-not row (reject! :server-target-missing))
       (authorize! row {:execute? true :server-target? true}))
+    ;; A stale epoch is recoverable only after the source, target and fresh
+    ;; execute policy still match. Revocation never becomes a stale reply.
+    (when-not (= (:epoch issued) (context/invalidation-epoch ctx))
+      (reject! :server-epoch-changed))
     captured))
 
 
@@ -263,5 +266,7 @@
       (log/warn "Read-only server call refused"
                 {:type :browser-server/refused
                  :reason (if (= :authz/forbidden (:type (ex-data error))) :forbidden :unavailable)})
-      {:ok false :reason "Server call is unavailable."
-       :http-status (if (= :authz/forbidden (:type (ex-data error))) 403 422)})))
+      (cond-> {:ok false :reason "Server call is unavailable."
+               :http-status (if (= :authz/forbidden (:type (ex-data error))) 403 422)}
+        (= {:type :browser-plan/unsupported :reason :server-epoch-changed} (ex-data error))
+        (assoc :code "server-call-stale")))))

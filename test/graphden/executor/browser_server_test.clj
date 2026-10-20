@@ -24,6 +24,7 @@
         allowed? (atom true)
         fresh-execute? (atom true)
         evidence (atom "source/binding/captures/contract")
+        call-target (atom target)
         on-execute (atom (fn [] nil))
         storage (assoc (remote/from-bundle {:fn [{:id target}]}) :branch-id branch)
         ctx {:storage storage :invalidation-count (atom 0)
@@ -33,7 +34,7 @@
                                 (throw (ex-info "Private target" {:type :authz/forbidden}))))}
         request {:headers {"authorization" "Bearer first-session"}}
         captured (fn [& _]
-                   {:evidence @evidence :calls {site target}
+                   {:evidence @evidence :calls {site @call-target}
                     :snapshot {:graph {:fns [{:id target}]}} :targets {target {:input-type {:query :text}
                                                                                :output-type {:label :text :branch-name :text}}}})]
     (reset! @(ns-resolve 'graphden.executor.browser-server 'issuances) {})
@@ -69,7 +70,58 @@
                 descriptor (get descriptors site)
                 input {:descriptor descriptor :input (wire/encode-value {:query ""})}]
             (f {:ctx ctx :request request :input input :calls calls :snapshots snapshots
-                :allowed? allowed? :fresh-execute? fresh-execute? :evidence evidence :on-execute on-execute})))))))
+                :allowed? allowed? :fresh-execute? fresh-execute? :evidence evidence
+                :call-target call-target :on-execute on-execute})))))))
+
+
+(deftest only-an-authorized-unchanged-call-receives-the-stale-epoch-code
+  (doseq [stage [:before :after]]
+    (fixture
+      (fn [{:keys [ctx request input calls on-execute]}]
+        (let [invalidate #(swap! (:invalidation-count ctx) inc)]
+          (if (= :before stage) (invalidate) (reset! on-execute invalidate))
+          (let [result (server/invoke-current ctx request input)]
+            (is (= {:ok false :reason "Server call is unavailable."
+                    :http-status 422 :code "server-call-stale"} result))
+            (is (= (if (= :before stage) 0 1)
+                   (count (filter #(= :run (first %)) @calls))))))))))
+
+
+(deftest epoch-changes-never-disguise-revocation-or-source-changes-as-stale
+  (doseq [stage [:before :after]
+          change [:execute :evidence :target]]
+    (fixture
+      (fn [{:keys [ctx request input fresh-execute? evidence call-target on-execute]}]
+        (let [mutate #(do (swap! (:invalidation-count ctx) inc)
+                          (case change
+                            :execute (reset! fresh-execute? false)
+                            :evidence (reset! evidence "changed source or captures")
+                            :target (reset! call-target (random-uuid))))]
+          (if (= :before stage) (mutate) (reset! on-execute mutate))
+          (let [result (server/invoke-current ctx request input)]
+            (is (= (if (= :execute change) 403 422) (:http-status result)))
+            (is (false? (:ok result)))
+            (is (nil? (:value result)))
+            (is (not (contains? result :code)))))))))
+
+
+(deftest stale-epoch-does-not-classify-session-or-unverified-policy-failures
+  (fixture
+    (fn [{:keys [ctx input]}]
+      (swap! (:invalidation-count ctx) inc)
+      (let [result (server/invoke-current ctx {:headers {"authorization" "Bearer next-session"}} input)]
+        (is (= 422 (:http-status result)))
+        (is (not (contains? result :code))))))
+  (fixture
+    (fn [{:keys [ctx request input]}]
+      (swap! (:invalidation-count ctx) inc)
+      (with-redefs [components/assert-current-policy!
+                    (fn [_]
+                      (throw (ex-info "Policy unpublished"
+                                      {:type :browser-plan/unsupported :reason :policy-refresh-required})))]
+        (let [result (server/invoke-current ctx request input)]
+          (is (= 422 (:http-status result)))
+          (is (not (contains? result :code))))))))
 
 
 (deftest source-issuance-does-not-grant-execution-or-export-captures
@@ -164,10 +216,12 @@
                          (binding [tenancy/*current-principal*
                                    (assoc tenancy/*current-principal* :role-ids @roles)]
                            (thunk))))]
-        (reset! on-execute #(reset! roles []))
+        (reset! on-execute #(do (swap! (:invalidation-count ctx) inc)
+                                (reset! roles [])))
         (let [result (server/invoke-current ctx request input)]
           (is (false? (:ok result)))
           (is (nil? (:value result)))
+          (is (not (contains? result :code)))
           (is (= 2 @scopes))))))
   (fixture
     (fn [{:keys [ctx request input calls]}]

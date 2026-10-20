@@ -21,6 +21,8 @@
                (= group :account-menu) (conj (str root ".theme"))) paths))
       (is (contains? names :ui))
       (is (not (contains? names :theme)) "a selected component never copies the theme entry")
+      (is (not-any? names [:account-menu-query :account-menu-component :recents-component :_root-base-view])
+          "Selected legacy copies keep their role closure without importing separate root entrypoints")
       (is (= (count definitions) (count (filter #(= :fn (:kind %)) records))))
       (when (= group :canvas-values)
         (let [view-id (ids/fn-id (str root ".canvas-values") :canvas-values-view)
@@ -103,6 +105,9 @@
                                                (= const-slot (:slot-id %))) records))]
       (is (= (count expected) (count fns)))
       (is (every? :name fns))
+      (is (not-any? #(contains? #{"account-menu-query" "account-menu-component" "recents-component"
+                                  "_root-base-view" "_root-initial-callable"} (:name %)) fns)
+          "Full legacy copies omit unreachable root constructors and query bodies")
       (let [style-id (ids/fn-id (str root ".menu") :_account-menu-style)]
         (doseq [rule [:_account-menu-hover-rule :_account-menu-focus-rule]]
           (is (= style-id (:return-type-fn-id

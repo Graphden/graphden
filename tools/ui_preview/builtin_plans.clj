@@ -14,6 +14,7 @@
     [graphden.executor.registry.core :as registry]
     [graphden.packages.loader :as loader]
     [graphden.packages.owned :as owned]
+    [graphden.packages.rebase :as rebase]
     [graphden.packages.records :as records]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as records-parse]
@@ -61,6 +62,33 @@
               :view (ids/fn-id "app.ui-fn-picker" :picker-view)}})
 
 
+(defn- complete-dependencies
+  "Retain the complete fixed module sources, adding their actual installed
+   dependencies. Literal data never creates a dependency edge."
+  [definitions installed]
+  (let [reference #(keyword (:namespace %) (name (:name %)))
+        indexed (into {} (map (juxt reference identity)) (concat installed definitions))
+        by-name (group-by (comp keyword name :name) (vals indexed))]
+    (loop [pending (vec definitions) seen #{} result []]
+      (if-let [definition (peek pending)]
+        (let [id (reference definition)]
+          (if (contains? seen id)
+            (recur (pop pending) seen result)
+            (let [dependencies (atom [])]
+              (rebase/rewrite-references
+                definition
+                (fn [ref]
+                  (let [local (if (namespace ref) ref (keyword (:namespace definition) (name ref)))
+                        target (or (get indexed local)
+                                   (when-not (namespace ref)
+                                     (let [matches (get by-name ref)]
+                                       (when (= 1 (count matches)) (first matches)))))]
+                    (when target (swap! dependencies conj target)))
+                  ref))
+              (recur (into (pop pending) @dependencies) (conj seen id) (conj result definition)))))
+        (vec (sort-by (juxt :namespace :name) result))))))
+
+
 (defn- source-definitions
   []
   (let [loaded (loader/load-packages ["web"])
@@ -74,7 +102,9 @@
                      (let [{module-namespace :namespace :keys [fns]}
                            (edn/read-string (slurp (io/resource (str "packages/app/" module "/fns.edn"))))]
                        (map #(assoc % :namespace module-namespace) fns))) modules)]
-    (vec (concat (sort-by (juxt :namespace :name) primitives) dependencies ui))))
+    (complete-dependencies (concat primitives dependencies ui)
+                           (concat (map (fn [[n d]] (assoc d :name n)) (:base-fn-defs loaded))
+                                   (:fn-defs loaded)))))
 
 
 (defn- source-graph

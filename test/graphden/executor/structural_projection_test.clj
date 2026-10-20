@@ -14,7 +14,6 @@
     [graphden.packages.owned :as owned]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as parse]
-    [graphden.packages.records.types :as record-types]
     [graphden.storage.remote.core :as remote]))
 
 
@@ -31,7 +30,7 @@
                          (filter #(contains? names (:name %)) definitions)))))
         [["core/logic" "core.logic" #{:const}]
          ["core/system" "core.system" #{:call}]
-         ["core/collections" "core.collections" #{:list :get :zipmap :into :merge}]
+         ["core/collections" "core.collections" #{:list :get :assoc :assoc-fn :zipmap :into :merge}]
          ["core/hof" "core.hof" #{:map}]
          ["web/graph-metadata" "web.graph-metadata" #{:find-function}]]))
 
@@ -40,10 +39,7 @@
   ([definitions] (graph definitions namespace-path))
   ([definitions path]
    (let [records (concat (ids/boot-primitive-records)
-                         (mapcat #(parse/parse-fn-def % {}) (interface-definitions))
-                         (mapcat #(record-types/inline-fn-type-rows-from-form
-                                    (get-in % [:args :func :type]))
-                                 (filter #(= :map (:name %)) (interface-definitions)))
+                         (parse/parse-module (interface-definitions))
                          (composition/fn-defs->records
                            (mapv #(assoc % :namespace path) definitions)
                            (reduce (fn [result {:keys [name] path :namespace}]

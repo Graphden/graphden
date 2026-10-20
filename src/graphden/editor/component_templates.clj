@@ -65,6 +65,25 @@
     (into (vec structural) identities)))
 
 
+(defn- definition-closure
+  "Select complete authored dependencies by reference positions, never literals."
+  [definitions roots]
+  (let [indexed (into {} (map #(vector (keyword (:namespace %) (name (:name %))) %)) definitions)]
+    (loop [pending (set roots) seen #{}]
+      (if (empty? pending)
+        (filterv #(contains? seen (keyword (:namespace %) (name (:name %)))) definitions)
+        (let [reference (first pending)
+              definition (get indexed reference)
+              references (atom #{})]
+          (rebase/rewrite-references definition
+                                     (fn [ref]
+                                       (let [qualified (if (namespace ref) ref (keyword (:namespace definition) (name ref)))]
+                                         (when (contains? indexed qualified) (swap! references conj qualified)))
+                                       ref))
+          (recur (into (disj pending reference) (remove (conj seen reference) @references))
+                 (conj seen reference)))))))
+
+
 (defn- copy-module
   [module destination]
   (let [definitions (installed-definitions module)
@@ -74,7 +93,7 @@
         qualify (fn [reference]
                   (let [local (if (= source-path (namespace reference))
                                 (keyword (name reference)) reference)]
-                    (if (contains? local-names local) local
+                    (if (contains? local-names local) (keyword destination (name local))
                         (get fixed-names reference reference))))]
     (mapv #(assoc (rebase/rewrite-references % qualify) :namespace destination) definitions)))
 
@@ -192,15 +211,20 @@
                                       (keyword root "_canvas-bindings-descriptor")]}}]
     (when-not color-const
       (throw (ex-info "Installed UI templates are unavailable" {:type :browser-plan/unsupported})))
-    (into [(assoc color-const :namespace theme) configuration]
-          (concat descriptors theme-definitions menu-definitions (copy-module "app/ui-fn-picker" picker)
-                  (copy-module "app/ui-recents" recents) (copy-module "app/ui-inspector" inspector)
-                  (copy-module "app/ui-explorer" explorer) (copy-module "app/ui-tutorial-catalog" tutorial-catalog)
-                  (copy-module "app/ui-canvas" canvas) (copy-module "app/ui-canvas-values" canvas-values)
-                  (copy-module "app/ui-canvas-inheritance" canvas-inheritance)
-                  (copy-module "app/ui-canvas-metadata" canvas-metadata)
-                  (copy-module "app/ui-canvas-type-structure" canvas-type-structure)
-                  (copy-module "app/ui-canvas-bindings" canvas-bindings)))))
+    ;; A full personal configuration copies every legacy component role plus
+    ;; its theme. New shipped root/query constructors are separate entry roots,
+    ;; not dependencies of these personal components or their ownership receipt.
+    (definition-closure
+      (into [(assoc color-const :namespace theme) configuration]
+            (concat descriptors theme-definitions menu-definitions (copy-module "app/ui-fn-picker" picker)
+                    (copy-module "app/ui-recents" recents) (copy-module "app/ui-inspector" inspector)
+                    (copy-module "app/ui-explorer" explorer) (copy-module "app/ui-tutorial-catalog" tutorial-catalog)
+                    (copy-module "app/ui-canvas" canvas) (copy-module "app/ui-canvas-values" canvas-values)
+                    (copy-module "app/ui-canvas-inheritance" canvas-inheritance)
+                    (copy-module "app/ui-canvas-metadata" canvas-metadata)
+                    (copy-module "app/ui-canvas-type-structure" canvas-type-structure)
+                    (copy-module "app/ui-canvas-bindings" canvas-bindings)))
+      [(keyword root "ui") (keyword theme "theme")])))
 
 
 (def namespace-suffixes
@@ -239,21 +263,8 @@
                         (assoc configuration :args (:args new-list)))
         all (into (vec (remove #(= :ui (:name %)) copied))
                   (concat [configuration] (when existing [new-list]) legacy-defs
-                          (when (seq legacy) [legacy-list])))
-        indexed (into {} (map #(vector (keyword (:namespace %) (name (:name %))) %)) all)]
-    (loop [pending #{(keyword root "ui")} seen #{}]
-      (if (empty? pending)
-        (filterv #(contains? seen (keyword (:namespace %) (name (:name %)))) all)
-        (let [reference (first pending)
-              definition (get indexed reference)
-              references (atom #{})]
-          (rebase/rewrite-references definition
-                                     (fn [ref]
-                                       (let [qualified (if (namespace ref) ref (keyword (:namespace definition) (name ref)))]
-                                         (when (contains? indexed qualified) (swap! references conj qualified)))
-                                       ref))
-          (recur (into (disj pending reference) (remove (conj seen reference) @references))
-                 (conj seen reference)))))))
+                          (when (seq legacy) [legacy-list])))]
+    (definition-closure all [(keyword root "ui")])))
 
 
 (defn descriptor

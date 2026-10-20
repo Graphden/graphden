@@ -124,6 +124,19 @@
    :canvasTypeStructure :canvas-type-structure :canvasBindings :canvas-bindings})
 
 
+(deftest fixed-module-source-retains-composed-and-server-dependencies
+  (let [definitions (tool 'source-definitions)
+        graph (get-in (tool 'source-graph definitions) [:snapshot :graph])
+        rows (into {} (map (juxt :id identity)) (:fns graph))]
+    (doseq [[path name] [["core.collections" :assoc-fn]
+                         ["core.system" :server-call]
+                         ["storage.branches" :current-branch-name]
+                         ["app.ui-account-menu" :account-menu-query]]]
+      (is (contains? rows (ids/fn-id path name)) (str path "/" name)))
+    (is (= [(ids/fn-id "core.collections" :assoc)]
+           (:parent-ids (get rows (ids/fn-id "core.collections" :assoc-fn)))))))
+
+
 (deftest shipped-builtin-plans-are-reproducible-and-isolated
   (let [rich (atom {:by-id {} :by-name {}})
         aliases (atom {:outside :int})
@@ -136,6 +149,9 @@
               shapes/*marker-registry-override* markers]
       (let [artifact (tool 'generate)
             payload (tool 'serialize artifact)]
+        (is (not-any? #(= (str (ids/fn-id "app.ui-account-menu" :_account-menu-branch-query)) (:id %))
+                      (mapcat :functions (vals (:plans artifact))))
+            "Fixed legacy entries never export an unreachable server query body")
         (let [baked (slurp "resources/packages/app/ui-preview/builtin-plans.json")
               script (slurp "resources/packages/app/ui-preview/builtin-plans.js")
               expected-script (tool 'serialize-script artifact)]

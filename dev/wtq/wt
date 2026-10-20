@@ -1337,6 +1337,13 @@ run_gate_stage() {
     build)
       step "build the CANDIDATE image from the merged tree"
       # Never overwrite the canonical tag before all mandatory suites pass.
+      # Integration tests create this ignored classpath fixture. Leaving it in
+      # resources makes artifact-identity correctly mark the jar as dirty and
+      # prevents a verified release even though the source tree is committed.
+      # The build writes the real hashes into target/classes itself.
+      [ ! -e "$wt/resources/graphden-build-hashes.json" ] \
+        || rm -- "$wt/resources/graphden-build-hashes.json" \
+        || { echo "FAIL: remove generated build-hashes test fixture"; return 1; }
       ( cd "$wt" && clojure -T:build uber ) || { echo "FAIL: uberjar"; return 1; }
       ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" docker-compose build executor ) \
         || { echo "FAIL: docker build"; return 1; }

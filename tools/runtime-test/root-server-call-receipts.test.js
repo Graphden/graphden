@@ -24,6 +24,9 @@ for (const rejected of [
   modify(7, {invocation: 2}), modify(6, {ok: false}), modify(4, {root: 3}),
   events.filter(event => event.kind !== 'changing'), events.filter(event => event.kind !== 'state'),
   events.filter(event => event.lifetime !== 2),
+  [...events.map(event => event.kind === 'changing' ? {...event, order: 4.75} : event),
+    {kind: 'state', ...old, phase: 'error', hostReady: true, order: 4.5}],
+  [...events, {kind: 'state', ...old, phase: 'error', owned: false, hostReady: false, order: 4.5}],
 ]) assert.throws(() => recoveredStaleCalls(rejected), /server/);
 assert.throws(() => withoutRecoveredServerErrors([], events), /exactly one/);
 assert.throws(() => withoutRecoveredServerErrors([failure, failure], events), /exactly one/);

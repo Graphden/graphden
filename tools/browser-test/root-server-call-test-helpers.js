@@ -13,6 +13,8 @@ function recoveredStaleCalls(events) {
     const request = calls.find(call => sameCall(call, response));
     assert(request?.owned && response.status === 422 && response.code === 'server-call-stale',
       'server refusal has no exact finite stale receipt');
+    assert(!events.some(state => sameCall(request, state) && state.kind === 'state' && state.phase === 'error'),
+      'current server consumer handled the refusal before supersession');
     const replacement = calls.find(call => call.document === request.document && call.owned
       && call.root > request.root
       && events.some(event => event.kind === 'changing' && event.document === call.document
@@ -81,7 +83,7 @@ async function observeRootServerCalls(page) {
       const response = fetch.apply(this, arguments);
       track(response.then(async result => {
         const body = await result.clone().json().catch(() => null);
-        await publish({kind: 'response', ...receipt, status: result.status(), ok: body?.ok === true,
+        await publish({kind: 'response', ...receipt, status: result.status, ok: body?.ok === true,
           code: body?.code === 'server-call-stale' ? body.code : null});
       }, error => publish({kind: 'failed', ...receipt, aborted: error?.name === 'AbortError'})));
       return response;

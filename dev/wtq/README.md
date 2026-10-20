@@ -30,8 +30,9 @@ Then, in that session:
 3. **It implements**, keeping `bb ci` (lint + unit) green — its fast loop.
 4. **It lands.** It runs the gate (`bb wt merge`) in the background: its
    branch is queued, joins the next merge train with whatever else is ready,
-   and the train is gated once — develop + every member → ci → build image →
-   e2e → integration → fast-forward develop → advance the demo instance.
+   and the train is gated once on develop + every member. Every selected CI,
+   build, browser, visual, integration and fleet stage must pass before the
+   exact tested SHA fast-forwards develop and advances the demo instance.
    Red/conflict bounces back and it fixes; green lands.
 5. **It cleans up.** It removes its own worktree + branch (`bb wt drop <name>`).
 
@@ -134,8 +135,30 @@ Details that are deliberate:
   `<name>-<ts>.log` is a hard link to it, so `bb wt log <name>` and
   `bb wt watch <name>` follow the train the member is in. A bisection writes one
   log per train, so a culprit's newest log is its own one-member run.
+- **Stage order.** The default is CI → verified candidate build → browser E2E
+  → visual → integration → fleet, with unselected stages omitted. Frontend-only
+  trains run build → browser → visual before CI. After a completed suite
+  failure, `.git/wtq/last-failure/<member>` remembers the branch, member SHA,
+  target base SHA and failed stage. On retry (including bisection), that stage
+  runs first, after the verified build if it needs an image; the remaining
+  selected stages keep their relative order and run exactly once. For example,
+  an integration retry runs build → integration → CI → browser → visual → fleet.
+  If integration or fleet has already run, the first subsequent browser/visual
+  stage waits for the existing `WTQ_MEM_MIN_MB` / `WTQ_LOAD_MAX` headroom
+  thresholds, retaining the queue lock and heavy-phase marker. This admission
+  does not skip stages or alter their verdicts.
+  Multiple member hints use the first valid hint in train order. A hint cannot
+  add an out-of-scope stage or override explicit skip flags. It is ignored if
+  the branch changed, the member is no longer a descendant of its recorded SHA,
+  the target history was rewritten, or the recorded stage/object is unknown.
+  A green train clears its members' hints; claiming a new worktree also clears
+  any hint from a previous task with the same name. Existing failure logs are
+  not backfilled. Interrupted trains, incomplete
+  receipts, preconditions, target movement and post-land errors do not record
+  new hints. Hints carry no stage results: every train still obtains its own
+  exact-SHA CI and image proof and runs its entire selected roster.
 - **Machine receipts.** The same directory holds `_train-<ts>.report.edn`
-  (exact assembled SHA, scope, exit, phase durations, queue wait, image ID and
+  (exact assembled SHA, scope, exit, failed stage, phase durations, queue wait, image ID and
   jar hash), `_train-<ts>.ci-expected.edn` (check roster computed before CI),
   `_train-<ts>.ci.edn` (selected checks, exits and durations), and
   `_train-<ts>.resources.csv`. A killed train leaves `:complete false`; a

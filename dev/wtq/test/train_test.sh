@@ -57,8 +57,9 @@ EOF
   cat > "$WTQ_GATE_STUB" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" >> "$STUB_LOG"
+printf '%s:%s\n' "$*" "${WTQ_FIRST_STAGE:-default}" >> "$STUB_LOG.priority"
 [ -f "$(git rev-parse --git-common-dir)/wtq/gate-heavy" ] && echo heavy >> "$STUB_LOG.heavy"
-if [ -e BAD ]; then echo "stub: BAD is in the train"; exit 1; fi
+if [ -e BAD ]; then echo "stub: BAD is in the train"; echo WTQ_FAILED_STAGE=integration; exit 1; fi
 exit 0
 EOF
   chmod +x "$WTQ_GATE_STUB"
@@ -167,6 +168,60 @@ check "and cleared the marker afterwards" test ! -e "$Q/gate-heavy"
 check "wt drop accepts the landed member" eval "wt_main drop solo-wtqtest >/dev/null 2>&1"
 check "_train is not a droppable feature" eval "! wt_main drop _train >/dev/null 2>&1"
 check "wt list hides the train worktree" eval "! list_has '^_train'"
+
+echo "== a new claim clears hints left by a previous task with the same name"
+new_world hint-lifecycle
+mkdir -p "$Q/last-failure"
+printf 'stale task hint\n' > "$Q/last-failure/reused"
+feature reused reused.txt new
+check "new worktree clears the previous task hint" test ! -e "$Q/last-failure/reused"
+
+echo "== completed stage failures survive retry as scheduling hints only"
+new_world failed-stage
+feature retry BAD broken
+merge_bg retry
+finish retry
+retry_sha="$(git -C "$WTQ_ROOT/retry" rev-parse HEAD)"
+check "failed member exits 1" eq "$(rc_of retry)" 1
+check "hint binds branch, member SHA, target base and stage" \
+  eq "$(cat "$Q/last-failure/retry")" "$(printf 'feature/retry\t%s\t%s\tintegration' "$retry_sha" "$(git -C "$REPO" rev-parse develop)")"
+failed_report="$(cat "$Q/prior-train/$retry_sha")"
+check "completed train receipt explicitly records integration" \
+  env WTQ_REPORT_TEST="$Q/logs/_train-$failed_report.report.edn" bb -e \
+  '(require (quote clojure.edn))
+   (let [r (clojure.edn/read-string (slurp (System/getenv "WTQ_REPORT_TEST")))]
+     (when-not (and (:complete r) (= 1 (:exit r)) (= :integration (:failed-stage r)))
+       (System/exit 1)))'
+git -C "$WTQ_ROOT/retry" rm -q BAD
+git -C "$WTQ_ROOT/retry" commit -q -m 'fix: retry'
+merge_bg retry
+finish retry
+check "fixed descendant lands" eq "$(rc_of retry)" 0
+check "retry receives failed-stage priority" eq "$(tail -n1 "$STUB_LOG.priority")" 'retry:integration'
+check "green clears the hint" test ! -e "$Q/last-failure/retry"
+
+echo "== killed gate cannot turn an emitted marker into a durable hint"
+new_world killed-stage
+feature killed killed.txt candidate
+cat > "$WTQ_GATE_STUB" <<'EOF'
+#!/usr/bin/env bash
+# Kill only this throwaway gate subshell, after a misleading partial marker.
+echo WTQ_FAILED_STAGE=fleet
+gate_pid="$(ps -o ppid= -p "$PPID" | tr -d ' ')"
+kill -KILL "$gate_pid"
+exit 0
+EOF
+merge_bg killed
+finish killed
+check "killed candidate never lands" eval '! on_develop killed.txt'
+check "kill records no failed-stage hint" test ! -e "$Q/last-failure/killed"
+killed_sha="$(git -C "$WTQ_ROOT/killed" rev-parse HEAD)"
+killed_report="$(cat "$Q/prior-train/$killed_sha")"
+check "killed train receipt remains incomplete" \
+  env WTQ_REPORT_TEST="$Q/logs/_train-$killed_report.report.edn" bb -e \
+  '(require (quote clojure.edn))
+   (when (:complete (clojure.edn/read-string (slurp (System/getenv "WTQ_REPORT_TEST"))))
+     (System/exit 1))'
 
 echo "== interrupted post-land train cannot recover as GREEN by ancestry alone"
 new_world interrupted-land
@@ -285,6 +340,10 @@ check "extra gates within ceil(log2 4)+1 = 3" eq "$(($(gates | wc -l) - 1))" 3
 check "no ref ambiguity with the .git/wtq state dir" eval "! grep -q 'broken ref' '$Q'/logs/*.log"
 check "the red train's log says it is bisecting" eval "grep -q 'TRAIN RED with 4 members' '$Q'/logs/_train-*.log"
 check "c's newest log is its own one-member train" log_has c "gate: wtq-train = develop + [ c ]"
+check "bisection children inherit failed-stage priority" \
+  eq "$(cat "$STUB_LOG.priority" | tr '\n' '|')" 'a b c d:default|a b:integration|c:integration|d:integration|'
+for n in a b d; do check "green member $n clears its hint" test ! -e "$Q/last-failure/$n"; done
+check "culprit keeps its retry hint" test -f "$Q/last-failure/c"
 
 echo "== known-red second half: the lone culprit is confirmed by one gate"
 new_world confirm

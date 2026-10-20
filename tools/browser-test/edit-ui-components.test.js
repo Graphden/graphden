@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const assert = require('node:assert/strict');
 const {unexpectedSelectiveCopyErrors, components} = require('./selective-copy-errors');
 const {unexpectedThemeRetryErrors} = require('./theme-retry-errors');
+const {observeRootServerCalls, withoutRecoveredServerErrors, rootServerDiagnostic} = require('./root-server-call-test-helpers');
 const {preparePickerOnlySelection, restorePickerOnlySelection, restoreLessonSelection} = require('./partial-ui-components-fixture');
 const {unexpectedCleanupErrors} = require('./owned-cleanup-errors');
 const {chromium} = require('playwright');
@@ -70,6 +71,7 @@ const {waitForLoadedUIComponents, drainUIPlanReplies, observeUIPlanLoads} = requ
     }
   });
   const plans = await observeUIPlanLoads(page);
+  const serverCalls = await observeRootServerCalls(page);
   const planReplies = plans.replies;
   const captureResponse = async response => {
     if (response.request().method() === 'DELETE') deletes.push({url: response.url(), status: response.status()});
@@ -144,6 +146,7 @@ const {waitForLoadedUIComponents, drainUIPlanReplies, observeUIPlanLoads} = requ
             }))}));
           throw error;
         }
+        await serverCalls.settle();
       },
       onStagedReceipt: async receipt => {
         lessonReceipt = receipt;
@@ -164,6 +167,7 @@ const {waitForLoadedUIComponents, drainUIPlanReplies, observeUIPlanLoads} = requ
     assert.equal(batches.length, 0, 'the lesson does not need a separate deletion transaction');
     assert(!deletes.some(row => /^\/api\/entities\/fn\//.test(new URL(row.url).pathname)),
       'manifest cleanup does not issue per-function DELETE requests');
+    await serverCalls.settle();
     await Promise.all(pendingReplies);
     assert.deepEqual(forcedCleanupPolicyRetries, proofComponents,
       'the loaded legacy tutorial catalog recovers an exact policy refusal after the undo commit');
@@ -179,7 +183,8 @@ const {waitForLoadedUIComponents, drainUIPlanReplies, observeUIPlanLoads} = requ
     }
     const behaviorVerified = process.env.GRAPHDEN_COMPONENT_CLEANUP_ONLY !== '1';
     const unexpected = unexpectedCleanupErrors(unexpectedThemeRetryErrors(
-      unexpectedSelectiveCopyErrors(errors, planReplies, behaviorVerified), themeReplies, behaviorVerified), deletes, ownedIds, true);
+      unexpectedSelectiveCopyErrors(withoutRecoveredServerErrors(errors, serverCalls.events), planReplies, behaviorVerified),
+      themeReplies, behaviorVerified), deletes, ownedIds, true);
     if (unexpected.length) {
       console.error(JSON.stringify({diagnostic: 'unexpected-ui-console', errors: unexpected.map(error => ({
         kind: error.kind, stage: stages.get(new URL(error.url || 'http://unknown').pathname) || 'other',
@@ -188,6 +193,7 @@ const {waitForLoadedUIComponents, drainUIPlanReplies, observeUIPlanLoads} = requ
       throw new Error('Unexpected browser errors');
     }
   } catch (error) {
+    console.error('Root server receipt diagnostic:', JSON.stringify(rootServerDiagnostic(error, serverCalls.events)));
     const frames = String(error.stack || '').split('\n').flatMap(line => {
       const match = line.match(/\/(tutorial-ui-components-helpers|edit-ui-components(?:\.test)?|tutorial-tour-helpers)\.js:(\d+):(\d+)\)?$/);
       return match ? [{file: match[1], line: Number(match[2]), column: Number(match[3])}] : [];

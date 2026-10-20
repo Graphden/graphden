@@ -125,14 +125,14 @@
               ;; Identity targets provide only authorized names for checker
               ;; reconstruction. Never read their slots, bindings or literals.
               (doseq [row rows]
-                (cond
-                  (contains? server-targets (:id row))
+                (condp contains? (:id row)
+                  server-targets
                   (authorize! row {:execute? true :server-target? true})
 
-                  (contains? contracts/component-identities (:id row))
+                  contracts/component-identities
                   (authorize! row {:identity-only? true})
 
-                  :else (authorize! row)))
+                  (authorize! row)))
               (-> graph
                   (update :fns into rows)
                   (cond-> (or manifest? server?) (assoc :identity-target-ids targets)

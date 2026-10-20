@@ -276,5 +276,4 @@
    :description "Explicit async account-menu query; its server HOF remains on the server."
    :return-type :_account-query-result
    :args {:func {:ref :_account-menu-branch-query}
-          :arg {:as :input :type :_account-query-input}}}
-]}
+          :arg {:as :input :type :_account-query-input}}}]}

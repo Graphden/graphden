@@ -28,7 +28,6 @@ the old entry contracts. A custom root binding wins over this adapter. Missing
 or denied selected source is refused; the adapter creates no graphs or grants.
 Preference, authentication and branch changes retire the old root and callbacks.
 
-
 Settings → Appearance can select an ordinary personal theme graph. It executes
 on the server through the normal access checks, with effects disabled and a
 bounded execution time. Only the validated theme result reaches the browser.

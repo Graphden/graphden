@@ -34,19 +34,19 @@
                                   (try
                                     ;; Model JDBC that needs time to unwind after
                                     ;; cancellation. Its connection remains owned.
-                                    (try (.await finish) (catch InterruptedException _ (.await finish)))
+                                    (try (CountDownLatch/.await finish) (catch InterruptedException _ (CountDownLatch/.await finish)))
                                     :late-value
                                     (finally (deliver closed true)))))
                               (catch Exception error (:reason (ex-data error)))))]
-              (is (= true (deref started 1000 false)))
+              (is (true? (deref started 1000 false)))
               (is (= :server-timeout (deref waiting 1000 :did-not-time-out)))
               (is (not (realized? closed)))
               (is (= :server-capacity
                      (try (execution/run ctx (constantly :not-admitted))
                           (catch Exception error (:reason (ex-data error))))))
-              (.countDown finish)
-              (is (= true (deref closed 1000 false)))))))
+              (CountDownLatch/.countDown finish)
+              (is (true? (deref closed 1000 false)))))))
       (finally
-        (.countDown finish)
+        (CountDownLatch/.countDown finish)
         (ExecutorService/.shutdown pool)
         (is (ExecutorService/.awaitTermination pool 2 TimeUnit/SECONDS))))))

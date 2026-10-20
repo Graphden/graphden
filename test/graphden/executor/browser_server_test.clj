@@ -100,7 +100,7 @@
       (doseq [forged [(assoc input :target (str (random-uuid)))
                       (assoc input :captures {:label "forged"})
                       (assoc input :descriptor {:token (str (random-uuid))})
-                      (assoc input :descriptor (assoc (:descriptor input) :target (str (random-uuid))))
+                      (assoc-in input [:descriptor :target] (str (random-uuid)))
                       (assoc input :input (wire/encode-value {:query "" :capture "forged"}))]]
         (is (false? (:ok (server/invoke-current ctx request forged)))))
       (is (not-any? #(= :run (first %)) @calls)))))

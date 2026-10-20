@@ -39,13 +39,17 @@
                           hof-definitions (concat
                                             (filter #(contains? #{:map :filter :group-by :sort-by} (:name %))
                                                     (:fns (shipped-module "core/hof")))
-                                            (filter #(= :call (:name %))
-                                                    (:fns (shipped-module "core/system"))))
+                                            (filter #(contains? #{:call :server-call} (:name %))
+                                                    (:fns (shipped-module "core/system")))
+                                            (filter #(= :assoc-fn (:name %))
+                                                    (:fns (shipped-module "core/collections"))))
                           callback (mapcat (fn [definition]
                                              (record-types/inline-fn-type-rows-from-form
                                                (get-in definition [:args (case (:name definition)
                                                                            :map :func
                                                                            :call :func
+                                                                           :server-call :func
+                                                                           :assoc-fn :value
                                                                            :filter :pred
                                                                            :key-fn) :type])))
                                            hof-definitions)

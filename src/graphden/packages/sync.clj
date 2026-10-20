@@ -370,7 +370,11 @@
        (register-type-aliases! (:fn-defs packages))
        (doseq [[fn-name impl] base-fns-map]
          (exec/register-base-fn! fn-name impl))
-       (registry/sync-defs-to-storage! storage base-fn-defs ns-id-map all-name->id)
+       (let [written (registry/sync-defs-to-storage! storage base-fn-defs ns-id-map all-name->id)]
+         ;; Include parser-emitted anonymous type rows, using the writer's
+         ;; actual identities after any existing-row remap. Only trusted
+         ;; package bootstrap does this; tenant sync-bundle! never does.
+         (owned/record-owned-ids! (::fn-core/written-fn-ids (meta written))))
        {:ns-id-map ns-id-map
         :all-name->id all-name->id
         :base-fns base-fns-map}))))
@@ -1179,6 +1183,8 @@
                                       (reconcile-moved-identities! storage packages fns
                                                                    {:preexisting-fn-ids preexisting-fn-ids})
                                       fns))))]
+
+     (owned/record-owned-ids! (::fn-core/written-fn-ids (meta fns)))
 
      ;; Snapshot composed fn-defs into the in-memory rich-type registry
      ;; so the editor's `:effects` strip and arg-type hints can resolve

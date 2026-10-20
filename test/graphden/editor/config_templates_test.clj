@@ -1,5 +1,7 @@
 (ns graphden.editor.config-templates-test
   (:require
+    [clojure.edn :as edn]
+    [clojure.java.io :as io]
     [clojure.set :as set]
     [clojure.test :refer [deftest is]]
     [graphden.editor.component-bundle :as bundle]
@@ -13,7 +15,10 @@
 
 (defn- graph
   [definitions]
-  (let [interfaces (templates/interfaces)
+  (let [interfaces (into (templates/interfaces)
+                         (comp (filter #(= :call (:name %)))
+                               (map #(assoc % :namespace "core.system")))
+                         (:fns (edn/read-string (slurp (io/resource "packages/core/system/fns.edn")))))
         index (fn [value-fn]
                 (reduce (fn [result {:keys [name] path :namespace :as definition}]
                           (assoc result name (value-fn definition)
@@ -21,7 +26,7 @@
                         {} interfaces))
         names (merge (ids/primitive-fn-ids) (index #(ids/fn-id (:namespace %) (:name %))))
         shared (filter #(= "app.ui-config" (:namespace %)) interfaces)
-        declarations (filter #(or (contains? #{"core.logic" "core.collections" "core.hof" "web.graph-metadata"}
+        declarations (filter #(or (contains? #{"core.logic" "core.system" "core.collections" "core.hof" "web.graph-metadata"}
                                              (:namespace %))
                                   (and (= "app.ui-components" (:namespace %))
                                        (contains? #{:ui-components :_ui-components-identities} (:name %)))) interfaces)

@@ -4,7 +4,8 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const source = fs.readFileSync('resources/packages/app/editor/editor-root.js', 'utf8');
+const path = require('node:path');
+const source = fs.readFileSync(path.join(__dirname, '../../resources/packages/app/editor/editor-root.js'), 'utf8');
 function fixture() {
   const listeners = new Map(), requests = [], executed = [], nodes = [];
   const legacy = {dataset: {}, before(node) { nodes.push(node); }};

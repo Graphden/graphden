@@ -30,6 +30,7 @@
                     (map #(assoc % :namespace path)
                          (filter #(contains? names (:name %)) definitions)))))
         [["core/logic" "core.logic" #{:const}]
+         ["core/system" "core.system" #{:call}]
          ["core/collections" "core.collections" #{:list :get :zipmap :into :merge}]
          ["core/hof" "core.hof" #{:map}]
          ["web/graph-metadata" "web.graph-metadata" #{:find-function}]]))

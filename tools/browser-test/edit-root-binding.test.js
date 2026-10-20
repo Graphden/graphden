@@ -5,7 +5,7 @@
 const assert = require('node:assert/strict');
 const {randomUUID} = require('node:crypto');
 const {chromium} = require('playwright');
-const {newContext, api, BASE, waitForServerHealthy} = require('./edit-test-helpers');
+const {newContext, api, BASE, waitFor, waitForServerHealthy} = require('./edit-test-helpers');
 const {undoConfiguration} = require('./configuration-undo-test-helpers');
 const branchName = 'root-binding-' + randomUUID();
 const branchApi = (method, path, body) => api(null, method, path, body, {'X-Graphden-Branch': branchName});
@@ -36,15 +36,20 @@ function slotsOf(graph, owner) {
 async function checkedRoot(page) {
   // Wait only for the explicit pending type-recheck 409. Every checker/source
   // or ACL refusal fails immediately; this never substitutes an exported plan.
-  const checked = await page.waitForFunction(async () => {
-    const response = await authFetch(API.api_ui_root_plan, {cache: 'no-store'});
-    if (response.status === 409) { await response.text(); return false; }
-    const body = await response.json();
-    if (!response.ok || body.ok !== true) throw new Error('Stored root export refused: HTTP ' + response.status);
-    return body.plan;
-  }, null, {polling: 1000, timeout: 60000});
-  const plan = await checked.jsonValue();
-  await checked.dispose();
+  let plan;
+  const ready = await waitFor(async () => {
+    const checked = await page.evaluate(async () => {
+      const response = await authFetch(API.api_ui_root_plan, {cache: 'no-store'});
+      if (response.status === 409) { await response.text(); return null; }
+      const body = await response.json();
+      if (!response.ok || body.ok !== true) throw new Error('Stored root export refused: HTTP ' + response.status);
+      return body.plan;
+    });
+    if (!checked) return false;
+    plan = checked;
+    return true;
+  }, 60000);
+  assert(ready, 'stored root type recheck completed within 60 seconds');
   await page.evaluate(() => gdEditorRoot.reload());
   await page.waitForFunction(() => gdShellMenuGraph.ready && !!gdEditorRoot.componentNow('account-menu'));
   return plan;

@@ -38,6 +38,27 @@ function withoutRecoveredServerErrors(errors, events) {
   return errors.filter(error => !serverErrors.includes(error));
 }
 
+function rootServerDiagnostic(error, events) {
+  const reasons = [
+    ['server refusal has no exact finite stale receipt', 'unknown-refusal'],
+    ['current server consumer handled the refusal before supersession', 'current-consumer-error'],
+    ['stale server request lacks a superseding installed root and successful typed query', 'missing-replacement'],
+    ['every stale console error has exactly one correlated response', 'console-receipt-count'],
+  ];
+  const documents = new Map();
+  const calls = events.filter(event => event.kind === 'request').map(call => {
+    if (!documents.has(call.document)) documents.set(call.document, documents.size);
+    const same = event => event.document === call.document && event.root === call.root
+      && event.lifetime === call.lifetime && event.invocation === call.invocation;
+    const response = events.find(event => event.kind === 'response' && same(event));
+    return {document: documents.get(call.document), root: call.root, owned: call.owned,
+      status: response?.status, code: response?.code,
+      states: events.filter(event => event.kind === 'state' && same(event))
+        .map(({phase, owned, hostReady}) => ({phase, owned, hostReady}))};
+  });
+  return {reason: reasons.find(([message]) => error?.message?.startsWith(message))?.[1] || 'other', calls};
+}
+
 async function observeRootServerCalls(page) {
   const events = [];
   await page.exposeFunction('__gdRootServerReceipt', event => { events.push(event); });
@@ -99,4 +120,4 @@ async function observeRootServerCalls(page) {
     await page.evaluate(() => window.__gdFlushRootServerReceipts());
   }};
 }
-module.exports = {observeRootServerCalls, recoveredStaleCalls, withoutRecoveredServerErrors};
+module.exports = {observeRootServerCalls, recoveredStaleCalls, withoutRecoveredServerErrors, rootServerDiagnostic};

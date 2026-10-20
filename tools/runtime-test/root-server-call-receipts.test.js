@@ -1,6 +1,6 @@
 'use strict';
 const assert = require('node:assert/strict');
-const {recoveredStaleCalls, withoutRecoveredServerErrors} = require('../browser-test/root-server-call-test-helpers');
+const {recoveredStaleCalls, withoutRecoveredServerErrors, rootServerDiagnostic} = require('../browser-test/root-server-call-test-helpers');
 const old = {document: 'same-document', root: 1, lifetime: 1, invocation: 1, owned: true};
 const next = {...old, root: 2, lifetime: 2};
 const events = [
@@ -33,4 +33,6 @@ assert.throws(() => withoutRecoveredServerErrors([failure, failure], events), /e
 const unrelated = {kind: 'console', text: 'unrelated', url: 'http://localhost/other'};
 assert.deepEqual(withoutRecoveredServerErrors([failure, unrelated], events), [unrelated]);
 assert.equal(recoveredStaleCalls(events.filter(event => event.status !== 422)), 0);
+assert.equal(rootServerDiagnostic(new Error('private body or token'), events).reason, 'other');
+assert(!JSON.stringify(rootServerDiagnostic(null, events)).includes('same-document'));
 console.log('PASS exact stale server-call supersession receipts; current, unknown, cross-document and unrendered refusals reject');

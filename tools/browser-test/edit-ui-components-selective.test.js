@@ -2,7 +2,7 @@
 // activation conflict. Every cleanup operation uses exact creation receipts.
 const {unexpectedSelectiveCopyErrors} = require('./selective-copy-errors');
 const {unexpectedThemeRetryErrors} = require('./theme-retry-errors');
-const {observeRootServerCalls, withoutRecoveredServerErrors} = require('./root-server-call-test-helpers');
+const {observeRootServerCalls, withoutRecoveredServerErrors, rootServerDiagnostic} = require('./root-server-call-test-helpers');
 const {chromium} = require('playwright');
 const {assert, newContext, api} = require('./edit-test-helpers');
 const {undoConfiguration} = require('./configuration-undo-test-helpers');
@@ -262,6 +262,7 @@ async function cleanup(page, receipts) {
       'cleaning the new receipt preserves all previously authored copies');
     console.log('PASS selective UI choices, authored retention, builtin fallback, real CAS conflict, exact cleanup');
   } catch (error) {
+    console.error('Root server receipt diagnostic:', JSON.stringify(rootServerDiagnostic(error, serverCalls.events)));
     const state = await page.evaluate(() => ({surface: document.body.dataset.surface,
       catalogVisible: !!document.getElementById('gd-ui-components-root')?.getClientRects().length,
       menuVisible: !!document.querySelector('.auth-menu-item[data-item="Settings"]')?.getClientRects().length,

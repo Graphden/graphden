@@ -7,6 +7,7 @@ const {randomUUID} = require('node:crypto');
 const {chromium} = require('playwright');
 const {newContext, api, BASE, waitFor, waitForServerHealthy} = require('./edit-test-helpers');
 const {undoConfiguration} = require('./configuration-undo-test-helpers');
+const {storedRootPlan} = require('./root-plan-test-helpers');
 const branchName = 'root-binding-' + randomUUID();
 const branchApi = (method, path, body) => api(null, method, path, body, {'X-Graphden-Branch': branchName});
 const mainApi = (method, path, body) => api(null, method, path, body, {'X-Graphden-Branch': 'main'});
@@ -34,19 +35,24 @@ function slotsOf(graph, owner) {
     .map(row => [slots.get(row['slot-id']).name, row['slot-id']]));
 }
 async function checkedRoot(page) {
-  // Wait only for the explicit pending type-recheck 409. Every checker/source
-  // or ACL refusal fails immediately; this never substitutes an exported plan.
+  // Fail closed on checker/source/ACL denials. Only pending recheck 409 or
+  // the exact retryable policy envelope permits a fresh no-store GET; a
+  // refused plan is never used and the original 60-second bound stays fixed.
   let plan;
+  const deadline = Date.now() + 60000;
   const ready = await waitFor(async () => {
-    const checked = await page.evaluate(async () => {
+    const checked = storedRootPlan(await page.evaluate(async () => {
       const response = await authFetch(API.api_ui_root_plan, {cache: 'no-store'});
-      if (response.status === 409) { await response.text(); return null; }
-      const body = await response.json();
-      if (!response.ok || body.ok !== true) throw new Error('Stored root export refused: HTTP ' + response.status);
-      return body.plan;
-    });
-    if (!checked) return false;
-    plan = checked;
+      const body = await response.json().catch(() => null);
+      return {status: response.status, ok: response.ok, body};
+    }));
+    if (checked.pending) {
+      const delay = Math.min(checked.delayMs, Math.max(0, deadline - Date.now()));
+      if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+      return false;
+    }
+    if (!checked.plan) return false;
+    plan = checked.plan;
     return true;
   }, 60000);
   assert(ready, 'stored root type recheck completed within 60 seconds');

@@ -266,16 +266,19 @@ console.log(' owned counter sampler is stopped on parent termination');
 
 console.log(' slow_limit stays under the per-attempt hard timeout');
 {
-  const limit = (baseline, env = '') => spawnSync('bash', ['-c', `
+  const limit = (baseline, env = '', file = 'f') => spawnSync('bash', ['-c', `
+    eval "$(sed -n '/^timeout_for() {/,/^}/p' "$0")"
     eval "$(sed -n '/^slow_limit() {/,/^}/p' "$0")"
-    declare -A BASELINE=(${baseline == null ? '' : `[f]=${baseline}`})
+    declare -A BASELINE=(${baseline == null ? '' : `[${file}]=${baseline}`})
     THRASH_FILE_SECS=\${THRASH_FILE_SECS:-150} SLOW_FACTOR=2.5 SLOW_MIN_EXTRA=30 ${env}
-    slow_limit f`, RUNNER], { encoding: 'utf8' }).stdout;
+    slow_limit ${file}`, RUNNER], { encoding: 'utf8' }).stdout;
   assert(limit(122) === '299', 'tour-ux 122 s × 2.5 = 305 → capped at 299 (got ' + limit(122) + ')');
   assert(limit(20) === '50', 'an uncapped limit is unchanged (got ' + limit(20) + ')');
   assert(limit(null) === '150', 'no baseline → THRASH_FILE_SECS (got ' + limit(null) + ')');
   assert(limit(null, 'THRASH_FILE_SECS=400') === '299', 'a no-baseline limit is capped too (got ' + limit(null, 'THRASH_FILE_SECS=400') + ')');
   assert(limit(122, 'PER_TEST_TIMEOUT=200') === '199', 'the cap follows PER_TEST_TIMEOUT (got ' + limit(122, 'PER_TEST_TIMEOUT=200') + ')');
+  assert(limit(200, '', 'edit-ui-components-selective.test.js') === '359', 'the selective cleanup cap follows its measured 360s timeout');
+  assert(limit(200, 'PER_TEST_TIMEOUT=200', 'edit-ui-components-selective.test.js') === '199', 'an explicit timeout overrides the selective default');
 }
 
 console.log(`\n${passes} passed, ${failures} failed`);

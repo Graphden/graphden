@@ -435,12 +435,21 @@ done
 SLOW_FACTOR="${SLOW_FACTOR:-2.5}"
 SLOW_MIN_EXTRA="${SLOW_MIN_EXTRA:-30}"
 # Seconds past which a file's attempt reads as STARVED rather than slow-ish.
-# Capped just under the per-attempt hard timeout: an attempt can never run
-# longer than PER_TEST_TIMEOUT, so a limit at or past it (tour-ux: 122 s × 2.5
+# Capped just under the file's hard timeout: an attempt can never run
+# longer than that limit, so a threshold at or past it (tour-ux: 122 s × 2.5
 # = 305 s against the 300 s cap) means that file can never be judged slow. At
 # the cap, only an attempt that ran into the timeout itself counts.
+timeout_for() {
+  # Selective UI performs five exact graph cleanups. A focused candidate-image
+  # run took 288s, including 31s of final cleanup; 300s made a routine registry
+  # pause kill it after its behavior assertions. Keep other files at 300s.
+  case "$1" in
+    edit-ui-components-selective.test.js) printf '%s' "${PER_TEST_TIMEOUT:-360}" ;;
+    *) printf '%s' "${PER_TEST_TIMEOUT:-300}" ;;
+  esac
+}
 slow_limit() {
-  local b="${BASELINE[$1]:-}" cap=$(( ${PER_TEST_TIMEOUT:-300} - 1 ))
+  local b="${BASELINE[$1]:-}" cap=$(( $(timeout_for "$1") - 1 ))
   if [ -z "$b" ]; then
     if [ "$THRASH_FILE_SECS" -gt "$cap" ]; then printf '%s' "$cap"; else printf '%s' "$THRASH_FILE_SECS"; fi
     return
@@ -555,8 +564,9 @@ for f in $FILES; do
   read -r FN_BEFORE NS_BEFORE BR_BEFORE <<<"$(graph_counts)"
   CTR_BEFORE="$(executor_counters)"
   CTR_ATTEMPT="$CTR_BEFORE"
-  # Per-test wall-clock cap. Individual tests should complete in
-  # < 1 min under load; bounded at 5 min hard, then SIGKILL via the
+  # Per-test wall-clock cap. Most tests should complete in
+  # < 1 min under load; bounded at 5 min hard (6 min for selective UI),
+  # then SIGKILL via the
   # GNU coreutils `timeout`. Without this a stuck `page.evaluate`
   # against an unresponsive editor JS can pin a single test for
   # arbitrarily long (verified empirically: edit-effects-badges hung
@@ -605,7 +615,7 @@ for f in $FILES; do
     export GRAPHDEN_TOUR_AUDIT
     start_counter_sampler
     ATTEMPT_START=$SECONDS
-    if timeout -k 5 "${PER_TEST_TIMEOUT:-300}" node "$f" >"$attempt_out" 2>&1; then
+    if timeout -k 5 "$(timeout_for "$f")" node "$f" >"$attempt_out" 2>&1; then
       judged_secs=$((SECONDS - ATTEMPT_START))
       stop_counter_sampler
       skip_reason="$(grep -m1 '^SKIP:' "$attempt_out" || true)"

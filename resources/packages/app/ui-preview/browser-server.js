@@ -1,7 +1,6 @@
 // Explicit server requests are opaque graph values until an owned async host
 // invokes them. Generation and scope checks cover both network and body parsing.
 ((host) => {
-  'use strict';
   const requests = new WeakSet();
   function call(descriptor, input) {
     if (!descriptor || Object.keys(descriptor).length !== 1 || typeof descriptor.token !== 'string') throw new Error('Invalid server descriptor');

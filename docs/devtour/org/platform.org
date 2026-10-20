@@ -27,13 +27,13 @@ Tests whether the current request has platform-level context rather than an orga
 :PROPERTIES:
 :CUSTOM_ID: platform/notify!
 :FILE: src/graphden/tenancy/context.clj
-:LINE: 258
+:LINE: 260
 :MINS: 1.0
 :END:
 
 Passes a domain event to an installed notification handler, such as a package-moderation decision. The [[file:glossary.org::#term/integrant][addon]] decides recipients and delivery. With no handler the event is ignored; delivery failure does not reverse the domain write.
 
-- source :: [[file:../../../src/graphden/tenancy/context.clj::(defn notify!][src/graphden/tenancy/context.clj:258]]
+- source :: [[file:../../../src/graphden/tenancy/context.clj::(defn notify!][src/graphden/tenancy/context.clj:260]]
 - same file :: [[file:platform.org::#platform/platform-tier?][platform-tier?]], [[file:constellation.org::#constellation/install-org-cap-fn!][install-org-cap-fn!]], [[file:constellation.org::#constellation/tenancy-addon-active?][tenancy-addon-active?]]
 
 * 3. single-token-provider

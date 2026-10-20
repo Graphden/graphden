@@ -14,9 +14,12 @@
   {:name :_root-view-callable :fn-type [{:input :app.ui-account-menu/_root-view-input} :app.ui-account-menu/_root-view-result]}
   {:name :_root-initial-record :type {:initial :app.ui-account-menu/_root-initial-callable}}
   {:name :_root-update-record :type {:initial :app.ui-account-menu/_root-initial-callable :update :app.ui-account-menu/_root-update-callable}}
-  {:name :root-component :type {:initial :app.ui-account-menu/_root-initial-callable :update :app.ui-account-menu/_root-update-callable :view :app.ui-account-menu/_root-view-callable}}
+  {:name :_root-query-callable :fn-type [{:input :app.ui-account-menu/_account-query-input} :app.ui-account-menu/_account-query-result]}
+  {:name :_root-view-record :type {:initial :app.ui-account-menu/_root-initial-callable :update :app.ui-account-menu/_root-update-callable :view :app.ui-account-menu/_root-view-callable}}
+  {:name :root-component :type {:initial :app.ui-account-menu/_root-initial-callable :update :app.ui-account-menu/_root-update-callable :view :app.ui-account-menu/_root-view-callable :query :app.ui-account-menu/_root-query-callable}}
   {:name :root-initial :parent :account-menu-initial :lambda-params []}
   {:name :root-update :parent :account-menu-update :lambda-params [:input]
+   :return-type :app.ui-account-menu/_root-update-result
    :args {:state {:parent :get :args {:coll {:as :input :type :app.ui-account-menu/_root-update-input} :key {:value :state}}}
           :context {:parent :get :args {:coll {:as :input :type :app.ui-account-menu/_root-update-input} :key {:value :context}}}
           :event {:parent :get :args {:coll {:as :input :type :app.ui-account-menu/_root-update-input} :key {:value :event}}}}}
@@ -52,8 +55,12 @@
    :args {:map {} :key {:value :initial} :value {:ref :root-initial}}}
   {:name :_root-update-field :parent :_root-update-assoc :return-type :app.ui-account-menu/_root-update-record
    :args {:map {:ref :_root-initial-field :type :app.ui-account-menu/_root-initial-record} :key {:value :update} :value {:ref :root-update}}}
-  {:name :account-menu-component :parent :_root-view-assoc :return-type :app.ui-account-menu/root-component
+  {:name :_root-view-field :parent :_root-view-assoc :return-type :app.ui-account-menu/_root-view-record
    :args {:map {:ref :_root-update-field :type :app.ui-account-menu/_root-update-record} :key {:value :view} :value {:ref :root-view}}}
+  {:name :_root-query-assoc :parent :assoc-fn
+   :args {:value {:as :value :type :app.ui-account-menu/_root-query-callable}}}
+  {:name :account-menu-component :parent :_root-query-assoc :return-type :app.ui-account-menu/root-component
+   :args {:map {:ref :_root-view-field :type :app.ui-account-menu/_root-view-record} :key {:value :query} :value {:ref :account-menu-query}}}
   {:name :_account-menu-event :type {:kind :text :key :text :index :int}}
   {:name :_account-menu-state :type {:phase :text :active :int :handled :bool}}
   {:name :_account-menu-context :type {:items [:list :text]}}
@@ -228,8 +235,9 @@
    :return-type :_account-menu-style
    :args {:keys [{:value :selector} {:value :declarations}]
           :vals ["& .auth-menu-item:focus-visible" :account-menu-item-highlight]}}
+  {:name :_account-menu-styles :list :_account-menu-style}
   {:name :account-menu-styles :parent :list
-   :return-type [:list :_account-menu-style]
+   :return-type :_account-menu-styles
    :args {:items [{:value {:selector "&" :declarations {"display" "contents"}}}
                   {:value {:selector "& > .auth-menu-common" :declarations {"display" "contents"}}}
                   :_account-menu-hover-rule :_account-menu-focus-rule]}}

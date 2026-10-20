@@ -310,7 +310,7 @@ Increments the graph [[file:glossary.org::#term/invalidation][epoch]] before a g
 :CUSTOM_ID: versioning/build-branch-ctx
 :FILE: src/graphden/system/branch_router.clj
 :LINE: 75
-:MINS: 4.2
+:MINS: 4.4
 :END:
 
 Creates a branch-specific [[file:glossary.org::#term/context][execution context]] with storage bound to that branch, independent graph and compiled-registry caches, and a copy of the branch's [[file:glossary.org::#term/rich-types][rich type information]]. The router binds those types while compiling and handling requests, preventing another branch's types from determining this branch's behavior.
@@ -323,13 +323,13 @@ Creates a branch-specific [[file:glossary.org::#term/context][execution context]
 :PROPERTIES:
 :CUSTOM_ID: versioning/dispatch*
 :FILE: src/graphden/system/branch_router.clj
-:LINE: 900
+:LINE: 903
 :MINS: 8.4
 :END:
 
 Resolves a request's branch reference from a header or query parameter and invokes that branch's handler. Unknown branches return 400. The public wrapper handles ~/livez~ before branch compilation so the liveness probe does not depend on the [[file:glossary.org::#term/compiled-registry][compiled registry]].
 
-- source :: [[file:../../../src/graphden/system/branch_router.clj::(defn- dispatch*][src/graphden/system/branch_router.clj:900]]
+- source :: [[file:../../../src/graphden/system/branch_router.clj::(defn- dispatch*][src/graphden/system/branch_router.clj:903]]
 - same file :: [[file:versioning.org::#versioning/build-branch-ctx][build-branch-ctx]]
 - referenced from :: [[file:storage.org::#storage/create-listener][create-listener]], [[file:web.org::#web/dispatch-to-branch][dispatch-to-branch]]
 

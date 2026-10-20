@@ -528,6 +528,11 @@
     (is (not= (:constraint row) constraint) "Real JSONB codec stores ordinary symbol spellings")
     (with-redefs [owned/owned-fn-id? #(= (:id row) %)]
       (is (= (:constraint row) (:constraint (reconstruct captured))))
+      (let [attributed (update-in captured [:graph :fns 0] assoc :author-id "boot" :author-label "Boot sync")]
+        (is (= (:constraint row) (:constraint (reconstruct attributed))))
+        (doseq [field [:expects-effects :execution]]
+          (is (= :type-contract-source-mismatch
+                 (:reason (failure #(reconstruct (assoc-in attributed [:graph :fns 0 field] ["io"]))))))))
       (is (= constraint (get-in captured [:graph :fns 0 :constraint])) "Source evidence is not rewritten")
       (doseq [forged [(assoc-in captured [:graph :fns 0 :constraint 2] :text)
                       (assoc-in captured [:graph :fns 0 :constraint 1 :arg] :a)

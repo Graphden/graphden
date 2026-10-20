@@ -245,7 +245,12 @@
                 (try
                   (let [versioned (vs/wrap-with-versioning storage "main")
                         captured (binding [registry-core/*rich-types-override*
-                                           (atom (registry-core/snapshot-for-isolation))]
+                                           (atom (registry-core/snapshot-for-isolation))
+                                           ;; Loading packages evals native Vars again. Keep
+                                           ;; the process baseline aligned with those Vars,
+                                           ;; just as the initial golden bootstrap does;
+                                           ;; sibling clone contexts outlive this override.
+                                           registry/*registry-override* nil]
                                    ;; Golden clone is already synced; this re-sync is
                                    ;; idempotent — we run it only to reach the sweep,
                                    ;; which populates the bound override.

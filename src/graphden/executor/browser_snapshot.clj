@@ -146,7 +146,7 @@
    other non-nil field, including future effect/execution annotations, must
    agree with the canonical emitted row before replacing its constraint."
   [expected actual]
-  (let [cosmetic #{:description :created-at :updated-at :deleted-at :kind
+  (let [cosmetic #{:description :author-id :author-label :created-at :updated-at :deleted-at :kind
                    :constraint :org-id :concealed?}
         fields (set/difference (into (set (keys expected)) (keys actual)) cosmetic)]
     (and (nil? (:deleted-at actual))

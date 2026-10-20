@@ -76,13 +76,13 @@ Builds a pure boundary validator from the same supported data declaration used b
 :PROPERTIES:
 :CUSTOM_ID: types/native-execution
 :FILE: src/graphden/executor/capabilities.clj
-:LINE: 62
+:LINE: 63
 :MINS: 1.1
 :END:
 
 A real JVM implementation proves JVM support; the canonical identity-keyed browser primitive ABI adds browser support only for implemented operations. Purity, a familiar name and authored type annotations cannot manufacture execution support.
 
-- source :: [[file:../../../src/graphden/executor/capabilities.clj::(defn native-execution][src/graphden/executor/capabilities.clj:62]]
+- source :: [[file:../../../src/graphden/executor/capabilities.clj::(defn native-execution][src/graphden/executor/capabilities.clj:63]]
 
 * 7. make-union
 :PROPERTIES:
@@ -271,7 +271,7 @@ Chooses return-type inference for the root [[file:glossary.org::#term/base-funct
 :CUSTOM_ID: types/check-fn-def!
 :FILE: src/graphden/types/check.clj
 :LINE: 2594
-:MINS: 9.2
+:MINS: 9.3
 :END:
 
 Checks one function definition against its parents and inherited [[file:glossary.org::#term/slot][slots]]. It validates argument changes and [[file:glossary.org::#term/effect][effects]], checks [[file:glossary.org::#term/binding][bindings]], computes the return type, and records detailed type information for later dependent functions.
@@ -284,13 +284,13 @@ Checks one function definition against its parents and inherited [[file:glossary
 :PROPERTIES:
 :CUSTOM_ID: types/check-all-defs!
 :FILE: src/graphden/types/check.clj
-:LINE: 2728
+:LINE: 2730
 :MINS: 1.9
 :END:
 
 Checks definitions in [[file:glossary.org::#term/topological-order][dependency order]], registering each result before dependent definitions need it. This performs the full graph type sweep using the same single-definition checker.
 
-- source :: [[file:../../../src/graphden/types/check.clj::(defn check-all-defs!][src/graphden/types/check.clj:2728]]
+- source :: [[file:../../../src/graphden/types/check.clj::(defn check-all-defs!][src/graphden/types/check.clj:2730]]
 - same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/rule-return][rule-return]], [[file:types.org::#types/check-fn-def!][check-fn-def!]]
 - referenced from :: [[file:packages.org::#packages/sync-fn-entities-from-packages!][sync-fn-entities-from-packages!]]
 

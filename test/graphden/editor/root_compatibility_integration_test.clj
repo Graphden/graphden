@@ -4,23 +4,24 @@
     [clojure.edn :as edn]
     [clojure.java.shell :as sh]
     [clojure.test :refer [deftest is use-fixtures]]
+    [graphden.crud.type-check :as type-check]
     [graphden.editor.component-templates :as templates]
     [graphden.editor.components :as components]
     [graphden.editor.root-plan :as root-plan]
     [graphden.executor.browser-snapshot :as snapshot]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.types :as record-types]
+    [graphden.storage.graph-writer :as writer]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as router]
     [graphden.system.branch-router.epoch :as epoch]
     [graphden.tenancy.context :as tenancy]
     [graphden.test-infra.golden-app :as ga]
-    [graphden.test-infra.impls :as impls]
     [graphden.types.check :as check]
     [graphden.versioning.storage.core :as versioned]))
 
 
-(use-fixtures :once (ga/fixture (ns-name *ns*)) (impls/impls-fixture "storage" "branches"))
+(use-fixtures :once (ga/fixture (ns-name *ns*)))
 
 
 (defn- copied-definitions
@@ -48,7 +49,7 @@
                   :return-type :app.ui-components/ui-component-manifest
                   :args {:items [(keyword path "_menu-descriptor") (keyword path "_recents-descriptor")]}}])
         selected (ids/fn-id path :selection)]
-    ((impls/impl-of :sync-fn-defs-branch!) {:branch-id branch :fn-defs (vec definitions)} ctx)
+    ((get (:base-fns ctx) :sync-fn-defs-branch!) {:branch-id branch :fn-defs (vec definitions)} ctx)
     (sp/create-entity storage :ui-pref {:owner-id owner :key "components"
                                         :value {:fn-id (str selected) :branch-id (str branch) :org (tenancy/current-org)}})
     (epoch/seed-watermark! storage)
@@ -59,7 +60,8 @@
   [plan]
   (let [script (str "const g=require('./resources/packages/app/ui-preview/browser-runtime.js');let s='';"
                     "process.stdin.on('data',x=>s+=x);process.stdin.on('end',()=>{"
-                    "const root=g.createRuntime(JSON.parse(s),{operationLimit:1000000}).run('root');"
+                    "const plan=JSON.parse(s),supplied=Object.fromEntries(plan.inputs[plan.entries.root].required.map(n=>[n,new Map()]));"
+                    "const root=g.createRuntime(plan,{operationLimit:1000000}).run('root',supplied);"
                     "const key=g.keyword,field=(m,n)=>m.get(key(n)),m=x=>new Map(Object.entries(x).map(([k,v])=>[key(k),v]));"
                     "const menu=field(root,'account-menu'),recents=field(root,'recents');"
                     "const state=g.invoke(field(menu,'initial'),m({}));"
@@ -95,7 +97,7 @@
 
 (deftest existing-personal-copies-remain-selected-and-source-guarded
   (binding [router/*active-router-override* (atom nil)]
-    (let [ctx (:ctx ga/*bootstrap*) owner (random-uuid)
+    (let [ctx (:ctx ga/*bootstrap*) storage (:storage ctx) owner (str (random-uuid))
           selected (setup-selection! ctx owner)]
       (with-redefs [tenancy/current-user-id (constantly owner)
                     tenancy/current-personal-namespace (constantly nil)]
@@ -105,7 +107,7 @@
           (is (zero? (:exit rendered -1)) (:err rendered))
           (is (re-find #"Personal settings" (:out rendered "")))
           (is (re-find #"My trail" (:out rendered ""))))
-        (with-redefs [tenancy/current-user-id (constantly (random-uuid))]
+        (with-redefs [tenancy/current-user-id (constantly (str (random-uuid)))]
           (let [result (export-root ctx)]
             (is (:ok result) (pr-str result))
             (is (not-any? #(= (str (:menu selected)) (:id %)) (get-in result [:plan :functions])))))
@@ -121,13 +123,14 @@
           (let [result (export-root ctx)]
             (is (false? (:ok result)))
             (is (not (contains? result :plan)))))
-        (let [read-row sp/read-entity]
-          (with-redefs [sp/read-entity (fn [storage entity id]
-                                         (when-not (and (= :fn entity) (= (:selected selected) id))
-                                           (read-row storage entity id)))]
-            (let [result (export-root ctx)]
-              (is (false? (:ok result)))
-              (is (not (contains? result :plan))))))))))
+        (writer/with-write [storage :graph]
+                           (sp/delete-entity storage :fn (:selected selected)))
+        (epoch/seed-watermark! (:storage ctx))
+        (is (nil? (sp/read-entity (:storage ctx) :fn (:selected selected))))
+        (let [result (export-root ctx)]
+          (is (false? (:ok result)))
+          (is (= :source-missing (get-in result [:diagnostic :reason])))
+          (is (not (contains? result :plan))))))))
 
 
 (deftest actual-jsonb-generic-callback-is-restored-only-from-its-exact-contract
@@ -149,3 +152,14 @@
              (read-checked (assoc-in captured [:graph :fns 0 :constraint 1 :arg] :b))
              nil
              (catch clojure.lang.ExceptionInfo error (:reason (ex-data error))))))))
+
+
+(deftest actual-jsonb-account-styles-retain-their-element-contract
+  (let [storage (:storage (:ctx ga/*bootstrap*))
+        producer (ids/fn-id "app.ui-account-menu" :account-menu-styles)
+        style-list (ids/fn-id "app.ui-account-menu" :_account-menu-styles)
+        style (ids/fn-id "app.ui-account-menu" :_account-menu-style)]
+    (is (= style-list (:return-type-fn-id (sp/read-entity storage :fn producer))))
+    (is (= style (:element-fn-id (sp/read-entity storage :fn style-list))))
+    (is (= :app.ui-account-menu/_account-menu-styles
+           (:return-type (type-check/reconstruct-fn-def storage producer))))))

@@ -7,7 +7,7 @@ Loading, graph-backed controls, actions, forms, and preferences.
 
 after: web, layout
 
-[[file:index.org][index]] · ~187 min
+[[file:index.org][index]] · ~188 min
 
 * 1. initGraph
 :PROPERTIES:
@@ -182,13 +182,13 @@ Orders function-picker candidates without accessing the [[file:glossary.org::#te
 :PROPERTIES:
 :CUSTOM_ID: editor/export-plan
 :FILE: src/graphden/executor/browser_plan.clj
-:LINE: 324
+:LINE: 348
 :MINS: 2.7
 :END:
 
 The ordinary account menu, function picker and Explorer navigation trail use bundled graph plans for their local state or markup. This exporter resolves inheritance, bindings, and renames on the server and emits an ID-based plan for supported primitives; the browser does not resolve graph names itself. Shipped plans are generated during development. The generic editable-graph export takes a whole snapshot and remains unavailable under tenancy. Personal components instead use ~graphden.editor.components/export-current~, which authorizes every source dependency and exports only a bounded component plan. See the [[file:../../../resources/packages/app/ui-preview/README.md][graph-backed UI contract]].
 
-- source :: [[file:../../../src/graphden/executor/browser_plan.clj::(defn export-plan][src/graphden/executor/browser_plan.clj:324]]
+- source :: [[file:../../../src/graphden/executor/browser_plan.clj::(defn export-plan][src/graphden/executor/browser_plan.clj:348]]
 - see also :: [[file:executor.org::#executor/build-lookups][build-lookups]], [[file:editor.org::#editor/createRuntime][createRuntime]]
 - referenced from :: [[file:editor.org::#editor/export-current][export-current]]
 
@@ -196,26 +196,26 @@ The ordinary account menu, function picker and Explorer navigation trail use bun
 :PROPERTIES:
 :CUSTOM_ID: editor/export-current
 :FILE: src/graphden/editor/root_plan.clj
-:LINE: 24
-:MINS: 4.2
+:LINE: 26
+:MINS: 4.4
 :END:
 
 The editor root endpoint reads the ordinary root HOF binding from its server-owned handler configuration. It checks root execute permission and every dependency's source visibility in one snapshot, then exports a bounded plan. The browser invokes the root through the same call ABI as other graph callables. Its initial typed bootstrap contract selects the explicit legacy editor adapter; it does not export the server handler body.
 
-- source :: [[file:../../../src/graphden/editor/root_plan.clj::(defn export-current][src/graphden/editor/root_plan.clj:24]]
+- source :: [[file:../../../src/graphden/editor/root_plan.clj::(defn export-current][src/graphden/editor/root_plan.clj:26]]
 - see also :: [[file:editor.org::#editor/export-plan][export-plan]], [[file:editor.org::#editor/createRuntime][createRuntime]]
 
 * 16. createRuntime
 :PROPERTIES:
 :CUSTOM_ID: editor/createRuntime
 :FILE: resources/packages/app/ui-preview/browser-runtime.js
-:LINE: 394
-:MINS: 5.9
+:LINE: 401
+:MINS: 6.5
 :END:
 
 Creates the bounded browser interpreter for that plan. Each entry invocation has lazy argument reads, memoized calls, and an operation limit; unsupported primitives fail. This backend supports a small part of the graph vocabulary, separate from the JVM executor. ~editor-shell-menu-graph.js~ and ~editor-fn-picker-graph.js~ connect shipped plans to real controls; native host code retains authentication, search, type verdicts, authorized actions, and focus.
 
-- source :: [[file:../../../resources/packages/app/ui-preview/browser-runtime.js::  function createRuntime(plan, {operationLimit = 10000} = {}) {][resources/packages/app/ui-preview/browser-runtime.js:394]]
+- source :: [[file:../../../resources/packages/app/ui-preview/browser-runtime.js::  function createRuntime(plan, {operationLimit = 10000, serverCall} = {}) {][resources/packages/app/ui-preview/browser-runtime.js:401]]
 - see also :: [[file:editor.org::#editor/mount][mount]], [[file:editor.org::#editor/pickerArrange][pickerArrange]]
 - referenced from :: [[file:editor.org::#editor/export-plan][export-plan]], [[file:editor.org::#editor/export-current][export-current]], [[file:editor.org::#editor/renderRecentFns][renderRecentFns]], [[file:editor.org::#editor/mount][mount]], [[file:editor.org::#editor/mountCanvasBody][mountCanvasBody]], [[file:editor.org::#editor/format][format]], [[file:editor.org::#editor/mountCatalog][mountCatalog]], [[file:editor.org::#editor/openTutorialMenu][openTutorialMenu]]
 
@@ -296,13 +296,13 @@ A lens button is rendered by the selected Explorer graph, but native code dispat
 :PROPERTIES:
 :CUSTOM_ID: editor/renderRecentFns
 :FILE: resources/packages/app/editor/editor-recents.js
-:LINE: 164
-:MINS: 1.6
+:LINE: 172
+:MINS: 1.7
 :END:
 
 The Explorer trail executes the shipped ~app.ui-recents~ initial and view graphs. Its update graph returns state and fixed persistence/navigation requests, deduplicates selections, limits the trail and toggles pins; the view excludes the selected function and pinned duplicates and hides during searches or filters. Ordinary row functions produce Hiccup and scoped styles. The host persists localStorage, resolves namespace paths and delegates navigation; keyed rendering preserves focused pin buttons.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-recents.js::function renderRecentFns() {][resources/packages/app/editor/editor-recents.js:164]]
+- source :: [[file:../../../resources/packages/app/editor/editor-recents.js::function renderRecentFns() {][resources/packages/app/editor/editor-recents.js:172]]
 - see also :: [[file:editor.org::#editor/mount][mount]], [[file:editor.org::#editor/createRuntime][createRuntime]]
 - referenced from :: [[file:editor.org::#editor/create][create]]
 
@@ -555,26 +555,26 @@ Each server partial captures a latest-wins read token and exact native host. Tab
 :PROPERTIES:
 :CUSTOM_ID: editor/definitions
 :FILE: src/graphden/editor/component_templates.clj
-:LINE: 105
+:LINE: 108
 :MINS: 7.3
 :END:
 
 Copies the fixed shipped theme, menu, picker, Recents, Inspector, Explorer, tutorial catalogue, passive canvas, value/type, inheritance and function metadata definitions into a fresh named namespace. An ordinary descriptor list selects component entry identities. Shared menu colors reference copied theme leaves; menu hover owns a local literal. Color wrappers retain the canonical color type and ordinary editor form. This is an advanced legacy compatibility path; Lesson 25 instead creates a small inherited menu child and captures its free theme input.
 
-- source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn definitions][src/graphden/editor/component_templates.clj:105]]
+- source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn definitions][src/graphden/editor/component_templates.clj:108]]
 - same file :: [[file:editor.org::#editor/selected-definitions][selected-definitions]]
 
 * 42. selected-definitions
 :PROPERTIES:
 :CUSTOM_ID: editor/selected-definitions
 :FILE: src/graphden/editor/component_templates.clj
-:LINE: 214
+:LINE: 217
 :MINS: 3.4
 :END:
 
 The retained legacy selective-copy compatibility path keeps only the chosen component and its owned reference closure. A new ordinary concat manifest references the previous authored manifest and the new descriptor list, preserving existing identities and edits. Legacy slots are adapted to descriptors without copying their bodies. Retained identities are outside the create-only receipt; group creation does not activate a theme.
 
-- source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn selected-definitions][src/graphden/editor/component_templates.clj:214]]
+- source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn selected-definitions][src/graphden/editor/component_templates.clj:217]]
 - same file :: [[file:editor.org::#editor/definitions][definitions]]
 
 * 43. apply!
@@ -594,13 +594,13 @@ Rebuilds the manifest, the fixed list of proposed objects and UUIDs, while holdi
 :PROPERTIES:
 :CUSTOM_ID: editor/collect-closure
 :FILE: src/graphden/executor/browser_source.clj
-:LINE: 151
+:LINE: 188
 :MINS: 1.0
 :END:
 
 Collects only the selected [[file:glossary.org::#term/reachable-graph][reachable graph]] and its type dependencies, limiting function and row counts. Each function's [[file:glossary.org::#term/auth][source authorization]] precedes its binding and literal reads. The caller supplies a snapshot-local policy; generic whole-graph preview remains unavailable to cloud tenants. Narrow exceptions for fixed shipped primitive/type interfaces verify identity and installed origin; a matching name is insufficient.
 
-- source :: [[file:../../../src/graphden/executor/browser_source.clj::(defn collect-closure][src/graphden/executor/browser_source.clj:151]]
+- source :: [[file:../../../src/graphden/executor/browser_source.clj::(defn collect-closure][src/graphden/executor/browser_source.clj:188]]
 
 * 45. export-resolved
 :PROPERTIES:

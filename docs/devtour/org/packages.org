@@ -215,13 +215,13 @@ Creates the stored namespace hierarchy, such as ~core~ and ~core.arithmetic~, an
 :PROPERTIES:
 :CUSTOM_ID: packages/sync-fn-entities-from-packages!
 :FILE: src/graphden/packages/sync.clj
-:LINE: 1110
-:MINS: 11.1
+:LINE: 1114
+:MINS: 11.2
 :END:
 
 Synchronizes packaged definitions into storage, repairs moved identities, removes unused retired definitions, and checks types in [[file:glossary.org::#term/topological-order][dependency order]]. Packages on disk describe the desired state. Test bootstraps may skip the full type sweep; production boot and ~bb type-sweep~ run it explicitly.
 
-- source :: [[file:../../../src/graphden/packages/sync.clj::(defn sync-fn-entities-from-packages!][src/graphden/packages/sync.clj:1110]]
+- source :: [[file:../../../src/graphden/packages/sync.clj::(defn sync-fn-entities-from-packages!][src/graphden/packages/sync.clj:1114]]
 - see also :: [[file:types.org::#types/check-all-defs!][check-all-defs!]], [[file:versioning.org::#versioning/repoint-refs!][repoint-refs!]]
 - same file :: [[file:packages.org::#packages/adopt-bundle-identities!][adopt-bundle-identities!]], [[file:packages.org::#packages/reconcile-bundle-scope!][reconcile-bundle-scope!]]
 - referenced from :: [[file:boot.org::#boot/packages][packages]]
@@ -357,26 +357,26 @@ Seeds starter themes, keymaps, and examples from ~starter-catalogue.edn~ at boot
 :PROPERTIES:
 :CUSTOM_ID: packages/adopt-bundle-identities!
 :FILE: src/graphden/packages/sync.clj
-:LINE: 587
+:LINE: 591
 :MINS: 3.2
 :END:
 
 During bundle import, aligns editor-created same-name identities with deterministic IDs and redirects their references. The surrounding graph pipeline chooses the target branch, excludes package-owned definitions, synchronizes the bundle, and optionally removes missing definitions. This identity-level repair is specific to import, not ordinary [[file:glossary.org::#term/mcp][MCP]] upsert.
 
-- source :: [[file:../../../src/graphden/packages/sync.clj::(defn adopt-bundle-identities!][src/graphden/packages/sync.clj:587]]
+- source :: [[file:../../../src/graphden/packages/sync.clj::(defn adopt-bundle-identities!][src/graphden/packages/sync.clj:591]]
 - same file :: [[file:packages.org::#packages/sync-fn-entities-from-packages!][sync-fn-entities-from-packages!]], [[file:packages.org::#packages/reconcile-bundle-scope!][reconcile-bundle-scope!]]
 
 * 28. reconcile-bundle-scope!
 :PROPERTIES:
 :CUSTOM_ID: packages/reconcile-bundle-scope!
 :FILE: src/graphden/packages/sync.clj
-:LINE: 630
+:LINE: 634
 :MINS: 4.4
 :END:
 
 Implements ~?prune=true~ within the bundle's namespaces. Definitions absent from the snapshot receive branch-specific [[file:glossary.org::#term/tombstone][tombstones]], including inherited definitions. It does not physically purge shared identities; referenced removals are retained and reported.
 
-- source :: [[file:../../../src/graphden/packages/sync.clj::(defn reconcile-bundle-scope!][src/graphden/packages/sync.clj:630]]
+- source :: [[file:../../../src/graphden/packages/sync.clj::(defn reconcile-bundle-scope!][src/graphden/packages/sync.clj:634]]
 - same file :: [[file:packages.org::#packages/sync-fn-entities-from-packages!][sync-fn-entities-from-packages!]], [[file:packages.org::#packages/adopt-bundle-identities!][adopt-bundle-identities!]]
 
 * 29. bundle->files

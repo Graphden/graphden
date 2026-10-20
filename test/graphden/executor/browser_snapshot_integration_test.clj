@@ -25,14 +25,12 @@
     [graphden.tenancy.context :as tenancy]
     [graphden.test-infra.account-menu-cases :as account-menu]
     [graphden.test-infra.golden-app :as ga]
-    [graphden.test-infra.impls :as impls]
+    [graphden.types.check :as check]
     [graphden.types.diagnostics :as diag]
     [graphden.versioning.storage.core :as vs]))
 
 
-(use-fixtures :once
-  (ga/fixture (ns-name *ns*))
-  (impls/impls-fixture "storage" "branches"))
+(use-fixtures :once (ga/fixture (ns-name *ns*)))
 
 
 (defn- setup-copy!
@@ -41,7 +39,7 @@
                    :rich-types-atom (registry/fork-rich-types-atom (registry/active-rich-types-atom))
                    :per-org-rich-atom (registry/fork-per-org-rich-atom (registry/active-per-org-rich-atom)))
         id (records/fn-id ns-path :leaf)]
-    ((impls/impl-of :sync-fn-defs-branch!)
+    ((get (:base-fns ctx) :sync-fn-defs-branch!)
      {:branch-id (vs/current-branch-id (:storage ctx))
       :fn-defs [{:name :leaf :namespace ns-path :parent :const
                  :args {:value {:value "before"}}}]} ctx)
@@ -75,10 +73,25 @@
   (binding [br/*active-router-override* (atom nil)]
     (let [ctx (:ctx ga/*bootstrap*)
           failure-response components/failure-response
-          result (with-redefs [components/failure-response
+          checker check/check-fn-def!
+          checked-error (atom nil)
+          _ (is (identical? @(find-var 'graphden.packages.storage.branches.impls/current-branch-name)
+                            (get (:base-fns ctx) :current-branch-name))
+                "Golden-clone registry and loaded reader identity agree")
+          result (with-redefs [check/check-fn-def!
+                               (fn [& args]
+                                 (try (apply checker args)
+                                      (catch Exception error
+                                        (reset! checked-error
+                                                (assoc (select-keys (ex-data error)
+                                                                    [:type :reason :fn-name :arg :expected :actual :parent-name])
+                                                       :message (Exception/.getMessage error)))
+                                        (throw error))))
+                               components/failure-response
                                (fn [error]
                                  (assoc (failure-response error) :test-error
-                                        (select-keys (ex-data error) [:type :reason])))]
+                                        (assoc (select-keys (ex-data error) [:type :reason :fn-id])
+                                               :checker @checked-error)))]
                    (export-editor-root ctx))]
       (is (true? (:ok result))
           (pr-str {:result result
@@ -228,7 +241,7 @@
           slot (ids/slot-id (ids/fn-id "app.editor" :client-handler) :root)
           binding (first (sp/query-entities storage :binding {:fn-id handler :slot-id slot}))
           root (ids/fn-id "snapshot.root" :alternate)]
-      ((impls/impl-of :sync-fn-defs-branch!)
+      ((get (:base-fns ctx) :sync-fn-defs-branch!)
        {:branch-id (vs/current-branch-id storage)
         :fn-defs [{:name :_root-bootstrap-body :namespace "snapshot.root" :parent :const :lambda-params []
                    :args {:value {:value {:legacy true}}}}
@@ -305,7 +318,7 @@
           entries (into {} (map (fn [[entry n]] [entry (records/fn-id graph-ns n)]))
                         {:initial :account-menu-initial :update :account-menu-update :view :account-menu-view})
           query (str/join "&" (map (fn [[entry id]] (str (name entry) "=" id)) entries))]
-      ((impls/impl-of :sync-fn-defs-branch!)
+      ((get (:base-fns ctx) :sync-fn-defs-branch!)
        {:branch-id (vs/current-branch-id (:storage ctx))
         :fn-defs (mapv #(assoc % :namespace graph-ns) definitions)} ctx)
       ;; No initial graph execution or manual type warmup occurs before this

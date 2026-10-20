@@ -1,7 +1,12 @@
 (ns ^:integration ^:serial graphden.executor.browser-server-source-integration-test
   "Prove the shipped query closure against stored source and frozen types."
   (:require
+    [cheshire.core :as json]
+    [clojure.java.shell :as sh]
+    [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
+    [graphden.editor.components :as components]
+    [graphden.editor.root-plan :as root-plan]
     [graphden.executor.browser-plan :as wire]
     [graphden.executor.browser-server :as server]
     [graphden.executor.browser-server-source :as server-source]
@@ -25,6 +30,9 @@
 (deftest shipped-account-query-has-a-closed-read-only-contract
   (let [ctx (:ctx ga/*bootstrap*)
         target (ids/fn-id "app.ui-account-menu" :_account-menu-branch-query)]
+    (is (identical? @(find-var 'graphden.packages.storage.branches.impls/current-branch-name)
+                    (get (:base-fns ctx) :current-branch-name))
+        "Sibling golden-clone contexts retain the freshly loaded trusted reader")
     (recheck/call-with-ctx-slices
       ctx
       (fn []
@@ -96,3 +104,38 @@
     (compiled/rebuild! ctx)
     (is (owned/owned-fn-id? boot-type))
     (is (not (owned/owned-fn-id? tenant-type)) "Restoring graph data cannot promote tenant types to trusted package ownership")))
+
+
+(deftest actual-root-wire-retains-an-opaque-query-without-server-body-or-captures
+  (let [ctx (:ctx ga/*bootstrap*)
+        request {:request-method :post :uri "/api/ui/server-call" :headers {"host" "localhost"}}
+        target (ids/fn-id "app.ui-account-menu" :_account-menu-branch-query)
+        _ (epoch/seed-watermark! (:storage ctx))
+        failure components/failure-response
+        result (with-redefs [components/failure-response
+                             (fn [error]
+                               (assoc (failure error) :diagnostic
+                                      (select-keys (ex-data error) [:type :reason :fn-id :slot-id :arg :name])))]
+                 (root-plan/export-current ctx request))]
+    (is (:ok result) (pr-str result))
+    (when (:ok result)
+      (let [serialized (json/generate-string (:plan result))
+            program (str "const g=require('./resources/packages/app/ui-preview/browser-runtime.js');let text='';"
+                         "process.stdin.on('data',x=>text+=x);process.stdin.on('end',()=>{"
+                         "const plan=JSON.parse(text),supplied=Object.fromEntries(plan.inputs[plan.entries.root].required.map(n=>[n,new Map()]));"
+                         "const root=g.createRuntime(plan,{operationLimit:1000000,"
+                         "serverCall:(descriptor,input)=>({descriptor,input:g.encode(input)})}).run('root',supplied);"
+                         "const menu=root.get(g.keyword('account-menu'));"
+                         "const query=menu.get(g.keyword('query'));"
+                         "if(!g.isCallable(query))throw Error('Missing retained account query');"
+                         "process.stdout.write(JSON.stringify(g.invoke(query,new Map([[g.keyword('query'),'']]))));});")
+            invoked (sh/sh "node" "-e" program :in serialized)]
+        (is (not (str/includes? serialized (str target))))
+        (is (not (str/includes? serialized (json/generate-string ["string" "Branch"]))))
+        (is (zero? (:exit invoked)) (:err invoked))
+        (when (zero? (:exit invoked))
+          (let [input (json/parse-string (:out invoked) true)
+                response (server/invoke-current ctx request input)]
+            (is (= #{:token} (set (keys (:descriptor input)))))
+            (is (:ok response) (pr-str response))
+            (is (= {:label "Branch" :branch-name "main"} (some-> (:value response) wire/decode-value)))))))))

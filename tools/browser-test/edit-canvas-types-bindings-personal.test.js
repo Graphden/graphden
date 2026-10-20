@@ -5,18 +5,21 @@ const {assert, newContext, api, nodeApi, BASE, waitForServerHealthy, getEntities
 const {undoConfiguration} = require('./configuration-undo-test-helpers');
 const {savePresentationAudit} = require('./canvas-presentation-audit');
 const {unexpectedSelectiveCopyErrors} = require('./selective-copy-errors');
+const {withoutRecoveredRootErrors} = require('./root-server-call-test-helpers');
 const {captureLoadedUIComponents, waitForLoadedUIComponents, drainUIPlanReplies} = require('./ui-component-runtime-test-helpers');
 (async () => {
   await waitForServerHealthy();
   const {browser, page} = await newContext(chromium, {boot: false});
-  const copies = [], activations = [], errors = [], plans = [], pending = [], requests = [];
-  const receipts = new WeakMap();
+  const copies = [], activations = [], errors = [], plans = [], pending = [], requests = [], rootPlans = [], rootPending = [];
+  const receipts = new WeakMap(), rootRequests = new WeakMap();
+  let rootSequence = 0, forcedRootPolicy = false;
   let phase = 'boot';
   let completed = false;
   let original;
   page.on('pageerror', error => errors.push({kind: 'pageerror', text: error.message}));
   page.on('console', message => { if (message.type() === 'error') errors.push({kind: 'console', text: message.text(), url: message.location().url}); });
   page.on('request', request => {
+    if (new URL(request.url()).pathname === '/api/ui/root/plan') rootRequests.set(request, ++rootSequence);
     if (!request.url().endsWith('/ui/configuration/plan')) return;
     const row = {sequence: requests.length + 1, phase, component: request.postDataJSON()?.component, status: 'pending'};
     requests.push(row); receipts.set(request, row);
@@ -26,6 +29,13 @@ const {captureLoadedUIComponents, waitForLoadedUIComponents, drainUIPlanReplies}
     if (row) { row.status = 'failed'; row.failure = request.failure()?.errorText; }
   });
   page.on('response', response => {
+    if (new URL(response.url()).pathname === '/api/ui/root/plan') {
+      rootPending.push((async () => {
+        const body = await response.json().catch(() => null);
+        rootPlans.push({sequence: rootRequests.get(response.request()), status: response.status(),
+          ok: body?.ok === true, code: body?.code, retryable: body?.retryable === true});
+      })());
+    }
     if (!response.url().endsWith('/ui/configuration/plan')) return;
     pending.push((async () => {
       const row = receipts.get(response.request());
@@ -77,6 +87,13 @@ const {captureLoadedUIComponents, waitForLoadedUIComponents, drainUIPlanReplies}
     return preview;
   }
   try {
+    await page.route(url => url.pathname === '/api/ui/root/plan', async route => {
+      if (phase === 'hidden-personal-bindings' && !forcedRootPolicy) {
+        forcedRootPolicy = true;
+        await route.fulfill({status: 422, contentType: 'application/json',
+          body: JSON.stringify({ok: false, code: 'policy-refresh-required', retryable: true})});
+      } else await route.continue();
+    });
     await page.goto(BASE + '/#web-server');
     await page.waitForFunction(() => gdPrefsReady && gdPrefOwner && gdUIConfigurationState?.()?.revision
       && graphReady() && !graph.animating, null, {timeout: 60000});
@@ -192,12 +209,24 @@ const {captureLoadedUIComponents, waitForLoadedUIComponents, drainUIPlanReplies}
     for (const [component, activation] of [['canvas-type-structure', typeActivation], ['canvas-bindings', bindingActivation]])
       assert(plans.some(row => row.component === component && row.status === 200 && row.ok && !row.fallback
         && row.selectionId === activation.receipt.id), 'actual authorized stored source exported for ' + component);
-    assert(unexpectedSelectiveCopyErrors(errors, plans, true).length === 0, 'no unexpected source/browser errors');
+    await Promise.all(rootPending);
+    assert(forcedRootPolicy, 'root plan retry exercised after the stored source edit');
+    assert(rootPlans.some(row => row.status === 422 && row.code === 'policy-refresh-required'),
+      'the forced root refusal was observed');
+    assert(unexpectedSelectiveCopyErrors(withoutRecoveredRootErrors(errors, rootPlans), plans, true).length === 0,
+      'no unexpected source/browser errors');
     completed = true;
     console.log('PASS persisted expanded types/bindings, preview/apply/restore and retained native controls');
   } catch (error) {
     console.log('bounded type/binding failure', JSON.stringify({phase, requests,
-      plans: plans.map(row => ({component: row.component, status: row.status, code: row.code})), errors: errors.length}));
+      plans: plans.map(row => ({component: row.component, status: row.status, code: row.code})),
+      rootPlans: rootPlans.map(row => ({sequence: row.sequence, status: row.status, code: row.code, ok: row.ok})),
+      errors: unexpectedSelectiveCopyErrors(errors, plans, true).map(row => ({
+        kind: row.kind,
+        route: row.url ? new URL(row.url).pathname.replace(/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/gi, ':id') : null,
+        status: Number(row.text?.match(/^Failed to load resource: the server responded with a status of (\d+)/)?.[1]) || null,
+        message: row.kind === 'pageerror' ? row.text.split('\n')[0].slice(0, 160) : null,
+      }))}));
     if (process.env.GRAPHDEN_CANVAS_SCREENSHOT) await page.screenshot({path: process.env.GRAPHDEN_CANVAS_SCREENSHOT + '.failure.png'});
     throw error;
   } finally {

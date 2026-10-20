@@ -12,6 +12,22 @@
   const stamp = () => JSON.stringify([window.gdPrefOwner,
     typeof graphdenCurrentOrg === 'string' ? graphdenCurrentOrg : 'public',
     typeof getCurrentBranchName === 'function' ? getCurrentBranchName() : 'main', window.gdPrefRead?.('components')]);
+  async function loadPlan(signal, current) {
+    const retryDeadline = performance.now() + 30000;
+    while (true) {
+      if (!current()) throw new DOMException('Editor root changed', 'AbortError');
+      const response = await window.authFetch(window.API.api_ui_root_plan, {signal, cache: 'no-store'});
+      const result = await response.json();
+      if (!current()) throw new DOMException('Editor root changed', 'AbortError');
+      if (performance.now() < retryDeadline && response.status === 422 && !response.ok && result.ok === false
+        && result.code === 'policy-refresh-required' && result.retryable === true) {
+        await window.gdWaitForGraphPolicy(signal);
+        if (!current()) throw new DOMException('Editor root changed', 'AbortError');
+        if (performance.now() < retryDeadline) continue;
+      }
+      return {response, result};
+    }
+  }
   function dispose() {
     installed = null;
     diagnostic?.remove();
@@ -67,8 +83,7 @@
         if (window.gdAccountsReady) await window.gdAccountsReady;
         if (!current()) return;
         scope = stamp();
-        const response = await window.authFetch(window.API.api_ui_root_plan, {signal, cache: 'no-store'});
-        const result = await response.json();
+        const {response, result} = await loadPlan(signal, current);
         if (!current()) return;
         if (!response.ok || result.ok !== true) throw new Error('Editor root source is unavailable');
         const runtime = api.createRuntime(result.plan, {operationLimit: 1000000, serverCall: window.GraphdenServer?.call});

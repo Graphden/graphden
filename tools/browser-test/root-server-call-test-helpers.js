@@ -124,4 +124,17 @@ async function observeRootServerCalls(page) {
     await page.evaluate(() => window.__gdFlushRootServerReceipts());
   }};
 }
-module.exports = {observeRootServerCalls, recoveredStaleCalls, withoutRecoveredServerErrors, rootServerDiagnostic};
+function withoutRecoveredRootErrors(errors, rootPlans) {
+  const refusals = rootPlans.filter(row => row.status === 422);
+  for (const refusal of refusals)
+    assert(refusal.code === 'policy-refresh-required' && refusal.retryable
+      && rootPlans.some(row => row.sequence > refusal.sequence && row.status === 200 && row.ok),
+    'root policy refusal recovered by a later successful plan');
+  const rootErrors = errors.filter(error => error.kind === 'console' && error.url
+    && new URL(error.url).pathname === '/api/ui/root/plan'
+    && /status of 422\b/.test(error.text || ''));
+  assert.equal(rootErrors.length, refusals.length, 'each recovered root refusal has one browser error');
+  return errors.filter(error => !rootErrors.includes(error));
+}
+module.exports = {observeRootServerCalls, recoveredStaleCalls, withoutRecoveredServerErrors,
+  rootServerDiagnostic, withoutRecoveredRootErrors};

@@ -12,7 +12,7 @@ const {
 } = require('./edit-test-helpers');
 const { unexpectedSelectiveCopyErrors } = require('./selective-copy-errors');
 const { undoConfiguration } = require('./configuration-undo-test-helpers');
-const { observeRootServerCalls, withoutRecoveredServerErrors } = require('./root-server-call-test-helpers');
+const { observeRootServerCalls, withoutRecoveredServerErrors, withoutRecoveredRootErrors } = require('./root-server-call-test-helpers');
 (async () => {
   await waitForServerHealthy();
   const { browser, page } = await newContext(chromium, { boot: false });
@@ -59,18 +59,6 @@ const { observeRootServerCalls, withoutRecoveredServerErrors } = require('./root
       );
     }
   });
-  function withoutRecoveredRootErrors(input) {
-    const refusals = rootPlans.filter((row) => row.status === 422);
-    for (const refusal of refusals)
-      assert(refusal.code === 'policy-refresh-required' && refusal.retryable
-        && rootPlans.some((row) => row.sequence > refusal.sequence && row.status === 200 && row.ok),
-      'root policy refusal recovered by a later successful plan');
-    const rootErrors = input.filter((error) => error.kind === 'console' && error.url
-      && new URL(error.url).pathname === '/api/ui/root/plan'
-      && /status of 422\b/.test(error.text || ''));
-    assert(rootErrors.length === refusals.length, 'each recovered root refusal has one browser error');
-    return input.filter((error) => !rootErrors.includes(error));
-  }
   try {
     await page.goto(BASE + '/#web-server');
     await page.waitForFunction(
@@ -195,7 +183,7 @@ const { observeRootServerCalls, withoutRecoveredServerErrors } = require('./root
       await page.screenshot({ path: process.env.GRAPHDEN_CANVAS_SCREENSHOT, fullPage: false });
     await serverCalls.settle();
     await Promise.all(pending);
-    const browserErrors = withoutRecoveredRootErrors(withoutRecoveredServerErrors(errors, serverCalls.events));
+    const browserErrors = withoutRecoveredRootErrors(withoutRecoveredServerErrors(errors, serverCalls.events), rootPlans);
     const unexpected = unexpectedSelectiveCopyErrors(browserErrors, plans, true);
     if (unexpected.length)
       console.log(

@@ -2,6 +2,7 @@
   "Exercise authorization and response retirement independently of transport."
   (:require
     [clojure.test :refer [deftest is]]
+    [graphden.auth.provider :as auth]
     [graphden.crud.fn-execution.persist :as persist]
     [graphden.editor.components :as components]
     [graphden.executor.browser-plan :as wire]
@@ -15,7 +16,7 @@
 
 
 (defn- fixture
-  [f]
+  [f & [options]]
   (let [target (random-uuid)
         site [(random-uuid) (random-uuid)]
         branch (random-uuid)
@@ -28,6 +29,7 @@
         on-execute (atom (fn [] nil))
         storage (assoc (remote/from-bundle {:fn [{:id target}]}) :branch-id branch)
         ctx {:storage storage :invalidation-count (atom 0)
+             :auth-provider (:auth-provider options)
              :execute-guard (fn [_ id]
                               (swap! calls conj [:guard id runtime/*execute-authorized*])
                               (when-not @allowed?
@@ -39,7 +41,9 @@
                                                                                :output-type {:label :text :branch-name :text}}}})]
     (reset! @(ns-resolve 'graphden.executor.browser-server 'issuances) {})
     (binding [tenancy/*current-org* "team"
-              tenancy/*current-principal* {:authenticated? true :user-id "owner-a" :role-ids ["reader-role"]}
+              tenancy/*current-principal* (get options :principal
+                                               {:authenticated? true :user-id "owner-a"
+                                                :role-ids ["reader-role"]})
               runtime/*execute-authorized* true]
       (with-redefs-fn
         {(ns-resolve 'graphden.executor.browser-server 'capture-client) captured
@@ -228,3 +232,119 @@
       (let [ctx (assoc ctx :request-scope (fn [& _] {:status 403 :headers {} :body "refused"}))]
         (is (false? (:ok (server/invoke-current ctx request input))))
         (is (empty? @calls))))))
+
+
+(deftest single-token-authentication-does-not-require-a-tenancy-principal
+  (fixture
+    (fn [{:keys [ctx request input calls]}]
+      ;; A Ring :principal is client/request data, not the tenancy binding or
+      ;; provider result. It cannot change either authenticated authority.
+      (let [request (assoc request :principal {:authenticated? true :user-id "forged"})
+            result (server/invoke-current ctx request input)]
+        (is (true? (:ok result)))
+        (is (= {:label "Branch" :branch-name "main"} (wire/decode-value (:value result))))
+        (is (= 1 (count (filter #(= :run (first %)) @calls)))))
+      (doseq [request [{} {:headers {"authorization" "Bearer wrong-session"}}]]
+        (let [result (server/invoke-current ctx
+                                            (assoc request :principal {:authenticated? true}) input)]
+          (is (false? (:ok result)))
+          (is (nil? (:value result)))
+          (is (not (contains? result :code)))))
+      (is (= 1 (count (filter #(= :run (first %)) @calls)))))
+    {:principal nil :auth-provider (auth/single-token-provider "first-session")}))
+
+
+(deftest configured-provider-must-authenticate-the-original-request-at-issuance
+  (doseq [subject [nil {} {:authenticated? false} {:authenticated? "true"}]]
+    (let [provider (reify auth/AuthProvider
+                     (authenticate [_ _] subject))
+          error (try
+                  (fixture (fn [_] (is false "invalid provider subject cannot issue a descriptor"))
+                           {:principal nil :auth-provider provider})
+                  (catch clojure.lang.ExceptionInfo error (ex-data error)))]
+      (is (= {:type :browser-plan/unsupported :reason :server-session-changed} error))))
+  (fixture
+    (fn [{:keys [ctx request input]}]
+      (is (true? (:ok (server/invoke-current ctx request input)))))
+    {:principal nil :auth-provider nil}))
+
+
+(deftest provider-subject-changes-before-or-after-execution-retire-the-response
+  (doseq [stage [:before :after]
+          changed [nil {} {:authenticated? false}
+                   {:authenticated? true :user-id "other"}
+                   {:authenticated? true :api-token? true :token-scopes #{:read}}]]
+    (let [subject (atom {:authenticated? true})
+          provider (reify auth/AuthProvider
+                     (authenticate [_ _] @subject))]
+      (fixture
+        (fn [{:keys [ctx request input calls on-execute]}]
+          (if (= :before stage)
+            (reset! subject changed)
+            (reset! on-execute #(reset! subject changed)))
+          (let [result (server/invoke-current ctx request input)]
+            (is (false? (:ok result)))
+            (is (nil? (:value result)))
+            (is (not (contains? result :code)))
+            (is (= (if (= :before stage) 0 1)
+                   (count (filter #(= :run (first %)) @calls))))))
+        {:principal nil :auth-provider provider}))))
+
+
+(deftest provider-presence-and-tenancy-subject-are-independent-authority
+  (fixture
+    (fn [{:keys [ctx request input calls]}]
+      (let [result (server/invoke-current (dissoc ctx :auth-provider) request input)]
+        (is (false? (:ok result)))
+        (is (nil? (:value result))))
+      ;; Even a newly configured provider accepting a replacement bearer
+      ;; cannot transfer an issuance from the original authenticated carrier.
+      (let [result (server/invoke-current
+                     (assoc ctx :auth-provider (auth/single-token-provider "next-session"))
+                     {:headers {"authorization" "Bearer next-session"}} input)]
+        (is (false? (:ok result)))
+        (is (nil? (:value result))))
+      (is (empty? @calls)))
+    {:principal nil :auth-provider (auth/single-token-provider "first-session")})
+  (fixture
+    (fn [{:keys [ctx request input calls]}]
+      (let [result (server/invoke-current
+                     (assoc ctx :auth-provider (auth/single-token-provider "first-session")) request input)]
+        (is (false? (:ok result)))
+        (is (nil? (:value result))))
+      (is (empty? @calls)))
+    {:principal nil})
+  (let [provider (reify auth/AuthProvider
+                   (authenticate [_ _] {:authenticated? true :user-id "other"}))
+        error (try
+                (fixture (fn [_] (is false "provider cannot impersonate the bound tenancy subject"))
+                         {:auth-provider provider})
+                (catch clojure.lang.ExceptionInfo error (ex-data error)))]
+    (is (= :server-session-changed (:reason error)))))
+
+
+(deftest authenticated-provider-does-not-replace-fresh-tenancy-authority
+  (doseq [stage [:before :after]
+          change [:roles :org :session]]
+    (fixture
+      (fn [{:keys [ctx request input on-execute calls]}]
+        (let [changed? (atom (= :before stage))
+              ctx (assoc ctx :request-scope
+                         (fn [_ received thunk]
+                           (is (identical? request received))
+                           (let [principal (cond-> tenancy/*current-principal*
+                                             (and @changed? (= change :roles)) (assoc :role-ids [])
+                                             (and @changed? (= change :session)) (assoc :session-id "replaced"))]
+                             (binding [tenancy/*current-principal* principal
+                                       tenancy/*current-org* (if (and @changed? (= change :org))
+                                                               "other-team" tenancy/*current-org*)]
+                               (thunk)))))]
+          (reset! on-execute #(reset! changed? true))
+          (let [result (server/invoke-current ctx request input)]
+            (is (false? (:ok result)))
+            (is (nil? (:value result)))
+            (is (not (contains? result :code)))
+            (is (= (if (= :before stage) 0 1)
+                   (count (filter #(= :run (first %)) @calls)))))))
+      {:auth-provider (reify auth/AuthProvider
+                        (authenticate [_ _] {:authenticated? true :user-id "owner-a"}))})))

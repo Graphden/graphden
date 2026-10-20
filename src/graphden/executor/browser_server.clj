@@ -39,9 +39,28 @@
                   {:type :browser-plan/unsupported :reason reason})))
 
 
+(def ^:private provider-subject-keys
+  [:authenticated? :user-id :api-token? :token-scopes])
+
+
+(defn- provider-subject
+  [ctx request principal]
+  (when-let [provider (:auth-provider ctx)]
+    (let [authenticated (auth/authenticate provider request)]
+      (when-not (and (map? authenticated) (true? (:authenticated? authenticated)))
+        (reject! :server-session-changed))
+      (let [subject (select-keys authenticated provider-subject-keys)]
+        ;; Core's single-token provider has no tenancy principal. When a
+        ;; tenancy scope exists, its authenticated subject must still agree.
+        (when (and principal (not= subject (select-keys principal provider-subject-keys)))
+          (reject! :server-session-changed))
+        subject))))
+
+
 (defn- scope
   [ctx request]
   {:principal (some-> tenancy/*current-principal* (update :role-ids set))
+   :provider-subject (provider-subject ctx request tenancy/*current-principal*)
    :org (tenancy/current-org)
    :branch (versioned/current-branch-id (:storage ctx))
    ;; This fingerprint never leaves server memory. Only the random issuance
@@ -150,12 +169,10 @@
 
 (defn- current-auth!
   [ctx request saved]
-  (when-not (= saved (scope ctx request)) (reject! :server-scope-changed))
-  (when-let [provider (:auth-provider ctx)]
-    (let [current (auth/authenticate provider request)]
-      (when-not (= (select-keys (:principal saved) [:authenticated? :user-id :api-token? :token-scopes])
-                   (select-keys current [:authenticated? :user-id :api-token? :token-scopes]))
-        (reject! :server-session-changed)))))
+  (let [current (scope ctx request)]
+    (when-not (= (:provider-subject saved) (:provider-subject current))
+      (reject! :server-session-changed))
+    (when-not (= saved current) (reject! :server-scope-changed))))
 
 
 (defn- execute-guard!

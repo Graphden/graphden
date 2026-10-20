@@ -89,27 +89,51 @@ async function editPickerAndSettle(page, leaf, value) {
   }
 }
 
-async function cleanup(page, receipts) {
-  for (const receipt of [...receipts].reverse()) {
+async function cleanupPhase(phase, progress, action) {
+  // Only fixed phase labels and numeric progress belong in cleanup output.
+  const started = process.hrtime.bigint();
+  const diagnostic = {diagnostic: 'selective-cleanup', phase, ...progress};
+  console.log(JSON.stringify({...diagnostic, event: 'start'}));
+  let outcome = 'failed';
+  try {
+    const result = await action();
+    outcome = 'complete';
+    return result;
+  } finally {
+    console.log(JSON.stringify({...diagnostic, event: outcome,
+      elapsedMs: Number((process.hrtime.bigint() - started) / 1000000n)}));
+  }
+}
+async function cleanup(page, receipts, scope = 'final') {
+  const reversed = [...receipts].reverse();
+  for (const [index, receipt] of reversed.entries()) {
     if (!receipt.activation) continue;
-    const undone = await undoConfiguration(page, receipt.activation);
-    assert(undone.ok, 'compatibility cleanup restores each original root in LIFO order');
-    receipt.activation = null;
+    await cleanupPhase(scope + '-undo', {receipt: index + 1, receipts: reversed.length}, async () => {
+      const undone = await undoConfiguration(page, receipt.activation);
+      assert(undone.ok, 'compatibility cleanup restores each original root in LIFO order');
+      receipt.activation = null;
+    });
   }
   const functions = receipts.flatMap(receipt => receipt.manifest.functions);
   if (functions.length) {
-    const result = await api(page, 'POST', '/api/functions/delete-batch', {functions},
-      {'X-Graphden-Branch': receipts[0].request['branch-id']});
-    const acknowledged = [...(result.deleted || []), ...(result['already-absent'] || [])];
-    const expected = new Set(functions.map(row => row.id));
-    assert(acknowledged.length === expected.size && new Set(acknowledged).size === expected.size
-      && acknowledged.every(id => expected.has(id)), 'cleanup acknowledges only every exact newly created identity');
+    await cleanupPhase(scope + '-batch-delete', {functions: functions.length}, async () => {
+      const result = await api(page, 'POST', '/api/functions/delete-batch', {functions},
+        {'X-Graphden-Branch': receipts[0].request['branch-id']});
+      const acknowledged = [...(result.deleted || []), ...(result['already-absent'] || [])];
+      const expected = new Set(functions.map(row => row.id));
+      assert(acknowledged.length === expected.size && new Set(acknowledged).size === expected.size
+        && acknowledged.every(id => expected.has(id)), 'cleanup acknowledges only every exact newly created identity');
+    });
   }
-  for (const receipt of [...receipts].reverse()) {
-    for (const namespace of [...receipt.manifest.namespaces].reverse()) {
-      const result = await api(page, 'DELETE', '/api/entities/ns/' + namespace.id, undefined,
-        {'X-Graphden-Branch': receipt.request['branch-id']});
-      assert(result.ok || result.status === 200 || result.status === 404, 'only the receipt namespace is removed');
+  for (const [receiptIndex, receipt] of reversed.entries()) {
+    const namespaces = [...receipt.manifest.namespaces].reverse();
+    for (const [index, namespace] of namespaces.entries()) {
+      await cleanupPhase(scope + '-namespace-delete',
+        {receipt: receiptIndex + 1, namespace: index + 1, namespaces: namespaces.length}, async () => {
+          const result = await api(page, 'DELETE', '/api/entities/ns/' + namespace.id, undefined,
+            {'X-Graphden-Branch': receipt.request['branch-id']});
+          assert(result.ok || result.status === 200 || result.status === 404, 'only the receipt namespace is removed');
+        });
     }
   }
 }
@@ -267,13 +291,12 @@ async function cleanup(page, receipts) {
       ready: serverCalls.events.filter(event => event.kind === 'state' && event.phase === 'ready' && event.owned && event.hostReady).length,
     }));
     await page.evaluate(() => window.gdEditorRoot.dispose());
-    await cleanup(page, [receipts[receipts.length - 1]]);
+    await cleanup(page, [receipts[receipts.length - 1]], 'retention');
     receipts.pop();
     const remaining = await api(page, 'GET', '/api/graph/entities?scope=index');
     const remainingIds = new Set(remaining.fns.map(row => row.id));
     assert([...picker.functions, ...recents.functions, ...inspector.functions, ...explorer.functions].every(row => remainingIds.has(row.id)),
       'cleaning the new receipt preserves all previously authored copies');
-    console.log('PASS selective UI choices, authored retention, builtin fallback, real CAS conflict, exact cleanup');
   } catch (error) {
     console.error('Root server receipt diagnostic:', JSON.stringify(rootServerDiagnostic(error, serverCalls.events)));
     const state = await page.evaluate(() => ({surface: document.body.dataset.surface,
@@ -286,13 +309,16 @@ async function cleanup(page, receipts) {
       replies: replies.map(({component, status, code, retryable, ok}) => ({component, status, code, retryable, ok}))}));
     throw error;
   } finally {
-    try {
-      await page.unrouteAll({behavior: 'wait'});
-      await page.evaluate(() => window.gdEditorRoot?.dispose()).catch(() => null);
-      await cleanup(page, receipts);
-      if (homeSetup) await homeSetup.cleanup();
-    } finally {
-      await browser.close();
-    }
+    await cleanupPhase('final-cleanup', {receipts: receipts.length}, async () => {
+      try {
+        await cleanupPhase('unroute', {}, () => page.unrouteAll({behavior: 'wait'}));
+        await cleanupPhase('root-dispose', {}, () => page.evaluate(() => window.gdEditorRoot?.dispose())).catch(() => null);
+        await cleanup(page, receipts);
+        if (homeSetup) await cleanupPhase('home-cleanup', {}, () => homeSetup.cleanup());
+      } finally {
+        await cleanupPhase('browser-close', {}, () => browser.close());
+      }
+    });
   }
+  console.log('PASS selective UI choices, authored retention, builtin fallback, real CAS conflict, exact cleanup');
 })().catch(error => {console.error('FAIL selective UI proof;', require('./safe-diagnostics').errorKind(error), '; details withheld'); process.exitCode = 1;});

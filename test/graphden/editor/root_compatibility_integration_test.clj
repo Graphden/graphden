@@ -104,12 +104,14 @@
         (let [result (export-root ctx)
               rendered (when (:ok result) (run-views (:plan result)))]
           (is (:ok result) (pr-str result))
+          (is (= (:selected selected) (:component-selection-id result)))
           (is (zero? (:exit rendered -1)) (:err rendered))
           (is (re-find #"Personal settings" (:out rendered "")))
           (is (re-find #"My trail" (:out rendered ""))))
         (with-redefs [tenancy/current-user-id (constantly (str (random-uuid)))]
           (let [result (export-root ctx)]
             (is (:ok result) (pr-str result))
+            (is (not= (:selected selected) (:component-selection-id result)))
             (is (not-any? #(= (str (:menu selected)) (:id %)) (get-in result [:plan :functions])))))
         (let [read-branch versioned/current-branch-id]
           (with-redefs [versioned/current-branch-id (fn [storage]
@@ -122,7 +124,8 @@
                             (throw (ex-info "Revoked personal source" {:type :authz/forbidden})))))]
           (let [result (export-root ctx)]
             (is (false? (:ok result)))
-            (is (not (contains? result :plan)))))
+            (is (not (contains? result :plan)))
+            (is (not (contains? result :component-selection-id)))))
         (writer/with-write [storage :graph]
                            (sp/delete-entity storage :fn (:selected selected)))
         (epoch/seed-watermark! (:storage ctx))

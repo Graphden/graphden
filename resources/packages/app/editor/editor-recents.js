@@ -3,6 +3,7 @@ const RECENT_FNS_KEY = 'graphden.recentFns';
 const PINNED_FNS_KEY = 'graphden.pinnedFns';
 const GD_RECENTS_UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 let gdRecentsController = null;
+let gdRecentsRuntime = null;
 let gdRecentsMount = null;
 let gdRecentsHost = null;
 let gdRecentsSnapshot = null;
@@ -81,12 +82,13 @@ async function gdReloadRecents() {
     try {
       const candidate = await window.gdEditorRoot.component('recents');
       if (loading.signal.aborted || own !== gdRecentsLoadGeneration) return;
-      if (gdRecentsController) gdRecentsController.replaceRuntime(candidate);
+      if (gdRecentsController) gdReplaceRecentsRuntime(candidate);
       else gdLoadRecents(candidate);
       renderRecentFns();
       for (const {kind, entry} of gdRecentsEvents.splice(0)) gdRecentsEvent(kind, entry);
     } catch (error) {
       if (loading.signal.aborted || own !== gdRecentsLoadGeneration || error.name === 'AbortError') return;
+      window.gdEditorRoot.releaseComponent?.(gdRecentsRuntime);
       if (typeof gdToast === 'function') gdToast('Recent functions graph is unavailable.');
     } finally { if (gdRecentsPending === pending) gdRecentsPending = null; }
   })();
@@ -124,8 +126,17 @@ function gdLoadRecents(runtime = window.gdEditorRoot?.componentNow('recents')) {
       },
     },
   });
+  gdRecentsRuntime = runtime;
   gdRecentsSnapshot = JSON.stringify(gdRecentsStorage());
   return gdRecentsController;
+}
+function gdReplaceRecentsRuntime(candidate) {
+  window.gdEditorRoot?.releaseComponent?.(gdRecentsRuntime);
+  // replaceRuntime paints before committing the new evaluator. That paint must
+  // never attribute a preview or failed candidate to the previous root facade.
+  gdRecentsRuntime = null;
+  gdLoadRecents().replaceRuntime(candidate);
+  gdRecentsRuntime = candidate;
 }
 function gdRecentsSync(controller) {
   const snapshot = JSON.stringify(gdRecentsStorage());
@@ -144,6 +155,7 @@ function gdRecentsEvent(kind, entry = {id: '', name: '', qname: ''}) {
     gdRecentsSync(controller);
     controller.dispatch(gdRecentsValue({kind, entry}));
   } catch (error) {
+    window.gdEditorRoot?.releaseComponent?.(gdRecentsRuntime);
     if (typeof gdToast === 'function') gdToast(error.message);
     else console.warn('Recent functions:', error.message);
   }
@@ -172,28 +184,34 @@ function gdRecentsClick(event) {
 function renderRecentFns() {
   const controller = gdLoadRecents();
   if (!controller) return;
-  gdRecentsSync(controller);
+  window.gdEditorRoot?.releaseComponent?.(gdRecentsRuntime);
   const host = document.getElementById('gd-recent-fns');
   if (host !== gdRecentsHost) gdDisposeRecents();
   if (!host) return;
+  gdRecentsSync(controller);
   if (!gdRecentsMount) {
     gdRecentsHost = host;
     gdRecentsMount = window.GraphdenRenderer.mount(host, {nodeLimit: 10000});
     host.addEventListener('click', gdRecentsClick);
     controller.setRender(output => {
+      window.gdEditorRoot?.releaseComponent?.(gdRecentsRuntime);
       gdRecentsMount.render(gdRecentsField(output, 'tree'), gdRecentsField(output, 'styles'));
       host.hidden = gdRecentsField(output, 'hidden');
+      window.gdEditorRoot?.acceptComponent?.(gdRecentsRuntime);
     });
   }
+  window.gdEditorRoot?.releaseComponent?.(gdRecentsRuntime);
   controller.refresh();
 }
 window.gdRecentsGraph = {
   reload: gdReloadRecents,
-  replaceRuntime(candidate) { gdLoadRecents().replaceRuntime(candidate); },
+  replaceRuntime(candidate) { gdReplaceRecentsRuntime(candidate); renderRecentFns(); },
   dispose() {
     gdRecentsLoadGeneration++;
     gdRecentsPending?.controller.abort();
     gdRecentsPending = null;
+    window.gdEditorRoot?.releaseComponent?.(gdRecentsRuntime);
+    gdRecentsRuntime = null;
     gdDisposeRecents();
     gdRecentsController?.dispose();
     gdRecentsController = null;

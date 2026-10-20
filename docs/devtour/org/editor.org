@@ -197,7 +197,7 @@ The ordinary account menu, function picker and Explorer navigation trail use bun
 :CUSTOM_ID: editor/export-current
 :FILE: src/graphden/editor/root_plan.clj
 :LINE: 26
-:MINS: 4.4
+:MINS: 4.5
 :END:
 
 The editor root endpoint reads the ordinary root HOF binding from its server-owned handler configuration. It checks root execute permission and every dependency's source visibility in one snapshot, then exports a bounded plan. The browser invokes the root through the same call ABI as other graph callables. Its initial typed bootstrap contract selects the explicit legacy editor adapter; it does not export the server handler body.
@@ -296,13 +296,13 @@ A lens button is rendered by the selected Explorer graph, but native code dispat
 :PROPERTIES:
 :CUSTOM_ID: editor/renderRecentFns
 :FILE: resources/packages/app/editor/editor-recents.js
-:LINE: 172
-:MINS: 1.7
+:LINE: 184
+:MINS: 1.9
 :END:
 
 The Explorer trail executes the shipped ~app.ui-recents~ initial and view graphs. Its update graph returns state and fixed persistence/navigation requests, deduplicates selections, limits the trail and toggles pins; the view excludes the selected function and pinned duplicates and hides during searches or filters. Ordinary row functions produce Hiccup and scoped styles. The host persists localStorage, resolves namespace paths and delegates navigation; keyed rendering preserves focused pin buttons.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-recents.js::function renderRecentFns() {][resources/packages/app/editor/editor-recents.js:172]]
+- source :: [[file:../../../resources/packages/app/editor/editor-recents.js::function renderRecentFns() {][resources/packages/app/editor/editor-recents.js:184]]
 - see also :: [[file:editor.org::#editor/mount][mount]], [[file:editor.org::#editor/createRuntime][createRuntime]]
 - referenced from :: [[file:editor.org::#editor/create][create]]
 

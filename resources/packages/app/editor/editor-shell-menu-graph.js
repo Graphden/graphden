@@ -21,6 +21,7 @@
     if (!review) window.gdUIComponentFailed?.('account-menu');
     closeMounted();
     window.gdClearGraphTheme();
+    window.gdEditorRoot?.releaseComponent?.(runtime);
     runtime = null;
     window.gdShellMenuGraph.ready = false;
     if (typeof gdToast === 'function') gdToast('Menu graph unavailable: ' + error.message);
@@ -210,6 +211,7 @@
       // Reauthorization never keeps an older personal plan mounted.
       closeMounted();
       window.gdClearGraphTheme();
+      window.gdEditorRoot?.releaseComponent?.(runtime);
       runtime = null;
       integration.ready = false;
       const controller = new AbortController();
@@ -237,6 +239,7 @@
         integration.ready = true;
         ready = true;
         refreshTheme();
+        if (loadedRuntime && runtime === loadedRuntime && integration.ready) window.gdEditorRoot.acceptComponent(loadedRuntime);
         if (loadedRuntime?.query && window.GraphdenServer) {
           serverLifetime = window.GraphdenServer.createLifetime({
             transport(payload, options) {
@@ -266,12 +269,12 @@
   window.addEventListener('gd-editor-root-changing', () => {
     if (review) return;
     requestGeneration++; pending?.abort(); serverLifetime?.dispose(); serverLifetime = null;
-    closeMounted(); window.gdClearGraphTheme(); runtime = null; integration.ready = false;
+    closeMounted(); window.gdClearGraphTheme(); window.gdEditorRoot?.releaseComponent?.(runtime); runtime = null; integration.ready = false;
   });
   window.addEventListener('gd-auth-changed', () => {
     requestGeneration++;
     pending?.abort();
-    if (ready || runtime) { closeMounted(); window.gdClearGraphTheme(); runtime = null; integration.ready = false; }
+    if (ready || runtime) { closeMounted(); window.gdClearGraphTheme(); window.gdEditorRoot?.releaseComponent?.(runtime); runtime = null; integration.ready = false; }
     if (review && (isAuthenticated() || accountsAuthed)) void integration.reload();
   });
 })();

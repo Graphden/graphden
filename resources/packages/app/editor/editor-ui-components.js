@@ -166,7 +166,9 @@
     if (component === 'explorer' && section === 'namespaces') status(component, 'Personal Explorer namespaces are unavailable. Using built-in namespace presentation.');
     if (component === 'explorer' && section === 'diff') status(component, 'Personal Explorer compare presentation is unavailable. Using built-in compare controls.');
   };
-  window.gdUIComponentRuntimeIdentity = component => { const value = runtimeIdentities.get(component); return value?.stamp === stamp() ? value.id : null; };
+  window.gdUIComponentRuntimeIdentity = component => {
+    if (['account-menu', 'recents'].includes(component) && window.gdEditorRoot) return window.gdEditorRoot.componentIdentity(component);
+    const value = runtimeIdentities.get(component); return value?.stamp === stamp() ? value.id : null; };
   window.gdUIComponentsStatus = () => [...statuses.values()].find(Boolean) || '';
   window.gdUIComponentsSelection = selection;
   window.gdUIConfigurationState = () => configuration?.stamp === stamp() ? {

@@ -39,7 +39,7 @@
   [storage authorize! policy]
   (let [current (resolution/capture storage authorize! policy)]
     (if (not= resolution/defaults-id (:id current))
-      (:configuration current)
+      (select-keys current [:id :configuration])
       (let [rows (sp/query-entities storage :ui-pref
                                     {:owner-id (tenancy/current-user-id) :key "components"} {:limit 2})]
         (when (> (count rows) 1) (reject! :invalid-selection))
@@ -51,8 +51,8 @@
             (let [graph (source/collect-manifest storage id authorize!)
                   captured {:graph graph :namespaces (source/collect-namespaces storage graph)}]
               (snapshot/validate-source! captured id policy)
-              (config/configuration graph id)))
-          (:configuration current))))))
+              {:id id :configuration (config/configuration graph id)}))
+          (select-keys current [:id :configuration]))))))
 
 
 (defn- literal
@@ -124,14 +124,14 @@
         (update :primitives merge-rows [{:id get-id :op "get"} {:id const-id :op "const"}]))))
 
 
-(defn adapt-plan
+(defn adapt-root
   "Preserve existing personal selections only for the shipped default root.
    Custom root bindings remain authoritative. Caller owns snapshot/epoch checks."
   [ctx storage authorize! policy root plan]
   (if (or (not= default-root root)
           (nil? (tenancy/current-user-id)))
-    plan
-    (let [configuration (selected-configuration storage authorize! policy)
+    {:plan plan}
+    (let [{:keys [id configuration]} (selected-configuration storage authorize! policy)
           result
           (reduce-kv
             (fn [plan component {path :namespace prefix :prefix}]
@@ -151,4 +151,10 @@
                       plan selected)))))
             plan legacy-components)]
       (when (> (count (:functions result)) 1024) (reject! :function-limit))
-      result)))
+      {:plan result :component-selection-id id})))
+
+
+(defn adapt-plan
+  "Compatibility entry for callers requiring only the adapted plan."
+  [ctx storage authorize! policy root plan]
+  (:plan (adapt-root ctx storage authorize! policy root plan)))

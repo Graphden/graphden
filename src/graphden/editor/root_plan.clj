@@ -60,7 +60,8 @@
                (let [graph (source/collect-client-closure storage [root] authorize!)
                      plan (server/export-client-plan ctx storage authorize! policy {:root root} request
                                                      {:fn-id handler-id :slot-id root-slot-id :ref-fn-id root})
-                     plan (compatibility/adapt-plan ctx storage authorize! policy root plan)
+                     adapted (compatibility/adapt-root ctx storage authorize! policy root plan)
+                     plan (:plan adapted)
                      input (get-in plan [:inputs (str root)])
                      required (:required input)
                      argument (first required)]
@@ -74,6 +75,7 @@
                  (components/assert-current-policy! storage)
                  (when-not (= epoch (context/invalidation-epoch ctx))
                    (reject! :policy-refresh-required))
-                 {:ok true :plan plan :argument-name argument}))))))
+                 {:ok true :plan plan :argument-name argument
+                  :component-selection-id (:component-selection-id adapted)}))))))
      (catch Exception error
        (assoc (components/failure-response error) :reason "Editor root is unavailable.")))))

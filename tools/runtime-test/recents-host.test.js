@@ -9,6 +9,8 @@ const saved = new Map();
 let mounted = 0;
 let disposed = 0;
 let renderCount = 0;
+let accepted = null;
+let failRender = false;
 let clicked = null;
 const callbacks = new Map();
 const host = {hidden: true, contains: () => true,
@@ -24,11 +26,14 @@ const ctx = vm.createContext({Map, Set, Promise, AbortController, console,
 });
 ctx.window = ctx;
 ctx.GraphdenBrowser = graph;
-const builtin = () => graph.createRuntime(artifact.plans.recents, {operationLimit: 1000000});
-ctx.gdEditorRoot = {componentNow: builtin, component: async () => builtin()};
+const issued = new WeakSet();
+const builtin = () => { const candidate = graph.createRuntime(artifact.plans.recents, {operationLimit: 1000000}); issued.add(candidate); return candidate; };
+ctx.gdEditorRoot = {componentNow: builtin, component: async () => builtin(),
+  acceptComponent(candidate) { if (issued.has(candidate)) accepted = candidate; },
+  releaseComponent(candidate) { if (accepted === candidate) accepted = null; }};
 ctx.addEventListener = (kind, fn) => listeners.set(kind, fn);
 ctx.GraphdenStyles = {normalize() {}};
-ctx.GraphdenRenderer = {vnode() {}, mount() { mounted++; return {render() { renderCount++; }, dispose() { disposed++; }}; }};
+ctx.GraphdenRenderer = {vnode() {}, mount() { mounted++; return {render() { if (failRender) throw new Error('invalid view'); renderCount++; }, dispose() { disposed++; }}; }};
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../../resources/packages/app/ui-preview/graph-component.js'), 'utf8'), ctx);
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../../resources/packages/app/editor/editor-recents.js'), 'utf8'), ctx);
 (async () => {
@@ -43,6 +48,18 @@ vm.runInContext(fs.readFileSync(path.join(__dirname, '../../resources/packages/a
   assert.deepEqual(JSON.parse(saved.get('graphden.recentFns')).map(row => row.id), ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222']);
   ctx.renderRecentFns();
   assert.equal(host.hidden, false);
+  assert(accepted, 'only a successfully rendered root facade is accepted');
+  failRender = true;
+  assert.throws(() => ctx.renderRecentFns(), /invalid view/);
+  assert.equal(accepted, null, 'controller existence cannot advertise readiness after a render failure');
+  failRender = false;
+  ctx.renderRecentFns();
+  assert(accepted, 'a repaired render can accept its current facade');
+  ctx.gdRecentsGraph.replaceRuntime(graph.createRuntime(artifact.plans.recents, {operationLimit: 1000000}));
+  ctx.renderRecentFns();
+  assert.equal(accepted, null, 'preview replacement cannot retain the old root facade receipt');
+  ctx.gdRecentsGraph.replaceRuntime(builtin());
+  assert(accepted, 'a current root facade can regain readiness after successful replacement');
   assert.equal(mounted, 1, 'tree paints retain renderer ownership');
   const button = {dataset: {action: 'navigate', fnId: '22222222-2222-4222-8222-222222222222', qname: 'map'}};
   callbacks.get('click')({target: {closest: () => button}});
@@ -85,6 +102,7 @@ vm.runInContext(fs.readFileSync(path.join(__dirname, '../../resources/packages/a
   resolveLoad({run() { throw new Error('late candidate must not execute'); }});
   await late;
   assert.equal(disposed, 2);
+  assert.equal(accepted, null, 'root disposal retires the host receipt');
   assert.equal(callbacks.size, 0, 'dispose releases delegated events');
   assert(renderCount > 2);
   console.log('PASS recents persistence, navigation, visibility and cleanup');

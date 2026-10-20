@@ -8,6 +8,7 @@
   let diagnostic = null;
   let installed = null;
   let loading = null;
+  const facades = new WeakMap();
   const stamp = () => JSON.stringify([window.gdPrefOwner,
     typeof graphdenCurrentOrg === 'string' ? graphdenCurrentOrg : 'public',
     typeof getCurrentBranchName === 'function' ? getCurrentBranchName() : 'main', window.gdPrefRead?.('components')]);
@@ -27,7 +28,7 @@
     for (const entry of ['initial', 'update', 'view']) {
       if (!api.isCallable(field(callbacks, entry))) throw new Error('Invalid editor component callback');
     }
-    return {
+    const facade = {
       query: field(callbacks, 'query'),
       run(entry, supplied = {}, budget = null) {
         if (installed !== owner || owner.scope !== stamp()) throw new DOMException('Editor root changed', 'AbortError');
@@ -37,6 +38,21 @@
         return result;
       },
     };
+    facades.set(facade, {owner, name});
+    return Object.freeze(facade);
+  }
+  function releaseComponent(facade) {
+    const receipt = facades.get(facade);
+    if (receipt?.owner === installed && installed.accepted.get(receipt.name) === facade) installed.accepted.delete(receipt.name);
+  }
+  function acceptComponent(facade) {
+    const receipt = facades.get(facade);
+    if (!receipt || receipt.owner !== installed || installed.scope !== stamp()) return false;
+    installed.accepted.set(receipt.name, facade);
+    return true;
+  }
+  function componentIdentity(name) {
+    return installed?.scope === stamp() && installed.accepted.has(name) ? installed.selection : null;
   }
   function reload() {
     const own = ++generation;
@@ -64,7 +80,9 @@
         if (!field(output, 'legacy')) throw new Error('Unsupported editor root adapter');
         const legacy = document.getElementById('app');
         if (!legacy) throw new Error('Editor legacy host is unavailable');
-        installed = {scope, output};
+        const selection = result['component-selection-id'];
+        if (selection != null && (typeof selection !== 'string' || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(selection))) throw new Error('Invalid editor selection receipt');
+        installed = {scope, output, selection: selection ?? null, accepted: new Map()};
         // Validate complete callable records before exposing either component.
         for (const name of ['account-menu', 'recents']) if (field(output, name) !== undefined) componentNow(name);
         legacy.dataset.gdRootAdapter = 'legacy';
@@ -82,7 +100,7 @@
     return loading;
   }
   window.gdEditorRoot = {
-    reload, componentNow,
+    reload, componentNow, acceptComponent, releaseComponent, componentIdentity,
     async component(name) {
       await (loading || reload());
       const result = componentNow(name);

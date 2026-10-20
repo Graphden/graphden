@@ -54,6 +54,16 @@ function fixture() {
   }};
 }
 (async () => {
+  {
+    const f = fixture();
+    let selection = first;
+    f.window.gdEditorRoot = {componentIdentity: name => ['account-menu', 'recents'].includes(name) ? selection : null};
+    assert.equal(f.window.gdUIComponentRuntimeIdentity('account-menu'), first);
+    assert.equal(f.window.gdUIComponentRuntimeIdentity('recents'), first);
+    selection = null;
+    assert.equal(f.window.gdUIComponentRuntimeIdentity('account-menu'), null, 'root refusal never falls back to a legacy selection');
+    assert.equal(f.window.gdUIComponentRuntimeIdentity('recents'), null);
+  }
   const waiting = {ok: false, code: 'policy-refresh-required', retryable: true, 'retry-after': 1};
   const settle = () => new Promise(resolve => setImmediate(resolve));
   {

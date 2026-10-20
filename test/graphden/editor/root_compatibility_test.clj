@@ -4,6 +4,7 @@
     [cheshire.core :as json]
     [clojure.java.shell :as sh]
     [clojure.test :refer [deftest is testing]]
+    [graphden.editor.component-config :as config]
     [graphden.editor.config-resolution :as resolution]
     [graphden.editor.root-compatibility :as compatibility]
     [graphden.executor.browser-plan :as browser]
@@ -147,3 +148,36 @@
                       sp/query-entities (fn [_ _ where _]
                                           (is (= :other-owner (:owner-id where))) [])]
           (is (= root-plan (compatibility/adapt-plan {} nil nil nil root root-plan))))))))
+
+
+(deftest root-selection-receipt-comes-from-the-authorized-capture
+  (let [selected (random-uuid)]
+    (with-redefs [tenancy/current-user-id (constantly :owner)
+                  resolution/capture (fn [& _] {:id selected :configuration {}})]
+      (is (= {:plan root-plan :component-selection-id selected}
+             (compatibility/adapt-root {} nil nil nil root root-plan)))
+      (is (= {:plan root-plan}
+             (compatibility/adapt-root {} nil nil nil (random-uuid) root-plan)))
+      (with-redefs [tenancy/current-user-id (constantly nil)]
+        (is (= {:plan root-plan}
+               (compatibility/adapt-root {} nil nil nil root root-plan)))))))
+
+
+(deftest legacy-selection-receipt-is-the-validated-fallback-not-the-default
+  (let [selected (random-uuid) owner (random-uuid) branch (random-uuid)
+        row {:owner-id owner :key "components"
+             :value {:fn-id (str selected) :branch-id (str branch) :org "org"}}]
+    (with-redefs [tenancy/current-user-id (constantly owner)
+                  tenancy/current-org (constantly "org")
+                  versioned/current-branch-id (constantly branch)
+                  resolution/capture (fn [& _] {:id resolution/defaults-id :configuration {}})
+                  sp/query-entities (fn [& _] [row])
+                  sp/read-entity (fn [_ _ id] {:id id})
+                  source/collect-manifest (fn [_ id _] (is (= selected id)) {:fns []})
+                  source/collect-namespaces (fn [& _] [])
+                  snapshot/validate-source! (fn [_ id _] (is (= selected id)))
+                  config/configuration (fn [_ id] (is (= selected id)) {})]
+      (let [authorized (atom [])]
+        (is (= {:plan root-plan :component-selection-id selected}
+               (compatibility/adapt-root {} nil (fn [row permissions] (swap! authorized conj [(:id row) permissions])) nil root root-plan)))
+        (is (= [[selected {:execute? true}]] @authorized))))))

@@ -40,6 +40,10 @@ function withoutRecoveredServerErrors(errors, events) {
 
 function rootServerDiagnostic(error, events) {
   const reasons = [
+    ['UI configuration identity unavailable', 'configuration-not-ready'],
+    ['UI plan request failed before receipt drain', 'legacy-plan-request-failed'],
+    ['UI plan response receipts did not drain', 'legacy-plan-drain-timeout'],
+    ['UI plan has no known terminal receipt', 'legacy-plan-unknown-receipt'],
     ['server refusal has no exact finite stale receipt', 'unknown-refusal'],
     ['current server consumer handled the refusal before supersession', 'current-consumer-error'],
     ['stale server request lacks a superseding installed root and successful typed query', 'missing-replacement'],

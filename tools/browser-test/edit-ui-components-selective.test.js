@@ -121,6 +121,7 @@ async function cleanup(page, receipts) {
   const failures = [];
   const replies = planLoads.replies, themeReplies = [], pendingReplies = [], requestSequences = new WeakMap();
   async function settle() {
+    await page.waitForFunction(() => gdUIConfigurationState()?.revision);
     await planLoads.flush();
     const loaded = await captureLoadedUIComponents(page);
     await waitForLoadedUIComponents(page, loaded);
@@ -238,6 +239,13 @@ async function cleanup(page, receipts) {
     menuReceipt.activation = external;
     await settle();
     const rejected = await api(page, 'POST', '/api/ui/configuration/apply', stale.request);
+    let refusal;
+    try { refusal = JSON.parse(rejected.body || 'null'); } catch (_) { refusal = null; }
+    console.log('Stale configuration CAS receipt:', JSON.stringify({
+      status: Number.isInteger(rejected.status) ? rejected.status : 200,
+      code: ['stale-configuration', 'policy-refresh-required'].includes(refusal?.code) ? refusal.code : null,
+      committed: rejected.committed === true,
+    }));
     assert(rejected.status === 409, 'a stale ordinary-root activation cannot overwrite the second tab');
     const index = await api(page, 'GET', '/api/graph/entities?scope=index');
     const live = new Set(index.fns.map(row => row.id));
@@ -272,7 +280,8 @@ async function cleanup(page, receipts) {
       catalogVisible: !!document.getElementById('gd-ui-components-root')?.getClientRects().length,
       menuVisible: !!document.querySelector('.auth-menu-item[data-item="Settings"]')?.getClientRects().length,
       pickerVisible: !!document.querySelector('.fn-picker-popover')?.getClientRects().length,
-      ready: !!gdPrefsReady, authenticated: isAuthenticated()})).catch(() => null);
+      ready: !!gdPrefsReady, authenticated: isAuthenticated(),
+      configurationReady: !!gdUIConfigurationState()?.revision, menuReady: gdShellMenuGraph?.ready === true})).catch(() => null);
     console.error('Selective phase diagnostic:', JSON.stringify({phase, kind: require('./safe-diagnostics').errorKind(error), state,
       replies: replies.map(({component, status, code, retryable, ok}) => ({component, status, code, retryable, ok}))}));
     throw error;

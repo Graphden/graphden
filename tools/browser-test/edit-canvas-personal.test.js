@@ -12,12 +12,16 @@ const {
 } = require('./edit-test-helpers');
 const { unexpectedSelectiveCopyErrors } = require('./selective-copy-errors');
 const { undoConfiguration } = require('./configuration-undo-test-helpers');
+const { observeRootServerCalls, withoutRecoveredServerErrors } = require('./root-server-call-test-helpers');
 (async () => {
   await waitForServerHealthy();
   const { browser, page } = await newContext(chromium, { boot: false });
   const errors = [],
     plans = [],
+    rootPlans = [],
     pending = [];
+  const serverCalls = await observeRootServerCalls(page);
+  const requestSequences = new WeakMap();
   let sequence = 0;
   let receipt, activation;
   page.on('pageerror', (e) => errors.push({ kind: 'pageerror', text: e.message }));
@@ -25,16 +29,25 @@ const { undoConfiguration } = require('./configuration-undo-test-helpers');
     if (m.type() === 'error')
       errors.push({ kind: 'console', text: m.text(), url: m.location().url });
   });
+  page.on('request', (request) => {
+    if (['/api/ui/configuration/plan', '/api/ui/root/plan'].includes(new URL(request.url()).pathname))
+      requestSequences.set(request, ++sequence);
+  });
   page.on('response', (r) => {
-    if (r.url().endsWith('/ui/configuration/plan')) {
-      const own = ++sequence;
+    const path = new URL(r.url()).pathname;
+    if (path === '/api/ui/configuration/plan' || path === '/api/ui/root/plan') {
       pending.push(
         (async () => {
           const b = await r.json().catch(() => null);
+          if (path === '/api/ui/root/plan') {
+            rootPlans.push({sequence: requestSequences.get(r.request()), status: r.status(),
+              ok: b?.ok === true, code: b?.code, retryable: b?.retryable === true});
+            return;
+          }
           plans.push({
             kind: 'plan',
             url: r.url(),
-            sequence: own,
+            sequence: requestSequences.get(r.request()),
             component: r.request().postDataJSON()?.component,
             status: r.status(),
             ok: b?.ok,
@@ -46,6 +59,18 @@ const { undoConfiguration } = require('./configuration-undo-test-helpers');
       );
     }
   });
+  function withoutRecoveredRootErrors(input) {
+    const refusals = rootPlans.filter((row) => row.status === 422);
+    for (const refusal of refusals)
+      assert(refusal.code === 'policy-refresh-required' && refusal.retryable
+        && rootPlans.some((row) => row.sequence > refusal.sequence && row.status === 200 && row.ok),
+      'root policy refusal recovered by a later successful plan');
+    const rootErrors = input.filter((error) => error.kind === 'console' && error.url
+      && new URL(error.url).pathname === '/api/ui/root/plan'
+      && /status of 422\b/.test(error.text || ''));
+    assert(rootErrors.length === refusals.length, 'each recovered root refusal has one browser error');
+    return input.filter((error) => !rootErrors.includes(error));
+  }
   try {
     await page.goto(BASE + '/#web-server');
     await page.waitForFunction(
@@ -168,13 +193,19 @@ const { undoConfiguration } = require('./configuration-undo-test-helpers');
     );
     if (process.env.GRAPHDEN_CANVAS_SCREENSHOT)
       await page.screenshot({ path: process.env.GRAPHDEN_CANVAS_SCREENSHOT, fullPage: false });
+    await serverCalls.settle();
     await Promise.all(pending);
-    const unexpected = unexpectedSelectiveCopyErrors(errors, plans, true);
+    const browserErrors = withoutRecoveredRootErrors(withoutRecoveredServerErrors(errors, serverCalls.events));
+    const unexpected = unexpectedSelectiveCopyErrors(browserErrors, plans, true);
     if (unexpected.length)
       console.log(
         'unexpected error counts',
         JSON.stringify({
           count: unexpected.length,
+          errors: unexpected.map(({ kind, text, url }) => ({kind,
+            route: url ? new URL(url).pathname : null,
+            status: Number(text?.match(/status of (\d+)/)?.[1]) || null,
+            pageError: kind === 'pageerror' ? String(text).slice(0, 120) : null})),
           plans: plans.map(({ component, status, code }) => ({ component, status, code })),
         }),
       );

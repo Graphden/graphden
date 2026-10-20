@@ -124,6 +124,21 @@
                         :vals [{:value role} (reference (str (name role) "-id"))]})]) roles))))
 
 
+(defn- personal-menu-definitions
+  [theme menu]
+  (let [color-parent (keyword theme "color-const")]
+    (mapv (fn [definition]
+            (let [definition (rebase/rewrite-references
+                               definition #(if (= :core.refinements/color-const %)
+                                             color-parent %))]
+              (case (:name definition)
+                :theme-accent (assoc definition :args {:value (keyword theme "theme-accent-color")})
+                :theme-canvas-background (assoc definition :args {:value (keyword theme "theme-canvas-color")})
+                :account-menu-hover (assoc definition :args {:value "#f8fafc"})
+                definition)))
+          (copy-module "app/ui-account-menu" menu))))
+
+
 (defn definitions
   "Fixed ordinary named graphs, grouped under a fresh writable personal root.
    Color wrappers inherit the canonical registered color type, preserving the
@@ -140,16 +155,7 @@
                                    % (fn [reference]
                                        (if (= :core.refinements/color-const reference)
                                          color-parent reference))) theme-definitions)
-        menu-definitions (mapv (fn [definition]
-                                 (let [definition (rebase/rewrite-references
-                                                    definition #(if (= :core.refinements/color-const %)
-                                                                  color-parent %))]
-                                   (case (:name definition)
-                                     :theme-accent (assoc definition :args {:value (keyword theme "theme-accent-color")})
-                                     :theme-canvas-background (assoc definition :args {:value (keyword theme "theme-canvas-color")})
-                                     :account-menu-hover (assoc definition :args {:value "#f8fafc"})
-                                     definition)))
-                               (copy-module "app/ui-account-menu" menu))
+        menu-definitions (personal-menu-definitions theme menu)
         recents (str root ".recents")
         inspector (str root ".inspector")
         explorer (str root ".explorer")

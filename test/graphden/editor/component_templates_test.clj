@@ -134,12 +134,13 @@
   (let [root "users.alice.ui-test"
         recents-namespace (str root ".recents")
         definitions (templates/definitions root)
+        by-reference (into {} (map #(vector (keyword (:namespace %) (name (:name %))) %)) definitions)
         union (first (filter #(and (= recents-namespace (:namespace %)) (= :_recents-request (:name %))) definitions))]
-    (is (= [:_recents-persist-request :_recents-navigate-request]
+    (is (= [(keyword recents-namespace "_recents-persist-request")
+            (keyword recents-namespace "_recents-navigate-request")]
            (:union union)))
     (doseq [member (:union union)]
-      (is (boolean (some #(and (= recents-namespace (:namespace %))
-                               (= member (:name %))) definitions))
+      (is (contains? by-reference member)
           "Every copied union member resolves inside the same bundle"))))
 
 

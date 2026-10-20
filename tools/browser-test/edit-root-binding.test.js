@@ -1,14 +1,15 @@
-// Persisted HOF binding -> checked/source-authorized endpoint -> real editor UI.
-// Run against an isolated combined B instance; every write is on one exact
-// throwaway branch. No request interception or browser-plan substitution.
+// Sanctioned personal selection + persisted user HOF binding -> real root
+// checker/source exporter -> real editor UI. Package-owned bindings are read
+// only. No response interception; exact receipts clean up the throwaway branch.
 'use strict';
 const assert = require('node:assert/strict');
 const {randomUUID} = require('node:crypto');
 const {chromium} = require('playwright');
 const {newContext, api, BASE, waitForServerHealthy} = require('./edit-test-helpers');
+const {undoConfiguration} = require('./configuration-undo-test-helpers');
 const branchName = 'root-binding-' + randomUUID();
-const childName = 'root-view-' + randomUUID();
 const branchApi = (method, path, body) => api(null, method, path, body, {'X-Graphden-Branch': branchName});
+const mainApi = (method, path, body) => api(null, method, path, body, {'X-Graphden-Branch': 'main'});
 const subtree = (call, id) => call('GET', '/api/graph/entities?scope=subtree&root-id=' + encodeURIComponent(id));
 const argument = (fn, name) => fn.args.find(arg => arg.name === name)?.expr;
 const keyOf = fn => argument(fn, 'key')?.value?.[2];
@@ -27,129 +28,195 @@ function successful(result, action) {
   assert(result.ok !== false && (!result.status || result.status < 400), action + ': ' + JSON.stringify(result));
   return result;
 }
+function slotsOf(graph, owner) {
+  const slots = new Map(graph.slots.map(slot => [slot.id, slot]));
+  return Object.fromEntries(graph['fn-slots'].filter(row => row['fn-id'] === owner)
+    .map(row => [slots.get(row['slot-id']).name, row['slot-id']]));
+}
 async function checkedRoot(page) {
-  // CRUD may leave a bounded asynchronous type recheck pending. Wait only for
-  // its explicit 409; every checker/source/ACL refusal fails immediately.
-  await page.waitForFunction(async () => {
+  // Wait only for the explicit pending type-recheck 409. Every checker/source
+  // or ACL refusal fails immediately; this never substitutes an exported plan.
+  const checked = await page.waitForFunction(async () => {
     const response = await authFetch(API.api_ui_root_plan, {cache: 'no-store'});
-    if (response.status === 409) return false;
+    if (response.status === 409) { await response.text(); return false; }
     const body = await response.json();
     if (!response.ok || body.ok !== true) throw new Error('Stored root export refused: HTTP ' + response.status);
-    return true;
+    return body.plan;
   }, null, {polling: 1000, timeout: 60000});
-  const [response] = await Promise.all([
-    page.waitForResponse(response => response.url().includes('/api/ui/root/plan') && response.request().method() === 'GET'),
-    page.evaluate(() => gdEditorRoot.reload()),
-  ]);
-  const body = await response.json();
-  assert.equal(response.status(), 200);
-  assert.equal(body.ok, true);
+  const plan = await checked.jsonValue();
+  await checked.dispose();
+  await page.evaluate(() => gdEditorRoot.reload());
   await page.waitForFunction(() => gdShellMenuGraph.ready && !!gdEditorRoot.componentNow('account-menu'));
-  return body.plan;
+  return plan;
+}
+async function viewTree(page) {
+  return page.evaluate(() => {
+    const g = GraphdenBrowser;
+    const runtime = gdEditorRoot.componentNow('account-menu');
+    const m = object => new Map(Object.entries(object).map(([key, value]) => [g.keyword(key), value]));
+    const output = runtime.run('view', {state: runtime.run('initial', {}),
+      theme: m({accent: '#336699', 'canvas-background': '#ffffff'}), server: m({phase: 'idle', label: '', 'branch-name': ''})});
+    const plain = value => {
+      if (Array.isArray(value) || g.isSequence(value)) return Array.from(value, plain);
+      if (value instanceof Map) return Object.fromEntries([...value].map(([key, item]) => [key.name || key, plain(item)]));
+      return value instanceof g.Keyword ? value.name : value;
+    };
+    const tree = plain(output.get(g.keyword('common-tree')));
+    const replaceSettings = node => {
+      if (!Array.isArray(node)) return false;
+      if (node[0] === 'button' && node[1]?.['data-action'] === 'settings') {
+        node.splice(2, node.length - 2, 'Persisted root settings');
+        return true;
+      }
+      return node.some(replaceSettings);
+    };
+    if (!replaceSettings(tree)) throw new Error('No settings destination in actual view');
+    return tree;
+  });
 }
 (async () => {
   await waitForServerHealthy();
   const {browser, page} = await newContext(chromium, {boot: false});
-  const errors = [];
+  const errors = [], custom = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('dialog', dialog => dialog.accept());
-  let branch, binding, child, valueBinding;
+  let branch, copy, activation, setup, mainBinding, shippedOwner;
+  const createFn = async (parent, namespace, suffix, extra = {}) => {
+    const name = 'root-' + suffix + '-' + randomUUID();
+    successful(await branchApi('POST', '/api/entities/fn', new URLSearchParams({name,
+      'parent-ids': parent, 'namespace-id': namespace, ...extra}).toString()), 'create user graph');
+    const found = await branchApi('GET', '/api/graph/entities?scope=search&q=' + encodeURIComponent(name));
+    const row = found.fns.find(row => row.name === name && row['namespace-id'] === namespace);
+    assert(row?.id, 'exact user graph identity is readable');
+    custom.push({id: row.id, name: row.name, 'namespace-id': namespace});
+    return row;
+  };
+  const bind = async (fn, slot, fields) => {
+    successful(await branchApi('POST', '/api/entities/binding', new URLSearchParams({
+      'fn-id': fn, 'slot-id': slot, ...fields}).toString()), 'create user binding');
+    const graph = await subtree(branchApi, fn);
+    const row = graph.bindings.find(row => row['fn-id'] === fn && row['slot-id'] === slot);
+    assert(row?.id, 'exact created binding is readable');
+    return row;
+  };
   try {
     branch = successful(await api(null, 'POST', '/api/branches', {name: branchName, 'base-branch-id': 'main'}), 'create isolated branch');
     await page.goto(BASE + '/?branch=' + encodeURIComponent(branchName) + '#core.logic.const');
-    await page.waitForFunction(() => typeof gdEditorRoot !== 'undefined' && !!gdEditorRoot.componentNow('account-menu'), null, {timeout: 120000});
+    await page.waitForFunction(() => window.gdPrefsReady && window.gdPrefOwner && window.gdEditorRoot?.componentNow('account-menu'), null, {timeout: 120000});
     const originalPlan = await checkedRoot(page);
-    const selected = menuView(originalPlan);
-    const graph = await subtree(branchApi, selected.owner);
-    binding = graph.bindings.find(row => row['fn-id'] === selected.owner && row['slot-id'] === selected.slot);
-    assert(binding?.['ref-fn-id'], 'returned callable field has an actual stored ref binding');
-    const originalTarget = binding['ref-fn-id'];
-    const parent = graph.fns.find(row => row.id === originalTarget);
-    assert(parent, 'view binding resolves to a stored ordinary graph');
-    const parentNode = originalPlan.functions.find(fn => fn.id === originalTarget);
-    assert(parentNode, 'stored view source is present in the checked plan');
-    const valueSlot = parentNode.args.find(arg => arg.name === 'value')?.slot;
-    assert(valueSlot, 'view inherits the generic assoc value slot');
-    const mainBefore = await subtree((method, path, body) => api(null, method, path, body, {'X-Graphden-Branch': 'main'}), selected.owner);
-    const mainBinding = mainBefore.bindings.find(row => row.id === binding.id);
-    assert.equal(mainBinding?.['ref-fn-id'], originalTarget, 'branch starts with the unchanged main binding');
-
+    shippedOwner = menuView(originalPlan).owner;
+    const shipped = await subtree(mainApi, shippedOwner);
+    mainBinding = shipped.bindings.find(row => row['fn-id'] === shippedOwner && row['slot-id'] === menuView(originalPlan).slot);
+    assert(mainBinding?.['ref-fn-id'], 'shipped HOF reference is recorded read-only');
     await page.locator('#auth-lock-btn').click();
     const originalLabel = await page.locator('[role="menuitem"][data-action="settings"]').innerText();
     await page.keyboard.press('Escape');
-    const tree = await page.evaluate(() => {
-      const g = GraphdenBrowser;
-      const runtime = gdEditorRoot.componentNow('account-menu');
-      const m = object => new Map(Object.entries(object).map(([key, value]) => [g.keyword(key), value]));
-      const output = runtime.run('view', {state: runtime.run('initial', {}),
-        theme: m({accent: '#336699', 'canvas-background': '#ffffff'}), server: m({phase: 'idle', label: '', 'branch-name': ''})});
-      // Hiccup tag keywords become equivalent tag strings. Attribute maps keep
-      // their native action identities; only the visible text child changes.
-      const plain = value => {
-        if (g.isSequence(value)) return Array.from(value, plain);
-        if (value instanceof Map) return Object.fromEntries([...value].map(([key, item]) => [key.name || key, plain(item)]));
-        if (value instanceof g.Keyword) return value.name;
-        return value;
-      };
-      const tree = plain(output.get(g.keyword('common-tree')));
-      const replaceSettings = node => {
-        if (!Array.isArray(node)) return false;
-        if (node[0] === 'button' && node[1]?.['data-action'] === 'settings') {
-          node.splice(2, node.length - 2, 'Persisted root settings');
-          return true;
-        }
-        return node.some(replaceSettings);
-      };
-      if (!replaceSettings(tree)) throw new Error('No settings destination in actual view');
-      return tree;
-    });
-    assert(JSON.stringify(tree).includes('Persisted root settings'));
-    successful(await branchApi('POST', '/api/entities/fn', new URLSearchParams({name: childName,
-      'parent-ids': originalTarget, 'namespace-id': parent['namespace-id'] || ''}).toString()), 'create ordinary view descendant');
-    const created = await branchApi('GET', '/api/graph/entities?scope=search&q=' + encodeURIComponent(childName));
-    child = created.fns.find(row => row.name === childName);
-    assert(child?.id, 'exact created descendant identity is readable');
-    successful(await branchApi('POST', '/api/entities/binding', new URLSearchParams({
-      'fn-id': child.id, 'slot-id': valueSlot, value: JSON.stringify(tree)}).toString()), 'store alternate Hiccup value');
-    const own = await subtree(branchApi, child.id);
-    valueBinding = own.bindings.find(row => row['fn-id'] === child.id && row['slot-id'] === valueSlot);
-    assert(valueBinding?.id, 'exact created literal binding is readable');
+    const replacementTree = await viewTree(page);
 
-    successful(await branchApi('PUT', '/api/entities/binding/' + binding.id,
-      new URLSearchParams({'ref-fn-id': child.id}).toString()), 'persist the root component HOF reference');
-    const stored = await subtree(branchApi, selected.owner);
-    assert.equal(stored.bindings.find(row => row.id === binding.id)?.['ref-fn-id'], child.id);
-    const changedPlan = await checkedRoot(page);
-    assert.equal(menuView(changedPlan).target, child.id, 'real checker/export returns the newly stored HOF binding');
+    setup = successful(await branchApi('POST', '/api/ui/configuration/prepare', {home: true}), 'prepare explicit personal home');
+    const owner = await page.evaluate(() => gdPrefOwner);
+    copy = successful(await branchApi('POST', '/api/ui/components/create/preview',
+      {owner, 'namespace-id': null, component: 'account-menu'}), 'preview personal account menu');
+    const applied = successful(await branchApi('POST', '/api/ui/components/create/apply', copy.request), 'apply exact copy receipt');
+    assert.equal(applied.committed, true);
+    assert.deepEqual(applied.manifest, copy.manifest, 'apply confirms the exact personal-copy receipt');
+    const view = copy.manifest.roots['menu-id'];
+    const graph = await subtree(branchApi, view);
+    const parent = graph.fns.find(row => row.id === view);
+    assert(copy.manifest.functions.some(row => row.id === view), 'view is owned by the exact personal-copy receipt');
+    const viewSlots = slotsOf(graph, parent['parent-ids'][0]);
+    const keysBinding = graph.bindings.find(row => row['fn-id'] === view && row['slot-id'] === viewSlots.keys);
+    const valsBinding = graph.bindings.find(row => row['fn-id'] === view && row['slot-id'] === viewSlots.vals);
+    const items = graph['list-items'];
+    const treeKey = items.find(item => item['binding-id'] === keysBinding.id
+      && ['common-tree', ':common-tree'].includes(item.value));
+    assert(treeKey, 'view key sequence identifies the common-tree position');
+    const vals = items.filter(item => item['binding-id'] === valsBinding.id).sort((a, b) => a.position - b.position);
+    assert(vals.some(item => item.position === treeKey.position));
+    const callbackA = await createFn(view, parent['namespace-id'], 'original-view', {'lambda-params': '[]'});
+    const callbackB = await createFn(view, parent['namespace-id'], 'changed-view', {'lambda-params': '[]'});
+    const overridden = await bind(callbackB.id, viewSlots.vals, {'list-closed': 'true'});
+    for (const item of vals) {
+      const field = item.position === treeKey.position ? {value: JSON.stringify(replacementTree)}
+        : {'ref-fn-id': item['ref-fn-id']};
+      assert(field.value || field['ref-fn-id'], 'every retained output comes from its actual source reference');
+      successful(await branchApi('POST', '/api/entities/binding-list-item', new URLSearchParams({
+        'binding-id': overridden.id, position: String(item.position), ...field}).toString()), 'create exact output sequence item');
+    }
+    const call = originalPlan.primitives.find(primitive => primitive.op === 'call');
+    assert(call, 'generic call ABI is present');
+    const callSlots = slotsOf(await subtree(branchApi, call.id), call.id);
+    const wrapper = await createFn(call.id, parent['namespace-id'], 'view-call');
+    const hof = await bind(wrapper.id, callSlots.func, {'ref-fn-id': callbackA.id});
+    await bind(wrapper.id, callSlots.arg, {value: 'null'});
+    const manifest = await subtree(branchApi, copy.manifest.roots['configuration-id']);
+    const viewIdentities = manifest.bindings.filter(row => row['ref-fn-id'] === view && row['type-override-fn-id']);
+    assert.equal(viewIdentities.length, 1, 'personal manifest has one terminal view identity');
+    assert(copy.manifest.functions.some(row => row.id === viewIdentities[0]['fn-id']), 'selection edit is user-owned');
+    successful(await branchApi('PUT', '/api/entities/binding/' + viewIdentities[0].id,
+      new URLSearchParams({'ref-fn-id': wrapper.id}).toString()), 'select user view wrapper in personal manifest');
+    await page.evaluate(() => gdCaptureUIConfiguration(new AbortController().signal));
+    const state = await page.evaluate(() => gdUIConfigurationState());
+    const proposal = successful(await branchApi('POST', '/api/ui/configuration/preview', {operation: 'activate', command: {
+      'selection-id': copy.manifest.roots['configuration-id'], 'expected-preference': state.preference,
+      'expected-configuration-revision': state.revision}}), 'preview sanctioned personal selection');
+    const activated = successful(await branchApi('POST', '/api/ui/configuration/apply', proposal.request), 'activate personal graph');
+    assert.equal(activated.committed, true);
+    activation = proposal;
+    await page.evaluate(async () => { await loadGraphData(); gdRefreshUIConfiguration(); });
+    const before = await checkedRoot(page);
+    assert(before.functions.some(fn => fn.id === wrapper.id), 'actual root exporter includes selected ordinary user graph');
+    assert.equal(argument(before.functions.find(fn => fn.id === wrapper.id), 'func').fn, callbackA.id);
+
+    successful(await branchApi('PUT', '/api/entities/binding/' + hof.id,
+      new URLSearchParams({'ref-fn-id': callbackB.id}).toString()), 'persist user-owned HOF reference');
+    const stored = await subtree(branchApi, wrapper.id);
+    assert.equal(stored.bindings.find(row => row.id === hof.id)['ref-fn-id'], callbackB.id);
+    const changed = await checkedRoot(page);
+    assert.equal(argument(changed.functions.find(fn => fn.id === wrapper.id), 'func').fn, callbackB.id,
+      'actual checker/export returns the persisted HOF replacement');
     await page.locator('#auth-lock-btn').click();
-    const changed = page.getByRole('menuitem', {name: 'Persisted root settings', exact: true});
-    await changed.waitFor();
-    assert.equal(await changed.isVisible(), true, 'actual editor renders the stored replacement view');
+    await page.getByRole('menuitem', {name: 'Persisted root settings', exact: true}).waitFor();
     await page.keyboard.press('Escape');
-
-    successful(await branchApi('PUT', '/api/entities/binding/' + binding.id,
-      new URLSearchParams({'ref-fn-id': originalTarget}).toString()), 'restore the original root reference');
-    const restored = await checkedRoot(page);
-    assert.equal(menuView(restored).target, selected.target);
+    successful(await branchApi('PUT', '/api/entities/binding/' + hof.id,
+      new URLSearchParams({'ref-fn-id': callbackA.id}).toString()), 'restore original user HOF reference');
+    await checkedRoot(page);
     await page.locator('#auth-lock-btn').click();
     await page.getByRole('menuitem', {name: originalLabel, exact: true}).waitFor();
     await page.keyboard.press('Escape');
-    const mainAfter = await subtree((method, path, body) => api(null, method, path, body, {'X-Graphden-Branch': 'main'}), selected.owner);
-    assert.equal(mainAfter.bindings.find(row => row.id === binding.id)?.['ref-fn-id'], mainBinding['ref-fn-id']);
     assert.deepEqual(errors, []);
   } finally {
-    await page.close();
     try {
-      if (binding) successful(await branchApi('PUT', '/api/entities/binding/' + binding.id,
-        new URLSearchParams({'ref-fn-id': binding['ref-fn-id']}).toString()), 'cleanup restores exact original reference');
-      if (valueBinding) successful(await branchApi('DELETE', '/api/entities/binding/' + valueBinding.id), 'cleanup removes created value binding');
-      if (child) successful(await branchApi('DELETE', '/api/entities/fn/' + child.id), 'cleanup removes created descendant');
-      if (branch) {
-        const rows = await api(null, 'GET', '/api/branches');
-        const exact = rows.branches.find(row => row.name === branchName);
-        if (exact) successful(await api(null, 'DELETE', '/api/branches/' + exact.id), 'cleanup deletes exact test branch');
+      if (activation) assert.equal((await undoConfiguration(page, activation)).ok, true, 'exact activation receipt restores prior selection');
+      await page.close();
+      if (mainBinding) {
+        const main = await subtree(mainApi, shippedOwner);
+        assert.equal(main.bindings.find(row => row.id === mainBinding.id)['ref-fn-id'], mainBinding['ref-fn-id'], 'shipped main HOF binding was never changed');
       }
+      const functions = [...(copy?.manifest.functions || []), ...custom];
+      if (functions.length) {
+        const removed = successful(await branchApi('POST', '/api/functions/delete-batch', {functions}), 'delete exact created graph cohort');
+        const acknowledged = new Set([...(removed.deleted || []), ...(removed['already-absent'] || [])]);
+        const expected = new Set(functions.map(row => row.id));
+        assert.equal(acknowledged.size, expected.size);
+        assert([...acknowledged].every(id => expected.has(id)), 'cleanup acknowledges only exact created identities');
+      }
+      for (const namespace of [...(copy?.manifest.namespaces || [])].reverse()) {
+        const removed = await branchApi('DELETE', '/api/entities/ns/' + namespace.id);
+        if (removed.status !== 404) successful(removed, 'delete exact copy namespace');
+      }
+      for (const id of setup?.['changed-namespaces'] || []) {
+        assert.equal(id, setup.home.id, 'home cleanup uses only its explicit setup receipt');
+        successful(await branchApi('DELETE', '/api/entities/ns/' + id), 'delete explicitly created empty home');
+      }
+      if (branch) {
+        const exact = (await api(null, 'GET', '/api/branches')).branches.find(row => row.name === branchName);
+        if (exact) successful(await api(null, 'DELETE', '/api/branches/' + exact.id), 'delete exact test branch');
+      }
+    } catch (error) {
+      console.error('Root binding fixture cleanup requires review on branch ' + branchName);
+      throw error;
     } finally { await browser.close(); }
   }
-  console.log('PASS persisted root HOF binding changes real editor UI and restores branch state');
+  console.log('PASS user-owned persisted HOF binding changes real root UI without package writes');
 })().catch(error => { console.error(error); process.exitCode = 1; });

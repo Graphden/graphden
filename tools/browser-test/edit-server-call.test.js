@@ -9,6 +9,7 @@ const {newContext, waitForServerHealthy, BASE} = require('./edit-test-helpers');
   const {browser, page} = await newContext(chromium, {boot: false});
   const errors = [];
   const calls = [];
+  let stage = 'boot';
   page.on('pageerror', error => errors.push(error.message));
   page.on('dialog', dialog => dialog.accept());
   page.on('response', response => {
@@ -16,10 +17,14 @@ const {newContext, waitForServerHealthy, BASE} = require('./edit-test-helpers');
   });
   try {
     await page.goto(BASE);
+    assert.equal(await page.evaluate(() => window.API.api_ui_server_call), '/api/ui/server-call',
+      'server transport uses the actual path-derived API constant');
     await page.waitForFunction(() => window.gdShellMenuGraph?.ready, null, {timeout: 120000});
+    stage = 'menu-ready';
     await page.locator('#auth-lock-btn').click();
     const status = page.locator('#auth-popover .auth-menu-status');
     await status.waitFor();
+    stage = 'status-visible';
     await page.waitForFunction(() => document.querySelector('#auth-popover .auth-menu-status')?.textContent.startsWith('Branch · '),
       null, {timeout: 120000});
     const branch = await page.evaluate(() => getCurrentBranchName());
@@ -39,6 +44,9 @@ const {newContext, waitForServerHealthy, BASE} = require('./edit-test-helpers');
     await page.screenshot({path: '/tmp/b3-server-call.png'});
     assert.deepEqual(errors, []);
     console.log('Account server query: real HTTP typed result rendered in the existing menu PASS');
+  } catch (error) {
+    console.error(JSON.stringify({stage, serverStatuses: calls.map(response => response.status())}));
+    throw error;
   } finally {
     await browser.close();
   }

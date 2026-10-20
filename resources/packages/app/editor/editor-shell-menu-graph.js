@@ -240,7 +240,7 @@
         if (loadedRuntime?.query && window.GraphdenServer) {
           serverLifetime = window.GraphdenServer.createLifetime({
             transport(payload, options) {
-              return window.authFetch(window.API.api_editor_server_call, {...options, method: 'POST',
+              return window.authFetch(window.API.api_ui_server_call, {...options, method: 'POST',
                 headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
             },
             scope: () => String(requestGeneration),

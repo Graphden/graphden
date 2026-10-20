@@ -194,6 +194,10 @@ const {waitForLoadedUIComponents, drainUIPlanReplies, observeUIPlanLoads} = requ
     }
   } catch (error) {
     console.error('Root server receipt diagnostic:', JSON.stringify(rootServerDiagnostic(error, serverCalls.events)));
+    console.error(JSON.stringify({diagnostic: 'recent-component-plans', replies: planReplies.slice(-16).map(reply => ({
+      component: reply.component, status: reply.status, code: reply.code,
+      retryable: reply.retryable, loadId: reply.loadId,
+    }))}));
     const frames = String(error.stack || '').split('\n').flatMap(line => {
       const match = line.match(/\/(tutorial-ui-components-helpers|edit-ui-components(?:\.test)?|tutorial-tour-helpers)\.js:(\d+):(\d+)\)?$/);
       return match ? [{file: match[1], line: Number(match[2]), column: Number(match[3])}] : [];

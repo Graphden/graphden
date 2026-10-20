@@ -222,7 +222,18 @@ async function walkUIComponentsLesson(page, {onReceipt = async () => {}, onStage
   previous, {timeout: 60000});
   // Configuration publication can precede another component's bounded policy
   // retry. Wait for the actual previously loaded runtimes, not just the picker.
-  await waitForLoadedUIComponents(page, loadedComponents);
+  try {
+    await waitForLoadedUIComponents(page, loadedComponents);
+  } catch (error) {
+    const runtime = await page.evaluate(expected => ({
+      selectionMatches: gdUIConfigurationState()?.selection?.['fn-id'] === expected.configuration,
+      components: expected.names.map(name => ({name,
+        matches: gdUIComponentRuntimeIdentity(name) === expected.configuration})),
+      status: gdUIComponentsStatus(),
+    }), loadedComponents).catch(() => ({unavailable: true}));
+    console.error(JSON.stringify({diagnostic: 'cleanup-component-runtime', runtime}));
+    throw error;
+  }
   await settleComponents(loadedComponents);
   assert(await page.evaluate(() => gdShellMenuGraph.ready && !gdUIComponentsStatus()),
     'cleanup restores the loaded component runtimes without a terminal fallback');

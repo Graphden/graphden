@@ -4,12 +4,18 @@ const {chromium} = require('playwright');
 const {assert, newContext, api, BASE, waitForServerHealthy, getEntities, synthArgs} = require('./edit-test-helpers');
 const {undoConfiguration} = require('./configuration-undo-test-helpers');
 const {unexpectedSelectiveCopyErrors} = require('./selective-copy-errors');
-const {captureLoadedUIComponents, waitForLoadedUIComponents, drainUIPlanReplies} = require('./ui-component-runtime-test-helpers');
+const {observeRootServerCalls, withoutRecoveredServerErrors} = require('./root-server-call-test-helpers');
+const {observeUIPlanLoads, captureLoadedUIComponents, waitForLoadedUIComponents, drainUIPlanReplies} = require('./ui-component-runtime-test-helpers');
 (async () => {
   await waitForServerHealthy();
   const {browser, page} = await newContext(chromium, {boot: false});
-  const copies = [], activations = [], probes = [], errors = [], plans = [], pending = [], sourceRequests = [];
-  const requestReceipts = new WeakMap();
+  const copies = [], activations = [], probes = [], errors = [], plans = [], rootPlans = [], pending = [];
+  const planLoads = await observeUIPlanLoads(page);
+  const serverCalls = await observeRootServerCalls(page);
+  const sourceRequests = planLoads.requests;
+  const requestSequences = new WeakMap();
+  let requestSequence = 0;
+  let originalRuntimes;
   let phase = 'boot';
   await page.addInitScript(() => {
     window.canvasProofLifecycle = [];
@@ -21,24 +27,23 @@ const {captureLoadedUIComponents, waitForLoadedUIComponents, drainUIPlanReplies}
       });
     }, {once: true});
   });
-  page.on('pageerror', error => errors.push({kind: 'pageerror', text: error.message}));
+  page.on('pageerror', error => errors.push({kind: 'pageerror', text: error.message, stack: error.stack}));
   page.on('console', message => { if (message.type() === 'error') errors.push({kind: 'console', text: message.text(), url: message.location().url}); });
   page.on('request', request => {
-    if (!request.url().endsWith('/ui/configuration/plan')) return;
-    const receipt = {sequence: sourceRequests.length + 1, phase, component: request.postDataJSON()?.component, status: 'pending'};
-    requestReceipts.set(request, receipt); sourceRequests.push(receipt);
-  });
-  page.on('requestfailed', request => {
-    const receipt = requestReceipts.get(request);
-    if (receipt) { receipt.status = 'failed'; receipt.failure = request.failure()?.errorText; }
+    if (['/api/ui/configuration/plan', '/api/ui/root/plan'].includes(new URL(request.url()).pathname))
+      requestSequences.set(request, ++requestSequence);
   });
   page.on('response', response => {
-    if (!response.url().endsWith('/ui/configuration/plan')) return;
+    const path = new URL(response.url()).pathname;
+    if (path !== '/api/ui/configuration/plan' && path !== '/api/ui/root/plan') return;
     pending.push((async () => {
-      const receipt = requestReceipts.get(response.request());
-      if (receipt) { receipt.status = response.status(); receipt.type = response.headers()['content-type']; }
       const body = await response.json().catch(() => null);
-      plans.push({kind: 'plan', url: response.url(), sequence: receipt.sequence,
+      if (path === '/api/ui/root/plan') {
+        rootPlans.push({sequence: requestSequences.get(response.request()), status: response.status(),
+          ok: body?.ok === true, code: body?.code, retryable: body?.retryable === true});
+        return;
+      }
+      plans.push({kind: 'plan', url: response.url(), sequence: requestSequences.get(response.request()),
         component: response.request().postDataJSON()?.component, status: response.status(),
         ok: body?.ok, fallback: body?.fallback, code: body?.code, selectionId: body?.['selection-id'], retryable: body?.retryable === true});
     })());
@@ -56,11 +61,25 @@ const {captureLoadedUIComponents, waitForLoadedUIComponents, drainUIPlanReplies}
     assert(result.ok || result.status === 200, 'ordinary source edit saved');
   }
   async function settleComponents(snapshot) {
-    // A global refresh starts every catalog component. Wait for this exact
-    // generation's validated runtimes before a later source edit can abort
-    // another component's policy retry or the error audit reads its receipt.
     await waitForLoadedUIComponents(page, snapshot);
-    await drainUIPlanReplies(sourceRequests, plans, pending);
+    await planLoads.flush();
+    await drainUIPlanReplies(sourceRequests, planLoads.replies, pending, true, async names => {
+      await waitForLoadedUIComponents(page, {...snapshot, names});
+      await planLoads.flush();
+    });
+  }
+  function withoutRecoveredRootErrors(input) {
+    const refusals = rootPlans.filter(row => row.status === 422);
+    for (const refusal of refusals) {
+      assert(refusal.code === 'policy-refresh-required' && refusal.retryable
+        && rootPlans.some(row => row.sequence > refusal.sequence && row.status === 200 && row.ok),
+      'root policy refusal recovered by a later successful plan');
+    }
+    const rootErrors = input.filter(error => error.kind === 'console'
+      && error.url && new URL(error.url).pathname === '/api/ui/root/plan'
+      && /status of 422\b/.test(error.text || ''));
+    assert(rootErrors.length === refusals.length, 'each recovered root refusal has one browser error');
+    return input.filter(error => !rootErrors.includes(error));
   }
   async function select(id) {
     await page.evaluate(async id => { await ensureSubtreeFor(id); await selectFn(id); }, id);
@@ -83,6 +102,8 @@ const {captureLoadedUIComponents, waitForLoadedUIComponents, drainUIPlanReplies}
     await page.evaluate(() => gdPrefsRefresh());
     await page.waitForFunction(({component, id}) => gdUIComponentRuntimeIdentity(component) === id,
       {component: copy.manifest.component, id: preview.receipt.id}, {timeout: 60000});
+    await settleComponents({configuration: preview.receipt.id, names: originalRuntimes.names});
+    await serverCalls.settle();
     return preview;
   }
   async function createProbe(copy, suffix, parents, extra = '') {
@@ -99,8 +120,9 @@ const {captureLoadedUIComponents, waitForLoadedUIComponents, drainUIPlanReplies}
     await page.goto(BASE + '/#web-server');
     await page.waitForFunction(() => gdPrefsReady && gdPrefOwner && gdUIConfigurationState?.()?.revision
       && graphReady() && !graph.animating, null, {timeout: 60000});
-    const originalRuntimes = await captureLoadedUIComponents(page);
+    originalRuntimes = await captureLoadedUIComponents(page);
     await settleComponents(originalRuntimes);
+    await serverCalls.settle();
     assert((await api(page, 'POST', '/api/ui/configuration/prepare', {home: true})).ok, 'personal home prepared');
     const owner = await page.evaluate(() => gdPrefOwner);
     async function createCopy(component) {
@@ -193,15 +215,12 @@ const {captureLoadedUIComponents, waitForLoadedUIComponents, drainUIPlanReplies}
       && metadataFocusProof.card.querySelector('.lambda-params-chip') === metadataFocusProof.lambda
       && metadataFocusProof.card.querySelector('.effects-chip-env') === metadataFocusProof.effect),
       'actual personal metadata retains exact native lambda/effect controls and focus');
-    console.log('bounded activation receipts', JSON.stringify({
-      requests: sourceRequests.filter(row => row.phase === 'activate-canvas-metadata'),
-      identities: await page.evaluate(() => ({
+    console.log('bounded activation identities', JSON.stringify(await page.evaluate(() => ({
         inheritance: gdUIComponentRuntimeIdentity('canvas-inheritance'),
         metadata: gdUIComponentRuntimeIdentity('canvas-metadata'),
         selectedInheritance: gdUIComponentsRoots()['canvas-inheritance-id'],
         selectedMetadata: gdUIComponentsRoots()['canvas-metadata-id'], lifecycle: canvasProofLifecycle,
-      })),
-    }));
+      }))));
     for (const dark of [false, true]) {
       await page.evaluate(dark => applyTheme(dark), dark);
       const geometry = await page.evaluate(async () => {
@@ -249,7 +268,7 @@ const {captureLoadedUIComponents, waitForLoadedUIComponents, drainUIPlanReplies}
     const metadataRuntimes = await captureLoadedUIComponents(page);
     await settleComponents(metadataRuntimes);
     await editLiteral(metadata, '_style-effect', 'vals', 'none', 0);
-    await page.evaluate(() => gdRefreshUIConfiguration());
+    await page.evaluate(() => gdCanvasMetadataGraph.reload());
     await page.waitForFunction(() => getComputedStyle(metadataFocusProof.effect.querySelector('.gd-canvas-metadata-effect')).display === 'none',
       null, {timeout: 60000});
     await settleComponents(metadataRuntimes);
@@ -277,8 +296,9 @@ const {captureLoadedUIComponents, waitForLoadedUIComponents, drainUIPlanReplies}
     await page.locator('.node-overlay[data-original-fn-id="' + effect.id + '"] .effects-chip-env').click();
     await page.locator('.type-explainer.visible').waitFor({state: 'visible', timeout: 60000});
     await page.keyboard.press('Escape');
+    phase = 'restore-visible-metadata';
     await editLiteral(metadata, '_style-effect', 'vals', 'inline-flex', 0);
-    await page.evaluate(() => gdRefreshUIConfiguration());
+    await page.evaluate(() => gdCanvasMetadataGraph.reload());
     await page.waitForFunction(() => getComputedStyle(metadataFocusProof.effect.querySelector('.gd-canvas-metadata-effect')).display === 'inline-flex',
       null, {timeout: 60000});
     await settleComponents(metadataRuntimes);
@@ -294,11 +314,15 @@ const {captureLoadedUIComponents, waitForLoadedUIComponents, drainUIPlanReplies}
       assert(plans.some(row => row.component === component && row.status === 200 && row.ok
         && !row.fallback && row.selectionId === activation.receipt.id), 'actual authorized stored plan exported for ' + component);
     }
-    assert(unexpectedSelectiveCopyErrors(errors, plans, true).length === 0, 'no unexpected browser/source errors');
+    await serverCalls.settle();
+    await Promise.all(pending);
+    const browserErrors = withoutRecoveredRootErrors(withoutRecoveredServerErrors(errors, serverCalls.events));
+    assert(unexpectedSelectiveCopyErrors(browserErrors, plans, true).length === 0, 'no unexpected browser/source errors');
     console.log('PASS persisted canvas inheritance and metadata personal plans, native controls, geometry and restore');
   } catch (error) {
-    console.log('bounded card proof failure', JSON.stringify({phase, errors: errors.length,
-      requests: sourceRequests,
+    console.log('bounded card proof failure', JSON.stringify({phase, errors,
+      requests: sourceRequests.slice(-32).map(({component, status, loadId, abortError, signalAborted}) =>
+        ({component, status, loadId, abortError, signalAborted})),
       plans: plans.map(row => ({component: row.component, status: row.status, code: row.code}))}));
     console.log('bounded runtime diagnostics', JSON.stringify(await page.evaluate(() => ({
       ready: gdPrefsReady, status: gdUIComponentsStatus(),

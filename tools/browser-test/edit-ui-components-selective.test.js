@@ -94,6 +94,7 @@ async function cleanup(page, receipts) {
     if (!receipt.activation) continue;
     const undone = await undoConfiguration(page, receipt.activation);
     assert(undone.ok, 'compatibility cleanup restores each original root in LIFO order');
+    receipt.activation = null;
   }
   const functions = receipts.flatMap(receipt => receipt.manifest.functions);
   if (functions.length) {
@@ -125,6 +126,7 @@ async function cleanup(page, receipts) {
     await waitForLoadedUIComponents(page, loaded);
     await drainUIPlanReplies(planLoads.requests, replies, [], true);
     await planLoads.flush();
+    await serverCalls.settle();
   }
   let sequence = 0;
   page.on('pageerror', error => failures.push({kind: 'pageerror', text: error.message}));
@@ -166,6 +168,7 @@ async function cleanup(page, receipts) {
     await page.evaluate(async id => { await ensureSubtreeFor(id); gdShellSurface('build'); selectFn(id); }, picker.roots['picker-id']);
     await page.waitForFunction(id => selectedFnId === id, picker.roots['picker-id']);
     const leaf = await selectCreatedLeaf(page, picker, 'picker', 'picker-active-background');
+    await settle();
     await editPickerAndSettle(page, leaf, 'rgb(254, 215, 170)');
     await settle();
     phase = 'copy-recents';
@@ -233,6 +236,7 @@ async function cleanup(page, receipts) {
     assert(stale.ok, 'the first tab previews menu activation');
     const external = await activate(page, picker.roots['configuration-id'], settle);
     menuReceipt.activation = external;
+    await settle();
     const rejected = await api(page, 'POST', '/api/ui/configuration/apply', stale.request);
     assert(rejected.status === 409, 'a stale ordinary-root activation cannot overwrite the second tab');
     const index = await api(page, 'GET', '/api/graph/entities?scope=index');
@@ -255,7 +259,8 @@ async function cleanup(page, receipts) {
       ready: serverCalls.events.filter(event => event.kind === 'state' && event.phase === 'ready' && event.owned && event.hostReady).length,
     }));
     await page.evaluate(() => window.gdEditorRoot.dispose());
-    await cleanup(page, [receipts.pop()]);
+    await cleanup(page, [receipts[receipts.length - 1]]);
+    receipts.pop();
     const remaining = await api(page, 'GET', '/api/graph/entities?scope=index');
     const remainingIds = new Set(remaining.fns.map(row => row.id));
     assert([...picker.functions, ...recents.functions, ...inspector.functions, ...explorer.functions].every(row => remainingIds.has(row.id)),

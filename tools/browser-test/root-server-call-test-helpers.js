@@ -56,7 +56,7 @@ function rootServerDiagnostic(error, events) {
       states: events.filter(event => event.kind === 'state' && same(event))
         .map(({phase, owned, hostReady}) => ({phase, owned, hostReady}))};
   });
-  return {reason: reasons.find(([message]) => error?.message?.startsWith(message))?.[1] || 'other', calls};
+  return {reason: reasons.find(([message]) => typeof error?.message === 'string' && error.message.startsWith(message))?.[1] || 'other', calls};
 }
 
 async function observeRootServerCalls(page) {

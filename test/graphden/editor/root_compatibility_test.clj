@@ -1,4 +1,5 @@
-(ns graphden.editor.root-compatibility-test
+(ns ^:serial graphden.editor.root-compatibility-test
+  "Serial because compatibility boundary tests replace process-wide source and resolver Vars."
   (:require
     [cheshire.core :as json]
     [clojure.java.shell :as sh]

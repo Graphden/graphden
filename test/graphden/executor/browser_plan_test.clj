@@ -16,6 +16,7 @@
     [graphden.executor.registry.core :as registry]
     [graphden.executor.runtime :as rt]
     [graphden.packages.loader :as loader]
+    [graphden.packages.rebase :as rebase]
     [graphden.packages.records :as records]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.types :as record-types]
@@ -790,6 +791,37 @@
     (assert-differential! graph impls ids differential-cases)))
 
 
+(defn- module-entry-definitions
+  "The differential fixture exercises its listed entries, not every independent
+   bootstrap entry in a package. Follow real reference positions and relocate
+   the complete local closure, including qualified type aliases, together."
+  [module entries]
+  (let [{:keys [fns] module-ns :namespace}
+        (edn/read-string (slurp (str "resources/packages/app/" module "/fns.edn")))
+        by-name (into {} (map (juxt :name identity)) fns)
+        local-name (fn [reference]
+                     (when (and (keyword? reference)
+                                (or (nil? (namespace reference)) (= module-ns (namespace reference))))
+                       (let [local (keyword (name reference))]
+                         (when (contains? by-name local) local))))
+        reachable (loop [pending (set entries) seen #{}]
+                    (if-let [entry (first pending)]
+                      (let [definition (get by-name entry)
+                            _ (when-not definition (throw (ex-info "Missing differential entry" {:entry entry})))
+                            references (volatile! #{})]
+                        (rebase/rewrite-references definition
+                                                   (fn [reference]
+                                                     (when-let [local (local-name reference)]
+                                                       (vswap! references conj local))
+                                                     reference))
+                        (let [seen (conj seen entry)]
+                          (recur (into (disj pending entry) (remove seen @references)) seen)))
+                      seen))]
+    (rebase/rebase-bundle (mapv #(assoc % :namespace module-ns)
+                                (filter #(contains? reachable (:name %)) fns))
+                          (constantly "preview"))))
+
+
 (deftest real-account-menu-matches-jvm-and-json-input-boundary
   (let [loaded (loader/load-packages ["web"])
         base-defs (select-keys (:base-fn-defs loaded)
@@ -797,9 +829,9 @@
         type-defs (remove #(or (:parent %) (:parents %)) (:fn-defs loaded))
         primitive-rows (conj (into (vec type-defs) (map (fn [[n d]] (assoc d :name n))) base-defs)
                              (first (filter #(= :color-const (:name %)) (:fn-defs loaded))))
-        definitions (:fns (edn/read-string (slurp "resources/packages/app/ui-account-menu/fns.edn")))
-        impls (into {} (map (fn [[n d]] [n (:impl d)])) base-defs)
-        cases (account-menu/cases)]
+        cases (account-menu/cases)
+        definitions (module-entry-definitions "ui-account-menu" (map :entry cases))
+        impls (into {} (map (fn [[n d]] [n (:impl d)])) base-defs)]
     (testing "real common rows, dynamic native item count, all phase/keyboard transitions"
       (let [{:keys [graph ids]} (graph-of primitive-rows definitions)]
         (assert-differential! graph impls ids cases)))
@@ -837,7 +869,7 @@
 
 
 (deftest real-recents-matches-jvm-for-selection-dedupe-and-pin-transitions
-  (let [definitions (:fns (edn/read-string (slurp "resources/packages/app/ui-recents/fns.edn")))
+  (let [definitions (module-entry-definitions "ui-recents" (map :entry recents/cases))
         {:keys [graph impls ids]} (map-fixture definitions)]
     (assert-differential! graph impls ids recents/cases)))
 

@@ -110,7 +110,9 @@ const {waitForLoadedUIComponents, drainUIPlanReplies, observeUIPlanLoads} = requ
   const forcePolicyRetry = process.env.GRAPHDEN_POLICY_RETRY_PROOF === '1';
   const forcedPolicyRetries = new Set();
   const forcedCleanupPolicyRetries = new Set();
-  const proofComponents = new Set(['account-menu', 'tutorial-catalog']);
+  // The menu is supplied by the fail-closed root HOF. Only the legacy
+  // tutorial loader transparently retries this component-plan refusal.
+  const proofComponents = new Set(['tutorial-catalog']);
   await page.route(url => url.pathname.endsWith('/ui/configuration/plan'), async route => {
     const request = route.request();
     const component = request.method() === 'POST' ? request.postDataJSON()?.component : undefined;
@@ -164,16 +166,16 @@ const {waitForLoadedUIComponents, drainUIPlanReplies, observeUIPlanLoads} = requ
       'manifest cleanup does not issue per-function DELETE requests');
     await Promise.all(pendingReplies);
     assert.deepEqual(forcedCleanupPolicyRetries, proofComponents,
-      'both loaded components recover an exact policy refusal after the undo commit');
+      'the loaded legacy tutorial catalog recovers an exact policy refusal after the undo commit');
     if (forcePolicyRetry) {
       assert.deepEqual(forcedPolicyRetries, proofComponents,
-        'the targeted proof forced both known component policy refusals');
+        'the targeted proof forced the legacy component policy refusal');
       for (const component of proofComponents) {
         assert(planReplies.some(reply => reply.component === component && reply.status === 422 && reply.retryable),
           'the harness observed the ' + component + ' policy refusal');
       }
       assert(errors.filter(error => error.kind === 'console' && error.text.includes('status of 422')).length >= proofComponents.size,
-        'the browser emitted both network-console errors under test');
+        'the browser emitted the legacy network-console error under test');
     }
     const behaviorVerified = process.env.GRAPHDEN_COMPONENT_CLEANUP_ONLY !== '1';
     const unexpected = unexpectedCleanupErrors(unexpectedThemeRetryErrors(

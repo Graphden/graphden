@@ -47,19 +47,13 @@ function fixture() {
   await pending;
   assert(!f.executed.includes('stale branch'));
 
-  const denied = f.window.gdEditorRoot.reload();
-  f.requests[3].resolve({ok: false, json: async () => ({ok: false})});
-  await denied;
-  assert.equal(f.legacy.dataset.gdRootAdapter, undefined);
-  assert(!f.executed.includes('stale branch'));
-
   const legacy = f.window.gdEditorRoot.reload();
-  f.reply(4, true, null);
+  f.reply(3, true, null);
   await legacy;
   assert.equal(f.legacy.dataset.gdRootAdapter, 'legacy');
   const callbacks = new Map([['initial', () => 'initial'], ['update', input => input.get('state')], ['view', () => 'replacement view']]);
   const components = f.window.gdEditorRoot.reload();
-  f.requests[5].resolve({ok: true, json: async () => ({ok: true, 'argument-name': null,
+  f.requests[4].resolve({ok: true, json: async () => ({ok: true, 'argument-name': null,
     'component-selection-id': '00000000-0000-0000-0000-000000000001',
     plan: {label: 'components', output: new Map([['legacy', true], ['account-menu', callbacks], ['recents', callbacks]])}})});
   await components;
@@ -85,14 +79,37 @@ function fixture() {
   const secondSelection = '00000000-0000-0000-0000-000000000002';
   const componentsReply = selection => ({ok: true, 'argument-name': null, 'component-selection-id': selection,
     plan: {output: new Map([['legacy', true], ['recents', callbacks]])}});
-  f.requests[6].resolve({ok: true, json: async () => componentsReply(secondSelection)});
+  f.requests[5].resolve({ok: true, json: async () => componentsReply(secondSelection)});
   await reload;
   assert.equal(root.acceptComponent(selected), false, 'old facade cannot accept after a new root');
   root.acceptComponent(root.componentNow('recents'));
   root.releaseComponent(selected);
   assert.equal(root.componentIdentity('recents'), secondSelection, 'stale A cannot replace or release installed B');
+  const beforeDenial = root.componentNow('recents');
+  const executionCount = f.executed.length;
+  const denied = root.reload();
+  f.requests[6].resolve({ok: false, status: 422,
+    json: async () => ({ok: false, code: 'policy-refresh-required', retryable: true})});
+  await denied;
+  assert.equal(f.requests.length, 7, 'a root policy refusal does not transparently retry');
+  assert.equal(f.executed.length, executionCount, 'a refused root never executes a plan');
+  assert.equal(f.legacy.dataset.gdRootAdapter, undefined);
+  assert.equal(root.componentNow('recents'), null, 'a refused root exposes no callbacks');
+  assert.equal(root.componentIdentity('recents'), null, 'a refused root exposes no host identity');
+  await assert.rejects(root.component('recents'), /Editor root component is unavailable/);
+  assert.equal(root.acceptComponent(beforeDenial), false);
+  assert.throws(() => beforeDenial.run('view'), /Editor root changed/);
+  const recovered = root.reload();
+  f.requests[7].resolve({ok: true, json: async () => componentsReply(secondSelection)});
+  await recovered;
+  const fresh = root.componentNow('recents');
+  assert.equal(fresh.run('view'), 'replacement view', 'an explicit reload installs freshly authorized callbacks');
+  assert(root.acceptComponent(fresh));
+  assert.equal(root.componentIdentity('recents'), secondSelection);
+  assert.equal(root.acceptComponent(beforeDenial), false, 'recovery cannot revive a facade from before the denial');
+  assert.throws(() => beforeDenial.run('view'), /Editor root changed/);
   const custom = root.reload();
-  f.requests[7].resolve({ok: true, json: async () => componentsReply(null)});
+  f.requests[8].resolve({ok: true, json: async () => componentsReply(null)});
   await custom;
   assert(root.acceptComponent(root.componentNow('recents')));
   assert.equal(root.componentIdentity('recents'), null, 'custom root has no selection witness even with a valid ready host');

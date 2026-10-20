@@ -219,7 +219,9 @@
   "Install `(fn [snapshot-storage] (fn [fn-row & [permissions]] ...))`.
    Pass true for the selected configuration's execute permission, or a fixed
    `{:write? true}` for the template destination's fresh write authorization.
-   These extra permissions never relax read/source visibility. The policy
+   `{:execute? true :server-target? true}` authorizes a terminal target
+   identity plus private server-side closure inspection, never source export.
+   Other extra permissions never relax read/source visibility. The policy
    must authorize source disclosure before the reader loads bindings/literals.
    Its grant reads belong to the same immutable database snapshot."
   [f]

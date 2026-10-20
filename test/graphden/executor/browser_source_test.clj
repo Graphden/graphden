@@ -3,6 +3,7 @@
     [clojure.test :refer [deftest is]]
     [graphden.executor.browser-contracts :as contracts]
     [graphden.executor.browser-source :as source]
+    [graphden.executor.capabilities :as capabilities]
     [graphden.packages.records.ids :as ids]
     [graphden.storage.bounded-query :as bounded]
     [graphden.storage.protocol.core :as sp]))
@@ -230,3 +231,44 @@
              (try (source/collect-component-identities storage [(random-uuid)] (constantly nil))
                   (catch clojure.lang.ExceptionInfo error (:reason (ex-data error))))))
       (is (= [[:read :fn id]] @calls)))))
+
+
+(deftest explicit-server-call-target-is-terminal-before-body-or-capture-reads
+  (let [root (random-uuid)
+        target (random-uuid)
+        primitive capabilities/server-call-id
+        slot capabilities/server-call-slot-id
+        fn-type (ids/primitive-fn-id :fn)
+        text-type (ids/primitive-fn-id :text)
+        calls (atom [])
+        authorized (atom {})
+        tables {:fn (keyed [{:id root :parent-ids [primitive]}
+                            {:id primitive :parent-ids [] :return-type-fn-id text-type}
+                            {:id fn-type :parent-ids []}
+                            {:id text-type :parent-ids []}
+                            {:id target :parent-ids [(random-uuid)]}])
+                :slot {slot {:id slot :name "func" :type-fn-id fn-type}}
+                :fn-slot (keyed [{:id (random-uuid) :fn-id primitive :slot-id slot :position 0}])
+                :binding (keyed [{:id (random-uuid) :fn-id root :slot-id slot :ref-fn-id target}
+                                 {:id (random-uuid) :fn-id target :value-present true :value "server capture"}])}
+        graph (source/collect-client-closure (fixture-storage tables calls) [root]
+                                             (fn [row & [permissions]]
+                                               (swap! authorized assoc (:id row) permissions)))]
+    (is (= {:execute? true :server-target? true} (get @authorized target)))
+    (is (contains? (:identity-target-ids graph) target))
+    (is (= [target] (mapv :ref-fn-id (:server-bindings graph))))
+    (is (not-any? #(= target (:fn-id %)) (:bindings graph)))
+    (is (not-any? (fn [[operation entity where]]
+                    (and (= operation :query) (contains? #{:binding :fn-slot} entity)
+                         (some #{target} (:fn-id where)))) @calls))
+    (let [ordinary-slot (random-uuid)
+          junction (random-uuid)
+          binding (random-uuid)
+          mixed (-> tables
+                    (assoc-in [:fn target :parent-ids] [])
+                    (assoc-in [:slot ordinary-slot] {:id ordinary-slot :name "ordinary" :type-fn-id text-type})
+                    (assoc-in [:fn-slot junction] {:id junction :fn-id root :slot-id ordinary-slot :position 1})
+                    (assoc-in [:binding binding] {:id binding :fn-id root :slot-id ordinary-slot :ref-fn-id target}))]
+      (is (= :mixed-server-target
+             (try (source/collect-client-closure (fixture-storage mixed (atom [])) [root] (constantly nil))
+                  (catch clojure.lang.ExceptionInfo error (:reason (ex-data error)))))))))

@@ -2,7 +2,7 @@
   "Exercise authorization and response retirement independently of transport."
   (:require
     [clojure.test :refer [deftest is]]
-    [graphden.crud.fn-execution :as execution]
+    [graphden.crud.fn-execution.persist :as persist]
     [graphden.editor.components :as components]
     [graphden.executor.browser-plan :as wire]
     [graphden.executor.browser-server :as server]
@@ -22,6 +22,7 @@
         calls (atom [])
         snapshots (atom 0)
         allowed? (atom true)
+        fresh-execute? (atom true)
         evidence (atom "source/binding/captures/contract")
         on-execute (atom (fn [] nil))
         storage (assoc (remote/from-bundle {:fn [{:id target}]}) :branch-id branch)
@@ -33,36 +34,42 @@
         request {:headers {"authorization" "Bearer first-session"}}
         captured (fn [& _]
                    {:evidence @evidence :calls {site target}
-                    :snapshot {} :targets {target {:input-type {:query :text}
-                                                   :output-type {:label :text :branch-name :text}}}})]
+                    :snapshot {:graph {:fns [{:id target}]}} :targets {target {:input-type {:query :text}
+                                                                               :output-type {:label :text :branch-name :text}}}})]
     (reset! @(ns-resolve 'graphden.executor.browser-server 'issuances) {})
     (binding [tenancy/*current-org* "team"
-              tenancy/*current-principal* {:authenticated? true :user-id "owner-a"}
+              tenancy/*current-principal* {:authenticated? true :user-id "owner-a" :role-ids ["reader-role"]}
               runtime/*execute-authorized* true]
       (with-redefs-fn
         {(ns-resolve 'graphden.executor.browser-server 'capture-client) captured
          #'source/with-snapshot (fn [st consume]
                                   (swap! snapshots inc)
-                                  (consume st (constantly nil)))
+                                  (consume st (fn [row & [permissions]]
+                                                (when (and (= target (:id row)) (:execute? permissions)
+                                                           (not @fresh-execute?))
+                                                  (throw (ex-info "Revoked" {:type :authz/forbidden}))))))
          #'snapshot/export-snapshot (fn [captured _ _ _]
                                       (get-in captured [:server-plan-options :server-descriptors]))
          #'snapshot/capture-context-policy (fn [_] {})
          #'components/assert-current-policy! (fn [_] nil)
          #'recheck/call-with-ctx-slices (fn [_ thunk] (thunk))
-         #'execution/apply-execute
-         (fn [exec-ctx parsed row]
-           (swap! calls conj [:run (:id row) runtime/*execute-authorized*
-                              (:allowed-effects exec-ctx) (:args parsed)])
+         (ns-resolve 'graphden.executor.browser-server 'read-only-context)
+         (fn [exec-ctx _ _] (assoc exec-ctx :allowed-effects #{:db}))
+         #'persist/redact-outcome (fn [_ result] result)
+         #'runtime/execute
+         (fn [exec-ctx target arguments]
+           (swap! calls conj [:run target runtime/*execute-authorized*
+                              (:allowed-effects exec-ctx) arguments])
+           (runtime/record-effect! :db)
            (@on-execute)
-           {:status :succeeded :runtime-effects #{:db}
-            :result {:label "Branch" :branch-name "main" :secret "never serialize"}})}
+           {:label "Branch" :branch-name "main" :secret "never serialize"})}
         (fn []
           (let [descriptors (server/export-client-plan ctx storage (constantly nil) {}
                                                        {:root (first site)} request {})
                 descriptor (get descriptors site)
                 input {:descriptor descriptor :input (wire/encode-value {:query ""})}]
             (f {:ctx ctx :request request :input input :calls calls :snapshots snapshots
-                :allowed? allowed? :evidence evidence :on-execute on-execute})))))))
+                :allowed? allowed? :fresh-execute? fresh-execute? :evidence evidence :on-execute on-execute})))))))
 
 
 (deftest source-issuance-does-not-grant-execution-or-export-captures
@@ -132,3 +139,38 @@
       (let [result (server/invoke-current ctx request input)]
         (is (false? (:ok result)))
         (is (nil? (:value result)))))))
+
+
+(deftest fresh-target-source-policy-vetoes-a-memoized-execute-guard
+  (fixture
+    (fn [{:keys [ctx request input fresh-execute? on-execute]}]
+      ;; The request-local execute guard continues to allow. Only a newly
+      ;; created snapshot policy can see the target's revoked execute grant.
+      (reset! on-execute #(reset! fresh-execute? false))
+      (let [result (server/invoke-current ctx request input)]
+        (is (= 403 (:http-status result)))
+        (is (nil? (:value result)))))))
+
+
+(deftest fresh-auth-subject-and-short-circuiting-request-scope-retire-responses
+  (fixture
+    (fn [{:keys [ctx request input on-execute]}]
+      (let [roles (atom ["reader-role"])
+            scopes (atom 0)
+            ctx (assoc ctx :request-scope
+                       (fn [_ received thunk]
+                         (is (identical? request received))
+                         (swap! scopes inc)
+                         (binding [tenancy/*current-principal*
+                                   (assoc tenancy/*current-principal* :role-ids @roles)]
+                           (thunk))))]
+        (reset! on-execute #(reset! roles []))
+        (let [result (server/invoke-current ctx request input)]
+          (is (false? (:ok result)))
+          (is (nil? (:value result)))
+          (is (= 2 @scopes))))))
+  (fixture
+    (fn [{:keys [ctx request input calls]}]
+      (let [ctx (assoc ctx :request-scope (fn [& _] {:status 403 :headers {} :body "refused"}))]
+        (is (false? (:ok (server/invoke-current ctx request input))))
+        (is (empty? @calls))))))

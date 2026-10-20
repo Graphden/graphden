@@ -2,18 +2,21 @@
   "Opaque, short-lived server callable descriptors. Every invocation resolves
    the original source binding under fresh principal/session/branch policy."
   (:require
+    [clojure.set :as set]
+    [clojure.tools.logging :as log]
     [graphden.accounts.crypto :as crypto]
     [graphden.accounts.provider :as accounts]
     [graphden.auth.provider :as auth]
-    [graphden.crud.fn-execution :as execution]
     [graphden.crud.fn-execution.persist :as persist]
     [graphden.editor.components :as components]
     [graphden.executor.browser-plan :as wire]
+    [graphden.executor.browser-server-execution :as server-execution]
     [graphden.executor.browser-server-source :as server-source]
     [graphden.executor.browser-server-values :as values]
     [graphden.executor.browser-snapshot :as snapshot]
     [graphden.executor.browser-source :as source]
     [graphden.executor.capabilities :as capabilities]
+    [graphden.executor.compile-eager :as eager]
     [graphden.executor.compile-runtime :as runtime]
     [graphden.executor.compile.bindings :as bindings]
     [graphden.executor.compile.lookups :as lookups]
@@ -27,7 +30,6 @@
 
 (def ^:private lifetime-ms 120000)
 (def ^:private max-issuances 2048)
-(def ^:private wall-ms 750)
 (defonce ^:private issuances (atom {}))
 
 
@@ -39,12 +41,33 @@
 
 (defn- scope
   [ctx request]
-  {:principal tenancy/*current-principal*
+  {:principal (some-> tenancy/*current-principal* (update :role-ids set))
    :org (tenancy/current-org)
    :branch (versioned/current-branch-id (:storage ctx))
    ;; This fingerprint never leaves server memory. Only the random issuance
    ;; identity is serialized; a browser cannot correlate auth carrier hashes.
    :session (some-> (accounts/request-token request) crypto/sha256-hex)})
+
+
+(defn- call-with-fresh-scope
+  "Re-enter the trusted original auth scope. A short-circuiting 403/421/429
+   cannot manufacture a successful internal invocation."
+  [ctx request f]
+  (if-let [request-scope (:request-scope ctx)]
+    (let [result (volatile! ::not-called)
+          receipt (str (random-uuid))
+          response (request-scope
+                     ctx request
+                     (fn []
+                       (vreset! result (f))
+                       {:status 204 :headers {"X-Graphden-Server-Scope" receipt} :body ""}))]
+      (when-not (and (not= ::not-called @result) (= 204 (:status response))
+                     (= receipt (get-in response [:headers "X-Graphden-Server-Scope"])))
+        (reject! :server-scope-changed))
+      @result)
+    (if (tenancy/tenancy-addon-active?)
+      (reject! :server-scope-unavailable)
+      (f))))
 
 
 (defn- normalized-graph
@@ -150,43 +173,77 @@
                    (= (:target issued) (get-in captured [:calls (:site issued)]))
                    (= (:epoch issued) (context/invalidation-epoch ctx)))
       (reject! :server-binding-changed))
+    (let [row (some #(when (= (:target issued) (:id %)) %) (get-in captured [:snapshot :graph :fns]))]
+      (when-not row (reject! :server-target-missing))
+      (authorize! row {:execute? true :server-target? true}))
     captured))
+
+
+(defn- read-only-context
+  [ctx storage graph]
+  ;; Compile exactly the source closure that was just certified, rather than
+  ;; borrowing a mutable whole-branch registry between proof and invocation.
+  (let [index (assoc (lookups/build-lookups graph) :base-fns (:base-fns ctx))
+        allowed (cond-> #{:db}
+                  (:allowed-effects ctx) (set/intersection (set (:allowed-effects ctx)))
+                  (not= tenancy/public-org (tenancy/current-org))
+                  (set/intersection (set (runtime/cloud-allowed-effects-for (tenancy/current-org)))))]
+    (assoc ctx :storage storage :allowed-effects allowed
+           :graph-cache (atom graph) :compiled-registry (atom (eager/compile-all index))
+           :registry-stale? (atom false))))
+
+
+(defn- run-certified
+  [ctx request issued input]
+  (current-auth! ctx request (:scope issued))
+  (execute-guard! ctx (:target issued))
+  (let [policy (snapshot/capture-context-policy ctx)]
+    (source/with-snapshot
+      (:storage ctx)
+      (fn [storage authorize!]
+        (components/assert-current-policy! storage)
+        (let [captured (current-call! ctx storage authorize! policy issued)
+              target (:target issued)
+              graph (get-in captured [:targets target :graph])
+              argument (values/input (get-in issued [:contract :input-type]) input)
+              exec-ctx (read-only-context ctx storage graph)
+              trace (atom #{})]
+          (binding [runtime/*execute-authorized* false runtime/*effect-trace* trace
+                    runtime/*allowed-effects* (:allowed-effects exec-ctx)
+                    runtime/*path-trace* nil]
+            (runtime/with-fresh-call-cache
+              (fn []
+                (let [outcome (persist/redact-outcome
+                                target {:status :succeeded
+                                        :result (runtime/execute exec-ctx target {:input argument})})]
+                  (when (:tainted? outcome) (reject! :server-execution-failed))
+                  ;; Materialize under the SAME effect/deadline/cache scope,
+                  ;; before this worker can release its own snapshot.
+                  (let [encoded (wire/encode-result
+                                  (values/project (get-in issued [:contract :output-type]) (:result outcome)))]
+                    (runtime/check-cancel!)
+                    (when (not-every? #{:db} @trace) (reject! :server-execution-failed))
+                    {:ok true :value encoded}))))))))))
 
 
 (defn- execute-current
   [ctx request issued input]
   (current-auth! ctx request (:scope issued))
-  (execute-guard! ctx (:target issued))
-  (let [policy (snapshot/capture-context-policy ctx)
-        result
+  (let [result (server-execution/run
+                 ctx #(call-with-fresh-scope ctx request (fn [] (run-certified ctx request issued input))))]
+    (call-with-fresh-scope
+      ctx request
+      (fn []
+        (current-auth! ctx request (:scope issued))
+        (execute-guard! ctx (:target issued))
+        ;; A new transaction and a newly resolved auth subject are essential:
+        ;; the worker snapshot cannot observe a grant, role or source revocation.
         (source/with-snapshot
           (:storage ctx)
           (fn [storage authorize!]
             (components/assert-current-policy! storage)
-            (current-call! ctx storage authorize! policy issued)
-            (let [target (:target issued)
-                  row (sp/read-entity storage :fn target)
-                  argument (values/input (get-in issued [:contract :input-type]) input)]
-              (binding [runtime/*execute-authorized* false
-                        persist/*max-execution-wall-ms* wall-ms]
-                (execution/apply-execute
-                  (assoc ctx :storage storage :allowed-effects #{:db})
-                  {:fn-id target :args {:input argument} :persist? false :timeout-ms wall-ms}
-                  row)))))]
-    (when-not (and (= :succeeded (:status result)) (not (:tainted? result))
-                   (every? #{:db} (:runtime-effects result)))
-      (reject! :server-execution-failed))
-    (current-auth! ctx request (:scope issued))
-    (execute-guard! ctx (:target issued))
-    ;; A new transaction is essential: the first repeatable-read snapshot
-    ;; cannot observe a grant, graph or capture edit committed during execution.
-    (source/with-snapshot
-      (:storage ctx)
-      (fn [storage authorize!]
-        (components/assert-current-policy! storage)
-        (current-call! ctx storage authorize! (snapshot/capture-context-policy ctx) issued)))
-    {:ok true :value (wire/encode-result
-                       (values/project (get-in issued [:contract :output-type]) (:result result)))}))
+            (current-call! ctx storage authorize! (snapshot/capture-context-policy ctx) issued)))))
+    result))
 
 
 (defn invoke-current
@@ -203,5 +260,8 @@
         (reject! :server-descriptor-expired))
       (recheck/call-with-ctx-slices ctx #(execute-current ctx request issued (:input input))))
     (catch Exception error
+      (log/warn "Read-only server call refused"
+                {:type :browser-server/refused
+                 :reason (if (= :authz/forbidden (:type (ex-data error))) :forbidden :unavailable)})
       {:ok false :reason "Server call is unavailable."
        :http-status (if (= :authz/forbidden (:type (ex-data error))) 403 422)})))

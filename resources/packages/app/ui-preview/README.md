@@ -578,3 +578,31 @@ pan/zoom only reanchors cached hosts. Collapsing, Escape, host reaping and auth
 changes dispose nested renderers/styles and reject late replies. Seal editability,
 checked/disabled state, writes and the nonempty binder-blocking reason stay native.
 Constraint display messages likewise never decide whether a literal is valid.
+
+## Explicit read-only server calls
+
+`core.system/server-call` accepts an ordinary server callable and typed input.
+The first browser implementation supports a separate async callable entry with
+statically closed server configuration. Its target closure must consist only
+of checked pure operations and the active-branch reader. Dynamic captures,
+callable inputs, nested network calls in synchronous expressions, and targets
+also reached through ordinary browser edges are refused.
+
+Export stops at the server binding and supplies an opaque descriptor. Neither
+the target implementation nor its configured captures are part of the browser
+plan. Source access and execution permission are separate. Every invocation
+checks the original root, binding, target, contract, captures, authenticated
+session, organization and branch again. The response also requires a newly
+resolved authorization subject and a fresh source/execute policy.
+
+`POST /api/ui/server-call` accepts only `{descriptor, input}`, with input in the
+runtime's tagged data format. Descriptors expire after two minutes and are
+local to the issuing executor. The server validates input against a closed
+contract and recursively projects result records before encoding them, so
+undeclared fields cannot leave through an otherwise valid result.
+
+The bounded worker owns its read-only transaction until it actually exits,
+including after a caller timeout. The browser lifetime exposes loading, ready,
+error and cancelled states, and discards replies from an older root or session,
+including replies whose JSON parsing finishes late. Cancellation stops waiting;
+it does not promise to undo a completed mutation. No automatic retry is made.

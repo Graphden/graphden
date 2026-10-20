@@ -197,20 +197,22 @@
   {:name :account-menu-view :parent :zipmap
    :args {:keys [{:value :frame} {:value :common-rows} {:value :common-tree} {:value :styles} {:value :active} {:value :phase} {:value :handled} {:value :theme-tokens} {:value :menu-tokens} {:value :motion}]
           :vals [:account-menu-frame :_account-menu-common-rows :account-menu-common-tree :account-menu-styles :account-menu-active-index :account-menu-phase :_account-menu-handled :_theme-tokens :_account-menu-tokens :_account-menu-motion]}}
+  {:name :_account-query-input :type {:query :text}}
+  {:name :_account-query-result :type {:label :text :branch-name :text}}
   {:name :_account-query-text :parent :get :return-type :text
-   :args {:coll {:as :input :type {:query :text}} :key {:value :query} :default ""}}
+   :args {:coll {:as :input :type :_account-query-input} :key {:value :query} :default ""}}
   {:name :_account-query-matches :parent :str-contains?
    :args {:string :current-branch-name :substring :_account-query-text}}
   {:name :_account-query-branch :parent :if :return-type :text
    :args {:test :_account-query-matches :then :current-branch-name :else ""}}
   {:name :_account-menu-branch-query :parent :zipmap :lambda-params [:input]
    :description "Read-only server query. The label is configured here and is never exported as a browser capture."
-   :return-type {:label :text :branch-name :text}
+   :return-type :_account-query-result
    :args {:keys [{:value :label} {:value :branch-name}]
           :vals [{:value "Branch"} :_account-query-branch]}}
   {:name :account-menu-query :parent :server-call :lambda-params [:input]
    :description "Explicit async account-menu query; its server HOF remains on the server."
-   :return-type {:label :text :branch-name :text}
+   :return-type :_account-query-result
    :args {:func {:ref :_account-menu-branch-query}
-          :arg {:as :input :type {:query :text}}}}
+          :arg {:as :input :type :_account-query-input}}}
 ]}

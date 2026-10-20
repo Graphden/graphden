@@ -5,6 +5,7 @@
     [graphden.executor.registry.core :as registry]
     [graphden.packages.records.ids :as ids]
     [graphden.types.check :as check]
+    [graphden.types.check.execution :as execution]
     [graphden.types.core :as types]))
 
 
@@ -171,3 +172,23 @@
                           [:literal-ref-map-vector [{:ref :server}]]]]
     (check/check-fn-def! {:name name :parent :const :args {:value {:value payload}}})
     (is (= #{:jvm-server :browser-main} (:execution (registry/rich-type-of name))))))
+
+
+(deftest explicit-server-call-proves-remote-support-without-local-target-support
+  (let [shape [:fn {:arg :text} :text :any #{:jvm-server}]
+        root {:fn-id (ids/fn-id "core.system" :server-call)
+              :args {:func shape :arg :text}
+              :execution #{:jvm-server :browser-main}}
+        binding {:func {:ref :reader :type shape}}]
+    (is (= #{:jvm-server :browser-main}
+           (execution/derive root binding (constantly {:args {:input :text}
+                                                       :lambda-params [:input]
+                                                       :return :text :execution #{:jvm-server}}))))
+    (is (= :unknown
+           (execution/derive root binding (constantly {:args {:input :text}
+                                                       :lambda-params [:input]
+                                                       :return :text :execution :unknown}))))
+    (is (= :unknown
+           (execution/derive root binding (constantly {:args {:input :text}
+                                                       :lambda-params [:input]
+                                                       :return :text :execution #{:browser-main}}))))))

@@ -12,6 +12,7 @@
     [graphden.executor.registry.core :as registry]
     [graphden.packages.owned :as owned]
     [graphden.packages.records.ids :as ids]
+    [graphden.storage.protocol.core :as sp]
     [graphden.types.check.provenance :as provenance]))
 
 
@@ -60,7 +61,12 @@
   "Read/check the complete server closure inside the caller's snapshot.
    Returns server-only evidence and a frozen input/output contract."
   [ctx storage authorize! policy target]
-  (let [graph (source/collect-closure storage [target] authorize!)
+  (let [row (first (sp/query-bounded-entities storage :fn {:id target} 1))
+        _ (when-not row (reject! :server-target-missing))
+        ;; Only the target execute grant authorizes this private inspection.
+        ;; Dependency rows never enter the browser source/export graph.
+        _ (authorize! row {:execute? true :server-target? true})
+        graph (source/collect-closure storage [target] (constantly nil))
         signature (get-in policy [:rich :by-id target])
         captured {:graph graph :namespaces (source/collect-namespaces storage graph)}
         natives (filter #(and (empty? (:parent-ids %)) (:return-type-fn-id %)) (:fns graph))]
@@ -79,7 +85,7 @@
       ;; Fresh reconstruction and frozen marker provenance must both permit
       ;; every row. A signature copied from another source is insufficient.
       (snapshot/validate-source! captured target policy)
-      {:target target :signature signature :input-type input-type :output-type output-type
+      {:target target :graph graph :signature signature :input-type input-type :output-type output-type
        :fingerprint (provenance/fingerprint-data
                       {:graph (into {} (map (fn [[k rows]] [k (vec (sort-by (comp str :id) rows))])) graph)
                        :contract [input-type output-type]

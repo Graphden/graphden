@@ -2,6 +2,7 @@
   "Bounded source collection for personal editor components. Source guards run
    before bindings are read; every database read uses one decorated snapshot."
   (:require
+    [clojure.set :as set]
     [graphden.executor.browser-contracts :as contracts]
     [graphden.executor.capabilities :as capabilities]
     [graphden.executor.compile.bindings :as bindings]
@@ -18,6 +19,21 @@
       Connection)))
 
 
+(def ^:dynamic *snapshot-check*
+  "Optional cooperative cancellation/deadline check for an owned snapshot."
+  nil)
+
+
+(def ^:dynamic *statement-timeout-ms*
+  "Internal read-only worker bound; never supplied by browser request data."
+  nil)
+
+
+(defn- check-snapshot!
+  []
+  (when *snapshot-check* (*snapshot-check*)))
+
+
 (def ^:private max-functions 2048)
 (def ^:private max-rows 16384)
 (def ^:private batch-size 64)
@@ -31,6 +47,7 @@
 
 (defn- read-rows
   [storage entity ids]
+  (check-snapshot!)
   (if (satisfies? sp/StorageBatchCRUD storage)
     (vals (sp/read-entities storage entity ids))
     (keep #(sp/read-entity storage entity %) ids)))
@@ -38,6 +55,7 @@
 
 (defn- limited-query
   [storage entity where budget]
+  (check-snapshot!)
   (when-not (satisfies? sp/StorageBoundedQuery storage)
     (reject! :bounded-storage-unsupported))
   (try
@@ -95,6 +113,8 @@
                                           (:ref-id %))) classified)
               remaining (remove seen (concat ordinary (keep :ref-fn-id (:list-items graph))
                                              (remove terminal refs)))]
+          (when (seq (set/intersection server-targets seen))
+            (reject! :mixed-server-target))
           (if (seq remaining)
             (recur (set remaining) seen graph)
             (let [targets (set (remove seen terminal))
@@ -105,9 +125,14 @@
               ;; Identity targets provide only authorized names for checker
               ;; reconstruction. Never read their slots, bindings or literals.
               (doseq [row rows]
-                (if (contains? contracts/component-identities (:id row))
+                (cond
+                  (contains? server-targets (:id row))
+                  (authorize! row {:execute? true :server-target? true})
+
+                  (contains? contracts/component-identities (:id row))
                   (authorize! row {:identity-only? true})
-                  (authorize! row)))
+
+                  :else (authorize! row)))
               (-> graph
                   (update :fns into rows)
                   (cond-> (or manifest? server?) (assoc :identity-target-ids targets)
@@ -216,6 +241,12 @@
               resolution/*graph-load-memo* (atom {})
               branch-local/*storage-caches-override* (atom {})]
       (jdbc/with-transaction [connection datasource {:isolation :repeatable-read :read-only true}]
+                             (when *statement-timeout-ms*
+                               ;; PostgreSQL configuration RPC; value remains a parameter.
+                               (jdbc/execute! connection
+                                              ["select set_config('statement_timeout', ?, true)"
+                                               (str *statement-timeout-ms*)]))
+                             (check-snapshot!)
                              (let [storage (tx/with-connection storage connection)]
                                (f storage (tenancy/browser-source-policy storage)))))))
 

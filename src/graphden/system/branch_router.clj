@@ -112,6 +112,9 @@
       ;; Inherit the off-record auth seam so per-branch execution
       ;; authenticates through the same provider as the base context.
       (:auth-provider base-ctx) (assoc :auth-provider (:auth-provider base-ctx))
+      ;; Explicit server-call reauthorization re-enters the original request
+      ;; scope to refresh organization membership, roles and its grant memo.
+      (:request-scope base-ctx) (assoc :request-scope (:request-scope base-ctx))
       (:http-host-limits base-ctx) (assoc :http-host-limits (:http-host-limits base-ctx))
       ;; Inherit the per-namespace execute guard (§4.2) — branch execution
       ;; must enforce the same grants as the base context.

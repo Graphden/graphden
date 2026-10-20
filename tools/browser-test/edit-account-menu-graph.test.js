@@ -12,9 +12,16 @@ const branch = 'account-menu-' + process.pid + '-' + Date.now().toString(36);
   await waitForServerHealthy();
   const {browser, page} = await newContext(chromium, {boot: false});
   const errors = [];
+  const reviewPlanResponses = [];
   let prepared;
   let namespaceBaseline;
   page.on('pageerror', (error) => errors.push(error.message));
+  page.on('response', async (response) => {
+    if (new URL(response.url()).pathname !== '/ui-preview/plan') return;
+    let planOk = null;
+    try { planOk = (await response.json()).ok !== false; } catch (_) { /* failure state is still visible below */ }
+    reviewPlanResponses.push({status: response.status(), planOk});
+  });
   page.on('dialog', (dialog) => dialog.accept());
   try {
     namespaceBaseline = await captureFixtureNamespaces(page);
@@ -27,7 +34,20 @@ const branch = 'account-menu-' + process.pid + '-' + Date.now().toString(36);
       canvas: getComputedStyle(document.body).getPropertyValue('--bg').trim(),
     }));
     await page.goto(prepared.url);
-    await page.waitForFunction(() => window.gdShellMenuGraph?.ready, null, {timeout: 120000});
+    try {
+      await page.waitForFunction(() => window.gdShellMenuGraph?.ready, null, {timeout: 120000});
+    } catch (error) {
+      const state = await page.evaluate(() => ({
+        menuPresent: Boolean(window.gdShellMenuGraph),
+        menuReady: Boolean(window.gdShellMenuGraph?.ready),
+        menuRuntime: Boolean(window.gdShellMenuGraph?.runtime),
+        authenticated: typeof isAuthenticated === 'function' && isAuthenticated(),
+        accountsAuthed: typeof accountsAuthed !== 'undefined' && Boolean(accountsAuthed),
+        branchMatches: typeof getCurrentBranchName === 'function'
+          && new URLSearchParams(location.search).get('branch') === getCurrentBranchName(),
+      })).catch(() => ({pageUnavailable: true}));
+      throw new Error('account menu review readiness: ' + JSON.stringify({state, reviewPlanResponses}), {cause: error});
+    }
     assert(await page.evaluate(() => getComputedStyle(document.body).getPropertyValue('--gd-flow').trim()) === baseTheme.accent,
       'default graph preserves the current personal theme');
     const themed = await page.evaluate(async () => {

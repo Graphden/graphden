@@ -26,7 +26,7 @@
     window.gdShellMenuGraph.ready = false;
     if (typeof gdToast === 'function') gdToast('Menu graph unavailable: ' + error.message);
   }
-  function view() { return runtime.run('view', {state, theme, server}); }
+  function view() { return runtime.run('view', review ? {state, theme} : {state, theme, server}); }
   function themeTokens(value) {
     if (!(value instanceof Map)) throw new Error('Invalid graph theme');
     const tokens = Object.fromEntries(value);

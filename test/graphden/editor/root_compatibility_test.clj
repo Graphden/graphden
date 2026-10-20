@@ -67,17 +67,42 @@
     (compatibility/adapt-plan {} ::storage ::authorize ::policy root root-plan)))
 
 
-(deftest selected-personal-view-is-invoked-through-the-root-field
-  (let [plan (adapt {:account-menu {:view target}})
-        script (str "const g=require('./resources/packages/app/ui-preview/browser-runtime.js');let s='';"
+(defn- run-personal-view
+  [plan]
+  (let [script (str "const g=require('./resources/packages/app/ui-preview/browser-runtime.js');let s='';"
                     "process.stdin.on('data',x=>s+=x);process.stdin.on('end',()=>{"
                     "const r=g.createRuntime(JSON.parse(s)).run('root');"
-                    "process.stdout.write(g.invoke(r.get(g.keyword('view')),new Map([[g.keyword('state'),'personal copy']])));});")
-        result (sh/sh "node" "-e" script :in (json/generate-string plan))]
+                    "process.stdout.write(g.invoke(r.get(g.keyword('view')),new Map([[g.keyword('state'),'personal copy']])));});")]
+    (sh/sh "node" "-e" script :in (json/generate-string plan))))
+
+
+(deftest selected-personal-view-is-invoked-through-the-root-field
+  (let [plan (adapt {:account-menu {:view target}})
+        result (run-personal-view plan)]
     (is (zero? (:exit result)) (:err result))
     (is (= "personal copy" (:out result)))
     (is (= old (get-in root-plan [:functions 0 :args 2 :expr :fn])) "Input plan stays immutable")
     (is (not= old (get-in plan [:functions 0 :args 2 :expr :fn])))))
+
+
+(deftest required-hof-captures-are-projected-from-the-allowed-envelope
+  (let [plan (with-redefs [personal-plan (assoc-in personal-plan [:inputs (str target) :accepted] [])]
+               (adapt {:account-menu {:view target}}))
+        result (run-personal-view plan)
+        wrapper-id (get-in plan [:functions 0 :args 2 :expr :fn])
+        wrapper (first (filter #(= wrapper-id (:id %)) (:functions plan)))]
+    (is (= ["state"] (mapv :name (:env wrapper))))
+    (is (zero? (:exit result)) (:err result))
+    (is (= "personal copy" (:out result)))))
+
+
+(deftest required-captures-outside-the-legacy-abi-remain-refused
+  (with-redefs [personal-plan (assoc-in personal-plan [:inputs (str target)] {:accepted [] :required ["vals"]})]
+    (is (= :legacy-callback-inputs
+           (try
+             (adapt {:account-menu {:view target}})
+             nil
+             (catch clojure.lang.ExceptionInfo error (:reason (ex-data error))))))))
 
 
 (deftest a-custom-root-or-missing-principal-never-enters-legacy-resolution

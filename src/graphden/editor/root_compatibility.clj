@@ -75,11 +75,13 @@
    These nodes use only generic get/const/call; they add no source authority."
   [target role input]
   (let [accepted (set (:accepted input))
+        required (set (:required input))
         allowed (get role-inputs role)
-        names (sort (set/intersection allowed accepted))
+        ;; A HOF capture can be required without being a public lambda parameter.
+        names (sort (set/intersection allowed (set/union accepted required)))
         id (str (ids/fn-id "graphden.editor.root-compatibility" (str target "/" (name role))))
         getter-id #(str (ids/fn-id id %))]
-    (when-not (set/subset? (set (:required input)) allowed)
+    (when-not (set/subset? required allowed)
       (reject! :legacy-callback-inputs))
     {:id id
      :functions

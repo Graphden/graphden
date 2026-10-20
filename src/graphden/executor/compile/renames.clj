@@ -1180,10 +1180,10 @@
    `apply-hof-translation` copies fa[ext-name] to fa[R-slot-id] so R's
    slot-id-keyed readers find the value without the name-fallback path.
 
-   Lambda-param entries are EXCLUDED — those values come from the
-   per-call `lambda-args` merge after translation, not from the
-   wrap-time captured fa. Pre-translating them would create stale
-   slot-id keys from the wrap snapshot that persist across iterations.
+   Lambda-param and target-local env entries are EXCLUDED — those values
+   come from per-call lambda args or the target's lexical env, not the
+   wrap-time captured fa. Pre-translating them would create stale slot-id
+   keys that bypass the target's newer name-keyed values.
 
    Cross-fn slot-id rename cascades (e.g. `:method-map :handler` →
    `:assoc-handler :handler` rename slot ids differ) stay on the
@@ -1192,9 +1192,11 @@
    transitional state."
   [r-fn-id lambda-params lookups]
   (let [r-entries (deep-free-ext-entries r-fn-id lookups)
-        lambda-set (set lambda-params)]
+        local-names (into (set lambda-params)
+                          (map :env-name)
+                          (b/collect-env-bindings r-fn-id lookups))]
     (reduce (fn [acc {:keys [ext-name slot-id]}]
-              (if (and slot-id ext-name (not (lambda-set ext-name)))
+              (if (and slot-id ext-name (not (local-names ext-name)))
                 (assoc acc slot-id ext-name)
                 acc))
             {}

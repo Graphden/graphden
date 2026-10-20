@@ -447,6 +447,45 @@
       (is (= "closure" (get-in (function-entry plan (get ids :root)) [:args 0 :expr :kind]))))))
 
 
+(deftest local-environment-shadows-captured-slot-translations
+  (let [{:keys [graph impls ids]}
+        (map-fixture
+          [{:name :left :parent :get :args {:coll {:as :inputs} :key {:value :left} :default nil}}
+           {:name :right :parent :get :args {:coll {:as :inputs} :key {:value :right} :default nil}}
+           {:name :envelope-inputs :parent :get :args {:coll {:as :input} :key {:value :inputs} :default nil}}
+           {:name :previous-inputs :parent :get :args {:coll {:as :inputs} :key {:value :nested} :default nil}}
+           {:name :callback :parent :list :lambda-params [:input]
+            :args {:items [:left :right {:as :caption}] :inputs :envelope-inputs}}
+           {:name :inherited-callback :parent :callback :lambda-params [:input]}
+           {:name :scope-callback :parent :list :lambda-params []
+            :args {:items [:left :right {:as :caption}] :inputs :previous-inputs}}
+           {:name :wrapper :parent :call :lambda-params [:input]
+            :args {:func {:ref :callback} :arg {:as :input}}}
+           {:name :root :parent :call :args {:func {:ref :callback} :arg {:as :inputs} :caption {:value nil}}}
+           {:name :false-root :parent :root :args {:caption {:value false}}}
+           {:name :inherited-root :parent :call :args {:func {:ref :inherited-callback} :arg {:as :inputs} :caption false}}
+           {:name :scope-root :parent :call :args {:func {:ref :scope-callback} :arg {:as :inputs} :caption false}}
+           {:name :nested :parent :call :args {:func {:ref :wrapper} :arg {:as :inputs} :caption false}}
+           {:name :repeated :parent :map :args {:func {:ref :callback} :coll {:as :inputs} :caption {:value nil}}}])
+        input {:inputs {:left "pins" :right "trail"}}]
+    (assert-differential!
+      graph impls ids
+      [{:entry :root :inputs {:inputs input} :expected ["pins" "trail" nil]}
+       {:entry :false-root :inputs {:inputs input} :expected ["pins" "trail" false]}
+       {:entry :inherited-root :inputs {:inputs input} :expected ["pins" "trail" false]}
+       {:entry :scope-root :inputs {:inputs {:nested {:left "old-left" :right "old-right"}}}
+        :expected ["old-left" "old-right" false]}
+       {:entry :nested :inputs {:inputs input} :expected ["pins" "trail" false]}
+       {:entry :repeated :inputs {:inputs [input {:inputs {:left "next-pins" :right "next-trail"}}]}
+        :expected [["pins" "trail" nil] ["next-pins" "next-trail" nil]]}])
+    (let [plan (browser/export-plan graph impls {:root (:root ids)} {:allow-fn? (constantly true)})
+          translation (get-in (function-entry plan (:root ids)) [:args 0 :expr :translation])]
+      (is (not-any? #(= "inputs" (:name %)) translation)
+          "Target-local bindings never create stale captured slot routes")
+      (is (some #(= "caption" (:name %)) translation)
+          "Unrelated captures retain their slot translation"))))
+
+
 (deftest nested-filter-captures-survive-an-intermediate-count-test
   (let [definitions
         [{:name :pins :parent :get

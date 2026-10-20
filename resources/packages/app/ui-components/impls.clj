@@ -7,6 +7,7 @@
     [graphden.editor.config-preparation :as preparation]
     [graphden.editor.config-receipts :as receipts]
     [graphden.editor.config-undo :as undo]
+    [graphden.editor.root-plan :as root-plan]
     [graphden.executor.compile-runtime :as runtime]
     [graphden.executor.defbase :refer [defbase]]))
 
@@ -27,6 +28,12 @@
   [input]
   (runtime/record-effect! :db)
   (components/export-resolved ctx input))
+
+
+(defbase _editor-root-plan
+  []
+  (runtime/record-effect! :db)
+  (root-plan/export-current ctx))
 
 
 (defn- configuration-result
@@ -104,6 +111,8 @@
   {:ui-components ui-components
    :_ui-components-plan {:impl _ui-components-plan :taint-propagate? true}
    :_editor-configuration-plan {:impl _editor-configuration-plan :taint-propagate? true}
+   ;; No caller values enter this source-authorized, server-selected export.
+   :_editor-root-plan _editor-root-plan
    :_editor-configuration-prepare {:impl _editor-configuration-prepare :taint-propagate? true}
    :_editor-configuration-preview {:impl _editor-configuration-preview :taint-propagate? true}
    :_editor-configuration-reconcile {:impl _editor-configuration-reconcile :taint-propagate? true}

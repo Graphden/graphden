@@ -983,6 +983,7 @@
                   :api-ui-theme-create-template
                   :api-ui-components-plan
                   :api-editor-configuration-plan
+                  :api-editor-root-plan
                   :api-editor-configuration-prepare
                   :api-editor-configuration-preview
                   :api-editor-configuration-apply

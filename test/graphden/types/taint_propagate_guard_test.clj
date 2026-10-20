@@ -46,7 +46,7 @@
     ;; Personal configuration receipts echo caller-selected graph identities and
     ;; binding values; the protected metadata lookup returns server-owned rows.
     :_editor-configuration-apply :_editor-configuration-cleanup-preview
-    :_editor-configuration-plan :_editor-configuration-prepare
+    :_editor-root-plan :_editor-configuration-plan :_editor-configuration-prepare
     :_editor-configuration-preview :_editor-configuration-reconcile
     :_editor-configuration-reconcile-undo :_editor-configuration-undo
     :find-function :ui-pref-store-status

@@ -88,6 +88,7 @@
                   ;; Branch / org / workspace context + the fetch wrap — the
                   ;; wrap is installed AT LOAD, so this precedes the chip UI.
                   "packages/app/editor/editor-branch-context.js"
+                  "packages/app/editor/editor-root.js"
                   "packages/app/editor/editor-branches.js"
                   "packages/app/editor/editor-branch-policy.js"
                   "packages/app/editor/editor-branch-merge.js"
@@ -887,6 +888,10 @@
    :return-type :text
    :args {:hiccup :page}}
 
+  {:name :client-handler
+   :description "Editor shell handler with an ordinary browser root HOF binding. The root plan endpoint exports that binding through source authorization."
+   :parents [:html-no-cache-ok-response :app.ui-config/_editor-root-input]}
+
   {:name :_editor-handler
    ;; [] — static page; [:default] was a leaked derived free, and a 1-param
    ;; shape drops the raw ring request into that slot on the bare-route path.
@@ -894,8 +899,9 @@
    ;; rolls on an asset-override save — a heuristically-cached shell would
    ;; keep serving the old URLs.
    :lambda-params []
-   :parent :html-no-cache-ok-response
-   :args {:body :_editor-rendered-page}}
+   :parent :client-handler
+   :args {:body :_editor-rendered-page
+          :root {:ref :app.ui-config/editor-root}}}
 
   ;; =============================================================================
   ;; ASSET HANDLERS — bundled JS / CSS at /assets/editor.{js,css}

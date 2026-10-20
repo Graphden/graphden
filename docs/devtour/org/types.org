@@ -76,13 +76,13 @@ Builds a pure boundary validator from the same supported data declaration used b
 :PROPERTIES:
 :CUSTOM_ID: types/native-execution
 :FILE: src/graphden/executor/capabilities.clj
-:LINE: 60
+:LINE: 62
 :MINS: 1.1
 :END:
 
 A real JVM implementation proves JVM support; the canonical identity-keyed browser primitive ABI adds browser support only for implemented operations. Purity, a familiar name and authored type annotations cannot manufacture execution support.
 
-- source :: [[file:../../../src/graphden/executor/capabilities.clj::(defn native-execution][src/graphden/executor/capabilities.clj:60]]
+- source :: [[file:../../../src/graphden/executor/capabilities.clj::(defn native-execution][src/graphden/executor/capabilities.clj:62]]
 
 * 7. make-union
 :PROPERTIES:

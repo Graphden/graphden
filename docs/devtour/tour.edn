@@ -1406,6 +1406,14 @@
            and exports only a bounded component plan. See the [graph-backed UI contract](../../resources/packages/app/ui-preview/README.md)."
      :see [[:executor "build-lookups"] [:editor "createRuntime"]]}
 
+    {:ns graphden.editor.root-plan :defn export-current
+     :say "The editor root endpoint reads the ordinary root HOF binding from its server-owned
+           handler configuration. It checks root execute permission and every dependency's source
+           visibility in one snapshot, then exports a bounded plan. The browser invokes the root
+           through the same call ABI as other graph callables. Its initial typed bootstrap contract
+           selects the explicit legacy editor adapter; it does not export the server handler body."
+     :see [[:editor "export-plan"] [:editor "createRuntime"]]}
+
     {:file "resources/packages/app/ui-preview/browser-runtime.js" :defn createRuntime
      :say "Creates the bounded browser interpreter for that plan. Each entry invocation has lazy
            argument reads, memoized calls, and an operation limit; unsupported primitives fail.

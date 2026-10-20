@@ -8,6 +8,17 @@ change another user's preferences. Regenerate the checked-in artifacts with
 source graphs. The generator validates the supported primitive ABI and records
 a source fingerprint; its tests check that the artifacts match the sources.
 
+The editor shell also exposes an ordinary root HOF binding on its
+`app.editor/client-handler` contract. `GET /api/ui/root/plan` selects the stored
+binding on the server; request parameters cannot choose a target or captures.
+Export requires execute permission for the root and source visibility for its
+ordinary graph dependencies. Public ABI primitives retain their fixed interface
+policy. The bounded browser ABI supports static
+`core.system/call` callbacks and captures. The current typed bootstrap result,
+`{:legacy true}`, selects the explicit adapter for existing editor hosts.
+Unsupported adapters fail explicitly. Exporting a UiView root requires further
+marker provenance support; this bootstrap does not change marker semantics.
+
 Settings → Appearance can select an ordinary personal theme graph. It executes
 on the server through the normal access checks, with effects disabled and a
 bounded execution time. Only the validated theme result reaches the browser.

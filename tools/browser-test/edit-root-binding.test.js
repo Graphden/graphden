@@ -135,7 +135,14 @@ async function viewTree(page) {
     assert(vals.some(item => item.position === treeKey.position));
     const callbackA = await createFn(view, parent['namespace-id'], 'original-view', {'lambda-params': '[]'});
     const callbackB = await createFn(view, parent['namespace-id'], 'changed-view', {'lambda-params': '[]'});
-    const overridden = await bind(callbackB.id, viewSlots.vals, {'list-closed': 'true'});
+    // A list binding appends to inherited items. Put the replacement values on
+    // a fresh producer, then reference it from B so the inherited vals close.
+    const list = originalPlan.primitives.find(primitive => primitive.op === 'list');
+    assert(list, 'generic list ABI is present');
+    const listSlots = slotsOf(await subtree(branchApi, list.id), list.id);
+    const producer = await createFn(list.id, parent['namespace-id'], 'view-values');
+    const overridden = await bind(producer.id, listSlots.items, {'list-append': 'true', 'list-closed': 'true'});
+    assert.equal(overridden['list-append'], true, 'the fresh producer owns a sequence binding');
     for (const item of vals) {
       const field = item.position === treeKey.position ? {value: JSON.stringify(replacementTree)}
         : {'ref-fn-id': item['ref-fn-id']};
@@ -143,12 +150,35 @@ async function viewTree(page) {
       successful(await branchApi('POST', '/api/entities/binding-list-item', new URLSearchParams({
         'binding-id': overridden.id, position: String(item.position), ...field}).toString()), 'create exact output sequence item');
     }
+    const produced = await subtree(branchApi, producer.id);
+    const ownItems = produced['list-items'].filter(item => item['binding-id'] === overridden.id)
+      .sort((a, b) => a.position - b.position);
+    assert.equal(ownItems.length, vals.length, 'replacement sequence has exactly the original output positions');
+    for (let index = 0; index < vals.length; index++) {
+      assert.equal(ownItems[index].position, vals[index].position);
+      if (ownItems[index].position === treeKey.position) assert.deepEqual(ownItems[index].value, replacementTree);
+      else assert.equal(ownItems[index]['ref-fn-id'], vals[index]['ref-fn-id']);
+    }
+    const replacement = await bind(callbackB.id, viewSlots.vals, {'ref-fn-id': producer.id});
+    assert.equal(replacement['ref-fn-id'], producer.id, 'B replaces inherited vals with the fresh producer');
     const call = originalPlan.primitives.find(primitive => primitive.op === 'call');
     assert(call, 'generic call ABI is present');
     const callSlots = slotsOf(await subtree(branchApi, call.id), call.id);
     const wrapper = await createFn(call.id, parent['namespace-id'], 'view-call');
     const hof = await bind(wrapper.id, callSlots.func, {'ref-fn-id': callbackA.id});
-    await bind(wrapper.id, callSlots.arg, {value: 'null'});
+    const arg = await bind(wrapper.id, callSlots.arg, {value: 'null'});
+    assert.equal(arg['value-present'], true, 'the stored call argument is a pinned literal, including null');
+    assert.equal(arg.value, null);
+    assert.equal(arg['ref-fn-id'] ?? null, null);
+    const callbacks = [];
+    for (const callback of [callbackA, callbackB]) {
+      const stored = (await subtree(branchApi, callback.id)).fns.find(row => row.id === callback.id);
+      assert.deepEqual(stored['lambda-params'], [], 'the stored user callback explicitly captures all free inputs');
+      callbacks.push({id: callback.id, 'lambda-params': stored['lambda-params']});
+    }
+    console.log('Stored user HOF fixture: ' + JSON.stringify({wrapper: wrapper.id, callbacks,
+      arg: {slot: arg['slot-id'], 'value-present': arg['value-present'],
+        'ref-fn-id': arg['ref-fn-id'] ?? null, 'value-is-null': arg.value === null}}));
     const manifest = await subtree(branchApi, copy.manifest.roots['configuration-id']);
     const viewIdentities = manifest.bindings.filter(row => row['ref-fn-id'] === view && row['type-override-fn-id']);
     assert.equal(viewIdentities.length, 1, 'personal manifest has one terminal view identity');
@@ -212,7 +242,12 @@ async function viewTree(page) {
       if (branch) {
         const exact = (await api(null, 'GET', '/api/branches')).branches.find(row => row.name === branchName);
         if (exact) successful(await api(null, 'DELETE', '/api/branches/' + exact.id), 'delete exact test branch');
+        const remaining = (await api(null, 'GET', '/api/branches')).branches.find(row => row.name === branchName);
+        assert.equal(remaining, undefined, 'the exact test branch is absent after cleanup');
       }
+      console.log('Root fixture cleanup PASS: ' + JSON.stringify({branch: branchName,
+        functions: functions.length, namespaces: copy?.manifest.namespaces.length || 0,
+        activationRestored: !!activation, shippedBindingUnchanged: !!mainBinding}));
     } catch (error) {
       console.error('Root binding fixture cleanup requires review on branch ' + branchName);
       throw error;

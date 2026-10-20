@@ -82,6 +82,26 @@
                 (map :ref-fn-id items))))
 
 
+(defn- attach-identity-targets
+  "Append terminal identity rows without loading their bodies or captures."
+  [storage authorize! graph seen {:keys [terminal server-targets server-bindings manifest? server?]}]
+  (let [targets (set (remove seen terminal))
+        _ (when (> (+ (count seen) (count targets)) max-functions)
+            (reject! :source-function-limit))
+        rows (vec (read-rows storage :fn targets))]
+    (when-not (= targets (set (map :id rows))) (reject! :source-missing))
+    (doseq [row rows]
+      (condp contains? (:id row)
+        server-targets (authorize! row {:execute? true :server-target? true})
+        contracts/component-identities (authorize! row {:identity-only? true})
+        (authorize! row)))
+    (-> graph
+        (update :fns into rows)
+        (cond-> (or manifest? server?) (assoc :identity-target-ids targets)
+                server? (assoc :server-bindings server-bindings))
+        (update :slots #(vec (vals (into {} (map (juxt :id identity)) %)))))))
+
+
 (defn- collect-source
   "Collect only requested roots and their source/type dependencies. `authorize!`
    receives each fn row BEFORE any of its binding/item values are loaded.
@@ -117,27 +137,9 @@
             (reject! :mixed-server-target))
           (if (seq remaining)
             (recur (set remaining) seen graph)
-            (let [targets (set (remove seen terminal))
-                  _ (when (> (+ (count seen) (count targets)) max-functions)
-                      (reject! :source-function-limit))
-                  rows (vec (read-rows storage :fn targets))]
-              (when-not (= targets (set (map :id rows))) (reject! :source-missing))
-              ;; Identity targets provide only authorized names for checker
-              ;; reconstruction. Never read their slots, bindings or literals.
-              (doseq [row rows]
-                (condp contains? (:id row)
-                  server-targets
-                  (authorize! row {:execute? true :server-target? true})
-
-                  contracts/component-identities
-                  (authorize! row {:identity-only? true})
-
-                  (authorize! row)))
-              (-> graph
-                  (update :fns into rows)
-                  (cond-> (or manifest? server?) (assoc :identity-target-ids targets)
-                          server? (assoc :server-bindings server-bindings))
-                  (update :slots #(vec (vals (into {} (map (juxt :id identity)) %))))))))
+            (attach-identity-targets storage authorize! graph seen
+                                     {:terminal terminal :server-targets server-targets
+                                      :server-bindings server-bindings :manifest? manifest? :server? server?})))
         (let [ids (set (take batch-size pending))
               fns (vec (read-rows storage :fn ids))]
           (when-not (= ids (set (map :id fns))) (reject! :source-missing))

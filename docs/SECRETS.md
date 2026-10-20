@@ -143,12 +143,20 @@ diagnostic's type-carrying keys (`:expected`/`:actual`/`:declared`/
 | `core/collections` | All 35 fns wrap existing structural rules. |
 | `core/logic` | All 15 fns propagate (passthrough / conditional). |
 | `core/arithmetic` | Every fn propagates (`:add` `:sub` `:mul` `:div` `:mod` `:quot` `:neg` `:abs` `:min` `:max` `:floor` `:ceil` `:sqrt` `:pow` `:neq` `:lt` `:lte` `:gt` `:gte`). `(lt secret 42)` leaks; the comparisons are included. |
-| `core/system` | 15 fns propagate. Bare environment readers (`:jvm-version`, `:env`, etc.) take no user input so taint can't enter — left bare. |
+| `core/system` | Content-passing fns, including typed `:server-call`, propagate. Bare environment readers (`:jvm-version`, `:env`, etc.) take no user input so taint can't enter — left bare. |
 | `core/hof` | All 14 fns propagate (content-passing by construction: `coll` elements / `init` / the captured `value` flow into the result; `partition-by` returns the original elements in adjacent groups). |
 | `core/refinements` | The `:ensure-*` narrowers (`:ensure-positive-int`, `:ensure-non-empty-text`) preserve taint structurally — refinement impls carry no `:taint-propagate?` flag. |
 | `web/html` | `:render-hiccup` / `:hiccup` propagate — they serialize/assemble a tree whose `[:list :any]` arm (and `:hiccup`'s `:any` attr values) can carry a secret. `:h-raw` is bare — its `:string` input can't accept a `[:secret :text]`. |
 | `web/vault` | `:secret-leaf` declares `[:secret :text]` return directly. |
 | `app/reprs` | `:render-value-repr` and `:tabulate-records` propagate — their record/`:any` inputs can carry a marked value and the output (repr hiccup / cell strings) derives from it. `:svg-polyline-points` (`[:list :numeric]` slot) and `:fn-return-type` (id in, type expr out) are bare — taint can't enter. |
+
+The editor's `:_editor-server-call` propagates request/input markers: a typed,
+projected result can still derive from caller content or a marked callback return.
+The nullary `:current-branch-name` reads trusted branch context without caller
+values. `:_editor-root-plan` uses its request only to bind private issuance/session
+state; its checked stored source and fresh opaque descriptor contain no request
+fields, credentials or auth-carrier hashes. This exception does not relax source
+or marker visibility checks and never supplies caller values as graph captures.
 
 `web/http-*` and `web/sql` also send inputs as side-effects. Mark a sink's
 slot `[:secret :text]` to require its inputs be secret-aware

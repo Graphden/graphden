@@ -5,6 +5,7 @@
     [clojure.java.shell :as sh]
     [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
+    [graphden.accounts.crypto :as crypto]
     [graphden.editor.components :as components]
     [graphden.editor.root-plan :as root-plan]
     [graphden.executor.browser-plan :as wire]
@@ -108,7 +109,13 @@
 
 (deftest actual-root-wire-retains-an-opaque-query-without-server-body-or-captures
   (let [ctx (:ctx ga/*bootstrap*)
-        request {:request-method :post :uri "/api/ui/server-call" :headers {"host" "localhost"}}
+        carrier "private-root-session-carrier"
+        bearer "private-root-bearer-carrier"
+        content "private-root-request-content"
+        request {:request-method :post :uri "/api/ui/server-call"
+                 :headers {"host" "localhost" "authorization" (str "Bearer " bearer)}
+                 :cookies {"gd_session" {:value carrier}}
+                 :body {:private [:secret content]} :query-params {"private" content}}
         target (ids/fn-id "app.ui-account-menu" :_account-menu-branch-query)
         _ (epoch/seed-watermark! (:storage ctx))
         failure components/failure-response
@@ -130,6 +137,8 @@
                          "if(!g.isCallable(query))throw Error('Missing retained account query');"
                          "process.stdout.write(JSON.stringify(g.invoke(query,new Map([[g.keyword('query'),'']]))));});")
             invoked (sh/sh "node" "-e" program :in serialized)]
+        (doseq [private [carrier bearer content (crypto/sha256-hex carrier) (crypto/sha256-hex bearer)]]
+          (is (not (str/includes? serialized private)) "Request values and auth fingerprints remain exclusively server-side"))
         (is (not (str/includes? serialized (str target))))
         (is (not (str/includes? serialized (json/generate-string ["string" "Branch"]))))
         (is (zero? (:exit invoked)) (:err invoked))

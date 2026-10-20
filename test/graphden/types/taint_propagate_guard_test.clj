@@ -46,7 +46,7 @@
     ;; Personal configuration receipts echo caller-selected graph identities and
     ;; binding values; the protected metadata lookup returns server-owned rows.
     :_editor-configuration-apply :_editor-configuration-cleanup-preview
-    :_editor-root-plan :_editor-configuration-plan :_editor-configuration-prepare
+    :_editor-server-call :_editor-root-plan :_editor-configuration-plan :_editor-configuration-prepare
     :_editor-configuration-preview :_editor-configuration-reconcile
     :_editor-configuration-reconcile-undo :_editor-configuration-undo
     :find-function :ui-pref-store-status
@@ -93,7 +93,7 @@
     :semver-pick :mirror-store-package-version! :remote-auth-value
     :branch-by-name :create-owned-branch! :drop-orphan-anon-defs
     :adopt-bundle-identities! :prune-bundle-scope!
-    :current-instant :current-user-id :current-user-label :loaded-packages
+    :current-instant :current-user-id :current-user-label :current-branch-name :loaded-packages
     :round :rows->csv :semver-rank :ui-pref-write! :ui-pref-compare-write! :ui-prefs-read :url-encode
     ;; the origin's marketplace card — remote, server-derived data, not the
     ;; caller's content
@@ -103,7 +103,7 @@
     :moderation-on? :moderation-queue :moderate-package-version!
     ;; Cached read of the fixed build artifact — no caller content.
     :build-hashes-raw :byte-count
-    :byte-len :cached-api-routes-js :call :call-noargs :call-noargs-traced
+    :byte-len :cached-api-routes-js :server-call :call :call-noargs :call-noargs-traced
     :cancel-execution! :case :cell :chain-has-process-effect?
     :classify-literal :closed-enum-of :coalesce :comp
     :compatible-type-names :concat :cond :conj :cons :const
@@ -237,7 +237,7 @@
     ;; The configuration operations and preference status return caller graph
     ;; identities, values or receipt fields; none declassifies marked content.
     :_editor-configuration-apply :_editor-configuration-cleanup-preview
-    :_editor-configuration-plan :_editor-configuration-prepare
+    :_editor-server-call :_editor-configuration-plan :_editor-configuration-prepare
     :_editor-configuration-preview :_editor-configuration-reconcile
     :_editor-configuration-reconcile-undo :_editor-configuration-undo
     :ui-pref-store-status
@@ -253,7 +253,7 @@
     ;; registry: the pick / store / import filters echo caller content
     :semver-pick :mirror-store-package-version! :drop-orphan-anon-defs
     :adopt-bundle-identities! :prune-bundle-scope!
-    :abs :add :and :assert :assert-eq :assert-some :assoc :assoc-in :atom :blank? :byte-len :call-with :call :call-traced :with-heartbeat
+    :server-call :abs :add :and :assert :assert-eq :assert-some :assoc :assoc-in :atom :blank? :byte-len :call-with :call :call-traced :with-heartbeat
     :call-noargs :call-noargs-traced :case :cell :coalesce :comp :concat :cond :conj :cons :const
     :constant-time-equal? :constantly :contains? :count :deref :dissoc :distinct :div :do :drop
     :empty? :equal? :every? :ex-data :ex-info :filter :filter-xf :find-first
@@ -406,3 +406,41 @@
         "Marked values cannot enter the unmarked identity slots")
     (is (= identities ((:impl definition) identities nil))
         "Configuration returns the selected identities without executing their graph")))
+
+
+(deftest typed-server-boundaries-preserve-every-argument-marker
+  (let [definitions (:base-fn-defs (loader/load-packages ["app"]))]
+    (doseq [[primitive plain return-type]
+            [[:server-call {:func {:type [:fn {:arg :text} :text :any #{:jvm-server}]}
+                            :arg {:type :text}} :text]
+             [:_editor-server-call (:args (get definitions :_editor-server-call)) :keyword-map]]]
+      (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
+                registry/*per-org-rich-override* (atom {})]
+        (registry/record-rich-types! primitive (get definitions primitive))
+        (is (= return-type (check/rule-return primitive plain return-type)))
+        (doseq [[slot {:keys [type]}] plain]
+          (let [result-type (check/rule-return primitive (assoc-in plain [slot :type] [:secret type]) return-type)
+                id (random-uuid)]
+            (is (= [:secret return-type] result-type) (str primitive " must preserve secret " slot))
+            (registry/record-rich-types-raw! id :server-boundary-result {:return result-type})
+            (is (= {:status :succeeded :result nil :tainted? true}
+                   (persist/redact-outcome id {:status :succeeded :result "must-not-escape"})))))))))
+
+
+(deftest typed-server-callback-return-markers-are-preserved
+  (let [definition (get (:base-fn-defs (loader/load-packages ["core"])) :server-call)]
+    (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
+              registry/*per-org-rich-override* (atom {})]
+      (registry/record-rich-types! :server-call definition)
+      (is (= [:secret :text]
+             (check/rule-return :server-call
+                                {:func {:type [:fn {:arg :text} [:secret :text] :any #{:jvm-server}]}
+                                 :arg {:type :text}}
+                                :text))))))
+
+
+(deftest active-branch-name-is-a-context-reader-without-caller-content
+  (let [definition (get (:base-fn-defs (loader/load-packages ["storage"])) :current-branch-name)]
+    (is (empty? (:args definition)))
+    (is (= :text (:return-type definition)))
+    (is (not (:taint-propagate? definition)))))

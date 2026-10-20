@@ -693,24 +693,6 @@
     (into [binding-row] item-rows)))
 
 
-(defn- own-slot-declaration?
-  "True iff this `:args` value is an OWN slot declaration (not a
-   binding on an inherited slot). Shape: a map with `:type` and
-   optionally `:description` / `:required`, but NONE of the binding
-   markers (`:value`, `:ref`, `:as`, `:append`, `:closed`).
-
-   Composed fn-defs use this to expose a NEW free pin under their own
-   contract — the slot's value flows down to deeper refs by name
-   match, the same way it would if the slot were declared at a
-   base-fn. Without this the parser would treat `{:data {:type :jsonb}}`
-   as a binding on a non-existent inherited `:data` slot."
-  [arg-value]
-  (and (map? arg-value)
-       (contains? arg-value :type)
-       (not-any? #(contains? arg-value %)
-                 [:value :ref :as :append :closed])))
-
-
 (defn- parse-composed
   "Composed fn-def: `:parent` (single) or `:parents` (multi). Each
    `:args` entry becomes a binding row on the inherited slot it
@@ -741,7 +723,7 @@
         ;; Partition args: own-slot declarations (shape `{:type T}`
         ;; without binding markers) vs. bindings on inherited slots.
         {own-slot-args true binding-args false} (group-by
-                                                  (fn [[_ v]] (own-slot-declaration? v))
+                                                  (fn [[_ v]] (types/own-slot-declaration? v))
                                                   args)
         own-slot-map (into {} own-slot-args)
         binding-map (into {} binding-args)

@@ -2,8 +2,6 @@
  :description "Pure shared editor configuration and a protected authenticated metadata resolver. No component body copies or per-user selector table."
  :fns
  [{:name :_editor-bootstrap-result :type {:legacy :bool}}
-  {:name :_editor-root-input
-   :type {:root [:fn {:inputs :keyword-map} :_editor-bootstrap-result]}}
   {:name :legacy-editor-root :parent :const
    :description "Explicit adapter retaining the existing editor hosts until they are composed as ordinary HOFs."
    :return-type :_editor-bootstrap-result

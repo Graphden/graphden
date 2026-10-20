@@ -14,6 +14,7 @@
     [graphden.executor.browser-snapshot :as snapshot]
     [graphden.executor.browser-source :as source]
     [graphden.executor.context :as context]
+    [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
     [graphden.packages.records :as records]
     [graphden.packages.records.ids :as ids]
@@ -93,6 +94,18 @@
                     (get-in result [:plan :functions]))))))
 
 
+(deftest editor-root-contract-preserves-the-executable-http-router
+  (binding [br/*active-router-override* (atom nil)]
+    (let [ctx (:ctx ga/*bootstrap*)]
+      (epoch/seed-watermark! (:storage ctx))
+      (is (fn? (exec/execute ctx (ids/fn-id "app.server" :_router) {})))
+      (let [response (ga/exec-handler :_editor-root-plan-handler
+                                      {:request-method :get :uri "/api/ui/root/plan"})
+            result (json/parse-string (:body response) true)]
+        (is (= 200 (:status response)))
+        (is (true? (:ok result)))))))
+
+
 (deftest editor-root-source-visibility-does-not-grant-execute
   (binding [br/*active-router-override* (atom nil)]
     (let [root (ids/fn-id "app.ui-config" :editor-root)
@@ -143,7 +156,7 @@
   (binding [br/*active-router-override* (atom nil)]
     (let [ctx (:ctx ga/*bootstrap*) storage (:storage ctx)
           handler (ids/fn-id "app.editor" :_editor-handler)
-          slot (ids/slot-id (ids/fn-id "app.ui-config" :_editor-root-input) :root)
+          slot (ids/slot-id (ids/fn-id "app.editor" :client-handler) :root)
           binding (first (sp/query-entities storage :binding {:fn-id handler :slot-id slot}))]
       (doseq [change [{:value-present true} {:terminal true} {:list-append true}
                       {:list-closed true} {:resolver-fn-id (ids/fn-id "core.logic" :const)}
@@ -212,7 +225,7 @@
                      :per-org-rich-atom (registry/fork-per-org-rich-atom (registry/active-per-org-rich-atom)))
           storage (:storage ctx)
           handler (ids/fn-id "app.editor" :_editor-handler)
-          slot (ids/slot-id (ids/fn-id "app.ui-config" :_editor-root-input) :root)
+          slot (ids/slot-id (ids/fn-id "app.editor" :client-handler) :root)
           binding (first (sp/query-entities storage :binding {:fn-id handler :slot-id slot}))
           root (ids/fn-id "snapshot.root" :alternate)]
       ((impls/impl-of :sync-fn-defs-branch!)

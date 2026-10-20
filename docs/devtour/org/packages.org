@@ -105,26 +105,26 @@ Reads a module's [[file:glossary.org::#term/edn][EDN]] definitions while retaini
 :PROPERTIES:
 :CUSTOM_ID: packages/prepare-module
 :FILE: src/graphden/packages/records/parse.clj
-:LINE: 1176
+:LINE: 1158
 :MINS: 3.2
 :END:
 
 Prepares the module shared by production composition and its type sweep. References resolve within their namespace before dependency sorting, and inline functions expand before checker identities are attached. The public ~parse-module~ entry uses these same indexes to resolve inherited [[file:glossary.org::#term/slot][slot]] ownership before emitting stored rows.
 
-- source :: [[file:../../../src/graphden/packages/records/parse.clj::(defn prepare-module][src/graphden/packages/records/parse.clj:1176]]
+- source :: [[file:../../../src/graphden/packages/records/parse.clj::(defn prepare-module][src/graphden/packages/records/parse.clj:1158]]
 - same file :: [[file:packages.org::#packages/parse-composed][parse-composed]]
 
 * 9. parse-composed
 :PROPERTIES:
 :CUSTOM_ID: packages/parse-composed
 :FILE: src/graphden/packages/records/parse.clj
-:LINE: 714
+:LINE: 696
 :MINS: 6.6
 :END:
 
 Parses a composed function's parents and arguments. A bound argument creates a [[file:glossary.org::#term/binding][binding]] to an inherited [[file:glossary.org::#term/slot][slot]]; a type-only argument declaration can add an own [[file:glossary.org::#term/slot][slot]]. ~resolve-slot-owner~ determines which ancestor owns the targeted [[file:glossary.org::#term/slot][slot]].
 
-- source :: [[file:../../../src/graphden/packages/records/parse.clj::(defn- parse-composed][src/graphden/packages/records/parse.clj:714]]
+- source :: [[file:../../../src/graphden/packages/records/parse.clj::(defn- parse-composed][src/graphden/packages/records/parse.clj:696]]
 - same file :: [[file:packages.org::#packages/prepare-module][prepare-module]]
 
 * 10. resolve-slot-owner

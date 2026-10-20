@@ -83,6 +83,7 @@
     [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.executor.registry.core :as registry]
+    [graphden.packages.records.types :as record-types]
     [graphden.types.check.execution :as execution]
     [graphden.types.check.gradual :as gradual]
     [graphden.types.check.literals :as lit]
@@ -936,13 +937,15 @@
      propagated up).
    - `:resolved-bindings` keys — slots ALREADY bound somewhere in the
      parent chain. The child can shadow these (closer-fn-wins).
+   - An own slot declaration in the original parser form — adds a new
+     typed free argument to the composed callable contract.
    - Any sibling ref's free arg name — the binding seeds a value for
      a closure-captured arg the sibling consumes. Common pattern in
      `:cond :clauses` chains where `:parsed` / `:fn-in-use-reason` /
      etc. seed the per-clause refs.
 
    Anything outside that union is a typo or a stale name."
-  [{fn-name :name :as fn-def} parent-name parent-args parent-info]
+  [{fn-name :name :as fn-def} parent-name parent-args parent-info own-declarations]
   (let [own-args (:args fn-def)
         ;; Closure-capture seeds: a sibling binding's free args
         ;; whitelist this fn-def's bindings of the same name.
@@ -954,7 +957,8 @@
         ;; shadowed earlier in the parent chain.
         valid (-> (set (keys parent-args))
                   (into (keys (:resolved-bindings parent-info {})))
-                  (into sibling-free-args))
+                  (into sibling-free-args)
+                  (into own-declarations))
         unknown (remove valid (keys own-args))]
     (when (seq unknown)
       (let [arg-name (first unknown)
@@ -2605,7 +2609,12 @@
                            against the slot's element type
      {:ref :name}        — same as a bare keyword fn-ref"
   [fn-def0]
-  (let [{fn-name :name :as fn-def} (checker-view fn-def0)]
+  (let [;; Read declaration syntax before checker-view removes a same-name
+        ;; :as marker. A rename must never mint a new slot declaration.
+        own-declarations (into #{} (keep (fn [[k v]]
+                                           (when (record-types/own-slot-declaration? v) k)))
+                               (:args fn-def0))
+        {fn-name :name :as fn-def} (checker-view fn-def0)]
     (when-let [{:keys [primary-parent parent-info]} (resolve-parent-info fn-def)]
       (binding [*source-info* (source-info-for fn-def)]
         ;; Type-row parents (e.g. `:Storage`, `:ResolveVersionedRowsInput`)
@@ -2646,7 +2655,7 @@
                                 parent-list)
               parent-args (merge type-row-fields (:args parent-info))]
           (check-effect-categories! fn-def)
-          (check-unknown-slots! fn-def primary-parent parent-args parent-info)
+          (check-unknown-slots! fn-def primary-parent parent-args parent-info own-declarations)
           (check-ref-type-overrides! fn-def primary-parent)
           (check-binding-monotonicity! fn-def primary-parent parent-args)
           (check-branch-local-monotonicity! fn-def)

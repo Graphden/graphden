@@ -20,6 +20,24 @@
   (and (map? m) (contains? m :type)))
 
 
+(defn own-slot-declaration?
+  "True iff this `:args` value is an OWN slot declaration (not a
+   binding on an inherited slot). Shape: a map with `:type` and
+   optionally `:description` / `:required`, but NONE of the binding
+   markers (`:value`, `:ref`, `:as`, `:append`, `:closed`).
+
+   Composed fn-defs use this to expose a NEW free pin under their own
+   contract — the slot's value flows down to deeper refs by name
+   match, the same way it would if the slot were declared at a
+   base-fn. Without this the parser would treat `{:data {:type :jsonb}}`
+   as a binding on a non-existent inherited `:data` slot."
+  [arg-value]
+  (and (map? arg-value)
+       (contains? arg-value :type)
+       (not-any? #(contains? arg-value %)
+                 [:value :ref :as :append :closed])))
+
+
 (def ambiguous-name
   "Sentinel in dual-keyed name→id maps for a BARE name that exists in
    more than one namespace (per-ns names, ADR-identity-model.md

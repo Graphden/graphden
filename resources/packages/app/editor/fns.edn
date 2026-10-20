@@ -890,7 +890,8 @@
 
   {:name :client-handler
    :description "Editor shell handler with an ordinary browser root HOF binding. The root plan endpoint exports that binding through source authorization."
-   :parents [:html-no-cache-ok-response :app.ui-config/_editor-root-input]}
+   :parent :html-no-cache-ok-response
+   :args {:root {:type [:fn {:inputs :keyword-map} :app.ui-config/_editor-bootstrap-result]}}}
 
   {:name :_editor-handler
    ;; [] — static page; [:default] was a leaked derived free, and a 1-param

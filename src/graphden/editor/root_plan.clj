@@ -12,7 +12,7 @@
 
 
 (def ^:private handler-id (ids/fn-id "app.editor" :_editor-handler))
-(def ^:private root-slot-id (ids/slot-id (ids/fn-id "app.ui-config" :_editor-root-input) :root))
+(def ^:private root-slot-id (ids/slot-id (ids/fn-id "app.editor" :client-handler) :root))
 
 
 (defn- reject!

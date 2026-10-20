@@ -453,6 +453,28 @@
               (str "suggestion should be :a or :b, got " (pr-str (:suggestion d)))))))))
 
 
+(deftest composed-own-slot-declarations-extend-the-callable-contract
+  (let [callback [:fn {:inputs :keyword-map} :keyword-map]]
+    (check/check-fn-def! {:name :root-handler :parent :int-add
+                          :args {:root {:type callback}}})
+    (is (= (types-core/resolve-alias callback)
+           (get-in (registry/rich-type-of :root-handler) [:args :root])))
+    (registry/record-rich-types! :root-body {:args {:inputs :keyword-map} :return-type :keyword-map})
+    (is (some? (check/check-fn-def! {:name :bound-root-handler :parent :root-handler
+                                     :args {:root {:ref :root-body}}})))
+    (registry/record-rich-types! :invalid-root-body {:args {:inputs :keyword-map} :return-type :int})
+    (is (thrown? clojure.lang.ExceptionInfo
+          (check/check-fn-def! {:name :invalid-bound-root-handler :parent :root-handler
+                                :args {:root {:ref :invalid-root-body}}})))
+    (doseq [binding [{:ref :root-body} {:type callback :ref :root-body}
+                     {:value nil} {:type callback :value nil}
+                     {:as :root :type callback}]]
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo #"neither a slot"
+            (check/check-fn-def! {:name :unknown-root-handler :parent :int-add
+                                  :args {:root binding}})) (pr-str binding)))))
+
+
 (deftest error-message-contains-fn-def-context
   (testing "error message names the fn-def, the binding, and gives a hint"
     (try

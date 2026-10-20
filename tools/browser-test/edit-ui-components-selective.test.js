@@ -2,6 +2,7 @@
 // activation conflict. Every cleanup operation uses exact creation receipts.
 const {unexpectedSelectiveCopyErrors} = require('./selective-copy-errors');
 const {unexpectedThemeRetryErrors} = require('./theme-retry-errors');
+const {observeRootServerCalls, withoutRecoveredServerErrors} = require('./root-server-call-test-helpers');
 const {chromium} = require('playwright');
 const {assert, newContext, api} = require('./edit-test-helpers');
 const {undoConfiguration} = require('./configuration-undo-test-helpers');
@@ -114,6 +115,7 @@ async function cleanup(page, receipts) {
 (async () => {
   const {browser, page} = await newContext(chromium, {boot: false});
   const planLoads = await observeUIPlanLoads(page);
+  const serverCalls = await observeRootServerCalls(page);
   const receipts = [];
   const failures = [];
   const replies = planLoads.replies, themeReplies = [], pendingReplies = [], requestSequences = new WeakMap();
@@ -238,20 +240,26 @@ async function cleanup(page, receipts) {
     assert(menu.functions.every(row => live.has(row.id)), 'activation conflict retains every newly created menu graph');
     assert(await unchangedTheme(page, previous.theme),
       'creating a menu also leaves the active theme unchanged');
-    await cleanup(page, [receipts.pop()]);
-    const remaining = await api(page, 'GET', '/api/graph/entities?scope=index');
-    const remainingIds = new Set(remaining.fns.map(row => row.id));
-    assert([...picker.functions, ...recents.functions, ...inspector.functions, ...explorer.functions].every(row => remainingIds.has(row.id)),
-      'cleaning the new receipt preserves all previously authored copies');
     await settle();
+    await serverCalls.settle();
     await Promise.all(pendingReplies);
-    const unexpected = unexpectedSelectiveCopyErrors(unexpectedThemeRetryErrors(failures, themeReplies, true), replies, true, true);
+    const unexpected = unexpectedSelectiveCopyErrors(unexpectedThemeRetryErrors(withoutRecoveredServerErrors(failures, serverCalls.events), themeReplies, true), replies, true, true);
     if (unexpected.length) console.error('Unclassified selective errors:', JSON.stringify({
       errors: unexpected.map(error => ({kind: error.kind, status: Number(error.text?.match(/status of (\d+)/)?.[1]) || null,
         path: error.url ? new URL(error.url).pathname : null})),
       replies: replies.map(({kind, component, status, code, retryable, ok, sequence, loadId}) => ({kind, component, status, code, retryable, ok, sequence, loadId})),
     }));
     assert(unexpected.length === 0, 'no unclassified browser errors');
+    console.log('Root server query receipts:', JSON.stringify({
+      stale: serverCalls.events.filter(event => event.kind === 'response' && event.status === 422).length,
+      ready: serverCalls.events.filter(event => event.kind === 'state' && event.phase === 'ready' && event.owned && event.hostReady).length,
+    }));
+    await page.evaluate(() => window.gdEditorRoot.dispose());
+    await cleanup(page, [receipts.pop()]);
+    const remaining = await api(page, 'GET', '/api/graph/entities?scope=index');
+    const remainingIds = new Set(remaining.fns.map(row => row.id));
+    assert([...picker.functions, ...recents.functions, ...inspector.functions, ...explorer.functions].every(row => remainingIds.has(row.id)),
+      'cleaning the new receipt preserves all previously authored copies');
     console.log('PASS selective UI choices, authored retention, builtin fallback, real CAS conflict, exact cleanup');
   } catch (error) {
     const state = await page.evaluate(() => ({surface: document.body.dataset.surface,
@@ -265,6 +273,7 @@ async function cleanup(page, receipts) {
   } finally {
     try {
       await page.unrouteAll({behavior: 'wait'});
+      await page.evaluate(() => window.gdEditorRoot?.dispose()).catch(() => null);
       await cleanup(page, receipts);
       if (homeSetup) await homeSetup.cleanup();
     } finally {

@@ -87,15 +87,171 @@
   (snapshot/export-snapshot snapshot {} {:view id} (or policy (policy-of f))))
 
 
+(defn- checked-marker-policy
+  "Run a real checker with an authored marker-bearing return. The callback
+   changes registries only after the checker has captured its input flags."
+  [return flags during-check]
+  (let [id (random-uuid)
+        rich (atom {:by-id {} :by-name {}})
+        markers (atom (assoc flags :secret {:monotone? true :hide-result? true}))
+        authored {:fn-id id :name :checked-marker :namespace "snapshot"
+                  :parent :const :args {} :return-type return}
+        original-lookup registry/rich-type-of]
+    (binding [registry/*rich-types-override* rich
+              registry/*per-org-rich-override* (atom {})
+              types/*type-aliases-override* (atom {})
+              shapes/*marker-registry-override* markers]
+      (registry/record-rich-types! :const constant)
+      (with-redefs [registry/rich-type-of
+                    (fn [& args]
+                      (during-check markers)
+                      (apply original-lookup args))]
+        (check/check-fn-def! authored))
+      {:id id :rich @rich :markers @markers :authored authored})))
+
+
+(defn- captured-class
+  [{:keys [id rich markers]}]
+  (binding [shapes/*marker-registry-override* (atom markers)]
+    (get-in (snapshot/capture-policy rich) [:classes id])))
+
+
+(deftest custom-markers-require-an-unchanged-issued-signature
+  (let [{:keys [id rich authored] :as f}
+        (checked-marker-policy [:view-tag :text] {:view-tag {:hide-result? false}} identity)
+        signature (get-in rich [:by-id id])]
+    (is (= :plain (captured-class f)))
+    (doseq [changed [(assoc signature :return :text :args {})
+                     (with-meta (assoc signature :return :text :args {})
+                       {::provenance/input (provenance/fingerprint authored)})
+                     (assoc signature :return [:view-tag :int])
+                     (assoc signature :args {:secret {:type [:secret :text]}})
+                     (provenance/stamp signature (assoc authored :namespace "changed"))
+                     (assoc signature :fn-id (random-uuid))
+                     (with-meta signature {::provenance/input (provenance/fingerprint authored)
+                                           ::provenance/marker {:flags (:markers f)}})
+                     (edn/read-string (pr-str signature))
+                     (json/parse-string (json/generate-string signature) true)]]
+      (is (= :unknown (captured-class (assoc-in f [:rich :by-id id] changed)))))
+    (testing "copied metadata cannot bless another registry identity"
+      (let [other-id (random-uuid)
+            copied (assoc signature :fn-id other-id)]
+        (is (= :unknown (captured-class (assoc f :id other-id
+                                               :rich {:by-id {other-id copied} :by-name {}}))))))
+    (testing "registry enrichment and storage certification preserve the witness"
+      (let [stored (provenance/stamp-storage-input signature authored "source")]
+        (is (= :plain (captured-class (assoc-in f [:rich :by-id id] stored))))
+        (is (provenance/matches-storage-input? stored "source"))))))
+
+
+(deftest frozen-and-current-marker-policies-can-only-deny
+  (doseq [[original current expected]
+          [[true false :secret-output] [false true :secret-output]
+           [false nil :unknown] [true nil :unknown]]]
+    (let [f (checked-marker-policy [:view-tag :text]
+                                   {:view-tag {:hide-result? original}} identity)
+          flags (if (nil? current) {} {:view-tag {:hide-result? current}})]
+      (is (= expected (captured-class (assoc f :markers flags))))))
+  (testing "a mutation inside checker computation cannot relax captured flags"
+    (let [f (checked-marker-policy [:view-tag :text] {:view-tag {:hide-result? true}}
+                                   #(swap! % assoc :view-tag {:hide-result? false}))]
+      (is (= :secret-output (captured-class f)))))
+  (testing "a mutation inside checker computation can tighten captured flags"
+    (let [f (checked-marker-policy [:view-tag :text] {:view-tag {:hide-result? false}}
+                                   #(swap! % assoc :view-tag {:hide-result? true}))]
+      (is (= :secret-output (captured-class f))))))
+
+
+(deftest custom-marker-witness-never-hides-a-nested-secret
+  (doseq [return [[:view-tag [:secret :text]]
+                  [:view-tag {:nested [:list [:secret :text]]}]
+                  [:view-tag [:map :text [:secret :text]]]
+                  [:view-tag [:fn {:input [:secret :text]} :text]]]]
+    (let [f (checked-marker-policy return {:view-tag {:hide-result? false}} identity)]
+      (is (= :secret-output (captured-class (assoc-in f [:markers :secret :hide-result?] false)))))))
+
+
+(deftest raw-record-argument-type-field-does-not-hide-secret-siblings
+  (let [rich (atom {:by-id {} :by-name {}})
+        id (random-uuid)
+        payload {:type :text :password [:secret :text]}]
+    (binding [registry/*rich-types-override* rich
+              registry/*per-org-rich-override* (atom {})
+              types/*type-aliases-override* (atom {})
+              shapes/*marker-registry-override* (atom {:secret {:hide-result? true}})]
+      (registry/record-rich-types! :record-input
+                                   {:name :record-input :args {:payload {:type payload}}
+                                    :return-type :text})
+      (check/check-fn-def! {:fn-id id :name :record-child :parent :record-input :args {}})
+      (is (= payload (get-in @rich [:by-id id :args :payload])))
+      (is (= :secret-input (registry/trace-capture-class id nil)))
+      (is (= :secret-input (get-in (snapshot/capture-policy @rich) [:classes id]))))))
+
+
+(deftest snapshot-marker-declarations-are-an-independent-veto
+  (let [{:keys [id rich markers snapshot] :as f}
+        (fixture [{:name :view-tag :marker {:hide-result? false}}] {})
+        authored {:fn-id id :name :leaf :namespace "snapshot" :parent :const
+                  :args {:value {:value "public"}} :return-type [:view-tag :text]}
+        rich-atom (atom rich)
+        digest (get (source-contract/fingerprints (:graph snapshot)) id)]
+    (binding [registry/*rich-types-override* rich-atom
+              registry/*per-org-rich-override* (atom {})
+              types/*type-aliases-override* (atom {})
+              shapes/*marker-registry-override* (atom markers)]
+      (check/check-fn-def! authored))
+    (let [signature (provenance/stamp-storage-input (get-in @rich-atom [:by-id id]) authored digest)
+          f (assoc-in f [:rich :by-id id] signature)
+          policy (policy-of f)]
+      (is (= :plain (get-in policy [:classes id])))
+      (is (map? (export (assoc f :policy policy))))
+      (testing "a forged storage digest cannot bind the checked marker to changed source"
+        (let [changed (update-in f [:snapshot :graph :bindings]
+                                 (fn [rows]
+                                   (mapv (fn [row]
+                                           (if (= id (:fn-id row))
+                                             (assoc row :value "changed-source") row)) rows)))
+              changed-digest (get (source-contract/fingerprints (get-in changed [:snapshot :graph])) id)
+              forged (vary-meta signature assoc ::provenance/storage-input
+                                {:authored-input (::provenance/input (meta signature))
+                                 :source-fingerprint changed-digest})]
+          (is (= :type-source-mismatch
+                 (:reason (failure #(export (assoc-in changed [:rich :by-id id] forged))))))))
+      (testing "storage reconstruction cannot bless a stripped signature or witness"
+        (let [plain (assoc signature :return :text :args {})
+              source-only (select-keys (meta signature)
+                                       [::provenance/input ::provenance/storage-input])]
+          (doseq [tampered [plain (with-meta plain source-only)]]
+            (is (= :visibility-denied
+                   (:reason (failure #(export (assoc-in f [:rich :by-id id] tampered)))))))))
+      (doseq [remove? [false true]]
+        (let [changed (update-in f [:snapshot :graph :fns]
+                                 (fn [rows]
+                                   (into [] (keep (fn [row]
+                                                    (if (= "view-tag" (:name row))
+                                                      (when-not remove?
+                                                        (assoc row :constraint [:marker-def {:hide-result? true}]))
+                                                      row))) rows)))]
+          (is (= :visibility-denied
+                 (:reason (failure #(export (assoc changed :policy policy))))))))
+      (testing "serialized rich entries cannot recover the original marker witness"
+        (let [rebuilt (edn/read-string (pr-str signature))]
+          (is (= :type-source-mismatch
+                 (:reason (failure #(export (assoc-in f [:rich :by-id id] rebuilt)))))))))))
+
+
 (deftest canonical-writer-witness-preserves-fresh-check-and-original-policy-veto
   (let [{:keys [id snapshot] :as f} (fixture [] {})
-        authored {:name :leaf :namespace "snapshot" :parent :const
+        authored {:fn-id id :name :leaf :namespace "snapshot" :parent :const
                   :args {:value {:value "public"}}}
-        signature (get-in f [:rich :by-id id])
+        rich (atom (:rich f))
+        signature (binding [registry/*rich-types-override* rich
+                            registry/*per-org-rich-override* (atom {})
+                            shapes/*marker-registry-override* (atom (:markers f))]
+                    (check/check-fn-def! authored)
+                    (get-in @rich [:by-id id]))
         digest (get (source-contract/fingerprints (:graph snapshot)) id)
-        witnessed (-> signature
-                      (provenance/stamp authored)
-                      (provenance/stamp-storage-input authored digest))
+        witnessed (provenance/stamp-storage-input signature authored digest)
         certified (assoc-in f [:rich :by-id id] witnessed)]
     (is (map? (export certified)))
     (is (= :type-source-mismatch
@@ -270,7 +426,7 @@
       (binding [shapes/*marker-registry-override* (atom {:secret {:hide-result? false}})]
         (let [policy (snapshot/capture-policy
                        (assoc-in (:rich f) [:by-id id :return] [:secret :text]))]
-          (is (= :secret-output (get-in policy [:classes id])))
+          (is (= :unknown (get-in policy [:classes id])))
           (is (= :visibility-denied
                  (:reason (failure #(export (assoc f :policy policy)))))))))))
 

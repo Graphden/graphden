@@ -25,4 +25,9 @@
     (testing "authored certificate mismatch cannot reuse an old witness"
       (is (false? (provenance/matches-storage-input?
                     (vary-meta witnessed assoc :graphden.types.check.provenance/input "new-check")
-                    "exact-writer-source"))))))
+                    "exact-writer-source"))))
+    (testing "a map containing correct public digests is not an issued certificate"
+      (let [forged (vary-meta checked assoc :graphden.types.check.provenance/storage-input
+                              {:authored-input (provenance/fingerprint authored)
+                               :source-fingerprint "forged-source"})]
+        (is (false? (provenance/matches-storage-input? forged "forged-source")))))))

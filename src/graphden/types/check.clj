@@ -2188,7 +2188,7 @@
    The effects arrive as `{:effects :arg-effects}` — computed once by
    `check-fn-def!` (`compute-per-arg-effects` → `compute-effects`)."
   [fn-name fn-def primary-parent parent-info free-args
-   computed-return {:keys [effects arg-effects]} own-resolved slot-types nav-types drift]
+   computed-return {:keys [effects arg-effects]} own-resolved slot-types nav-types drift marker-stamp]
   (let [expected (some-> fn-def :expects-effects set)
         resolved (merge (:resolved-bindings parent-info {}) own-resolved)
         root-info (registry/rich-type-of (registry/root-base-fn-name primary-parent))
@@ -2205,47 +2205,47 @@
       ;; uuid-v5(ns, name) their storage rows use.
       (registry/fn-def-registry-id fn-name fn-def)
       fn-name
-      (provenance/stamp
-        (cond-> (merge {:return computed-return :args free-args :execution execution-support}
-                       (source-info-for fn-def))
-          ;; `:lambda-params` — authored HOF call-site parameter list;
-          ;; must survive into the registry entry the runtime's
-          ;; wrap-arity dispatch reads (compile.renames/hof-lambda-params).
-          (contains? fn-def :lambda-params)
-          (assoc :lambda-params (vec (:lambda-params fn-def)))
-          ;; `:namespace` — the registry index dual-keys entries
-          ;; (bare + qualified) so per-ns duplicate names resolve
-          ;; precisely; without it a composed entry claims only the
-          ;; bare (last-write) key.
-          (:namespace fn-def)
-          (assoc :namespace (:namespace fn-def))
-          (seq binding-expectations) (assoc :binding-expectations binding-expectations)
-          (seq view-hints)  (assoc :type-hints view-hints)
-          (seq resolved)    (assoc :resolved-bindings resolved)
-          (seq slot-types)  (assoc :slot-types slot-types)
-          (seq nav-types)   (assoc :nav-types nav-types)
-          primary-parent    (assoc :primary-parent primary-parent)
-          (seq effects)     (assoc :effects effects)
-          ;; `:arg-effects` — per-binding effect contribution. Used by
-          ;; the closure-capture strip in check-binding! to subtract
-          ;; wrap-time-only effects from the per-invocation callable
-          ;; contract when the strip removes captured-arg keys.
-          (some seq (vals arg-effects)) (assoc :arg-effects arg-effects)
-          ;; `:call-time-effects` — effects per-invocation when used as
-          ;; a HOF callable. Parent's body + free-arg ref-effects;
-          ;; EXCLUDES bound-arg ref-effects (those are wrap-time, run
-          ;; once during outer assembly). When equal to `:effects` the
-          ;; assoc is redundant — only stash on divergence.
-          (and (some seq (vals arg-effects))
-               (not= call-time-effects effects))
-          (assoc :call-time-effects call-time-effects)
-          expected          (assoc :expects-effects expected)
-          drift             (assoc :return-type-drift drift)
-          ;; Surface description so the inline-expand panel can show
-          ;; a human-readable hint under the type name.
-          (and (:description fn-def)
-               (seq (:description fn-def))) (assoc :description (:description fn-def)))
-        fn-def))))
+      (marker-stamp (provenance/stamp
+                      (cond-> (merge {:return computed-return :args free-args :execution execution-support}
+                                     (source-info-for fn-def))
+                        ;; `:lambda-params` — authored HOF call-site parameter list;
+                        ;; must survive into the registry entry the runtime's
+                        ;; wrap-arity dispatch reads (compile.renames/hof-lambda-params).
+                        (contains? fn-def :lambda-params)
+                        (assoc :lambda-params (vec (:lambda-params fn-def)))
+                        ;; `:namespace` — the registry index dual-keys entries
+                        ;; (bare + qualified) so per-ns duplicate names resolve
+                        ;; precisely; without it a composed entry claims only the
+                        ;; bare (last-write) key.
+                        (:namespace fn-def)
+                        (assoc :namespace (:namespace fn-def))
+                        (seq binding-expectations) (assoc :binding-expectations binding-expectations)
+                        (seq view-hints)  (assoc :type-hints view-hints)
+                        (seq resolved)    (assoc :resolved-bindings resolved)
+                        (seq slot-types)  (assoc :slot-types slot-types)
+                        (seq nav-types)   (assoc :nav-types nav-types)
+                        primary-parent    (assoc :primary-parent primary-parent)
+                        (seq effects)     (assoc :effects effects)
+                        ;; `:arg-effects` — per-binding effect contribution. Used by
+                        ;; the closure-capture strip in check-binding! to subtract
+                        ;; wrap-time-only effects from the per-invocation callable
+                        ;; contract when the strip removes captured-arg keys.
+                        (some seq (vals arg-effects)) (assoc :arg-effects arg-effects)
+                        ;; `:call-time-effects` — effects per-invocation when used as
+                        ;; a HOF callable. Parent's body + free-arg ref-effects;
+                        ;; EXCLUDES bound-arg ref-effects (those are wrap-time, run
+                        ;; once during outer assembly). When equal to `:effects` the
+                        ;; assoc is redundant — only stash on divergence.
+                        (and (some seq (vals arg-effects))
+                             (not= call-time-effects effects))
+                        (assoc :call-time-effects call-time-effects)
+                        expected          (assoc :expects-effects expected)
+                        drift             (assoc :return-type-drift drift)
+                        ;; Surface description so the inline-expand panel can show
+                        ;; a human-readable hint under the type name.
+                        (and (:description fn-def)
+                             (seq (:description fn-def))) (assoc :description (:description fn-def)))
+                      fn-def)))))
 
 
 ;; -----------------------------------------------------------------------------
@@ -2614,7 +2614,9 @@
         own-declarations (into #{} (keep (fn [[k v]]
                                            (when (record-types/own-slot-declaration? v) k)))
                                (:args fn-def0))
-        {fn-name :name :as fn-def} (checker-view fn-def0)]
+        {fn-name :name :as fn-def} (checker-view fn-def0)
+        marker-stamp (provenance/capture-marker-stamp
+                       fn-def (registry/fn-def-registry-id fn-name fn-def))]
     (when-let [{:keys [primary-parent parent-info]} (resolve-parent-info fn-def)]
       (binding [*source-info* (source-info-for fn-def)]
         ;; Type-row parents (e.g. `:Storage`, `:ResolveVersionedRowsInput`)
@@ -2721,7 +2723,7 @@
                             free-args recorded-return
                             {:effects effects :arg-effects arg-effects}
                             own-bindings
-                            slot-types nav-types drift)
+                            slot-types nav-types drift marker-stamp)
             subst))))))
 
 

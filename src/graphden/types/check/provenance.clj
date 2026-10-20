@@ -2,7 +2,22 @@
   "An internal certificate of the checker input, not a graph property.
    Metadata keeps the digest out of public rich-type maps and JSON responses."
   (:require
-    [graphden.packages.records.ids :as ids]))
+    [graphden.packages.records.ids :as ids]
+    [graphden.types.core.shapes :as shapes]))
+
+
+(deftype ^:private MarkerWitness
+  [seal input fn-id signature flags])
+
+
+(deftype ^:private StorageWitness
+  [seal authored-input source-fingerprint])
+
+
+(defonce ^:private witness-seal (Object.))
+
+
+(defonce ^:private marker-key (Object.))
 
 
 (defn- canonical
@@ -53,6 +68,44 @@
   (= (::input (meta signature)) (fingerprint definition)))
 
 
+(defn capture-marker-stamp
+  "Freeze flags before checker computation. The returned issuer certifies only
+   the completed signature, source input and actual registry identity. Ordinary
+   maps and copied metadata cannot certify a changed security projection."
+  [definition fn-id]
+  (let [flags (shapes/markers-snapshot)
+        input (fingerprint definition)]
+    (fn [signature]
+      (vary-meta signature assoc marker-key
+                 (MarkerWitness. witness-seal input fn-id
+                                 (fingerprint-data (select-keys signature [:args :return]))
+                                 flags)))))
+
+
+(defn checker-stamp-present?
+  "Authored entries require marker evidence even if that witness was removed.
+   A stale certificate must not fall back to an apparently plain signature."
+  [signature]
+  (let [metadata (meta signature)]
+    (or (contains? metadata ::input) (contains? metadata marker-key))))
+
+
+;; Uniform Class/.-field syntax resolves these generated fields as methods.
+^{:splint/disable [#_{:clj-kondo/ignore [:unresolved-namespace]} lint/prefer-method-values]}
+(defn checked-marker-flags
+  "Return frozen flags only for an internally issued, unmodified signature.
+   Registry enrichment outside args/return does not change this certificate."
+  [fn-id signature]
+  (let [witness (get (meta signature) marker-key)]
+    (when (and (instance? MarkerWitness witness)
+               (identical? witness-seal (.-seal ^MarkerWitness witness))
+               (= fn-id (:fn-id signature) (.-fn-id ^MarkerWitness witness))
+               (= (::input (meta signature)) (.-input ^MarkerWitness witness))
+               (= (fingerprint-data (select-keys signature [:args :return]))
+                  (.-signature ^MarkerWitness witness)))
+      (.-flags ^MarkerWitness witness))))
+
+
 (defn stamp-storage-input
   "Keep a second certificate of exact canonical writer input on the SAME
    authored-checked signature. This never changes types or original evidence;
@@ -60,11 +113,12 @@
   [signature definition source-fingerprint]
   (if (and source-fingerprint (matches? signature definition))
     (vary-meta signature assoc ::storage-input
-               {:authored-input (::input (meta signature))
-                :source-fingerprint source-fingerprint})
+               (StorageWitness. witness-seal (::input (meta signature)) source-fingerprint))
     signature))
 
 
+;; Keep typed field access for the same generated-type constraint above.
+^{:splint/disable [lint/prefer-method-values]}
 (defn matches-storage-input?
   "Compare immutable snapshot source to certified writer input. Both the
    original authored certificate and its bound storage certificate must exist.
@@ -74,5 +128,7 @@
         witness (::storage-input metadata)]
     (and (some? source-fingerprint)
          (some? (::input metadata))
-         (= (::input metadata) (:authored-input witness))
-         (= source-fingerprint (:source-fingerprint witness)))))
+         (instance? StorageWitness witness)
+         (identical? witness-seal (.-seal ^StorageWitness witness))
+         (= (::input metadata) (.-authored-input ^StorageWitness witness))
+         (= source-fingerprint (.-source-fingerprint ^StorageWitness witness)))))

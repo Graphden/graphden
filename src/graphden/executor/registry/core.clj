@@ -683,8 +683,9 @@
    marker — the fn CONSUMES a secret even if its return is plain."
   [rt]
   (boolean (some (fn [[_ arg-entry]]
-                   (types/contains-hide-result-marker?
-                     (or (some-> arg-entry :type) arg-entry)))
+                   ;; Registry args are rich types, including raw records
+                   ;; whose ordinary :type field has no wrapper semantics.
+                   (types/contains-hide-result-marker? arg-entry))
                  (:args rt))))
 
 

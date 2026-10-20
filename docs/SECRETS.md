@@ -356,6 +356,16 @@ every share-shaped bundle treats it explicitly:
   editor's inline secret-binding form (vault path + write-only value)
   is the affordance to define it.
 
+Browser plan export freezes marker flags before checking an authored function.
+Custom markers require an internal certificate bound to that source, registry
+identity and final argument/return types. Current flags and snapshot declarations
+can only veto export; removing a marker or relaxing its flags cannot erase the
+original restriction. The seeded `:secret` remains hidden at every depth,
+including record arguments with an ordinary field named `:type`.
+Certificates do not survive JSON/EDN reconstruction; reconstructed custom
+signatures need a fresh authored check. Storage source certificates are issued
+internally too: a map containing a replacement source digest grants no access.
+
 ## Path-trace capture (T6)
 
 The Debug path trace (docs/EXECUTION.md § Path trace) captures

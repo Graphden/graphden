@@ -38,8 +38,7 @@
 
 
 (defn- closed-policy-type?
-  "Only resolved built-in shapes have visibility independent of later alias
-   or marker registration. Custom tags and unresolved aliases fail closed."
+  "Reject unresolved aliases and unknown constructors under one frozen view."
   [t]
   (not (types/type-any?
          (fn [part]
@@ -47,36 +46,53 @@
                     (shapes/record-type? part) (shapes/fn-type? part)
                     (shapes/list-type? part) (shapes/map-type? part)
                     (shapes/tuple-type? part) (shapes/refine-type? part)
-                    (shapes/union-type? part) (shapes/secret-type? part))))
+                    (shapes/union-type? part) (shapes/marker-type? part))))
          t)))
 
 
 (defn- closed-policy-signature?
   [{:keys [return args]}]
   (and (closed-policy-type? return)
-       (every? (fn [arg] (closed-policy-type? (or (:type arg) arg)))
-               (vals args))))
+       ;; Rich arguments are types. A record field named :type is ordinary
+       ;; data and must not hide its siblings from the policy walk.
+       (every? closed-policy-type? (vals args))))
+
+
+(defn- signature-class
+  [id signature flags]
+  (binding [shapes/*marker-registry-override*
+            (atom (assoc flags :secret {:monotone? true :hide-result? true}))]
+    (if (closed-policy-signature? signature)
+      (registry/trace-capture-class id nil)
+      :unknown)))
 
 
 (defn capture-policy
-  "Freeze visibility from rich entries BEFORE the database read. Only fully
-   resolved built-in shapes qualify: aliases/custom markers cannot be safely
-   reinterpreted through separately mutable registries, even before that read."
+  "Freeze visibility before source reads. Custom markers require a checker
+   witness; frozen flags authorize while the current view can only veto."
   [rich]
-  (binding [types/*type-aliases-override* (atom {})
-            types/*alias-view* nil
-            shapes/*marker-registry-override* (atom {:secret {:monotone? true :hide-result? true}})
-            registry/*rich-types-override* (atom rich)
-            registry/*per-org-rich-override* (atom {})]
-    (try
-      {:rich rich
-       :classes (into {}
-                      (map (fn [[id signature]]
-                             [id (if (closed-policy-signature? signature)
-                                   (registry/trace-capture-class id nil)
-                                   :unknown)]))
-                      (:by-id rich))}
-      (catch Exception _ (reject! :policy-capture-failed {})))))
+  (let [current-flags (shapes/markers-snapshot)]
+    (binding [types/*type-aliases-override* (atom {})
+              types/*alias-view* nil
+              shapes/*marker-registry-override* (atom {:secret {:monotone? true :hide-result? true}})
+              registry/*rich-types-override* (atom rich)
+              registry/*per-org-rich-override* (atom {})]
+      (try
+        {:rich rich
+         :classes (into {}
+                        (map (fn [[id signature]]
+                               (let [frozen (provenance/checked-marker-flags id signature)
+                                     original (if (and (nil? frozen)
+                                                       (provenance/checker-stamp-present? signature))
+                                                :unknown
+                                                (signature-class id signature (or frozen {})))]
+                                 [id (if (= :unknown original)
+                                       :unknown
+                                       (let [current (signature-class id signature current-flags)]
+                                         (if (or (= :unknown current) (= :plain original))
+                                           current original)))])))
+                        (:by-id rich))}
+        (catch Exception _ (reject! :policy-capture-failed {}))))))
 
 
 (defn capture-context-policy
@@ -171,6 +187,8 @@
     (try
       (runtime/register-type-aliases-from-db! (:graph snapshot) ::snapshot
                                               (ns-path/path-map (:namespaces snapshot)))
+      ;; Even a stored declaration cannot weaken the seeded confidentiality tag.
+      (shapes/register-marker! :secret {:monotone? true :hide-result? true})
       (when structural?
         (let [present (into #{} (map :id) (get-in snapshot [:graph :fns]))]
           (doseq [id (set/intersection present (structural-contracts/operation-ids))]
@@ -181,14 +199,16 @@
                                                    (ids/fn-id "app.ui-components" :ui-components))
                                        structural? (into (structural-contracts/operation-ids)))))
       (check-closure! snapshot entries rich type-recheck)
-      (consume
-        {:allow-fn?
-         (fn [id]
-           (and (= :plain (registry/trace-capture-class id nil))
-                ;; Storage intentionally erases inline marker
-                ;; annotations. A fresh check is only a veto:
-                ;; it must never relax the original policy.
-                (= :plain (get classes id))))})
+      (let [snapshot-classes (:classes (capture-policy rich))]
+        (consume
+          {:allow-fn?
+           (fn [id]
+             (and (= :plain (registry/trace-capture-class id nil))
+                  ;; Storage intentionally erases inline marker
+                  ;; annotations. A fresh check is only a veto:
+                  ;; it must never relax the original policy.
+                  (= :plain (get classes id))
+                  (= :plain (get snapshot-classes id))))}))
       (catch Exception error
         (if (= :browser-plan/unsupported (:type (ex-data error)))
           (throw error)

@@ -402,7 +402,7 @@
          base-defs (select-keys (:base-fn-defs loaded)
                                 [:const :if :list :mod :get :equal? :nil? :coalesce :count :map :filter :take :concat
                                  :vals :group-by :partition-by :sort-by :str :str-join :str-starts-with? :str-lower :str-trim
-                                 :blank? :non-blank?
+                                 :blank? :non-blank? :call
                                  :str-contains? :str-clip :hiccup :zipmap :assoc :add :lte])
          type-defs (remove #(or (:parent %) (:parents %)) (:fn-defs loaded))
          primitives (into (vec type-defs) (map (fn [[n d]] (assoc d :name n))) base-defs)]
@@ -413,6 +413,36 @@
 (deftest browser-map-matches-jvm-for-ordinary-views-and-captures
   (let [{:keys [graph impls ids]} (map-fixture)]
     (assert-differential! graph impls ids browser-map/cases)))
+
+
+(deftest static-callable-root-matches-jvm-with-captures-and-renames
+  (let [{:keys [graph impls ids]}
+        (map-fixture
+          [{:name :root-body :parent :list :lambda-params [:input]
+            :args {:items [{:as :input} {:as :caption}]}}
+           {:name :root :parent :call
+            :args {:func {:ref :root-body}
+                   :arg {:as :request}
+                   :caption {:value "captured"}}}
+           {:name :renamed :parent :root :args {:request {:as :payload}}}
+           {:name :closed-body :parent :const :lambda-params []
+            :args {:value {:as :caption}}}
+           {:name :closed :parent :call
+            :args {:func {:ref :closed-body} :arg {:value nil}
+                   :caption {:value "closed"}}}])]
+    (assert-differential!
+      graph impls ids
+      [{:entry :root :inputs {:request {:name "editor"}}
+        :expected [{:name "editor"} "captured"]}
+       {:entry :renamed :inputs {:payload false} :expected [false "captured"]}
+       {:entry :closed :inputs {} :expected "closed"}])
+    (let [plan (browser/export-plan graph impls {:root (get ids :root)}
+                                    {:allow-fn? (constantly true)})]
+      (is (= :visibility-denied
+             (:reason (failure #(browser/export-plan
+                                  graph impls {:root (get ids :root)}
+                                  {:allow-fn? (fn [id] (not= id (get ids :root-body)))})))))
+      (is (= "closure" (get-in (function-entry plan (get ids :root)) [:args 0 :expr :kind]))))))
 
 
 (deftest nested-filter-captures-survive-an-intermediate-count-test

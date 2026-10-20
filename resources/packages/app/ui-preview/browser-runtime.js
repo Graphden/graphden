@@ -143,6 +143,11 @@
   }
   const operations = {
     const: (arg) => arg('value'),
+    call: (arg) => {
+      const func = arg('func');
+      if (!(func instanceof GraphClosure)) throw new Error('Browser call requires a graph callback');
+      return func.invoke(arg('arg'));
+    },
     list: (arg) => arg('items'),
     map: (arg, tick) => {
       const func = arg('func');

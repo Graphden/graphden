@@ -15,14 +15,16 @@
                                ["core.collections" [:list :get :assoc :zipmap :count :take :concat :vals]]
                                ["core.arithmetic" [:add :mod :lte]]
                                ["core.hof" [:map :filter :group-by :partition-by :sort-by]]
+                               ["core.system" [:call]]
                                ["core.strings" [:str :str-starts-with? :str-lower :str-trim :str-contains? :str-clip]]
                                ["web.html" [:hiccup :as-ui-view :encode-view]]]
               n names]
           [(ids/fn-id ns-path n)
            {:browser-op (name n)
-            :invoked-slots (if (= ns-path "core.hof")
-                             #{(case n :map :func :filter :pred :key-fn)}
-                             #{})}])))
+            :invoked-slots (cond
+                             (= ns-path "core.hof") #{(case n :map :func :filter :pred :key-fn)}
+                             (= ns-path "core.system") #{:func}
+                             :else #{})}])))
 
 
 (defn browser-op

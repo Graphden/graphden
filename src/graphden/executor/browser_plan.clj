@@ -196,7 +196,7 @@
 
 
 (defn- closure-expr
-  "Only statically bound callbacks for supported single-item HOFs are allowed.
+  "Only statically bound callbacks for supported single-argument HOFs are allowed.
    Reuse the JVM's parameter/capture decisions; callable producers and env HOFs stay closed."
   [{:keys [kind slot-id ref-id] :as binding} fid lookups context]
   (when-not (and (= :ref kind)

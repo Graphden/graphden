@@ -36,12 +36,16 @@
   []
   (tenancy/with-org tenancy/public-org
                     (let [named (mapcat (fn [[module names]] (type-records module names)) declarations)
-                          hof-definitions (filter #(contains? #{:map :filter :group-by :sort-by} (:name %))
-                                                  (:fns (shipped-module "core/hof")))
+                          hof-definitions (concat
+                                            (filter #(contains? #{:map :filter :group-by :sort-by} (:name %))
+                                                    (:fns (shipped-module "core/hof")))
+                                            (filter #(= :call (:name %))
+                                                    (:fns (shipped-module "core/system"))))
                           callback (mapcat (fn [definition]
                                              (record-types/inline-fn-type-rows-from-form
                                                (get-in definition [:args (case (:name definition)
                                                                            :map :func
+                                                                           :call :func
                                                                            :filter :pred
                                                                            :key-fn) :type])))
                                            hof-definitions)

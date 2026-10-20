@@ -1,6 +1,60 @@
 {:namespace "app.ui-account-menu"
  :fns
- [{:name :_account-menu-event :type {:kind :text :key :text :index :int}}
+ [{:name :_root-update-input :type {:state :_account-menu-state :context :_account-menu-context :event :_account-menu-event}}
+  {:name :_root-server-state :type {:phase :text :label :text :branch-name :text}}
+  {:name :_root-view-input :type {:state :_account-menu-state :theme :_account-menu-theme :server :_root-server-state}}
+  {:name :_root-view-result :type {:frame :hiccup-node :common-rows [:list :hiccup-node] :common-tree :hiccup-node
+                                   :styles [:list {:selector :text :declarations :text-map}]
+                                   :active :int :phase :text :handled :bool
+                                   :theme-tokens :text-map :menu-tokens :text-map
+                                   :motion {:duration-ms :int :offset-y :int :opacity :non-negative-int}}}
+  {:name :_root-update-result :type {:phase :text :active :numeric :handled :bool}}
+  {:name :_root-initial-callable :fn-type [{} :app.ui-account-menu/_account-menu-state]}
+  {:name :_root-update-callable :fn-type [{:input :app.ui-account-menu/_root-update-input} :app.ui-account-menu/_root-update-result]}
+  {:name :_root-view-callable :fn-type [{:input :app.ui-account-menu/_root-view-input} :app.ui-account-menu/_root-view-result]}
+  {:name :_root-initial-record :type {:initial :app.ui-account-menu/_root-initial-callable}}
+  {:name :_root-update-record :type {:initial :app.ui-account-menu/_root-initial-callable :update :app.ui-account-menu/_root-update-callable}}
+  {:name :root-component :type {:initial :app.ui-account-menu/_root-initial-callable :update :app.ui-account-menu/_root-update-callable :view :app.ui-account-menu/_root-view-callable}}
+  {:name :root-initial :parent :account-menu-initial :lambda-params []}
+  {:name :root-update :parent :account-menu-update :lambda-params [:input]
+   :args {:state {:parent :get :args {:coll {:as :input :type :app.ui-account-menu/_root-update-input} :key {:value :state}}}
+          :context {:parent :get :args {:coll {:as :input :type :app.ui-account-menu/_root-update-input} :key {:value :context}}}
+          :event {:parent :get :args {:coll {:as :input :type :app.ui-account-menu/_root-update-input} :key {:value :event}}}}}
+  {:name :_root-base-view :parent :account-menu-view
+   :return-type :app.ui-account-menu/_root-view-result
+   :args {:state {:parent :get :args {:coll {:as :input :type :app.ui-account-menu/_root-view-input} :key {:value :state}}}
+          :theme {:parent :get :args {:coll {:as :input :type :app.ui-account-menu/_root-view-input} :key {:value :theme}}}}}
+  {:name :_root-server :parent :get
+   :args {:coll {:as :input :type :app.ui-account-menu/_root-view-input} :key {:value :server}}}
+  {:name :_root-server-phase :parent :get :args {:coll :_root-server :key {:value :phase} :default "idle"}}
+  {:name :_root-server-label :parent :get :args {:coll :_root-server :key {:value :label} :default ""}}
+  {:name :_root-server-branch :parent :get :args {:coll :_root-server :key {:value :branch-name} :default ""}}
+  {:name :_root-server-ready :parent :equal? :args {:a :_root-server-phase :b "ready"}}
+  {:name :_root-server-loading :parent :equal? :args {:a :_root-server-phase :b "loading"}}
+  {:name :_root-server-error :parent :equal? :args {:a :_root-server-phase :b "error"}}
+  {:name :_root-server-details :parent :str :args {:parts [:_root-server-label " · " :_root-server-branch]}}
+  {:name :_root-server-failure :parent :if :args {:test :_root-server-error :then "Account details could not be loaded." :else ""}}
+  {:name :_root-server-pending :parent :if :args {:test :_root-server-loading :then "Loading account details…" :else :_root-server-failure}}
+  {:name :_root-server-text :parent :if :args {:test :_root-server-ready :then :_root-server-details :else :_root-server-pending}}
+  {:name :_root-server-node :parent :hiccup
+   :args {:tag "div" :attrs {:value {:role "status" :class "auth-menu-status"}} :children [:_root-server-text]}}
+  {:name :_root-common-tree :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "auth-menu-common"}} :children [:settings-row :organization-row :_root-server-node]}}
+  {:name :root-view :parent :assoc :lambda-params [:input] :return-type :app.ui-account-menu/_root-view-result
+   :args {:map :_root-base-view :key {:value :common-tree} :value :_root-common-tree}}
+  {:name :_root-initial-assoc :parent :assoc-fn
+   :args {:value {:as :value :type :app.ui-account-menu/_root-initial-callable}}}
+  {:name :_root-update-assoc :parent :assoc-fn
+   :args {:value {:as :value :type :app.ui-account-menu/_root-update-callable}}}
+  {:name :_root-view-assoc :parent :assoc-fn
+   :args {:value {:as :value :type :app.ui-account-menu/_root-view-callable}}}
+  {:name :_root-initial-field :parent :_root-initial-assoc :return-type :app.ui-account-menu/_root-initial-record
+   :args {:map {} :key {:value :initial} :value {:ref :root-initial}}}
+  {:name :_root-update-field :parent :_root-update-assoc :return-type :app.ui-account-menu/_root-update-record
+   :args {:map {:ref :_root-initial-field :type :app.ui-account-menu/_root-initial-record} :key {:value :update} :value {:ref :root-update}}}
+  {:name :account-menu-component :parent :_root-view-assoc :return-type :app.ui-account-menu/root-component
+   :args {:map {:ref :_root-update-field :type :app.ui-account-menu/_root-update-record} :key {:value :view} :value {:ref :root-view}}}
+  {:name :_account-menu-event :type {:kind :text :key :text :index :int}}
   {:name :_account-menu-state :type {:phase :text :active :int :handled :bool}}
   {:name :_account-menu-context :type {:items [:list :text]}}
   {:name :_account-menu-theme :type {:accent :core.refinements/color :canvas-background :core.refinements/color}}

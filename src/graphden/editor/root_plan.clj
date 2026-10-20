@@ -2,6 +2,7 @@
   "Export the editor handler's static root binding under snapshot source policy."
   (:require
     [graphden.editor.components :as components]
+    [graphden.editor.root-compatibility :as compatibility]
     [graphden.executor.browser-server :as server]
     [graphden.executor.browser-snapshot :as snapshot]
     [graphden.executor.browser-source :as source]
@@ -59,6 +60,7 @@
                (let [graph (source/collect-client-closure storage [root] authorize!)
                      plan (server/export-client-plan ctx storage authorize! policy {:root root} request
                                                      {:fn-id handler-id :slot-id root-slot-id :ref-fn-id root})
+                     plan (compatibility/adapt-plan ctx storage authorize! policy root plan)
                      input (get-in plan [:inputs (str root)])
                      required (:required input)
                      argument (first required)]

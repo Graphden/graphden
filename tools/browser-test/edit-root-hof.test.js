@@ -31,9 +31,55 @@ const {newContext} = require('./edit-test-helpers');
     });
     assert.equal(forged.plan.entries.root, result.body.plan.entries.root);
 
+    const replacement = structuredClone(result.body);
+    const byId = new Map(replacement.plan.functions.map(fn => [fn.id, fn]));
+    const argument = (fn, name) => fn.args.find(arg => arg.name === name)?.expr;
+    const literalKey = fn => argument(fn, 'key')?.value?.[2];
+    const menuField = replacement.plan.functions.find(fn => literalKey(fn) === 'account-menu');
+    assert(menuField, 'root record contains the account-menu field');
+    let component = byId.get(argument(menuField, 'value').fn);
+    while (component && literalKey(component) !== 'view') component = byId.get(argument(component, 'map')?.fn);
+    assert.equal(argument(component, 'value').kind, 'closure');
+    const viewBinding = argument(component, 'value');
+    const encodedView = await page.evaluate(() => {
+      const g = window.GraphdenBrowser;
+      const menu = window.gdEditorRoot.componentNow('account-menu');
+      const state = menu.run('initial', {});
+      const theme = new Map([[g.keyword('accent'), '#336699'], [g.keyword('canvas-background'), '#ffffff']]);
+      const server = new Map([[g.keyword('phase'), 'idle'], [g.keyword('label'), ''], [g.keyword('branch-name'), '']]);
+      return g.encode(menu.run('view', {state, theme, server}));
+    });
+    const tree = encodedView[1].find(([key]) => key[0] === 'keyword' && key[2] === 'common-tree')[1];
+    const rewriteChildren = value => value[0] === 'string' && value[1] === 'Settings'
+      ? ['string', 'Root binding settings']
+      : value[0] === 'vector' ? ['vector', value[1].map(rewriteChildren)] : value;
+    const rewritten = rewriteChildren(tree);
+    const assocPrimitive = replacement.plan.primitives.find(primitive => primitive.op === 'assoc');
+    replacement.plan.functions.push({id: 'browser-proof-view', primitive: assocPrimitive.id, aliases: [], env: [],
+      args: [
+        {name: 'map', slot: 'proof-map', expr: {kind: 'call', fn: viewBinding.fn, renames: []}},
+        {name: 'key', slot: 'proof-key', expr: {kind: 'literal', value: ['keyword', null, 'common-tree']}},
+        {name: 'value', slot: 'proof-value', expr: {kind: 'literal', value: rewritten}},
+      ]});
+    viewBinding.fn = 'browser-proof-view';
+    await page.route(endpoint, route => route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify(replacement)}));
+    await page.evaluate(() => window.gdEditorRoot.reload());
+    await page.locator('#auth-lock-btn').click();
+    await page.getByRole('menuitem', {name: 'Root binding settings', exact: true}).waitFor();
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => typeof openFnPicker === 'function');
+    await page.evaluate(() => openFnPicker({anchorEl: document.body, onPick() {}}));
+    await page.locator('.fn-picker-popover input').waitFor();
+    await page.keyboard.press('Escape');
+    await page.locator('.fn-picker-popover').waitFor({state: 'detached'});
+    assert.equal(await page.locator('#app').isVisible(), true);
+    await page.unroute(endpoint);
+
     const alternate = structuredClone(result.body);
     const operations = new Map(alternate.plan.primitives.map(primitive => [primitive.id, primitive.op]));
-    const body = alternate.plan.functions.find(fn => operations.get(fn.primitive) === 'const');
+    const body = alternate.plan.functions.find(fn => operations.get(fn.primitive) === 'const'
+      && fn.args.some(arg => arg.name === 'value' && arg.expr.kind === 'literal'
+        && arg.expr.value[0] === 'map' && arg.expr.value[1].some(([key]) => key[0] === 'keyword' && key[2] === 'legacy')));
     assert(body, 'static root callback is part of the checked graph');
     body.args.find(arg => arg.name === 'value').expr.value = ['map', [[['keyword', null, 'legacy'], ['bool', false]]]];
     await page.route(endpoint, route => route.fulfill({status: 200, contentType: 'application/json', body: JSON.stringify(alternate)}));

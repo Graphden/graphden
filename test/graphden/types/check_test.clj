@@ -2531,3 +2531,19 @@
            (get-in (registry/rich-type-of :own-context-binding)
                    [:resolved-bindings :value :type]))
         "Direct own capture still narrows a reference through the original own-context pass")))
+
+
+(deftest assoc-fn-keeps-map-keys-independent-of-callback-inputs
+  (let [assoc-fn (first (filter #(= :assoc-fn (:name %)) (:fn-defs (loader/load-packages ["core"]))))]
+    (check/check-fn-def! assoc-fn)
+    (check/check-fn-def! {:name :record-callback :parent :get
+                          :args {:coll {:as :input :type {:label :text}}
+                                 :key {:value :label} :default ""}})
+    (check/check-fn-def! {:name :typed-callable-field :parent :assoc-fn
+                          :args {:value {:as :value :type [:fn {:input {:label :text}} :text]}}})
+    (check/check-fn-def! {:name :retained-record-callback :parent :typed-callable-field
+                          :args {:map {:value {:existing "kept"}} :key {:value :callback}
+                                 :value {:ref :record-callback}}})
+    (let [result (:return (registry/rich-type-of :retained-record-callback))]
+      (is (= :text (:existing result)))
+      (is (= {:input {:label :text}} (types-core/fn-args (:callback result)))))))

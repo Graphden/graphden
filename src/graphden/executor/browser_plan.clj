@@ -7,7 +7,8 @@
     [graphden.executor.compile.bindings :as b]
     [graphden.executor.compile.lookups :as l]
     [graphden.executor.compile.renames :as r]
-    [graphden.executor.compile.surface :as surface]))
+    [graphden.executor.compile.surface :as surface]
+    [graphden.packages.records.ids :as ids]))
 
 
 (def ^:private max-safe-integer 9007199254740991)
@@ -195,21 +196,34 @@
       :item (str (:id item)))))
 
 
+(def ^:private assoc-value-slot
+  (ids/slot-id (ids/fn-id "core.collections" :assoc) :value))
+
+
+(defn- retained-callable?
+  [binding]
+  (and (:is-fn binding) (= assoc-value-slot (:slot-id binding))))
+
+
 (defn- closure-expr
   "Only statically bound callbacks for supported single-argument HOFs are allowed.
    Reuse the JVM's parameter/capture decisions; callable producers and env HOFs stay closed."
   [{:keys [kind slot-id ref-id] :as binding} fid lookups context]
   (when-not (and (= :ref kind)
-                 (capabilities/browser-callable-slot? slot-id)
+                 (or (capabilities/browser-callable-slot? slot-id)
+                     ;; Canonical assoc stores the checked callable; it does not invoke it.
+                     (retained-callable? binding))
                  (not (:env-binding? context)))
     (reject! :callable-binding context))
-  (let [params (r/hof-lambda-params ref-id slot-id binding fid lookups)
-        translation (r/build-hof-translation ref-id params lookups)]
-    (when (> (count params) 1) (reject! :callable-arity context))
-    {:kind "closure" :fn (str ref-id)
-     :lambdaParams (mapv wire-name params)
-     :translation (mapv (fn [[sid n]] {:slot (str sid) :name (wire-name n)})
-                        (sort-by (comp str key) translation))}))
+  (if-let [descriptor (get (:server-descriptors context) [fid slot-id])]
+    {:kind "server" :descriptor descriptor}
+    (let [params (r/hof-lambda-params ref-id slot-id binding fid lookups)
+          translation (r/build-hof-translation ref-id params lookups)]
+      (when (> (count params) 1) (reject! :callable-arity context))
+      {:kind "closure" :fn (str ref-id)
+       :lambdaParams (mapv wire-name params)
+       :translation (mapv (fn [[sid n]] {:slot (str sid) :name (wire-name n)})
+                          (sort-by (comp str key) translation))})))
 
 
 (defn- binding-expr
@@ -233,11 +247,13 @@
 
 
 (defn- binding-deps
-  [binding]
-  (case (:kind binding)
-    :ref [(:ref-id binding)]
-    :seq (keep :ref-fn-id (:items binding))
-    []))
+  [binding fid context]
+  (if (get (:server-descriptors context) [fid (:slot-id binding)])
+    []
+    (case (:kind binding)
+      :ref [(:ref-id binding)]
+      :seq (keep :ref-fn-id (:items binding))
+      [])))
 
 
 (defn- check-fn!
@@ -272,7 +288,9 @@
                            :name (wire-name (:base-name entry))
                            :expr (binding-expr entry fid lookups context)})
                         bindings)}
-     :deps (vec (distinct (mapcat binding-deps (concat bindings env))))
+     :deps (vec (distinct (mapcat #(binding-deps % fid context) (concat bindings env))))
+     :retained (into #{} (comp (filter retained-callable?) (map :ref-id)) bindings)
+     :async? (= "server-call" (capabilities/browser-op primitive))
      :primitive primitive}))
 
 
@@ -292,11 +310,12 @@
 
 (defn- collect-plans
   "Postorder walk; local state shares completed plans between entry roots."
-  [roots lookups allow-fn?]
+  [roots lookups allow-fn? server-descriptors]
   (let [done (volatile! {})
         started (volatile! #{})
         order (volatile! [])
         primitives (volatile! #{})
+        async-fns (volatile! #{})
         value-budget (volatile! max-value-nodes)]
     (letfn [(visit
               [fid path]
@@ -304,14 +323,19 @@
                 (reject! :cycle {:fn-id fid :path (conj path fid)}))
               (when-not (contains? @done fid)
                 (let [path (conj path fid)
-                      context {:fn-id fid :path path :value-budget value-budget}]
+                      context {:fn-id fid :path path :value-budget value-budget
+                               :server-descriptors server-descriptors}]
                   (when (> (count path) max-call-depth) (reject! :call-depth context))
                   (when (>= (count @started) max-functions) (reject! :function-limit context))
                   (vswap! started conj fid)
-                  (let [{:keys [plan deps primitive]}
+                  (let [{:keys [plan deps primitive retained async?]}
                         (derive! context #(do (check-fn! fid lookups allow-fn? context)
                                               (function-plan fid lookups context)))]
-                    (doseq [dep deps] (visit dep path))
+                    (doseq [dep deps]
+                      (visit dep path)
+                      (when (and (contains? @async-fns dep) (not (contains? retained dep)))
+                        (reject! :nested-server-call context)))
+                    (when async? (vswap! async-fns conj fid))
                     (vswap! done assoc fid plan)
                     (vswap! order conj plan)
                     (vswap! primitives conj primitive)))))]
@@ -333,7 +357,7 @@
    No literal values or graph snapshots are included in exception data."
   ([graph base-fns entry-ids]
    (export-plan graph base-fns entry-ids {}))
-  ([graph base-fns entry-ids {:keys [allow-fn?]}]
+  ([graph base-fns entry-ids {:keys [allow-fn? server-descriptors]}]
    (when-not (fn? allow-fn?) (reject! :missing-visibility-policy {}))
    (when-not (and (map? entry-ids) (seq entry-ids)
                   (every? uuid? (vals entry-ids)))
@@ -341,7 +365,7 @@
    (let [lookups (assoc (derive! {} #(l/build-lookups graph)) :base-fns base-fns)
          entries (into (sorted-map) (map (fn [[k v]] [(wire-name k) (str v)])) entry-ids)
          roots (mapv val (sort-by (comp str key) entry-ids))
-         plans (collect-plans roots lookups allow-fn?)]
+         plans (collect-plans roots lookups allow-fn? server-descriptors)]
      (merge {:format 1 :primitiveAbi capabilities/browser-primitive-abi :entries entries
              :inputs (into {} (map (fn [fid]
                                      [(str fid) (derive! {:fn-id fid :path [fid]}

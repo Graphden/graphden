@@ -13,13 +13,14 @@ function fixture() {
     gdPrefOwner: 'first', API: {api_ui_root_plan: '/api/ui/root/plan'},
     authFetch(url, options) { return new Promise(resolve => requests.push({url, options, resolve})); },
     addEventListener(name, callback) { listeners.set(name, callback); }, dispatchEvent() {},
-    GraphdenBrowser: {keyword: value => value, createRuntime: plan => ({run: () => { executed.push(plan.label); return plan.output; }})},
+    GraphdenBrowser: {keyword: value => value, isCallable: value => typeof value === 'function',
+      invoke: (callback, input) => callback(input), createRuntime: plan => ({run: () => { executed.push(plan.label); return plan.output; }})},
   };
   const document = {
     readyState: 'loading', addEventListener() {}, getElementById: id => id === 'app' ? legacy : null,
     createElement: () => ({remove() {}, setAttribute() {}}),
   };
-  const context = {window, document, Map, AbortController, CustomEvent: class {}, graphdenCurrentOrg: 'org',
+  const context = {window, document, Map, AbortController, DOMException, Event: class {}, CustomEvent: class {}, graphdenCurrentOrg: 'org',
     getCurrentBranchName: () => context.branch, branch: 'main'};
   vm.runInNewContext(source, context);
   const reply = (index, legacyMode, label) => requests[index].resolve({ok: true,
@@ -56,5 +57,15 @@ function fixture() {
   f.reply(4, true, null);
   await legacy;
   assert.equal(f.legacy.dataset.gdRootAdapter, 'legacy');
+  const callbacks = new Map([['initial', () => 'initial'], ['update', input => input.get('state')], ['view', () => 'replacement view']]);
+  const components = f.window.gdEditorRoot.reload();
+  f.requests[5].resolve({ok: true, json: async () => ({ok: true, 'argument-name': null,
+    plan: {label: 'components', output: new Map([['legacy', true], ['account-menu', callbacks], ['recents', callbacks]])}})});
+  await components;
+  const selected = await f.window.gdEditorRoot.component('recents');
+  assert.equal(selected.run('view'), 'replacement view', 'the root field selects the rendered behavior');
+  assert.equal(selected.run('update', {state: 'current'}), 'current');
+  f.window.gdPrefOwner = 'third';
+  assert.throws(() => selected.run('view'), /Editor root changed/);
   f.window.gdEditorRoot.dispose();
 })().catch(error => { console.error(error); process.exitCode = 1; });

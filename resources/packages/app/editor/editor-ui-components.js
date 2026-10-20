@@ -128,16 +128,15 @@
     }
   };
   let refreshTimer = null;
-  function refresh() {
+  function refresh(root = true) {
+    if (root) void window.gdEditorRoot?.reload();
     generation++;
     configuration = null;
     catalog = null;
     runtimeIdentities.clear();
     clearTimeout(refreshTimer);
     refreshTimer = setTimeout(() => {
-      void window.gdShellMenuGraph?.reload();
       void window.gdFnPickerGraph?.reload();
-      void window.gdRecentsGraph?.reload();
       void window.gdInspectorGraph?.reload();
       void window.gdExplorerGraph?.reload();
       void window.gdTourCatalogGraph?.reload();
@@ -153,10 +152,10 @@
   window.addEventListener('gd-auth-changed', () => {
     prepared = null;
     statuses.clear();
-    refresh();
+    refresh(false);
     window.dispatchEvent(new Event('gd-ui-components-status'));
   });
-  window.addEventListener('gd-graph-changed', () => { if (eligible()) refresh(); });
+  window.addEventListener('gd-graph-changed', () => { if (eligible()) refresh(false); });
   window.addEventListener('focus', () => { if (eligible()) refresh(); });
   document.addEventListener('visibilitychange', () => { if (!document.hidden && eligible()) refresh(); });
   window.gdUIComponentFailed = component => { runtimeIdentities.delete(component); status(component, 'Personal UI graph does not match the component contract. Using built-in controls.'); };

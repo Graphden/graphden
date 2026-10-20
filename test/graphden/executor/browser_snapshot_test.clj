@@ -6,6 +6,7 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [graphden.crud.type-check :as type-check]
+    [graphden.executor.browser-contracts :as contracts]
     [graphden.executor.browser-plan :as plan]
     [graphden.executor.browser-preview :as preview]
     [graphden.executor.browser-snapshot :as snapshot]
@@ -13,8 +14,11 @@
     [graphden.executor.compile-runtime :as runtime]
     [graphden.executor.registry.core :as registry]
     [graphden.executor.source-contract :as source-contract]
+    [graphden.packages.owned :as owned]
     [graphden.packages.records :as records]
     [graphden.packages.records.types :as record-types]
+    [graphden.storage.postgres.codec :as codec]
+    [graphden.storage.protocol.core :as sp]
     [graphden.storage.remote.core :as remote]
     [graphden.tenancy.context :as tenancy]
     [graphden.types.check :as check]
@@ -507,3 +511,44 @@
                                                                   (assoc :value "changed"))) rows)))
                                      rich {:view id})))))
       (is (= :source-missing (:reason (failure #(run expanded rich {:view (random-uuid)}))))))))
+
+
+(deftest checker-storage-restores-only-exact-owned-generic-type-contracts
+  (let [definition (first (filter #(= :call (:name %))
+                                  (:fns (edn/read-string (slurp "resources/packages/core/system/fns.edn")))))
+        row (first (filter #(and (= :fn (:kind %)) (contracts/contract (:id %)))
+                           (record-types/inline-fn-type-rows-from-form (get-in definition [:args :func :type]))))
+        row (dissoc row :kind)
+        specs {:constraint {:type :jsonb}}
+        stored (codec/decode-row (codec/encode-row row specs) specs)
+        captured {:graph {:fns [stored] :slots [] :fn-slots [] :bindings [] :list-items []}
+                  :namespaces []}
+        reconstruct #(sp/read-entity (#'snapshot/snapshot-storage %) :fn (:id row))
+        constraint (:constraint stored)]
+    (is (not= (:constraint row) constraint) "Real JSONB codec stores ordinary symbol spellings")
+    (with-redefs [owned/owned-fn-id? #(= (:id row) %)]
+      (is (= (:constraint row) (:constraint (reconstruct captured))))
+      (is (= constraint (get-in captured [:graph :fns 0 :constraint])) "Source evidence is not rewritten")
+      (doseq [forged [(assoc-in captured [:graph :fns 0 :constraint 2] :text)
+                      (assoc-in captured [:graph :fns 0 :constraint 1 :arg] :a)
+                      (assoc-in captured [:graph :fns 0 :constraint] (conj constraint #{:io}))
+                      (assoc-in captured [:graph :fns 0 :constraint] (conj constraint :any #{:jvm-server}))
+                      (assoc-in captured [:graph :fns 0 :constraint] [:secret constraint])
+                      (assoc-in captured [:graph :fns 0 :parent-ids] [(random-uuid)])
+                      (assoc-in captured [:graph :fns 0 :expects-effects] ["io"])
+                      (assoc-in captured [:graph :fns 0 :execution] #{:jvm-server})
+                      (assoc-in captured [:graph :fns 0 :effects] #{:io})
+                      (assoc-in captured [:graph :fns 0 :impl] :forged)
+                      (assoc-in captured [:graph :fns 0 :marker-flags] {:hide-result? true})
+                      (assoc-in captured [:graph :fns 0 :lambda-params] ["forged"])
+                      (assoc-in captured [:graph :fns 0 :namespace-id] (random-uuid))
+                      (assoc-in captured [:graph :fns 0 :deleted-at] "tombstone")
+                      (assoc-in captured [:graph :fns 0 :kind] :marker)
+                      (assoc-in captured [:graph :bindings] [{:fn-id (:id row) :value "forged"}])
+                      (assoc-in captured [:graph :fn-slots] [{:id (random-uuid) :fn-id (:id row) :slot-id (random-uuid)}])]]
+        (is (= :type-contract-source-mismatch (:reason (failure #(reconstruct forged))))))
+      (doseq [private [(assoc-in captured [:graph :fns 0 :org-id] "foreign")
+                       (assoc-in captured [:graph :fns 0 :concealed?] true)]]
+        (is (= constraint (:constraint (reconstruct private))) "Private rows receive no restoration")))
+    (with-redefs [owned/owned-fn-id? (constantly false)]
+      (is (= constraint (:constraint (reconstruct captured))) "Unowned rows receive no restoration"))))

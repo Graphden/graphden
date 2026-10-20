@@ -1,6 +1,38 @@
 {:namespace "app.ui-recents"
  :fns
- [{:name :recents-pins :parent :get  :args {:coll {:as :state :type :_recents-state} :key {:value :pins} :default {:value []}}}
+ [{:name :_root-initial-input :type {:inputs :_recents-inputs}}
+  {:name :_root-update-input :type {:state :_recents-state :inputs :_recents-inputs :event :_recents-event}}
+  {:name :_root-view-input :type {:state :_recents-state :inputs :_recents-inputs}}
+  {:name :_root-view-result :type {:tree :hiccup-node :styles [:list {:selector :text :declarations :text-map}] :hidden :bool}}
+  {:name :_root-initial-callable :fn-type [{:input :app.ui-recents/_root-initial-input} :app.ui-recents/_recents-state]}
+  {:name :_root-update-callable :fn-type [{:input :app.ui-recents/_root-update-input} :app.ui-recents/_recents-transition]}
+  {:name :_root-view-callable :fn-type [{:input :app.ui-recents/_root-view-input} :app.ui-recents/_root-view-result]}
+  {:name :_root-initial-record :type {:initial :app.ui-recents/_root-initial-callable}}
+  {:name :_root-update-record :type {:initial :app.ui-recents/_root-initial-callable :update :app.ui-recents/_root-update-callable}}
+  {:name :root-component :type {:initial :app.ui-recents/_root-initial-callable :update :app.ui-recents/_root-update-callable :view :app.ui-recents/_root-view-callable}}
+  {:name :root-initial :parent :recents-initial :lambda-params [:input]
+   :args {:inputs {:parent :get :args {:coll {:as :input :type :app.ui-recents/_root-initial-input} :key {:value :inputs}}}}}
+  {:name :root-update :parent :recents-update :lambda-params [:input]
+   :args {:state {:parent :get :args {:coll {:as :input :type :app.ui-recents/_root-update-input} :key {:value :state}}}
+          :inputs {:parent :get :args {:coll {:as :input :type :app.ui-recents/_root-update-input} :key {:value :inputs}}}
+          :event {:parent :get :args {:coll {:as :input :type :app.ui-recents/_root-update-input} :key {:value :event}}}}}
+  {:name :root-view :parent :recents-view :lambda-params [:input]
+   :return-type :app.ui-recents/_root-view-result
+   :args {:state {:parent :get :args {:coll {:as :input :type :app.ui-recents/_root-view-input} :key {:value :state}}}
+          :inputs {:parent :get :args {:coll {:as :input :type :app.ui-recents/_root-view-input} :key {:value :inputs}}}}}
+  {:name :_root-initial-assoc :parent :assoc-fn
+   :args {:value {:as :value :type :app.ui-recents/_root-initial-callable}}}
+  {:name :_root-update-assoc :parent :assoc-fn
+   :args {:value {:as :value :type :app.ui-recents/_root-update-callable}}}
+  {:name :_root-view-assoc :parent :assoc-fn
+   :args {:value {:as :value :type :app.ui-recents/_root-view-callable}}}
+  {:name :_root-initial-field :parent :_root-initial-assoc :return-type :app.ui-recents/_root-initial-record
+   :args {:map {} :key {:value :initial} :value {:ref :root-initial}}}
+  {:name :_root-update-field :parent :_root-update-assoc :return-type :app.ui-recents/_root-update-record
+   :args {:map {:ref :_root-initial-field :type :app.ui-recents/_root-initial-record} :key {:value :update} :value {:ref :root-update}}}
+  {:name :recents-component :parent :_root-view-assoc :return-type :app.ui-recents/root-component
+   :args {:map {:ref :_root-update-field :type :app.ui-recents/_root-update-record} :key {:value :view} :value {:ref :root-view}}}
+  {:name :recents-pins :parent :get  :args {:coll {:as :state :type :_recents-state} :key {:value :pins} :default {:value []}}}
   {:name :recents-trail :parent :get  :args {:coll {:as :state :type :_recents-state} :key {:value :trail} :default {:value []}}}
   {:name :_initial-pins :parent :get :args {:coll {:as :inputs :type :_recents-inputs} :key {:value :pins} :default {:value []}}}
   {:name :_initial-trail :parent :get :args {:coll {:as :inputs :type :_recents-inputs} :key {:value :trail} :default {:value []}}}

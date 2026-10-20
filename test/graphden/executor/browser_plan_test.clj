@@ -7,6 +7,7 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.browser-plan :as browser]
+    [graphden.executor.capabilities :as capabilities]
     [graphden.executor.compile-eager :as eager]
     [graphden.executor.compile-runtime :as runtime]
     [graphden.executor.compile.bindings :as bindings]
@@ -1371,3 +1372,60 @@
            (:execution (registry/rich-type-of :callback))))
     (is (= :unknown (:execution (registry/rich-type-of :boxed-callback))))
     (is (= :callable-binding (:reason (failure #(export-fixture fixture :boxed-callback)))))))
+
+
+(deftest assoc-fn-retains-a-static-callable-without-invoking-it
+  (let [primitives (conj primitive-defs
+                         {:name :assoc :namespace "core.collections"
+                          :args {:map {:type [:map :keyword :any]} :key {:type :keyword}
+                                 :value {:type :any}} :return-type [:map :keyword :any]})
+        fixture (graph-of primitives
+                          [{:name :callback :parent :const :lambda-params [:input]
+                            :args {:value {:as :input :type :text}}}
+                           {:name :record :parent :assoc
+                            :args {:map {} :key {:value :view}
+                                   :value {:ref :callback :type [:fn {:input :text} :text]}}}])
+        plan (export-fixture fixture :record)
+        entry (function-entry plan (get-in fixture [:ids :record]))
+        value (first (filter #(= "value" (:name %)) (:args entry)))
+        script (str "const g=require('./resources/packages/app/ui-preview/browser-runtime.js');"
+                    "let s='';process.stdin.on('data',x=>s+=x);process.stdin.on('end',()=>{"
+                    "const r=g.createRuntime(JSON.parse(s)).run('view');"
+                    "process.stdout.write(g.invoke(r.get(g.keyword('view')),'changed binding'));});")
+        result (sh/sh "node" "-e" script :in (json/generate-string plan))]
+    (is (= "closure" (get-in value [:expr :kind])))
+    (is (= ["input"] (get-in value [:expr :lambdaParams])))
+    (is (zero? (:exit result)) (:err result))
+    (is (= "changed binding" (:out result)))))
+
+
+(deftest retained-server-query-is-terminal-and-cannot-feed-a-sync-consumer
+  (let [server-id (ids/fn-id "core.system" :server-call)
+        server-slot (ids/slot-id server-id :func)
+        primitives (into primitive-defs
+                         [{:name :server-call :namespace "core.system"
+                           :args {:func {:type [:fn {:input :text} :text]} :arg {:type :text}}
+                           :return-type :text}
+                          {:name :assoc :namespace "core.collections"
+                           :args {:map {:type [:map :keyword :any]} :key {:type :keyword} :value {:type :any}}
+                           :return-type [:map :keyword :any]}])
+        {:keys [graph ids]} (graph-of primitives
+                                      [{:name :server-target :parent :const :args {:value "server-only"}}
+                                       {:name :query :parent :server-call :lambda-params [:input]
+                                        :args {:func {:ref :server-target} :arg {:as :input}}}
+                                       {:name :record :parent :assoc
+                                        :args {:map {} :key {:value :query}
+                                               :value {:ref :query :type [:fn {:input :text} :text]}}}
+                                       {:name :sync-consumer :parent :const :args {:value {:ref :query}}}])
+        opts {:allow-fn? (constantly true)
+              :server-descriptors {[(get ids :query) server-slot] {:token "opaque"}}}
+        original-op capabilities/browser-op
+        original-slot? capabilities/browser-callable-slot?]
+    (with-redefs [capabilities/browser-op (fn [id] (if (= id server-id) "server-call" (original-op id)))
+                  capabilities/browser-callable-slot? (fn [id] (or (= id server-slot) (original-slot? id)))]
+      (let [plan (browser/export-plan graph {} {:root (get ids :record)} opts)
+            query (function-entry plan (get ids :query))]
+        (is (some #(= "server" (get-in % [:expr :kind])) (:args query)))
+        (is (not-any? #(= (str (get ids :server-target)) (:id %)) (:functions plan))))
+      (is (= :nested-server-call
+             (:reason (failure #(browser/export-plan graph {} {:root (get ids :sync-consumer)} opts))))))))

@@ -14,10 +14,20 @@ binding on the server; request parameters cannot choose a target or captures.
 Export requires execute permission for the root and source visibility for its
 ordinary graph dependencies. Public ABI primitives retain their fixed interface
 policy. The bounded browser ABI supports static
-`core.system/call` callbacks and captures. The current typed bootstrap result,
-`{:legacy true}`, selects the explicit adapter for existing editor hosts.
-Unsupported adapters fail explicitly. Exporting a UiView root requires further
-marker provenance support; this bootstrap does not change marker semantics.
+`core.system/call` callbacks and captures. The root returns a checked record
+with `legacy`, `account-menu`, and `recents` fields. Each component record
+contains ordinary callable `initial`, `update`, and `view` values constructed
+with `core.collections/assoc-fn`. The host invokes callbacks through `GraphdenBrowser.invoke`; update and view
+use unary input envelopes, and initial may be nullary. Callables cannot be forged or serialized by
+the value codec. The explicit legacy adapter retains other editor hosts.
+
+Existing personal menu and recents selections use a read-only server adapter:
+the ordinary configuration resolver and selected source plans share the root
+snapshot and visibility checks. Mechanical generic argument projections retain
+the old entry contracts. A custom root binding wins over this adapter. Missing
+or denied selected source is refused; the adapter creates no graphs or grants.
+Preference, authentication and branch changes retire the old root and callbacks.
+
 
 Settings → Appearance can select an ordinary personal theme graph. It executes
 on the server through the normal access checks, with effects disabled and a

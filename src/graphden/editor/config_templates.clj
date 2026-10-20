@@ -21,7 +21,12 @@
   "Canonical parse declarations only. Publication separately authorizes the
    installed dependency rows and verifies their source/type certificates."
   []
-  (let [{:keys [fns] path :namespace} (module "app/ui-config")
+  (let [{all-fns :fns path :namespace} (module "app/ui-config")
+        ;; Configuration templates consume identity manifests, not browser
+        ;; bootstrap implementations or their callable record contracts.
+        fns (remove #(contains? #{:_editor-bootstrap-result :legacy-editor-root
+                                  :_root-account-menu :component-editor-root :editor-root}
+                                (:name %)) all-fns)
         collections (module "core/collections")
         identity-targets (filter #(and (keyword? %) (namespace %))
                                  (keep #(get-in % [:args :value :ref]) fns))

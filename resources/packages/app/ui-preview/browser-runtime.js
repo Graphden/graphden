@@ -96,8 +96,14 @@
   const isSequence = (value) => value instanceof LazySequence;
   // Internal only: supplied values and the result codec cannot mint or carry
   // callables. A closure always names a checked target in this plan.
+  const graphClosures = new WeakSet();
   class GraphClosure {
-    constructor(invoke) { this.invoke = invoke; }
+    constructor(invoke, external = invoke) {
+      this.invoke = invoke;
+      this.external = external;
+      graphClosures.add(this);
+      Object.freeze(this);
+    }
   }
   function sequence(value) {
     if (value === null) return [];
@@ -145,13 +151,14 @@
     const: (arg) => arg('value'),
     call: (arg) => {
       const func = arg('func');
-      if (!(func instanceof GraphClosure)) throw new Error('Browser call requires a graph callback');
+      if (!(graphClosures.has(func))) throw new Error('Browser call requires a graph callback');
       return func.invoke(arg('arg'));
     },
+    'server-call': (arg) => operations.call(arg),
     list: (arg) => arg('items'),
     map: (arg, tick) => {
       const func = arg('func');
-      if (!(func instanceof GraphClosure)) throw new Error('Browser map requires a graph callback');
+      if (!(graphClosures.has(func))) throw new Error('Browser map requires a graph callback');
       const values = [];
       for (const item of sequence(arg('coll'))) {
         tick();
@@ -164,7 +171,7 @@
     },
     filter: (arg, tick) => {
       const pred = arg('pred');
-      if (!(pred instanceof GraphClosure)) throw new Error('Browser filter requires a graph callback');
+      if (!(graphClosures.has(pred))) throw new Error('Browser filter requires a graph callback');
       const values = [];
       let count = 0;
       for (const item of sequence(arg('coll'))) {
@@ -177,7 +184,7 @@
     },
     'group-by': (arg, tick) => {
       const callback = arg('key-fn');
-      if (!(callback instanceof GraphClosure)) throw new Error('Browser group-by requires a graph callback');
+      if (!(graphClosures.has(callback))) throw new Error('Browser group-by requires a graph callback');
       const groups = new Map();
       let count = 0;
       for (const item of sequence(arg('coll'))) {
@@ -191,7 +198,7 @@
     },
     'partition-by': (arg, tick) => {
       const callback = arg('key-fn');
-      if (!(callback instanceof GraphClosure)) throw new Error('Browser partition-by requires a graph callback');
+      if (!(graphClosures.has(callback))) throw new Error('Browser partition-by requires a graph callback');
       const runs = [];
       let previous;
       let first = true;
@@ -209,7 +216,7 @@
     },
     'sort-by': (arg, tick) => {
       const callback = arg('key-fn');
-      if (!(callback instanceof GraphClosure)) throw new Error('Browser sort-by requires a graph callback');
+      if (!(graphClosures.has(callback))) throw new Error('Browser sort-by requires a graph callback');
       const rows = [];
       for (const item of sequence(arg('coll'))) {
         tick();
@@ -391,7 +398,7 @@
     operationBudgets.set(token, state);
     return token;
   }
-  function createRuntime(plan, {operationLimit = 10000} = {}) {
+  function createRuntime(plan, {operationLimit = 10000, serverCall} = {}) {
     if (plan.format !== 1 || plan.primitiveAbi !== 1) throw new Error('Unsupported browser graph format');
     const functions = new Map(plan.functions.map((fn) => [fn.id, fn]));
     const primitives = new Map(plan.primitives.map(({id, op}) => {
@@ -399,7 +406,7 @@
       return [id, operations[op]];
     }));
     function run(entry, supplied = {}, operationBudget = null) {
-      const shared = operationBudget === null ? null : operationBudgets.get(operationBudget);
+      let shared = operationBudget === null ? null : operationBudgets.get(operationBudget);
       if (operationBudget !== null && !shared) throw new Error('Invalid browser batch budget token');
       if (shared && shared.remaining < 1) throw new Error('Browser graph batch operation limit exceeded');
       checkOperationDeadline(shared);
@@ -435,10 +442,18 @@
             if (!(item instanceof Thunk)) captured.slots.set(slot, item);
           }
         }
-        return new GraphClosure((item) => {
+        const invoke = (item) => {
           const invocation = {slots: captured.slots, names: new Map(captured.names)};
           if (value.lambdaParams.length) invocation.names.set(value.lambdaParams[0], item);
           return call(value.fn, invocation);
+        };
+        return new GraphClosure(invoke, (item, budget = null) => {
+          shared = budget === null ? null : operationBudgets.get(budget);
+          if (budget !== null && !shared) throw new Error('Invalid browser batch budget token');
+          checkOperationDeadline(shared);
+          encode(item);
+          remaining = operationLimit;
+          return invoke(item);
         });
       }
       function expr(value, frame) {
@@ -448,6 +463,10 @@
           case 'read': return force(frame.slots.has(value.slot) ? frame.slots.get(value.slot) : frame.names.has(value.name) ? frame.names.get(value.name) : null);
           case 'seq': return new LazySequence(value.items.map((item) => new Thunk(() => expr(item, frame))));
           case 'closure': return closure(value, frame);
+          case 'server': return new GraphClosure(item => {
+            if (typeof serverCall !== 'function') throw new Error('Server call transport is unavailable');
+            return serverCall(value.descriptor, item);
+          });
           case 'call': {
             let calleeFrame = frame;
             if (value.renames.length) {
@@ -494,7 +513,14 @@
     }
     return {run};
   }
-  const api = {createRuntime, createOperationBudget, encode, decode, keyword, Keyword, equal, isSequence};
+  function invoke(callback, input = null, operationBudget = null) {
+    if (!(graphClosures.has(callback))) throw new Error('Expected a graph callback');
+    if (operationBudget !== null && !operationBudgets.has(operationBudget)) throw new Error('Invalid browser batch budget token');
+    encode(input);
+    return callback.external(input, operationBudget);
+  }
+  const isCallable = value => graphClosures.has(value);
+  const api = {invoke, isCallable, createRuntime, createOperationBudget, encode, decode, keyword, Keyword, equal, isSequence};
   host.GraphdenBrowser = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window === 'undefined' ? globalThis : window);

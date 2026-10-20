@@ -44,7 +44,7 @@
    installed dependency under source authorization before writing anything."
   []
   (let [modules {"core/logic" ["core.logic" #{:const :if :equal? :nil? :coalesce}]
-                 "core/collections" ["core.collections" #{:list :get :assoc :zipmap :count :take :concat :vals}]
+                 "core/collections" ["core.collections" #{:list :get :assoc :assoc-fn :zipmap :count :take :concat :vals}]
                  "core/arithmetic" ["core.arithmetic" #{:add :mod :lte}]
                  "core/hof" ["core.hof" #{:map :filter :group-by :partition-by :sort-by}]
                  "core/strings" ["core.strings" #{:str :str-starts-with? :str-lower :str-trim :str-contains? :str-clip}]
@@ -70,9 +70,12 @@
   (let [definitions (installed-definitions module)
         local-names (set (map :name definitions))
         fixed-names (merge public-type-names abi-names)
+        source-path (str/replace module "/" ".")
         qualify (fn [reference]
-                  (if (contains? local-names reference) reference
-                      (get fixed-names reference reference)))]
+                  (let [local (if (= source-path (namespace reference))
+                                (keyword (name reference)) reference)]
+                    (if (contains? local-names local) local
+                        (get fixed-names reference reference))))]
     (mapv #(assoc (rebase/rewrite-references % qualify) :namespace destination) definitions)))
 
 

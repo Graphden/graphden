@@ -1,16 +1,20 @@
 {:namespace "app.ui-config"
  :description "Pure shared editor configuration and a protected authenticated metadata resolver. No component body copies or per-user selector table."
  :fns
- [{:name :_editor-bootstrap-result :type {:legacy :bool}}
+ [{:name :_editor-bootstrap-result :type {:legacy :bool :account-menu :app.ui-account-menu/root-component :recents :app.ui-recents/root-component}}
   {:name :legacy-editor-root :parent :const
-   :description "Explicit adapter retaining the existing editor hosts until they are composed as ordinary HOFs."
-   :return-type :_editor-bootstrap-result
-   :lambda-params []
+   :description "Explicit adapter retaining the editor hosts not yet selected through root callable records."
+   :return-type {:legacy :bool} :lambda-params []
    :args {:value {:value {:legacy true}}}}
+  {:name :_root-account-menu :parent :assoc
+   :args {:map :legacy-editor-root :key {:value :account-menu} :value :app.ui-account-menu/account-menu-component}}
+  {:name :component-editor-root :parent :assoc :lambda-params []
+   :return-type :_editor-bootstrap-result
+   :args {:map :_root-account-menu :key {:value :recents} :value :app.ui-recents/recents-component}}
   {:name :editor-root :parent :call
    :description "Ordinary browser root invocation with an explicit legacy editor adapter."
    :return-type :_editor-bootstrap-result
-   :args {:func {:ref :legacy-editor-root} :arg {:as :inputs :type :keyword-map}}}
+   :args {:func {:ref :component-editor-root} :arg {:as :inputs :type :keyword-map}}}
   {:name :_component-entry :type {:role :keyword :fn-id :uuid}}
   {:name :_component-entries :list :_component-entry}
   {:name :_component-descriptor :type {:component-id :uuid :entries :_component-entries}}

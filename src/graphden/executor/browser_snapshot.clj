@@ -4,6 +4,7 @@
   (:require
     [clojure.set :as set]
     [graphden.crud.type-check :as type-check]
+    [graphden.executor.browser-contracts :as contracts]
     [graphden.executor.browser-plan :as plan]
     [graphden.executor.compile-runtime :as runtime]
     [graphden.executor.compile.deps :as deps]
@@ -15,6 +16,7 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.remote.core :as remote]
     [graphden.storage.tx :as tx]
+    [graphden.tenancy.context :as tenancy]
     [graphden.types.check :as check]
     [graphden.types.check.provenance :as provenance]
     [graphden.types.core :as types]
@@ -125,10 +127,66 @@
       (catch Exception _ (reject! :snapshot-read-failed {})))))
 
 
+(defn- stored-constraint-matches?
+  "Keywords remain type aliases; only the exact symbol or its JSONB string
+   spelling can be reconstructed as a declared generic variable."
+  [expected actual]
+  (cond
+    (symbol? expected) (or (= expected actual)
+                           (and (string? actual) (= (str expected) actual)))
+    (map? expected) (and (map? actual) (= (set (keys expected)) (set (keys actual)))
+                         (every? (fn [[k v]] (stored-constraint-matches? v (get actual k))) expected))
+    (vector? expected) (and (vector? actual) (= (count expected) (count actual))
+                            (every? true? (map stored-constraint-matches? expected actual)))
+    :else (= expected actual)))
+
+
+(defn- type-row-semantics-match?
+  "Descriptions and storage bookkeeping carry no callable semantics. Every
+   other non-nil field, including future effect/execution annotations, must
+   agree with the canonical emitted row before replacing its constraint."
+  [expected actual]
+  (let [cosmetic #{:description :created-at :updated-at :deleted-at :kind
+                   :constraint :org-id :concealed?}
+        fields (set/difference (into (set (keys expected)) (keys actual)) cosmetic)]
+    (and (nil? (:deleted-at actual))
+         ;; Entity-keyed storage rows omit :kind; an explicit discriminator
+         ;; must still identify the same emitted fn row.
+         (or (not (contains? actual :kind)) (= (:kind expected) (:kind actual)))
+         (every? #(= (get expected %) (get actual %)) fields))))
+
+
+(defn- reconstruction-fns
+  "Restore type-variable symbols only from an exact trusted type contract.
+   JSONB keeps their spelling as strings. The original graph remains the source
+   witness; this projection is used only to reconstruct checker declarations."
+  [{:keys [fns slots fn-slots bindings]}]
+  (let [slots-by-id (into {} (map (juxt :id identity)) slots)
+        junctions (group-by :fn-id fn-slots)
+        bindings (group-by :fn-id bindings)]
+    (mapv (fn [row]
+            (if-let [contract (when (and (owned/owned-fn-id? (:id row))
+                                         (contains? #{nil tenancy/public-org} (:org-id row)))
+                                (let [contract (contracts/contract (:id row))]
+                                  (when (and (not (:concealed? row))
+                                             (= :fn (first (get-in contract [:fn :constraint]))))
+                                    contract)))]
+              (let [own-junctions (vec (get junctions (:id row)))
+                    own-slots (mapv #(get slots-by-id (:slot-id %)) own-junctions)]
+                (when-not (and (type-row-semantics-match? (:fn contract) row)
+                               (contracts/matches? contract row own-slots own-junctions
+                                                   (get bindings (:id row)))
+                               (stored-constraint-matches? (get-in contract [:fn :constraint]) (:constraint row)))
+                  (reject! :type-contract-source-mismatch {:fn-id (:id row)}))
+                (assoc row :constraint (get-in contract [:fn :constraint])))
+              row)) fns)))
+
+
 (defn- snapshot-storage
   [{:keys [graph namespaces]}]
-  ;; The existing adapter accepts entity-keyed bundles and performs no I/O.
-  (remote/from-bundle {:fn (:fns graph) :slot (:slots graph)
+  ;; Source fingerprints are computed from the original immutable rows. Only
+  ;; the checker's read adapter receives the canonical typed reconstruction.
+  (remote/from-bundle {:fn (reconstruction-fns graph) :slot (:slots graph)
                        :fn-slot (:fn-slots graph) :binding (:bindings graph)
                        :binding-list-item (:list-items graph) :ns namespaces}))
 

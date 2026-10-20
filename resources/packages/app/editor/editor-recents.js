@@ -8,6 +8,7 @@ let gdRecentsHost = null;
 let gdRecentsSnapshot = null;
 let gdRecentsLoadGeneration = 0;
 let gdRecentsPending = null;
+let gdRecentsEvents = [];
 function gdRecentsText(value) { return typeof value === 'string' && value.length > 0 && value.length <= 4096 && ![...value].some(char => char.charCodeAt(0) < 32); }
 function gdReadFnTrail(key) {
   try {
@@ -70,26 +71,30 @@ function gdRecentsPersist(key, entries) {
   catch (_) { throw new Error('Recent functions changed, but could not be saved.'); }
   finally { gdRecentsSnapshot = JSON.stringify(gdRecentsStorage()); }
 }
-function gdRecentsBuiltin() { return window.GraphdenBrowser.createRuntime(window.GraphdenBuiltinPlans.plans.recents, {operationLimit: 1000000}); }
 async function gdReloadRecents() {
-  if (!gdRecentsController || typeof window.gdLoadUIComponentRuntime !== 'function') return;
-  const controller = gdRecentsController;
+  if (gdRecentsPending) return gdRecentsPending.promise;
   const own = ++gdRecentsLoadGeneration;
-  gdRecentsPending?.abort();
   const loading = new AbortController();
-  gdRecentsPending = loading;
-  try {
-    const candidate = await window.gdLoadUIComponentRuntime('recents', window.GraphdenBuiltinPlans.plans.recents, {operationLimit: 1000000}, loading.signal);
-    if (loading.signal.aborted || own !== gdRecentsLoadGeneration || controller !== gdRecentsController) return;
-    controller.replaceRuntime(candidate);
-  } catch (error) {
-    if (loading.signal.aborted || own !== gdRecentsLoadGeneration || controller !== gdRecentsController || error.name === 'AbortError') return;
-    window.gdUIComponentFailed?.('recents');
-    controller.replaceRuntime(gdRecentsBuiltin());
-  } finally { if (gdRecentsPending === loading) gdRecentsPending = null; }
+  const pending = {controller: loading, promise: null};
+  gdRecentsPending = pending;
+  pending.promise = (async () => {
+    try {
+      const candidate = await window.gdEditorRoot.component('recents');
+      if (loading.signal.aborted || own !== gdRecentsLoadGeneration) return;
+      if (gdRecentsController) gdRecentsController.replaceRuntime(candidate);
+      else gdLoadRecents(candidate);
+      renderRecentFns();
+      for (const {kind, entry} of gdRecentsEvents.splice(0)) gdRecentsEvent(kind, entry);
+    } catch (error) {
+      if (loading.signal.aborted || own !== gdRecentsLoadGeneration || error.name === 'AbortError') return;
+      if (typeof gdToast === 'function') gdToast('Recent functions graph is unavailable.');
+    } finally { if (gdRecentsPending === pending) gdRecentsPending = null; }
+  })();
+  return pending.promise;
 }
-function gdLoadRecents() {
+function gdLoadRecents(runtime = window.gdEditorRoot?.componentNow('recents')) {
   if (gdRecentsController) return gdRecentsController;
+  if (!runtime) { void gdReloadRecents(); return null; }
   const persist = (kind, key, limit) => ({
     validate(request) {
       gdRecentsFields(request, ['kind', 'entries']);
@@ -98,7 +103,7 @@ function gdLoadRecents() {
     },
     execute(entries) { gdRecentsPersist(key, entries); },
   });
-  gdRecentsController = window.GraphdenComponent.create(gdRecentsBuiltin(), {
+  gdRecentsController = window.GraphdenComponent.create(runtime, {
     inputs: gdRecentsInputs, validateState: gdRecentsStateValid, rendererOptions: {nodeLimit: 10000},
     validateView(output) {
       gdRecentsFields(output, ['tree', 'styles', 'hidden']);
@@ -120,7 +125,6 @@ function gdLoadRecents() {
     },
   });
   gdRecentsSnapshot = JSON.stringify(gdRecentsStorage());
-  Promise.resolve().then(() => { if (gdRecentsController) void gdReloadRecents(); });
   return gdRecentsController;
 }
 function gdRecentsSync(controller) {
@@ -132,6 +136,10 @@ function gdRecentsSync(controller) {
 }
 function gdRecentsEvent(kind, entry = {id: '', name: '', qname: ''}) {
   const controller = gdLoadRecents();
+  if (!controller) {
+    if (gdRecentsEvents.length < 1000) gdRecentsEvents.push({kind, entry});
+    return;
+  }
   try {
     gdRecentsSync(controller);
     controller.dispatch(gdRecentsValue({kind, entry}));
@@ -163,6 +171,7 @@ function gdRecentsClick(event) {
 }
 function renderRecentFns() {
   const controller = gdLoadRecents();
+  if (!controller) return;
   gdRecentsSync(controller);
   const host = document.getElementById('gd-recent-fns');
   if (host !== gdRecentsHost) gdDisposeRecents();
@@ -183,17 +192,16 @@ window.gdRecentsGraph = {
   replaceRuntime(candidate) { gdLoadRecents().replaceRuntime(candidate); },
   dispose() {
     gdRecentsLoadGeneration++;
-    gdRecentsPending?.abort();
+    gdRecentsPending?.controller.abort();
     gdRecentsPending = null;
     gdDisposeRecents();
     gdRecentsController?.dispose();
     gdRecentsController = null;
     gdRecentsSnapshot = null;
+    gdRecentsEvents = [];
   },
 };
 window.addEventListener('pagehide', () => window.gdRecentsGraph.dispose());
-window.addEventListener('gd-auth-changed', () => {
-  window.gdRecentsGraph.dispose();
-  renderRecentFns();
-});
+window.addEventListener('gd-editor-root-changing', () => window.gdRecentsGraph.dispose());
+window.addEventListener('gd-editor-root-ready', () => { void gdReloadRecents(); });
 window.addEventListener('storage', event => { if (event.key === RECENT_FNS_KEY || event.key === PINNED_FNS_KEY) renderRecentFns(); });

@@ -4,7 +4,6 @@
   const params = new URLSearchParams(location.search);
   const names = ['ui-initial', 'ui-update', 'ui-view'];
   const review = names.some((name) => params.has(name));
-  if (!review && !window.GraphdenBuiltinPlans) return;
   const api = window.GraphdenBrowser;
   const key = api.keyword;
   const get = (map, name) => map instanceof Map ? map.get(key(name)) : undefined;
@@ -15,6 +14,8 @@
   let requestGeneration = 0;
   let pending = null;
   let ready = false;
+  let serverLifetime = null;
+  let server = new Map([['phase', 'idle'], ['label', ''], ['branch-name', '']].map(([name, value]) => [key(name), value]));
 
   function report(error) {
     if (!review) window.gdUIComponentFailed?.('account-menu');
@@ -24,7 +25,7 @@
     window.gdShellMenuGraph.ready = false;
     if (typeof gdToast === 'function') gdToast('Menu graph unavailable: ' + error.message);
   }
-  function view() { return runtime.run('view', {state, theme}); }
+  function view() { return runtime.run('view', {state, theme, server}); }
   function themeTokens(value) {
     if (!(value instanceof Map)) throw new Error('Invalid graph theme');
     const tokens = Object.fromEntries(value);
@@ -47,7 +48,10 @@
     const commonTree = get(value, 'common-tree');
     const common = window.GraphdenRenderer.vnode(commonTree);
     if (common.type !== 'div' || common.props.className !== 'auth-menu-common') throw new Error('Invalid account menu content');
-    const rows = [common.props.children].flat().filter(Boolean);
+    const children = [common.props.children].flat().filter(Boolean);
+    const rows = children.filter(row => row.props?.role !== 'status');
+    const statuses = children.filter(row => row.props?.role === 'status');
+    if (statuses.length > 1 || statuses.some(row => row.type !== 'div' || !rowContent(row.props.children))) throw new Error('Invalid account status');
     const destinations = new Map([['settings', 'Settings'], ['operate', 'Organization']]);
     if (rows.length !== destinations.size || rows.some((row) => {
       const action = row.props?.['data-action'];
@@ -200,6 +204,9 @@
     async reload() {
       const generation = ++requestGeneration;
       pending?.abort();
+      serverLifetime?.dispose();
+      serverLifetime = null;
+      server = new Map([[key('phase'), 'idle'], [key('label'), ''], [key('branch-name'), '']]);
       // Reauthorization never keeps an older personal plan mounted.
       closeMounted();
       window.gdClearGraphTheme();
@@ -219,8 +226,7 @@
           plan = await response.json();
           if (!response.ok || plan.ok === false) throw new Error(plan.reason || 'Graph export refused');
         } else {
-          plan = window.GraphdenBuiltinPlans.plans.accountMenu;
-          loadedRuntime = await window.gdLoadUIComponentRuntime('account-menu', plan, {}, controller.signal);
+          loadedRuntime = await window.gdEditorRoot.component('account-menu');
         }
         if (generation !== requestGeneration) return;
         if (mounted) closeMounted();
@@ -231,6 +237,22 @@
         integration.ready = true;
         ready = true;
         refreshTheme();
+        if (loadedRuntime?.query && window.GraphdenServer) {
+          serverLifetime = window.GraphdenServer.createLifetime({
+            transport(payload, options) {
+              return window.authFetch(window.API.api_editor_server_call, {...options, method: 'POST',
+                headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
+            },
+            scope: () => String(requestGeneration),
+            onState(next) {
+              if (generation !== requestGeneration || controller.signal.aborted) return;
+              server = new Map([[key('phase'), next.phase],
+                [key('label'), get(next.value, 'label') || ''], [key('branch-name'), get(next.value, 'branch-name') || '']]);
+              refreshTheme();
+            },
+          });
+          void serverLifetime.invoke(loadedRuntime.query, new Map([[key('query'), '']]));
+        }
       } catch (error) { if (generation === requestGeneration && error.name !== 'AbortError') report(error); }
       finally { if (pending === controller) pending = null; }
     },
@@ -239,11 +261,17 @@
   };
   window.gdShellMenuGraph = integration;
   window.gdRefreshGraphTheme = refreshTheme;
-  document.addEventListener('DOMContentLoaded', () => { if (!review || isAuthenticated() || accountsAuthed) void integration.reload(); }, {once: true});
+  document.addEventListener('DOMContentLoaded', () => { if (review && (isAuthenticated() || accountsAuthed)) void integration.reload(); }, {once: true});
+  window.addEventListener('gd-editor-root-ready', () => { if (!review) void integration.reload(); });
+  window.addEventListener('gd-editor-root-changing', () => {
+    if (review) return;
+    requestGeneration++; pending?.abort(); serverLifetime?.dispose(); serverLifetime = null;
+    closeMounted(); window.gdClearGraphTheme(); runtime = null; integration.ready = false;
+  });
   window.addEventListener('gd-auth-changed', () => {
     requestGeneration++;
     pending?.abort();
     if (ready || runtime) { closeMounted(); window.gdClearGraphTheme(); runtime = null; integration.ready = false; }
-    if (!review || isAuthenticated() || accountsAuthed) void integration.reload();
+    if (review && (isAuthenticated() || accountsAuthed)) void integration.reload();
   });
 })();

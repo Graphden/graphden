@@ -164,7 +164,23 @@ async function cleanup(page, finish) {
     await waitTourTitle(page, 'Bind :queue');
     await bindNamedPlaceholder(page, 'queue', 'literal', queue);
     await waitTourTitle(page, 'Bind :payload');
-    await bindNamedPlaceholder(page, 'payload', 'literal', '"original"');
+    try {
+      await bindNamedPlaceholder(page, 'payload', 'literal', '"original"');
+    } catch (error) {
+      console.error('Exact payload binder state: ' + JSON.stringify(await page.evaluate(() => ({
+        selected: selectedFnId,
+        root: lookups.fnMap.get(selectedFnId)?.name,
+        animating: graph.animating,
+        binders: document.querySelectorAll('.placeholder-binder').length,
+        chooser: !!document.querySelector('.literal-vs-ref-chooser'),
+        literalButtons: [...document.querySelectorAll('button')]
+          .filter(button => /^(Bind|Append) literal$/.test(button.textContent.trim())).length,
+        valuePopovers: document.querySelectorAll('.arg-value-edit-popover').length,
+        slotKnown: [...lookups.slotMap.values()].some(slot => slot.name === 'payload'),
+      }))));
+      console.error('Payload binder wait: ' + error.stack);
+      throw error;
+    }
     await waitTourTitle(page, 'Publish once and observe dead letter');
     await openRun(page, 'tutorial-queue-publish', true);
     await waitTourTitle(page, 'Open tutorial-queue-worker', 90000);

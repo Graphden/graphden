@@ -210,7 +210,7 @@ async function enterFreeArgBindEditMode(arg, anchorEl) {
   const expected = expectedSlotType(arg);
   // A graph refresh may replace the clicked button while the subtree loads.
   // Keep the pending action anchored to the live canvas in that case.
-  const liveAnchor = anchorEl?.isConnected === false
+  const liveAnchor = () => anchorEl?.isConnected === false
     ? (document.getElementById('graph-surface') || document.body)
     : anchorEl;
 
@@ -222,7 +222,7 @@ async function enterFreeArgBindEditMode(arg, anchorEl) {
   if (effType === 'fn') {
     if (typeof openFnPicker === 'function') {
       openFnPicker({
-        anchorEl: liveAnchor,
+        anchorEl: liveAnchor(),
         excludeIds: arg['fn-id'] ? [arg['fn-id']] : [],
         // The slot's structural type from /api/types — picker uses
         // it to highlight type-compatible fns.
@@ -240,16 +240,16 @@ async function enterFreeArgBindEditMode(arg, anchorEl) {
   // bound; the fn-ref side stays for a secret from the Secrets panel.
   const marker = (typeof slotMarkerName === 'function') ? slotMarkerName(arg) : null;
   openLiteralVsRefChooser({
-    anchorEl: liveAnchor,
+    anchorEl: liveAnchor(),
     ariaLabel: marker ? ('Bind ' + marker + ' slot') : 'Bind free arg',
     litLabel: marker ? ('Bind ' + marker) : 'Bind literal',
     refLabel: 'Bind fn-ref',
     // Fall through into the existing arg-value editor.
-    onLiteral: () => enterArgValueEditMode(arg, anchorEl),
+    onLiteral: () => enterArgValueEditMode(arg, liveAnchor()),
     onRef: () => {
       if (typeof openFnPicker === 'function') {
         openFnPicker({
-          anchorEl,
+          anchorEl: liveAnchor(),
           excludeIds: arg['fn-id'] ? [arg['fn-id']] : [],
           expectedType: expected,
           onPick: async (fn) => { await saveArgRef(arg, fn.id); }

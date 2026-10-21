@@ -1461,7 +1461,9 @@ async function bindNamedPlaceholder(page, argName, kind, text) {
     const pop = pops[pops.length - 1];
     return pop && (pop.querySelector('.arg-value-edit-input')
       || pop.querySelector('[data-form-field]'));
-  }, null, {timeout: 10000, polling: 100});
+  // A loaded gate took 9.8s for a canvas layout request alone; the popover
+  // still needs a turn after that response. Polling returns as soon as ready.
+  }, null, {timeout: 30000, polling: 100});
   await page.evaluate((t) => {
     const pops = document.querySelectorAll('.arg-value-edit-popover');
     const pop = pops[pops.length - 1];

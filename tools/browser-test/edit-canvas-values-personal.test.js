@@ -346,14 +346,29 @@ const { undoConfiguration } = require('./configuration-undo-test-helpers');
       'custom to builtin shrinks the same measured native card');
     await Promise.all(pending);
     const unexpected = unexpectedSelectiveCopyErrors(errors, plans, true);
-    if (unexpected.length)
+    if (unexpected.length) {
+      const route = (url) => {
+        let path;
+        try { path = new URL(url).pathname; } catch (_) { return 'other'; }
+        if (path === '/api/ui/configuration/plan') return 'configuration-plan';
+        if (path === '/api/ui/root/plan') return 'root-plan';
+        if (path === '/api/ui/server-call') return 'server-call';
+        return 'other';
+      };
       console.log(
         'unexpected error counts',
         JSON.stringify({
+          phase,
           count: unexpected.length,
+          unexpected: unexpected.slice(0, 12).map((error) => ({
+            kind: error.kind,
+            route: route(error.url),
+            status: Number(error.text?.match(/status of (\d{3})/)?.[1]) || null,
+          })),
           plans: plans.map(({ component, status, code }) => ({ component, status, code })),
         }),
       );
+    }
     assert(unexpected.length === 0, 'no runtime errors or unclassified console errors');
     console.log('PASS persisted canvas-values two surfaces/native ownership/measured geometry');
   } catch (error) {

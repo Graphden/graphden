@@ -901,6 +901,7 @@
            :call-noargs "Declared signature — the bound thunk's return: a."
            :call-noargs-traced "Declared signature — the bound thunk's return: a (each fire persists as a run of the callee; the value is the callee's)."
            :call-traced "Declared signature — the bound callable's return: b (the trace hop persists the call, the value is the callee's)."
+           :server-call "Declared signature — the server callable's return: b. The browser receives only an opaque call descriptor; source and captures stay on the server."
            :with-heartbeat "Declared signature — the body's return: a (the beat's value is discarded)."
            :with-timeout "Declared signature — the body's return: a (a deadline miss throws, it never widens the type)."
            :try "Declared signature — body's type unioned with the handler's: [:union a b]."

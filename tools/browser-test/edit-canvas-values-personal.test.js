@@ -13,13 +13,20 @@ const {
 } = require('./edit-test-helpers');
 const { unexpectedSelectiveCopyErrors } = require('./selective-copy-errors');
 const { undoConfiguration } = require('./configuration-undo-test-helpers');
+const {observeRootServerCalls, withoutRecoveredServerErrors, withoutRecoveredRootErrors,
+  rootServerDiagnostic} =
+  require('./root-server-call-test-helpers');
 (async () => {
   await waitForServerHealthy();
   const { browser, page } = await newContext(chromium, { boot: false });
+  const serverCalls = await observeRootServerCalls(page);
   const errors = [],
     plans = [],
+    rootPlans = [],
     pending = [];
   let sequence = 0;
+  let rootSequence = 0;
+  const rootRequests = new WeakMap();
   let receipt, activation, witnessId;
   let phase = "boot";
   page.on('pageerror', (e) => errors.push({ kind: 'pageerror', text: e.message }));
@@ -27,7 +34,18 @@ const { undoConfiguration } = require('./configuration-undo-test-helpers');
     if (m.type() === 'error')
       errors.push({ kind: 'console', text: m.text(), url: m.location().url });
   });
+  page.on('request', request => {
+    if (new URL(request.url()).pathname === '/api/ui/root/plan')
+      rootRequests.set(request, ++rootSequence);
+  });
   page.on('response', (r) => {
+    if (new URL(r.url()).pathname === '/api/ui/root/plan') {
+      pending.push((async () => {
+        const body = await r.json().catch(() => null);
+        rootPlans.push({sequence: rootRequests.get(r.request()), status: r.status(),
+          ok: body?.ok === true, code: body?.code, retryable: body?.retryable === true});
+      })());
+    }
     if (r.url().endsWith('/ui/configuration/plan')) {
       const own = ++sequence;
       pending.push(
@@ -59,6 +77,7 @@ const { undoConfiguration } = require('./configuration-undo-test-helpers');
         graphReady() &&
         !graph.animating,
     );
+    await serverCalls.settle();
     assert(
       (await api(page, 'POST', '/api/ui/configuration/prepare', { home: true })).ok,
       'explicit personal home ready',
@@ -123,12 +142,14 @@ const { undoConfiguration } = require('./configuration-undo-test-helpers');
     assert(activation.ok, 'ordinary activation preview');
     const applied = await api(page, 'POST', '/api/ui/configuration/apply', activation.request);
     assert(applied.ok && applied.committed, 'ordinary selection persisted');
+    await serverCalls.settle();
     // API setup deliberately happened outside the page's preference/index
     // state. A hash-only navigation does not reload either of those stores.
     phase = 'persisted-runtime';
     await page.reload();
     await page.waitForFunction(id => gdUIComponentRuntimeIdentity('canvas-values') === id
       && graphReady() && !graph.animating, activation.receipt.id, {timeout: 60000});
+    await serverCalls.settle();
     phase = 'native-repr-history';
     await page.evaluate(async id => { await ensureSubtreeFor(id); await selectFn(id); }, probe.id);
     await page.waitForFunction(id => selectedFnId === id && !graph.animating
@@ -345,7 +366,10 @@ const { undoConfiguration } = require('./configuration-undo-test-helpers');
       && graph.nodes.get(valuesLiveProof.id).y === valuesLiveProof.dragged.y),
       'custom to builtin shrinks the same measured native card');
     await Promise.all(pending);
-    const unexpected = unexpectedSelectiveCopyErrors(errors, plans, true);
+    await serverCalls.settle();
+    const unexpected = unexpectedSelectiveCopyErrors(
+      withoutRecoveredRootErrors(
+        withoutRecoveredServerErrors(errors, serverCalls.events), rootPlans), plans, true);
     if (unexpected.length) {
       const route = (url) => {
         let path;
@@ -366,6 +390,7 @@ const { undoConfiguration } = require('./configuration-undo-test-helpers');
             status: Number(error.text?.match(/status of (\d{3})/)?.[1]) || null,
           })),
           plans: plans.map(({ component, status, code }) => ({ component, status, code })),
+          rootPlans: rootPlans.map(({status, code}) => ({status, code})),
         }),
       );
     }
@@ -385,7 +410,9 @@ const { undoConfiguration } = require('./configuration-undo-test-helpers');
     }), {selection: activation?.receipt?.id, witness: witnessId}).catch(() => null);
     console.log('bounded canvas proof failure', JSON.stringify({phase, facts,
       errors: errors.length, plans: plans.map(({component, status, code}) => ({component, status,
-        code: typeof code === 'string' && /^[a-z0-9:/-]{1,80}$/.test(code) ? code : null}))}));
+        code: typeof code === 'string' && /^[a-z0-9:/-]{1,80}$/.test(code) ? code : null})),
+      rootPlans: rootPlans.map(({status, code}) => ({status, code})),
+      server: rootServerDiagnostic(error, serverCalls.events)}));
     if (process.env.GRAPHDEN_CANVAS_SCREENSHOT)
       await page.screenshot({path: process.env.GRAPHDEN_CANVAS_SCREENSHOT + '.failure.png'}).catch(() => {});
     throw error;

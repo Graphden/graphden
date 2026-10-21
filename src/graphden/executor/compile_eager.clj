@@ -1314,6 +1314,13 @@
          env-builders (mapv #(env-arg-builder fn-id % child-callables lookups)
                             env-bnds)
          env-names (mapv :env-name env-bnds)
+         ;; A root ref may duplicate its own env initializer (html-page body).
+         ;; Match the target too: a different env ref with the same name
+         ;; (method-map handler) must remain visible to the root ref.
+         env-source-refs (into #{}
+                               (comp (filter #(= :ref (:kind %)))
+                                     (map (juxt :env-name :ref-id)))
+                               env-bnds)
          env-n (count env-bnds)
          ;; Compile-time-derived runtime aliasing for this fn's own
          ;; rename slots. When a rename like `{:as :item}` surfaces
@@ -1383,10 +1390,15 @@
              (impl (persistent!
                      (loop [acc (transient {}), i 0]
                        (if (< i n)
-                         (recur (assoc! acc
-                                        (nth keys-vec i)
-                                        ((nth builders i) fa' ctx))
-                                (inc i))
+                         (let [name (nth keys-vec i)
+                               entry (nth enriched i)
+                               ext-name (:ext-name entry)
+                               scope (if (and (= :ref (:kind entry))
+                                              (env-source-refs [ext-name (:ref-id entry)]))
+                                       (binding-scope fa' fa ext-name)
+                                       fa')]
+                           (recur (assoc! acc name ((nth builders i) scope ctx))
+                                  (inc i)))
                          acc)))
                    ctx)))]
      ;; `:cell` (and any `:compile-time-value?` base-fn): evaluate once

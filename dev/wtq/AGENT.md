@@ -97,7 +97,7 @@ You were started in one of two ways:
    don't guess load-bearing decisions.
 2. **Implement** in small commits, inside your worktree.
 3. **Fast feedback:** after each batch of edits, run formatting/syntax/lint on
-   the changed files before expensive tests (`bb scripts/ci_fast_cli.clj`).
+   the changed files before expensive tests (`bb scripts/ci.clj --preflight-only`).
    `bb ci`, `bb lint` and the gate run this preflight automatically, without
    additional flags. A final complete **`bb lint` is mandatory** before queueing;
    a changed-file check does not replace it. Coordinate JVM linters with the

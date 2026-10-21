@@ -36,7 +36,9 @@ bb() {
     scripts/ci_resume_cli.clj)
       if [ "${BAD_STAGE_PLAN:-0}" = 1 ] && [ "$2" = start ]; then printf 'ci\n'; return 0; fi
       command bb -cp "$SCRIPT_DIR/../../scripts" "$SCRIPT_DIR/../../$1" "${@:2}" ;;
-    scripts/ci_fast_cli.clj) [ "${FAIL_FAST:-0}" != 1 ] ;;
+    scripts/ci.clj)
+      [ "$#" = 3 ] && [ "$2" = --preflight-only ] && [ "${FAIL_FAST:-0}" != 1 ] ;;
+    scripts/ci_fast_cli.clj) echo 'gate bypassed admitted preflight' >&2; return 1 ;;
     scripts/ci_gate.clj)
       echo "$2" >> "$TEST_LOG"
       if [ "$2" = verify ]; then [ "${FAIL_VERIFY:-0}" != 1 ]; fi ;;

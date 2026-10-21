@@ -1470,7 +1470,8 @@ gate_suites() {
     return 1
   fi
   # Cheap changed-file formatting/syntax/lint always precedes expensive stages.
-  (cd "$wt" && bb scripts/ci_fast_cli.clj "$base_sha") \
+  step "bb ci (changed-file preflight)"
+  (cd "$wt" && bb scripts/ci.clj --preflight-only "$base_sha") \
     || { echo "FAIL: changed-file preflight"; return 1; }
   local GRAPHDEN_FAST_DONE_SHA="$ci_sha"
   export GRAPHDEN_FAST_DONE_SHA

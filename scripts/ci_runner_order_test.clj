@@ -8,7 +8,7 @@
 
 ;; Load the real dispatcher without invoking its CLI; child processes are the
 ;; only stub. This exercises the actual stop/skip path without a JVM or Docker.
-(load-string (str/replace (slurp "scripts/ci.clj") #"\(run-ci\)\s*$" ""))
+(load-string (str/replace (slurp "scripts/ci.clj") #"\(main\)\s*$" ""))
 
 
 (defn dispatch
@@ -65,22 +65,24 @@
       (finally (reset! progress nil) (fs/delete-tree dir)))))
 
 
-(deftest even-lint-only-preflight-is-admitted-and-cleaned-before-lock-release
-  (let [events (atom [])]
-    (with-redefs-fn {(ns-resolve 'ci 'select-checks) (fn [_] {:run [] :scoped [] :manual [] :since "base"})
-                     (ns-resolve 'ci-resume 'git-output) (constantly "preflight-fixture-sha")
-                     (ns-resolve 'ci-report 'write-atomic!) (fn [& _])
-                     (ns-resolve 'ci 'acquire-lock!) (fn [] (swap! events conj :lock) ::lock)
-                     (ns-resolve 'ci 'release-lock!) (fn [_] (swap! events conj :release))
-                     (ns-resolve 'ci 'kill-live-procs!) (fn [] (swap! events conj :cleanup))
-                     (ns-resolve 'ci-proc 'run-bounded!)
-                     (fn [command timeout-ms _]
-                       (swap! events conj :preflight)
-                       (is (= ["bb" "scripts/ci_fast_cli.clj" "base"] command))
-                       (is (= 120000 timeout-ms))
-                       (throw (ex-info "fixture preflight red" {})))}
-      #(is (thrown? Exception ((ns-resolve 'ci 'run-ci)))))
-    (is (= [:lock :preflight :cleanup :release] @events))))
+(deftest ci-and-gate-preflight-share-admission-and-cleanup
+  (doseq [entry ['run-ci 'main]]
+    (let [events (atom [])]
+      (with-redefs-fn {(ns-resolve 'ci 'select-checks) (fn [_] {:run [] :scoped [] :manual [] :since "base"})
+                       (ns-resolve 'ci-resume 'git-output) (constantly "preflight-fixture-sha")
+                       (ns-resolve 'ci-report 'write-atomic!) (fn [& _])
+                       (ns-resolve 'ci 'acquire-lock!) (fn [] (swap! events conj :lock) ::lock)
+                       (ns-resolve 'ci 'release-lock!) (fn [_] (swap! events conj :release))
+                       (ns-resolve 'ci 'kill-live-procs!) (fn [] (swap! events conj :cleanup))
+                       (ns-resolve 'ci-proc 'run-bounded!)
+                       (fn [command timeout-ms _]
+                         (swap! events conj :preflight)
+                         (is (= ["bb" "scripts/ci_fast_cli.clj" "base"] command))
+                         (is (= 120000 timeout-ms))
+                         (throw (ex-info "fixture preflight red" {})))}
+        #(binding [*command-line-args* ["--preflight-only" "base"]]
+           (is (thrown? Exception ((ns-resolve 'ci entry))))))
+      (is (= [:lock :preflight :cleanup :release] @events)))))
 
 
 (let [{:keys [fail error]} (run-tests)]

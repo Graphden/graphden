@@ -536,6 +536,29 @@
                     " checks passed in " (format "%.1fs" elapsed-s) scope-note ")")))))
 
 
+(defn- with-admission!
+  "One admission/cleanup boundary for CI and the gate's early preflight."
+  [needs-lock? work]
+  (let [lock-handle (when needs-lock? (acquire-lock!))
+        hook (Thread. ^Runnable (fn []
+                                  (kill-live-procs!)
+                                  (when lock-handle (release-lock! lock-handle))))]
+    (Runtime/.addShutdownHook (Runtime/getRuntime) hook)
+    (try
+      (work lock-handle)
+      (finally
+        (kill-live-procs!)
+        (try (Runtime/.removeShutdownHook (Runtime/getRuntime) hook)
+             (catch IllegalStateException _ nil))
+        (when lock-handle (release-lock! lock-handle))))))
+
+
+(defn- run-preflight!
+  [since]
+  (ci-proc/run-bounded! (cond-> ["bb" "scripts/ci_fast_cli.clj"] since (conj since))
+                        120000 live-procs))
+
+
 (defn run-ci
   "Select the checks, run them in waves behind a live progress line,
    report. Coverage lives in `bb coverage` — `bb ci` runs the plain
@@ -562,58 +585,55 @@
             (ci-report/write-atomic! report-path
                                      {:schema 1 :complete false :sha (str/trim (:out (p/shell {:out :string} "git" "rev-parse" "HEAD")))
                                       :command (into ["bb" "ci"] *command-line-args*) :exit nil}))
-        lock-handle (do (report-skips! scoped manual since)
-                        (when needs-lock? (acquire-lock!)))
-        hook (Thread. ^Runnable (fn []
-                                  (kill-live-procs!)
-                                  (when lock-handle (release-lock! lock-handle))))]
-    (Runtime/.addShutdownHook (Runtime/getRuntime) hook)
-    (try
-      (when preflight?
-        (ci-proc/run-bounded! (cond-> ["bb" "scripts/ci_fast_cli.clj"] since (conj since))
-                              120000 live-procs))
-      (let [status (atom (merge (into {} (map (fn [c] [(:name c) :pending]) checks))
-                                (into {} (map (fn [c] [(:name c) :scoped]) scoped))
-                                (into {} (map (fn [c] [(:name c) :manual-skip]) manual))))
-            results (atom {})
-            failed (atom false)
-            start-time (System/currentTimeMillis)
-            elapsed-s #(/ (- (System/currentTimeMillis) start-time) 1000.0)
-            ;; The status line is re-rendered every 200 ms into a SINGLE
-            ;; terminal row — no row-tracking / cursor-up, so we can never
-            ;; overshoot above the start of the status output and erase the
-            ;; user's scrollback.
-            cols (terminal-cols)
-            progress-running (atom true)
-            progress-thread (future
-                              (while @progress-running
-                                (print (str "\r\033[2K"
-                                            (status-line checks @status (elapsed-s) cols)))
-                                (flush)
-                                (Thread/sleep 200)))]
-        (reset! progress (ci-resume/invocation! "checks" (mapv :name checks)))
-        (run-waves! checks status results failed
-                    (boolean (some #{"--retry-solo"} *command-line-args*)))
-        (reset! progress-running false)
-        @progress-thread
-        (println)                     ; close the progress row
-        (print-report! checks scoped manual @status @results since)
-        (when report-path
-          (ci-report/write-atomic! report-path
-                                   (ci-report/receipt
-                                     {:sha (str/trim (:out (p/shell {:out :string} "git" "rev-parse" "HEAD")))
-                                      :command (into ["bb" "ci"] *command-line-args*)
-                                      :since since :checks checks :scoped scoped :manual manual
-                                      :status @status :results @results
-                                      :elapsed-ms (- (System/currentTimeMillis) start-time)
-                                      :exit (if @failed 1 0)
-                                      :wait-ms (or (nth lock-handle 2 nil) 0)
-                                      :path report-path})))
-        (print-verdict! checks scoped manual @status @failed (elapsed-s)))
-      (finally
-        (kill-live-procs!)
-        (Runtime/.removeShutdownHook (Runtime/getRuntime) hook)
-        (when lock-handle (release-lock! lock-handle))))))
+        _ (report-skips! scoped manual since)]
+    (with-admission! needs-lock?
+      (fn [lock-handle]
+        (when preflight? (run-preflight! since))
+        (let [status (atom (merge (into {} (map (fn [c] [(:name c) :pending]) checks))
+                                  (into {} (map (fn [c] [(:name c) :scoped]) scoped))
+                                  (into {} (map (fn [c] [(:name c) :manual-skip]) manual))))
+              results (atom {})
+              failed (atom false)
+              start-time (System/currentTimeMillis)
+              elapsed-s #(/ (- (System/currentTimeMillis) start-time) 1000.0)
+              ;; The status line is re-rendered every 200 ms into a SINGLE
+              ;; terminal row — no row-tracking / cursor-up, so we can never
+              ;; overshoot above the start of the status output and erase the
+              ;; user's scrollback.
+              cols (terminal-cols)
+              progress-running (atom true)
+              progress-thread (future
+                                (while @progress-running
+                                  (print (str "\r\033[2K"
+                                              (status-line checks @status (elapsed-s) cols)))
+                                  (flush)
+                                  (Thread/sleep 200)))]
+          (reset! progress (ci-resume/invocation! "checks" (mapv :name checks)))
+          (run-waves! checks status results failed
+                      (boolean (some #{"--retry-solo"} *command-line-args*)))
+          (reset! progress-running false)
+          @progress-thread
+          (println)                     ; close the progress row
+          (print-report! checks scoped manual @status @results since)
+          (when report-path
+            (ci-report/write-atomic! report-path
+                                     (ci-report/receipt
+                                       {:sha (str/trim (:out (p/shell {:out :string} "git" "rev-parse" "HEAD")))
+                                        :command (into ["bb" "ci"] *command-line-args*)
+                                        :since since :checks checks :scoped scoped :manual manual
+                                        :status @status :results @results
+                                        :elapsed-ms (- (System/currentTimeMillis) start-time)
+                                        :exit (if @failed 1 0)
+                                        :wait-ms (or (nth lock-handle 2 nil) 0)
+                                        :path report-path})))
+          (print-verdict! checks scoped manual @status @failed (elapsed-s)))))))
 
 
-(run-ci)
+(defn main
+  []
+  (if (= "--preflight-only" (first *command-line-args*))
+    (with-admission! true (fn [_] (run-preflight! (second *command-line-args*))))
+    (run-ci)))
+
+
+(main)

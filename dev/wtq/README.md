@@ -170,13 +170,14 @@ Details that are deliberate:
   runtime JS files within `tests-js`, and visual test cases are not reordered.
 - **Changed-file preflight.** `bb ci`/`bb lint` and the landing gate automatically
   check formatting, syntax and lint for changed Clojure, JavaScript, JSON, CSS,
-  Markdown and shell files before expensive checks. In CI this preflight is
-  admitted under the host CI lock, including lint-only runs, and has a two-minute
-  deadline with descendant-process cleanup before releasing admission. The gate uses its target base; standalone
+  Markdown and shell files before expensive checks. Both CI and the gate use
+  the same preflight entrypoint under the host CI lock, including lint-only runs.
+  It has a two-minute deadline and cleans up descendant processes before releasing
+  admission. The gate uses its target base; standalone
   commands use the merge base with develop, including uncommitted/untracked files.
   The check is read-only and does not modify the candidate. Full pre-queue lint
   and the complete selected CI roster remain mandatory. During editing,
-  `bb scripts/ci_fast_cli.clj` runs the same small checks explicitly.
+  `bb scripts/ci.clj --preflight-only` runs the same small checks explicitly.
 - **Machine receipts.** The same directory holds `_train-<ts>.report.edn`
   (exact assembled SHA, scope, exit, failed stage, phase durations, queue wait, image ID and
   jar hash), `_train-<ts>.ci-expected.edn` (check roster computed before CI),

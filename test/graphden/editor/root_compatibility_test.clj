@@ -3,6 +3,7 @@
   (:require
     [cheshire.core :as json]
     [clojure.java.shell :as sh]
+    [clojure.walk]
     [clojure.test :refer [deftest is testing]]
     [graphden.editor.component-config :as config]
     [graphden.editor.config-resolution :as resolution]
@@ -115,11 +116,12 @@
 
 
 (deftest revoked-personal-source-never-becomes-a-default-fallback
-  (with-redefs [tenancy/current-user-id (constantly :owner)
-                resolution/capture (fn [& _] {:id ::authored :configuration {:recents {:view target}}})
-                source/collect-closure (fn [& _] (throw (ex-info "Source refused" {:reason :visibility-denied})))]
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Source refused"
-          (compatibility/adapt-plan {} nil nil nil root root-plan)))))
+  (doseq [component [:recents :fn-picker]]
+    (with-redefs [tenancy/current-user-id (constantly :owner)
+                  resolution/capture (fn [& _] {:id ::authored :configuration {component {:view target}}})
+                  source/collect-closure (fn [& _] (throw (ex-info "Source refused" {:reason :visibility-denied})))]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Source refused"
+            (compatibility/adapt-plan {} nil nil nil root root-plan))))))
 
 
 (deftest legacy-preferences-are-exactly-owner-and-branch-scoped
@@ -181,3 +183,19 @@
         (is (= {:plan root-plan :component-selection-id selected}
                (compatibility/adapt-root {} nil (fn [row permissions] (swap! authorized conj [(:id row) permissions])) nil root root-plan)))
         (is (= [[selected {:execute? true}]] @authorized))))))
+
+
+(deftest legacy-picker-projects-only-model-through-checked-source
+  (let [picker-old (str (ids/fn-id "app.ui-fn-picker" :root-view))
+        picker-plan (clojure.walk/postwalk-replace {old picker-old} root-plan)
+        personal (clojure.walk/postwalk-replace {"state" "model" "personal-state" "personal-model"} personal-plan)
+        adapted (with-redefs [root-plan picker-plan personal-plan personal]
+                  (adapt {:fn-picker {:view target}}))
+        wrapper-id (get-in adapted [:functions 0 :args 2 :expr :fn])
+        wrapper (first (filter #(= wrapper-id (:id %)) (:functions adapted)))]
+    (is (= ["model"] (mapv :name (:env wrapper))))
+    (is (not= picker-old wrapper-id))
+    (with-redefs [personal-plan (assoc-in personal [:inputs (str target) :required] ["state"])]
+      (is (= :legacy-callback-inputs
+             (try (adapt {:fn-picker {:view target}}) nil
+                  (catch clojure.lang.ExceptionInfo error (:reason (ex-data error)))))))))

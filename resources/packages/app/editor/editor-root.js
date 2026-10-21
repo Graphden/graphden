@@ -36,14 +36,18 @@
     if (legacy) delete legacy.dataset.gdRootAdapter;
     window.dispatchEvent(new Event('gd-editor-root-changing'));
   }
+  function validateCallbacks(callbacks) {
+    if (!(callbacks instanceof Map) || !api.isCallable(field(callbacks, 'view'))) throw new Error('Invalid editor component callback');
+    for (const [entry, callback] of callbacks) {
+      if (!['initial', 'update', 'view', 'query'].some(name => entry === api.keyword(name)) || !api.isCallable(callback)) throw new Error('Invalid editor component callback');
+    }
+  }
   function componentNow(name) {
     const owner = installed;
     if (!owner || owner.scope !== stamp()) return null;
     const callbacks = field(owner.output, name);
-    if (!(callbacks instanceof Map)) return null;
-    for (const entry of ['initial', 'update', 'view']) {
-      if (!api.isCallable(field(callbacks, entry))) throw new Error('Invalid editor component callback');
-    }
+    if (callbacks === undefined) return null;
+    validateCallbacks(callbacks);
     const facade = {
       query: field(callbacks, 'query'),
       run(entry, supplied = {}, budget = null) {
@@ -90,16 +94,14 @@
         const argument = result['argument-name'];
         if (argument !== null && typeof argument !== 'string') throw new Error('Invalid editor root argument');
         const output = runtime.run('root', argument === null ? {} : {[argument]: new Map()});
-        if (!(output instanceof Map) || typeof field(output, 'legacy') !== 'boolean'
-          || [...output.keys()].some(key => !['legacy', 'account-menu', 'recents'].some(name => key === api.keyword(name)))) throw new Error('Invalid editor root result');
+        if (!(output instanceof Map) || typeof field(output, 'legacy') !== 'boolean') throw new Error('Invalid editor root result');
+        for (const [key, callbacks] of output) if (key !== api.keyword('legacy')) validateCallbacks(callbacks);
         if (!field(output, 'legacy')) throw new Error('Unsupported editor root adapter');
         const legacy = document.getElementById('app');
         if (!legacy) throw new Error('Editor legacy host is unavailable');
         const selection = result['component-selection-id'];
         if (selection != null && (typeof selection !== 'string' || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(selection))) throw new Error('Invalid editor selection receipt');
         installed = {scope, output, selection: selection ?? null, accepted: new Map()};
-        // Validate complete callable records before exposing either component.
-        for (const name of ['account-menu', 'recents']) if (field(output, name) !== undefined) componentNow(name);
         legacy.dataset.gdRootAdapter = 'legacy';
         window.dispatchEvent(new Event('gd-editor-root-ready'));
       } catch (error) {

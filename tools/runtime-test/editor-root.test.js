@@ -113,6 +113,24 @@ function fixture() {
   await custom;
   assert(root.acceptComponent(root.componentNow('recents')));
   assert.equal(root.componentIdentity('recents'), null, 'custom root has no selection witness even with a valid ready host');
+  // The root value carries ordinary callable records, including view-only
+  // surfaces and arbitrary authored names. A native component roster is absent.
+  const picker = fixture();
+  const pickerReady = picker.window.gdEditorRoot.reload();
+  picker.requests[0].resolve({ok: true, json: async () => ({ok: true, 'argument-name': null,
+    plan: {output: new Map([['legacy', true], ['fn-picker', new Map([['view', input => input.get('model')]])],
+      ['authored-surface', new Map([['view', () => 'ordinary graph']])]])}})});
+  await pickerReady;
+  const pickerView = picker.window.gdEditorRoot.componentNow('fn-picker');
+  assert.equal(pickerView.run('view', {model: 'picker model'}), 'picker model');
+  assert.equal(picker.window.gdEditorRoot.componentNow('authored-surface').run('view'), 'ordinary graph');
+  picker.context.branch = 'another';
+  assert.throws(() => pickerView.run('view'), /Editor root changed/);
+  const forged = picker.window.gdEditorRoot.reload();
+  picker.requests[1].resolve({ok: true, json: async () => ({ok: true, 'argument-name': null,
+    plan: {output: new Map([['legacy', true], ['fn-picker', new Map([['view', {invoke() {}}]])]])}})});
+  await forged;
+  assert.equal(picker.window.gdEditorRoot.componentNow('fn-picker'), null, 'forged callback fails the whole root');
   f.window.gdPrefOwner = 'third';
   assert.throws(() => selected.run('view'), /Editor root changed/);
   f.window.gdEditorRoot.dispose();

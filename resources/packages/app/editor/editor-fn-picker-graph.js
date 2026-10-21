@@ -18,7 +18,7 @@ window.gdRefreshPickerReturnLabels = entries => {
 (() => {
   const params = new URLSearchParams(location.search);
   const review = params.has('ui-picker-view');
-  if (!review && !window.GraphdenBuiltinPlans) return;
+  if (!window.GraphdenBrowser) return;
   const api = window.GraphdenBrowser;
   const get = (value, name) => value instanceof Map ? value.get(api.keyword(name)) : undefined;
   const value = (item) => Array.isArray(item) ? item.map(value)
@@ -30,6 +30,7 @@ window.gdRefreshPickerReturnLabels = entries => {
   function invalidate() {
     generation++;
     pending?.abort();
+    window.gdEditorRoot?.releaseComponent(runtime);
     runtime = null;
     integration.ready = false;
     if (instances.size) window.closeFnPicker?.();
@@ -51,8 +52,7 @@ window.gdRefreshPickerReturnLabels = entries => {
         plan = await response.json();
         if (!response.ok || plan.ok === false) throw new Error(plan.reason || 'Graph export refused');
       } else {
-        plan = window.GraphdenBuiltinPlans.plans.fnPicker;
-        loadedRuntime = await window.gdLoadUIComponentRuntime('fn-picker', plan, {operationLimit: 150000}, controller.signal);
+        loadedRuntime = await window.gdEditorRoot.component('fn-picker');
       }
       if (own !== generation) return;
       if (instances.size) window.closeFnPicker?.();
@@ -62,7 +62,6 @@ window.gdRefreshPickerReturnLabels = entries => {
     } catch (error) {
       if (own !== generation || error.name === 'AbortError') return;
       invalidate();
-      if (!review) window.gdUIComponentFailed?.('fn-picker');
       if (typeof gdToast === 'function') gdToast('Picker graph unavailable: ' + error.message);
     } finally {
       if (pending === controller) pending = null;
@@ -124,6 +123,7 @@ window.gdRefreshPickerReturnLabels = entries => {
             'show-other': options.showOther, 'hidden-other': arranged.hiddenOther};
           const output = evaluator.run('view', {model: value(model)});
           component.render(get(output, 'tree'), get(output, 'styles'));
+          if (!review && !window.gdEditorRoot.acceptComponent(evaluator)) throw new DOMException('Editor root changed', 'AbortError');
           const nodes = new Map();
           for (const node of host.querySelectorAll('[data-picker-key]')) {
             const key = node.dataset.pickerKey;
@@ -141,6 +141,7 @@ window.gdRefreshPickerReturnLabels = entries => {
           if (disposed) return;
           disposed = true;
           instances.delete(instance);
+          if (!review && instances.size === 0) window.gdEditorRoot.releaseComponent(evaluator);
           candidateKeys.clear();
           component.dispose();
         },
@@ -150,9 +151,15 @@ window.gdRefreshPickerReturnLabels = entries => {
     },
   };
   window.gdFnPickerGraph = integration;
-  document.addEventListener('DOMContentLoaded', () => { if (!review || isAuthenticated() || accountsAuthed) void load(); }, {once: true});
-  window.addEventListener('gd-auth-changed', () => {
-    invalidate();
-    if (!review || isAuthenticated() || accountsAuthed) void load();
-  });
+  if (review) {
+    document.addEventListener('DOMContentLoaded', () => { if (isAuthenticated() || accountsAuthed) void load(); }, {once: true});
+    window.addEventListener('gd-auth-changed', () => {
+      invalidate();
+      if (isAuthenticated() || accountsAuthed) void load();
+    });
+  } else {
+    window.addEventListener('gd-editor-root-changing', invalidate);
+    window.addEventListener('gd-editor-root-ready', () => { void load(); });
+    if (window.gdEditorRoot?.componentNow('fn-picker')) void load();
+  }
 })();

@@ -82,7 +82,7 @@ feature() {   # <name> <file> <content>  — claim a worktree, commit one change
 declare -A PID
 merge_bg() {   # <name> [flags...] — a real `wt merge` waiter in the background
   local n="$1"; shift
-  ( cd "$WTQ_ROOT/$n" && exec ./dev/wtq/wt merge "$@" ) > "$T/$n.out" 2>&1 &
+  ( export WTQ_TEST_WAITER_PID="$BASHPID"; cd "$WTQ_ROOT/$n" && exec ./dev/wtq/wt merge "$@" ) > "$T/$n.out" 2>&1 &
   PID[$n]=$!
 }
 queued() { [ -f "$Q/queue/$1" ]; }
@@ -205,10 +205,11 @@ new_world killed-stage
 feature killed killed.txt candidate
 cat > "$WTQ_GATE_STUB" <<'EOF'
 #!/usr/bin/env bash
-# Kill only this throwaway gate subshell, after a misleading partial marker.
+# Kill the gate and its throwaway waiter after a misleading partial marker.
+# Bash versions use different subshell depths here; the exported waiter PID
+# is stable, while $PPID is the gate shell or its immediate wrapper.
 echo WTQ_FAILED_STAGE=fleet
-gate_pid="$(ps -o ppid= -p "$PPID" | tr -d ' ')"
-kill -KILL "$gate_pid"
+kill -KILL "$PPID" "$WTQ_TEST_WAITER_PID"
 exit 0
 EOF
 merge_bg killed

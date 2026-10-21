@@ -16,6 +16,7 @@
     [graphden.executor.context :as context]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
+    [graphden.packages.owned :as owned]
     [graphden.packages.records :as records]
     [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]
@@ -75,9 +76,9 @@
           failure-response components/failure-response
           checker check/check-fn-def!
           checked-error (atom nil)
-          _ (is (identical? @(find-var 'graphden.packages.storage.branches.impls/current-branch-name)
-                            (get (:base-fns ctx) :current-branch-name))
-                "Golden-clone registry and loaded reader identity agree")
+          _ (is (owned/owned-impl? (ids/fn-id "storage.branches" :current-branch-name)
+                                   (get (:base-fns ctx) :current-branch-name))
+                "Golden-clone context retains a trusted package reader")
           result (with-redefs [check/check-fn-def!
                                (fn [& args]
                                  (try (apply checker args)

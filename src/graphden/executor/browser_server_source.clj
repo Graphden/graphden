@@ -35,10 +35,7 @@
                        (and (capabilities/browser-op id)
                             (not= capabilities/server-call-id id)
                             (= #{} (:effects signature))))
-                   (if reader?
-                     (identical? (some-> (find-var 'graphden.packages.storage.branches.impls/current-branch-name) deref)
-                                 (get (:base-fns ctx) :current-branch-name))
-                     (fn? (get (:base-fns ctx) (keyword (:name row))))))
+                   (owned/owned-impl? id (get (:base-fns ctx) (keyword (:name row)))))
       (reject! :server-not-read-only))))
 
 

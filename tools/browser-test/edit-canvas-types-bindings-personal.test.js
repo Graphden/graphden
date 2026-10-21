@@ -5,11 +5,13 @@ const {assert, newContext, api, nodeApi, BASE, waitForServerHealthy, getEntities
 const {undoConfiguration} = require('./configuration-undo-test-helpers');
 const {savePresentationAudit} = require('./canvas-presentation-audit');
 const {unexpectedSelectiveCopyErrors} = require('./selective-copy-errors');
-const {withoutRecoveredRootErrors} = require('./root-server-call-test-helpers');
+const {observeRootServerCalls, withoutRecoveredServerErrors, withoutRecoveredRootErrors,
+  rootServerDiagnostic} = require('./root-server-call-test-helpers');
 const {captureLoadedUIComponents, waitForLoadedUIComponents, drainUIPlanReplies} = require('./ui-component-runtime-test-helpers');
 (async () => {
   await waitForServerHealthy();
   const {browser, page} = await newContext(chromium, {boot: false});
+  const serverCalls = await observeRootServerCalls(page);
   const copies = [], activations = [], errors = [], plans = [], pending = [], requests = [], rootPlans = [], rootPending = [];
   const receipts = new WeakMap(), rootRequests = new WeakMap();
   let rootSequence = 0, forcedRootPolicy = false;
@@ -49,6 +51,7 @@ const {captureLoadedUIComponents, waitForLoadedUIComponents, drainUIPlanReplies}
   async function settle(snapshot) {
     await waitForLoadedUIComponents(page, snapshot);
     await drainUIPlanReplies(requests, plans, pending);
+    await serverCalls.settle();
   }
   async function editLiteral(copy, name, slot, value, position) {
     const fn = copy.manifest.functions.find(row => row.name === name);
@@ -213,7 +216,8 @@ const {captureLoadedUIComponents, waitForLoadedUIComponents, drainUIPlanReplies}
     assert(forcedRootPolicy, 'root plan retry exercised after the stored source edit');
     assert(rootPlans.some(row => row.status === 422 && row.code === 'policy-refresh-required'),
       'the forced root refusal was observed');
-    assert(unexpectedSelectiveCopyErrors(withoutRecoveredRootErrors(errors, rootPlans), plans, true).length === 0,
+    assert(unexpectedSelectiveCopyErrors(withoutRecoveredRootErrors(
+      withoutRecoveredServerErrors(errors, serverCalls.events), rootPlans), plans, true).length === 0,
       'no unexpected source/browser errors');
     completed = true;
     console.log('PASS persisted expanded types/bindings, preview/apply/restore and retained native controls');
@@ -226,7 +230,7 @@ const {captureLoadedUIComponents, waitForLoadedUIComponents, drainUIPlanReplies}
         route: row.url ? new URL(row.url).pathname.replace(/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/gi, ':id') : null,
         status: Number(row.text?.match(/^Failed to load resource: the server responded with a status of (\d+)/)?.[1]) || null,
         message: row.kind === 'pageerror' ? row.text.split('\n')[0].slice(0, 160) : null,
-      }))}));
+      })), server: rootServerDiagnostic(error, serverCalls.events)}));
     if (process.env.GRAPHDEN_CANVAS_SCREENSHOT) await page.screenshot({path: process.env.GRAPHDEN_CANVAS_SCREENSHOT + '.failure.png'});
     throw error;
   } finally {

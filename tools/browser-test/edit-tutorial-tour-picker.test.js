@@ -1,292 +1,22 @@
-// Lesson 17 (tests), then the tour machinery around the lessons — branch
-// isolation (lesson 01 walked on a tutorial branch, then rolled back), the
-// handoff into the next lesson, the picker / catalogue, editions, Escape,
-// mobile, the lens trap and the funnel counters.
-//
-// Part of the interactive-tutorial drift guard: walks every step of its
-// lessons by doing the real UI actions, so a renamed class or a changed
-// flow fails HERE, not on a visitor. The lessons are split across files
-// because the runner caps one file at 5 minutes — see
-// tutorial-tour-helpers.js.
-//
-// Run from this directory:  node edit-tutorial-tour-picker.test.js
-// Exit code 0 = PASS, 1 = FAIL.
+// Tutorial catalogue, editions, Escape, mobile, lens, and funnel.
+// Each suite owns its browser context and cleans tutorial fixtures.
 
 const {chromium} = require('playwright');
 const {assert, newContext, api} = require('./edit-test-helpers');
 const {
-  NS_NAME, FN_NAME, hardCleanup, waitTourTitle, clickTourButton,
-  filterAndSelect, extendViaRowActions, bindFirstPlaceholder,
-  pickIncompatFnRef, pickAnyway, removeUseSiteBinding, waitClickable,
-  createBranchViaChip, switchBranchViaChip, editBoundValue, runViaRowActions,
-  appendSeqItemViaEdge, bindFnRefPlaceholder,
-  createRootNamespace, createFnInNamespace, setParentViaStrip,
-  runWithEffectAck, finishAndDelete, tourTitle, tourWhere,
-  waitUntil, waitTourClosed, setBranchLocalViaStrip, openMarkerFormViaPlaceholder,
+  hardCleanup, waitTourTitle, clickTourButton, tourTitle, tourWhere,
 } = require('./tutorial-tour-helpers');
 
 (async () => {
   const {browser, page} = await newContext(chromium, {boot: false});
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
-  console.log('edit-tutorial-tour-picker — lesson 17 + branch isolation / handoff / picker / editions / escape / mobile / lens / funnel');
+  console.log('edit-tutorial-tour-picker — Tutorial catalogue, editions, Escape, mobile, lens, and funnel.');
+  const startedAt = Date.now();
+  const checkpoint = (label) => console.log('  ' + label + ' (' + Math.round((Date.now() - startedAt) / 1000) + 's)');
   let failed = false;
   try {
     await hardCleanup(page);
     const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
-    // ---------- Lesson 17 — tests (2 + 2 → assert-eq → green → red → green) --
-    await page.goto(BASE + '/?tutorial=17');
-    await waitTourTitle(page, 'A test is just a fn', 150000);
-    assert(await clickTourButton(page, 'Next'), 'lesson 17 Next');
-    // The fn under test first — a real 2 + 2, so the assertion compares
-    // something computed rather than a literal with itself.
-    await waitTourTitle(page, 'Something to test');
-    await filterAndSelect(page, 'add', 'add');
-    await waitTourTitle(page, 'Extend it', 150000);
-    await extendViaRowActions(page, 'tutorial-sum', 'add');
-    await waitTourTitle(page, 'tutorial-sum is open', 150000);
-    await waitTourTitle(page, 'Two…', 150000);
-    await bindFirstPlaceholder(page, '2');
-    await waitTourTitle(page, '…plus two', 150000);
-    await appendSeqItemViaEdge(page, '2');
-    // The filter still says `add` from the step before — and a filtered tree
-    // hides the namespace row the next step clicks into. Clearing it is a
-    // step of its own now, ringed on the ×; the check reads the input.
-    await waitTourTitle(page, 'Clear the filter', 150000);
-    await page.evaluate(() => document.querySelector('#search-clear')?.click());
-    await page.waitForFunction(() => !(document.querySelector('input[placeholder="Filter..."]')?.value),
-      null, {timeout: 15000, polling: 100});
-    await waitTourTitle(page, 'Create the tests namespace', 150000);
-    await createRootNamespace(page, 'tests');
-    await waitTourTitle(page, 'Add the test fn', 150000);
-    await createFnInNamespace(page, 'tests', 'two-plus-two');
-    await waitTourTitle(page, 'Make it an assertion', 150000);
-    await setParentViaStrip(page, 'assert-eq');
-    await waitTourTitle(page, 'What it computes', 150000);
-    // assert-eq exposes exactly two slots — wait for BOTH placeholders to
-    // paint before touching either. (The step's title lands on selection,
-    // which is earlier than the card.) The canvas decides which placeholder
-    // is first, and the lesson's checks are order-independent: a fn-ref in
-    // :expected and a 4 in :actual is the same passing test.
-    await page.waitForFunction(
-      () => document.querySelectorAll('.placeholder-binder').length === 2,
-      null, {timeout: 60000, polling: 150});
-    await bindFnRefPlaceholder(page, 'tutorial-sum');
-    await waitTourTitle(page, 'What it should be', 150000);
-    // The card repaints asynchronously after the first bind. Clicking
-    // before it does hits the SAME (now bound) placeholder, and the write
-    // collides on `(fn-id, slot-id)` — a genuine 409 that reads as a broken
-    // lesson. Wait for exactly one placeholder to remain.
-    await page.waitForFunction(
-      () => document.querySelectorAll('.placeholder-binder').length === 1,
-      null, {timeout: 60000, polling: 150});
-    await bindFirstPlaceholder(page, '4');
-    // The write itself triggers the auto-run — that IS the lesson's claim.
-    await waitTourTitle(page, 'See it pass', 150000);
-    // The step completes on the Explorer's green dot under the ✓ tests
-    // lens, so do what the lesson tells the reader to: click the chip.
-    // (`dom` checks mean VISIBLE — the row must be on screen, which the
-    // lens guarantees for the namespace the reader just built in.)
-    await page.waitForSelector('#kind-filters .kind-toggle[data-kind="tests"]',
-                               {timeout: 30000});
-    const testsLensOn = () => page.evaluate(() =>
-      document.querySelector('#kind-filters .kind-toggle[data-kind="tests"]')
-        ?.getAttribute('aria-pressed') === 'true');
-    for (let attempt = 0; attempt < 5 && !(await testsLensOn()); attempt++) {
-      await page.evaluate(() => {
-        document.querySelector('#kind-filters .kind-toggle[data-kind="tests"]')?.click();
-      });
-      await waitUntil(page, () =>
-        document.querySelector('#kind-filters .kind-toggle[data-kind="tests"]')
-          ?.getAttribute('aria-pressed') === 'true', null, 1000);
-    }
-    assert(await testsLensOn(), '✓ tests lens switched on');
-    // Auto-run is asynchronous (the write returns first) — poll rather than
-    // read once. `pending` is a status too — poll until the run REACHES a
-    // terminal one.
-    const testStatus = async (want) => {
-      let row = null;
-      for (let i = 0; i < 45; i++) {
-        const statuses = await api(page, 'GET', '/api/tests/status');
-        row = (Array.isArray(statuses) ? statuses : []).find(
-          (t) => t['fn-name'] === 'two-plus-two');
-        if (row && row.status === want) break;
-        await new Promise((r) => setTimeout(r, 2000));
-      }
-      return row;
-    };
-    let testRow = await testStatus('succeeded');
-    assert(testRow && testRow.status === 'succeeded',
-      'the test auto-ran and passed (got: ' + JSON.stringify(testRow) + ')');
-    // Break it: the bound 4 → 5. The dot goes grey (new version, not run),
-    // then red — the tour's step completes on the red dot.
-    await waitTourTitle(page, 'Break it', 150000);
-    await editBoundValue(page, '5');
-    testRow = await testStatus('failed');
-    assert(testRow && testRow.status === 'failed',
-      'the auto-run caught the lie (got: ' + JSON.stringify(testRow) + ')');
-    await waitTourTitle(page, 'Fix it', 150000);
-    await editBoundValue(page, '4');
-    testRow = await testStatus('succeeded');
-    assert(testRow && testRow.status === 'succeeded',
-      'and the fix turned it green again (got: ' + JSON.stringify(testRow) + ')');
-    await waitTourTitle(page, 'Tests are graph, too', 150000);
-    await finishAndDelete(page);
-    console.log('  lesson 17: walked + cleaned');
-
-    // ---------- Branch isolation × LESSON STEPS ----------
-    // The intersection the reparent bug and the lesson-11 breakage both
-    // escaped through: branch-mode e2e used to be env-gated
-    // (GRAPHDEN_TOUR_BRANCH_E2E=1) and covered only entry/exit, while
-    // the step walks all ran in-place on main. The historic reason for
-    // the gate — a deterministic 240s stall of the `?branch=` load on
-    // THIS stack (5/5, twice) — no longer reproduces after the
-    // stale-branch + reparent + branch-router fixes (re-measured
-    // 2026-08-26 in the same testcontainers environment: the whole
-    // create→switch→resume flow completes in ~10s). So this now runs
-    // UNGATED and walks every lesson-01 step ON the tour branch, then
-    // asserts the full rollback: branch gone, main untouched, no
-    // tutorial-* leak.
-    await hardCleanup(page);
-    // This file opens on a fresh page (the lesson walks that used to run
-    // first in the same file booted the editor for it).
-    await page.goto(BASE + '/');
-    await page.waitForFunction(() => typeof window.startTutorialIsolated === 'function',
-      null, {timeout: 60000, polling: 200});
-    const isoT0 = Date.now();
-    const startedIso = await page.evaluate(async () => {
-      return await window.startTutorialIsolated('01');
-    });
-    assert(startedIso, 'startTutorialIsolated returned true');
-    try {
-      await page.waitForFunction(() => {
-        return /[?&]branch=tutorial-01-/.test(location.search)
-          && !!document.querySelector('#gd-tour-pop .gd-tour-title');
-      }, null, {timeout: 120000, polling: 300});
-    } catch (e) {
-      // Evidence first, failure second.
-      const diag = await page.evaluate(() => ({
-        url: location.href,
-        storedBranch: (() => {
-          try { return localStorage.getItem('graphden.branch'); }
-          catch (_) { return 'unreadable'; }
-        })(),
-        tourTitle: document.querySelector('#gd-tour-pop .gd-tour-title')
-          ?.textContent.trim() || null,
-      }));
-      console.error('  branch-isolation diagnostics: ' + JSON.stringify(diag));
-      throw e;
-    }
-    const isoBranch = await page.evaluate(() =>
-      new URLSearchParams(location.search).get('branch'));
-    console.log('  branch isolation: on ' + isoBranch
-      + ' after ' + (Date.now() - isoT0) + 'ms');
-
-    // The full lesson-01 walk, on the branch — the same real-UI steps
-    // the in-place suite drives, incl. the set-parent REPARENT that the
-    // 2026-08-26 cross-branch gate bug blocked.
-    await waitTourTitle(page, 'Welcome to the interactive tutorial', 150000);
-    assert(await clickTourButton(page, 'Next'), 'welcome Next');
-    await waitTourTitle(page, 'Create a namespace');
-    await createRootNamespace(page, NS_NAME);
-    await waitTourTitle(page, 'Add a function', 150000);
-    await createFnInNamespace(page, NS_NAME, FN_NAME);
-    await waitTourTitle(page, 'Set the parent', 150000);
-    await setParentViaStrip(page, 'add');
-    await waitTourTitle(page, 'The first number', 150000);
-    await bindFirstPlaceholder(page, '1');
-    await waitTourTitle(page, 'And the second', 150000);
-    await appendSeqItemViaEdge(page, '1');
-    await waitTourTitle(page, 'Run it', 150000);
-    await runViaRowActions(page);
-    await waitTourTitle(page, 'Two', 150000);
-    assert(await clickTourButton(page, 'Next'), 'branch isolation: look-step Next');
-    await waitTourTitle(page, "That's the whole loop", 150000);
-    console.log('  branch isolation: all lesson-01 steps walked on the branch');
-
-    // Finish → the branch-rollback dialog (not the per-item cleanup).
-    assert(await clickTourButton(page, 'Finish'), 'Finish button');
-    await waitTourTitle(page, 'Delete the tutorial branch?');
-    // "What now?" is a real question at the end of a lesson, and the dialog
-    // that asks about the branch is where the reader is already looking.
-    const nextUp = await page.evaluate(() => {
-      const box = document.querySelector('.gd-tour-next');
-      return box ? {
-        text: box.textContent,
-        buttons: Array.from(box.querySelectorAll('.gd-tour-btn'))
-          .map((b) => b.textContent.trim()),
-      } : null;
-    });
-    assert(nextUp, 'the rollback dialog offers what to read next');
-    assert((nextUp.buttons || []).some((b) => /^Start 02 · /.test(b)),
-      'naming the lesson that follows (got: '
-      + JSON.stringify(nextUp && nextUp.buttons) + ')');
-    assert(/Deletes this branch first/.test(nextUp.text),
-      'and saying what continuing does to this one');
-    assert(await clickTourButton(page, 'Delete branch & return'),
-      'Delete branch & return button');
-    await page.waitForFunction(() => !/[?&]branch=/.test(location.search),
-      null, {timeout: 120000, polling: 300});
-
-    // Rollback is COMPLETE: no tutorial-* branch survives (the lesson-11
-    // leak class), and main never saw the lesson's rows.
-    const branchesAfter = await api(page, 'GET', '/api/branches');
-    const leakedTutorial = (branchesAfter.branches || [])
-      .filter((b) => /^tutorial-/.test(b.name || ''));
-    assert(leakedTutorial.length === 0,
-      'no tutorial-* branch leaked (got: '
-      + JSON.stringify(leakedTutorial.map((b) => b.name)) + ')');
-    const mainTree = await api(page, 'GET', '/api/graph/entities?scope=tree');
-    assert(!(mainTree.namespaces || []).some((n) => n.name === NS_NAME),
-      'main never saw the lesson namespace');
-    console.log('  branch isolation: rolled back — branch deleted, main clean');
-
-    // ---------- and straight into the next lesson --------------------------
-    // Continuing from that dialog cannot be a function call: the rollback ends
-    // in a branch switch, which RELOADS. The id is parked in
-    // `graphden.tour.next` and picked up on the other side — this is that
-    // other side, the half no unit test can reach (it needs a real load, a
-    // real branch create and the boot hook). The parking half is asserted
-    // above (the button) and in tools/runtime-test/tour-end.test.js.
-    await page.evaluate(() => localStorage.setItem('graphden.tour.next', '02'));
-    await page.goto(BASE + '/');
-    await page.waitForFunction(() => /[?&]branch=tutorial-02-/.test(location.search)
-      && !!document.querySelector('#gd-tour-pop .gd-tour-title'),
-      null, {timeout: 120000, polling: 300});
-    const handoff = await page.evaluate(() => ({
-      branch: new URLSearchParams(location.search).get('branch'),
-      step: document.querySelector('#gd-tour-pop .gd-tour-progress')
-        ?.textContent.trim() || null,
-      queued: localStorage.getItem('graphden.tour.next'),
-    }));
-    assert(handoff.queued === null,
-      'the parked lesson is consumed, not left to re-fire on a later visit'
-      + ' (got: ' + handoff.queued + ')');
-    assert(/^Lesson 02 · step 1\//.test(handoff.step || ''),
-      'and it opens at lesson 02\'s FIRST step (got: ' + handoff.step + ')');
-    // Leave nothing behind: end the tour, drop the branch it made, and take
-    // the browser OFF that branch before the next load — a page booted on a
-    // deleted branch is the 2026-08-20 dead-editor 400, not a test failure
-    // worth debugging twice.
-    await page.keyboard.press('Escape');
-    await page.evaluate(() => {
-      localStorage.removeItem('graphden.tour');
-      localStorage.removeItem('graphden.tour.done');
-      localStorage.removeItem('graphden.branch');
-    });
-    // Off the branch FIRST, delete it SECOND. The other order raced: with the
-    // page still standing on the branch, its next request after the DELETE
-    // came back 400 (dead branch), `maybeRecoverFromDeletedBranch` answered
-    // with its own reload to main, and that reload aborted this goto
-    // (`net::ERR_ABORTED`) — a 1-in-2 flake that blamed nothing real.
-    await page.goto(BASE + '/');
-    await page.waitForSelector('#entity-list', {timeout: 20000}).catch(() => {});
-    await api(page, 'DELETE', '/api/branches/' + handoff.branch);
-    const leftOver = await api(page, 'GET', '/api/branches');
-    assert(!(leftOver.branches || []).some((b) => /^tutorial-/.test(b.name || '')),
-      'and the handoff leaks no branch either (got: '
-      + JSON.stringify((leftOver.branches || []).map((b) => b.name)) + ')');
-    console.log('  handoff: a parked lesson opens isolated on the next load, once');
-
     // ---------- picker: a lesson this session cannot run is LOCKED --------
     // The org lessons drive panels that need `manage-users` / `manage-grants`.
     // On this stack (no tenancy addon) the capability probe is absent, so the
@@ -342,7 +72,7 @@ const {
     assert(assetsLesson, 'lesson 25 is listed');
     assert(!assetsLesson.disabled,
       'lesson 25 is offered on a single-tenant stack (got: ' + assetsLesson.text + ')');
-    console.log('  picker: org lessons locked, the assets lesson offered');
+    checkpoint('picker: org lessons locked, the assets lesson offered');
 
     // ---------- The catalogue as a catalogue ----------
     // Twenty-five lessons in five chapters is taller than a laptop viewport.
@@ -428,7 +158,7 @@ const {
     assert(cat.doneMarked, 'a finished lesson is marked done');
     assert(cat.chapters.length === new Set(cat.chapters).size,
       'each chapter heading appears once (got: ' + cat.chapters.join(', ') + ')');
-    console.log('  picker: resume + filter + done marks, list scrolls, Cancel pinned');
+    checkpoint('picker: resume + filter + done marks, list scrolls, Cancel pinned');
 
     // ---------- The ✓ is the reader's, so it comes back off ----------------
     // A lesson skipped step-by-step to see the end, or read so long ago it
@@ -511,7 +241,7 @@ const {
       localStorage.removeItem('graphden.tour.done');
       localStorage.removeItem('graphden.tour');
     });
-    console.log('  picker: one ✓ removable, the whole history clearable behind a confirm');
+    checkpoint('picker: one ✓ removable, the whole history clearable behind a confirm');
 
     // ---------- Editions: the menu count, the chips, the counters ----------
     // A lesson's `:version` is bumped when its flow changes; the reader's ✓
@@ -594,7 +324,7 @@ const {
       localStorage.removeItem('graphden.tour.seen');
       localStorage.removeItem('graphden.tour');
     });
-    console.log('  editions: menu count, new/updated chips, done/available/total counters');
+    checkpoint('editions: menu count, new/updated chips, done/available/total counters');
 
     // ---------- Escape belongs to whatever is on TOP ----------
     // Every lesson tells the reader to open something — a picker, a panel, a
@@ -616,7 +346,7 @@ const {
     await page.keyboard.press('Escape');
     await page.waitForFunction(() => !document.querySelector('#gd-tour-pop'),
       null, {timeout: 15000, polling: 200});
-    console.log('  escape: closes the panel first, ends the tour only when alone');
+    checkpoint('escape: closes the panel first, ends the tour only when alone');
 
     // ---------- On a phone the tour is a bottom sheet ----------
     // A 360px popover on a 390px screen lands on the Explorer, which is where
@@ -661,7 +391,7 @@ const {
       document.querySelector('#gd-tour-pop').classList.contains('gd-tour-sheet')),
       'and a desktop window keeps the anchored popover');
     await page.evaluate(() => { localStorage.removeItem('graphden.tour'); });
-    console.log('  mobile: step + catalogue dock as a sheet, desktop unchanged');
+    checkpoint('mobile: step + catalogue dock as a sheet, desktop unchanged');
 
     // ---------- A lens the reader left on must not dead-end a step ----------
     // The Explorer's kind lens hides rows; a step waiting on a fn the lens
@@ -712,7 +442,7 @@ const {
     assert(lensAfter === 'true',
       'the tour cleared the lens that was hiding the step\'s fn (all=' + lensAfter + ')');
     await page.evaluate(() => { localStorage.removeItem('graphden.tour'); });
-    console.log('  lens: a kind lens hiding the step\'s fn is cleared, once');
+    checkpoint('lens: a kind lens hiding the step\'s fn is cleared, once');
 
     // ---------- The funnel actually moves ----------
     // 25 lessons and no way to know where a reader stops was the gap; the
@@ -740,7 +470,7 @@ const {
     assert(stepAfter >= 1,
       'and the advance counted its step bucket (tour-step-01-1 = ' + stepAfter + ')');
     await page.evaluate(() => { localStorage.removeItem('graphden.tour'); });
-    console.log('  funnel: started + step counters moved on /metrics');
+    checkpoint('funnel: started + step counters moved on /metrics');
 
     console.log('PASS');
   } catch (err) {
@@ -748,8 +478,8 @@ const {
     console.error('FAIL:', err.message);
     try {
       console.error('  tour at failure:', await tourWhere(page));
-      await page.screenshot({path: '/tmp/edit-tutorial-tour-fail.png'});
-      console.error('  screenshot: /tmp/edit-tutorial-tour-fail.png');
+      await page.screenshot({path: '/tmp/edit-tutorial-tour-picker-fail.png'});
+      console.error('  screenshot: /tmp/edit-tutorial-tour-picker-fail.png');
     } catch (_) { /* page may be gone */ }
   } finally {
     await hardCleanup(page);

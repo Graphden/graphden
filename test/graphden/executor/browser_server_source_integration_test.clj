@@ -31,9 +31,9 @@
 (deftest shipped-account-query-has-a-closed-read-only-contract
   (let [ctx (:ctx ga/*bootstrap*)
         target (ids/fn-id "app.ui-account-menu" :_account-menu-branch-query)]
-    (is (identical? @(find-var 'graphden.packages.storage.branches.impls/current-branch-name)
-                    (get (:base-fns ctx) :current-branch-name))
-        "Sibling golden-clone contexts retain the freshly loaded trusted reader")
+    (is (owned/owned-impl? (ids/fn-id "storage.branches" :current-branch-name)
+                           (get (:base-fns ctx) :current-branch-name))
+        "Sibling golden-clone contexts retain their trusted reader after package reload")
     (recheck/call-with-ctx-slices
       ctx
       (fn []
@@ -51,9 +51,34 @@
                               (throw (ex-info "No source grant" {:type :authz/forbidden}))))
                           policy target)))]
           (is (= [[target {:execute? true :server-target? true}]] @authorizations))
+          (is (= :server-not-read-only
+                 (source/with-snapshot
+                   (:storage ctx)
+                   (fn [storage _]
+                     (try
+                       (server-source/capture
+                         (assoc-in ctx [:base-fns :current-branch-name]
+                                   (fn [_ _] "forged"))
+                         storage (fn [_ _] nil) policy target)
+                       nil
+                       (catch clojure.lang.ExceptionInfo error
+                         (:reason (ex-data error)))))))
+              "A replacement reader in the context cannot inherit package trust")
           (is (= {:query :text} (:input-type proof)))
           (is (= {:label :text :branch-name :text} (:output-type proof)))
           (is (string? (:fingerprint proof)))
+          (is (= (:fingerprint proof)
+                 (with-redefs-fn
+                   {(find-var 'graphden.packages.storage.branches.impls/current-branch-name)
+                    (fn [_ _] "reloaded")}
+                   (fn []
+                     (source/with-snapshot
+                       (:storage ctx)
+                       (fn [storage _]
+                         (:fingerprint
+                           (server-source/capture ctx storage (fn [_ _] nil)
+                                                  policy target)))))))
+              "A context keeps its trusted implementation after the package Var changes")
           (is (= {:label "Branch" :branch-name "main"}
                  (exec/execute ctx target {:input {:query ""}})))
           (is (= {:label "Branch" :branch-name ""}

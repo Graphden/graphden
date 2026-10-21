@@ -356,14 +356,20 @@
            ;; `extra-base-fns` is merged on top of package impls. Same
            ;; map is also pushed into the global registry for back-compat
            ;; with direct `exec/get-base-fn` / REPL callers.
-           base-fns-map (merge (registry/compute-base-fns-map base-fn-defs)
-                               extra-base-fns)]
+           package-base-fns (registry/compute-base-fns-map base-fn-defs)
+           base-fns-map (merge package-base-fns extra-base-fns)]
        (registry/sync-primitives! storage)
        ;; Feed the package-write guard: every deterministic id this sync
        ;; is about to write (base-fns + composed fn-defs + primitives)
        ;; becomes API-read-only — see `graphden.packages.owned`.
        (owned/record-owned-ids! (vals all-name->id))
        (owned/record-owned-ids! (vals (records/primitive-fn-ids)))
+       (owned/record-owned-impls!
+         (into {}
+               (map (fn [[fn-name fn-def]]
+                      [(records/fn-id (:namespace fn-def) fn-name)
+                       (get package-base-fns fn-name)]))
+               base-fn-defs))
        ;; Register refinement type-aliases BEFORE base-fn rich-type
        ;; recording so `:http-server :args {:port :port}` stores the
        ;; structural `[:refine :int …]` form, not the bare keyword.

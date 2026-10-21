@@ -31,3 +31,28 @@
                               {:authored-input (provenance/fingerprint authored)
                                :source-fingerprint "forged-source"})]
         (is (false? (provenance/matches-storage-input? forged "forged-source")))))))
+
+
+(deftest marker-witness-survives-enrichment-and-equivalent-projection-only
+  (let [id (random-uuid)
+        authored {:fn-id id :name :checked-view :parent :const
+                  :args {:value {:value "checked"}}}
+        issuer (provenance/capture-marker-stamp authored id)
+        signature (provenance/stamp
+                    {:fn-id id :args {:value {:nested [:list :text]}}
+                     :return {:result :text}} authored)
+        issued (issuer signature)
+        flags (provenance/checked-marker-flags id issued)]
+    (is (= flags (provenance/checked-marker-flags id (assoc issued :effects #{:db})))
+        "unrelated registry enrichment retains the issued projection")
+    (is (= flags (provenance/checked-marker-flags
+                   id (assoc issued :args (into (sorted-map) (:args issued)))))
+        "an equal rebuilt projection still uses the canonical digest proof")
+    (is (nil? (provenance/checked-marker-flags
+                id (assoc-in issued [:args :value :nested 1] :int)))
+        "copied metadata cannot certify a changed nested argument")
+    (is (nil? (provenance/checked-marker-flags
+                id (assoc-in issued [:return :result] [:secret :text])))
+        "copied metadata cannot certify a changed return type")
+    (is (nil? (provenance/checked-marker-flags (random-uuid) issued))
+        "the witness remains bound to the issued function")))

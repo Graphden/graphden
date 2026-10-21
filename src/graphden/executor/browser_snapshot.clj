@@ -69,32 +69,38 @@
       :unknown)))
 
 
+(defn- capture-policy-for
+  ([rich signatures]
+   (capture-policy-for rich signatures (shapes/markers-snapshot)))
+  ([rich signatures current-flags]
+   (binding [types/*type-aliases-override* (atom {})
+             types/*alias-view* nil
+             shapes/*marker-registry-override* (atom {:secret {:monotone? true :hide-result? true}})
+             registry/*rich-types-override* (atom rich)
+             registry/*per-org-rich-override* (atom {})]
+     (try
+       {:rich rich
+        :classes (into {}
+                       (map (fn [[id signature]]
+                              (let [frozen (provenance/checked-marker-flags id signature)
+                                    original (if (and (nil? frozen)
+                                                      (provenance/checker-stamp-present? signature))
+                                               :unknown
+                                               (signature-class id signature (or frozen {})))]
+                                [id (if (= :unknown original)
+                                      :unknown
+                                      (let [current (signature-class id signature current-flags)]
+                                        (if (or (= :unknown current) (= :plain original))
+                                          current original)))])))
+                       signatures)}
+       (catch Exception _ (reject! :policy-capture-failed {}))))))
+
+
 (defn capture-policy
   "Freeze visibility before source reads. Custom markers require a checker
    witness; frozen flags authorize while the current view can only veto."
   [rich]
-  (let [current-flags (shapes/markers-snapshot)]
-    (binding [types/*type-aliases-override* (atom {})
-              types/*alias-view* nil
-              shapes/*marker-registry-override* (atom {:secret {:monotone? true :hide-result? true}})
-              registry/*rich-types-override* (atom rich)
-              registry/*per-org-rich-override* (atom {})]
-      (try
-        {:rich rich
-         :classes (into {}
-                        (map (fn [[id signature]]
-                               (let [frozen (provenance/checked-marker-flags id signature)
-                                     original (if (and (nil? frozen)
-                                                       (provenance/checker-stamp-present? signature))
-                                                :unknown
-                                                (signature-class id signature (or frozen {})))]
-                                 [id (if (= :unknown original)
-                                       :unknown
-                                       (let [current (signature-class id signature current-flags)]
-                                         (if (or (= :unknown current) (= :plain original))
-                                           current original)))])))
-                        (:by-id rich))}
-        (catch Exception _ (reject! :policy-capture-failed {}))))))
+  (capture-policy-for rich (:by-id rich)))
 
 
 (defn capture-context-policy
@@ -258,7 +264,16 @@
                                                    (ids/fn-id "app.ui-components" :ui-components))
                                        structural? (into (structural-contracts/operation-ids)))))
       (check-closure! snapshot entries rich type-recheck)
-      (let [snapshot-classes (:classes (capture-policy rich))]
+      ;; A snapshot checks only source identities it actually exports. The
+      ;; original policy was frozen in full before the storage read; this
+      ;; second classification is a fresh veto, not another authority grant.
+      (let [current-flags (shapes/markers-snapshot)
+            snapshot-class (memoize
+                             (fn [id]
+                               (get-in (capture-policy-for rich
+                                                           (select-keys (:by-id rich) [id])
+                                                           current-flags)
+                                       [:classes id])))]
         (consume
           {:allow-fn?
            (fn [id]
@@ -267,7 +282,7 @@
                   ;; annotations. A fresh check is only a veto:
                   ;; it must never relax the original policy.
                   (= :plain (get classes id))
-                  (= :plain (get snapshot-classes id))))}))
+                  (= :plain (snapshot-class id))))}))
       (catch Exception error
         (if (= :browser-plan/unsupported (:type (ex-data error)))
           (throw error)

@@ -7,7 +7,7 @@
 
 
 (deftype ^:private MarkerWitness
-  [seal input fn-id signature flags])
+  [seal input fn-id signature flags args return-value])
 
 
 (deftype ^:private StorageWitness
@@ -79,7 +79,7 @@
       (vary-meta signature assoc marker-key
                  (MarkerWitness. witness-seal input fn-id
                                  (fingerprint-data (select-keys signature [:args :return]))
-                                 flags)))))
+                                 flags (:args signature) (:return signature))))))
 
 
 (defn checker-stamp-present?
@@ -101,8 +101,13 @@
                (identical? witness-seal (.-seal ^MarkerWitness witness))
                (= fn-id (:fn-id signature) (.-fn-id ^MarkerWitness witness))
                (= (::input (meta signature)) (.-input ^MarkerWitness witness))
-               (= (fingerprint-data (select-keys signature [:args :return]))
-                  (.-signature ^MarkerWitness witness)))
+               ;; Checked signatures are persistent Clojure data. An enriched
+               ;; map shares these immutable values; a rebuilt projection must
+               ;; still prove equality through the original digest.
+               (or (and (identical? (:args signature) (.-args ^MarkerWitness witness))
+                        (identical? (:return signature) (.-return-value ^MarkerWitness witness)))
+                   (= (fingerprint-data (select-keys signature [:args :return]))
+                      (.-signature ^MarkerWitness witness))))
       (.-flags ^MarkerWitness witness))))
 
 

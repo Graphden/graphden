@@ -37,23 +37,25 @@
   (let [storage (:storage ctx)
         branch (versioned/current-branch-id storage)
         path (str "root-compat-" (random-uuid))
-        menu (str path ".menu") recents (str path ".recents")
+        menu (str path ".menu") recents (str path ".recents") picker (str path ".picker")
         roles (fn [ns-path prefix]
                 (mapv (fn [role] [role (keyword ns-path (str prefix "-" (name role)))]) [:initial :update :view]))
         definitions
         (concat (copied-definitions "ui-account-menu" menu :settings-row #(assoc-in % [:args :children] ["Personal settings"]))
                 (copied-definitions "ui-recents" recents :_caption #(assoc-in % [:args :then] "My trail"))
+                (copied-definitions "ui-fn-picker" picker :picker-active-background #(assoc-in % [:args :value] "var(--success-fg)"))
                 (templates/component-definitions path "menu" :app.ui-account-menu/account-menu-view (roles menu "account-menu"))
                 (templates/component-definitions path "recents" :app.ui-recents/recents-view (roles recents "recents"))
+                (templates/component-definitions path "picker" :app.ui-fn-picker/picker-view [[:view (keyword picker "picker-view")]])
                 [{:name :selection :namespace path :parent :list
                   :return-type :app.ui-components/ui-component-manifest
-                  :args {:items [(keyword path "_menu-descriptor") (keyword path "_recents-descriptor")]}}])
+                  :args {:items [(keyword path "_menu-descriptor") (keyword path "_recents-descriptor") (keyword path "_picker-descriptor")]}}])
         selected (ids/fn-id path :selection)]
     ((get (:base-fns ctx) :sync-fn-defs-branch!) {:branch-id branch :fn-defs (vec definitions)} ctx)
     (sp/create-entity storage :ui-pref {:owner-id owner :key "components"
                                         :value {:fn-id (str selected) :branch-id (str branch) :org (tenancy/current-org)}})
     (epoch/seed-watermark! storage)
-    {:selected selected :menu (ids/fn-id menu :account-menu-view) :recents (ids/fn-id recents :recents-view)}))
+    {:selected selected :menu (ids/fn-id menu :account-menu-view) :recents (ids/fn-id recents :recents-view) :picker (ids/fn-id picker :picker-view)}))
 
 
 (defn- run-views
@@ -69,7 +71,8 @@
                     "const inputs=m({pins:[],trail:[],selected:null,searching:false});"
                     "const recentState=g.invoke(field(recents,'initial'),m({inputs}));"
                     "const recentView=g.invoke(field(recents,'view'),m({state:recentState,inputs}));"
-                    "process.stdout.write(JSON.stringify([g.encode(menuView),g.encode(recentView)]));});")]
+                    "const pickerView=g.invoke(field(field(root,'fn-picker'),'view'),m({model:m({sections:[],'empty-kind':'all','show-other-toggle':false,'show-other':false,'hidden-other':0})}));"
+                    "process.stdout.write(JSON.stringify([g.encode(menuView),g.encode(recentView),g.encode(pickerView)]));});")]
     (sh/sh "node" "-e" script :in (json/generate-string plan))))
 
 
@@ -107,7 +110,8 @@
           (is (= (:selected selected) (:component-selection-id result)))
           (is (zero? (:exit rendered -1)) (:err rendered))
           (is (re-find #"Personal settings" (:out rendered "")))
-          (is (re-find #"My trail" (:out rendered ""))))
+          (is (re-find #"My trail" (:out rendered "")))
+          (is (re-find #"var\(--success-fg\)" (:out rendered ""))))
         (with-redefs [tenancy/current-user-id (constantly (str (random-uuid)))]
           (let [result (export-root ctx)]
             (is (:ok result) (pr-str result))
@@ -117,15 +121,16 @@
           (with-redefs [versioned/current-branch-id (fn [storage]
                                                       (when (read-branch storage) (random-uuid)))]
             (is (false? (:ok (export-root ctx))))))
-        (with-redefs [tenancy/browser-source-policy
-                      (fn [_]
-                        (fn [row & _]
-                          (when (= (:id row) (:menu selected))
-                            (throw (ex-info "Revoked personal source" {:type :authz/forbidden})))))]
-          (let [result (export-root ctx)]
-            (is (false? (:ok result)))
-            (is (not (contains? result :plan)))
-            (is (not (contains? result :component-selection-id)))))
+        (doseq [revoked [(:menu selected) (:picker selected)]]
+          (with-redefs [tenancy/browser-source-policy
+                        (fn [_]
+                          (fn [row & _]
+                            (when (= (:id row) revoked)
+                              (throw (ex-info "Revoked personal source" {:type :authz/forbidden})))))]
+            (let [result (export-root ctx)]
+              (is (false? (:ok result)))
+              (is (not (contains? result :plan)))
+              (is (not (contains? result :component-selection-id))))))
         (writer/with-write [storage :graph]
                            (sp/delete-entity storage :fn (:selected selected)))
         (epoch/seed-watermark! (:storage ctx))

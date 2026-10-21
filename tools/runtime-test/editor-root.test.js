@@ -20,7 +20,7 @@ function fixture() {
     readyState: 'loading', addEventListener() {}, getElementById: id => id === 'app' ? legacy : null,
     createElement: () => ({remove() {}, setAttribute() {}}),
   };
-  const context = {window, document, Map, AbortController, DOMException, Event: class {}, CustomEvent: class {}, graphdenCurrentOrg: 'org',
+  const context = {window, document, Map, performance, AbortController, DOMException, Event: class {}, CustomEvent: class {}, graphdenCurrentOrg: 'org',
     getCurrentBranchName: () => context.branch, branch: 'main'};
   vm.runInNewContext(source, context);
   const reply = (index, legacyMode, label) => requests[index].resolve({ok: true,

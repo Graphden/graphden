@@ -1,3 +1,4 @@
+const {verifyPickerRootSelection} = require('./picker-root-test-helpers');
 // Compatibility selective copies, retained authored identities, and a real cross-tab
 // activation conflict. Every cleanup operation uses exact creation receipts.
 const {unexpectedSelectiveCopyErrors} = require('./selective-copy-errors');
@@ -53,7 +54,8 @@ async function copy(page, component, receipts, settle) {
   assert(result.ok && result.committed && JSON.stringify(result.manifest) === JSON.stringify(proposed.manifest),
     'apply confirms the exact create-only receipt');
   receipt.activation = await activate(page, proposed.manifest.roots['configuration-id'], settle);
-  await page.waitForFunction(({root, component}) => gdUIComponentRuntimeIdentity(component) === root
+  if (component === 'fn-picker') await verifyPickerRootSelection(page, receipt.activation.receipt.id, proposed.manifest.roots['picker-id']);
+  await page.waitForFunction(({root, component}) => (component === 'fn-picker' ? gdFnPickerGraph.ready : gdUIComponentRuntimeIdentity(component) === root)
     && gdUIComponentRuntimeIdentity('account-menu') === root && gdShellMenuGraph.ready,
   {root: receipt.activation.receipt.id, component});
   await settle();
@@ -187,7 +189,7 @@ async function cleanup(page, receipts, scope = 'final') {
     phase = 'copy-picker';
     const picker = await copy(page, 'fn-picker', receipts, settle);
     phase = 'runtime-picker';
-    await page.waitForFunction(id => gdUIComponentRuntimeIdentity('fn-picker') === id, picker.activationId);
+    await verifyPickerRootSelection(page, picker.activationId, picker.roots['picker-id']);
     assert(await page.evaluate(() => gdShellMenuGraph.ready && gdUIComponentsRoots()['menu-id']),
       'partial compatibility manifests receive a working shared menu through graph composition');
     await page.evaluate(async id => { await ensureSubtreeFor(id); gdShellSurface('build'); selectFn(id); }, picker.roots['picker-id']);
@@ -195,6 +197,7 @@ async function cleanup(page, receipts, scope = 'final') {
     const leaf = await selectCreatedLeaf(page, picker, 'picker', 'picker-active-background');
     await settle();
     await editPickerAndSettle(page, leaf, 'rgb(254, 215, 170)');
+    await verifyPickerRootSelection(page, picker.activationId, picker.roots['picker-id'], 'rgb(254, 215, 170)');
     await settle();
     phase = 'copy-recents';
     const recents = await copy(page, 'recents', receipts, settle);

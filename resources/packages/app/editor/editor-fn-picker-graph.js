@@ -123,7 +123,6 @@ window.gdRefreshPickerReturnLabels = entries => {
             'show-other': options.showOther, 'hidden-other': arranged.hiddenOther};
           const output = evaluator.run('view', {model: value(model)});
           component.render(get(output, 'tree'), get(output, 'styles'));
-          if (!review && !window.gdEditorRoot.acceptComponent(evaluator)) throw new DOMException('Editor root changed', 'AbortError');
           const nodes = new Map();
           for (const node of host.querySelectorAll('[data-picker-key]')) {
             const key = node.dataset.pickerKey;
@@ -135,6 +134,7 @@ window.gdRefreshPickerReturnLabels = entries => {
             entry.rowEl = nodes.get(entry.key);
             if (!entry.rowEl) throw new Error('Picker graph changed a navigation identity');
           }
+          if (!review && !window.gdEditorRoot.acceptComponent(evaluator)) throw new DOMException('Editor root changed', 'AbortError');
           return entries;
         },
         dispose() {

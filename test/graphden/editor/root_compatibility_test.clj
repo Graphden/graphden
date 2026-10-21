@@ -70,12 +70,14 @@
 
 
 (defn- run-personal-view
-  [plan]
-  (let [script (str "const g=require('./resources/packages/app/ui-preview/browser-runtime.js');let s='';"
-                    "process.stdin.on('data',x=>s+=x);process.stdin.on('end',()=>{"
-                    "const r=g.createRuntime(JSON.parse(s)).run('root');"
-                    "process.stdout.write(g.invoke(r.get(g.keyword('view')),new Map([[g.keyword('state'),'personal copy']])));});")]
-    (sh/sh "node" "-e" script :in (json/generate-string plan))))
+  ([plan] (run-personal-view plan "state"))
+  ([plan input-name]
+   (let [script (str "const g=require('./resources/packages/app/ui-preview/browser-runtime.js');let s='';"
+                     "process.stdin.on('data',x=>s+=x);process.stdin.on('end',()=>{"
+                     "const r=g.createRuntime(JSON.parse(s)).run('root');"
+                     "process.stdout.write(g.invoke(r.get(g.keyword('view')),new Map([[g.keyword("
+                     (json/generate-string input-name) "),'personal copy']])));});")]
+     (sh/sh "node" "-e" script :in (json/generate-string plan)))))
 
 
 (deftest selected-personal-view-is-invoked-through-the-root-field
@@ -195,6 +197,9 @@
         wrapper (first (filter #(= wrapper-id (:id %)) (:functions adapted)))]
     (is (= ["model"] (mapv :name (:env wrapper))))
     (is (not= picker-old wrapper-id))
+    (let [result (run-personal-view adapted "model")]
+      (is (zero? (:exit result)) (:err result))
+      (is (= "personal copy" (:out result))))
     (with-redefs [personal-plan (assoc-in personal [:inputs (str target) :required] ["state"])]
       (is (= :legacy-callback-inputs
              (try (adapt {:fn-picker {:view target}}) nil

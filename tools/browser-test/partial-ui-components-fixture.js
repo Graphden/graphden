@@ -1,5 +1,6 @@
 'use strict';
 const {assert, api, BASE} = require('./edit-test-helpers');
+const {verifyPickerRootSelection} = require('./picker-root-test-helpers');
 const {undoConfiguration} = require('./configuration-undo-test-helpers');
 
 // A controlled prior partial manifest makes lesson25's restore/fallback
@@ -38,9 +39,8 @@ async function preparePickerOnlySelection(page, remember, homeSetup) {
     const activated = await api(page, 'POST', '/api/ui/configuration/apply', activation.request);
     assert(activated.ok && activated.committed, 'ordinary fixture activation commits');
     await page.evaluate(() => gdRefreshUIConfiguration());
-    await page.waitForFunction(({root, picker}) => gdUIComponentRuntimeIdentity('fn-picker') === root
-      && gdUIComponentsRoots()['picker-id'] === picker,
-    {root: activated.id, picker: proposed.manifest.roots['picker-id']});
+    await verifyPickerRootSelection(page, activated.id, proposed.manifest.roots['picker-id']);
+    await page.waitForFunction(picker => gdUIComponentsRoots()['picker-id'] === picker, proposed.manifest.roots['picker-id']);
     await page.waitForFunction(({root, menu}) => gdShellMenuGraph.ready
       && gdUIComponentRuntimeIdentity('account-menu') === root
       && gdUIComponentsRoots()['menu-id'] === menu, {root: activated.id, menu: previous.menu});

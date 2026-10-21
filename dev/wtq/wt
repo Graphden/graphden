@@ -1298,29 +1298,37 @@ run_scoped_ci_gate() {
     || { echo "FAIL: missing, partial or stale CI receipt"; return 1; }
 }
 
-# A hint is evidence of a completed failed stage, not a waiver or attribution
+# A hint identifies a failed/in-flight stage, never a waiver or attribution
 # of blame. Red multi-member trains share it with their bisection children.
 prior_failed_stage() {
-  local m branch sha base stage extra
+  local m branch sha base stage receipt extra
   for m in "$@"; do
     [ -f "$FAILURE_DIR/$m" ] || continue
-    IFS=$'\t' read -r branch sha base stage extra < "$FAILURE_DIR/$m" || continue
+    IFS=$'\t' read -r branch sha base stage receipt extra < "$FAILURE_DIR/$m" || continue
     [ -z "$extra" ] && [ "$branch" = "${M_BRANCH[$m]}" ] || continue
     case "$stage" in ci|build|e2e|visual|integration|fleet) ;; *) continue ;; esac
     # Reject reused names, rebases/resets, missing objects and rewritten target.
     git -C "$MAIN_WT" merge-base --is-ancestor "$sha" "${M_SHA[$m]}" 2>/dev/null || continue
     git -C "$MAIN_WT" merge-base --is-ancestor "$base" "$TARGET" 2>/dev/null || continue
-    printf '%s\n' "$stage"
+    if [ -n "$receipt" ]; then
+      case "$receipt" in "$LOG_DIR"/_train-*) ;; *) continue ;; esac
+      [ -f "$receipt.stages.edn" ] || continue
+    fi
+    if [ "${WTQ_HINT_RECEIPT:-0}" = 1 ]; then printf '%s\n' "$receipt"
+    else printf '%s\n' "$stage"; fi
     return 0
   done
 }
 
 record_failed_stage() {
   local stage="$1" base="$2"; shift 2
-  local m tmp
+  local m tmp suffix="" receipt="${WTQ_FAILURE_RECEIPT:-}"
+  # Older/stubbed gates have a stage marker but no progress artifact. Retain
+  # their four-field hint; never publish a pointer to a nonexistent receipt.
+  if [ -n "$receipt" ] && [ -f "$receipt.stages.edn" ]; then suffix=$'\t'"$receipt"; fi
   for m in "$@"; do
     tmp="$FAILURE_DIR/.$m.$$"
-    if ! { printf '%s\t%s\t%s\t%s\n' "${M_BRANCH[$m]}" "${M_SHA[$m]}" "$base" "$stage" > "$tmp" \
+    if ! { printf '%s\t%s\t%s\t%s%s\n' "${M_BRANCH[$m]}" "${M_SHA[$m]}" "$base" "$stage" "$suffix" > "$tmp" \
            && mv -f "$tmp" "$FAILURE_DIR/$m"; }; then
       rm -f "$tmp"
       warn "could not save failed-stage scheduling hint for $m"
@@ -1412,8 +1420,12 @@ gate_suites() {
   echo "  (bb ci runs diff-scoped: checks whose scripts/checks.edn :relevant"
   echo "   paths saw no change are skipped visibly. Unrecognised -> everything.)"
 
-  local base_sha ci_sha ci_receipt ci_expected stage priority="${WTQ_FIRST_STAGE:-}"
+  local base_sha ci_sha ci_receipt ci_expected stage stage_order priority="${WTQ_FIRST_STAGE:-}"
   local pending_browser_headroom=0
+  local -a WTQ_PROGRESS_MEMBERS=("${WTQ_PROGRESS_MEMBERS[@]}")
+  local GRAPHDEN_RESUME_OUT="$LOG_DIR/_train-$WTQ_REPORT_TS"
+  local GRAPHDEN_RESUME_FROM="${WTQ_RESUME_FROM:-}"
+  export GRAPHDEN_RESUME_OUT GRAPHDEN_RESUME_FROM
   local -a stages=(ci) ordered=()
   base_sha="$(git -C "$wt" rev-parse "$TARGET")"
   ci_sha="$(git -C "$wt" rev-parse HEAD)"
@@ -1435,20 +1447,29 @@ gate_suites() {
   [ "$NEED_INTEGRATION" = 1 ] && stages+=(integration)
   [ "$NEED_FLEET" = 1 ] && stages+=(fleet)
 
-  # A hint only promotes a SELECTED stage. Its build dependency follows the
-  # same verified-image path; all other selected stages retain their order.
+  # Old four-field hints have no progress receipt: rotate the canonical
+  # roster after the failure, then revisit the previously completed prefix.
+  local found_priority=0
   for stage in "${stages[@]}"; do
-    if [ "$stage" = "$priority" ]; then
-      case "$priority" in
-        e2e|visual|integration|fleet) ordered+=(build) ;;
-      esac
-      ordered+=("$priority")
-      break
-    fi
+    [ "$stage" = "$priority" ] && found_priority=1
+    [ "$found_priority" = 1 ] && ordered+=("$stage")
   done
   for stage in "${stages[@]}"; do
     case " ${ordered[*]} " in *" $stage "*) ;; *) ordered+=("$stage") ;; esac
   done
+  stage_order="$(cd "$wt" && bb scripts/ci_resume_cli.clj start stages \
+    "$GRAPHDEN_RESUME_OUT.stages.edn" "${GRAPHDEN_RESUME_FROM:+$GRAPHDEN_RESUME_FROM.stages.edn}" \
+    "$ci_sha" "${ordered[@]}")" || { echo "FAIL: cannot initialize stage progress"; return 1; }
+  mapfile -t ordered <<< "$stage_order"
+  if [ "$(printf '%s\n' "${ordered[@]}" | sort)" != "$(printf '%s\n' "${stages[@]}" | sort)" ]; then
+    echo "FAIL: resume stage list is not the complete selected roster"
+    return 1
+  fi
+  # Cheap changed-file formatting/syntax/lint always precedes expensive stages.
+  (cd "$wt" && bb scripts/ci_fast_cli.clj "$base_sha") \
+    || { echo "FAIL: changed-file preflight"; return 1; }
+  local GRAPHDEN_FAST_DONE_SHA="$ci_sha"
+  export GRAPHDEN_FAST_DONE_SHA
   echo "  stage order: ${ordered[*]}"
   for stage in "${ordered[@]}"; do
     case "$stage" in
@@ -1463,10 +1484,18 @@ gate_suites() {
           pending_browser_headroom=0
         fi ;;
     esac
+    (cd "$wt" && bb scripts/ci_resume_cli.clj mark stages "$GRAPHDEN_RESUME_OUT.stages.edn" "$stage" running) || return 1
+    # Save before dispatch so SIGINT/timeout can resume the in-flight boundary.
+    # This pointer grants scheduling priority only, never a green verdict.
+    if [ "${#WTQ_PROGRESS_MEMBERS[@]}" -gt 0 ]; then
+      WTQ_FAILURE_RECEIPT="$GRAPHDEN_RESUME_OUT" record_failed_stage "$stage" "$base_sha" "${WTQ_PROGRESS_MEMBERS[@]}"
+    fi
     if ! run_gate_stage "$stage" "$wt" "$base_sha" "$ci_receipt" "$ci_expected"; then
+      (cd "$wt" && bb scripts/ci_resume_cli.clj mark stages "$GRAPHDEN_RESUME_OUT.stages.edn" "$stage" failed) || return 1
       echo "WTQ_FAILED_STAGE=$stage"
       return 1
     fi
+    (cd "$wt" && bb scripts/ci_resume_cli.clj mark stages "$GRAPHDEN_RESUME_OUT.stages.edn" "$stage" passed) || return 1
     case "$stage" in integration|fleet) pending_browser_headroom=1 ;; esac
   done
   # Only a complete successful runtime roster may promote this candidate.
@@ -1992,11 +2021,12 @@ train_run() {
   # The gate's own output is also kept apart (the outer tee may not have
   # flushed it to $log yet when we read the failing step back).
   local gate_out="$LOG_DIR/.gate-$ts.out"
-  local first_stage failure_stage gate_base report_complete=0
+  local first_stage resume_from failure_stage gate_base report_complete=0
   first_stage="$(prior_failed_stage "${gated[@]}")"
+  resume_from="$(WTQ_HINT_RECEIPT=1 prior_failed_stage "${gated[@]}")"
   gate_base="$(git -C "$MAIN_WT" rev-parse "$TARGET")"
   start_sampler "$resources"
-  ( WTQ_FIRST_STAGE="$first_stage" WTQ_REPORT_TS="$ts" gate_body "$TRAIN_WT" "$no_e2e" "$deploy" "$no_fleet" "$no_visual" "${gated[@]}" ) 2>&1 | tee "$gate_out"
+  ( WTQ_PROGRESS_MEMBERS=("${gated[@]}"); WTQ_RESUME_FROM="$resume_from" WTQ_FIRST_STAGE="$first_stage" WTQ_REPORT_TS="$ts" gate_body "$TRAIN_WT" "$no_e2e" "$deploy" "$no_fleet" "$no_visual" "${gated[@]}" ) 2>&1 | tee "$gate_out"
   grc="${PIPESTATUS[0]}"
   stop_sampler
   if ! bb "$SCRIPT_DIR/report.clj" finish "$report" "$(git -C "$TRAIN_WT" rev-parse HEAD)" "$queue_ms" "$gate_out" "$ci_report" "$resources" "$grc"; then
@@ -2005,12 +2035,12 @@ train_run() {
   else
     report_complete=1
   fi
-  # Only an explicit suite failure with a completed receipt updates hints.
-  # Killed gates, preconditions, post-land errors and target movement cannot do so.
+  # Completed failures confirm the in-flight scheduling pointer. Interrupted
+  # stages retain their pointer; incomplete progress is never pass evidence.
   if [ "$grc" = 1 ] && [ "$report_complete" = 1 ]; then
     failure_stage="$(sed -n 's/^WTQ_FAILED_STAGE=//p' "$gate_out" | tail -n1)"
     case "$failure_stage" in
-      ci|build|e2e|visual|integration|fleet) record_failed_stage "$failure_stage" "$gate_base" "${gated[@]}" ;;
+      ci|build|e2e|visual|integration|fleet) WTQ_FAILURE_RECEIPT="$LOG_DIR/_train-$ts" record_failed_stage "$failure_stage" "$gate_base" "${gated[@]}" ;;
     esac
   elif [ "$grc" = 0 ]; then
     for m in "${gated[@]}"; do rm -f "$FAILURE_DIR/$m"; done

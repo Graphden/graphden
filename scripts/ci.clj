@@ -16,8 +16,10 @@
    and the suite continues so the user always gets a result line."
   (:require
     [babashka.process :as p]
+    [ci-fast]
     [ci-proc]
     [ci-report]
+    [ci-resume]
     [ci-select]
     [clojure.string :as str])
   (:import
@@ -109,6 +111,7 @@
 (defn status-char
   [s]
   (case s
+    :pending "·"
     :running (str yellow "◐" reset)
     :passed (str green "✓" reset)
     :failed (str red "✗" reset)
@@ -283,6 +286,9 @@
             (swap! status assoc check-name :passed)))))))
 
 
+(def ^:private progress (atom nil))
+
+
 (defn- run-check
   "`run-check*`, with any exception it throws recorded as THAT CHECK's
    failure instead of propagating.
@@ -295,6 +301,8 @@
    trace and NO verdict: the one thing the report exists to tell you —
    which check died — was the one thing it could not say."
   [c status results failed]
+  (when-let [run @progress] (ci-resume/mark! run (:name c) :running))
+  (swap! status assoc (:name c) :running)
   (try
     (run-check* c status results failed)
     (catch Exception e
@@ -307,7 +315,13 @@
               :warnings false
               :duration-ms 0})
       (swap! status assoc (:name c) :failed)
-      (reset! failed true))))
+      (reset! failed true))
+    (finally
+      (when-let [run @progress]
+        (ci-resume/mark! run (:name c)
+                         (if (or (#{:passed :retried} (get @status (:name c)))
+                                 (and (= :warning (get @status (:name c))) (= :info (:group c))))
+                           :passed :failed))))))
 
 
 (defn- report-skips!
@@ -412,6 +426,8 @@
         ;; and gitleaks beside the three JVM linters merely by omitting web
         ;; checks that separated them in the healthy full run.
         batches (ci-select/canonical-batches registry checks)
+        prior (when-not retry-solo? (:prior @progress))
+        scheduled (ci-resume/schedule-batches batches prior)
         wave (fn [bs]
                (doseq [batch bs]
                  (doseq [f (mapv (fn [c] (future (run-check c status results failed))) batch)]
@@ -421,18 +437,24 @@
         post-checks (mapcat identity (:post-test batches))
         pre-checks (mapcat identity (:pre batches))
         skip-all! (fn [cs] (doseq [c cs] (swap! status assoc (:name c) :skipped)))]
-    (wave (:pre batches))
-    (when (and retry-solo? @failed)
-      (ci-proc/retry-solo! pre-checks status results failed run-check))
-    (if @failed
-      (skip-all! (concat priority-checks test-checks post-checks))
-      (do (wave (:priority batches))
-          (if @failed
-            (skip-all! (concat test-checks post-checks))
-            (do (wave (:test batches))
-                (if @failed
-                  (skip-all! post-checks)
-                  (wave (:post-test batches)))))))))
+    (when (:state @progress)
+      (ci-resume/record-order! @progress (mapv :name (mapcat identity scheduled))))
+    (if prior
+      (doseq [batch scheduled]
+        (if @failed (skip-all! batch) (wave [batch])))
+      (do
+        (wave (:pre batches))
+        (when (and retry-solo? @failed)
+          (ci-proc/retry-solo! pre-checks status results failed run-check))
+        (if @failed
+          (skip-all! (concat priority-checks test-checks post-checks))
+          (do (wave (:priority batches))
+              (if @failed
+                (skip-all! (concat test-checks post-checks))
+                (do (wave (:test batches))
+                    (if @failed
+                      (skip-all! post-checks)
+                      (wave (:post-test batches)))))))))))
 
 
 (defn- print-check-result!
@@ -457,7 +479,7 @@
                     :retried (str " " yellow "PASSED on a solo re-run" reset
                                   " (its first run, beside the others, did not — load / runner,"
                                   " not code; first attempt below)")
-                    :skipped (str " " yellow "SKIPPED" reset " (lint failed first)")
+                    :skipped (str " " yellow "SKIPPED" reset " (an earlier check failed)")
                     :scoped (str " " yellow "SKIPPED" reset " (out of scope — no relevant files changed since " since ")")
                     :manual-skip (str " " yellow "SKIPPED" reset " (--skip: operator choice)")
                     "")
@@ -541,6 +563,9 @@
             (ci-report/write-atomic! report-path
                                      {:schema 1 :complete false :sha (str/trim (:out (p/shell {:out :string} "git" "rev-parse" "HEAD")))
                                       :command (into ["bb" "ci"] *command-line-args*) :exit nil}))
+        _ (when-not (= (System/getenv "GRAPHDEN_FAST_DONE_SHA")
+                       (ci-resume/git-output "rev-parse" "HEAD"))
+            (ci-fast/run! since))
         lock-handle (do (report-skips! scoped manual since)
                         (when needs-lock? (acquire-lock!)))]
     (Runtime/.addShutdownHook
@@ -551,7 +576,7 @@
           (kill-live-procs!)
           (when lock-handle (release-lock! lock-handle)))))
     (try
-      (let [status (atom (merge (into {} (map (fn [c] [(:name c) :running]) checks))
+      (let [status (atom (merge (into {} (map (fn [c] [(:name c) :pending]) checks))
                                 (into {} (map (fn [c] [(:name c) :scoped]) scoped))
                                 (into {} (map (fn [c] [(:name c) :manual-skip]) manual))))
             results (atom {})
@@ -570,6 +595,7 @@
                                             (status-line checks @status (elapsed-s) cols)))
                                 (flush)
                                 (Thread/sleep 200)))]
+        (reset! progress (ci-resume/invocation! "checks" (mapv :name checks)))
         (run-waves! checks status results failed
                     (boolean (some #{"--retry-solo"} *command-line-args*)))
         (reset! progress-running false)

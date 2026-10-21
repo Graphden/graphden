@@ -1044,7 +1044,10 @@
              (load-file "scripts/ci_proc_test.clj")
              (load-file "scripts/ci_select_test.clj")
              (load-file "scripts/ci_report_test.clj")
-             (load-file "scripts/ci_priority_core_test.clj"))}
+             (load-file "scripts/ci_priority_core_test.clj")
+             (load-file "scripts/ci_resume_test.clj")
+             (load-file "scripts/ci_fast_test.clj")
+             (load-file "scripts/ci_runner_order_test.clj"))}
 
   lint
   {:doc "Every linter, parallel, NO unit tests — the fast pre-gate check (~1 min). `--retry-solo` re-runs each red check alone before it counts (wt merge's pre-queue lint)."

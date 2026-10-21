@@ -54,7 +54,24 @@ esac
 }
 
 function runSuite(tests, env = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'run-edit-verdicts-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'run-edit-verdicts-'));
+  const dir = env.STUB_RESUME ? path.join(root, 'tools', 'browser-test') : root;
+  fs.mkdirSync(dir, {recursive: true});
+  if (env.STUB_RESUME) {
+    const scripts = path.join(root, 'scripts');
+    fs.mkdirSync(scripts);
+    for (const name of ['ci_resume.clj', 'ci_resume_cli.clj', 'ci_report.clj']) {
+      fs.copyFileSync(path.join(__dirname, '..', '..', 'scripts', name), path.join(scripts, name));
+    }
+    fs.writeFileSync(path.join(root, 'bb.edn'), '{:paths ["scripts"]}');
+    for (const args of [['init', '-q'], ['-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid',
+      '-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', 'fixture']]) {
+      const result = spawnSync('git', args, {cwd: root, encoding: 'utf8'});
+      if (result.status !== 0) throw new Error(result.stderr);
+    }
+    fs.writeFileSync(path.join(root, 'prior.browser.edn'), env.STUB_RESUME);
+    env = {...env, GRAPHDEN_RESUME_OUT: path.join(root, 'current'), GRAPHDEN_RESUME_FROM: path.join(root, 'prior')};
+  }
   const bin = path.join(dir, 'bin');
   const state = path.join(dir, 'state');
   fs.mkdirSync(bin);
@@ -95,6 +112,9 @@ if [ -n "$out" ]; then [ "$out" = /dev/null ] || printf '%s' "$body" > "$out"; e
       HOST_LOAD_PER_CPU: '100000',
       GRAPHDEN_TOUR_AUDIT: path.join(dir, 'audit'),
       E2E_BASELINE: '/dev/null',
+      GRAPHDEN_RESUME_OUT: '',
+      GRAPHDEN_RESUME_FROM: '',
+      GRAPHDEN_E2E_PRIORITY_BASE: '',
       ...env,
     },
   });
@@ -103,8 +123,9 @@ if [ -n "$out" ]; then [ "$out" = /dev/null ] || printf '%s' "$body" > "$out"; e
     return [n, fs.existsSync(f) ? Number(fs.readFileSync(f, 'utf8')) : 0];
   }));
   const attempts = (name) => counts[name];
-  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 2 });
-  return { code: r.status, out: (r.stdout || '') + (r.stderr || ''), attempts };
+  const receipt = env.STUB_RESUME ? fs.readFileSync(path.join(root, 'current.browser.edn'), 'utf8') : '';
+  fs.rmSync(root, { recursive: true, force: true, maxRetries: 2 });
+  return { receipt, code: r.status, out: (r.stdout || '') + (r.stderr || ''), attempts };
 }
 
 console.log(' two REAL races in one run are two red files, not host jitter');
@@ -200,6 +221,22 @@ console.log(' strict gate stops after deterministic triage, with normal summary'
   assert(r.attempts('edit-b.test.js') === 0, 'later file was never scheduled', r.out);
   assert(/edit suite: 0 pass \/ 1 fail \/ 1 total/.test(r.out) && /NOT RUN after gate failure:.*edit-b/.test(r.out), 'summary distinguishes real fail from unrun', r.out);
   assert(/entities leaked into the graph/.test(r.out), 'normal post-loop accounting still runs', r.out);
+}
+console.log(' receipts automatically resume failed file, unrun tail, then prior passes');
+{
+  const prior = '{:schema 1 :kind "browser" :sha "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"'
+    + ' :roster ["edit-a.test.js" "edit-b.test.js" "edit-c.test.js"]'
+    + ' :status {"edit-a.test.js" :passed "edit-b.test.js" :failed "edit-c.test.js" :pending}}';
+  const files = {'edit-a.test.js': ['pass'], 'edit-b.test.js': ['pass'], 'edit-c.test.js': ['pass']};
+  const r = runSuite(files, {STUB_RESUME: prior, WTQ_FAIL_FAST: '1'});
+  const order = [...r.out.matchAll(/─── (edit-.*?\.test\.js) ───/g)].map(match => match[1]);
+  assert(r.code === 0 && order.join(',') === 'edit-b.test.js,edit-c.test.js,edit-a.test.js', 'receipt reorders complete suite', r.out);
+  assert(Object.keys(files).every(name => r.attempts(name) === 1), 'every current file executes once', r.out);
+  const red = runSuite({...files, 'edit-b.test.js': ['fail:same']}, {STUB_RESUME: prior, WTQ_FAIL_FAST: '1'});
+  assert(red.code !== 0 && red.attempts('edit-c.test.js') === 0 && red.attempts('edit-a.test.js') === 0,
+    'failed resumed file leaves tail untouched', red.out);
+  assert(red.receipt.includes('"edit-b.test.js" :failed') && red.receipt.includes('"edit-a.test.js" :pending'),
+    'receipt records actual verdict and resets previous green proof', red.receipt);
 }
 console.log(' adhoc default aggregates failures and healthy gate stops strict flakes');
 {

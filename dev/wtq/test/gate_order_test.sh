@@ -22,7 +22,7 @@ E2E_BASELINE_LOCAL="$TEST_DIR/baseline"
 
 step() { :; }
 wait_for_headroom() { echo headroom >> "$TEST_LOG"; [ "${FAIL_HEADROOM:-0}" != 1 ]; }
-git() { printf '%s\n' 00000001; }
+git() { printf '%s\n' 0000000000000000000000000000000000000001; }
 node() { :; }
 clojure() { echo uber >> "$TEST_LOG"; }
 docker-compose() { echo build >> "$TEST_LOG"; }
@@ -33,11 +33,21 @@ verify_candidate_image() {
 }
 bb() {
   case "$1" in
+    scripts/ci_resume_cli.clj)
+      if [ "${BAD_STAGE_PLAN:-0}" = 1 ] && [ "$2" = start ]; then printf 'ci\n'; return 0; fi
+      command bb -cp "$SCRIPT_DIR/../../scripts" "$SCRIPT_DIR/../../$1" "${@:2}" ;;
+    scripts/ci_fast_cli.clj) [ "${FAIL_FAST:-0}" != 1 ] ;;
     scripts/ci_gate.clj)
       echo "$2" >> "$TEST_LOG"
       if [ "$2" = verify ]; then [ "${FAIL_VERIFY:-0}" != 1 ]; fi ;;
     ci) echo ci >> "$TEST_LOG"; [ "${FAIL_CI:-0}" != 1 ] ;;
-    test-e2e) echo e2e >> "$TEST_LOG"; [ "${FAIL_E2E:-0}" != 1 ] ;;
+    test-e2e)
+      echo e2e >> "$TEST_LOG"
+      if [ "${EXPECT_PROGRESS_POINTER:-0}" = 1 ]; then
+        [ "$(prior_failed_stage test)" = e2e ] || return 1
+        grep -q '"e2e" :running' "$LOG_DIR/_train-$WTQ_REPORT_TS.stages.edn" || return 1
+      fi
+      [ "${FAIL_E2E:-0}" != 1 ] ;;
     test-visual) echo visual >> "$TEST_LOG"; [ "${FAIL_VISUAL:-0}" != 1 ] ;;
     test-integration) echo integration >> "$TEST_LOG"; [ "${FAIL_INTEGRATION:-0}" != 1 ] ;;
     test-fleet-e2e) echo fleet >> "$TEST_LOG"; [ "${FAIL_FLEET:-0}" != 1 ] ;;
@@ -147,10 +157,10 @@ for WTQ_FIRST_STAGE in ci build e2e visual integration fleet; do
   run_case
   case "$WTQ_FIRST_STAGE" in
     ci) assert_events 'expect,ci,verify,uber,build,image,e2e,visual,integration,fleet' ;;
-    build) assert_events 'expect,uber,build,image,ci,verify,e2e,visual,integration,fleet' ;;
-    e2e) assert_events 'expect,uber,build,image,e2e,ci,verify,visual,integration,fleet' ;;
-    visual) assert_events 'expect,uber,build,image,visual,ci,verify,e2e,integration,fleet' ;;
-    integration) assert_events 'expect,uber,build,image,integration,ci,verify,headroom,e2e,visual,fleet' ;;
+    build) assert_events 'expect,uber,build,image,e2e,visual,integration,fleet,ci,verify' ;;
+    e2e) assert_events 'expect,uber,build,image,e2e,visual,integration,fleet,ci,verify' ;;
+    visual) assert_events 'expect,uber,build,image,visual,integration,fleet,ci,verify,headroom,e2e' ;;
+    integration) assert_events 'expect,uber,build,image,integration,fleet,ci,verify,headroom,e2e,visual' ;;
     fleet) assert_events 'expect,uber,build,image,fleet,ci,verify,headroom,e2e,visual,integration' ;;
   esac
   [ "$built_candidate" = 1 ]
@@ -172,7 +182,7 @@ unset FAIL_INTEGRATION
 CASE_E2E=0
 WTQ_FIRST_STAGE=integration
 run_case
-assert_events 'expect,uber,build,image,integration,ci,verify,headroom,visual,fleet'
+assert_events 'expect,uber,build,image,integration,fleet,ci,verify,headroom,visual'
 
 # Admission cannot manufacture success or permit candidate promotion.
 FAIL_HEADROOM=1
@@ -181,7 +191,7 @@ built_candidate=0
 admission_rc=0
 gate_suites "$TEST_DIR" 0 0 0 > "$TEST_DIR/admission.out" || admission_rc=$?
 [ "$admission_rc" = 3 ]
-assert_events 'expect,uber,build,image,integration,ci,verify,headroom'
+assert_events 'expect,uber,build,image,integration,fleet,ci,verify,headroom'
 [ "$built_candidate" = 0 ]
 if grep -q '^WTQ_FAILED_STAGE=' "$TEST_DIR/admission.out"; then
   echo 'interrupted headroom admission was recorded as a suite failure' >&2; exit 1
@@ -203,6 +213,41 @@ WTQ_FIRST_STAGE=fleet
 gate_suites "$TEST_DIR" 1 1 1 >/dev/null
 assert_events 'expect,ci,verify,uber,build,image,integration'
 unset WTQ_FIRST_STAGE
+
+# A real progress receipt remembers the executed order through repeated reds.
+WTQ_REPORT_TS=first-red
+FAIL_VISUAL=1
+: > "$TEST_LOG"
+if gate_suites "$TEST_DIR" 0 0 0 >/dev/null; then exit 1; fi
+assert_events 'expect,ci,verify,uber,build,image,e2e,visual'
+unset FAIL_VISUAL
+WTQ_RESUME_FROM="$LOG_DIR/_train-first-red"
+WTQ_REPORT_TS=second-red
+FAIL_INTEGRATION=1
+: > "$TEST_LOG"
+if gate_suites "$TEST_DIR" 0 0 0 >/dev/null; then exit 1; fi
+assert_events 'expect,uber,build,image,visual,integration'
+unset FAIL_INTEGRATION
+WTQ_RESUME_FROM="$LOG_DIR/_train-second-red"
+WTQ_REPORT_TS=third-green
+run_case
+assert_events 'expect,uber,build,image,integration,fleet,ci,verify,headroom,e2e,visual'
+unset WTQ_RESUME_FROM
+
+# The shell independently rejects a planner that omits mandatory stages.
+BAD_STAGE_PLAN=1
+: > "$TEST_LOG"
+if gate_suites "$TEST_DIR" 0 0 0 >/dev/null; then exit 1; fi
+assert_events expect
+unset BAD_STAGE_PLAN
+
+# Preflight failure admits no expensive stage and does not invent a stage red.
+FAIL_FAST=1
+: > "$TEST_LOG"
+if gate_suites "$TEST_DIR" 0 0 0 > "$TEST_DIR/fast.out"; then exit 1; fi
+assert_events expect
+if grep -q '^WTQ_FAILED_STAGE=' "$TEST_DIR/fast.out"; then exit 1; fi
+unset FAIL_FAST
 
 # Validate durable hints against real git ancestry without touching the queue.
 (
@@ -242,6 +287,16 @@ unset WTQ_FIRST_STAGE
   [ -z "$(prior_failed_stage test)" ]
   printf 'feature/test\tmissing-object\t%s\tintegration\n' "$base" > "$FAILURE_DIR/test"
   [ -z "$(prior_failed_stage test)" ]
+  # Saving a pointer happens before dispatch, even if the child never returns.
+  WTQ_PROGRESS_MEMBERS=(test)
+  EXPECT_PROGRESS_POINTER=1
+  WTQ_REPORT_TS=inflight
+  CASE_BUILD=1 CASE_INTEGRATION=0 CASE_E2E=1 CASE_VISUAL=0 CASE_FLEET=0
+  mkdir -p "$MAIN_WT/tools/browser-test"
+  gate_suites "$MAIN_WT" 0 0 0 >/dev/null
+  [ "$(prior_failed_stage test)" = ci ]
+  [ "$(WTQ_HINT_RECEIPT=1 prior_failed_stage test)" = "$LOG_DIR/_train-inflight" ]
+  unset EXPECT_PROGRESS_POINTER
   record_failed_stage invalid "$base" test
   [ -z "$(prior_failed_stage test)" ]
 )

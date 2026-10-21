@@ -96,8 +96,12 @@ You were started in one of two ways:
    build (not just a detail with a sane default), **stop and ask the user** —
    don't guess load-bearing decisions.
 2. **Implement** in small commits, inside your worktree.
-3. **Fast feedback:** run `bb lint` (~1 min, all linters, no tests) after each
-   batch of edits — it catches most gate-reds for pennies. Run targeted tests
+3. **Fast feedback:** after each batch of edits, run formatting/syntax/lint on
+   the changed files before expensive tests (`bb scripts/ci_fast_cli.clj`).
+   `bb ci`, `bb lint` and the gate run this preflight automatically, without
+   additional flags. A final complete **`bb lint` is mandatory** before queueing;
+   a changed-file check does not replace it. Coordinate JVM linters with the
+   shared heavy-work slot. Run targeted tests
    through **`bb wt test --focus <ns>`** (same kaocha arguments) around the code
    you actually changed — never raw `clojure -M:dev:test -m kaocha.runner`. The
    wrapper waits while the landing gate is in a heavy phase (image build, unit

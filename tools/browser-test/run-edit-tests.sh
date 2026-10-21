@@ -101,6 +101,31 @@ if [ -n "${GRAPHDEN_E2E_PRIORITY_BASE:-}" ]; then
   echo "browser order: $(printf '%s\n' "$FILES" | head -n 5 | tr '\n' ' ') ..."
 fi
 
+# Receipts affect order only. The normal checkout includes this helper; a
+# copied standalone verdict-test fixture deliberately has no repository planner.
+BROWSER_PROGRESS=""
+if [ -f ../../scripts/ci_resume_cli.clj ]; then
+  if [ -n "${GRAPHDEN_RESUME_OUT:-}" ]; then
+    BROWSER_PROGRESS="$GRAPHDEN_RESUME_OUT.browser.edn"
+  else
+    BROWSER_PROGRESS="$(cd ../.. && git rev-parse --path-format=absolute --git-path graphden-resume/browser.edn)" || exit 2
+  fi
+  ORIGINAL_FILES="$FILES"
+  # shellcheck disable=SC2086 # IDs come from the edit-*.test.js roster above.
+  FILES="$(cd ../.. && bb scripts/ci_resume_cli.clj auto browser $FILES)" || exit 2
+  if [ "$(printf '%s\n' "$FILES" | sort)" != "$(printf '%s\n' "$ORIGINAL_FILES" | sort)" ]; then
+    echo "resume browser list is not the complete suite" >&2
+    exit 2
+  fi
+elif [ -n "${GRAPHDEN_RESUME_OUT:-}" ]; then
+  echo "missing browser progress planner" >&2
+  exit 2
+fi
+browser_progress() {
+  [ -n "$BROWSER_PROGRESS" ] || return 0
+  (cd ../.. && bb scripts/ci_resume_cli.clj mark browser "$BROWSER_PROGRESS" "$1" "$2") || exit 2
+}
+
 # Playwright does NOT await an async `waitForFunction` predicate: the pending
 # Promise is truthy, the wait returns on its first tick, and the "wait" is
 # decorative. Three such waits sat in this suite until 2026-09-05 — lesson 26's
@@ -543,6 +568,7 @@ for f in $FILES; do
     REMAINING_FILES="$REMAINING_FILES $f"
     continue
   fi
+  browser_progress "$f" running
   echo "─── $f ───"
   FILE_START=$SECONDS
   # NOTE: the baseline is sampled AFTER wait_for_server, not before it. The
@@ -553,6 +579,7 @@ for f in $FILES; do
     WORST=1
     FAIL=$((FAIL+1))
     FAILED_NAMES="$FAILED_NAMES $f(server-down)"
+    browser_progress "$f" failed
     CONSECUTIVE_DOWN=$((CONSECUTIVE_DOWN+1))
     if [ "$CONSECUTIVE_DOWN" -ge "$CASCADE_CAP" ]; then
       echo "  (server down for $CONSECUTIVE_DOWN consecutive tests — aborting cascade)" >&2
@@ -839,6 +866,12 @@ for f in $FILES; do
       echo "  (gate fail-fast: $f is red after retry/triage; remaining files will not run)" >&2
     fi
   fi
+  if [ "$passed" = 1 ]; then browser_progress "$f" passed
+  else browser_progress "$f" failed; fi
+  # Keep strict failures visible even when the underlying attempt passed.
+  case " $STRICT_FLAKES $STRICT_LEAKS " in
+    *" $f "*|*" $f("*) browser_progress "$f" failed ;;
+  esac
   if [ "$STOP_AFTER_RED" != "1" ] && [ "$SWEEP_DELAY" != "0" ]; then sleep "$SWEEP_DELAY"; fi
 done
 
@@ -865,6 +898,7 @@ if run_is_degraded; then
 fi
 if [ -n "$STRICT_FLAKES$STRICT_LEAKS" ]; then
   if [ "$DEGRADED" = 1 ]; then
+    for x in $STRICT_FLAKES $STRICT_LEAKS; do browser_progress "${x%%(*}" passed; done
     echo "  (run-level thrash: env degraded — strict flakes/leaks are REPORT-ONLY this run, NOT a red RESULT)" >&2
   else
     # Healthy host: escalate exactly as strict mode did before this change.

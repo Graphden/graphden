@@ -55,7 +55,7 @@
     (try
       (doseq [[group verdict] [[:clj :failed] [:info :passed]]]
         (let [run (resume/begin! (str (fs/path dir "progress.edn")) "checks"
-                                 (apply str (repeat 40 "a")) ["check"] nil)
+                                 (str/join (repeat 40 "a")) ["check"] nil)
               status (atom {})]
           (reset! progress run)
           (with-redefs-fn {(ns-resolve 'ci 'run-check*)

@@ -8,7 +8,7 @@
     [clojure.test :refer [deftest is run-tests]]))
 
 
-(def sha (apply str (repeat 40 "a")))
+(def sha (str/join (repeat 40 "a")))
 
 
 (defn hint
@@ -126,7 +126,7 @@
       (is (true? (:inherited (resume/read-hint (str r2 ".browser.edn") "browser"))))
       ;; R3 keeps b,c,a, but resets every status for its own actual invocation.
       (resume/carry-hints! r3 r2)
-      (let [run (resume/begin! (str r3 ".browser.edn") "browser" (apply str (repeat 40 "b"))
+      (let [run (resume/begin! (str r3 ".browser.edn") "browser" (str/join (repeat 40 "b"))
                                ["a" "b" "c"] (resume/read-hint (str r3 ".browser.edn") "browser"))]
         (is (= ["b" "c" "a"] (:roster run)))
         (is (= #{:pending} (set (vals (:status @(:state run))))))

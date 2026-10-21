@@ -1,5 +1,7 @@
-(require '[ci-resume :as resume]
-         '[clojure.string :as str])
+(ns ci-resume-cli
+  (:require
+    [ci-resume :as resume]
+    [clojure.string :as str]))
 
 
 (let [[command kind & args] *command-line-args*]

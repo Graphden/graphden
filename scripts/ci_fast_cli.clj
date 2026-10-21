@@ -1,3 +1,6 @@
-(require '[ci-fast :as fast])
+(ns ci-fast-cli
+  (:require
+    [ci-fast :as fast]))
 
-(fast/run! (first *command-line-args*))
+
+(fast/run-checks! (first *command-line-args*))

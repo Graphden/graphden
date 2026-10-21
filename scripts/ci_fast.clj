@@ -23,9 +23,9 @@
            (when (seq clj)
              [(into (if native-style? ["cljstyle" "check"] ["clojure" "-M:cljstyle" "check"]) clj)
               (into (if native-kondo? ["clj-kondo" "--lint"] ["clojure" "-M:kondo" "--lint"]) clj)])
-           (map #(vector "node" "--check" %) js)
-           (map #(vector "node" "-e" "JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8'))" %) json)
-           (map #(vector "bash" "-n" %) shell)
+           (for [path js] ["node" "--check" path])
+           (for [path json] ["node" "-e" "JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8'))" path])
+           (for [path shell] ["bash" "-n" path])
            (when (and native-shellcheck? (seq shell)) [(into ["shellcheck"] shell)])
            (when (seq web) [(into ["npx" "--no-install" "biome" "check"] web)])
            (when (seq css) [(into ["npx" "--no-install" "stylelint"] css)])
@@ -39,7 +39,7 @@
     (if (zero? (:exit result)) (str/trim (:out result)) "HEAD")))
 
 
-(defn run!
+(defn run-checks!
   [base]
   (let [changed (select/changed-files (or base (default-base)))
         _ (when-not changed (throw (ex-info "Cannot determine changed-file preflight scope" {:base base})))

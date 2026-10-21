@@ -118,8 +118,10 @@ async function putDescriptionOn(page, fnId, branch, desc) {
 
     await page.click(
       '.branch-row[data-branch-name="' + FEAT_BRANCH + '"] .branch-row-merge');
+    // The conflict response took 10.3s in a full gate; polling still returns
+    // as soon as the modal appears on a normal run.
     await page.waitForSelector('.merge-conflicts-modal:not(.hidden)',
-                               {timeout: 10000});
+                               {timeout: 30000});
 
     const conflictState = await page.evaluate(() => {
       const m = document.querySelector('.merge-conflicts-modal');

@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const assert = require('node:assert/strict');
 const {unexpectedSelectiveCopyErrors, components} = require('./selective-copy-errors');
 const {unexpectedThemeRetryErrors} = require('./theme-retry-errors');
-const {observeRootServerCalls, withoutRecoveredServerErrors, rootServerDiagnostic} = require('./root-server-call-test-helpers');
+const {observeRootServerCalls, withoutRecoveredServerErrors, withoutRecoveredRootErrors, rootServerDiagnostic} = require('./root-server-call-test-helpers');
 const {preparePickerOnlySelection, restorePickerOnlySelection, restoreLessonSelection} = require('./partial-ui-components-fixture');
 const {unexpectedCleanupErrors} = require('./owned-cleanup-errors');
 const {chromium} = require('playwright');
@@ -42,6 +42,7 @@ const {waitForLoadedUIComponents, drainUIPlanReplies, observeUIPlanLoads} = requ
   }
   const errors = [];
   const themeReplies = [];
+  const rootPlans = [];
   const pendingReplies = [];
   const requestSequences = new WeakMap();
   let sequence = 0;
@@ -75,8 +76,15 @@ const {waitForLoadedUIComponents, drainUIPlanReplies, observeUIPlanLoads} = requ
   const planReplies = plans.replies;
   const captureResponse = async response => {
     if (response.request().method() === 'DELETE') deletes.push({url: response.url(), status: response.status()});
-    if (new URL(response.url()).pathname === '/api/ui/configuration/undo' && response.ok()) cleanupCommitted = true;
-    const stage = stages.get(new URL(response.url()).pathname);
+    const path = new URL(response.url()).pathname;
+    if (path === '/api/ui/configuration/undo' && response.ok()) cleanupCommitted = true;
+    if (path === '/api/ui/root/plan') {
+      const body = await response.json().catch(() => null);
+      rootPlans.push({sequence: requestSequences.get(response.request()), status: response.status(),
+        ok: body?.ok === true, code: body?.code, retryable: body?.retryable === true});
+      return;
+    }
+    const stage = stages.get(path);
     if (!stage || stage === 'component-plan' && !requestSequences.has(response.request())) return;
     const attempt = (attempts.get(stage) || 0) + 1;
     attempts.set(stage, attempt);
@@ -183,17 +191,20 @@ const {waitForLoadedUIComponents, drainUIPlanReplies, observeUIPlanLoads} = requ
     }
     const behaviorVerified = process.env.GRAPHDEN_COMPONENT_CLEANUP_ONLY !== '1';
     const unexpected = unexpectedCleanupErrors(unexpectedThemeRetryErrors(
-      unexpectedSelectiveCopyErrors(withoutRecoveredServerErrors(errors, serverCalls.events), planReplies, behaviorVerified),
+      unexpectedSelectiveCopyErrors(withoutRecoveredRootErrors(withoutRecoveredServerErrors(errors, serverCalls.events), rootPlans),
+        planReplies, behaviorVerified),
       themeReplies, behaviorVerified), deletes, ownedIds, true);
     if (unexpected.length) {
       console.error(JSON.stringify({diagnostic: 'unexpected-ui-console', errors: unexpected.map(error => ({
         kind: error.kind, stage: stages.get(new URL(error.url || 'http://unknown').pathname) || 'other',
+        route: new URL(error.url || 'http://unknown').pathname,
         networkStatus: Number(error.text?.match(/^Failed to load resource: the server responded with a status of (\d+)/)?.[1]) || null,
       }))}));
       throw new Error('Unexpected browser errors');
     }
   } catch (error) {
     console.error('Root server receipt diagnostic:', JSON.stringify(rootServerDiagnostic(error, serverCalls.events)));
+    console.error(JSON.stringify({diagnostic: 'recent-root-plans', replies: rootPlans.slice(-12)}));
     console.error(JSON.stringify({diagnostic: 'recent-component-plans', replies: planReplies.slice(-16).map(reply => ({
       component: reply.component, status: reply.status, code: reply.code,
       retryable: reply.retryable, loadId: reply.loadId,

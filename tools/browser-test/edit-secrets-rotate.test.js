@@ -117,13 +117,20 @@ async function cleanup(page) {
     // ===================================================================
     // Click ↻ on the secret row.
     // ===================================================================
-    await page.evaluate((name) => {
-      const row = Array.from(document.querySelectorAll('.entity-secret'))
-        .find((r) => (r.textContent || '').includes(name));
-      const rotateBtn = Array.from(row.querySelectorAll('button'))
-        .find((b) => (b.title || '') === 'Rotate value');
-      rotateBtn?.click();
-    }, SECRET_NAME);
+    const rotateSelector = '.entity-secret[data-fn-id="' + seedId + '"] button[title="Rotate value"]';
+    assert(await page.locator(rotateSelector).count() === 1,
+      'created secret has one rotate action');
+    // The form is mounted only after this graph-rendered GET and its body
+    // complete. Keep the short DOM deadline, starting it after the response.
+    const [formResponse] = await Promise.all([
+      page.waitForResponse((r) => r.request().method() === 'GET'
+        && new URL(r.url()).pathname === '/partials/secret-rotate-form'
+        && new URL(r.url()).searchParams.get('name') === SECRET_NAME),
+      page.click(rotateSelector),
+    ]);
+    await formResponse.finished();
+    assert(formResponse.status() === 200,
+      'rotate form GET returned HTTP ' + formResponse.status());
     await page.waitForSelector('[data-popover="rotate-secret"]',
                                {timeout: 5000});
 

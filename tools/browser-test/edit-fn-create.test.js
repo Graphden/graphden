@@ -149,20 +149,39 @@ async function openCreateMenuForNs(page, nsName) {
     // Phase D: fill name + submit → POST → fn appears + selected.
     // ===================================================================
     await page.fill('.inline-input-row .inline-input', FN_NAME);
-    await page.click('.inline-input-row .inline-btn-save');
-    await page.waitForFunction(
-      (name) => {
-        // The create handler's loadGraphData → select → hash chain is
-        // async. Wait for the WHOLE post-create nav to settle: the fn's
-        // row appears AND it's selected AND the URL hash points at it —
-        // else a single read below races the still-pending navigation.
-        const item = Array.from(document.querySelectorAll('.entity-item'))
-          .find((el) => el.textContent.includes(name));
-        return !!item && item.classList.contains('selected')
-          && location.hash.includes(name);
-      },
-      FN_NAME,
-      {timeout: 10000});
+    let createStage = 'not-requested';
+    const isCreate = (request) => request.method() === 'POST'
+      && new URL(request.url()).pathname === '/api/entities/fn';
+    const onCreateRequest = (request) => {
+      if (isCreate(request)) createStage = 'response-pending';
+    };
+    page.on('request', onCreateRequest);
+    try {
+      const [response] = await Promise.all([
+        page.waitForResponse((r) => isCreate(r.request())),
+        page.click('.inline-input-row .inline-btn-save'),
+      ]);
+      createStage = 'body-pending';
+      await response.finished();
+      assert(response.status() === 200,
+        'new fn POST returned HTTP ' + response.status());
+      createStage = 'ui-pending';
+      await page.waitForFunction(
+        (name) => {
+          // Wait for the whole post-create navigation: row, selection and hash.
+          const item = Array.from(document.querySelectorAll('.entity-item'))
+            .find((el) => el.textContent.includes(name));
+          return !!item && item.classList.contains('selected')
+            && location.hash.includes(name);
+        },
+        FN_NAME,
+        {timeout: 10000});
+    } catch (error) {
+      console.error('  [create-stage]', createStage);
+      throw error;
+    } finally {
+      page.off('request', onCreateRequest);
+    }
     const created = await page.evaluate((name) => {
       const fnItem = Array.from(document.querySelectorAll('.entity-item'))
         .find((el) => el.textContent.includes(name));

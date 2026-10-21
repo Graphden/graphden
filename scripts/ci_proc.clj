@@ -14,6 +14,8 @@
    Here the whole tree is killed through `ProcessHandle`s, which close
    nothing: once every holder of the pipe is gone the read ends on EOF with
    the output intact. Tested by `scripts/ci_proc_test.clj`."
+  (:require
+    [babashka.process :as p])
   (:import
     (java.lang
       ProcessHandle)))
@@ -34,6 +36,23 @@
   [proc]
   (destroy-tree! proc)
   (try (deref proc 5000 nil) (catch Exception _ nil)))
+
+
+(defn run-bounded!
+  "Run an admitted preflight with the same process-tree ownership as checks.
+   Register before waiting; timeout, exceptional exit and shutdown cannot leave
+   its JVM/Node descendants running after admission is released."
+  [command timeout-ms live-procs]
+  (let [proc (p/process {:cmd command :out :inherit :err :inherit})]
+    (swap! live-procs conj proc)
+    (try
+      (let [result (deref proc timeout-ms ::timeout)]
+        (when (or (= ::timeout result) (not= 0 (:exit result)))
+          (throw (ex-info (if (= ::timeout result) "Changed-file preflight timed out" "Changed-file preflight failed")
+                          {:command command :timeout-ms timeout-ms :exit (:exit result)}))))
+      (finally
+        (kill-and-salvage! proc)
+        (swap! live-procs disj proc)))))
 
 
 (defn blocking-red?

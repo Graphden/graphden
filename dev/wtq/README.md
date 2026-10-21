@@ -160,13 +160,19 @@ Details that are deliberate:
   Multiple members use the first valid hint in train order. Green trains and
   new claims clear hints. Old logs are not backfilled; old four-field hints use
   the same failed/tail/prefix rotation without per-file progress.
+  If an intervening run fails before reaching CI/browser, it carries the last
+  valid detailed receipt forward with its original SHA and an inherited marker.
+  Starting that suite resets every verdict for the new invocation; carried
+  receipts never become current-SHA pass proof.
   Standalone CI/browser invocations also save worktree-local receipts and reuse
   them only when the recorded SHA is an ancestor of the current HEAD.
   Granularity is gate stage, CI check and browser file. Individual Kaocha vars,
   runtime JS files within `tests-js`, and visual test cases are not reordered.
 - **Changed-file preflight.** `bb ci`/`bb lint` and the landing gate automatically
   check formatting, syntax and lint for changed Clojure, JavaScript, JSON, CSS,
-  Markdown and shell files before expensive checks. The gate uses its target base; standalone
+  Markdown and shell files before expensive checks. In CI this preflight is
+  admitted under the host CI lock, including lint-only runs, and has a two-minute
+  deadline with descendant-process cleanup before releasing admission. The gate uses its target base; standalone
   commands use the merge base with develop, including uncommitted/untracked files.
   The check is read-only and does not modify the candidate. Full pre-queue lint
   and the complete selected CI roster remain mandatory. During editing,

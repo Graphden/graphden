@@ -16,7 +16,6 @@
    and the suite continues so the user always gets a result line."
   (:require
     [babashka.process :as p]
-    [ci-fast]
     [ci-proc]
     [ci-report]
     [ci-resume]
@@ -552,30 +551,27 @@
                          (assoc check :extra-env {"GRAPHDEN_CI_SINCE" (or since "")})
                          check))
                      selected-checks)
-        ;; The host-wide lock exists to keep two testcontainer stacks off one
-        ;; Docker daemon — so it is only needed when the unit suite runs. A
-        ;; lint-only run (`bb lint`, `bb lint-clj`) skips it and never waits on a
-        ;; gate's `bb ci`.
-        needs-lock? (some #(#{:priority :test} (:group %)) checks)
+        preflight? (not= (System/getenv "GRAPHDEN_FAST_DONE_SHA")
+                         (ci-resume/git-output "rev-parse" "HEAD"))
+        ;; A changed-file preflight can use JVM fallback linters, including in
+        ;; lint-only invocations. Admit it before spawning those children.
+        needs-lock? (or preflight? (some #(#{:priority :test} (:group %)) checks))
         report-path (System/getenv "GRAPHDEN_CI_REPORT")
         ;; An old green receipt must not survive a crash in a new invocation.
         _ (when report-path
             (ci-report/write-atomic! report-path
                                      {:schema 1 :complete false :sha (str/trim (:out (p/shell {:out :string} "git" "rev-parse" "HEAD")))
                                       :command (into ["bb" "ci"] *command-line-args*) :exit nil}))
-        _ (when-not (= (System/getenv "GRAPHDEN_FAST_DONE_SHA")
-                       (ci-resume/git-output "rev-parse" "HEAD"))
-            (ci-fast/run! since))
         lock-handle (do (report-skips! scoped manual since)
-                        (when needs-lock? (acquire-lock!)))]
-    (Runtime/.addShutdownHook
-      (Runtime/getRuntime)
-      (Thread.
-        ^Runnable
-        (fn []
-          (kill-live-procs!)
-          (when lock-handle (release-lock! lock-handle)))))
+                        (when needs-lock? (acquire-lock!)))
+        hook (Thread. ^Runnable (fn []
+                                  (kill-live-procs!)
+                                  (when lock-handle (release-lock! lock-handle))))]
+    (Runtime/.addShutdownHook (Runtime/getRuntime) hook)
     (try
+      (when preflight?
+        (ci-proc/run-bounded! (cond-> ["bb" "scripts/ci_fast_cli.clj"] since (conj since))
+                              120000 live-procs))
       (let [status (atom (merge (into {} (map (fn [c] [(:name c) :pending]) checks))
                                 (into {} (map (fn [c] [(:name c) :scoped]) scoped))
                                 (into {} (map (fn [c] [(:name c) :manual-skip]) manual))))
@@ -615,6 +611,8 @@
                                       :path report-path})))
         (print-verdict! checks scoped manual @status @failed (elapsed-s)))
       (finally
+        (kill-live-procs!)
+        (Runtime/.removeShutdownHook (Runtime/getRuntime) hook)
         (when lock-handle (release-lock! lock-handle))))))
 
 

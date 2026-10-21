@@ -65,5 +65,23 @@
       (finally (reset! progress nil) (fs/delete-tree dir)))))
 
 
+(deftest even-lint-only-preflight-is-admitted-and-cleaned-before-lock-release
+  (let [events (atom [])]
+    (with-redefs-fn {(ns-resolve 'ci 'select-checks) (fn [_] {:run [] :scoped [] :manual [] :since "base"})
+                     (ns-resolve 'ci-resume 'git-output) (constantly "preflight-fixture-sha")
+                     (ns-resolve 'ci-report 'write-atomic!) (fn [& _])
+                     (ns-resolve 'ci 'acquire-lock!) (fn [] (swap! events conj :lock) ::lock)
+                     (ns-resolve 'ci 'release-lock!) (fn [_] (swap! events conj :release))
+                     (ns-resolve 'ci 'kill-live-procs!) (fn [] (swap! events conj :cleanup))
+                     (ns-resolve 'ci-proc 'run-bounded!)
+                     (fn [command timeout-ms _]
+                       (swap! events conj :preflight)
+                       (is (= ["bb" "scripts/ci_fast_cli.clj" "base"] command))
+                       (is (= 120000 timeout-ms))
+                       (throw (ex-info "fixture preflight red" {})))}
+      #(is (thrown? Exception ((ns-resolve 'ci 'run-ci)))))
+    (is (= [:lock :preflight :cleanup :release] @events))))
+
+
 (let [{:keys [fail error]} (run-tests)]
   (when (pos? (+ fail error)) (System/exit 1)))

@@ -47,6 +47,13 @@ bb() {
         [ "$(prior_failed_stage test)" = e2e ] || return 1
         grep -q '"e2e" :running' "$LOG_DIR/_train-$WTQ_REPORT_TS.stages.edn" || return 1
       fi
+      if [ -n "${EXPECT_BROWSER_ORDER:-}" ]; then
+        local browser_order
+        browser_order="$(command bb -cp "$SCRIPT_DIR/../../scripts" "$SCRIPT_DIR/../../scripts/ci_resume_cli.clj" \
+          start browser "$GRAPHDEN_RESUME_OUT.browser.edn" "$GRAPHDEN_RESUME_FROM.browser.edn" \
+          0000000000000000000000000000000000000001 a b c)"
+        [ "$(printf '%s\n' "$browser_order" | paste -sd,)" = "$EXPECT_BROWSER_ORDER" ] || return 1
+      fi
       [ "${FAIL_E2E:-0}" != 1 ] ;;
     test-visual) echo visual >> "$TEST_LOG"; [ "${FAIL_VISUAL:-0}" != 1 ] ;;
     test-integration) echo integration >> "$TEST_LOG"; [ "${FAIL_INTEGRATION:-0}" != 1 ] ;;
@@ -233,6 +240,24 @@ WTQ_REPORT_TS=third-green
 run_case
 assert_events 'expect,uber,build,image,integration,fleet,ci,verify,headroom,e2e,visual'
 unset WTQ_RESUME_FROM
+
+# R1 browser b fails; R2 fails build; R3 must retain b,c,a without manual hints.
+WTQ_REPORT_TS=browser-r1
+FAIL_E2E=1
+if gate_suites "$TEST_DIR" 0 0 0 >/dev/null; then exit 1; fi
+unset FAIL_E2E
+printf '%s\n' '{:schema 1 :kind "browser" :sha "0000000000000000000000000000000000000001" :roster ["a" "b" "c"] :status {"a" :passed "b" :failed "c" :pending}}' \
+  > "$LOG_DIR/_train-browser-r1.browser.edn"
+WTQ_RESUME_FROM="$LOG_DIR/_train-browser-r1"
+WTQ_REPORT_TS=build-r2
+FAIL_IMAGE=1
+if gate_suites "$TEST_DIR" 0 0 0 >/dev/null; then exit 1; fi
+unset FAIL_IMAGE
+WTQ_RESUME_FROM="$LOG_DIR/_train-build-r2"
+WTQ_REPORT_TS=browser-r3
+EXPECT_BROWSER_ORDER=b,c,a
+run_case
+unset EXPECT_BROWSER_ORDER WTQ_RESUME_FROM
 
 # The shell independently rejects a planner that omits mandatory stages.
 BAD_STAGE_PLAN=1

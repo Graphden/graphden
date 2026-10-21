@@ -1,6 +1,7 @@
 (ns ci-resume
   "Progress is a scheduling hint, never evidence that a current check passed."
   (:require
+    [babashka.fs :as fs]
     [babashka.process :as p]
     [ci-report :as report]
     [clojure.string :as str]))
@@ -27,6 +28,19 @@
       (let [receipt (report/read-report path)]
         (when (valid-receipt? receipt kind) receipt))
       (catch Exception _ nil))))
+
+
+(defn carry-hints!
+  "Carry detailed scheduling hints across a run that never reaches that kind.
+   The caller has validated the source member/base lineage. Keep the original
+   SHA and mark the copy inherited; it is neither current progress nor proof."
+  [output-prefix source-prefix]
+  (doseq [kind ["checks" "browser"]
+          :let [path (str output-prefix "." kind ".edn")
+                prior (read-hint (when (seq source-prefix) (str source-prefix "." kind ".edn")) kind)]]
+    (if prior
+      (report/write-atomic! path (assoc prior :inherited true))
+      (fs/delete-if-exists path))))
 
 
 (defn order

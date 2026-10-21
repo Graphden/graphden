@@ -111,5 +111,31 @@
       (finally (fs/delete-tree dir)))))
 
 
+(deftest browser-failure-survives-an-intervening-build-failure
+  (let [dir (fs/create-temp-dir)
+        prefix #(str (fs/path dir %))
+        r1 (prefix "r1") r2 (prefix "r2") r3 (prefix "r3")
+        prior (assoc (hint ["a" "b" "c"] [:passed :failed :pending]) :kind "browser")]
+    (try
+      ;; R1 fails browser b after a passes; R2 fails build before browser starts.
+      (report/write-atomic! (str r1 ".browser.edn") prior)
+      (resume/carry-hints! r2 r1)
+      (let [build (resume/begin! (str r2 ".stages.edn") "stages" sha ["build" "e2e"] nil)]
+        (resume/mark! build "build" :failed))
+      (is (= sha (:sha (resume/read-hint (str r2 ".browser.edn") "browser"))))
+      (is (true? (:inherited (resume/read-hint (str r2 ".browser.edn") "browser"))))
+      ;; R3 keeps b,c,a, but resets every status for its own actual invocation.
+      (resume/carry-hints! r3 r2)
+      (let [run (resume/begin! (str r3 ".browser.edn") "browser" (apply str (repeat 40 "b"))
+                               ["a" "b" "c"] (resume/read-hint (str r3 ".browser.edn") "browser"))]
+        (is (= ["b" "c" "a"] (:roster run)))
+        (is (= #{:pending} (set (vals (:status @(:state run))))))
+        (is (not (contains? @(:state run) :inherited))))
+      ;; Rejected lineage supplies no source; it must not resurrect old hints.
+      (resume/carry-hints! r3 nil)
+      (is (nil? (resume/read-hint (str r3 ".browser.edn") "browser")))
+      (finally (fs/delete-tree dir)))))
+
+
 (let [{:keys [fail error]} (run-tests)]
   (when (pos? (+ fail error)) (System/exit 1)))

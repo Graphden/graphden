@@ -4,6 +4,7 @@
 
 (let [[command kind & args] *command-line-args*]
   (case command
+    "carry" (resume/carry-hints! kind (first args))
     "start" (let [[path source sha & roster] args
                   run (resume/begin! path kind sha roster (resume/read-hint source kind))]
               (println (str/join "\n" (:roster run))))

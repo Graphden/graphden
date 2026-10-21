@@ -74,6 +74,29 @@
     (is (false? @failed))))
 
 
+(deftest admitted-preflight-timeout-kills-its-descendants-and-clears-ownership
+  (let [live (atom #{})
+        run (future (try (ci-proc/run-bounded! ["bash" "-c" "sleep 30 & wait"] 1000 live)
+                         (catch Exception e (ex-data e))))
+        grandchildren (loop [tries 0]
+                        (let [children (mapcat descendants-of @live)]
+                          (if (or (seq children) (= tries 50)) (vec children)
+                              (do (Thread/sleep 10) (recur (inc tries))))))]
+    (is (seq grandchildren) "preflight is owned while its descendant is alive")
+    (is (= 1000 (:timeout-ms @run)))
+    (is (empty? @live))
+    (Thread/sleep 200)
+    (is (not-any? ProcessHandle/.isAlive grandchildren))))
+
+
+(deftest admitted-preflight-nonzero-exit-is-not-success
+  (let [live (atom #{})
+        failure (try (ci-proc/run-bounded! ["bash" "-c" "exit 7"] 1000 live)
+                     (catch Exception e (ex-data e)))]
+    (is (= 7 (:exit failure)))
+    (is (empty? @live))))
+
+
 (let [{:keys [fail error]} (run-tests 'ci-proc-test)]
   (when (pos? (+ fail error))
     (System/exit 1)))

@@ -1457,6 +1457,10 @@ gate_suites() {
   for stage in "${stages[@]}"; do
     case " ${ordered[*]} " in *" $stage "*) ;; *) ordered+=("$stage") ;; esac
   done
+  # Preserve the last detailed hint even when this run fails before that suite.
+  # GRAPHDEN_RESUME_FROM was selected through member/base ancestry validation.
+  (cd "$wt" && bb scripts/ci_resume_cli.clj carry "$GRAPHDEN_RESUME_OUT" "$GRAPHDEN_RESUME_FROM") \
+    || { echo "FAIL: cannot preserve detailed scheduling hints"; return 1; }
   stage_order="$(cd "$wt" && bb scripts/ci_resume_cli.clj start stages \
     "$GRAPHDEN_RESUME_OUT.stages.edn" "${GRAPHDEN_RESUME_FROM:+$GRAPHDEN_RESUME_FROM.stages.edn}" \
     "$ci_sha" "${ordered[@]}")" || { echo "FAIL: cannot initialize stage progress"; return 1; }

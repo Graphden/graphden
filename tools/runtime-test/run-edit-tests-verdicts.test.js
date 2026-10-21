@@ -107,7 +107,6 @@ if [ -n "$out" ]; then [ "$out" = /dev/null ] || printf '%s' "$body" > "$out"; e
       GRAPHDEN_URL: 'http://stub:1',
       SWEEP_DELAY: '0',
       WTQ_FLAKE_STRICT: '1',
-      WTQ_FAIL_FAST: '0',
       HOST_MEM_MIN_MB: '0',
       HOST_LOAD_PER_CPU: '100000',
       GRAPHDEN_TOUR_AUDIT: path.join(dir, 'audit'),
@@ -214,12 +213,20 @@ console.log(' an env-signed failure between two identical real ones does not cou
   assert(r.attempts('edit-a.test.js') === 4, 'retried through to attempt 4', r.out);
 }
 
-console.log(' strict gate stops after deterministic triage, with normal summary');
+console.log(' strict gate collects independent failures and still returns red');
 {
-  const r = runSuite({ 'edit-a.test.js': ['fail:same'], 'edit-b.test.js': ['pass'] }, {WTQ_FAIL_FAST: '1'});
-  assert(r.code !== 0 && r.attempts('edit-a.test.js') === 2, 'deterministic classification keeps two attempts', r.out);
-  assert(r.attempts('edit-b.test.js') === 0, 'later file was never scheduled', r.out);
-  assert(/edit suite: 0 pass \/ 1 fail \/ 1 total/.test(r.out) && /NOT RUN after gate failure:.*edit-b/.test(r.out), 'summary distinguishes real fail from unrun', r.out);
+  const r = runSuite({
+    'edit-a.test.js': ['fail:first'],
+    'edit-b.test.js': ['pass'],
+    'edit-c.test.js': ['fail:second'],
+  });
+  assert(r.code !== 0 && r.attempts('edit-a.test.js') === 2 && r.attempts('edit-c.test.js') === 2,
+         'both deterministic failures are triaged', r.out);
+  assert(r.attempts('edit-b.test.js') === 1, 'the file between failures ran', r.out);
+  assert(/edit suite: 1 pass \/ 2 fail \/ 3 total/.test(r.out)
+         && /edit-a\.test\.js\(deterministic\)/.test(r.out)
+         && /edit-c\.test\.js\(deterministic\)/.test(r.out),
+         'summary names every failed file', r.out);
   assert(/entities leaked into the graph/.test(r.out), 'normal post-loop accounting still runs', r.out);
 }
 console.log(' receipts automatically resume failed file, unrun tail, then prior passes');
@@ -228,32 +235,35 @@ console.log(' receipts automatically resume failed file, unrun tail, then prior 
     + ' :roster ["edit-a.test.js" "edit-b.test.js" "edit-c.test.js"]'
     + ' :status {"edit-a.test.js" :passed "edit-b.test.js" :failed "edit-c.test.js" :pending}}';
   const files = {'edit-a.test.js': ['pass'], 'edit-b.test.js': ['pass'], 'edit-c.test.js': ['pass']};
-  const r = runSuite(files, {STUB_RESUME: prior, WTQ_FAIL_FAST: '1'});
+  const r = runSuite(files, {STUB_RESUME: prior});
   const order = [...r.out.matchAll(/─── (edit-.*?\.test\.js) ───/g)].map(match => match[1]);
   assert(r.code === 0 && order.join(',') === 'edit-b.test.js,edit-c.test.js,edit-a.test.js', 'receipt reorders complete suite', r.out);
   assert(Object.keys(files).every(name => r.attempts(name) === 1), 'every current file executes once', r.out);
-  const red = runSuite({...files, 'edit-b.test.js': ['fail:same']}, {STUB_RESUME: prior, WTQ_FAIL_FAST: '1'});
-  assert(red.code !== 0 && red.attempts('edit-c.test.js') === 0 && red.attempts('edit-a.test.js') === 0,
-    'failed resumed file leaves tail untouched', red.out);
-  assert(red.receipt.includes('"edit-b.test.js" :failed') && red.receipt.includes('"edit-a.test.js" :pending'),
-    'receipt records actual verdict and resets previous green proof', red.receipt);
+  const red = runSuite({...files, 'edit-b.test.js': ['fail:same'], 'edit-c.test.js': ['fail:later']}, {STUB_RESUME: prior});
+  assert(red.code !== 0 && red.attempts('edit-b.test.js') === 2 && red.attempts('edit-c.test.js') === 2
+    && red.attempts('edit-a.test.js') === 1, 'two failures do not leave any mandatory file unrun', red.out);
+  assert(red.receipt.includes('"edit-b.test.js" :failed') && red.receipt.includes('"edit-c.test.js" :failed')
+    && red.receipt.includes('"edit-a.test.js" :passed'),
+    'receipt preserves both failures and final passing file', red.receipt);
 }
-console.log(' adhoc default aggregates failures and healthy gate stops strict flakes');
+console.log(' strict retry-pass flake is red while later files still run');
 {
-  const files = {'edit-a.test.js': ['fail:same'], 'edit-b.test.js': ['pass']};
-  const r = runSuite(files, {WTQ_FLAKE_STRICT: '0', WTQ_FAIL_FAST: ''});
-  assert(r.code !== 0 && r.attempts('edit-b.test.js') === 1, 'default adhoc still runs later files', r.out);
-  const gate = runSuite({'edit-a.test.js': ['fail:race', 'pass'], 'edit-b.test.js': ['pass']}, {WTQ_FAIL_FAST: ''});
-  assert(gate.code !== 0 && gate.attempts('edit-a.test.js') === 2 && gate.attempts('edit-b.test.js') === 0,
-    'strict default stops only after retry-pass flake classification', gate.out);
+  const prior = '{:schema 1 :kind "browser" :sha "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"'
+    + ' :roster ["edit-a.test.js" "edit-b.test.js"]'
+    + ' :status {"edit-a.test.js" :pending "edit-b.test.js" :pending}}';
+  const gate = runSuite({'edit-a.test.js': ['fail:race', 'pass'], 'edit-b.test.js': ['pass']}, {STUB_RESUME: prior});
+  assert(gate.code !== 0 && gate.attempts('edit-a.test.js') === 2 && gate.attempts('edit-b.test.js') === 1,
+    'strict flake does not prevent later files from running', gate.out);
   assert(/flaked-passed-on-retry/.test(gate.out), 'strict flake remains a named red verdict', gate.out);
+  assert(gate.receipt.includes('"edit-a.test.js" :failed') && gate.receipt.includes('"edit-b.test.js" :passed'),
+    'strict retry-pass stays failed in receipt while later pass is recorded', gate.receipt);
 }
 console.log(' environment-signed retries and already proven thrash retain their exceptions');
 {
-  const r = runSuite({'edit-a.test.js': ['envfail:window', 'pass'], 'edit-b.test.js': ['pass']}, {WTQ_FAIL_FAST: '1'});
+  const r = runSuite({'edit-a.test.js': ['envfail:window', 'pass'], 'edit-b.test.js': ['pass']});
   assert(r.code === 0 && r.attempts('edit-b.test.js') === 1, 'server-window retry does not stop the suite', r.out);
   const degraded = runSuite({'edit-a.test.js': ['envfail:window', 'pass'], 'edit-b.test.js': ['envfail:window', 'pass'],
-    'edit-c.test.js': ['fail:race', 'pass'], 'edit-d.test.js': ['pass']}, {WTQ_FAIL_FAST: '1'});
+    'edit-c.test.js': ['fail:race', 'pass'], 'edit-d.test.js': ['pass']});
   assert(degraded.code === 0 && degraded.attempts('edit-d.test.js') === 1, 'already proven degraded run preserves report-only flake', degraded.out);
 }
 

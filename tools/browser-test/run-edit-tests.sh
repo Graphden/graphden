@@ -531,11 +531,8 @@ CONSECUTIVE_DOWN=0
 CASCADE_CAP=${CASCADE_CAP:-3}
 SKIP_AFTER_CASCADE=0
 REMAINING_FILES=""
-# Landing gates stop scheduling after a classified red file. Adhoc runs keep
-# aggregate diagnostics; WTQ_FAIL_FAST=0 explicitly requests that behaviour.
-WTQ_FAIL_FAST=${WTQ_FAIL_FAST:-${WTQ_FLAKE_STRICT:-0}}
-STOP_AFTER_RED=0
-UNRUN_AFTER_RED=""
+# A red file does not stop the suite. The full set of file verdicts is needed
+# to fix independent regressions before paying for another landing gate.
 run_is_degraded() {
   local env_count=0 x
   for x in $ENV_FLAKED; do env_count=$((env_count+1)); done
@@ -560,10 +557,6 @@ if [ "${GD_E2E_BOOTSTRAP_HOME:-0}" = 1 ]; then
   echo "isolated personal home fixture ready"
 fi
 for f in $FILES; do
-  if [ "$STOP_AFTER_RED" = "1" ]; then
-    UNRUN_AFTER_RED="$UNRUN_AFTER_RED $f"
-    continue
-  fi
   if [ "$SKIP_AFTER_CASCADE" = "1" ]; then
     REMAINING_FILES="$REMAINING_FILES $f"
     continue
@@ -858,21 +851,13 @@ for f in $FILES; do
   TIMINGS="$TIMINGS$FILE_SECS	$FILE_MEM	$f
 "
   echo
-  if [ "$WTQ_FAIL_FAST" = "1" ]; then
-    if [ "$passed" != "1" ] || { [ "${WTQ_FLAKE_STRICT:-0}" = "1" ] \
-      && [ -n "$STRICT_FLAKES$STRICT_LEAKS" ] && ! run_is_degraded; }; then
-      STOP_AFTER_RED=1
-      WORST=1
-      echo "  (gate fail-fast: $f is red after retry/triage; remaining files will not run)" >&2
-    fi
-  fi
   if [ "$passed" = 1 ]; then browser_progress "$f" passed
   else browser_progress "$f" failed; fi
   # Keep strict failures visible even when the underlying attempt passed.
   case " $STRICT_FLAKES $STRICT_LEAKS " in
     *" $f "*|*" $f("*) browser_progress "$f" failed ;;
   esac
-  if [ "$STOP_AFTER_RED" != "1" ] && [ "$SWEEP_DELAY" != "0" ]; then sleep "$SWEEP_DELAY"; fi
+  if [ "$SWEEP_DELAY" != "0" ]; then sleep "$SWEEP_DELAY"; fi
 done
 
 # Mark cascade-skipped tests in the failed-names list so the summary
@@ -935,9 +920,6 @@ if [ "$SKIP" -gt 0 ]; then
   echo "  skipped:$SKIPPED_NAMES"
 else
   echo "edit suite: $PASS pass / $FAIL fail / $((PASS+FAIL)) total"
-fi
-if [ -n "$UNRUN_AFTER_RED" ]; then
-  echo "  NOT RUN after gate failure:$UNRUN_AFTER_RED" >&2
 fi
 [ -n "$TOUR_AUDIT_NOTE" ] && echo "  tour spotlight: $TOUR_AUDIT_NOTE"
 if [ -n "$FLAKED" ]; then

@@ -168,9 +168,18 @@ async function postSequenceAppend(page, fnId, body) {
     // ===================================================================
     // Phase D: click the FIRST × → 2 items remain.
     // ===================================================================
-    await page.evaluate(() => {
-      document.querySelector('.arg-seq-btn-remove')?.click();
-    });
+    const firstItem = page.locator('.edge-seq-item[data-index="0"]');
+    const firstItemId = await firstItem.getAttribute('data-item-id');
+    assert(firstItemId, 'first visible item has a stored identity');
+    const removed = page.waitForResponse((response) => response.request().method() === 'DELETE'
+      && new URL(response.url()).pathname === '/api/sequence/item/' + firstItemId, {timeout: 60000});
+    await page.evaluate((id) => {
+      const button = document.querySelector('.edge-seq-item[data-item-id="' + id + '"] .arg-seq-btn-remove');
+      if (!button) throw new Error('first item remove control missing');
+      button.click();
+    }, firstItemId);
+    const removeResponse = await removed;
+    assert(removeResponse.ok(), 'first item DELETE completed: ' + removeResponse.status());
     await page.waitForFunction(
       () => document.querySelectorAll('.arg-seq-btn-remove').length === 2,
       null,
@@ -197,6 +206,8 @@ async function postSequenceAppend(page, fnId, body) {
       .sort((a, b) => (a.position || 0) - (b.position || 0));
     assert(items.length === 2,
            'storage has 2 binding-list-items: ' + items.length);
+    assert(items.map((item) => item.value).join(',') === 'b,c',
+           'storage retains the second and appended values in order');
 
     console.log('✓ sequence add/remove verified — chain + / × buttons + value form');
   } catch (e) {

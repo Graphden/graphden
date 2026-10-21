@@ -147,13 +147,25 @@ const PAPER = '#123456';
     //      `#@marketplace/<name>` on a FRESH document (a new tab, the way the
     //      storefront link arrives) opens the Marketplace on the item.
     const landing = await page.context().newPage();
+    let releaseTree;
+    let treeBlocked = false;
+    const treeGate = new Promise((resolve) => { releaseTree = resolve; });
+    await landing.route(/\/api\/graph\/entities\?scope=tree(?:&|$)/, async (route) => {
+      treeBlocked = true;
+      await treeGate;
+      await route.continue();
+    });
     try {
       await landing.goto(BASE + '/#@marketplace/' + encodeURIComponent(THEME));
+      // The item partial has no graph dependency. It must open while the
+      // initial graph tree is still blocked by this test.
       await landing.waitForSelector('#gd-market-root [data-marketplace-item="' + THEME + '"]', {timeout: 20000});
+      assert(treeBlocked, 'the initial graph tree is still blocked');
       assert(await landing.evaluate(() => document.body.dataset.surface === 'market'), 'the deep link opens the Marketplace surface');
       assert(await landing.evaluate((t) => document.querySelector('#gd-market-root [data-marketplace]')?.dataset.marketplaceItem === t, THEME),
         'the deep link lands on the item');
     } finally {
+      releaseTree();
       await landing.close();
     }
   } finally {

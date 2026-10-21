@@ -557,6 +557,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   initAuthLock();
   if (typeof initBranchSelector === 'function') initBranchSelector();
   if (typeof initOrgSwitcher === 'function') initOrgSwitcher();
+  // Management deep links do not need the graph. Route them before the
+  // initial tree/type load so a slow rebuild cannot hold the surface closed.
+  const bootHash = window.location.hash.slice(1);
+  if (bootHash.startsWith('@') && typeof gdRouteSurfaceHash === 'function') {
+    gdRouteSurfaceHash(decodeURIComponent(bootHash));
+  }
   // Top-level catch so a failed initial /api/graph/entities load (network
   // outage, 5xx, branch-router error) shows a user-visible error in the
   // header instead of leaving the editor silently broken with just an

@@ -190,13 +190,29 @@ async function enterFreeArgBindEditMode(arg, anchorEl) {
   if (!arg) return;
   closeInlineEdit();
   // A mutation refreshes rich facts before the previous canvas is replaced.
-  // Await its relational rows before capturing a picker's expected contract.
+  // Hydrate the selected graph, which contains the argument's owner even when
+  // it is a child card. A child-only fetch would replace the selected root's
+  // rows and can be superseded by the canvas render, silently losing the click.
+  const selectedRoot = typeof selectedFnId === 'undefined' ? null : selectedFnId;
+  const rootId = selectedRoot || arg['fn-id'];
   if (typeof ensureSubtreeFor === 'function') {
-    try { if (!await ensureSubtreeFor(arg['fn-id'])) return; }
+    try {
+      let installed = false;
+      for (let attempt = 0; attempt < 2 && !installed; attempt += 1) {
+        installed = await ensureSubtreeFor(rootId);
+        if (selectedRoot && selectedFnId !== selectedRoot) return;
+      }
+      if (!installed) return;
+    }
     catch (_) { alert('The argument is still loading. Please try again.'); return; }
   }
   if (!lookups?.slotMap?.has(arg['slot-id'])) return;
   const expected = expectedSlotType(arg);
+  // A graph refresh may replace the clicked button while the subtree loads.
+  // Keep the pending action anchored to the live canvas in that case.
+  const liveAnchor = anchorEl?.isConnected === false
+    ? (document.getElementById('graph-surface') || document.body)
+    : anchorEl;
 
   // Slot-level type drives the default action.
   const effType = arg.type ? String(arg.type).replace(/^:/, '') : null;
@@ -206,7 +222,7 @@ async function enterFreeArgBindEditMode(arg, anchorEl) {
   if (effType === 'fn') {
     if (typeof openFnPicker === 'function') {
       openFnPicker({
-        anchorEl,
+        anchorEl: liveAnchor,
         excludeIds: arg['fn-id'] ? [arg['fn-id']] : [],
         // The slot's structural type from /api/types — picker uses
         // it to highlight type-compatible fns.
@@ -224,7 +240,7 @@ async function enterFreeArgBindEditMode(arg, anchorEl) {
   // bound; the fn-ref side stays for a secret from the Secrets panel.
   const marker = (typeof slotMarkerName === 'function') ? slotMarkerName(arg) : null;
   openLiteralVsRefChooser({
-    anchorEl,
+    anchorEl: liveAnchor,
     ariaLabel: marker ? ('Bind ' + marker + ' slot') : 'Bind free arg',
     litLabel: marker ? ('Bind ' + marker) : 'Bind literal',
     refLabel: 'Bind fn-ref',

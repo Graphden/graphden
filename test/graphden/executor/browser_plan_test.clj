@@ -458,13 +458,23 @@
             :args {:items [:left :right {:as :caption}] :inputs :envelope-inputs}}
            {:name :inherited-callback :parent :callback :lambda-params [:input]}
            {:name :scope-callback :parent :list :lambda-params []
-            :args {:items [:left :right {:as :caption}] :inputs :previous-inputs}}
+            :args {:items [:left :right :previous-inputs {:as :caption}]
+                   :inputs :previous-inputs}}
+           {:name :source-shadow :parent :list
+            :args {:items [:left :right] :inputs {:value {:left 1 :right 2}}}}
+           {:name :input-constructor :parent :const :args {:value {:as :inputs}}}
+           {:name :source-handler :parent :input-constructor :lambda-params []
+            :args {:inputs :previous-inputs}}
+           {:name :shadow-handler :parent :input-constructor :lambda-params []
+            :args {:inputs :source-shadow}}
            {:name :wrapper :parent :call :lambda-params [:input]
             :args {:func {:ref :callback} :arg {:as :input}}}
            {:name :root :parent :call :args {:func {:ref :callback} :arg {:as :inputs} :caption {:value nil}}}
            {:name :false-root :parent :root :args {:caption {:value false}}}
            {:name :inherited-root :parent :call :args {:func {:ref :inherited-callback} :arg {:as :inputs} :caption false}}
            {:name :scope-root :parent :call :args {:func {:ref :scope-callback} :arg {:as :inputs} :caption false}}
+           {:name :source-root :parent :call :args {:func {:ref :source-handler} :arg {:as :inputs}}}
+           {:name :shadow-root :parent :call :args {:func {:ref :shadow-handler} :arg {:as :inputs}}}
            {:name :nested :parent :call :args {:func {:ref :wrapper} :arg {:as :inputs} :caption false}}
            {:name :repeated :parent :map :args {:func {:ref :callback} :coll {:as :inputs} :caption {:value nil}}}])
         input {:inputs {:left "pins" :right "trail"}}]
@@ -473,8 +483,13 @@
       [{:entry :root :inputs {:inputs input} :expected ["pins" "trail" nil]}
        {:entry :false-root :inputs {:inputs input} :expected ["pins" "trail" false]}
        {:entry :inherited-root :inputs {:inputs input} :expected ["pins" "trail" false]}
-       {:entry :scope-root :inputs {:inputs {:nested {:left "old-left" :right "old-right"}}}
-        :expected ["old-left" "old-right" false]}
+       {:entry :scope-root :inputs {:inputs {:nested {:left "old-left" :right "old-right"
+                                                      :nested "inner"}}}
+        :expected ["old-left" "old-right" "inner" false]}
+       {:entry :source-root :inputs {:inputs {:nested {:nested "inner"}}}
+        :expected {:nested "inner"}}
+       {:entry :shadow-root :inputs {:inputs {:left 10 :right 20}}
+        :expected [1 2]}
        {:entry :nested :inputs {:inputs input} :expected ["pins" "trail" false]}
        {:entry :repeated :inputs {:inputs [input {:inputs {:left "next-pins" :right "next-trail"}}]}
         :expected [["pins" "trail" nil] ["next-pins" "next-trail" nil]]}])

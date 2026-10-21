@@ -271,7 +271,13 @@
   (let [root (l/root-fn fid (:fn-map lookups) lookups)
         primitive (:id root)
         bindings (b/collect-bindings fid lookups)
-        env (b/collect-env-bindings fid lookups)]
+        env (b/collect-env-bindings fid lookups)
+        ;; Mirror compile-eager: only a duplicate root/env ref reads the
+        ;; caller's same-name value, not an unrelated local env ref.
+        env-source-refs (into #{}
+                              (comp (filter #(= :ref (:kind %)))
+                                    (map (juxt :env-name :ref-id)))
+                              env)]
     (when-not (capabilities/browser-op primitive)
       (reject! :unsupported-primitive context))
     {:plan {:id (str fid) :primitive (str primitive)
@@ -284,9 +290,14 @@
                           :expr (binding-expr entry fid lookups (assoc context :env-binding? true))})
                        env)
             :args (mapv (fn [entry]
-                          {:slot (str (:slot-id entry))
-                           :name (wire-name (:base-name entry))
-                           :expr (binding-expr entry fid lookups context)})
+                          (let [source-name (when (and (= :ref (:kind entry))
+                                                       (env-source-refs [(:ext-name entry)
+                                                                         (:ref-id entry)]))
+                                              (:ext-name entry))]
+                            (cond-> {:slot (str (:slot-id entry))
+                                     :name (wire-name (:base-name entry))
+                                     :expr (binding-expr entry fid lookups context)}
+                              source-name (assoc :sourceName (wire-name source-name)))))
                         bindings)}
      :deps (vec (distinct (mapcat #(binding-deps % fid context) (concat bindings env))))
      :retained (into #{} (comp (filter retained-callable?) (map :ref-id)) bindings)

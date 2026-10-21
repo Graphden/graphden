@@ -492,13 +492,17 @@
             ? {slots: incoming.slots, names: new Map(incoming.names)} : incoming;
           for (const {fromName, toName} of fn.aliases) if (frame.names.has(fromName) && !frame.names.has(toName)) frame.names.set(toName, frame.names.get(fromName));
           const aliasedNames = fn.env.length ? new Map(frame.names) : null;
-          for (const binding of fn.env) frame.names.set(binding.name, new Thunk(() => {
+          function sourceScope(name) {
             const scope = {slots: frame.slots, names: new Map(frame.names)};
-            if (aliasedNames.has(binding.name)) scope.names.set(binding.name, aliasedNames.get(binding.name));
-            else scope.names.delete(binding.name);
-            return expr(binding.expr, scope);
+            if (aliasedNames.has(name)) scope.names.set(name, aliasedNames.get(name));
+            else scope.names.delete(name);
+            return scope;
+          }
+          for (const binding of fn.env) frame.names.set(binding.name, new Thunk(() => {
+            return expr(binding.expr, sourceScope(binding.name));
           }));
-          const args = new Map(fn.args.map((arg) => [arg.name, new Thunk(() => expr(arg.expr, frame))]));
+          const args = new Map(fn.args.map((arg) => [arg.name, new Thunk(() =>
+            expr(arg.expr, arg.sourceName ? sourceScope(arg.sourceName) : frame))]));
           const operation = primitives.get(fn.primitive);
           if (!operation) throw new Error('Missing browser primitive: ' + fn.primitive);
           try { return operation((name) => args.has(name) ? args.get(name).force() : null, tick); }

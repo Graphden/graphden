@@ -31,16 +31,20 @@ if [ ! -d node_modules ]; then
   exit 2
 fi
 
-# Block until the editor answers. The stack reports healthy before the graph
-# is compiled, and a screenshot of a half-booted editor is a red baseline that
-# says nothing about the change under test.
-deadline=$(( $(date +%s) + 120 ))
-until curl -fsS -o /dev/null "${GRAPHDEN_URL}/health"; do
-  if [ "$(date +%s)" -ge "$deadline" ]; then
-    echo "editor never became healthy at ${GRAPHDEN_URL}" >&2
-    exit 2
-  fi
-  sleep 2
-done
+# /health can answer while compiled graph reads are still queued. Use the
+# browser suite's bounded, authenticated compiled-path probe before opening
+# three pages at once; otherwise all screenshots can capture a half-booted UI.
+node <<'NODE'
+const {waitForServerHealthy} = require('../browser-test/edit-test-helpers');
+waitForServerHealthy(120000).catch((err) => {
+  console.error('visual-regression: editor graph did not become ready:', err);
+  process.exitCode = 2;
+});
+NODE
 
-exec npx playwright test
+args=()
+if [ -n "${VISUAL_TEST_PROJECT:-}" ]; then args+=(--project "$VISUAL_TEST_PROJECT"); fi
+if [ -n "${VISUAL_TEST_GREP:-}" ]; then args+=(--grep "$VISUAL_TEST_GREP"); fi
+if [ -n "${VISUAL_TEST_WORKERS:-}" ]; then args+=(--workers "$VISUAL_TEST_WORKERS"); fi
+if [ -n "${VISUAL_TEST_TRACE:-}" ]; then args+=(--trace "$VISUAL_TEST_TRACE"); fi
+exec npx playwright test "${args[@]}"

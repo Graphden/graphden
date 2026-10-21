@@ -5,7 +5,7 @@
 
 From stored definitions to callable code and results.
 
-[[file:index.org][index]] · ~90 min
+[[file:index.org][index]] · ~91 min
 
 * 1. execute
 :PROPERTIES:
@@ -153,13 +153,13 @@ Classifies the root [[file:glossary.org::#term/slot][slots]] through ~classify-s
 :PROPERTIES:
 :CUSTOM_ID: executor/compile-all
 :FILE: src/graphden/executor/compile_eager.clj
-:LINE: 1574
+:LINE: 1586
 :MINS: 4.7
 :END:
 
 Compiles functions in [[file:glossary.org::#term/topological-order][dependency order]]: a referenced function must be available before a caller uses it. The process cache is keyed by graph structure, [[file:glossary.org::#term/base-function][base-function]] implementations, and [[file:glossary.org::#term/rich-types][rich type information]]. Types affect whether a referenced function is passed as a callable or evaluated, so different type information must not share the same compiled result.
 
-- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn compile-all][src/graphden/executor/compile_eager.clj:1574]]
+- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn compile-all][src/graphden/executor/compile_eager.clj:1586]]
 - see also :: [[file:executor.org::#executor/compile-fn][compile-fn]]
 - same file :: [[file:executor.org::#executor/compile-fn][compile-fn]], [[file:executor.org::#executor/arg-builder][arg-builder]], [[file:executor.org::#executor/resolve-impl][resolve-impl]], [[file:executor.org::#executor/call-with-cache][call-with-cache]], [[file:executor.org::#executor/hof-wrap][hof-wrap]]
 - referenced from :: [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:types.org::#types/record-rich-types!][record-rich-types!]]
@@ -169,7 +169,7 @@ Compiles functions in [[file:glossary.org::#term/topological-order][dependency o
 :CUSTOM_ID: executor/compile-fn
 :FILE: src/graphden/executor/compile_eager.clj
 :LINE: 1280
-:MINS: 8.3
+:MINS: 9.1
 :END:
 
 Builds one runtime [[file:glossary.org::#term/closure][closure]] ~(fn [fa ctx])~. It prepares argument builders, [[file:glossary.org::#term/binding][bindings]] to inputs outside the root's slots, and name aliases at compile time. At execution time the [[file:glossary.org::#term/closure][closure]] assembles the argument map from caller input and those builders, then calls ~(impl args ctx)~.

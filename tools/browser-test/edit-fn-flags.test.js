@@ -64,8 +64,22 @@ async function openCanvas(page, name, waitSelector) {
 }
 
 
-async function saveInlinePopover(page) {
-  await page.click('.arg-value-edit-popover .arg-value-edit-btn:not(.arg-value-edit-btn-secondary):not(.arg-value-edit-btn-danger)');
+async function saveInlinePopover(page, fnId) {
+  const saveButton = '.arg-value-edit-popover .arg-value-edit-btn:not(.arg-value-edit-btn-secondary):not(.arg-value-edit-btn-danger)';
+  // A successful save keeps the popover open until its fn PUT completes. In a
+  // full gate that PUT took 11–13 s, so start the UI deadline after the exact
+  // write response. The empty named-list validation below has no PUT.
+  if (fnId) {
+    const [response] = await Promise.all([
+      page.waitForResponse((r) => r.request().method() === 'PUT'
+        && new URL(r.url()).pathname === '/api/entities/fn/' + fnId),
+      page.click(saveButton),
+    ]);
+    await response.finished();
+    assert(response.status() === 200, 'fn flag save returned HTTP ' + response.status());
+  } else {
+    await page.click(saveButton);
+  }
   await page.waitForFunction(
     () => !document.querySelector('.arg-value-edit-popover')
           || document.querySelector('.arg-value-edit-popover .arg-value-edit-error.visible'),
@@ -84,7 +98,7 @@ async function lambdaChip(page, name) {
 
 
 // Open the λ popover and pick a state: 'derived' | 'none' | [names].
-async function setLambda(page, name, state) {
+async function setLambda(page, name, state, fnId) {
   await page.click('.node-overlay[data-fn-name="' + name + '"] .lambda-params-chip');
   await page.waitForSelector('.arg-value-edit-popover .lambda-params-edit', {timeout: 5000});
   await page.evaluate((st) => {
@@ -100,7 +114,7 @@ async function setLambda(page, name, state) {
       }
     }
   }, state);
-  return saveInlinePopover(page);
+  return saveInlinePopover(page, fnId);
 }
 
 
@@ -190,7 +204,7 @@ async function waitItems(page, name, expected) {
     assert(chip && chip.declared === 'derived' && /λ derived/.test(chip.text) && chip.tag === 'BUTTON',
       'a fresh composed fn shows a clickable "λ derived" chip: ' + JSON.stringify(chip));
 
-    let err = await setLambda(page, SHOUT, ['string']);
+    let err = await setLambda(page, SHOUT, ['string'], shout.id);
     assert(err === '', 'naming the free arg saves: ' + err);
     await waitChip(page, SHOUT, JSON.stringify(['string']));
     chip = await lambdaChip(page, SHOUT);
@@ -199,14 +213,14 @@ async function waitItems(page, name, expected) {
     assert(JSON.stringify(row['lambda-params']) === '["string"]',
       'the fn row carries ["string"] (got: ' + JSON.stringify(row['lambda-params']) + ')');
 
-    err = await setLambda(page, SHOUT, 'none');
+    err = await setLambda(page, SHOUT, 'none', shout.id);
     assert(err === '', '"None — []" saves: ' + err);
     await waitChip(page, SHOUT, '[]');
     row = await rowOf(page, shout);
     assert(JSON.stringify(row['lambda-params']) === '[]',
       '[] is stored as an EMPTY vector, not cleared (got: ' + JSON.stringify(row['lambda-params']) + ')');
 
-    err = await setLambda(page, SHOUT, 'derived');
+    err = await setLambda(page, SHOUT, 'derived', shout.id);
     assert(err === '', 'back to derived saves: ' + err);
     await waitChip(page, SHOUT, 'derived');
     row = await rowOf(page, shout);
@@ -254,7 +268,7 @@ async function waitItems(page, name, expected) {
       const r = document.querySelector('.arg-value-edit-popover input[name="lp-mode"][value="none"]');
       r.checked = true; r.dispatchEvent(new Event('change', {bubbles: true}));
     });
-    err = await saveInlinePopover(page);
+    err = await saveInlinePopover(page, shout.id);
     assert(err === '', 'saving from the Inspector row works: ' + err);
     await page.waitForFunction(() => /λ \[\]/.test(document.querySelector('.gd-insp-flag-row[data-action="lambda-params"]')?.textContent || ''),
       null, {timeout: 30000, polling: 200});
@@ -273,7 +287,7 @@ async function waitItems(page, name, expected) {
     await page.click('.gd-insp-flag-row[data-action="return-type"]');
     await page.waitForSelector('.arg-value-edit-popover select.arg-value-edit-input', {timeout: 5000});
     await page.selectOption('.arg-value-edit-popover select.arg-value-edit-input', 'text');
-    err = await saveInlinePopover(page);
+    err = await saveInlinePopover(page, shout.id);
     assert(err === '', 'declaring a return type from the Inspector row works: ' + err);
     // The row already read the COMPUTED :text before the save; poll the fn
     // row itself for the declaration — the graph API exposes it as the id of
@@ -291,7 +305,7 @@ async function waitItems(page, name, expected) {
     console.log('  compact: Returns / Effects rows open the strip popovers; return-type saved from the row');
     await page.evaluate(() => document.body.classList.remove('gd-cards-compact'));
     await openCanvas(page, SHOUT, '.node-overlay[data-fn-name="' + SHOUT + '"] .lambda-params-chip');
-    err = await setLambda(page, SHOUT, 'derived');
+    err = await setLambda(page, SHOUT, 'derived', shout.id);
     assert(err === '', 'back to derived from the card: ' + err);
     await waitChip(page, SHOUT, 'derived');
     console.log('  compact: the Inspector rows carry λ / 📍 and open the popovers');
@@ -306,7 +320,7 @@ async function waitItems(page, name, expected) {
     await page.click('.node-overlay[data-fn-name="' + SHOUT + '"] .branch-local-strip');
     await page.waitForSelector('.arg-value-edit-popover input[data-branch-local="toggle"]', {timeout: 5000});
     await page.click('.arg-value-edit-popover input[data-branch-local="toggle"]');
-    err = await saveInlinePopover(page);
+    err = await saveInlinePopover(page, shout.id);
     assert(err === '', 'ticking Branch-local saves: ' + err);
     await waitStrip(page, SHOUT, 'own');
     row = await rowOf(page, shout);
@@ -343,7 +357,7 @@ async function waitItems(page, name, expected) {
     await page.click('.node-overlay[data-fn-name="' + SHOUT + '"] .branch-local-strip');
     await page.waitForSelector('.arg-value-edit-popover input[data-branch-local="toggle"]', {timeout: 5000});
     await page.click('.arg-value-edit-popover input[data-branch-local="toggle"]');
-    err = await saveInlinePopover(page);
+    err = await saveInlinePopover(page, shout.id);
     assert(err === '', 'unticking saves: ' + err);
     await waitStrip(page, SHOUT, 'off');
     row = await rowOf(page, shout);

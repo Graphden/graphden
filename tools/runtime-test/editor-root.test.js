@@ -7,11 +7,20 @@ const vm = require('node:vm');
 const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../../resources/packages/app/editor/editor-root.js'), 'utf8');
 function fixture() {
-  const listeners = new Map(), requests = [], executed = [], nodes = [];
+  const listeners = new Map();
+  const requests = [];
+  const executed = [];
+  const nodes = [];
+  const policyWaits = [];
   const legacy = {dataset: {}, before(node) { nodes.push(node); }};
   const window = {
     gdPrefOwner: 'first', API: {api_ui_root_plan: '/api/ui/root/plan'},
     authFetch(url, options) { return new Promise(resolve => requests.push({url, options, resolve})); },
+    gdWaitForGraphPolicy(signal) {
+      return new Promise(resolve => {
+        policyWaits.push({signal, resolve});
+      });
+    },
     addEventListener(name, callback) { listeners.set(name, callback); }, dispatchEvent() {},
     GraphdenBrowser: {keyword: value => value, isCallable: value => typeof value === 'function',
       invoke: (callback, input) => callback(input), createRuntime: plan => ({run: () => { executed.push(plan.label); return plan.output; }})},
@@ -20,14 +29,17 @@ function fixture() {
     readyState: 'loading', addEventListener() {}, getElementById: id => id === 'app' ? legacy : null,
     createElement: () => ({remove() {}, setAttribute() {}}),
   };
-  const context = {window, document, Map, AbortController, DOMException, Event: class {}, CustomEvent: class {}, graphdenCurrentOrg: 'org',
+  const context = {window, document, Map, performance: {now: () => 0}, AbortController, DOMException, Event: class {}, CustomEvent: class {}, graphdenCurrentOrg: 'org',
     getCurrentBranchName: () => context.branch, branch: 'main'};
   vm.runInNewContext(source, context);
   const reply = (index, legacyMode, label) => requests[index].resolve({ok: true,
     json: async () => ({ok: true, 'argument-name': null,
       plan: {label, output: new Map([['legacy', legacyMode]])}})});
-  return {window, requests, executed, legacy, listeners, reply, context};
+  return {window, requests, executed, legacy, listeners, reply, context, policyWaits};
 }
+const flush = () => new Promise(resolve => setImmediate(resolve));
+const transientRefusal = () => ({ok: false, status: 422,
+  json: async () => ({ok: false, code: 'policy-refresh-required', retryable: true})});
 (async () => {
   const f = fixture();
   const first = f.window.gdEditorRoot.reload();
@@ -88,10 +100,11 @@ function fixture() {
   const beforeDenial = root.componentNow('recents');
   const executionCount = f.executed.length;
   const denied = root.reload();
-  f.requests[6].resolve({ok: false, status: 422,
-    json: async () => ({ok: false, code: 'policy-refresh-required', retryable: true})});
+  f.requests[6].resolve({ok: false, status: 403,
+    json: async () => ({ok: false, code: 'source-denied'})});
   await denied;
-  assert.equal(f.requests.length, 7, 'a root policy refusal does not transparently retry');
+  assert.equal(f.requests.length, 7, 'a source denial does not retry');
+  assert.equal(f.policyWaits.length, 0, 'a source denial never waits for graph policy');
   assert.equal(f.executed.length, executionCount, 'a refused root never executes a plan');
   assert.equal(f.legacy.dataset.gdRootAdapter, undefined);
   assert.equal(root.componentNow('recents'), null, 'a refused root exposes no callbacks');
@@ -116,4 +129,47 @@ function fixture() {
   f.window.gdPrefOwner = 'third';
   assert.throws(() => selected.run('view'), /Editor root changed/);
   f.window.gdEditorRoot.dispose();
+
+  const retry = fixture();
+  const retrying = retry.window.gdEditorRoot.reload();
+  retry.requests[0].resolve(transientRefusal());
+  await flush();
+  assert.equal(retry.policyWaits.length, 1, 'transient refusal waits for graph policy');
+  assert.equal(retry.requests.length, 1, 'transient refusal waits before a fresh request');
+  assert.deepEqual(retry.executed, [], 'a transient refusal never executes a plan');
+  assert.equal(retry.policyWaits[0].signal, retry.requests[0].options.signal);
+  retry.policyWaits[0].resolve();
+  await flush();
+  assert.equal(retry.requests.length, 2, 'policy readiness triggers a fresh root request');
+  assert.equal(retry.requests[1].options.cache, 'no-store');
+  retry.reply(1, true, 'fresh authorized root');
+  await retrying;
+  assert.deepEqual(retry.executed, ['fresh authorized root']);
+  assert.equal(retry.legacy.dataset.gdRootAdapter, 'legacy');
+  retry.window.gdEditorRoot.dispose();
+
+  for (const action of ['reload', 'dispose']) {
+    const stale = fixture();
+    const waiting = stale.window.gdEditorRoot.reload();
+    stale.requests[0].resolve(transientRefusal());
+    await flush();
+    assert.equal(stale.policyWaits.length, 1);
+    const replacement = stale.window.gdEditorRoot[action]();
+    assert(stale.policyWaits[0].signal.aborted, action + ' aborts the old policy wait');
+    // Resolve even after abort: a late readiness notification must not revive
+    // the old generation, regardless of the wait helper's cancellation timing.
+    stale.policyWaits[0].resolve();
+    await flush();
+    assert.equal(stale.requests.length, action === 'reload' ? 2 : 1,
+      action + ' prevents a fresh request from the superseded generation');
+    await waiting;
+    assert.deepEqual(stale.executed, [], 'the superseded generation never executes');
+    assert.equal(stale.legacy.dataset.gdRootAdapter, undefined);
+    if (action === 'reload') {
+      stale.reply(1, true, 'replacement root');
+      await replacement;
+      assert.deepEqual(stale.executed, ['replacement root']);
+    }
+    stale.window.gdEditorRoot.dispose();
+  }
 })().catch(error => { console.error(error); process.exitCode = 1; });

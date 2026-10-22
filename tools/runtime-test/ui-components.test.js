@@ -64,6 +64,17 @@ function fixture() {
     assert.equal(f.window.gdUIComponentRuntimeIdentity('account-menu'), null, 'root refusal never falls back to a legacy selection');
     assert.equal(f.window.gdUIComponentRuntimeIdentity('recents'), null);
   }
+  {
+    const f = fixture();
+    let roots = 0, pickers = 0, inspectors = 0;
+    f.window.gdEditorRoot = {reload() { roots++; }};
+    f.window.gdFnPickerGraph = {reload() { pickers++; }};
+    f.window.gdInspectorGraph = {reload() { inspectors++; }};
+    f.choose();
+    assert.equal(roots, 1, 'configuration refresh reloads the authoritative root');
+    assert.equal(pickers, 0, 'legacy refresh never races the root-owned picker loader');
+    assert.equal(inspectors, 1, 'remaining legacy consumers still refresh');
+  }
   const waiting = {ok: false, code: 'policy-refresh-required', retryable: true, 'retry-after': 1};
   const settle = () => new Promise(resolve => setImmediate(resolve));
   {

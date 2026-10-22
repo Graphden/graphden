@@ -22,3 +22,17 @@
     (owned/record-owned-impls! {id trusted})
     (is (owned/owned-impl? id trusted))
     (is (not (owned/owned-impl? id equal-impostor)))))
+
+
+(deftest package-reload-retains-live-context-implementations
+  (let [id (random-uuid)
+        other-id (random-uuid)
+        original (fn [_ _] :original)
+        reloaded (fn [_ _] :reloaded)
+        override (fn [_ _] :override)]
+    (owned/record-owned-impls! {id original})
+    (owned/record-owned-impls! {id reloaded})
+    (is (owned/owned-impl? id original))
+    (is (owned/owned-impl? id reloaded))
+    (is (not (owned/owned-impl? id override)))
+    (is (not (owned/owned-impl? other-id original)))))

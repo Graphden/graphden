@@ -61,30 +61,30 @@
 
 
 (defn schedule-batches
-  "Split canonical resource batches by prior verdict; never combine batches.
-   Post-test readers still wait for every selected measuring test."
+  "Reorder only within canonical waves/resource batches. Quick pre-checks always
+   precede measuring tests, and post-test readers follow every selected test."
   [batches prior]
   (let [original (vec (mapcat batches [:pre :priority :test :post-test]))
         ids (mapv :name (mapcat identity original))
         position (zipmap (order ids prior) (range))
         category #(case (get-in prior [:status (:name %)])
-                    (:failed :running) 0 :passed 2 1)
-        pieces (mapcat #(map val (sort-by key (group-by category %))) original)
-        ordered (sort-by #(apply min (map (comp position :name) %)) pieces)
-        tests (filter #(= :test (:group (first %))) ordered)]
-    (vec (distinct (mapcat (fn [batch]
-                             (if (= :post-test (:group (first batch)))
-                               (concat tests [batch]) [batch]))
-                           ordered)))))
+                    (:failed :running) 0 :passed 2 1)]
+    (vec (mapcat (fn [wave]
+                   (let [pieces (mapcat #(map val (sort-by key (group-by category %))) (get batches wave))]
+                     (sort-by #(apply min (map (comp position :name) %)) pieces)))
+                 [:pre :priority :test :post-test]))))
 
 
 (defn stage-dependencies
-  "Insert the selected build before the first image consumer, exactly once."
+  "Keep CI quick checks first and insert build before its first image consumer."
   [ordered]
-  (if (some #{"build"} ordered)
-    (vec (distinct (mapcat #(if (#{"e2e" "visual" "integration" "fleet"} %)
-                              ["build" %] [%]) ordered)))
-    ordered))
+  (let [ordered (if (some #{"ci"} ordered)
+                  (into ["ci"] (remove #{"ci"}) ordered)
+                  ordered)]
+    (if (some #{"build"} ordered)
+      (vec (distinct (mapcat #(if (#{"e2e" "visual" "integration" "fleet"} %)
+                                ["build" %] [%]) ordered)))
+      ordered)))
 
 
 (defn begin!

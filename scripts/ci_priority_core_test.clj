@@ -1,6 +1,9 @@
 (ns ci-priority-core-test
   (:require
+    [babashka.fs :as fs]
+    [babashka.process :as p]
     [ci-priority-core :as priority]
+    [clojure.edn :as edn]
     [clojure.test :refer [deftest is run-tests]]))
 
 
@@ -59,10 +62,35 @@
   (is (= [] (priority/integration-first #{"test/graphden/types/core_test.clj"}))))
 
 
-(deftest empty-kaocha-focus-is-not-a-pass
-  (is (priority/empty-focused-run? "WARNING: All 124 tests were skipped. Check focus."))
-  (is (priority/empty-focused-run? "WARNING: No tests were found."))
-  (is (not (priority/empty-focused-run? "27 tests, 104 assertions, 0 failures."))))
+(deftest runtime-order-preserves-full-roster-once
+  (let [all (priority/runtime-order nil)
+        changed #{"tools/runtime-test/undo-journal.test.js"}
+        ordered (priority/runtime-order changed)]
+    (is (= "tools/runtime-test/undo-journal.test.js" (first ordered)))
+    (is (= (frequencies all) (frequencies ordered)))
+    (is (every? #(= 1 %) (vals (frequencies ordered))))
+    (is (= all (priority/runtime-order #{"unknown"})))))
+
+
+;; Task output colors are supplied by bb.edn :init in normal execution.
+(def green "")
+(def red "")
+(def reset "")
+
+
+(deftest js-task-executes-full-roster-once-in-its-own-directory
+  (let [calls (atom [])
+        task (get-in (edn/read-string (slurp "bb.edn")) [:tasks 'test-js :task])
+        expected (set (map (fn [path]
+                             ["tools/runtime-test" "node" (str (fs/file-name path))])
+                           (fs/glob "tools/runtime-test" "*.test.js")))]
+    (with-redefs [priority/changed-paths (constantly nil)
+                  p/shell (fn [opts executable filename]
+                            (swap! calls conj [(:dir opts) executable filename])
+                            {:exit 0})]
+      (eval task))
+    (is (= expected (set @calls)))
+    (is (= (count expected) (count @calls)))))
 
 
 (let [{:keys [fail error]} (run-tests 'ci-priority-core-test)]

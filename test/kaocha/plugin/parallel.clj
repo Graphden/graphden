@@ -44,6 +44,7 @@
   (:require
     [clojure.test :as t]
     [kaocha.plugin :refer [defplugin]]
+    [kaocha.plugin.priority :as priority]
     [kaocha.testable :as testable]
     [kaocha.type.clojure.test]
     [kaocha.type.ns]
@@ -307,13 +308,16 @@
 
 (defn- run-children-mixed
   "Same shape as `testable/run-testables` (vector of result-testables in
-   the input order), but splits children into serial + parallel sets and
-   runs the parallel set on an N-thread pool."
-  [testables test-plan n]
+   the input order). Priority namespaces run sequentially first, then serial
+   remainder, then parallel remainder on an N-thread pool."
+  [testables test-plan n hints]
   (let [load-error? (some ::testable/load-error testables)
-        indexed (map-indexed vector testables)
+        {:keys [remaining] priority-set :priority} (priority/indexed-order testables hints)
+        priority-results (mapv (fn [[i t]]
+                                 [i (run-one t test-plan load-error?)])
+                               priority-set)
         {serial-set true parallel-set false}
-        (group-by (comp ns-serial? second) indexed)
+        (group-by (comp ns-serial? second) remaining)
         serial-results (mapv (fn [[i t]]
                                [i (run-one t test-plan load-error?)])
                              serial-set)
@@ -321,7 +325,7 @@
         parallel-tests (mapv second parallel-set)
         parallel-raw (run-testables-parallel parallel-tests test-plan n load-error?)
         parallel-results (mapv vector (map first parallel-set) parallel-raw)]
-    (->> (concat serial-results parallel-results)
+    (->> (concat priority-results serial-results parallel-results)
          (sort-by first)
          (mapv second))))
 
@@ -334,9 +338,16 @@
         env-n (some-> (System/getenv "KAOCHA_PARALLELISM") parse-long)
         n (or env-n (:kaocha/parallelism testable) 1)
         children (:kaocha.test-plan/tests testable)
+        hints (priority/namespace-hints (System/getenv "GRAPHDEN_CI_PRIORITY_HINTS")
+                                        (:kaocha.testable/id testable))
         results (if (> n 1)
-                  (run-children-mixed children test-plan n)
-                  (testable/run-testables children test-plan))
+                  (run-children-mixed children test-plan n hints)
+                  (let [{:keys [priority remaining]} (priority/indexed-order children hints)
+                        ordered (concat priority remaining)
+                        results (testable/run-testables (mapv second ordered) test-plan)]
+                    (->> (map vector (map first ordered) results)
+                         (sort-by first)
+                         (mapv second))))
         testable (-> testable
                      (dissoc :kaocha.test-plan/tests)
                      (assoc :kaocha.result/tests results))]

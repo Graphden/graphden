@@ -92,6 +92,15 @@
            vec))))
 
 
+(defn runtime-order
+  "Move directly related JS files first while retaining the full file roster."
+  [changed]
+  (let [all (mapv str (sort (fs/glob "tools/runtime-test" "*.test.js")))
+        first-files (runtime-first changed)
+        first-set (set first-files)]
+    (into (vec first-files) (remove first-set) all)))
+
+
 (defn- direct-unit-test
   [source]
   (condp re-matches source
@@ -148,8 +157,8 @@
 
 
 (defn unit-first
-  "At most three exact path-paired unit namespaces. More matches would make
-   this preflight a second broad suite; the full unit run remains required."
+  "At most three exact path-paired unit namespaces to schedule first inside
+   the authoritative full suite."
   [changed]
   (when changed
     (let [namespaces (->> changed
@@ -186,10 +195,3 @@
    :unit (unit-first changed)
    :integration (integration-first changed)
    :browser (browser-first changed)})
-
-
-(defn empty-focused-run?
-  "Kaocha exits 0 when a focus filter selects no tests; reject that warning."
-  [output]
-  (boolean (re-find #"All [0-9]+ tests were skipped\.|No tests were found\."
-                    output)))

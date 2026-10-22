@@ -27,7 +27,7 @@ Then, in that session:
 2. **It self-registers.** Once aligned, the agent picks a branch name and runs
    `bb wt claim <name> "<summary>"` itself — creating `feature/<name>` + an
    isolated worktree and joining the pool. It cannot edit code before this.
-3. **It implements**, keeping `bb ci` (lint + unit) green — its fast loop.
+3. **It implements**, using optional focused diagnostics and committing the result.
 4. **It lands.** It runs the gate (`bb wt merge`) in the background: its
    branch is queued, joins the next merge train with whatever else is ready,
    and the train is gated once on develop + every member. Every selected CI,
@@ -43,12 +43,10 @@ stops only for a real decision that is yours.
 
 ## Why it's safe to run in parallel
 
-- **Fast loop is parallel where it can be.** `bb lint` (no tests) takes no lock
-  at all, so N agents run it simultaneously. A full `bb ci` (unit tests
-  selected) takes a *machine-wide* flock (`/tmp/graphden-ci.lock`) and
-  serializes — two concurrent unit suites on this box once lost 9 of 17 checks
-  to TIMEOUT at load 75 (`scripts/ci.clj` documents the incident). The lock
-  blocks rather than fails, so a queued `bb ci` just waits its turn.
+- **One required validation pass.** A clean committed branch queues directly;
+  no full local CI, pre-queue lint or lint stamp is required. The native gate
+  validates the immutable merged candidate once. Optional local diagnostics
+  share the existing CI admission lock and heavy-work limits.
 - **Heavy checks are serialized.** `integration` + `e2e` run
   against the canonical `graphden-executor:latest`, so exactly one may build it
   at a time. `bb wt merge` enforces that with a machine-wide `flock`; whoever
@@ -122,7 +120,7 @@ Details that are deliberate:
   cannot have read rules that land in the same fast-forward; alone, the next
   train's drift check marks them **NEEDS-ACK**. They keep their queue place and
   their waiters keep waiting; `bb wt ack` prints the diff and re-arms the entry
-  at the same sha (the lint stamp still holds, so no re-lint).
+  at the same sha.
 - **Ctrl-C / kill of a waiter removes its queue entry**, unless a train already
   took it (in a gate or mid-bisection — that verdict is owed). An entry whose
   waiter died without the trap (`kill -9`, a lost terminal) is pruned by the
@@ -135,49 +133,45 @@ Details that are deliberate:
   `<name>-<ts>.log` is a hard link to it, so `bb wt log <name>` and
   `bb wt watch <name>` follow the train the member is in. A bisection writes one
   log per train, so a culprit's newest log is its own one-member run.
-- **Automatic resume order.** The default is CI → verified candidate build →
-  browser E2E → visual → integration → fleet, with unselected stages omitted.
-  Frontend-only trains run build → browser → visual before CI. Each train writes
-  atomic `_train-<ts>.{stages,checks,browser}.edn` scheduling receipts. The next
-  run automatically executes failed/in-flight work first, then the unrun tail,
-  then previously passed work. No log analysis or manual priority flag is needed.
-  For example, a visual failure after CI/build/browser resumes as build → visual
-  → integration → fleet → CI → browser. A browser file failure similarly moves
-  that file and its unrun tail before earlier passing files. New checks join
-  the unrun set; deleted or newly out-of-scope checks are absent from the new roster.
-  Every selected stage/check/file still executes for the new SHA; a previous
-  green result never satisfies a current requirement. Existing browser retries
-  and the separate source-focused CI check retain their current semantics.
-  CI preserves canonical resource batches (it may split, never combine them),
-  and post-test readers wait for their measuring tests. The verified image build
-  precedes image consumers. After integration/fleet, browser admission still
-  waits for the existing memory/load thresholds under the queue lock.
-  `.git/wtq/last-failure/<member>` binds the receipt prefix to the branch, member
-  SHA, target base and current stage. It is saved before stage dispatch so an
-  interrupted stage retains its in-flight hint. Reused branch names, rewritten
-  ancestry, unknown stages and missing receipts are rejected. Malformed progress
-  falls back to the complete current roster; it can never remove a check.
-  Multiple members use the first valid hint in train order. Green trains and
-  new claims clear hints. Old logs are not backfilled; old four-field hints use
-  the same failed/tail/prefix rotation without per-file progress.
-  If an intervening run fails before reaching CI/browser, it carries the last
-  valid detailed receipt forward with its original SHA and an inherited marker.
-  Starting that suite resets every verdict for the new invocation; carried
-  receipts never become current-SHA pass proof.
-  Standalone CI/browser invocations also save worktree-local receipts and reuse
-  them only when the recorded SHA is an ancestor of the current HEAD.
-  Granularity is gate stage, CI check and browser file. Individual Kaocha vars,
-  runtime JS files within `tests-js`, and visual test cases are not reordered.
-- **Changed-file preflight.** `bb ci`/`bb lint` and the landing gate automatically
-  check formatting, syntax and lint for changed Clojure, JavaScript, JSON, CSS,
-  Markdown and shell files before expensive checks. Both CI and the gate use
-  the same preflight entrypoint under the host CI lock, including lint-only runs.
-  It has a two-minute deadline and cleans up descendant processes before releasing
-  admission. The gate uses its target base; standalone
-  commands use the merge base with develop, including uncommitted/untracked files.
-  The check is read-only and does not modify the candidate. Full pre-queue lint
-  and the complete selected CI roster remain mandatory. During editing,
-  `bb scripts/ci.clj --preflight-only` runs the same small checks explicitly.
+- **Single-pass ordering.** The native gate begins with CI, then runs the
+  verified candidate build, browser E2E, visual, integration and fleet stages,
+  omitting only stages outside the selected scope. CI runs quick checks before
+  full selected test suites, followed by their dependent readers. Source-related
+  unit/integration namespaces and runtime JS files run earlier inside those full
+  suites, each once; no separate focused pre-run duplicates them. The browser
+  runner also retains its complete authoritative file roster.
+- **Retry hints never cache passes.** Each train writes atomic
+  `_train-<ts>.{stages,checks,browser}.edn` scheduling receipts. Valid hints rank
+  failed/in-flight work, then the unrun tail, then previously passed work,
+  within the required phase and producer dependencies. A browser file failure
+  moves that file and its unrun tail before earlier passing files. New checks
+  join the unrun set; deleted or out-of-scope checks leave the current roster.
+  Every selected stage/check/file executes for the new candidate. Prior green
+  results never satisfy a current requirement. CI preserves canonical resource
+  batches (it may split, never combine them); readers follow their measuring
+  tests, and the verified build precedes image consumers. Browser admission
+  retains the existing memory/load thresholds under the queue lock. Browser
+  retries, timeouts and strict-flake rules are unchanged.
+  `.git/wtq/last-failure/<member>` binds the receipt prefix to branch, member SHA,
+  target base and current stage before dispatch. Reused names, rewritten
+  ancestry, unknown stages and missing receipts are rejected. Malformed hints
+  fall back to the complete current roster. Multiple members use the first
+  valid hint in train order. Green trains and new claims clear hints.
+  An intervening run that does not reach CI/browser preserves the last detailed
+  receipt with its original SHA and an inherited marker. Starting that suite
+  resets every verdict; inherited receipts never become current-SHA pass proof.
+  Standalone CI/browser invocations also save worktree-local ordering receipts
+  and accept them only when the recorded SHA is an ancestor of current HEAD.
+- **Candidate integrity and optional diagnostics.** CI requires a committed
+  HEAD and clean nonignored tree at start and finish, and rejects any candidate
+  change during execution. Queueing does not launch a separate lint or
+  changed-file preflight pass. The selected quick CI checks provide the required
+  early signal in the single native run. During editing,
+  `bb scripts/ci.clj --preflight-only` explicitly runs the read-only changed-file
+  formatting/syntax/lint diagnostics. It keeps its bounded timeout, process-tree
+  cleanup and host admission. It may inspect uncommitted edits; it is optional
+  and does not provide reusable gate proof. Full local CI or lint may also be
+  chosen for diagnosis, but is never required before queueing.
 - **Machine receipts.** The same directory holds `_train-<ts>.report.edn`
   (exact assembled SHA, scope, exit, failed stage, phase durations, queue wait, image ID and
   jar hash), `_train-<ts>.ci-expected.edn` (check roster computed before CI),
@@ -191,27 +185,17 @@ Details that are deliberate:
 - **`bb wt list` / `status`** show `QUEUED`, `IN-TRAIN`, `SPLITTING` and the
   final verdicts, the running train (id, members, log), the queue order and
   live soon-markers.
-- **Lint before the queue.** `bb wt merge` runs `bb lint --retry-solo` on the
-  member's worktree first (outside the gate lock; stamped per sha in
-  `.git/wtq/lint-ok/`, so a re-queue of the same commit does not re-lint).
-  Pre-queue lints run ONE AT A TIME (`.git/wtq/lint.lock`; a waiting one names
-  the holder): side by side at load 40-80 they timed each other out. A lint
-  still yields to the gate's heavy phases, and the gate yields back between
-  trains (`WTQ_GATE_LINT_WAIT`, default 900 s) so back-to-back trains cannot
-  starve it. A check
-  that still goes red is re-run once alone before it counts — one that passes
-  alone is reported as such (with its first attempt), not failed. It refuses
-  to queue a red
-  or dirty tree. The conductor re-checks each member's stamp against its
-  queued sha. The train still runs `bb ci` (lint included) on the MERGED tree —
-  cross-branch drift such as a stale devtour bake only shows there.
+- **Queue admission.** `bb wt merge` requires a clean committed worktree and
+  pins its SHA. It performs no pre-queue full lint or lint-stamp handshake.
+  The conductor validates the assembled candidate through the single native
+  gate before advancing develop; merged-tree drift is checked there.
 - **Memory.** A gate starts only with `WTQ_MEM_MIN_MB` (default 6000) of
   `MemAvailable` besides the load bound: over 237 gate runs the gate's own
   footprint was p50 4.2 GB, p90 5.4 GB on this 11.9 GB host, and a gate
   admitted short of it is OOM-killed mid-suite rather than slowed. While the
   gate is in a heavy phase (bb ci, image build, e2e, visual, integration,
   fleet) it writes `.git/wtq/gate-heavy` (phase + pid; stale once the pid is
-  gone); `bb wt test <kaocha args>`, `bb wt up` and the pre-queue lint wait
+  gone); `bb wt test <kaocha args>` and `bb wt up` wait
   it out, and also wait for `WTQ_AGENT_MEM_MIN_MB` (default 3000).
 - **Rolling e2e baseline.** A GREEN gate that ran e2e (and was not
   DEGRADED) keeps its e2e output in `.git/wtq/e2e-runs/` (newest 9,

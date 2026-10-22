@@ -74,11 +74,10 @@ You were started in one of two ways:
    It prints the actual diff, not a summary — the point is that the new rules
    pass through your context on the way to being acknowledged. Read them, decide
    whether they change what you are doing. If they don't, that is all: the ack
-   re-arms your queued entry and the waiting `bb wt merge` carries on (no
-   re-lint). If they do, fix, commit, and re-run `bb wt merge`.
+   re-arms your queued entry and the waiting `bb wt merge` carries on. If they do, fix, commit, and re-run `bb wt merge`.
 4. **Commit as you go** — conventional-commit format, English messages.
 5. **Land it yourself. Don't ask permission to finish.** When the feature is
-   complete and `bb lint` is green, run the gate (`bb wt merge`) — then, once it
+   complete and committed, run the gate (`bb wt merge`) — then, once it
    is green, clean up (`bb wt drop`). Report what happened. You do not pause for
    a sign-off at either step: the gate cannot advance `develop` on a red result,
    and `wt drop` refuses a branch that is not merged, so neither step can lose
@@ -96,48 +95,42 @@ You were started in one of two ways:
    build (not just a detail with a sane default), **stop and ask the user** —
    don't guess load-bearing decisions.
 2. **Implement** in small commits, inside your worktree.
-3. **Fast feedback:** after each batch of edits, run formatting/syntax/lint on
-   the changed files before expensive tests (`bb scripts/ci.clj --preflight-only`).
-   `bb ci`, `bb lint` and the gate run this preflight automatically, without
-   additional flags. A final complete **`bb lint` is mandatory** before queueing;
-   a changed-file check does not replace it. Coordinate JVM linters with the
-   shared heavy-work slot. Run targeted tests
-   through **`bb wt test --focus <ns>`** (same kaocha arguments) around the code
-   you actually changed — never raw `clojure -M:dev:test -m kaocha.runner`. The
-   wrapper waits while the landing gate is in a heavy phase (image build, unit
-   suite, e2e, integration — it announces them in `.git/wtq/gate-heavy`) or
-   `MemAvailable` is below `WTQ_AGENT_MEM_MIN_MB` (default 3000): five agents'
-   JVMs next to a booting e2e stack is how this 12 GB host runs out of memory
-   and a gate goes red on environment. `bb wt up` waits the same way. A full local `bb ci` before queueing is OPTIONAL when you
-   are the only agent in the pool — the gate re-runs `bb ci` on the merged
-   result anyway (diff-scoped via `--since`: checks whose `:relevant` paths in
-   `scripts/checks.edn` saw no change are skipped visibly; `WTQ_CI_SKIP=a,b`
-   force-skips a stage when you must, announced in the gate log), so a pre-queue full run only duplicates it. When
-   `bb wt list` shows OTHER claimed agents, go `bb ci`-green before queueing:
-   a red gate then burns a ~35-min serialized slot the whole pool waits behind.
-   Either way, `bb ci` stays your only ALLOWED local heavy test command — never
-   `bb rebuild` / `bb test-e2e` / `bb test-integration` from a worktree.
-4. **Land** — when the feature is complete and `bb lint` is green, run the
-   gate. No sign-off needed (Rule 5):
+3. **Optional diagnostics:** use `bb scripts/ci.clj --preflight-only` for
+   changed-file formatting/syntax/lint, or **`bb wt test --focus <ns>`** for
+   focused tests. These are editing aids, not required pre-queue proof. Do not
+   run raw `clojure -M:dev:test -m kaocha.runner`. The wrapper waits while the
+   gate is in a heavy phase (`.git/wtq/gate-heavy`) or `MemAvailable` is below
+   `WTQ_AGENT_MEM_MIN_MB` (default 3000); `bb wt up` waits the same way.
+   Coordinate optional JVM diagnostics with this shared heavy-work slot.
+   Neither a full local `bb ci` nor a full `bb lint` is required before queueing,
+   regardless of how many agents are claimed. If explicitly chosen, standalone
+   CI requires a committed, unchanged HEAD and clean nonignored tree at start and
+   end. Local diagnostics may repeat work by choice; they cannot substitute
+   for the native gate. Never drive `bb rebuild`, `bb test-e2e` or
+   `bb test-integration` from a worktree.
+4. **Land** — commit the complete feature and run the gate. No sign-off needed
+   (Rule 5):
 
-   `bb wt merge` first runs **`bb lint` on your worktree** (outside the queue,
-   one agent's lint at a time — it says so when it waits for another's; a check
-   that goes red is re-run once ALONE before it counts, and one that passes
-   alone is reported, not failed; skipped if that exact commit already passed)
-   and refuses to queue a red or
-   uncommitted tree (PRECOND, exit 3, with the lint output) — a lint red found
-   inside a train would cost everyone in it a gate. Then it **enqueues** your
-   branch at its current commit and waits. A gate also only starts with enough
+   `bb wt merge` rejects an uncommitted tree (PRECOND, exit 3), then enqueues
+   your branch at its current commit and waits. A gate also only starts with enough
    memory free (`WTQ_MEM_MIN_MB`, default 6000 — the gate's measured p90
    footprint), so "waiting for memory" in the output is the queue protecting
    the run, not a hang. It
    may land you in a **merge train**: every branch that is ready at the same
    time is merged on top of the latest develop together and gated ONCE
-   (ci → build image → e2e → integration → fast-forward develop → advance the
-   demo instance — only if it was running when the gate started; a `--deploy`
+   (CI → build image → browser → visual → integration → fleet → fast-forward
+   develop → advance the demo instance — only if it was running when the gate started; a `--deploy`
    landing with the demo down leaves `.git/wtq/demo-needs-reset`, which the
    next `bb instance-up` honours). You still get **your own** verdict and exit
-   code. A full run takes **~30–50 min**, a docs-only / diff-scoped one ~10 —
+   code. The single native gate runs quick CI checks before full selected
+   suites on the immutable assembled candidate. Source-related cases run first
+   inside the full unit/integration/JS suite, each namespace or file once.
+   Retry receipts rank work, including browser files, but skip no selected
+   checks and reuse no passes. CI rejects a changed HEAD or nonignored tree between
+   start and finish. Full selected checks, timeouts and strict-flake rules
+   remain mandatory.
+
+   A full run takes **~30–50 min**, a docs-only / diff-scoped one ~10 —
    plus the queue — longer than a foreground command may run, so **launch it
    with `run_in_background: true`** and wait to be re-invoked when it exits.
 

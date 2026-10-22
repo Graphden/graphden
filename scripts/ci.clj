@@ -16,6 +16,7 @@
    and the suite continues so the user always gets a result line."
   (:require
     [babashka.process :as p]
+    [ci-priority-core :as priority]
     [ci-proc]
     [ci-report]
     [ci-resume]
@@ -410,7 +411,7 @@
    have run, so every count reads low and every budget passes), so it is
    skipped rather than reported as a reassuring lie.
 
-   `retry-solo?` (`--retry-solo`, the pre-queue lint of `wt merge`): the
+   `retry-solo?` (the explicit diagnostic `--retry-solo` option): the
    lint wave's reds are re-run one at a time before they count
    (`ci-proc/retry-solo!`). Only that wave — a flaky TEST must stay red."
   [checks status results failed retry-solo?]
@@ -559,6 +560,15 @@
                         120000 live-procs))
 
 
+(defn- assert-candidate!
+  [initial]
+  (let [current {:sha (ci-resume/git-output "rev-parse" "HEAD")
+                 :worktree-status (ci-resume/git-output "status" "--porcelain" "--untracked-files=normal")}]
+    (when-not (ci-report/stable-candidate? initial current)
+      (throw (ex-info "CI requires one unchanged committed candidate; commit edits and rerun"
+                      {:initial-sha (:sha initial) :current-sha (:sha current)})))))
+
+
 (defn run-ci
   "Select the checks, run them in waves behind a live progress line,
    report. Coverage lives in `bb coverage` — `bb ci` runs the plain
@@ -569,26 +579,22 @@
         ;; narrows it, `--since` diff-scopes it, `--skip` force-skips.
         {selected-checks :run scoped :scoped manual :manual since :since}
         (select-checks *command-line-args*)
-        checks (mapv (fn [check]
-                       (if (= "tests-focused" (:name check))
-                         (assoc check :extra-env {"GRAPHDEN_CI_SINCE" (or since "")})
-                         check))
-                     selected-checks)
-        preflight? (not= (System/getenv "GRAPHDEN_FAST_DONE_SHA")
-                         (ci-resume/git-output "rev-parse" "HEAD"))
-        ;; A changed-file preflight can use JVM fallback linters, including in
-        ;; lint-only invocations. Admit it before spawning those children.
-        needs-lock? (or preflight? (some #(#{:priority :test} (:group %)) checks))
+        candidate {:sha (ci-resume/git-output "rev-parse" "HEAD")
+                   :worktree-status (ci-resume/git-output "status" "--porcelain" "--untracked-files=normal")}
+        hints (select-keys (priority/plan (priority/changed-paths since)) [:unit :integration])
+        checks (mapv #(assoc % :extra-env {"GRAPHDEN_CI_SINCE" (or since "")
+                                           "GRAPHDEN_CI_PRIORITY_HINTS" (pr-str hints)}) selected-checks)
         report-path (System/getenv "GRAPHDEN_CI_REPORT")
+        proof? (or report-path (not (some #{"--groups"} *command-line-args*)))
         ;; An old green receipt must not survive a crash in a new invocation.
         _ (when report-path
             (ci-report/write-atomic! report-path
-                                     {:schema 1 :complete false :sha (str/trim (:out (p/shell {:out :string} "git" "rev-parse" "HEAD")))
+                                     {:schema 1 :complete false :sha (:sha candidate)
                                       :command (into ["bb" "ci"] *command-line-args*) :exit nil}))
         _ (report-skips! scoped manual since)]
-    (with-admission! needs-lock?
+    (with-admission! true
       (fn [lock-handle]
-        (when preflight? (run-preflight! since))
+        (when proof? (assert-candidate! candidate))
         (let [status (atom (merge (into {} (map (fn [c] [(:name c) :pending]) checks))
                                   (into {} (map (fn [c] [(:name c) :scoped]) scoped))
                                   (into {} (map (fn [c] [(:name c) :manual-skip]) manual))))
@@ -614,11 +620,12 @@
           (reset! progress-running false)
           @progress-thread
           (println)                     ; close the progress row
+          (when proof? (assert-candidate! candidate))
           (print-report! checks scoped manual @status @results since)
           (when report-path
             (ci-report/write-atomic! report-path
                                      (ci-report/receipt
-                                       {:sha (str/trim (:out (p/shell {:out :string} "git" "rev-parse" "HEAD")))
+                                       {:sha (:sha candidate)
                                         :command (into ["bb" "ci"] *command-line-args*)
                                         :since since :checks checks :scoped scoped :manual manual
                                         :status @status :results @results

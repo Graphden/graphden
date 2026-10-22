@@ -794,33 +794,33 @@
                         "node" "cloud-membership-authz-e2e.js"))))}
 
   ci-priority
-  {:doc "Run exact source-related unit and JS tests before the broad CI test wave. The full suite still follows. GRAPHDEN_CI_SINCE is set by bb ci."
+  {:doc "Print source-related ordering hints; never launch tests. GRAPHDEN_CI_SINCE is set by bb ci."
    :task (load-file "scripts/ci_priority.clj")}
 
   test-js
   {:doc "JS tests that need NO graphden stack — tools/runtime-test/*.test.js, run under node's vm with no browser at all: the shared client runtime, and (since 2026-08-22) the editor's type helpers + the resolution-section renderer.
 
    Those last two used to live in tools/browser-test as `type-system-ui-*.test.js`, driving a real chromium at a LOADED editor because they read editor globals. That put them in no runner at all — this task excluded them, run-edit-tests.sh's glob excluded them, so `shortTypeLabel(['list','text']) = '[text]'` was asserted nowhere. They now take their globals as fixtures (a 3-line `richTypes`, a `lookups` mock) and their DOM from `tools/runtime-test/mini-dom.js`, which is the smaller and more honest test anyway: the inputs are written down instead of being whatever the server shipped."
-   :task (let [;; dir → glob. Same contract as run-edit-tests.sh: adding a file
-               ;; takes a glob, never an edit here.
-               groups {"tools/runtime-test" "*.test.js"}
-               failed (atom [])]
-           (doseq [[dir pattern] groups
-                   f (sort-by str (fs/glob dir pattern))
-                   :let [file (str (fs/file-name f))
-                         ;; `:dir` matters — each script resolves its imports
-                         ;; relative to its own directory.
-                         {:keys [exit]} (p/shell {:dir dir :continue true}
-                                                 "node" file)]]
-             (when-not (zero? exit)
-               (swap! failed conj (str dir "/" file))))
-           ;; `(deref failed)`, not `@failed` — bb.edn is read as EDN, where the
-           ;; deref reader macro is not a thing.
-           (if (seq (deref failed))
-             (do (println (str red "✗ test-js: " (count (deref failed)) " failed" reset))
-                 (doseq [f (deref failed)] (println (str "    " f)))
-                 (System/exit 1))
-             (println (str green "✓ test-js" reset))))}
+   :task (do
+           (require (quote [ci-priority-core :as priority]))
+           (let [changed (priority/changed-paths (System/getenv "GRAPHDEN_CI_SINCE"))
+                 files (priority/runtime-order changed)
+                 failed (atom [])]
+             (doseq [path files
+                     :let [dir (str (fs/parent path))
+                           file (str (fs/file-name path))
+                           ;; Each script resolves imports relative to its own directory.
+                           {:keys [exit]} (p/shell {:dir dir :continue true}
+                                                   "node" file)]]
+               (when-not (zero? exit)
+                 (swap! failed conj path)))
+             ;; `(deref failed)`, not `@failed` — bb.edn is read as EDN, where the
+             ;; deref reader macro is not a thing.
+             (if (seq (deref failed))
+               (do (println (str red "✗ test-js: " (count (deref failed)) " failed" reset))
+                   (doseq [f (deref failed)] (println (str "    " f)))
+                   (System/exit 1))
+               (println (str green "✓ test-js" reset)))))}
 
   test-perf
   {:doc "Perf scenarios (focus ^:perf) — what each API-level operation costs in SQL round trips, written to perf/runs/perf.edn for `bb perf` to gate. ~1 min, nearly all of it the shared fixture. In-JVM + testcontainers only: no built image, so unlike the e2e suite this runs anywhere, CI included."
@@ -1045,12 +1045,13 @@
              (load-file "scripts/ci_select_test.clj")
              (load-file "scripts/ci_report_test.clj")
              (load-file "scripts/ci_priority_core_test.clj")
+             (p/shell "bb" "scripts/ci_priority_schedule_test.clj")
              (load-file "scripts/ci_resume_test.clj")
              (load-file "scripts/ci_fast_test.clj")
              (load-file "scripts/ci_runner_order_test.clj"))}
 
   lint
-  {:doc "Every linter, parallel, NO unit tests — the fast pre-gate check (~1 min). `--retry-solo` re-runs each red check alone before it counts (wt merge's pre-queue lint)."
+  {:doc "Optional linter diagnostic, including uncommitted edits. The native gate already runs these checks once; --retry-solo is diagnostic only."
    :task (binding [*command-line-args* (into ["--groups" "clj,web,infra,docs,sec,commit"]
                                              *command-line-args*)]
            (load-file "scripts/ci.clj"))}

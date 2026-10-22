@@ -55,7 +55,7 @@
     ;; no rule, no vars — `rule-owner-of` returns nil, the popover
     ;; never opens, so a narrative would be dead prose.
     :map :filter :reduce :find-first :group-by :partition-by :sort-by
-    :constantly :transduce :call :call-noargs :call-noargs-traced :call-with :call-traced :with-heartbeat :with-timeout :try
+    :constantly :transduce :call :server-call :call-noargs :call-noargs-traced :call-with :call-traced :with-heartbeat :with-timeout :try
     ;; stdlib batch 2026-09-22 (var-carrying declarations):
     :last :partition :frequencies
     ;; audit-3 guard additions (every-rule-owner-has-a-narrative):

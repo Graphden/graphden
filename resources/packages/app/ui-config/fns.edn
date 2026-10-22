@@ -1,7 +1,7 @@
 {:namespace "app.ui-config"
  :description "Pure shared editor configuration and a protected authenticated metadata resolver. No component body copies or per-user selector table."
  :fns
- [{:name :_editor-bootstrap-result :type {:legacy :bool :account-menu :app.ui-account-menu/root-component :recents :app.ui-recents/root-component :fn-picker :app.ui-fn-picker/root-component}}
+ [{:name :_editor-bootstrap-result :type {:legacy :bool :account-menu :app.ui-account-menu/root-component :recents :app.ui-recents/root-component :fn-picker :app.ui-fn-picker/root-component :tutorial-catalog :app.ui-tutorial-catalog/root-component}}
   {:name :legacy-editor-root :parent :const
    :description "Explicit adapter retaining the editor hosts not yet selected through root callable records."
    :return-type {:legacy :bool} :lambda-params []
@@ -10,9 +10,11 @@
    :args {:map :legacy-editor-root :key {:value :account-menu} :value :app.ui-account-menu/account-menu-component}}
   {:name :_root-recents :parent :assoc
    :args {:map :_root-account-menu :key {:value :recents} :value :app.ui-recents/recents-component}}
+  {:name :_root-fn-picker :parent :assoc
+   :args {:map :_root-recents :key {:value :fn-picker} :value :app.ui-fn-picker/picker-component}}
   {:name :component-editor-root :parent :assoc :lambda-params []
    :return-type :_editor-bootstrap-result
-   :args {:map :_root-recents :key {:value :fn-picker} :value :app.ui-fn-picker/picker-component}}
+   :args {:map :_root-fn-picker :key {:value :tutorial-catalog} :value :app.ui-tutorial-catalog/catalog-component}}
   {:name :editor-root :parent :call
    :description "Ordinary browser root invocation with an explicit legacy editor adapter."
    :return-type :_editor-bootstrap-result

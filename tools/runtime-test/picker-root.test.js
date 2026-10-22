@@ -29,10 +29,19 @@ const callback = label => ({run(entry, input) {
 }});
 const tick = () => new Promise(resolve => setImmediate(resolve));
 (async () => {
+  listeners.get('gd-editor-root-changing')();
+  popupOpen = true;
   listeners.get('gd-editor-root-ready')();
+  assert.equal(popupOpen, true, 'same-root ready keeps a native picker opened during initial loading');
+  assert.equal(closed, 0, 'readiness is not root retirement');
+  assert.equal(window.gdFnPickerGraph.ready, false);
+  assert.equal(accepted, null);
   current = callback('first graph');
   requests.shift()(current);
   await tick();
+  assert.equal(popupOpen, true, 'finishing the same-root component load preserves the native popup');
+  assert.equal(window.gdFnPickerGraph.ready, true);
+  assert.equal(accepted, null, 'a native popup cannot certify graph rendering on ready');
   const host = {querySelectorAll: () => []};
   const arranged = {exact: [], groups: [], total: 0, hiddenOther: 0};
   popupOpen = true;

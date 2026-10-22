@@ -1,13 +1,14 @@
 (ns ci-report-test
   (:require
     [ci-report]
+    [clojure.string :as str]
     [clojure.test :refer [deftest is run-tests]]))
 
 
 (deftest changed-or-dirty-candidate-cannot-own-a-green-receipt
-  (let [initial {:sha (apply str (repeat 40 "a")) :worktree-status ""}
+  (let [initial {:sha (str/join (repeat 40 "a")) :worktree-status ""}
         dirty (assoc initial :worktree-status " M src/a.clj")
-        moved (assoc initial :sha (apply str (repeat 40 "b")))]
+        moved (assoc initial :sha (str/join (repeat 40 "b")))]
     (is (ci-report/stable-candidate? initial initial))
     (is (not (ci-report/stable-candidate? initial moved)))
     (is (not (ci-report/stable-candidate? initial dirty)))

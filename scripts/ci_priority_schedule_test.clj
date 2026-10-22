@@ -1,36 +1,21 @@
-;; Load the real plugin against tiny Kaocha stubs: no JVM, database or containers.
-;; These test-only namespaces stub Kaocha for the real runner loaded below.
-#_{:clj-kondo/ignore [:namespace-name-mismatch]}
-(ns kaocha.plugin)
+;; The real runner is loaded against runtime-only stubs in this BB subprocess.
+;; Keep the stubs out of static namespace analysis: they must not replace the
+;; real Kaocha exports used when kondo analyzes the rest of the repository.
+(load-string
+  "(ns kaocha.plugin)
+   (defmacro defplugin [& _] nil)
+   (ns kaocha.testable)
+   (defmulti -run {:arglists '([testable plan])}
+     (fn [testable _] (:kaocha.testable/type testable)))
+   (defn run-testable [testable _] testable)
+   (defn run-testables [testables plan]
+     (mapv #(run-testable % plan) testables))
+   (ns kaocha.type.clojure.test)
+   (ns kaocha.type.ns)
+   (ns kaocha.type.var)
+   (ns user)")
 
 
-(defmacro defplugin
-  [& _]
-  nil)
-
-
-#_{:clj-kondo/ignore [:namespace-name-mismatch]}
-(ns kaocha.testable)
-(defmulti -run (fn [testable _] (:kaocha.testable/type testable)))
-
-
-(defn run-testable
-  [testable _]
-  testable)
-
-
-(defn run-testables
-  [testables plan]
-  (mapv #(run-testable % plan) testables))
-
-
-#_{:clj-kondo/ignore [:namespace-name-mismatch]}
-(ns kaocha.type.clojure.test)
-#_{:clj-kondo/ignore [:namespace-name-mismatch]}
-(ns kaocha.type.ns)
-#_{:clj-kondo/ignore [:namespace-name-mismatch]}
-(ns kaocha.type.var)
-(ns user)
 (load-file "test/kaocha/plugin/priority.clj")
 (load-file "test/kaocha/plugin/parallel.clj")
 
@@ -130,8 +115,8 @@
                                      (swap! events conj [:start id @active])
                                      (try
                                        (when (pool-ids id)
-                                         (.countDown both-started)
-                                         (when-not (.await both-started 5 TimeUnit/SECONDS)
+                                         (CountDownLatch/.countDown both-started)
+                                         (when-not (CountDownLatch/.await both-started 5 TimeUnit/SECONDS)
                                            (throw (ex-info "Pool workers did not overlap" {}))))
                                        (assoc child :ran true)
                                        (finally

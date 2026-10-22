@@ -1,3 +1,4 @@
+const {verifyTourCatalogRootSelection} = require('./tour-catalog-root-test-helpers');
 'use strict';
 const {assert, api, BASE} = require('./edit-test-helpers');
 const {waitTourTitle, clickTourButton} = require('./tutorial-tour-helpers');
@@ -149,15 +150,17 @@ async function walkUIComponentsLesson(page, {onReceipt = async () => {}, onStage
   const previous = await page.evaluate(() => ({components: gdPrefRead('components'),
     configuration: gdUIConfigurationState().selection['fn-id'], theme: gdPrefRead('theme'),
     picker: gdUIComponentsRoots()['picker-id'], branch: getCurrentBranchName()}));
-  // The tour title can advance before the root menu and lazy catalog accept
-  // this selection. Capture only after both actual runtimes are ready.
+  // The catalogue certifies root identity only while a real host is painted.
+  await verifyTourCatalogRootSelection(page, previous.configuration);
+  await waitTourTitle(page, 'Personalize the menu');
+  // Capture persistent runtimes after the temporary catalogue closes.
   await page.waitForFunction(configuration => window.gdShellMenuGraph?.ready
-    && ['account-menu', 'tutorial-catalog'].every(name => gdUIComponentRuntimeIdentity(name) === configuration),
+    && gdUIComponentRuntimeIdentity('account-menu') === configuration,
   previous.configuration, {timeout: 60000});
   const loadedComponents = await captureLoadedUIComponents(page);
   await settleComponents(loadedComponents);
-  assert(loadedComponents.names.includes('account-menu') && loadedComponents.names.includes('tutorial-catalog'),
-    'the menu and tutorial catalog use the ordinary configuration before personalization');
+  assert(loadedComponents.names.includes('account-menu'),
+    'the menu uses the ordinary configuration after the catalogue paint proof');
   const applyPath = await page.evaluate(() => new URL(API.api_ui_configuration_apply, location.href).pathname);
   const matchesApply = url => url.pathname === applyPath;
   let selectionWaitedForPersistence = false;

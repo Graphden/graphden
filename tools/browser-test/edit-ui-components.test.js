@@ -120,12 +120,10 @@ const {waitForLoadedUIComponents, drainUIPlanReplies, observeUIPlanLoads} = requ
   const forcePolicyRetry = process.env.GRAPHDEN_POLICY_RETRY_PROOF === '1';
   const forcedPolicyRetries = new Set();
   const forcedCleanupPolicyRetries = new Set();
-  // The menu is supplied by the fail-closed root HOF. Only the legacy
-  // tutorial loader transparently retries this component-plan refusal.
-  const proofComponents = new Set(['tutorial-catalog']);
-  await page.route(url => url.pathname.endsWith('/ui/configuration/plan'), async route => {
-    const request = route.request();
-    const component = request.method() === 'POST' ? request.postDataJSON()?.component : undefined;
+  // Both menu and catalogue now use the same fail-closed editor root.
+  const proofComponents = new Set(['editor-root']);
+  await page.route(url => url.pathname.endsWith('/ui/root/plan'), async route => {
+    const component = 'editor-root';
     const forced = cleanupCommitted ? forcedCleanupPolicyRetries : forcedPolicyRetries;
     if ((cleanupCommitted || forcePolicyRetry) && proofComponents.has(component) && !forced.has(component)) {
       forced.add(component);
@@ -178,16 +176,16 @@ const {waitForLoadedUIComponents, drainUIPlanReplies, observeUIPlanLoads} = requ
     await serverCalls.settle();
     await Promise.all(pendingReplies);
     assert.deepEqual(forcedCleanupPolicyRetries, proofComponents,
-      'the loaded legacy tutorial catalog recovers an exact policy refusal after the undo commit');
+      'the editor root recovers an exact policy refusal after the undo commit');
     if (forcePolicyRetry) {
       assert.deepEqual(forcedPolicyRetries, proofComponents,
-        'the targeted proof forced the legacy component policy refusal');
+        'the targeted proof forced the editor root policy refusal');
       for (const component of proofComponents) {
-        assert(planReplies.some(reply => reply.component === component && reply.status === 422 && reply.retryable),
+        assert(rootPlans.some(reply => reply.status === 422 && reply.retryable),
           'the harness observed the ' + component + ' policy refusal');
       }
       assert(errors.filter(error => error.kind === 'console' && error.text.includes('status of 422')).length >= proofComponents.size,
-        'the browser emitted the legacy network-console error under test');
+        'the browser emitted the root network-console error under test');
     }
     const behaviorVerified = process.env.GRAPHDEN_COMPONENT_CLEANUP_ONLY !== '1';
     const unexpected = unexpectedCleanupErrors(unexpectedThemeRetryErrors(

@@ -3,7 +3,7 @@
     [babashka.fs :as fs]
     [babashka.process :as p]
     [ci-priority-core :as priority]
-    [clojure.edn :as edn]
+    [clojure.string :as str]
     [clojure.test :refer [deftest is run-tests]]))
 
 
@@ -72,25 +72,27 @@
     (is (= all (priority/runtime-order #{"unknown"})))))
 
 
-;; Task output colors are supplied by bb.edn :init in normal execution.
-(def green "")
-(def red "")
-(def reset "")
-
-
-(deftest js-task-executes-full-roster-once-in-its-own-directory
-  (let [calls (atom [])
-        task (get-in (edn/read-string (slurp "bb.edn")) [:tasks 'test-js :task])
-        expected (set (map (fn [path]
-                             ["tools/runtime-test" "node" (str (fs/file-name path))])
+(deftest fresh-bb-task-executes-full-roster-once-in-its-own-directory
+  ;; A real child BB process compiles the task with ONLY bb.edn's :requires.
+  ;; Evaluating its body in this test ns would mask a missing priority alias.
+  (let [dir (fs/create-temp-dir)
+        log (str (fs/path dir "node-calls.tsv"))
+        stub (str (fs/path dir "node"))
+        runtime-dir (str (fs/canonicalize "tools/runtime-test"))
+        expected (set (map (fn [path] [runtime-dir "1" (str (fs/file-name path))])
                            (fs/glob "tools/runtime-test" "*.test.js")))]
-    (with-redefs [priority/changed-paths (constantly nil)
-                  p/shell (fn [opts executable filename]
-                            (swap! calls conj [(:dir opts) executable filename])
-                            {:exit 0})]
-      (eval task))
-    (is (= expected (set @calls)))
-    (is (= (count expected) (count @calls)))))
+    (try
+      (spit stub "#!/usr/bin/env bash\nprintf '%s\\t%s\\t%s\\n' \"$PWD\" \"$#\" \"$1\" >> \"$CI_JS_TASK_CALL_LOG\"\n")
+      (p/shell "chmod" "+x" stub)
+      (let [result (p/shell {:out :string :err :string :continue true
+                             :extra-env {"PATH" (str dir (System/getProperty "path.separator") (System/getenv "PATH"))
+                                         "CI_JS_TASK_CALL_LOG" log "GRAPHDEN_CI_SINCE" ""}}
+                            "bb" "test-js")
+            calls (if (fs/exists? log) (mapv #(str/split % #"\t") (str/split-lines (slurp log))) [])]
+        (is (zero? (:exit result)) (str (:out result) (:err result)))
+        (is (= expected (set calls)))
+        (is (= (count expected) (count calls))))
+      (finally (fs/delete-tree dir)))))
 
 
 (let [{:keys [fail error]} (run-tests 'ci-priority-core-test)]

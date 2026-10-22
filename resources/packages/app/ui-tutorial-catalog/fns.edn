@@ -1,16 +1,14 @@
 {:namespace "app.ui-tutorial-catalog"
  :description "Pure browser-local presentation of the ordered lesson catalogue. History, requirements, links, and actions remain editor-owned."
  :fns
- [{:name :_root-view-input :type {:inputs :_catalog-inputs}}
-  {:name :_root-view-result
+ [{:name :_root-view-result
    :type {:counts :web.html/hiccup-node :sections :_catalog-sections :empty :web.html/hiccup-node
           :intro :web.html/hiccup-node :resume-label :text
-          :styles [:list {:selector :text :declarations [:map :keyword :text]}]}}
-  {:name :_root-view-callable :fn-type [{:input :app.ui-tutorial-catalog/_root-view-input} :app.ui-tutorial-catalog/_root-view-result]}
+          :styles [:list {:selector :text :declarations [:map [:union :keyword :text] :text]}]}}
+  {:name :_root-view-callable :fn-type [{:inputs :_catalog-inputs} :app.ui-tutorial-catalog/_root-view-result]}
   {:name :root-component :type {:view :app.ui-tutorial-catalog/_root-view-callable}}
-  {:name :root-view :parent :catalog-view :lambda-params [:input]
-   :return-type :app.ui-tutorial-catalog/_root-view-result
-   :args {:inputs {:parent :get :args {:coll {:as :input :type :app.ui-tutorial-catalog/_root-view-input} :key {:value :inputs}}}}}
+  {:name :root-view :parent :catalog-view :lambda-params [:inputs]
+   :return-type :app.ui-tutorial-catalog/_root-view-result}
   {:name :_root-view-assoc :parent :assoc-fn
    :args {:value {:as :value :type :app.ui-tutorial-catalog/_root-view-callable}}}
   {:name :catalog-component :parent :_root-view-assoc :return-type :app.ui-tutorial-catalog/root-component

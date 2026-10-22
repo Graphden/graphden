@@ -21,7 +21,11 @@
 
 (def ^:private legacy-components
   {:account-menu {:namespace "app.ui-account-menu" :prefix "account-menu"}
-   :recents {:namespace "app.ui-recents" :prefix "recents"}})
+   :recents {:namespace "app.ui-recents" :prefix "recents"}
+   ;; Read-only C1 bridge until the deterministic personal-root migration replaces
+   ;; this adapter. New roots select callbacks only through ordinary graph refs.
+   :fn-picker {:namespace "app.ui-fn-picker" :prefix "picker"
+               :roles [:view] :inputs {:view #{"model"}}}})
 
 
 (def ^:private role-inputs
@@ -73,10 +77,9 @@
 (defn- wrapper
   "Project a unary envelope into the old checked entry's public arguments.
    These nodes use only generic get/const/call; they add no source authority."
-  [target role input]
+  [target role input allowed]
   (let [accepted (set (:accepted input))
         required (set (:required input))
-        allowed (get role-inputs role)
         ;; A HOF capture can be required without being a public lambda parameter.
         names (sort (set/intersection allowed (set/union accepted required)))
         id (str (ids/fn-id "graphden.editor.root-compatibility" (str target "/" (name role))))
@@ -104,10 +107,10 @@
 
 
 (defn- replace-callback
-  [plan old-target target role personal]
+  [plan old-target target role personal allowed]
   (let [input (get-in personal [:inputs target])
         _ (when-not input (reject! :legacy-entry-missing))
-        {:keys [id functions]} (wrapper target role input)
+        {:keys [id functions]} (wrapper target role input allowed)
         old-ids (set (map :id (:functions plan)))
         _ (when (some #(contains? old-ids (:id %)) functions) (reject! :legacy-plan-conflict))
         replace-expr (fn [expr]
@@ -134,9 +137,9 @@
     (let [{:keys [id configuration]} (selected-configuration storage authorize! policy)
           result
           (reduce-kv
-            (fn [plan component {path :namespace prefix :prefix}]
+            (fn [plan component {path :namespace prefix :prefix :keys [roles inputs]}]
               (let [entries (get configuration component)
-                    defaults (into {} (for [role [:initial :update :view]]
+                    defaults (into {} (for [role (or roles [:initial :update :view])]
                                         [role (ids/fn-id path (str prefix "-" (name role)))]))
                     selected (into {} (remove (fn [[role id]] (= id (get defaults role)))) entries)]
                 (if (empty? selected)
@@ -147,7 +150,7 @@
                     (reduce-kv
                       (fn [plan role target]
                         (let [old (ids/fn-id path (str "root-" (name role)))]
-                          (replace-callback plan (str old) (str target) role personal)))
+                          (replace-callback plan (str old) (str target) role personal (get (or inputs role-inputs) role))))
                       plan selected)))))
             plan legacy-components)]
       (when (> (count (:functions result)) 1024) (reject! :function-limit))

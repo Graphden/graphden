@@ -178,3 +178,22 @@ receipt remains limited to 512 functions. Source-export and browser-plan
 limits, account quotas, authorization and the 30-second write shield remain
 separate constraints. If a write times out or its response is lost, reconcile
 the original staged receipt: a timeout alone does not prove rollback.
+
+
+## Picker root callback
+
+The handler-selected editor root exposes `:fn-picker {:view callback}` as an
+ordinary graph value. Its unary callback receives `{:model ...}` and returns
+`{:tree ... :styles ...}`. The picker host owns search, candidate identities,
+compatibility, events, focus and keyboard navigation. The passive renderer
+validates Hiccup and scoped styles; callbacks cannot supply DOM handlers.
+
+For the shipped default root only, the temporary read-only compatibility
+adapter projects the current user's existing personal picker view into that
+unary envelope. The selected source closure passes the root request's current
+source authorization and snapshot checks. Missing or revoked selected source
+refuses the root export; it never selects an older plan. A custom root's
+ordinary refs are authoritative. Remove the compatibility projection after the
+deterministic personal-root migration has replaced its readers and records.
+Root replacement immediately closes a mounted picker and retires its render
+receipt; old asynchronous loads cannot reactivate it.

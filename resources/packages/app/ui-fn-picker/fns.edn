@@ -1,6 +1,17 @@
 {:namespace "app.ui-fn-picker"
  :fns
- [{:name :_picker-none :parent :const
+ [{:name :_root-view-input :type {:model :keyword-map}}
+  {:name :_root-view-result :type {:tree :hiccup-node :styles [:list {:selector :text :declarations :text-map}]}}
+  {:name :_root-view-callable :fn-type [{:input :app.ui-fn-picker/_root-view-input} :app.ui-fn-picker/_root-view-result]}
+  {:name :root-component :type {:view :app.ui-fn-picker/_root-view-callable}}
+  {:name :root-view :parent :picker-view :lambda-params [:input]
+   :return-type :app.ui-fn-picker/_root-view-result
+   :args {:model {:parent :get :args {:coll {:as :input :type :app.ui-fn-picker/_root-view-input} :key {:value :model}}}}}
+  {:name :_root-view-assoc :parent :assoc-fn
+   :args {:value {:as :value :type :app.ui-fn-picker/_root-view-callable}}}
+  {:name :picker-component :parent :_root-view-assoc :return-type :app.ui-fn-picker/root-component
+   :args {:map {} :key {:value :view} :value {:ref :root-view}}}
+  {:name :_picker-none :parent :const
    :args {:value nil}}
   {:name :_picker-row-key :parent :get
    :args {:coll {:as :row} :key {:value :key} :default ""}}

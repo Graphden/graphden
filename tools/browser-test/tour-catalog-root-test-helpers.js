@@ -35,7 +35,7 @@ async function verifyTourCatalogRootLifetime(page, selection) {
     await page.waitForFunction(selection => gdEditorRoot.componentIdentity('tutorial-catalog') === selection, selection);
     const retired = await page.evaluate(() => {
       const proof = window.__gdCatalogLifetime;
-      proof.row = document.querySelector('.gd-tour-lesson-row button.gd-tour-btn:not([disabled])');
+      proof.row = document.querySelector('.gd-tour-lesson-row button.gd-tour-btn-primary:not([disabled])');
       proof.scopes = [...document.querySelectorAll('#gd-tour-pop [data-gd-ui-style]')];
       proof.reloaded = gdEditorRoot.reload();
       return !document.querySelector('.gd-tour-lesson-list')

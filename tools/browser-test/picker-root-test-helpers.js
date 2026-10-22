@@ -59,11 +59,14 @@ async function verifyPickerNativeRootLifetime(page, candidate) {
       await page.evaluate(() => { window.__gdPickerRootLifetime.routeFailed = true; }).catch(() => {});
     } finally { finishHeld(); }
   };
-  async function openDuringHeldLoad() {
-    await page.evaluate(() => { window.__gdPickerRootLifetime.firstReload = gdEditorRoot.reload(); });
-    await page.waitForFunction(() => window.__gdPickerRootLifetime.held || window.__gdPickerRootLifetime.routeFailed);
-    if (routeError) throw routeError;
-    assert(await page.evaluate(candidate => {
+  async function openDuringHeldLoad(refresh = false) {
+    if (!refresh) {
+      await page.evaluate(() => { window.__gdPickerRootLifetime.firstReload = gdEditorRoot.reload(); });
+      await page.waitForFunction(() => window.__gdPickerRootLifetime.held || window.__gdPickerRootLifetime.routeFailed);
+      if (routeError) throw routeError;
+    }
+    assert(await page.evaluate(({candidate, refresh}) => {
+      if (refresh) gdRefreshUIConfiguration();
       const fixture = window.__gdPickerRootLifetime;
       if (gdFnPickerGraph.ready || gdEditorRoot.componentNow('fn-picker')) return false;
       fixture.anchor.focus();
@@ -72,9 +75,16 @@ async function verifyPickerNativeRootLifetime(page, candidate) {
       }], onPick() { fixture.picked++; }});
       fixture.loadingRow = document.querySelector('.fn-picker-row');
       document.querySelector('.fn-picker-search')?.focus();
+      if (refresh) fixture.refreshTimerPassed = new Promise(resolve => setTimeout(resolve, 0));
       return !!fixture.loadingRow && !fixture.loadingRow.hasAttribute('data-picker-key')
         && gdEditorRoot.componentIdentity('fn-picker') === null;
-    }, candidate), 'picker opened during a held root load uses native rows without a render receipt');
+    }, {candidate, refresh}), 'picker opened during a held root load uses native rows without a render receipt');
+    if (refresh) {
+      await page.waitForFunction(() => window.__gdPickerRootLifetime.held || window.__gdPickerRootLifetime.routeFailed);
+      if (routeError) throw routeError;
+      // Registered after the production refresh task, not a timing sleep.
+      await page.evaluate(() => window.__gdPickerRootLifetime.refreshTimerPassed);
+    }
   }
   let routed = false;
   try {
@@ -116,6 +126,24 @@ async function verifyPickerNativeRootLifetime(page, candidate) {
 
     await page.route(matchesRoot, holdFirstPlan);
     routed = true;
+    await openDuringHeldLoad(true);
+    const sameLoadingPopup = () => page.evaluate(() => !!document.querySelector('.fn-picker-popover')
+      && window.__gdPickerRootLifetime.loadingRow.isConnected
+      && !window.__gdPickerRootLifetime.loadingRow.hasAttribute('data-picker-key')
+      && document.activeElement === document.querySelector('.fn-picker-search')
+      && gdEditorRoot.componentIdentity('fn-picker') === null);
+    assert(await sameLoadingPopup(), 'deferred legacy refresh cannot close the root-owned loading picker');
+    releaseHeld();
+    await finished;
+    if (routeError) throw routeError;
+    await page.waitForFunction(() => gdFnPickerGraph.ready && gdEditorRoot.componentNow('fn-picker'));
+    assert(await sameLoadingPopup(), 'configuration root readiness keeps the same native row and focus without a render receipt');
+    await page.evaluate(() => {
+      closeFnPicker();
+      window.__gdPickerRootLifetime.held = false;
+      window.__gdPickerRootLifetime.routeFailed = false;
+    });
+    resetHold();
     await openDuringHeldLoad();
     releaseHeld();
     await finished;

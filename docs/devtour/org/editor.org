@@ -7,7 +7,7 @@ Loading, graph-backed controls, actions, forms, and preferences.
 
 after: web, layout
 
-[[file:index.org][index]] · ~187 min
+[[file:index.org][index]] · ~188 min
 
 * 1. initGraph
 :PROPERTIES:
@@ -390,13 +390,13 @@ Projects authorized source labels and finite seal facts into a view-only graph. 
 :PROPERTIES:
 :CUSTOM_ID: editor/mountCatalog
 :FILE: resources/packages/app/editor/editor-tour-catalog-graph.js
-:LINE: 106
-:MINS: 3.1
+:LINE: 97
+:MINS: 3.6
 :END:
 
-Runs the selected ordinary tutorial catalogue view over browser-local display facts. Its checked output keeps lesson identities in source order and accepts only passive Hiccup; one shared stylesheet scopes to graph body hosts, never native buttons or the dialog. A legacy personal view falls back for this section alone.
+Runs the selected root HOF's tutorial catalogue callback over browser-local display facts. Its checked output keeps lesson identities in source order and accepts only passive Hiccup; one shared stylesheet scopes to graph body hosts, never native buttons or the dialog. Missing or revoked root callbacks close the catalogue.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-tour-catalog-graph.js::  function mountCatalog(refresh) {][resources/packages/app/editor/editor-tour-catalog-graph.js:106]]
+- source :: [[file:../../../resources/packages/app/editor/editor-tour-catalog-graph.js::  function mountCatalog() {][resources/packages/app/editor/editor-tour-catalog-graph.js:97]]
 - see also :: [[file:editor.org::#editor/openTutorialMenu][openTutorialMenu]], [[file:editor.org::#editor/createRuntime][createRuntime]]
 - referenced from :: [[file:editor.org::#editor/openTutorialMenu][openTutorialMenu]]
 
@@ -404,13 +404,13 @@ Runs the selected ordinary tutorial catalogue view over browser-local display fa
 :PROPERTIES:
 :CUSTOM_ID: editor/openTutorialMenu
 :FILE: resources/packages/app/editor/editor-tour-picker.js
-:LINE: 329
-:MINS: 16.4
+:LINE: 331
+:MINS: 16.9
 :END:
 
-Owns the tutorial catalogue's local reading history, requirement checks, stable filter and Read/Unmark controls. The graph filters lessons and partitions adjacent chapter runs after filtering; native actions recheck membership and context. Teardown cancels both an initial lesson fetch and a later graph load.
+Owns the tutorial catalogue's local reading history, requirement checks, stable filter and Read/Unmark controls. The root callback filters lessons and partitions adjacent chapter runs after filtering; native actions recheck membership and context. Root replacement retires pending fetches, painted rows and the render receipt.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-tour-picker.js::async function openTutorialMenu() {][resources/packages/app/editor/editor-tour-picker.js:329]]
+- source :: [[file:../../../resources/packages/app/editor/editor-tour-picker.js::async function openTutorialMenu() {][resources/packages/app/editor/editor-tour-picker.js:331]]
 - see also :: [[file:editor.org::#editor/mountCatalog][mountCatalog]], [[file:editor.org::#editor/createRuntime][createRuntime]]
 - referenced from :: [[file:editor.org::#editor/mountCatalog][mountCatalog]]
 

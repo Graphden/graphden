@@ -40,6 +40,7 @@ function lessonCleanupFixture({absent = false, confirmed = true, foreign = false
     if (name === './configuration-undo-test-helpers') return {undoConfiguration: async (_page, _proposal, command) => {
       calls.push({method: 'UNDO', command}); return {ok: true};
     }};
+    if (name === './picker-root-test-helpers') return require('../browser-test/picker-root-test-helpers');
     throw Error('unexpected dependency');
   }};
   vm.runInNewContext(fs.readFileSync(require.resolve('../browser-test/partial-ui-components-fixture'), 'utf8'), sandbox);

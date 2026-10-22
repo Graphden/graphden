@@ -1,11 +1,12 @@
 'use strict';
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const path = require('node:path');
 const vm = require('node:vm');
 const graph = require('../../resources/packages/app/ui-preview/browser-runtime.js');
-const source = fs.readFileSync('resources/packages/app/editor/editor-fn-picker-graph.js', 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '../../resources/packages/app/editor/editor-fn-picker-graph.js'), 'utf8');
 const listeners = new Map(), requests = [], painted = [];
-let current, accepted = null, closed = 0, disposed = 0;
+let current, accepted = null, closed = 0, disposed = 0, popupOpen = false;
 const window = {
   GraphdenBrowser: graph,
   gdEditorRoot: {
@@ -16,7 +17,7 @@ const window = {
   },
   GraphdenRenderer: {mount: () => ({render(tree) { painted.push(tree); }, dispose() { disposed++; }})},
   addEventListener(name, fn) { listeners.set(name, fn); },
-  closeFnPicker() { closed++; },
+  closeFnPicker() { if (popupOpen) { closed++; popupOpen = false; } },
   gdLoadUIComponentRuntime() { throw new Error('Picker must not dispatch through the legacy catalogue'); },
 };
 vm.runInNewContext(source, {window, Map, URLSearchParams, location: {search: ''}, AbortController, DOMException,
@@ -34,6 +35,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   await tick();
   const host = {querySelectorAll: () => []};
   const arranged = {exact: [], groups: [], total: 0, hiddenOther: 0};
+  popupOpen = true;
   const first = window.gdFnPickerGraph.mount(host, () => { throw new Error('No candidates'); });
   first.render(arranged, {});
   assert.equal(painted.at(-1), 'first graph');
@@ -55,8 +57,23 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
   current = callback('changed graph binding');
   requests.shift()(current);
   await tick();
-  window.gdFnPickerGraph.mount(host).render(arranged, {});
+  const fallback = window.gdFnPickerGraph.mount(host);
+  fallback.render(arranged, {});
   assert.equal(painted.at(-1), 'changed graph binding');
   assert.equal(accepted, current);
+  // An oversized list releases its graph owner but retains the native popup.
+  fallback.dispose();
+  popupOpen = true;
+  const beforeFallback = closed;
+  listeners.get('gd-editor-root-changing')();
+  assert.equal(closed, beforeFallback + 1, 'root replacement closes the native fallback popup');
+  assert.equal(accepted, null);
+  // A picker opened before the next root is ready has no graph owner at all.
+  popupOpen = true;
+  assert.equal(window.gdFnPickerGraph.mount(host), null);
+  const beforeLoading = closed;
+  listeners.get('gd-editor-root-changing')();
+  assert.equal(closed, beforeLoading + 1, 'root replacement closes a popup opened while loading');
+  assert.equal(accepted, null, 'a native fallback cannot certify a rendered root selection');
   console.log('Picker root: binding behavior, render receipt, revocation and stale session OK');
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -33,7 +33,9 @@ window.gdRefreshPickerReturnLabels = entries => {
     window.gdEditorRoot?.releaseComponent(runtime);
     runtime = null;
     integration.ready = false;
-    if (instances.size) window.closeFnPicker?.();
+    // Native fallback keeps the popup after releasing its graph instance.
+    // Its candidates and callbacks still belong to the retired root.
+    window.closeFnPicker?.();
     for (const instance of [...instances]) instance.dispose();
   }
   async function load() {

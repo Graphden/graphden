@@ -141,7 +141,12 @@ function makeWorld(opts) {
   vm.runInContext(readPreview('builtin-plans.js'), ctx);
   ctx.GraphdenStyles = {normalize: rules => [...rules], acquire: () => ({id: 'tour-end'}), release: () => {}};
   ctx.GraphdenRenderer = graphRenderer(document, ctx.GraphdenBrowser);
-  ctx.gdLoadUIComponentRuntime = async (_component, plan) => ctx.GraphdenBrowser.createRuntime(plan);
+  const rootRuntime = ctx.GraphdenBrowser.createRuntime(ctx.GraphdenBuiltinPlans.plans.tutorialCatalog);
+  ctx.gdEditorRoot = {
+    component: async () => rootRuntime,
+    acceptComponent: () => true,
+    releaseComponent: () => {},
+  };
   vm.runInContext(read('editor-tour-catalog-graph.js'), ctx);
   vm.runInContext(read('editor-tour-picker.js'), ctx);
   // `_tourLessons` / `_tourState` are script-scope `let`s — the browser's tour

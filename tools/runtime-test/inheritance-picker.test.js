@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { createDocument } = require('./mini-dom');
+const browserGraph = require('../../resources/packages/app/ui-preview/browser-runtime.js');
 const file = path.join(__dirname, '../../resources/packages/app/editor/editor-fn-picker.js');
 const source = fs.readFileSync(file, 'utf8');
 
@@ -48,6 +49,7 @@ async function exercise(graph) {
       { id: 'allowed-id', name: 'same-name', qualified: 'same-name', ns: null, compatible: true, effects: [] },
       { id: 'blocked-id', name: 'blocked', qualified: 'blocked', ns: null, compatible: false,
         reason: 'Would remove a sealed slot.', effects: [] },
+      { id: 'neutral-id', name: 'neutral', qualified: 'neutral', ns: null, effects: [] },
     ],
     options: { anchorEl: anchor, label: 'Choose ancestor',
       onPick(fn, candidate) { picked = { fn, candidate }; } },
@@ -59,7 +61,11 @@ async function exercise(graph) {
           const rowEl = doc.createElement('div');
           rowEl.id = 'option-' + idx;
           list.appendChild(rowEl);
-          return { c, rowEl, model: format(c, false) };
+          const model = format(c, false);
+          // The selected root invokes a callable and validates its input codec.
+          // A bounded candidate may legitimately have no compatibility verdict.
+          browserGraph.encode(new Map(Object.entries(model)));
+          return { c, rowEl, model };
         });
         return graphRows;
       } };
@@ -69,6 +75,8 @@ async function exercise(graph) {
   vm.runInContext(source, ctx);
   vm.runInContext('options.candidates = candidates; openFnPicker(options)', ctx);
   if (graph) {
+    assert.equal(graphRows[2].model.compatible, null, 'missing verdict is graph nil');
+    assert.equal(graphRows[2].model.disabled, false);
     assert.equal(graphRows[0].model.fit, 'exact');
     assert.equal(graphRows[0].model['fit-title'], '');
     assert.equal(graphRows[1].model.title, 'Would remove a sealed slot.');

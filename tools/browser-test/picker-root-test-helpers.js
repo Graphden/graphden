@@ -18,6 +18,16 @@ async function verifyPickerRootSelection(page, selection, candidate, background 
     await page.keyboard.press('ArrowUp');
     await page.keyboard.press('Escape');
     await page.waitForFunction(() => !document.querySelector('.fn-picker-popover'));
+  } catch (error) {
+    console.error('Picker selection diagnostic:', JSON.stringify(await page.evaluate(selection => ({
+      ready: !!window.gdFnPickerGraph?.ready,
+      rootPicker: !!window.gdEditorRoot?.componentNow('fn-picker'),
+      shell: typeof graphData !== 'undefined' && Array.isArray(graphData?.fns),
+      selected: gdEditorRoot.componentIdentity('fn-picker') === selection,
+      popup: !!document.querySelector('.fn-picker-popover'),
+      row: !!document.querySelector('.fn-picker-row[data-picker-key]'),
+    }), selection)));
+    throw error;
   } finally { await page.evaluate(() => closeFnPicker()); }
 }
 

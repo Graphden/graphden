@@ -285,7 +285,7 @@ function openFnPicker(opts) {
   let lastPickerArrangement = null;
   let lastPickerOptions = null;
   let graphPicker = window.gdFnPickerGraph?.ready ? window.gdFnPickerGraph.mount(list, (c, bareName) => {
-    const compatible = fixedCandidates ? c.compatible : expected && serverLoaded ? c.compatible !== false : null;
+    const compatible = fixedCandidates ? c.compatible ?? null : expected && serverLoaded ? c.compatible !== false : null;
     const lastDot = c.qualified.lastIndexOf('.');
     const label = (name) => typeof displayLabel === 'function' ? displayLabel(name) : name;
     const fit = !fixedCandidates && compatible === true && typeof pickerTierOf === 'function' ? pickerTierOf(expected, c) : 'exact';

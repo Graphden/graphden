@@ -14,17 +14,10 @@
   const nativeClasses = new Set(['gd-tour-btn', 'gd-tour-unmark', 'gd-tour-read-btn',
     'gd-tour-lesson-row', 'gd-tour-chapter', 'gd-tour-lesson-list', 'gd-tour-filter', 'gd-tour-picker-foot']);
   const sessions = new Set();
-  const rejected = new WeakSet();
   let selected = null;
   let pending = null;
   let generation = 0;
-  let builtinRuntime = null;
 
-  function builtin() {
-    if (!builtinRuntime) builtinRuntime = api.createRuntime(window.GraphdenBuiltinPlans.plans.tutorialCatalog,
-      {operationLimit: 150000});
-    return builtinRuntime;
-  }
   function safeTree(tree, limit) {
     const root = window.GraphdenRenderer.vnode(tree, 'gd-tour-catalog', limit);
     function visit(node) {
@@ -77,39 +70,43 @@
     const styles = window.GraphdenStyles.normalize(field(output, 'styles'));
     return {counts, sections: rows, empty, intro, resumeLabel, styles};
   }
-  function notify() { for (const session of sessions) session.refresh(); }
   function invalidate() {
     generation++;
-    pending?.abort();
-    pending = null;
     selected = null;
-    notify();
+    pending = null;
+    window.gdTourCatalogClose?.();
+    for (const session of [...sessions]) session.dispose();
   }
-  async function reload() {
-    invalidate();
+  async function prepare() {
+    if (selected) return;
+    if (pending) return pending;
+    // component() may synchronously start the first root load. Register this
+    // load after that changing event, while later root changes still retire it.
+    const loading = window.gdEditorRoot.component('tutorial-catalog');
     const own = generation;
-    const controller = new AbortController();
-    pending = controller;
-    try {
-      const runtime = await window.gdLoadUIComponentRuntime('tutorial-catalog',
-        window.GraphdenBuiltinPlans.plans.tutorialCatalog, {operationLimit: 150000}, controller.signal);
-      if (own !== generation || controller.signal.aborted) return;
+    const request = (async () => {
+      const runtime = await loading;
+      if (own !== generation) throw new DOMException('Editor root changed', 'AbortError');
+      if (!runtime) throw new Error('Tutorial catalogue missing from editor root');
       selected = runtime;
-      notify();
-    } catch (error) {
-      if (own !== generation || error.name === 'AbortError') return;
-      window.gdUIComponentFailed?.('tutorial-catalog');
-    } finally {
-      if (pending === controller) pending = null;
-    }
+    })();
+    pending = request;
+    try { await request; }
+    finally { if (pending === request) pending = null; }
   }
-  function mountCatalog(refresh) {
+  function mountCatalog() {
+    const evaluator = selected;
+    const own = generation;
+    if (!evaluator) throw new Error('Tutorial catalogue unavailable');
+    let painted = null;
+    let proposed = null;
     let sheet = null;
     let signature = null;
     let disposed = false;
     const hosts = new Set();
     const session = {
-      refresh,
+      evaluator,
+      accepted: () => painted !== null,
       own(host) {
         if (disposed || !host) return;
         hosts.add(host);
@@ -117,14 +114,13 @@
       },
       view(input) {
         if (disposed) throw new Error('Catalogue graph is disposed');
-        const picked = selected && !rejected.has(selected) ? selected : builtin();
-        let output;
-        try { output = checkedView(picked, input, input.lessons); }
-        catch (error) {
-          if (picked === builtin()) throw error;
-          rejected.add(picked);
-          window.gdUIComponentFailed?.('tutorial-catalog');
-          output = checkedView(builtin(), input, input.lessons);
+        if (own !== generation || evaluator !== selected) throw new DOMException('Editor root changed', 'AbortError');
+        proposed = checkedView(evaluator, input, input.lessons);
+        return proposed;
+      },
+      painted(output) {
+        if (disposed || own !== generation || evaluator !== selected || proposed !== output) {
+          throw new DOMException('Editor root changed', 'AbortError');
         }
         const nextSignature = JSON.stringify(output.styles);
         if (signature !== nextSignature) {
@@ -137,12 +133,18 @@
           sheet = next;
           signature = nextSignature;
         }
-        return output;
+        if (!window.gdEditorRoot.acceptComponent(evaluator)) throw new DOMException('Editor root changed', 'AbortError');
+        painted = output;
       },
       dispose() {
         if (disposed) return;
         disposed = true;
         sessions.delete(session);
+        proposed = null;
+        painted = null;
+        if (![...sessions].some(item => item.evaluator === evaluator && item.accepted())) {
+          window.gdEditorRoot.releaseComponent(evaluator);
+        }
         for (const host of hosts) delete host.dataset.gdUiStyle;
         hosts.clear();
         window.GraphdenStyles.release(sheet);
@@ -151,8 +153,6 @@
     sessions.add(session);
     return session;
   }
-  window.gdTourCatalogGraph = {mount: mountCatalog, reload, invalidate};
-  document.addEventListener('DOMContentLoaded', () => { void reload(); }, {once: true});
-  window.addEventListener('gd-auth-changed', invalidate);
-  window.addEventListener('gd-graph-changed', invalidate);
+  window.gdTourCatalogGraph = {mount: mountCatalog, prepare, invalidate};
+  window.addEventListener('gd-editor-root-changing', invalidate);
 })();

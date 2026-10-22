@@ -1,3 +1,4 @@
+const {verifyTourCatalogRootSelection, verifyTourCatalogRootLifetime} = require('./tour-catalog-root-test-helpers');
 const {verifyPickerRootSelection, verifyPickerNativeRootLifetime} = require('./picker-root-test-helpers');
 // Compatibility selective copies, retained authored identities, and a real cross-tab
 // activation conflict. Every cleanup operation uses exact creation receipts.
@@ -54,8 +55,9 @@ async function copy(page, component, receipts, settle) {
   assert(result.ok && result.committed && JSON.stringify(result.manifest) === JSON.stringify(proposed.manifest),
     'apply confirms the exact create-only receipt');
   receipt.activation = await activate(page, proposed.manifest.roots['configuration-id'], settle);
+  if (component === 'tutorial-catalog') await verifyTourCatalogRootSelection(page, receipt.activation.receipt.id);
   if (component === 'fn-picker') await verifyPickerRootSelection(page, receipt.activation.receipt.id, proposed.manifest.roots['picker-id']);
-  await page.waitForFunction(({root, component}) => (component === 'fn-picker' ? gdFnPickerGraph.ready : gdUIComponentRuntimeIdentity(component) === root)
+  await page.waitForFunction(({root, component}) => (component === 'fn-picker' ? gdFnPickerGraph.ready : component === 'tutorial-catalog' ? !!gdEditorRoot.componentNow(component) : gdUIComponentRuntimeIdentity(component) === root)
     && gdUIComponentRuntimeIdentity('account-menu') === root && gdShellMenuGraph.ready,
   {root: receipt.activation.receipt.id, component});
   await settle();
@@ -246,6 +248,15 @@ async function cleanup(page, receipts, scope = 'final') {
       'the stored personal Explorer update executes its finite filter request');
     await page.locator('#kind-filters [data-kind="all"]').click();
     assert(await page.evaluate(() => !gdFiltersActive()), 'the stored personal All request preserves the native clear semantics');
+
+    phase = 'copy-tutorial-catalog';
+    const catalog = await copy(page, 'tutorial-catalog', receipts, settle);
+    phase = 'runtime-tutorial-catalog';
+    await verifyTourCatalogRootSelection(page, catalog.activationId);
+    await verifyTourCatalogRootLifetime(page, catalog.activationId);
+    assert(await page.evaluate(id => gdUIComponentsRoots()['picker-id'] === id, picker.roots['picker-id']),
+      'adding a legacy catalogue preserves the authored picker identity');
+    assert(await unchangedTheme(page, previous.theme), 'catalogue selection does not activate a theme');
 
     phase = 'copy-menu-conflict';
     await settle();

@@ -315,13 +315,15 @@ function _tourCatalogAuthIdentity() {
     typeof isAuthenticated === 'function' ? !!isAuthenticated() : null]);
 }
 
+// Native auth teardown must run before the root's ordinary auth observer
+// retires catalogue DOM and clears its close owner. Other root changes only close.
 window.addEventListener('gd-auth-changed', () => {
   _tourCatalogEpoch++;
   if (_tourCatalogClose) {
     _tourCatalogClose();
     _tourTeardown(true);
   }
-});
+}, {capture: true});
 window.addEventListener('gd-graph-changed', () => {
   if (_tourCatalogClose && !_tourCatalogClose.current()) _tourCatalogClose();
 });
@@ -550,61 +552,61 @@ async function openTutorialMenu() {
         step: saved?.step || 0, steps: (paused?.steps || []).length},
       'text-only-copy': _tourCopy('read-only', 'text only')};
     try {
-    const model = graph.view(input);
-    renderPassive(countsRenderer, counts, model.counts);
-    renderPassive(introRenderer, body, model.intro);
-    if (resume) resume.textContent = model.resumeLabel;
-    const desired = [];
-    const lessonsById = new Map(lessons.lessons.map(lesson => [lesson.id, lesson]));
-    for (const [sectionIndex, section] of model.sections.entries()) {
-      if (section.chapter) {
-        let heading = headings[sectionIndex];
-        if (!heading) {
-          heading = document.createElement('div');
-          heading.className = 'gd-tour-chapter';
-          headings[sectionIndex] = heading;
+      const model = graph.view(input);
+      renderPassive(countsRenderer, counts, model.counts);
+      renderPassive(introRenderer, body, model.intro);
+      if (resume) resume.textContent = model.resumeLabel;
+      const desired = [];
+      const lessonsById = new Map(lessons.lessons.map(lesson => [lesson.id, lesson]));
+      for (const [sectionIndex, section] of model.sections.entries()) {
+        if (section.chapter) {
+          let heading = headings[sectionIndex];
+          if (!heading) {
+            heading = document.createElement('div');
+            heading.className = 'gd-tour-chapter';
+            headings[sectionIndex] = heading;
+          }
+          heading.textContent = section.chapter;
+          desired.push(heading);
         }
-        heading.textContent = section.chapter;
-        desired.push(heading);
+        for (const item of section.rows) {
+          const lesson = lessonsById.get(item.id);
+          let entry = rows.get(item.id);
+          if (!entry) {
+            entry = nativeRow(lesson);
+            rows.set(item.id, entry);
+          }
+          const need = _tourRequirement(lesson);
+          entry.row.className = 'gd-tour-lesson-row'
+            + (item['text-only'] ? ' gd-tour-lesson-row-text' : '')
+            + (item.fresh ? ' gd-tour-lesson-row-new' : '')
+            + (item.done ? ' gd-tour-lesson-row-done' : '')
+            + (item.stale ? ' gd-tour-lesson-row-updated' : '');
+          entry.btn.classList.toggle('gd-tour-btn-done', item.done);
+          entry.btn.classList.toggle('gd-tour-btn-locked', !need.allowed && !lesson['text-only?']);
+          if (!lesson['text-only?']) {
+            entry.btn.disabled = !need.allowed;
+            entry.btn.title = need.allowed ? '' : 'Needs ' + need.phrase + ' — this session does not have it.';
+          }
+          if (done.has(_tourKey(lesson))) {
+            if (entry.undo.parentNode !== entry.row) entry.row.appendChild(entry.undo);
+          } else if (entry.undo.parentNode === entry.row) entry.undo.remove();
+          renderPassive(entry.bodyRenderer, entry.btn.firstChild, item.tree);
+          desired.push(entry.row);
+        }
       }
-      for (const item of section.rows) {
-        const lesson = lessonsById.get(item.id);
-        let entry = rows.get(item.id);
-        if (!entry) {
-          entry = nativeRow(lesson);
-          rows.set(item.id, entry);
-        }
-        const need = _tourRequirement(lesson);
-        entry.row.className = 'gd-tour-lesson-row'
-          + (item['text-only'] ? ' gd-tour-lesson-row-text' : '')
-          + (item.fresh ? ' gd-tour-lesson-row-new' : '')
-          + (item.done ? ' gd-tour-lesson-row-done' : '')
-          + (item.stale ? ' gd-tour-lesson-row-updated' : '');
-        entry.btn.classList.toggle('gd-tour-btn-done', item.done);
-        entry.btn.classList.toggle('gd-tour-btn-locked', !need.allowed && !lesson['text-only?']);
-        if (!lesson['text-only?']) {
-          entry.btn.disabled = !need.allowed;
-          entry.btn.title = need.allowed ? '' : 'Needs ' + need.phrase + ' — this session does not have it.';
-        }
-        if (done.has(_tourKey(lesson))) {
-          if (entry.undo.parentNode !== entry.row) entry.row.appendChild(entry.undo);
-        } else if (entry.undo.parentNode === entry.row) entry.undo.remove();
-        renderPassive(entry.bodyRenderer, entry.btn.firstChild, item.tree);
-        desired.push(entry.row);
+      if (!desired.length && model.empty !== null) {
+        renderPassive(emptyRenderer, emptyHost, model.empty);
+        desired.push(emptyHost);
       }
-    }
-    if (!desired.length && model.empty !== null) {
-      renderPassive(emptyRenderer, emptyHost, model.empty);
-      desired.push(emptyHost);
-    }
-    const focused = document.activeElement;
-    const retainFocus = focused && desired.some(node => node.contains(focused));
-    desired.forEach((node, index) => {
-      if (list.children[index] !== node) list.insertBefore(node, list.children[index] || null);
-    });
-    while (list.children.length > desired.length) list.children[list.children.length - 1].remove();
-    if (retainFocus && document.activeElement !== focused && focused.isConnected) focused.focus();
-    graph.painted(model);
+      const focused = document.activeElement;
+      const retainFocus = focused && desired.some(node => node.contains(focused));
+      desired.forEach((node, index) => {
+        if (list.children[index] !== node) list.insertBefore(node, list.children[index] || null);
+      });
+      while (list.children.length > desired.length) list.children[list.children.length - 1].remove();
+      if (retainFocus && document.activeElement !== focused && focused.isConnected) focused.focus();
+      graph.painted(model);
     } catch (error) {
       retire();
       if (typeof gdToast === 'function') gdToast('Tutorial catalogue unavailable');

@@ -96,6 +96,8 @@ function makeWorld(opts) {
   const said = [];
   const started = [];
   const toasts = [];
+  const teardowns = [];
+  let releasedSheets = 0;
   const ctx = {
     console,
     process,
@@ -123,7 +125,7 @@ function makeWorld(opts) {
     // of clearing the step's inline position itself (2026-09-17).
     _tourCenterPop: (p) => { p.classList.add('gd-tour-centered'); p.style.left = ''; p.style.top = ''; },
     _tourResume: () => {},
-    _tourTeardown: () => { ctx.gdTourCatalogClose?.(); },
+    _tourTeardown: keepSaved => { teardowns.push(keepSaved); ctx.gdTourCatalogClose?.(); },
     _tourSay: (m) => said.push(m),
     gdToast: (m) => toasts.push(m),
     startTutorialIsolated: (id) => started.push(id),
@@ -137,17 +139,28 @@ function makeWorld(opts) {
     },
   };
   ctx.window = ctx;
+  // Window's at-target capture listeners precede normal observers even when
+  // registered later. Node EventTarget does not model this browser ordering.
   const windowEvents = new EventTarget();
-  ctx.addEventListener = windowEvents.addEventListener.bind(windowEvents);
-  ctx.removeEventListener = windowEvents.removeEventListener.bind(windowEvents);
-  ctx.dispatchEvent = windowEvents.dispatchEvent.bind(windowEvents);
+  const captureEvents = new EventTarget();
+  const captures = options => options === true || !!options?.capture;
+  ctx.addEventListener = (name, callback, options) =>
+    (captures(options) ? captureEvents : windowEvents).addEventListener(name, callback, options);
+  ctx.removeEventListener = (name, callback, options) =>
+    (captures(options) ? captureEvents : windowEvents).removeEventListener(name, callback, options);
+  ctx.dispatchEvent = event => {
+    captureEvents.dispatchEvent(event);
+    return windowEvents.dispatchEvent(event);
+  };
+  // editor-root loads before tour-picker and registers this normal observer.
+  ctx.addEventListener('gd-auth-changed', () => ctx.dispatchEvent(new Event('gd-editor-root-changing')));
   ctx.window.graphdenHasCap = (cap) => o.caps.includes(cap);
   ctx.window.graphdenTenancyActive = () => o.tenancy === true;
   ctx.window.API = o.api || {};
   vm.createContext(ctx);
   vm.runInContext(browserSource, ctx);
   vm.runInContext(builtinSource, ctx);
-  ctx.GraphdenStyles = {normalize: rules => [...rules], acquire: () => ({id: 'catalog-test'}), release: () => {}};
+  ctx.GraphdenStyles = {normalize: rules => [...rules], acquire: () => ({id: 'catalog-test'}), release: sheet => { if (sheet) releasedSheets++; }};
   ctx.GraphdenRenderer = graphRenderer(document, ctx.GraphdenBrowser);
   let accepted = null;
   let released = 0;
@@ -162,7 +175,8 @@ function makeWorld(opts) {
   vm.runInContext(createSource, ctx);
   vm.runInContext(source, ctx);
   return {
-    ctx, pop, said, started, toasts,
+    ctx, pop, said, started, toasts, teardowns,
+    releasedSheets: () => releasedSheets,
     accepted: () => accepted, released: () => released,
     stored: () => {
       const raw = store.get('graphden.tour.done');
@@ -658,8 +672,28 @@ function makeWorld(opts) {
     const hosts = w.pop.querySelectorAll('[data-gd-ui-style]');
     w.ctx.dispatchEvent(new Event('gd-editor-root-changing'));
     assert(w.pop.children.length === 0 && w.accepted() === null, 'old DOM and receipt retire immediately');
-    assert(hosts.every(host => !host.dataset.gdUiStyle), 'all retired passive style scopes released');
+    assert(hosts.length > 0 && hosts.every(host => !host.dataset.gdUiStyle) && w.releasedSheets() > 0,
+      'all previously painted passive style scopes and acquired sheets released');
+    assert(w.teardowns.length === 0, 'ordinary root replacement preserves the native tour session');
     assert(w.ctx.document.activeElement === trigger, 'retirement restores the opening focus');
+  });
+
+  await test('native auth teardown survives the earlier root auth observer for open and pending catalogues', async () => {
+    for (const pending of [false, true]) {
+      let resolveRuntime;
+      const w = makeWorld(pending ? {loadRuntime: () => new Promise(resolve => { resolveRuntime = resolve; })} : {});
+      const opening = w.ctx.openTutorialMenu();
+      if (!pending) await opening;
+      w.ctx.dispatchEvent(new Event('gd-auth-changed'));
+      assert(w.teardowns.length === 1 && w.teardowns[0] === true,
+        'auth preserves the original conditional native teardown before root retirement');
+      if (pending) resolveRuntime({run() { throw new Error('Stale callback'); }});
+      await opening;
+      assert(w.pop.children.length === 0 && w.accepted() === null, 'auth leaves no old DOM or paint receipt');
+    }
+    const unopened = makeWorld();
+    unopened.ctx.dispatchEvent(new Event('gd-auth-changed'));
+    assert(unopened.teardowns.length === 0, 'auth without catalogue ownership does not add a tutorial teardown');
   });
 
   await test('view production alone cannot certify root rendering', async () => {

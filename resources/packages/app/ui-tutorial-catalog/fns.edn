@@ -5,7 +5,7 @@
   {:name :_root-view-result
    :type {:counts :web.html/hiccup-node :sections :_catalog-sections :empty :web.html/hiccup-node
           :intro :web.html/hiccup-node :resume-label :text
-          :styles [:list {:selector :text :declarations :text-map}]}}
+          :styles [:list {:selector :text :declarations [:map :keyword :text]}]}}
   {:name :_root-view-callable :fn-type [{:input :app.ui-tutorial-catalog/_root-view-input} :app.ui-tutorial-catalog/_root-view-result]}
   {:name :root-component :type {:view :app.ui-tutorial-catalog/_root-view-callable}}
   {:name :root-view :parent :catalog-view :lambda-params [:input]

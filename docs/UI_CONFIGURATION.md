@@ -199,3 +199,19 @@ receipt; old asynchronous loads cannot reactivate it.
 Completing the same root's load preserves a native picker opened during loading.
 That popup stays native and carries no graph render receipt until it is closed;
 the next root replacement still retires it immediately.
+
+## Tutorial catalogue root callback
+
+The handler-selected editor root exposes `:tutorial-catalog {:view callback}` as
+an ordinary graph value. Its unary callback receives `{:inputs ...}` with the
+ordered lesson display facts and returns the existing catalogue view model.
+The native host keeps history, requirements, navigation, focus and lesson
+actions. It validates row identities and passive Hiccup before painting, and
+accepts the root render receipt only after the complete host paint succeeds.
+
+The shipped default root's temporary read-only compatibility adapter projects
+an existing personal catalogue view through the checked source closure. A
+missing, revoked or malformed selected root callback closes the catalogue;
+it cannot reactivate a built-in view. Root replacement retires pending and
+open catalogue work, styles and receipts. The same root's initial load may
+complete without cancelling the opening catalogue.

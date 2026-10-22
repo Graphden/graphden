@@ -15,10 +15,12 @@ Export requires execute permission for the root and source visibility for its
 ordinary graph dependencies. Public ABI primitives retain their fixed interface
 policy. The bounded browser ABI supports static
 `core.system/call` callbacks and captures. The root returns a checked record
-with `legacy`, `account-menu`, and `recents` fields. Each component record
-contains ordinary callable `initial`, `update`, and `view` values constructed
-with `core.collections/assoc-fn`. The host invokes callbacks through `GraphdenBrowser.invoke`; update and view
-use unary input envelopes, and initial may be nullary. Callables cannot be forged or serialized by
+with `legacy`, `account-menu`, `recents`, `fn-picker`, and `tutorial-catalog`
+fields. Component records contain ordinary callables constructed with
+`core.collections/assoc-fn`; the account menu and recents expose `initial`,
+`update`, and `view`, while the picker and catalogue expose `view`. The host
+invokes callbacks through `GraphdenBrowser.invoke`; update and view use unary
+input envelopes, and initial may be nullary. Callables cannot be forged or serialized by
 the value codec. The explicit legacy adapter retains other editor hosts.
 
 Existing personal menu and recents selections use a read-only server adapter:

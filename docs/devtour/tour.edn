@@ -41,196 +41,195 @@
            merge queue, read [CLAUDE.md](../../CLAUDE.md) and [worktree
            workflow](../../dev/wtq/AGENT.md)."
 
- :glossary [
-  {:id "graph-function" :title "Graph function"
-   :say "A stored definition of a computation, identified by a function ID. It can declare arguments
+ :glossary [{:id "graph-function" :title "Graph function"
+             :say "A stored definition of a computation, identified by a function ID. It can declare arguments
            or specialize parent functions by [inheritance](#term/inheritance) and
            [bindings](#term/binding). A function ID identifies the definition; its name is a label
            within a namespace."}
-  {:id "base-function" :title "Base function"
-   :say "A [graph function](#term/graph-function) with a registered host-language implementation.
+            {:id "base-function" :title "Base function"
+             :say "A [graph function](#term/graph-function) with a registered host-language implementation.
            Composed functions obtain the implementation through their parents and supply arguments
            through graph [bindings](#term/binding). A base function is distinct from the base branch
            used in version resolution."}
-  {:id "context" :title "Execution context"
-   :say "The runtime value carrying storage, implementations, caches, and execution policy. It
+            {:id "context" :title "Execution context"
+             :say "The runtime value carrying storage, implementations, caches, and execution policy. It
            determines the data and branch visible to a call. A branch-specific context may resolve the
            same function ID differently from another context."}
-  {:id "compiled-registry" :title "Compiled registry"
-   :say "A map from [graph function](#term/graph-function) IDs to callable Clojure
+            {:id "compiled-registry" :title "Compiled registry"
+             :say "A map from [graph function](#term/graph-function) IDs to callable Clojure
            [closures](#term/closure) produced by compilation. It is cached in an [execution
            context](#term/context) and updated or invalidated after relevant graph changes. This is
            different from the type registry or package inventory."}
-  {:id "closure" :title "Closure"
-   :say "A callable function that retains values from the environment in which it was created. In
+            {:id "closure" :title "Closure"
+             :say "A callable function that retains values from the environment in which it was created. In
            this tour, graph reachability is called the [reachable graph](#term/reachable-graph); it
            must not be confused with a callable closure."}
-  {:id "slot" :title "Argument slot"
-   :say "The identity of a named, typed graph argument. Functions expose slots through `fn-slot`
+            {:id "slot" :title "Argument slot"
+             :say "The identity of a named, typed graph argument. Functions expose slots through `fn-slot`
            links; the same slot identity can be shared by several functions. Renaming may create a
            view linked through source-slot-id. Slot identity is different from
            its displayed name and from a [concurrency permit](#term/concurrency-permit)."}
-  {:id "binding" :title "Binding"
-   :say "Stored information specifying a graph argument: a literal value, a reference, sequence
+            {:id "binding" :title "Binding"
+             :say "Stored information specifying a graph argument: a literal value, a reference, sequence
            items, or caller-supplied input. Effective bindings can be inherited. This differs from
            Clojure [dynamic bindings](#term/dynamic-binding), which temporarily supply values to
            dynamic vars during execution."}
-  {:id "dynamic-binding" :title "Clojure dynamic binding"
-   :say "A Clojure var declared `^:dynamic` can receive a temporary, thread-local value through
+            {:id "dynamic-binding" :title "Clojure dynamic binding"
+             :say "A Clojure var declared `^:dynamic` can receive a temporary, thread-local value through
            `binding`. Nested calls see that value until the scope exits and restores the earlier
            value. Graphden uses this for execution policy, tracing, and cancellation. Asynchronous
            work must convey these bindings when it needs the same context. This does not create a
            stored graph [binding](#term/binding) or a lexical [closure capture](#term/capture)."}
-  {:id "free-argument" :title "Free argument"
-   :say "An input that the current function has not supplied internally and exposes to its caller.
+            {:id "free-argument" :title "Free argument"
+             :say "An input that the current function has not supplied internally and exposes to its caller.
            Identity comes from the underlying [slot](#term/slot) even when its public name changes.
            Some free arguments reached through a callback are supplied by [capture](#term/capture)."}
-  {:id "inheritance" :title "Function inheritance"
-   :say "A [graph function](#term/graph-function) names parent functions and inherits their argument
+            {:id "inheritance" :title "Function inheritance"
+             :say "A [graph function](#term/graph-function) names parent functions and inherits their argument
            structure and [bindings](#term/binding), subject to the graph rules. Multiple inheritance
            combines several parents. This parent relation uses parent-ids; branch ancestry uses
            base-branch-id and is separate."}
-  {:id "thunk" :title "Deferred computation / thunk"
-   :say "A callable wrapper representing work to perform when an argument is read. A delay also
+            {:id "thunk" :title "Deferred computation / thunk"
+             :say "A callable wrapper representing work to perform when an argument is read. A delay also
            defers work and caches its result. Deferral allows a conditional to leave the unselected
            branch unevaluated; it is not a promise that every deferred result is cached forever."}
-  {:id "hof" :title "Higher-order function / HOF"
-   :say "A function that accepts or returns another callable function, such as map accepting a
+            {:id "hof" :title "Higher-order function / HOF"
+             :say "A function that accepts or returns another callable function, such as map accepting a
            per-element callback. Graphden uses function types and parameter metadata to distinguish
            arguments passed on each callback invocation from [captured input](#term/capture)."}
-  {:id "capture" :title "Closure capture"
-   :say "Supplying a callback [free argument](#term/free-argument) from the enclosing caller instead
+            {:id "capture" :title "Closure capture"
+             :say "Supplying a callback [free argument](#term/free-argument) from the enclosing caller instead
            of treating it as a per-invocation parameter. For example, a callback can receive each item
            from map while retaining a threshold supplied by its caller."}
-  {:id "effect" :title "Effect"
-   :say "An operation involving external state or the environment, such as network access or a
+            {:id "effect" :title "Effect"
+             :say "An operation involving external state or the environment, such as network access or a
            database write. Declared effect information supports checks; runtime enforcement checks
            actual recorded effects against the currently allowed set. A pure function has no such
            effects."}
-  {:id "invalidation" :title "Cache invalidation"
-   :say "Marking cached data as no longer current, removing it, or updating affected entries after a
+            {:id "invalidation" :title "Cache invalidation"
+             :say "Marking cached data as no longer current, removing it, or updating affected entries after a
            change. An epoch is a counter used to detect whether cached data was built before relevant
            changes. Notifications can accelerate this process but may be missed."}
-  {:id "memoization" :title "Memoization"
-   :say "Remembering a function result under a key derived from its inputs so a repeated request can
+            {:id "memoization" :title "Memoization"
+             :say "Remembering a function result under a key derived from its inputs so a repeated request can
            reuse it. Correctness depends on the key including relevant inputs and on the lifetime of
            the cache; per-execution caching differs from process-wide caching."}
-  {:id "topological-order" :title "Dependency order"
-   :say "An ordering in which each dependency is processed before the function or package that needs
+            {:id "topological-order" :title "Dependency order"
+             :say "An ordering in which each dependency is processed before the function or package that needs
            it. A topological ordering exists for an acyclic directed graph. This is not necessarily
            the visual order of nodes on the canvas."}
-  {:id "reachable-graph" :title "Reachable graph / BFS / DFS"
-   :say "The nodes reached by repeatedly following the relevant reference edges from a starting
+            {:id "reachable-graph" :title "Reachable graph / BFS / DFS"
+             :say "The nodes reached by repeatedly following the relevant reference edges from a starting
            node. Breadth-first search (BFS) visits one distance level at a time; depth-first search
            (DFS) follows a path before returning. Which edges count depends on the traversal contract."}
-  {:id "protocol" :title "Protocol and storage decorator"
-   :say "A Clojure protocol declares methods implemented by different backends. A storage decorator
+            {:id "protocol" :title "Protocol and storage decorator"
+             :say "A Clojure protocol declares methods implemented by different backends. A storage decorator
            implements the same protocol while wrapping another storage object, adding behavior such as
            branch resolution without changing caller method names."}
-  {:id "advisory-lock" :title "Advisory lock"
-   :say "A PostgreSQL lock selected explicitly by application code using a shared key. It
+            {:id "advisory-lock" :title "Advisory lock"
+             :say "A PostgreSQL lock selected explicitly by application code using a shared key. It
            coordinates cooperating callers, for example around a uniqueness check and write.
            Transaction-scoped locks release at transaction end; session locks belong to the
            connection."}
-  {:id "cte" :title "Recursive SQL / CTE"
-   :say "A common table expression (CTE) gives a named intermediate query result using WITH. WITH
+            {:id "cte" :title "Recursive SQL / CTE"
+             :say "A common table expression (CTE) gives a named intermediate query result using WITH. WITH
            RECURSIVE allows subsequent rows to refer to earlier results; Graphden uses it to traverse
            references in the database."}
-  {:id "branch-view" :title "Resolved branch view"
-   :say "The effective entity rows visible on a branch after considering own versions, branch
+            {:id "branch-view" :title "Resolved branch view"
+             :say "The effective entity rows visible on a branch after considering own versions, branch
            ancestry, merged versions, and [deletion markers](#term/tombstone). Identity rows identify
            entities; version rows carry branch-dependent content. A comparison resolves each branch
            independently."}
-  {:id "tombstone" :title "Deletion marker / tombstone"
-   :say "A version recording that an entity is deleted in a branch view. It can hide inherited
+            {:id "tombstone" :title "Deletion marker / tombstone"
+             :say "A version recording that an entity is deleted in a branch view. It can hide inherited
            content without physically deleting a shared identity. Physical deletion has stricter
            cross-branch safety checks."}
-  {:id "branch-local" :title "Branch-local function"
-   :say "A function excluded from normal merge propagation when it or an ancestor has branch-local?
+            {:id "branch-local" :title "Branch-local function"
+             :say "A function excluded from normal merge propagation when it or an ancestor has branch-local?
            true. The effective flag is inherited by OR: false on a descendant does not undo a true
            ancestor. This mechanism is intended for branch-specific configuration."}
-  {:id "subtype" :title "Subtyping and refinement"
-   :say "Actual is a subtype of expected when every value allowed by actual is also allowed by
+            {:id "subtype" :title "Subtyping and refinement"
+             :say "Actual is a subtype of expected when every value allowed by actual is also allowed by
            expected. A refinement restricts a base type with a condition, such as an integer greater
            than zero. Nullability concerns whether null is allowed, not whether a field must be
            present."}
-  {:id "unification" :title "Type variables and unification"
-   :say "A type variable stands for a type not yet fixed, such as the element type a in a list.
+            {:id "unification" :title "Type variables and unification"
+             :say "A type variable stands for a type not yet fixed, such as the element type a in a list.
            Unification chooses compatible substitutions for variables. The occurs check rejects
            substitutions that make a variable contain itself. Directional assignment still needs a
            separate check."}
-  {:id "rich-types" :title "Rich-types registry"
-   :say "A registry of computed argument types, return type, [effects](#term/effect), and related
+            {:id "rich-types" :title "Rich-types registry"
+             :say "A registry of computed argument types, return type, [effects](#term/effect), and related
            metadata for each function. It is scoped to the active branch. The compiler and UI read it,
            but it is separate from the [compiled registry](#term/compiled-registry) of executable
            [closures](#term/closure)."}
-  {:id "secret" :title "Secret marking and redaction"
-   :say "A secret type marker tracks whether a value may reveal sensitive input. Propagation keeps
+            {:id "secret" :title "Secret marking and redaction"
+             :say "A secret type marker tracks whether a value may reveal sensitive input. Propagation keeps
            that marker through computations. Redaction removes sensitive data from persisted or
            displayed results; it does not mean the computation never used the original value."}
-  {:id "hiccup" :title "Hiccup and DOM"
-   :say "Hiccup represents markup as Clojure data: vectors contain a tag, optional attribute map,
+            {:id "hiccup" :title "Hiccup and DOM"
+             :say "Hiccup represents markup as Clojure data: vectors contain a tag, optional attribute map,
            and children. Rendering produces HTML. DOM is the browser representation of the page;
            constructing Hiccup does not itself install browser event handlers."}
-  {:id "ring" :title "Ring, Reitit, and middleware"
-   :say "Ring represents HTTP requests and responses as Clojure maps; a handler maps a request to a
+            {:id "ring" :title "Ring, Reitit, and middleware"
+             :say "Ring represents HTTP requests and responses as Clojure maps; a handler maps a request to a
            response. Middleware wraps a handler to add processing. Reitit matches request paths and
            methods to route handlers."}
-  {:id "htmx" :title "HTMX and partial fragments"
-   :say "HTMX uses HTML attributes to request and replace page fragments. In this editor, partials
+            {:id "htmx" :title "HTMX and partial fragments"
+             :say "HTMX uses HTML attributes to request and replace page fragments. In this editor, partials
            are server-rendered HTML inserted into an existing host element. Local action dispatch and
            stale-response protection are still browser-runtime responsibilities."}
-  {:id "reconciliation" :title "Reconciliation"
-   :say "Comparing desired configuration with actual state and applying the differences. A periodic
+            {:id "reconciliation" :title "Reconciliation"
+             :say "Comparing desired configuration with actual state and applying the differences. A periodic
            pass can recover from missed notifications or process failure. Service reconciliation
            starts and stops instances; package synchronization reconciles authored definitions with
            stored rows."}
-  {:id "concurrency-permit" :title "Execution concurrency permit"
-   :say "An admission token used to limit concurrent execution requests, such as runs admitted for
+            {:id "concurrency-permit" :title "Execution concurrency permit"
+             :say "An admission token used to limit concurrent execution requests, such as runs admitted for
            an organisation or process. A run acquires it before submission and releases it on
            completion or failed submission. It is not an argument [slot](#term/slot), and it is
            separate from the advisory-lock permits coordinating [service
            instances](#term/cardinality)."}
-  {:id "cardinality" :title "Service cardinality"
-   :say "The service placement rule: one instance across participating executors (singleton), up to
+            {:id "cardinality" :title "Service cardinality"
+             :say "The service placement rule: one instance across participating executors (singleton), up to
            N coordinated instances (pool), or an instance per executor process (per-pod). An
            [advisory-lock](#term/advisory-lock) permit enforces coordinated counts; it is unrelated to
            a function [argument slot](#term/slot)."}
-  {:id "fleet" :title "Execution fleet and cell"
-   :say "A fleet is a group of executor processes. A cell identifies the workload for an
+            {:id "fleet" :title "Execution fleet and cell"
+             :say "A fleet is a group of executor processes. A cell identifies the workload for an
            organisation and entry function. Placement maps that cell to the executor serving it; a
            heartbeat records that an instance is still active."}
-  {:id "sse" :title "Server-sent events / SSE"
-   :say "A long-lived HTTP stream that lets a server deliver events to a client. Graphden uses it
+            {:id "sse" :title "Server-sent events / SSE"
+             :say "A long-lived HTTP stream that lets a server deliver events to a client. Graphden uses it
            for [invalidation](#term/invalidation) and UI updates. PostgreSQL LISTEN/NOTIFY is a
            separate database notification mechanism that can feed these updates."}
-  {:id "integrant" :title "Integrant and addon"
-   :say "Integrant initializes and halts application components from configuration data and
+            {:id "integrant" :title "Integrant and addon"
+             :say "Integrant initializes and halts application components from configuration data and
            dependency references. An addon supplies extra configuration and component implementations
            through existing interfaces. It need not be a fork of the core application."}
-  {:id "auth" :title "Authentication, authorization, and capability"
-   :say "Authentication identifies the caller. Authorization decides whether that caller may perform
+            {:id "auth" :title "Authentication, authorization, and capability"
+             :say "Authentication identifies the caller. Authorization decides whether that caller may perform
            an operation. A capability names one permission checked by policy. An authenticated
            principal is the identity information returned by an authentication provider."}
-  {:id "ssrf" :title "SSRF and address revalidation"
-   :say "Server-side request forgery makes a server contact a destination the attacker could not
+            {:id "ssrf" :title "SSRF and address revalidation"
+             :say "Server-side request forgery makes a server contact a destination the attacker could not
            reach directly. Address validation must consider DNS changes and redirects: checking a name
            earlier is insufficient if the actual connection later uses a different address."}
-  {:id "checkpoint" :title "CRaC checkpoint / restore"
-   :say "An optional JVM facility for saving a prepared process state and restoring it later. Open
+            {:id "checkpoint" :title "CRaC checkpoint / restore"
+             :say "An optional JVM facility for saving a prepared process state and restoring it later. Open
            sockets and other external resources need coordinated shutdown and reopening around the
            snapshot. Availability depends on the runtime and deployment setup."}
-  {:id "edn" :title "EDN, keywords, and classpath"
-   :say "EDN is a data format used for Graphden definitions. A keyword such as :name is distinct
+            {:id "edn" :title "EDN, keywords, and classpath"
+             :say "EDN is a data format used for Graphden definitions. A keyword such as :name is distinct
            from the string \"name\"; namespaced keywords can identify references. The classpath is the
            collection of code and resource locations visible to the JVM."}
-  {:id "mcp" :title "MCP"
-   :say "Model Context Protocol: a communication protocol through which tools
+            {:id "mcp" :title "MCP"
+             :say "Model Context Protocol: a communication protocol through which tools
            such as coding assistants call server-provided operations. Graphden exposes optional graph
            operations through its MCP package; those writes still use the normal branch and graph
            validation paths."}
-  {:id "semver" :title "Semantic version and installation pin"
-   :say "Semantic versions describe major, minor, and patch releases and support dependency
+            {:id "semver" :title "Semantic version and installation pin"
+             :say "Semantic versions describe major, minor, and patch releases and support dependency
            constraints. An installation pin selects a particular package version. A pin is not the
            [branch-local](#term/branch-local) flag that excludes function changes from merging."}]
 
@@ -1980,5 +1979,4 @@
            checks must keep the core revision used by cloud and by tenancy identical; otherwise the
            assembled deployment differs from the combination tested. Documentation, translations, and
            organisation templates live in separate repositories without becoming runtime dependencies."
-     :see [[:boot "boot!"] [:boot "read-config"]]}]}
-]}
+     :see [[:boot "boot!"] [:boot "read-config"]]}]}]}

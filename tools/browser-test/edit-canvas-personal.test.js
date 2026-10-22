@@ -69,6 +69,8 @@ const { observeRootServerCalls, withoutRecoveredServerErrors, withoutRecoveredRo
         graphReady() &&
         !graph.animating,
     );
+    // Complete the initial owned query before fixture writes change its source epoch.
+    await serverCalls.settle();
     assert(
       (await api(page, 'POST', '/api/ui/configuration/prepare', { home: true })).ok,
       'explicit personal home ready',

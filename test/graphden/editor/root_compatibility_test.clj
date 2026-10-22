@@ -118,7 +118,7 @@
 
 
 (deftest revoked-personal-source-never-becomes-a-default-fallback
-  (doseq [component [:recents :fn-picker]]
+  (doseq [component [:recents :fn-picker :tutorial-catalog]]
     (with-redefs [tenancy/current-user-id (constantly :owner)
                   resolution/capture (fn [& _] {:id ::authored :configuration {component {:view target}}})
                   source/collect-closure (fn [& _] (throw (ex-info "Source refused" {:reason :visibility-denied})))]
@@ -187,20 +187,22 @@
         (is (= [[selected {:execute? true}]] @authorized))))))
 
 
-(deftest legacy-picker-projects-only-model-through-checked-source
-  (let [picker-old (str (ids/fn-id "app.ui-fn-picker" :root-view))
-        picker-plan (clojure.walk/postwalk-replace {old picker-old} root-plan)
-        personal (clojure.walk/postwalk-replace {"state" "model" "personal-state" "personal-model"} personal-plan)
-        adapted (with-redefs [root-plan picker-plan personal-plan personal]
-                  (adapt {:fn-picker {:view target}}))
-        wrapper-id (get-in adapted [:functions 0 :args 2 :expr :fn])
-        wrapper (first (filter #(= wrapper-id (:id %)) (:functions adapted)))]
-    (is (= ["model"] (mapv :name (:env wrapper))))
-    (is (not= picker-old wrapper-id))
-    (let [result (run-personal-view adapted "model")]
-      (is (zero? (:exit result)) (:err result))
-      (is (= "personal copy" (:out result))))
-    (with-redefs [personal-plan (assoc-in personal [:inputs (str target) :required] ["state"])]
-      (is (= :legacy-callback-inputs
-             (try (adapt {:fn-picker {:view target}}) nil
-                  (catch clojure.lang.ExceptionInfo error (:reason (ex-data error)))))))))
+(deftest single-role-legacy-views-project-only-their-declared-input
+  (doseq [[component path input-name] [[:fn-picker "app.ui-fn-picker" "model"]
+                                       [:tutorial-catalog "app.ui-tutorial-catalog" "inputs"]]]
+    (let [previous (str (ids/fn-id path :root-view))
+          component-plan (clojure.walk/postwalk-replace {old previous} root-plan)
+          personal (clojure.walk/postwalk-replace {"state" input-name "personal-state" "personal-input"} personal-plan)
+          adapted (with-redefs [root-plan component-plan personal-plan personal]
+                    (adapt {component {:view target}}))
+          wrapper-id (get-in adapted [:functions 0 :args 2 :expr :fn])
+          wrapper (first (filter #(= wrapper-id (:id %)) (:functions adapted)))]
+      (is (= [input-name] (mapv :name (:env wrapper))))
+      (is (not= previous wrapper-id))
+      (let [result (run-personal-view adapted input-name)]
+        (is (zero? (:exit result)) (:err result))
+        (is (= "personal copy" (:out result))))
+      (with-redefs [personal-plan (assoc-in personal [:inputs (str target) :required] ["state"])]
+        (is (= :legacy-callback-inputs
+               (try (adapt {component {:view target}}) nil
+                    (catch clojure.lang.ExceptionInfo error (:reason (ex-data error))))))))))

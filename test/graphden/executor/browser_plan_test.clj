@@ -984,7 +984,7 @@
 
 
 (deftest tutorial-catalog-view-preserves-filtered-teaching-order-and-all-lesson-counts
-  (let [definitions (:fns (edn/read-string (slurp "resources/packages/app/ui-tutorial-catalog/fns.edn")))
+  (let [definitions (module-entry-definitions "ui-tutorial-catalog" [:catalog-view])
         {:keys [graph impls ids]} (map-fixture definitions)
         lesson (fn [id chapter & {:keys [done stale fresh allowed text-only]
                                   :or {done false stale false fresh false allowed true text-only false}}]

@@ -25,7 +25,9 @@
    ;; Read-only C1 bridge until the deterministic personal-root migration replaces
    ;; this adapter. New roots select callbacks only through ordinary graph refs.
    :fn-picker {:namespace "app.ui-fn-picker" :prefix "picker"
-               :roles [:view] :inputs {:view #{"model"}}}})
+               :roles [:view] :inputs {:view #{"model"}}}
+   :tutorial-catalog {:namespace "app.ui-tutorial-catalog" :prefix "catalog"
+                      :roles [:view] :inputs {:view #{"inputs"}}}})
 
 
 (def ^:private role-inputs

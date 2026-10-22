@@ -4,6 +4,10 @@
 # shellcheck disable=SC1090,SC2034
 set -euo pipefail
 
+# A nested CI run inherits the enclosing train's scheduling hints. Each case
+# below owns its priority and resume receipts, including the default cases.
+unset WTQ_FIRST_STAGE WTQ_RESUME_FROM
+
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 source <(sed -n '/^run_scoped_ci_gate() {/,/^}/p' "$SCRIPT_DIR/wt")
 source <(sed -n '/^run_gate_stage() {/,/^}/p' "$SCRIPT_DIR/wt")

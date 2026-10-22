@@ -1,4 +1,4 @@
-const {verifyPickerRootSelection} = require('./picker-root-test-helpers');
+const {verifyPickerRootSelection, verifyPickerNativeRootLifetime} = require('./picker-root-test-helpers');
 // Compatibility selective copies, retained authored identities, and a real cross-tab
 // activation conflict. Every cleanup operation uses exact creation receipts.
 const {unexpectedSelectiveCopyErrors} = require('./selective-copy-errors');
@@ -190,6 +190,8 @@ async function cleanup(page, receipts, scope = 'final') {
     const picker = await copy(page, 'fn-picker', receipts, settle);
     phase = 'runtime-picker';
     await verifyPickerRootSelection(page, picker.activationId, picker.roots['picker-id']);
+    phase = 'picker-root-lifetime';
+    await verifyPickerNativeRootLifetime(page, picker.roots['picker-id']);
     assert(await page.evaluate(() => gdShellMenuGraph.ready && gdUIComponentsRoots()['menu-id']),
       'partial compatibility manifests receive a working shared menu through graph composition');
     await page.evaluate(async id => { await ensureSubtreeFor(id); gdShellSurface('build'); selectFn(id); }, picker.roots['picker-id']);

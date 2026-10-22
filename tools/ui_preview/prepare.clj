@@ -6,6 +6,7 @@
     [clojure.edn :as edn]
     [clojure.java.io :as io]
     [clojure.string :as str]
+    [graphden.packages.rebase :as rebase]
     [graphden.packages.records.ids :as ids]))
 
 
@@ -35,11 +36,15 @@
 
 (defn- pure-definitions
   [project account-menu? picker?]
-  (mapcat (fn [module-name]
-            (let [module (edn/read-string (slurp (io/file project "resources/packages/app" module-name "fns.edn")))]
-              (take-while #(not= :_ui-preview-export (:name %)) (:fns module))))
-          (cond-> [(if account-menu? "ui-account-menu" "ui-preview")]
-            picker? (conj "ui-fn-picker"))))
+  (mapcat (fn [[module-name roots]]
+            (let [module (edn/read-string (slurp (io/file project "resources/packages/app" module-name "fns.edn")))
+                  source (:namespace module)
+                  definitions (mapv #(assoc % :namespace source) (:fns module))]
+              (rebase/definition-closure definitions (mapv #(keyword source (name %)) roots))))
+          (cond-> [(if account-menu?
+                     ["ui-account-menu" [:account-menu-initial :account-menu-update :account-menu-view]]
+                     ["ui-preview" [:menu-initial :menu-update :menu-view]])]
+            picker? (conj ["ui-fn-picker" [:picker-view]]))))
 
 
 (defn- validate-plan!
@@ -85,13 +90,13 @@
       (if account-menu?
         (validate-plan! url query expected)
         (let [plan (:result (request url :post (str "/api/execute?branch=" encoded-branch)
-                                    (json/generate-string {:fn-id plan-id :args {} :timeout-ms 15000})
-                                    "application/json"))]
+                                     (json/generate-string {:fn-id plan-id :args {} :timeout-ms 15000})
+                                     "application/json"))]
           (when-not (= expected (:entries plan))
             (throw (ex-info "Preview entry functions do not resolve to the editable copy" {})))))
       (when picker?
         (validate-plan! url (str "branch=" encoded-branch "&initial=" (:initial expected)
-                                "&update=" (:update expected) "&view=" picker-id)
+                                 "&update=" (:update expected) "&view=" picker-id)
                         (assoc expected :view picker-id)))
       (cond-> {:branch branch :namespace graph-namespace :entries (cond-> expected picker? (assoc :picker-view picker-id))
                :url (if account-menu?

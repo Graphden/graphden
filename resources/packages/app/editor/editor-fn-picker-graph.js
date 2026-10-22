@@ -27,7 +27,7 @@ window.gdRefreshPickerReturnLabels = entries => {
   let generation = 0;
   let pending = null;
   const instances = new Set();
-  function invalidate() {
+  function invalidate(closePopup = true) {
     generation++;
     pending?.abort();
     window.gdEditorRoot?.releaseComponent(runtime);
@@ -35,11 +35,11 @@ window.gdRefreshPickerReturnLabels = entries => {
     integration.ready = false;
     // Native fallback keeps the popup after releasing its graph instance.
     // Its candidates and callbacks still belong to the retired root.
-    window.closeFnPicker?.();
+    if (closePopup) window.closeFnPicker?.();
     for (const instance of [...instances]) instance.dispose();
   }
-  async function load() {
-    invalidate();
+  async function load(closePopup = true) {
+    invalidate(closePopup);
     const own = generation;
     const controller = new AbortController();
     pending = controller;
@@ -161,7 +161,9 @@ window.gdRefreshPickerReturnLabels = entries => {
     });
   } else {
     window.addEventListener('gd-editor-root-changing', invalidate);
-    window.addEventListener('gd-editor-root-ready', () => { void load(); });
+    // A native picker opened during this root's initial load still belongs to
+    // the same root. Retirement already happened at root-changing.
+    window.addEventListener('gd-editor-root-ready', () => { void load(false); });
     if (window.gdEditorRoot?.componentNow('fn-picker')) void load();
   }
 })();

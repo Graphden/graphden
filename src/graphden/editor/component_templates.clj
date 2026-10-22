@@ -66,23 +66,9 @@
 
 
 (defn definition-closure
-  "Select local authored dependencies by reference positions, never literals.
-   External references stay external; this grants no source authority."
+  "Select local authored dependencies by reference positions, never literals."
   [definitions roots]
-  (let [indexed (into {} (map #(vector (keyword (:namespace %) (name (:name %))) %)) definitions)]
-    (loop [pending (set roots) seen #{}]
-      (if (empty? pending)
-        (filterv #(contains? seen (keyword (:namespace %) (name (:name %)))) definitions)
-        (let [reference (first pending)
-              definition (get indexed reference)
-              references (atom #{})]
-          (rebase/rewrite-references definition
-                                     (fn [ref]
-                                       (let [qualified (if (namespace ref) ref (keyword (:namespace definition) (name ref)))]
-                                         (when (contains? indexed qualified) (swap! references conj qualified)))
-                                       ref))
-          (recur (into (disj pending reference) (remove (conj seen reference) @references))
-                 (conj seen reference)))))))
+  (rebase/definition-closure definitions roots))
 
 
 (defn- copy-module

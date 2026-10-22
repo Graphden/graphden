@@ -196,3 +196,6 @@ ordinary refs are authoritative. Remove the compatibility projection after the
 deterministic personal-root migration has replaced its readers and records.
 Root replacement immediately closes a mounted picker and retires its render
 receipt; old asynchronous loads cannot reactivate it.
+Completing the same root's load preserves a native picker opened during loading.
+That popup stays native and carries no graph render receipt until it is closed;
+the next root replacement still retires it immediately.

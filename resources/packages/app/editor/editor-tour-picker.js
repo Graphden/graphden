@@ -328,6 +328,10 @@ window.addEventListener('gd-graph-changed', () => {
 
 async function openTutorialMenu() {
   _tourCatalogClose?.();
+  const returnEl = document.activeElement;
+  // Starting the very first root load may announce changing synchronously.
+  // Our pending owner begins after that intentional initial transition.
+  const preparing = window.gdTourCatalogGraph.prepare();
   const epoch = ++_tourCatalogEpoch;
   const location = _tourCatalogLocation();
   const authIdentity = _tourCatalogAuthIdentity();
@@ -343,8 +347,13 @@ async function openTutorialMenu() {
   _tourCatalogClose = closePending;
   window.gdTourCatalogClose = closePending;
   let lessons;
-  try { lessons = await _tourFetchLessons(); }
-  catch (error) { closePending(); throw error; }
+  try { [lessons] = await Promise.all([_tourFetchLessons(), preparing]); }
+  catch (error) {
+    const owned = _tourCatalogClose === closePending;
+    closePending();
+    if (owned && error.name !== 'AbortError' && typeof gdToast === 'function') gdToast('Tutorial catalogue unavailable');
+    return;
+  }
   const owner = window.gdPrefOwner || null;
   const firstOwnerLoaded = openingOwner === null && !openingPrefsReady && !!window.gdPrefsReady;
   if (epoch !== _tourCatalogEpoch || location !== _tourCatalogLocation()
@@ -372,7 +381,6 @@ async function openTutorialMenu() {
   pop.replaceChildren();
   pop.classList.add('gd-tour-visible');
   _tourCenterPop(pop);
-  const returnEl = document.activeElement;
   let disposed = false;
   let graph = null;
   let countsRenderer = null;
@@ -384,6 +392,7 @@ async function openTutorialMenu() {
     && context === _tourCatalogContext() && pop.isConnected;
   const retire = () => {
     if (disposed) return;
+    const hadFocus = pop.contains(document.activeElement);
     disposed = true;
     if (_tourCatalogClose === retire) _tourCatalogClose = null;
     if (window.gdTourCatalogClose === retire) window.gdTourCatalogClose = null;
@@ -396,6 +405,7 @@ async function openTutorialMenu() {
     pop.replaceChildren();
     pop.onkeydown = null;
     pop.classList.remove('gd-tour-visible');
+    if (hadFocus && returnEl?.isConnected && typeof returnEl.focus === 'function') returnEl.focus();
   };
   retire.current = current;
   _tourCatalogClose = retire;
@@ -539,13 +549,8 @@ async function openTutorialMenu() {
       resume: {active: !!paused, ended, id: paused?.id || '', title: paused?.title || '',
         step: saved?.step || 0, steps: (paused?.steps || []).length},
       'text-only-copy': _tourCopy('read-only', 'text only')};
-    let model;
-    try { model = graph.view(input); }
-    catch (error) {
-      retire();
-      if (typeof gdToast === 'function') gdToast('Tutorial catalogue unavailable');
-      return;
-    }
+    try {
+    const model = graph.view(input);
     renderPassive(countsRenderer, counts, model.counts);
     renderPassive(introRenderer, body, model.intro);
     if (resume) resume.textContent = model.resumeLabel;
@@ -599,6 +604,11 @@ async function openTutorialMenu() {
     });
     while (list.children.length > desired.length) list.children[list.children.length - 1].remove();
     if (retainFocus && document.activeElement !== focused && focused.isConnected) focused.focus();
+    graph.painted(model);
+    } catch (error) {
+      retire();
+      if (typeof gdToast === 'function') gdToast('Tutorial catalogue unavailable');
+    }
   }
 
   function renderFoot(confirming) {
@@ -635,7 +645,7 @@ async function openTutorialMenu() {
       'gd-tour-btn-quiet gd-tour-clear', () => renderFoot(true)));
   }
 
-  graph = window.gdTourCatalogGraph.mount(() => render(filter.value));
+  graph = window.gdTourCatalogGraph.mount();
   graph.own(body);
   graph.own(counts);
   graph.own(emptyHost);
@@ -648,6 +658,7 @@ async function openTutorialMenu() {
     render('');
   });
   render('');
+  if (!current()) return;
   if (typeof focusIntoDialog === 'function') focusIntoDialog(pop);
   else if (typeof filter.focus === 'function') filter.focus();
 }

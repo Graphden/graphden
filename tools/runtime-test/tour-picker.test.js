@@ -100,6 +100,7 @@ function makeWorld(opts) {
     console,
     process,
     AbortController,
+    DOMException,
     JSON,
     Set,
     localStorage: {
@@ -148,13 +149,21 @@ function makeWorld(opts) {
   vm.runInContext(builtinSource, ctx);
   ctx.GraphdenStyles = {normalize: rules => [...rules], acquire: () => ({id: 'catalog-test'}), release: () => {}};
   ctx.GraphdenRenderer = graphRenderer(document, ctx.GraphdenBrowser);
-  ctx.gdLoadUIComponentRuntime = o.loadRuntime
-    || (async (_component, plan) => ctx.GraphdenBrowser.createRuntime(plan));
+  let accepted = null;
+  let released = 0;
+  const rootRuntime = ctx.GraphdenBrowser.createRuntime(ctx.GraphdenBuiltinPlans.plans.tutorialCatalog);
+  ctx.gdEditorRoot = {
+    component: () => o.loadRuntime ? o.loadRuntime(rootRuntime) : Promise.resolve(rootRuntime),
+    acceptComponent(runtime) { accepted = runtime; return true; },
+    releaseComponent(runtime) { if (accepted === runtime) accepted = null; released++; },
+  };
+  ctx.gdLoadUIComponentRuntime = () => { throw new Error('Legacy catalogue dispatch forbidden'); };
   vm.runInContext(graphSource, ctx);
   vm.runInContext(createSource, ctx);
   vm.runInContext(source, ctx);
   return {
     ctx, pop, said, started, toasts,
+    accepted: () => accepted, released: () => released,
     stored: () => {
       const raw = store.get('graphden.tour.done');
       return raw === undefined ? null : JSON.parse(raw);
@@ -578,7 +587,7 @@ function makeWorld(opts) {
     assert(w.rows().map(row => row.dataset.lessonId).join() === '01,03', 'filter keeps the original row order');
   });
 
-  await test('graph refresh keeps native draft, focus, row controls and their single listeners', async () => {
+  await test('filter redraw keeps native draft, focus, row controls and their single listeners', async () => {
     const w = makeWorld({done: ['02']});
     w.ctx._tourTextUrl = lesson => '/lessons/' + lesson.id;
     await w.ctx.openTutorialMenu();
@@ -590,8 +599,8 @@ function makeWorld(opts) {
     filter.value = 'slots';
     filter.dispatch('input');
     filter.focus();
-    await w.ctx.gdTourCatalogGraph.reload();
-    await w.ctx.gdTourCatalogGraph.reload();
+    filter.dispatch('input');
+    filter.dispatch('input');
     assert(w.pop.querySelector('.gd-tour-filter') === filter && filter.value === 'slots'
       && w.ctx.document.activeElement === filter, 'draft and focus survive selected-runtime refresh');
     assert(w.row('02') === row && row.children[0] === button
@@ -607,7 +616,7 @@ function makeWorld(opts) {
     'personal graph styles are scoped to passive body hosts, not native controls');
     for (const control of [button, read, undo]) {
       control.focus();
-      await w.ctx.gdTourCatalogGraph.reload();
+      filter.dispatch('input');
       assert(w.ctx.document.activeElement === control && w.row('02') === row,
         'chapter redraw retains connected control focus and row identity');
     }
@@ -616,37 +625,93 @@ function makeWorld(opts) {
       'refresh did not duplicate the unmark handler');
   });
 
-  await test('auth retirement clears old catalogue DOM and ignores its late graph runtime', async () => {
+  await test('root replacement retires pending catalogue and ignores late runtime', async () => {
     let resolveRuntime;
-    let deferredPlan;
-    const w = makeWorld({loadRuntime: (_component, plan) => {
-      deferredPlan = plan;
-      return new Promise(resolve => { resolveRuntime = resolve; });
-    }});
-    await w.ctx.openTutorialMenu();
-    const loading = w.ctx.gdTourCatalogGraph.reload();
-    assert(w.rows().length === 5, 'builtin catalogue remains available while selection loads');
-    w.ctx.gdPrefOwner = 'another-account';
-    w.ctx.dispatchEvent(new Event('gd-auth-changed'));
+    const w = makeWorld({loadRuntime: () => new Promise(resolve => { resolveRuntime = resolve; })});
+    const opening = w.ctx.openTutorialMenu();
+    assert(w.pop.children.length === 0, 'no builtin catalogue appears while root loads');
+    w.ctx.dispatchEvent(new Event('gd-editor-root-changing'));
+    resolveRuntime({run() { throw new Error('Stale runtime must never execute'); }});
+    await opening;
     assert(w.pop.children.length === 0 && !w.pop.classList.contains('gd-tour-visible'),
-      'old-account catalogue data is removed immediately');
-    resolveRuntime(w.ctx.GraphdenBrowser.createRuntime(deferredPlan));
-    await loading;
-    assert(w.pop.children.length === 0, 'late old-account selection cannot revive old rows');
+      'late old-root selection cannot revive catalogue rows');
+    assert(w.accepted() === null, 'pending runtime never receives paint receipt');
   });
 
-  await test('legacy or invalid personal view falls back only for the catalogue body', async () => {
-    const w = makeWorld();
+  await test('malformed root view fails closed without builtin fallback', async () => {
+    const w = makeWorld({loadRuntime: async () => ({run: () => new Map()})});
     await w.ctx.openTutorialMenu();
-    const filter = w.pop.querySelector('.gd-tour-filter');
-    const otherPersonalOwner = {id: 'other-component-runtime'};
-    w.ctx.otherPersonalOwner = otherPersonalOwner;
-    w.ctx.gdLoadUIComponentRuntime = async () => ({run: () => new Map()});
-    await w.ctx.gdTourCatalogGraph.reload();
-    assert(w.rows().length === 5 && w.pop.querySelector('.gd-tour-filter') === filter,
-      'the section-local built-in view remains usable with native controls');
-    assert(w.ctx.otherPersonalOwner === otherPersonalOwner,
-      'catalogue fallback does not replace unrelated personal component state');
+    assert(w.pop.children.length === 0 && !w.pop.classList.contains('gd-tour-visible'),
+      'invalid custom catalogue cannot activate the builtin or leave native controls');
+    assert(w.accepted() === null, 'invalid view cannot certify a rendered selection');
+    assert(w.toasts.includes('Tutorial catalogue unavailable'), 'contract refusal is visible');
+  });
+
+  await test('root replacement releases styles and receipt and returns focus', async () => {
+    const w = makeWorld();
+    const trigger = w.ctx.document.createElement('button');
+    w.ctx.document.body.appendChild(trigger);
+    trigger.focus();
+    await w.ctx.openTutorialMenu();
+    assert(w.accepted() !== null, 'successful host paint receives selection receipt');
+    w.pop.querySelector('.gd-tour-filter').focus();
+    const hosts = w.pop.querySelectorAll('[data-gd-ui-style]');
+    w.ctx.dispatchEvent(new Event('gd-editor-root-changing'));
+    assert(w.pop.children.length === 0 && w.accepted() === null, 'old DOM and receipt retire immediately');
+    assert(hosts.every(host => !host.dataset.gdUiStyle), 'all retired passive style scopes released');
+    assert(w.ctx.document.activeElement === trigger, 'retirement restores the opening focus');
+  });
+
+  await test('view production alone cannot certify root rendering', async () => {
+    const w = makeWorld();
+    await w.ctx.gdTourCatalogGraph.prepare();
+    const session = w.ctx.gdTourCatalogGraph.mount();
+    const model = session.view({lessons: [], query: '',
+      resume: {active: false, ended: false, id: '', title: '', step: 0, steps: 0}, 'text-only-copy': 'text only'});
+    assert(w.accepted() === null, 'validated view output alone has no root receipt');
+    session.painted(model);
+    assert(w.accepted() !== null, 'explicit successful host paint accepts the current facade');
+    session.dispose();
+    assert(w.accepted() === null, 'last session disposal releases the paint receipt');
+    let refused = false;
+    try { session.painted(model); } catch (_) { refused = true; }
+    assert(refused && w.accepted() === null, 'disposed model cannot certify a later paint');
+  });
+
+  await test('missing or revoked root callback cannot reactivate the built-in catalogue', async () => {
+    for (const loadRuntime of [async () => null, async () => { throw new Error('Source access revoked'); }]) {
+      const w = makeWorld({loadRuntime});
+      await w.ctx.openTutorialMenu();
+      assert(w.pop.children.length === 0 && w.accepted() === null, 'unavailable root leaves no catalogue or render receipt');
+      assert(w.toasts.includes('Tutorial catalogue unavailable'), 'unavailable root has a visible refusal');
+    }
+  });
+
+  await test('host paint and stylesheet failures retire partially rendered DOM without receipt', async () => {
+    for (const failure of ['render', 'styles']) {
+      const w = makeWorld();
+      if (failure === 'render') {
+        const original = w.ctx.GraphdenRenderer.mount;
+        w.ctx.GraphdenRenderer.mount = (...args) => {
+          const renderer = original(...args);
+          renderer.render = () => { throw new Error('Paint refused'); };
+          return renderer;
+        };
+      } else w.ctx.GraphdenStyles.acquire = () => { throw new Error('Styles refused'); };
+      await w.ctx.openTutorialMenu();
+      assert(w.pop.children.length === 0 && w.accepted() === null, 'failed host paint retires partial DOM and cannot certify selection');
+    }
+  });
+
+  await test('first root load can announce changing without cancelling its own open', async () => {
+    const w = makeWorld();
+    const original = w.ctx.gdEditorRoot.component;
+    w.ctx.gdEditorRoot.component = () => {
+      w.ctx.dispatchEvent(new Event('gd-editor-root-changing'));
+      return original();
+    };
+    await w.ctx.openTutorialMenu();
+    assert(w.rows().length === 5, 'intentional synchronous initial root load retains its new owner');
   });
 
   await test('teardown during initial lesson fetch cannot open a late catalogue', async () => {

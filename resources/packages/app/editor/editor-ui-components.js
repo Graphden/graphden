@@ -139,7 +139,6 @@
       void window.gdFnPickerGraph?.reload();
       void window.gdInspectorGraph?.reload();
       void window.gdExplorerGraph?.reload();
-      void window.gdTourCatalogGraph?.reload();
       void window.gdCanvasGraph?.reload();
       void window.gdCanvasValuesGraph?.reload();
       void window.gdCanvasInheritanceGraph?.reload();
@@ -167,7 +166,7 @@
     if (component === 'explorer' && section === 'diff') status(component, 'Personal Explorer compare presentation is unavailable. Using built-in compare controls.');
   };
   window.gdUIComponentRuntimeIdentity = component => {
-    if (['account-menu', 'recents', 'fn-picker'].includes(component) && window.gdEditorRoot) return window.gdEditorRoot.componentIdentity(component);
+    if (['account-menu', 'recents', 'fn-picker', 'tutorial-catalog'].includes(component) && window.gdEditorRoot) return window.gdEditorRoot.componentIdentity(component);
     const value = runtimeIdentities.get(component); return value?.stamp === stamp() ? value.id : null; };
   window.gdUIComponentsStatus = () => [...statuses.values()].find(Boolean) || '';
   window.gdUIComponentsSelection = selection;

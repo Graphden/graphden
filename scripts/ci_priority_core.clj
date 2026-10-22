@@ -39,7 +39,8 @@
    "tools/browser-test/tutorial-tour-helpers.js" [:tutorial]})
 
 
-(defn- impacted-browser-files [browser-files path]
+(defn- impacted-browser-files
+  [browser-files path]
   (mapcat (fn [entry]
             (if (= entry :tutorial)
               (filter #(str/starts-with? % "edit-tutorial-") browser-files)

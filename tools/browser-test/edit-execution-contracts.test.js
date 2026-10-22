@@ -17,6 +17,10 @@ async function goto(page, name) {
   await page.waitForFunction(expected => graphReady() && !graph.animating
     && lookups.fnMap.get(selectedFnId)?.name === expected, names[name], {timeout: 60000});
   await page.waitForSelector('.edge-label-overlay', {timeout: 30000});
+  // Ranking starts after the initial root export. Loading lifetime is covered
+  // separately with a held response; canvas readiness alone does not prove it.
+  await page.waitForFunction(() => window.gdFnPickerGraph?.ready
+    && window.gdEditorRoot?.componentNow('fn-picker'));
 }
 async function expandMapValue(page, argName) {
   const chip = page.locator('.edge-label-overlay[data-arg-name="' + argName + '"] .arg-type-chip').first();
@@ -184,6 +188,8 @@ async function candidate(page, name, compatible) {
           text: panel.textContent.slice(0, 800)})),
         picker: [...document.querySelectorAll('.fn-picker-row')].map(row => ({className: row.className, name: row.dataset.fnName})),
         pickerExpected: document.querySelector('.fn-picker-expected')?.textContent,
+        pickerReady: window.gdFnPickerGraph?.ready === true,
+        pickerRootAvailable: !!window.gdEditorRoot?.componentNow('fn-picker'),
         popovers: [...document.querySelectorAll('.arg-value-edit-popover')].map(panel => panel.getAttribute('aria-label'))};
     }).catch(() => ({snapshotUnavailable: true}));
     console.log('execution finite DOM/type snapshot', JSON.stringify(snapshot));

@@ -10,6 +10,15 @@
       StandardCopyOption)))
 
 
+(defn stable-candidate?
+  "A CI verdict belongs to one committed HEAD; nonignored worktree edits invalidate it."
+  [initial current]
+  (and (string? (:sha initial))
+       (re-matches #"[0-9a-f]{40}" (:sha initial))
+       (= (:sha initial) (:sha current))
+       (= "" (:worktree-status initial) (:worktree-status current))))
+
+
 (defn receipt
   [{:keys [sha command since checks scoped manual status results elapsed-ms exit wait-ms path]}]
   {:schema 1

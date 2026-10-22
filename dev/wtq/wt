@@ -91,8 +91,6 @@ SOON_DIR="$WTQ_DIR/soon"         # "I will enqueue within N minutes" markers
 BISECT_DIR="$WTQ_DIR/bisect"     # per red-train bisection budget
 STATE_LOCK="$WTQ_DIR/state.lock" # short-lived lock over queue/, soon/, bisect/, results/
 TRAIN_FILE="$WTQ_DIR/train"      # the train currently being gated (id, members, log)
-LINT_LOCK="$WTQ_DIR/lint.lock"   # one pre-queue lint at a time (see cmd_merge)
-LINT_HOLDER="$WTQ_DIR/lint.holder"
 E2E_RUNS_DIR="$WTQ_DIR/e2e-runs" # the e2e output of the last green gates (rolling baseline)
 E2E_BASELINE_LOCAL="$WTQ_DIR/e2e-baseline.tsv"
 mkdir -p "$LOG_DIR" "$TASKS_DIR" "$RESULT_DIR" "$PRIOR_TRAIN_DIR" "$FAILURE_DIR" "$QUEUE_DIR" "$SOON_DIR" "$BISECT_DIR"
@@ -400,8 +398,8 @@ isolated workspace.
        bb wt claim <name> "<one-line task summary>"
    This creates feature/<name> + an isolated worktree and registers you in the
    pool. cd into the printed WORKTREE path and do ALL work there.
-3. Implement, keeping `bb ci` green.
-4. When the code is ready and `bb ci` is green, LAND IT YOURSELF — run the gate
+3. Implement in small commits; queue the completed candidate for its single full gate.
+4. When the completed candidate is committed, LAND IT YOURSELF — run the gate
    (`bb wt merge` in the BACKGROUND). Don't ask permission to finish: the gate
    cannot advance develop on a red result. Handle any conflict or failure it
    reports, and iterate until it is green.
@@ -435,7 +433,7 @@ EOF
   local commits; commits="$(git -C "$path" rev-list --count "$TARGET..$branch" 2>/dev/null || echo 0)"
   if [ "${commits:-0}" -eq 0 ]; then
     cat <<EOF
-Execute the task end to end: implement in small commits, keep 'bb ci' green as
+Execute the task end to end: implement in small commits and use focused diagnostics as
 your fast loop, and when the feature is complete LAND IT YOURSELF — run the gate
 with 'bb wt merge' (in the BACKGROUND — it takes ~40 min), handling any conflict
 or failure it reports, then clean up with 'bb wt drop'. Do not ask permission to
@@ -475,7 +473,7 @@ EOF
 
   cat <<EOF
 
-Then finish the job: keep 'bb ci' green, and when the feature is complete land it
+Then finish the job: commit the completed candidate and land it
 yourself — 'bb wt merge' (in the BACKGROUND — it takes ~40 min), handling any
 conflict or failure it reports, then 'bb wt drop'. Do not ask permission to
 finish. Ask only if you hit a real decision you can't make.
@@ -541,7 +539,7 @@ cmd_ack() {
   if [ "$(qget "$name" needs_ack)" = 1 ]; then qset "$name" needs_ack ""; armed=1; fi
   state_unlock
   if [ -n "$armed" ]; then
-    say "  Your queued entry is re-armed at its place — its waiting 'wt merge' carries on (no re-lint)."
+    say "  Your queued entry is re-armed at its place — its waiting 'wt merge' carries on (no extra checks)."
     say "  If what you just read changes your work, commit and re-run ${BLD}bb wt merge${RST} instead."
   else
     say "  Re-read anything above that changes what you are doing, then: ${BLD}bb wt merge${RST}"
@@ -723,7 +721,7 @@ cmd_new() {
 
   if [ "${CLAIMED:-0}" = 1 ]; then
     # agent self-registered — it is already running; just point it at the workspace
-    ok "Registered in the pool. cd into WORKTREE above and do ALL edits there; keep 'bb ci' green."
+    ok "Registered in the pool. cd into WORKTREE above and do ALL edits there; queue the completed candidate for its single full gate."
     return
   fi
 
@@ -1012,8 +1010,7 @@ cmd_drop() {
 #   - A branch that changes a GOVERNANCE path travels ALONE. Its siblings could
 #     not have read rules that land in the same fast-forward; alone, the next
 #     train's drift check marks them NEEDS-ACK: skipped, but kept in their
-#     queue place with their waiters waiting, until `wt ack` re-arms them (the
-#     lint stamp for the sha still holds — no re-lint, no re-queue).
+#     queue place with their waiters waiting, until `wt ack` re-arms them.
 #   - An entry whose waiter died (kill -9, a lost terminal) is pruned, not
 #     landed — like the old blocking flock, where a dead waiter simply left the
 #     queue. Members already mid-bisection are kept: their verdict is owed.
@@ -1180,14 +1177,12 @@ queue_state() {
 #                         (default 6000 = the p90 footprint + ~0.6 GB slack;
 #                         the rare heavier run then eats into page cache, not
 #                         into a live process).
-#   WTQ_AGENT_MEM_MIN_MB  what an agent's `wt test` / `wt up` / pre-queue lint
+#   WTQ_AGENT_MEM_MIN_MB  what an agent's `wt test` / `wt up` / optional diagnostics
 #                         waits for (default 3000: one kaocha JVM or one 2 GB
 #                         `wt up` stack plus slack).
 # and while the gate is in a heavy phase it says so in $GATE_HEAVY; agent-side
 # commands yield until it is gone.
 GATE_HEAVY="$WTQ_DIR/gate-heavy"
-LINT_OK_DIR="$WTQ_DIR/lint-ok"     # <name> = the HEAD sha `bb lint` last passed on
-mkdir -p "$LINT_OK_DIR"
 
 mem_avail_mb() { awk '/^MemAvailable:/{print int($2 / 1024)}' /proc/meminfo; }
 int_or() { case "$1" in ''|*[!0-9]*) echo "$2" ;; *) echo "$1" ;; esac; }
@@ -1440,10 +1435,6 @@ gate_suites() {
   fi
   [ "$NEED_E2E" = 1 ] && stages+=(e2e)
   [ "$NEED_VISUAL" = 1 ] && stages+=(visual)
-  # Keep the established browser-first default for frontend-only trains.
-  if [ "$NEED_INTEGRATION" = 0 ] && [ "$NEED_E2E" = 1 ]; then
-    stages=("${stages[@]:1}" ci)
-  fi
   [ "$NEED_INTEGRATION" = 1 ] && stages+=(integration)
   [ "$NEED_FLEET" = 1 ] && stages+=(fleet)
 
@@ -1469,12 +1460,11 @@ gate_suites() {
     echo "FAIL: resume stage list is not the complete selected roster"
     return 1
   fi
-  # Cheap changed-file formatting/syntax/lint always precedes expensive stages.
-  step "bb ci (changed-file preflight)"
-  (cd "$wt" && bb scripts/ci.clj --preflight-only "$base_sha") \
-    || { echo "FAIL: changed-file preflight"; return 1; }
-  local GRAPHDEN_FAST_DONE_SHA="$ci_sha"
-  export GRAPHDEN_FAST_DONE_SHA
+  # Quick mandatory CI checks run first inside the one current candidate gate.
+  local GRAPHDEN_CI_SINCE="$base_sha" GRAPHDEN_CI_PRIORITY_HINTS
+  GRAPHDEN_CI_PRIORITY_HINTS="$(cd "$wt" && bb scripts/ci_priority.clj kaocha-hints "$base_sha")" \
+    || { echo "FAIL: cannot prepare suite ordering hints"; return 1; }
+  export GRAPHDEN_CI_SINCE GRAPHDEN_CI_PRIORITY_HINTS
   echo "  stage order: ${ordered[*]}"
   for stage in "${ordered[@]}"; do
     case "$stage" in
@@ -1569,7 +1559,7 @@ gate_body() {
     _ph_name="$*"
     _ph_t0=$SECONDS
     # JVM / container heavy phases announce themselves, so agents' `wt test`,
-    # `wt up` and pre-queue lint yield instead of starving them.
+    # `wt up` and optional focused checks yield instead of starving them.
     case "$*" in
       "bb ci"*|"build the CANDIDATE"*|"bb test-"*|"TEST STUB"*) heavy_on "$*" ;;
       *) heavy_off ;;
@@ -1920,9 +1910,6 @@ train_run() {
       state_lock; qset "$m" needs_ack 1; qset "$m" seg ""; qset "$m" state queued; state_unlock
       continue
     fi
-    if [ "$(cat "$LINT_OK_DIR/$m" 2>/dev/null)" != "${M_SHA[$m]}" ]; then
-      decide "$m" PRECOND "$ts" "no green 'bb lint' stamp for the queued sha — re-run 'bb wt merge' (it lints first)"; continue
-    fi
     if git -C "$MAIN_WT" merge-base --is-ancestor "${M_SHA[$m]}" "$TARGET"; then
       if { [ -n "${M_TRAIN_TS[$m]}" ] || [ -f "$PRIOR_TRAIN_DIR/${M_SHA[$m]}" ]; } \
         && ! prior_train_complete "$m"; then
@@ -2193,7 +2180,6 @@ conduct() {
     guard=$((guard + 1))
     prune_finished_bisections
     conductor_has_work "$own" "$own_sha" || return 0
-    yield_to_lint
     wait_for_headroom
     refresh_target
     rc=0; train_cycle || rc=$?
@@ -2204,22 +2190,6 @@ conduct() {
     esac
   done
   warn "conductor: 100 trains in one hold — stopping as a safety net (this is a bug; report it)"
-}
-
-# A pre-queue lint yields to the gate's heavy phases (yield_to_gate) — and with
-# trains back to back the heavy phases never end: the gap between two trains is
-# seconds, and a lint polling every 15 s starved for over an hour (2026-09-24),
-# holding the lint lock, so every agent behind it starved too. So between
-# trains the gate yields back: if a lint holds the lock (it may be waiting for
-# exactly this gap), the next train waits until it is done — at most
-# WTQ_GATE_LINT_WAIT seconds (default 900), then starts anyway.
-yield_to_lint() {
-  local cap; cap="$(int_or "${WTQ_GATE_LINT_WAIT:-}" 900)"
-  # Free lock = no lint running (a killed lint can leave its holder line behind).
-  flock -n "$LINT_LOCK" true 2>/dev/null && return 0
-  info "between trains: letting the pre-queue lint of $(cat "$LINT_HOLDER") finish first (at most ${cap}s) ..."
-  flock -w "$cap" "$LINT_LOCK" true \
-    || warn "that lint is still running after ${cap}s — starting the train anyway"
 }
 
 # The per-check timeouts are ceilings measured on an idle box; starting the
@@ -2329,36 +2299,7 @@ waiter_abort() {
   state_unlock
 }
 
-# The pre-queue lint, ONE AT A TIME for every worktree of the repo. Several
-# agents running `wt merge` together used to lint side by side (load 40-80),
-# and their checks timed each other out or lost a child's stream — PRECOND for
-# code that was fine (one agent needed five attempts, 2026-09-24). Waiting a
-# few minutes for another lint is cheaper than that. `--retry-solo` then
-# re-runs a check that still went red once alone before it counts (the report
-# says which, and prints the first attempt).
-LINT_CMD="${WTQ_LINT_CMD:-bb lint --retry-solo}"
-lint_serialized() {   # <worktree> <name> <sha>
-  local wt="$1" name="$2" sha="$3"
-  (
-    exec 8>"$LINT_LOCK"
-    if ! flock -n 8; then
-      warn "lint: another pre-queue lint is running ($(cat "$LINT_HOLDER" 2>/dev/null || echo '?')) — waiting for it; side by side they time each other out ..."
-      flock 8
-    fi
-    printf '%s @ %s (pid %s) since %s' "$name" "${sha:0:8}" "$BASHPID" "$(date +%H:%M:%S)" > "$LINT_HOLDER"
-    yield_to_gate "lint"
-    info "lint: running '$LINT_CMD' at ${sha:0:8} before queueing ..."
-    local rc=0
-    # 8>&-: the lint must not inherit the lock — an orphan it leaves behind
-    # would hold every other agent's lint hostage.
-    # shellcheck disable=SC2086  # a command line, split on purpose
-    ( cd "$wt" && exec $LINT_CMD 8>&- ) || rc=$?
-    : > "$LINT_HOLDER"
-    exit "$rc"
-  )
-}
-
-lint_refused() {   # <name> <branch> <sha> <why> — PRECOND, never queued
+queue_refused() {   # <name> <branch> <sha> <why> — PRECOND, never queued
   state_lock; write_result "$1" PRECOND "$2" "$3" "" "not queued: $4"; state_unlock
   warn "↩ NOT queued: $4"
 }
@@ -2386,31 +2327,15 @@ cmd_merge() {
   local name sha; name="$(basename "$wt")"; sha="$(git -C "$wt" rev-parse HEAD)"
   MY_NAME="$name"; MY_SHA="$sha"
 
-  rm -f "$RESULT_DIR/$name"   # this run's verdict starts now, lint included
+  rm -f "$RESULT_DIR/$name"   # this run's verdict starts now
 
-  # Lint BEFORE queueing, outside the gate lock: a lint red found inside a
-  # train costs the whole serialized train a gate (and a bisection), found
-  # here it costs one agent a minute. Stamped by the exact sha, so a re-queue
-  # of the same commit does not lint twice; the conductor re-checks the stamp.
-  # (The train still lints the MERGED tree in `bb ci` — cross-branch drift
-  # like a stale devtour bake only shows there.)
-  if [ "$(cat "$LINT_OK_DIR/$name" 2>/dev/null)" = "$sha" ]; then
-    ok "lint: already green at ${sha:0:8} — reusing the stamp"
-  else
-    [ -z "$(git -C "$wt" status --porcelain)" ] \
-      || { lint_refused "$name" "$branch" "$sha" "worktree dirty — commit first (lint must see exactly the queued commit)"; return 3; }
-    bootstrap_node_modules "$wt"
-    local lrc=0
-    lint_serialized "$wt" "$name" "$sha" || lrc=$?
-    if [ "$lrc" != 0 ]; then
-      lint_refused "$name" "$branch" "$sha" "'$LINT_CMD' is red (output above) — fix, commit, re-run 'bb wt merge'"; return 3
-    fi
-    if [ "$(git -C "$wt" rev-parse HEAD)" != "$sha" ] || [ -n "$(git -C "$wt" status --porcelain)" ]; then
-      lint_refused "$name" "$branch" "$sha" "the worktree changed while lint ran — re-run 'bb wt merge'"; return 3
-    fi
-    printf '%s\n' "$sha" > "$LINT_OK_DIR/$name"
-    ok "lint: green at ${sha:0:8}"
-  fi
+  # Enqueue the clean committed candidate without a duplicate full lint/CI.
+  # The assembled immutable train runs every selected check once, quick first.
+  [ -z "$(git -C "$wt" status --porcelain)" ] \
+    || { queue_refused "$name" "$branch" "$sha" "worktree dirty — commit before queueing"; return 3; }
+  bootstrap_node_modules "$wt"
+  [ "$(git -C "$wt" rev-parse HEAD)" = "$sha" ] \
+    || { queue_refused "$name" "$branch" "$sha" "the branch changed before queueing"; return 3; }
 
   # Enqueue. A queued merge INVALIDATES the previous verdict: `wt watch` and
   # retry drivers must never report a stale verdict as this run's outcome.
@@ -2446,7 +2371,7 @@ cmd_merge() {
       if [ "$said" != needs-ack ]; then
         said=needs-ack
         warn "NEEDS-ACK: $TARGET changed the rules you work under and you have not seen them."
-        warn "  Your place in the queue is kept. In this worktree run:  bb wt ack   — then this waiter carries on (no re-lint, no re-queue)."
+        warn "  Your place in the queue is kept. In this worktree run:  bb wt ack   — then this waiter carries on (no checks repeated, no re-queue)."
       fi
       sleep "$poll"; continue
     fi

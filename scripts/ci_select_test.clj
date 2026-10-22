@@ -54,12 +54,14 @@
         sh (run-names #{"dev/new-script.sh"})
         wtq (run-names #{"dev/wtq/wt"})
         tour (run-names #{"docs/devtour/tour.edn"})]
-    (is (every? src ["clj-kondo" "splint" "cljstyle" "tests-focused" "tests-unit" "tests-perf" "perf"
+    (is (every? src ["clj-kondo" "splint" "cljstyle" "tests-unit" "tests-perf" "perf"
                      "devtour" "devtour-emacs"])
         "a toured form lives in src/ — the bake AND the emacs anchor path must re-check")
     (is (not-any? docs ["tests-unit" "tests-perf" "perf" "clj-kondo" "biome"]))
     (is (every? docs ["markdownlint" "lychee" "typos" "gitleaks" "commitlint"]))
-    (is (every? js ["biome" "tests-focused" "tests-js" "tests-unit"]))
+    (is (every? js ["syntax" "biome" "tests-js" "tests-unit"]))
+    (is (contains? (run-names #{"docs/example.json"}) "syntax"))
+    (is (contains? (run-names #{"tools/browser-test/helper.cjs"}) "syntax"))
     (is (contains? iac "trivy") "deploy/ IaC manifests are trivy-scanned — must stay relevant")
     (is (contains? compose "trivy") "docker-compose is trivy-scanned — must stay relevant")
     (is (contains? sh "shellcheck"))

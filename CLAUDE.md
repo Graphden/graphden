@@ -32,8 +32,8 @@ often violated after a context loss:
 |------|----------------|
 | **Claim before you edit** — `bb wt claim <name> "<summary>"`, then `cd` to the printed WORKTREE and work only there | Editing the main checkout on `develop` corrupts the shared baseline every other agent branches from |
 | **Stay in your worktree** — never `cd` into another agent's worktree, never edit `develop`, never touch another agent's branch | Agents change unrelated files in parallel; your view of the repo is your branch only |
-| **`bb ci` is your only local *test* command; `bb wt up` is your only live *instance*** | `bb rebuild` / `bb deploy` / `bb test-integration` / `bb test-e2e` / `bb coverage` drive the SHARED stack (`graphden-executor` on :9002) and the shared image tag that `bb test-e2e` boots — from a worktree they steal the demo and make another agent's suite test your binary. They belong to the landing gate, behind its lock. `bb wt up` gives you an isolated stack (own containers, volumes, image, ports) to see your change run |
-| **Finish the job yourself** — a complete, `bb lint`-green feature goes through `bb wt merge`, then `bb wt drop`, without asking | Neither step can lose work: the gate cannot advance `develop` on a red result, and `drop` refuses an unmerged branch. `bb wt merge` may put you in a *merge train* with other ready branches — you still get your own verdict and exit code; a red train is bisected and only the culprit bounces. Asking to merge a finished feature is ceremony, and it stalls a serialized queue on a human's reply. (A full local `bb ci` before queueing is optional solo — the gate re-runs it on the merged result; go `bb ci`-green first only when `bb wt list` shows other claimed agents.) Stop and ask only when a real decision is yours and the answer changes what you build |
+| **Use `bb wt test` for optional focused tests; `bb wt up` for your live instance** | `bb rebuild` / `bb deploy` / `bb test-integration` / `bb test-e2e` / `bb coverage` drive the SHARED stack (`graphden-executor` on :9002) and the shared image tag that `bb test-e2e` boots — from a worktree they steal the demo and make another agent's suite test your binary. They belong to the landing gate, behind its lock. `bb wt up` gives you an isolated stack (own containers, volumes, image, ports) to see your change run |
+| **Finish the job yourself** — commit a complete feature, then run `bb wt merge` and `bb wt drop` without asking | Queueing requires a clean committed tree, with no pre-queue full CI, lint run or lint stamp. The single native gate validates the immutable merged candidate: quick CI checks first, then complete selected suites. Neither landing nor cleanup can lose work: a red gate cannot advance `develop`, and `drop` refuses an unmerged branch. A red train is bisected. Stop and ask only when a real decision changes what you build |
 
 **Recovering the contract and your place in it** — the branch, the worktree and
 the task spec all live on disk, so nothing but the *prompt* is lost with the
@@ -234,11 +234,11 @@ bb repl         # Start REPL with dev profile
 
 # CI check hierarchy — one runner (scripts/ci.clj) over one registry
 # (scripts/checks.edn); every task below delegates, no command is duplicated.
-bb ci           # Full CI: lint (fail-fast) THEN unit tests. A lint slip skips the suite.
+bb ci           # Full selected CI on a clean committed candidate: quick checks, tests, readers.
                 #   --since <ref>  diff-scope: skip checks whose :relevant paths
                 #                  (scripts/checks.edn) saw no change — skips are VISIBLE
                 #   --skip <a,b>   force-skip by check/group name (gate: WTQ_CI_SKIP)
-bb lint         # Every linter, NO tests — the fast pre-gate check (~1 min)
+bb lint         # Optional explicit lint diagnostic; no pre-queue requirement.
 bb check        #   alias for `bb lint`
 bb lint-clj     # Clojure only (kondo/splint/cljstyle) — after editing .clj
 bb lint-web     # Editor JS/CSS (biome/stylelint)
@@ -752,7 +752,7 @@ setup + the honesty table):
 3. Copy the VERIFIED EDN into `fns.edn` verbatim.
 4. Final `bb wt up` — the ONLY step that runs the real package
    boot-sync (load-order, topological sort across packages,
-   ambiguous-ref, packages.owned) — then `bb ci`.
+   ambiguous-ref, packages.owned). Commit the result, then `bb wt merge`.
 
 Do NOT use the MCP cycle for: constant/description edits, renames,
 `impls.clj` (base-fns need a rebuild; fast hypotheses go over nREPL —
@@ -894,10 +894,20 @@ unless it changes what a newcomer should read.
 
 ## CI Workflow
 
-**Run once, save output:**
+Commit the complete change and queue it with `bb wt merge`. The native gate
+runs the complete selected CI roster once on its immutable merged candidate;
+there is no obligatory local full CI or pre-queue lint pass. Quick CI checks
+precede the full suites. Source-related namespaces and runtime JS files run
+earlier within their authoritative full suite, each once.
 
-```bash
-bb ci 2>&1 | tee /tmp/ci-output.txt
-```
+CI requires the same committed HEAD and a clean nonignored tree at the start and
+end; changing the candidate invalidates the run. Retry receipts only rank work,
+including browser files, and never cache a previous pass. Every selected check
+remains mandatory; timeout and strict-flake rules are unchanged.
 
-Check final line for PASSED/FAILED. All information is in the single run — don't run multiple times.
+For optional local diagnostics, use `bb scripts/ci.clj --preflight-only` or
+focused tests through `bb wt test`; `bb lint` and its group aliases accept
+uncommitted edits when no authoritative CI receipt is requested. An explicit
+standalone `bb ci` also requires
+a clean committed candidate; save its output if you choose to run it. These
+local diagnostics do not replace the native gate or become reusable gate proof.

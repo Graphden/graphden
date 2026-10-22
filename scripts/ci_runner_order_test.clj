@@ -36,17 +36,18 @@
 (deftest resumed-dispatch-executes-every-selected-check-once
   (let [{:keys [calls failed]} (dispatch nil)]
     (is (false? failed))
-    (is (= ["tests-js" "tests-unit" "perf"] (subvec calls 0 3)))
-    (is (= #{"clj-kondo" "splint"} (set (subvec calls 3))))
+    (is (= #{"clj-kondo" "splint"} (set (subvec calls 0 2))))
+    (is (= ["tests-js" "tests-unit" "perf"] (subvec calls 2)))
     (is (= 5 (count calls) (count (set calls))))))
 
 
 (deftest resumed-failure-leaves-unrun-tail-explicitly-skipped
   (let [{:keys [calls status failed]} (dispatch "tests-js")]
     (is failed)
-    (is (= ["tests-js"] calls))
+    (is (= #{"clj-kondo" "splint"} (set (take 2 calls))))
+    (is (= ["tests-js"] (vec (drop 2 calls))))
     (is (= :failed (get status "tests-js")))
-    (is (= #{:skipped} (set (vals (dissoc status "tests-js")))))))
+    (is (= #{:skipped} (set (vals (apply dissoc status ["tests-js" "clj-kondo" "splint"])))))))
 
 
 (deftest blocking-warning-is-a-failed-resume-hint
@@ -66,7 +67,7 @@
 
 
 (deftest ci-and-gate-preflight-share-admission-and-cleanup
-  (doseq [entry ['run-ci 'main]]
+  (doseq [entry ['main]]
     (let [events (atom [])]
       (with-redefs-fn {(ns-resolve 'ci 'select-checks) (fn [_] {:run [] :scoped [] :manual [] :since "base"})
                        (ns-resolve 'ci-resume 'git-output) (constantly "preflight-fixture-sha")
@@ -83,6 +84,36 @@
         #(binding [*command-line-args* ["--preflight-only" "base"]]
            (is (thrown? Exception ((ns-resolve 'ci entry))))))
       (is (= [:lock :preflight :cleanup :release] @events)))))
+
+
+(deftest immutable-candidate-fence-refuses-moving-or-dirty-source
+  (doseq [diagnostic? [false true]
+          change [identity #(assoc % :sha (apply str (repeat 40 "b")))
+                  #(assoc % :worktree-status " M src/changed.clj")
+                  #(assoc % :worktree-status "?? test/uncommitted_test.clj")]]
+    (let [initial {:sha (apply str (repeat 40 "a")) :worktree-status ""}
+          current (atom initial)
+          reports (atom 0)
+          admissions (atom 0)]
+      (with-redefs-fn {(ns-resolve 'ci 'select-checks) (constantly {:run [] :scoped [] :manual []})
+                       (ns-resolve 'ci 'ci-report-path) (constantly nil)
+                       (ns-resolve 'ci-priority-core 'changed-paths) (constantly [])
+                       (ns-resolve 'ci-resume 'git-output)
+                       (fn [& args] (if (= "rev-parse" (first args)) (:sha @current) (:worktree-status @current)))
+                       (ns-resolve 'ci-resume 'invocation!) (constantly nil)
+                       (ns-resolve 'ci 'acquire-lock!) (fn [] (swap! admissions inc) nil)
+                       (ns-resolve 'ci 'release-lock!) (fn [_])
+                       (ns-resolve 'ci 'kill-live-procs!) (fn [])
+                       (ns-resolve 'ci 'run-waves!) (fn [& _] (swap! current change))
+                       (ns-resolve 'ci 'print-report!) (fn [& _] (swap! reports inc))
+                       (ns-resolve 'ci 'print-verdict!) (fn [& _])}
+        #(binding [*command-line-args* (if diagnostic? ["--groups" "clj"] [])]
+           (with-out-str
+             (if (or diagnostic? (= initial (change initial)))
+               (do ((ns-resolve 'ci 'run-ci)) (is (= 1 @reports)))
+               (do (is (thrown-with-msg? Exception #"unchanged committed candidate" ((ns-resolve 'ci 'run-ci))))
+                   (is (zero? @reports)))))))
+      (is (= 1 @admissions)))))
 
 
 (let [{:keys [fail error]} (run-tests)]

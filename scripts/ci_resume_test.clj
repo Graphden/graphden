@@ -70,13 +70,13 @@
         batches {:pre [[a b] [c]] :priority [] :test [[t]] :post-test [[p]]}
         old (hint ["a" "b" "c" "test" "perf"] [:passed :failed :pending :passed :pending])
         scheduled (resume/schedule-batches batches old)]
-    (is (= [[b] [c] [t] [p] [a]] scheduled))
+    (is (= [[b] [c] [a] [t] [p]] scheduled))
     (is (= (frequencies [a b c t p]) (frequencies (mapcat identity scheduled))))))
 
 
 (deftest image-dependency-is-recorded-in-the-actual-execution-order
   (let [ordered ["visual" "integration" "fleet" "ci" "build" "e2e"]]
-    (is (= ["build" "visual" "integration" "fleet" "ci" "e2e"]
+    (is (= ["ci" "build" "visual" "integration" "fleet" "e2e"]
            (resume/stage-dependencies ordered)))
     (is (= (frequencies ordered) (frequencies (resume/stage-dependencies ordered))))))
 

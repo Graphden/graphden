@@ -43,15 +43,6 @@ new_world() {
   export WTQ_GATE_STUB="$T/stub.sh" STUB_LOG="$T/gates.log"
   export WTQ_NO_PUSH=1 WTQ_LOAD_MAX=100000 WTQ_POLL_SECS=1 WTQ_SOON_POLL=1
   export WTQ_MEM_MIN_MB=0 WTQ_AGENT_MEM_MIN_MB=0 WTQ_YIELD_POLL=1
-  export WTQ_LINT_CMD="$T/lint.sh" LINT_LOG="$T/lints.log"
-  : > "$LINT_LOG"
-  cat > "$WTQ_LINT_CMD" <<'EOF'
-#!/usr/bin/env bash
-git rev-parse HEAD >> "$LINT_LOG"
-if [ -e LINTFAIL ]; then echo "lint: LINTFAIL is present"; exit 1; fi
-exit 0
-EOF
-  chmod +x "$WTQ_LINT_CMD"
   unset WTQ_TRAIN_MAX WTQ_SOON_UNIT WTQ_TARGET
   : > "$STUB_LOG"
   cat > "$WTQ_GATE_STUB" <<'EOF'
@@ -59,6 +50,7 @@ EOF
 echo "$*" >> "$STUB_LOG"
 printf '%s:%s\n' "$*" "${WTQ_FIRST_STAGE:-default}" >> "$STUB_LOG.priority"
 [ -f "$(git rev-parse --git-common-dir)/wtq/gate-heavy" ] && echo heavy >> "$STUB_LOG.heavy"
+if [ -e LINTFAIL ]; then echo "lint: LINTFAIL is present"; echo WTQ_FAILED_STAGE=ci; exit 1; fi
 if [ -e BAD ]; then echo "stub: BAD is in the train"; echo WTQ_FAILED_STAGE=integration; exit 1; fi
 exit 0
 EOF
@@ -161,8 +153,7 @@ check "one gate, one member" eq "$(gates)" "solo-wtqtest"
 check "branch untouched, now an ancestor of develop" git -C "$REPO" merge-base --is-ancestor feature/solo-wtqtest develop
 check "queue entry removed" eval '! queued solo-wtqtest'
 check "wt log shows the train log" log_has solo-wtqtest "GREEN: [ solo-wtqtest ] landed"
-check "lint ran once, on the queued sha" eq "$(cat "$LINT_LOG")" "$(git -C "$REPO" rev-parse feature/solo-wtqtest)"
-check "lint stamp records that sha" eq "$(cat "$Q/lint-ok/solo-wtqtest")" "$(git -C "$REPO" rev-parse feature/solo-wtqtest)"
+check "no pre-queue lint stamp is needed" test ! -e "$Q/lint-ok/solo-wtqtest"
 check "the gate marked its heavy phase while the suites ran" test -s "$STUB_LOG.heavy"
 check "and cleared the marker afterwards" test ! -e "$Q/gate-heavy"
 check "wt drop accepts the landed member" eval "wt_main drop solo-wtqtest >/dev/null 2>&1"
@@ -533,26 +524,6 @@ check "a DEGRADED green run is not recorded" eq "$(find "$Q/e2e-runs" -name '*.l
 check "and does not move the baseline" grep -qP '^20\tedit-a\.test\.js$' "$Q/e2e-baseline.tsv"
 unset E2E_SECS
 
-echo "== between trains the gate lets a running pre-queue lint finish"
-new_world yield-lint
-feature yl yl.txt yl
-# shellcheck disable=SC2016  # expands inside the stub, not here
-sed -i '2i date +%s.%N > "$STUB_LOG.start"' "$WTQ_GATE_STUB"
-hold_lock
-enqueue_in_order yl
-# Another agent's lint holds the lint lock (it waits for the gate's heavy
-# phase to end — i.e. for exactly the gap between two trains).
-flock "$Q/lint.lock" -c "echo 'other @ deadbeef' > '$Q/lint.holder'; touch '$T/lint-held'; sleep 2; date +%s.%N > '$T/lint.end'; : > '$Q/lint.holder'" &
-lint_pid=$!
-wait_for 10 test -e "$T/lint-held"
-release_lock
-finish yl
-wait "$lint_pid" 2>/dev/null || true
-check "yl GREEN" eq "$(rc_of yl)" 0
-check "the train started only after that lint ended" \
-  awk -v a="$(cat "$STUB_LOG.start")" -v b="$(cat "$T/lint.end")" 'BEGIN {exit !(a >= b)}'
-check "and said why it waited" grep -q 'letting the pre-queue lint of other' "$T/yl.out"
-
 echo "== conflict with develop itself -> CONFLICT"
 new_world conflict
 feature x f.txt x
@@ -655,26 +626,6 @@ finish t2
 check "t2 GREEN after the ack, same waiter" eq "$(verdict t2)" GREEN
 check "t2 exit 0" eq "$(rc_of t2)" 0
 check "gates: [t1] alone, then [t2]" eq "$(gates | tr '\n' '|')" "t1|t2|"
-check "t2 was linted once — the ack did not re-lint" \
-  eq "$(grep -c "$(git -C "$REPO" rev-parse feature/t2)" "$LINT_LOG")" 1
-
-echo "== concurrent 'wt merge's lint one at a time"
-new_world lint-serial
-cat > "$WTQ_LINT_CMD" <<'EOF'
-#!/usr/bin/env bash
-echo "start $(basename "$PWD")" >> "$LINT_LOG"
-sleep 1
-echo "end $(basename "$PWD")" >> "$LINT_LOG"
-EOF
-feature l1 l1.txt l1; feature l2 l2.txt l2
-merge_bg l1; merge_bg l2
-finish l1 l2
-check "both GREEN" eq "$(rc_of l1)$(rc_of l2)" 00
-check "the two lints never overlapped" \
-  eq "$(cut -d' ' -f1 "$LINT_LOG" | tr '\n' ' ')" "start end start end "
-check "the second one said what it waited for" \
-  eval "grep -q 'another pre-queue lint is running' '$T/l1.out' '$T/l2.out'"
-
 echo "== soon: the train waits for a marked branch"
 new_world soon
 export WTQ_SOON_UNIT=5
@@ -741,31 +692,17 @@ check "only g2 was gated" eq "$(gates)" "g2"
 check "g1's entry is gone" eval '! queued g1'
 check "g1 never landed" eval '! on_develop g1.txt'
 
-echo "== lint red at enqueue -> refused, never queued"
+echo "== a clean candidate with red lint fails inside its only gate"
 new_world lint-red
 feature lr LINTFAIL x
 merge_bg lr
 finish lr
-check "exit 3" eq "$(rc_of lr)" 3
-check "RESULT PRECOND" eq "$(verdict lr)" PRECOND
-check "the lint output reached the agent" grep -q 'LINTFAIL is present' "$T/lr.out"
-check "never queued" eval '! queued lr'
-check "no gate ran" eq "$(gates)" ""
-check "no stamp for a red lint" test ! -e "$Q/lint-ok/lr"
-
-echo "== lint stamp is reused for the same sha, re-checked by the conductor"
-new_world lint-stamp
-feature ls1 ls1.txt x
-hold_lock
-enqueue_in_order ls1
-kill -TERM "${PID[ls1]}"; finish ls1
-enqueue_in_order ls1
-check "the re-queue reused the stamp (lint ran once)" eq "$(wc -l < "$LINT_LOG")" 1
-printf 'deadbeef\n' > "$Q/lint-ok/ls1"   # a stamp for some other commit
-release_lock
-finish ls1
-check "stale stamp at the conductor -> PRECOND" eq "$(verdict ls1)" PRECOND
-check "no gate ran" eq "$(gates)" ""
+check "exit 1" eq "$(rc_of lr)" 1
+check "RESULT FAIL" eq "$(verdict lr)" FAIL
+check "the gate lint output reached the agent" grep -q 'LINTFAIL is present' "$T/lr.out"
+check "one gate ran" eq "$(gates)" lr
+check "red candidate did not land" eval '! on_develop LINTFAIL'
+check "queue is removed after final red" eval '! queued lr'
 
 echo "== wt test yields to a live heavy phase, ignores a stale one"
 new_world yield

@@ -11,7 +11,6 @@
 ;;   :clj :web :infra :docs :sec   — domain lint sub-groups (`bb lint-clj`, …)
 ;;   :commit                       — commit-message lint (part of full lint)
 ;;   :test                         — the suites; run AFTER lint passes
-;;   :priority                     — exact related tests before the broad suite
 ;;   :post-test                    — reads what the test wave WROTE (`bb perf`
 ;;                                   grades perf/runs/*.edn), so it cannot share
 ;;                                   a wave with the runs it grades
@@ -41,6 +40,8 @@
  ;; edited rarely, so re-running on such a diff is cheap insurance.
  {:name "cljstyle"      :bb "cljstyle"      :timeout 120000 :group :clj
   :relevant ["\\.(clj|cljc|cljs|edn|bb)$" "^\\.cljstyle$"]}
+ {:name "syntax"       :bb "syntax"       :timeout 120000 :group :infra
+  :relevant ["\\.(js|mjs|cjs|json)$" "^scripts/ci_fast" "^bb\\.edn$"]}
  {:name "biome"         :bb "biome"         :timeout  60000 :group :web
   :relevant ["\\.(js|mjs|jsonc?)$" "^bb\\.edn$"]}
  {:name "stylelint"     :bb "stylelint"     :timeout 120000 :group :web
@@ -155,14 +156,7 @@
  {:name "license-check" :bb "license-check" :timeout 120000 :group :sec
   :relevant ["package(-lock)?\\.json$" "^bb\\.edn$"]}
  {:name "commitlint"    :bb "commitlint"    :timeout  60000 :group :commit}
- ;; A red directly-related test should stop the run before the ~13-minute
- ;; unit suite starts. This is an extra preflight, never a substitute for the
- ;; full :test wave; unknown relationships simply do nothing.
- {:name "tests-focused" :bb "ci-priority" :timeout 900000 :group :priority
-  :relevant ["^src/graphden/.*\\.clj$" "^test/graphden/.*_test\\.clj$"
-             "^resources/packages/app/editor/.*\\.(js|css)$"
-             "^tools/runtime-test/.*\\.test\\.js$"
-             "^scripts/ci_priority"]}
+ ;; Full suites run related cases first, without a separate focused execution.
  {:name "tests-js"      :bb "test-js"       :timeout  60000 :group :test
   :relevant ["\\.(js|mjs)$" "^tools/runtime-test/" "^tools/browser-test/run-edit-tests\\.sh$"
              "^bb\\.edn$"]}

@@ -40,8 +40,9 @@ bb() {
     scripts/ci_resume_cli.clj)
       if [ "${BAD_STAGE_PLAN:-0}" = 1 ] && [ "$2" = start ]; then printf 'ci\n'; return 0; fi
       command bb -cp "$SCRIPT_DIR/../../scripts" "$SCRIPT_DIR/../../$1" "${@:2}" ;;
-    scripts/ci.clj)
-      [ "$#" = 3 ] && [ "$2" = --preflight-only ] && [ "${FAIL_FAST:-0}" != 1 ] ;;
+    scripts/ci_priority.clj)
+      [ "${FAIL_HINTS:-0}" != 1 ] || return 1
+      printf '%s\n' '{:unit [] :integration []}' ;;
     scripts/ci_fast_cli.clj) echo 'gate bypassed admitted preflight' >&2; return 1 ;;
     scripts/ci_gate.clj)
       echo "$2" >> "$TEST_LOG"
@@ -92,7 +93,7 @@ run_case() {
 
 CASE_BUILD=1 CASE_INTEGRATION=0 CASE_E2E=1 CASE_VISUAL=1
 run_case
-assert_events 'expect,uber,build,image,e2e,visual,ci,verify'
+assert_events 'expect,ci,verify,uber,build,image,e2e,visual'
 [ "$built_candidate" = 1 ]
 
 CASE_INTEGRATION=1 CASE_E2E=1 CASE_VISUAL=0
@@ -108,7 +109,7 @@ if gate_suites "$TEST_DIR" 0 0 0 >/dev/null; then
   echo 'failed browser gate returned success' >&2
   exit 1
 fi
-assert_events 'expect,uber,build,image,e2e'
+assert_events 'expect,ci,verify,uber,build,image,e2e'
 [ "$built_candidate" = 0 ]
 unset FAIL_E2E
 
@@ -120,7 +121,7 @@ if gate_suites "$TEST_DIR" 0 0 0 >/dev/null; then
   echo 'failed visual gate returned success' >&2
   exit 1
 fi
-assert_events 'expect,uber,build,image,e2e,visual'
+assert_events 'expect,ci,verify,uber,build,image,e2e,visual'
 [ "$built_candidate" = 0 ]
 unset FAIL_VISUAL
 
@@ -132,7 +133,7 @@ if gate_suites "$TEST_DIR" 0 0 0 >/dev/null; then
   echo 'failed CI after browser returned success' >&2
   exit 1
 fi
-assert_events 'expect,uber,build,image,e2e,ci'
+assert_events 'expect,ci'
 [ "$built_candidate" = 0 ]
 
 unset FAIL_CI
@@ -143,7 +144,7 @@ if gate_suites "$TEST_DIR" 0 0 0 >/dev/null; then
   echo 'stale or partial CI receipt returned success' >&2
   exit 1
 fi
-assert_events 'expect,uber,build,image,e2e,ci,verify'
+assert_events 'expect,ci,verify'
 [ "$built_candidate" = 0 ]
 unset FAIL_VERIFY
 
@@ -154,7 +155,7 @@ if gate_suites "$TEST_DIR" 0 0 0 >/dev/null; then
   echo 'unverified candidate image returned success' >&2
   exit 1
 fi
-assert_events 'expect,uber,build,image'
+assert_events 'expect,ci,verify,uber,build,image'
 [ "$built_candidate" = 0 ]
 unset FAIL_IMAGE
 
@@ -170,11 +171,11 @@ for WTQ_FIRST_STAGE in ci build e2e visual integration fleet; do
   run_case
   case "$WTQ_FIRST_STAGE" in
     ci) assert_events 'expect,ci,verify,uber,build,image,e2e,visual,integration,fleet' ;;
-    build) assert_events 'expect,uber,build,image,e2e,visual,integration,fleet,ci,verify' ;;
-    e2e) assert_events 'expect,uber,build,image,e2e,visual,integration,fleet,ci,verify' ;;
-    visual) assert_events 'expect,uber,build,image,visual,integration,fleet,ci,verify,headroom,e2e' ;;
-    integration) assert_events 'expect,uber,build,image,integration,fleet,ci,verify,headroom,e2e,visual' ;;
-    fleet) assert_events 'expect,uber,build,image,fleet,ci,verify,headroom,e2e,visual,integration' ;;
+    build) assert_events 'expect,ci,verify,uber,build,image,e2e,visual,integration,fleet' ;;
+    e2e) assert_events 'expect,ci,verify,uber,build,image,e2e,visual,integration,fleet' ;;
+    visual) assert_events 'expect,ci,verify,uber,build,image,visual,integration,fleet,headroom,e2e' ;;
+    integration) assert_events 'expect,ci,verify,uber,build,image,integration,fleet,headroom,e2e,visual' ;;
+    fleet) assert_events 'expect,ci,verify,uber,build,image,fleet,headroom,e2e,visual,integration' ;;
   esac
   [ "$built_candidate" = 1 ]
 done
@@ -186,7 +187,7 @@ built_candidate=0
 if gate_suites "$TEST_DIR" 0 0 0 > "$TEST_DIR/failure.out"; then
   echo 'failed prioritized integration returned success' >&2; exit 1
 fi
-assert_events 'expect,uber,build,image,integration'
+assert_events 'expect,ci,verify,uber,build,image,integration'
 [ "$built_candidate" = 0 ]
 grep -qx 'WTQ_FAILED_STAGE=integration' "$TEST_DIR/failure.out"
 unset FAIL_INTEGRATION
@@ -195,7 +196,7 @@ unset FAIL_INTEGRATION
 CASE_E2E=0
 WTQ_FIRST_STAGE=integration
 run_case
-assert_events 'expect,uber,build,image,integration,fleet,ci,verify,headroom,visual'
+assert_events 'expect,ci,verify,uber,build,image,integration,fleet,headroom,visual'
 
 # Admission cannot manufacture success or permit candidate promotion.
 FAIL_HEADROOM=1
@@ -204,7 +205,7 @@ built_candidate=0
 admission_rc=0
 gate_suites "$TEST_DIR" 0 0 0 > "$TEST_DIR/admission.out" || admission_rc=$?
 [ "$admission_rc" = 3 ]
-assert_events 'expect,uber,build,image,integration,fleet,ci,verify,headroom'
+assert_events 'expect,ci,verify,uber,build,image,integration,fleet,headroom'
 [ "$built_candidate" = 0 ]
 if grep -q '^WTQ_FAILED_STAGE=' "$TEST_DIR/admission.out"; then
   echo 'interrupted headroom admission was recorded as a suite failure' >&2; exit 1
@@ -239,12 +240,12 @@ WTQ_REPORT_TS=second-red
 FAIL_INTEGRATION=1
 : > "$TEST_LOG"
 if gate_suites "$TEST_DIR" 0 0 0 >/dev/null; then exit 1; fi
-assert_events 'expect,uber,build,image,visual,integration'
+assert_events 'expect,ci,verify,uber,build,image,visual,integration'
 unset FAIL_INTEGRATION
 WTQ_RESUME_FROM="$LOG_DIR/_train-second-red"
 WTQ_REPORT_TS=third-green
 run_case
-assert_events 'expect,uber,build,image,integration,fleet,ci,verify,headroom,e2e,visual'
+assert_events 'expect,ci,verify,uber,build,image,integration,fleet,headroom,e2e,visual'
 unset WTQ_RESUME_FROM
 
 # R1 browser b fails; R2 fails build; R3 must retain b,c,a without manual hints.
@@ -272,13 +273,13 @@ if gate_suites "$TEST_DIR" 0 0 0 >/dev/null; then exit 1; fi
 assert_events expect
 unset BAD_STAGE_PLAN
 
-# Preflight failure admits no expensive stage and does not invent a stage red.
-FAIL_FAST=1
+# Hint preparation failure admits no check or expensive stage.
+FAIL_HINTS=1
 : > "$TEST_LOG"
 if gate_suites "$TEST_DIR" 0 0 0 > "$TEST_DIR/fast.out"; then exit 1; fi
 assert_events expect
 if grep -q '^WTQ_FAILED_STAGE=' "$TEST_DIR/fast.out"; then exit 1; fi
-unset FAIL_FAST
+unset FAIL_HINTS
 
 # Validate durable hints against real git ancestry without touching the queue.
 (
@@ -325,7 +326,7 @@ unset FAIL_FAST
   CASE_BUILD=1 CASE_INTEGRATION=0 CASE_E2E=1 CASE_VISUAL=0 CASE_FLEET=0
   mkdir -p "$MAIN_WT/tools/browser-test"
   gate_suites "$MAIN_WT" 0 0 0 >/dev/null
-  [ "$(prior_failed_stage test)" = ci ]
+  [ "$(prior_failed_stage test)" = e2e ]
   [ "$(WTQ_HINT_RECEIPT=1 prior_failed_stage test)" = "$LOG_DIR/_train-inflight" ]
   unset EXPECT_PROGRESS_POINTER
   record_failed_stage invalid "$base" test

@@ -24,15 +24,18 @@
   {:name :_catalog-section :type {:chapter :text :rows :_catalog-rows}}
   {:name :_catalog-sections :list :_catalog-section}
 
+  {:name :_catalog-input-record :parent :const :return-type :_catalog-inputs
+   :args {:value {:as :inputs :type :_catalog-inputs}}}
+
   {:name :_catalog-lessons-input :parent :get
-   :args {:coll {:as :inputs :type :_catalog-inputs} :key {:value :lessons} :default {:value []}}}
+   :args {:coll :_catalog-input-record :key {:value :lessons} :default {:value []}}}
   {:name :_catalog-query-input :parent :get
-   :args {:coll {:as :inputs :type :_catalog-inputs} :key {:value :query} :default ""}}
+   :args {:coll :_catalog-input-record :key {:value :query} :default ""}}
   {:name :_catalog-resume-input :parent :get
-   :args {:coll {:as :inputs :type :_catalog-inputs} :key {:value :resume}
+   :args {:coll :_catalog-input-record :key {:value :resume}
           :default {:value {:active false :ended false :id "" :title "" :step 0 :steps 0}}}}
   {:name :_catalog-text-only-copy :parent :get
-   :args {:coll {:as :inputs :type :_catalog-inputs} :key {:value :text-only-copy} :default "text only"}}
+   :args {:coll :_catalog-input-record :key {:value :text-only-copy} :default "text only"}}
   {:name :_catalog-query-trim :parent :str-trim :args {:string :_catalog-query-input}}
   {:name :_catalog-query :parent :str-lower :args {:string :_catalog-query-trim}}
   {:name :_catalog-no-query :parent :equal? :args {:a :_catalog-query :b ""}}

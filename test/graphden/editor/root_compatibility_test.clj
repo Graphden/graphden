@@ -3,8 +3,8 @@
   (:require
     [cheshire.core :as json]
     [clojure.java.shell :as sh]
-    [clojure.walk]
     [clojure.test :refer [deftest is testing]]
+    [clojure.walk]
     [graphden.editor.component-config :as config]
     [graphden.editor.config-resolution :as resolution]
     [graphden.editor.root-compatibility :as compatibility]

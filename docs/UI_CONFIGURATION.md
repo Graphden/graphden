@@ -179,7 +179,6 @@ limits, account quotas, authorization and the 30-second write shield remain
 separate constraints. If a write times out or its response is lost, reconcile
 the original staged receipt: a timeout alone does not prove rollback.
 
-
 ## Picker root callback
 
 The handler-selected editor root exposes `:fn-picker {:view callback}` as an

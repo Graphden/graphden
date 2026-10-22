@@ -244,7 +244,7 @@ function initPrefsLate() {
   gdPrefApply('keymap');
   installViewportWatcher();
   // the per-user server copy (theme + keymap) — wins over the mirror
-  gdPrefsRefresh();
+  void gdPrefsRefresh(true).finally(() => _prefsInitialReady());
 }
 
 // Re-apply auto-collapse decision when the viewport crosses the
@@ -419,6 +419,8 @@ let _prefsGen = 0;
 const _prefWrittenGen = {};
 let _prefsIdentityGen = 0;
 let _prefsRefreshGen = 0;
+let _prefsInitialReady;
+window.gdPrefsInitialReady = new Promise(resolve => { _prefsInitialReady = resolve; });
 window.gdPrefsReady = false;
 window.gdPrefOwner = null;
 
@@ -435,8 +437,8 @@ function gdPrefApply(key) {
   if (key === 'keymap' && typeof window.gdApplyKeymap === 'function') window.gdApplyKeymap(v?.payload?.bindings || null);
 }
 
-function gdPrefNotify(key) {
-  for (const fn of _prefListeners) { try { fn(key, gdPrefRead(key)); } catch (_) {} }
+function gdPrefNotify(key, detail) {
+  for (const fn of _prefListeners) { try { fn(key, gdPrefRead(key), detail); } catch (_) {} }
 }
 
 // Component plans resolve the server's selection, so publish that preference
@@ -480,7 +482,7 @@ async function gdPrefWrite(key, value, options) {
 }
 
 // Pull the server's map (per-principal) and apply what changed.
-async function gdPrefsRefresh() {
+async function gdPrefsRefresh(initial = false) {
   const api = window.API;
   if (!api || typeof api.api_prefs !== 'string') return;
   const startedAt = _prefsGen;
@@ -515,7 +517,7 @@ async function gdPrefsRefresh() {
     gdPrefApply('keymap');
     gdPrefNotify('theme');
     gdPrefNotify('keymap');
-    gdPrefNotify('components');
+    gdPrefNotify('components', {initial});
   } catch (_) { /* offline / signed out — the mirror stands */ }
 }
 

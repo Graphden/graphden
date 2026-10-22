@@ -6,7 +6,7 @@ const {
   waitTourTitle, clickTourButton, createBranchViaChip, switchBranchViaChip,
   createRootNamespace, createFnInNamespace, setParentViaStrip,
   bindNamedPlaceholder, editBoundValue, filterAndSelect, finishAndDelete,
-  tourWhere,
+  tourWhere, openTutorialCatalog,
 } = require('./tutorial-tour-helpers');
 
 async function publish(page, version) {
@@ -70,7 +70,7 @@ async function ledger(page) {
       .some(row => row.name === 'tutorial-greet'), 'do not claim an existing publication');
 
     await page.goto(BASE + '/?branch=main');
-    await page.evaluate(() => window.openTutorialMenu());
+    await openTutorialCatalog(page);
     await page.locator('[data-lesson-id="41"] .gd-tour-btn-primary').dispatchEvent('click');
     await waitTourTitle(page, 'Author and consumer', 150000);
     assert(await clickTourButton(page, 'Next'), 'start the author/consumer loop');

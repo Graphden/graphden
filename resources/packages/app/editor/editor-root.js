@@ -85,6 +85,7 @@
     loading = (async () => {
       try {
         if (window.gdAccountsReady) await window.gdAccountsReady;
+        if (window.gdPrefsInitialReady) await window.gdPrefsInitialReady;
         if (!current()) return;
         scope = stamp();
         const {response, result} = await loadPlan(signal, current);

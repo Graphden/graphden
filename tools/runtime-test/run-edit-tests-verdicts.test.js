@@ -44,6 +44,7 @@ case "$step" in
   pass) echo "  ✓ ok"; exit 0 ;;
   skip:*) echo "SKIP: \${step#skip:}"; exit 0 ;;
   fail:*) echo "  ✗ \${step#fail:}" >&2; exit 1 ;;
+  timeout:*) echo "TimeoutError: locator.waitFor: Timeout 20000ms exceeded" >&2; echo "  - waiting for locator('\${step#timeout:}')" >&2; exit 1 ;;
   rebuildfail:*) echo 1 > "$STUB_STATE/rebuilds"; echo 300 > "$STUB_STATE/clock"; echo "  ✗ late cleanup" >&2; exit 1 ;;
   recentfail:*) echo 1 > "$STUB_STATE/rebuilds"; echo 140 > "$STUB_STATE/clock"; echo "  ✗ compilation window" >&2; exit 1 ;;
   restartfail:*) echo 0 > "$STUB_STATE/rebuilds"; echo "  ✗ server restart" >&2; exit 1 ;;
@@ -201,6 +202,20 @@ console.log(' the same real assertion twice in a row is deterministic: two attem
 }
 
 console.log(' different failures keep their retries');
+
+console.log(' identical real selector timeouts stop after two attempts');
+{
+  const r = runSuite({ 'edit-a.test.js': ['timeout:.gd-tour-lesson-list', 'timeout:.gd-tour-lesson-list'] });
+  assert(r.attempts('edit-a.test.js') === 2, 'same real timeout stops after attempt 2', r.out);
+  assert(r.code !== 0 && /edit-a\.test\.js\(deterministic\)/.test(r.out), 'timeout stays red', r.out);
+}
+
+console.log(' different timed-out selectors retain retry budget');
+{
+  const r = runSuite({ 'edit-a.test.js': ['timeout:.first', 'timeout:.second', 'pass'] });
+  assert(r.attempts('edit-a.test.js') === 3, 'different wait retries to attempt 3', r.out);
+}
+
 {
   const r = runSuite({ 'edit-a.test.js': ['fail:first thing', 'fail:second thing', 'pass'] });
   assert(r.attempts('edit-a.test.js') === 3, 'ran to the passing attempt 3', r.out);

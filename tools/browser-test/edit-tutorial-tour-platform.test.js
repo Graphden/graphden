@@ -22,7 +22,7 @@ const {handlerPreviewTestOptions} = require('./handler-preview-test-options');
 const {
   hardCleanup, waitTourTitle, clickTourButton, filterAndSelect,
   createRootNamespace, createFnInNamespace, setParentViaStrip,
-  finishAndDelete, tourWhere, openOperateSection, waitTourClosed,
+  finishAndDelete, tourWhere, openOperateSection, waitTourClosed, openTutorialCatalog,
 } = require('./tutorial-tour-helpers');
 
 const {trackPublications, walkLesson35} = require('./tutorial-http-helpers');
@@ -44,7 +44,7 @@ const {trackPublications, walkLesson35} = require('./tutorial-http-helpers');
 
     // ---------- lesson 32 — publish / install / uninstall ----------
     await page.goto(BASE + '/?branch=main');
-    await page.evaluate(() => window.openTutorialMenu());
+    await openTutorialCatalog(page);
     await page.locator('[data-lesson-id="32"] .gd-tour-btn-primary').click();
     await waitTourTitle(page, 'Sharing more than one fn', 150000);
     const packageBranch = await page.evaluate(() => {

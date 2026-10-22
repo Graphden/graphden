@@ -35,6 +35,21 @@
     (is (= (frequencies (priority/browser-order nil)) (frequencies ordered)))))
 
 
+(deftest root-catalog-impact-includes-consumers-with-different-file-names
+  (doseq [source ["resources/packages/app/editor/editor-root.js"
+                  "resources/packages/app/editor/editor-tour-picker.js"
+                  "resources/packages/app/ui-tutorial-catalog/fns.edn"
+                  "tools/browser-test/tutorial-tour-helpers.js"]]
+    (let [first-files (set (priority/browser-first #{source}))]
+      (is (contains? first-files "edit-tutorial-tour-picker.test.js") source)
+      (is (contains? first-files "edit-tutorial-tour-queues.test.js") source)
+      (is (= (frequencies (priority/browser-order nil))
+             (frequencies (priority/browser-order #{source}))) source)))
+  (is (contains? (set (priority/browser-first
+                        #{"resources/packages/app/editor/editor-root.js"}))
+                 "edit-account-menu-graph.test.js")))
+
+
 (deftest backend-focus-is-exact-and-bounded
   (is (= ["graphden.types.core-test"]
          (priority/unit-first #{"src/graphden/types/core.clj"})))

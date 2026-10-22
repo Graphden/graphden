@@ -9,7 +9,7 @@ const {handlerPreviewTestOptions} = require('./handler-preview-test-options');
 const {
   waitTourTitle, clickTourButton, filterAndSelect, extendViaRowActions,
   bindPlaceholderOn, bindSeqAnchorPlaceholder, appendFnRefViaChip,
-  bindOptionalArgChip, editBoundValue, finishAndDelete,
+  bindOptionalArgChip, editBoundValue, finishAndDelete, openTutorialCatalog,
 } = require('./tutorial-tour-helpers');
 
 const handler = 'tutorial-fragment-handler';
@@ -45,7 +45,7 @@ const {walkLesson30} = require('./tutorial-app-helpers');
     }));
     if (!profile.tenancy) {
       stage = 'selfhost lesson availability';
-      await page.evaluate(() => window.openTutorialMenu());
+      await openTutorialCatalog(page);
       for (const id of ['14', '30']) {
         const row = page.locator('[data-lesson-id="' + id + '"]');
         await row.waitFor();
@@ -70,7 +70,7 @@ const {walkLesson30} = require('./tutorial-app-helpers');
     // starts in place and cannot prove the branch ownership below.
     await page.goto(BASE + '/?branch=main');
     await page.waitForFunction(() => typeof window.openTutorialMenu === 'function');
-    await page.evaluate(() => window.openTutorialMenu());
+    await openTutorialCatalog(page);
     await page.locator('[data-lesson-id="14"] .gd-tour-btn-primary').dispatchEvent('click');
     await waitTourTitle(page, 'A real fragment request', 150000);
     await clickTourButton(page, 'Next');

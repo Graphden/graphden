@@ -19,6 +19,34 @@
    "editor-problems.js" ["edit-problem-lenses.test.js"]})
 
 
+(def ^:private browser-impact
+  ;; A module can affect consumers that do not mention its name. Keep this
+  ;; dependency map explicit; filename matching below is only a fallback.
+  {"resources/packages/app/editor/editor-root.js"
+   ["edit-ui-components-selective.test.js" "edit-account-menu-graph.test.js"
+    "edit-recents-graph.test.js" "edit-fn-picker.test.js" :tutorial]
+   "resources/packages/app/editor/editor-prefs.js"
+   ["edit-prefs.test.js" "edit-ui-components-selective.test.js" :tutorial]
+   "resources/packages/app/editor/editor-ui-components.js"
+   ["edit-ui-components-selective.test.js" "edit-ui-components.test.js"
+    "edit-account-menu-graph.test.js" "edit-recents-graph.test.js" :tutorial]
+   "resources/packages/app/editor/editor-tour-picker.js"
+   ["edit-tutorial-tour-picker.test.js" :tutorial]
+   "resources/packages/app/editor/editor-tour-catalog-graph.js"
+   ["edit-tutorial-tour-picker.test.js" "edit-ui-components-selective.test.js" :tutorial]
+   "resources/packages/app/ui-tutorial-catalog/fns.edn"
+   ["edit-tutorial-tour-picker.test.js" "edit-ui-components-selective.test.js" :tutorial]
+   "tools/browser-test/tutorial-tour-helpers.js" [:tutorial]})
+
+
+(defn- impacted-browser-files [browser-files path]
+  (mapcat (fn [entry]
+            (if (= entry :tutorial)
+              (filter #(str/starts-with? % "edit-tutorial-") browser-files)
+              [entry]))
+          (get browser-impact path)))
+
+
 (defn changed-paths
   "Use the same path set as CI scoping. A missing base yields no early hints;
    the full gate widens as usual."
@@ -28,9 +56,9 @@
 
 
 (defn browser-first
-  "Existing browser files directly changed, paired with an editor module, or
-   sharing its specific filename stem. This only moves tests earlier; the shell
-   runner validates the complete suite again before use."
+  "Existing browser files directly changed, declared as consumers of a module,
+   or sharing its specific filename stem. This only moves tests earlier; the
+   shell runner validates the complete suite again before use."
   [changed]
   (when changed
     (let [browser-files (->> (fs/glob "tools/browser-test" "edit-*.test.js")
@@ -51,12 +79,13 @@
                                       (str/replace #"\.(js|css)$" "")
                                       (str/replace #"-graph$" ""))
                              prefix (str "edit-" stem "-")]
-                         (concat (get browser-by-editor basename)
+                         (concat (impacted-browser-files browser-files path)
+                                 (get browser-by-editor basename)
                                  (filter #(or (= % (str "edit-" stem ".test.js"))
                                               (str/starts-with? % prefix))
                                          browser-files)))
 
-                       :else nil)))
+                       :else (impacted-browser-files browser-files path))))
            distinct
            (filter #(fs/exists? (str "tools/browser-test/" %)))
            vec))))

@@ -7,7 +7,7 @@ const {assert, newContext, BASE} = require('./edit-test-helpers');
 const {readQueueError} = require('./queue-error-diagnostic');
 const {waitTourTitle, clickTourButton, filterAndSelect, extendViaRowActions,
   bindNamedPlaceholder, openRowActionsFor, editBoundValue, openOperateSection,
-  tourWhere} = require('./tutorial-tour-helpers');
+  tourWhere, openTutorialCatalog} = require('./tutorial-tour-helpers');
 
 const REQUIRED = process.env.GRAPHDEN_REQUIRE_QUEUE_SERVICES === '1';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -109,7 +109,7 @@ async function cleanup(page, finish) {
       return;
     }
     await page.goto(BASE + '/');
-    await page.evaluate(() => window.openTutorialMenu());
+    await openTutorialCatalog(page);
     await page.locator('[data-lesson-id="39"] .gd-tour-btn-primary').dispatchEvent('click');
     await waitTourTitle(page, 'A real background worker', 120000);
     assert(await clickTourButton(page, 'Next'), 'queue lesson introduction');

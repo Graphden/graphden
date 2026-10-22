@@ -146,7 +146,7 @@
       void window.gdCanvasBindingsGraph?.reload();
     }, 0);
   }
-  window.gdPrefOnChange((key) => { if (key === 'components') refresh(); });
+  window.gdPrefOnChange((key, _value, detail) => { if (key === 'components') refresh(!detail?.initial); });
   window.addEventListener('gd-auth-changed', () => {
     prepared = null;
     statuses.clear();

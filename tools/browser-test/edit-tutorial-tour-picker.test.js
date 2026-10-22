@@ -4,7 +4,7 @@
 const {chromium} = require('playwright');
 const {assert, newContext, api} = require('./edit-test-helpers');
 const {
-  hardCleanup, waitTourTitle, clickTourButton, tourTitle, tourWhere,
+  hardCleanup, waitTourTitle, clickTourButton, tourTitle, tourWhere, openTutorialCatalog,
 } = require('./tutorial-tour-helpers');
 
 (async () => {
@@ -25,6 +25,8 @@ const {
     await page.goto(BASE + '/');
     await page.waitForFunction(() => typeof window.openTutorialMenu === 'function',
       null, {timeout: 60000, polling: 200});
+    // This first open is intentionally immediate: it guards the boot race
+    // between preference hydration and the editor root's initial load.
     await page.evaluate(() => window.openTutorialMenu());
     await page.waitForSelector('.gd-tour-lesson-list', {timeout: 20000});
     // A lesson row is a CONTAINER since the ✓ became removable: the lesson
@@ -90,8 +92,7 @@ const {
     // Script availability precedes initGraph's async saved-lesson restore.
     // Open the catalogue only after that restore has published its real step.
     await waitTourTitle(page, 'Make the first child', 60000);
-    await page.evaluate(() => window.openTutorialMenu());
-    await page.waitForSelector('.gd-tour-lesson-list', {timeout: 30000});
+    await openTutorialCatalog(page);
     const cat = await page.evaluate(() => {
       const pop = document.querySelector('#gd-tour-pop');
       const list = document.querySelector('.gd-tour-lesson-list');
@@ -175,8 +176,7 @@ const {
     await page.goto(BASE + '/');
     await page.waitForFunction(() => typeof window.openTutorialMenu === 'function',
       null, {timeout: 60000, polling: 200});
-    await page.evaluate(() => window.openTutorialMenu());
-    await page.waitForSelector('.gd-tour-lesson-list', {timeout: 30000});
+    await openTutorialCatalog(page);
     const unmarked = await page.evaluate(() => {
       const row = document.querySelector('[data-lesson-id="02"]');
       const undo = row.querySelector('.gd-tour-unmark');
@@ -286,8 +286,7 @@ const {
       + ' (got: ' + menuCount.text + ', expected ' + (staged - 3 + 1) + ')');
     assert(/new/.test(menuCount.title) && /1 updated/.test(menuCount.title),
       'its tooltip says which is which (got: ' + menuCount.title + ')');
-    await page.evaluate(() => window.openTutorialMenu());
-    await page.waitForSelector('.gd-tour-lesson-list', {timeout: 30000});
+    await openTutorialCatalog(page);
     const chipped = await page.evaluate(() => {
       const counts = Array.from(document.querySelectorAll('.gd-tour-counts .gd-tour-count'))
         .map((c) => c.textContent);
@@ -379,8 +378,7 @@ const {
     assert(phone.leavesRoom, 'and leaves the panel the lesson points at visible');
     assert(phone.reservesScroll,
       'the Explorer reserves the sheet height so a row under it can scroll clear');
-    await page.evaluate(() => window.openTutorialMenu());
-    await page.waitForSelector('.gd-tour-lesson-list', {timeout: 15000});
+    await openTutorialCatalog(page, 15000);
     assert(await page.evaluate(() =>
       document.querySelector('#gd-tour-pop').classList.contains('gd-tour-sheet')),
       'the catalogue is a sheet too');

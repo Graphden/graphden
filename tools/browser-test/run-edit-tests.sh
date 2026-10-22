@@ -439,8 +439,16 @@ host_starved() {
 # uuid / timestamp in the message does not make the same failure look new.
 # Empty when neither is found — then the file keeps its full retry budget.
 failure_signature() {
-  { grep -m1 -E '^[[:space:]]*✗ ' "$1" || grep -m1 -E '[A-Za-z]*Error: ' "$1"; } 2>/dev/null \
-    | sed -E 's/^[[:space:]]+//; s/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/<id>/g; s/[0-9]+/N/g'
+  local message locator
+  message="$({ grep -m1 -E '^[[:space:]]*✗ ' "$1" || grep -m1 -E '[A-Za-z]*Error: ' "$1"; } 2>/dev/null)"
+  [ -n "$message" ] || return 0
+  # A Playwright timeout also records the selector. Preserve it so two
+  # different waits in one test cannot be mistaken for the same failure.
+  if [[ "$message" == *TimeoutError:* ]]; then
+    locator="$(grep -m1 -E 'waiting for locator\(' "$1" || true)"
+    message="$message $locator"
+  fi
+  printf '%s\n' "$message" | sed -E 's/^[[:space:]]+//; s/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/<id>/g; s/[0-9]+/N/g'
 }
 
 # Per-file duration baseline for the DEGRADED verdict (see the header).
@@ -691,20 +699,20 @@ for f in $FILES; do
       fi
       [ "${attempt_real:-0}" = 1 ] || env_signed=1
       # A deterministic failure is not worth five attempts: two CONSECUTIVE
-      # real (no environment signature) assertion-shaped failures with the same
+      # real (no environment signature) failures with the same
       # message are the same bug twice, and three more tries only add ~10 s +
       # a full walk each (edit-description: 96 s instead of ~15 s, repeated on
-      # every bisection re-run). Timeouts keep their retries — a race and a
-      # slow window both look like one.
+      # every bisection re-run). A hard shell timeout without a diagnostic
+      # still keeps its retries; a Playwright timeout names its failed wait.
       sig=""
-      if [ "${attempt_real:-0}" = 1 ] && [ "$shape" = "assertion" ]; then
+      if [ "${attempt_real:-0}" = 1 ]; then
         sig="$(failure_signature "$attempt_out")"
       fi
       rm -f "$attempt_out"
       attempt_real=0
       if [ -n "$sig" ] && [ "$sig" = "$prev_real_sig" ]; then
         deterministic=1
-        echo "  (same REAL assertion failure twice in a row — deterministic, not retrying: $sig)" >&2
+        echo "  (same REAL failure twice in a row — deterministic, not retrying: $sig)" >&2
         break
       fi
       prev_real_sig="$sig"

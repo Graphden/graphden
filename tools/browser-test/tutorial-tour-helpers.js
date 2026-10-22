@@ -13,6 +13,15 @@ const {assert, api, deleteFnByName, submitInlineRow} = require('./edit-test-help
 const NS_NAME = 'tutorial';
 const FN_NAME = 'one-plus-one';
 
+// Ordinary lesson tests share one catalogue entry path. The separate picker
+// startup regression opens immediately after script availability on purpose.
+async function openTutorialCatalog(page, timeout = 30000) {
+  await page.waitForFunction(() => !!window.gdEditorRoot?.componentNow('tutorial-catalog'),
+    null, {timeout});
+  await page.evaluate(() => window.openTutorialMenu());
+  await page.waitForSelector('.gd-tour-lesson-list', {timeout});
+}
+
 
 // Retry wrapper for cleanup deletes: a DELETE fired right after a UI write
 // can 409 while the write (or its invalidation) is still settling on the
@@ -1973,6 +1982,7 @@ async function setFnDescription(page, fnName, text) {
 module.exports = {
   NS_NAME, FN_NAME,
   retryingDelete, hardCleanup, tourTitle, tourWhere, waitTourTitle, settleTourRing, clickTourButton,
+  openTutorialCatalog,
   waitUntil, tourProgress, clickTourAdvance,
   installSpotlightAudit,
   filterAndSelect, openRowActionsFor, extendViaRowActions, bindFirstPlaceholder, setFnDescription, resetDescriptionTransient,

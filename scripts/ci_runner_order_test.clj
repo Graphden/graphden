@@ -96,6 +96,7 @@
           reports (atom 0)
           admissions (atom 0)]
       (with-redefs-fn {(ns-resolve 'ci 'select-checks) (constantly {:run [] :scoped [] :manual []})
+                       (ns-resolve 'ci 'ci-report-path) (constantly nil)
                        (ns-resolve 'ci-priority-core 'changed-paths) (constantly [])
                        (ns-resolve 'ci-resume 'git-output)
                        (fn [& args] (if (= "rev-parse" (first args)) (:sha @current) (:worktree-status @current)))

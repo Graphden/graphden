@@ -11,7 +11,6 @@
 ;;   :clj :web :infra :docs :sec   — domain lint sub-groups (`bb lint-clj`, …)
 ;;   :commit                       — commit-message lint (part of full lint)
 ;;   :test                         — the suites; run AFTER lint passes
-;;   :priority                     — exact related tests before the broad suite
 ;;   :post-test                    — reads what the test wave WROTE (`bb perf`
 ;;                                   grades perf/runs/*.edn), so it cannot share
 ;;                                   a wave with the runs it grades
@@ -41,6 +40,8 @@
  ;; edited rarely, so re-running on such a diff is cheap insurance.
  {:name "cljstyle"      :bb "cljstyle"      :timeout 120000 :group :clj
   :relevant ["\\.(clj|cljc|cljs|edn|bb)$" "^\\.cljstyle$"]}
+ {:name "syntax"       :bb "syntax"       :timeout 120000 :group :infra
+  :relevant ["\\.(js|mjs|cjs|json)$" "^scripts/ci_fast" "^bb\\.edn$"]}
  {:name "biome"         :bb "biome"         :timeout  60000 :group :web
   :relevant ["\\.(js|mjs|jsonc?)$" "^bb\\.edn$"]}
  {:name "stylelint"     :bb "stylelint"     :timeout 120000 :group :web

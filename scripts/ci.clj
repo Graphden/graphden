@@ -569,6 +569,11 @@
                       {:initial-sha (:sha initial) :current-sha (:sha current)})))))
 
 
+(defn- ci-report-path
+  []
+  (System/getenv "GRAPHDEN_CI_REPORT"))
+
+
 (defn run-ci
   "Select the checks, run them in waves behind a live progress line,
    report. Coverage lives in `bb coverage` — `bb ci` runs the plain
@@ -584,7 +589,7 @@
         hints (select-keys (priority/plan (priority/changed-paths since)) [:unit :integration])
         checks (mapv #(assoc % :extra-env {"GRAPHDEN_CI_SINCE" (or since "")
                                            "GRAPHDEN_CI_PRIORITY_HINTS" (pr-str hints)}) selected-checks)
-        report-path (System/getenv "GRAPHDEN_CI_REPORT")
+        report-path (ci-report-path)
         proof? (or report-path (not (some #{"--groups"} *command-line-args*)))
         ;; An old green receipt must not survive a crash in a new invocation.
         _ (when report-path

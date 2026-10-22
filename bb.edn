@@ -3,6 +3,7 @@
  :tasks
  {:requires ([babashka.fs :as fs]
              [babashka.process :as p]
+             [ci-fast :as fast]
              [clojure.string :as str])
 
   :init (do
@@ -15,7 +16,7 @@
           ;; or local-green/CI-red is structural.
           ;; Every Clojure/EDN file a human edits — INCLUDING the bb scripts, build.clj
           ;; and this file: the lint tooling is code and drifts like any other.
-          (def all-paths "src test development resources/packages scripts dev/wtq build.clj bb.edn")
+          (def all-paths fast/clj-scan-paths)
           (def green "\u001b[32m")
           (def red "\u001b[31m")
           (def cyan "\u001b[36m")
@@ -222,7 +223,8 @@
 
   kondo
   {:doc "Run clj-kondo [path]"
-   :task (let [path (or (first *command-line-args*) all-paths)
+   :task (let [paths (if (seq *command-line-args*) (vec *command-line-args*)
+                         (fast/lint-paths all-paths (System/getenv "GRAPHDEN_CI_SINCE")))
                ;; The deps.edn :kondo alias is THE pinned version (the CI
                ;; workflow pins the same one). A native binary on PATH is
                ;; used only when it matches — otherwise a dev box with a
@@ -230,7 +232,7 @@
                ;; lints with different rules than CI and the gate.
                pinned (get-in (clojure.edn/read-string (slurp "deps.edn"))
                               [:aliases :kondo :extra-deps
-                               'clj-kondo/clj-kondo :mvn/version])
+                               (quote clj-kondo/clj-kondo) :mvn/version])
                native? (= 0 (:exit (p/shell {:out :string :err :string :continue true} "which clj-kondo")))
                native-version (when native?
                                 (some->> (:out (p/shell {:out :string :err :string :continue true}
@@ -242,16 +244,20 @@
              (println (str "kondo: native clj-kondo " native-version
                            " != pinned " pinned " — using the deps.edn alias")))
            (if native-ok?
-             (p/shell (str "clj-kondo --lint " path))
-             (clojure (str "-M:kondo --lint " path))))}
+             (apply p/shell (into ["clj-kondo" "--lint"] paths))
+             (apply p/shell (into ["clojure" "-M:kondo" "--lint"] paths))))}
 
   splint
   {:doc "Run splint [path]"
-   :task (clojure (str "-M:splint " (or (first *command-line-args*) all-paths)))}
+   :task (apply p/shell (into ["clojure" "-M:splint"]
+                              (if (seq *command-line-args*) (vec *command-line-args*)
+                                  (fast/lint-paths all-paths (System/getenv "GRAPHDEN_CI_SINCE")))))}
 
   cljstyle
   {:doc "Check formatting [path]"
-   :task (clojure (str "-M:cljstyle check " (or (first *command-line-args*) all-paths)))}
+   :task (apply p/shell (into ["clojure" "-M:cljstyle" "check"]
+                              (if (seq *command-line-args*) (vec *command-line-args*)
+                                  (fast/lint-paths all-paths (System/getenv "GRAPHDEN_CI_SINCE")))))}
 
   biome
   {:doc "Lint editor JS via biome"
@@ -793,6 +799,11 @@
                                      "GDCLOUD_SCRIPT" (str (fs/canonicalize script))}}
                         "node" "cloud-membership-authz-e2e.js"))))}
 
+  syntax
+  {:doc "Check changed JS/JSON syntax, including files outside editor lint and runtime suites."
+   :task (do (require (quote [ci-fast :as fast]))
+             (fast/run-syntax! (System/getenv "GRAPHDEN_CI_SINCE")))}
+
   ci-priority
   {:doc "Print source-related ordering hints; never launch tests. GRAPHDEN_CI_SINCE is set by bb ci."
    :task (load-file "scripts/ci_priority.clj")}
@@ -1045,7 +1056,8 @@
              (load-file "scripts/ci_select_test.clj")
              (load-file "scripts/ci_report_test.clj")
              (load-file "scripts/ci_priority_core_test.clj")
-             (p/shell "bb" "scripts/ci_priority_schedule_test.clj")
+             (p/shell {:extra-env {"KAOCHA_PARALLELISM" ""}}
+                      "bb" "scripts/ci_priority_schedule_test.clj")
              (load-file "scripts/ci_resume_test.clj")
              (load-file "scripts/ci_fast_test.clj")
              (load-file "scripts/ci_runner_order_test.clj"))}
@@ -1095,7 +1107,8 @@
 
   fix
   {:doc "Auto-fix formatting [path]"
-   :task (clojure (str "-M:cljstyle fix " (or (first *command-line-args*) all-paths)))}
+   :task (apply p/shell (into ["clojure" "-M:cljstyle" "fix"]
+                              (if (seq *command-line-args*) (vec *command-line-args*) all-paths)))}
 
   outdated
   {:doc "Check outdated dependencies"

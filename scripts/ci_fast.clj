@@ -8,12 +8,24 @@
     [clojure.string :as str]))
 
 
+(def clj-scan-paths
+  ["src" "test" "development" "resources/packages" "scripts" "dev/wtq" "build.clj" "bb.edn"])
+
+
+(defn syntax-commands
+  "Syntax guards outside the narrower biome and runtime test scan sets."
+  [paths]
+  (let [paths (sort paths)]
+    (vec (concat
+           (for [path paths :when (re-find #"\.(js|mjs|cjs)$" path)] ["node" "--check" path])
+           (for [path paths :when (str/ends-with? path ".json")]
+             ["node" "-e" "JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8'))" path])))))
+
+
 (defn commands
   [paths native-style? native-kondo? native-shellcheck?]
   (let [paths (sort paths)
         clj (filter #(re-find #"\.(clj|cljc|cljs|edn|bb)$" %) paths)
-        js (filter #(re-find #"\.(js|mjs|cjs)$" %) paths)
-        json (filter #(str/ends-with? % ".json") paths)
         docs (filter #(str/ends-with? % ".md") paths)
         shell (filter #(or (str/ends-with? % ".sh") (= % "dev/wtq/wt")) paths)
         web (filter #(re-find #"^resources/packages/app/(editor|ui-preview)/.*\.(js|mjs|jsonc?)$" %) paths)
@@ -23,8 +35,7 @@
            (when (seq clj)
              [(into (if native-style? ["cljstyle" "check"] ["clojure" "-M:cljstyle" "check"]) clj)
               (into (if native-kondo? ["clj-kondo" "--lint"] ["clojure" "-M:kondo" "--lint"]) clj)])
-           (for [path js] ["node" "--check" path])
-           (for [path json] ["node" "-e" "JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8'))" path])
+           (syntax-commands paths)
            (for [path shell] ["bash" "-n" path])
            (when (and native-shellcheck? (seq shell)) [(into ["shellcheck"] shell)])
            (when (seq web) [(into ["npx" "--no-install" "biome" "check"] web)])
@@ -37,6 +48,31 @@
   (let [result (p/shell {:out :string :err :string :continue true}
                         "git" "merge-base" "HEAD" "develop")]
     (if (zero? (:exit result)) (str/trim (:out result)) "HEAD")))
+
+
+(defn lint-paths
+  "Canonical scanner roots plus changed Clojure/EDN files outside those roots.
+   Paths remain separate arguments, including spaces and shell metacharacters."
+  [roots base]
+  (let [base (if (str/blank? base) (default-base) base)
+        changed (select/changed-files base)]
+    (when-not changed (throw (ex-info "Cannot determine extra lint scope" {:base base})))
+    (into (vec roots)
+          (comp (filter #(re-find #"\.(clj|cljc|cljs|edn|bb)$" %))
+                (filter fs/regular-file?)
+                (remove (fn [path] (some #(or (= path %) (str/starts-with? path (str % "/"))) roots)))
+                (distinct))
+          (sort changed))))
+
+
+(defn run-syntax!
+  [base]
+  (let [base (if (str/blank? base) (default-base) base)
+        changed (select/changed-files base)]
+    (when-not changed (throw (ex-info "Cannot determine syntax scope" {:base base})))
+    (doseq [command (syntax-commands (filter fs/regular-file? changed))]
+      (println "syntax:" (str/join " " command))
+      (apply p/shell command))))
 
 
 (defn run-checks!

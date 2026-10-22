@@ -23,7 +23,7 @@ async function refusesBeforeWriting({headers = {}, status = 200, body, message, 
   } finally { await new Promise((resolve) => server.close(resolve)); }
 }
 
-async function preparesAccountMenu({rejectExport = false} = {}) {
+async function preparesAccountMenu({rejectExport = false, picker = false, generic = false} = {}) {
   const requests = [];
   let imported = '';
   const exporterId = await promisify(execFile)('bb', ['-cp', 'src', '-e',
@@ -39,6 +39,14 @@ async function preparesAccountMenu({rejectExport = false} = {}) {
     else if (request.method === 'POST' && uri.pathname === '/api/import/graph') {
       for await (const chunk of request) imported += chunk;
       body = {imported: true};
+    } else if (uri.pathname === '/api/execute') {
+      const namespace = imported.match(/:namespace "([^"]+)"/)[1];
+      const entries = await promisify(execFile)('bb', ['-cp', 'src', '-e',
+        "(require '[graphden.packages.records.ids :as ids] '[cheshire.core :as json]) " +
+        '(print (json/generate-string (into {} (map (fn [[role n]] [role (str (ids/fn-id ' +
+        JSON.stringify(namespace) + ' n))]) {:initial :menu-initial :update :menu-update :view :menu-view}))))'],
+      {cwd: path.resolve(__dirname, '../..'), timeout: 15000});
+      body = {result: {entries: JSON.parse(entries.stdout)}};
     } else if (uri.pathname === '/ui-preview/plan') {
       assert.equal(uri.searchParams.get('branch'), 'review-fixture');
       status = rejectExport ? 422 : 200;
@@ -53,22 +61,42 @@ async function preparesAccountMenu({rejectExport = false} = {}) {
   try {
     const url = 'http://127.0.0.1:' + server.address().port;
     const run = promisify(execFile)('bb', ['-cp', 'src', 'tools/ui_preview/prepare.clj',
-      '--account-menu', url, 'review-fixture', 'user.account-menu'],
+      ...(generic ? [] : ['--account-menu']), ...(picker ? ['--picker'] : []), url, 'review-fixture', 'user.account-menu'],
     {cwd: path.resolve(__dirname, '../..'), timeout: 15000});
     if (rejectExport) await assert.rejects(run, (error) => error.code === 1 && /visibility-denied/.test(error.stderr));
     else {
       const prepared = JSON.parse((await run).stdout);
       const editor = new URL(prepared.url);
-      assert.equal(editor.pathname, '/');
+      assert.equal(editor.pathname, generic ? '/ui-preview' : '/');
       assert.equal(editor.searchParams.get('branch'), prepared.branch);
-      for (const name of ['initial', 'update', 'view']) assert.equal(editor.searchParams.get('ui-' + name), prepared.entries[name]);
-      assert.equal(editor.hash, '#' + prepared.namespace + '.theme-canvas-background');
-      assert.equal(prepared['plan-id'], undefined);
+      if (generic) {
+        assert.equal(editor.searchParams.get('graph'), prepared.namespace);
+        assert.equal(editor.searchParams.get('plan'), prepared['plan-id']);
+        assert(prepared['plan-id']);
+      } else {
+        for (const name of ['initial', 'update', 'view']) assert.equal(editor.searchParams.get('ui-' + name), prepared.entries[name]);
+        assert.equal(editor.hash, '#' + prepared.namespace + '.theme-canvas-background');
+        assert.equal(prepared['plan-id'], undefined);
+      }
     }
-    assert.match(imported, /:name :account-menu-view/);
-    assert.doesNotMatch(imported, /:name :browser-plan\b/);
+    if (picker) {
+      const names = [...imported.matchAll(/:name (:[-a-zA-Z0-9_?!]+)/g)].map(match => match[1]);
+      assert.equal(new Set(names).size, names.length, 'combined preview imports unique authored names');
+      assert.match(imported, /:name :picker-view\b/);
+      assert.match(imported, /:name :_picker-row-verdict\b/);
+      assert.doesNotMatch(imported, /:name :root-component\b/);
+    }
+    if (generic) {
+      assert.match(imported, /:name :menu-view\b/);
+      assert.match(imported, /:name :browser-plan\b/);
+      assert.doesNotMatch(imported, /:name :_ui-preview-export\b/);
+    } else {
+      assert.match(imported, /:name :account-menu-view/);
+      assert.doesNotMatch(imported, /:name :browser-plan\b/);
+    }
     assert.deepEqual(requests, [['GET', '/api/branches'], ['GET', '/api/graph/entities'],
-      ['POST', '/api/import/graph'], ['GET', '/ui-preview/plan'],
+      ['POST', '/api/import/graph'], generic ? ['POST', '/api/execute'] : ['GET', '/ui-preview/plan'],
+      ...(picker && !rejectExport ? [['GET', '/ui-preview/plan']] : []),
       ...(rejectExport ? [['DELETE', '/api/branches/review-fixture']] : [])]);
   } finally { await new Promise((resolve) => server.close(resolve)); }
 }
@@ -84,5 +112,7 @@ async function preparesAccountMenu({rejectExport = false} = {}) {
     message: /limited to self-hosted/, mode: ['--account-menu']});
   await preparesAccountMenu();
   await preparesAccountMenu({rejectExport: true});
+  await preparesAccountMenu({picker: true});
+  await preparesAccountMenu({generic: true});
   console.log('PASS: prepare guards, actual editor URL, read-only export and exact failed-copy cleanup');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

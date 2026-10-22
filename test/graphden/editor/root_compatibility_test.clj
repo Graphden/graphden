@@ -189,7 +189,7 @@
 
 (deftest single-role-legacy-views-project-only-their-declared-input
   (doseq [[component path input-name] [[:fn-picker "app.ui-fn-picker" "model"]
-                                     [:tutorial-catalog "app.ui-tutorial-catalog" "inputs"]]]
+                                       [:tutorial-catalog "app.ui-tutorial-catalog" "inputs"]]]
     (let [previous (str (ids/fn-id path :root-view))
           component-plan (clojure.walk/postwalk-replace {old previous} root-plan)
           personal (clojure.walk/postwalk-replace {"state" input-name "personal-state" "personal-input"} personal-plan)

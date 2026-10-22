@@ -136,7 +136,6 @@
     runtimeIdentities.clear();
     clearTimeout(refreshTimer);
     refreshTimer = setTimeout(() => {
-      void window.gdFnPickerGraph?.reload();
       void window.gdInspectorGraph?.reload();
       void window.gdExplorerGraph?.reload();
       void window.gdTourCatalogGraph?.reload();

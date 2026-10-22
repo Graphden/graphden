@@ -88,10 +88,10 @@
 
 (deftest immutable-candidate-fence-refuses-moving-or-dirty-source
   (doseq [diagnostic? [false true]
-          change [identity #(assoc % :sha (apply str (repeat 40 "b")))
+          change [identity #(assoc % :sha (str/join (repeat 40 "b")))
                   #(assoc % :worktree-status " M src/changed.clj")
                   #(assoc % :worktree-status "?? test/uncommitted_test.clj")]]
-    (let [initial {:sha (apply str (repeat 40 "a")) :worktree-status ""}
+    (let [initial {:sha (str/join (repeat 40 "a")) :worktree-status ""}
           current (atom initial)
           reports (atom 0)
           admissions (atom 0)]

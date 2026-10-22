@@ -590,7 +590,7 @@
         checks (mapv #(assoc % :extra-env {"GRAPHDEN_CI_SINCE" (or since "")
                                            "GRAPHDEN_CI_PRIORITY_HINTS" (pr-str hints)}) selected-checks)
         report-path (ci-report-path)
-        proof? (or report-path (not (some #{"--groups"} *command-line-args*)))
+        proof? (or report-path (not-any? #{"--groups"} *command-line-args*))
         ;; An old green receipt must not survive a crash in a new invocation.
         _ (when report-path
             (ci-report/write-atomic! report-path

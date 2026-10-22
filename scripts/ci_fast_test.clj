@@ -2,6 +2,7 @@
   (:require
     [babashka.fs :as fs]
     [babashka.process :as p]
+    [babashka.tasks :refer [clojure]]
     [ci-fast :as fast]
     [ci-select :as select]
     [clojure.edn :as edn]
@@ -43,6 +44,9 @@
     (with-redefs [fast/default-base (constantly "base")
                   select/changed-files (constantly [outside "src/a.clj"])
                   fs/regular-file? (constantly true)
+                  clojure (fn [& args]
+                            (swap! calls conj (into ["clojure"] args))
+                            {:exit 0})
                   p/shell (fn [& args]
                             (if (= ["which clj-kondo"] (vec (rest args)))
                               {:exit 1}
@@ -53,6 +57,35 @@
                  [["clojure" "-M:kondo" "--lint"] ["clojure" "-M:splint"]
                   ["clojure" "-M:cljstyle" "check"]])
            @calls))))
+
+
+(deftest formatting-tasks-work-without-an-external-clojure-cli
+  (let [dir (fs/create-temp-dir)
+        bin (fs/path dir "bin")
+        fixture (str (fs/path dir "literal ' $(name).clj"))
+        bb (str (fs/canonicalize (fs/which "bb")))]
+    (try
+      (fs/create-dirs bin)
+      (fs/create-sym-link (fs/path bin "java") (fs/canonicalize (fs/which "java")))
+      (is (not (fs/exists? (fs/path bin "clojure"))))
+      (spit fixture "(ns fixture)\n\n\n(defn answer []\n(+ 1 2))\n")
+      (let [run (fn [task]
+                  (p/shell {:continue true :out :string :err :string
+                            :extra-env {"PATH" (str bin)}}
+                           bb task fixture))
+            bad (run "cljstyle")
+            fixed (run "fix")
+            checked (run "cljstyle")]
+        (is (not (zero? (:exit bad))) (str (:out bad) (:err bad)))
+        (is (zero? (:exit fixed)) (str (:out fixed) (:err fixed)))
+        (is (zero? (:exit checked)) (str (:out checked) (:err checked)))
+        (let [result (p/shell {:continue true :out :string :err :string
+                               :extra-env {"PATH" (str bin)}}
+                              bb "-e" (str "(require (quote ci-fast)) (ci-fast/run-command! "
+                                           (pr-str ["clojure" "-M:cljstyle" "check" fixture]) ")"))]
+          (is (zero? (:exit result)) (str (:out result) (:err result))))
+        (is (re-find #"\n  \(\+ 1 2\)" (slurp fixture))))
+      (finally (fs/delete-tree dir)))))
 
 
 (deftest unique-js-json-syntax-guards-reject-malformed-files-outside-editor

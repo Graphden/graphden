@@ -246,17 +246,17 @@
                            " != pinned " pinned " — using the deps.edn alias")))
            (if native-ok?
              (apply p/shell (into ["clj-kondo" "--lint"] paths))
-             (apply p/shell (into ["clojure" "-M:kondo" "--lint"] paths))))}
+             (apply clojure (into ["-M:kondo" "--lint"] paths))))}
 
   splint
   {:doc "Run splint [path]"
-   :task (apply p/shell (into ["clojure" "-M:splint"]
+   :task (apply clojure (into ["-M:splint"]
                               (if (seq *command-line-args*) (vec *command-line-args*)
                                   (fast/lint-paths all-paths (System/getenv "GRAPHDEN_CI_SINCE")))))}
 
   cljstyle
   {:doc "Check formatting [path]"
-   :task (apply p/shell (into ["clojure" "-M:cljstyle" "check"]
+   :task (apply clojure (into ["-M:cljstyle" "check"]
                               (if (seq *command-line-args*) (vec *command-line-args*)
                                   (fast/lint-paths all-paths (System/getenv "GRAPHDEN_CI_SINCE")))))}
 
@@ -1106,7 +1106,7 @@
 
   fix
   {:doc "Auto-fix formatting [path]"
-   :task (apply p/shell (into ["clojure" "-M:cljstyle" "fix"]
+   :task (apply clojure (into ["-M:cljstyle" "fix"]
                               (if (seq *command-line-args*) (vec *command-line-args*) all-paths)))}
 
   outdated

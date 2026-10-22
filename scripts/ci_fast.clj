@@ -3,6 +3,7 @@
   (:require
     [babashka.fs :as fs]
     [babashka.process :as p]
+    [babashka.tasks :as tasks]
     [ci-select :as select]
     [clojure.edn :as edn]
     [clojure.string :as str]))
@@ -75,6 +76,14 @@
       (apply p/shell command))))
 
 
+(defn run-command!
+  "Use Babashka's embedded Clojure CLI when only bb and Java are installed."
+  [command]
+  (if (= "clojure" (first command))
+    (apply tasks/clojure (rest command))
+    (apply p/shell command)))
+
+
 (defn run-checks!
   [base]
   (let [changed (select/changed-files (or base (default-base)))
@@ -87,4 +96,4 @@
                                                       (:out (p/shell {:out :string} "clj-kondo" "--version"))))))]
     (doseq [command (commands paths (boolean (fs/which "cljstyle")) native-kondo? (boolean (fs/which "shellcheck")))]
       (println "changed-file preflight:" (str/join " " command))
-      (apply p/shell command))))
+      (run-command! command))))

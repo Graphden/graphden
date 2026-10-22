@@ -1,5 +1,5 @@
-const {verifyTourCatalogRootSelection} = require('./tour-catalog-root-test-helpers');
 'use strict';
+const {verifyTourCatalogRootSelection} = require('./tour-catalog-root-test-helpers');
 const {assert, api, BASE} = require('./edit-test-helpers');
 const {waitTourTitle, clickTourButton} = require('./tutorial-tour-helpers');
 const {captureLoadedUIComponents, waitForLoadedUIComponents} = require('./ui-component-runtime-test-helpers');

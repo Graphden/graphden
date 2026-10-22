@@ -35,7 +35,7 @@ async function verifyTourCatalogRootLifetime(page, selection) {
     await page.waitForFunction(selection => gdEditorRoot.componentIdentity('tutorial-catalog') === selection, selection);
     const retired = await page.evaluate(() => {
       const proof = window.__gdCatalogLifetime;
-      proof.row = document.querySelector('.gd-tour-lesson-row .gd-tour-btn');
+      proof.row = document.querySelector('.gd-tour-lesson-row button.gd-tour-btn:not([disabled])');
       proof.scopes = [...document.querySelectorAll('#gd-tour-pop [data-gd-ui-style]')];
       proof.reloaded = gdEditorRoot.reload();
       return !document.querySelector('.gd-tour-lesson-list')
@@ -46,15 +46,21 @@ async function verifyTourCatalogRootLifetime(page, selection) {
     assert(retired, 'real root reload immediately retires catalogue DOM, styles, focus and render receipt');
     await page.evaluate(async () => {
       const proof = window.__gdCatalogLifetime;
+      if (!proof.row || typeof window._tourChooseLesson !== 'function') throw new Error('Native lesson action unavailable');
+      proof.originalChoose = window._tourChooseLesson;
+      proof.chosen = 0;
+      window._tourChooseLesson = () => { proof.chosen++; };
       proof.row.click();
       await proof.reloaded;
     });
-    assert(await page.evaluate(() => !document.querySelector('.gd-tour-lesson-list')
+    assert(await page.evaluate(() => window.__gdCatalogLifetime.chosen === 0
+      && !document.querySelector('.gd-tour-lesson-list')
       && gdEditorRoot.componentIdentity('tutorial-catalog') === null),
-    'detached old lesson callback cannot revive the retired catalogue or certify a selection');
+    'detached old lesson callback cannot choose a lesson, revive the catalogue or certify a selection');
   } finally {
     await page.evaluate(() => {
       gdTourCatalogClose?.();
+      if (window.__gdCatalogLifetime?.originalChoose) window._tourChooseLesson = window.__gdCatalogLifetime.originalChoose;
       window.__gdCatalogLifetime?.anchor.remove();
       delete window.__gdCatalogLifetime;
     });

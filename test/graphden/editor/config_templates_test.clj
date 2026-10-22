@@ -161,3 +161,19 @@
             :let [matches (filter #(= reference (keyword (:namespace %) (name (:name %)))) interfaces)]]
       (is (seq matches))
       (is (every? #(= #{:name :namespace} (set (keys %))) matches)))))
+
+
+(deftest configuration-interfaces-exclude-unrelated-browser-roots
+  (let [interfaces (templates/interfaces)
+        names (into #{} (comp (filter #(= "app.ui-config" (:namespace %))) (map :name)) interfaces)]
+    (is (contains? names :editor-defaults))
+    (is (contains? names :_component-entry))
+    (is (contains? names :_descriptor-pair))
+    (is (not-any? names [:_root-recents :_root-account-menu :editor-root :component-editor-root])))
+  (let [definitions [{:namespace "config" :name :template :parent :const
+                      :return-type :record :args {:value {:value :unrelated}}}
+                     {:namespace "config" :name :record :type {:value :text}}
+                     {:namespace "config" :name :unrelated :parent :absent.component/body}]]
+    (is (= #{:template :record}
+           (set (map :name (components/definition-closure definitions [:config/template]))))
+        "Literal labels and unrelated browser bodies are not parse dependencies")))

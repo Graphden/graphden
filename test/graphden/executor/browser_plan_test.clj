@@ -67,6 +67,37 @@
                      rows)})))
 
 
+(defn- module-entry-definitions
+  "The differential fixture exercises its listed entries, not every independent
+   bootstrap entry in a package. Follow real reference positions and relocate
+   the complete local closure, including qualified type aliases, together."
+  [module entries]
+  (let [{:keys [fns] module-ns :namespace}
+        (edn/read-string (slurp (str "resources/packages/app/" module "/fns.edn")))
+        by-name (into {} (map (juxt :name identity)) fns)
+        local-name (fn [reference]
+                     (when (and (keyword? reference)
+                                (or (nil? (namespace reference)) (= module-ns (namespace reference))))
+                       (let [local (keyword (name reference))]
+                         (when (contains? by-name local) local))))
+        reachable (loop [pending (set entries) seen #{}]
+                    (if-let [entry (first pending)]
+                      (let [definition (get by-name entry)
+                            _ (when-not definition (throw (ex-info "Missing differential entry" {:entry entry})))
+                            references (volatile! #{})]
+                        (rebase/rewrite-references definition
+                                                   (fn [reference]
+                                                     (when-let [local (local-name reference)]
+                                                       (vswap! references conj local))
+                                                     reference))
+                        (let [seen (conj seen entry)]
+                          (recur (into (disj pending entry) (remove seen @references)) seen)))
+                      seen))]
+    (rebase/rebase-bundle (mapv #(assoc % :namespace module-ns)
+                                (filter #(contains? reachable (:name %)) fns))
+                          (constantly "preview"))))
+
+
 (defn- export-fixture
   [{:keys [graph ids]} n]
   ;; Every definition in these small fixtures is supplied by this test.
@@ -731,7 +762,7 @@
 
 
 (deftest real-picker-matches-jvm-including-120-rows-with-all-badges
-  (let [definitions (:fns (edn/read-string (slurp "resources/packages/app/ui-fn-picker/fns.edn")))
+  (let [definitions (module-entry-definitions "ui-fn-picker" (map :entry browser-picker/cases))
         {:keys [graph impls ids]} (map-fixture definitions)
         full-case (full-picker-case)
         distributed (distributed-picker-case)
@@ -843,37 +874,6 @@
         {:keys [graph ids]} (graph-of primitive-rows differential-definitions)
         impls (into {} (map (fn [[n d]] [n (:impl d)])) base-defs)]
     (assert-differential! graph impls ids differential-cases)))
-
-
-(defn- module-entry-definitions
-  "The differential fixture exercises its listed entries, not every independent
-   bootstrap entry in a package. Follow real reference positions and relocate
-   the complete local closure, including qualified type aliases, together."
-  [module entries]
-  (let [{:keys [fns] module-ns :namespace}
-        (edn/read-string (slurp (str "resources/packages/app/" module "/fns.edn")))
-        by-name (into {} (map (juxt :name identity)) fns)
-        local-name (fn [reference]
-                     (when (and (keyword? reference)
-                                (or (nil? (namespace reference)) (= module-ns (namespace reference))))
-                       (let [local (keyword (name reference))]
-                         (when (contains? by-name local) local))))
-        reachable (loop [pending (set entries) seen #{}]
-                    (if-let [entry (first pending)]
-                      (let [definition (get by-name entry)
-                            _ (when-not definition (throw (ex-info "Missing differential entry" {:entry entry})))
-                            references (volatile! #{})]
-                        (rebase/rewrite-references definition
-                                                   (fn [reference]
-                                                     (when-let [local (local-name reference)]
-                                                       (vswap! references conj local))
-                                                     reference))
-                        (let [seen (conj seen entry)]
-                          (recur (into (disj pending entry) (remove seen @references)) seen)))
-                      seen))]
-    (rebase/rebase-bundle (mapv #(assoc % :namespace module-ns)
-                                (filter #(contains? reachable (:name %)) fns))
-                          (constantly "preview"))))
 
 
 (deftest real-account-menu-matches-jvm-and-json-input-boundary

@@ -65,8 +65,9 @@
     (into (vec structural) identities)))
 
 
-(defn- definition-closure
-  "Select complete authored dependencies by reference positions, never literals."
+(defn definition-closure
+  "Select local authored dependencies by reference positions, never literals.
+   External references stay external; this grants no source authority."
   [definitions roots]
   (let [indexed (into {} (map #(vector (keyword (:namespace %) (name (:name %))) %)) definitions)]
     (loop [pending (set roots) seen #{}]

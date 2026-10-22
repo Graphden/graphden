@@ -22,11 +22,13 @@
    installed dependency rows and verifies their source/type certificates."
   []
   (let [{all-fns :fns path :namespace} (module "app/ui-config")
-        ;; Configuration templates consume identity manifests, not browser
-        ;; bootstrap implementations or their callable record contracts.
-        fns (remove #(contains? #{:_editor-bootstrap-result :legacy-editor-root
-                                  :_root-account-menu :component-editor-root :editor-root}
-                                (:name %)) all-fns)
+        ;; Follow only the configuration template vocabulary. Unrelated browser
+        ;; root helpers must not import omitted component bodies into parsing.
+        fns (components/definition-closure
+              (mapv #(assoc % :namespace path) all-fns)
+              (mapv #(keyword path (name %))
+                    [:editor-defaults :_descriptor-pair :_legacy-menu-initial
+                     :_legacy-menu-update :_legacy-menu-view :_legacy-picker-view]))
         collections (module "core/collections")
         identity-targets (filter #(and (keyword? %) (namespace %))
                                  (keep #(get-in % [:args :value :ref]) fns))

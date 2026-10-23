@@ -38,16 +38,50 @@
    ["edit-tutorial-tour-picker.test.js" :tutorial]
    "resources/packages/app/editor/editor-tour-catalog-graph.js"
    ["edit-tutorial-tour-picker.test.js" "edit-ui-components-selective.test.js" :tutorial]
+   "resources/packages/app/editor/editor-row-actions.js"
+   [:row-actions]
    "resources/packages/app/ui-tutorial-catalog/fns.edn"
    ["edit-tutorial-tour-picker.test.js" "edit-ui-components-selective.test.js" :tutorial]
    "tools/browser-test/tutorial-tour-helpers.js" [:tutorial]})
 
 
+(declare dependency-distances)
+
+
+(defn- browser-contract-consumers
+  [browser-files marker]
+  (let [sources (into {}
+                      (map (fn [path]
+                             [(str (fs/file-name path)) (slurp (str path))]))
+                      (fs/glob "tools/browser-test" "*.js"))
+        owners (->> sources
+                    (keep (fn [[file source]]
+                            (when (str/includes? source marker) file)))
+                    set)
+        consumers (reduce-kv
+                    (fn [graph file source]
+                      (reduce (fn [g [_ dependency]]
+                                (let [dependency (if (str/ends-with? dependency ".js")
+                                                   dependency (str dependency ".js"))]
+                                  (if (contains? sources dependency)
+                                    (update g dependency (fnil conj #{}) file)
+                                    g)))
+                              graph
+                              (re-seq #"require\(['\"]\./([^'\"]+)['\"]\)" source)))
+                    {} sources)
+        distances (dependency-distances consumers owners)]
+    (->> browser-files
+         (filter #(contains? distances %))
+         (sort-by (juxt distances identity)))))
+
+
 (defn- impacted-browser-files
   [browser-files path]
   (mapcat (fn [entry]
-            (if (= entry :tutorial)
-              (filter #(str/starts-with? % "edit-tutorial-") browser-files)
+            (case entry
+              :tutorial (filter #(str/starts-with? % "edit-tutorial-") browser-files)
+              :row-actions (browser-contract-consumers browser-files
+                                                       "row-actions-popover")
               [entry]))
           (get browser-impact path)))
 

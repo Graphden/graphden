@@ -60,6 +60,18 @@
              (frequencies (priority/browser-order #{source}))) source))))
 
 
+(deftest row-actions-owner-contract-prioritizes-its-browser-consumers
+  (let [source "resources/packages/app/editor/editor-row-actions.js"
+        early (priority/browser-first #{source})
+        positions (zipmap early (range))]
+    (is (contains? positions "edit-canvas-card-personal.test.js"))
+    (is (contains? positions "edit-row-actions-pin.test.js"))
+    (is (< (positions "edit-canvas-card-personal.test.js")
+           (positions "edit-tutorial-tour-picker.test.js")))
+    (is (= (frequencies (priority/browser-order nil))
+           (frequencies (priority/browser-order #{source}))))))
+
+
 (deftest backend-priority-covers-direct-and-transitive-consumers
   (let [layers (priority/unit-layers #{"src/graphden/types/core.clj"})
         direct (first layers)

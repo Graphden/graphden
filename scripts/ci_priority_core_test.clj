@@ -99,6 +99,19 @@
   (is (= [] (priority/integration-first #{"test/graphden/types/core_test.clj"}))))
 
 
+(deftest literal-dynamic-loads-and-package-fixtures-enter-the-early-graph
+  ;; compile-eager intentionally breaks a load cycle via requiring-resolve.
+  (is (contains? (:deps (#'priority/namespace-entry
+                         "src/graphden/executor/compile_eager.clj"))
+                 'graphden.executor.compile-runtime))
+  (is (contains? (:packages (#'priority/namespace-entry
+                             "test/graphden/packages/core/hof_test.clj"))
+                 ["core" "hof"]))
+  (is (= ["graphden.packages.core.hof-test"]
+         (priority/unit-first
+           #{"resources/packages/core/hof/impls.clj"}))))
+
+
 (deftest runtime-order-preserves-full-roster-once
   (let [all (priority/runtime-order nil)
         changed #{"tools/runtime-test/undo-journal.test.js"}

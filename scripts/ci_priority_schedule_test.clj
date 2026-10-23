@@ -4,6 +4,11 @@
 (load-string
   "(ns kaocha.plugin)
    (defmacro defplugin [& _] nil)
+   (ns kaocha.result)
+   (defn failed? [testable]
+     (or (pos? (get testable :kaocha.result/fail 0))
+         (pos? (get testable :kaocha.result/error 0))
+         (some failed? (:kaocha.result/tests testable))))
    (ns kaocha.testable)
    (defmulti -run {:arglists '([testable plan])}
      (fn [testable _] (:kaocha.testable/type testable)))
@@ -179,6 +184,42 @@
     (is (< (positions [:end :direct-a]) (positions [:start :indirect])))
     (is (< (positions [:end :direct-b]) (positions [:start :indirect])))
     (is (< (positions [:end :indirect]) (positions [:start :rest])))))
+
+
+(deftest red-affected-layer-skips-indirect-and-remainder-without-losing-results
+  (doseq [red-id [:direct-b :indirect]]
+    (let [children (mapv #(hash-map :kaocha.testable/id %) [:rest :indirect :direct-a :direct-b])
+          calls (atom [])
+          suite {:kaocha.testable/type :kaocha.type/clojure.test
+                 :kaocha.testable/id :unit
+                 :kaocha/parallelism 2
+                 :kaocha.test-plan/tests children}
+          result (with-redefs [priority/namespace-layers
+                               (fn [_ _] [["direct-a" "direct-b"] ["indirect"]])
+                               priority/namespace-hints (fn [_ _] [])
+                               clojure.core/requiring-resolve (constantly nil)
+                               testable/run-testable
+                               (fn [child _]
+                                 (let [id (:kaocha.testable/id child)]
+                                   (swap! calls conj id)
+                                   (if (= red-id id)
+                                     (assoc child :kaocha.result/tests
+                                            [{:kaocha.result/error 1}])
+                                     (assoc child :ran true))))]
+                   (testable/-run suite {}))
+          results (:kaocha.result/tests result)]
+      (is (= (cond-> #{:direct-a :direct-b}
+               (= red-id :indirect) (conj :indirect))
+             (set @calls)))
+      (is (= (mapv :kaocha.testable/id children)
+             (mapv :kaocha.testable/id results)))
+      (is (:kaocha.testable/skip (first results)))
+      (is (= (not= red-id :indirect)
+             (boolean (:kaocha.testable/skip (second results)))))
+      (is (= [{:kaocha.result/error 1}]
+             (:kaocha.result/tests (if (= red-id :indirect)
+                                     (second results)
+                                     (last results))))))))
 
 
 (let [{:keys [fail error]} (run-tests 'ci-priority-schedule-test)]

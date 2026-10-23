@@ -45,6 +45,7 @@
     [clojure.test :as t]
     [kaocha.plugin :refer [defplugin]]
     [kaocha.plugin.priority :as priority]
+    [kaocha.result :as result]
     [kaocha.testable :as testable]
     [kaocha.type.clojure.test]
     [kaocha.type.ns]
@@ -348,15 +349,21 @@
   [children test-plan n layers suite-id]
   (let [load-error? (some ::testable/load-error children)
         {:keys [layers remaining]} (priority/indexed-layers children layers)
-        affected-results (mapv (fn [[index layer]]
-                                 (println (str "CI " (name suite-id) " dependency layer "
-                                               (inc index) "/" (count layers) ": "
-                                               (count layer) " namespaces"))
-                                 (run-indexed-layer layer test-plan n load-error?))
-                               (map-indexed vector layers))
-        remaining-results (run-indexed-layer remaining test-plan n load-error?)
-        results (concat (mapcat identity affected-results) remaining-results)]
-    (->> results (sort-by first) (mapv second))))
+        ordered-results (loop [done [] pending layers index 0]
+                          (if-let [layer (first pending)]
+                            (let [_ (println (str "CI " (name suite-id) " dependency layer "
+                                                  (inc index) "/" (count layers) ": "
+                                                  (count layer) " namespaces"))
+                                  batch (run-indexed-layer layer test-plan n load-error?)
+                                  done (into done batch)]
+                              (if (some (comp result/failed? second) batch)
+                                (let [unrun (concat (mapcat identity (rest pending)) remaining)]
+                                  (println (str "CI " (name suite-id) " affected layer failed; "
+                                                (count unrun) " later namespaces skipped"))
+                                  (into done (map (fn [[i t]] [i (assoc t ::testable/skip true)]) unrun)))
+                                (recur done (rest pending) (inc index))))
+                            (into done (run-indexed-layer remaining test-plan n load-error?))))]
+    (->> ordered-results (sort-by first) (mapv second))))
 
 
 (defn- run-suite-maybe-parallel

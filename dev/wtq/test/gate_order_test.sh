@@ -167,6 +167,7 @@ assert_events 'expect,ci,verify'
 [ "$built_candidate" = 0 ]
 
 CASE_INTEGRATION=1
+unset VERIFIED_IMAGE_ID
 run_case
 assert_events 'expect,ci,verify,integration'
 [ "$built_candidate" = 0 ]

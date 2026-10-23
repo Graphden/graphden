@@ -1374,7 +1374,7 @@ run_gate_stage() {
       ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" bb test-visual ) || { echo "FAIL: visual"; return 1; } ;;
     integration)
       step "bb test-integration"
-      ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" bb test-integration ) || { echo "FAIL: integration"; return 1; } ;;
+      ( cd "$wt" && bb test-integration ) || { echo "FAIL: integration"; return 1; } ;;
     fleet)
       step "bb test-fleet-e2e"
       # This remains the real two-pod shared-Postgres control-plane check.

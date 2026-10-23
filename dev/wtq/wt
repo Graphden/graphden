@@ -246,7 +246,10 @@ governance_drift() {
 #                                    actionlint in the lint pass -> nothing heavy
 #   tools/browser-test/**            the e2e suite itself   -> e2e
 #   packages' .js/.css/.html/.svg    browser-only surface   -> e2e
-#   everything else                  src, .clj/.edn, deps.edn, bb.edn, scripts/,
+#   scripts/ci*.clj, checks.edn       CI runner and its tests, not shipped
+#   bb.edn                           only audited CI-task edits skip runtime;
+#                                    shared setup and build tasks do not
+#   everything else                  src, .clj/.edn, deps.edn, other scripts/,
 #                                    Dockerfile*, compose, and THIS gate's own
 #                                    config -> integration + e2e; unknown
 #   deps.edn has one semantic exception: only the audited :watson tool's git
@@ -270,7 +273,7 @@ governance_drift() {
 classify_changes() {   # <worktree> -> NEED_BUILD / NEED_INTEGRATION / NEED_E2E / NEED_FLEET / NEED_VISUAL / CHANGED_N
   local wt="$1" f changed
   NEED_BUILD=0; NEED_INTEGRATION=0; NEED_E2E=0; NEED_FLEET=0; NEED_VISUAL=0; CHANGED_N=0
-  DEPS_DEVTOOL_ONLY=0
+  DEPS_DEVTOOL_ONLY=0; BB_CI_ONLY=0
   if ! changed="$(git -C "$wt" diff --name-only "$TARGET..HEAD" 2>/dev/null)"; then
     NEED_BUILD=1; NEED_INTEGRATION=1; NEED_E2E=1; NEED_FLEET=1; NEED_VISUAL=1; CHANGED_N=unknown
     return 0
@@ -282,9 +285,15 @@ classify_changes() {   # <worktree> -> NEED_BUILD / NEED_INTEGRATION / NEED_E2E 
       DEPS_DEVTOOL_ONLY=1
       continue                     # exempt from BOTH runtime and fleet cases
     fi
+    if [ "$f" = bb.edn ] && bb "$SCRIPT_DIR/bb_scope.clj" "$wt" "$TARGET" HEAD 2>/dev/null; then
+      BB_CI_ONLY=1
+      continue
+    fi
     case "$f" in
       resources/*.md|src/*.md)        NEED_BUILD=1 ;;
       *.md|docs/*|dev/*|.github/*)    : ;;
+      scripts/ci*.clj|scripts/checks.edn|scripts/ci-release-guard.sh|\
+      scripts/test-ci-release-guard.sh) : ;;
       tools/browser-test/*)           NEED_E2E=1 ;;
       resources/packages/*.js|resources/packages/*.css|\
       resources/packages/*.html|resources/packages/*.svg)
@@ -1374,38 +1383,41 @@ run_gate_stage() {
 gate_suites() {
   local wt="$1" no_e2e="$2" no_fleet="$3" no_visual="$4"
 
+  step "scope: what this change needs"
+  classify_changes "$wt"
+  [ "$no_e2e" = "1" ] && NEED_E2E=0     # explicit override still wins
+  [ "$no_fleet" = "1" ] && NEED_FLEET=0
+  [ "$no_visual" = "1" ] && NEED_VISUAL=0
+
   # Preflight. The e2e suite needs playwright to be resolvable from
   # tools/browser-test; a broken install there does not surface until the
   # suite runs — 40 minutes into the gate — as a wall of
   # "Cannot find module 'playwright'". Cost of asking now: ~50 ms.
   step "preflight: e2e runner dependencies"
-  if [ "$no_e2e" != "1" ] && ! ( cd "$wt/tools/browser-test" && node -e "require.resolve('playwright')" ) 2>/dev/null; then
+  if [ "$NEED_E2E" = 1 ] && ! ( cd "$wt/tools/browser-test" && node -e "require.resolve('playwright')" ) 2>/dev/null; then
     echo "ABORT: cannot resolve 'playwright' from $wt/tools/browser-test."
     echo "  The e2e suite would fail an hour from now with MODULE_NOT_FOUND."
     echo "  Fix the SOURCE tree (worktrees are hardlinked from it), then retry:"
     echo "      (cd $MAIN_WT/tools/browser-test && npm ci)"
     return 3
   fi
-  echo "ok"
-
-  step "scope: what this change needs"
-  classify_changes "$wt"
-  [ "$no_e2e" = "1" ] && NEED_E2E=0     # explicit override still wins
-  [ "$no_fleet" = "1" ] && NEED_FLEET=0
-  [ "$no_visual" = "1" ] && NEED_VISUAL=0
+  if [ "$NEED_E2E" = 1 ]; then echo "ok"; else echo "not needed — e2e out of scope"; fi
   echo "  $CHANGED_N file(s) changed vs $TARGET"
   if [ "$DEPS_DEVTOOL_ONLY" = 1 ]; then
     echo "  deps.edn: only the audited :watson devtool coordinate changed"
   fi
+  if [ "$BB_CI_ONLY" = 1 ]; then
+    echo "  bb.edn: only audited CI tasks changed; shared setup and runtime tasks are unchanged"
+  fi
   if [ "$NEED_INTEGRATION" = 1 ]; then echo "  integration: RUN"
-  else echo "  integration: SKIPPED — only docs / browser assets / audited devtool coordinates changed"; fi
+  else echo "  integration: SKIPPED — no runtime change requires it"; fi
   if [ "$NEED_BUILD" = 1 ] || [ "$NEED_INTEGRATION" = 1 ] || [ "$NEED_E2E" = 1 ] \
      || [ "$NEED_FLEET" = 1 ] || [ "$NEED_VISUAL" = 1 ]; then
     echo "  image build: RUN"
   else echo "  image build: SKIPPED — no stage needs an image"; fi
   if [ "$no_e2e" = "1" ]; then echo "  e2e:         SKIPPED — --no-e2e (every member asked for it)"
   elif [ "$NEED_E2E" = 1 ]; then echo "  e2e:         RUN"
-  else echo "  e2e:         SKIPPED — docs / audited devtool only, no runtime surface"; fi
+  else echo "  e2e:         SKIPPED — no browser or runtime surface changed"; fi
   if [ "$no_fleet" = "1" ]; then echo "  fleet e2e:   SKIPPED — --no-fleet (every member asked for it)"
   elif [ "$NEED_FLEET" = 1 ]; then echo "  fleet e2e:   RUN"
   else echo "  fleet e2e:   SKIPPED — nothing touching the cross-pod control plane"; fi

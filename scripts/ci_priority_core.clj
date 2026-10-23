@@ -30,6 +30,10 @@
    "resources/packages/app/editor/editor-ui-components.js"
    ["edit-ui-components-selective.test.js" "edit-ui-components.test.js"
     "edit-account-menu-graph.test.js" "edit-recents-graph.test.js" :tutorial]
+   "resources/packages/app/editor/editor-edit-modes.js"
+   ["edit-ui-components.test.js" "edit-arg-value.test.js" "edit-secret-inline.test.js"]
+   "resources/packages/web/runtime/graphden-popover.js"
+   ["edit-ui-components.test.js" "edit-arg-value.test.js" "edit-value-card-display.test.js"]
    "resources/packages/app/editor/editor-tour-picker.js"
    ["edit-tutorial-tour-picker.test.js" :tutorial]
    "resources/packages/app/editor/editor-tour-catalog-graph.js"

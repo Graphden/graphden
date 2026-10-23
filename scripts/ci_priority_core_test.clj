@@ -50,6 +50,16 @@
                  "edit-account-menu-graph.test.js")))
 
 
+(deftest shared-popover-impact-includes-the-personal-theme-walk
+  (doseq [source ["resources/packages/app/editor/editor-edit-modes.js"
+                  "resources/packages/web/runtime/graphden-popover.js"]]
+    (let [first-files (set (priority/browser-first #{source}))]
+      (is (contains? first-files "edit-ui-components.test.js") source)
+      (is (contains? first-files "edit-arg-value.test.js") source)
+      (is (= (frequencies (priority/browser-order nil))
+             (frequencies (priority/browser-order #{source}))) source))))
+
+
 (deftest backend-focus-is-exact-and-bounded
   (is (= ["graphden.types.core-test"]
          (priority/unit-first #{"src/graphden/types/core.clj"})))

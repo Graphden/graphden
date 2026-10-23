@@ -45,6 +45,7 @@ case "$step" in
   skip:*) echo "SKIP: \${step#skip:}"; exit 0 ;;
   fail:*) echo "  ✗ \${step#fail:}" >&2; exit 1 ;;
   timeout:*) echo "TimeoutError: locator.waitFor: Timeout 20000ms exceeded" >&2; echo "  - waiting for locator('\${step#timeout:}')" >&2; exit 1 ;;
+  diagnostic:*) echo '{"diagnostic":"ui-graph-walk-failure","kind":"timeout","frames":[{"file":"walk","line":'"\${step#diagnostic:}"'}]}' >&2; echo 'FAIL walkthrough; details withheld' >&2; exit 1 ;;
   rebuildfail:*) echo 1 > "$STUB_STATE/rebuilds"; echo 300 > "$STUB_STATE/clock"; echo "  ✗ late cleanup" >&2; exit 1 ;;
   recentfail:*) echo 1 > "$STUB_STATE/rebuilds"; echo 140 > "$STUB_STATE/clock"; echo "  ✗ compilation window" >&2; exit 1 ;;
   restartfail:*) echo 0 > "$STUB_STATE/rebuilds"; echo "  ✗ server restart" >&2; exit 1 ;;
@@ -214,6 +215,16 @@ console.log(' different timed-out selectors retain retry budget');
 {
   const r = runSuite({ 'edit-a.test.js': ['timeout:.first', 'timeout:.second', 'pass'] });
   assert(r.attempts('edit-a.test.js') === 3, 'different wait retries to attempt 3', r.out);
+}
+
+console.log(' privacy-safe browser diagnostics identify the repeated failing frame');
+{
+  const same = runSuite({ 'edit-a.test.js': ['diagnostic:138', 'diagnostic:138'] });
+  assert(same.attempts('edit-a.test.js') === 2 && /\(deterministic\)/.test(same.out),
+    'same safe diagnostic stops after two attempts', same.out);
+  const different = runSuite({ 'edit-a.test.js': ['diagnostic:138', 'diagnostic:197', 'pass'] });
+  assert(different.attempts('edit-a.test.js') === 3 && !/\(deterministic\)/.test(different.out),
+    'different frames retain retry budget', different.out);
 }
 
 {

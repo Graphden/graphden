@@ -135,7 +135,14 @@ async function bindPersonalMenuTheme(page, entry, accent, background) {
     'the inherited theme record retains both canonical color widgets');
   await form.locator('[data-form-field][data-field-path="accent"]').fill(accent);
   await form.locator('[data-form-field][data-field-path="canvas-background"]').fill(background);
-  await form.getByRole('button', {name: 'Save', exact: true}).click();
+  const save = form.getByRole('button', {name: 'Save', exact: true});
+  await save.scrollIntoViewIfNeeded();
+  assert(await save.evaluate(button => {
+    const rect = button.getBoundingClientRect();
+    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    return !button.disabled && (hit === button || button.contains(hit));
+  }), 'the loaded theme form leaves Save reachable in the viewport');
+  await save.click();
   await form.waitFor({state: 'detached'});
 }
 

@@ -440,6 +440,10 @@ host_starved() {
 # Empty when neither is found — then the file keeps its full retry budget.
 failure_signature() {
   local message locator
+  # Some privacy-preserving browser walks deliberately suppress Playwright's
+  # raw DOM dump. Their structured frame receipt is the precise failure site.
+  message="$(grep -m1 -E '"diagnostic":"ui-graph-walk-failure"' "$1" || true)"
+  if [ -n "$message" ]; then printf '%s\n' "$message"; return 0; fi
   message="$({ grep -m1 -E '^[[:space:]]*✗ ' "$1" || grep -m1 -E '[A-Za-z]*Error: ' "$1"; } 2>/dev/null)"
   [ -n "$message" ] || return 0
   # A Playwright timeout also records the selector. Preserve it so two

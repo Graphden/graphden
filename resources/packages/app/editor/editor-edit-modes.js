@@ -36,6 +36,7 @@ let inlineEditOutsideHandler = null;
 // back to it rather than dropping focus on the document.
 let inlineEditAnchor = null;
 let inlineEditClosed = null;
+let stopInlineEditAnchorObservation = null;
 
 // Installed once — reads the live element, inert while closed.
 installTabTrap({
@@ -58,6 +59,8 @@ document.addEventListener('keydown', (e) => {
 });
 
 function closeInlineEdit() {
+  stopInlineEditAnchorObservation?.();
+  stopInlineEditAnchorObservation = null;
   if (inlineEditOutsideHandler) {
     document.removeEventListener('pointerdown', inlineEditOutsideHandler);
     inlineEditOutsideHandler = null;
@@ -99,12 +102,9 @@ function openInlineEditPopover(opts) {
   el.setAttribute('role', 'dialog');
   el.setAttribute('aria-modal', 'false');
   el.setAttribute('aria-label', opts.ariaLabel || 'Edit');
-  const rect = opts.anchorEl.getBoundingClientRect();
-  // Position below the anchor by default; flip above + clamp inside
-  // the viewport so iPad-portrait edits don't push the popover off
-  // the bottom of the screen when the soft keyboard appears.
-  el.style.top  = (rect.bottom + 6) + 'px';
-  el.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 280)) + 'px';
+  // The control can grow after an asynchronous value-form response. The
+  // shared anchor primitive keeps the full form reachable as its size and
+  // the viewport change, including when the trigger sits near the bottom.
 
   const control = opts.makeControl(el);
 
@@ -192,6 +192,11 @@ function openInlineEditPopover(opts) {
   document.body.appendChild(el);
   inlineEditEl = el;
   inlineEditClosed = typeof opts.onClosed === 'function' ? opts.onClosed : null;
+  const place = () => anchorBelowClamped(el, opts.anchorEl,
+    {constrainHeight: true, display: 'flex'});
+  place();
+  stopInlineEditAnchorObservation = observePopoverAnchor(el, opts.anchorEl,
+    place, typeof onViewportChanged === 'function' ? onViewportChanged : undefined);
 
   setTimeout(() => {
     if (inlineEditEl !== el) return;

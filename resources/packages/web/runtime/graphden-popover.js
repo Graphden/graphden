@@ -35,9 +35,15 @@ function anchorBelowClamped(el, anchorEl, opts) {
   const viewportTop = bounds.offsetTop || 0;
   const viewportRight = viewportLeft + bounds.width;
   const viewportBottom = viewportTop + bounds.height;
-  el.style.display = 'block';
+  el.style.display = opts?.display || 'block';
   el.style.left = '0px';
   el.style.top = '-9999px';
+  if (opts?.constrainHeight) {
+    // Re-measure the natural height after async content replaces a loading
+    // state; the prior viewport cap must not force the next side choice.
+    el.style.maxHeight = '';
+    el.style.overflowY = '';
+  }
   const scale = opts?.scale || 1;
   const w = (el.offsetWidth || opts?.fallbackW || 280) * scale;
   let h = (el.offsetHeight || opts?.fallbackH || 120) * scale;

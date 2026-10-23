@@ -243,7 +243,20 @@ const {assert, newContext} = require('./edit-test-helpers');
     assert(await page.evaluate(({id, selector}) => selectedFnId === id && !graph.animating
       && geometryGraphTarget.isConnected && document.querySelector(selector) === geometryGraphTarget, graphTarget),
     'viewport pan retains the completed render target');
-    assert(await aligned(graphTarget.selector) <= 1, 'actual graph viewport pan updates the spotlight');
+    const panError = await aligned(graphTarget.selector);
+    if (panError > 1) {
+      const state = await page.evaluate(selector => {
+        const target = document.querySelector(selector)?.getBoundingClientRect();
+        const ring = document.getElementById('gd-tour-spot')?.getBoundingClientRect();
+        return {target: target && {left: target.left, top: target.top},
+          ring: ring && {left: ring.left, top: ring.top},
+          viewport: {x: viewport.pan.x, y: viewport.pan.y},
+          listeners: _viewportListeners.length, positioning: !!_tourStopPositioning,
+          calls: window.geometryCalls, stepTarget: _tourStep()?.target};
+      }, graphTarget.selector);
+      console.error(JSON.stringify({diagnostic: 'tour-pan-alignment', error: panError, ...state}));
+    }
+    assert(panError <= 1, 'actual graph viewport pan updates the spotlight');
     await page.evaluate(() => { window.geometryBaselineListeners = _viewportListeners.length - 1; });
     await page.screenshot({path: '/tmp/graphden-tour-geometry.png'});
     await page.evaluate(() => {

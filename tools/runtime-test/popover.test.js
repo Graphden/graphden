@@ -132,6 +132,23 @@ test('an unmeasurable popover falls back to the caller\'s guess', () => {
          'clamped using fallbackW (1000-400-8), got ' + el.style.left);
 });
 
+test('an async form grows and moves above its anchor after a constrained first layout', () => {
+  const { ctx, document } = makeCtx({ w: 1000, h: 400 });
+  const el = sized(document, 280, 80);
+  let naturalHeight = 80;
+  Object.defineProperty(el, 'offsetHeight', {get() {
+    return Math.min(naturalHeight, parseInt(el.style.maxHeight || naturalHeight, 10));
+  }});
+  const anchor = anchoredAt(document, {left: 100, top: 180, bottom: 290});
+  ctx.anchorBelowClamped(el, anchor, {constrainHeight: true, display: 'flex'});
+  assert(px(el.style.top) === 298 && el.style.display === 'flex',
+    'small loading form stays below with its flex layout');
+  naturalHeight = 150;
+  ctx.anchorBelowClamped(el, anchor, {constrainHeight: true, display: 'flex'});
+  assert(px(el.style.top) === 22 && px(el.style.maxHeight) === 164,
+    'grown form is remeasured and moves into the larger space above');
+});
+
 
 // --- dismissal ---------------------------------------------------------------
 

@@ -135,15 +135,6 @@
     (into (vec first-files) (remove first-set) all)))
 
 
-(defn- direct-unit-test
-  [source]
-  (condp re-matches source
-    #"test/graphden/.+_test\.clj" source
-    #"src/graphden/.+\.clj"
-    (str "test/" (subs source (count "src/") (- (count source) 4)) "_test.clj")
-    nil))
-
-
 (def ^:private non-unit-tags [:integration :container-e2e :perf])
 
 
@@ -190,42 +181,140 @@
     (catch Exception _ nil)))
 
 
-(defn unit-first
-  "At most three exact path-paired unit namespaces to schedule first inside
-   the authoritative full suite."
-  [changed]
+(defn- libspec-names
+  [spec]
+  (cond
+    (symbol? spec) [spec]
+    (and (vector? spec) (symbol? (first spec)))
+    (let [[prefix & more] spec]
+      (if (vector? (first more))
+        (mapcat (fn [child]
+                  (when (and (vector? child) (symbol? (first child)))
+                    [(symbol (str prefix "." (first child)))]))
+                more)
+        [prefix]))
+    :else []))
+
+
+(defn- namespace-entry
+  [path]
+  (with-open [reader (java.io.PushbackReader. (io/reader path))]
+    (binding [*read-eval* false]
+      (let [form (read {:read-cond :allow :features #{:clj :bb}} reader)
+            name (when (and (seq? form) (= 'ns (first form))) (second form))]
+        (when-not (symbol? name)
+          (throw (ex-info "Expected ns form" {:path path})))
+        {:name name
+         :deps (->> (drop 2 form)
+                    (filter #(and (seq? %) (#{:require :use :require-macros} (first %))))
+                    (mapcat rest)
+                    (mapcat libspec-names)
+                    set)}))))
+
+
+(defn- clojure-files
+  []
+  (concat (fs/glob "src" "**/*.clj")
+          (fs/glob "test" "**/*.clj")))
+
+
+(defn- namespace-graph
+  []
+  (reduce (fn [graph path]
+            (let [path (str path)
+                  entry (namespace-entry path)]
+              (when (contains? (:by-name graph) (:name entry))
+                (throw (ex-info "Duplicate namespace" {:path path :name (:name entry)})))
+              (-> graph
+                  (assoc-in [:by-path path] entry)
+                  (assoc-in [:by-name (:name entry)] path)
+                  (update :reverse
+                          (fn [consumers]
+                            (reduce (fn [r dep]
+                                      (update r dep (fnil conj #{}) (:name entry)))
+                                    consumers (:deps entry)))))))
+          {:by-path {} :by-name {} :reverse {}}
+          (clojure-files)))
+
+
+(defn- dependency-distances
+  [reverse-graph sources]
+  (loop [distances (zipmap sources (repeat 0))
+         frontier (set sources)
+         depth 1]
+    (if (empty? frontier)
+      distances
+      (let [next-frontier (->> frontier
+                               (mapcat #(get reverse-graph %))
+                               (remove #(contains? distances %))
+                               set)]
+        (recur (into distances (map #(vector % depth)) next-frontier)
+               next-frontier
+               (inc depth))))))
+
+
+(defn- test-layers
+  "All reachable test namespaces, grouped by shortest require distance.
+   The Kaocha runner completes each layer before starting the next. A parse
+   failure removes hints altogether; the unchanged full suite still runs."
+  [changed kind]
   (when changed
-    (let [namespaces (->> changed
-                          sort
-                          (keep direct-unit-test)
-                          (filter fs/exists?)
-                          distinct
-                          (map #(focused-namespace % :unit))
-                          (remove nil?)
-                          vec)]
-      (if (<= (count namespaces) 3) namespaces []))))
+    (try
+      (let [{:keys [by-path] consumers :reverse} (namespace-graph)
+            sources (->> changed
+                         (filter #(or (str/starts-with? % "src/")
+                                      (str/starts-with? % "test/")))
+                         (filter #(str/ends-with? % ".clj"))
+                         (keep #(get-in by-path [% :name]))
+                         set)
+            distances (dependency-distances consumers sources)
+            test-entries (->> by-path
+                              (filter (fn [[path _]]
+                                        (and (str/starts-with? path "test/")
+                                             (str/ends-with? path "_test.clj"))))
+                              (keep (fn [[path {:keys [name]}]]
+                                      (when-let [depth (get distances name)]
+                                        (when (focused-namespace path kind)
+                                          [depth (str name)]))))
+                              (sort-by (juxt first second)))]
+        (->> test-entries
+             (partition-by first)
+             (mapv (fn [layer] (mapv second layer)))))
+      (catch Exception e
+        (println (str "⚠ Clojure namespace graph unavailable: " (ex-message e)
+                      " — running the full suite without early hints"))
+        []))))
+
+
+(defn unit-layers
+  [changed]
+  (test-layers changed :unit))
+
+
+(defn integration-layers
+  [changed]
+  (test-layers changed :integration))
+
+
+(defn unit-first
+  "All reachable unit namespaces in dependency-distance order."
+  [changed]
+  (when changed (vec (mapcat identity (unit-layers changed)))))
 
 
 (defn integration-first
-  "One exact path-paired integration namespace for an early PG signal. The
-   normal full integration gate remains mandatory after browser tests."
+  "All reachable integration namespaces in dependency-distance order."
   [changed]
-  (when changed
-    (->> changed
-         sort
-         (keep direct-unit-test)
-         (filter fs/exists?)
-         distinct
-         (keep #(focused-namespace % :integration))
-         first
-         vector
-         (remove nil?)
-         vec)))
+  (when changed (vec (mapcat identity (integration-layers changed)))))
 
 
 (defn plan
   [changed]
-  {:runtime (runtime-first changed)
-   :unit (unit-first changed)
-   :integration (integration-first changed)
-   :browser (browser-first changed)})
+  (let [unit-groups (unit-layers changed)
+        integration-groups (integration-layers changed)]
+    {:runtime (runtime-first changed)
+     :unit (vec (mapcat identity unit-groups))
+     :unit-layers unit-groups
+     :integration (vec (mapcat identity integration-groups))
+     :integration-layers integration-groups
+     :browser (browser-first changed)}))

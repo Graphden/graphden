@@ -14,6 +14,40 @@
     (catch Exception _ [])))
 
 
+(defn namespace-layers
+  "Validated distance layers for unit/integration. Bad input drops ordering hints
+   and leaves the authoritative test roster intact."
+  [encoded suite-id]
+  (try
+    (let [layers (get (edn/read-string (or encoded "{}"))
+                      (keyword (str (name suite-id) "-layers")))]
+      (if (and (#{:unit :integration} suite-id) (vector? layers)
+               (every? #(and (vector? %) (every? string? %)) layers))
+        layers
+        []))
+    (catch Exception _ [])))
+
+
+(defn indexed-layers
+  "Select each existing testable once, preserving its original result index."
+  [testables layers]
+  (let [indexed (mapv vector (range) testables)
+        by-name (into {} (map (fn [[i t]] [(some-> (:kaocha.testable/id t) name) [i t]])) indexed)
+        seen (volatile! #{})
+        selected (mapv (fn [layer]
+                         (into []
+                               (keep (fn [ns-name]
+                                       (when-not (contains? @seen ns-name)
+                                         (vswap! seen conj ns-name)
+                                         (get by-name ns-name))))
+                               layer))
+                       layers)]
+    {:layers selected
+     :remaining (filterv (fn [[_ t]]
+                           (not (contains? @seen (some-> (:kaocha.testable/id t) name))))
+                         indexed)}))
+
+
 (defn indexed-order
   "Priority pairs followed by the remaining original pairs, each exactly once.
    Keeping the original index lets the runner restore Kaocha's result order."

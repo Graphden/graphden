@@ -60,21 +60,33 @@
              (frequencies (priority/browser-order #{source}))) source))))
 
 
-(deftest backend-focus-is-exact-and-bounded
-  (is (= ["graphden.types.core-test"]
-         (priority/unit-first #{"src/graphden/types/core.clj"})))
-  (is (= ["graphden.layout.data-test"]
-         (priority/unit-first #{"src/graphden/layout/data.clj"})))
+(deftest backend-priority-covers-direct-and-transitive-consumers
+  (let [layers (priority/unit-layers #{"src/graphden/types/core.clj"})
+        direct (first layers)
+        indirect (second layers)
+        names (vec (mapcat identity layers))]
+    (is (some #{"graphden.types.core-test"} direct))
+    (is (some #{"graphden.crud.validation-test"} indirect))
+    (is (> (count layers) 2))
+    (is (= (count names) (count (distinct names))))
+    (is (= names (priority/unit-first #{"src/graphden/types/core.clj"}))))
+  (is (some #{"graphden.layout.data-test"}
+            (priority/unit-first #{"src/graphden/layout/data.clj"})))
+  (let [layers (priority/unit-layers
+                 #{"src/graphden/types/core.clj"
+                   "test/graphden/types/core_test.clj"})]
+    (is (= ["graphden.types.core-test"] (first layers)))
+    (is (some #{"graphden.types.check-test"} (second layers))))
   (is (= [] (priority/unit-first #{"test/graphden/e2e_test.clj"})))
   (is (= [] (priority/unit-first #{"test/graphden/perf/scenarios_test.clj"})))
   (is (= [] (priority/unit-first #{"test/graphden/accounts/routes_test.clj"})))
   (is (= [] (priority/unit-first #{"test/graphden/storage/postgres/constraints_test.clj"})))
   (is (= [] (priority/unit-first #{"src/graphden/no_such_file.clj"})))
-  (is (= [] (priority/unit-first
-              #{"test/graphden/types/core_test.clj"
-                "test/graphden/types/check_test.clj"
-                "test/graphden/types/rules_test.clj"
-                "test/graphden/types/folds_test.clj"}))))
+  (is (= 4 (count (priority/unit-first
+                    #{"test/graphden/types/core_test.clj"
+                      "test/graphden/types/check_test.clj"
+                      "test/graphden/types/rules_test.clj"
+                      "test/graphden/types/folds_test.clj"})))))
 
 
 (deftest backend-integration-focus-selects-real-pg-tests
@@ -83,7 +95,7 @@
   (is (= ["graphden.storage.postgres.constraints-test"]
          (priority/integration-first
            #{"test/graphden/storage/postgres/constraints_test.clj"})))
-  (is (= [] (priority/integration-first #{"src/graphden/types/core.clj"})))
+  (is (< 1 (count (priority/integration-first #{"src/graphden/types/core.clj"}))))
   (is (= [] (priority/integration-first #{"test/graphden/types/core_test.clj"}))))
 
 

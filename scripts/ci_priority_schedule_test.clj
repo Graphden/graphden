@@ -57,6 +57,18 @@
       (is (= children (mapv second remaining))))))
 
 
+(deftest layered-hints-keep-exact-roster-and-ignore-malformed-input
+  (let [children (mapv #(hash-map :kaocha.testable/id %) [:a :b :c])
+        layers (priority/namespace-layers
+                 "{:unit-layers [[\"b\" \"missing\"] [\"a\" \"b\"]]}" :unit)
+        indexed (priority/indexed-layers children layers)]
+    (is (= [[:b] [:a]]
+           (mapv #(mapv (comp :kaocha.testable/id second) %) (:layers indexed))))
+    (is (= [:c] (mapv (comp :kaocha.testable/id second) (:remaining indexed))))
+    (is (= [] (priority/namespace-layers "{:unit-layers [[\"a\"] :bad]}" :unit)))
+    (is (= [] (priority/namespace-layers "{:unit-layers [[\"a\"]]}" :perf)))))
+
+
 (deftest real-runner-keeps-red-priority-and-restores-full-results-in-both-modes
   (let [serial-ns (create-ns 'priority-fixture-serial)
         _ (alter-meta! serial-ns assoc :serial true)
@@ -138,6 +150,35 @@
         (is (= #{} @active)))
       (finally
         (remove-ns 'priority-fixture-serial)))))
+
+
+(deftest dependency-layers-finish-in-order-with-parallelism-inside-each-layer
+  (let [children (mapv #(hash-map :kaocha.testable/id %) [:rest :indirect :direct-a :direct-b])
+        events (atom [])
+        suite {:kaocha.testable/type :kaocha.type/clojure.test
+               :kaocha.testable/id :unit
+               :kaocha/parallelism 2
+               :kaocha.test-plan/tests children}
+        result (with-redefs [priority/namespace-layers
+                             (fn [_ _]
+                               [["direct-a" "direct-b" "missing"]
+                                ["indirect" "direct-a"]])
+                             priority/namespace-hints (fn [_ _] [])
+                             clojure.core/requiring-resolve (constantly nil)
+                             testable/run-testable
+                             (fn [child _]
+                               (let [id (:kaocha.testable/id child)]
+                                 (swap! events conj [:start id])
+                                 (when (= id :direct-a) (Thread/sleep 30))
+                                 (swap! events conj [:end id])
+                                 (assoc child :ran true)))]
+                 (testable/-run suite {}))
+        positions (zipmap @events (range))]
+    (is (= (mapv #(assoc % :ran true) children) (:kaocha.result/tests result)))
+    (is (= 8 (count @events)))
+    (is (< (positions [:end :direct-a]) (positions [:start :indirect])))
+    (is (< (positions [:end :direct-b]) (positions [:start :indirect])))
+    (is (< (positions [:end :indirect]) (positions [:start :rest])))))
 
 
 (let [{:keys [fail error]} (run-tests 'ci-priority-schedule-test)]

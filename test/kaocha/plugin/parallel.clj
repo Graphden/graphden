@@ -330,6 +330,35 @@
          (mapv second))))
 
 
+(defn- run-indexed-layer
+  "Complete one dependency-distance layer before admitting the next. Serial
+   namespaces run outside the pool; ordinary namespaces keep the usual
+   per-thread isolation and bounded parallelism."
+  [indexed test-plan n load-error?]
+  (let [{serial true parallel false} (group-by (comp ns-serial? second) indexed)
+        serial-results (mapv (fn [[i t]] [i (run-one t test-plan load-error?)]) serial)
+        parallel (heavy-first parallel)
+        results (if (> n 1)
+                  (run-testables-parallel (mapv second parallel) test-plan n load-error?)
+                  (mapv #(run-one (second %) test-plan load-error?) parallel))]
+    (into serial-results (map vector (map first parallel) results))))
+
+
+(defn- run-children-layered
+  [children test-plan n layers suite-id]
+  (let [load-error? (some ::testable/load-error children)
+        {:keys [layers remaining]} (priority/indexed-layers children layers)
+        affected-results (mapv (fn [[index layer]]
+                                 (println (str "CI " (name suite-id) " dependency layer "
+                                               (inc index) "/" (count layers) ": "
+                                               (count layer) " namespaces"))
+                                 (run-indexed-layer layer test-plan n load-error?))
+                               (map-indexed vector layers))
+        remaining-results (run-indexed-layer remaining test-plan n load-error?)
+        results (concat (mapcat identity affected-results) remaining-results)]
+    (->> results (sort-by first) (mapv second))))
+
+
 (defn- run-suite-maybe-parallel
   [testable test-plan]
   (t/do-report {:type :begin-test-suite})
@@ -338,16 +367,20 @@
         env-n (some-> (System/getenv "KAOCHA_PARALLELISM") parse-long)
         n (or env-n (:kaocha/parallelism testable) 1)
         children (:kaocha.test-plan/tests testable)
-        hints (priority/namespace-hints (System/getenv "GRAPHDEN_CI_PRIORITY_HINTS")
-                                        (:kaocha.testable/id testable))
-        results (if (> n 1)
-                  (run-children-mixed children test-plan n hints)
-                  (let [{:keys [priority remaining]} (priority/indexed-order children hints)
-                        ordered (concat priority remaining)
-                        results (testable/run-testables (mapv second ordered) test-plan)]
-                    (->> (map vector (map first ordered) results)
-                         (sort-by first)
-                         (mapv second))))
+        encoded (System/getenv "GRAPHDEN_CI_PRIORITY_HINTS")
+        suite-id (:kaocha.testable/id testable)
+        layers (priority/namespace-layers encoded suite-id)
+        hints (priority/namespace-hints encoded suite-id)
+        results (if (seq layers)
+                  (run-children-layered children test-plan n layers suite-id)
+                  (if (> n 1)
+                    (run-children-mixed children test-plan n hints)
+                    (let [{:keys [priority remaining]} (priority/indexed-order children hints)
+                          ordered (concat priority remaining)
+                          results (testable/run-testables (mapv second ordered) test-plan)]
+                      (->> (map vector (map first ordered) results)
+                           (sort-by first)
+                           (mapv second)))))
         testable (-> testable
                      (dissoc :kaocha.test-plan/tests)
                      (assoc :kaocha.result/tests results))]

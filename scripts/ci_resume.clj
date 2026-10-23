@@ -64,7 +64,7 @@
   "Reorder only within canonical waves/resource batches. Quick pre-checks always
    precede measuring tests, and post-test readers follow every selected test."
   [batches prior]
-  (let [original (vec (mapcat batches [:pre :priority :test :post-test]))
+  (let [original (vec (mapcat batches [:affected :pre :priority :test :post-test]))
         ids (mapv :name (mapcat identity original))
         position (zipmap (order ids prior) (range))
         category #(case (get-in prior [:status (:name %)])
@@ -72,7 +72,7 @@
     (vec (mapcat (fn [wave]
                    (let [pieces (mapcat #(map val (sort-by key (group-by category %))) (get batches wave))]
                      (sort-by #(apply min (map (comp position :name) %)) pieces)))
-                 [:pre :priority :test :post-test]))))
+                 [:affected :pre :priority :test :post-test]))))
 
 
 (defn stage-dependencies

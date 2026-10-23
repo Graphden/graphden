@@ -162,10 +162,14 @@
 (deftest full-run-batching-is-unchanged
   (let [selected (mapv #(assoc % :cmd ["bb" (:bb %)]) real-registry)
         batches (ci-select/canonical-batches real-registry selected)
-        pre (remove #(#{:priority :test :post-test} (:group %)) selected)]
+        pre (remove #(or (= :affected (:stage %))
+                         (#{:priority :test :post-test} (:group %))) selected)
+        affected (filter #(= :affected (:stage %)) selected)]
+    (is (= (mapv vec (partition-all 8 affected)) (:affected batches)))
     (is (= (mapv vec (partition-all 8 pre)) (:pre batches)))
     (doseq [wave [:priority :test :post-test]]
-      (is (= (mapv vec (partition-all 8 (filter #(= wave (:group %)) selected)))
+      (is (= (mapv vec (partition-all 8 (filter #(and (= wave (:group %))
+                                                     (not= :affected (:stage %))) selected)))
              (get batches wave))))))
 
 
@@ -174,7 +178,7 @@
                       (mapv #(assoc % :cmd ["bb" (:bb %)])))
         batches (ci-select/canonical-batches real-registry selected)
         first-names (mapv :name (first (:pre batches)))
-        emitted (mapcat identity (mapcat batches [:pre :priority :test :post-test]))]
+        emitted (mapcat identity (mapcat batches [:affected :pre :priority :test :post-test]))]
     (is (= ["clj-kondo" "splint" "cljstyle"] first-names))
     (is (not-any? #{"compile-dev" "gitleaks"} first-names))
     (is (= (frequencies (map :name selected)) (frequencies (map :name emitted))))
@@ -203,7 +207,7 @@
                      {:changed #{"docs/tutorial/01-intro.md"}}]
             :let [selected (:run (ci-select/partition-checks real-registry options))
                   batches (ci-select/canonical-batches real-registry selected)]
-            wave [:pre :test :post-test]
+            wave [:affected :pre :test :post-test]
             batch (get batches wave)]
       (is (some (fn [canonical]
                   (= batch (filterv (set batch) canonical)))

@@ -394,7 +394,7 @@
 
 
 (defn- run-waves!
-  "Four waves, fail-fast.
+  "Affected checks then the four existing waves, fail-fast.
 
    The lint / commit / info checks run in parallel first (~1 min); the
    directly-related `:priority` tests run before the broad unit suite. The
@@ -436,6 +436,7 @@
         test-checks (mapcat identity (:test batches))
         post-checks (mapcat identity (:post-test batches))
         pre-checks (mapcat identity (:pre batches))
+        after-affected (mapcat identity (mapcat batches [:pre :priority :test :post-test]))
         skip-all! (fn [cs] (doseq [c cs] (swap! status assoc (:name c) :skipped)))]
     (when (:state @progress)
       (ci-resume/record-order! @progress (mapv :name (mapcat identity scheduled))))
@@ -443,18 +444,22 @@
       (doseq [batch scheduled]
         (if @failed (skip-all! batch) (wave [batch])))
       (do
-        (wave (:pre batches))
-        (when (and retry-solo? @failed)
-          (ci-proc/retry-solo! pre-checks status results failed run-check))
+        (wave (:affected batches))
         (if @failed
-          (skip-all! (concat priority-checks test-checks post-checks))
-          (do (wave (:priority batches))
-              (if @failed
-                (skip-all! (concat test-checks post-checks))
-                (do (wave (:test batches))
-                    (if @failed
-                      (skip-all! post-checks)
-                      (wave (:post-test batches)))))))))))
+          (skip-all! after-affected)
+          (do
+            (wave (:pre batches))
+            (when (and retry-solo? @failed)
+              (ci-proc/retry-solo! pre-checks status results failed run-check))
+            (if @failed
+              (skip-all! (concat priority-checks test-checks post-checks))
+              (do (wave (:priority batches))
+                  (if @failed
+                    (skip-all! (concat test-checks post-checks))
+                    (do (wave (:test batches))
+                        (if @failed
+                          (skip-all! post-checks)
+                          (wave (:post-test batches)))))))))))))
 
 
 (defn- print-check-result!

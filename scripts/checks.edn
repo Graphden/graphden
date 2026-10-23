@@ -40,10 +40,14 @@
  ;; edited rarely, so re-running on such a diff is cheap insurance.
  {:name "cljstyle"      :bb "cljstyle"      :timeout 120000 :group :clj
   :relevant ["\\.(clj|cljc|cljs|edn|bb)$" "^\\.cljstyle$"]}
- {:name "syntax"       :bb "syntax"       :timeout 120000 :group :infra
+ {:name "syntax"       :bb "syntax"       :timeout 120000 :group :infra :stage :affected
   :relevant ["\\.(js|mjs|cjs|json)$" "^scripts/ci_fast" "^bb\\.edn$"]}
- {:name "biome"         :bb "biome"         :timeout  60000 :group :web
-  :relevant ["\\.(js|mjs|jsonc?)$" "^bb\\.edn$"]}
+ {:name "biome-affected" :bb "staged-biome-affected" :timeout 60000 :group :web :stage :affected
+  :relevant ["^resources/packages/app/(editor|ui-preview)/" "^scripts/devtour/tour\\.js$" "^biome\\.jsonc$" "^package(-lock)?\\.json$" "^bb\\.edn$"
+             "^scripts/(ci_staged|ci_select|ci_resume)\\.clj$" "^scripts/checks\\.edn$"]}
+ {:name "biome"         :bb "staged-biome-rest" :timeout 60000 :group :web
+  :relevant ["^resources/packages/app/(editor|ui-preview)/" "^scripts/devtour/tour\\.js$" "^biome\\.jsonc$" "^package(-lock)?\\.json$" "^bb\\.edn$"
+             "^scripts/(ci_staged|ci_select|ci_resume)\\.clj$" "^scripts/checks\\.edn$"]}
  {:name "stylelint"     :bb "stylelint"     :timeout 120000 :group :web
   :relevant ["\\.css$" "^\\.stylelintrc" "^bb\\.edn$"]}
  {:name "shellcheck"    :bb "shellcheck"    :timeout 120000 :group :infra
@@ -157,9 +161,12 @@
   :relevant ["package(-lock)?\\.json$" "^bb\\.edn$"]}
  {:name "commitlint"    :bb "commitlint"    :timeout  60000 :group :commit}
  ;; Full suites run related cases first, without a separate focused execution.
- {:name "tests-js"      :bb "test-js"       :timeout  60000 :group :test
+ {:name "tests-js-affected" :bb "staged-js-affected" :timeout 60000 :group :test :stage :affected
   :relevant ["\\.(js|mjs)$" "^tools/runtime-test/" "^tools/browser-test/run-edit-tests\\.sh$"
-             "^bb\\.edn$"]}
+             "^bb\\.edn$" "^scripts/(ci_staged|ci_select|ci_resume)\\.clj$" "^scripts/checks\\.edn$"]}
+ {:name "tests-js"      :bb "staged-js-rest" :timeout  60000 :group :test
+  :relevant ["\\.(js|mjs)$" "^tools/runtime-test/" "^tools/browser-test/run-edit-tests\\.sh$"
+             "^bb\\.edn$" "^scripts/(ci_staged|ci_select|ci_resume)\\.clj$" "^scripts/checks\\.edn$"]}
  {:name "tests-unit"    :bb "test-unit"     :timeout 900000 :group :test
   :relevant ["^src/" "^test/" "^resources/" "^scripts/" "^external-packages/"
              "^(bb|deps|tests)\\.edn$" "^build\\.clj$" "^dev-resources/" "^development/src/"]}

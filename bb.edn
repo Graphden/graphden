@@ -5,6 +5,7 @@
              [babashka.process :as p]
              [ci-fast :as fast]
              [ci-priority-core :as priority]
+             [ci-staged :as staged]
              [clojure.string :as str])
 
   :init (do
@@ -262,7 +263,15 @@
 
   biome
   {:doc "Lint editor JS via biome"
-   :task (p/shell "npx" "biome" "check" "resources/packages/app/editor" "resources/packages/app/ui-preview")}
+   :task (p/shell "npx" "biome" "check" "resources/packages/app/editor" "resources/packages/app/ui-preview" "scripts/devtour/tour.js")}
+
+  staged-biome-affected
+  {:doc "Biome changed files, exact candidate-bound stage A"
+   :task (staged/run! :biome :affected (System/getenv "GRAPHDEN_CI_SINCE"))}
+
+  staged-biome-rest
+  {:doc "Biome exact complement, requires matching stage A receipt"
+   :task (staged/run! :biome :remainder (System/getenv "GRAPHDEN_CI_SINCE"))}
 
   biome-fix
   {:doc "Auto-fix safe biome violations"
@@ -832,6 +841,18 @@
                  (System/exit 1))
              (println (str green "✓ test-js" reset))))}
 
+  staged-js-affected
+  {:doc "Changed or declared dependent runtime tests, stage A"
+   :task (staged/run! :runtime :affected (System/getenv "GRAPHDEN_CI_SINCE"))}
+
+  staged-js-rest
+  {:doc "Remaining runtime tests, exact complement of stage A"
+   :task (staged/run! :runtime :remainder (System/getenv "GRAPHDEN_CI_SINCE"))}
+
+  staged-status
+  {:doc "Show exact candidate-bound staged-check journal"
+   :task (staged/status!)}
+
   test-perf
   {:doc "Perf scenarios (focus ^:perf) — what each API-level operation costs in SQL round trips, written to perf/runs/perf.edn for `bb perf` to gate. ~1 min, nearly all of it the shared fixture. In-JVM + testcontainers only: no built image, so unlike the e2e suite this runs anywhere, CI included."
    ;; `--no-randomize` is load-bearing, not tidiness. The scenarios share one
@@ -1053,6 +1074,7 @@
    :task (do (load-file "scripts/artifact_identity_test.clj")
              (load-file "scripts/ci_proc_test.clj")
              (load-file "scripts/ci_select_test.clj")
+             (load-file "scripts/ci_staged_test.clj")
              (load-file "scripts/ci_report_test.clj")
              (load-file "scripts/ci_priority_core_test.clj")
              (p/shell {:extra-env {"KAOCHA_PARALLELISM" ""}}

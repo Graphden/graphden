@@ -41,6 +41,8 @@
         (throw (ex-info (str ctx ": :group " (pr-str (:group c))
                              " is not one of " (pr-str known-groups))
                         {:check c})))
+      (when (and (contains? c :stage) (not= :affected (:stage c)))
+        (throw (ex-info (str ctx ": :stage must be :affected") {:check c})))
       (when-some [rel (:relevant c)]
         (when-not (and (vector? rel) (every? string? rel))
           (throw (ex-info (str ctx ": :relevant must be a vector of regex strings") {:check c})))
@@ -70,12 +72,14 @@
   [registry checks]
   (let [selected (into {} (map (juxt :name identity)) checks)
         names (set (map :name registry))
-        wave-key #(case (:group %) :priority :priority :test :test :post-test :post-test :pre)]
+        wave-key #(if (= :affected (:stage %))
+                    :affected
+                    (case (:group %) :priority :priority :test :test :post-test :post-test :pre))]
     (when (or (not= (count checks) (count selected))
               (some #(not (contains? names %)) (keys selected)))
       (throw (ex-info "Selected checks must have unique registered names" {})))
     (into {}
-          (for [wave [:pre :priority :test :post-test]]
+          (for [wave [:affected :pre :priority :test :post-test]]
             [wave (->> registry
                        (filter #(= wave (wave-key %)))
                        (partition-all 8)

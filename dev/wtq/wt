@@ -246,7 +246,8 @@ governance_drift() {
 #                                    actionlint in the lint pass -> nothing heavy
 #   tools/browser-test/**            the e2e suite itself   -> e2e
 #   test/**/*.clj                    Kaocha test + fixtures -> CI + integration
-#                                    (fleet tests also run container e2e)
+#                                    (fleet tests and shared Kaocha plugins
+#                                     also run container e2e)
 #   packages' .js/.css/.html/.svg    browser-only surface   -> e2e
 #   scripts/ci*.clj, checks.edn       CI runner and its tests, not shipped
 #   bb.edn                           only audited CI-task edits skip runtime;
@@ -306,7 +307,8 @@ classify_changes() {   # <worktree> -> NEED_BUILD / NEED_INTEGRATION / NEED_E2E 
     case "$f" in
       src/graphden/fleet/*|src/graphden/system/*|src/graphden/storage/remote/*|\
       src/graphden/byo.clj|src/graphden/crac.clj|\
-      test/graphden/fleet/*|Dockerfile*|docker-compose*|deps.edn|build.clj)
+      test/graphden/fleet/*|test/kaocha/*|tests.edn|\
+      Dockerfile*|docker-compose*|deps.edn|build.clj)
                                       NEED_FLEET=1 ;;
     esac
     # A screenshot can only see the rendered surface: the editor's own assets

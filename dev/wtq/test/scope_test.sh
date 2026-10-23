@@ -90,9 +90,10 @@ check_scope 'unsupported tagged data keeps full gate' 11110/0 "$T/before.edn" "$
 check_scope 'missing base ref fails closed including visual' 11111/0 "$T/before.edn" "$T/after.edn" '' nonexistent-ref
 check_scope 'ordinary source changes are not hidden' 11100/1 "$T/before.edn" "$T/after.edn" src/change.clj
 check_scope 'ordinary docs do not rebuild the image' 00000/0 "$T/before.edn" "$T/before.edn" docs/guide.md
-check_scope 'Kaocha plugin runs source suites without image' 01000/0 "$T/before.edn" "$T/before.edn" test/kaocha/plugin/parallel.clj
+check_scope 'Kaocha plugin also runs image-backed fleet suite' 01010/0 "$T/before.edn" "$T/before.edn" test/kaocha/plugin/parallel.clj
 check_scope 'Clojure test runs source suites without image' 01000/0 "$T/before.edn" "$T/before.edn" test/graphden/lesson_test.clj
 check_scope 'fleet test also runs image-backed fleet suite' 01010/0 "$T/before.edn" "$T/before.edn" test/graphden/fleet/two_container_e2e_test.clj
+check_scope 'Kaocha suite config retains every runtime suite' 11110/0 "$T/before.edn" "$T/before.edn" tests.edn
 check_scope 'unknown test asset retains full runtime gate' 11100/0 "$T/before.edn" "$T/before.edn" test/graphden/fixture.edn
 check_scope 'shipped AI context rebuilds the image' 10000/0 "$T/before.edn" "$T/before.edn" resources/packages/mcp/mcp/ai-context.md
 check_scope 'CI runner edit skips runtime phases' 00000/0 "$T/before.edn" "$T/before.edn" scripts/ci_staged.clj

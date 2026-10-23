@@ -25,7 +25,7 @@ sed 's/v6.1.0/v6.2.0/; s/be98e4d/c0dcdf3/' "$T/before.edn" > "$T/after.edn"
 check_scope() { # label, expected flags, before-file, after-file, optional extra path/ref
   local label="$1" expected="$2" before="$3" after="$4" extra="${5:-}" ref="${6:-}" base actual
   rm -f "$REPO/deps.edn" "$REPO/bb.edn" "$REPO/src/change.clj"
-  rm -rf "$REPO/docs" "$REPO/resources"
+  rm -rf "$REPO/docs" "$REPO/resources" "$REPO/test"
   [ "$before" = missing ] || cp "$before" "$REPO/deps.edn"
   git -C "$REPO" add -A; git -C "$REPO" commit -qm base --allow-empty
   base="$(git -C "$REPO" rev-parse HEAD)"
@@ -90,6 +90,10 @@ check_scope 'unsupported tagged data keeps full gate' 11110/0 "$T/before.edn" "$
 check_scope 'missing base ref fails closed including visual' 11111/0 "$T/before.edn" "$T/after.edn" '' nonexistent-ref
 check_scope 'ordinary source changes are not hidden' 11100/1 "$T/before.edn" "$T/after.edn" src/change.clj
 check_scope 'ordinary docs do not rebuild the image' 00000/0 "$T/before.edn" "$T/before.edn" docs/guide.md
+check_scope 'Kaocha plugin runs source suites without image' 01000/0 "$T/before.edn" "$T/before.edn" test/kaocha/plugin/parallel.clj
+check_scope 'Clojure test runs source suites without image' 01000/0 "$T/before.edn" "$T/before.edn" test/graphden/lesson_test.clj
+check_scope 'fleet test also runs image-backed fleet suite' 01010/0 "$T/before.edn" "$T/before.edn" test/graphden/fleet/two_container_e2e_test.clj
+check_scope 'unknown test asset retains full runtime gate' 11100/0 "$T/before.edn" "$T/before.edn" test/graphden/fixture.edn
 check_scope 'shipped AI context rebuilds the image' 10000/0 "$T/before.edn" "$T/before.edn" resources/packages/mcp/mcp/ai-context.md
 check_scope 'CI runner edit skips runtime phases' 00000/0 "$T/before.edn" "$T/before.edn" scripts/ci_staged.clj
 check_scope 'CI registry edit skips runtime phases' 00000/0 "$T/before.edn" "$T/before.edn" scripts/checks.edn

@@ -166,6 +166,12 @@ run_case
 assert_events 'expect,ci,verify'
 [ "$built_candidate" = 0 ]
 
+CASE_INTEGRATION=1
+run_case
+assert_events 'expect,ci,verify,integration'
+[ "$built_candidate" = 0 ]
+CASE_INTEGRATION=0
+
 # Every priority preserves the complete mandatory roster, exactly once.
 CASE_BUILD=1 CASE_INTEGRATION=1 CASE_E2E=1 CASE_VISUAL=1 CASE_FLEET=1
 for WTQ_FIRST_STAGE in ci build e2e visual integration fleet; do

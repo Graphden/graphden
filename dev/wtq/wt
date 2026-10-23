@@ -245,11 +245,13 @@ governance_drift() {
 #                                    gate, and its workflows are validated by
 #                                    actionlint in the lint pass -> nothing heavy
 #   tools/browser-test/**            the e2e suite itself   -> e2e
+#   test/**/*.clj                    Kaocha test + fixtures -> CI + integration
+#                                    (fleet tests also run container e2e)
 #   packages' .js/.css/.html/.svg    browser-only surface   -> e2e
 #   scripts/ci*.clj, checks.edn       CI runner and its tests, not shipped
 #   bb.edn                           only audited CI-task edits skip runtime;
 #                                    shared setup and build tasks do not
-#   everything else                  src, .clj/.edn, deps.edn, other scripts/,
+#   everything else                  src, unmatched .clj/.edn, deps.edn, other scripts/,
 #                                    Dockerfile*, compose, and THIS gate's own
 #                                    config -> integration + e2e; unknown
 #   deps.edn has one semantic exception: only the audited :watson tool's git
@@ -294,6 +296,7 @@ classify_changes() {   # <worktree> -> NEED_BUILD / NEED_INTEGRATION / NEED_E2E 
       *.md|docs/*|dev/*|.github/*)    : ;;
       scripts/ci*.clj|scripts/checks.edn|scripts/ci-release-guard.sh|\
       scripts/test-ci-release-guard.sh) : ;;
+      test/*.clj)                     NEED_INTEGRATION=1 ;;
       tools/browser-test/*)           NEED_E2E=1 ;;
       resources/packages/*.js|resources/packages/*.css|\
       resources/packages/*.html|resources/packages/*.svg)
@@ -1411,7 +1414,7 @@ gate_suites() {
   fi
   if [ "$NEED_INTEGRATION" = 1 ]; then echo "  integration: RUN"
   else echo "  integration: SKIPPED — no runtime change requires it"; fi
-  if [ "$NEED_BUILD" = 1 ] || [ "$NEED_INTEGRATION" = 1 ] || [ "$NEED_E2E" = 1 ] \
+  if [ "$NEED_BUILD" = 1 ] || [ "$NEED_E2E" = 1 ] \
      || [ "$NEED_FLEET" = 1 ] || [ "$NEED_VISUAL" = 1 ]; then
     echo "  image build: RUN"
   else echo "  image build: SKIPPED — no stage needs an image"; fi
@@ -1441,7 +1444,7 @@ gate_suites() {
   ( cd "$wt" && bb scripts/ci_gate.clj expect "$ci_expected" "$ci_sha" "$base_sha" "${WTQ_CI_SKIP:-}" ) \
     || { echo "FAIL: cannot calculate required CI checks"; return 1; }
 
-  if [ "$NEED_BUILD" = 1 ] || [ "$NEED_INTEGRATION" = 1 ] || [ "$NEED_E2E" = 1 ] \
+  if [ "$NEED_BUILD" = 1 ] || [ "$NEED_E2E" = 1 ] \
      || [ "$NEED_FLEET" = 1 ] || [ "$NEED_VISUAL" = 1 ]; then
     stages+=(build)
   fi

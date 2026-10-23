@@ -169,7 +169,7 @@
     (is (= (mapv vec (partition-all 8 pre)) (:pre batches)))
     (doseq [wave [:priority :test :post-test]]
       (is (= (mapv vec (partition-all 8 (filter #(and (= wave (:group %))
-                                                     (not= :affected (:stage %))) selected)))
+                                                      (not= :affected (:stage %))) selected)))
              (get batches wave))))))
 
 

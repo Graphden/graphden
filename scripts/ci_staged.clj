@@ -12,6 +12,7 @@
     [clojure.set :as set]
     [clojure.string :as str]))
 
+
 (def runtime-impact
   {"resources/packages/app/editor/editor-root.js"
    ["editor-root.test.js" "tour-picker.test.js"]
@@ -23,18 +24,22 @@
    "resources/packages/app/editor/editor-tour-catalog-graph.js"
    ["tour-picker.test.js" "tour-end.test.js"]})
 
+
 (def shared-inputs
   #{"bb.edn" "package.json" "package-lock.json" "biome.jsonc"
     "scripts/ci_staged.clj" "scripts/ci_select.clj" "scripts/ci_resume.clj"
     "scripts/checks.edn"})
 
-(defn roster [kind]
+
+(defn roster
+  [kind]
   (case kind
     :biome (->> ["resources/packages/app/editor" "resources/packages/app/ui-preview"]
                 (mapcat #(fs/glob % "**"))
                 (filter #(and (fs/regular-file? %) (str/ends-with? (str %) ".js")))
                 (map str) (concat ["scripts/devtour/tour.js"]) sort vec)
     :runtime (->> (fs/glob "tools/runtime-test" "*.test.js") (map str) sort vec)))
+
 
 (defn affected
   "Unknown dynamic editor dependencies widen the affected stage to every
@@ -66,7 +71,9 @@
                        (filter all-set) set sort vec)
            :reason :declared-dependency})))))
 
-(defn plan [kind since]
+
+(defn make-plan
+  [kind since]
   (let [all (roster kind)
         changed (when (seq since) (select/changed-files since))
         {:keys [files reason]} (affected kind changed all)
@@ -82,12 +89,13 @@
      :since since :changed (vec (sort changed)) :reason reason
      :roster all :affected files :remainder rest-files}))
 
+
 (defn valid-affected-receipt?
   [receipt plan toolchain]
   (and (= 1 (:schema receipt))
        (= :affected (:phase receipt))
        (true? (:complete receipt))
-       (= 0 (:exit receipt))
+       (zero? (:exit receipt))
        (= plan (:plan receipt))
        (= toolchain (:toolchain receipt))
        (= (if (= :biome (:kind plan))
@@ -96,16 +104,22 @@
           (mapv :paths (:commands receipt)))
        (every? #(zero? (:exit %)) (:commands receipt))))
 
-(defn- receipt-path [plan phase]
+
+(defn- receipt-path
+  [plan phase]
   (str (fs/path (resume/git-output "rev-parse" "--git-path" "graphden-staged")
                 (:sha plan) (str (name (:kind plan)) "-" (name phase) ".edn"))))
 
-(defn- command [kind paths]
+
+(defn- command
+  [kind paths]
   (case kind
     :biome (into ["npx" "--no-install" "biome" "check"] paths)
     :runtime ["node" (str (fs/file-name (first paths)))]))
 
-(defn- invoke! [kind paths]
+
+(defn- invoke!
+  [kind paths]
   (let [argv (command kind paths)
         start (System/currentTimeMillis)
         result (apply p/shell (merge {:continue true}
@@ -113,15 +127,17 @@
     {:paths paths :argv argv :started-at-ms start
      :duration-ms (- (System/currentTimeMillis) start) :exit (:exit result)}))
 
-(defn run! [kind phase since]
-  (let [plan (plan kind since)
+
+(defn run-phase!
+  [kind phase since]
+  (let [plan (make-plan kind since)
         paths (get plan phase)
         path (receipt-path plan phase)
         source (receipt-path plan :affected)
         toolchain {:node (str/trim (:out (p/shell {:out :string} "node" "--version")))
                    :biome (when (= kind :biome)
                             (str/trim (:out (p/shell {:out :string}
-                                                      "npx" "--no-install" "biome" "--version"))))}
+                                                     "npx" "--no-install" "biome" "--version"))))}
         prior (when (and (= phase :remainder) (fs/exists? source))
                 (edn/read-string (slurp source)))]
     (when (and (= phase :remainder)
@@ -153,13 +169,15 @@
           (throw (ex-info "Staged receipts do not cover the complete roster" {:kind kind}))))
       (report/write-atomic! path @state))))
 
-(defn status! []
+
+(defn status!
+  []
   (let [sha (resume/git-output "rev-parse" "HEAD")
         dir (fs/path (resume/git-output "rev-parse" "--git-path" "graphden-staged") sha)
         paths (if (fs/exists? dir) (sort (fs/glob dir "*.edn")) [])]
     (when (empty? paths) (println "No staged journal for" sha))
     (doseq [path paths]
-      (let [{:keys [complete exit phase plan commands]} (edn/read-string (slurp path))]
+      (let [{:keys [complete exit phase plan commands]} (edn/read-string (slurp (str path)))]
         (println (name (:kind plan)) (name phase) "sha" (subs sha 0 8)
                  "files" (reduce + (map (comp count :paths) commands)) "/" (count (get plan phase))
                  "remaining" (- (count (get plan phase)) (reduce + (map (comp count :paths) commands)))

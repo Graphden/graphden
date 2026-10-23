@@ -267,11 +267,11 @@
 
   staged-biome-affected
   {:doc "Biome changed files, exact candidate-bound stage A"
-   :task (staged/run! :biome :affected (System/getenv "GRAPHDEN_CI_SINCE"))}
+   :task (staged/run-phase! :biome :affected (System/getenv "GRAPHDEN_CI_SINCE"))}
 
   staged-biome-rest
   {:doc "Biome exact complement, requires matching stage A receipt"
-   :task (staged/run! :biome :remainder (System/getenv "GRAPHDEN_CI_SINCE"))}
+   :task (staged/run-phase! :biome :remainder (System/getenv "GRAPHDEN_CI_SINCE"))}
 
   biome-fix
   {:doc "Auto-fix safe biome violations"
@@ -843,11 +843,11 @@
 
   staged-js-affected
   {:doc "Changed or declared dependent runtime tests, stage A"
-   :task (staged/run! :runtime :affected (System/getenv "GRAPHDEN_CI_SINCE"))}
+   :task (staged/run-phase! :runtime :affected (System/getenv "GRAPHDEN_CI_SINCE"))}
 
   staged-js-rest
   {:doc "Remaining runtime tests, exact complement of stage A"
-   :task (staged/run! :runtime :remainder (System/getenv "GRAPHDEN_CI_SINCE"))}
+   :task (staged/run-phase! :runtime :remainder (System/getenv "GRAPHDEN_CI_SINCE"))}
 
   staged-status
   {:doc "Show exact candidate-bound staged-check journal"

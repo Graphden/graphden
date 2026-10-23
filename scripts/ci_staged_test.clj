@@ -1,11 +1,14 @@
 (ns ci-staged-test
-  (:require [ci-staged :as staged]
-            [clojure.test :refer [deftest is run-tests]]))
+  (:require
+    [ci-staged :as staged]
+    [clojure.test :refer [deftest is run-tests]]))
+
 
 (def runtime-roster
   ["tools/runtime-test/editor-root.test.js"
    "tools/runtime-test/popover.test.js"
    "tools/runtime-test/tour-picker.test.js"])
+
 
 (deftest runtime-dependencies-are-explicit-and-unknown-widens
   (is (= ["tools/runtime-test/editor-root.test.js"
@@ -22,6 +25,7 @@
                                   #{"resources/packages/app/editor/editor-unknown.js"}
                                   runtime-roster)))))
 
+
 (deftest shared-input-and-empty-diff
   (is (= runtime-roster
          (:files (staged/affected :runtime #{"scripts/ci_staged.clj"} runtime-roster))))
@@ -29,6 +33,7 @@
   (is (= [] (:files (staged/affected :biome #{} ["a.js" "b.js"]))))
   (is (= ["a.js" "b.js"]
          (:files (staged/affected :biome #{"biome.jsonc"} ["a.js" "b.js"])))))
+
 
 (deftest receipt-is-bound-to-plan-toolchain-and-complete-coverage
   (let [plan {:schema 1 :kind :runtime :sha "a" :base "b"
@@ -44,6 +49,7 @@
     (is (not (staged/valid-affected-receipt? (assoc good :commands []) plan {:node "v22" :biome nil})))
     (is (not (staged/valid-affected-receipt? good (assoc plan :sha "c") {:node "v22" :biome nil})))
     (is (not (staged/valid-affected-receipt? good plan {:node "v24" :biome nil})))))
+
 
 (let [result (run-tests 'ci-staged-test)]
   (when (pos? (+ (:fail result) (:error result)))

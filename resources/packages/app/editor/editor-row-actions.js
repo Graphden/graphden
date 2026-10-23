@@ -202,8 +202,13 @@ function positionRowActionsPopover(el, anchor) {
 // The host is empty on entry; `build` appends whatever icons it likes
 // (and is free to use the same factories the inline rows used to use,
 // just without the `pinRight: true` flag).
-function showRowActionsPopover(anchorEl, build) {
+function showRowActionsPopover(anchorEl, build, allowPinnedSwitch = false) {
   if (!anchorEl?.isConnected || typeof build !== 'function') return;
+  // A pinned menu belongs to the row the user clicked. Hovering another
+  // trigger must not replace its anchor while keeping the sticky flag: the
+  // subsequent click would then toggle that new row closed before the user
+  // can reach its action. An explicit trigger click may switch owners.
+  if (rowActionsPopoverSticky && rowActionsPopoverAnchor !== anchorEl && !allowPinnedSwitch) return;
   if (rowActionsPopoverHideTimer) {
     clearTimeout(rowActionsPopoverHideTimer);
     rowActionsPopoverHideTimer = null;
@@ -283,7 +288,7 @@ function toggleRowActionsPopoverSticky(anchorEl, build) {
     return;
   }
   rowActionsPopoverSticky = true;
-  showRowActionsPopover(anchorEl, build);
+  showRowActionsPopover(anchorEl, build, true);
 }
 
 // Document-level dismissal — clicking anywhere that isn't the popover

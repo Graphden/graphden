@@ -66,3 +66,29 @@ console.log('✓ row-actions geometry: narrow top/middle/bottom, zoom, scroll bo
   ctx.positionRowActionsPopover(el, anchor);
   assert.equal(el.style.display, 'none', 'detached geometry never positions at viewport origin');
 }
+
+// A pinned row menu belongs to its clicked anchor. Merely hovering a second
+// row must not make that second row's click look like a toggle-close.
+{
+  const {ctx, el} = harness(1600, 900, 1);
+  const makeAnchor = () => ({isConnected: true, setAttribute() {}});
+  const first = makeAnchor(), second = makeAnchor();
+  ctx.ensureRowActionsPopover = () => el;
+  ctx.ensureRowActionsCyHandlers = () => {};
+  ctx.positionRowActionsPopover = () => { el.style.display = 'inline-block'; };
+  ctx.requestAnimationFrame = callback => callback();
+  el.querySelector = () => null;
+
+  ctx.toggleRowActionsPopoverSticky(first, () => {});
+  assert.equal(vm.runInContext('rowActionsPopoverAnchor', ctx), first);
+  assert.equal(vm.runInContext('rowActionsPopoverSticky', ctx), true);
+  ctx.showRowActionsPopover(second, () => {}); // pointer hover only
+  assert.equal(vm.runInContext('rowActionsPopoverAnchor', ctx), first,
+    'hover does not steal a pinned menu');
+  ctx.toggleRowActionsPopoverSticky(second, () => {}); // user click
+  assert.equal(vm.runInContext('rowActionsPopoverAnchor', ctx), second,
+    'click moves the pinned menu to the second row');
+  assert.equal(vm.runInContext('rowActionsPopoverSticky', ctx), true,
+    'the second row remains pinned for its action click');
+  assert.equal(el.style.display, 'inline-block');
+}

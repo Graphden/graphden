@@ -12,7 +12,7 @@
 
 
 (def ci-tasks
-  '#{ci ci-test wtq-test lint check lint-clj lint-web lint-infra
+  '#{ci ci-test wtq-test lint check lint-clj lint-web lint-infra gitleaks
      lint-docs lint-sec ci-priority staged-biome-affected staged-biome-rest
      staged-js-affected staged-js-rest staged-status})
 

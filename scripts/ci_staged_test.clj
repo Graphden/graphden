@@ -51,6 +51,39 @@
     (is (not (staged/valid-affected-receipt? good plan {:node "v24" :biome nil})))))
 
 
+(deftest status-distinguishes-pending-stale-interrupted-and-passed
+  (let [plan {:schema 1 :kind :runtime :sha "a"
+              :roster runtime-roster :reason :declared-dependency
+              :affected ["tools/runtime-test/popover.test.js"]
+              :remainder ["tools/runtime-test/editor-root.test.js"
+                          "tools/runtime-test/tour-picker.test.js"]}
+        toolchain {:node "v22" :biome nil}
+        receipt {:plan plan :phase :affected :toolchain toolchain
+                 :complete true :exit 0
+                 :commands [{:paths (:affected plan) :exit 0}]}]
+    (is (= :pending (staged/phase-status plan :affected nil toolchain (constantly false))))
+    (is (= :passed (staged/phase-status plan :affected receipt toolchain (constantly false))))
+    (is (= :stale (staged/phase-status plan :affected receipt {:node "v24"} (constantly false))))
+    (is (= :stale (staged/phase-status (assoc plan :sha "b") :affected receipt toolchain
+                                       (constantly false))))
+    (is (= :running (staged/phase-status plan :affected (assoc receipt :complete false :pid 1)
+                                         toolchain (constantly true))))
+    (is (= :interrupted (staged/phase-status plan :affected (assoc receipt :complete false :pid 1)
+                                             toolchain (constantly false))))
+    (is (= :failed (staged/phase-status plan :affected (assoc receipt :exit 1)
+                                        toolchain (constantly false))))
+    (is (= :failed (staged/phase-status plan :affected (assoc receipt :commands [])
+                                        toolchain (constantly false))))))
+
+
+(deftest invalid-base-widens-the-roster
+  (let [plan (staged/make-plan :runtime "not-a-ref")]
+    (is (nil? (:base plan)))
+    (is (= :unknown-diff (:reason plan)))
+    (is (= (:roster plan) (:affected plan)))
+    (is (= [] (:remainder plan)))))
+
+
 (let [result (run-tests 'ci-staged-test)]
   (when (pos? (+ (:fail result) (:error result)))
     (System/exit 1)))

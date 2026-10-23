@@ -85,7 +85,10 @@
       (throw (ex-info "Staged check partition does not cover roster exactly" {:kind kind})))
     {:schema 1 :kind kind :sha (resume/git-output "rev-parse" "HEAD")
      :tree (resume/git-output "rev-parse" "HEAD^{tree}")
-     :base (when (seq since) (resume/git-output "rev-parse" since))
+     :base (when (seq since)
+             (let [{:keys [exit out]} (p/shell {:out :string :err :string :continue true}
+                                               "git" "rev-parse" since)]
+               (when (zero? exit) (str/trim out))))
      :since since :changed (vec (sort changed)) :reason reason
      :roster all :affected files :remainder rest-files}))
 
@@ -128,26 +131,32 @@
      :duration-ms (- (System/currentTimeMillis) start) :exit (:exit result)}))
 
 
+(defn- toolchain
+  [kind]
+  {:node (str/trim (:out (p/shell {:out :string} "node" "--version")))
+   :biome (when (= kind :biome)
+            (str/trim (:out (p/shell {:out :string}
+                                     "npx" "--no-install" "biome" "--version"))))})
+
+
 (defn run-phase!
   [kind phase since]
   (let [plan (make-plan kind since)
         paths (get plan phase)
         path (receipt-path plan phase)
         source (receipt-path plan :affected)
-        toolchain {:node (str/trim (:out (p/shell {:out :string} "node" "--version")))
-                   :biome (when (= kind :biome)
-                            (str/trim (:out (p/shell {:out :string}
-                                                     "npx" "--no-install" "biome" "--version"))))}
+        current-toolchain (toolchain kind)
         prior (when (and (= phase :remainder) (fs/exists? source))
                 (edn/read-string (slurp source)))]
     (when (and (= phase :remainder)
-               (not (valid-affected-receipt? prior plan toolchain)))
+               (not (valid-affected-receipt? prior plan current-toolchain)))
       (throw (ex-info "Affected stage missing, failed or for another candidate/roster"
                       {:kind kind :receipt source})))
     (fs/create-dirs (fs/parent path))
     (let [state (atom {:schema 1 :complete false :exit nil :plan plan
                        :phase phase :started-at-ms (System/currentTimeMillis)
-                       :toolchain toolchain
+                       :pid (java.lang.ProcessHandle/.pid (java.lang.ProcessHandle/current))
+                       :toolchain current-toolchain
                        :commands []})]
       (report/write-atomic! path @state)
       (println "staged" (name kind) (name phase) (count paths) "of" (count (:roster plan))
@@ -170,16 +179,63 @@
       (report/write-atomic! path @state))))
 
 
+(defn phase-status
+  [plan phase receipt current-toolchain alive?]
+  (cond
+    (nil? receipt) :pending
+    (or (not= plan (:plan receipt))
+        (not= phase (:phase receipt))
+        (not= current-toolchain (:toolchain receipt))) :stale
+    (not (:complete receipt)) (if (alive? (:pid receipt)) :running :interrupted)
+    (and (number? (:exit receipt)) (zero? (:exit receipt))
+         (= (set (get plan phase))
+            (set (mapcat :paths (:commands receipt))))) :passed
+    :else :failed))
+
+
+(defn- live-pid?
+  [pid]
+  (and (integer? pid)
+       (some-> (java.lang.ProcessHandle/of pid)
+               (java.util.Optional/.orElse nil)
+               (java.lang.ProcessHandle/.isAlive))))
+
+
+(defn- read-receipt
+  [path]
+  (when (fs/exists? path)
+    (try (edn/read-string (slurp path))
+         (catch Exception _ {:invalid true}))))
+
+
 (defn status!
   []
   (let [sha (resume/git-output "rev-parse" "HEAD")
         dir (fs/path (resume/git-output "rev-parse" "--git-path" "graphden-staged") sha)
-        paths (if (fs/exists? dir) (sort (fs/glob dir "*.edn")) [])]
-    (when (empty? paths) (println "No staged journal for" sha))
-    (doseq [path paths]
-      (let [{:keys [complete exit phase plan commands]} (edn/read-string (slurp (str path)))]
-        (println (name (:kind plan)) (name phase) "sha" (subs sha 0 8)
-                 "files" (reduce + (map (comp count :paths) commands)) "/" (count (get plan phase))
-                 "remaining" (- (count (get plan phase)) (reduce + (map (comp count :paths) commands)))
-                 "status" (cond (not complete) :running (zero? exit) :passed :else :failed)
-                 "reason" (name (:reason plan)) "journal" path)))))
+        since-env (System/getenv "GRAPHDEN_CI_SINCE")]
+    (doseq [kind [:biome :runtime]
+            :let [a-path (str (fs/path dir (str (name kind) "-affected.edn")))
+                  b-path (str (fs/path dir (str (name kind) "-remainder.edn")))
+                  a (read-receipt a-path)
+                  b (read-receipt b-path)
+                  since (or since-env (get-in a [:plan :since]) (get-in b [:plan :since]))]
+            :when (or a b (seq since))]
+      (let [plan (make-plan kind since)
+            current-toolchain (try (toolchain kind) (catch Exception _ nil))
+            a-status (phase-status plan :affected a current-toolchain live-pid?)
+            b-status (if (and (nil? b) (not= :passed a-status))
+                       :blocked
+                       (phase-status plan :remainder b current-toolchain live-pid?))]
+        (doseq [[phase receipt state path] [[:affected a a-status a-path]
+                                            [:remainder b b-status b-path]]]
+          (let [passed (if (= state :passed) (count (get plan phase))
+                           (reduce + (map (comp count :paths)
+                                          (filter #(and (number? (:exit %))
+                                                        (zero? (:exit %)))
+                                                  (:commands receipt)))))]
+            (println (name kind) (name phase) "sha" (subs sha 0 8)
+                     "status" (name state) "passed" passed "/" (count (get plan phase))
+                     "pending" (- (count (get plan phase)) passed)
+                     "reason" (name (:reason plan)) "journal" path)))))
+    (when (and (not (fs/exists? dir)) (not (seq since-env)))
+      (println "No staged journal for" sha "; use bb wt status for a running train"))))

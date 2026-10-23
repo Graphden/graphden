@@ -76,6 +76,7 @@ classify_changes() {
   NEED_FLEET="${CASE_FLEET:-0}"
   CHANGED_N=1
   DEPS_DEVTOOL_ONLY=0
+  BB_CI_ONLY=0
 }
 assert_events() {
   local expected="$1" actual

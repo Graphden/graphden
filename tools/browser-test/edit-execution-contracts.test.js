@@ -37,6 +37,18 @@ async function expandMapValue(page, argName) {
 async function entry(page) {
   return page.evaluate(() => richTypeEntryOf(lookups.fnMap.get(selectedFnId)));
 }
+async function withGraphRefresh(page, action) {
+  await page.evaluate(() => {
+    window.__executionGraphRefresh = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Graph refresh did not finish after the edit')), 60000);
+      window.addEventListener('gd-graph-changed', () => { clearTimeout(timer); resolve(); }, {once: true});
+    });
+  });
+  await action();
+  await page.evaluate(() => window.__executionGraphRefresh);
+  await page.waitForFunction(() => window.gdFnPickerGraph?.ready
+    && window.gdEditorRoot?.componentNow('fn-picker'), null, {timeout: 60000});
+}
 async function openPicker(page, owner) {
   await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
@@ -60,11 +72,21 @@ async function candidate(page, name, compatible) {
 (async () => {
   await waitForServerHealthy();
   const {browser, page} = await newContext(chromium, {boot: false});
+  await page.addInitScript(() => {
+    window.__executionRootEvents = [];
+    for (const name of ['gd-editor-root-changing', 'gd-editor-root-ready', 'gd-editor-root-error',
+      'gd-auth-changed', 'gd-graph-changed']) {
+      window.addEventListener(name, () => window.__executionRootEvents.push([name, Math.round(performance.now())]));
+    }
+  });
   const errors = [];
   page.on('pageerror', error => { errors.push(error.message); console.log('execution pageerror', error.message.slice(0, 400)); });
   let consoleErrors = 0;
   page.on('console', message => { if (message.type() === 'error' && consoleErrors++ < 3) console.log('execution console.error', message.text().slice(0, 600)); });
   page.on('response', async response => {
+    if (new URL(response.url()).pathname === '/api/types/candidates' && !response.ok()) {
+      console.log('execution candidates HTTP' + response.status(), (await response.text().catch(() => 'unavailable')).slice(0, 600));
+    }
     if (response.status() !== 422) return;
     const url = new URL(response.url());
     const body = await response.text().catch(() => 'unavailable');
@@ -92,7 +114,7 @@ async function candidate(page, name, compatible) {
       'inherited constraint is read-only until a local override exists');
     assert((await inherited.innerText()).includes('Inherited constraint'), 'inherited control explains its read-only state');
     await page.keyboard.press('Escape');
-    await renameArgViaEdgeLabel(page, 'handlers', 'events');
+    await withGraphRefresh(page, () => renameArgViaEdgeLabel(page, 'handlers', 'events'));
     const panel = await expandMapValue(page, 'events');
     const execution = panel.getByRole('combobox', {name: 'Execution profile', exact: true});
     await execution.waitFor();
@@ -153,8 +175,10 @@ async function candidate(page, name, compatible) {
     assert(/Browser/.test(reason) && /JVM/.test(reason), 'server-only callback rejection explains the two execution profiles');
     await page.screenshot({path: '/tmp/graphden-a3-execution-refusal.png', fullPage: true});
     await openPicker(page, 'browser-child');
-    await (await candidate(page, 'pure-callback', true)).click();
-    await page.locator('.fn-picker-popover').waitFor({state: 'hidden', timeout: 30000});
+    await withGraphRefresh(page, async () => {
+      await (await candidate(page, 'pure-callback', true)).click();
+      await page.locator('.fn-picker-popover').waitFor({state: 'hidden', timeout: 30000});
+    });
     await goto(page, 'server-child');
     const serverEntry = await entry(page);
     assert(serverEntry.args.handler[4].includes('jvm-server') && !serverEntry.args.handler[4].includes('browser-main'),
@@ -177,7 +201,8 @@ async function candidate(page, name, compatible) {
         const data = typeof edge?.data === 'function' ? edge.data() : edge?.data;
         return data && argRowFromNode(data);
       }).filter(Boolean);
-      return {url: location.href, selected: {id: row?.id, name: row?.name},
+      return {url: location.href, rootEvents: window.__executionRootEvents,
+        selected: {id: row?.id, name: row?.name},
         rich: richTypeEntryOf(row),
         args: args.map(arg => ({name: arg.name, slot: lookups.slotMap.get(arg['slot-id']),
           binding: arg['binding-id'], expected: expectedSlotType(arg)})),

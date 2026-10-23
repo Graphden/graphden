@@ -32,7 +32,7 @@ function boot(files) {
   const destroyed = [];
   const timers = [];
   const ctx = vm.createContext({
-    console, Promise,
+    console, Promise, AbortController,
     document: doc,
     Event: class { constructor(type, o) { this.type = type; Object.assign(this, o || {}); } },
     installTabTrap() {},
@@ -42,6 +42,8 @@ function boot(files) {
     pointerEventInTour: () => false,
     setTimeout: fn => { timers.push(fn); return timers.length; },
     innerWidth: 1200,
+    innerHeight: 800,
+    addEventListener() {},
   });
   ctx.window = ctx;
   ctx.gdCode = {
@@ -58,7 +60,8 @@ function boot(files) {
 }
 
 (async () => {
-  const EDIT = [['app', 'editor', 'editor-edit-modes.js']];
+  const EDIT = [['web', 'runtime', 'graphden-popover.js'],
+                ['app', 'editor', 'editor-edit-modes.js']];
 
   console.log(' a throwing doSave re-enables Save / Cancel and says why');
   {

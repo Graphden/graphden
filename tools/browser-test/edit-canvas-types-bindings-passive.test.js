@@ -13,7 +13,8 @@ const source = process.env.GRAPHDEN_CANVAS_SOURCE_ROOT || path.join(__dirname, '
   try {
     await page.setContent('<main id="canvas" style="width:300px;padding:20px"></main>');
     await page.addStyleTag({path: path.join(source, 'resources/packages/app/editor/editor-styles.css')});
-    for (const file of ['web/vendor/preact.min.js', 'app/ui-preview/browser-runtime.js',
+    for (const file of ['web/vendor/preact.min.js', 'web/runtime/graphden-popover.js',
+      'app/ui-preview/browser-runtime.js',
       'app/ui-preview/graph-styles.js', 'app/ui-preview/graph-renderer.js', 'app/ui-preview/builtin-plans.js']) {
       await page.addScriptTag({path: path.join(source, 'resources/packages', file)});
     }

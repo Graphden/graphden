@@ -21,9 +21,9 @@
 
 
 (defn sha256
-  [bytes]
-  (let [digest (.digest (MessageDigest/getInstance "SHA-256") bytes)]
-    (apply str (map #(format "%02x" (bit-and (int %) 0xff)) digest))))
+  [payload]
+  (let [digest (MessageDigest/.digest (MessageDigest/getInstance "SHA-256") payload)]
+    (str/join (map #(format "%02x" (bit-and (int %) 0xff)) digest))))
 
 
 (defn file-sha
@@ -94,7 +94,7 @@
 (defn write-cache!
   [path value]
   (let [target (fs/path path)
-        temporary (Files/createTempFile (.getParent ^Path target) "gitleaks-" ".tmp"
+        temporary (Files/createTempFile (fs/parent ^Path target) "gitleaks-" ".tmp"
                                         (make-array java.nio.file.attribute.FileAttribute 0))]
     (try
       (spit (str temporary) (pr-str value))

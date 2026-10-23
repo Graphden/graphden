@@ -7,8 +7,8 @@
     [clojure.test :refer [deftest is run-tests]]))
 
 
-(def head-a (apply str (repeat 40 "a")))
-(def head-b (apply str (repeat 40 "b")))
+(def head-a (str/join (repeat 40 "a")))
+(def head-b (str/join (repeat 40 "b")))
 
 
 (def proof

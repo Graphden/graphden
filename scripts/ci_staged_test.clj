@@ -26,6 +26,20 @@
                                   runtime-roster)))))
 
 
+(deftest inspector-contracts-select-direct-runtime-consumers
+  (let [roster ["tools/runtime-test/fn-usages-section.test.js"
+                "tools/runtime-test/inspector-graph-lifecycle.test.js"
+                "tools/runtime-test/tour-picker.test.js"]]
+    (is (= (take 2 roster)
+           (:files (staged/affected :runtime
+                                    #{"resources/packages/app/ui-inspector/fns.edn"}
+                                    roster))))
+    (is (= [(first roster)]
+           (:files (staged/affected :runtime
+                                    #{"resources/packages/app/editor/editor-fn-usages.js"}
+                                    roster))))))
+
+
 (deftest shared-input-and-empty-diff
   (is (= runtime-roster
          (:files (staged/affected :runtime #{"scripts/ci_staged.clj"} runtime-roster))))

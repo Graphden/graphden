@@ -95,9 +95,14 @@ You were started in one of two ways:
    build (not just a detail with a sane default), **stop and ask the user** —
    don't guess load-bearing decisions.
 2. **Implement** in small commits, inside your worktree.
-3. **Optional diagnostics:** use `bb scripts/ci.clj --preflight-only` for
-   changed-file formatting/syntax/lint, or **`bb wt test --focus <ns>`** for
-   focused tests. These are editing aids, not required pre-queue proof. Do not
+3. **Candidate readiness:** before queueing a UI graph or editor change, run
+   `bb scripts/ci.clj --preflight-only` in the claimed worktree. It selects
+   changed-file formatting, graph audits, generated-plan/devtour checks and
+   directly affected Node runtime tests from the Git diff. Inspect
+   `bb scripts/ci_fast_cli.clj --status` or `target/preflight/latest.edn` for
+   the command/time/exit journal. For focused JVM debugging use
+   **`bb wt test --focus <ns>`**. Preflight is an editing aid; its worktree
+   receipt does not replace the merged candidate's mandatory gate. Do not
    run raw `clojure -M:dev:test -m kaocha.runner`. The wrapper waits while the
    gate is in a heavy phase (`.git/wtq/gate-heavy`) or `MemAvailable` is below
    `WTQ_AGENT_MEM_MIN_MB` (default 3000); `bb wt up` waits the same way.

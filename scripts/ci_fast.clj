@@ -4,7 +4,9 @@
     [babashka.fs :as fs]
     [babashka.process :as p]
     [babashka.tasks :as tasks]
+    [ci-report :as report]
     [ci-select :as select]
+    [ci-staged :as staged]
     [clojure.edn :as edn]
     [clojure.string :as str]))
 
@@ -31,17 +33,27 @@
         shell (filter #(or (str/ends-with? % ".sh") (= % "dev/wtq/wt")) paths)
         web (filter #(re-find #"^resources/packages/app/(editor|ui-preview)/.*\.(js|mjs|jsonc?)$" %) paths)
         css (filter #(or (re-find #"^resources/packages/app/(editor|ui-preview)/.*\.css$" %)
-                         (= % "scripts/devtour/tour.css")) paths)]
+                         (= % "scripts/devtour/tour.css")) paths)
+        graph? (some #(re-find #"^resources/packages/.+/fns\.edn$" %) paths)
+        plan-input? (some #(or (re-find #"^resources/packages/.+/(fns\.edn|impls\.clj)$" %)
+                               (re-find #"^resources/packages/app/ui-preview/builtin-plans\.(json|js)$" %)
+                               (re-find #"^tools/ui_preview/(builtin_plans|generate_builtin_plans)\.clj$" %)) paths)
+        devtour-input? (some #(or (re-find #"^(src|resources/packages|development/src)/.*\.(clj|cljc|cljs|edn|js)$" %)
+                                  (= % "docs/devtour/tour.edn")) paths)]
     (vec (concat
            (when (seq clj)
-             [(into (if native-style? ["cljstyle" "check"] ["clojure" "-M:cljstyle" "check"]) clj)
+             [(into ["clojure" "-M:splint"] clj)
+              (into (if native-style? ["cljstyle" "check"] ["clojure" "-M:cljstyle" "check"]) clj)
               (into (if native-kondo? ["clj-kondo" "--lint"] ["clojure" "-M:kondo" "--lint"]) clj)])
            (syntax-commands paths)
            (for [path shell] ["bash" "-n" path])
            (when (and native-shellcheck? (seq shell)) [(into ["shellcheck"] shell)])
            (when (seq web) [(into ["npx" "--no-install" "biome" "check"] web)])
            (when (seq css) [(into ["npx" "--no-install" "stylelint"] css)])
-           (when (seq docs) [(into ["npx" "--no-install" "markdownlint-cli2" "--no-globs"] docs)])))))
+           (when (seq docs) [(into ["npx" "--no-install" "markdownlint-cli2" "--no-globs"] docs)])
+           (when graph? [["bb" "graph-lint"] ["bb" "reachability"]])
+           (when devtour-input? [["bb" "devtour-check"]])
+           (when plan-input? [["clojure" "-M:dev" "tools/ui_preview/generate_builtin_plans.clj" "--check"]])))))
 
 
 (defn default-base
@@ -86,14 +98,79 @@
 
 (defn run-checks!
   [base]
-  (let [changed (select/changed-files (or base (default-base)))
+  (let [base (or base (default-base))
+        changed (select/changed-files base)
         _ (when-not changed (throw (ex-info "Cannot determine changed-file preflight scope" {:base base})))
         paths (filter fs/regular-file? changed)
         pinned (get-in (edn/read-string (slurp "deps.edn"))
                        [:aliases :kondo :extra-deps 'clj-kondo/clj-kondo :mvn/version])
         native-kondo? (and (fs/which "clj-kondo")
                            (= pinned (second (re-find #"v([0-9.]+)"
-                                                      (:out (p/shell {:out :string} "clj-kondo" "--version"))))))]
-    (doseq [command (commands paths (boolean (fs/which "cljstyle")) native-kondo? (boolean (fs/which "shellcheck")))]
-      (println "changed-file preflight:" (str/join " " command))
-      (run-command! command))))
+                                                      (:out (p/shell {:out :string} "clj-kondo" "--version"))))))
+        commands (commands paths (boolean (fs/which "cljstyle")) native-kondo? (boolean (fs/which "shellcheck")))
+        {:keys [files reason]} (staged/affected :runtime (set changed) (staged/roster :runtime))
+        sha (str/trim (:out (p/shell {:out :string} "git" "rev-parse" "HEAD")))
+        started (System/currentTimeMillis)
+        directory "target/preflight"
+        path (str directory "/" sha "-" started ".edn")
+        state (atom {:schema 1 :complete false :sha sha :base base
+                     :pid (java.lang.ProcessHandle/.pid (java.lang.ProcessHandle/current))
+                     :changed (vec (sort changed)) :runtime-reason reason
+                     :started-at-ms started :commands []})
+        save! #(do (report/write-atomic! path @state)
+                   (report/write-atomic! (str directory "/latest.edn") @state))
+        run! (fn [command cwd]
+               (let [start (System/currentTimeMillis)
+                     item {:argv command :cwd cwd :started-at-ms start}]
+                 (println "candidate preflight:" (str/join " " command)
+                          (if cwd (str "in " cwd) ""))
+                 (swap! state update :commands conj item)
+                 (save!)
+                 (try
+                   (if cwd
+                     (apply p/shell {:dir cwd} command)
+                     (run-command! command))
+                   (swap! state update :commands update (dec (count (:commands @state)))
+                          assoc :exit 0 :duration-ms (- (System/currentTimeMillis) start))
+                   (catch Exception error
+                     (swap! state update :commands update (dec (count (:commands @state)))
+                            assoc :exit (or (:exit (ex-data error)) 1)
+                            :duration-ms (- (System/currentTimeMillis) start))
+                     (save!)
+                     (throw error)))
+                 (save!)))]
+    (fs/create-dirs directory)
+    (save!)
+    (try
+      (doseq [command commands] (run! command nil))
+      (println "runtime preflight:" (count files) "file(s), reason" (name reason))
+      (doseq [runtime-path files]
+        (run! ["node" (str (fs/file-name runtime-path))] "tools/runtime-test"))
+      (swap! state assoc :complete true :exit 0 :finished-at-ms (System/currentTimeMillis))
+      (save!)
+      (println "candidate preflight: PASS, receipt" path)
+      (catch Exception error
+        (swap! state assoc :complete true :exit 1 :finished-at-ms (System/currentTimeMillis))
+        (save!)
+        (println "candidate preflight: FAIL, receipt" path)
+        (throw error)))))
+
+
+(defn show-status!
+  []
+  (let [path "target/preflight/latest.edn"]
+    (if-not (fs/exists? path)
+      (println "candidate preflight: no receipt")
+      (let [{:keys [sha complete exit commands started-at-ms finished-at-ms pid]} (edn/read-string (slurp path))
+            passed (count (filter #(= 0 (:exit %)) commands))
+            current (last (filter #(nil? (:exit %)) commands))
+            alive? (and pid (some-> (java.lang.ProcessHandle/of pid) (.isPresent)))]
+        (println "candidate preflight:" (cond
+                                          (and (not complete) alive?) "RUNNING"
+                                          (not complete) "INTERRUPTED"
+                                          (zero? exit) "PASS"
+                                          :else "FAIL")
+                 "sha" sha "checks" passed "/" (count commands)
+                 "started" started-at-ms "finished" finished-at-ms)
+        (when current (println "current:" (:argv current)))
+        (println "receipt:" path)))))

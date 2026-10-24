@@ -16,6 +16,10 @@
 (def runtime-impact
   {"resources/packages/app/editor/editor-root.js"
    ["editor-root.test.js" "tour-picker.test.js"]
+   "resources/packages/app/editor/editor-fn-usages.js"
+   ["fn-usages-section.test.js"]
+   "resources/packages/app/ui-inspector/fns.edn"
+   ["fn-usages-section.test.js" "inspector-graph-lifecycle.test.js"]
    "resources/packages/app/editor/editor-edit-modes.js"
    ["inline-edit.test.js" "path-value-lifecycle.test.js"]
    "resources/packages/web/runtime/graphden-popover.js"
@@ -56,6 +60,7 @@
       (= kind :runtime)
       (let [runtime-source? #(or (str/starts-with? % "resources/packages/app/editor/")
                                  (str/starts-with? % "resources/packages/app/ui-preview/")
+                                 (str/starts-with? % "resources/packages/app/ui-inspector/")
                                  (str/starts-with? % "resources/packages/web/runtime/")
                                  (str/starts-with? % "tools/runtime-test/"))
             dynamic? (some #(or (contains? shared-inputs %)

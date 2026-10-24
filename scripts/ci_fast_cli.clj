@@ -3,4 +3,6 @@
     [ci-fast :as fast]))
 
 
-(fast/run-checks! (first *command-line-args*))
+(if (= ["--status"] (vec *command-line-args*))
+  (fast/show-status!)
+  (fast/run-checks! (first *command-line-args*)))

@@ -4,23 +4,53 @@
     [babashka.process :as p]
     [babashka.tasks :refer [clojure]]
     [ci-fast :as fast]
+    [ci-report :as report]
     [ci-select :as select]
+    [ci-staged :as staged]
     [clojure.edn :as edn]
     [clojure.test :refer [deftest is run-tests]]))
 
 
 (deftest changed-file-checks-never-expand-to-full-tree
-  (is (= [["cljstyle" "check" "scripts/a.clj"]
+  (is (= [["clojure" "-M:splint" "scripts/a.clj"]
+          ["cljstyle" "check" "scripts/a.clj"]
           ["clj-kondo" "--lint" "scripts/a.clj"]
           ["node" "--check" "tools/runtime-test/a.test.js"]
           ["bash" "-n" "dev/wtq/wt"]
           ["shellcheck" "dev/wtq/wt"]
           ["npx" "--no-install" "markdownlint-cli2" "--no-globs" "README.md"]]
          (fast/commands ["scripts/a.clj" "tools/runtime-test/a.test.js" "dev/wtq/wt" "README.md"] true true true)))
-  (is (= [["clojure" "-M:cljstyle" "check" "a b.clj"]
+  (is (= [["clojure" "-M:splint" "a b.clj"]
+          ["clojure" "-M:cljstyle" "check" "a b.clj"]
           ["clojure" "-M:kondo" "--lint" "a b.clj"]]
          (fast/commands ["a b.clj"] false false false)))
   (is (= [] (fast/commands [] true true true))))
+
+
+(deftest graph-edit-preflight-covers-the-c3-failures
+  (let [commands (fast/commands ["resources/packages/app/ui-inspector/fns.edn"] true true true)]
+    (is (some #{["bb" "graph-lint"]} commands))
+    (is (some #{["bb" "reachability"]} commands))
+    (is (some #{["bb" "devtour-check"]} commands))
+    (is (some #{["clojure" "-M:dev" "tools/ui_preview/generate_builtin_plans.clj" "--check"]}
+              commands))))
+
+
+(deftest failed-preflight-records-the-command-before-returning-red
+  (let [receipts (atom [])]
+    (with-redefs [select/changed-files (constantly ["scripts/ci_fast.clj"])
+                  fast/commands (fn [& _] [["fixture" "red"]])
+                  fast/run-command! (fn [_] (throw (ex-info "fixture failed" {:exit 7})))
+                  staged/roster (constantly [])
+                  staged/affected (fn [& _] {:files [] :reason :declared-dependency})
+                  p/shell (fn [& _] {:out "0123456789012345678901234567890123456789\n" :exit 0})
+                  report/write-atomic! (fn [path value] (swap! receipts conj [path value]))]
+      (is (thrown? Exception (fast/run-checks! "base"))))
+    (let [[_ receipt] (last @receipts)]
+      (is (= true (:complete receipt)))
+      (is (= 1 (:exit receipt)))
+      (is (= 7 (get-in receipt [:commands 0 :exit])))
+      (is (= ["fixture" "red"] (get-in receipt [:commands 0 :argv]))))))
 
 
 (def all-paths fast/clj-scan-paths)

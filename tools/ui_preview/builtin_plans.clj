@@ -255,8 +255,18 @@
 
 (defn -main
   [& args]
-  (when (seq args) (throw (ex-info "Builtin generation accepts no source or entry arguments" {})))
-  (let [artifact (generate)]
-    (spit artifact-path (serialize artifact))
-    (spit script-path (serialize-script artifact)))
-  (println "Generated" artifact-path "and" script-path))
+  (when-not (or (empty? args) (= ["--check"] (vec args)))
+    (throw (ex-info "Use no arguments to generate, or --check to verify builtin plans" {})))
+  (let [artifact (generate)
+        expected {artifact-path (serialize artifact)
+                  script-path (serialize-script artifact)}]
+    (if (seq args)
+      (let [stale (into [] (keep (fn [[path content]]
+                                   (when (not= content (when (.exists (io/file path)) (slurp path))) path))) expected)]
+        (when (seq stale)
+          (throw (ex-info "Builtin plans are stale; regenerate before WTQ"
+                          {:paths stale :command "clojure -M:dev tools/ui_preview/generate_builtin_plans.clj"})))
+        (println "Builtin plans match graph sources"))
+      (do
+        (doseq [[path content] expected] (spit path content))
+        (println "Generated" artifact-path "and" script-path)))))

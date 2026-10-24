@@ -403,6 +403,12 @@ function _tourPanCanvasTo(el) {
   return true;
 }
 
+function _tourNotifyStepChanged() {
+  if (typeof Event === 'function') {
+    document.dispatchEvent?.(new Event('gd-tour-step-changed'));
+  }
+}
+
 function _tourAdvance(skipped) {
   const lesson = _tourLesson();
   const step = _tourStep();
@@ -413,6 +419,7 @@ function _tourAdvance(skipped) {
     if (!dup) _tourState.created.push(step.creates);
   }
   _tourState.step += 1;
+  _tourNotifyStepChanged();
   _tourState.activeBranch = _tourSessionBranch();
   _tourSaveState();
   _tourCount('step', lesson.id, _tourState.step);
@@ -484,6 +491,7 @@ async function _tourLoadInheritanceCheckSource(preview) {
 function _tourBack() {
   if (!_tourState || _tourState.step <= 0) return;
   _tourState.step -= 1;
+  _tourNotifyStepChanged();
   _tourSaveState();
   _tourRenderStep();
 }

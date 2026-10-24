@@ -44,6 +44,28 @@ function fadeOutPopover() {
   }, 90);
 }
 
+function dismissRowActionsPopover({immediate = false, restoreFocus = false} = {}) {
+  if (rowActionsPopoverHideTimer) clearTimeout(rowActionsPopoverHideTimer);
+  rowActionsPopoverHideTimer = null;
+  const anchor = rowActionsPopoverAnchor;
+  rowActionsPopoverSticky = false;
+  rowActionsPopoverAnchor = null;
+  if (anchor) anchor.setAttribute('aria-expanded', 'false');
+  if (immediate) {
+    if (rowActionsPopoverFadeTimer) clearTimeout(rowActionsPopoverFadeTimer);
+    rowActionsPopoverFadeTimer = null;
+    if (rowActionsPopoverEl) {
+      rowActionsPopoverEl.style.opacity = '0';
+      rowActionsPopoverEl.style.display = 'none';
+    }
+  } else {
+    fadeOutPopover();
+  }
+  if (restoreFocus && anchor) {
+    try { anchor.focus({preventScroll: true}); } catch (_) { anchor.focus(); }
+  }
+}
+
 function ensureRowActionsPopover() {
   if (rowActionsPopoverEl) return rowActionsPopoverEl;
   const el = document.createElement('div');
@@ -121,13 +143,7 @@ function ensureRowActionsPopover() {
 // may finish later, but it must never reveal actions for a detached row.
 function dismissRowActionsPopoverWithin(root) {
   if (!rowActionsPopoverAnchor || !root.contains(rowActionsPopoverAnchor)) return;
-  rowActionsPopoverAnchor.setAttribute('aria-expanded', 'false');
-  rowActionsPopoverAnchor = null;
-  rowActionsPopoverSticky = false;
-  if (rowActionsPopoverEl) {
-    rowActionsPopoverEl.style.display = 'none';
-    rowActionsPopoverEl.style.opacity = '0';
-  }
+  dismissRowActionsPopover({immediate: true});
 }
 
 function positionRowActionsPopover(el, anchor) {
@@ -149,12 +165,7 @@ function positionRowActionsPopover(el, anchor) {
                  || ar.bottom < 0 || ar.top > window.innerHeight
                  || cr.right < 0 || cr.left > window.innerWidth;
   if (offscreen) {
-    rowActionsPopoverSticky = false;
-    if (rowActionsPopoverAnchor) {
-      rowActionsPopoverAnchor.setAttribute('aria-expanded', 'false');
-    }
-    rowActionsPopoverAnchor = null;
-    fadeOutPopover();
+    dismissRowActionsPopover();
     return;
   }
   const rawZoom = (typeof gv !== 'undefined' && gv.ready()) ? gv.zoom() : 1;
@@ -283,8 +294,7 @@ function hideRowActionsPopover() {
 // trigger's click handler; touch devices land here exclusively).
 function toggleRowActionsPopoverSticky(anchorEl, build) {
   if (rowActionsPopoverSticky && rowActionsPopoverAnchor === anchorEl) {
-    rowActionsPopoverSticky = false;
-    hideRowActionsPopover();
+    dismissRowActionsPopover();
     return;
   }
   rowActionsPopoverSticky = true;
@@ -305,26 +315,21 @@ function ensureRowActionsDismissHandler() {
     if (rowActionsPopoverEl.contains(e.target)) return;
     if (rowActionsPopoverAnchor?.contains(e.target)) return;
     if (pointerEventInTour(e)) return;
-    rowActionsPopoverSticky = false;
-    if (rowActionsPopoverAnchor) {
-      rowActionsPopoverAnchor.setAttribute('aria-expanded', 'false');
-    }
-    rowActionsPopoverAnchor = null;
-    fadeOutPopover();
+    dismissRowActionsPopover();
   }, true);
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape' || e.defaultPrevented) return;
     if (!rowActionsPopoverEl || rowActionsPopoverEl.style.display === 'none') return;
     e.stopPropagation();
     e.preventDefault();   // consumed — see graphden-popover.js
-    rowActionsPopoverSticky = false;
-    const anchor = rowActionsPopoverAnchor;
-    rowActionsPopoverAnchor = null;
-    if (anchor) {
-      anchor.setAttribute('aria-expanded', 'false');
-      try { anchor.focus({ preventScroll: true }); } catch (_) { anchor.focus(); }
+    dismissRowActionsPopover({restoreFocus: true});
+  });
+  // A new tutorial step owns a new target. An old pinned menu must not cover
+  // that target, including when the step advanced without a pointer event.
+  document.addEventListener('gd-tour-step-changed', () => {
+    if (rowActionsPopoverAnchor) {
+      dismissRowActionsPopover({immediate: true});
     }
-    fadeOutPopover();
   });
 }
 ensureRowActionsDismissHandler();

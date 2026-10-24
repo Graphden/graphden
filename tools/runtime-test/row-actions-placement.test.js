@@ -8,13 +8,41 @@ const root = path.join(__dirname, '../../resources/packages');
 const shared = fs.readFileSync(path.join(root, 'web/runtime/graphden-popover.js'), 'utf8');
 const rows = fs.readFileSync(path.join(root, 'app/editor/editor-row-actions.js'), 'utf8');
 function harness(width, height, zoom) {
+  const listeners = new Map();
   const ctx = vm.createContext({console, window: {innerWidth: width, innerHeight: height},
-    document: {addEventListener() {}}, gv: {ready: () => true, zoom: () => zoom}});
+    document: {addEventListener(type, callback) { listeners.set(type, callback); }},
+    gv: {ready: () => true, zoom: () => zoom}});
   vm.runInContext(shared + '\n' + rows, ctx);
   const el = {style: {}, offsetWidth: 240};
   Object.defineProperty(el, 'offsetHeight', {get: () => el.style.maxHeight
     ? Math.min(600, parseFloat(el.style.maxHeight)) : 600});
-  return {ctx, el};
+  return {ctx, el, dispatch: type => listeners.get(type)?.()};
+}
+
+// Advancing the tutorial releases a pinned menu before the next target can be
+// covered. It also cancels a pending async reveal from the previous step.
+{
+  const {ctx, el, dispatch} = harness(1600, 900, 1);
+  const anchor = {isConnected: true, setAttribute() {}};
+  ctx.ensureRowActionsPopover = () => el;
+  ctx.ensureRowActionsCyHandlers = () => {};
+  ctx.positionRowActionsPopover = () => { el.style.display = 'inline-block'; };
+  ctx.requestAnimationFrame = callback => callback();
+  el.querySelector = () => null;
+  ctx.host = el;
+  vm.runInContext('rowActionsPopoverEl = host;', ctx);
+  ctx.toggleRowActionsPopoverSticky(anchor, () => {});
+  assert.equal(el.style.display, 'inline-block');
+  dispatch('gd-tour-step-changed');
+  assert.equal(el.style.display, 'none');
+  assert.equal(vm.runInContext('rowActionsPopoverAnchor', ctx), null);
+  assert.equal(vm.runInContext('rowActionsPopoverSticky', ctx), false);
+
+  let complete;
+  ctx.toggleRowActionsPopoverSticky(anchor, () => ({then(resolve) { complete = resolve; }}));
+  dispatch('gd-tour-step-changed');
+  complete();
+  assert.equal(el.style.display, 'none', 'late reply cannot restore the previous step menu');
 }
 for (const zoom of [0.9, 1, 1.1]) {
   for (const top of [10, 95, 180]) {

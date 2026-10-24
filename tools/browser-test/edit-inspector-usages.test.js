@@ -22,13 +22,16 @@ let phase = 'boot';
     await page.waitForFunction(() => typeof lookups !== 'undefined' && lookups?.fnMap?.size > 1
       && typeof graphReady === 'function' && graphReady() && !graph.animating);
     const emptyPayload = await (await emptyUsages).json();
-    assert(emptyPayload.usages.length === 0, 'the real selected app root has no authorized callers');
-    await page.waitForFunction(() => document.querySelector('.gd-insp-usages[hidden]'));
-    assert(await page.evaluate(() => {
-      const host = document.querySelector('[data-gd-usages-host]');
-      return host.getBoundingClientRect().height === 0
-        && getComputedStyle(host).marginTop === '0px';
-    }), 'an empty Used-by renderer contributes no height or margin to the Inspector');
+    assert(emptyPayload.usages.length > 0
+      && emptyPayload.usages.every(row => row.kind === 'service-root' || row.kind === 'route-root'),
+    'the app root has no fn callers but its enabled service is an incoming root reference');
+    assert(emptyPayload.reachability?.state === 'reachable'
+      && emptyPayload.reachability.path?.length === 1
+      && emptyPayload.reachability.path[0]['fn-name'] === 'web-server',
+    'the enabled service root is reachable from itself despite having no callers');
+    await page.locator('.gd-insp-reachability').waitFor({state: 'visible'});
+    assert(await page.locator('.gd-insp-usages').isVisible(),
+      'root reachability stays visible with only an entry reference');
     phase = 'authorized-data';
     const selection = await page.evaluate(async () => {
       const priorities = ['const', 'get', 'if', 'list', 'str', 'zipmap'];
@@ -39,7 +42,10 @@ let phase = 'boot';
         if (!response.ok) continue;
         const payload = await response.json();
         const unique = new Set(payload.usages?.map(row => [row.kind, row['fn-id'], row['slot-name'] || ''].join('|')));
-        if (payload.ok !== false && unique.size > 30) return {id: fn.id, count: payload.count};
+        if (payload.ok !== false && unique.size > 30
+          && payload.reachability?.state === 'reachable' && payload.reachability.path?.length > 1) {
+          return {id: fn.id, count: payload.count};
+        }
       }
       return null;
     });
@@ -135,6 +141,16 @@ let phase = 'boot';
     await row.click();
     await page.waitForFunction(id => document.getElementById('gd-inspector').dataset.fnId === id, target);
     assert(await page.locator('#gd-inspector').getAttribute('data-fn-id') === target, 'finite navigation selects the actual authorized caller identity');
+    phase = 'root-path-navigation';
+    await page.evaluate(id => gdInspectorRender(id), selection.id);
+    const rootStep = page.locator('.gd-insp-path-step').first();
+    await rootStep.waitFor({state: 'visible'});
+    const rootId = await rootStep.getAttribute('data-usage-id');
+    assert(!!rootId && rootId !== selection.id, 'the graph renders a navigable root-to-target path');
+    await rootStep.click();
+    await page.waitForFunction(id => document.getElementById('gd-inspector').dataset.fnId === id, rootId);
+    assert(await page.locator('#gd-inspector').getAttribute('data-fn-id') === rootId,
+      'root-path navigation selects the authorized root identity');
     assert(errors.length === 0, 'Used-by lifecycle produces no page or console errors');
   } catch (error) {
     console.error('Inspector Used-by proof failed', JSON.stringify({phase, type: error.name}));

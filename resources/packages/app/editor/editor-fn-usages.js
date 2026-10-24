@@ -13,7 +13,7 @@
   function normalize(payload) {
     if (!payload || payload.ok === false || !Array.isArray(payload.usages) || payload.usages.length > 400
       || !Number.isSafeInteger(payload.count) || payload.count < 0 || typeof payload['truncated?'] !== 'boolean') throw new Error('Invalid Used-by data');
-    const rows = payload.usages.map(row => {
+    const normalizeRow = row => {
       if (typeof row.kind !== 'string' || typeof row['fn-id'] !== 'string' || row.anonymous != null && typeof row.anonymous !== 'boolean') throw new Error('Invalid Used-by row');
       const result = {kind: row.kind, 'fn-id': row['fn-id'], anonymous: row.anonymous === true};
       for (const name of ['fn-name', 'fn-namespace', 'slot-name']) {
@@ -21,14 +21,21 @@
         result[name] = row[name] || '';
       }
       return value(result);
-    });
-    return value({rows, count: payload.count, truncated: payload['truncated?']});
+    };
+    const rows = payload.usages.map(normalizeRow);
+    const reach = payload.reachability;
+    if (!reach || !['reachable', 'unreachable', 'unknown'].includes(reach.state) || !Array.isArray(reach.path)
+      || reach.path.length > 1000 || reach.state !== 'reachable' && reach.path.length) throw new Error('Invalid reachability data');
+    const path = reach.path.map(normalizeRow);
+    return value({rows, count: payload.count, truncated: payload['truncated?'],
+      reachability: value({state: reach.state, path})});
   }
   function builtin() { return api.createRuntime(window.GraphdenBuiltinPlans.plans.inspector, {operationLimit: 150000}); }
   window.gdMountFnUsages = (host, fnId, {owns, captureRead}) => {
     if (!host || !fnId || !window.API?.api_fns_usages) return;
     mounted.get(host)?.dispose();
-    let payload = value({rows: [], count: 0, truncated: false});
+    let payload = value({rows: [], count: 0, truncated: false,
+      reachability: value({state: 'unknown', path: []})});
     let disposed = false;
     let output = null;
     const renderer = window.GraphdenRenderer.mount(host, rendererOptions);
@@ -56,7 +63,8 @@
       requests: {
         navigate: {validate(entry) {
           const id = request(entry);
-          const row = field(payload, 'rows').find(item => field(item, 'fn-id') === id && !field(item, 'anonymous'));
+          const row = [...field(payload, 'rows'), ...field(field(payload, 'reachability'), 'path')]
+            .find(item => field(item, 'fn-id') === id && !field(item, 'anonymous'));
           if (!row) throw new Error('Invalid Used-by navigation');
           return row;
         }, execute(row) {
@@ -89,7 +97,8 @@
     function click(event) {
       const row = event.target.closest('[data-usage-id]');
       if (!row || !host.contains(row)) return;
-      if (!field(payload, 'rows').some(item => field(item, 'fn-id') === row.dataset.usageId && !field(item, 'anonymous'))) return;
+      if (![...field(payload, 'rows'), ...field(field(payload, 'reachability'), 'path')]
+        .some(item => field(item, 'fn-id') === row.dataset.usageId && !field(item, 'anonymous'))) return;
       event.preventDefault(); dispatch('navigate', row.dataset.usageId);
     }
     function keydown(event) {
@@ -100,12 +109,13 @@
     host.addEventListener('input', input);
     host.addEventListener('click', click);
     host.addEventListener('keydown', keydown);
+    window.addEventListener('gd-editor-root-ready', load);
     function load() {
       const read = captureRead(host, load);
       if (!read.start) return;
       const doFetch = typeof authFetch === 'function' ? authFetch : fetch;
       doFetch(API.api_fns_usages, {method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({'fn-id': fnId}), signal: read.signal})
+        body: JSON.stringify({'fn-id': fnId, 'root-id': window.gdEditorRoot?.rootId()}), signal: read.signal})
         .then(response => response.ok ? response.json() : null)
         .then(data => {
           if (!read.current() || !data || data.ok === false) return;
@@ -117,6 +127,7 @@
       disposed = true;
       unsubscribe(); controller.dispose(); renderer.dispose();
       host.removeEventListener('input', input); host.removeEventListener('click', click); host.removeEventListener('keydown', keydown);
+      window.removeEventListener('gd-editor-root-ready', load);
       mounted.delete(host);
     }};
     mounted.set(host, lifecycle);

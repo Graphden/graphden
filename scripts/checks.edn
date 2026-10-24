@@ -167,7 +167,11 @@
  {:name "tests-js"      :bb "staged-js-rest" :timeout  60000 :group :test
   :relevant ["\\.(js|mjs)$" "^tools/runtime-test/" "^tools/browser-test/run-edit-tests\\.sh$"
              "^bb\\.edn$" "^scripts/(ci_staged|ci_select|ci_resume)\\.clj$" "^scripts/checks\\.edn$"]}
- {:name "tests-unit"    :bb "test-unit"     :timeout 900000 :group :test
+ ;; The priority scheduler serializes the graph-owned builtin-plan namespace
+ ;; inside a later dependency layer. Its measured 323s plus the registry layer
+ ;; left <12% headroom at 900s; two C3 trains reached that ceiling while still
+ ;; running tests. Keep a finite 18m cap until the expensive layer is reduced.
+ {:name "tests-unit"    :bb "test-unit"     :timeout 1080000 :group :test
   :relevant ["^src/" "^test/" "^resources/" "^scripts/" "^external-packages/"
              "^(bb|deps|tests)\\.edn$" "^build\\.clj$" "^dev-resources/" "^development/src/"]}
  {:name "tests-perf"    :bb "test-perf"     :timeout 300000 :group :test

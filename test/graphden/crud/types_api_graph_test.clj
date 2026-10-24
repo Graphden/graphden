@@ -129,9 +129,15 @@
   (testing "POST {fn-id: <uuid>} parses — the body the /api/fns/usages
             alias (inspector Used-by) sends; an unknown id is an empty
             result, not a validation error"
-    (let [result (post-via :types-usages-handler {:fn-id (str (random-uuid))})]
+    (let [result (post-via :types-usages-handler
+                           {:fn-id (str (random-uuid))
+                            :root-id (str (random-uuid))})]
       (is (true? (:ok result)))
-      (is (zero? (:count result))))))
+      (is (zero? (:count result)))
+      (is (map? (:reachability result)))
+      (is (not-any? #(= :editor (:root-kind %))
+                    (get-in result [:reachability :roots]))
+          "a submitted root absent from the authorized graph grants no path"))))
 
 
 ;; =============================================================================

@@ -57,7 +57,7 @@
                (components/assert-current-policy! storage)
                (when-not (= epoch (context/invalidation-epoch ctx))
                  (reject! :policy-refresh-required))
-               {:ok true :plan plan :argument-name argument
+               {:ok true :plan plan :argument-name argument :root-id (str root)
                 :component-selection-id (:component-selection-id adapted)})))))
      (catch Exception error
        (assoc (components/failure-response error) :reason "Editor root is unavailable.")))))

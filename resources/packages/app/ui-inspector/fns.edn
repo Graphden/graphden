@@ -8,7 +8,8 @@
        {:name :_inspector-chrome-state, :type {:tab :text, :open :bool, :handled :bool}}
        {:name :_inspector-usages-state, :type {:query :text, :handled :bool}}
        {:name :_inspector-usage-row, :type {:kind :text, :fn-id :text, :fn-name :text, :fn-namespace :text, :slot-name :text, :anonymous :bool}}
-       {:name :_inspector-usages-payload, :type {:rows [:list :_inspector-usage-row], :count :int, :truncated :bool}}
+       {:name :_inspector-reachability, :type {:state :text :path [:list :_inspector-usage-row]}}
+       {:name :_inspector-usages-payload, :type {:rows [:list :_inspector-usage-row], :count :int, :truncated :bool :reachability :_inspector-reachability}}
        {:name :_inspector-state :union [:_inspector-chrome-state :_inspector-usages-state]}
        {:name :_inspector-inputs :type {:selected :bool :name :text :namespace :text :description :text :parents [:list :text] :has-return :bool :narrow :bool :surface :text :usages :_inspector-usages-payload}}
        {:name :_inspector-diff-field :type {:name :text :old :text :new :text :show-name :bool}}
@@ -126,7 +127,7 @@
        {:name :_inspector-chrome-view :parent :_inspector-view-fields :args {:vals [:_inspector-tree :inspector-styles :_inspector-state-tab :_inspector-state-open :_inspector-view-handled]}}
        {:name :_inspector-surface, :parent :get, :args {:coll {:as :inputs :type :_inspector-inputs}, :key {:value :surface}, :default {:value "chrome"}}}
        {:name :_inspector-usages-surface, :parent :equal?, :args {:a :_inspector-surface, :b "usages"}}
-       {:name :_usages-payload, :parent :get, :args {:coll {:as :inputs :type :_inspector-inputs}, :key {:value :usages}, :default {:value {:rows [], :count 0, :truncated false}}}}
+       {:name :_usages-payload, :parent :get, :args {:coll {:as :inputs :type :_inspector-inputs}, :key {:value :usages}, :default {:value {:rows [], :count 0, :truncated false, :reachability {:state "unknown" :path []}}}}}
        {:name :_usages-rows, :parent :get, :args {:coll :_usages-payload, :key {:value :rows}, :default {:value []}}}
        {:name :_usages-count, :parent :get, :args {:coll :_usages-payload, :key {:value :count}, :default {:value 0}}}
        {:name :_usages-truncated, :parent :get, :args {:coll :_usages-payload, :key {:value :truncated}, :default {:value false}}}
@@ -149,7 +150,6 @@
        {:name :_usage-kind-key, :parent :_usage-kind, :args {}, :lambda-params [:item]}
        {:name :_usages-by-kind, :parent :group-by, :args {:key-fn :_usage-kind-key, :coll :_usages-unique}}
        {:name :_usages-unique-count, :parent :count, :args {:coll :_usages-unique}}
-       {:name :_usages-none, :parent :equal?, :args {:a :_usages-unique-count, :b 0}}
        {:name :_usages-filter-sample, :parent :take, :args {:count 31, :coll :_usages-unique}}
        {:name :_usages-filter-count, :parent :count, :args {:coll :_usages-filter-sample}}
        {:name :_usages-show-filter, :parent :equal?, :args {:a :_usages-filter-count, :b 31}}
@@ -216,7 +216,7 @@
        {:name :_usage-group-attrs, :parent :zipmap, :args {:keys [{:value :class} {:value :key}], :vals ["gd-insp-usage-group" :_usage-group-kind]}}
        {:name :_usage-group-node, :parent :hiccup, :args {:tag "div", :attrs :_usage-group-attrs, :children [:_usage-group-heading-node :_usage-group-list]}}
        {:name :_usage-group, :parent :if, :args {:test :_usage-group-empty, :then nil, :else :_usage-group-node}, :lambda-params [:group]}
-       {:name :_usage-groups, :parent :const, :args {:value {:value [{:kind "parent-of", :label "Extended by"} {:kind "ref-of", :label "Referenced by"} {:kind "resolver-of", :label "Resolver in"} {:kind "slot-of", :label "Slot type in"} {:kind "binding-of", :label "Type override in"} {:kind "base-of", :label "Narrowed by"} {:kind "element-of", :label "List element of"} {:kind "return-of", :label "Return type of"} {:kind "union-branch", :label "Union branch of"} {:kind "variant-branch", :label "Variant branch of"} {:kind "fn-type-arg-or-return", :label "Fn-type mention in"} {:kind "other", :label "Mentioned in"}]}}}
+       {:name :_usage-groups, :parent :const, :args {:value {:value [{:kind "service-root", :label "Service entry"} {:kind "route-root", :label "App route"} {:kind "parent-of", :label "Extended by"} {:kind "ref-of", :label "Referenced by"} {:kind "resolver-of", :label "Resolver in"} {:kind "slot-of", :label "Slot type in"} {:kind "binding-of", :label "Type override in"} {:kind "base-of", :label "Narrowed by"} {:kind "element-of", :label "List element of"} {:kind "return-of", :label "Return type of"} {:kind "union-branch", :label "Union branch of"} {:kind "variant-branch", :label "Variant branch of"} {:kind "fn-type-arg-or-return", :label "Fn-type mention in"} {:kind "other", :label "Mentioned in"}]}}}
        {:name :_usages-group-nodes, :parent :map, :args {:func :_usage-group, :coll :_usage-groups}}
        {:name :_usages-count-node, :parent :hiccup, :args {:tag "span", :attrs {:value {:class "gd-insp-usages-count"}}, :children [:_usages-display-count]}}
        {:name :_usages-heading, :parent :hiccup, :args {:tag "div", :attrs {:value {:class "gd-insp-usages-head"}}, :children ["Used by" :_usages-count-node]}}
@@ -227,8 +227,26 @@
        {:name :_usages-truncation-text, :parent :str, :args {:parts ["Showing the first " :_usages-raw-count " of " :_usages-display-count " usages."]}}
        {:name :_usages-truncation-node, :parent :hiccup, :args {:tag "div", :attrs {:value {:class "gd-insp-usage-more"}}, :children [:_usages-truncation-text]}}
        {:name :_usages-truncation, :parent :if, :args {:test :_usages-truncated, :then :_usages-truncation-node, :else nil}}
-       {:name :_usages-root-attrs, :parent :zipmap, :args {:keys [{:value :class} {:value :hidden}], :vals ["gd-insp-usages" :_usages-none]}}
-       {:name :_usages-tree, :parent :hiccup, :args {:tag "div", :attrs :_usages-root-attrs, :children [:_usages-heading :_usages-filter :_usages-truncation :_usages-group-nodes]}}
+       {:name :_reachability :parent :get :args {:coll :_usages-payload :key {:value :reachability} :default {:value {:state "unknown" :path []}}} :return-type :_inspector-reachability}
+       {:name :_reach-state :parent :get :args {:coll :_reachability :key {:value :state} :default {:value "unknown"}}}
+       {:name :_reach-path :parent :get :args {:coll :_reachability :key {:value :path} :default {:value []}} :return-type :_inspector-usage-rows}
+       {:name :_reach-is-reachable :parent :equal? :args {:a :_reach-state :b "reachable"}}
+       {:name :_reach-is-unreachable :parent :equal? :args {:a :_reach-state :b "unreachable"}}
+       {:name :_reach-path-count :parent :count :args {:coll :_reach-path}}
+       {:name :_reach-no-path :parent :equal? :args {:a :_reach-path-count :b 0}}
+       {:name :_reach-label-unreachable :parent :if :args {:test :_reach-is-unreachable :then "No path from visible roots" :else "Reachability unknown"}}
+       {:name :_reach-label :parent :if :args {:test :_reach-is-reachable :then "Reachable from a root" :else :_reach-label-unreachable}}
+       {:name :_reach-label-node :parent :hiccup :args {:tag "div" :attrs {:value {:class "gd-insp-reach-label"}} :children [:_reach-label]}}
+       {:name :_reach-step-name :parent :get :args {:coll {:as :item :type :_inspector-usage-row} :key {:value :fn-name} :default {:value "(anonymous)"}}}
+       {:name :_reach-step-id :parent :get :args {:coll {:as :item :type :_inspector-usage-row} :key {:value :fn-id} :default {:value ""}}}
+       {:name :_reach-step-attrs :parent :zipmap :args {:keys [{:value :type} {:value :class} {:value :data-usage-id} {:value :key}] :vals ["button" "gd-insp-path-step" :_reach-step-id :_reach-step-id]}}
+       {:name :_reach-step :parent :hiccup :args {:tag "button" :attrs :_reach-step-attrs :children [:_reach-step-name]} :lambda-params [:item]}
+       {:name :_reach-steps :parent :map :args {:func :_reach-step :coll :_reach-path}}
+       {:name :_reach-path-node :parent :hiccup :args {:tag "div" :attrs {:value {:class "gd-insp-path" :aria-label "Path from root"}} :children [:_reach-steps]}}
+       {:name :_reach-visible-path :parent :if :args {:test :_reach-no-path :then nil :else :_reach-path-node}}
+       {:name :_reach-section :parent :hiccup :args {:tag "div" :attrs {:value {:class "gd-insp-reachability"}} :children [:_reach-label-node :_reach-visible-path]}}
+       {:name :_usages-root-attrs, :parent :zipmap, :args {:keys [{:value :class} {:value :hidden}], :vals ["gd-insp-usages" false]}}
+       {:name :_usages-tree, :parent :hiccup, :args {:tag "div", :attrs :_usages-root-attrs, :children [:_reach-section :_usages-heading :_usages-filter :_usages-truncation :_usages-group-nodes]}}
        {:name :_usages-is-filter, :parent :equal?, :args {:a :_inspector-event-kind, :b "filter"}}
        {:name :_usages-is-navigation, :parent :equal?, :args {:a :_inspector-event-kind, :b "navigate"}}
        {:name :_usages-is-escape, :parent :equal?, :args {:a :_inspector-event-key, :b "Escape"}}
@@ -248,7 +266,13 @@
        {:name :_usages-update, :parent :zipmap, :args {:keys [{:value :state} {:value :requests}], :vals [:_usages-next-state :_usages-requests]}, :return-type :_inspector-usages-transition}
        {:name :_usages-handled, :parent :get, :args {:coll {:as :state :type :_inspector-usages-state}, :key {:value :handled}, :default {:value false}}}
        {:name :_usages-styles, :parent :list, :args {:items [{:value {:selector "& .gd-insp-usages", :declarations {"margin-top" "18px"}}} {:value {:selector "& .gd-insp-usages-head", :declarations {"gap" "6px", "text-transform" "uppercase", "align-items" "baseline", "margin-bottom" "4px", "font-weight" "600", "font-size" "0.6875rem", "letter-spacing" "0.06em", "display" "flex", "color" "var(--gd-ink-3)"}}} {:value {:selector "& .gd-insp-usages-count", :declarations {"font-weight" "400", "color" "var(--gd-ink-3)"}}} {:value {:selector "& .gd-insp-usage-filter", :declarations {"width" "100%", "font-family" "var(--gd-mono)", "margin" "4px 0 2px", "border" "1px solid var(--card-border)", "padding" "3px 6px", "font-size" "0.75rem", "background-color" "var(--card-bg)", "border-radius" "6px", "color" "var(--fg)"}}} {:value {:selector "& .gd-insp-usage-filter:focus-visible", :declarations {"outline" "2px solid var(--accent)" "outline-offset" "1px"}}} {:value {:selector "& .gd-insp-usage-glabel", :declarations {"margin" "8px 0 2px", "font-size" "0.6875rem", "color" "var(--gd-ink-3)"}}} {:value {:selector "& .gd-insp-usage-list", :declarations {"display" "flex", "flex-direction" "column"}}} {:value {:selector "& .gd-insp-usage-row", :declarations {"gap" "6px", "margin" "0", "border" "none", "align-items" "baseline", "padding" "3px 4px", "text-align" "left", "cursor" "pointer", "font-size" "0.75rem", "background-color" "transparent", "border-radius" "4px", "display" "flex"}}} {:value {:selector "& .gd-insp-usage-row[hidden]", :declarations {"display" "none"}}} {:value {:selector "& .gd-insp-usage-row:hover", :declarations {"background-color" "var(--hover-bg)"}}} {:value {:selector "& .gd-insp-usage-row:focus-visible", :declarations {"outline" "2px solid var(--accent)" "outline-offset" "1px"}}} {:value {:selector "& .gd-insp-usage-name", :declarations {"font-family" "var(--gd-mono)", "font-weight" "600", "color" "var(--gd-flow-ink)", "overflow-wrap" "anywhere"}}} {:value {:selector "& .gd-insp-usage-slot", :declarations {"font-family" "var(--gd-mono)", "color" "var(--gd-ink-3)"}}} {:value {:selector "& .gd-insp-usage-ns", :declarations {"margin-left" "auto", "padding-left" "8px", "font-size" "0.6875rem", "color" "var(--gd-ink-3)", "overflow" "hidden", "text-overflow" "ellipsis", "white-space" "nowrap", "max-width" "45%"}}} {:value {:selector "& .gd-insp-usage-more", :declarations {"padding" "3px 4px", "font-size" "0.6875rem", "font-style" "italic", "color" "var(--gd-ink-3)"}}}]}}
-       {:name :_usages-render, :parent :_inspector-view-fields, :args {:vals [:_usages-tree :_usages-styles "overview" false :_usages-handled]}}
+       {:name :_reach-styles :parent :list :args {:items
+                                                  [{:value {:selector "& .gd-insp-reachability" :declarations {"margin-bottom" "10px" "font-size" "0.75rem" "color" "var(--gd-ink-3)"}}}
+                                                   {:value {:selector "& .gd-insp-path" :declarations {"display" "flex" "flex-wrap" "wrap" "gap" "4px" "margin-top" "4px"}}}
+                                                   {:value {:selector "& .gd-insp-path-step" :declarations {"border" "1px solid var(--card-border)" "border-radius" "4px" "background-color" "var(--card-bg)" "color" "var(--fg)" "cursor" "pointer" "font-family" "var(--gd-mono)" "font-size" "0.6875rem" "padding" "2px 4px"}}}
+                                                   {:value {:selector "& .gd-insp-path-step:focus-visible" :declarations {"outline" "2px solid var(--accent)" "outline-offset" "1px"}}}]}}
+       {:name :_all-usages-styles :parent :concat :args {:colls [:_usages-styles :_reach-styles]}}
+       {:name :_usages-render, :parent :_inspector-view-fields, :args {:vals [:_usages-tree :_all-usages-styles "overview" false :_usages-handled]}}
        {:name :_usages-view :parent :_usages-render :args {:groups :_usages-by-kind}}
        {:name :inspector-initial, :parent :if, :args {:test :_inspector-usages-surface, :then :_usages-initial, :else :_inspector-chrome-initial}, :return-type :_inspector-state, :return-type-wide? true}
        {:name :inspector-update, :parent :if, :args {:test :_inspector-usages-surface, :then :_usages-update, :else :_inspector-chrome-update} :return-type :_inspector-transition}

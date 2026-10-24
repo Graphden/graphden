@@ -4,6 +4,7 @@
     [clojure.string :as str]
     [graphden.crud.entities.list :as entity-list]
     [graphden.crud.fn-execution.errors :as execution-errors]
+    [graphden.crud.graph-refs :as refs]
     [graphden.crud.secret-shape :as secret-shape]
     [graphden.crud.types-api :as types-api]
     [graphden.executor.compile.bindings :as bindings]
@@ -17,26 +18,15 @@
 
 
 (defn- reverse-ref-adjacency
-  "target-fn-id → [user-fn-ids] over EVERY composition edge: parent-ids,
-   binding ref/resolver, list-item refs (through their owner binding).
-   One pass over the base rows — the `uses:` rule BFSes this map."
-  [{:keys [fns bindings list-items]}]
-  (let [owner-of-binding (into {} (map (juxt :id :fn-id)) bindings)
-        add (fn [m target user]
-              (if (and target user)
-                (update m target (fnil conj []) user)
-                m))]
-    (as-> {} m
-          (reduce (fn [m f] (reduce #(add %1 %2 (:id f)) m (:parent-ids f))) m fns)
-          (reduce (fn [m b]
-                    (-> m
-                        (add (:ref-fn-id b) (:fn-id b))
-                        (add (:resolver-fn-id b) (:fn-id b))))
-                  m bindings)
-          (reduce (fn [m li]
-                    (add m (:ref-fn-id li)
-                         (get owner-of-binding (:binding-id li))))
-                  m list-items))))
+  "target-fn-id → [user-fn-ids] for the composition kinds used by `uses:`.
+   The edge source is shared with Used-by and subtree traversal."
+  [graph]
+  (reduce (fn [index {:keys [target-id fn-id kind]}]
+            (if (#{:parent-of :ref-of :resolver-of} kind)
+              (update index target-id (fnil conj []) fn-id)
+              index))
+          {}
+          (refs/edges graph)))
 
 
 (defn- transitive-user-ids

@@ -6,6 +6,7 @@
     [clojure.edn :as edn]
     [clojure.java.io :as io]
     [clojure.string :as str]
+    [graphden.editor.component-config :as config]
     [graphden.editor.root-legacy :as legacy]
     [graphden.packages.rebase :as rebase]))
 
@@ -21,7 +22,9 @@
    Missing roles inherit the shared root."
   [configuration]
   (when-not (map? configuration) (refuse!))
-  (when-not (every? (set (keys legacy/components)) (keys configuration))
+  ;; The ordinary configuration also contains components outside this root
+  ;; bridge. Keep their checked selection intact for the later migration.
+  (when-not (every? (set (keys config/component-contracts)) (keys configuration))
     (refuse!))
   (into (sorted-map)
         (keep (fn [[component {:keys [roles]}]]

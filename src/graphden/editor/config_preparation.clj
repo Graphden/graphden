@@ -5,7 +5,7 @@
   (:require
     [graphden.crud.entities.invalidation :as invalidation]
     [graphden.crud.request :as request]
-    [graphden.editor.component-bundle :as bundle]
+    [graphden.editor.cohort-preparation :as cohort]
     [graphden.editor.component-config :as config]
     [graphden.editor.components :as components]
     [graphden.editor.config-resolution :as resolution]
@@ -13,20 +13,15 @@
     [graphden.editor.preference-write :as preferences]
     [graphden.executor.browser-snapshot :as snapshot]
     [graphden.executor.browser-source :as source]
-    [graphden.executor.composition.deps :as deps]
     [graphden.executor.context :as context]
-    [graphden.executor.registry.core :as registry]
     [graphden.graph.metadata :as metadata]
     [graphden.graph.personal-home :as personal-home]
-    [graphden.packages.rebase :as rebase]
-    [graphden.storage.expected-source :as expected-source]
     [graphden.storage.graph-writer :as writer]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.tx :as tx]
     [graphden.system.branch-router.epoch :as epoch]
     [graphden.system.branch-router.recheck :as recheck]
     [graphden.tenancy.context :as tenancy]
-    [graphden.types.check :as check]
     [graphden.versioning.storage.core :as versioned]
     [graphden.versioning.storage.resolution :as branch-resolution]))
 
@@ -59,52 +54,16 @@
    (prepared-records storage home selected authorize! policy (random-uuid)))
   ([storage home selected authorize! policy nonce]
    (when-not (uuid? nonce) (refuse! :invalid-request))
-   ;; The supported writer stack has VersionedStorage outermost. An unknown
-   ;; decorator around it cannot prove raw identity absence: its resolved
-   ;; reads may hide tombstones. Refuse before any source reads or writes.
+   ;; Reject an unknown storage wrapper before parsing or source access.
    (when-not (versioned/versioned-storage? storage) (refuse! :unsupported-storage))
    (let [parser-root (str "editor-config." nonce)
          parsed (if (:component selected)
                   (templates/personalize parser-root (:component selected) (:roles selected) (:prior-id selected))
-                  (templates/parse parser-root (:id selected) (:record? selected) (:prior-id selected)))
-         records (mapv #(cond-> %
-                          (= :fn (:kind %)) (assoc :namespace-id (:id home))
-                          (and (= (:root-id parsed) (:id %)) (contains? selected :description))
-                          (assoc :description (:description selected))) (:records parsed))
-         expected (or (expected-source/canonical-graph storage (bundle/graph records))
-                      (refuse! :expected-source-unavailable))
-         external (source/collect-manifests storage (bundle/external-identities records) authorize!)
-         captured {:graph external :namespaces (source/collect-namespaces storage external)}]
-     ;; Shipped parse declarations are not authority. Check their ACTUAL
-     ;; installed source and original classifications before any CREATE.
-     (snapshot/validate-source! captured resolution/defaults-id policy)
-     (config/configuration (merge-with into external expected) (:root-id parsed))
-     ;; Type-check the exact generated compositions before writing them, in a
-     ;; private registry. Retained aliases resolve to the authenticated UUID,
-     ;; including anonymous roots. This grants nothing and publishes no cache
-     ;; certificate for uncommitted rows.
-     (let [references (:reference-identities parsed)
-           definitions (mapv #(rebase/rewrite-references
-                                % (fn [reference]
-                                    (or (get references reference)
-                                        (when (and (keyword? reference) (nil? (namespace reference)))
-                                          (some (fn [[reference-name id]]
-                                                  (when (= (name reference-name) (name reference)) id)) references))
-                                        reference))) (:definitions parsed))]
-       (binding [registry/*rich-types-override* (atom @(registry/active-rich-types-atom))]
-         (check/check-all-defs! (deps/topological-sort definitions))))
-     (doseq [row (filter #(= :fn (:kind %)) records)]
-       (writer/assert-creation-authorized! storage row (versioned/current-branch-id storage)))
-     ;; Fresh preview identities must stay fresh even after an earlier APPLY
-     ;; was undone. Resolved absence hides tombstones; identity rows do not.
-     ;; Keep any remaining decorator around the unwrapped versioning layer.
-     (let [base (versioned/unwrap storage)]
-       (when (some (fn [[entity rows]]
-                     (seq (sp/read-entities base entity (mapv :id rows))))
-                   (group-by :kind records))
-         (refuse! :identity-collision)))
-     {:records records :id (:root-id parsed)
-      :snapshot {:graph (merge-with into external expected)}})))
+                  (templates/parse parser-root (:id selected) (:record? selected) (:prior-id selected)))]
+     (cohort/prepare storage home parsed
+                     {:authorize! authorize! :policy policy :source-root resolution/defaults-id
+                      :validate-result! (fn [graph root-id] (config/configuration graph root-id))
+                      :root-metadata selected}))))
 
 
 (defn create-records!

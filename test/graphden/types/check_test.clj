@@ -140,6 +140,19 @@
                                      :args {:a 5 :b 10}})))))
 
 
+(deftest uuid-parent-runs-the-same-type-check-as-a-named-parent
+  (let [parent-id (random-uuid)]
+    (registry/record-rich-types! parent-id :uuid-parent
+                                 {:args {:a :int :b :int} :return-type :int})
+    (check/check-fn-def! {:name :uuid-parent-child :parent parent-id
+                          :args {:a 5 :b 10}})
+    (is (= :int (:return (registry/rich-type-of :uuid-parent-child))))
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"(?i)type-check failed"
+          (check/check-fn-def! {:name :uuid-parent-invalid :parent parent-id
+                                :args {:a "bad" :b 10}})))))
+
+
 (deftest ensure-type-narrows-from-a-literal-tag
   (testing "the checked runtime boundary also narrows its static result"
     (check/check-fn-def! {:name :checked-int

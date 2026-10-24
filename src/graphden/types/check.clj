@@ -772,7 +772,7 @@
   [{:keys [parent] parent-vec :parents}]
   (let [parent-list (cond
                       (seq parent-vec) (vec parent-vec)
-                      (and parent (keyword? parent)) [parent]
+                      (and parent (or (keyword? parent) (uuid? parent))) [parent]
                       :else nil)]
     (when-let [primary (first parent-list)]
       (when-let [info (merge-mi-parent-infos parent-list)]

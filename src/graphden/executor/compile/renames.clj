@@ -793,11 +793,12 @@
      @result)))
 
 
-(defn- find-slot-id-in-tree
+(defn find-slot-id-in-tree
   "Find the slot-id corresponding to free-arg name `ext-name` reachable
    from `fn-id` via inheritance + non-HOF refs + seq items. Returns the
    slot-id or nil. `:is-fn` refs are a boundary — slots inside a HOF
-   lambda's body don't bubble up as F-tree slots."
+   lambda's body don't bubble up as F-tree slots. The editor's explicit
+   root migration uses this same compiler resolution before writing a bind."
   [fn-id ext-name {:keys [slot-by-fn-name] :as lookups}]
   (let [visited (atom #{})]
     (letfn [(walk

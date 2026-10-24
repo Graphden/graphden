@@ -7,6 +7,7 @@
     [graphden.editor.config-preparation :as preparation]
     [graphden.editor.config-receipts :as receipts]
     [graphden.editor.config-undo :as undo]
+    [graphden.editor.root-migration :as root-migration]
     [graphden.editor.root-plan :as root-plan]
     [graphden.executor.browser-server :as server]
     [graphden.executor.compile-runtime :as runtime]
@@ -58,6 +59,18 @@
              (= :personal-home-unavailable (:reason (ex-data error))))
         (assoc :code "personal-home-unavailable"
                :reason "Your deployment has no available personal graph namespace.")))))
+
+
+(defbase _editor-root-migration-preview
+  [input]
+  (runtime/record-effect! :db)
+  (configuration-result root-migration/preview! ctx input))
+
+
+(defbase _editor-root-migration-apply
+  [input]
+  (runtime/record-effect! :db)
+  (configuration-result root-migration/apply! ctx input))
 
 
 (defbase _editor-configuration-prepare
@@ -120,6 +133,8 @@
    :_editor-configuration-plan {:impl _editor-configuration-plan :taint-propagate? true}
    ;; No caller values enter this source-authorized, server-selected export.
    :_editor-root-plan _editor-root-plan
+   :_editor-root-migration-preview {:impl _editor-root-migration-preview :taint-propagate? true}
+   :_editor-root-migration-apply {:impl _editor-root-migration-apply :taint-propagate? true}
    :_editor-server-call {:impl _editor-server-call :taint-propagate? true}
    :_editor-configuration-prepare {:impl _editor-configuration-prepare :taint-propagate? true}
    :_editor-configuration-preview {:impl _editor-configuration-preview :taint-propagate? true}

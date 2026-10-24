@@ -630,13 +630,13 @@ Explicit profile infrastructure setup follows the configured personal namespace 
 :PROPERTIES:
 :CUSTOM_ID: editor/apply-proposal!
 :FILE: src/graphden/editor/config_activation.clj
-:LINE: 335
+:LINE: 338
 :MINS: 1.8
 :END:
 
 Rebuilds the exact scoped preview and source expectations before writes. Small ordinary role children inherit selected definitions; the editor root merges defaults, retained prior and new entries. Replacing editor privately renames the old root in this branch and creates a new UUID, never rewriting its shared identity-plane parent junctions. All new IDs and original restore witnesses are staged before APPLY; source, policy or CAS changes refuse the transaction.
 
-- source :: [[file:../../../src/graphden/editor/config_activation.clj::(defn apply-proposal!][src/graphden/editor/config_activation.clj:335]]
+- source :: [[file:../../../src/graphden/editor/config_activation.clj::(defn apply-proposal!][src/graphden/editor/config_activation.clj:338]]
 
 * 48. cleanup-preview!
 :PROPERTIES:

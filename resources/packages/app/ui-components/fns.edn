@@ -9,6 +9,22 @@
    :args {:envelope :_editor-root-plan}}
   {:name :api-editor-root-plan :parent :get-auth-required
    :args {:path "/ui/root/plan" :handler :_editor-root-plan-handler}}
+  {:name :_editor-root-migration-preview
+   :description "Read-only proposal to preserve the checked ordinary component selection by reference in a new personal HOF root."
+   :args {:input {:type :jsonb}} :return-type :keyword-map :effects #{:db}}
+  {:name :_editor-root-migration-preview-handler :parent :json-envelope-response
+   :lambda-params [:request]
+   :args {:envelope {:parent :_editor-root-migration-preview :args {:input :parse-json-body}}}}
+  {:name :api-editor-root-migration-preview :parent :app.routes.auth/post
+   :args {:path "/ui/root/migration/preview" :handler :_editor-root-migration-preview-handler}}
+  {:name :_editor-root-migration-apply
+   :description "Recheck a root migration proposal under current source and ACL, then atomically create only the new personal HOF cohort."
+   :args {:input {:type :jsonb}} :return-type :keyword-map :effects #{:db}}
+  {:name :_editor-root-migration-apply-handler :parent :json-envelope-response
+   :lambda-params [:request]
+   :args {:envelope {:parent :_editor-root-migration-apply :args {:input :parse-json-body}}}}
+  {:name :api-editor-root-migration-apply :parent :app.routes.auth/post
+   :args {:path "/ui/root/migration/apply" :handler :_editor-root-migration-apply-handler}}
   {:name :_editor-server-call
    :description "Reauthorize an opaque server descriptor and execute its read-only typed target. No caller-provided target or captures are accepted."
    :args {:request {:type :ring-request-shape} :input {:type :jsonb}}

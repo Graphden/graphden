@@ -54,6 +54,12 @@
            (get-in empty-plan [:definitions 0 :args :func :ref])))))
 
 
+(deftest known-components-outside-the-root-bridge-stay-with-the-ordinary-configuration
+  (let [selected {:inspector {:view (random-uuid)}
+                  :tutorial-catalog {:view (legacy/default-role-id :tutorial-catalog :view)}}]
+    (is (= {} (:overrides (templates/definitions "migration-other" selected))))))
+
+
 (deftest unsupported-legacy-roles-refuse-before-building-a-root
   (is (= :invalid-configuration
          (refusal-reason {:fn-picker {:view "not-a-uuid"}})))

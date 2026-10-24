@@ -984,6 +984,8 @@
                   :api-ui-components-plan
                   :api-editor-configuration-plan
                   :api-editor-root-plan
+                  :api-editor-root-migration-preview
+                  :api-editor-root-migration-apply
                   :api-editor-server-call
                   :api-editor-configuration-prepare
                   :api-editor-configuration-preview

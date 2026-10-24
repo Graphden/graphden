@@ -267,7 +267,9 @@
         (assoc receipt :committed true)))))
 
 
-(defn- call-with-current-configuration
+(defn call-with-current-configuration
+  "Freeze source policy and epoch, then run an editor configuration operation
+   under the graph writer and current owner's preference lock."
   [ctx operation]
   (let [storage (request/require-storage ctx)
         context-epoch (context/invalidation-epoch ctx)
@@ -286,7 +288,8 @@
                                   result))))))))
 
 
-(defn- wire-value
+(defn wire-value
+  "Encode the exact JSON value that a client can send back as a proposal."
   [value]
   ;; Match the actual API encoding, including keyword enum values. Converting
   ;; UUIDs alone would produce a Clojure-only request the JSON parser rejects.

@@ -141,9 +141,9 @@
     (is (some #{"graphden.types.taint-propagate-guard-test"} (first layers)))
     (is (= (count (mapcat identity layers))
            (count (distinct (mapcat identity layers))))))
-  (is (not (some #{"graphden.types.taint-propagate-guard-test"}
-                 (priority/unit-first
-                   #{"resources/packages/core/hof/fns.edn"})))))
+  (is (not-any? #{"graphden.types.taint-propagate-guard-test"}
+                (priority/unit-first
+                  #{"resources/packages/core/hof/fns.edn"}))))
 
 
 (deftest runtime-order-preserves-full-roster-once

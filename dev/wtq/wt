@@ -1454,8 +1454,11 @@ gate_suites() {
      || [ "$NEED_FLEET" = 1 ] || [ "$NEED_VISUAL" = 1 ]; then
     stages+=(build)
   fi
-  [ "$NEED_E2E" = 1 ] && stages+=(e2e)
+  # Visual and browser E2E boot separate isolated Testcontainers stacks from
+  # the same verified image. Run the short visual suite first so a changed
+  # screenshot cannot fail only after the long browser roster.
   [ "$NEED_VISUAL" = 1 ] && stages+=(visual)
+  [ "$NEED_E2E" = 1 ] && stages+=(e2e)
   [ "$NEED_INTEGRATION" = 1 ] && stages+=(integration)
   [ "$NEED_FLEET" = 1 ] && stages+=(fleet)
 

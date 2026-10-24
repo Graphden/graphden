@@ -123,7 +123,7 @@ You were started in one of two ways:
    the run, not a hang. It
    may land you in a **merge train**: every branch that is ready at the same
    time is merged on top of the latest develop together and gated ONCE
-   (CI → build image → browser → visual → integration → fleet → fast-forward
+   (CI → build image → visual → browser → integration → fleet → fast-forward
    develop → advance the demo instance — only if it was running when the gate started; a `--deploy`
    landing with the demo down leaves `.git/wtq/demo-needs-reset`, which the
    next `bb instance-up` honours). You still get **your own** verdict and exit

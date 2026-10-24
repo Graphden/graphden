@@ -94,7 +94,7 @@ run_case() {
 
 CASE_BUILD=1 CASE_INTEGRATION=0 CASE_E2E=1 CASE_VISUAL=1
 run_case
-assert_events 'expect,ci,verify,uber,build,image,e2e,visual'
+assert_events 'expect,ci,verify,uber,build,image,visual,e2e'
 [ "$built_candidate" = 1 ]
 
 CASE_INTEGRATION=1 CASE_E2E=1 CASE_VISUAL=0
@@ -122,7 +122,7 @@ if gate_suites "$TEST_DIR" 0 0 0 >/dev/null; then
   echo 'failed visual gate returned success' >&2
   exit 1
 fi
-assert_events 'expect,ci,verify,uber,build,image,e2e,visual'
+assert_events 'expect,ci,verify,uber,build,image,visual'
 [ "$built_candidate" = 0 ]
 unset FAIL_VISUAL
 
@@ -178,12 +178,12 @@ CASE_BUILD=1 CASE_INTEGRATION=1 CASE_E2E=1 CASE_VISUAL=1 CASE_FLEET=1
 for WTQ_FIRST_STAGE in ci build e2e visual integration fleet; do
   run_case
   case "$WTQ_FIRST_STAGE" in
-    ci) assert_events 'expect,ci,verify,uber,build,image,e2e,visual,integration,fleet' ;;
-    build) assert_events 'expect,ci,verify,uber,build,image,e2e,visual,integration,fleet' ;;
-    e2e) assert_events 'expect,ci,verify,uber,build,image,e2e,visual,integration,fleet' ;;
-    visual) assert_events 'expect,ci,verify,uber,build,image,visual,integration,fleet,headroom,e2e' ;;
-    integration) assert_events 'expect,ci,verify,uber,build,image,integration,fleet,headroom,e2e,visual' ;;
-    fleet) assert_events 'expect,ci,verify,uber,build,image,fleet,headroom,e2e,visual,integration' ;;
+    ci) assert_events 'expect,ci,verify,uber,build,image,visual,e2e,integration,fleet' ;;
+    build) assert_events 'expect,ci,verify,uber,build,image,visual,e2e,integration,fleet' ;;
+    e2e) assert_events 'expect,ci,verify,uber,build,image,e2e,integration,fleet,headroom,visual' ;;
+    visual) assert_events 'expect,ci,verify,uber,build,image,visual,e2e,integration,fleet' ;;
+    integration) assert_events 'expect,ci,verify,uber,build,image,integration,fleet,headroom,visual,e2e' ;;
+    fleet) assert_events 'expect,ci,verify,uber,build,image,fleet,headroom,visual,e2e,integration' ;;
   esac
   [ "$built_candidate" = 1 ]
 done
@@ -241,19 +241,19 @@ WTQ_REPORT_TS=first-red
 FAIL_VISUAL=1
 : > "$TEST_LOG"
 if gate_suites "$TEST_DIR" 0 0 0 >/dev/null; then exit 1; fi
-assert_events 'expect,ci,verify,uber,build,image,e2e,visual'
+assert_events 'expect,ci,verify,uber,build,image,visual'
 unset FAIL_VISUAL
 WTQ_RESUME_FROM="$LOG_DIR/_train-first-red"
 WTQ_REPORT_TS=second-red
 FAIL_INTEGRATION=1
 : > "$TEST_LOG"
 if gate_suites "$TEST_DIR" 0 0 0 >/dev/null; then exit 1; fi
-assert_events 'expect,ci,verify,uber,build,image,visual,integration'
+assert_events 'expect,ci,verify,uber,build,image,visual,e2e,integration'
 unset FAIL_INTEGRATION
 WTQ_RESUME_FROM="$LOG_DIR/_train-second-red"
 WTQ_REPORT_TS=third-green
 run_case
-assert_events 'expect,ci,verify,uber,build,image,integration,fleet,headroom,e2e,visual'
+assert_events 'expect,ci,verify,uber,build,image,integration,fleet,headroom,visual,e2e'
 unset WTQ_RESUME_FROM
 
 # R1 browser b fails; R2 fails build; R3 must retain b,c,a without manual hints.

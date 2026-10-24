@@ -47,7 +47,7 @@
                   report/write-atomic! (fn [path value] (swap! receipts conj [path value]))]
       (is (thrown? Exception (fast/run-checks! "base"))))
     (let [[_ receipt] (last @receipts)]
-      (is (= true (:complete receipt)))
+      (is (true? (:complete receipt)))
       (is (= 1 (:exit receipt)))
       (is (= 7 (get-in receipt [:commands 0 :exit])))
       (is (= ["fixture" "red"] (get-in receipt [:commands 0 :argv]))))))

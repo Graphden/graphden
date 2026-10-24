@@ -262,7 +262,7 @@
                   script-path (serialize-script artifact)}]
     (if (seq args)
       (let [stale (into [] (keep (fn [[path content]]
-                                   (when (not= content (when (.exists (io/file path)) (slurp path))) path))) expected)]
+                                   (when (not= content (when (java.io.File/.exists (io/file path)) (slurp path))) path))) expected)]
         (when (seq stale)
           (throw (ex-info "Builtin plans are stale; regenerate before WTQ"
                           {:paths stale :command "clojure -M:dev tools/ui_preview/generate_builtin_plans.clj"})))

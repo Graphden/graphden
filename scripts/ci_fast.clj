@@ -107,7 +107,7 @@
         native-kondo? (and (fs/which "clj-kondo")
                            (= pinned (second (re-find #"v([0-9.]+)"
                                                       (:out (p/shell {:out :string} "clj-kondo" "--version"))))))
-        commands (commands paths (boolean (fs/which "cljstyle")) native-kondo? (boolean (fs/which "shellcheck")))
+        planned-commands (commands paths (boolean (fs/which "cljstyle")) native-kondo? (boolean (fs/which "shellcheck")))
         {:keys [files reason]} (staged/affected :runtime (set changed) (staged/roster :runtime))
         sha (str/trim (:out (p/shell {:out :string} "git" "rev-parse" "HEAD")))
         started (System/currentTimeMillis)
@@ -119,33 +119,33 @@
                      :started-at-ms started :commands []})
         save! #(do (report/write-atomic! path @state)
                    (report/write-atomic! (str directory "/latest.edn") @state))
-        run! (fn [command cwd]
-               (let [start (System/currentTimeMillis)
-                     item {:argv command :cwd cwd :started-at-ms start}]
-                 (println "candidate preflight:" (str/join " " command)
-                          (if cwd (str "in " cwd) ""))
-                 (swap! state update :commands conj item)
-                 (save!)
-                 (try
-                   (if cwd
-                     (apply p/shell {:dir cwd} command)
-                     (run-command! command))
-                   (swap! state update :commands update (dec (count (:commands @state)))
-                          assoc :exit 0 :duration-ms (- (System/currentTimeMillis) start))
-                   (catch Exception error
-                     (swap! state update :commands update (dec (count (:commands @state)))
-                            assoc :exit (or (:exit (ex-data error)) 1)
-                            :duration-ms (- (System/currentTimeMillis) start))
-                     (save!)
-                     (throw error)))
-                 (save!)))]
+        run-item! (fn [command cwd]
+                    (let [start (System/currentTimeMillis)
+                          item {:argv command :cwd cwd :started-at-ms start}]
+                      (println "candidate preflight:" (str/join " " command)
+                               (if cwd (str "in " cwd) ""))
+                      (swap! state update :commands conj item)
+                      (save!)
+                      (try
+                        (if cwd
+                          (apply p/shell {:dir cwd} command)
+                          (run-command! command))
+                        (swap! state update :commands update (dec (count (:commands @state)))
+                               assoc :exit 0 :duration-ms (- (System/currentTimeMillis) start))
+                        (catch Exception error
+                          (swap! state update :commands update (dec (count (:commands @state)))
+                                 assoc :exit (or (:exit (ex-data error)) 1)
+                                 :duration-ms (- (System/currentTimeMillis) start))
+                          (save!)
+                          (throw error)))
+                      (save!)))]
     (fs/create-dirs directory)
     (save!)
     (try
-      (doseq [command commands] (run! command nil))
+      (doseq [command planned-commands] (run-item! command nil))
       (println "runtime preflight:" (count files) "file(s), reason" (name reason))
       (doseq [runtime-path files]
-        (run! ["node" (str (fs/file-name runtime-path))] "tools/runtime-test"))
+        (run-item! ["node" (str (fs/file-name runtime-path))] "tools/runtime-test"))
       (swap! state assoc :complete true :exit 0 :finished-at-ms (System/currentTimeMillis))
       (save!)
       (println "candidate preflight: PASS, receipt" path)
@@ -161,16 +161,17 @@
   (let [path "target/preflight/latest.edn"]
     (if-not (fs/exists? path)
       (println "candidate preflight: no receipt")
-      (let [{:keys [sha complete exit commands started-at-ms finished-at-ms pid]} (edn/read-string (slurp path))
-            passed (count (filter #(= 0 (:exit %)) commands))
-            current (last (filter #(nil? (:exit %)) commands))
+      (let [{:keys [sha complete exit started-at-ms finished-at-ms pid] :as receipt} (edn/read-string (slurp path))
+            items (:commands receipt)
+            passed (count (filter #(and (some? (:exit %)) (zero? (:exit %))) items))
+            current (last (filter #(nil? (:exit %)) items))
             alive? (and pid (some-> (java.lang.ProcessHandle/of pid) (.isPresent)))]
         (println "candidate preflight:" (cond
                                           (and (not complete) alive?) "RUNNING"
                                           (not complete) "INTERRUPTED"
                                           (zero? exit) "PASS"
                                           :else "FAIL")
-                 "sha" sha "checks" passed "/" (count commands)
+                 "sha" sha "checks" passed "/" (count items)
                  "started" started-at-ms "finished" finished-at-ms)
         (when current (println "current:" (:argv current)))
         (println "receipt:" path)))))

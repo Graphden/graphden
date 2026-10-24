@@ -150,7 +150,6 @@
        {:name :_usage-kind-key, :parent :_usage-kind, :args {}, :lambda-params [:item]}
        {:name :_usages-by-kind, :parent :group-by, :args {:key-fn :_usage-kind-key, :coll :_usages-unique}}
        {:name :_usages-unique-count, :parent :count, :args {:coll :_usages-unique}}
-       {:name :_usages-none, :parent :equal?, :args {:a :_usages-unique-count, :b 0}}
        {:name :_usages-filter-sample, :parent :take, :args {:count 31, :coll :_usages-unique}}
        {:name :_usages-filter-count, :parent :count, :args {:coll :_usages-filter-sample}}
        {:name :_usages-show-filter, :parent :equal?, :args {:a :_usages-filter-count, :b 31}}

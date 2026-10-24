@@ -93,19 +93,49 @@
      :roster all :affected files :remainder rest-files}))
 
 
-(defn valid-affected-receipt?
-  [receipt plan toolchain]
+(defn- command
+  [kind paths]
+  (case kind
+    :biome (into ["npx" "--no-install" "biome" "check"] paths)
+    :runtime ["node" (str (fs/file-name (first paths)))]))
+
+
+(defn- command-cwd
+  [kind paths]
+  (when (= kind :runtime)
+    (str (fs/parent (first paths)))))
+
+
+(defn- expected-batches
+  [plan phase]
+  (let [paths (get plan phase)]
+    (if (= :biome (:kind plan))
+      (if (seq paths) [paths] [])
+      (mapv vector paths))))
+
+
+(defn- valid-phase-receipt?
+  [receipt plan phase toolchain]
   (and (= 1 (:schema receipt))
-       (= :affected (:phase receipt))
+       (= phase (:phase receipt))
        (true? (:complete receipt))
+       (number? (:exit receipt))
        (zero? (:exit receipt))
        (= plan (:plan receipt))
        (= toolchain (:toolchain receipt))
-       (= (if (= :biome (:kind plan))
-            (if (seq (:affected plan)) [(:affected plan)] [])
-            (mapv vector (:affected plan)))
-          (mapv :paths (:commands receipt)))
-       (every? #(zero? (:exit %)) (:commands receipt))))
+       (= (mapv (fn [paths]
+                  {:paths paths
+                   :argv (command (:kind plan) paths)
+                   :cwd (command-cwd (:kind plan) paths)})
+                (expected-batches plan phase))
+          (mapv #(select-keys % [:paths :argv :cwd]) (:commands receipt)))
+       (every? #(and (number? (:exit %)) (zero? (:exit %)))
+               (:commands receipt))))
+
+
+(defn valid-affected-receipt?
+  [receipt plan toolchain]
+  (valid-phase-receipt? receipt plan :affected toolchain))
 
 
 (defn- receipt-path
@@ -114,26 +144,22 @@
                 (:sha plan) (str (name (:kind plan)) "-" (name phase) ".edn"))))
 
 
-(defn- command
-  [kind paths]
-  (case kind
-    :biome (into ["npx" "--no-install" "biome" "check"] paths)
-    :runtime ["node" (str (fs/file-name (first paths)))]))
-
-
 (defn- invoke!
   [kind paths]
   (let [argv (command kind paths)
+        cwd (command-cwd kind paths)
         start (System/currentTimeMillis)
         result (apply p/shell (merge {:continue true}
-                                     (when (= kind :runtime) {:dir (str (fs/parent (first paths)))})) argv)]
-    {:paths paths :argv argv :started-at-ms start
+                                     (when cwd {:dir cwd})) argv)]
+    {:paths paths :argv argv :cwd cwd :started-at-ms start
      :duration-ms (- (System/currentTimeMillis) start) :exit (:exit result)}))
 
 
 (defn- toolchain
   [kind]
   {:node (str/trim (:out (p/shell {:out :string} "node" "--version")))
+   :env {:PATH (System/getenv "PATH")
+         :RUN_EDIT_TESTS (System/getenv "RUN_EDIT_TESTS")}
    :biome (when (= kind :biome)
             (str/trim (:out (p/shell {:out :string}
                                      "npx" "--no-install" "biome" "--version"))))})
@@ -150,7 +176,7 @@
                 (edn/read-string (slurp source)))]
     (when (and (= phase :remainder)
                (not (valid-affected-receipt? prior plan current-toolchain)))
-      (throw (ex-info "Affected stage missing, failed or for another candidate/roster"
+      (throw (ex-info "Affected stage missing, failed or for another candidate/roster/command/environment"
                       {:kind kind :receipt source})))
     (fs/create-dirs (fs/parent path))
     (let [state (atom {:schema 1 :complete false :exit nil :plan plan
@@ -172,6 +198,9 @@
             (throw (ex-info "Staged check failed" result)))))
       (swap! state assoc :complete true :exit 0 :finished-at-ms (System/currentTimeMillis))
       (when (= phase :remainder)
+        (when-not (valid-phase-receipt? @state plan :remainder current-toolchain)
+          (throw (ex-info "Remainder receipt does not prove expected commands"
+                          {:kind kind :receipt path})))
         (when-not (= (set (:roster plan))
                      (set (concat (mapcat :paths (:commands prior))
                                   (mapcat :paths (:commands @state)))))
@@ -187,9 +216,7 @@
         (not= phase (:phase receipt))
         (not= current-toolchain (:toolchain receipt))) :stale
     (not (:complete receipt)) (if (alive? (:pid receipt)) :running :interrupted)
-    (and (number? (:exit receipt)) (zero? (:exit receipt))
-         (= (set (get plan phase))
-            (set (mapcat :paths (:commands receipt))))) :passed
+    (valid-phase-receipt? receipt plan phase current-toolchain) :passed
     :else :failed))
 
 

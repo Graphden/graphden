@@ -43,10 +43,21 @@
                           "tools/runtime-test/tour-picker.test.js"]}
         good {:schema 1 :phase :affected :complete true :exit 0
               :plan plan :toolchain {:node "v22" :biome nil}
-              :commands [{:paths ["tools/runtime-test/popover.test.js"] :exit 0}]}]
+              :commands [{:paths ["tools/runtime-test/popover.test.js"]
+                          :argv ["node" "popover.test.js"]
+                          :cwd "tools/runtime-test" :exit 0}]}]
     (is (staged/valid-affected-receipt? good plan {:node "v22" :biome nil}))
     (is (not (staged/valid-affected-receipt? (assoc good :complete false) plan {:node "v22" :biome nil})))
     (is (not (staged/valid-affected-receipt? (assoc good :commands []) plan {:node "v22" :biome nil})))
+    (is (not (staged/valid-affected-receipt?
+               (assoc-in good [:commands 0 :argv] ["true"])
+               plan {:node "v22" :biome nil})))
+    (is (not (staged/valid-affected-receipt?
+               (update-in good [:commands 0] dissoc :argv)
+               plan {:node "v22" :biome nil})))
+    (is (not (staged/valid-affected-receipt?
+               (assoc-in good [:commands 0 :cwd] "wrong-dir")
+               plan {:node "v22" :biome nil})))
     (is (not (staged/valid-affected-receipt? good (assoc plan :sha "c") {:node "v22" :biome nil})))
     (is (not (staged/valid-affected-receipt? good plan {:node "v24" :biome nil})))))
 
@@ -58,9 +69,11 @@
               :remainder ["tools/runtime-test/editor-root.test.js"
                           "tools/runtime-test/tour-picker.test.js"]}
         toolchain {:node "v22" :biome nil}
-        receipt {:plan plan :phase :affected :toolchain toolchain
+        receipt {:schema 1 :plan plan :phase :affected :toolchain toolchain
                  :complete true :exit 0
-                 :commands [{:paths (:affected plan) :exit 0}]}]
+                 :commands [{:paths (:affected plan)
+                             :argv ["node" "popover.test.js"]
+                             :cwd "tools/runtime-test" :exit 0}]}]
     (is (= :pending (staged/phase-status plan :affected nil toolchain (constantly false))))
     (is (= :passed (staged/phase-status plan :affected receipt toolchain (constantly false))))
     (is (= :stale (staged/phase-status plan :affected receipt {:node "v24"} (constantly false))))
@@ -73,7 +86,33 @@
     (is (= :failed (staged/phase-status plan :affected (assoc receipt :exit 1)
                                         toolchain (constantly false))))
     (is (= :failed (staged/phase-status plan :affected (assoc receipt :commands [])
-                                        toolchain (constantly false))))))
+                                        toolchain (constantly false))))
+    (is (= :failed (staged/phase-status
+                     plan :affected (assoc-in receipt [:commands 0 :argv] ["true"])
+                     toolchain (constantly false))))))
+
+
+(deftest biome-receipt-requires-one-exact-batch-command
+  (let [plan {:schema 1 :kind :biome :sha "a"
+              :roster ["a.js" "b.js"] :affected ["a.js" "b.js"] :remainder []}
+        toolchain {:node "v22" :biome "2.0"}
+        good {:schema 1 :phase :affected :complete true :exit 0
+              :plan plan :toolchain toolchain
+              :commands [{:paths ["a.js" "b.js"]
+                          :argv ["npx" "--no-install" "biome" "check" "a.js" "b.js"]
+                          :cwd nil
+                          :exit 0}]}]
+    (is (staged/valid-affected-receipt? good plan toolchain))
+    (is (not (staged/valid-affected-receipt?
+               (assoc good :commands [{:paths ["a.js"]
+                                       :argv ["npx" "--no-install" "biome" "check" "a.js"]
+                                       :cwd nil
+                                       :exit 0}
+                                      {:paths ["b.js"]
+                                       :argv ["npx" "--no-install" "biome" "check" "b.js"]
+                                       :cwd nil
+                                       :exit 0}])
+               plan toolchain)))))
 
 
 (deftest invalid-base-widens-the-roster

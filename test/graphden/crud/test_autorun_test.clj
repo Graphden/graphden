@@ -140,8 +140,13 @@
   ;; The shutdown / fixture hook: a runner left alive past the storage it
   ;; reads from logs a failed auto-run pass.
   (let [gate (promise)
-        runner (future (deref gate 10000 :timeout))]
-    (reset! pending-atom {[nil :b1] {:seeds #{:x} :runner? true :runner runner}
+        started? (atom false)
+        stopped (promise)
+        runner (future (reset! started? true)
+                       (try (deref gate 10000 :timeout)
+                            (finally (deliver stopped true))))]
+    (reset! pending-atom {[nil :b1] {:seeds #{:x} :runner? true
+                                     :runner {:future runner :started? started? :stopped stopped}}
                           [nil :b2] {:seeds #{:y} :runner? true}})
     (is (= 1 (autorun/cancel-all!)) "counts the scopes that actually held a runner handle")
     (is (= {} @pending-atom) "every queue forgotten, claim-without-handle included")
@@ -149,15 +154,44 @@
     (deliver gate :done)))
 
 
-;; =============================================================================
-;; schedule-affected! — the write-path hook
-;; =============================================================================
-
 (defn- hot-ctx
   "Ctx with a warm reverse-dependency index (what `invalidate!` passes)."
   []
   {:compile-deps (atom {:reverse-deps reverse-deps})})
 
+
+(deftest cancel-all!-waits-for-an-active-storage-pass
+  ;; A cancelled future reports cancelled before its body has unwound. Hold
+  ;; the storage operation past interruption to prove shutdown joins the body.
+  (let [entered (promise)
+        release (java.util.concurrent.CountDownLatch. 1)
+        shutdown (promise)]
+    (with-redefs [test-runs/test-fn-rows (fn [_] test-rows)
+                  test-runs/run-tests! (fn [_ _]
+                                         (deliver entered true)
+                                         (loop []
+                                           (when-not (try
+                                                       (java.util.concurrent.CountDownLatch/.await
+                                                         release 100 java.util.concurrent.TimeUnit/MILLISECONDS)
+                                                       (catch InterruptedException _ false))
+                                             (recur))))]
+      (binding [registry/*rich-types-override*
+                (rich-types {:test-a #{} :test-b #{} :test-c #{}})]
+        (is (= 1 (autorun/schedule-affected! (hot-ctx) #{:util} :b)))
+        (is (true? (deref entered 6000 ::timeout)) "the pass entered its storage operation")
+        (let [canceller (future (deliver shutdown (autorun/cancel-all!)))]
+          (try
+            (is (= ::waiting (deref shutdown 150 ::waiting))
+                "shutdown cannot return while the interrupted storage operation is active")
+            (finally
+              (java.util.concurrent.CountDownLatch/.countDown release)
+              @canceller))
+          (is (= 1 @shutdown) "shutdown returns after the held pass exits"))))))
+
+
+;; =============================================================================
+;; schedule-affected! — the write-path hook
+;; =============================================================================
 
 (deftest schedule-affected!-no-ops-queue-nothing
   (testing "off-switch"

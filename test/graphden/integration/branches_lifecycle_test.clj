@@ -897,7 +897,9 @@
 
 (defn- await-type-recovery!
   "Await this existing generation's completion, not a sleep or a global drain.
-   A completed sweep may legitimately retain invalid-user-fn diagnostics."
+   A completed sweep may legitimately retain invalid-user-fn diagnostics.
+   The full parallel integration suite can keep a live worker pending on
+   recovery admission longer than 15s; the focused case takes only seconds."
   [ctx]
   (let [state (:type-recheck-state ctx)
         generation (:generation @state)
@@ -913,12 +915,13 @@
     (add-watch state watch-key (fn [_ _ _ current] (observe current)))
     (try
       (observe @state)
-      (let [result (deref completed 15000 ::timeout)]
+      (let [result (deref completed 60000 ::timeout)]
         (when-not (and (map? result) (= generation (:generation result))
                        (not (:cancelled? result)) (not (:worker-running? result))
                        (contains? #{:ready :failed} (:status result)))
           (throw (ex-info "Merge probe recovery baseline did not complete"
-                          {:type :test/recovery-baseline-unavailable :captured-generation generation
+                          {:type :test/recovery-baseline-unavailable :timeout-ms 60000
+                           :captured-generation generation
                            :current (select-keys @state [:generation :status :cancelled? :worker-running?])})))
         result)
       (finally (remove-watch state watch-key)))))

@@ -46,7 +46,8 @@
     ;; Personal configuration receipts echo caller-selected graph identities and
     ;; binding values; the protected metadata lookup returns server-owned rows.
     :_editor-configuration-apply :_editor-configuration-cleanup-preview
-    :_editor-server-call :_editor-root-plan :_editor-configuration-plan :_editor-configuration-prepare
+    :_editor-server-call :_editor-root-plan :_editor-root-migration-preview :_editor-root-migration-apply
+    :_editor-configuration-plan :_editor-configuration-prepare
     :_editor-configuration-preview :_editor-configuration-reconcile
     :_editor-configuration-reconcile-undo :_editor-configuration-undo
     :find-function :ui-pref-store-status
@@ -237,6 +238,9 @@
     ;; The configuration operations and preference status return caller graph
     ;; identities, values or receipt fields; none declassifies marked content.
     :_editor-configuration-apply :_editor-configuration-cleanup-preview
+    ;; Migration proposals and receipts carry caller-selected graph identity;
+    ;; validation is not a declassification boundary.
+    :_editor-root-migration-preview :_editor-root-migration-apply
     :_editor-server-call :_editor-configuration-plan :_editor-configuration-prepare
     :_editor-configuration-preview :_editor-configuration-reconcile
     :_editor-configuration-reconcile-undo :_editor-configuration-undo

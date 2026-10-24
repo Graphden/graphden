@@ -9,6 +9,8 @@
     [graphden.auth.provider :as auth]
     [graphden.crud.fn-execution.persist :as persist]
     [graphden.editor.components :as components]
+    [graphden.editor.config-resolution :as resolution]
+    [graphden.editor.root-binding :as root-binding]
     [graphden.executor.browser-plan :as wire]
     [graphden.executor.browser-server-execution :as server-execution]
     [graphden.executor.browser-server-source :as server-source]
@@ -21,7 +23,7 @@
     [graphden.executor.compile.bindings :as bindings]
     [graphden.executor.compile.lookups :as lookups]
     [graphden.executor.context :as context]
-    [graphden.storage.protocol.core :as sp]
+    [graphden.storage.binding-read :as binding-read]
     [graphden.system.branch-router.recheck :as recheck]
     [graphden.tenancy.context :as tenancy]
     [graphden.types.check.provenance :as provenance]
@@ -96,19 +98,26 @@
 
 
 (defn- anchor!
-  [storage {:keys [fn-id slot-id ref-fn-id]}]
-  (let [rows (sp/query-bounded-entities storage :binding {:fn-id fn-id :slot-id slot-id} 2)
-        row (first rows)]
-    (when-not (and (= 1 (count rows)) (= ref-fn-id (:ref-fn-id row))
-                   (nil? (:resolver-fn-id row)) (nil? (:value row))
-                   (not (:value-present row)) (not (:terminal row)))
-      (reject! :server-binding-changed))
-    row))
+  [storage authorize! policy {:keys [fn-id slot-id ref-fn-id handler-root selected-root] :as anchor}]
+  (if (contains? anchor :selected-root)
+    (let [{current-root :root :keys [root-row selector-row]} (root-binding/capture! storage)
+          choice (resolution/root-choice storage authorize! policy)
+          current-selection (root-binding/selected-root current-root choice)]
+      (when-not (and (= handler-root current-root) (= selected-root current-selection))
+        (reject! :server-binding-changed))
+      {:root-binding root-row :selector-binding selector-row :selected-root current-selection})
+    (let [rows (binding-read/exact-slot (binding-read/owner-bindings storage fn-id) slot-id)
+          row (first rows)]
+      (when-not (and (= 1 (count rows)) (= ref-fn-id (:ref-fn-id row))
+                     (nil? (:resolver-fn-id row)) (nil? (:value row))
+                     (not (:value-present row)) (not (:terminal row)))
+        (reject! :server-binding-changed))
+      row)))
 
 
 (defn- capture-client
   [ctx storage authorize! policy entries anchor]
-  (let [anchor-row (anchor! storage anchor)
+  (let [anchor-row (anchor! storage authorize! policy anchor)
         graph (source/collect-client-closure storage (vals entries) authorize!)
         _ (doseq [id (vals entries)]
             (let [row (some #(when (= id (:id %)) %) (:fns graph))]

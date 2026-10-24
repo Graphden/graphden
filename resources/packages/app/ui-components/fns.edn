@@ -2,7 +2,7 @@
  :description "Personal editor components: ordinary identity bindings select bounded graph templates."
  :fns
  [{:name :_editor-root-plan
-   :description "Export the current editor handler's static root HOF. No client target identity is accepted; every source dependency is authorized in one snapshot."
+   :description "Export the root HOF selected by the editor handler's protected graph resolver. No client target identity is accepted; every source dependency is authorized in one snapshot."
    :args {:request {:type :ring-request-shape}} :return-type :keyword-map :effects #{:db}}
   {:name :_editor-root-plan-handler :parent :json-envelope-response
    :lambda-params [:request]

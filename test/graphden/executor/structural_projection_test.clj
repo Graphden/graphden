@@ -199,6 +199,33 @@
             (config-resolution/resolve-identity snapshot scope capability))))))
 
 
+(deftest graph-bound-root-resolver-has-a-closed-public-source
+  (let [{:keys [fns] package-path :namespace} (edn/read-string
+                                                (slurp (io/resource "packages/app/ui-config/fns.edn")))
+        app-id (random-uuid)
+        config-id (random-uuid)
+        namespaces [{:id app-id :name "app" :parent-id nil}
+                    {:id config-id :name "ui-config" :parent-id app-id}]
+        source (update (graph fns package-path) :fns
+                       #(mapv (fn [row]
+                                (if (= package-path (:namespace-id row)) (assoc row :namespace-id config-id) row)) %))
+        snapshot {:graph source :namespaces namespaces}
+        scope {:namespace-path nil :name "editor-root" :principal-id "operator"
+               :org "public" :branch-id (random-uuid)}
+        capability (metadata/function-lookup (remote/from-bundle {}) (fn [& _]) scope)
+        owners (set (map #(ids/fn-id package-path %)
+                         [:editor-root-resolver :_editor-root-discovery :_editor-root-default-id]))]
+    (with-redefs [owned/owned-fn-id? owners]
+      (is (= config-resolution/default-root-id
+             (:id (config-resolution/resolve-root-identity snapshot scope capability))))
+      (is (thrown? clojure.lang.ExceptionInfo
+            (config-resolution/resolve-root-identity
+              (update-in snapshot [:graph :bindings] conj
+                         {:id (random-uuid) :fn-id config-resolution/root-resolver-id
+                          :slot-id (random-uuid) :value "poison"})
+              scope capability))))))
+
+
 (deftest callback-frames-retain-each-descriptors-identity-test
   (let [{:keys [first-target second-target definitions]} (fixture)
         result (project definitions :indexed)]

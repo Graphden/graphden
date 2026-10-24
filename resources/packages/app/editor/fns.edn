@@ -890,9 +890,11 @@
    :args {:hiccup :page}}
 
   {:name :client-handler
-   :description "Editor shell handler with an ordinary browser root HOF binding. The root plan endpoint exports that binding through source authorization."
+   :description "Editor shell handler with an ordinary browser root HOF and a protected graph selector for a personal root."
    :parent :html-no-cache-ok-response
-   :args {:root {:type [:fn {:inputs :keyword-map} :app.ui-config/_editor-bootstrap-result]}}}
+   :args {:root {:type [:fn {:inputs :keyword-map} :app.ui-config/_editor-bootstrap-result]}
+          :root-selector {:type [:fn {:namespace-path [:union :null :text]
+                                      :principal-id :text :org :text :branch-id :uuid} :uuid]}}}
 
   {:name :_editor-handler
    ;; [] — static page; [:default] was a leaked derived free, and a 1-param
@@ -903,7 +905,8 @@
    :lambda-params []
    :parent :client-handler
    :args {:body :_editor-rendered-page
-          :root {:ref :app.ui-config/editor-root}}}
+          :root {:ref :app.ui-config/editor-root}
+          :root-selector {:ref :app.ui-config/editor-root-resolver}}}
 
   ;; =============================================================================
   ;; ASSET HANDLERS — bundled JS / CSS at /assets/editor.{js,css}

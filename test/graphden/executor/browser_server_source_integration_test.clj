@@ -15,14 +15,18 @@
     [graphden.executor.browser-source :as source]
     [graphden.executor.compile-runtime :as compiled]
     [graphden.executor.interface :as exec]
+    [graphden.executor.registry.core :as registry]
     [graphden.packages.owned :as owned]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.types :as record-types]
     [graphden.packages.sync :as packages]
     [graphden.storage.protocol.core :as sp]
+    [graphden.system.branch-router :as br]
     [graphden.system.branch-router.epoch :as epoch]
     [graphden.system.branch-router.recheck :as recheck]
-    [graphden.test-infra.golden-app :as ga]))
+    [graphden.tenancy.context :as tenancy]
+    [graphden.test-infra.golden-app :as ga]
+    [graphden.versioning.storage.core :as versioned]))
 
 
 (use-fixtures :once (ga/fixture (ns-name *ns*)))
@@ -173,3 +177,50 @@
             (is (= #{:token} (set (keys (:descriptor input)))))
             (is (:ok response) (pr-str response))
             (is (= {:label "Branch" :branch-name "main"} (some-> (:value response) wire/decode-value)))))))))
+
+
+(deftest personal-root-change-retires-issued-server-descriptors
+  (binding [br/*active-router-override* (atom nil)
+            tenancy/*seams-override* (atom (tenancy/seams-isolation-seed))]
+    (let [ctx (assoc (:ctx ga/*bootstrap*)
+                     :rich-types-atom (registry/fork-rich-types-atom (registry/active-rich-types-atom))
+                     :per-org-rich-atom (registry/fork-per-org-rich-atom (registry/active-per-org-rich-atom)))
+          storage (:storage ctx)
+          home-name (str "server-root-" (random-uuid))
+          root (ids/fn-id home-name :editor-root)
+          request {:request-method :post :uri "/api/ui/server-call" :headers {"host" "localhost"}}]
+      (sp/create-entity storage :ns {:name home-name})
+      (tenancy/install-personal-namespace-fn!
+        (constantly {:namespace-path home-name :source :fixture :isolated? false}))
+      ((get (:base-fns ctx) :sync-fn-defs-branch!)
+       {:branch-id (versioned/current-branch-id storage)
+        :fn-defs [{:name :editor-root :namespace home-name :parent :app.ui-config/editor-root}]} ctx)
+      (epoch/seed-watermark! storage)
+      (let [result (root-plan/export-current ctx request)
+            descriptor (some (fn [value]
+                               (when (map? value)
+                                 (let [fields (into {} (filter (comp keyword? key)) value)]
+                                   (when (= "server" (:kind fields))
+                                     (:descriptor fields)))))
+                             (tree-seq coll? seq (:plan result)))]
+        (is (:ok result) (pr-str result))
+        (is (= (str root) (get-in result [:plan :entries "root"])))
+        (is (= #{:token} (set (keys descriptor))))
+        (when descriptor
+          (with-redefs [tenancy/browser-source-policy
+                        (fn [_]
+                          (fn [row & _]
+                            (when (= root (:id row))
+                              (throw (ex-info "Revoked root" {:type :authz/forbidden})))))]
+            (let [response (server/invoke-current ctx request
+                                                  {:descriptor descriptor
+                                                   :input (wire/encode-value {:query ""})})]
+              (is (= 403 (:http-status response)))
+              (is (nil? (:value response)))))
+          (sp/update-entity storage :fn root {:name "retired-editor-root"})
+          (epoch/seed-watermark! storage)
+          (let [response (server/invoke-current ctx request
+                                                {:descriptor descriptor
+                                                 :input (wire/encode-value {:query ""})})]
+            (is (false? (:ok response)))
+            (is (nil? (:value response)))))))))

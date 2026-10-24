@@ -24,8 +24,10 @@
 (def ^:private path "app.ui-config")
 (def resolver-id (ids/fn-id path :editor-resolver))
 (def defaults-id (ids/fn-id path :editor-defaults))
-(def ^:private protected-names #{:editor-resolver :_editor-discovery :_editor-defaults-id})
-(def ^:private protected-ids (set (map #(ids/fn-id path %) protected-names)))
+(def root-resolver-id (ids/fn-id path :editor-root-resolver))
+(def default-root-id (ids/fn-id path :editor-root))
+(def ^:private configuration-resolver-names #{:editor-resolver :_editor-discovery :_editor-defaults-id})
+(def ^:private root-resolver-names #{:editor-root-resolver :_editor-root-discovery :_editor-root-default-id})
 
 
 (defn- module
@@ -34,7 +36,7 @@
 
 
 (defn- canonical-source
-  []
+  [names-to-protect]
   (let [definitions (:fns (module "packages/app/ui-config/fns.edn"))
         interfaces (mapcat (fn [[resource names]]
                              (let [{:keys [fns] namespace-path :namespace} (module resource)]
@@ -53,14 +55,16 @@
                                              (keyword namespace-path (clojure.core/name name)) definition))
                                     {} interfaces)
         records (parse/parse-module
-                  (mapv #(assoc % :namespace path) (filter #(contains? protected-names (:name %)) definitions))
+                  (mapv #(assoc % :namespace path) (filter #(contains? names-to-protect (:name %)) definitions))
                   names definitions-by-name)
         grouped (group-by :kind records)]
     {:fns (:fn grouped) :slots (:slot grouped) :fn-slots (:fn-slot grouped)
      :bindings (:binding grouped) :list-items (:binding-list-item grouped)}))
 
 
-(def ^:private fixed-source (delay (canonical-source)))
+(def ^:private fixed-sources
+  (delay {:configuration (canonical-source configuration-resolver-names)
+          :root (canonical-source root-resolver-names)}))
 
 
 (defn- public-row?
@@ -83,12 +87,10 @@
             (recur (:parent-id row) (conj seen id) (cons (:name row) segments))))))))
 
 
-(defn assert-protected-source!
-  "Check authorized snapshot rows before injecting a metadata capability.
-   Package origin and exact closed source are both required; neither grants
-   implementation visibility to this resolver or its chosen configuration."
-  [{:keys [graph namespaces]}]
-  (let [by-id (into {} (map (juxt :id identity)) namespaces)
+(defn- assert-protected-source*
+  [{:keys [graph namespaces]} names-to-protect source-kind]
+  (let [protected-ids (set (map #(ids/fn-id path %) names-to-protect))
+        by-id (into {} (map (juxt :id identity)) namespaces)
         protected (filter #(contains? protected-ids (:id %)) (:fns graph))
         normalized (update graph :fns
                            #(mapv (fn [row]
@@ -98,19 +100,28 @@
     (when-not (and (= protected-ids (set (map :id protected)))
                    (every? #(and (public-row? %) (owned/owned-fn-id? (:id %))
                                  (= path (complete-public-path by-id (:namespace-id %)))) protected)
-                   (contract/matches? @fixed-source normalized protected-ids))
+                   (contract/matches? (get @fixed-sources source-kind) normalized protected-ids))
       (throw (ex-info "Editor resolver source is unavailable"
                       {:type :browser-plan/unsupported :reason :resolver-source-mismatch}))))
   nil)
 
 
-(defn resolve-identity
-  "Project an already source-authorized immutable resolver snapshot. Inputs
-   and the exact lookup capability must come from authenticated ingress."
-  [snapshot inputs lookup-capability]
-  (assert-protected-source! snapshot)
-  (let [selected-reference (projection/project-resolver (:graph snapshot) resolver-id
-                                                        #(or (nil? %) (contains? #{:fn-id "editor"} %))
+(defn assert-protected-source!
+  "Check the closed, packaged configuration resolver before metadata discovery."
+  [selected]
+  (assert-protected-source* selected configuration-resolver-names :configuration))
+
+
+(defn assert-protected-root-source!
+  "Check the closed, packaged browser-root resolver before metadata discovery."
+  [selected]
+  (assert-protected-source* selected root-resolver-names :root))
+
+
+(defn- resolve-protected-identity
+  [snapshot resolver discovery-name inputs lookup-capability]
+  (let [selected-reference (projection/project-resolver (:graph snapshot) resolver
+                                                        #(or (nil? %) (contains? #{:fn-id discovery-name} %))
                                                         inputs lookup-capability)]
     (when-not (projection/identity-value? selected-reference)
       (throw (ex-info "Editor resolver identity is unavailable"
@@ -118,10 +129,47 @@
     selected-reference))
 
 
+(defn resolve-identity
+  "Project an already source-authorized immutable configuration resolver."
+  [snapshot inputs lookup-capability]
+  (assert-protected-source! snapshot)
+  (resolve-protected-identity snapshot resolver-id "editor" inputs lookup-capability))
+
+
+(defn resolve-root-identity
+  "Project the graph-bound browser-root resolver under authenticated scope."
+  [snapshot inputs lookup-capability]
+  (assert-protected-root-source! snapshot)
+  (resolve-protected-identity snapshot root-resolver-id "editor-root" inputs lookup-capability))
+
+
 (defn- captured-source
   [storage authorize! id]
   (let [graph (source/collect-manifest storage id authorize!)]
     {:graph graph :namespaces (source/collect-namespaces storage graph)}))
+
+
+(defn- current-scope
+  [storage home name]
+  {:namespace-path (:namespace-path home) :name name
+   :principal-id (tenancy/current-user-id) :org (tenancy/current-org)
+   :branch-id (versioned/current-branch-id storage)})
+
+
+(defn root-choice
+  "Resolve the handler's protected graph selector in this authenticated
+   snapshot. Discovery supplies identity only; the caller checks source and
+   execute permission for the selected HOF separately."
+  [storage authorize! policy]
+  (let [scope (current-scope storage (tenancy/current-personal-namespace) "editor-root")
+        resolver (captured-source storage authorize! root-resolver-id)
+        _ (assert-protected-root-source! resolver)
+        _ (snapshot/validate-source! resolver root-resolver-id policy)
+        id (if (:principal-id scope)
+             (:id (resolve-root-identity resolver scope
+                                         (metadata/function-lookup storage authorize! scope)))
+             default-root-id)]
+    {:id id :scope scope}))
 
 
 (defn source-revision
@@ -196,9 +244,7 @@
    source never becomes absence. No provisioning or migration occurs here."
   [storage authorize! policy]
   (let [home (tenancy/current-personal-namespace)
-        scope {:namespace-path (:namespace-path home) :name "editor"
-               :principal-id (tenancy/current-user-id) :org (tenancy/current-org)
-               :branch-id (versioned/current-branch-id storage)}
+        scope (current-scope storage home "editor")
         resolver (captured-source storage authorize! resolver-id)
         _ (assert-protected-source! resolver)
         _ (snapshot/validate-source! resolver resolver-id policy)

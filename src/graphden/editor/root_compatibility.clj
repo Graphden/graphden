@@ -6,6 +6,7 @@
     [graphden.editor.component-config :as config]
     [graphden.editor.components :as components]
     [graphden.editor.config-resolution :as resolution]
+    [graphden.editor.root-legacy :as legacy]
     [graphden.executor.browser-plan :as browser]
     [graphden.executor.browser-snapshot :as snapshot]
     [graphden.executor.browser-source :as source]
@@ -19,33 +20,19 @@
 (def ^:private const-id (str (ids/fn-id "core.logic" :const)))
 
 
-(def ^:private legacy-components
-  {:account-menu {:namespace "app.ui-account-menu" :prefix "account-menu"}
-   :recents {:namespace "app.ui-recents" :prefix "recents"}
-   ;; Read-only C1 bridge until the deterministic personal-root migration replaces
-   ;; this adapter. New roots select callbacks only through ordinary graph refs.
-   :fn-picker {:namespace "app.ui-fn-picker" :prefix "picker"
-               :roles [:view] :inputs {:view #{"model"}}}
-   :tutorial-catalog {:namespace "app.ui-tutorial-catalog" :prefix "catalog"
-                      :roles [:view] :inputs {:view #{"inputs"}}}})
-
-
-(def ^:private role-inputs
-  {:initial #{"inputs"} :update #{"state" "event" "inputs" "context"}
-   :view #{"state" "inputs" "theme" "server"}})
-
-
 (defn- reject!
   [reason]
   (throw (ex-info "Personal root adapter is unavailable"
                   {:type :browser-plan/unsupported :reason reason})))
 
 
-(defn- selected-configuration
+(defn capture-selection
+  "Capture the authenticated ordinary or legacy component selection, its
+   source, and the owner preference state for an explicit migration."
   [storage authorize! policy]
   (let [current (resolution/capture storage authorize! policy)]
     (if (not= resolution/defaults-id (:id current))
-      (select-keys current [:id :configuration])
+      current
       (let [rows (sp/query-entities storage :ui-pref
                                     {:owner-id (tenancy/current-user-id) :key "components"} {:limit 2})]
         (when (> (count rows) 1) (reject! :invalid-selection))
@@ -57,8 +44,13 @@
             (let [graph (source/collect-manifest storage id authorize!)
                   captured {:graph graph :namespaces (source/collect-namespaces storage graph)}]
               (snapshot/validate-source! captured id policy)
-              {:id id :configuration (config/configuration graph id)}))
-          (select-keys current [:id :configuration]))))))
+              (-> current
+                  (assoc :id id :configuration (config/configuration graph id)
+                         :snapshot captured
+                         :legacy-preference {:present true :value (:value (first rows))})
+                  (dissoc :revision))))
+          (assoc current :legacy-preference {:present (boolean (first rows))
+                                             :value (:value (first rows))}))))))
 
 
 (defn- literal
@@ -136,13 +128,13 @@
   (if (or (not= default-root root)
           (nil? (tenancy/current-user-id)))
     {:plan plan}
-    (let [{:keys [id configuration]} (selected-configuration storage authorize! policy)
+    (let [{:keys [id configuration]} (capture-selection storage authorize! policy)
           result
           (reduce-kv
-            (fn [plan component {path :namespace prefix :prefix :keys [roles inputs]}]
+            (fn [plan component {path :namespace :keys [roles inputs]}]
               (let [entries (get configuration component)
                     defaults (into {} (for [role (or roles [:initial :update :view])]
-                                        [role (ids/fn-id path (str prefix "-" (name role)))]))
+                                        [role (legacy/default-role-id component role)]))
                     selected (into {} (remove (fn [[role id]] (= id (get defaults role)))) entries)]
                 (if (empty? selected)
                   plan
@@ -152,9 +144,9 @@
                     (reduce-kv
                       (fn [plan role target]
                         (let [old (ids/fn-id path (str "root-" (name role)))]
-                          (replace-callback plan (str old) (str target) role personal (get (or inputs role-inputs) role))))
+                          (replace-callback plan (str old) (str target) role personal (get inputs role))))
                       plan selected)))))
-            plan legacy-components)]
+            plan legacy/components)]
       (when (> (count (:functions result)) 1024) (reject! :function-limit))
       {:plan result :component-selection-id id})))
 

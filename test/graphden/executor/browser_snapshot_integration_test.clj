@@ -135,7 +135,8 @@
           result (with-redefs [tenancy/browser-source-policy policy]
                    (export-editor-root (:ctx ga/*bootstrap*)))]
       (is (= 403 (:http-status result)))
-      (is (= [[root {:execute? true}]] @checked))
+      (is (some #(= [root {:execute? true}] %) @checked))
+      (is (not-any? #(= handler (first %)) @checked))
       (is (not (contains? result :plan))))))
 
 
@@ -171,7 +172,9 @@
     (let [ctx (:ctx ga/*bootstrap*) storage (:storage ctx)
           handler (ids/fn-id "app.editor" :_editor-handler)
           slot (ids/slot-id (ids/fn-id "app.editor" :client-handler) :root)
-          binding (first (sp/query-entities storage :binding {:fn-id handler :slot-id slot}))]
+          selector-slot (ids/slot-id (ids/fn-id "app.editor" :client-handler) :root-selector)
+          binding (first (sp/query-entities storage :binding {:fn-id handler :slot-id slot}))
+          selector (first (sp/query-entities storage :binding {:fn-id handler :slot-id selector-slot}))]
       (doseq [change [{:value-present true} {:terminal true} {:list-append true}
                       {:list-closed true} {:resolver-fn-id (ids/fn-id "core.logic" :const)}
                       {:type-override-fn-id (ids/fn-id "core.logic" :const)}]]
@@ -181,7 +184,15 @@
             (is (= 422 (:http-status result)))
             (is (not (contains? result :plan))))
           (finally
-            (sp/update-entity storage :binding (:id binding) (select-keys binding (keys change)))))))))
+            (sp/update-entity storage :binding (:id binding) (select-keys binding (keys change))))))
+      (doseq [change [{:ref-fn-id (random-uuid)} {:value-present true}]]
+        (try
+          (sp/update-entity storage :binding (:id selector) change)
+          (let [result (export-editor-root ctx)]
+            (is (= 422 (:http-status result)))
+            (is (not (contains? result :plan))))
+          (finally
+            (sp/update-entity storage :binding (:id selector) (select-keys selector (keys change)))))))))
 
 
 (deftest editor-root-rejects-a-missing-principal-before-selection
@@ -257,6 +268,48 @@
           (is (= "request" (:argument-name result))))
         (finally
           (sp/update-entity storage :binding (:id binding) {:ref-fn-id (:ref-fn-id binding)}))))))
+
+
+(deftest graph-bound-selector-uses-an-authorized-personal-hof
+  (binding [br/*active-router-override* (atom nil)
+            tenancy/*seams-override* (atom (tenancy/seams-isolation-seed))]
+    (let [ctx (assoc (:ctx ga/*bootstrap*)
+                     :rich-types-atom (registry/fork-rich-types-atom (registry/active-rich-types-atom))
+                     :per-org-rich-atom (registry/fork-per-org-rich-atom (registry/active-per-org-rich-atom)))
+          storage (:storage ctx)
+          home-name (str "personal-root-" (random-uuid))
+          home (sp/create-entity storage :ns {:name home-name})
+          root (ids/fn-id home-name :editor-root)]
+      (tenancy/install-personal-namespace-fn!
+        (constantly {:namespace-path home-name :source :fixture :isolated? false}))
+      ((get (:base-fns ctx) :sync-fn-defs-branch!)
+       {:branch-id (vs/current-branch-id storage)
+        :fn-defs [{:name :_body :namespace home-name :parent :const :lambda-params []
+                   :args {:value {:value {:legacy true}}}}
+                  {:name :editor-root :namespace home-name :parent :call
+                   :args {:func {:ref (keyword home-name "_body")}
+                          :arg {:as :request :type :keyword-map}}}]} ctx)
+      (epoch/seed-watermark! storage)
+      (let [result (export-editor-root ctx)]
+        (is (:ok result) (pr-str result))
+        (is (= (str root) (get-in result [:plan :entries "root"])))
+        (is (= "request" (:argument-name result)))
+        (is (nil? (:component-selection-id result))))
+      (with-redefs [tenancy/browser-source-policy
+                    (fn [_]
+                      (fn [row & _]
+                        (when (= root (:id row))
+                          (throw (ex-info "Revoked root" {:type :authz/forbidden})))))]
+        (let [result (export-editor-root ctx)]
+          (is (= 403 (:http-status result)))
+          (is (not (contains? result :plan)))))
+      (sp/update-entity storage :fn root {:name "retired-editor-root"})
+      (epoch/seed-watermark! storage)
+      (let [result (export-editor-root ctx)]
+        (is (:ok result) (pr-str result))
+        (is (= (str (ids/fn-id "app.ui-config" :editor-root))
+               (get-in result [:plan :entries "root"]))))
+      (is (= (:id home) (:namespace-id (sp/read-entity storage :fn root)))))))
 
 
 (deftest crud-between-table-reads-cannot-mix-graph-versions-or-live-policy

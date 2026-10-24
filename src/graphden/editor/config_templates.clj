@@ -4,12 +4,9 @@
   (:require
     [clojure.edn :as edn]
     [clojure.java.io :as io]
-    [clojure.string :as str]
+    [graphden.editor.cohort-parser :as cohort]
     [graphden.editor.component-config :as config]
-    [graphden.editor.component-templates :as components]
-    [graphden.executor.composition.core :as composition]
-    [graphden.packages.rebase :as rebase]
-    [graphden.packages.records.ids :as ids]))
+    [graphden.editor.component-templates :as components]))
 
 
 (defn- module
@@ -91,33 +88,6 @@
                           (if (= :map legacy-record?) {:ref legacy-reference} (keyword root "_legacy-components"))]}}])))
 
 
-(defn- parse-cohort
-  [root function-definitions references]
-  (let [declarations (interfaces)
-        index (fn [value-fn]
-                (reduce (fn [result {:keys [name] path :namespace :as definition}]
-                          (assoc result name (value-fn definition)
-                                 (keyword path (clojure.core/name name)) (value-fn definition)))
-                        {} declarations))
-        reference-names (into references (map (fn [[reference id]] [(keyword (name reference)) id])) references)
-        names (merge (ids/primitive-fn-ids) (index #(ids/fn-id (:namespace %) (:name %))) reference-names)
-        suffix (last (str/split root #"\."))
-        local-names (into {} (keep (fn [{:keys [name]}]
-                                     (when (not= :editor name)
-                                       [name (keyword (str (clojure.core/name name) "-" suffix))]))) function-definitions)
-        rewrite (fn [reference]
-                  (if (or (nil? (namespace reference)) (= root (namespace reference)))
-                    (if-let [renamed (get local-names (keyword (name reference)))]
-                      (if (namespace reference) (keyword root (name renamed)) renamed)
-                      reference)
-                    reference))
-        fresh-definitions (mapv #(assoc (rebase/rewrite-references % rewrite)
-                                        :name (get local-names (:name %) (:name %))) function-definitions)
-        records (composition/fn-defs->records fresh-definitions names (index identity))]
-    {:definitions fresh-definitions :records records :root-id (ids/fn-id root :editor)
-     :reference-identities references}))
-
-
 (defn parse
   "Parse a fresh configuration cohort. Actual source-authorized UUID aliases
    are parser-only: no component implementation or shared helper is copied."
@@ -139,7 +109,8 @@
                                   (definitions root reference legacy-record?))
          references (cond-> {} reference (assoc reference legacy-id)
                             prior-reference (assoc prior-reference prior-id))]
-     (assoc (parse-cohort root cohort-definitions references) :retained-reference reference))))
+     (assoc (cohort/parse-cohort root :editor cohort-definitions references (interfaces))
+            :retained-reference reference))))
 
 
 (defn personalize
@@ -183,4 +154,4 @@
                                                   true (conj (keyword root "_personal-components")))}}]))
           references (cond-> (into {} (map (fn [[role id]] [(role-reference role) id])) roles)
                        prior-reference (assoc prior-reference prior-id))]
-      (parse-cohort root cohort-definitions references))))
+      (cohort/parse-cohort root :editor cohort-definitions references (interfaces)))))

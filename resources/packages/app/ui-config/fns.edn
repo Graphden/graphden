@@ -162,4 +162,11 @@
    :args {:value {:ref :editor-defaults :type :fn-ref}}}
   {:name :editor-resolver :parent :get
    :description "Protected identity selection: authenticated exact home/name discovery, otherwise shared ordinary defaults. Discovery grants no access to the chosen configuration or its component bodies."
-   :args {:coll :_editor-discovery :key {:value :fn-id} :default :_editor-defaults-id}}]}
+   :args {:coll :_editor-discovery :key {:value :fn-id} :default :_editor-defaults-id}}
+  {:name :_editor-root-discovery :parent :web.graph-metadata/find-function
+   :args {:name "editor-root"}}
+  {:name :_editor-root-default-id :parent :const :return-type :fn-ref
+   :args {:value {:ref :editor-root :type :fn-ref}}}
+  {:name :editor-root-resolver :parent :get
+   :description "Protected identity selection for the browser root HOF. A personal editor-root in the authenticated home takes precedence over the shipped root."
+   :args {:coll :_editor-root-discovery :key {:value :fn-id} :default :_editor-root-default-id}}]}

@@ -7,7 +7,7 @@ Loading, graph-backed controls, actions, forms, and preferences.
 
 after: web, layout
 
-[[file:index.org][index]] · ~188 min
+[[file:index.org][index]] · ~187 min
 
 * 1. initGraph
 :PROPERTIES:
@@ -196,13 +196,13 @@ The ordinary account menu, function picker and Explorer navigation trail use bun
 :PROPERTIES:
 :CUSTOM_ID: editor/export-current
 :FILE: src/graphden/editor/root_plan.clj
-:LINE: 26
-:MINS: 4.5
+:LINE: 21
+:MINS: 3.6
 :END:
 
 The editor root endpoint reads the ordinary root HOF binding from its server-owned handler configuration. It checks root execute permission and every dependency's source visibility in one snapshot, then exports a bounded plan. The browser invokes the root through the same call ABI as other graph callables. Its initial typed bootstrap contract selects the explicit legacy editor adapter; it does not export the server handler body.
 
-- source :: [[file:../../../src/graphden/editor/root_plan.clj::(defn export-current][src/graphden/editor/root_plan.clj:26]]
+- source :: [[file:../../../src/graphden/editor/root_plan.clj::(defn export-current][src/graphden/editor/root_plan.clj:21]]
 - see also :: [[file:editor.org::#editor/export-plan][export-plan]], [[file:editor.org::#editor/createRuntime][createRuntime]]
 
 * 16. createRuntime

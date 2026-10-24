@@ -1,6 +1,7 @@
 'use strict';
 const {randomBytes} = require('node:crypto');
 const {assert} = require('./edit-test-helpers');
+const {openCatalog} = require('./tutorial-actions');
 const {waitTourTitle, clickTourButton, filterAndSelect, extendViaRowActions,
   bindPlaceholderOn, finishAndDelete} = require('./tutorial-tour-helpers');
 const {rootAction, apps, closePopover, mint, openPreview, exactFnPresent} = require('./tutorial-handler-preview-helpers');
@@ -11,8 +12,7 @@ async function walkLesson30(page, base, {label = 'native-app-' + randomBytes(6).
   // Use the same chooser as readers: lesson 30 needs its owned sandbox,
   // while a direct tutorial URL intentionally starts on the current branch.
   await page.goto(base + '/?branch=main');
-  await page.waitForFunction(() => typeof window.openTutorialMenu === 'function');
-  await page.evaluate(() => window.openTutorialMenu());
+  await openCatalog(page);
   await page.locator('[data-lesson-id="30"] .gd-tour-btn-primary').dispatchEvent('click');
   await waitTourTitle(page, 'Serving the graph to the public', 150000);
   await clickTourButton(page, 'Next');

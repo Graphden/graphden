@@ -9,6 +9,8 @@
 // Everything shared by those files lives here.
 
 const {assert, api, deleteFnByName, submitInlineRow} = require('./edit-test-helpers');
+const {checkedAction} = require('./checked-action');
+const {openCatalog} = require('./tutorial-actions');
 
 const NS_NAME = 'tutorial';
 const FN_NAME = 'one-plus-one';
@@ -16,10 +18,7 @@ const FN_NAME = 'one-plus-one';
 // Ordinary lesson tests share one catalogue entry path. The separate picker
 // startup regression opens immediately after script availability on purpose.
 async function openTutorialCatalog(page, timeout = 30000) {
-  await page.waitForFunction(() => !!window.gdEditorRoot?.componentNow('tutorial-catalog'),
-    null, {timeout});
-  await page.evaluate(() => window.openTutorialMenu());
-  await page.waitForSelector('.gd-tour-lesson-list', {timeout});
+  await openCatalog(page, timeout);
 }
 
 
@@ -613,21 +612,22 @@ async function appendSeqItemViaEdge(page, literalText) {
 async function appendOrBindLiteralFromChooser(page, literalText) {
   // Scalar slots offer "Bind literal"; sequence slots offer "Append
   // literal" (or "Insert literal" from an item's + ) — accept any.
-  await page.waitForFunction(() => {
-    return Array.from(document.querySelectorAll('button'))
-      .some((b) => /^(Bind|Append|Insert) literal$/.test((b.textContent || '').trim()));
-  }, null, {timeout: 8000, polling: 100});
-  await page.evaluate(() => {
-    Array.from(document.querySelectorAll('button'))
-      .find((b) => /^(Bind|Append|Insert) literal$/.test((b.textContent || '').trim()))
-      .click();
+  const choice = page.getByRole('button', {name: /^(Bind|Append|Insert) literal$/}).first();
+  let kind;
+  await checkedAction(page, {
+    name: 'choose-literal', timeoutMs: 10000,
+    ready: () => choice.waitFor({state: 'visible', timeout: 8000}),
+    gesture: async () => {
+      kind = (await choice.textContent()).trim();
+      await choice.click();
+    },
+    settled: () => page.waitForFunction(() => {
+      const pops = document.querySelectorAll('.arg-value-edit-popover');
+      const pop = pops[pops.length - 1];
+      return pop && (pop.querySelector('.arg-value-edit-input')
+        || pop.querySelector('[data-form-field]'));
+    }, null, {timeout: 10000, polling: 100})
   });
-  await page.waitForFunction(() => {
-    const pops = document.querySelectorAll('.arg-value-edit-popover');
-    const pop = pops[pops.length - 1];
-    return pop && (pop.querySelector('.arg-value-edit-input')
-      || pop.querySelector('[data-form-field]'));
-  }, null, {timeout: 10000, polling: 100});
   await page.evaluate((text) => {
     const pops = document.querySelectorAll('.arg-value-edit-popover');
     const pop = pops[pops.length - 1];
@@ -636,15 +636,21 @@ async function appendOrBindLiteralFromChooser(page, literalText) {
     field.value = text;
     field.dispatchEvent(new Event('input', {bubbles: true}));
     field.dispatchEvent(new Event('change', {bubbles: true}));
-    Array.from(pop.querySelectorAll('.arg-value-edit-btn'))
-      .find((b) => b.textContent.trim() === 'Save').click();
   }, literalText);
-  // The bind/append popover unmounts once the write's response lands —
-  // waiting here keeps a later cleanup DELETE from racing an in-flight
-  // write on the same fn (the 2026-08-19 gate-poisoning trigger window).
-  await page.waitForFunction(
-    () => !document.querySelector('.arg-value-edit-popover'),
-    null, {timeout: 60000, polling: 100});
+  const save = page.locator('.arg-value-edit-popover').last().getByRole('button', {name: 'Save'});
+  await checkedAction(page, {
+    name: kind === 'Bind literal' ? 'bind-literal' : 'append-literal',
+    timeoutMs: 60000,
+    ready: () => save.waitFor({state: 'visible', timeout: 10000}),
+    gesture: () => save.click(),
+    request: {method: 'POST', path: kind === 'Bind literal'
+      ? '/api/entities/binding' : /^\/api\/sequence\/append\/[^/]+$/},
+    // The popover unmounts after a successful write. This also keeps cleanup
+    // DELETE from racing the same fn's in-flight mutation.
+    settled: () => page.waitForFunction(
+      () => !document.querySelector('.arg-value-edit-popover'),
+      null, {timeout: 60000, polling: 100})
+  });
 }
 
 

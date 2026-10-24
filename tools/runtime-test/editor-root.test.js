@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../../resources/packages/app/editor/editor-root.js'), 'utf8');
+const ROOT_ID = '00000000-0000-0000-0000-000000000003';
 function fixture() {
   const listeners = new Map();
   const requests = [];
@@ -33,7 +34,7 @@ function fixture() {
     getCurrentBranchName: () => context.branch, branch: 'main'};
   vm.runInNewContext(source, context);
   const reply = (index, legacyMode, label) => requests[index].resolve({ok: true,
-    json: async () => ({ok: true, 'argument-name': null,
+    json: async () => ({ok: true, 'argument-name': null, 'root-id': ROOT_ID,
       plan: {label, output: new Map([['legacy', legacyMode]])}})});
   return {window, requests, executed, legacy, listeners, reply, context, policyWaits};
 }
@@ -51,6 +52,7 @@ const transientRefusal = () => ({ok: false, status: 422,
   await Promise.all([first, second]);
   assert.deepEqual(f.executed, ['current account']);
   assert.equal(f.legacy.dataset.gdRootAdapter, 'legacy');
+  assert.equal(f.window.gdEditorRoot.rootId(), ROOT_ID);
 
   const pending = f.window.gdEditorRoot.reload();
   assert.equal(f.legacy.dataset.gdRootAdapter, undefined);
@@ -66,6 +68,7 @@ const transientRefusal = () => ({ok: false, status: 422,
   const callbacks = new Map([['initial', () => 'initial'], ['update', input => input.get('state')], ['view', () => 'replacement view']]);
   const components = f.window.gdEditorRoot.reload();
   f.requests[4].resolve({ok: true, json: async () => ({ok: true, 'argument-name': null,
+    'root-id': ROOT_ID,
     'component-selection-id': '00000000-0000-0000-0000-000000000001',
     plan: {label: 'components', output: new Map([['legacy', true], ['account-menu', callbacks], ['recents', callbacks]])}})});
   await components;
@@ -89,7 +92,8 @@ const transientRefusal = () => ({ok: false, status: 422,
   assert.equal(root.componentIdentity('recents'), null, 'same-scope reload clears readiness immediately');
   assert.equal(root.acceptComponent(selected), false, 'old facade cannot accept during reload');
   const secondSelection = '00000000-0000-0000-0000-000000000002';
-  const componentsReply = selection => ({ok: true, 'argument-name': null, 'component-selection-id': selection,
+  const componentsReply = selection => ({ok: true, 'argument-name': null, 'root-id': ROOT_ID,
+    'component-selection-id': selection,
     plan: {output: new Map([['legacy', true], ['recents', callbacks]])}});
   f.requests[5].resolve({ok: true, json: async () => componentsReply(secondSelection)});
   await reload;
@@ -108,6 +112,7 @@ const transientRefusal = () => ({ok: false, status: 422,
   assert.equal(f.executed.length, executionCount, 'a refused root never executes a plan');
   assert.equal(f.legacy.dataset.gdRootAdapter, undefined);
   assert.equal(root.componentNow('recents'), null, 'a refused root exposes no callbacks');
+  assert.equal(root.rootId(), null, 'a refused root exposes no root identity');
   assert.equal(root.componentIdentity('recents'), null, 'a refused root exposes no host identity');
   await assert.rejects(root.component('recents'), /Editor root component is unavailable/);
   assert.equal(root.acceptComponent(beforeDenial), false);
@@ -131,6 +136,7 @@ const transientRefusal = () => ({ok: false, status: 422,
   const picker = fixture();
   const pickerReady = picker.window.gdEditorRoot.reload();
   picker.requests[0].resolve({ok: true, json: async () => ({ok: true, 'argument-name': null,
+    'root-id': ROOT_ID,
     plan: {output: new Map([['legacy', true], ['fn-picker', new Map([['view', input => input.get('model')]])],
       ['authored-surface', new Map([['view', () => 'ordinary graph']])]])}})});
   await pickerReady;
@@ -141,6 +147,7 @@ const transientRefusal = () => ({ok: false, status: 422,
   assert.throws(() => pickerView.run('view'), /Editor root changed/);
   const forged = picker.window.gdEditorRoot.reload();
   picker.requests[1].resolve({ok: true, json: async () => ({ok: true, 'argument-name': null,
+    'root-id': ROOT_ID,
     plan: {output: new Map([['legacy', true], ['fn-picker', new Map([['view', {invoke() {}}]])]])}})});
   await forged;
   assert.equal(picker.window.gdEditorRoot.componentNow('fn-picker'), null, 'forged callback fails the whole root');

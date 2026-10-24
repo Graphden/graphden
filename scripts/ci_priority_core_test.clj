@@ -72,6 +72,19 @@
            (frequencies (priority/browser-order #{source}))))))
 
 
+(deftest local-browser-helper-changes-reach-transitive-test-consumers
+  (doseq [source ["tools/browser-test/tutorial-actions.js"
+                  "tools/browser-test/checked-action.js"]]
+    (let [early (priority/browser-first #{source})]
+      (is (some #{"edit-tutorial-tour.test.js"} early) source)
+      (is (some #{"edit-tutorial-tour-args.test.js"} early) source)
+      (is (= (frequencies (priority/browser-order nil))
+             (frequencies (priority/browser-order #{source}))) source)))
+  (let [early (priority/browser-first
+                #{"tools/browser-test/tutorial-tour-helpers.js"})]
+    (is (some #{"edit-tutorial-tour.test.js"} early))))
+
+
 (deftest backend-priority-covers-direct-and-transitive-consumers
   (let [layers (priority/unit-layers #{"src/graphden/types/core.clj"})
         direct (first layers)

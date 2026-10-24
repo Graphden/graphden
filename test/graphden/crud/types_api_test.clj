@@ -370,12 +370,17 @@
                                          {:name "tu-type" :parent-ids []
                                           :base-fn-id int-id :constraint [:> 0]})
               host    (setup/create-base-fn! storage "tu-host")
+              other   (setup/create-base-fn! storage "tu-other")
               slot    (setup/create-slot! storage "field" (:id type-row))
               _       (setup/attach-slot! storage (:id host) (:id slot) 0)
+              _       (setup/attach-slot! storage (:id other) (:id slot) 0)
               res     (ta/apply-types-usages {:target-id (:id type-row)} c)]
           (is (true? (:ok res)))
           (is (pos? (:count res)))
-          (is (some #(= :slot-of (:kind %)) (:usages res)))))
+          (is (= ["tu-host" "tu-other"]
+                 (sort (map :fn-name (filter #(= :slot-of (:kind %))
+                                             (:usages res)))))
+              "a shared slot must report every owner")))
 
       (finally (sp/close storage))))
 
@@ -411,7 +416,12 @@
                                         {:fn-id (:id caller) :slot-id (:id resolvd)
                                          :resolver-fn-id (:id target)})
               res     (ta/apply-types-usages {:target-id (:id target)} c)
-              by-kind (group-by :kind (:usages res))]
+              by-kind (group-by :kind (:usages res))
+              concealed (ta/apply-types-usages
+                          {:target-id (:id target)} c
+                          (fn [graph]
+                            (update graph :bindings
+                                    #(filterv (fn [b] (not= (:id caller) (:fn-id b))) %))))]
           (is (true? (:ok res)))
           (is (= ["fu-child"] (map :fn-name (:parent-of by-kind)))
               "a child extending the target is a parent-of usage")
@@ -420,7 +430,11 @@
               "one ref-of per (fn, slot) — the two list items collapse to one")
           (is (= [["fu-caller" "resolved"]]
                  (map (juxt :fn-name :slot-name) (:resolver-of by-kind)))
-              "a resolver-fn-id reference is a resolver-of usage")))
+              "a resolver-fn-id reference is a resolver-of usage")
+          (is (not-any? #(and (= "fu-caller" (:fn-name %))
+                              (#{:ref-of :resolver-of} (:kind %)))
+                        (:usages concealed))
+              "a concealed owner's binding and list-item references stay hidden")))
       (finally (sp/close storage))))
 
   (let [storage (setup/create-test-storage)

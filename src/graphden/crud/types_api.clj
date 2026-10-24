@@ -13,6 +13,7 @@
    Depends on `graphden.crud.request` for request context."
   (:require
     [clojure.string :as str]
+    [graphden.crud.graph-refs :as refs]
     [graphden.crud.request :as request]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.context :as exec-ctx]
@@ -744,78 +745,22 @@
                (or extra {}))))))
 
 
-(defn- type-plane-usages
-  "References to the target AS A TYPE: base/element/return FKs,
-   union/variant/fn-type constraint mentions, slot declarations and
-   binding type-overrides."
-  [target-id target-name {:keys [fns slots bindings]}
-   slot-by-id slot-owner-by-id fn-summary]
-  (concat
-    (->> fns
-         (filter #(= (:base-fn-id %) target-id))
-         (map #(fn-summary (:id %) :base-of)))
-    (->> fns
-         (filter #(= (:element-fn-id %) target-id))
-         (map #(fn-summary (:id %) :element-of)))
-    (->> fns
-         (filter #(= (:return-type-fn-id %) target-id))
-         (map #(fn-summary (:id %) :return-of)))
-    (->> fns
-         (filter (fn [f]
-                   (and (vector? (:constraint f))
-                        target-name
-                        (constraint-contains-type-ref? (:constraint f) target-name))))
-         (map (fn [f]
-                (fn-summary (:id f)
-                            (case (first (:constraint f))
-                              :union :union-branch
-                              :variant :variant-branch
-                              :fn :fn-type-arg-or-return
-                              :other)))))
-    (->> slots
-         (filter #(= (:type-fn-id %) target-id))
-         (mapcat (fn [s]
-                   (when-let [owner-id (get slot-owner-by-id (:id s))]
-                     [(fn-summary owner-id :slot-of {:slot-name (:name s)})]))))
-    (->> bindings
-         (filter #(= (:type-override-fn-id %) target-id))
-         (map (fn [b]
-                (let [s (get slot-by-id (:slot-id b))]
-                  (fn-summary (:fn-id b) :binding-of
-                              {:slot-name (:name s)})))))))
-
-
-(defn- composition-plane-usages
-  "References to the target AS A FN: children extending it, bindings
-   and list items ref-ing it (one row per (fn, slot) pair — not one per
-   appended item), resolver bindings."
-  [target-id {:keys [fns bindings list-items]} slot-by-id fn-summary]
-  (let [binding-by-id (into {} (map (juxt :id identity)) bindings)]
-    (concat
-      (->> fns
-           (filter #(some #{target-id} (:parent-ids %)))
-           (map #(fn-summary (:id %) :parent-of)))
-      (->> bindings
-           (filter #(= (:ref-fn-id %) target-id))
-           (map (fn [b]
-                  (let [s (get slot-by-id (:slot-id b))]
-                    (fn-summary (:fn-id b) :ref-of
-                                {:slot-name (:name s)})))))
-      (->> list-items
-           (filter #(= (:ref-fn-id %) target-id))
-           (keep (fn [li]
-                   (when-let [b (get binding-by-id (:binding-id li))]
-                     (let [s (get slot-by-id (:slot-id b))]
-                       [(:fn-id b) (:name s)]))))
-           (distinct)
-           (map (fn [[fid slot-name]]
-                  (fn-summary fid :ref-of {:slot-name slot-name}))))
-      (->> bindings
-           (filter #(= (:resolver-fn-id %) target-id))
-           (map (fn [b]
-                  (let [s (get slot-by-id (:slot-id b))]
-                    (fn-summary (:fn-id b) :resolver-of
-                                {:slot-name (:name s)}))))))))
+(defn- constraint-usages
+  "Named type references inside recursive constraints are the only incoming
+   links that do not carry a target fn-id in a graph row."
+  [target-name {:keys [fns]} fn-summary]
+  (->> fns
+       (filter (fn [f]
+                 (and (vector? (:constraint f))
+                      target-name
+                      (constraint-contains-type-ref? (:constraint f) target-name))))
+       (map (fn [f]
+              (fn-summary (:id f)
+                          (case (first (:constraint f))
+                            :union :union-branch
+                            :variant :variant-branch
+                            :fn :fn-type-arg-or-return
+                            :other))))))
 
 
 (def ^:private usages-response-cap
@@ -830,18 +775,19 @@
   "`apply-types-usages` over an already-concealed `graph`."
   [parsed ctx graph]
   (let [target-id (:target-id parsed)
-        {:keys [fns slots fn-slots]} graph
-        fn-by-id (into {} (map (juxt :id identity)) fns)
-        slot-by-id (into {} (map (juxt :id identity)) slots)
-        slot-owner-by-id (into {} (map (juxt :slot-id :fn-id)) fn-slots)
+        fn-by-id (into {} (map (juxt :id identity)) (:fns graph))
         target-name (some-> (get fn-by-id target-id) :name)
         fn-summary (usage-summary-fn fn-by-id ctx)
-        usages (vec (concat
-                      (composition-plane-usages target-id graph
-                                                slot-by-id fn-summary)
-                      (type-plane-usages target-id target-name graph
-                                         slot-by-id slot-owner-by-id
-                                         fn-summary)))
+        usages (if (contains? fn-by-id target-id)
+                 (vec
+                   (concat
+                     (->> (refs/edges graph)
+                          (filter #(= target-id (:target-id %)))
+                          (map (fn [{:keys [fn-id kind slot-name]}]
+                                 (fn-summary fn-id kind
+                                             (when slot-name {:slot-name slot-name})))))
+                     (constraint-usages target-name graph fn-summary)))
+                 [])
         ;; :const-scale targets have hundreds of users; the clients cap
         ;; their DISPLAY anyway, so don't ship an unbounded list —
         ;; :count stays the full total and :truncated? says the list is
@@ -857,10 +803,9 @@
 
 (defn apply-types-usages
   "Stage 3 of types-usages — walk the graph for every reference to the
-   target fn row. Covers BOTH reference planes: the composition plane
-   (`composition-plane-usages` — children, arg refs, resolvers) and the
-   type plane (`type-plane-usages` — slots, overrides, FKs, constraint
-   branches). One walk serves `/api/types/usages` (the type-expand
+   target fn row. Structural links share `graph-refs/edges` with the editor
+   subtree walker; recursive named constraints add the remaining type links.
+   One walk serves `/api/types/usages` (the type-expand
    footer) and `/api/fns/usages` (the inspector's Used-by section) —
    kinds that don't apply to a given target simply come back empty.
    Reached only after the graph's `types-usages` validation passes

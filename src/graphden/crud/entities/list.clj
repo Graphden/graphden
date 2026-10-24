@@ -8,6 +8,7 @@
    tree: no write path calls into it and it calls into none of them."
   (:require
     [clojure.string :as str]
+    [graphden.crud.graph-refs :as refs]
     [graphden.crud.request :as request]
     [graphden.crud.secret-shape :as secret-shape]
     [graphden.crud.types-api :as types-api]
@@ -22,25 +23,11 @@
 
 
 (defn- subtree-fn-id-closure
-  "BFS the set of fn-ids transitively reachable from `root-id` (or a
-   collection of root ids) via:
-   - `parent-ids` (inheritance chain)
-   - `binding.ref-fn-id` for bindings owned by an in-set fn
-   - `binding.type-override-fn-id` for those same bindings
-   - `binding-list-item.ref-fn-id` for items under those bindings
-   - `slot.type-fn-id` for slots in any in-set fn's `fn-slots` row
-
-   These are exactly the edges that the editor + layout + runtime
-   need to render or execute the root fn. Nothing else in the graph
-   contributes to that view.
-
-   `graph` is the full graph map from `cached-or-load-graph`."
+  "BFS from one or more root ids through the same structural references
+   reported by Used-by. The shared edge source is `graph-refs/edges`."
   [graph root-id]
-  (let [fns-by-id        (into {} (map (juxt :id identity)) (:fns graph))
-        fn-slots-by-fn   (group-by :fn-id (:fn-slots graph))
-        slots-by-id      (into {} (map (juxt :id identity)) (:slots graph))
-        bindings-by-fn   (group-by :fn-id (:bindings graph))
-        items-by-binding (group-by :binding-id (:list-items graph))
+  (let [fns-by-id (into {} (map (juxt :id identity)) (:fns graph))
+        by-source (refs/by-source graph)
         seen (java.util.HashSet.)
         stack (java.util.ArrayDeque.)
         push! (fn [^java.util.UUID id]
@@ -51,26 +38,8 @@
       (let [fid (java.util.ArrayDeque/.pop stack)]
         (when-not (java.util.HashSet/.contains seen fid)
           (java.util.HashSet/.add seen fid)
-          (when-let [fn-row (get fns-by-id fid)]
-            (doseq [pid (:parent-ids fn-row)] (push! pid))
-            ;; The fn's own type-fn / impl references — so a fn's subtree is
-            ;; self-contained for by-id type resolution once the editor no
-            ;; longer holds a full-fns mirror. `base-fn-id` (composed → its
-            ;; base), `return-type-fn-id` (base-fn's declared return type),
-            ;; `element-fn-id` (a list type-row's element type). Each resolves
-            ;; to a small base-fn / type-row.
-            (push! (:base-fn-id fn-row))
-            (push! (:return-type-fn-id fn-row))
-            (push! (:element-fn-id fn-row))
-            (doseq [b (get bindings-by-fn fid)]
-              (push! (:ref-fn-id b))
-              (push! (:resolver-fn-id b))
-              (push! (:type-override-fn-id b))
-              (doseq [it (get items-by-binding (:id b))]
-                (push! (:ref-fn-id it))))
-            (doseq [fs (get fn-slots-by-fn fid)]
-              (when-let [slot (get slots-by-id (:slot-id fs))]
-                (push! (:type-fn-id slot))))))))
+          (when (contains? fns-by-id fid)
+            (doseq [target (get by-source fid)] (push! target))))))
     (set seen)))
 
 

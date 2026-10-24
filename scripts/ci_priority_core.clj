@@ -269,6 +269,7 @@
         (when-not (symbol? name)
           (throw (ex-info "Expected ns form" {:path path})))
         {:name name
+         :package-impl-consumer? (boolean (:ci/package-impl-consumer (meta name)))
          :deps (into (->> (drop 2 form)
                           (filter #(and (seq? %) (#{:require :use :require-macros} (first %))))
                           (mapcat rest)
@@ -294,6 +295,8 @@
               (-> graph
                   (assoc-in [:by-path path] entry)
                   (assoc-in [:by-name (:name entry)] path)
+                  (cond-> (:package-impl-consumer? entry)
+                    (update :package-impl-consumers (fnil conj #{}) (:name entry)))
                   (update :package-consumers
                           (fn [consumers]
                             (reduce (fn [r [package module]]
@@ -305,7 +308,8 @@
                             (reduce (fn [r dep]
                                       (update r dep (fnil conj #{}) (:name entry)))
                                     consumers (:deps entry)))))))
-          {:by-path {} :by-name {} :reverse {} :package-consumers {}}
+          {:by-path {} :by-name {} :reverse {} :package-consumers {}
+           :package-impl-consumers #{}}
           (clojure-files)))
 
 
@@ -332,7 +336,8 @@
   [changed kind]
   (when changed
     (try
-      (let [{:keys [by-path package-consumers] consumers :reverse}
+      (let [{:keys [by-path package-consumers package-impl-consumers]
+             consumers :reverse}
             (namespace-graph)
             sources (->> changed
                          (filter #(or (str/starts-with? % "src/")
@@ -349,8 +354,14 @@
                                            (get package-consumers [package module]))))
                                  (mapcat identity)
                                  set)
+            package-impl-sources (when (some #(re-matches
+                                                #"resources/packages/[^/]+/[^/]+/impls\.clj"
+                                                %)
+                                             changed)
+                                   package-impl-consumers)
             distances (dependency-distances consumers
-                                            (into sources package-sources))
+                                            (into sources
+                                                  (concat package-sources package-impl-sources)))
             test-entries (->> by-path
                               (filter (fn [[path _]]
                                         (and (str/starts-with? path "test/")

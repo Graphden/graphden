@@ -132,9 +132,18 @@
   (is (contains? (:packages (#'priority/namespace-entry
                              "test/graphden/packages/core/hof_test.clj"))
                  ["core" "hof"]))
-  (is (= ["graphden.packages.core.hof-test"]
+  (is (= ["graphden.packages.core.hof-test"
+          "graphden.types.taint-propagate-guard-test"]
          (priority/unit-first
-           #{"resources/packages/core/hof/impls.clj"}))))
+           #{"resources/packages/core/hof/impls.clj"})))
+  (let [layers (priority/unit-layers
+                 #{"resources/packages/core/hof/impls.clj"})]
+    (is (some #{"graphden.types.taint-propagate-guard-test"} (first layers)))
+    (is (= (count (mapcat identity layers))
+           (count (distinct (mapcat identity layers))))))
+  (is (not (some #{"graphden.types.taint-propagate-guard-test"}
+                 (priority/unit-first
+                   #{"resources/packages/core/hof/fns.edn"})))))
 
 
 (deftest runtime-order-preserves-full-roster-once

@@ -1,4 +1,5 @@
-(ns graphden.types.taint-propagate-guard-test
+;; CI reads this marker because load-packages consumes impls.clj dynamically.
+(ns ^:ci/package-impl-consumer graphden.types.taint-propagate-guard-test
   "Anti-drift guard for the `:secret` information-flow marker (SECRETS.md § T3).
 
    A base-fn that passes or transforms caller CONTENT must declare

@@ -70,37 +70,37 @@
   ([graph roots target-id]
    (shortest-path graph roots target-id (edges graph)))
   ([graph roots target-id links]
-  (let [visible (into #{} (map :id) (:fns graph))
-        roots (->> roots (filter visible) distinct (sort-by str) vec)
-        adjacent (->> links
-                      (filter #(#{:parent-of :ref-of :resolver-of} (:kind %)))
-                      (filter #(contains? visible (:target-id %)))
-                      (group-by :fn-id)
-                      (reduce-kv (fn [index id links]
-                                   (assoc index id
-                                          (sort-by (juxt (comp str :target-id)
-                                                         :kind :slot-name)
-                                                   links)))
-                                 {}))]
-    (when (contains? visible target-id)
-      (loop [queue (into clojure.lang.PersistentQueue/EMPTY roots)
-             parents (into {} (map (fn [root] [root nil])) roots)]
-        (when-let [current (peek queue)]
-          (if (= current target-id)
-            (loop [id current path ()]
-              (if-let [{:keys [from kind slot-name]} (get parents id)]
-                (recur from
-                       (conj path (cond-> {:fn-id id :kind kind}
-                                    slot-name (assoc :slot-name slot-name))))
-                (vec (conj path {:fn-id id}))))
-            (let [[queue parents]
-                  (reduce (fn [[pending seen] {:keys [target-id kind slot-name]}]
-                            (if (contains? seen target-id)
-                              [pending seen]
-                              [(conj pending target-id)
-                               (assoc seen target-id
-                                      {:from current :kind kind
-                                       :slot-name slot-name})]))
-                          [(pop queue) parents]
-                          (get adjacent current))]
-              (recur queue parents)))))))))
+   (let [visible (into #{} (map :id) (:fns graph))
+         roots (->> roots (filter visible) distinct (sort-by str) vec)
+         adjacent (->> links
+                       (filter #(#{:parent-of :ref-of :resolver-of} (:kind %)))
+                       (filter #(contains? visible (:target-id %)))
+                       (group-by :fn-id)
+                       (reduce-kv (fn [index id links]
+                                    (assoc index id
+                                           (sort-by (juxt (comp str :target-id)
+                                                          :kind :slot-name)
+                                                    links)))
+                                  {}))]
+     (when (contains? visible target-id)
+       (loop [queue (into clojure.lang.PersistentQueue/EMPTY roots)
+              parents (into {} (map (fn [root] [root nil])) roots)]
+         (when-let [current (peek queue)]
+           (if (= current target-id)
+             (loop [id current path ()]
+               (if-let [{:keys [from kind slot-name]} (get parents id)]
+                 (recur from
+                        (conj path (cond-> {:fn-id id :kind kind}
+                                     slot-name (assoc :slot-name slot-name))))
+                 (vec (conj path {:fn-id id}))))
+             (let [[queue parents]
+                   (reduce (fn [[pending seen] {:keys [target-id kind slot-name]}]
+                             (if (contains? seen target-id)
+                               [pending seen]
+                               [(conj pending target-id)
+                                (assoc seen target-id
+                                       {:from current :kind kind
+                                        :slot-name slot-name})]))
+                           [(pop queue) parents]
+                           (get adjacent current))]
+               (recur queue parents)))))))))

@@ -287,13 +287,13 @@ Runs functions from ~tests~ namespaces through the ordinary execution API with e
 :PROPERTIES:
 :CUSTOM_ID: crud/schedule-affected!
 :FILE: src/graphden/crud/test_autorun.clj
-:LINE: 170
-:MINS: 2.4
+:LINE: 182
+:MINS: 3.1
 :END:
 
 Finds tests affected by a write through reverse dependencies. It selects tests with no [[file:glossary.org::#term/effect][effects]], combines closely spaced requests into one delayed run, and runs them with conveyed [[file:glossary.org::#term/dynamic-binding][dynamic bindings]]. ~:allowed-effects #{}~ enforces the no-effects restriction during execution as well.
 
-- source :: [[file:../../../src/graphden/crud/test_autorun.clj::(defn schedule-affected!][src/graphden/crud/test_autorun.clj:170]]
+- source :: [[file:../../../src/graphden/crud/test_autorun.clj::(defn schedule-affected!][src/graphden/crud/test_autorun.clj:182]]
 
 * 23. graph-list-env
 :PROPERTIES:

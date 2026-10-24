@@ -23,6 +23,11 @@ function fixture() {
     gdNavigateToFn(...args) { navigations.push(args); },
   });
   context.window = context;
+  const windowListeners = new Map();
+  context.addEventListener = (type, listener) => windowListeners.set(type, listener);
+  context.removeEventListener = (type, listener) => {
+    if (windowListeners.get(type) === listener) windowListeners.delete(type);
+  };
   installInspectorGraph(context, document);
   MiniElement.prototype.matches = function(selector) { return this.className.split(' ').includes(selector.slice(1)); };
   MiniElement.prototype.blur = function() { blurs++; if (document.activeElement === this) document.activeElement = null; };
@@ -39,7 +44,8 @@ function fixture() {
   };
   context.gdMountFnUsages(host, 'selected', {owns, captureRead});
   async function reply(payload, request = requests.at(-1)) {
-    request.resolve({ok: true, json: async () => ({ok: true, count: payload.usages.length, 'truncated?': false, ...payload})});
+    request.resolve({ok: true, json: async () => ({ok: true, count: payload.usages.length, 'truncated?': false,
+      reachability: {state: 'unknown', path: []}, ...payload})});
     await flush();
   }
   return {context, document, body, host, requests, navigations, reply,
@@ -72,7 +78,8 @@ function fixture() {
   {
     const f = fixture(); await f.reply({usages: []});
     assert.equal(f.rows().length, 0);
-    assert.equal(f.host.querySelector('.gd-insp-usages').getAttribute('hidden'), 'true');
+    assert.equal(f.host.querySelector('.gd-insp-usages').getAttribute('hidden'), 'false');
+    assert.equal(f.host.querySelector('.gd-insp-reach-label').textContent, 'Reachability unknown');
   }
   {
     const f = fixture();

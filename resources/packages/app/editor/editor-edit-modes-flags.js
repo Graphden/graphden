@@ -49,6 +49,35 @@ function gdOwnEditable(fn) {
     && ((typeof graphdenIsFnOwned !== 'function') || graphdenIsFnOwned(fn));
 }
 
+let gdFlagRefreshPending = false;
+let gdFlagRefreshVersion = 0;
+let gdFlagPendingIntent = null;
+const gdFlagAuthEpoch = () => typeof _graphAuthEpoch === 'undefined' ? null : _graphAuthEpoch;
+
+// A save reloads the graph and replaces the Inspector Overview. If a reader
+// clicks another flag during that refresh, replay the action on the new row
+// after its server partial has been bound. The current lookup map is empty
+// during part of loadGraphData, so resolving the fn at the original click
+// would silently discard it.
+function gdReplayFlagIntent() {
+  if (gdFlagRefreshPending || !gdFlagPendingIntent) return;
+  const intent = gdFlagPendingIntent;
+  const inspector = document.getElementById?.('gd-inspector');
+  if ((inspector && inspector.dataset.fnId !== intent.fnId)
+      || intent.authEpoch !== gdFlagAuthEpoch()
+      || (typeof isAuthenticated === 'function' && !isAuthenticated())) {
+    gdFlagPendingIntent = null;
+    return;
+  }
+  const row = Array.from(document.querySelectorAll('.gd-insp-flag-row[data-action]'))
+    .find((candidate) => candidate.dataset.fnId === intent.fnId
+      && candidate.dataset.action === intent.action
+      && candidate.classList.contains('gd-insp-editable'));
+  if (!row) return;
+  gdFlagPendingIntent = null;
+  row.click();
+}
+
 
 // Wire the Inspector Overview's flag rows: on a fn the reader may edit, a
 // row becomes a button that opens the same popover the card strip opens.
@@ -101,6 +130,11 @@ function gdBindInspectorFlagRows(host) {
     row.setAttribute('role', 'button');
     row.title = (row.title ? row.title + ' — ' : '') + 'click to change';
     const open = () => {
+      if (gdFlagRefreshPending) {
+        gdFlagPendingIntent = {fnId: row.dataset.fnId, action: row.dataset.action,
+          authEpoch: gdFlagAuthEpoch()};
+        return;
+      }
       const fn = fnOf(row.dataset.fnId);
       if (!fn || !gdFlagEditable(fn)) return;
       if (row.dataset.action === 'lambda-params') {
@@ -120,17 +154,35 @@ function gdBindInspectorFlagRows(host) {
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
     });
   }
+  if (gdFlagPendingIntent) {
+    const rows = Array.from(host.querySelectorAll('.gd-insp-flag-row[data-action]'));
+    const target = rows.find((row) => row.dataset.fnId === gdFlagPendingIntent.fnId
+      && row.dataset.action === gdFlagPendingIntent.action);
+    if (rows.length && !target?.classList.contains('gd-insp-editable')) {
+      gdFlagPendingIntent = null;
+    }
+  }
+  gdReplayFlagIntent();
 }
 
 
 // After a flag write the canvas reloads (the strips read layout facts) and
 // the Inspector, if it shows this fn, re-renders its Overview rows.
 function gdAfterFlagSaved(fn) {
-  if (typeof loadGraphData === 'function') loadGraphData();
-  if (typeof window.gdInspectorRender === 'function'
-      && document.querySelector('.gd-insp-flag-row[data-fn-id="' + fn.id + '"]')) {
-    window.gdInspectorRender(fn.id);
-  }
+  const version = ++gdFlagRefreshVersion;
+  gdFlagRefreshPending = true;
+  return Promise.resolve()
+    .then(() => { if (typeof loadGraphData === 'function') return loadGraphData(); })
+    .catch((error) => console.error('Inspector flag refresh failed', error))
+    .then(() => {
+      if (version !== gdFlagRefreshVersion) return;
+      gdFlagRefreshPending = false;
+      if (typeof window.gdInspectorRender === 'function'
+          && document.querySelector('.gd-insp-flag-row[data-fn-id="' + fn.id + '"]')) {
+        window.gdInspectorRender(fn.id);
+      }
+      gdReplayFlagIntent();
+    });
 }
 
 // --- λ call-site parameters (`:lambda-params`) ---

@@ -593,9 +593,9 @@
    :return-type-wide? true}
 
   {:name :_types-usages-parsed
-   :description "Stage 1 of types-usages — JSON body → `{:target-id}` (the `type-fn-id` — or its `fn-id` synonym, which the /api/fns/usages alias sends — coerced to a UUID, or nil when absent / malformed). The `:to-str → :parse-uuid` chain preserves the original `(when id (try uuid-parse (catch _ nil)))` shape — `:to-str` of nil is `\"\"`, `:parse-uuid` of `\"\"` is nil, so missing keys still collapse to a nil target-id."
+   :description "Stage 1 of types-usages — parse the target and optional editor root UUIDs. The editor root is a point of view, not an authorization grant."
    :parent :zipmap
-   :args {:keys [{:value :target-id}]
+   :args {:keys [{:value :target-id} {:value :root-id}]
           :vals [{:parent :parse-uuid
                   :args {:string {:parent :to-str
                                   :args {:value {:parent :coalesce
@@ -606,7 +606,13 @@
                                                         :default {:parent :get
                                                                   :args {:coll :_parsed-body
                                                                          :key {:value :fn-id}
-                                                                         :default nil}}}}}}}}]}
+                                                                         :default nil}}}}}}}}
+          {:parent :parse-uuid
+           :args {:string {:parent :to-str
+                           :args {:value {:parent :get
+                                          :args {:coll :_parsed-body
+                                                 :key {:value :root-id}
+                                                 :default nil}}}}}}]}
    :return-type :_types-usages-parsed-shape}
 
   {:name :_types-usages-validation

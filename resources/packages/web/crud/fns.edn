@@ -44,7 +44,7 @@
 
   {:name :_types-usages-parsed-shape
    :description "Output of `:_types-usages-parsed` — the type-row id to search references for. `:target-id` is nullable to match the parse stage's `(when raw (try uuid-parse ...))` semantics; the downstream validation guard catches the nil case."
-   :type {:target-id :nullable-uuid}}
+   :type {:target-id :nullable-uuid :root-id :nullable-uuid}}
 
   {:name :_create-record-type-parsed-shape
    :description "Output of `:_create-record-type-parsed` — a record type-row's name, owning namespace, description and field list. `:name`/`:ns-id` are nullable post-parse; `:description` is loosely-typed (the JSON body may carry non-string descriptions); `:fields` is the per-field record list (`:vec` of the body's `:fields` value)."
@@ -120,7 +120,8 @@
 
   {:name :_types-usages-result-shape
    :description "Output of `:_types-usages-apply` — every reference to the target type-row. `:type-fn-id` is the id stringified."
-   :type {:ok :bool :type-fn-id :text :type-name :text :count :int :usages :jsonb}}
+   :type {:ok :bool :type-fn-id :text :type-name :text :count :int :usages :jsonb
+          :reachability :jsonb}}
 
   {:name :_id-name-result-shape
    :description "The success payload of a type-row create / update — the new row's id (stringified) and name."

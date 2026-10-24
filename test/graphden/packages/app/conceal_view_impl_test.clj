@@ -221,6 +221,19 @@
       #(is (not (contains? (users) "web-server"))))))
 
 
+(deftest reachability-does-not-expose-a-revoked-root-body
+  (let [path #(get-in (types-api/apply-types-usages
+                        {:target-id (ga/fn-id :http-server)
+                         :root-id (ga/fn-id :web-server)}
+                        (ctx) entities/apply-view-impl-filter)
+                      [:reachability :path])]
+    (is (some (fn [row] (= "web-server" (:fn-name row))) (path))
+        "control: the authorized editor root is on a path to its parent")
+    (with-filter* (hide-named "web-server")
+      #(is (not-any? (fn [row] (= "web-server" (:fn-name row))) (path))
+           "revoking view-impl removes the root's outgoing path"))))
+
+
 (deftest whole-graph-export-leaves-a-hidden-fn-out
   (let [storage (:storage ga/*bootstrap*)
         names #(set (map :name (export/export-graph storage entities/apply-view-impl-filter)))]

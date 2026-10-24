@@ -55,6 +55,11 @@
     (is (= [nearer target] (mapv :fn-id nearest)))
     (is (= :parent-of (:kind (last nearest))))
     (is (nil? (refs/shortest-path
+                {:fns [{:id root :return-type-fn-id target}
+                       {:id target}]}
+                [root] target))
+        "a type annotation does not make a function executable from a root")
+    (is (nil? (refs/shortest-path
                 (update graph :fns
                         #(filterv (fn [row] (not= middle (:id row))) %))
                 [root] target)))))

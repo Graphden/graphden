@@ -63,14 +63,17 @@
 
 
 (defn shortest-path
-  "The shortest visible structural path from any supplied root to `target-id`.
+  "The shortest visible execution path from any supplied root to `target-id`.
    Each step after the root names the incoming edge. nil means that the
    supplied roots have no visible structural path; callers decide whether
    dynamic selection or concealed source makes that result unknown."
-  [graph roots target-id]
+  ([graph roots target-id]
+   (shortest-path graph roots target-id (edges graph)))
+  ([graph roots target-id links]
   (let [visible (into #{} (map :id) (:fns graph))
         roots (->> roots (filter visible) distinct (sort-by str) vec)
-        adjacent (->> (edges graph)
+        adjacent (->> links
+                      (filter #(#{:parent-of :ref-of :resolver-of} (:kind %)))
                       (filter #(contains? visible (:target-id %)))
                       (group-by :fn-id)
                       (reduce-kv (fn [index id links]
@@ -100,4 +103,4 @@
                                        :slot-name slot-name})]))
                           [(pop queue) parents]
                           (get adjacent current))]
-              (recur queue parents))))))))
+              (recur queue parents)))))))))

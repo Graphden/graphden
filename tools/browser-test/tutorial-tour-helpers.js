@@ -9,8 +9,8 @@
 // Everything shared by those files lives here.
 
 const {assert, api, deleteFnByName, submitInlineRow} = require('./edit-test-helpers');
-const {checkedAction} = require('./checked-action');
-const {openCatalog} = require('./tutorial-actions');
+const {openCatalog, saveInlinePopover, fillInlineField,
+  appendOrBindLiteralFromChooser, saveDescriptionTooltip} = require('./tutorial-actions');
 
 const NS_NAME = 'tutorial';
 const FN_NAME = 'one-plus-one';
@@ -551,19 +551,11 @@ async function extendViaRowActions(page, childName, expectOwner) {
   });
   await page.waitForSelector('.arg-value-edit-popover .arg-value-edit-input',
     {timeout: 10000});
-  await page.evaluate((name) => {
-    const pop = document.querySelector('.arg-value-edit-popover');
-    const input = pop.querySelector('.arg-value-edit-input');
-    input.value = name;
-    input.dispatchEvent(new Event('input', {bubbles: true}));
-    Array.from(pop.querySelectorAll('.arg-value-edit-btn'))
-      .find((b) => b.textContent.trim() === 'Save').click();
-  }, childName);
-  // The extend popover unmounts on success — waiting for that prevents
-  // the NEXT bind step from typing into this (dead) popover's input.
-  await page.waitForFunction(
-    () => !document.querySelector('.arg-value-edit-popover'),
-    null, {timeout: 15000, polling: 100});
+  await saveInlinePopover(page, {
+    name: 'extend-fn', timeoutMs: 30000,
+    prepare: () => fillInlineField(page, childName, {selector: '.arg-value-edit-input'}),
+    request: {method: 'POST', path: '/api/entities/fn'}
+  });
 }
 
 
@@ -604,53 +596,6 @@ async function bindSeqAnchorPlaceholder(page, literalText) {
 // so the click lands on the tail and not on a binder about to be replaced.
 async function appendSeqItemViaEdge(page, literalText) {
   await bindSeqAnchorPlaceholder(page, literalText);
-}
-
-
-// Shared tail of the two above: the literal / fn-ref chooser (if the slot
-// offers one), the value form, Save, and the wait for the write to land.
-async function appendOrBindLiteralFromChooser(page, literalText) {
-  // Scalar slots offer "Bind literal"; sequence slots offer "Append
-  // literal" (or "Insert literal" from an item's + ) — accept any.
-  const choice = page.getByRole('button', {name: /^(Bind|Append|Insert) literal$/}).first();
-  let kind;
-  await checkedAction(page, {
-    name: 'choose-literal', timeoutMs: 10000,
-    ready: () => choice.waitFor({state: 'visible', timeout: 8000}),
-    gesture: async () => {
-      kind = (await choice.textContent()).trim();
-      await choice.click();
-    },
-    settled: () => page.waitForFunction(() => {
-      const pops = document.querySelectorAll('.arg-value-edit-popover');
-      const pop = pops[pops.length - 1];
-      return pop && (pop.querySelector('.arg-value-edit-input')
-        || pop.querySelector('[data-form-field]'));
-    }, null, {timeout: 10000, polling: 100})
-  });
-  await page.evaluate((text) => {
-    const pops = document.querySelectorAll('.arg-value-edit-popover');
-    const pop = pops[pops.length - 1];
-    const field = pop.querySelector('.arg-value-edit-input')
-      || pop.querySelector('[data-form-field]');
-    field.value = text;
-    field.dispatchEvent(new Event('input', {bubbles: true}));
-    field.dispatchEvent(new Event('change', {bubbles: true}));
-  }, literalText);
-  const save = page.locator('.arg-value-edit-popover').last().getByRole('button', {name: 'Save'});
-  await checkedAction(page, {
-    name: kind === 'Bind literal' ? 'bind-literal' : 'append-literal',
-    timeoutMs: 60000,
-    ready: () => save.waitFor({state: 'visible', timeout: 10000}),
-    gesture: () => save.click(),
-    request: {method: 'POST', path: kind === 'Bind literal'
-      ? '/api/entities/binding' : /^\/api\/sequence\/append\/[^/]+$/},
-    // The popover unmounts after a successful write. This also keeps cleanup
-    // DELETE from racing the same fn's in-flight mutation.
-    settled: () => page.waitForFunction(
-      () => !document.querySelector('.arg-value-edit-popover'),
-      null, {timeout: 60000, polling: 100})
-  });
 }
 
 
@@ -866,23 +811,12 @@ async function switchBranchViaChip(page, name, {expectClipped = false, clickBlan
 async function editBoundValue(page, text) {
   await page.waitForSelector('.arg-value-editable', {timeout: 30000});
   await page.evaluate(() => document.querySelector('.arg-value-editable').click());
-  await page.waitForFunction(() => {
-    const pops = document.querySelectorAll('.arg-value-edit-popover');
-    const pop = pops[pops.length - 1];
-    return pop && pop.querySelector('[data-form-field], .arg-value-edit-input');
-  }, null, {timeout: 15000, polling: 100});
-  await page.evaluate((v) => {
-    const pops = document.querySelectorAll('.arg-value-edit-popover');
-    const pop = pops[pops.length - 1];
-    const f = pop.querySelector('[data-form-field]') || pop.querySelector('.arg-value-edit-input');
-    f.value = v;
-    f.dispatchEvent(new Event('input', {bubbles: true}));
-    f.dispatchEvent(new Event('change', {bubbles: true}));
-    Array.from(pop.querySelectorAll('.arg-value-edit-btn'))
-      .find((b) => b.textContent.trim() === 'Save').click();
-  }, text);
-  await page.waitForFunction(() => !document.querySelector('.arg-value-edit-popover'),
-    null, {timeout: 30000, polling: 100});
+  await saveInlinePopover(page, {
+    name: 'edit-bound-value', timeoutMs: 30000,
+    prepare: () => fillInlineField(page, text),
+    request: {method: ['POST', 'PUT'],
+      path: /^\/api\/(?:entities\/binding(?:\/[^/]+)?|sequence\/item\/[^/]+)$/}
+  });
 }
 
 
@@ -1168,37 +1102,7 @@ async function chipByName(page, chipName) {
 // `window.gdCode.set` is the wrapper's documented write seam.
 async function bindOptionalArgChip(page, chipName, literalText, opts) {
   await chipByName(page, chipName);
-  await page.waitForFunction(() => Array.from(document.querySelectorAll('button'))
-    .some((b) => b.textContent.trim() === 'Bind literal'),
-  null, {timeout: 15000, polling: 100});
-  await page.evaluate(() => {
-    Array.from(document.querySelectorAll('button'))
-      .find((b) => b.textContent.trim() === 'Bind literal').click();
-  });
-  await page.waitForFunction(() => {
-    const pops = document.querySelectorAll('.arg-value-edit-popover');
-    const pop = pops[pops.length - 1];
-    return pop && (pop.querySelector('.arg-value-edit-input')
-      || pop.querySelector('[data-form-field]'));
-  }, null, {timeout: 10000, polling: 100});
-  await page.evaluate(({text, code}) => {
-    const pops = document.querySelectorAll('.arg-value-edit-popover');
-    const pop = pops[pops.length - 1];
-    const field = pop.querySelector('.arg-value-edit-input')
-      || pop.querySelector('[data-form-field]');
-    if (code && window.gdCode) {
-      window.gdCode.set(field, text);
-    } else {
-      field.value = text;
-      field.dispatchEvent(new Event('input', {bubbles: true}));
-      field.dispatchEvent(new Event('change', {bubbles: true}));
-    }
-    Array.from(pop.querySelectorAll('.arg-value-edit-btn'))
-      .find((b) => b.textContent.trim() === 'Save').click();
-  }, {text: literalText, code: !!(opts && opts.code)});
-  await page.waitForFunction(
-    () => !document.querySelector('.arg-value-edit-popover'),
-    null, {timeout: 20000, polling: 100});
+  await appendOrBindLiteralFromChooser(page, literalText, {code: !!opts?.code});
 }
 
 
@@ -1239,31 +1143,17 @@ async function renameArgViaEdgeLabel(page, currentName, newName) {
     .some(owner => owner.getAttribute('aria-label') === 'Rename slot ' + name
       && owner.querySelector(':scope > .canvas-bindings-body-frame > .gd-canvas-body-host')?.textContent.trim() === name),
   currentName, {timeout: 30000, polling: 150});
-  // A row-actions popover left open from an earlier step sits over the
-  // label. Close it the way a user does — Escape — and NOT by removing the
-  // node: the editor holds a singleton reference to that element, so
-  // deleting it leaves every later ⋯ click with nothing to open.
-  await page.keyboard.press('Escape');
-  await page.waitForFunction(() => {
-    const pop = document.querySelector('.row-actions-popover');
-    return !pop || pop.offsetParent === null;
-  }, null, {timeout: 10000, polling: 50});
   await rename.click();
   await page.waitForFunction(() => {
     const pop = document.querySelector('.arg-value-edit-popover');
     return pop && pop.getAttribute('aria-label') === 'Rename arg';
   }, null, {timeout: 15000, polling: 100});
-  await page.evaluate((name) => {
-    const pop = document.querySelector('.arg-value-edit-popover');
-    const input = pop.querySelector('input');
-    input.value = name;
-    input.dispatchEvent(new Event('input', {bubbles: true}));
-    Array.from(pop.querySelectorAll('.arg-value-edit-btn'))
-      .find((b) => b.textContent.trim() === 'Save').click();
-  }, newName);
-  await page.waitForFunction(
-    () => !document.querySelector('.arg-value-edit-popover'),
-    null, {timeout: 20000, polling: 100});
+  await saveInlinePopover(page, {
+    name: 'rename-arg', timeoutMs: 30000,
+    prepare: () => fillInlineField(page, newName, {selector: 'input'}),
+    request: {method: ['POST', 'PUT'],
+      path: /^\/api\/entities\/binding(?:\/[^/]+)?$/}
+  });
 }
 
 
@@ -1463,36 +1353,7 @@ async function bindNamedPlaceholder(page, argName, kind, text) {
       null, {timeout: 30000, polling: 150});
     return;
   }
-  await page.waitForFunction(() => {
-    return Array.from(document.querySelectorAll('button'))
-      .some((b) => /^(Bind|Append) literal$/.test((b.textContent || '').trim()));
-  }, null, {timeout: 8000, polling: 100});
-  await page.evaluate(() => {
-    Array.from(document.querySelectorAll('button'))
-      .find((b) => /^(Bind|Append) literal$/.test((b.textContent || '').trim())).click();
-  });
-  await page.waitForFunction(() => {
-    const pops = document.querySelectorAll('.arg-value-edit-popover');
-    const pop = pops[pops.length - 1];
-    return pop && (pop.querySelector('.arg-value-edit-input')
-      || pop.querySelector('[data-form-field]'));
-  // A loaded gate took 9.8s for a canvas layout request alone; the popover
-  // still needs a turn after that response. Polling returns as soon as ready.
-  }, null, {timeout: 30000, polling: 100});
-  await page.evaluate((t) => {
-    const pops = document.querySelectorAll('.arg-value-edit-popover');
-    const pop = pops[pops.length - 1];
-    const field = pop.querySelector('.arg-value-edit-input')
-      || pop.querySelector('[data-form-field]');
-    if (field.type === 'checkbox') field.checked = t === 'true';
-    else field.value = t;
-    field.dispatchEvent(new Event('input', {bubbles: true}));
-    field.dispatchEvent(new Event('change', {bubbles: true}));
-    Array.from(pop.querySelectorAll('.arg-value-edit-btn'))
-      .find((b) => b.textContent.trim() === 'Save').click();
-  }, text);
-  await page.waitForFunction(() => !document.querySelector('.arg-value-edit-popover'),
-    null, {timeout: 30000, polling: 150}).catch(() => {});
+  await appendOrBindLiteralFromChooser(page, text);
 }
 
 // The `+` of ONE card's slot — pinned by the fn the binding lands on AND
@@ -1553,33 +1414,7 @@ async function bindPlaceholderOn(page, ownerName, argName, kind, text) {
       null, {timeout: 30000, polling: 150});
     return;
   }
-  await page.waitForFunction(() => {
-    return Array.from(document.querySelectorAll('.free-arg-bind-chooser button'))
-      .some((b) => /^(Bind|Append) literal$/.test((b.textContent || '').trim()));
-  }, null, {timeout: 8000, polling: 100});
-  await page.evaluate(() => {
-    Array.from(document.querySelectorAll('.free-arg-bind-chooser button'))
-      .find((b) => /^(Bind|Append) literal$/.test((b.textContent || '').trim())).click();
-  });
-  await page.waitForFunction(() => {
-    const pops = document.querySelectorAll('.arg-value-edit-popover');
-    const pop = pops[pops.length - 1];
-    return pop && (pop.querySelector('.arg-value-edit-input')
-      || pop.querySelector('[data-form-field]'));
-  }, null, {timeout: 10000, polling: 100});
-  await page.evaluate((t) => {
-    const pops = document.querySelectorAll('.arg-value-edit-popover');
-    const pop = pops[pops.length - 1];
-    const field = pop.querySelector('.arg-value-edit-input')
-      || pop.querySelector('[data-form-field]');
-    field.value = t;
-    field.dispatchEvent(new Event('input', {bubbles: true}));
-    field.dispatchEvent(new Event('change', {bubbles: true}));
-    Array.from(pop.querySelectorAll('.arg-value-edit-btn'))
-      .find((b) => b.textContent.trim() === 'Save').click();
-  }, text);
-  await page.waitForFunction(() => !document.querySelector('.arg-value-edit-popover'),
-    null, {timeout: 30000, polling: 150}).catch(() => {});
+  await appendOrBindLiteralFromChooser(page, text);
 }
 
 
@@ -1604,16 +1439,15 @@ async function extendInPlace(page, cardName, childName) {
   await page.waitForSelector('.arg-value-edit-popover .arg-value-edit-input', {timeout: 10000});
   const hint = await page.evaluate(() => document.querySelector('.arg-value-edit-popover .arg-value-edit-hint')?.textContent || '');
   assert(/in place of/.test(hint), 'the Extend popover on a bound card says it extends in place: ' + hint);
-  await page.evaluate((name) => {
-    const pop = document.querySelector('.arg-value-edit-popover');
-    const input = pop.querySelector('.arg-value-edit-input');
-    input.value = name;
-    input.dispatchEvent(new Event('input', {bubbles: true}));
-    Array.from(pop.querySelectorAll('.arg-value-edit-btn'))
-      .find((b) => b.textContent.trim() === 'Save').click();
-  }, childName);
-  await page.waitForFunction(() => !document.querySelector('.arg-value-edit-popover'),
-    null, {timeout: 30000, polling: 100});
+  await saveInlinePopover(page, {
+    name: 'extend-in-place', timeoutMs: 60000,
+    prepare: () => fillInlineField(page, childName, {selector: '.arg-value-edit-input'}),
+    requests: [
+      {name: 'create-child', method: 'POST', path: '/api/entities/fn'},
+      {name: 'rebind-use-site', method: ['POST', 'PUT'],
+        path: /^\/api\/(?:entities\/binding(?:\/[^/]+)?|sequence\/item\/[^/]+)$/}
+    ]
+  });
   await page.waitForSelector('.node-overlay[data-fn-name="' + childName + '"]', {timeout: 60000});
   assert(await page.evaluate(() => location.hash) === hash,
     'extending in place stays on the canvas (hash ' + hash + ')');
@@ -1656,16 +1490,22 @@ async function setSealsViaBadge(page, argName, wanted, fnName) {
       null, {timeout: 15000, polling: 100}).catch(() => {});
     await new Promise((r) => setTimeout(r, 250));
   }
+  const writes = {binding: false, slot: false};
   for (const [key, on] of Object.entries(wanted)) {
     const sel = '.arg-value-edit-popover input[data-seal="' + key + '"]';
     const state = await page.$eval(sel, (i) => ({checked: i.checked, disabled: i.disabled}));
     assert(!state.disabled, 'seal "' + key + '" is offered enabled on :' + argName);
-    if (state.checked !== !!on) await page.click(sel);
+    if (state.checked !== !!on) {
+      writes[key === 'slot-optional' ? 'slot' : 'binding'] = true;
+      await page.click(sel);
+    }
   }
-  await page.evaluate(() => Array.from(document.querySelectorAll('.arg-value-edit-popover .arg-value-edit-btn'))
-    .find((b) => b.textContent.trim() === 'Save').click());
-  await page.waitForFunction(() => !document.querySelector('.arg-value-edit-popover'),
-    null, {timeout: 30000, polling: 150});
+  const requests = [];
+  if (writes.binding) requests.push({name: 'binding-seal', method: ['POST', 'PUT'],
+    path: /^\/api\/entities\/binding(?:\/[^/]+)?$/});
+  if (writes.slot) requests.push({name: 'slot-optional', method: 'PUT',
+    path: /^\/api\/entities\/slot\/[^/]+$/});
+  await saveInlinePopover(page, {name: 'save-seals', requests, timeoutMs: 30000});
 }
 
 
@@ -1731,22 +1571,27 @@ async function setLambdaParamsViaInspector(page, fnName, names) {
   await page.waitForSelector(row, {timeout: 60000});
   await page.evaluate((s) => document.querySelector(s).click(), row);
   await page.waitForSelector('.arg-value-edit-popover .lambda-params-edit', {timeout: 15000});
-  await page.evaluate((ns) => {
-    const pop = document.querySelector('.arg-value-edit-popover');
-    const named = pop.querySelector('input[name="lp-mode"][value="named"]');
-    named.checked = true;
-    named.dispatchEvent(new Event('change', {bubbles: true}));
-    for (const n of ns) {
-      const cb = pop.querySelector('input[data-lambda-name="' + n + '"]');
-      if (cb && !cb.checked) { cb.checked = true; cb.dispatchEvent(new Event('change', {bubbles: true})); }
-    }
-    Array.from(pop.querySelectorAll('.arg-value-edit-btn'))
-      .find((b) => b.textContent.trim() === 'Save').click();
-  }, names);
-  await page.waitForFunction(([n, ns]) => {
-    const fn = Array.from(lookups.fnMap.values()).find((f) => f.name === n);
-    return fn && JSON.stringify(fn['lambda-params']) === JSON.stringify(ns);
-  }, [fnName, names], {timeout: 60000, polling: 200});
+  await saveInlinePopover(page, {
+    name: 'save-lambda-params', timeoutMs: 60000,
+    prepare: () => page.evaluate((ns) => {
+      const pop = document.querySelector('.arg-value-edit-popover');
+      const named = pop.querySelector('input[name="lp-mode"][value="named"]');
+      named.checked = true;
+      named.dispatchEvent(new Event('change', {bubbles: true}));
+      for (const n of ns) {
+        const cb = pop.querySelector('input[data-lambda-name="' + n + '"]');
+        if (cb && !cb.checked) {
+          cb.checked = true;
+          cb.dispatchEvent(new Event('change', {bubbles: true}));
+        }
+      }
+    }, names),
+    request: {method: 'PUT', path: /^\/api\/entities\/fn\/[^/]+$/},
+    settled: () => page.waitForFunction(([n, ns]) => {
+      const fn = Array.from(lookups.fnMap.values()).find((f) => f.name === n);
+      return fn && JSON.stringify(fn['lambda-params']) === JSON.stringify(ns);
+    }, [fnName, names], {timeout: 60000, polling: 200})
+  });
 }
 
 
@@ -1757,17 +1602,21 @@ async function setBranchLocalViaStrip(page, fnName, on) {
   await page.waitForSelector(strip, {timeout: 60000});
   await page.evaluate((s) => document.querySelector(s).click(), strip);
   await page.waitForSelector('.arg-value-edit-popover input[data-branch-local="toggle"]', {timeout: 15000});
-  await page.evaluate((want) => {
-    const pop = document.querySelector('.arg-value-edit-popover');
-    const cb = pop.querySelector('input[data-branch-local="toggle"]');
-    if (cb.checked !== want) cb.click();
-    Array.from(pop.querySelectorAll('.arg-value-edit-btn'))
-      .find((b) => b.textContent.trim() === 'Save').click();
-  }, on);
-  await page.waitForFunction(([s, want]) => {
-    const el = document.querySelector(s);
-    return el && (el.dataset.state === 'own') === want;
-  }, [strip, on], {timeout: 60000, polling: 200});
+  const current = await page.$eval('.arg-value-edit-popover input[data-branch-local="toggle"]',
+    (checkbox) => checkbox.checked);
+  await saveInlinePopover(page, {
+    name: 'save-branch-local', timeoutMs: 60000,
+    prepare: () => page.evaluate((want) => {
+      const cb = document.querySelector('.arg-value-edit-popover input[data-branch-local="toggle"]');
+      if (cb.checked !== want) cb.click();
+    }, on),
+    request: current === on ? undefined
+      : {method: 'PUT', path: /^\/api\/entities\/fn\/[^/]+$/},
+    settled: () => page.waitForFunction(([s, want]) => {
+      const el = document.querySelector(s);
+      return el && (el.dataset.state === 'own') === want;
+    }, [strip, on], {timeout: 60000, polling: 200})
+  });
 }
 
 
@@ -1915,13 +1764,7 @@ async function setFnDescription(page, fnName, text) {
     assert(editorColors.dark && editorColors.editor === editorColors.page,
       'description editor uses the dark form surface: ' + JSON.stringify(editorColors));
 
-    await page.evaluate((v) => {
-      const ta = document.querySelector('.description-tooltip-textarea');
-      ta.value = v;
-      ta.dispatchEvent(new Event('input', {bubbles: true}));
-      Array.from(document.querySelectorAll('.description-tooltip-btn'))
-        .find((b) => b.textContent.trim() === 'Save').click();
-    }, text);
+    await saveDescriptionTooltip(page, fnId, text);
 
     // Confirm against the SERVER, not `window.graphData`: the editor's graph
     // state is a script-scope binding the modules share, and what a page

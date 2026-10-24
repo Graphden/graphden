@@ -34,5 +34,20 @@ async function fails(phase, overrides = {}, browser = page()) {
   await fails('http-error', {}, page(request({ok: () => false, status: () => 500,
     url: () => 'http://localhost/api/entities/binding'})));
   await fails('ui-not-settled', {settled: async () => { throw new Error('popover still open'); }});
+  const created = {...request(), url: () => 'http://localhost/api/entities/fn'};
+  const rebound = {...request(), method: () => 'PUT',
+    url: () => 'http://localhost/api/entities/binding/123'};
+  const requests = [
+    {name: 'create', method: 'POST', path: '/api/entities/fn'},
+    {name: 'rebind', method: ['POST', 'PUT'], path: /^\/api\/entities\/binding\/[^/]+$/}
+  ];
+  const browser = {waitForRequest: async (matches) => [created, rebound].find(matches)};
+  assert.deepEqual(await checkedAction(browser, {...action, request: undefined, requests}),
+    [goodResponse, goodResponse]);
+  await assert.rejects(checkedAction({waitForRequest: async (matches) => {
+    if (matches(created)) return created;
+    throw new Error('rebind absent');
+  }}, {...action, request: undefined, requests}),
+  (error) => error.phase === 'request-not-sent' && /rebind/.test(error.message));
   console.log('checked browser action phases passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

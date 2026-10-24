@@ -13,7 +13,10 @@ class ActionFailure extends Error {
 }
 
 function matchingRequest(request, expected) {
-  if (expected.method && request.method() !== expected.method) return false;
+  if (expected.method) {
+    const methods = Array.isArray(expected.method) ? expected.method : [expected.method];
+    if (!methods.includes(request.method())) return false;
+  }
   if (expected.path) {
     const path = new URL(request.url()).pathname;
     if (expected.path instanceof RegExp ? !expected.path.test(path) : path !== expected.path) {
@@ -37,8 +40,9 @@ async function responseWithin(request, timeoutMs) {
   }
 }
 
-async function checkedAction(page, {name, ready, gesture, request, settled, timeoutMs = 15000}) {
+async function checkedAction(page, {name, ready, gesture, request, requests, settled, timeoutMs = 15000}) {
   if (!name || typeof gesture !== 'function') throw new Error('checkedAction needs name and gesture');
+  if (request && requests) throw new Error('checkedAction accepts request or requests');
   try {
     if (ready) await ready();
   } catch (error) {
@@ -48,33 +52,36 @@ async function checkedAction(page, {name, ready, gesture, request, settled, time
   // Arm the listener before the gesture so even a fast response is correlated
   // with this action. Turn its rejection into data to avoid an unhandled
   // timeout if the click itself fails first.
-  const requestWait = request
-    ? page.waitForRequest((candidate) => matchingRequest(candidate, request),
-      {timeout: timeoutMs}).then((value) => ({value}), (error) => ({error}))
-    : null;
+  const expectedRequests = requests || (request ? [request] : []);
+  const requestWaits = expectedRequests.map((expected) =>
+    page.waitForRequest((candidate) => matchingRequest(candidate, expected),
+      {timeout: timeoutMs}).then((value) => ({value}), (error) => ({error})));
   try {
     await gesture();
   } catch (error) {
     throw new ActionFailure(name, 'click-failed', error.message, error);
   }
 
-  let response;
-  if (requestWait) {
-    const observed = await requestWait;
+  const responses = [];
+  for (let i = 0; i < requestWaits.length; i++) {
+    const observed = await requestWaits[i];
+    const label = expectedRequests[i].name || `request ${i + 1}`;
     if (observed.error) {
-      throw new ActionFailure(name, 'request-not-sent', observed.error.message, observed.error);
+      throw new ActionFailure(name, 'request-not-sent', `${label}: ${observed.error.message}`, observed.error);
     }
+    let response;
     try {
       response = await responseWithin(observed.value, timeoutMs);
     } catch (error) {
-      throw new ActionFailure(name, 'response-timeout', error.message, error);
+      throw new ActionFailure(name, 'response-timeout', `${label}: ${error.message}`, error);
     }
     if (!response) {
-      throw new ActionFailure(name, 'response-missing', observed.value.failure()?.errorText);
+      throw new ActionFailure(name, 'response-missing', `${label}: ${observed.value.failure()?.errorText || 'network failure'}`);
     }
     if (!response.ok()) {
-      throw new ActionFailure(name, 'http-error', `HTTP ${response.status()} ${response.url()}`);
+      throw new ActionFailure(name, 'http-error', `${label}: HTTP ${response.status()} ${response.url()}`);
     }
+    responses.push(response);
   }
 
   try {
@@ -82,7 +89,7 @@ async function checkedAction(page, {name, ready, gesture, request, settled, time
   } catch (error) {
     throw new ActionFailure(name, 'ui-not-settled', error.message, error);
   }
-  return response;
+  return requests ? responses : responses[0];
 }
 
 module.exports = {ActionFailure, checkedAction};

@@ -56,6 +56,7 @@
 
 
 (def ^:private debounce-ms 500)
+(def ^:private shutdown-wait-ms 10000)
 
 
 (defn- pure-test?
@@ -84,8 +85,9 @@
              test-rows)))))
 
 
-;; {[org branch-id] {:seeds #{uuid} :runner? bool}} — pending SEEDS per
-;; scope. `:runner?` marks a live debounce future; followers only add
+;; {[org branch-id] {:seeds #{uuid} :runner? bool :runner handle}} — pending
+;; SEEDS per scope. `:runner?` marks a live debounce future; the handle
+;; carries its completion signal for storage shutdown. Followers only add
 ;; seeds. Selection (reverse closure ∩ tests ∩ pure) happens INSIDE the
 ;; runner future, never on the write path — the perf budget on
 ;; `:sql/create-fn` counts every synchronous round trip, and the
@@ -156,15 +158,25 @@
 
 
 (defn cancel-all!
-  "Interrupt every debounced runner and forget its queue — the shutdown
-   hook, and what a test fixture calls BEFORE closing the storage a
-   runner would otherwise wake up to (a closed pool mid-pass logs as a
-   failed auto-run). Returns the number of runners cancelled."
+  "Interrupt every debounced runner and wait for active passes to finish
+   before a fixture closes their storage. Returns the number of runners
+   cancelled; a stuck pass throws instead of letting storage close under it."
   []
-  (let [[old _] (swap-vals! pending (constantly {}))]
-    (count (keep (fn [[_ {:keys [runner]}]]
-                   (when runner (future-cancel runner) runner))
-                 old))))
+  (locking pending
+    (let [[old _] (swap-vals! pending (constantly {}))
+          runners (into [] (keep :runner) (vals old))
+          deadline (+ (System/nanoTime) (* shutdown-wait-ms 1000000))]
+      (doseq [{task :future} runners]
+        (future-cancel task))
+      ;; Keep registration blocked until old passes exit: an old pass must
+      ;; not release a newly scheduled claim for the same org and branch.
+      (doseq [{:keys [started? stopped]} runners
+              :when @started?]
+        (let [remaining (max 0 (quot (- deadline (System/nanoTime)) 1000000))]
+          (when (= ::timeout (deref stopped remaining ::timeout))
+            (throw (ex-info "Test auto-run did not stop before storage shutdown"
+                            {:timeout-ms shutdown-wait-ms})))))
+      (count runners))))
 
 
 (defn schedule-affected!
@@ -181,16 +193,27 @@
   [ctx seeds branch-id]
   (when (and *auto-run?* (seq seeds)
              (some-> (:compile-deps ctx) deref :reverse-deps seq))
-    (let [key [(tc/current-org) branch-id]
-          [old _] (swap-vals! pending
-                              (fn [m]
-                                (-> m
-                                    (update-in [key :seeds] (fnil into #{}) seeds)
-                                    (assoc-in [key :runner?] true))))]
-      (when-not (get-in old [key :runner?])
-        (let [runner (future (run-pending! ctx key))]
-          ;; Keep the handle so `cancel-all!` can interrupt it; the claim
-          ;; may already be released (a fast pass) — then there is
-          ;; nothing to record.
-          (swap! pending (fn [m] (if (contains? m key) (assoc-in m [key :runner] runner) m)))))
+    (let [key [(tc/current-org) branch-id]]
+      ;; Serialize claim, spawn and handle registration with shutdown. A
+      ;; cancellation between the claim and registration would miss a runner.
+      (locking pending
+        (let [[old _] (swap-vals! pending
+                                  (fn [m]
+                                    (-> m
+                                        (update-in [key :seeds] (fnil into #{}) seeds)
+                                        (assoc-in [key :runner?] true))))]
+          (when-not (get-in old [key :runner?])
+            (let [started? (atom false)
+                  stopped (promise)
+                  runner {:started? started?
+                          :stopped stopped
+                          :future (future
+                                    (reset! started? true)
+                                    (try (run-pending! ctx key)
+                                         (finally (deliver stopped true))))}]
+              ;; A completed pass may already have released the claim.
+              (swap! pending (fn [m]
+                               (if (contains? m key)
+                                 (assoc-in m [key :runner] runner)
+                                 m)))))))
       (count seeds))))

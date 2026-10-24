@@ -86,7 +86,8 @@
                      :kaocha.testable/id :unit
                      :kaocha/parallelism n
                      :kaocha.test-plan/tests children}
-              result (with-redefs [priority/namespace-hints (fn [_ _] ["priority"])
+              result (with-redefs [priority/namespace-layers (fn [_ _] [])
+                                   priority/namespace-hints (fn [_ _] ["priority"])
                                    ;; Production isolation vars are outside this fixture.
                                    clojure.core/requiring-resolve (constantly nil)
                                    testable/run-testable
@@ -123,7 +124,8 @@
                :kaocha/parallelism 3
                :kaocha.test-plan/tests children}]
     (try
-      (let [result (with-redefs [priority/namespace-hints (fn [_ _] ["priority"])
+      (let [result (with-redefs [priority/namespace-layers (fn [_ _] [])
+                                 priority/namespace-hints (fn [_ _] ["priority"])
                                  clojure.core/requiring-resolve (constantly nil)
                                  testable/run-testable
                                  (fn [child _]

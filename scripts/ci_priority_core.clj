@@ -48,16 +48,12 @@
 (declare dependency-distances)
 
 
-(defn- browser-contract-consumers
-  [browser-files marker]
+(defn- browser-local-consumers
+  [browser-files owners]
   (let [sources (into {}
                       (map (fn [path]
                              [(str (fs/file-name path)) (slurp (str path))]))
                       (fs/glob "tools/browser-test" "*.js"))
-        owners (->> sources
-                    (keep (fn [[file source]]
-                            (when (str/includes? source marker) file)))
-                    set)
         consumers (reduce-kv
                     (fn [graph file source]
                       (reduce (fn [g [_ dependency]]
@@ -73,6 +69,16 @@
     (->> browser-files
          (filter #(contains? distances %))
          (sort-by (juxt distances identity)))))
+
+
+(defn- browser-contract-consumers
+  [browser-files marker]
+  (let [owners (->> (fs/glob "tools/browser-test" "*.js")
+                    (keep (fn [path]
+                            (when (str/includes? (slurp (str path)) marker)
+                              (str (fs/file-name path)))))
+                    set)]
+    (browser-local-consumers browser-files owners)))
 
 
 (defn- impacted-browser-files
@@ -110,6 +116,11 @@
                      (cond
                        (re-matches #"tools/browser-test/edit-[^/]+\.test\.js" path)
                        [(str (fs/file-name path))]
+
+                       (re-matches #"tools/browser-test/[^/]+\.js" path)
+                       (concat (browser-local-consumers browser-files
+                                                        #{(str (fs/file-name path))})
+                               (impacted-browser-files browser-files path))
 
                        (str/starts-with? path "resources/packages/app/editor/")
                        (let [basename (str (fs/file-name path))

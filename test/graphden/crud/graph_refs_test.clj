@@ -38,3 +38,23 @@
                              #(filterv (fn [row] (not= root (:id row))) %)))
                    root))
         "an owner absent from the visible graph cannot expose its references")))
+
+
+(deftest shortest-path-is-cycle-safe-and-stays-within-visible-fns
+  (let [root (random-uuid)
+        nearer (random-uuid)
+        middle (random-uuid)
+        target (random-uuid)
+        graph {:fns [{:id root :parent-ids [middle]}
+                     {:id nearer :parent-ids [target]}
+                     {:id middle :parent-ids [root target]}
+                     {:id target :parent-ids []}]}
+        path (refs/shortest-path graph [root] target)
+        nearest (refs/shortest-path graph [root nearer] target)]
+    (is (= [root middle target] (mapv :fn-id path)))
+    (is (= [nearer target] (mapv :fn-id nearest)))
+    (is (= :parent-of (:kind (last nearest))))
+    (is (nil? (refs/shortest-path
+                (update graph :fns
+                        #(filterv (fn [row] (not= middle (:id row))) %))
+                [root] target)))))

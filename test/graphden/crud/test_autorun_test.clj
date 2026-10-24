@@ -171,19 +171,20 @@
                                          (deliver entered true)
                                          (loop []
                                            (when-not (try
-                                                       (.await release 100 java.util.concurrent.TimeUnit/MILLISECONDS)
+                                                       (java.util.concurrent.CountDownLatch/.await
+                                                         release 100 java.util.concurrent.TimeUnit/MILLISECONDS)
                                                        (catch InterruptedException _ false))
                                              (recur))))]
       (binding [registry/*rich-types-override*
                 (rich-types {:test-a #{} :test-b #{} :test-c #{}})]
         (is (= 1 (autorun/schedule-affected! (hot-ctx) #{:util} :b)))
-        (is (= true (deref entered 6000 ::timeout)) "the pass entered its storage operation")
+        (is (true? (deref entered 6000 ::timeout)) "the pass entered its storage operation")
         (let [canceller (future (deliver shutdown (autorun/cancel-all!)))]
           (try
             (is (= ::waiting (deref shutdown 150 ::waiting))
                 "shutdown cannot return while the interrupted storage operation is active")
             (finally
-              (.countDown release)
+              (java.util.concurrent.CountDownLatch/.countDown release)
               @canceller))
           (is (= 1 @shutdown) "shutdown returns after the held pass exits"))))))
 

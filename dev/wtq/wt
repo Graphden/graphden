@@ -245,6 +245,9 @@ governance_drift() {
 #                                    gate, and its workflows are validated by
 #                                    actionlint in the lint pass -> nothing heavy
 #   tools/browser-test/**            the e2e suite itself   -> e2e
+#   tools/runtime-test/*.test.js     Node-only tests in CI  -> nothing heavy
+#                                    other runtime-test helpers can be called
+#                                    from Clojure tests and stay fail-safe
 #   test/**/*.clj                    Kaocha test + fixtures -> CI + integration
 #                                    (fleet tests and shared Kaocha plugins
 #                                     also run container e2e)
@@ -299,6 +302,7 @@ classify_changes() {   # <worktree> -> NEED_BUILD / NEED_INTEGRATION / NEED_E2E 
       scripts/test-ci-release-guard.sh) : ;;
       test/*.clj)                     NEED_INTEGRATION=1 ;;
       tools/browser-test/*)           NEED_E2E=1 ;;
+      tools/runtime-test/*.test.js)   : ;;
       resources/packages/*.js|resources/packages/*.css|\
       resources/packages/*.html|resources/packages/*.svg)
                                       NEED_E2E=1 ;;

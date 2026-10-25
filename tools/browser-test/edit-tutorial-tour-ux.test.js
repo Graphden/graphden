@@ -18,7 +18,7 @@ const {
   hardCleanup, waitTourTitle, clickTourButton, filterAndSelect,
   runViaRowActions, tourWhere, extendViaRowActions, bindFirstPlaceholder,
   bindFnRefPlaceholder, finishAndDelete, runWithEffectAck, waitTourClosed,
-  openRowActionsFor, bindNamedPlaceholder, bindPlaceholderOn, extendInPlace,
+  openRowActionsFor, bindPlaceholderOn, extendInPlace,
   waitUntil,
 } = require('./tutorial-tour-helpers');
 

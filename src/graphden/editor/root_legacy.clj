@@ -27,7 +27,16 @@
                :wrapper {:view :root-view} :root-component :picker-component}
    :tutorial-catalog {:namespace "app.ui-tutorial-catalog" :prefix "catalog"
                       :roles [:view] :inputs {:view #{"inputs"}}
-                      :wrapper {:view :root-view} :root-component :catalog-component}})
+                      :wrapper {:view :root-view} :root-component :catalog-component}
+   :execution-status {:namespace "app.ui-execution" :prefix "status"
+                      :roles [:view] :inputs {:view #{"inputs"}}
+                      :wrapper {:view :root-view} :root-component :execution-status-component}
+   :execution-path {:namespace "app.ui-execution" :prefix "path"
+                    :roles [:view] :inputs {:view #{"inputs"}}
+                    :wrapper {:view :root-path-view} :root-component :execution-path-component}
+   :feedback {:namespace "app.ui-feedback" :prefix "feedback"
+              :roles [:view] :inputs {:view #{"inputs"}}
+              :wrapper {:view :root-view} :root-component :feedback-component-value}})
 
 
 (defn default-role-id

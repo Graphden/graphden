@@ -33,4 +33,10 @@
    :canvas-bindings {:id (ids/fn-id "app.ui-canvas-bindings" :bindings-view)
                      :reference :app.ui-canvas-bindings/bindings-view :roles #{:view}}
    :tutorial-catalog {:id (ids/fn-id "app.ui-tutorial-catalog" :catalog-view)
-                      :reference :app.ui-tutorial-catalog/catalog-view :roles #{:view}}})
+                      :reference :app.ui-tutorial-catalog/catalog-view :roles #{:view}}
+   :execution-status {:id (ids/fn-id "app.ui-execution" :status-view)
+                      :reference :app.ui-execution/status-view :roles #{:view}}
+   :execution-path {:id (ids/fn-id "app.ui-execution" :path-view)
+                    :reference :app.ui-execution/path-view :roles #{:view}}
+   :feedback {:id (ids/fn-id "app.ui-feedback" :feedback-view)
+              :reference :app.ui-feedback/feedback-view :roles #{:view}}})

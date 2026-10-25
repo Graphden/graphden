@@ -9,9 +9,10 @@ const doc = createDocument();
 let stopped = 0;
 let place;
 let mutation;
-const ctx = vm.createContext({console, document: doc,
+const ctx = vm.createContext({console, Map, Set, WeakSet, Symbol, document: doc,
   window: {innerWidth: 390, innerHeight: 800,
-    visualViewport: {width: 390, height: 240, offsetLeft: 0, offsetTop: 40}},
+    visualViewport: {width: 390, height: 240, offsetLeft: 0, offsetTop: 40},
+    addEventListener() {}},
   installPopoverDismiss() {},
   observePopoverAnchor(_el, _anchor, callback) { place = callback; return () => { stopped++; }; },
   MutationObserver: class { constructor(callback) { mutation = callback; } observe() {} disconnect() {} },
@@ -26,6 +27,10 @@ const ctx = vm.createContext({console, document: doc,
 });
 const common = fs.readFileSync(path.join(packages, 'web/runtime/graphden-popover.js'), 'utf8');
 vm.runInContext(common.slice(common.indexOf('function anchorBelowClamped'), common.indexOf('// Native animations')), ctx);
+for (const file of ['app/ui-preview/browser-runtime.js', 'app/ui-preview/builtin-plans.js',
+  'app/editor/editor-execution-path-graph.js']) {
+  vm.runInContext(fs.readFileSync(path.join(packages, file), 'utf8'), ctx, {filename: file});
+}
 vm.runInContext(fs.readFileSync(path.join(packages, 'app/editor/editor-path-view.js'), 'utf8'), ctx);
 const entries = [
   {'fn-id': 'leaf', 'duration-ms': 1, value: 'old complete value'},

@@ -1,7 +1,7 @@
 {:namespace "app.ui-config"
  :description "Pure shared editor configuration and a protected authenticated metadata resolver. No component body copies or per-user selector table."
  :fns
- [{:name :_editor-bootstrap-result :type {:legacy :bool :account-menu :app.ui-account-menu/root-component :recents :app.ui-recents/root-component :fn-picker :app.ui-fn-picker/root-component :tutorial-catalog :app.ui-tutorial-catalog/root-component}}
+ [{:name :_editor-bootstrap-result :type {:legacy :bool :account-menu :app.ui-account-menu/root-component :recents :app.ui-recents/root-component :fn-picker :app.ui-fn-picker/root-component :tutorial-catalog :app.ui-tutorial-catalog/root-component :execution-status :app.ui-execution/status-component :execution-path :app.ui-execution/path-component :feedback :app.ui-feedback/feedback-component}}
   {:name :legacy-editor-root :parent :const
    :description "Explicit adapter retaining the editor hosts not yet selected through root callable records."
    :return-type {:legacy :bool} :lambda-params []
@@ -12,9 +12,15 @@
    :args {:map :_root-account-menu :key {:value :recents} :value :app.ui-recents/recents-component}}
   {:name :_root-fn-picker :parent :assoc
    :args {:map :_root-recents :key {:value :fn-picker} :value :app.ui-fn-picker/picker-component}}
+  {:name :_root-tutorial-catalog :parent :assoc
+   :args {:map :_root-fn-picker :key {:value :tutorial-catalog} :value :app.ui-tutorial-catalog/catalog-component}}
+  {:name :_root-execution-status :parent :assoc
+   :args {:map :_root-tutorial-catalog :key {:value :execution-status} :value :app.ui-execution/execution-status-component}}
+  {:name :_root-execution-path :parent :assoc
+   :args {:map :_root-execution-status :key {:value :execution-path} :value :app.ui-execution/execution-path-component}}
   {:name :component-editor-root :parent :assoc :lambda-params []
    :return-type :_editor-bootstrap-result
-   :args {:map :_root-fn-picker :key {:value :tutorial-catalog} :value :app.ui-tutorial-catalog/catalog-component}}
+   :args {:map :_root-execution-path :key {:value :feedback} :value :app.ui-feedback/feedback-component-value}}
   {:name :editor-root :parent :call
    :description "Ordinary browser root invocation with an explicit legacy editor adapter."
    :return-type :_editor-bootstrap-result
@@ -90,6 +96,24 @@
    :args {:keys [{:value :role} {:value :fn-id}] :vals [{:value :view} :_tutorial-catalog-view-id]}}
   {:name :_tutorial-catalog-entries :parent :list :return-type :_component-entries
    :args {:items [:_tutorial-catalog-view-entry]}}
+  {:name :_execution-status-view-id :parent :const :return-type :fn-ref
+   :args {:value {:ref :app.ui-execution/status-view :type :fn-ref}}}
+  {:name :_execution-status-view-entry :parent :zipmap :return-type :_component-entry
+   :args {:keys [{:value :role} {:value :fn-id}] :vals [{:value :view} :_execution-status-view-id]}}
+  {:name :_execution-status-entries :parent :list :return-type :_component-entries
+   :args {:items [:_execution-status-view-entry]}}
+  {:name :_execution-path-view-id :parent :const :return-type :fn-ref
+   :args {:value {:ref :app.ui-execution/path-view :type :fn-ref}}}
+  {:name :_execution-path-view-entry :parent :zipmap :return-type :_component-entry
+   :args {:keys [{:value :role} {:value :fn-id}] :vals [{:value :view} :_execution-path-view-id]}}
+  {:name :_execution-path-entries :parent :list :return-type :_component-entries
+   :args {:items [:_execution-path-view-entry]}}
+  {:name :_feedback-view-id :parent :const :return-type :fn-ref
+   :args {:value {:ref :app.ui-feedback/feedback-view :type :fn-ref}}}
+  {:name :_feedback-view-entry :parent :zipmap :return-type :_component-entry
+   :args {:keys [{:value :role} {:value :fn-id}] :vals [{:value :view} :_feedback-view-id]}}
+  {:name :_feedback-entries :parent :list :return-type :_component-entries
+   :args {:items [:_feedback-view-entry]}}
   {:name :_canvas-view-id :parent :const :return-type :fn-ref
    :args {:value {:ref :app.ui-canvas/canvas-view :type :fn-ref}}}
   {:name :_canvas-view-entry :parent :zipmap :return-type :_component-entry
@@ -136,8 +160,8 @@
    :args {:items [:_canvas-bindings-view-entry]}}
   {:name :editor-defaults :parent :zipmap
    :description "Shared editor defaults. Personal ordinary graphs may reference these entries or override exposed constructor slots without copying their component bodies."
-   :args {:keys [:_account-menu-view-id :_fn-picker-view-id :_recents-view-id :_inspector-view-id :_explorer-view-id :_tutorial-catalog-view-id :_canvas-view-id :_canvas-values-view-id :_canvas-inheritance-view-id :_canvas-metadata-view-id :_canvas-type-structure-view-id :_canvas-bindings-view-id]
-          :vals [:_account-menu-entries :_fn-picker-entries :_recents-entries :_inspector-entries :_explorer-entries :_tutorial-catalog-entries :_canvas-entries :_canvas-values-entries :_canvas-inheritance-entries :_canvas-metadata-entries :_canvas-type-structure-entries :_canvas-bindings-entries]}}
+   :args {:keys [:_account-menu-view-id :_fn-picker-view-id :_recents-view-id :_inspector-view-id :_explorer-view-id :_tutorial-catalog-view-id :_execution-status-view-id :_execution-path-view-id :_feedback-view-id :_canvas-view-id :_canvas-values-view-id :_canvas-inheritance-view-id :_canvas-metadata-view-id :_canvas-type-structure-view-id :_canvas-bindings-view-id]
+          :vals [:_account-menu-entries :_fn-picker-entries :_recents-entries :_inspector-entries :_explorer-entries :_tutorial-catalog-entries :_execution-status-entries :_execution-path-entries :_feedback-entries :_canvas-entries :_canvas-values-entries :_canvas-inheritance-entries :_canvas-metadata-entries :_canvas-type-structure-entries :_canvas-bindings-entries]}}
   {:name :_descriptor-component-id :parent :get
    :args {:coll {:as :item :type :_component-descriptor} :key {:value :component-id} :default {:value nil}}}
   {:name :_descriptor-entries :parent :get

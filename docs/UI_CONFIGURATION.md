@@ -215,3 +215,16 @@ missing, revoked or malformed selected root callback closes the catalogue;
 it cannot reactivate a built-in view. Root replacement retires pending and
 open catalogue work, styles and receipts. The same root's initial load may
 complete without cancelling the opening catalogue.
+
+## Execution and feedback roots
+
+The editor root exposes `:execution-status`, `:execution-path` and `:feedback`
+as ordinary view callbacks. The shipped browser plans keep status and feedback
+presentation usable when the instance backend is unavailable. Status receives
+only bounded display strings; native code still polls, cancels and handles
+HTTP. The execution path receives value-free trace metrics and renders per-fn
+badges plus the summary panel. Captured values stay in the native, client-held
+popover and secret frames cannot be unhidden by a personal graph. Feedback
+renders the form from the selected root or the shipped plan; the host keeps
+focus, consent, error collection and direct intake delivery. Failure counts
+are offered as an attachment only for an authenticated session.

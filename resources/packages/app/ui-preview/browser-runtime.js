@@ -65,7 +65,7 @@
     if (value instanceof Map) return ['map', [...value].map(([k, v]) => [child(mapKey(k)), child(v)])];
     throw new Error('Unsupported graph value');
   }
-  function encode(value) { return encodeValue(value, {nodes: 50000}, 0); }
+  function encode(value, nodeLimit = 50000) { return encodeValue(value, {nodes: nodeLimit}, 0); }
   function equal(a, b) {
     if (a === b) return true;
     if ((Array.isArray(a) || a instanceof LazySequence) && (Array.isArray(b) || b instanceof LazySequence)) {
@@ -97,11 +97,13 @@
   // Internal only: supplied values and the result codec cannot mint or carry
   // callables. A closure always names a checked target in this plan.
   const graphClosures = new WeakSet();
+  const closureValueLimits = new WeakMap();
   class GraphClosure {
-    constructor(invoke, external = invoke) {
+    constructor(invoke, external = invoke, valueNodeLimit = 50000) {
       this.invoke = invoke;
       this.external = external;
       graphClosures.add(this);
+      closureValueLimits.set(this, valueNodeLimit);
       Object.freeze(this);
     }
   }
@@ -398,8 +400,11 @@
     operationBudgets.set(token, state);
     return token;
   }
-  function createRuntime(plan, {operationLimit = 10000, serverCall} = {}) {
+  function createRuntime(plan, {operationLimit = 10000, valueNodeLimit = 50000, serverCall} = {}) {
     if (plan.format !== 1 || plan.primitiveAbi !== 1) throw new Error('Unsupported browser graph format');
+    if (!Number.isSafeInteger(valueNodeLimit) || valueNodeLimit < 1 || valueNodeLimit > 200000) {
+      throw new Error('Invalid browser graph value limit');
+    }
     const functions = new Map(plan.functions.map((fn) => [fn.id, fn]));
     const primitives = new Map(plan.primitives.map(({id, op}) => {
       if (!Object.hasOwn(operations, op)) throw new Error('Unsupported browser primitive: ' + id);
@@ -417,7 +422,7 @@
       for (const name of Object.keys(supplied)) if (!accepted.has(name)) throw new Error('Unknown graph argument: ' + name);
       for (const name of input.required) if (!Object.hasOwn(supplied, name)) throw new Error('Missing graph argument: ' + name);
       const root = {slots: new Map(), names: new Map()};
-      for (const [name, value] of Object.entries(supplied)) { encode(value); root.names.set(name, value); }
+      for (const [name, value] of Object.entries(supplied)) { encode(value, valueNodeLimit); root.names.set(name, value); }
       for (const {name, slots} of input.destinations) if (Object.hasOwn(supplied, name)) for (const slot of slots) root.slots.set(slot, supplied[name]);
       checkOperationDeadline(shared);
       let remaining = operationLimit;
@@ -451,10 +456,10 @@
           shared = budget === null ? null : operationBudgets.get(budget);
           if (budget !== null && !shared) throw new Error('Invalid browser batch budget token');
           checkOperationDeadline(shared);
-          encode(item);
+          encode(item, valueNodeLimit);
           remaining = operationLimit;
           return invoke(item);
-        });
+        }, valueNodeLimit);
       }
       function expr(value, frame) {
         tick();
@@ -520,7 +525,7 @@
   function invoke(callback, input = null, operationBudget = null) {
     if (!(graphClosures.has(callback))) throw new Error('Expected a graph callback');
     if (operationBudget !== null && !operationBudgets.has(operationBudget)) throw new Error('Invalid browser batch budget token');
-    encode(input);
+    encode(input, closureValueLimits.get(callback));
     return callback.external(input, operationBudget);
   }
   const isCallable = value => graphClosures.has(value);

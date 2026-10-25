@@ -81,6 +81,7 @@
                   "packages/app/ui-preview/graph-renderer.js"
                   "packages/app/ui-preview/graph-component.js"
                   "packages/app/ui-preview/builtin-plans.js"
+                  "packages/app/editor/editor-feedback-graph.js"
                   "packages/app/editor/editor-ui-components.js"
                   "packages/app/editor/editor-shell-menu-graph.js"
                   "packages/app/editor/editor-fn-picker-graph.js"
@@ -161,7 +162,9 @@
                   "packages/app/editor/editor-inheritance-api.js"
                   "packages/app/editor/editor-inheritance-intent.js"
                   "packages/app/editor/editor-edit-reparent.js"
+                  "packages/app/editor/editor-execution-status-graph.js"
                   "packages/app/editor/editor-execute-result.js"
+                  "packages/app/editor/editor-execution-path-graph.js"
                   ;; Canvas path-highlight for traced runs (Debug P2) —
                   ;; loaded before the execute modules that call its
                   ;; window-exported entry points.
@@ -629,6 +632,9 @@
                   [:button {:type "button" :class "gd-set-btn" :data-ui-component "explorer" :data-ui-label "Explorer toolbar"} "Personalize Explorer toolbar"]]
                  [:div {:class "gd-theme-actions gd-ui-components-actions"}
                   [:button {:type "button" :class "gd-set-btn" :data-ui-component "tutorial-catalog" :data-ui-label "tutorial catalogue"} "Personalize tutorial catalogue"]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-component "execution-status" :data-ui-label "execution status"} "Personalize execution status"]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-component "execution-path" :data-ui-label "execution path"} "Personalize execution path"]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-component "feedback" :data-ui-label "feedback form"} "Personalize feedback form"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-component "canvas" :data-ui-label "canvas presentation"} "Personalize canvas presentation"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-component "canvas-values" :data-ui-label "value and type presentation"} "Personalize value and type presentation"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-component "canvas-inheritance" :data-ui-label "inheritance presentation"} "Personalize inheritance presentation"]

@@ -31,6 +31,7 @@
   (let [commands (fast/commands ["resources/packages/app/ui-inspector/fns.edn"] true true true)]
     (is (some #{["bb" "graph-lint"]} commands))
     (is (some #{["bb" "reachability"]} commands))
+    (is (some #{["bb" "type-sweep"]} commands))
     (is (some #{["bb" "devtour-check"]} commands))
     (is (some #{["clojure" "-M:dev" "tools/ui_preview/generate_builtin_plans.clj" "--check"]}
               commands))))
@@ -39,6 +40,7 @@
 (deftest deleted-graph-source-still-runs-semantic-checks
   (is (= [["bb" "graph-lint"]
           ["bb" "reachability"]
+          ["bb" "type-sweep"]
           ["bb" "devtour-check"]
           ["clojure" "-M:dev" "tools/ui_preview/generate_builtin_plans.clj" "--check"]]
          (fast/commands [] ["resources/packages/app/ui-inspector/fns.edn"] true true true)))

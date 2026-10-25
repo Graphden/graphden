@@ -1,4 +1,4 @@
-// Editor Execute — result rendering primitives.
+// Editor Execute — transient graph-backed status and result effects.
 //
 // Pure DOM-building helpers shared by:
 //   * inline submit response (editor-execute.js)
@@ -21,25 +21,12 @@
 // fetch is in flight. Distinct visually from `execute-pending-pane`
 // below, which is the post-submit polling state for an :id-bound run.
 function renderSubmitSpinner(text) {
-  const spin = document.createElement('div');
-  spin.className = 'execute-submit-spinner';
-  spin.textContent = text;
-  return spin;
+  return window.gdExecutionStatusNode('submitting', text);
 }
 
 
 function renderPendingPane(execId) {
-  const pane = document.createElement('div');
-  pane.className = 'execute-pending-pane';
-  const spin = document.createElement('span');
-  spin.className = 'execute-pending-spinner';
-  spin.textContent = '…';
-  pane.appendChild(spin);
-  const txt = document.createElement('span');
-  txt.className = 'execute-pending-text';
-  txt.textContent = 'Running… (id: ' + execId.slice(0, 8) + ')';
-  pane.appendChild(txt);
-  return pane;
+  return window.gdExecutionStatusNode('pending', '', execId);
 }
 
 
@@ -75,17 +62,10 @@ async function appendRuntimeEffectsStrip(hostEl, runtimeEffects, declaredEffects
 
 
 function renderErrorPane(error, errorData) {
-  const pane = document.createElement('div');
-  pane.className = 'execute-error-pane';
-  const head = document.createElement('div');
-  head.className = 'execute-error-head';
-  head.textContent = error || 'Execution failed';
-  pane.appendChild(head);
+  let detail = '';
   if (errorData) {
-    const pre = document.createElement('pre');
-    pre.className = 'execute-error-data';
-    pre.textContent = JSON.stringify(errorData, null, 2);
-    pane.appendChild(pre);
+    try { detail = JSON.stringify(errorData, null, 2) || ''; }
+    catch (_) { detail = String(errorData); }
   }
-  return pane;
+  return window.gdExecutionStatusNode('error', error || 'Execution failed', '', detail);
 }

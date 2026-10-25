@@ -1,0 +1,120 @@
+{:namespace "app.ui-feedback"
+ :description "Offline-capable feedback form presentation. The editor owns delivery, context collection, focus and event handlers."
+ :fns
+ [{:name :_feedback-inputs :type {:error-count :int :authenticated :bool}}
+  {:name :_feedback-envelope :type {:inputs :_feedback-inputs}}
+  {:name :_feedback-result
+   :type {:tree :web.html/hiccup-node
+          :styles [:list {:selector :text :declarations [:map [:union :keyword :text] :text]}]}}
+  {:name :_feedback-callable :fn-type [{:input :_feedback-envelope} :_feedback-result]}
+  {:name :feedback-component :type {:view :_feedback-callable}}
+  {:name :_state :parent :const :args {:value {:as :inputs :type :_feedback-inputs}}}
+  {:name :_error-count :parent :get :args {:coll :_state :key {:value :error-count} :default 0}}
+  {:name :_authenticated :parent :get :args {:coll :_state :key {:value :authenticated} :default false}}
+  {:name :_title :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "feedback-title"}} :children ["Report a problem"]}}
+  {:name :_category-control :parent :hiccup
+   :args {:tag "select" :attrs {:value {:class "feedback-category"}}
+          :children [{:parent :hiccup :args {:tag "option" :attrs {:value {:value "bug"}} :children ["Bug"]}}
+                     {:parent :hiccup :args {:tag "option" :attrs {:value {:value "idea"}} :children ["Idea"]}}
+                     {:parent :hiccup :args {:tag "option" :attrs {:value {:value "question"}} :children ["Question"]}}]}}
+  {:name :_category-row :parent :hiccup
+   :args {:tag "label" :attrs {:value {:class "feedback-row"}}
+          :children [{:parent :hiccup :args {:tag "span" :attrs {:value {}} :children ["Category"]}}
+                     :_category-control]}}
+  {:name :_description-control :parent :hiccup
+   :args {:tag "textarea"
+          :attrs {:value {:class "feedback-description" :rows 5 :maxlength 10000
+                          :placeholder "What happened? What did you expect?"}}
+          :children []}}
+  {:name :_description-row :parent :hiccup
+   :args {:tag "label" :attrs {:value {:class "feedback-row"}}
+          :children [{:parent :hiccup :args {:tag "span" :attrs {:value {}} :children ["Description"]}}
+                     :_description-control]}}
+  {:name :_email-control :parent :hiccup
+   :args {:tag "input"
+          :attrs {:value {:class "feedback-email" :type "email" :maxlength 200
+                          :placeholder "you@example.com (optional, for follow-up)"}}
+          :children []}}
+  {:name :_email-row :parent :hiccup
+   :args {:tag "label" :attrs {:value {:class "feedback-row"}}
+          :children [{:parent :hiccup :args {:tag "span" :attrs {:value {}} :children ["Email"]}}
+                     :_email-control]}}
+  {:name :_honeypot-input :parent :hiccup
+   :args {:tag "input"
+          :attrs {:value {:name "website" :tabindex -1 :autocomplete "off"}}
+          :children []}}
+  {:name :_honeypot :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "feedback-honeypot" :aria-hidden "true"}}
+          :children [:_honeypot-input]}}
+  {:name :_attach-title :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "feedback-attach-title"}}
+          :children ["Attach (sent only on submit):"]}}
+  {:name :_env-label :parent :hiccup
+   :args {:tag "label" :attrs {:value {:class "feedback-check"}}
+          :children [{:parent :hiccup
+                      :args {:tag "input" :attrs {:value {:type "checkbox" :checked true :class "feedback-env"}}
+                             :children []}}
+                     " Build & environment (versions, browser)"]}}
+  {:name :_errors-label-text :parent :str
+   :args {:parts [" Recent console errors (" :_error-count ")"]}}
+  {:name :_errors-label :parent :hiccup
+   :args {:tag "label" :attrs {:value {:class "feedback-check"}}
+          :children [{:parent :hiccup
+                      :args {:tag "input" :attrs {:value {:type "checkbox" :checked true :class "feedback-errors"}}
+                             :children []}}
+                     :_errors-label-text]}}
+  {:name :_location-label :parent :hiccup
+   :args {:tag "label" :attrs {:value {:class "feedback-check"}}
+          :children [{:parent :hiccup
+                      :args {:tag "input" :attrs {:value {:type "checkbox" :class "feedback-location"}}
+                             :children []}}
+                     " Current location (instance URL, branch, open fn)"]}}
+  {:name :_failures-label :parent :hiccup
+   :args {:tag "label" :attrs {:value {:class "feedback-check"}}
+          :children [{:parent :hiccup
+                      :args {:tag "input" :attrs {:value {:type "checkbox" :class "feedback-failures"}}
+                             :children []}}
+                     " Recent failed executions (fn names + counts, last 7 days)"]}}
+  {:name :_optional-failures :parent :if
+   :args {:test :_authenticated :then :_failures-label :else nil}}
+  {:name :_attachments :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "feedback-attach"}}
+          :children [:_attach-title :_env-label :_errors-label :_location-label :_optional-failures]}}
+  {:name :_send :parent :hiccup
+   :args {:tag "button" :attrs {:value {:class "feedback-send" :type "button"}}
+          :children ["Send"]}}
+  {:name :_cancel :parent :hiccup
+   :args {:tag "button" :attrs {:value {:class "feedback-cancel" :type "button"}}
+          :children ["Cancel"]}}
+  {:name :_actions :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "feedback-actions"}}
+          :children [:_send :_cancel]}}
+  {:name :_status :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "feedback-status"}} :children []}}
+  {:name :_form-tree :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "feedback-popover" :role "dialog"
+                                     :aria-modal "true" :aria-label "Report a problem"}}
+          :children [:_title :_category-row :_description-row :_email-row
+                     :_honeypot :_attachments :_actions :_status]}}
+  {:name :feedback-styles :parent :list
+   :args {:items [{:value {:selector "& .feedback-title"
+                           :declarations {"color" "var(--fg)" "border-bottom-color" "var(--border)"}}}
+                  {:value {:selector "& .feedback-row span"
+                           :declarations {"color" "var(--muted-fg)"}}}
+                  {:value {:selector "& .feedback-send"
+                           :declarations {"background-color" "var(--accent)" "color" "var(--on-accent)"}}}
+                  {:value {:selector "& .feedback-cancel"
+                           :declarations {"background-color" "var(--bg)" "color" "var(--fg)"}}}
+                  {:value {:selector "& .feedback-status"
+                           :declarations {"color" "var(--muted-fg)"}}}]}}
+  {:name :feedback-view :parent :zipmap :return-type :_feedback-result
+   :args {:keys [{:value :tree} {:value :styles}]
+          :vals [:_form-tree :feedback-styles]}}
+  {:name :root-view :parent :feedback-view :lambda-params [:input] :return-type :_feedback-result
+   :args {:inputs {:parent :get
+                   :args {:coll {:as :input :type :_feedback-envelope} :key {:value :inputs}}}}}
+  {:name :_view-assoc :parent :assoc-fn
+   :args {:value {:as :value :type :_feedback-callable}}}
+  {:name :feedback-component-value :parent :_view-assoc :return-type :feedback-component
+   :args {:map {} :key {:value :view} :value {:ref :root-view}}}]}

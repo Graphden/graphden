@@ -21,6 +21,13 @@ assert.equal(tree.type, 'div');
 for (const limit of [0, 10001, NaN]) assert.throws(() => ctx.GraphdenRenderer.vnode([k('div')], null, limit));
 assert.throws(() => ctx.GraphdenRenderer.vnode([k('div'), 'child'], null, 1));
 assert.equal(ctx.GraphdenRenderer.vnode([k('div'), attrs({id: 'gd-test-option'})], 'gd-test').props.id, 'gd-test-option');
+assert.equal(ctx.GraphdenRenderer.vnode([k('pre'), 'read-only error detail']).type, 'pre');
+const form = ctx.GraphdenRenderer.vnode([k('label'),
+  [k('select'), [k('option'), attrs({value: 'bug'}), 'Bug']],
+  [k('textarea'), attrs({rows: 5, maxlength: 10000})]]);
+assert.equal(form.props.children[0].type, 'select');
+assert.equal(form.props.children[1].props.maxLength, 10000);
+assert.throws(() => ctx.GraphdenRenderer.vnode([k('textarea'), attrs({maxlength: 10001})]));
 assert.throws(() => ctx.GraphdenRenderer.vnode([k('div'), attrs({id: 'auth-lock-btn'})], 'gd-test'));
 assert.throws(() => ctx.GraphdenRenderer.vnode([k('div'), attrs({id: 'gd-test-option'})]));
 assert.equal(tree.props.children[0].key, 'a');

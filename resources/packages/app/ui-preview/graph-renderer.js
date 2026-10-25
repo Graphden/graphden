@@ -5,7 +5,7 @@
   const styles = window.GraphdenStyles;
   const name = (value) => value instanceof api.Keyword ? (value.namespace ? value.namespace + '/' : '') + value.name : value;
   const owners = new WeakSet();
-  const tags = new Set(['div', 'span', 'button', 'input', 'label', 'ul', 'li', 'p', 'strong', 'small', 'section']);
+  const tags = new Set(['div', 'span', 'button', 'input', 'label', 'ul', 'li', 'p', 'pre', 'strong', 'small', 'section', 'select', 'option', 'textarea']);
   const textAttributes = new Set(['class', 'role', 'type', 'title', 'name', 'value', 'placeholder', 'autocomplete']);
   const booleanAttributes = new Set(['disabled', 'hidden', 'readonly', 'checked']);
 
@@ -24,6 +24,9 @@
       } else if (attr === 'tabindex') {
         if (!Number.isSafeInteger(item) || item < -1 || item > 0) throw new Error('Invalid graph tabindex');
         result.tabIndex = item;
+      } else if (attr === 'rows' || attr === 'maxlength') {
+        if (!Number.isSafeInteger(item) || item < 1 || item > 10000) throw new Error('Invalid graph numeric attribute');
+        result[attr === 'maxlength' ? 'maxLength' : attr] = item;
       } else if (booleanAttributes.has(attr)) {
         if (typeof item !== 'boolean') throw new Error('Invalid graph boolean attribute');
         result[attr === 'readonly' ? 'readOnly' : attr] = item;

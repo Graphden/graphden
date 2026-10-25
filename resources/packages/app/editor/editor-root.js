@@ -83,7 +83,8 @@
         const {response, result} = await loadPlan(signal, current);
         if (!current()) return;
         if (!response.ok || result.ok !== true) throw new Error('Editor root source is unavailable');
-        const runtime = api.createRuntime(result.plan, {operationLimit: 1000000, serverCall: window.GraphdenServer?.call});
+        const runtime = api.createRuntime(result.plan, {operationLimit: 3000000,
+          valueNodeLimit: 120000, serverCall: window.GraphdenServer?.call});
         const argument = result['argument-name'];
         if (argument !== null && typeof argument !== 'string') throw new Error('Invalid editor root argument');
         const output = runtime.run('root', argument === null ? {} : {[argument]: new Map()});

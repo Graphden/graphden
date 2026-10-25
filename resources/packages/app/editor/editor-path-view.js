@@ -51,26 +51,21 @@ function _pathViewLayer() {
 // invocation is the one being debugged); secret entries never carry
 // one, matching the capture-time redaction.
 function aggregatePathTrace(entries) {
-  const byFn = new Map();
+  const byFn = window.gdExecutionPathMetrics(entries);
+  for (const agg of byFn.values()) {
+    agg.hasValue = false;
+    agg.lastValue = undefined;
+    agg.valueTruncated = false;
+  }
   for (const e of entries) {
     const fnId = e['fn-id'];
-    if (!fnId) continue;
-    let agg = byFn.get(fnId);
-    if (!agg) {
-      agg = { count: 0, fresh: 0, hits: 0, totalMs: 0, maxMs: 0, hidden: false,
-              hasValue: false, lastValue: undefined, valueTruncated: false };
-      byFn.set(fnId, agg);
-    }
-    agg.count += 1;
+    const agg = byFn.get(fnId);
+    if (!agg) continue;
     if ('hidden' in e) {
-      agg.hidden = true;
-    } else if (e['cache-hit?']) {
-      agg.hits += 1;
-    } else {
-      agg.fresh += 1;
-      const ms = typeof e['duration-ms'] === 'number' ? e['duration-ms'] : 0;
-      agg.totalMs += ms;
-      if (ms > agg.maxMs) agg.maxMs = ms;
+      agg.hasValue = false;
+      agg.lastValue = undefined;
+      agg.valueTruncated = false;
+    } else if (!e['cache-hit?']) {
       // The latest fresh invocation owns the value, including an unavailable one.
       agg.hasValue = false;
       agg.lastValue = undefined;
@@ -84,29 +79,6 @@ function aggregatePathTrace(entries) {
     }
   }
   return byFn;
-}
-
-
-function pathBadgeText(agg) {
-  const times = agg.count > 1 ? agg.count + '× ' : '';
-  if (agg.hidden) return 'secret';
-  if (agg.fresh === 0) return times + 'cache';
-  return times + agg.totalMs + 'ms';
-}
-
-
-function pathBadgeTitle(agg) {
-  if (agg.hidden) {
-    return '[hidden — secret] — this fn touches :secret-typed data; '
-           + 'timings are not captured for it.';
-  }
-  const parts = [agg.count + (agg.count === 1 ? ' invocation' : ' invocations')];
-  if (agg.fresh > 0) {
-    parts.push(agg.fresh + ' fresh (total ' + agg.totalMs + ' ms, max '
-               + agg.maxMs + ' ms)');
-  }
-  if (agg.hits > 0) parts.push(agg.hits + (agg.hits === 1 ? ' cache hit' : ' cache hits'));
-  return 'Execution path: ' + parts.join(' · ');
 }
 
 
@@ -247,52 +219,13 @@ function _pathViewOffCanvasLabel(fnId) {
 
 function _showPathViewPanel(highlightedCount, offCanvasIds, truncated, valuesDropped) {
   if (_pathViewPanelEl) _pathViewPanelEl.remove();
-  const panel = document.createElement('div');
-  panel.className = 'path-view-panel';
-  panel.setAttribute('role', 'status');
-
-  const label = document.createElement('span');
-  label.textContent = 'Execution path: ' + highlightedCount
-    + (highlightedCount === 1 ? ' fn' : ' fns') + ' highlighted';
-  panel.appendChild(label);
-
-  if (offCanvasIds.length > 0) {
-    const off = document.createElement('span');
-    off.className = 'path-view-off-canvas';
-    off.textContent = '· not on canvas: ' + offCanvasIds.length
-      + (offCanvasIds.length === 1 ? ' fn' : ' fns');
-    off.title = offCanvasIds.map(_pathViewOffCanvasLabel).join(', ');
-    panel.appendChild(off);
-  }
-
-  if (truncated) {
-    const trunc = document.createElement('span');
-    trunc.className = 'path-view-truncated';
-    trunc.textContent = '· trace truncated';
-    trunc.title = 'The capture hit its size cap — oldest entries were dropped.';
-    panel.appendChild(trunc);
-  }
-
-  if (valuesDropped) {
-    const dropped = document.createElement('span');
-    dropped.className = 'path-view-truncated';
-    dropped.textContent = '· some values dropped';
-    dropped.title = 'Captured values hit the total 16 MB budget — the oldest '
-      + 'entries were dropped first.';
-    panel.appendChild(dropped);
-  }
-
-  const clearBtn = document.createElement('button');
-  clearBtn.type = 'button';
-  clearBtn.className = 'path-view-clear';
-  clearBtn.textContent = '✕ clear';
-  clearBtn.setAttribute('aria-label', 'Clear the execution-path highlight');
+  const panel = window.gdExecutionPathPanelNode(highlightedCount, offCanvasIds.length,
+    offCanvasIds.map(_pathViewOffCanvasLabel).join(', '), truncated, valuesDropped);
+  const clearBtn = panel.querySelector('.path-view-clear');
   clearBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     clearExecutionPathView();
   });
-  panel.appendChild(clearBtn);
-
   document.body.appendChild(panel);
   _pathViewPanelEl = panel;
 }
@@ -344,8 +277,8 @@ function showExecutionPathView(pathTrace) {
     const badge = document.createElement('span');
     badge.className = 'path-trace-badge'
       + (agg.hidden ? ' path-trace-badge-secret' : '');
-    badge.textContent = pathBadgeText(agg);
-    badge.title = pathBadgeTitle(agg);
+    badge.textContent = agg.badge;
+    badge.title = agg.title;
     overlay.appendChild(badge);
     // Debug P3 — captured-value affordance. Secret nodes never get one
     // (their entries carry no value by capture-time redaction).

@@ -3,16 +3,16 @@
 // Three responsibilities:
 //   1. A small ring buffer of uncaught JS errors (window.onerror /
 //      unhandledrejection) so a report can carry "what just broke".
-//   2. The report form popover — category / text / email + a transparent
-//      "what will be sent" checkbox list. Opened from the shell menu
+//   2. The report form popover — graph-presented category / text / email + a
+//      transparent "what will be sent" checkbox list. Opened from the shell menu
 //      (editor-auth.js).
 //   3. Delivery: POST to the intake URL announced by THIS instance's
 //      GET /api/feedback/config (env-controlled; empty string = feature
 //      hidden), falling back to a "download the report / open GitHub"
 //      path when the intake is unreachable.
 //
-// graph-first-exception: the form is built client-side, not fetched from
-// /partials/* — it must render and submit even when this instance's
+// graph-first-exception: the pure form view runs from the shipped browser
+// graph, not /partials/* — it must render even when this instance's
 // backend is broken, which is exactly when a user wants to report. For
 // the same reason the send goes straight from the browser to the intake
 // (cross-origin; the intake answers with Access-Control-Allow-Origin).
@@ -140,6 +140,7 @@ function closeFeedbackForm() {
   const el = document.getElementById('feedback-backdrop');
   const hadFocus = !!el && el.contains(document.activeElement);
   if (el) setSiblingsInert(el, false);
+  if (el) window.gdFeedbackFormRelease?.(el.querySelector('.feedback-popover'));
   if (el) el.remove();
   document.removeEventListener('keydown', _fbEscHandler, true);
   if (hadFocus) returnFocusTo(_fbTrigger);
@@ -148,27 +149,6 @@ function closeFeedbackForm() {
 
 function _fbEscHandler(e) {
   if (e.key === 'Escape') { closeFeedbackForm(); e.stopPropagation(); }
-}
-
-function _fbRow(labelText, input) {
-  const row = document.createElement('label');
-  row.className = 'feedback-row';
-  const span = document.createElement('span');
-  span.textContent = labelText;
-  row.appendChild(span);
-  row.appendChild(input);
-  return row;
-}
-
-function _fbCheck(labelText, checked) {
-  const label = document.createElement('label');
-  label.className = 'feedback-check';
-  const box = document.createElement('input');
-  box.type = 'checkbox';
-  box.checked = !!checked;
-  label.appendChild(box);
-  label.appendChild(document.createTextNode(' ' + labelText));
-  return { el: label, box };
 }
 
 // opts: {prefillText: string}
@@ -186,86 +166,22 @@ function openFeedbackForm(opts = {}) {
     if (e.target === backdrop) closeFeedbackForm();
   });
 
-  const card = document.createElement('div');
-  card.className = 'feedback-popover';
-  card.setAttribute('role', 'dialog');
-  card.setAttribute('aria-modal', 'true');
-  card.setAttribute('aria-label', 'Report a problem');
-
-  const title = document.createElement('div');
-  title.className = 'feedback-title';
-  title.textContent = 'Report a problem';
-  card.appendChild(title);
-
-  const category = document.createElement('select');
-  for (const [v, label] of [['bug', 'Bug'], ['idea', 'Idea'], ['question', 'Question']]) {
-    const o = document.createElement('option');
-    o.value = v;
-    o.textContent = label;
-    category.appendChild(o);
-  }
-  card.appendChild(_fbRow('Category', category));
-
-  const text = document.createElement('textarea');
-  text.rows = 5;
-  text.maxLength = 10000;
-  text.placeholder = 'What happened? What did you expect?';
+  const card = window.gdFeedbackFormNode(_fbRecentErrors.length,
+    typeof isAuthenticated === 'function' && isAuthenticated());
+  const category = card.querySelector('.feedback-category');
+  const text = card.querySelector('.feedback-description');
+  const email = card.querySelector('.feedback-email');
+  const honeypot = card.querySelector('.feedback-honeypot input');
+  const cEnv = card.querySelector('.feedback-env');
+  const cErrs = card.querySelector('.feedback-errors');
+  const cLoc = card.querySelector('.feedback-location');
+  const cFails = card.querySelector('.feedback-failures');
+  const status = card.querySelector('.feedback-status');
+  const send = card.querySelector('.feedback-send');
+  const cancel = card.querySelector('.feedback-cancel');
   if (opts.prefillText) text.value = opts.prefillText;
-  card.appendChild(_fbRow('Description', text));
-
-  const email = document.createElement('input');
-  email.type = 'email';
-  email.maxLength = 200;
-  email.placeholder = 'you@example.com (optional, for follow-up)';
   if (window.gdAccount?.email) email.value = window.gdAccount.email;
-  card.appendChild(_fbRow('Email', email));
-
-  // Honeypot — visually absent; bots that fill every field reveal
-  // themselves. The intake pretends success when it arrives non-empty.
-  const honeypotWrap = document.createElement('div');
-  honeypotWrap.className = 'feedback-honeypot';
-  honeypotWrap.setAttribute('aria-hidden', 'true');
-  const honeypot = document.createElement('input');
-  honeypot.name = 'website';
-  honeypot.tabIndex = -1;
-  honeypot.autocomplete = 'off';
-  honeypotWrap.appendChild(honeypot);
-  card.appendChild(honeypotWrap);
-
-  const attach = document.createElement('div');
-  attach.className = 'feedback-attach';
-  const attachTitle = document.createElement('div');
-  attachTitle.className = 'feedback-attach-title';
-  attachTitle.textContent = 'Attach (sent only on submit):';
-  attach.appendChild(attachTitle);
-  const cEnv = _fbCheck('Build & environment (versions, browser)', true);
-  const cErrs = _fbCheck(`Recent console errors (${_fbRecentErrors.length})`, true);
-  const cLoc = _fbCheck('Current location (instance URL, branch, open fn)', false);
-  attach.appendChild(cEnv.el);
-  attach.appendChild(cErrs.el);
-  attach.appendChild(cLoc.el);
-  let cFails = null;
-  if (typeof isAuthenticated === 'function' && isAuthenticated()) {
-    cFails = _fbCheck('Recent failed executions (fn names + counts, last 7 days)', false);
-    attach.appendChild(cFails.el);
-  }
-  card.appendChild(attach);
-
-  const status = document.createElement('div');
-  status.className = 'feedback-status';
-  const actions = document.createElement('div');
-  actions.className = 'feedback-actions';
-  const send = document.createElement('button');
-  send.className = 'feedback-send';
-  send.textContent = 'Send';
-  const cancel = document.createElement('button');
-  cancel.className = 'feedback-cancel';
-  cancel.textContent = 'Cancel';
   cancel.addEventListener('click', closeFeedbackForm);
-  actions.appendChild(send);
-  actions.appendChild(cancel);
-  card.appendChild(actions);
-  card.appendChild(status);
 
   send.addEventListener('click', async () => {
     if (!text.value.trim()) {
@@ -280,10 +196,10 @@ function openFeedbackForm(opts = {}) {
       email: email.value.trim(),
       website: honeypot.value,
       context: await _fbBuildContext({
-        env: cEnv.box.checked,
-        consoleErrors: cErrs.box.checked,
-        location: cLoc.box.checked,
-        failures: !!cFails?.box.checked,
+        env: cEnv.checked,
+        consoleErrors: cErrs.checked,
+        location: cLoc.checked,
+        failures: !!cFails?.checked,
       }),
     };
     try {

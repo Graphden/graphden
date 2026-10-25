@@ -54,7 +54,11 @@
             (when (seq web) [(into ["npx" "--no-install" "biome" "check"] web)])
             (when (seq css) [(into ["npx" "--no-install" "stylelint"] css)])
             (when (seq docs) [(into ["npx" "--no-install" "markdownlint-cli2" "--no-globs"] docs)])
-            (when graph? [["bb" "graph-lint"] ["bb" "reachability"]])
+            ;; A graph edit can introduce a corpus-wide type alias collision
+            ;; even when its own plan compiles. Check before building a live
+            ;; instance; the normal CI roster still runs the same sweep once.
+            (when graph? [["bb" "graph-lint"] ["bb" "reachability"]
+                          ["bb" "type-sweep"]])
             (when devtour-input? [["bb" "devtour-check"]])
             (when plan-input? [["clojure" "-M:dev" "tools/ui_preview/generate_builtin_plans.clj" "--check"]]))))))
 

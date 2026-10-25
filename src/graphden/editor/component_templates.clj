@@ -147,6 +147,9 @@
         inspector (str root ".inspector")
         explorer (str root ".explorer")
         tutorial-catalog (str root ".tutorial-catalog")
+        execution-status (str root ".execution-status")
+        execution-path (str root ".execution-path")
+        feedback (str root ".feedback")
         canvas (str root ".canvas")
         canvas-values (str root ".canvas-values")
         canvas-inheritance (str root ".canvas-inheritance")
@@ -173,6 +176,12 @@
                                                     [:view (keyword recents "recents-view")]])
                             (component-definitions root "tutorial-catalog" :app.ui-tutorial-catalog/catalog-view
                                                    [[:view (keyword tutorial-catalog "catalog-view")]])
+                            (component-definitions root "execution-status" :app.ui-execution/status-view
+                                                   [[:view (keyword execution-status "status-view")]])
+                            (component-definitions root "execution-path" :app.ui-execution/path-view
+                                                   [[:view (keyword execution-path "path-view")]])
+                            (component-definitions root "feedback" :app.ui-feedback/feedback-view
+                                                   [[:view (keyword feedback "feedback-view")]])
                             (component-definitions root "canvas" :app.ui-canvas/canvas-view
                                                    [[:view (keyword canvas "canvas-view")]])
                             (component-definitions root "canvas-values" :app.ui-canvas-values/canvas-values-view
@@ -196,6 +205,9 @@
                                       (keyword root "_inspector-descriptor")
                                       (keyword root "_explorer-descriptor")
                                       (keyword root "_tutorial-catalog-descriptor")
+                                      (keyword root "_execution-status-descriptor")
+                                      (keyword root "_execution-path-descriptor")
+                                      (keyword root "_feedback-descriptor")
                                       (keyword root "_canvas-descriptor")
                                       (keyword root "_canvas-values-descriptor")
                                       (keyword root "_canvas-inheritance-descriptor")
@@ -212,6 +224,9 @@
             (concat descriptors theme-definitions menu-definitions (copy-module "app/ui-fn-picker" picker)
                     (copy-module "app/ui-recents" recents) (copy-module "app/ui-inspector" inspector)
                     (copy-module "app/ui-explorer" explorer) (copy-module "app/ui-tutorial-catalog" tutorial-catalog)
+                    (copy-module "app/ui-execution" execution-status)
+                    (copy-module "app/ui-execution" execution-path)
+                    (copy-module "app/ui-feedback" feedback)
                     (copy-module "app/ui-canvas" canvas) (copy-module "app/ui-canvas-values" canvas-values)
                     (copy-module "app/ui-canvas-inheritance" canvas-inheritance)
                     (copy-module "app/ui-canvas-metadata" canvas-metadata)
@@ -222,13 +237,13 @@
 
 (def namespace-suffixes
   "Owned child namespaces reserved for the installed personal template bundle."
-  ["theme" "menu" "picker" "recents" "inspector" "explorer" "tutorial-catalog" "canvas" "canvas-values" "canvas-inheritance" "canvas-metadata" "canvas-type-structure" "canvas-bindings"])
+  ["theme" "menu" "picker" "recents" "inspector" "explorer" "tutorial-catalog" "execution-status" "execution-path" "feedback" "canvas" "canvas-values" "canvas-inheritance" "canvas-metadata" "canvas-type-structure" "canvas-bindings"])
 
 
 (def groups
   "Fixed creation choices and their personal namespace/descriptor prefixes."
   {:account-menu "menu" :fn-picker "picker" :recents "recents" :inspector "inspector" :explorer "explorer"
-   :tutorial-catalog "tutorial-catalog" :canvas "canvas" :canvas-values "canvas-values" :canvas-inheritance "canvas-inheritance" :canvas-metadata "canvas-metadata" :canvas-type-structure "canvas-type-structure" :canvas-bindings "canvas-bindings"})
+   :tutorial-catalog "tutorial-catalog" :execution-status "execution-status" :execution-path "execution-path" :feedback "feedback" :canvas "canvas" :canvas-values "canvas-values" :canvas-inheritance "canvas-inheritance" :canvas-metadata "canvas-metadata" :canvas-type-structure "canvas-type-structure" :canvas-bindings "canvas-bindings"})
 
 
 (defn selected-definitions
@@ -284,4 +299,7 @@
    :canvas-type-structure-id (str (ids/fn-id (str root ".canvas-type-structure") :type-structure-view))
    :canvas-type-structure-initial-id (str (ids/fn-id (str root ".canvas-type-structure") :type-structure-initial))
    :canvas-bindings-id (str (ids/fn-id (str root ".canvas-bindings") :bindings-view))
-   :tutorial-catalog-id (str (ids/fn-id (str root ".tutorial-catalog") :catalog-view))})
+   :tutorial-catalog-id (str (ids/fn-id (str root ".tutorial-catalog") :catalog-view))
+   :execution-status-id (str (ids/fn-id (str root ".execution-status") :status-view))
+   :execution-path-id (str (ids/fn-id (str root ".execution-path") :path-view))
+   :feedback-id (str (ids/fn-id (str root ".feedback") :feedback-view))})

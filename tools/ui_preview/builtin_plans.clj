@@ -32,7 +32,7 @@
 (def script-path "resources/packages/app/ui-preview/builtin-plans.js")
 
 
-(def ^:private modules ["ui-account-menu" "ui-fn-picker" "ui-recents" "ui-inspector" "ui-explorer" "ui-tutorial-catalog" "ui-canvas" "ui-canvas-values" "ui-canvas-inheritance" "ui-canvas-metadata" "ui-canvas-type-structure" "ui-canvas-bindings"])
+(def ^:private modules ["ui-account-menu" "ui-fn-picker" "ui-recents" "ui-inspector" "ui-explorer" "ui-tutorial-catalog" "ui-execution" "ui-feedback" "ui-canvas" "ui-canvas-values" "ui-canvas-inheritance" "ui-canvas-metadata" "ui-canvas-type-structure" "ui-canvas-bindings"])
 
 
 (def ^:private entries
@@ -57,6 +57,9 @@
                          :view (ids/fn-id "app.ui-canvas-type-structure" :type-structure-view)}
    :canvasBindings {:view (ids/fn-id "app.ui-canvas-bindings" :bindings-view)}
    :tutorialCatalog {:view (ids/fn-id "app.ui-tutorial-catalog" :catalog-view)}
+   :executionStatus {:view (ids/fn-id "app.ui-execution" :status-view)}
+   :executionPath {:view (ids/fn-id "app.ui-execution" :path-view)}
+   :feedback {:view (ids/fn-id "app.ui-feedback" :feedback-view)}
    :fnPicker {:initial (ids/fn-id "app.ui-account-menu" :account-menu-initial)
               :update (ids/fn-id "app.ui-account-menu" :account-menu-update)
               :view (ids/fn-id "app.ui-fn-picker" :picker-view)}})

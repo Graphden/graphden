@@ -562,7 +562,7 @@
 (defn- run-preflight!
   [since]
   (ci-proc/run-bounded! (cond-> ["bb" "scripts/ci_fast_cli.clj"] since (conj since))
-                        240000 live-procs))
+                        360000 live-procs))
 
 
 (defn- assert-candidate!

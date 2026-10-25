@@ -117,7 +117,10 @@
                          :canvas-type-structure-id (some-> (get-in configuration [:canvas-type-structure :view]) str)
                          :canvas-type-structure-initial-id (some-> (get-in configuration [:canvas-type-structure :initial]) str)
                          :canvas-bindings-id (some-> (get-in configuration [:canvas-bindings :view]) str)
-                         :tutorial-catalog-id (some-> (get-in configuration [:tutorial-catalog :view]) str)}}
+                         :tutorial-catalog-id (some-> (get-in configuration [:tutorial-catalog :view]) str)
+                         :execution-status-id (some-> (get-in configuration [:execution-status :view]) str)
+                         :execution-path-id (some-> (get-in configuration [:execution-path :view]) str)
+                         :feedback-id (some-> (get-in configuration [:feedback :view]) str)}}
           resolved (assoc :configuration-revision (:revision resolved)
                           :configuration-preference {:present (boolean (seq preference-rows))
                                                      :value (:value (first preference-rows))}

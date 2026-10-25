@@ -1,0 +1,311 @@
+{:namespace "app.ui-execution"
+ :description "Pure presentation of execution status and path traces. Fetch, polling, cancellation, canvas geometry and focus belong to the editor host."
+ :fns
+ [{:name :_status-inputs
+   :type {:kind :text :message :text :execution-id :text :error-data :text}}
+  {:name :_status-view-envelope :type {:inputs :_status-inputs}}
+  {:name :_status-view-result :type {:tree :web.html/hiccup-node}}
+  {:name :_status-view-callable
+   :fn-type [{:input :app.ui-execution/_status-view-envelope}
+             :app.ui-execution/_status-view-result]}
+  {:name :status-component :type {:view :_status-view-callable}}
+
+  {:name :_status-input
+   :parent :get
+   :args {:coll {:as :inputs :type :_status-inputs}
+          :key {:value :kind} :default ""}}
+  {:name :_status-message
+   :parent :get
+   :args {:coll {:as :inputs :type :_status-inputs}
+          :key {:value :message} :default ""}}
+  {:name :_status-execution-id
+   :parent :get
+   :args {:coll {:as :inputs :type :_status-inputs}
+          :key {:value :execution-id} :default ""}}
+  {:name :_status-error-data
+   :parent :get
+   :args {:coll {:as :inputs :type :_status-inputs}
+          :key {:value :error-data} :default ""}}
+
+  {:name :_submit-tree
+   :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "execute-submit-spinner"}}
+          :children [:_status-message]}}
+  {:name :_pending-id-prefix
+   :parent :str-clip :args {:string :_status-execution-id :limit 8}}
+  {:name :_pending-label
+   :parent :str :args {:parts ["Running… (id: " :_pending-id-prefix ")"]}}
+  {:name :_pending-spinner
+   :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "execute-pending-spinner"}}
+          :children ["…"]}}
+  {:name :_pending-text
+   :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "execute-pending-text"}}
+          :children [:_pending-label]}}
+  {:name :_pending-tree
+   :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "execute-pending-pane"}}
+          :children [:_pending-spinner :_pending-text]}}
+  {:name :_error-label
+   :parent :if
+   :args {:test {:parent :equal? :args {:a :_status-message :b ""}}
+          :then "Execution failed" :else :_status-message}}
+  {:name :_error-head
+   :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "execute-error-head"}}
+          :children [:_error-label]}}
+  {:name :_error-data-node
+   :parent :if
+   :args {:test {:parent :equal? :args {:a :_status-error-data :b ""}}
+          :then nil
+          :else {:parent :hiccup
+                 :args {:tag "pre" :attrs {:value {:class "execute-error-data"}}
+                        :children [:_status-error-data]}}}}
+  {:name :_error-tree
+   :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "execute-error-pane"}}
+          :children [:_error-head :_error-data-node]}}
+  {:name :_status-tree
+   :parent :if
+   :args {:test {:parent :equal? :args {:a :_status-input :b "submitting"}}
+          :then :_submit-tree
+          :else {:parent :if
+                 :args {:test {:parent :equal? :args {:a :_status-input :b "pending"}}
+                        :then :_pending-tree :else :_error-tree}}}}
+  {:name :status-view
+   :parent :zipmap
+   :return-type :_status-view-result
+   :args {:keys [{:value :tree}] :vals [:_status-tree]}}
+  {:name :root-view
+   :parent :status-view
+   :lambda-params [:input]
+   :return-type :_status-view-result
+   :args {:inputs {:parent :get
+                   :args {:coll {:as :input :type :_status-view-envelope}
+                          :key {:value :inputs}}}}}
+  {:name :_root-view-assoc
+   :parent :assoc-fn
+   :args {:value {:as :value :type :_status-view-callable}}}
+  {:name :execution-status-component
+   :parent :_root-view-assoc
+   :return-type :status-component
+   :args {:map {} :key {:value :view} :value {:ref :root-view}}}
+
+  ;; The browser host passes only safe metrics from the already authorized
+  ;; trace. Raw captured values stay in its popover and never enter this plan.
+  {:name :_path-entry
+   :type {:fn-id :text :cache-hit :bool :hidden :bool :duration-ms :int}}
+  {:name :_path-inputs
+   :type {:entries [:list :_path-entry] :highlighted-count :int
+          :off-canvas-count :int :off-canvas-title :text
+          :path-truncated :bool :values-dropped :bool}}
+  {:name :_path-envelope :type {:inputs :_path-inputs}}
+  {:name :_path-row
+   :type {:fn-id :text :count :int :fresh :int :hits :int
+          :total-ms :int :max-ms :numeric :hidden :bool :badge :text :title :text}}
+  {:name :_path-result :type {:rows [:list :_path-row]
+                              :panel-tree :web.html/hiccup-node}}
+  {:name :_path-callable :fn-type [{:input :_path-envelope} :_path-result]}
+  {:name :path-component :type {:view :_path-callable}}
+  {:name :_path-entries
+   :parent :get
+   :args {:coll {:as :inputs :type :_path-inputs}
+          :key {:value :entries} :default {:value []}}}
+  {:name :_path-entry-id
+   :parent :get :lambda-params [:entry]
+   :args {:coll {:as :entry :type :_path-entry}
+          :key {:value :fn-id} :default ""}}
+  {:name :_path-entry-hidden
+   :parent :get :lambda-params [:entry]
+   :args {:coll {:as :entry :type :_path-entry}
+          :key {:value :hidden} :default false}}
+  {:name :_path-entry-cache-hit
+   :parent :get :lambda-params [:entry]
+   :args {:coll {:as :entry :type :_path-entry}
+          :key {:value :cache-hit} :default false}}
+  {:name :_path-entry-duration
+   :parent :get :lambda-params [:entry]
+   :args {:coll {:as :entry :type :_path-entry}
+          :key {:value :duration-ms} :default 0}}
+  {:name :_path-entry-fresh
+   :parent :if :lambda-params [:entry]
+   :args {:test :_path-entry-hidden :then false
+          :else {:parent :if :args {:test :_path-entry-cache-hit
+                                    :then false :else true}}}}
+  {:name :_path-entry-hit
+   :parent :if :lambda-params [:entry]
+   :args {:test :_path-entry-hidden :then false :else :_path-entry-cache-hit}}
+  {:name :_path-groups :parent :group-by
+   :args {:key-fn :_path-entry-id :coll :_path-entries}}
+  {:name :_path-group-list :parent :vals :args {:map :_path-groups}}
+  {:name :_path-group
+   :parent :const :args {:value {:as :group :type [:list :_path-entry]}}}
+  {:name :_path-group-first
+   :parent :get
+   :args {:coll :_path-group :key 0
+          :default {:value {:fn-id "" :cache-hit false :hidden false :duration-ms 0}}}}
+  {:name :_path-group-id
+   :parent :str
+   :args {:parts [{:parent :get
+                   :args {:coll :_path-group-first :key {:value :fn-id}
+                          :default ""}}]}}
+  {:name :_path-group-count :parent :count :args {:coll :_path-group}}
+  {:name :_path-group-hidden-entries
+   :parent :filter :args {:pred :_path-entry-hidden :coll :_path-group}}
+  {:name :_path-group-hidden-count
+   :parent :count :args {:coll :_path-group-hidden-entries}}
+  {:name :_path-group-hidden
+   :parent :if
+   :args {:test {:parent :equal? :args {:a :_path-group-hidden-count :b 0}}
+          :then false :else true}}
+  {:name :_path-group-fresh-entries
+   :parent :filter :args {:pred :_path-entry-fresh :coll :_path-group}}
+  {:name :_path-group-fresh-count
+   :parent :count :args {:coll :_path-group-fresh-entries}}
+  {:name :_path-group-hit-entries
+   :parent :filter :args {:pred :_path-entry-hit :coll :_path-group}}
+  {:name :_path-group-hit-count
+   :parent :count :args {:coll :_path-group-hit-entries}}
+  {:name :_path-group-durations
+   :parent :map :args {:func :_path-entry-duration :coll :_path-group-fresh-entries}}
+  {:name :_path-group-total-ms
+   :parent :add :args {:nums :_path-group-durations}}
+  {:name :_path-group-sorted-fresh
+   :parent :sort-by :args {:key-fn :_path-entry-duration
+                           :coll :_path-group-fresh-entries}}
+  {:name :_path-group-last-index
+   :parent :add :args {:nums [:_path-group-fresh-count -1]}}
+  {:name :_path-group-max-entry
+   :parent :get
+   :args {:coll :_path-group-sorted-fresh
+          :key :_path-group-last-index
+          :default {:value {:fn-id "" :cache-hit false :hidden false :duration-ms 0}}}}
+  {:name :_path-group-max-ms
+   :parent :if
+   :args {:test {:parent :equal? :args {:a :_path-group-fresh-count :b 0}}
+          :then 0
+          :else {:parent :add
+                 :args {:nums [0 {:parent :get
+                                  :args {:coll :_path-group-max-entry
+                                         :key {:value :duration-ms} :default 0}}]}}}}
+  {:name :_path-group-times
+   :parent :if
+   :args {:test {:parent :lte :args {:nums [:_path-group-count 1]}}
+          :then ""
+          :else {:parent :str :args {:parts [:_path-group-count "× "]}}}}
+  {:name :_path-group-badge
+   :parent :if
+   :args {:test :_path-group-hidden :then "secret"
+          :else {:parent :if
+                 :args {:test {:parent :equal? :args {:a :_path-group-fresh-count :b 0}}
+                        :then {:parent :str :args {:parts [:_path-group-times "cache"]}}
+                        :else {:parent :str :args {:parts [:_path-group-times
+                                                           :_path-group-total-ms "ms"]}}}}}}
+  {:name :_path-group-noun
+   :parent :if
+   :args {:test {:parent :equal? :args {:a :_path-group-count :b 1}}
+          :then " invocation" :else " invocations"}}
+  {:name :_path-group-fresh-title
+   :parent :if
+   :args {:test {:parent :equal? :args {:a :_path-group-fresh-count :b 0}}
+          :then ""
+          :else {:parent :str
+                 :args {:parts [" · " :_path-group-fresh-count " fresh (total "
+                                :_path-group-total-ms " ms, max "
+                                :_path-group-max-ms " ms)"]}}}}
+  {:name :_path-group-hit-noun
+   :parent :if
+   :args {:test {:parent :equal? :args {:a :_path-group-hit-count :b 1}}
+          :then " cache hit" :else " cache hits"}}
+  {:name :_path-group-hit-title
+   :parent :if
+   :args {:test {:parent :equal? :args {:a :_path-group-hit-count :b 0}}
+          :then ""
+          :else {:parent :str
+                 :args {:parts [" · " :_path-group-hit-count :_path-group-hit-noun]}}}}
+  {:name :_path-group-title
+   :parent :if
+   :args {:test :_path-group-hidden
+          :then "[hidden — secret] — this fn touches :secret-typed data; timings are not captured for it."
+          :else {:parent :str
+                 :args {:parts ["Execution path: " :_path-group-count
+                                :_path-group-noun :_path-group-fresh-title
+                                :_path-group-hit-title]}}}}
+  {:name :_path-group-row
+   :parent :zipmap :lambda-params [:group] :return-type :_path-row
+   :args {:keys [{:value :fn-id} {:value :count} {:value :fresh}
+                 {:value :hits} {:value :total-ms} {:value :max-ms}
+                 {:value :hidden} {:value :badge} {:value :title}]
+          :vals [:_path-group-id :_path-group-count :_path-group-fresh-count
+                 :_path-group-hit-count :_path-group-total-ms :_path-group-max-ms
+                 :_path-group-hidden :_path-group-badge :_path-group-title]}}
+  {:name :_path-rows
+   :parent :map :args {:func :_path-group-row :coll :_path-group-list}}
+  {:name :_path-panel-tree
+   :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "path-view-panel" :role "status"}}
+          :children
+          [{:parent :hiccup
+            :args {:tag "span" :attrs {:value {}}
+                   :children [{:parent :str
+                               :args {:parts ["Execution path: "
+                                              {:parent :get :args {:coll {:as :inputs :type :_path-inputs}
+                                                                   :key {:value :highlighted-count} :default 0}}
+                                              " functions highlighted"]}}]}}
+           {:parent :if
+            :args {:test {:parent :equal?
+                          :args {:a {:parent :get :args {:coll {:as :inputs :type :_path-inputs}
+                                                         :key {:value :off-canvas-count} :default 0}}
+                                 :b 0}}
+                   :then nil
+                   :else {:parent :hiccup
+                          :args {:tag "span"
+                                 :attrs {:parent :zipmap
+                                         :args {:keys [{:value :class} {:value :title}]
+                                                :vals ["path-view-off-canvas"
+                                                       {:parent :get :args {:coll {:as :inputs :type :_path-inputs}
+                                                                            :key {:value :off-canvas-title} :default ""}}]}}
+                                 :children [{:parent :str
+                                             :args {:parts ["· not on canvas: "
+                                                            {:parent :get :args {:coll {:as :inputs :type :_path-inputs}
+                                                                                 :key {:value :off-canvas-count} :default 0}}
+                                                            " functions"]}}]}}}}
+           {:parent :if
+            :args {:test {:parent :get :args {:coll {:as :inputs :type :_path-inputs}
+                                              :key {:value :path-truncated} :default false}}
+                   :then {:parent :hiccup
+                          :args {:tag "span"
+                                 :attrs {:value {:class "path-view-truncated"
+                                                 :title "The capture hit its size cap — oldest entries were dropped."}}
+                                 :children ["· trace truncated"]}}
+                   :else nil}}
+           {:parent :if
+            :args {:test {:parent :get :args {:coll {:as :inputs :type :_path-inputs}
+                                              :key {:value :values-dropped} :default false}}
+                   :then {:parent :hiccup
+                          :args {:tag "span"
+                                 :attrs {:value {:class "path-view-truncated"
+                                                 :title "Captured values hit the total 16 MB budget — the oldest entries were dropped first."}}
+                                 :children ["· some values dropped"]}}
+                   :else nil}}
+           {:parent :hiccup
+            :args {:tag "button"
+                   :attrs {:value {:type "button" :class "path-view-clear"
+                                   :aria-label "Clear the execution-path highlight"}}
+                   :children ["✕ clear"]}}]}}
+  {:name :path-view
+   :parent :zipmap :return-type :_path-result
+   :args {:keys [{:value :rows} {:value :panel-tree}]
+          :vals [:_path-rows :_path-panel-tree]}}
+  {:name :root-path-view
+   :parent :path-view :lambda-params [:input] :return-type :_path-result
+   :args {:inputs {:parent :get
+                   :args {:coll {:as :input :type :_path-envelope}
+                          :key {:value :inputs}}}}}
+  {:name :_root-path-assoc
+   :parent :assoc-fn
+   :args {:value {:as :value :type :_path-callable}}}
+  {:name :execution-path-component
+   :parent :_root-path-assoc :return-type :path-component
+   :args {:map {} :key {:value :view} :value {:ref :root-path-view}}}]}

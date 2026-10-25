@@ -15,6 +15,20 @@
   ["src" "test" "development" "resources/packages" "scripts" "dev/wtq" "build.clj" "bb.edn"])
 
 
+(defn changed-test-namespaces
+  "Run edited JVM tests before broader consumers. The path is the namespace;
+   no source-name guess or hand-maintained test list is involved."
+  [changed]
+  (->> changed
+       (keep (fn [path]
+               (when-let [[_ name] (re-matches #"test/(.+)_test\.clj[c]?" path)]
+                 (-> name
+                     (str/replace "/" ".")
+                     (str/replace "_" "-")
+                     (str "-test")))))
+       distinct sort vec))
+
+
 (defn syntax-commands
   "Syntax guards outside the narrower biome and runtime test scan sets."
   [paths]
@@ -48,11 +62,21 @@
                                 (re-find #"^resources/packages/app/ui-preview/builtin-plans\.(json|js)$" %)
                                 (re-find #"^tools/ui_preview/(builtin_plans|generate_builtin_plans)\.clj$" %)) changed)
          devtour-input? (some #(or (re-find #"^(src|resources/packages|development/src)/.*\.(clj|cljc|cljs|edn|js)$" %)
-                                   (= % "docs/devtour/tour.edn")) changed)]
+                                   (= % "docs/devtour/tour.edn")) changed)
+         changed-tests (changed-test-namespaces changed)
+         template-consumers ["graphden.editor.component-bundle-test"
+                             "graphden.editor.component-config-test"
+                             "graphden.editor.config-resolution-test"
+                             "graphden.executor.structural-projection-test"
+                             "graphden.executor.builtin-plans-test"]
+         remaining-consumers (remove (set changed-tests) template-consumers)]
      (vec (concat
             (when (seq clj)
+              [(into (if native-style? ["cljstyle" "check"] ["clojure" "-M:cljstyle" "check"]) clj)])
+            (when (seq changed-tests)
+              [(into ["bb" "wt" "test"] (mapcat (fn [ns] ["--focus" ns]) changed-tests))])
+            (when (seq clj)
               [(into ["clojure" "-M:splint"] clj)
-               (into (if native-style? ["cljstyle" "check"] ["clojure" "-M:cljstyle" "check"]) clj)
                (into (if native-kondo? ["clj-kondo" "--lint"] ["clojure" "-M:kondo" "--lint"]) clj)])
             (syntax-commands paths)
             (for [path shell] ["bash" "-n" path])
@@ -64,12 +88,9 @@
             ;; Personal templates and shipped browser plans share dynamic graph
             ;; references that a namespace require graph cannot infer. Run the
             ;; exact JVM consumers before the corpus-wide audits and image boot.
-            (when ui-template?
-              [["bb" "wt" "test"
-                "--focus" "graphden.editor.component-bundle-test"
-                "--focus" "graphden.editor.component-config-test"
-                "--focus" "graphden.executor.structural-projection-test"
-                "--focus" "graphden.executor.builtin-plans-test"]])
+            (when (and ui-template? (seq remaining-consumers))
+              [(into ["bb" "wt" "test"]
+                     (mapcat (fn [ns] ["--focus" ns]) remaining-consumers))])
             ;; A graph edit can introduce a corpus-wide type alias collision
             ;; even when its own plan compiles. Check before building a live
             ;; instance; the normal CI roster still runs the same sweep once.

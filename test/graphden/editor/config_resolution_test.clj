@@ -1,6 +1,7 @@
 (ns ^:serial graphden.editor.config-resolution-test
   (:require
     [clojure.test :refer [deftest is]]
+    [graphden.editor.component-config :as component-config]
     [graphden.editor.config-resolution :as resolution]
     [graphden.graph.metadata :as metadata]
     [graphden.storage.graph-writer :as writer]
@@ -22,8 +23,8 @@
                                                     (swap! checked conj id)
                                                     (when (= denied-id id)
                                                       (throw (ex-info "Denied" {:type :authz/forbidden}))))]
-      (is (= {"account-menu" false "fn-picker" true "inspector" false "explorer" false "recents" false
-              "tutorial-catalog" false "canvas" false "canvas-values" false "canvas-inheritance" false "canvas-metadata" false "canvas-type-structure" false "canvas-bindings" false}
+      (is (= (into {} (map (fn [component] [(name component) (= component :fn-picker)]))
+                   (keys component-config/component-contracts))
              (resolution/owned-writable-components nil current)))
       (is (= 1 @walks))
       (is (= #{own-id denied-id} (set @checked)))

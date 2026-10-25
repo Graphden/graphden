@@ -12,19 +12,34 @@
 
 
 (deftest changed-file-checks-never-expand-to-full-tree
-  (is (= [["clojure" "-M:splint" "scripts/a.clj"]
-          ["cljstyle" "check" "scripts/a.clj"]
+  (is (= [["cljstyle" "check" "scripts/a.clj"]
+          ["clojure" "-M:splint" "scripts/a.clj"]
           ["clj-kondo" "--lint" "scripts/a.clj"]
           ["node" "--check" "tools/runtime-test/a.test.js"]
           ["bash" "-n" "dev/wtq/wt"]
           ["shellcheck" "dev/wtq/wt"]
           ["npx" "--no-install" "markdownlint-cli2" "--no-globs" "README.md"]]
          (fast/commands ["scripts/a.clj" "tools/runtime-test/a.test.js" "dev/wtq/wt" "README.md"] true true true)))
-  (is (= [["clojure" "-M:splint" "a b.clj"]
-          ["clojure" "-M:cljstyle" "check" "a b.clj"]
+  (is (= [["clojure" "-M:cljstyle" "check" "a b.clj"]
+          ["clojure" "-M:splint" "a b.clj"]
           ["clojure" "-M:kondo" "--lint" "a b.clj"]]
          (fast/commands ["a b.clj"] false false false)))
   (is (= [] (fast/commands [] true true true))))
+
+
+(deftest edited-jvm-test-runs-immediately-after-changed-file-formatting
+  (let [commands (fast/commands
+                   ["test/graphden/editor/config_resolution_test.clj"
+                    "resources/packages/app/ui-inspector/fns.edn"]
+                   true true true)
+        direct ["bb" "wt" "test" "--focus" "graphden.editor.config-resolution-test"]
+        broader (first (filter #(and (= ["bb" "wt" "test"] (vec (take 3 %)))
+                                     (not= direct %)) commands))]
+    (is (= ["cljstyle" "check"] (vec (take 2 (first commands)))))
+    (is (= direct (second commands)))
+    (is (some? broader))
+    (is (not (some #{"graphden.editor.config-resolution-test"} broader)))
+    (is (< (.indexOf commands direct) (.indexOf commands broader)))))
 
 
 (deftest graph-edit-preflight-covers-the-c3-failures
@@ -49,6 +64,7 @@
   (is (= [["bb" "wt" "test"
            "--focus" "graphden.editor.component-bundle-test"
            "--focus" "graphden.editor.component-config-test"
+           "--focus" "graphden.editor.config-resolution-test"
            "--focus" "graphden.executor.structural-projection-test"
            "--focus" "graphden.executor.builtin-plans-test"]
           ["bb" "graph-lint"]

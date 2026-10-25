@@ -101,7 +101,7 @@
                        (fn [command timeout-ms _]
                          (swap! events conj :preflight)
                          (is (= ["bb" "scripts/ci_fast_cli.clj" "base"] command))
-                         (is (= 240000 timeout-ms))
+                         (is (= 360000 timeout-ms))
                          (throw (ex-info "fixture preflight red" {})))}
         #(binding [*command-line-args* ["--preflight-only" "base"]]
            (is (thrown? Exception ((ns-resolve 'ci entry))))))

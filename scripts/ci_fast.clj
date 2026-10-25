@@ -38,6 +38,9 @@
          css (filter #(or (re-find #"^resources/packages/app/(editor|ui-preview)/.*\.css$" %)
                           (= % "scripts/devtour/tour.css")) paths)
          graph? (some #(re-find #"^resources/packages/.+/fns\.edn$" %) changed)
+         ci-tool? (some #(or (re-find #"^scripts/ci(?:_|\.)" %)
+                             (= % "scripts/checks.edn")
+                             (= % "bb.edn")) changed)
          plan-input? (some #(or (re-find #"^resources/packages/.+/(fns\.edn|impls\.clj)$" %)
                                 (re-find #"^resources/packages/app/ui-preview/builtin-plans\.(json|js)$" %)
                                 (re-find #"^tools/ui_preview/(builtin_plans|generate_builtin_plans)\.clj$" %)) changed)
@@ -54,6 +57,7 @@
             (when (seq web) [(into ["npx" "--no-install" "biome" "check"] web)])
             (when (seq css) [(into ["npx" "--no-install" "stylelint"] css)])
             (when (seq docs) [(into ["npx" "--no-install" "markdownlint-cli2" "--no-globs"] docs)])
+            (when ci-tool? [["bb" "ci-test"]])
             ;; A graph edit can introduce a corpus-wide type alias collision
             ;; even when its own plan compiles. Check before building a live
             ;; instance; the normal CI roster still runs the same sweep once.

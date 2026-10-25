@@ -37,6 +37,13 @@
               commands))))
 
 
+(deftest ci-tool-edits-run-the-ci-selftest-before-the-gate
+  (let [commands (fast/commands ["scripts/ci.clj"] true true true)]
+    (is (some #{["bb" "ci-test"]} commands)))
+  (is (some #{["bb" "ci-test"]}
+            (fast/commands [] ["scripts/ci_runner_order_test.clj"] true true true))))
+
+
 (deftest deleted-graph-source-still-runs-semantic-checks
   (is (= [["bb" "graph-lint"]
           ["bb" "reachability"]

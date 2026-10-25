@@ -6,7 +6,7 @@ const {assert, newContext} = require('./edit-test-helpers');
 const {handlerPreviewTestOptions} = require('./handler-preview-test-options');
 const {
   hardCleanup, waitTourTitle, clickTourButton, filterAndSelect,
-  extendViaRowActions, finishAndDelete, bindNamedPlaceholder,
+  extendViaRowActions, finishAndDelete, bindPlaceholderOn,
   runWithEffectAck, editBoundValue, tourWhere,
 } = require('./tutorial-tour-helpers');
 const {
@@ -30,7 +30,7 @@ const {
     await waitTourTitle(page, 'Make your own caller');
     await extendViaRowActions(page, 'tutorial-http-address', 'service-endpoint');
     await waitTourTitle(page, 'Bind the handler identity', 150000);
-    await bindNamedPlaceholder(page, 'service', 'fn-ref', 'tutorial-contract-answer');
+    await bindPlaceholderOn(page, 'tutorial-http-address', 'service', 'fn-ref', 'tutorial-contract-answer');
     await waitTourTitle(page, 'Resolve the public address');
     await runWithEffectAck(page, undefined, 'tutorial-http-address');
     const raw = '.execute-popover.visible .execute-result-host .execute-result-raw pre';

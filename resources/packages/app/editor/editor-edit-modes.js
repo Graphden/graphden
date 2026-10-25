@@ -155,7 +155,15 @@ function openInlineEditPopover(opts) {
     const ok = (res === true) || !!res?.ok;
     if (ok) {
       if (inlineEditEl === el) closeInlineEdit();
-      if (typeof opts.onSaved === 'function') opts.onSaved();
+      if (typeof opts.onSaved === 'function') {
+        try { await opts.onSaved(); }
+        catch (error) {
+          console.error('Post-save editor refresh failed', error);
+          if (typeof gdToast === 'function') {
+            gdToast('Saved, but the editor could not refresh. Reload to see the change.', 'error');
+          }
+        }
+      }
     } else if (inlineEditEl === el) {
       save.disabled = false;
       cancel.disabled = false;
@@ -373,7 +381,7 @@ function enterArgValueEditMode(arg, anchorEl) {
     // index + subtree + rich-types (enough to reflect the value + any
     // inferred-type shift) WITHOUT `initGraph`'s value-kinds/services
     // re-fetch + graph re-render.
-    onSaved() { if (typeof loadGraphData === 'function') loadGraphData(); },
+    onSaved() { return typeof loadGraphData === 'function' ? loadGraphData() : undefined; },
     // Delete drops the binding so the slot reverts to a free-arg
     // placeholder — the single inline path for switching a bound
     // literal to anything else.
@@ -504,7 +512,7 @@ function enterSecretBindingEditMode(arg, anchorEl, opts) {
       }
     },
     // A rotation changes nothing graphden draws; a new binding does.
-    onSaved() { if (!rotate && typeof initGraph === 'function') initGraph(); }
+    onSaved() { return !rotate && typeof initGraph === 'function' ? initGraph() : undefined; }
   });
 }
 
@@ -646,7 +654,7 @@ function enterArgRenameEditMode(arg, anchorEl, displayLabel) {
     // a Run from it was rejected with "Unknown arg(s)" (lesson 05, step
     // 13). `loadGraphData` re-selects, which re-renders the
     // inspector — the form asks for the new name.
-    onSaved() { if (typeof loadGraphData === 'function') loadGraphData(); }
+    onSaved() { return typeof loadGraphData === 'function' ? loadGraphData() : undefined; }
   });
 }
 
@@ -678,7 +686,7 @@ async function deleteUseSiteBinding(arg) {
                                API.api_entities_type_id('binding', bindingId));
     if (r?.ok) {
       if (prev && typeof gdUndoRecordBindingDeleted === 'function') gdUndoRecordBindingDeleted(prev);
-      if (typeof initGraph === 'function') initGraph();
+      if (typeof initGraph === 'function') await initGraph();
       return true;
     }
   } catch (_) {}
@@ -697,7 +705,7 @@ async function saveArgRef(arg, refFnId) {
     if (typeof unfoldNodeForBuild === 'function') unfoldNodeForBuild(arg['fn-id']);
     // ref-fn-id change can shift the arg's inferred type — `loadGraphData`
     // refreshes rich-types + subtree, so the chip updates without initGraph.
-    if (typeof loadGraphData === 'function') loadGraphData();
+    if (typeof loadGraphData === 'function') await loadGraphData();
     return true;
   }
   return false;

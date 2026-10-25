@@ -266,6 +266,41 @@ function graphShellFromTree(tree) {
 function graphTypeGeneration() { return _subtreeResetEpoch; }
 function graphTypesReady() { return _typesReadyEpoch === _subtreeResetEpoch && _subtreeRootId != null; }
 
+// A mutation refresh temporarily has no usable lookups: resetGraphCaches()
+// invalidates them before the replacement tree/subtree arrive. Keep the old
+// controls visible for continuity, but make their whole interaction surface
+// inert until the new graph has rendered. This one fence covers Inspector,
+// canvas and Explorer callers, including refreshes started by legacy
+// fire-and-forget onSaved callbacks. Auth/navigation remain outside it.
+let _graphRefreshDepth = 0;
+let _graphRefreshLocked = [];
+function beginGraphRefresh() {
+  if (++_graphRefreshDepth === 1) {
+    _graphRefreshLocked = ['graph-container', 'gd-inspector', 'entity-list']
+      .map((id) => document.getElementById(id))
+      .filter(Boolean)
+      .map((el) => {
+        const prior = {el, inert: el.inert, busy: el.getAttribute('aria-busy')};
+        el.inert = true;
+        el.setAttribute('aria-busy', 'true');
+        return prior;
+      });
+  }
+  let ended = false;
+  return () => {
+    if (ended) return;
+    ended = true;
+    if (--_graphRefreshDepth !== 0) return;
+    for (const {el, inert, busy} of _graphRefreshLocked) {
+      el.inert = inert;
+      if (busy === null) el.removeAttribute('aria-busy');
+      else el.setAttribute('aria-busy', busy);
+    }
+    _graphRefreshLocked = [];
+    window.dispatchEvent(new Event('gd-graph-ready'));
+  };
+}
+
 function resetGraphCaches() {
   if (typeof hideAllInlineHosts === 'function') hideAllInlineHosts();
   for (const chip of document.querySelectorAll?.('.arg-type-chip[role="button"]') || []) {
@@ -363,6 +398,8 @@ function repaintExplorer() {
  * Initialize the graph editor
  */
 async function initGraph() {
+  const endRefresh = beginGraphRefresh();
+  try {
   const authEpoch = _graphAuthEpoch;
   // Load the namespace tree + the rich-type registry in parallel. Types feed
   // the in-place edit popovers' "Expected: <type>" hints, so they need to be
@@ -451,6 +488,9 @@ async function initGraph() {
   } else if (hash) {
     await selectFnByName(decodeURIComponent(hash), false);
   }
+  } finally {
+    endRefresh();
+  }
 }
 
 
@@ -460,6 +500,8 @@ async function initGraph() {
 // without a full page reload. Kept as a separate fn from `init()` so it
 // doesn't also re-fire the auth / hash navigation work.
 async function loadGraphData() {
+  const endRefresh = beginGraphRefresh();
+  try {
   const authEpoch = _graphAuthEpoch;
   // Post-mutation refresh: re-fetch the namespace tree (counts can shift on
   // create/delete/rename) AND re-prime the current subtree.
@@ -516,9 +558,12 @@ async function loadGraphData() {
     await selectFnByName(decodeURIComponent(hash), false);
   } else if (typeof renderGraph === 'function') {
     // `@`-surface hash (management screen up) or no hash — just repaint.
-    renderGraph(true);
+    await renderGraph(true);
   }
   window.dispatchEvent(new Event('gd-graph-changed'));
+  } finally {
+    endRefresh();
+  }
 }
 
 // ============================================================================

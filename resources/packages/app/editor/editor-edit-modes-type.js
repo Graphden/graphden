@@ -177,11 +177,11 @@ function enterArgTypeEditMode(arg, anchorEl) {
               value: preEdit.valueJson,
               'ref-fn-id': preEdit.refFnId,
             });
-            if (typeof initGraph === 'function') initGraph();
+            if (typeof initGraph === 'function') await initGraph();
           }
         });
       } else if (typeof initGraph === 'function') {
-        initGraph();
+        return initGraph();
       }
     }
   });

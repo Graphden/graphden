@@ -12,7 +12,7 @@
 const {chromium} = require('playwright');
 const {assert, newContext, api, getEntities, deleteFnByName, waitForServerHealthy, submitInlineRow, BASE}
   = require('./edit-test-helpers');
-const {bindNamedPlaceholder, openRowActionsFor} = require('./tutorial-tour-helpers');
+const {bindPlaceholderOn, openRowActionsFor} = require('./tutorial-tour-helpers');
 
 const RUN_ID = String(Date.now()).slice(-6);
 const CHILD = 'undo-child' + RUN_ID;
@@ -204,7 +204,7 @@ const undoToast = (page) => page.evaluate(() => {
     await page.waitForFunction(() => (graphData?.fns || []).some((f) => f.name === 'str-upper'),
       null, {timeout: 30000, polling: 100});
     await extendVia(page, 'str-upper', SCALAR);
-    await bindNamedPlaceholder(page, 'string', 'literal', 'abc');
+    await bindPlaceholderOn(page, SCALAR, 'string', 'literal', 'abc');
     await page.waitForFunction(() => (typeof gdUndoLastLabel === 'function') && gdUndoLastLabel() === 'Bound :string',
       null, {timeout: 15000, polling: 100});
     const scalar = (await getEntities(page, SCALAR)).fns.find((f) => f.name === SCALAR);
@@ -221,7 +221,7 @@ const undoToast = (page) => page.evaluate(() => {
     await page.waitForFunction(() => (graphData?.fns || []).some((f) => f.name === 'add'),
       null, {timeout: 30000, polling: 100});
     await extendVia(page, 'add', LISTY);
-    await bindNamedPlaceholder(page, 'nums', 'literal', '7');
+    await bindPlaceholderOn(page, LISTY, 'nums', 'literal', '7');
     await page.waitForFunction(() => (typeof gdUndoLastLabel === 'function') && gdUndoLastLabel() === 'Appended an item',
       null, {timeout: 15000, polling: 100});
     const listyEnts = await getEntities(page, LISTY);
@@ -246,7 +246,7 @@ const undoToast = (page) => page.evaluate(() => {
     await page.goto(BASE + '/#core.strings.' + SCALAR);
     await page.waitForFunction((name) => (graphData?.fns || []).some((f) => f.name === name),
       SCALAR, {timeout: 30000, polling: 200});
-    await bindNamedPlaceholder(page, 'string', 'literal', 'kept');
+    await bindPlaceholderOn(page, SCALAR, 'string', 'literal', 'kept');
     await page.waitForFunction(() => !document.body.classList.contains('editor-busy'),
       null, {timeout: 30000, polling: 100});
     const keptBefore = (await getEntities(page, SCALAR)).bindings

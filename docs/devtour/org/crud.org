@@ -299,25 +299,25 @@ Finds tests affected by a write through reverse dependencies. It selects tests w
 :PROPERTIES:
 :CUSTOM_ID: crud/graph-list-env
 :FILE: src/graphden/crud/entities/list.clj
-:LINE: 497
+:LINE: 466
 :MINS: 3.3
 :END:
 
 Builds a shared lazy read environment over the graph cache. Separate projections produce namespace trees, function lists, searches, subtrees, or a full graph listing. Server-assigned roles distinguish types from functions. This is the shared data source behind editor list refreshes.
 
-- source :: [[file:../../../src/graphden/crud/entities/list.clj::(defn- graph-list-env][src/graphden/crud/entities/list.clj:497]]
+- source :: [[file:../../../src/graphden/crud/entities/list.clj::(defn- graph-list-env][src/graphden/crud/entities/list.clj:466]]
 
 * 24. view-members
 :PROPERTIES:
 :CUSTOM_ID: crud/view-members
 :FILE: src/graphden/crud/entities/views.clj
-:LINE: 365
+:LINE: 355
 :MINS: 2.6
 :END:
 
 Evaluates graph filters for the Explorer and saved graph views. Filter dimensions are combined with AND; ~:uses~ follows reverse dependencies by function ID, and ~:views~ intersects other views with a cycle check. Ad-hoc filtering and the saved ~:explorer-view~ function use this same evaluator. Problems come from current-branch diagnostics, failures and lint; apps use the installed org-scoped route reader. Intersections run before the final result limit, so a nested view never loses later matches.
 
-- source :: [[file:../../../src/graphden/crud/entities/views.clj::(defn view-members][src/graphden/crud/entities/views.clj:365]]
+- source :: [[file:../../../src/graphden/crud/entities/views.clj::(defn view-members][src/graphden/crud/entities/views.clj:355]]
 
 * 25. save!
 :PROPERTIES:

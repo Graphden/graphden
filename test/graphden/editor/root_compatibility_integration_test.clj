@@ -111,6 +111,7 @@
         (let [result (export-root ctx)
               rendered (when (:ok result) (run-views (:plan result)))]
           (is (:ok result) (pr-str result))
+          (is (= (get-in result [:plan :entries "root"]) (:root-id result)))
           (is (= (:selected selected) (:component-selection-id result)))
           (is (zero? (:exit rendered -1)) (:err rendered))
           (is (re-find #"Personal settings" (:out rendered "")))
@@ -135,6 +136,7 @@
             (let [result (export-root ctx)]
               (is (false? (:ok result)))
               (is (not (contains? result :plan)))
+              (is (not (contains? result :root-id)))
               (is (not (contains? result :component-selection-id))))))
         (writer/with-write [storage :graph]
                            (sp/delete-entity storage :fn (:selected selected)))

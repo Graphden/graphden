@@ -13,7 +13,8 @@
     [graphden.crud.types-api :as ta]
     [graphden.executor.context :as ctx]
     [graphden.executor.test-setup :as setup]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.tenancy.context :as tenancy]))
 
 
 (use-fixtures :once (setup/create-container-fixture))
@@ -370,12 +371,17 @@
                                          {:name "tu-type" :parent-ids []
                                           :base-fn-id int-id :constraint [:> 0]})
               host    (setup/create-base-fn! storage "tu-host")
+              other   (setup/create-base-fn! storage "tu-other")
               slot    (setup/create-slot! storage "field" (:id type-row))
               _       (setup/attach-slot! storage (:id host) (:id slot) 0)
+              _       (setup/attach-slot! storage (:id other) (:id slot) 0)
               res     (ta/apply-types-usages {:target-id (:id type-row)} c)]
           (is (true? (:ok res)))
           (is (pos? (:count res)))
-          (is (some #(= :slot-of (:kind %)) (:usages res)))))
+          (is (= ["tu-host" "tu-other"]
+                 (sort (map :fn-name (filter #(= :slot-of (:kind %))
+                                             (:usages res)))))
+              "a shared slot must report every owner")))
 
       (finally (sp/close storage))))
 
@@ -411,7 +417,12 @@
                                         {:fn-id (:id caller) :slot-id (:id resolvd)
                                          :resolver-fn-id (:id target)})
               res     (ta/apply-types-usages {:target-id (:id target)} c)
-              by-kind (group-by :kind (:usages res))]
+              by-kind (group-by :kind (:usages res))
+              concealed (ta/apply-types-usages
+                          {:target-id (:id target)} c
+                          (fn [graph]
+                            (update graph :bindings
+                                    #(filterv (fn [b] (not= (:id caller) (:fn-id b))) %))))]
           (is (true? (:ok res)))
           (is (= ["fu-child"] (map :fn-name (:parent-of by-kind)))
               "a child extending the target is a parent-of usage")
@@ -420,7 +431,11 @@
               "one ref-of per (fn, slot) — the two list items collapse to one")
           (is (= [["fu-caller" "resolved"]]
                  (map (juxt :fn-name :slot-name) (:resolver-of by-kind)))
-              "a resolver-fn-id reference is a resolver-of usage")))
+              "a resolver-fn-id reference is a resolver-of usage")
+          (is (not-any? #(and (= "fu-caller" (:fn-name %))
+                              (#{:ref-of :resolver-of} (:kind %)))
+                        (:usages concealed))
+              "a concealed owner's binding and list-item references stay hidden")))
       (finally (sp/close storage))))
 
   (let [storage (setup/create-test-storage)
@@ -448,6 +463,52 @@
           (is (true? (:ok res)))
           (is (contains? kinds :union-branch))
           (is (contains? kinds :binding-of))))
+      (finally (sp/close storage)))))
+
+
+(deftest usages-reachability-respects-visible-service-route-and-editor-roots
+  (let [storage (setup/create-test-storage)
+        c (test-ctx storage)]
+    (try
+      (let [target (setup/create-base-fn! storage "reach-target")
+            middle (setup/create-composed-fn! storage "reach-middle" (:id target))
+            service-root (setup/create-composed-fn! storage "reach-service" (:id middle))
+            route-root (setup/create-composed-fn! storage "reach-route" (:id middle))
+            unrelated (setup/create-base-fn! storage "reach-unrelated")
+            _ (sp/create-entity storage :service
+                                {:fn-id (:id service-root) :enabled? true
+                                 :restart-policy :never :cardinality :singleton})
+            routes (fn [_] [{:handler-fn-id (:id route-root)}])]
+        (with-redefs [tenancy/tenant-app-routes routes]
+          (let [reachable (ta/apply-types-usages {:target-id (:id target)} c)
+                from-editor (ta/apply-types-usages
+                              {:target-id (:id target) :root-id (:id middle)} c)
+                service-usage (ta/apply-types-usages {:target-id (:id service-root)} c)
+                route-usage (ta/apply-types-usages {:target-id (:id route-root)} c)
+                disconnected (ta/apply-types-usages {:target-id (:id unrelated)} c)
+                concealed (ta/apply-types-usages
+                            {:target-id (:id target)} c
+                            (fn [graph]
+                              (update graph :fns
+                                      (fn [rows]
+                                        (mapv #(if (= (:id %) (:id middle))
+                                                 (assoc % :parent-ids []) %)
+                                              rows)))))]
+            (is (= :reachable (get-in reachable [:reachability :state])))
+            (let [path-ids (mapv (comp parse-uuid :fn-id)
+                                 (get-in reachable [:reachability :path]))]
+              (is (contains? #{(:id service-root) (:id route-root)} (first path-ids)))
+              (is (= [(:id middle) (:id target)] (subvec path-ids 1))))
+            (is (= #{:service :route}
+                   (set (map :root-kind (get-in reachable [:reachability :roots])))))
+            (is (= #{:service :route :editor}
+                   (set (map :root-kind (get-in from-editor [:reachability :roots])))))
+            (is (some #(= :service-root (:kind %)) (:usages service-usage)))
+            (is (some #(= :route-root (:kind %)) (:usages route-usage)))
+            (is (= :unreachable (get-in disconnected [:reachability :state])))
+            (is (= :unreachable (get-in concealed [:reachability :state])))
+            (is (empty? (get-in concealed [:reachability :path]))
+                "a concealed parent cannot appear in a path"))))
       (finally (sp/close storage)))))
 
 

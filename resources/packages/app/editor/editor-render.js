@@ -274,7 +274,7 @@ async function renderGraph(shouldFit = true) {
     }
 
     updateOverlayPositions();
-    graphAnimateNodes(targets, ANIM_DURATION, updateOverlayPositions).then(() => {
+    return graphAnimateNodes(targets, ANIM_DURATION, updateOverlayPositions).then(() => {
       if (superseded()) return;
       updateOverlayPositions();
       if (shouldFit && graph.nodes.size > 0) {
@@ -296,10 +296,9 @@ async function renderGraph(shouldFit = true) {
       fadeOutOverlay(getNodeOverlay(id), ANIM_DURATION);
     }
     if (targets.size > 0) {
-      graphAnimateNodes(targets, ANIM_DURATION, updateOverlayPositions, easeInCubic)
+      return graphAnimateNodes(targets, ANIM_DURATION, updateOverlayPositions, easeInCubic)
         .then(completeUpdate);
-      return;
     }
   }
-  completeUpdate();
+  return completeUpdate();
 }

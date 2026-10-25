@@ -6,7 +6,7 @@ const {chromium} = require('playwright');
 const {assert, newContext, BASE} = require('./edit-test-helpers');
 const {readQueueError} = require('./queue-error-diagnostic');
 const {waitTourTitle, clickTourButton, filterAndSelect, extendViaRowActions,
-  bindNamedPlaceholder, openRowActionsFor, editBoundValue, openOperateSection,
+  bindPlaceholderOn, openRowActionsFor, editBoundValue, openOperateSection,
   tourWhere, openTutorialCatalog} = require('./tutorial-tour-helpers');
 
 const REQUIRED = process.env.GRAPHDEN_REQUIRE_QUEUE_SERVICES === '1';
@@ -136,9 +136,9 @@ async function cleanup(page, finish) {
     await waitTourTitle(page, 'Open tutorial-queue-handler');
     await filterAndSelect(page, 'tutorial-queue-handler', 'tutorial-queue-handler');
     await waitTourTitle(page, 'Bind :string');
-    await bindNamedPlaceholder(page, 'string', 'literal', 'not JSON');
+    await bindPlaceholderOn(page, 'tutorial-queue-handler', 'string', 'literal', 'not JSON');
     await waitTourTitle(page, 'Bind :keywordize');
-    await bindNamedPlaceholder(page, 'keywordize', 'literal', 'true');
+    await bindPlaceholderOn(page, 'tutorial-queue-handler', 'keywordize', 'literal', 'true');
 
     await waitTourTitle(page, 'Open pg-queue-consumer');
     await filterAndSelect(page, 'pg-queue-consumer', 'pg-queue-consumer');
@@ -147,9 +147,9 @@ async function cleanup(page, finish) {
     await waitTourTitle(page, 'Open tutorial-queue-worker');
     await filterAndSelect(page, 'tutorial-queue-worker', 'tutorial-queue-worker');
     await waitTourTitle(page, 'Bind :queue');
-    await bindNamedPlaceholder(page, 'queue', 'literal', queue);
+    await bindPlaceholderOn(page, 'tutorial-queue-worker', 'queue', 'literal', queue);
     await waitTourTitle(page, 'Bind :handler');
-    await bindNamedPlaceholder(page, 'handler', 'fn-ref', 'tutorial-queue-handler');
+    await bindPlaceholderOn(page, 'tutorial-queue-worker', 'handler', 'fn-ref', 'tutorial-queue-handler');
     await waitTourTitle(page, 'Start the worker');
     await serviceSettings(page, true);
     await waitTourTitle(page, 'Open queue-publish', 90000);
@@ -162,10 +162,10 @@ async function cleanup(page, finish) {
     await waitTourTitle(page, 'Open tutorial-queue-publish');
     await filterAndSelect(page, 'tutorial-queue-publish', 'tutorial-queue-publish');
     await waitTourTitle(page, 'Bind :queue');
-    await bindNamedPlaceholder(page, 'queue', 'literal', queue);
+    await bindPlaceholderOn(page, 'tutorial-queue-publish', 'queue', 'literal', queue);
     await waitTourTitle(page, 'Bind :payload');
     try {
-      await bindNamedPlaceholder(page, 'payload', 'literal', '"original"');
+      await bindPlaceholderOn(page, 'tutorial-queue-publish', 'payload', 'literal', '"original"');
     } catch (error) {
       console.error('Exact payload binder state: ' + JSON.stringify(await page.evaluate(() => ({
         selected: selectedFnId,

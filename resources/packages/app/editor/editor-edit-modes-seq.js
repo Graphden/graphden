@@ -216,7 +216,7 @@ async function postSequenceAppend(fnId, body) {
       // Sequence edits change binding-list-item rows, not fn structure/
       // value-kinds — the lighter `loadGraphData` (index + subtree +
       // rich-types) reflects them without the `initGraph` graph re-render.
-      if (typeof loadGraphData === 'function') loadGraphData();
+      if (typeof loadGraphData === 'function') await loadGraphData();
       return true;
     }
   } catch (_) {}
@@ -235,7 +235,7 @@ async function moveSequenceItem(itemId, direction) {
     });
     if (r?.ok) {
       if (typeof gdUndoRecordSeqMove === 'function') gdUndoRecordSeqMove(itemId, direction);
-      if (typeof loadGraphData === 'function') loadGraphData();
+      if (typeof loadGraphData === 'function') await loadGraphData();
       return true;
     }
   } catch (_) {}
@@ -250,7 +250,7 @@ async function removeSequenceItem(itemId) {
                                API.api_sequence_item_item_id(itemId));
     if (r?.ok) {
       if (prev && typeof gdUndoRecordSeqRemoved === 'function') gdUndoRecordSeqRemoved(prev);
-      if (typeof loadGraphData === 'function') loadGraphData();
+      if (typeof loadGraphData === 'function') await loadGraphData();
       return true;
     }
   } catch (_) {}

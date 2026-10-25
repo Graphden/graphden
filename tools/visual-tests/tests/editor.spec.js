@@ -26,6 +26,13 @@ test.beforeEach(async ({ page }) => {
 async function waitForGraphRendered(page) {
   // Edges are SVG now; a rendered path means /api/graph/layout returned and drew.
   await page.waitForSelector('#edge-lines path', { state: 'attached', timeout: 20_000 });
+  // The editor can draw a read-only graph before its stored bearer has been
+  // accepted. Capturing then records the sign-in card instead of the editor
+  // that the gate exercises. Wait for the same authenticated state in every
+  // screenshot, including the first test of a cold isolated stack.
+  if (AUTH_TOKEN) {
+    await page.waitForFunction(() => window.isAuthenticated?.() === true);
+  }
   await page.evaluate(() => new Promise(requestAnimationFrame));
   await page.evaluate(() => new Promise(requestAnimationFrame));
 }

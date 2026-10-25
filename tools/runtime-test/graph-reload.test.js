@@ -34,16 +34,23 @@ const json = (body, status = 200) => ({
 
 // A fresh editor-main per case. `routes(url)` answers fetches; a route may
 // return a function (called at fetch time) to act mid-flight.
-function boot({ routes, accounts = false, tenancyClass = false }) {
+function boot({ routes, accounts = false, tenancyClass = false, renderGraph = () => {} }) {
   const calls = { popover: [], entityList: 0, href: null, requery: 0, events: [], inlineClosed: 0 };
   const oldChip = {attrs: {}, setAttribute(key, value) { this.attrs[key] = value; }};
+  const surfaces = Object.fromEntries(['graph-container', 'gd-inspector', 'entity-list'].map(id => [id, {
+    inert: false, attrs: {},
+    getAttribute(key) { return this.attrs[key] ?? null; },
+    setAttribute(key, value) { this.attrs[key] = value; },
+    removeAttribute(key) { delete this.attrs[key]; },
+  }]));
   const rowActions = new Map([['b1', {}]]);
   const ctx = vm.createContext({
     console, Event,
     API: { api_graph_entities: '/api/graph/entities', api_types: '/api/types', api_value_kinds: '/api/value-kinds' },
     location: { pathname: '/', search: '', hash: '#app.x',
                 set href(v) { calls.href = v; }, get href() { return calls.href; } },
-    document: { addEventListener() {}, querySelectorAll: () => [oldChip], body: { classList: { contains: (c) => tenancyClass && c === 'gd-tenancy' } } },
+    document: { addEventListener() {}, getElementById: id => surfaces[id] || null,
+                querySelectorAll: () => [oldChip], body: { classList: { contains: (c) => tenancyClass && c === 'gd-tenancy' } } },
     hideAllInlineHosts: () => { calls.inlineClosed += 1; },
     buildLookups: (g) => ({ fnMap: new Map(g.fns.map((f) => [f.id, f])) }),
     updateEntityList: () => { calls.entityList += 1; },
@@ -51,7 +58,7 @@ function boot({ routes, accounts = false, tenancyClass = false }) {
     clearAuthPassword() {},
     openAuthPopover: (msg) => { calls.popover.push(msg); },
     graphdenAccountsMode: () => accounts,
-    renderGraph() {},
+    renderGraph,
     graphData: null,
     lookups: null,
     richTypes: { stale: true },
@@ -70,7 +77,7 @@ function boot({ routes, accounts = false, tenancyClass = false }) {
     return Promise.resolve(typeof r === 'function' ? r() : r);
   };
   vm.runInContext(SRC, ctx, { filename: 'editor-main.js' });
-  return { ctx, calls, rowActions, oldChip };
+  return { ctx, calls, rowActions, oldChip, surfaces };
 }
 
 const TREE = { namespaces: [{ id: 'ns1', name: 'app' }], counts: [] };
@@ -121,13 +128,36 @@ function racingRoutes(ctxRef, typesBody) {
       ? new Promise(resolve => { finishTree = resolve; }) : json({})});
     b.ctx.location.hash = '';
     const refresh = b.ctx.loadGraphData();
+    assert(Object.values(b.surfaces).every(el => el.inert && el.attrs['aria-busy'] === 'true'),
+      'all graph interaction surfaces lock before caches are invalidated');
     assert(b.oldChip.attrs['aria-disabled'] === 'true', 'refresh immediately disables existing type actions');
     assert(b.oldChip.attrs.tabindex === '-1', 'stale actions leave the keyboard tab order');
     assert(b.calls.inlineClosed === 1, 'refresh closes stale editable type panels before fetching');
     assert(b.ctx.graphTypeGeneration() === 1 && !b.ctx.graphTypesReady(), 'type generation is pending during refresh');
     finishTree(json(TREE));
     await refresh;
+    assert(Object.values(b.surfaces).every(el => !el.inert && !('aria-busy' in el.attrs)),
+      'graph interaction surfaces unlock after refreshed data and render');
+    assert(b.calls.events.includes('gd-graph-ready'), 'refresh publishes graph readiness after unlock');
     assert(b.oldChip.attrs['aria-disabled'] === 'true', 'old actions are never reenabled after refresh');
+  }
+
+  {
+    let finishRender;
+    const b = boot({routes: url => json(url.includes('scope=tree') ? TREE : {}),
+      renderGraph: () => new Promise(resolve => { finishRender = resolve; })});
+    b.ctx.location.hash = '';
+    const refresh = b.ctx.loadGraphData();
+    for (let i = 0; i < 10 && !finishRender; i++) {
+      await new Promise(resolve => setImmediate(resolve));
+    }
+    assert(typeof finishRender === 'function', 'post-mutation graph render started');
+    assert(Object.values(b.surfaces).every(el => el.inert),
+      'replacement graph must render before stale controls become interactive');
+    if (finishRender) finishRender();
+    await refresh;
+    assert(Object.values(b.surfaces).every(el => !el.inert),
+      'render completion releases the shared interaction fence');
   }
 
   {
@@ -155,8 +185,12 @@ function racingRoutes(ctxRef, typesBody) {
     const latest = b.ctx.loadGraphData();
     pending[1](json({latest: true}));
     await latest;
+    assert(Object.values(b.surfaces).every(el => el.inert),
+      'overlapping stale refresh keeps the shared interaction fence closed');
     pending[0](json({obsolete: true}));
     await old;
+    assert(Object.values(b.surfaces).every(el => !el.inert),
+      'last overlapping refresh releases the shared interaction fence');
     assert(vm.runInContext('richTypes.latest && !richTypes.obsolete', b.ctx),
       'late older refresh cannot replace the current type registry at the same auth epoch');
     assert(vm.runInContext('_typesReadyEpoch === _subtreeResetEpoch', b.ctx),

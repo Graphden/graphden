@@ -74,6 +74,7 @@
   function componentIdentity(name) {
     return installed?.scope === stamp() && installed.accepted.has(name) ? installed.selection : null;
   }
+  function rootId() { return installed?.scope === stamp() ? installed.rootId : null; }
   function reload() {
     const own = ++generation;
     pending?.abort();
@@ -102,7 +103,9 @@
         if (!legacy) throw new Error('Editor legacy host is unavailable');
         const selection = result['component-selection-id'];
         if (selection != null && (typeof selection !== 'string' || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(selection))) throw new Error('Invalid editor selection receipt');
-        installed = {scope, output, selection: selection ?? null, accepted: new Map()};
+        const rootId = result['root-id'];
+        if (typeof rootId !== 'string' || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(rootId)) throw new Error('Invalid editor root identity');
+        installed = {scope, output, selection: selection ?? null, rootId, accepted: new Map()};
         legacy.dataset.gdRootAdapter = 'legacy';
         window.dispatchEvent(new Event('gd-editor-root-ready'));
       } catch (error) {
@@ -118,7 +121,7 @@
     return loading;
   }
   window.gdEditorRoot = {
-    reload, componentNow, acceptComponent, releaseComponent, componentIdentity,
+    reload, componentNow, acceptComponent, releaseComponent, componentIdentity, rootId,
     async component(name) {
       await (loading || reload());
       const result = componentNow(name);

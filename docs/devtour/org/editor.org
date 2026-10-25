@@ -13,13 +13,13 @@ after: web, layout
 :PROPERTIES:
 :CUSTOM_ID: editor/initGraph
 :FILE: resources/packages/app/editor/editor-main.js
-:LINE: 365
-:MINS: 5.1
+:LINE: 400
+:MINS: 5.3
 :END:
 
 Initializes the editor's plain JavaScript modules, concatenated in a fixed order. It first requests the namespace tree to determine [[file:glossary.org::#term/auth][authentication]] state, then starts secondary loads; function details load on demand. A 401 opens sign-in. See the [[file:../../../docs/EDITOR_MODULES.md][module map]].
 
-- source :: [[file:../../../resources/packages/app/editor/editor-main.js::async function initGraph() {][resources/packages/app/editor/editor-main.js:365]]
+- source :: [[file:../../../resources/packages/app/editor/editor-main.js::async function initGraph() {][resources/packages/app/editor/editor-main.js:400]]
 - see also :: [[file:editor.org::#editor/authFetch][authFetch]]
 
 * 2. buildLookups
@@ -67,7 +67,7 @@ Requests grid layout from ~/api/graph/layout~ using the selected root and expans
 :CUSTOM_ID: editor/renderGraph
 :FILE: resources/packages/app/editor/editor-render.js
 :LINE: 103
-:MINS: 10.0
+:MINS: 9.9
 :END:
 
 Coordinates one asynchronous render. A generation counter prevents an older render from replacing a newer one; a remembered anchor preserves the user's position while data loads. After applying layout changes, it measures [[file:glossary.org::#term/hiccup][DOM]] cards and adjusts positions to their actual sizes.
@@ -418,13 +418,13 @@ Owns the tutorial catalogue's local reading history, requirement checks, stable 
 :PROPERTIES:
 :CUSTOM_ID: editor/enterArgValueEditMode
 :FILE: resources/packages/app/editor/editor-edit-modes.js
-:LINE: 251
+:LINE: 259
 :MINS: 7.2
 :END:
 
 Asks ~/api/value-form~ for a widget appropriate to the [[file:glossary.org::#term/slot][slot]], then dispatches by ~data-form-widget~. The client does not choose the widget from raw type tags. After saving, it reloads [[file:glossary.org::#term/binding][bindings]] and lookups because changing a value changes stored graph rows.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-edit-modes.js::function enterArgValueEditMode(arg, anchorEl) {][resources/packages/app/editor/editor-edit-modes.js:251]]
+- source :: [[file:../../../resources/packages/app/editor/editor-edit-modes.js::function enterArgValueEditMode(arg, anchorEl) {][resources/packages/app/editor/editor-edit-modes.js:259]]
 - see also :: [[file:crud.org::#crud/resolve-form][resolve-form]], [[file:editor.org::#editor/writeBindingFields][writeBindingFields]]
 - same file :: [[file:editor.org::#editor/writeBindingFields][writeBindingFields]]
 
@@ -432,13 +432,13 @@ Asks ~/api/value-form~ for a widget appropriate to the [[file:glossary.org::#ter
 :PROPERTIES:
 :CUSTOM_ID: editor/writeBindingFields
 :FILE: resources/packages/app/editor/editor-edit-modes.js
-:LINE: 556
+:LINE: 564
 :MINS: 2.6
 :END:
 
 Follow a user saving a literal input: this writer targets its function and slot, creating an own binding with POST or updating an existing one with PUT. ~authMutate~ sends the form body through ~authFetch~; ~editor-branch-context.js~ attaches the current branch to API requests. The public handler is composed in [[file:../../../resources/packages/web/crud-write/fns.edn][web/crud-write/fns.edn]]: parse, reject unsafe changes, apply the write, then invalidate and notify. Versioned storage records the change in that branch. Ordinary type diagnostics can accompany a successful save; structural or secret-flow violations reject it. The caller reloads rows and lookups, then layout and rendering show the new value. Use the reading route in [[file:../../../docs/devtour/README.md][setup]] to follow the whole round trip.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-edit-modes.js::async function writeBindingFields(arg, fields, opts) {][resources/packages/app/editor/editor-edit-modes.js:556]]
+- source :: [[file:../../../resources/packages/app/editor/editor-edit-modes.js::async function writeBindingFields(arg, fields, opts) {][resources/packages/app/editor/editor-edit-modes.js:564]]
 - see also :: [[file:web.org::#web/write-rej][write-rej]], [[file:versioning.org::#versioning/VersionedStorage][VersionedStorage]], [[file:crud.org::#crud/type-check-fn-after-mutation!][type-check-fn-after-mutation!]], [[file:crud.org::#crud/notify-after-write!][notify-after-write!]], [[file:editor.org::#editor/buildLookups][buildLookups]], [[file:editor.org::#editor/fetchBackendLayout][fetchBackendLayout]]
 - same file :: [[file:editor.org::#editor/enterArgValueEditMode][enterArgValueEditMode]]
 - referenced from :: [[file:editor.org::#editor/enterArgValueEditMode][enterArgValueEditMode]]

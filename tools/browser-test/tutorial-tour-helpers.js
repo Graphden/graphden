@@ -346,10 +346,32 @@ async function installSpotlightAudit(page) {
 
 async function waitTourTitle(page, title, timeoutMs) {
   await installSpotlightAudit(page);
-  await page.waitForFunction((expected) => {
-    const t = document.querySelector('#gd-tour-pop .gd-tour-title');
-    return t && t.textContent.trim() === expected;
-  }, title, {timeout: timeoutMs || 120000, polling: 150});
+  try {
+    await page.waitForFunction((expected) => {
+      const t = document.querySelector('#gd-tour-pop .gd-tour-title');
+      return t && t.textContent.trim() === expected;
+    }, title, {timeout: timeoutMs || 120000, polling: 150});
+  } catch (error) {
+    const state = await page.evaluate(() => {
+      const step = typeof _tourStep === 'function' ? _tourStep() : null;
+      const check = step?.check;
+      const fn = check?.kind === 'binding-bound' && typeof _tourFnForCheck === 'function'
+        ? _tourFnForCheck(check) : null;
+      const bindings = fn && lookups?.bindingsByFn?.get(fn.id);
+      return {
+        title: document.querySelector('#gd-tour-pop .gd-tour-title')?.textContent.trim(),
+        step: _tourState?.step, check: check ? {kind: check.kind, name: check.name, slot: check.slot} : null,
+        selectedFnId, graphBusy: document.getElementById('graph-container')?.getAttribute('aria-busy'),
+        pickerOpen: !!document.querySelector('.fn-picker-popover'),
+        bindingRows: (bindings || []).map(row => ({
+          slot: lookups?.slotMap?.get(row['slot-id'])?.name,
+          hasValue: row.value != null, hasRef: !!row['ref-fn-id'],
+        })),
+      };
+    }).catch(() => ({unavailable: true}));
+    console.error('Tour wait diagnostic:', JSON.stringify(state));
+    throw error;
+  }
   // Under the audit, settle like a reader: a walk acts within milliseconds
   // of the title, and on a step whose action REMOVES its target (Uninstall,
   // Revert, the diff chip's ×, a Save that closes its popover) the ring
@@ -1289,76 +1311,9 @@ async function createRecordType(page, nsPath, typeName, fields) {
 
 
 
-// Bind the placeholder of a NAMED arg on the selected card — the binder
-// nearest the edge label that carries `argName` (the label overlay sits
-// just left of its target node, vertically centred on it; the binder is
-// the target). `kind` is 'literal' (then `text` is typed) or 'fn-ref'
-// (then `text` is the fn to pick). Use this when a card exposes several
-// placeholders and the lesson names one: `bindFirstPlaceholder` takes
-// whatever the canvas put first, which is not the lesson's choice.
-async function bindNamedPlaceholder(page, argName, kind, text) {
-  // A callable slot's label carries a leading λ (`λbase-handler`); match
-  // the bare name either way.
-  await page.waitForFunction((name) => {
-    return Array.from(document.querySelectorAll('.edge-label-overlay span'))
-      .some((sp) => sp.textContent.trim().replace(/^λ/, '') === name)
-      && document.querySelector('.placeholder-binder');
-  }, argName, {timeout: 30000, polling: 150});
-  const found = await page.evaluate((name) => {
-    const label = Array.from(document.querySelectorAll('.edge-label-overlay span'))
-      .find((sp) => sp.textContent.trim().replace(/^λ/, '') === name);
-    const lr = label.getBoundingClientRect();
-    const ly = lr.top + lr.height / 2;
-    let best = null;
-    let bestD = Number.POSITIVE_INFINITY;
-    for (const b of document.querySelectorAll('.placeholder-binder')) {
-      const r = b.getBoundingClientRect();
-      if (r.left < lr.left) continue;
-      const d = Math.abs((r.top + r.height / 2) - ly) + (r.left - lr.right) / 50;
-      if (d < bestD) { bestD = d; best = b; }
-    }
-    if (!best) return false;
-    best.click();
-    return true;
-  }, argName);
-  assert(found, 'a placeholder binder next to the "' + argName + '" label');
-  // `whole-list` — an EMPTY list slot's `+` offers "Bind fn-ref (whole
-  // list)": the slot takes one fn's result as the entire list (lesson 18's
-  // pipeline feeds :map's :coll with a :str-split that way).
-  if (kind === 'fn-ref' || kind === 'whole-list') {
-    const btnLabel = kind === 'whole-list' ? 'Bind fn-ref (whole list)' : 'Bind fn-ref';
-    await page.waitForFunction((label) => {
-      return !!document.querySelector('.fn-picker-popover')
-        || Array.from(document.querySelectorAll('button'))
-          .some((b) => b.textContent.trim() === label);
-    }, btnLabel, {timeout: 15000, polling: 100});
-    await page.evaluate((label) => {
-      if (document.querySelector('.fn-picker-popover')) return;
-      Array.from(document.querySelectorAll('button'))
-        .find((b) => b.textContent.trim() === label).click();
-    }, btnLabel);
-    await page.waitForSelector('.fn-picker-popover', {timeout: 15000});
-    await page.fill('.fn-picker-popover input', text);
-    await page.waitForFunction((n) => {
-      return Array.from(document.querySelectorAll('.fn-picker-row')).some((r) =>
-        r.dataset.fnName === n.replace(/\//g, '.')
-          || (!/[./]/.test(n) && (r.querySelector('.fn-picker-row-main')?.textContent || '').includes(n)));
-    }, text, {timeout: 30000, polling: 150});
-    await page.evaluate((n) => {
-      Array.from(document.querySelectorAll('.fn-picker-row')).find((r) =>
-        r.dataset.fnName === n.replace(/\//g, '.')
-          || (!/[./]/.test(n) && (r.querySelector('.fn-picker-row-main')?.textContent || '').includes(n))).click();
-    }, text);
-    await page.waitForFunction(() => !document.querySelector('.fn-picker-popover'),
-      null, {timeout: 30000, polling: 150});
-    return;
-  }
-  await appendOrBindLiteralFromChooser(page, text);
-}
-
 // The `+` of ONE card's slot — pinned by the fn the binding lands on AND
 // the slot, because the outer and inner fn of a pipeline often expose the
-// same slot name (:coll on both). `kind` as in `bindNamedPlaceholder`:
+// same slot name (:coll on both). `kind` is literal, fn-ref, or whole-list:
 // 'literal' (then `text` is typed), 'fn-ref' / 'whole-list' (then `text`
 // is the fn to pick; a callable slot skips the chooser and opens the
 // picker directly — accepted either way).
@@ -1841,7 +1796,7 @@ module.exports = {
   bindSeqAnchorPlaceholder,
   createRootNamespace, createFnInNamespace, setParentViaStrip,
   runWithEffectAck, finishAndDelete, waitTourClosed, bindFnRefPlaceholder,
-  bindNamedPlaceholder, bindPlaceholderOn, extendInPlace,
+  bindPlaceholderOn, extendInPlace,
   bindOptionalArgChip, appendFnRefViaChip, renameArgViaEdgeLabel,
   createRecordType, openOperateSection, openAccountSettings, openAccountMenu,
   setSealsViaBadge, deleteBoundValue, moveSeqItem, insertSeqLiteralBefore,

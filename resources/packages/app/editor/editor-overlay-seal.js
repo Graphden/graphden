@@ -292,7 +292,7 @@ function openSealPopover(arg, data, anchorEl) {
     },
     onSaved: () => {
       if (typeof gdToast === 'function') gdToast('Seals on :' + (arg?.name || 'slot') + ' saved');
-      if (typeof loadGraphData === 'function') loadGraphData();
+      return typeof loadGraphData === 'function' ? loadGraphData() : undefined;
     },
   });
 }

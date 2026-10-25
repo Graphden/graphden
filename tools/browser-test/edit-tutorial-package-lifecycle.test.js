@@ -5,7 +5,7 @@ const {assert, newContext, api, BASE} = require('./edit-test-helpers');
 const {
   waitTourTitle, clickTourButton, createBranchViaChip, switchBranchViaChip,
   createRootNamespace, createFnInNamespace, setParentViaStrip,
-  bindNamedPlaceholder, editBoundValue, filterAndSelect, finishAndDelete,
+  bindPlaceholderOn, editBoundValue, filterAndSelect, finishAndDelete,
   tourWhere, openTutorialCatalog,
 } = require('./tutorial-tour-helpers');
 
@@ -83,7 +83,7 @@ async function ledger(page) {
     await waitTourTitle(page, 'Give greet its parent');
     await setParentViaStrip(page, 'const');
     await waitTourTitle(page, 'Set the source to 1');
-    await bindNamedPlaceholder(page, 'value', 'literal', '1');
+    await bindPlaceholderOn(page, 'greet', 'value', 'literal', '1');
     await waitTourTitle(page, 'Publish 1.0.0');
     await publish(page, '1.0.0');
     await waitTourTitle(page, 'Return to main');
@@ -103,7 +103,7 @@ async function ledger(page) {
     await waitTourTitle(page, 'Give welcome its parent');
     await setParentViaStrip(page, 'to-str');
     await waitTourTitle(page, 'Reference the installed graph');
-    await bindNamedPlaceholder(page, 'value', 'fn-ref', 'tutorial-greetings@1-0-0.greet');
+    await bindPlaceholderOn(page, 'welcome', 'value', 'fn-ref', 'tutorial-greetings@1-0-0.greet');
     await waitTourTitle(page, 'Run the first release');
     await runWelcome(page);
     await waitTourTitle(page, 'Back to the author');

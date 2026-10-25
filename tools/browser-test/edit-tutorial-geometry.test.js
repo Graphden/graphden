@@ -142,6 +142,8 @@ const {assert, newContext} = require('./edit-test-helpers');
       owner.remove();
     });
     await page.emulateMedia({reducedMotion: 'reduce'});
+    assert(await page.evaluate(() => getComputedStyle(_tourEls.spot).transitionProperty === 'none'),
+      'reduced motion does not create an implicit spotlight position transition');
     await page.evaluate(() => { document.getElementById('geometry-fixture').style.transform = 'translateX(40px)'; });
     await frames();
     assert(await aligned('#geometry-fixture') <= 1, 'reduced motion reaches the same final geometry');
@@ -229,7 +231,7 @@ const {assert, newContext} = require('./edit-test-helpers');
         return {id: selectedFnId, selector: '.node-overlay[data-original-fn-id="' + selectedFnId + '"]'};
       } finally { renderGraph = original; }
     });
-    await page.waitForFunction(({id, selector}) => selectedFnId === id && !graph.animating
+    await page.waitForFunction(({id, selector}) => selectedFnId === id && graphRenderReady()
       && document.querySelector(selector)?.isConnected, graphTarget, {timeout: 30000});
     await page.evaluate(({selector}) => {
       window.geometryGraphTarget = document.querySelector(selector);
@@ -240,7 +242,7 @@ const {assert, newContext} = require('./edit-test-helpers');
       setViewportPan(viewport.pan.x + 24, viewport.pan.y + 16);
     }, graphTarget);
     await frames();
-    assert(await page.evaluate(({id, selector}) => selectedFnId === id && !graph.animating
+    assert(await page.evaluate(({id, selector}) => selectedFnId === id && graphRenderReady()
       && geometryGraphTarget.isConnected && document.querySelector(selector) === geometryGraphTarget, graphTarget),
     'viewport pan retains the completed render target');
     const panError = await aligned(graphTarget.selector);

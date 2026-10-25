@@ -63,6 +63,10 @@
          ui-template? (some #(or (re-find #"^resources/packages/app/ui-[^/]+/fns\.edn$" %)
                                  (re-find #"^src/graphden/editor/component_(?:bundle|config|templates)\.clj$" %)
                                  (= % "tools/ui_preview/builtin_plans.clj")) changed)
+         root-browser? (or ui-template?
+                           (some #{"src/graphden/editor/root_compatibility.clj"
+                                   "src/graphden/executor/browser_plan.clj"} changed))
+         browser-plan? (some #{"src/graphden/executor/browser_plan.clj"} changed)
          plan-input? (some #(or (re-find #"^resources/packages/.+/(fns\.edn|impls\.clj)$" %)
                                 (re-find #"^resources/packages/app/ui-preview/builtin-plans\.(json|js)$" %)
                                 (re-find #"^tools/ui_preview/(builtin_plans|generate_builtin_plans)\.clj$" %)) changed)
@@ -76,7 +80,11 @@
                              "graphden.editor.config-resolution-test"
                              "graphden.executor.structural-projection-test"
                              "graphden.executor.builtin-plans-test"]
-         remaining-consumers (remove (set changed-tests) template-consumers)]
+         consumers (concat
+                     (when root-browser? ["graphden.editor.root-compatibility-integration-test"])
+                     (when browser-plan? ["graphden.executor.browser-plan-test"])
+                     (when ui-template? template-consumers))
+         remaining-consumers (remove (set changed-tests) consumers)]
      (vec (concat
             (when (seq clj)
               [(into (if native-style? ["cljstyle" "check"] ["clojure" "-M:cljstyle" "check"]) clj)])
@@ -84,6 +92,12 @@
               [large-forms-command])
             (when (seq changed-tests)
               [(into ["bb" "wt" "test"] (mapcat (fn [ns] ["--focus" ns]) changed-tests))])
+            ;; Personal templates and browser plans share dynamic graph
+            ;; references that a namespace require graph cannot infer. Check
+            ;; these consumers before broader linters and corpus audits.
+            (when (seq remaining-consumers)
+              [(into ["bb" "wt" "test"]
+                     (mapcat (fn [ns] ["--focus" ns]) remaining-consumers))])
             (when (seq clj)
               [(into ["clojure" "-M:splint"] clj)
                (into (if native-kondo? ["clj-kondo" "--lint"] ["clojure" "-M:kondo" "--lint"]) clj)])
@@ -94,12 +108,6 @@
             (when (seq css) [(into ["npx" "--no-install" "stylelint"] css)])
             (when (seq docs) [(into ["npx" "--no-install" "markdownlint-cli2" "--no-globs"] docs)])
             (when ci-tool? [["bb" "ci-test"]])
-            ;; Personal templates and shipped browser plans share dynamic graph
-            ;; references that a namespace require graph cannot infer. Run the
-            ;; exact JVM consumers before the corpus-wide audits and image boot.
-            (when (and ui-template? (seq remaining-consumers))
-              [(into ["bb" "wt" "test"]
-                     (mapcat (fn [ns] ["--focus" ns]) remaining-consumers))])
             ;; A graph edit can introduce a corpus-wide type alias collision
             ;; even when its own plan compiles. Check before building a live
             ;; instance; the normal CI roster still runs the same sweep once.

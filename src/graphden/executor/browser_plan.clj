@@ -15,7 +15,14 @@
 (def ^:private max-value-depth 64)
 (def ^:private max-value-nodes 50000)
 (def ^:private max-string-length 1048576)
-(def ^:private max-functions 1024)
+
+
+(def max-functions
+  "Maximum browser plan size, including legacy personal-component adapters.
+   The source collector's separate closure bound remains 2048."
+  1536)
+
+
 (def ^:private max-call-depth 128)
 
 

@@ -48,6 +48,18 @@
     (is (= fast/large-forms-command (second commands)))))
 
 
+(deftest root-browser-consumers-run-before-the-broad-template-suite
+  (let [root-test "graphden.editor.root-compatibility-integration-test"
+        browser-test "graphden.executor.browser-plan-test"
+        ui-commands (fast/commands ["resources/packages/app/ui-tutorial-catalog/fns.edn"] true true true)
+        browser-commands (fast/commands ["src/graphden/executor/browser_plan.clj"] true true true)
+        focused (fn [commands]
+                  (first (filter #(= ["bb" "wt" "test"] (vec (take 3 %))) commands)))]
+    (is (= root-test (nth (focused ui-commands) 4)))
+    (is (= ["bb" "wt" "test" "--focus" root-test "--focus" browser-test]
+           (focused browser-commands)))))
+
+
 (deftest large-form-guard-runs-in-the-fast-babashka-process
   (is (zero? (:exit (apply p/shell {:continue true :out :string :err :string}
                            fast/large-forms-command)))))
@@ -78,6 +90,7 @@
 
 (deftest deleted-graph-source-still-runs-semantic-checks
   (is (= [["bb" "wt" "test"
+           "--focus" "graphden.editor.root-compatibility-integration-test"
            "--focus" "graphden.editor.component-bundle-test"
            "--focus" "graphden.editor.component-config-test"
            "--focus" "graphden.editor.config-resolution-test"

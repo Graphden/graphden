@@ -147,7 +147,8 @@
                           (replace-callback plan (str old) (str target) role personal (get inputs role))))
                       plan selected)))))
             plan legacy/components)]
-      (when (> (count (:functions result)) 1024) (reject! :function-limit))
+      (when (> (count (:functions result)) browser/max-functions)
+        (reject! :function-limit))
       {:plan result :component-selection-id id})))
 
 

@@ -126,6 +126,37 @@
           (copy-module "app/ui-account-menu" menu))))
 
 
+(defn- component-descriptors
+  [root]
+  (let [components [["explorer" :app.ui-explorer/explorer-toolbar-view
+                     [[:initial "explorer-toolbar-initial"] [:update "explorer-toolbar-update"]
+                      [:view "explorer-toolbar-view"]]]
+                    ["inspector" :app.ui-inspector/inspector-view
+                     [[:initial "inspector-initial"] [:update "inspector-update"] [:view "inspector-view"]]]
+                    ["menu" :app.ui-account-menu/account-menu-view
+                     [[:initial "account-menu-initial"] [:update "account-menu-update"] [:view "account-menu-view"]]]
+                    ["picker" :app.ui-fn-picker/picker-view [[:view "picker-view"]]]
+                    ["recents" :app.ui-recents/recents-view
+                     [[:initial "recents-initial"] [:update "recents-update"] [:view "recents-view"]]]
+                    ["tutorial-catalog" :app.ui-tutorial-catalog/catalog-view [[:view "catalog-view"]]]
+                    ["execution-status" :app.ui-execution/status-view [[:view "status-view"]]]
+                    ["execution-path" :app.ui-execution/path-view [[:view "path-view"]]]
+                    ["feedback" :app.ui-feedback/feedback-view [[:view "feedback-view"]]]
+                    ["canvas" :app.ui-canvas/canvas-view [[:view "canvas-view"]]]
+                    ["canvas-values" :app.ui-canvas-values/canvas-values-view [[:view "canvas-values-view"]]]
+                    ["canvas-inheritance" :app.ui-canvas-inheritance/inheritance-view
+                     [[:initial "inheritance-initial"] [:view "inheritance-view"]]]
+                    ["canvas-metadata" :app.ui-canvas-metadata/metadata-view [[:view "metadata-view"]]]
+                    ["canvas-type-structure" :app.ui-canvas-type-structure/type-structure-view
+                     [[:initial "type-structure-initial"] [:view "type-structure-view"]]]
+                    ["canvas-bindings" :app.ui-canvas-bindings/bindings-view [[:view "bindings-view"]]]]]
+    (mapcat (fn [[prefix shipped roles]]
+              (component-definitions root prefix shipped
+                                     (mapv (fn [[role name]]
+                                             [role (keyword (str root "." prefix) name)]) roles)))
+            components)))
+
+
 (defn definitions
   "Fixed ordinary named graphs, grouped under a fresh writable personal root.
    Color wrappers inherit the canonical registered color type, preserving the
@@ -156,46 +187,7 @@
         canvas-metadata (str root ".canvas-metadata")
         canvas-type-structure (str root ".canvas-type-structure")
         canvas-bindings (str root ".canvas-bindings")
-        descriptors (concat (component-definitions root "explorer" :app.ui-explorer/explorer-toolbar-view
-                                                   [[:initial (keyword explorer "explorer-toolbar-initial")]
-                                                    [:update (keyword explorer "explorer-toolbar-update")]
-                                                    [:view (keyword explorer "explorer-toolbar-view")]])
-                            (component-definitions root "inspector" :app.ui-inspector/inspector-view
-                                                   [[:initial (keyword inspector "inspector-initial")]
-                                                    [:update (keyword inspector "inspector-update")]
-                                                    [:view (keyword inspector "inspector-view")]])
-                            (component-definitions root "menu" :app.ui-account-menu/account-menu-view
-                                                   [[:initial (keyword menu "account-menu-initial")]
-                                                    [:update (keyword menu "account-menu-update")]
-                                                    [:view (keyword menu "account-menu-view")]])
-                            (component-definitions root "picker" :app.ui-fn-picker/picker-view
-                                                   [[:view (keyword picker "picker-view")]])
-                            (component-definitions root "recents" :app.ui-recents/recents-view
-                                                   [[:initial (keyword recents "recents-initial")]
-                                                    [:update (keyword recents "recents-update")]
-                                                    [:view (keyword recents "recents-view")]])
-                            (component-definitions root "tutorial-catalog" :app.ui-tutorial-catalog/catalog-view
-                                                   [[:view (keyword tutorial-catalog "catalog-view")]])
-                            (component-definitions root "execution-status" :app.ui-execution/status-view
-                                                   [[:view (keyword execution-status "status-view")]])
-                            (component-definitions root "execution-path" :app.ui-execution/path-view
-                                                   [[:view (keyword execution-path "path-view")]])
-                            (component-definitions root "feedback" :app.ui-feedback/feedback-view
-                                                   [[:view (keyword feedback "feedback-view")]])
-                            (component-definitions root "canvas" :app.ui-canvas/canvas-view
-                                                   [[:view (keyword canvas "canvas-view")]])
-                            (component-definitions root "canvas-values" :app.ui-canvas-values/canvas-values-view
-                                                   [[:view (keyword canvas-values "canvas-values-view")]])
-                            (component-definitions root "canvas-inheritance" :app.ui-canvas-inheritance/inheritance-view
-                                                   [[:initial (keyword canvas-inheritance "inheritance-initial")]
-                                                    [:view (keyword canvas-inheritance "inheritance-view")]])
-                            (component-definitions root "canvas-metadata" :app.ui-canvas-metadata/metadata-view
-                                                   [[:view (keyword canvas-metadata "metadata-view")]])
-                            (component-definitions root "canvas-type-structure" :app.ui-canvas-type-structure/type-structure-view
-                                                   [[:initial (keyword canvas-type-structure "type-structure-initial")]
-                                                    [:view (keyword canvas-type-structure "type-structure-view")]])
-                            (component-definitions root "canvas-bindings" :app.ui-canvas-bindings/bindings-view
-                                                   [[:view (keyword canvas-bindings "bindings-view")]]))
+        descriptors (component-descriptors root)
         configuration {:name :ui :namespace root :parent :core.collections/list
                        :return-type :app.ui-components/ui-component-manifest
                        :description "Your ordinary component manifest. Each descriptor selects entry identities; browser effects remain host-owned."

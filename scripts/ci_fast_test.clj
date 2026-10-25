@@ -33,13 +33,29 @@
                     "resources/packages/app/ui-inspector/fns.edn"]
                    true true true)
         direct ["bb" "wt" "test" "--focus" "graphden.editor.config-resolution-test"]
-        broader (first (filter #(and (= ["bb" "wt" "test"] (vec (take 3 %)))
-                                     (not= direct %)) commands))]
+        guard fast/large-forms-command
+        broader (first (filter #(some #{"graphden.editor.component-bundle-test"} %) commands))]
     (is (= ["cljstyle" "check"] (vec (take 2 (first commands)))))
-    (is (= direct (second commands)))
+    (is (= guard (second commands)))
+    (is (= direct (nth commands 2)))
     (is (some? broader))
     (is (not-any? #{"graphden.editor.config-resolution-test"} broader))
-    (is (some #{broader} (drop 2 commands)))))
+    (is (some #{broader} (drop 3 commands)))))
+
+
+(deftest changed-clojure-source-triggers-large-form-guard-before-broad-checks
+  (let [commands (fast/commands ["src/graphden/editor/component_templates.clj"] true true true)]
+    (is (= fast/large-forms-command (second commands)))))
+
+
+(deftest large-form-guard-runs-in-the-fast-babashka-process
+  (is (zero? (:exit (apply p/shell {:continue true :out :string :err :string}
+                           fast/large-forms-command)))))
+
+
+(deftest removed-test-file-does-not-run-a-missing-namespace
+  (is (= [fast/large-forms-command]
+         (fast/commands [] ["test/graphden/editor/removed_test.clj"] true true true))))
 
 
 (deftest graph-edit-preflight-covers-the-c3-failures

@@ -15,6 +15,11 @@
   ["src" "test" "development" "resources/packages" "scripts" "dev/wtq" "build.clj" "bb.edn"])
 
 
+(def large-forms-command
+  ["bb" "-e"
+   "(load-file \"test/graphden/large_forms_guard_test.clj\") (let [r (clojure.test/run-tests 'graphden.large-forms-guard-test)] (when (pos? (+ (:fail r) (:error r))) (System/exit 1)))"])
+
+
 (defn changed-test-namespaces
   "Run edited JVM tests before broader consumers. The path is the namespace;
    no source-name guess or hand-maintained test list is involved."
@@ -63,7 +68,9 @@
                                 (re-find #"^tools/ui_preview/(builtin_plans|generate_builtin_plans)\.clj$" %)) changed)
          devtour-input? (some #(or (re-find #"^(src|resources/packages|development/src)/.*\.(clj|cljc|cljs|edn|js)$" %)
                                    (= % "docs/devtour/tour.edn")) changed)
-         changed-tests (changed-test-namespaces changed)
+         changed-tests (vec (remove #{"graphden.large-forms-guard-test"}
+                                    (changed-test-namespaces paths)))
+         large-form-input? (some #(re-find #"^(src|test)/.*\.clj[c]?$" %) changed)
          template-consumers ["graphden.editor.component-bundle-test"
                              "graphden.editor.component-config-test"
                              "graphden.editor.config-resolution-test"
@@ -73,6 +80,8 @@
      (vec (concat
             (when (seq clj)
               [(into (if native-style? ["cljstyle" "check"] ["clojure" "-M:cljstyle" "check"]) clj)])
+            (when large-form-input?
+              [large-forms-command])
             (when (seq changed-tests)
               [(into ["bb" "wt" "test"] (mapcat (fn [ns] ["--focus" ns]) changed-tests))])
             (when (seq clj)

@@ -29,12 +29,13 @@
 
 (deftest graph-edit-preflight-covers-the-c3-failures
   (let [commands (fast/commands ["resources/packages/app/ui-inspector/fns.edn"] true true true)]
+    (is (some #(= ["bb" "wt" "test"] (vec (take 3 %))) commands))
     (is (some #{["bb" "graph-lint"]} commands))
     (is (some #{["bb" "reachability"]} commands))
     (is (some #{["bb" "type-sweep"]} commands))
     (is (some #{["bb" "devtour-check"]} commands))
-    (is (some #{["clojure" "-M:dev" "tools/ui_preview/generate_builtin_plans.clj" "--check"]}
-              commands))))
+    (is (not-any? #{["clojure" "-M:dev" "tools/ui_preview/generate_builtin_plans.clj" "--check"]}
+                  commands))))
 
 
 (deftest ci-tool-edits-run-the-ci-selftest-before-the-gate
@@ -45,11 +46,15 @@
 
 
 (deftest deleted-graph-source-still-runs-semantic-checks
-  (is (= [["bb" "graph-lint"]
+  (is (= [["bb" "wt" "test"
+           "--focus" "graphden.editor.component-bundle-test"
+           "--focus" "graphden.editor.component-config-test"
+           "--focus" "graphden.executor.structural-projection-test"
+           "--focus" "graphden.executor.builtin-plans-test"]
+          ["bb" "graph-lint"]
           ["bb" "reachability"]
           ["bb" "type-sweep"]
-          ["bb" "devtour-check"]
-          ["clojure" "-M:dev" "tools/ui_preview/generate_builtin_plans.clj" "--check"]]
+          ["bb" "devtour-check"]]
          (fast/commands [] ["resources/packages/app/ui-inspector/fns.edn"] true true true)))
   (is (= [["bb" "devtour-check"]]
          (fast/commands [] ["resources/packages/app/editor/removed.js"] true true true))))

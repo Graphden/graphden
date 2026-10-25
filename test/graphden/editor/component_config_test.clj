@@ -121,6 +121,9 @@
                                     :view (ids/fn-id (str root ".canvas-type-structure") :type-structure-view)}
             :canvas-bindings {:view (ids/fn-id (str root ".canvas-bindings") :bindings-view)}
             :tutorial-catalog {:view (ids/fn-id (str root ".tutorial-catalog") :catalog-view)}
+            :execution-status {:view (ids/fn-id (str root ".execution-status") :status-view)}
+            :execution-path {:view (ids/fn-id (str root ".execution-path") :path-view)}
+            :feedback {:view (ids/fn-id (str root ".feedback") :feedback-view)}
             :inspector {:initial (ids/fn-id (str root ".inspector") :inspector-initial)
                         :update (ids/fn-id (str root ".inspector") :inspector-update)
                         :view (ids/fn-id (str root ".inspector") :inspector-view)}}

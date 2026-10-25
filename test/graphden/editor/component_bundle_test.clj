@@ -23,7 +23,7 @@
       (is (not (contains? names :theme)) "a selected component never copies the theme entry")
       (is (not-any? names [:account-menu-query :account-menu-component :recents-component :_root-base-view])
           "Selected legacy copies keep their role closure without importing separate root entrypoints")
-      (is (= (count definitions) (count (filter #(= :fn (:kind %)) records))))
+      (is (<= (count definitions) (count (filter #(= :fn (:kind %)) records))))
       (when (= group :canvas-values)
         (let [view-id (ids/fn-id (str root ".canvas-values") :canvas-values-view)
               fields-id (ids/fn-id "app.ui-canvas" :canvas-view-fields)
@@ -91,19 +91,25 @@
     (is (= #{} (bundle/identity-targets [(assoc identity-binding :value-present true :value "mixed")])))))
 
 
-(deftest real-parser-keeps-every-copy-named-and-color-form-compatible
+(deftest real-parser-keeps-every-copy-owned-and-color-form-compatible
   (binding [tenancy/*current-org* "acme"]
     (let [root "users.alice.ui-test"
           {:keys [records]} (bundle/parse root)
           fns (filter #(= :fn (:kind %)) records)
           expected (templates/definitions root)
+          expected-ids (set (map #(ids/fn-id (:namespace %) (:name %)) expected))
+          anonymous (remove #(contains? expected-ids (:id %)) fns)
           color-id (ids/fn-id "core.refinements" :color)
           wrapper-id (ids/fn-id (str root ".theme") :color-const)
           const-slot (ids/slot-id (ids/fn-id "core.logic" :const) :value)
           wrapper-binding (first (filter #(and (= :binding (:kind %))
                                                (= wrapper-id (:fn-id %))
                                                (= const-slot (:slot-id %))) records))]
-      (is (= (count expected) (count fns)))
+      (is (= (count expected) (count (filter #(contains? expected-ids (:id %)) fns))))
+      (is (seq anonymous))
+      (is (every? #(and (re-matches #"_anon-[0-9a-f]{16}" (:name %))
+                        (= (:id %) (ids/fn-id (:namespace-id %) (keyword (:name %)))))
+                  anonymous))
       (is (every? :name fns))
       (is (not-any? #(contains? #{"account-menu-query" "account-menu-component" "recents-component"
                                   "_root-base-view" "_root-initial-callable"} (:name %)) fns)

@@ -6,6 +6,7 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is]]
     [graphden.crud.entities.function-batch-budget :as batch-budget]
+    [graphden.editor.component-bundle :as bundle]
     [graphden.editor.component-config :as config]
     [graphden.editor.component-templates :as templates]
     [graphden.packages.rebase :as rebase]))
@@ -123,7 +124,7 @@
 (deftest explorer-template-stays-finite-and-within-existing-receipt-bounds
   (let [root "users.alice.ui-explorer"
         selected (templates/selected-definitions root :explorer nil nil)
-        full (templates/definitions root)]
+        full (filter #(= :fn (:kind %)) (:records (bundle/parse root)))]
     (is (< (count selected) 512))
     (is (batch-budget/accepted-count? (count full)))
     (is (every? #(contains? #{root (str root ".explorer")} (:namespace %)) selected))

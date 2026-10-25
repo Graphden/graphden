@@ -119,6 +119,7 @@
 (def ^:private plan-components
   {:accountMenu :account-menu :fnPicker :fn-picker :recents :recents
    :inspector :inspector :explorer :explorer :tutorialCatalog :tutorial-catalog
+   :executionStatus :execution-status :executionPath :execution-path :feedback :feedback
    :canvas :canvas :canvasValues :canvas-values
    :canvasInheritance :canvas-inheritance :canvasMetadata :canvas-metadata
    :canvasTypeStructure :canvas-type-structure :canvasBindings :canvas-bindings})
@@ -176,14 +177,13 @@
         (is (= (mapv #(assoc % :namespace "__GRAPHDEN_THEME_NAMESPACE__")
                      (:fns (edn/read-string (slurp "resources/packages/app/ui-theme-template/fns.edn"))))
                (:fns (edn/read-string (get-in artifact [:themeTemplate :edn])))))
-        (is (= #{:accountMenu :fnPicker :recents :inspector :explorer :tutorialCatalog :canvas :canvasValues :canvasInheritance :canvasMetadata :canvasTypeStructure :canvasBindings}
-               (set (keys (:plans artifact)))))
         (is (= (set (vals plan-components)) (set (keys shipped/component-contracts))))
         (is (= (set (keys plan-components)) (set (keys (:plans artifact)))))
         (doseq [[kind compiled] (:plans artifact)]
           (is (= 1 (:format compiled) (:primitiveAbi compiled)))
           (is (= (case kind
-                   (:tutorialCatalog :canvas :canvasValues :canvasMetadata :canvasBindings) #{"view"}
+                   (:tutorialCatalog :executionStatus :executionPath :feedback
+                                     :canvas :canvasValues :canvasMetadata :canvasBindings) #{"view"}
                    (:canvasInheritance :canvasTypeStructure) #{"initial" "view"}
                    #{"initial" "update" "view"})
                  (set (keys (:entries compiled)))))))

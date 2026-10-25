@@ -199,7 +199,10 @@
     (let [{:keys [result] :as diagnosed} (export-diagnosed ctx "canvas-values")]
       (is (:ok result) (pr-str diagnosed))
       (is (= (get-in manifest [:roots :canvas-values-id]) (get-in result [:roots :canvas-values-id]))))
-    (doseq [[component root-key] [["canvas-inheritance" :canvas-inheritance-id]
+    (doseq [[component root-key] [["execution-status" :execution-status-id]
+                                  ["execution-path" :execution-path-id]
+                                  ["feedback" :feedback-id]
+                                  ["canvas-inheritance" :canvas-inheritance-id]
                                   ["canvas-metadata" :canvas-metadata-id]
                                   ["canvas-type-structure" :canvas-type-structure-id]
                                   ["canvas-bindings" :canvas-bindings-id]]]
@@ -238,13 +241,19 @@
         [:ns :fn :slot :fn-slot :binding :binding-list-item]))
 
 
+(defn- shipped-function-count
+  []
+  (count (filter #(= :fn (:kind %)) (:records (bundle/parse "proof.root")))))
+
+
 (defn- with-function-count
   [target f]
-  (let [original templates/definitions]
+  (let [original templates/definitions
+        shipped (shipped-function-count)]
     (with-redefs [templates/definitions
                   (fn [root]
                     (let [existing (original root)
-                          extra (- target (count existing))]
+                          extra (- target shipped)]
                       (when (neg? extra)
                         (throw (ex-info "Function count target is below the shipped bundle" {})))
                       (into existing
@@ -260,7 +269,7 @@
 (deftest full-cohort-over-1000-creates-and-deletes-by-exact-receipt
   (let [ctx (:ctx ga/*bootstrap*)
         storage (:storage ctx)
-        target (max 1001 (count (templates/definitions "proof.root")))
+        target (max 1001 (shipped-function-count))
         before (graph-identities storage)]
     (with-function-count target
       #(let [reserved (preview)

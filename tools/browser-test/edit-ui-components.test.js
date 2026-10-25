@@ -29,7 +29,7 @@ const {waitForLoadedUIComponents, drainUIPlanReplies, observeUIPlanLoads} = requ
         routes: scripts.findIndex(src => src.includes('/assets/api-routes.js')),
         editor: scripts.findIndex(src => src.includes('/assets/editor.js'))};
     });
-    assert.equal(boot.limit, 2048, 'the browser receives the server-owned atomic cohort budget');
+    assert.equal(boot.limit, 4096, 'the browser receives the server-owned atomic cohort budget');
     assert(boot.routes >= 0 && boot.editor > boot.routes,
       'the generated API/budget script loads before its editor consumers');
   } catch (error) {

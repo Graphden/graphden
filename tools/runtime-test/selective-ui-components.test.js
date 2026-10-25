@@ -37,7 +37,7 @@ function fixture(component = 'recents') {
   let applyResolve;
   let failApply = false;
   let preference = null;
-  const window = {gdPrefOwner: 'alice', gdPrefsReady: true, GraphdenAtomicFunctionBatchMax: 2048,
+  const window = {gdPrefOwner: 'alice', gdPrefsReady: true, GraphdenAtomicFunctionBatchMax: 4096,
     API: {api_ui_configuration_prepare: '/prepare', api_ui_configuration_preview: '/preview',
       api_ui_configuration_apply: '/apply', api_ui_components_create_preview: '/full-preview', api_ui_components_create_apply: '/full-apply'},
     gdPrefRead: () => preference, gdUIComponentsSelection: () => selection, gdUIComponentsRoots: () => roots,
@@ -119,7 +119,7 @@ for (const [count, accepted] of [[512, true], [513, false]]) test('new cohort re
   assert.equal(f.requests.some(row => row.route === '/apply'), accepted);
   if (accepted) { f.apply(); await until(() => f.confirms.length === 1); }
 });
-for (const [count, accepted] of [[1001, true], [2048, true], [2049, false]]) test('full compatibility receipt bound ' + count, async () => {
+for (const [count, accepted] of [[1001, true], [4096, true], [4097, false]]) test('full compatibility receipt bound ' + count, async () => {
   const f = fixture(); f.full.functions = Array.from({length: count}, (_, n) => ({id: id(n + 20), name: 'part-' + n, 'namespace-id': id(1)}));
   f.create.click({currentTarget: f.create});
   await until(() => accepted ? f.requests.some(row => row.route === '/apply') : f.status() === 'Creation manifest is unavailable.');

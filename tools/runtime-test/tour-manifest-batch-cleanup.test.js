@@ -14,7 +14,7 @@ function receipts(count = 2) {
 }
 function fixture(rows, body, status = 200) {
   const calls = [], effects = {saved: 0, cleared: 0};
-  const ctx = vm.createContext({GraphdenAtomicFunctionBatchMax: 2048,
+  const ctx = vm.createContext({GraphdenAtomicFunctionBatchMax: 4096,
     API: {api_functions_delete_batch: '/api/functions/delete-batch'},
     selectedFnId: rows[0].id, getCurrentBranchName: () => 'main',
     _tourSaveState: () => effects.saved++, gdClearSelection: () => effects.cleared++,
@@ -54,13 +54,13 @@ test('352 exact receipts use one branch-scoped request and retire only after a c
   assert(rows.every(row => row.receipt === 'removed'));
   assert.deepEqual(f.effects, {saved: 1, cleared: 1});
 });
-test('the boot contract admits 2048 exact receipts and rejects 2049 before mutation', async () => {
-  const admitted = receipts(2048);
+test('the boot contract admits 4096 exact receipts and rejects 4097 before mutation', async () => {
+  const admitted = receipts(4096);
   const f = fixture(admitted, {deleted: admitted.map(row => row.id), 'already-absent': []});
   assert.equal((await f.run()).length, 0);
   assert.equal(f.calls.length, 1);
-  assert.equal(JSON.parse(f.calls[0].options.body).functions.length, 2048);
-  const rejected = receipts(2049);
+  assert.equal(JSON.parse(f.calls[0].options.body).functions.length, 4096);
+  const rejected = receipts(4097);
   const g = fixture(rejected, {});
   assert.equal(await g.ctx._tourDeleteManifestFns(rejected), null);
   assert.equal(g.calls.length, 0);

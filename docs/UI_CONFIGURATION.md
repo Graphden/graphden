@@ -169,7 +169,7 @@ cleanup review. LIFO cleanup confirms one activation at a time; another edit
 after review requires a new review. Profile infrastructure and retained prior
 identities never enter the new-ID deletion receipt.
 
-An atomic function cohort contains at most 2048 functions. The same static
+An atomic function cohort contains at most 4096 functions. The same static
 bound applies to creation preflight, full-copy browser manifests, staged exact
 receipts and cleanup/undo; a larger proposal is refused before writing.
 Creation writes bounded database batches inside one writer transaction, so a

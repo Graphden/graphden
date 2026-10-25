@@ -41,6 +41,9 @@
          ci-tool? (some #(or (re-find #"^scripts/ci(?:_|\.)" %)
                              (= % "scripts/checks.edn")
                              (= % "bb.edn")) changed)
+         ui-template? (some #(or (re-find #"^resources/packages/app/ui-[^/]+/fns\.edn$" %)
+                                 (re-find #"^src/graphden/editor/component_(?:bundle|config|templates)\.clj$" %)
+                                 (= % "tools/ui_preview/builtin_plans.clj")) changed)
          plan-input? (some #(or (re-find #"^resources/packages/.+/(fns\.edn|impls\.clj)$" %)
                                 (re-find #"^resources/packages/app/ui-preview/builtin-plans\.(json|js)$" %)
                                 (re-find #"^tools/ui_preview/(builtin_plans|generate_builtin_plans)\.clj$" %)) changed)
@@ -58,13 +61,23 @@
             (when (seq css) [(into ["npx" "--no-install" "stylelint"] css)])
             (when (seq docs) [(into ["npx" "--no-install" "markdownlint-cli2" "--no-globs"] docs)])
             (when ci-tool? [["bb" "ci-test"]])
+            ;; Personal templates and shipped browser plans share dynamic graph
+            ;; references that a namespace require graph cannot infer. Run the
+            ;; exact JVM consumers before the corpus-wide audits and image boot.
+            (when ui-template?
+              [["bb" "wt" "test"
+                "--focus" "graphden.editor.component-bundle-test"
+                "--focus" "graphden.editor.component-config-test"
+                "--focus" "graphden.executor.structural-projection-test"
+                "--focus" "graphden.executor.builtin-plans-test"]])
             ;; A graph edit can introduce a corpus-wide type alias collision
             ;; even when its own plan compiles. Check before building a live
             ;; instance; the normal CI roster still runs the same sweep once.
             (when graph? [["bb" "graph-lint"] ["bb" "reachability"]
                           ["bb" "type-sweep"]])
             (when devtour-input? [["bb" "devtour-check"]])
-            (when plan-input? [["clojure" "-M:dev" "tools/ui_preview/generate_builtin_plans.clj" "--check"]]))))))
+            (when (and plan-input? (not ui-template?))
+              [["clojure" "-M:dev" "tools/ui_preview/generate_builtin_plans.clj" "--check"]]))))))
 
 
 (defn default-base

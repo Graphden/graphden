@@ -2,6 +2,7 @@
   "Pure parsing of the fixed personal UI template bundle. Existing tenant
    definitions and their literals are never a parser input."
   (:require
+    [clojure.set :as set]
     [graphden.editor.component-templates :as templates]
     [graphden.executor.composition.core :as composition]
     [graphden.packages.records.ids :as ids]
@@ -41,11 +42,21 @@
          records (tenancy/with-org tenancy/public-org
                                    (composition/fn-defs->records definitions names shapes))
          expected (into #{} (map #(ids/fn-id (:namespace %) (:name %))) definitions)
-         actual (into #{} (comp (filter #(= :fn (:kind %))) (map :id)) records)]
-     ;; Fixed templates deliberately have named type/state/style dependencies.
-     ;; A future anonymous definition must be made an explicit owned template
-     ;; member instead of silently sharing an org/global shape identity.
-     (when-not (= expected actual)
+         functions (filter #(= :fn (:kind %)) records)
+         actual (into #{} (map :id) functions)
+         owned-paths (set (map :namespace definitions))
+         local-anonymous? (fn [{:keys [id name namespace-id]}]
+                            (and (contains? owned-paths namespace-id)
+                                 (string? name)
+                                 (re-matches #"_anon-[0-9a-f]{16}" name)
+                                 (= id (ids/fn-id namespace-id (keyword name)))))
+         additional (remove #(contains? expected (:id %)) functions)]
+     ;; Inline operations belong to the fresh personal namespace and have a
+     ;; stable parser identity. Refuse global/shared anonymous shape rows or
+     ;; any unexpected identity before an exact create/delete receipt exists.
+     (when-not (and (set/subset? expected actual)
+                    (= (count functions) (count actual))
+                    (every? local-anonymous? additional))
        (throw (ex-info "Installed UI templates have unsupported anonymous dependencies"
                        {:type :browser-plan/unsupported :reason :template-identity-mismatch})))
      {:definitions definitions :records records})))

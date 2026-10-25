@@ -186,12 +186,15 @@ function bootRender() {
       return new Promise(resolve => { finish = () => { c.graph.animating = false; resolve(); }; });
     };
     const update = c.renderGraph(false);
-    await flush(); r.layouts[0](r.layoutFor('same')); await update;
+    let updateSettled = false;
+    update.then(() => { updateSettled = true; });
+    await flush(); r.layouts[0](r.layoutFor('same')); await flush();
     assert(!c.graphRenderReady(), 'installed overlays alone do not complete the update');
+    assert(!updateSettled, 'render promise stays pending through the final animation');
     finish();
     assert(!c.graphRenderReady(), 'idle animation alone still lacks the final callback receipt');
-    await flush();
-    assert(c.graphRenderReady(), 'completed current update is ready');
+    await update;
+    assert(updateSettled && c.graphRenderReady(), 'render promise settles with completed current update');
     c.console = {error() {}};
     const failed = c.renderGraph(false);
     await flush(); r.layouts[1](null); await failed;
@@ -224,15 +227,18 @@ function bootRender() {
     c.easeInCubic = () => {};
     c.graphAnimateNodes = () => new Promise((resolve) => animations.push(resolve));
     const previous = c.renderGraph(false);
-    await flush(); r.layouts[0](r.layoutFor('replacement')); await previous;
+    let previousSettled = false;
+    previous.then(() => { previousSettled = true; });
+    await flush(); r.layouts[0](r.layoutFor('replacement')); await flush();
     assert(animations.length === 1, 'old removal is still animating');
-    assert(!c.graphRenderReady(), 'removal animation has not installed a coherent graph');
+    assert(!previousSettled && !c.graphRenderReady(), 'removal animation keeps render pending');
     c.graph.nodes.clear(); c.selectedFnId = null;
     const cleared = c.renderGraph(false);
     await flush(); r.layouts[1]({nodes: [], edges: [], layout: new Map()}); await cleared;
     assert(c.graph.edges.size === 0, 'empty first-render path removes orphan edges');
-    animations[0](); await flush();
+    animations[0](); await previous;
     assert(c.graph.nodes.size === 0, 'late animation does not restore replacement nodes');
+    assert(previousSettled, 'superseded render promise settles after cancellation');
     assert(c.graphRenderReady(), 'late superseded animation cannot unset the empty graph receipt');
   }
 

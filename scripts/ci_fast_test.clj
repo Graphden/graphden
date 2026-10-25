@@ -38,8 +38,8 @@
     (is (= ["cljstyle" "check"] (vec (take 2 (first commands)))))
     (is (= direct (second commands)))
     (is (some? broader))
-    (is (not (some #{"graphden.editor.config-resolution-test"} broader)))
-    (is (< (.indexOf commands direct) (.indexOf commands broader)))))
+    (is (not-any? #{"graphden.editor.config-resolution-test"} broader))
+    (is (some #{broader} (drop 2 commands)))))
 
 
 (deftest graph-edit-preflight-covers-the-c3-failures

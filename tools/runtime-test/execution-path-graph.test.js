@@ -49,6 +49,25 @@ assert.equal(capped.get('f1').count, 10000);
 assert.equal(capped.get('f1').totalMs, 10000);
 
 const k = context.GraphdenBrowser.keyword;
+const pathPlan = context.GraphdenBuiltinPlans.plans.executionPath;
+const panelRuntime = context.GraphdenBrowser.createRuntime(pathPlan,
+  {operationLimit: 3000000, valueNodeLimit: 120000});
+const panelStrings = (value) => {
+  if (typeof value === 'string') return [value];
+  if (value instanceof Map) return [...value.values()].flatMap(panelStrings);
+  if (Array.isArray(value)) return value.flatMap(panelStrings);
+  return [];
+};
+for (const [count, label] of [[1, 'Execution path: 1 fn highlighted'],
+                             [2, 'Execution path: 2 fns highlighted']]) {
+  const inputs = new Map([
+    [k('entries'), []], [k('highlighted-count'), count], [k('off-canvas-count'), 0],
+    [k('off-canvas-title'), ''], [k('path-truncated'), false], [k('values-dropped'), false],
+  ]);
+  const result = panelRuntime.run('view', {inputs});
+  assert(panelStrings(result.get(k('panel-tree'))).includes(label),
+    `execution path panel keeps its ${count}-fn label`);
+}
 candidate = {run() { return new Map([[k('rows'), [new Map([
   [k('fn-id'), 'f2'], [k('count'), 1], [k('fresh'), 1], [k('hits'), 0],
   [k('total-ms'), 0], [k('max-ms'), 0], [k('hidden'), false],

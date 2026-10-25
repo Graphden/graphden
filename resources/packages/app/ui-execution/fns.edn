@@ -242,6 +242,14 @@
                  :_path-group-hidden :_path-group-badge :_path-group-title]}}
   {:name :_path-rows
    :parent :map :args {:func :_path-group-row :coll :_path-group-list}}
+  {:name :_path-highlighted-count
+   :parent :get
+   :args {:coll {:as :inputs :type :_path-inputs}
+          :key {:value :highlighted-count} :default 0}}
+  {:name :_path-highlighted-noun
+   :parent :if
+   :args {:test {:parent :equal? :args {:a :_path-highlighted-count :b 1}}
+          :then " fn" :else " fns"}}
   {:name :_path-panel-tree
    :parent :hiccup
    :args {:tag "div" :attrs {:value {:class "path-view-panel" :role "status"}}
@@ -249,10 +257,8 @@
           [{:parent :hiccup
             :args {:tag "span" :attrs {:value {}}
                    :children [{:parent :str
-                               :args {:parts ["Execution path: "
-                                              {:parent :get :args {:coll {:as :inputs :type :_path-inputs}
-                                                                   :key {:value :highlighted-count} :default 0}}
-                                              " functions highlighted"]}}]}}
+                               :args {:parts ["Execution path: " :_path-highlighted-count
+                                              :_path-highlighted-noun " highlighted"]}}]}}
            {:parent :if
             :args {:test {:parent :equal?
                           :args {:a {:parent :get :args {:coll {:as :inputs :type :_path-inputs}

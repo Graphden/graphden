@@ -514,7 +514,7 @@ function makeTightenButton(opts) {
       }
       // Close any open hosts and reload the graph.
       hideAllInlineHosts();
-      if (typeof initGraph === 'function') initGraph();
+      if (typeof initGraph === 'function') await initGraph();
     } catch (err) {
       errEl.textContent = String(err?.message ? err.message : err);
       errEl.style.display = 'block';

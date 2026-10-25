@@ -211,7 +211,7 @@ async function restoreFnVersion(fnEntity, versionId) {
     // a restore silently left the canvas showing the OLD version until a manual
     // reload. `loadGraphData` re-fetches index + subtree + rich-types (and
     // clears the type-compatible cache), which is exactly what's needed.
-    if (typeof loadGraphData === 'function') loadGraphData();
+    if (typeof loadGraphData === 'function') await loadGraphData();
   } catch (err) {
     alert('Restore failed: ' + (err?.message || 'network error'));
   }

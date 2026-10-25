@@ -31,6 +31,7 @@ function boot(files) {
   const doc = createDocument();
   const destroyed = [];
   const timers = [];
+  const toasts = [];
   const ctx = vm.createContext({
     console, Promise, AbortController,
     document: doc,
@@ -44,6 +45,7 @@ function boot(files) {
     innerWidth: 1200,
     innerHeight: 800,
     addEventListener() {},
+    gdToast: (message, kind) => { toasts.push({message, kind}); },
   });
   ctx.window = ctx;
   ctx.gdCode = {
@@ -56,7 +58,7 @@ function boot(files) {
   for (const f of files) {
     vm.runInContext(fs.readFileSync(path.join(ROOT, ...f), 'utf8'), ctx, { filename: f[f.length - 1] });
   }
-  return { ctx, doc, destroyed, timers };
+  return { ctx, doc, destroyed, timers, toasts };
 }
 
 (async () => {
@@ -100,6 +102,32 @@ function boot(files) {
     t.ctx.closeInlineEdit();
     assert(t.destroyed.includes(pop), 'destroyWithin(popover) before removal');
     assert(!pop.isConnected, 'popover removed');
+  }
+
+  console.log(' a failed post-save refresh reports that the mutation succeeded');
+  {
+    const t = boot(EDIT);
+    const anchor = t.doc.createElement('button');
+    anchor.getBoundingClientRect = () => ({ bottom: 10, left: 10 });
+    let failRefresh;
+    t.ctx.openInlineEditPopover({
+      anchorEl: anchor,
+      makeControl: root => root.appendChild(t.doc.createElement('input')),
+      doSave: async () => true,
+      onSaved: () => new Promise((_, reject) => { failRefresh = () => reject(new Error('layout unavailable')); }),
+    });
+    t.doc.querySelector('.arg-value-edit-popover').querySelectorAll('.arg-value-edit-btn')[1].click();
+    await flush();
+    assert(typeof failRefresh === 'function' && t.toasts.length === 0,
+      'post-save refresh begins after the mutation succeeds');
+    const originalError = console.error;
+    console.error = () => {};
+    failRefresh();
+    await flush();
+    console.error = originalError;
+    assert(t.toasts.length === 1 && t.toasts[0].kind === 'error'
+      && t.toasts[0].message.includes('Saved'),
+    'refresh failure is shown as a post-save error without claiming the write failed');
   }
 
   console.log(' retirement cleans passive owners once; late saves/timers cannot close or focus the next editor');

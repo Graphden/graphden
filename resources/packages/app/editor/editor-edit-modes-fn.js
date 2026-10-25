@@ -273,9 +273,9 @@ function enterExtendEditMode(fn, anchorEl, opts) {
             setTimeout(fitGraphIfOverflowing, wait);
           }
         };
-        if (typeof withBusy === 'function') withBusy(opKey, 'Loading ' + (pendingName || 'new fn') + '…', redraw);
-        else redraw();
-        return;
+        return typeof withBusy === 'function'
+          ? withBusy(opKey, 'Loading ' + (pendingName || 'new fn') + '…', redraw)
+          : redraw();
       }
       // Refetch + auto-select the new fn so the user sees its empty
       // body and can start adding bindings via the existing edit
@@ -289,11 +289,9 @@ function enterExtendEditMode(fn, anchorEl, opts) {
           await selectJustCreatedFn(pendingName);
         }
       };
-      if (typeof withBusy === 'function') {
-        withBusy(opKey, 'Loading ' + (pendingName || 'new fn') + '…', finalise);
-      } else {
-        finalise();
-      }
+      return typeof withBusy === 'function'
+        ? withBusy(opKey, 'Loading ' + (pendingName || 'new fn') + '…', finalise)
+        : finalise();
     }
   });
 }
@@ -363,7 +361,7 @@ function enterFnRenameEditMode(fn, anchorEl) {
       } catch (_) {}
       return false;
     },
-    onSaved() { if (typeof initGraph === 'function') initGraph(); }
+    onSaved() { return typeof initGraph === 'function' ? initGraph() : undefined; }
   });
 }
 // --- fn return-type select (Phase 1) ---
@@ -478,8 +476,8 @@ function enterExpectsEffectsEditMode(fn, anchorEl) {
     // alone left both stale until the next selection. The Overview row
     // that opened this popover re-renders too (editor-edit-modes-flags.js).
     onSaved() {
-      if (typeof gdAfterFlagSaved === 'function') gdAfterFlagSaved(fn);
-      else if (typeof loadGraphData === 'function') loadGraphData();
+      if (typeof gdAfterFlagSaved === 'function') return gdAfterFlagSaved(fn);
+      if (typeof loadGraphData === 'function') return loadGraphData();
     }
   });
 }
@@ -537,8 +535,8 @@ function enterFnReturnTypeEditMode(fn, anchorEl) {
     // alone left both stale until the next selection. The Overview row
     // that opened this popover re-renders too (editor-edit-modes-flags.js).
     onSaved() {
-      if (typeof gdAfterFlagSaved === 'function') gdAfterFlagSaved(fn);
-      else if (typeof loadGraphData === 'function') loadGraphData();
+      if (typeof gdAfterFlagSaved === 'function') return gdAfterFlagSaved(fn);
+      if (typeof loadGraphData === 'function') return loadGraphData();
     }
   });
 }
@@ -570,7 +568,7 @@ function enterNamespaceMoveEditMode(fn, anchorEl) {
           if (typeof gdUndoRecordNsMove === 'function') {
             gdUndoRecordNsMove(fn.id, fn.name, fn['namespace-id'] || null, picked.id || null);
           }
-          if (typeof initGraph === 'function') initGraph();
+          if (typeof initGraph === 'function') await initGraph();
         }
       } catch (_) {}
     }

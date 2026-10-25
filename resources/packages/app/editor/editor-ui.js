@@ -87,7 +87,7 @@ function selectFn(fnId, updateHistory = true) {
     window.gdAnnounce(getQualifiedFnName(fn) + ' selected');
   }
 
-  renderGraph(true);
+  return renderGraph(true);
 }
 
 // No selection at all — the state a fresh load without a hash shows: an
@@ -145,7 +145,7 @@ async function selectFnByName(name, updateHistory = true) {
     const id = name.slice(3).toLowerCase();
     if (await ensureSubtreeFor(id) && graphData.fns.some(fn => fn.id === id)) {
       if (typeof gdShellSurface === 'function') gdShellSurface('build');
-      selectFn(id, updateHistory);
+      await selectFn(id, updateHistory);
     }
     return;
   }
@@ -198,18 +198,10 @@ async function selectFnByName(name, updateHistory = true) {
     } catch (_) { /* URL untouched */ }
   }
   if (fn) {
-    selectFn(fn.id, updateHistory);
-    // selectFn kicks renderGraph → ensureSubtreeFor but doesn't await it.
-    // Await the subtree here (idempotent — cached by root) so callers that
-    // `await selectFnByName(...)` — notably initGraph's hash nav — return
-    // with the fn's slots/bindings + closure actually loaded, not still
-    // in flight.
-    if (typeof ensureSubtreeFor === 'function') {
-      try { await ensureSubtreeFor(fn.id); }
-      catch (err) {
-        console.error('selectFnByName subtree load failed', err);
-      }
-    }
+    // A caller that awaits navigation now waits for the selected graph's
+    // subtree, layout and overlays, which renderGraph owns. The mutation
+    // refresh fence must not open while a stale canvas is still displayed.
+    await selectFn(fn.id, updateHistory);
   }
 }
 

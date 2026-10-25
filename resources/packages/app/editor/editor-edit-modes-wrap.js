@@ -294,11 +294,9 @@ function promptWrapDetails(fn, parent, anchorEl) {
           await selectJustCreatedFn(pendingName);
         }
       };
-      if (typeof withBusy === 'function') {
-        withBusy(opKey, 'Loading ' + (pendingName || 'wrapper') + '…', finalise);
-      } else {
-        finalise();
-      }
+      return typeof withBusy === 'function'
+        ? withBusy(opKey, 'Loading ' + (pendingName || 'wrapper') + '…', finalise)
+        : finalise();
     }
   });
 }

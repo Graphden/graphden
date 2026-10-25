@@ -338,7 +338,7 @@ function enterLambdaParamsEditMode(fn, anchorEl) {
       } catch (_) {}
       return false;
     },
-    onSaved() { gdAfterFlagSaved(fn); }
+    onSaved() { return gdAfterFlagSaved(fn); }
   });
 }
 
@@ -416,6 +416,6 @@ function enterBranchLocalEditMode(fn, anchorEl, facts) {
     },
     // The strip reads a layout FACT (the server's parent-ids walk), so a
     // full graph reload is what redraws it.
-    onSaved() { gdAfterFlagSaved(fn); }
+    onSaved() { return gdAfterFlagSaved(fn); }
   });
 }

@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const prefsSource = fs.readFileSync(path.join(__dirname, '../../resources/packages/app/editor/editor-prefs.js'), 'utf8');
+const policySource = fs.readFileSync(path.join(__dirname, '../../resources/packages/app/editor/editor-ui-policy.js'), 'utf8');
 const componentsSource = fs.readFileSync(path.join(__dirname, '../../resources/packages/app/editor/editor-ui-components.js'), 'utf8');
 const first = {'fn-id': '11111111-1111-1111-1111-111111111111', 'branch-id': '33333333-3333-3333-3333-333333333333', org: 'org-a'};
 const second = {...first, 'fn-id': '22222222-2222-2222-2222-222222222222'};
@@ -37,6 +38,7 @@ function fixture(initial = null) {
   vm.runInContext(prefsSource, context);
   window.gdPrefsReady = true;
   window.gdPrefOwner = 'owner-a';
+  vm.runInContext(policySource, context);
   vm.runInContext(componentsSource, context);
   window.gdPrefOnChange(key => {
     if (key === 'components') for (const component of ['account-menu', 'fn-picker'])

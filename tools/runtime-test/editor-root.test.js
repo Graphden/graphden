@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
+const policy = fs.readFileSync(path.join(__dirname, '../../resources/packages/app/editor/editor-ui-policy.js'), 'utf8');
 const source = fs.readFileSync(path.join(__dirname, '../../resources/packages/app/editor/editor-root.js'), 'utf8');
 const ROOT_ID = '00000000-0000-0000-0000-000000000003';
 function fixture() {
@@ -16,12 +17,7 @@ function fixture() {
   const legacy = {dataset: {}, before(node) { nodes.push(node); }};
   const window = {
     gdPrefOwner: 'first', API: {api_ui_root_plan: '/api/ui/root/plan'},
-    authFetch(url, options) { return new Promise(resolve => requests.push({url, options, resolve})); },
-    gdWaitForGraphPolicy(signal) {
-      return new Promise(resolve => {
-        policyWaits.push({signal, resolve});
-      });
-    },
+    authFetch(url, options) { return new Promise((resolve, reject) => requests.push({url, options, resolve, reject})); },
     addEventListener(name, callback) { listeners.set(name, callback); }, dispatchEvent() {},
     GraphdenBrowser: {keyword: value => value, isCallable: value => typeof value === 'function',
       invoke: (callback, input) => callback(input), createRuntime: plan => ({run: () => { executed.push(plan.label); return plan.output; }})},
@@ -32,6 +28,8 @@ function fixture() {
   };
   const context = {window, document, Map, performance: {now: () => 0}, AbortController, DOMException, Event: class {}, CustomEvent: class {}, graphdenCurrentOrg: 'org',
     getCurrentBranchName: () => context.branch, branch: 'main'};
+  vm.runInNewContext(policy, context);
+  window.gdWaitForGraphPolicy = signal => new Promise(resolve => policyWaits.push({signal, resolve}));
   vm.runInNewContext(source, context);
   const reply = (index, legacyMode, label) => requests[index].resolve({ok: true,
     json: async () => ({ok: true, 'argument-name': null, 'root-id': ROOT_ID,
@@ -172,6 +170,28 @@ const transientRefusal = () => ({ok: false, status: 422,
   assert.deepEqual(retry.executed, ['fresh authorized root']);
   assert.equal(retry.legacy.dataset.gdRootAdapter, 'legacy');
   retry.window.gdEditorRoot.dispose();
+
+  const dropped = fixture();
+  const recovering = dropped.window.gdEditorRoot.reload();
+  dropped.requests[0].reject(new TypeError('Failed to fetch'));
+  await flush();
+  assert.equal(dropped.policyWaits.length, 1, 'a failed read waits before retrying');
+  assert.equal(dropped.requests.length, 1);
+  dropped.policyWaits[0].resolve();
+  await flush();
+  dropped.reply(1, true, 'recovered root');
+  await recovering;
+  assert.deepEqual(dropped.executed, ['recovered root'], 'transient network loss does not install a fallback');
+  dropped.window.gdEditorRoot.dispose();
+
+  const changedDuringLoss = fixture();
+  const obsolete = changedDuringLoss.window.gdEditorRoot.reload();
+  changedDuringLoss.requests[0].reject(new TypeError('Failed to fetch'));
+  await flush();
+  changedDuringLoss.window.gdPrefOwner = 'second';
+  changedDuringLoss.policyWaits[0].resolve();
+  await obsolete;
+  assert.equal(changedDuringLoss.requests.length, 1, 'a changed owner cannot retry the former request');
 
   for (const action of ['reload', 'dispose']) {
     const stale = fixture();

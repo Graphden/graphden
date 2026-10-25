@@ -115,6 +115,41 @@ function fixture() {
     assert.equal(f.window.gdUIComponentRuntimeIdentity('account-menu'), first);
     assert.equal(f.timers.size, 0);
   }
+  {
+    const f = fixture();
+    const loading = f.window.gdLoadUIComponentRuntime('canvas-metadata', plan);
+    f.requests[0].reject(new TypeError('Failed to fetch'));
+    await settle();
+    assert.equal(f.requests.length, 1, 'network loss waits before retrying the same read');
+    assert.equal(f.window.gdUIComponentsStatus(), '', 'transient loss does not install a fallback');
+    await f.advance();
+    f.finish(f.requests[1], {ok: true, 'selection-id': first, plan});
+    await loading;
+    assert.equal(f.window.gdUIComponentRuntimeIdentity('canvas-metadata'), first);
+  }
+  {
+    const f = fixture();
+    const controller = new AbortController();
+    const loading = f.window.gdLoadUIComponentRuntime('canvas-metadata', plan, {}, controller.signal);
+    f.requests[0].reject(new TypeError('Failed to fetch'));
+    await settle();
+    controller.abort();
+    await assert.rejects(loading, {name: 'AbortError'});
+    assert.equal(f.requests.length, 1, 'revoked load cannot retry under an old signal');
+  }
+  {
+    const f = fixture();
+    const loading = f.window.gdLoadUIComponentRuntime('canvas-metadata', plan);
+    for (let attempt = 0; attempt < 4; attempt++) {
+      f.requests[attempt].reject(new TypeError('Failed to fetch'));
+      await settle();
+      if (attempt < 3) await f.advance();
+    }
+    await loading;
+    assert.equal(f.requests.length, 4, 'persistent transport loss has a fixed request bound');
+    assert.match(f.window.gdUIComponentsStatus(), /unavailable/);
+    assert.equal(f.timers.size, 0);
+  }
   for (const capture of [false, true]) {
     const f = fixture();
     const controller = new AbortController();

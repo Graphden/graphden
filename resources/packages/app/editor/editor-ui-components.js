@@ -61,26 +61,14 @@
     }};
   }
   async function loadPlan(component, started, signal) {
-    // Retry admission is bounded per owned load. A successful current reply
-    // remains usable even if its in-flight request finishes after this window.
-    const retryDeadline = performance.now() + 30000;
-    while (true) {
-      if (started !== stamp() || signal?.aborted) throw new DOMException('Selection changed', 'AbortError');
-      const response = await window.authFetch(window.API.api_ui_configuration_plan, {
+    return window.gdReadGraphResponse(
+      () => window.authFetch(window.API.api_ui_configuration_plan, {
         method: 'POST', signal, cache: 'no-store',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({component}),
-      });
-      const result = await response.json();
-      if (started !== stamp() || signal?.aborted) throw new DOMException('Selection changed', 'AbortError');
-      if (performance.now() < retryDeadline && response.status === 422 && !response.ok && result.ok === false
-        && result.code === 'policy-refresh-required' && result.retryable === true) {
-        await window.gdWaitForGraphPolicy(signal);
-        if (started !== stamp() || signal?.aborted) throw new DOMException('Selection changed', 'AbortError');
-        if (performance.now() < retryDeadline) continue;
-      }
-      return {response, result};
-    }
+      }), signal, () => started === stamp(),
+      (response, result) => response.status === 422 && !response.ok && result.ok === false
+        && result.code === 'policy-refresh-required' && result.retryable === true);
   }
   function acceptConfiguration(response, result, started) {
     if (!response.ok || !result.ok || !uuid.test(result['selection-id'] || '')

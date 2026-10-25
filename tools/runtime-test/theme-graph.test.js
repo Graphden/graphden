@@ -30,7 +30,7 @@ function fixture() {
     dispatchEvent() {},
     authFetch: (url, options) => new Promise((resolve) => requests.push({url, options, resolve})),
   };
-  const ctx = vm.createContext({window, Event, AbortController, DOMException,
+  const ctx = vm.createContext({window, Event, AbortController, DOMException, performance: {now: () => 0},
     setTimeout(callback, delay) { const id = ++timerId; timers.set(id, {callback, delay}); return id; },
     clearTimeout(id) { timers.delete(id); },
     graphdenCurrentOrg: 'org-a', graphData: {namespaces: []},

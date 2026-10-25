@@ -24,25 +24,19 @@
     const route = window.API?.api_ui_theme_evaluate;
     if (typeof route !== 'string') throw new Error('unavailable');
     const owner = window.gdPrefOwner;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      if (!current() || signal.aborted) throw new DOMException('Selection changed', 'AbortError');
-      const response = await window.authFetch(route, {
+    const {response, result} = await window.gdReadGraphResponse(
+      () => window.authFetch(route, {
         method: 'POST', signal,
         headers: {'Content-Type': 'application/json', 'X-Graphden-Branch': graph.branch},
         body: JSON.stringify({'fn-id': graph['fn-id'], org: graph.org, owner, args: {}}),
-      });
-      const result = await response.json();
-      if (!current() || signal.aborted) throw new DOMException('Selection changed', 'AbortError');
-      if (attempt < 2 && response.status === 422 && !response.ok && result.ok === false
-        && result.reason === 'result-unavailable' && result.code === 'graph-changed' && result.retryable === true) {
-        await window.gdWaitForGraphPolicy(signal);
-        continue;
-      }
-      if (!response.ok || !result.ok || !result.payload) throw new Error('unavailable');
-      const payload = window.gdSanitizeThemePayload(result.payload);
-      if (!payload) throw new Error('unavailable');
-      return payload;
-    }
+      }), signal, current,
+      (reply, body) => reply.status === 422 && !reply.ok && body.ok === false
+        && body.reason === 'result-unavailable' && body.code === 'graph-changed' && body.retryable === true,
+      2);
+    if (!response.ok || !result.ok || !result.payload) throw new Error('unavailable');
+    const payload = window.gdSanitizeThemePayload(result.payload);
+    if (!payload) throw new Error('unavailable');
+    return payload;
   }
   let pending = null;
   async function applyPreference(preference) {

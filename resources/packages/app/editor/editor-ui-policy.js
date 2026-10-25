@@ -14,3 +14,37 @@ window.gdWaitForGraphPolicy = signal => {
     signal?.addEventListener('abort', abort, {once: true});
   });
 };
+
+// Read-only graph plans share one bounded transport/policy retry. A lost
+// response to a mutation must never be retried here: its commit is unknown.
+window.gdReadGraphResponse = async (request, signal, current, retryResponse, maxResponseRetries = Number.POSITIVE_INFINITY) => {
+  const deadline = performance.now() + 30000;
+  let networkRetries = 0;
+  let responseRetries = 0;
+  const assertCurrent = () => {
+    if (signal?.aborted || !current()) throw new DOMException('Graph read changed', 'AbortError');
+  };
+  while (true) {
+    assertCurrent();
+    let response;
+    try {
+      response = await request();
+    } catch (error) {
+      assertCurrent();
+      if (error?.name !== 'TypeError' || networkRetries >= 3 || performance.now() >= deadline) throw error;
+      networkRetries++;
+      await window.gdWaitForGraphPolicy(signal);
+      continue;
+    }
+    const result = await response.json();
+    assertCurrent();
+    if (retryResponse?.(response, result) && responseRetries < maxResponseRetries
+      && performance.now() < deadline) {
+      responseRetries++;
+      await window.gdWaitForGraphPolicy(signal);
+      assertCurrent();
+      if (performance.now() < deadline) continue;
+    }
+    return {response, result};
+  }
+};

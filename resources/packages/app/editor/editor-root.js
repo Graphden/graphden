@@ -13,20 +13,11 @@
     typeof graphdenCurrentOrg === 'string' ? graphdenCurrentOrg : 'public',
     typeof getCurrentBranchName === 'function' ? getCurrentBranchName() : 'main', window.gdPrefRead?.('components')]);
   async function loadPlan(signal, current) {
-    const retryDeadline = performance.now() + 30000;
-    while (true) {
-      if (!current()) throw new DOMException('Editor root changed', 'AbortError');
-      const response = await window.authFetch(window.API.api_ui_root_plan, {signal, cache: 'no-store'});
-      const result = await response.json();
-      if (!current()) throw new DOMException('Editor root changed', 'AbortError');
-      if (performance.now() < retryDeadline && response.status === 422 && !response.ok && result.ok === false
-        && result.code === 'policy-refresh-required' && result.retryable === true) {
-        await window.gdWaitForGraphPolicy(signal);
-        if (!current()) throw new DOMException('Editor root changed', 'AbortError');
-        if (performance.now() < retryDeadline) continue;
-      }
-      return {response, result};
-    }
+    return window.gdReadGraphResponse(
+      () => window.authFetch(window.API.api_ui_root_plan, {signal, cache: 'no-store'}),
+      signal, current,
+      (response, result) => response.status === 422 && !response.ok && result.ok === false
+        && result.code === 'policy-refresh-required' && result.retryable === true);
   }
   function dispose() {
     installed = null;

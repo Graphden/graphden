@@ -36,6 +36,16 @@
               commands))))
 
 
+(deftest deleted-graph-source-still-runs-semantic-checks
+  (is (= [["bb" "graph-lint"]
+          ["bb" "reachability"]
+          ["bb" "devtour-check"]
+          ["clojure" "-M:dev" "tools/ui_preview/generate_builtin_plans.clj" "--check"]]
+         (fast/commands [] ["resources/packages/app/ui-inspector/fns.edn"] true true true)))
+  (is (= [["bb" "devtour-check"]]
+         (fast/commands [] ["resources/packages/app/editor/removed.js"] true true true))))
+
+
 (deftest failed-preflight-records-the-command-before-returning-red
   (let [receipts (atom [])]
     (with-redefs [select/changed-files (constantly ["scripts/ci_fast.clj"])

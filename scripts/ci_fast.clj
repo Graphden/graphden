@@ -26,34 +26,37 @@
 
 
 (defn commands
-  [paths native-style? native-kondo? native-shellcheck?]
-  (let [paths (sort paths)
-        clj (filter #(re-find #"\.(clj|cljc|cljs|edn|bb)$" %) paths)
-        docs (filter #(str/ends-with? % ".md") paths)
-        shell (filter #(or (str/ends-with? % ".sh") (= % "dev/wtq/wt")) paths)
-        web (filter #(re-find #"^resources/packages/app/(editor|ui-preview)/.*\.(js|mjs|jsonc?)$" %) paths)
-        css (filter #(or (re-find #"^resources/packages/app/(editor|ui-preview)/.*\.css$" %)
-                         (= % "scripts/devtour/tour.css")) paths)
-        graph? (some #(re-find #"^resources/packages/.+/fns\.edn$" %) paths)
-        plan-input? (some #(or (re-find #"^resources/packages/.+/(fns\.edn|impls\.clj)$" %)
-                               (re-find #"^resources/packages/app/ui-preview/builtin-plans\.(json|js)$" %)
-                               (re-find #"^tools/ui_preview/(builtin_plans|generate_builtin_plans)\.clj$" %)) paths)
-        devtour-input? (some #(or (re-find #"^(src|resources/packages|development/src)/.*\.(clj|cljc|cljs|edn|js)$" %)
-                                  (= % "docs/devtour/tour.edn")) paths)]
-    (vec (concat
-           (when (seq clj)
-             [(into ["clojure" "-M:splint"] clj)
-              (into (if native-style? ["cljstyle" "check"] ["clojure" "-M:cljstyle" "check"]) clj)
-              (into (if native-kondo? ["clj-kondo" "--lint"] ["clojure" "-M:kondo" "--lint"]) clj)])
-           (syntax-commands paths)
-           (for [path shell] ["bash" "-n" path])
-           (when (and native-shellcheck? (seq shell)) [(into ["shellcheck"] shell)])
-           (when (seq web) [(into ["npx" "--no-install" "biome" "check"] web)])
-           (when (seq css) [(into ["npx" "--no-install" "stylelint"] css)])
-           (when (seq docs) [(into ["npx" "--no-install" "markdownlint-cli2" "--no-globs"] docs)])
-           (when graph? [["bb" "graph-lint"] ["bb" "reachability"]])
-           (when devtour-input? [["bb" "devtour-check"]])
-           (when plan-input? [["clojure" "-M:dev" "tools/ui_preview/generate_builtin_plans.clj" "--check"]])))))
+  ([paths native-style? native-kondo? native-shellcheck?]
+   (commands paths paths native-style? native-kondo? native-shellcheck?))
+  ([paths changed native-style? native-kondo? native-shellcheck?]
+   (let [paths (sort paths)
+         changed (sort changed)
+         clj (filter #(re-find #"\.(clj|cljc|cljs|edn|bb)$" %) paths)
+         docs (filter #(str/ends-with? % ".md") paths)
+         shell (filter #(or (str/ends-with? % ".sh") (= % "dev/wtq/wt")) paths)
+         web (filter #(re-find #"^resources/packages/app/(editor|ui-preview)/.*\.(js|mjs|jsonc?)$" %) paths)
+         css (filter #(or (re-find #"^resources/packages/app/(editor|ui-preview)/.*\.css$" %)
+                          (= % "scripts/devtour/tour.css")) paths)
+         graph? (some #(re-find #"^resources/packages/.+/fns\.edn$" %) changed)
+         plan-input? (some #(or (re-find #"^resources/packages/.+/(fns\.edn|impls\.clj)$" %)
+                                (re-find #"^resources/packages/app/ui-preview/builtin-plans\.(json|js)$" %)
+                                (re-find #"^tools/ui_preview/(builtin_plans|generate_builtin_plans)\.clj$" %)) changed)
+         devtour-input? (some #(or (re-find #"^(src|resources/packages|development/src)/.*\.(clj|cljc|cljs|edn|js)$" %)
+                                   (= % "docs/devtour/tour.edn")) changed)]
+     (vec (concat
+            (when (seq clj)
+              [(into ["clojure" "-M:splint"] clj)
+               (into (if native-style? ["cljstyle" "check"] ["clojure" "-M:cljstyle" "check"]) clj)
+               (into (if native-kondo? ["clj-kondo" "--lint"] ["clojure" "-M:kondo" "--lint"]) clj)])
+            (syntax-commands paths)
+            (for [path shell] ["bash" "-n" path])
+            (when (and native-shellcheck? (seq shell)) [(into ["shellcheck"] shell)])
+            (when (seq web) [(into ["npx" "--no-install" "biome" "check"] web)])
+            (when (seq css) [(into ["npx" "--no-install" "stylelint"] css)])
+            (when (seq docs) [(into ["npx" "--no-install" "markdownlint-cli2" "--no-globs"] docs)])
+            (when graph? [["bb" "graph-lint"] ["bb" "reachability"]])
+            (when devtour-input? [["bb" "devtour-check"]])
+            (when plan-input? [["clojure" "-M:dev" "tools/ui_preview/generate_builtin_plans.clj" "--check"]]))))))
 
 
 (defn default-base
@@ -107,7 +110,7 @@
         native-kondo? (and (fs/which "clj-kondo")
                            (= pinned (second (re-find #"v([0-9.]+)"
                                                       (:out (p/shell {:out :string} "clj-kondo" "--version"))))))
-        planned-commands (commands paths (boolean (fs/which "cljstyle")) native-kondo? (boolean (fs/which "shellcheck")))
+        planned-commands (commands paths changed (boolean (fs/which "cljstyle")) native-kondo? (boolean (fs/which "shellcheck")))
         {:keys [files reason]} (staged/affected :runtime (set changed) (staged/roster :runtime))
         sha (str/trim (:out (p/shell {:out :string} "git" "rev-parse" "HEAD")))
         started (System/currentTimeMillis)

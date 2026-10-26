@@ -35,6 +35,12 @@ verify_candidate_image() {
   VERIFIED_IMAGE_ID=sha256:test-candidate
   [ "${FAIL_IMAGE:-0}" != 1 ]
 }
+save_candidate_proof() { printf '%s\t%s\t%s\n' 0000000000000000000000000000000000000001 "$VERIFIED_IMAGE_ID" jar > "$2"; }
+restore_candidate_proof() {
+  [ "${FAIL_RESTORE_IMAGE:-0}" != 1 ] && [ -f "$2" ] || return 1
+  VERIFIED_IMAGE_ID=sha256:test-candidate
+  cp "$2" "$GRAPHDEN_RESUME_OUT.image.tsv"
+}
 bb() {
   case "$1" in
     scripts/ci_resume_cli.clj)
@@ -273,6 +279,35 @@ WTQ_REPORT_TS=browser-r3
 EXPECT_BROWSER_ORDER=b,c,a
 run_case
 unset EXPECT_BROWSER_ORDER WTQ_RESUME_FROM
+
+# An interrupted exact candidate credits completed stages. A missing image
+# invalidates every image consumer, while CI and integration remain independent.
+RESUME_SOURCE="$LOG_DIR/_train-interrupted"
+printf '%s\n' '{:schema 1 :kind "stages" :sha "0000000000000000000000000000000000000001" :roster ["ci" "build" "visual" "e2e" "integration" "fleet"] :status {"ci" :passed "build" :passed "visual" :passed "e2e" :running "integration" :pending "fleet" :pending}}' \
+  > "$RESUME_SOURCE.stages.edn"
+printf 'prior ci\n' > "$RESUME_SOURCE.ci.edn"
+printf '0000000000000000000000000000000000000001\tsha256:test-candidate\tjar\n' > "$RESUME_SOURCE.image.tsv"
+WTQ_RESUME_FROM="$RESUME_SOURCE"
+WTQ_REUSE_FROM="$RESUME_SOURCE"
+WTQ_REPORT_TS=resume-green
+CASE_BUILD=1 CASE_E2E=1 CASE_VISUAL=1 CASE_INTEGRATION=1 CASE_FLEET=1
+run_case
+assert_events 'expect,verify,e2e,integration,fleet'
+[ "$built_candidate" = 1 ]
+FAIL_RESTORE_IMAGE=1
+WTQ_REPORT_TS=resume-image-missing
+run_case
+grep -qx uber "$TEST_LOG"
+grep -qx build "$TEST_LOG"
+grep -qx image "$TEST_LOG"
+grep -qx visual "$TEST_LOG"
+sed 's/ "fleet"//; s/ "fleet" :pending//' "$RESUME_SOURCE.stages.edn" > "$RESUME_SOURCE.changed.edn"
+mv "$RESUME_SOURCE.changed.edn" "$RESUME_SOURCE.stages.edn"
+unset FAIL_RESTORE_IMAGE
+WTQ_REPORT_TS=resume-roster-changed
+run_case
+assert_events 'expect,ci,verify,uber,build,image,e2e,integration,fleet,headroom,visual'
+unset FAIL_RESTORE_IMAGE WTQ_REUSE_FROM WTQ_RESUME_FROM
 
 # The shell independently rejects a planner that omits mandatory stages.
 BAD_STAGE_PLAN=1

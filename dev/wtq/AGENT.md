@@ -130,8 +130,12 @@ You were started in one of two ways:
    code. The single native gate runs quick CI checks before full selected
    suites on the immutable assembled candidate. Source-related cases run first
    inside the full unit/integration/JS suite, each namespace or file once.
-   Retry receipts rank work, including browser files, but skip no selected
-   checks and reuse no passes. CI rejects a changed HEAD or nonignored tree between
+   After an interrupted train, durable receipts may credit completed stages,
+   CI checks and browser files only for the identical assembled SHA, base and
+   selected roster. The image ID and jar are verified before image stages are
+   credited; an in-flight or provisional browser verdict runs again. A finished
+   red train, changed candidate, missing receipt or changed roster gets ordering
+   hints only. CI rejects a changed HEAD or nonignored tree between
    start and finish. Full selected checks, timeouts and strict-flake rules
    remain mandatory.
 

@@ -301,27 +301,36 @@
    trace and NO verdict: the one thing the report exists to tell you —
    which check died — was the one thing it could not say."
   [c status results failed]
-  (when-let [run @progress] (ci-resume/mark! run (:name c) :running))
-  (swap! status assoc (:name c) :running)
-  (try
-    (run-check* c status results failed)
-    (catch Exception e
-      (swap! results assoc (:name c)
-             {:exit -1
-              :output (str "runner error while running this check: "
-                           (Class/.getName (class e)) ": " (ex-message e)
-                           "\nCommand: " (pr-str (:cmd c))
-                           "\n(the check's own output was lost with the stream)")
-              :warnings false
-              :duration-ms 0})
-      (swap! status assoc (:name c) :failed)
-      (reset! failed true))
-    (finally
-      (when-let [run @progress]
-        (ci-resume/mark! run (:name c)
-                         (if (or (#{:passed :retried} (get @status (:name c)))
-                                 (and (= :warning (get @status (:name c))) (= :info (:group c))))
-                           :passed :failed))))))
+  (if-let [proof (when (contains? (:credited @progress) (:name c))
+                   (get-in @progress [:prior :proof (:name c)]))]
+    (do (swap! results assoc (:name c) proof)
+        (swap! status assoc (:name c) :passed)
+        (println (str "resumed CI check " (:name c) " from exact-candidate checkpoint")))
+    (do
+      (when-let [run @progress] (ci-resume/mark! run (:name c) :running))
+      (swap! status assoc (:name c) :running)
+      (try
+        (run-check* c status results failed)
+        (catch Exception e
+          (swap! results assoc (:name c)
+                 {:exit -1
+                  :output (str "runner error while running this check: "
+                               (Class/.getName (class e)) ": " (ex-message e)
+                               "\nCommand: " (pr-str (:cmd c))
+                               "\n(the check's own output was lost with the stream)")
+                  :warnings false
+                  :duration-ms 0})
+          (swap! status assoc (:name c) :failed)
+          (reset! failed true))
+        (finally
+          (when-let [run @progress]
+            (let [passed? (or (#{:passed :retried} (get @status (:name c)))
+                              (and (= :warning (get @status (:name c))) (= :info (:group c))))]
+              (ci-resume/mark! run (:name c) (if passed? :passed :failed))
+              (when (and passed? (zero? (get-in @results [(:name c) :exit] -1)))
+                (ci-resume/mark-proof! run (:name c)
+                                       (select-keys (get @results (:name c))
+                                                    [:exit :duration-ms]))))))))))
 
 
 (defn- report-skips!

@@ -88,6 +88,28 @@
       (finally (reset! progress nil) (fs/delete-tree dir)))))
 
 
+(deftest completed-ci-check-uses-durable-proof-without-dispatch
+  (let [dir (fs/create-temp-dir)
+        progress @(ns-resolve 'ci 'progress)
+        sha (str/join (repeat 40 "a"))
+        prior {:schema 1 :kind "checks" :sha sha :roster ["check"]
+               :status {"check" :passed}
+               :proof {"check" {:exit 0 :duration-ms 42}}}
+        run (resume/begin! (str (fs/path dir "progress.edn")) "checks"
+                           sha ["check"] prior true)
+        status (atom {}) results (atom {}) failed (atom false)]
+    (try
+      (reset! progress run)
+      (with-redefs-fn {(ns-resolve 'ci 'run-check*)
+                       (fn [& _] (throw (ex-info "credited check executed" {})))}
+        #((ns-resolve 'ci 'run-check) {:name "check" :group :test}
+                                      status results failed))
+      (is (= :passed (get @status "check")))
+      (is (= {:exit 0 :duration-ms 42} (get @results "check")))
+      (is (false? @failed))
+      (finally (reset! progress nil) (fs/delete-tree dir)))))
+
+
 (deftest ci-and-gate-preflight-share-admission-and-cleanup
   (doseq [entry ['main]]
     (let [events (atom [])]

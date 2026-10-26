@@ -140,14 +140,16 @@ Details that are deliberate:
   unit/integration namespaces and runtime JS files run earlier inside those full
   suites, each once; no separate focused pre-run duplicates them. The browser
   runner also retains its complete authoritative file roster.
-- **Retry hints never cache passes.** Each train writes atomic
-  `_train-<ts>.{stages,checks,browser}.edn` scheduling receipts. Valid hints rank
+- **Interrupted trains resume exact-candidate passes.** Each train writes atomic
+  `_train-<ts>.{stages,checks,browser}.edn` progress receipts. Valid hints rank
   failed/in-flight work, then the unrun tail, then previously passed work,
   within the required phase and producer dependencies. A browser file failure
   moves that file and its unrun tail before earlier passing files. New checks
   join the unrun set; deleted or out-of-scope checks leave the current roster.
-  Every selected stage/check/file executes for the new candidate. Prior green
-  results never satisfy a current requirement. CI preserves canonical resource
+  A completed red run lends ordering hints only. An interrupted run may credit
+  completed passes when the assembled SHA, base, selected roster and image proof
+  match exactly; in-flight checks and provisional browser verdicts run again.
+  Missing or malformed proof runs the check rather than waiving it. CI preserves canonical resource
   batches (it may split, never combine them); readers follow their measuring
   tests, and the verified build precedes image consumers. Browser admission
   retains the existing memory/load thresholds under the queue lock. Browser
@@ -158,8 +160,8 @@ Details that are deliberate:
   fall back to the complete current roster. Multiple members use the first
   valid hint in train order. Green trains and new claims clear hints.
   An intervening run that does not reach CI/browser preserves the last detailed
-  receipt with its original SHA and an inherited marker. Starting that suite
-  resets every verdict; inherited receipts never become current-SHA pass proof.
+  receipt with its original SHA and an inherited marker. Inherited receipts
+  never become current-SHA pass proof.
   Standalone CI/browser invocations also save worktree-local ordering receipts
   and accept them only when the recorded SHA is an ancestor of current HEAD.
 - **Candidate integrity and optional diagnostics.** CI requires a committed

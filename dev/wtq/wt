@@ -1294,6 +1294,26 @@ verify_candidate_image() {
   echo "verified candidate image $image_id: executor-server.jar sha256 $actual"
 }
 
+# The tag is mutable, so a reboot may reuse the build only while both the
+# immutable image ID and its jar still match this exact assembled candidate.
+save_candidate_proof() {
+  local wt="$1" out="$2" sha jar
+  sha="$(git -C "$wt" rev-parse HEAD)" || return 1
+  jar="$(sha256sum "$wt/target/executor-server.jar" | cut -d' ' -f1)" || return 1
+  printf '%s\t%s\t%s\n' "$sha" "$VERIFIED_IMAGE_ID" "$jar" > "$out.tmp" && mv -f "$out.tmp" "$out"
+}
+
+restore_candidate_proof() {
+  local wt="$1" source="$2" sha image jar extra current
+  [ -f "$source" ] || return 1
+  IFS=$'\t' read -r sha image jar extra < "$source" || return 1
+  [ -z "$extra" ] && [ "$sha" = "$(git -C "$wt" rev-parse HEAD)" ] || return 1
+  current="$(sha256sum "$wt/target/executor-server.jar" 2>/dev/null | cut -d' ' -f1)"
+  [ -n "$current" ] && [ "$jar" = "$current" ] || return 1
+  verify_candidate_image "$wt" && [ "$VERIFIED_IMAGE_ID" = "$image" ] || return 1
+  cp "$source" "$GRAPHDEN_RESUME_OUT.image.tsv"
+}
+
 # The heavy part of the gate: scope, bb ci, image build, the suites. Called by
 # gate_body (same shell — it sets built_candidate there and uses its `step`).
 run_scoped_ci_gate() {
@@ -1368,7 +1388,9 @@ run_gate_stage() {
       ( cd "$wt" && clojure -T:build uber ) || { echo "FAIL: uberjar"; return 1; }
       ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" docker-compose build executor ) \
         || { echo "FAIL: docker build"; return 1; }
-      verify_candidate_image "$wt" || { echo "FAIL: candidate image identity"; return 1; } ;;
+      verify_candidate_image "$wt" || { echo "FAIL: candidate image identity"; return 1; }
+      save_candidate_proof "$wt" "$GRAPHDEN_RESUME_OUT.image.tsv" \
+        || { echo "FAIL: save candidate image proof"; return 1; } ;;
     e2e)
       step "bb test-e2e"
       # Preserve strict flake/leak verdicts, server-window triage and the
@@ -1437,11 +1459,15 @@ gate_suites() {
   echo "   paths saw no change are skipped visibly. Unrecognised -> everything.)"
 
   local base_sha ci_sha ci_receipt ci_expected stage stage_order priority="${WTQ_FIRST_STAGE:-}"
+  local stage_credits="" image_credit=0 reused=0
   local pending_browser_headroom=0
   local -a WTQ_PROGRESS_MEMBERS=("${WTQ_PROGRESS_MEMBERS[@]}")
   local GRAPHDEN_RESUME_OUT="$LOG_DIR/_train-$WTQ_REPORT_TS"
   local GRAPHDEN_RESUME_FROM="${WTQ_RESUME_FROM:-}"
-  export GRAPHDEN_RESUME_OUT GRAPHDEN_RESUME_FROM
+  local WTQ_REUSE_FROM="${WTQ_REUSE_FROM:-}"
+  local GRAPHDEN_RESUME_CREDIT=0
+  [ -n "${WTQ_REUSE_FROM:-}" ] && GRAPHDEN_RESUME_CREDIT=1
+  export GRAPHDEN_RESUME_OUT GRAPHDEN_RESUME_FROM GRAPHDEN_RESUME_CREDIT
   local -a stages=(ci) ordered=()
   base_sha="$(git -C "$wt" rev-parse "$TARGET")"
   ci_sha="$(git -C "$wt" rev-parse HEAD)"
@@ -1461,6 +1487,15 @@ gate_suites() {
   [ "$NEED_E2E" = 1 ] && stages+=(e2e)
   [ "$NEED_INTEGRATION" = 1 ] && stages+=(integration)
   [ "$NEED_FLEET" = 1 ] && stages+=(fleet)
+
+  if [ "$GRAPHDEN_RESUME_CREDIT" = 1 ] \
+     && ! (cd "$wt" && bb scripts/ci_resume_cli.clj match stages \
+           "$GRAPHDEN_RESUME_FROM.stages.edn" "$ci_sha" "${stages[@]}"); then
+    WTQ_REUSE_FROM=""
+    GRAPHDEN_RESUME_CREDIT=0
+    export GRAPHDEN_RESUME_CREDIT
+    echo "  checkpoint roster changed — running all selected checks"
+  fi
 
   # Old four-field hints have no progress receipt: rotate the canonical
   # roster after the failure, then revisit the previously completed prefix.
@@ -1484,6 +1519,10 @@ gate_suites() {
     echo "FAIL: resume stage list is not the complete selected roster"
     return 1
   fi
+  if [ "$GRAPHDEN_RESUME_CREDIT" = 1 ]; then
+    stage_credits="$(cd "$wt" && bb scripts/ci_resume_cli.clj credited stages \
+      "$GRAPHDEN_RESUME_FROM.stages.edn" "$ci_sha" "${stages[@]}")" || return 1
+  fi
   # Quick mandatory CI checks run first inside the one current candidate gate.
   local GRAPHDEN_CI_SINCE="$base_sha" GRAPHDEN_CI_PRIORITY_HINTS
   GRAPHDEN_CI_PRIORITY_HINTS="$(cd "$wt" && bb scripts/ci_priority.clj kaocha-hints "$base_sha")" \
@@ -1491,6 +1530,32 @@ gate_suites() {
   export GRAPHDEN_CI_SINCE GRAPHDEN_CI_PRIORITY_HINTS
   echo "  stage order: ${ordered[*]}"
   for stage in "${ordered[@]}"; do
+    reused=0
+    if [ -n "${WTQ_REUSE_FROM:-}" ] \
+       && { [ "$stage" = ci ] || [ "$stage" = build ] \
+            || printf '%s\n' "$stage_credits" | grep -qx "$stage"; }; then
+      case "$stage" in
+        ci)
+          if cp "$GRAPHDEN_RESUME_FROM.ci.edn" "$ci_receipt" 2>/dev/null \
+             && (cd "$wt" && bb scripts/ci_gate.clj verify "$ci_expected" "$ci_receipt"); then
+            reused=1
+          fi ;;
+        build)
+          if restore_candidate_proof "$wt" "$GRAPHDEN_RESUME_FROM.image.tsv"; then
+            reused=1; image_credit=1
+          fi ;;
+        e2e|visual|fleet)
+          [ "$image_credit" = 1 ] && reused=1 ;;
+        integration) reused=1 ;;
+      esac
+    fi
+    if [ "$reused" = 1 ]; then
+      (cd "$wt" && bb scripts/ci_resume_cli.clj mark stages "$GRAPHDEN_RESUME_OUT.stages.edn" "$stage" passed) || return 1
+      echo "  ✓ resumed $stage from exact-candidate checkpoint"
+      continue
+    fi
+    (cd "$wt" && bb scripts/ci_resume_cli.clj mark stages "$GRAPHDEN_RESUME_OUT.stages.edn" "$stage" pending) || return 1
+    if [ "$stage" = build ]; then GRAPHDEN_RESUME_CREDIT=0; export GRAPHDEN_RESUME_CREDIT; fi
     case "$stage" in
       e2e|visual)
         if [ "$pending_browser_headroom" = 1 ]; then
@@ -2041,8 +2106,15 @@ train_run() {
   first_stage="$(prior_failed_stage "${gated[@]}")"
   resume_from="$(WTQ_HINT_RECEIPT=1 prior_failed_stage "${gated[@]}")"
   gate_base="$(git -C "$MAIN_WT" rev-parse "$TARGET")"
+  local reuse_from=""
+  if [ -n "$resume_from" ] && (cd "$TRAIN_WT" && bb scripts/ci_resume_cli.clj eligible gate \
+       "$resume_from.report.edn" "$resume_from.ci-expected.edn" \
+       "$(git -C "$TRAIN_WT" rev-parse HEAD)" "$gate_base"); then
+    reuse_from="$resume_from"
+    echo "  exact-candidate interrupted checkpoint: $reuse_from"
+  fi
   start_sampler "$resources"
-  ( WTQ_PROGRESS_MEMBERS=("${gated[@]}"); WTQ_RESUME_FROM="$resume_from" WTQ_FIRST_STAGE="$first_stage" WTQ_REPORT_TS="$ts" gate_body "$TRAIN_WT" "$no_e2e" "$deploy" "$no_fleet" "$no_visual" "${gated[@]}" ) 2>&1 | tee "$gate_out"
+  ( WTQ_PROGRESS_MEMBERS=("${gated[@]}"); WTQ_RESUME_FROM="$resume_from" WTQ_REUSE_FROM="$reuse_from" WTQ_FIRST_STAGE="$first_stage" WTQ_REPORT_TS="$ts" gate_body "$TRAIN_WT" "$no_e2e" "$deploy" "$no_fleet" "$no_visual" "${gated[@]}" ) 2>&1 | tee "$gate_out"
   grc="${PIPESTATUS[0]}"
   stop_sampler
   if ! bb "$SCRIPT_DIR/report.clj" finish "$report" "$(git -C "$TRAIN_WT" rev-parse HEAD)" "$queue_ms" "$gate_out" "$ci_report" "$resources" "$grc"; then

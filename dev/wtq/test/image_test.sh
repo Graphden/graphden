@@ -4,6 +4,8 @@ SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 T="$(mktemp -d "${TMPDIR:-/tmp}/wtq-image-test.XXXXXX")"
 trap 'rm -rf "$T"' EXIT
 git init -q -b develop "$T/repo"
+git -C "$T/repo" -c user.name=fixture -c user.email=fixture@example.invalid \
+  -c commit.gpgsign=false commit -q --allow-empty -m fixture
 mkdir -p "$T/repo/dev/wtq" "$T/repo/target"
 cp "$SRC/wt" "$T/repo/dev/wtq/wt"
 printf 'verified jar\n' > "$T/repo/target/executor-server.jar"
@@ -24,7 +26,15 @@ docker() {
 }
 verify_candidate_image "$T/repo"
 [ "$VERIFIED_IMAGE_ID" = sha256:test-image ]
+GRAPHDEN_RESUME_OUT="$T/resumed"
+save_candidate_proof "$T/repo" "$T/source.image.tsv"
+restore_candidate_proof "$T/repo" "$T/source.image.tsv"
+cmp "$T/source.image.tsv" "$GRAPHDEN_RESUME_OUT.image.tsv"
 printf 'stale jar\n' > "$T/image.jar"
+if restore_candidate_proof "$T/repo" "$T/source.image.tsv" > "$T/rejected-restore.log"; then
+  echo 'stale image was restored' >&2
+  exit 1
+fi
 if verify_candidate_image "$T/repo" > "$T/rejected.log"; then
   echo 'stale image jar was accepted' >&2
   exit 1

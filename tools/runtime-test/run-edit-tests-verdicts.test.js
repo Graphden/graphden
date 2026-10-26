@@ -71,7 +71,8 @@ function runSuite(tests, env = {}) {
       const result = spawnSync('git', args, {cwd: root, encoding: 'utf8'});
       if (result.status !== 0) throw new Error(result.stderr);
     }
-    fs.writeFileSync(path.join(root, 'prior.browser.edn'), env.STUB_RESUME);
+    const sha = spawnSync('git', ['rev-parse', 'HEAD'], {cwd: root, encoding: 'utf8'}).stdout.trim();
+    fs.writeFileSync(path.join(root, 'prior.browser.edn'), env.STUB_RESUME.replace('@SHA@', sha));
     env = {...env, GRAPHDEN_RESUME_OUT: path.join(root, 'current'), GRAPHDEN_RESUME_FROM: path.join(root, 'prior')};
   }
   const bin = path.join(dir, 'bin');
@@ -281,8 +282,20 @@ console.log(' strict retry-pass flake is red while later files still run');
   assert(gate.code !== 0 && gate.attempts('edit-a.test.js') === 2 && gate.attempts('edit-b.test.js') === 1,
     'strict flake does not prevent later files from running', gate.out);
   assert(/flaked-passed-on-retry/.test(gate.out), 'strict flake remains a named red verdict', gate.out);
-  assert(gate.receipt.includes('"edit-a.test.js" :failed') && gate.receipt.includes('"edit-b.test.js" :passed'),
-    'strict retry-pass stays failed in receipt while later pass is recorded', gate.receipt);
+  assert(gate.receipt.includes('"edit-a.test.js" :pending') && gate.receipt.includes('"edit-b.test.js" :passed'),
+    'strict retry-pass stays provisional in receipt while later pass is recorded', gate.receipt);
+}
+console.log(' exact-candidate checkpoint skips only confirmed browser passes');
+{
+  const prior = '{:schema 1 :kind "browser" :sha "@SHA@"'
+    + ' :roster ["edit-a.test.js" "edit-b.test.js"]'
+    + ' :status {"edit-a.test.js" :passed "edit-b.test.js" :running}}';
+  const r = runSuite({'edit-a.test.js': ['pass'], 'edit-b.test.js': ['pass']},
+    {STUB_RESUME: prior, GRAPHDEN_RESUME_CREDIT: '1'});
+  assert(r.code === 0 && r.attempts('edit-a.test.js') === 0 && r.attempts('edit-b.test.js') === 1,
+    'only confirmed pass is credited; interrupted file runs', r.out);
+  assert(r.receipt.includes('"edit-a.test.js" :passed') && r.receipt.includes('"edit-b.test.js" :passed'),
+    'current receipt records the complete resumed roster', r.receipt);
 }
 console.log(' environment-signed retries and already proven thrash retain their exceptions');
 {

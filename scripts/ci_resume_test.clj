@@ -137,5 +137,33 @@
       (finally (fs/delete-tree dir)))))
 
 
+(deftest exact-interrupted-candidate-credits-only-proven-passes
+  (let [roster ["a" "b" "tests-perf" "perf"]
+        prior (-> (hint roster [:passed :passed :passed :passed])
+                  (assoc :proof {"a" {:exit 0 :duration-ms 42}
+                                 "tests-perf" {:exit 0 :duration-ms 50}
+                                 "perf" {:exit 0 :duration-ms 10}}))
+        dir (fs/create-temp-dir)
+        path (str (fs/path dir "checks.edn"))]
+    (try
+      (let [run (resume/begin! path "checks" sha roster prior true)]
+        (is (= #{"a"} (:credited run)))
+        (is (= :passed (get-in (report/read-report path) [:status "a"])))
+        (is (= :pending (get-in (report/read-report path) [:status "b"]))))
+      (is (empty? (:credited (resume/begin! path "checks" sha (conj roster "new") prior true))))
+      (is (empty? (:credited (resume/begin! path "checks" (str/join (repeat 40 "b")) roster prior true))))
+      (is (empty? (:credited (resume/begin! path "checks" sha roster (assoc prior :inherited true) true))))
+      (finally (fs/delete-tree dir)))))
+
+
+(deftest gate-credit-requires-an-unfinished-exact-train
+  (let [expected {:schema 1 :sha sha :scope {:since "base"}}
+        gate {:schema 1 :sha sha :complete false :exit nil}]
+    (is (resume/interrupted-gate? gate expected sha "base"))
+    (is (not (resume/interrupted-gate? (assoc gate :complete true :exit 1) expected sha "base")))
+    (is (not (resume/interrupted-gate? gate expected sha "other")))
+    (is (not (resume/interrupted-gate? gate expected (str/join (repeat 40 "b")) "base")))))
+
+
 (let [{:keys [fail error]} (run-tests)]
   (when (pos? (+ fail error)) (System/exit 1)))

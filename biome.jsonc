@@ -12,6 +12,9 @@
 		}
 	},
 	"files": {
+		// why: the generated browser plans grow with the shipped graph components;
+		// builtin_plans_test.clj enforces the same 1.25 MiB asset budget.
+		"maxSize": 1310720,
 		"includes": [
 			"**/resources/packages/app/editor/**/*.js",
 			// why: local graph preview scripts have the same browser boundary.

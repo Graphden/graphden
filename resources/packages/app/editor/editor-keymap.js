@@ -55,6 +55,11 @@
   function render() {
     host = document.getElementById('gd-keymap-root');
     if (!host || typeof window.gdShortcutEntries !== 'function') return;
+    const focused = host.contains(document.activeElement) ? document.activeElement : null;
+    const focusTarget = focused && {
+      action: focused.dataset.action || '', shortcut: focused.dataset.shortcut || '',
+      leader: focused.classList.contains('gd-km-leader'),
+    };
     const data = inputs();
     if (!selected && !rejected) {
       try { selected = window.gdEditorRoot?.componentNow('keymap') || null; }
@@ -73,6 +78,13 @@
       }
     }
     host.replaceChildren(pane || view(builtin, data));
+    if (focusTarget) {
+      const replacement = [...host.querySelectorAll('button[data-action], .gd-km-leader')].find(item =>
+        (item.dataset.action || '') === focusTarget.action
+        && (item.dataset.shortcut || '') === focusTarget.shortcut
+        && item.classList.contains('gd-km-leader') === focusTarget.leader);
+      replacement?.focus();
+    }
     if (recording) recording.row = [...host.querySelectorAll('.gd-km-row')]
       .find(row => row.dataset.shortcut === recording.id) || null;
   }

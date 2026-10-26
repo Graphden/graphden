@@ -125,6 +125,7 @@
             :execution-path {:view (ids/fn-id (str root ".execution-path") :path-view)}
             :feedback {:view (ids/fn-id (str root ".feedback") :feedback-view)}
             :keymap {:view (ids/fn-id (str root ".keymap") :keymap-view)}
+            :appearance {:view (ids/fn-id (str root ".appearance") :appearance-view)}
             :inspector {:initial (ids/fn-id (str root ".inspector") :inspector-initial)
                         :update (ids/fn-id (str root ".inspector") :inspector-update)
                         :view (ids/fn-id (str root ".inspector") :inspector-view)}}

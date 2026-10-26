@@ -1,353 +1,257 @@
-// Editor Theme pane — Settings → Appearance (docs/MARKETPLACE.md § Themes).
-//
-// The user edits the editor's design tokens (colours, fonts, size) LIVE; the
-// working copy is the `theme` preference (`{source, payload}` — see
-// editor-prefs.js for the payload shape and its apply path). Saving publishes
-// the payload as a versioned THEME package (private, or public = shared in
-// the marketplace); "roll back" applies an earlier version of the same
-// package; "reset" clears the preference (the built-in light / dark look).
-
+// Settings → Appearance. The selected graph owns the pane tree; this host owns
+// DOM events, theme validation, preference writes and the marketplace boundary.
 (() => {
-  
-
   const DEBOUNCE_MS = 250;
-  let _root = null;
-  let _saveTimer = 0;
+  let root = null;
+  let selected = null;
+  let rejected = false;
+  let wired = false;
+  let editing = false;
+  let draft = null;
+  let saveTimer = 0;
+  let saved = [];
+  let savedGeneration = 0;
+  const groupOpen = new Map();
+  const pref = () => window.gdPrefRead?.('theme') || null;
+  const market = () => !!window.gdMarketPresent?.();
 
-  function present() { return typeof window.gdMarketPresent === 'function' && window.gdMarketPresent(); }
-  function pref() { return (typeof window.gdPrefRead === 'function') ? window.gdPrefRead('theme') : null; }
-
-  // The payload to edit: the active custom theme, else the CURRENT built-in
-  // values read off the stylesheet (so an edit starts from what's on screen).
   function workingPayload() {
-    const p = pref()?.payload;
-    if (p) return window.gdSanitizeThemePayload(p);
+    const active = pref()?.payload;
+    if (active) return window.gdSanitizeThemePayload(active);
     const tokens = {};
     for (const [, name] of window.gdThemeTokens) {
-      const v = window.gdThemeTokenValue(name);
-      if (v) tokens[name] = v;
+      const value = window.gdThemeTokenValue(name);
+      if (value) tokens[name] = value;
     }
     const fonts = {};
-    for (const [k, v] of Object.entries(window.gdThemeFontVars)) {
-      const val = window.gdThemeTokenValue(v);
-      if (val) fonts[k] = val;
+    for (const [name, variable] of Object.entries(window.gdThemeFontVars)) {
+      const value = window.gdThemeTokenValue(variable);
+      if (value) fonts[name] = value;
     }
-    return { mode: document.body.classList.contains('theme-dark') ? 'dark' : 'light', tokens, fonts, scale: 100 };
+    return {mode: document.body.classList.contains('theme-dark') ? 'dark' : 'light', tokens, fonts, scale: 100};
   }
-
-  // relative luminance / contrast (WCAG) for the ink-on-paper hint
-  function parseColor(c) {
-    const s = String(c || '').trim();
-    let m = /^#([0-9a-f]{3,8})$/i.exec(s);
-    if (m) {
-      let h = m[1];
-      if (h.length === 3 || h.length === 4) h = h.split('').map((x) => x + x).join('');
-      return [Number.parseInt(h.slice(0, 2), 16), Number.parseInt(h.slice(2, 4), 16), Number.parseInt(h.slice(4, 6), 16)];
+  function parseColor(color) {
+    const value = String(color || '').trim();
+    let match = /^#([0-9a-f]{3,8})$/i.exec(value);
+    if (match) {
+      let hex = match[1];
+      if (hex.length === 3 || hex.length === 4) hex = hex.split('').map(part => part + part).join('');
+      return [0, 2, 4].map(index => Number.parseInt(hex.slice(index, index + 2), 16));
     }
-    m = /^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/.exec(s);
-    if (m) return [Number(m[1]), Number(m[2]), Number(m[3])];
-    return null;
+    match = /^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/.exec(value);
+    return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
   }
   function luminance(rgb) {
-    const f = (v) => { const c = v / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
-    return 0.2126 * f(rgb[0]) + 0.7152 * f(rgb[1]) + 0.0722 * f(rgb[2]);
+    const channel = value => { const normalized = value / 255; return normalized <= 0.03928
+      ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4; };
+    return 0.2126 * channel(rgb[0]) + 0.7152 * channel(rgb[1]) + 0.0722 * channel(rgb[2]);
   }
   function contrast(a, b) {
-    const ca = parseColor(a); const cb = parseColor(b);
-    if (!ca || !cb) return null;
-    const la = luminance(ca); const lb = luminance(cb);
-    return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+    const first = parseColor(a); const second = parseColor(b);
+    if (!first || !second) return null;
+    const light = luminance(first); const dark = luminance(second);
+    return (Math.max(light, dark) + 0.05) / (Math.min(light, dark) + 0.05);
   }
-  function toHex(c) {
-    const rgb = parseColor(c);
-    if (!rgb) return '#000000';
-    return '#' + rgb.map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('');
+  function toHex(color) {
+    const rgb = parseColor(color);
+    return rgb ? '#' + rgb.map(value => Math.max(0, Math.min(255, Math.round(value)))
+      .toString(16).padStart(2, '0')).join('') : '#000000';
   }
-
-  // ---- persistence ----
-  function commit(payload, source, immediate) {
-    const value = { source: source || null, payload: window.gdSanitizeThemePayload(payload) };
-    if (typeof window.gdApplyThemePayload === 'function') window.gdApplyThemePayload(value.payload);
-    clearTimeout(_saveTimer);
-    const write = () => { if (typeof window.gdPrefWrite === 'function') window.gdPrefWrite('theme', value); };
-    if (immediate) write(); else _saveTimer = setTimeout(write, DEBOUNCE_MS);
+  function contrastInfo(payload) {
+    const ratio = contrast(payload.tokens['--gd-ink'] || window.gdThemeTokenValue('--gd-ink'),
+      payload.tokens['--gd-paper'] || window.gdThemeTokenValue('--gd-paper'));
+    return {text: ratio == null ? '' : 'Ink on paper contrast ' + ratio.toFixed(1) + ':1'
+      + (ratio < 4.5 ? ' — below WCAG AA (4.5:1)' : ' ✓'), low: ratio != null && ratio < 4.5};
   }
-
-  // ---- render ----
-  function el(tag, cls, text) {
-    const e = document.createElement(tag);
-    if (cls) e.className = cls;
-    if (text != null) e.textContent = text;
-    return e;
+  function commit(payload, source, immediate = false) {
+    const value = {source: source || null, payload: window.gdSanitizeThemePayload(payload)};
+    window.gdApplyThemePayload?.(value.payload);
+    clearTimeout(saveTimer);
+    const write = () => { window.gdPrefWrite?.('theme', value); };
+    if (immediate) write(); else saveTimer = setTimeout(write, DEBOUNCE_MS);
   }
-
-  function renderActiveRow(host, current) {
-    const row = el('div', 'gd-set-row');
-    const copy = el('div', 'gd-set-copy');
-    copy.appendChild(el('div', 'gd-set-label', 'Custom theme'));
-    const hint = el('div', 'gd-set-hint');
-    const src = current?.source;
-    hint.textContent = current?.graph ? 'Graph: ' + (current.graph.label || 'Theme') : current?.payload
-      ? (src?.name ? 'Based on ' + src.name + '@' + src.version + (current.dirty ? ' (edited)' : '') : 'Unsaved local edits')
-      : 'Built-in look — the Theme toggle above picks light or dark.';
-    copy.appendChild(hint);
-    row.appendChild(copy);
-    const btns = el('div', 'gd-theme-btns');
-    const edit = el('button', 'gd-set-btn', _root.dataset.editing === '1' ? 'Close editor' : 'Customize…');
-    edit.type = 'button';
-    edit.id = 'gd-theme-edit';
-    edit.setAttribute('aria-expanded', _root.dataset.editing === '1' ? 'true' : 'false');
-    edit.addEventListener('click', () => { _root.dataset.editing = _root.dataset.editing === '1' ? '0' : '1'; render(); });
-    if (!current?.graph) btns.appendChild(edit);
-    if (current?.payload) {
-      const reset = el('button', 'gd-set-btn', 'Reset to built-in');
-      reset.type = 'button';
-      reset.id = 'gd-theme-reset';
-      reset.addEventListener('click', () => {
-        if (typeof window.gdApplyThemePayload === 'function') window.gdApplyThemePayload(null);
-        if (typeof window.gdPrefWrite === 'function') window.gdPrefWrite('theme', null);
-        render();
-      });
-      btns.appendChild(reset);
-    }
-    row.appendChild(btns);
-    host.appendChild(row);
-  }
-
-  function renderGraphRow(host, current) {
-    if (!window.gdChooseThemeGraph) return;
-    const row = el('div', 'gd-set-row');
-    const copy = el('div', 'gd-set-copy');
-    copy.appendChild(el('div', 'gd-set-label', 'Theme graph'));
-    const message = window.gdThemeGraphStatus?.();
-    const hint = el('div', 'gd-set-hint', message || 'Choose an ordinary function that returns a theme.');
-    hint.id = 'gd-theme-graph-status';
-    hint.setAttribute('role', 'status');
-    copy.appendChild(hint);
-    row.appendChild(copy);
-    const actions = el('div', 'gd-theme-btns');
-    if (window.API?.api_ui_theme_create && !current?.graph) {
-      const create = el('button', 'gd-set-btn', 'Create graph…');
-      create.type = 'button';
-      create.id = 'gd-theme-create-graph';
-      create.title = 'Create an editable theme in a namespace you can write.';
-      create.addEventListener('click', () => window.gdCreateThemeGraph(create));
-      actions.appendChild(create);
-    }
-    const choose = el('button', 'gd-set-btn', 'Use graph…');
-    choose.type = 'button';
-    choose.id = 'gd-theme-choose-graph';
-    choose.addEventListener('click', () => window.gdChooseThemeGraph(choose));
-    actions.appendChild(choose);
-    if (current?.graph) {
-      const open = el('button', 'gd-set-btn', 'Open graph');
-      open.type = 'button';
-      open.addEventListener('click', () => { void window.gdOpenThemeGraph(current.graph); });
-      actions.appendChild(open);
-      const detach = el('button', 'gd-set-btn', 'Use saved colors');
-      detach.type = 'button';
-      detach.id = 'gd-theme-detach-graph';
-      detach.title = 'Keep these colors and stop following the graph.';
-      detach.addEventListener('click', () => {
-        const payload = window.gdActiveThemePayload() || current.payload;
-        commit(payload, current.source, true);
-        render();
-      });
-      actions.appendChild(detach);
-    }
-    row.appendChild(actions);
-    host.appendChild(row);
-  }
-
-  async function renderSavedRow(host, current) {
-    if (!present()) return;
-    const row = el('div', 'gd-set-row');
-    const copy = el('div', 'gd-set-copy');
-    copy.appendChild(el('div', 'gd-set-label', 'Saved themes'));
-    copy.appendChild(el('div', 'gd-set-hint', 'Your saved versions and anything you applied from the marketplace. Pick one to apply it; an older version of the same theme is a roll-back.'));
-    row.appendChild(copy);
-    const ctl = el('div', 'gd-theme-btns');
-    const sel = el('select', 'mk-select gd-theme-select');
-    sel.id = 'gd-theme-select';
-    sel.setAttribute('aria-label', 'Saved themes');
-    const none = el('option', null, '— pick a saved theme —');
-    none.value = '';
-    sel.appendChild(none);
-    const cards = await window.gdMarketOwnCards('theme');
-    const src = current?.source;
-    if (src?.name && !cards.some((c) => c.name === src.name)) {
-      // applied from someone else's listing — still offer its versions
-      cards.push({ name: src.name, versions: [src.version], latest: src.version });
-    }
-    for (const c of cards) {
-      const og = document.createElement('optgroup');
-      og.label = c.name;
-      for (const v of (c.versions || [])) {
-        const o = el('option', null, c.name + '@' + v + (src?.name === c.name && src?.version === v ? ' (active)' : ''));
-        o.value = c.name + '@' + v;
-        if (src?.name === c.name && src?.version === v) o.selected = true;
-        og.appendChild(o);
-      }
-      sel.appendChild(og);
-    }
-    sel.addEventListener('change', async () => {
-      const [name, version] = sel.value.split('@');
-      if (!name) return;
-      const payload = await window.gdMarketFetchPayload(name, version);
-      if (!payload) return;
-      commit(payload, { name, version }, true);
-      render();
-    });
-    ctl.appendChild(sel);
-    const browse = el('button', 'gd-set-btn', 'Browse marketplace');
-    browse.type = 'button';
-    browse.id = 'gd-theme-browse';
-    browse.addEventListener('click', () => { if (typeof window.gdMarketOpen === 'function') window.gdMarketOpen({ kind: 'theme' }); });
-    ctl.appendChild(browse);
-    row.appendChild(ctl);
-    host.appendChild(row);
-  }
-
-  function renderEditor(host, current) {
-    if (current?.graph) return;
-    if (_root.dataset.editing !== '1') return;
-    const payload = workingPayload();
-    const box = el('div', 'gd-theme-editor');
-    box.id = 'gd-theme-editor';
-
-    // mode + scale + fonts
-    const top = el('div', 'gd-theme-top');
-    const modeL = el('label', 'gd-theme-field');
-    modeL.appendChild(el('span', null, 'Base'));
-    const mode = el('select', 'mk-select');
-    mode.id = 'gd-theme-mode';
-    for (const m of ['light', 'dark']) { const o = el('option', null, m); o.value = m; if (payload.mode === m) o.selected = true; mode.appendChild(o); }
-    mode.addEventListener('change', () => { payload.mode = mode.value; commit(payload, current?.source, true); render(); });
-    modeL.appendChild(mode);
-    top.appendChild(modeL);
-
-    const scaleL = el('label', 'gd-theme-field');
-    const [smin, smax] = window.gdThemeScaleRange;
-    const scaleLbl = el('span', null, 'Text size ' + payload.scale + '%');
-    scaleL.appendChild(scaleLbl);
-    const scale = document.createElement('input');
-    scale.type = 'range'; scale.min = String(smin); scale.max = String(smax); scale.step = '5'; scale.value = String(payload.scale);
-    scale.id = 'gd-theme-scale';
-    scale.addEventListener('input', () => { payload.scale = Number(scale.value); scaleLbl.textContent = 'Text size ' + payload.scale + '%'; commit(payload, current?.source); });
-    scaleL.appendChild(scale);
-    top.appendChild(scaleL);
-    box.appendChild(top);
-
-    const fonts = el('div', 'gd-theme-fonts');
-    for (const [k, label] of [['ui', 'UI font'], ['mono', 'Code font'], ['body', 'Canvas font']]) {
-      const l = el('label', 'gd-theme-field');
-      l.appendChild(el('span', null, label));
-      const inp = document.createElement('input');
-      inp.type = 'text'; inp.className = 'packages-publish-input gd-theme-font'; inp.value = payload.fonts?.[k] || '';
-      inp.dataset.font = k;
-      inp.placeholder = 'font-family stack';
-      inp.addEventListener('input', () => { payload.fonts = payload.fonts || {}; payload.fonts[k] = inp.value; commit(payload, current?.source); });
-      l.appendChild(inp);
-      fonts.appendChild(l);
-    }
-    box.appendChild(fonts);
-
-    // contrast hint
-    const hint = el('div', 'gd-theme-contrast');
-    hint.id = 'gd-theme-contrast';
-    const updateHint = () => {
-      const c = contrast(payload.tokens['--gd-ink'] || window.gdThemeTokenValue('--gd-ink'),
-        payload.tokens['--gd-paper'] || window.gdThemeTokenValue('--gd-paper'));
-      if (c == null) { hint.textContent = ''; return; }
-      hint.textContent = 'Ink on paper contrast ' + c.toFixed(1) + ':1' + (c < 4.5 ? ' — below WCAG AA (4.5:1)' : ' ✓');
-      hint.classList.toggle('is-low', c < 4.5);
-    };
-    updateHint();
-    box.appendChild(hint);
-
-    // token groups
-    const groups = new Map();
-    for (const [g, name, label] of window.gdThemeTokens) {
-      if (!groups.has(g)) groups.set(g, []);
-      groups.get(g).push([name, label]);
-    }
-    for (const [g, items] of groups) {
-      const d = document.createElement('details');
-      d.className = 'gd-theme-group';
-      d.open = g === 'Grounds' || g === 'Ink' || g === 'Accent';
-      const sum = el('summary', null, g);
-      d.appendChild(sum);
-      const grid = el('div', 'gd-theme-grid');
-      for (const [name, label] of items) {
-        const l = el('label', 'gd-theme-token');
-        const sw = document.createElement('input');
-        sw.type = 'color';
-        sw.className = 'gd-theme-swatch';
-        sw.dataset.token = name;
-        sw.value = toHex(payload.tokens[name] || window.gdThemeTokenValue(name));
-        sw.setAttribute('aria-label', label);
-        sw.addEventListener('input', () => { payload.tokens[name] = sw.value; commit(payload, current?.source); updateHint(); });
-        l.appendChild(sw);
-        l.appendChild(el('span', 'gd-theme-token-name', label));
-        l.appendChild(el('code', 'gd-theme-token-var', name));
-        grid.appendChild(l);
-      }
-      d.appendChild(grid);
-      box.appendChild(d);
-    }
-
-    // save / share
-    const actions = el('div', 'gd-theme-actions');
-    if (present()) {
-      const save = el('button', 'packages-install-btn gd-theme-save', 'Save / share…');
-      save.type = 'button';
-      save.id = 'gd-theme-save';
-      save.addEventListener('click', () => {
-        const src = current?.source;
-        window.gdMarketOpenPublishDialog({
-          kind: 'theme', payload: workingPayload(), name: src?.name || '',
-          onDone: (j) => { commit(workingPayload(), { name: j.name, version: j.version }, true); render(); },
-        });
-      });
-      actions.appendChild(save);
-    } else {
-      actions.appendChild(el('span', 'gd-set-hint', 'Saving and sharing need the registry package.'));
-    }
-    box.appendChild(actions);
-    host.appendChild(box);
-  }
-
-  function render() {
-    _root = document.getElementById('gd-theme-root');
-    if (!_root) return;
+  const api = () => window.GraphdenBrowser;
+  const keyword = value => api().keyword(value);
+  const record = value => new Map(Object.entries(value).map(([name, item]) => [keyword(name), item]));
+  let builtin = null;
+  function inputs() {
     const current = pref();
-    const mode = document.getElementById('gd-set-theme');
-    if (mode) {
-      mode.disabled = !!current?.graph;
-      mode.title = current?.graph ? 'Edit the mode in your theme graph, or use saved colors to stop following it.' : '';
-      mode.textContent = document.body.classList.contains('theme-dark') ? 'Dark' : 'Light';
+    const payload = editing && draft ? draft : workingPayload();
+    const groups = new Map();
+    for (const [name, token, label] of window.gdThemeTokens) {
+      if (!groups.has(name)) groups.set(name, []);
+      groups.get(name).push(record({name: token, label,
+        value: toHex(payload.tokens[token] || window.gdThemeTokenValue(token))}));
     }
-    _root.replaceChildren();
-    renderActiveRow(_root, current);
-    renderGraphRow(_root, current);
-    renderSavedRow(_root, current);
-    renderEditor(_root, current);
+    const source = current?.source;
+    const hint = current?.graph ? 'Graph: ' + (current.graph.label || 'Theme') : current?.payload
+      ? source?.name ? 'Based on ' + source.name + '@' + source.version + (current.dirty ? ' (edited)' : '')
+        : 'Unsaved local edits' : 'Built-in look — the Theme toggle above picks light or dark.';
+    const ratio = contrastInfo(payload);
+    return {
+      hint, 'graph-status': window.gdThemeGraphStatus?.() || 'Choose an ordinary function that returns a theme.',
+      'has-graph': !!current?.graph, 'has-payload': !!current?.payload,
+      'can-create': !!window.API?.api_ui_theme_create && !current?.graph,
+      editing, marketplace: market(),
+      saved: saved.map(item => record(item)), mode: payload.mode, scale: payload.scale,
+      'scale-min': String(window.gdThemeScaleRange[0]), 'scale-max': String(window.gdThemeScaleRange[1]),
+      fonts: [['ui', 'UI font'], ['mono', 'Code font'], ['body', 'Canvas font']]
+        .map(([id, label]) => record({id, label, value: payload.fonts?.[id] || ''})),
+      groups: [...groups].map(([name, items]) => record({name,
+        open: groupOpen.has(name) ? groupOpen.get(name) : ['Grounds', 'Ink', 'Accent'].includes(name), items})),
+      contrast: ratio.text, 'low-contrast': ratio.low,
+    };
   }
-
-  let _wired = false;
-  function gdRenderThemePane() {
-    render();
-    if (!_wired && typeof window.gdPrefOnChange === 'function') {
-      _wired = true;
-      // a marketplace "Apply" (another surface) changes the active theme
-      window.gdPrefOnChange((key) => { if (key === 'theme' && document.getElementById('gd-theme-root')?.isConnected && _root?.dataset.editing !== '1') render(); });
+  function view(runtime, data) {
+    const output = runtime.run('view', {inputs: record(data)});
+    if (!(output instanceof Map) || output.size !== 1 || !output.has(keyword('tree')))
+      throw new Error('Invalid appearance graph view');
+    const vnode = window.GraphdenRenderer.vnode(output.get(keyword('tree')), 'gd-theme', 4000);
+    const scratch = document.createElement('div');
+    window.GraphdenPreact.render(vnode, scratch);
+    if (scratch.childElementCount !== 1) throw new Error('Invalid appearance graph tree');
+    const pane = scratch.firstElementChild;
+    if (data.editing && !data['has-graph'] &&
+      (pane.querySelectorAll('.gd-theme-swatch[data-token]').length !== window.gdThemeTokens.length
+        || pane.querySelectorAll('.gd-theme-font[data-font]').length !== 3))
+      throw new Error('Incomplete appearance graph controls');
+    return pane;
+  }
+  function render() {
+    root = document.getElementById('gd-theme-root');
+    if (!root || !api()?.createRuntime) return;
+    const current = pref();
+    const toggle = document.getElementById('gd-set-theme');
+    if (toggle) {
+      toggle.disabled = !!current?.graph;
+      toggle.title = current?.graph ? 'Edit the mode in your theme graph, or use saved colors to stop following it.' : '';
+      toggle.textContent = document.body.classList.contains('theme-dark') ? 'Dark' : 'Light';
     }
+    const data = inputs();
+    const focused = root.contains(document.activeElement) ? document.activeElement : null;
+    const focusId = focused?.id || '';
+    if (!selected && !rejected) {
+      try { selected = window.gdEditorRoot?.componentNow('appearance') || null; }
+      catch (_) { rejected = true; window.gdUIComponentFailed?.('appearance'); }
+    }
+    let pane;
+    if (selected) {
+      try {
+        pane = view(selected, data);
+        if (!window.gdEditorRoot.acceptComponent(selected)) throw new Error('Editor root changed');
+      } catch (_) {
+        window.gdEditorRoot?.releaseComponent(selected);
+        selected = null; rejected = true;
+        window.gdUIComponentFailed?.('appearance');
+      }
+    }
+    builtin ||= api().createRuntime(window.GraphdenBuiltinPlans.plans.appearance, {operationLimit: 100000});
+    root.replaceChildren(pane || view(builtin, data));
+    if (focusId) root.querySelectorAll('[id]').forEach(item => { if (item.id === focusId) item.focus(); });
+  }
+  function updateContrast(payload) {
+    const info = contrastInfo(payload);
+    const hint = root?.querySelector('#gd-theme-contrast');
+    if (hint) { hint.textContent = info.text; hint.classList.toggle('is-low', info.low); }
+    const label = root?.querySelector('#gd-theme-scale-label');
+    if (label) label.textContent = 'Text size ' + payload.scale + '%';
+  }
+  async function loadSaved() {
+    const generation = ++savedGeneration;
+    if (!market()) { saved = []; render(); return; }
+    try {
+      const current = pref();
+      const cards = await window.gdMarketOwnCards('theme');
+      if (generation !== savedGeneration || !document.getElementById('gd-theme-root')?.isConnected) return;
+      const source = current?.source;
+      if (source?.name && !cards.some(card => card.name === source.name))
+        cards.push({name: source.name, versions: [source.version]});
+      saved = cards.flatMap(card => (card.versions || []).map(version => ({
+        label: card.name + '@' + version + (source?.name === card.name && source?.version === version ? ' (active)' : ''),
+        value: card.name + '@' + version,
+        active: source?.name === card.name && source?.version === version,
+      })));
+      render();
+    } catch (_) { if (generation === savedGeneration) { saved = []; render(); } }
+  }
+  function onClick(event) {
+    const button = event.target.closest?.('button[data-action]');
+    if (!button || !root?.contains(button)) return;
+    const current = pref();
+    switch (button.dataset.action) {
+      case 'edit': editing = !editing; draft = editing ? workingPayload() : null; render(); break;
+      case 'reset': draft = null; clearTimeout(saveTimer); window.gdApplyThemePayload?.(null); window.gdPrefWrite?.('theme', null); render(); break;
+      case 'create': window.gdCreateThemeGraph?.(button); break;
+      case 'choose': window.gdChooseThemeGraph?.(button); break;
+      case 'open': if (current?.graph) void window.gdOpenThemeGraph?.(current.graph); break;
+      case 'detach': if (current?.graph) { draft = null; commit(window.gdActiveThemePayload() || current.payload, current.source, true); render(); } break;
+      case 'browse': window.gdMarketOpen?.({kind: 'theme'}); break;
+      case 'save': if (market()) window.gdMarketOpenPublishDialog({kind: 'theme', payload: draft || workingPayload(),
+        name: current?.source?.name || '', onDone: result => {
+          commit(draft || workingPayload(), {name: result.name, version: result.version}, true);
+          void loadSaved();
+        }}); break;
+    }
+  }
+  async function onChange(event) {
+    const control = event.target;
+    if (!root?.contains(control)) return;
+    if (control.id === 'gd-theme-select') {
+      const [name, version] = control.value.split('@');
+      if (!name || !market()) return;
+      const payload = await window.gdMarketFetchPayload(name, version);
+      if (payload) { draft = null; commit(payload, {name, version}, true); render(); }
+    } else if (control.id === 'gd-theme-mode') {
+      const payload = draft || workingPayload(); payload.mode = control.value;
+      commit(payload, pref()?.source, true); render();
+    }
+  }
+  function onInput(event) {
+    const control = event.target;
+    if (!root?.contains(control)) return;
+    if (!draft) draft = workingPayload();
+    const payload = draft;
+    if (control.id === 'gd-theme-scale') payload.scale = Number(control.value);
+    else if (control.dataset.font && Object.hasOwn(window.gdThemeFontVars, control.dataset.font))
+      payload.fonts[control.dataset.font] = control.value;
+    else if (control.dataset.token && window.gdThemeTokens.some(([, name]) => name === control.dataset.token))
+      payload.tokens[control.dataset.token] = control.value;
+    else return;
+    commit(payload, pref()?.source);
+    updateContrast(payload);
+  }
+  function gdRenderThemePane() {
+    const next = document.getElementById('gd-theme-root');
+    if (root !== next) {
+      root?.removeEventListener('click', onClick);
+      root?.removeEventListener('change', onChange);
+      root?.removeEventListener('input', onInput);
+      next?.addEventListener('click', onClick);
+      next?.addEventListener('change', onChange);
+      next?.addEventListener('input', onInput);
+    }
+    render();
+    if (wired) return;
+    wired = true;
+    window.gdPrefOnChange?.(key => {
+      if (key === 'theme' && document.getElementById('gd-theme-root')?.isConnected) {
+        if (!editing) { render(); void loadSaved(); }
+      }
+    });
+    window.addEventListener('gd-theme-graph-status', () => {
+      const hint = document.getElementById('gd-theme-graph-status');
+      if (hint) hint.textContent = window.gdThemeGraphStatus() || 'Choose an ordinary function that returns a theme.';
+    });
+    window.addEventListener('gd-editor-root-changing', () => { selected = null; rejected = false; });
+    window.addEventListener('gd-editor-root-ready', () => {
+      if (document.getElementById('gd-theme-root')?.isConnected) render();
+    });
+    window.addEventListener('gd-auth-changed', () => {
+      clearTimeout(saveTimer); draft = null; saved = []; savedGeneration++;
+    });
+    void loadSaved();
   }
   window.gdRenderThemePane = gdRenderThemePane;
   window.gdThemeWorkingPayload = workingPayload;
   window.gdThemeContrast = contrast;
-  window.addEventListener('gd-theme-graph-status', () => {
-    const hint = document.getElementById('gd-theme-graph-status');
-    if (hint) hint.textContent = window.gdThemeGraphStatus() || 'Choose an ordinary function that returns a theme.';
-  });
 })();

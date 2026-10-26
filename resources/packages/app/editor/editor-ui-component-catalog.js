@@ -7,7 +7,7 @@
   let message = '';
   const organization = () => typeof graphdenCurrentOrg === 'string' && graphdenCurrentOrg ? graphdenCurrentOrg : 'public';
   const context = () => JSON.stringify([window.gdPrefOwner, organization(), getCurrentBranchName()]);
-  const groups = { 'account-menu': 'menu-id', 'fn-picker': 'picker-id', recents: 'recents-id', inspector: 'inspector-id', explorer: 'explorer-id', 'tutorial-catalog': 'tutorial-catalog-id', 'execution-status': 'execution-status-id', 'execution-path': 'execution-path-id', feedback: 'feedback-id', keymap: 'keymap-id', canvas: 'canvas-id', 'canvas-values': 'canvas-values-id', 'canvas-inheritance': 'canvas-inheritance-id', 'canvas-metadata': 'canvas-metadata-id', 'canvas-type-structure': 'canvas-type-structure-id', 'canvas-bindings': 'canvas-bindings-id' };
+  const groups = { 'account-menu': 'menu-id', 'fn-picker': 'picker-id', recents: 'recents-id', inspector: 'inspector-id', explorer: 'explorer-id', 'tutorial-catalog': 'tutorial-catalog-id', 'execution-status': 'execution-status-id', 'execution-path': 'execution-path-id', feedback: 'feedback-id', keymap: 'keymap-id', appearance: 'appearance-id', canvas: 'canvas-id', 'canvas-values': 'canvas-values-id', 'canvas-inheritance': 'canvas-inheritance-id', 'canvas-metadata': 'canvas-metadata-id', 'canvas-type-structure': 'canvas-type-structure-id', 'canvas-bindings': 'canvas-bindings-id' };
   const selectionStamp = () => JSON.stringify(window.gdPrefRead('components') ?? null);
   const selected = () => window.gdUIComponentsSelection();
   function render() {
@@ -47,7 +47,7 @@
   function validManifest(manifest) {
     const fullLimit = window.GraphdenAtomicFunctionBatchMax;
     if (!manifest || !Array.isArray(manifest.namespaces) || !Array.isArray(manifest.functions)
-      || !manifest.namespaces.length || manifest.namespaces.length > 16
+      || !manifest.namespaces.length || manifest.namespaces.length > 32
       || !Number.isInteger(fullLimit) || fullLimit < 1
       || !manifest.functions.length || manifest.functions.length > (manifest.component ? 512 : fullLimit)) return false;
     const namespaces = new Set(manifest.namespaces.map(row => row.id));
@@ -75,7 +75,7 @@
     if (!receipt || typeof receipt.created !== 'boolean' || !uuid.test(receipt.id || '')
       || !/^[0-9a-f]{64}$/.test(receipt['configuration-revision'] || '')
       || !Array.isArray(receipt.functions) || receipt.functions.length > 512
-      || !Array.isArray(receipt.namespaces) || receipt.namespaces.length > 16) return false;
+      || !Array.isArray(receipt.namespaces) || receipt.namespaces.length > 32) return false;
     if (!receipt.created) return receipt.functions.length === 0 && receipt.namespaces.length === 0;
     if (!/^[0-9a-f]{64}$/.test(receipt['restore-revision'] || '') || !uuid.test(receipt['restore-id'] || '')) return false;
     if (!/^[0-9a-f]{64}$/.test(receipt['cohort-revision'] || '') || !receipt.functions.length

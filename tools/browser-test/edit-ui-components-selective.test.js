@@ -258,6 +258,21 @@ async function cleanup(page, receipts, scope = 'final') {
       'adding a legacy catalogue preserves the authored picker identity');
     assert(await unchangedTheme(page, previous.theme), 'catalogue selection does not activate a theme');
 
+    phase = 'copy-appearance';
+    const appearanceCopy = await copy(page, 'appearance', receipts, settle);
+    await page.evaluate(() => { gdShellSurface('settings'); gdActivateSettingsSection('appearance'); });
+    await page.waitForFunction(id => gdUIComponentRuntimeIdentity('appearance') === id
+      && document.querySelector('#gd-theme-root .gd-set-label')?.textContent === 'Custom theme',
+    appearanceCopy.activationId);
+    await page.evaluate(() => gdShellSurface('build'));
+    const appearanceLeaf = await selectCreatedLeaf(page, appearanceCopy, 'appearance', 'appearance-title');
+    await editOwnValue(page, appearanceLeaf, 'value', 'My color workspace');
+    await settle();
+    await page.evaluate(() => { gdShellSurface('settings'); gdActivateSettingsSection('appearance'); });
+    await page.waitForFunction(() => document.querySelector('#gd-theme-root .gd-set-label')?.textContent === 'My color workspace');
+    assert(await unchangedTheme(page, previous.theme),
+      'editing the personal Appearance view leaves the separate active theme unchanged');
+
     phase = 'copy-menu-conflict';
     await settle();
     const owner = previous.owner;
@@ -311,7 +326,8 @@ async function cleanup(page, receipts, scope = 'final') {
     receipts.pop();
     const remaining = await api(page, 'GET', '/api/graph/entities?scope=index');
     const remainingIds = new Set(remaining.fns.map(row => row.id));
-    assert([...picker.functions, ...recents.functions, ...inspector.functions, ...explorer.functions].every(row => remainingIds.has(row.id)),
+    assert([...picker.functions, ...recents.functions, ...inspector.functions, ...explorer.functions,
+      ...catalog.functions, ...appearanceCopy.functions].every(row => remainingIds.has(row.id)),
       'cleaning the new receipt preserves all previously authored copies');
   } catch (error) {
     console.error('Root server receipt diagnostic:', JSON.stringify(rootServerDiagnostic(error, serverCalls.events)));

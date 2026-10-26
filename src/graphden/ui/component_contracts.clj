@@ -41,4 +41,6 @@
    :feedback {:id (ids/fn-id "app.ui-feedback" :feedback-view)
               :reference :app.ui-feedback/feedback-view :roles #{:view}}
    :keymap {:id (ids/fn-id "app.ui-keymap" :keymap-view)
-            :reference :app.ui-keymap/keymap-view :roles #{:view}}})
+            :reference :app.ui-keymap/keymap-view :roles #{:view}}
+   :appearance {:id (ids/fn-id "app.ui-appearance" :appearance-view)
+                :reference :app.ui-appearance/appearance-view :roles #{:view}}})

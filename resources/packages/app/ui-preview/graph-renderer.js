@@ -5,9 +5,9 @@
   const styles = window.GraphdenStyles;
   const name = (value) => value instanceof api.Keyword ? (value.namespace ? value.namespace + '/' : '') + value.name : value;
   const owners = new WeakSet();
-  const tags = new Set(['div', 'span', 'button', 'input', 'label', 'ul', 'li', 'p', 'pre', 'strong', 'small', 'section', 'select', 'option', 'textarea', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'kbd']);
-  const textAttributes = new Set(['class', 'role', 'type', 'title', 'name', 'value', 'placeholder', 'autocomplete']);
-  const booleanAttributes = new Set(['disabled', 'hidden', 'readonly', 'checked']);
+  const tags = new Set(['div', 'span', 'button', 'input', 'label', 'ul', 'li', 'p', 'pre', 'strong', 'small', 'section', 'select', 'option', 'optgroup', 'textarea', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'kbd', 'details', 'summary', 'code']);
+  const textAttributes = new Set(['class', 'role', 'type', 'title', 'name', 'value', 'placeholder', 'autocomplete', 'label']);
+  const booleanAttributes = new Set(['disabled', 'hidden', 'readonly', 'checked', 'selected', 'open']);
 
   function attributes(value, idPrefix) {
     if (!(value instanceof Map)) throw new Error('Graph element attributes must be a map');
@@ -27,6 +27,9 @@
       } else if (attr === 'rows' || attr === 'maxlength') {
         if (!Number.isSafeInteger(item) || item < 1 || item > 10000) throw new Error('Invalid graph numeric attribute');
         result[attr === 'maxlength' ? 'maxLength' : attr] = item;
+      } else if (attr === 'min' || attr === 'max' || attr === 'step') {
+        if (typeof item !== 'string' || !/^(?:0|[1-9][0-9]{0,5})$/.test(item)) throw new Error('Invalid graph range attribute');
+        result[attr] = item;
       } else if (booleanAttributes.has(attr)) {
         if (typeof item !== 'boolean') throw new Error('Invalid graph boolean attribute');
         result[attr === 'readonly' ? 'readOnly' : attr] = item;

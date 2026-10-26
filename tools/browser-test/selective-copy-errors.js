@@ -6,7 +6,7 @@ const componentRoots = Object.freeze({'account-menu': 'menu-id', 'fn-picker': 'p
   recents: 'recents-id', inspector: 'inspector-id', explorer: 'explorer-id',
   'tutorial-catalog': 'tutorial-catalog-id',
   'execution-status': 'execution-status-id', 'execution-path': 'execution-path-id',
-  feedback: 'feedback-id', keymap: 'keymap-id', canvas: 'canvas-id', 'canvas-values': 'canvas-values-id',
+  feedback: 'feedback-id', keymap: 'keymap-id', appearance: 'appearance-id', canvas: 'canvas-id', 'canvas-values': 'canvas-values-id',
   'canvas-inheritance': 'canvas-inheritance-id', 'canvas-metadata': 'canvas-metadata-id',
   'canvas-type-structure': 'canvas-type-structure-id', 'canvas-bindings': 'canvas-bindings-id'});
 const components = new Set(Object.keys(componentRoots));

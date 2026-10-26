@@ -120,7 +120,7 @@
   {:accountMenu :account-menu :fnPicker :fn-picker :recents :recents
    :inspector :inspector :explorer :explorer :tutorialCatalog :tutorial-catalog
    :executionStatus :execution-status :executionPath :execution-path :feedback :feedback
-   :keymap :keymap
+   :keymap :keymap :appearance :appearance
    :canvas :canvas :canvasValues :canvas-values
    :canvasInheritance :canvas-inheritance :canvasMetadata :canvas-metadata
    :canvasTypeStructure :canvas-type-structure :canvasBindings :canvas-bindings})
@@ -161,7 +161,7 @@
             (is (zero? (:exit result)) (:err result))
             (when (zero? (:exit result))
               (let [metrics (json/parse-string (:out result) true)]
-                (is (< (:bytes metrics) 1048576) "Generated script stays below the existing lint ceiling")
+                (is (< (:bytes metrics) 1310720) "Generated script stays below the bounded editor asset budget")
                 (println "Builtin script literal metrics" metrics))))
           ;; Keep exact byte equality; report hashes instead of dumping the
           ;; complete generated graph and JavaScript into a failed CI log.
@@ -183,7 +183,7 @@
         (doseq [[kind compiled] (:plans artifact)]
           (is (= 1 (:format compiled) (:primitiveAbi compiled)))
           (is (= (case kind
-                   (:tutorialCatalog :executionStatus :executionPath :feedback :keymap
+                   (:tutorialCatalog :executionStatus :executionPath :feedback :keymap :appearance
                                      :canvas :canvasValues :canvasMetadata :canvasBindings) #{"view"}
                    (:canvasInheritance :canvasTypeStructure) #{"initial" "view"}
                    #{"initial" "update" "view"})

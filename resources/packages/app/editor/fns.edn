@@ -636,6 +636,7 @@
                   [:button {:type "button" :class "gd-set-btn" :data-ui-component "execution-path" :data-ui-label "execution path"} "Personalize execution path"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-component "feedback" :data-ui-label "feedback form"} "Personalize feedback form"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-component "keymap" :data-ui-label "keyboard settings"} "Personalize keyboard settings"]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-component "appearance" :data-ui-label "appearance settings"} "Personalize appearance settings"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-component "canvas" :data-ui-label "canvas presentation"} "Personalize canvas presentation"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-component "canvas-values" :data-ui-label "value and type presentation"} "Personalize value and type presentation"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-component "canvas-inheritance" :data-ui-label "inheritance presentation"} "Personalize inheritance presentation"]

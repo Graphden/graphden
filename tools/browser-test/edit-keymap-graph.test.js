@@ -35,6 +35,11 @@ const {assert, newContext, waitForServerHealthy, BASE} = require('./edit-test-he
     }));
     assert(conflicts.rows >= 2 && conflicts.notes === 1,
       'graph marks both conflicting bindings and announces the conflict');
+    const leader = page.locator('#gd-keymap-root .gd-km-row[data-shortcut="graph-fit"] .gd-km-leader');
+    await leader.focus();
+    await page.keyboard.press('Space');
+    assert(await leader.evaluate(element => element === document.activeElement),
+      'a preference update keeps focus on the keyboard control');
     await page.click('#gd-keymap-root .gd-km-row[data-shortcut="graph-fit"] .gd-km-change');
     const before = await page.locator('#gd-keymap-root .gd-km-recording').textContent();
     const allowed = await page.evaluate(() => {

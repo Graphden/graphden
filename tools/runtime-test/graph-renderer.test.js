@@ -32,6 +32,14 @@ const keyboardTable = ctx.GraphdenRenderer.vnode([k('table'),
   [k('tbody'), [k('tr'), [k('td'), [k('kbd'), 'Space']]]]]);
 assert.equal(keyboardTable.type, 'table');
 assert.equal(keyboardTable.props.children[1].props.children.type, 'tr');
+const appearance = ctx.GraphdenRenderer.vnode([k('details'), attrs({open: true}),
+  [k('summary'), 'Ink'], [k('code'), '--gd-ink'],
+  [k('input'), attrs({type: 'range', min: '80', max: '150', step: '5', value: '100'})],
+  [k('select'), [k('optgroup'), attrs({label: 'Personal'}),
+    [k('option'), attrs({value: 'dark', selected: true}), 'Dark']]]]);
+assert.equal(appearance.type, 'details');
+assert.equal(appearance.props.children[2].props.min, '80');
+assert.throws(() => ctx.GraphdenRenderer.vnode([k('input'), attrs({min: '-1'})]));
 assert.throws(() => ctx.GraphdenRenderer.vnode([k('textarea'), attrs({maxlength: 10001})]));
 assert.throws(() => ctx.GraphdenRenderer.vnode([k('div'), attrs({id: 'auth-lock-btn'})], 'gd-test'));
 assert.throws(() => ctx.GraphdenRenderer.vnode([k('div'), attrs({id: 'gd-test-option'})]));

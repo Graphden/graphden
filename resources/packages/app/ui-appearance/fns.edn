@@ -1,0 +1,175 @@
+{:namespace "app.ui-appearance"
+ :description "Appearance settings view. Theme values are ordinary personal graphs; browser effects remain host-owned."
+ :fns
+ [{:name :_saved-theme :type {:label :text :value :text :active :bool}}
+  {:name :_font-field :type {:id :text :label :text :value :text}}
+  {:name :_color-token :type {:name :text :label :text :value :text}}
+  {:name :_token-group :type {:name :text :open :bool :items [:list :_color-token]}}
+  {:name :_appearance-inputs
+   :type {:hint :text :graph-status :text :has-graph :bool :has-payload :bool
+          :can-create :bool :editing :bool :marketplace :bool
+          :saved [:list :_saved-theme] :mode :text :scale :int :scale-min :text :scale-max :text
+          :fonts [:list :_font-field] :groups [:list :_token-group]
+          :contrast :text :low-contrast :bool}}
+  {:name :_appearance-envelope :type {:inputs :_appearance-inputs}}
+  {:name :_appearance-result :type {:tree :web.html/hiccup-node}}
+  {:name :_appearance-callable :fn-type [{:input :_appearance-envelope} :_appearance-result]}
+  {:name :appearance-root-component :type {:view :_appearance-callable}}
+  {:name :_inputs :parent :const :args {:value {:as :inputs :type :_appearance-inputs}}}
+  {:name :_hint :parent :get :args {:coll :_inputs :key {:value :hint} :default ""}}
+  {:name :_graph-status :parent :get :args {:coll :_inputs :key {:value :graph-status} :default ""}}
+  {:name :_has-graph :parent :get :args {:coll :_inputs :key {:value :has-graph} :default false}}
+  {:name :_has-payload :parent :get :args {:coll :_inputs :key {:value :has-payload} :default false}}
+  {:name :_can-create :parent :get :args {:coll :_inputs :key {:value :can-create} :default false}}
+  {:name :_editing :parent :get :args {:coll :_inputs :key {:value :editing} :default false}}
+  {:name :_marketplace :parent :get :args {:coll :_inputs :key {:value :marketplace} :default false}}
+  {:name :_saved :parent :get :args {:coll :_inputs :key {:value :saved} :default {:value []}}}
+  {:name :_mode :parent :get :args {:coll :_inputs :key {:value :mode} :default "light"}}
+  {:name :_scale :parent :get :args {:coll :_inputs :key {:value :scale} :default 100}}
+  {:name :_scale-min :parent :get :args {:coll :_inputs :key {:value :scale-min} :default "70"}}
+  {:name :_scale-max :parent :get :args {:coll :_inputs :key {:value :scale-max} :default "160"}}
+  {:name :_fonts :parent :get :args {:coll :_inputs :key {:value :fonts} :default {:value []}}}
+  {:name :_groups :parent :get :args {:coll :_inputs :key {:value :groups} :default {:value []}}}
+  {:name :_contrast :parent :get :args {:coll :_inputs :key {:value :contrast} :default ""}}
+  {:name :_low-contrast :parent :get :args {:coll :_inputs :key {:value :low-contrast} :default false}}
+  {:name :_edit-label :parent :if :args {:test :_editing :then "Close editor" :else "Customize…"}}
+  {:name :appearance-title :parent :const :return-type :text :args {:value "Custom theme"}}
+  {:name :_edit-expanded :parent :if :args {:test :_editing :then "true" :else "false"}}
+  {:name :_edit-button :parent :hiccup
+   :args {:tag "button" :attrs {:parent :zipmap
+                                :args {:keys [{:value :type} {:value :class} {:value :id} {:value :data-action} {:value :aria-expanded}]
+                                       :vals ["button" "gd-set-btn" "gd-theme-edit" "edit" :_edit-expanded]}}
+          :children [:_edit-label]}}
+  {:name :_reset-button :parent :hiccup
+   :args {:tag "button" :attrs {:value {:type "button" :class "gd-set-btn" :id "gd-theme-reset" :data-action "reset"}}
+          :children ["Reset to built-in"]}}
+  {:name :_active-actions :parent :hiccup :args {:tag "div" :attrs {:value {:class "gd-theme-btns"}}
+                                                 :children [{:parent :if :args {:test :_has-graph :then nil :else :_edit-button}}
+                                                            {:parent :if :args {:test :_has-payload :then :_reset-button :else nil}}]}}
+  {:name :_active-copy :parent :hiccup :args {:tag "div" :attrs {:value {:class "gd-set-copy"}}
+                                              :children [{:parent :hiccup :args {:tag "div" :attrs {:value {:class "gd-set-label"}} :children [:appearance-title]}}
+                                                         {:parent :hiccup :args {:tag "div" :attrs {:value {:class "gd-set-hint"}} :children [:_hint]}}]}}
+  {:name :_active-row :parent :hiccup :args {:tag "div" :attrs {:value {:class "gd-set-row"}}
+                                             :children [:_active-copy :_active-actions]}}
+  {:name :_create-button :parent :hiccup :args {:tag "button" :attrs {:value {:type "button" :class "gd-set-btn"
+                                                                              :id "gd-theme-create-graph" :data-action "create" :title "Create an editable theme in a namespace you can write."}}
+                                                :children ["Create graph…"]}}
+  {:name :_choose-button :parent :hiccup :args {:tag "button" :attrs {:value {:type "button" :class "gd-set-btn"
+                                                                              :id "gd-theme-choose-graph" :data-action "choose"}} :children ["Use graph…"]}}
+  {:name :_open-button :parent :hiccup :args {:tag "button" :attrs {:value {:type "button" :class "gd-set-btn" :data-action "open"}}
+                                              :children ["Open graph"]}}
+  {:name :_detach-button :parent :hiccup :args {:tag "button" :attrs {:value {:type "button" :class "gd-set-btn"
+                                                                              :id "gd-theme-detach-graph" :data-action "detach" :title "Keep these colors and stop following the graph."}}
+                                                :children ["Use saved colors"]}}
+  {:name :_graph-actions :parent :hiccup :args {:tag "div" :attrs {:value {:class "gd-theme-btns"}}
+                                                :children [{:parent :if :args {:test :_can-create :then :_create-button :else nil}}
+                                                           :_choose-button
+                                                           {:parent :if :args {:test :_has-graph :then :_open-button :else nil}}
+                                                           {:parent :if :args {:test :_has-graph :then :_detach-button :else nil}}]}}
+  {:name :_graph-copy :parent :hiccup :args {:tag "div" :attrs {:value {:class "gd-set-copy"}}
+                                             :children [{:parent :hiccup :args {:tag "div" :attrs {:value {:class "gd-set-label"}} :children ["Theme graph"]}}
+                                                        {:parent :hiccup :args {:tag "div" :attrs {:value {:class "gd-set-hint" :id "gd-theme-graph-status" :role "status"}}
+                                                                                :children [:_graph-status]}}]}}
+  {:name :_graph-row :parent :hiccup :args {:tag "div" :attrs {:value {:class "gd-set-row"}}
+                                            :children [:_graph-copy :_graph-actions]}}
+  {:name :_saved-label :parent :get :args {:coll {:as :saved :type :_saved-theme} :key {:value :label} :default ""}}
+  {:name :_saved-value :parent :get :args {:coll {:as :saved :type :_saved-theme} :key {:value :value} :default ""}}
+  {:name :_saved-active :parent :get :args {:coll {:as :saved :type :_saved-theme} :key {:value :active} :default false}}
+  {:name :_saved-option :parent :hiccup :lambda-params [:saved] :args {:tag "option"
+                                                                       :attrs {:parent :zipmap :args {:keys [{:value :value} {:value :selected}]
+                                                                                                      :vals [:_saved-value :_saved-active]}}
+                                                                       :children [:_saved-label]}}
+  {:name :_saved-options :parent :map :args {:func :_saved-option :coll :_saved}}
+  {:name :_saved-select :parent :hiccup :args {:tag "select"
+                                               :attrs {:value {:class "mk-select gd-theme-select" :id "gd-theme-select" :aria-label "Saved themes"}}
+                                               :children [{:parent :hiccup :args {:tag "option" :attrs {:value {:value ""}} :children ["— pick a saved theme —"]}}
+                                                          :_saved-options]}}
+  {:name :_browse-button :parent :hiccup :args {:tag "button" :attrs {:value {:type "button" :class "gd-set-btn"
+                                                                              :id "gd-theme-browse" :data-action "browse"}} :children ["Browse marketplace"]}}
+  {:name :_saved-row :parent :hiccup :args {:tag "div" :attrs {:value {:class "gd-set-row"}}
+                                            :children [{:parent :hiccup :args {:tag "div" :attrs {:value {:class "gd-set-copy"}}
+                                                                               :children [{:parent :hiccup :args {:tag "div" :attrs {:value {:class "gd-set-label"}} :children ["Saved themes"]}}
+                                                                                          {:parent :hiccup :args {:tag "div" :attrs {:value {:class "gd-set-hint"}}
+                                                                                                                  :children ["Pick a saved version to apply it. An older version rolls the theme back."]}}]}}
+                                                       {:parent :hiccup :args {:tag "div" :attrs {:value {:class "gd-theme-btns"}}
+                                                                               :children [:_saved-select :_browse-button]}}]}}
+  {:name :_mode-option :parent :hiccup :lambda-params [:candidate] :args {:tag "option"
+                                                                          :attrs {:parent :zipmap :args {:keys [{:value :value} {:value :selected}]
+                                                                                                         :vals [{:as :candidate} {:parent :equal? :args {:a {:as :candidate} :b :_mode}}]}}
+                                                                          :children [{:as :candidate}]}}
+  {:name :_mode-select :parent :hiccup :args {:tag "select"
+                                              :attrs {:value {:class "mk-select" :id "gd-theme-mode" :data-field "mode"}}
+                                              :children {:parent :map :args {:func :_mode-option :coll {:value ["light" "dark"]}}}}}
+  {:name :_mode-field :parent :hiccup :args {:tag "label" :attrs {:value {:class "gd-theme-field"}}
+                                             :children [{:parent :hiccup :args {:tag "span" :attrs {:value {}} :children ["Base"]}} :_mode-select]}}
+  {:name :_scale-label :parent :str :args {:parts ["Text size " :_scale "%"]}}
+  {:name :_scale-input :parent :hiccup :args {:tag "input"
+                                              :attrs {:parent :zipmap :args {:keys [{:value :type} {:value :min} {:value :max} {:value :step}
+                                                                                    {:value :value} {:value :id} {:value :data-field}]
+                                                                             :vals ["range" :_scale-min :_scale-max "5" {:parent :str :args {:parts [:_scale]}} "gd-theme-scale" "scale"]}}
+                                              :children []}}
+  {:name :_scale-field :parent :hiccup :args {:tag "label" :attrs {:value {:class "gd-theme-field"}}
+                                              :children [{:parent :hiccup :args {:tag "span" :attrs {:value {:id "gd-theme-scale-label"}} :children [:_scale-label]}}
+                                                         :_scale-input]}}
+  {:name :_top :parent :hiccup :args {:tag "div" :attrs {:value {:class "gd-theme-top"}}
+                                      :children [:_mode-field :_scale-field]}}
+  {:name :_font-id :parent :get :args {:coll {:as :font :type :_font-field} :key {:value :id} :default ""}}
+  {:name :_font-label :parent :get :args {:coll {:as :font :type :_font-field} :key {:value :label} :default ""}}
+  {:name :_font-value :parent :get :args {:coll {:as :font :type :_font-field} :key {:value :value} :default ""}}
+  {:name :_font-input :parent :hiccup :args {:tag "input" :attrs {:parent :zipmap
+                                                                  :args {:keys [{:value :type} {:value :class} {:value :value} {:value :data-font} {:value :placeholder}]
+                                                                         :vals ["text" "packages-publish-input gd-theme-font" :_font-value :_font-id "font-family stack"]}}
+                                             :children []}}
+  {:name :_font-row :parent :hiccup :lambda-params [:font] :args {:tag "label"
+                                                                  :attrs {:value {:class "gd-theme-field"}}
+                                                                  :children [{:parent :hiccup :args {:tag "span" :attrs {:value {}} :children [:_font-label]}} :_font-input]}}
+  {:name :_font-rows :parent :map :args {:func :_font-row :coll :_fonts}}
+  {:name :_font-box :parent :hiccup :args {:tag "div" :attrs {:value {:class "gd-theme-fonts"}} :children :_font-rows}}
+  {:name :_contrast-class :parent :if :args {:test :_low-contrast :then "gd-theme-contrast is-low" :else "gd-theme-contrast"}}
+  {:name :_contrast-row :parent :hiccup :args {:tag "div"
+                                               :attrs {:parent :zipmap :args {:keys [{:value :class} {:value :id}]
+                                                                              :vals [:_contrast-class "gd-theme-contrast"]}}
+                                               :children [:_contrast]}}
+  {:name :_token-name :parent :get :args {:coll {:as :token :type :_color-token} :key {:value :name} :default ""}}
+  {:name :_token-label :parent :get :args {:coll {:as :token :type :_color-token} :key {:value :label} :default ""}}
+  {:name :_token-value :parent :get :args {:coll {:as :token :type :_color-token} :key {:value :value} :default "#000000"}}
+  {:name :_token-input :parent :hiccup :args {:tag "input" :attrs {:parent :zipmap
+                                                                   :args {:keys [{:value :type} {:value :class} {:value :value} {:value :data-token} {:value :aria-label}]
+                                                                          :vals ["color" "gd-theme-swatch" :_token-value :_token-name :_token-label]}}
+                                              :children []}}
+  {:name :_token-row :parent :hiccup :lambda-params [:token] :args {:tag "label"
+                                                                    :attrs {:value {:class "gd-theme-token"}}
+                                                                    :children [:_token-input
+                                                                               {:parent :hiccup :args {:tag "span" :attrs {:value {:class "gd-theme-token-name"}} :children [:_token-label]}}
+                                                                               {:parent :hiccup :args {:tag "code" :attrs {:value {:class "gd-theme-token-var"}} :children [:_token-name]}}]}}
+  {:name :_group-name :parent :get :args {:coll {:as :group :type :_token-group} :key {:value :name} :default ""}}
+  {:name :_group-open :parent :get :args {:coll {:as :group :type :_token-group} :key {:value :open} :default false}}
+  {:name :_group-items :parent :get :args {:coll {:as :group :type :_token-group} :key {:value :items} :default {:value []}}}
+  {:name :_group-rows :parent :map :args {:func :_token-row :coll :_group-items}}
+  {:name :_group :parent :hiccup :lambda-params [:group] :args {:tag "details"
+                                                                :attrs {:parent :zipmap :args {:keys [{:value :class} {:value :open}]
+                                                                                               :vals ["gd-theme-group" :_group-open]}}
+                                                                :children [{:parent :hiccup :args {:tag "summary" :attrs {:value {}} :children [:_group-name]}}
+                                                                           {:parent :hiccup :args {:tag "div" :attrs {:value {:class "gd-theme-grid"}} :children :_group-rows}}]}}
+  {:name :_token-groups :parent :map :args {:func :_group :coll :_groups}}
+  {:name :_save-button :parent :hiccup :args {:tag "button"
+                                              :attrs {:value {:type "button" :class "packages-install-btn gd-theme-save" :id "gd-theme-save" :data-action "save"}}
+                                              :children ["Save / share…"]}}
+  {:name :_save-unavailable :parent :hiccup :args {:tag "span" :attrs {:value {:class "gd-set-hint"}}
+                                                   :children ["Saving and sharing need the registry package."]}}
+  {:name :_editor-actions :parent :hiccup :args {:tag "div" :attrs {:value {:class "gd-theme-actions"}}
+                                                 :children [{:parent :if :args {:test :_marketplace :then :_save-button :else :_save-unavailable}}]}}
+  {:name :_editor :parent :hiccup :args {:tag "div" :attrs {:value {:class "gd-theme-editor" :id "gd-theme-editor"}}
+                                         :children [:_top :_font-box :_contrast-row :_token-groups :_editor-actions]}}
+  {:name :_tree :parent :hiccup :args {:tag "div" :attrs {:value {}}
+                                       :children [:_active-row :_graph-row
+                                                  {:parent :if :args {:test :_marketplace :then :_saved-row :else nil}}
+                                                  {:parent :if :args {:test :_has-graph :then nil
+                                                                      :else {:parent :if :args {:test :_editing :then :_editor :else nil}}}}]}}
+  {:name :appearance-view :parent :zipmap :return-type :_appearance-result
+   :args {:keys [{:value :tree}] :vals [:_tree]}}
+  {:name :root-view :parent :appearance-view :lambda-params [:input] :return-type :_appearance-result
+   :args {:inputs {:parent :get :args {:coll {:as :input :type :_appearance-envelope} :key {:value :inputs}}}}}
+  {:name :_view-assoc :parent :assoc-fn :args {:value {:as :value :type :_appearance-callable}}}
+  {:name :appearance-component :parent :_view-assoc :return-type :appearance-root-component
+   :args {:map {} :key {:value :view} :value {:ref :root-view}}}]}

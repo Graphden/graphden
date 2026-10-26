@@ -121,7 +121,8 @@
                          :execution-status-id (some-> (get-in configuration [:execution-status :view]) str)
                          :execution-path-id (some-> (get-in configuration [:execution-path :view]) str)
                          :feedback-id (some-> (get-in configuration [:feedback :view]) str)
-                         :keymap-id (some-> (get-in configuration [:keymap :view]) str)}}
+                         :keymap-id (some-> (get-in configuration [:keymap :view]) str)
+                         :appearance-id (some-> (get-in configuration [:appearance :view]) str)}}
           resolved (assoc :configuration-revision (:revision resolved)
                           :configuration-preference {:present (boolean (seq preference-rows))
                                                      :value (:value (first preference-rows))}

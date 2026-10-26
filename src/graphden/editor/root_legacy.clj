@@ -39,7 +39,10 @@
               :wrapper {:view :root-view} :root-component :feedback-component-value}
    :keymap {:namespace "app.ui-keymap" :prefix "keymap"
             :roles [:view] :inputs {:view #{"inputs"}}
-            :wrapper {:view :root-view} :root-component :keymap-component}})
+            :wrapper {:view :root-view} :root-component :keymap-component}
+   :appearance {:namespace "app.ui-appearance" :prefix "appearance"
+                :roles [:view] :inputs {:view #{"inputs"}}
+                :wrapper {:view :root-view} :root-component :appearance-component}})
 
 
 (defn default-role-id

@@ -235,3 +235,11 @@ duplicate key sequences. The host owns the keydown capture listener, IME
 boundary, shortcut dispatch, marketplace actions and owner-scoped preference
 write. A shipped browser plan keeps the settings panel usable while a personal
 root is unavailable.
+
+Appearance settings use the `:appearance` view callback. The graph receives
+only validated display values for the active theme, saved versions, current
+editor draft and token groups. The browser keeps the editable draft, validates
+colour and font values, applies CSS, writes the owner-scoped preference and
+evaluates the separately selected ordinary theme graph. Typing in a font or
+colour control does not replace that focused control. The shipped browser plan
+is the fallback when the selected component cannot be used.

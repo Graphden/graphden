@@ -203,6 +203,7 @@
                                   ["execution-path" :execution-path-id]
                                   ["feedback" :feedback-id]
                                   ["keymap" :keymap-id]
+                                  ["appearance" :appearance-id]
                                   ["canvas-inheritance" :canvas-inheritance-id]
                                   ["canvas-metadata" :canvas-metadata-id]
                                   ["canvas-type-structure" :canvas-type-structure-id]

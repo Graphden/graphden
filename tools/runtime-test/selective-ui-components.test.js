@@ -128,6 +128,15 @@ for (const [count, accepted] of [[1001, true], [4096, true], [4097, false]]) tes
   if (accepted) assert.deepEqual(f.manifestStages[0].functions, f.full.functions);
   if (accepted) { f.apply(); await until(() => f.confirms.length === 1); }
 });
+for (const [count, accepted] of [[18, true], [32, true], [33, false]]) test('full compatibility namespace bound ' + count, async () => {
+  const f = fixture();
+  f.full.namespaces = Array.from({length: count}, (_, n) => ({id: n ? id(n + 100) : id(1), name: 'part-' + n,
+    'parent-id': n ? id(1) : null}));
+  f.create.click({currentTarget: f.create});
+  await until(() => accepted ? f.requests.some(row => row.route === '/apply') : f.status() === 'Creation manifest is unavailable.');
+  assert.equal(f.requests.some(row => row.route === '/full-apply'), accepted);
+  if (accepted) { f.apply(); await until(() => f.confirms.length === 1); }
+});
 for (const corrupt of [f => { f.receipt['function-receipts'][1].id = f.receipt.id; },
   f => { f.receipt.previous.id = f.receipt.id; }, f => { f.receipt['cohort-revision'] = 'invalid'; }]) {
   test('invalid receipt never reaches APPLY', async () => {

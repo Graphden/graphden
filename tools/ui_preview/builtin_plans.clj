@@ -32,7 +32,7 @@
 (def script-path "resources/packages/app/ui-preview/builtin-plans.js")
 
 
-(def ^:private modules ["ui-account-menu" "ui-fn-picker" "ui-recents" "ui-inspector" "ui-explorer" "ui-tutorial-catalog" "ui-execution" "ui-feedback" "ui-keymap" "ui-canvas" "ui-canvas-values" "ui-canvas-inheritance" "ui-canvas-metadata" "ui-canvas-type-structure" "ui-canvas-bindings"])
+(def ^:private modules ["ui-account-menu" "ui-fn-picker" "ui-recents" "ui-inspector" "ui-explorer" "ui-tutorial-catalog" "ui-execution" "ui-feedback" "ui-keymap" "ui-appearance" "ui-canvas" "ui-canvas-values" "ui-canvas-inheritance" "ui-canvas-metadata" "ui-canvas-type-structure" "ui-canvas-bindings"])
 
 
 (def ^:private entries
@@ -61,6 +61,7 @@
    :executionPath {:view (ids/fn-id "app.ui-execution" :path-view)}
    :feedback {:view (ids/fn-id "app.ui-feedback" :feedback-view)}
    :keymap {:view (ids/fn-id "app.ui-keymap" :keymap-view)}
+   :appearance {:view (ids/fn-id "app.ui-appearance" :appearance-view)}
    :fnPicker {:initial (ids/fn-id "app.ui-account-menu" :account-menu-initial)
               :update (ids/fn-id "app.ui-account-menu" :account-menu-update)
               :view (ids/fn-id "app.ui-fn-picker" :picker-view)}})

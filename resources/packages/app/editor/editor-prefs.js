@@ -417,6 +417,7 @@ const _prefListeners = new Set();
 // the keys" step never saw its (default: …) badge (a gate flake, twice).
 let _prefsGen = 0;
 const _prefWrittenGen = {};
+const _prefPendingGen = {};
 let _prefsIdentityGen = 0;
 let _prefsRefreshGen = 0;
 let _prefsInitialReady;
@@ -460,6 +461,7 @@ async function gdPrefWrite(key, value, options) {
   if (identity !== _prefsIdentityGen) return false;
   const api = window.API;
   if (!api || typeof api.api_prefs_key !== 'function') return false;
+  if (key !== 'components' && !conditional) _prefPendingGen[key] = generation;
   try {
     const f = window.authFetch || fetch;
     const r = await f(api.api_prefs_key(key), {
@@ -479,6 +481,9 @@ async function gdPrefWrite(key, value, options) {
     publish();
     return true;
   } catch (_) { return false; }
+  finally {
+    if (_prefPendingGen[key] === generation) delete _prefPendingGen[key];
+  }
 }
 
 // Pull the server's map (per-principal) and apply what changed.
@@ -486,6 +491,9 @@ async function gdPrefsRefresh(initial = false) {
   const api = window.API;
   if (!api || typeof api.api_prefs !== 'string') return;
   const startedAt = _prefsGen;
+  // A GET started after an optimistic PUT may observe the server before that
+  // PUT commits. Keep its local value even if the PUT settles before GET.
+  const pendingAtStart = {..._prefPendingGen};
   const identity = _prefsIdentityGen;
   const refresh = ++_prefsRefreshGen;
   try {
@@ -502,12 +510,14 @@ async function gdPrefsRefresh(initial = false) {
       _prefsIdentityGen++;
       _prefsGen++;
       for (const key of Object.keys(_prefWrittenGen)) delete _prefWrittenGen[key];
+      for (const key of Object.keys(_prefPendingGen)) delete _prefPendingGen[key];
     }
     // A key the user wrote while this request was in flight is newer than
     // the answer — the local value stands.
     const merged = Object.assign({}, map);
     for (const [key, gen] of Object.entries(_prefWrittenGen)) {
-      if (gen > startedAt) merged[key] = _prefs?.[key] ?? null;
+      if (gen > startedAt || pendingAtStart[key] === gen || _prefPendingGen[key] === gen)
+        merged[key] = _prefs?.[key] ?? null;
     }
     _prefs = merged;
     window.gdPrefOwner = owner;
@@ -531,6 +541,7 @@ window.addEventListener('gd-auth-changed', () => {
   _prefs = {};
   writePrefsMirror(_prefs);
   for (const key of Object.keys(_prefWrittenGen)) delete _prefWrittenGen[key];
+  for (const key of Object.keys(_prefPendingGen)) delete _prefPendingGen[key];
   window.gdPrefsReady = false;
   window.gdPrefOwner = null;
   gdPrefApply('theme');

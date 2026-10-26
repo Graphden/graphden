@@ -75,4 +75,20 @@
                 (reset! diagnostic nil)
                 (let [exported (components/export-current (:ctx rf/*bootstrap*)
                                                           {:component component})]
-                  (is (:ok exported) (str component " " @diagnostic)))))))))))
+                  (is (:ok exported) (str component " " @diagnostic))))))
+          (let [pin (first (sp/query-entities storage :package-install {:package-name name}))
+                own (first (sp/query-entities storage :ui-pref
+                                              {:owner-id "anonymous" :key "components"}))
+                uninstall #(setup/via-graph recipient :_uninstall-handler
+                                            {:request-method :delete
+                                             :query-params {"name" name "expected-id" (str (:id pin))}
+                                             :headers {}})]
+            (is (= 409 (:status (uninstall))) "An active personal root keeps its package pin")
+            (sp/delete-entity storage :ui-pref (:id own))
+            (let [other (sp/create-entity storage :ui-pref
+                                          {:owner-id "another-owner" :key "components"
+                                           :value (:value own)})]
+              (is (= 409 (:status (uninstall))) "Another owner's selection also keeps the pin")
+              (sp/delete-entity storage :ui-pref (:id other)))
+            (is (= 200 (:status (uninstall))) "Unpin succeeds after both selections are cleared")
+            (is (nil? (sp/read-entity storage :package-install (:id pin))))))))))

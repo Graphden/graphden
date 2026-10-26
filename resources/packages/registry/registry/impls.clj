@@ -13,6 +13,7 @@
     [graphden.executor.defbase :refer [defbase]]
     [graphden.packages.compat :as compat]
     [graphden.packages.export :as export]
+    [graphden.packages.pin-usage :as pin-usage]
     [graphden.packages.rebase :as rebase]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.wire :as wire]
@@ -743,9 +744,38 @@
                [:id :package-name :version :branch-id]))
 
 
-;; `:list-installed-packages` / `:remove-package-pin` are pure graph
-;; compositions in fns.edn over `:query-entities` / `:delete-entity` +
-;; `:current-branch-id`.
+;; `:list-installed-packages` remains graph composition. Uninstall is one
+;; transaction boundary because its use check must precede the exact delete.
+(defbase remove-package-pin-apply
+  [pkg-name expected-id]
+  (cr/record-effect! :db)
+  (writer/call-with-write
+    (request/require-storage ctx) :graph
+    (fn [storage]
+      (let [pin (first (sp/query-entities storage :package-install
+                                          {:branch-id (vs/current-branch-id storage)
+                                           :package-name pkg-name}))
+            envelope {:ok true :package-name pkg-name :removed (boolean pin)}]
+        (cond
+          (not= (:id pin) expected-id)
+          {:ok false :reason "identity-changed" :http-status 409}
+
+          (nil? pin) envelope
+
+          :else
+          (let [version (first (sp/query-entities storage :package-version
+                                                  {:name pkg-name :version (:version pin)}))]
+            (if-not version
+              {:ok false :reason "package-source-unavailable" :http-status 409}
+              (let [ids (into #{} (map (fn [f]
+                                         (ids/fn-id
+                                           (version-qualified-ns (:ns-root version) (:version pin)
+                                                                 (:namespace f))
+                                           (:name f)))) (:fns version))]
+                (if (or (empty? ids) (pin-usage/in-use? storage ids))
+                  {:ok false :reason "package-in-use" :http-status 409}
+                  (do (sp/delete-entity storage :package-install (:id pin))
+                      envelope))))))))))
 
 
 (defbase parse-graph-edn
@@ -789,6 +819,7 @@
    :rewrite-refs-to-version {:impl rewrite-refs-to-version :taint-propagate? true}
    :package-upsert-pin package-upsert-pin
    :package-pin-receipt {:impl package-pin-receipt :taint-propagate? true}
+   :remove-package-pin-apply {:impl remove-package-pin-apply :taint-propagate? true}
    ;; taint-propagate: echoes the caller's pkg-name / version.
    :mirror-store-package-version! {:impl mirror-store-package-version! :taint-propagate? true}
    :remote-auth-value remote-auth-value

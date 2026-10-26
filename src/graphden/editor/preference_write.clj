@@ -73,8 +73,11 @@
     (let [owner (tenancy/current-user-id)
           write (fn [storage]
                   (call-with-lock storage key #(write-locked! % owner key value conditional? expected)))]
-      ;; Same ordering as ordinary root activation: graph writer, then owner
-      ;; preference lock. Absence cannot race with creation of named editor.
-      (if (= "components" (str key))
+      ;; Same ordering as ordinary root activation and package uninstall:
+      ;; graph writer, then owner preference lock. Selecting a theme graph
+      ;; cannot race past the uninstall use check.
+      (if (or (= "components" (str key))
+              (and (= "theme" (str key))
+                   (map? (or (:graph value) (get value "graph")))))
         (writer/call-with-write storage :graph write)
         (write storage)))))

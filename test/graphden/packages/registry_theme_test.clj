@@ -118,4 +118,22 @@
                 (check-copy! (str graph-ns "@1-0-0") (set/union source-ids shipped-ids))
                 (is (= "1.0.0" (:version (first (sp/query-entities
                                                   (rf/storage) :package-install
-                                                  {:package-name package-name})))))))))))))
+                                                  {:package-name package-name})))))
+                (let [storage (rf/storage)
+                      pin (first (sp/query-entities storage :package-install
+                                                    {:package-name package-name}))
+                      branch-name (:name (sp/read-entity storage :branch
+                                                         (vs/current-branch-id storage)))
+                      selected (sp/create-entity storage :ui-pref
+                                                 {:owner-id "another-owner" :key "theme"
+                                                  :value {:graph {:fn-id (str (records/fn-id
+                                                                                (str graph-ns "@1-0-0") :theme))
+                                                                  :org "public" :branch branch-name}}})
+                      uninstall #(setup/via-graph recipient :_uninstall-handler
+                                                  {:request-method :delete
+                                                   :query-params {"name" package-name
+                                                                  "expected-id" (str (:id pin))}
+                                                   :headers {}})]
+                  (is (= 409 (:status (uninstall))) "A peer's selected theme keeps its pin")
+                  (sp/delete-entity storage :ui-pref (:id selected))
+                  (is (= 200 (:status (uninstall))) "The pin can be removed after theme rollback"))))))))))

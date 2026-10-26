@@ -1804,6 +1804,12 @@
    :return-type {:id :uuid :package-name :text :version :text :branch-id :uuid}
    :effects #{:db :time}}
 
+  {:name :remove-package-pin-apply
+   :description "Under the graph writer, recheck the exact branch pin, reject installed graph consumers and owner theme/root selections, then unpin atomically."
+   :args {:pkg-name {:type :text} :expected-id {:type :nullable-uuid}}
+   :return-type :keyword-map
+   :effects #{:db}}
+
   {:name :_pin-branch-text
    :parent :package-upsert-pin
    :args {:pkg-name {:as :pkg-name :type :text} :pkg-version {:as :pkg-version :type :text}}}
@@ -1851,9 +1857,8 @@
    :return-type [:list {:package-name :any :version :any
                         :branch-id :text :installed-at :text :id :text}]}
 
-  ;; Uninstall — pure graph composition: find the pin (shared
-  ;; `:_pin-row` lookup), delete it when present, return the
-  ;; idempotent envelope.
+  ;; Uninstall uses one guarded transaction for use-check + delete. Graph
+  ;; composition still owns lookup, identity verification and HTTP rendering.
   {:name :_unpin-present?
    :parent :some?
    :args {:value {:as :pin-row}}}
@@ -1862,25 +1867,10 @@
    :parent :get
    :args {:coll {:as :pin-row} :key {:value :id} :default nil}}
 
-  {:name :_unpin-delete
-   :parent :delete-entity
-   :args {:entity-type {:value "package-install"} :id {:ref :_unpin-id :type :uuid}}}
-
-  {:name :_unpin-maybe
-   :parent :if
-   :args {:test :_unpin-present?
-          :then :_unpin-delete
-          :else {:value nil}}}
-
-  {:name :_unpin-envelope
-   :parent :zipmap
-   :args {:keys [{:value :ok} {:value :package-name} {:value :removed}]
-          :vals [{:value true} {:as :pkg-name} :_unpin-present?]}}
-
   {:name :remove-package-pin-from-row
-   :description "Drop the pin for `(current-branch, :pkg-name)` — uninstall. Idempotent; `:removed false` when nothing was pinned. Pure graph composition (`:do` forces the delete before the envelope)."
-   :parent :do
-   :args {:steps [:_unpin-maybe :_unpin-envelope]}
+   :description "Uninstall the exact branch pin unless a graph or owner selection still uses its version."
+   :parent :remove-package-pin-apply
+   :args {:pkg-name {:as :pkg-name} :expected-id :_unpin-id}
    :return-type :keyword-map}
 
   {:name :remove-package-pin
@@ -2421,16 +2411,21 @@
    :parent :json-envelope-response
    :args {:envelope {:value {:ok false :reason "identity-changed" :http-status 409}}}}
 
-  {:name :_uninstall-then-panel
-   :description "Remove the pin, THEN render the refreshed panel — `:do` forces order so :list-installed-packages excludes the removed pin."
-   :parent :do :args {:steps [:_uninstall-do :_pkg-panel-html]}}
+  {:name :_uninstall-after-apply
+   :lambda-params [:outcome]
+   :parent :if
+   :args {:test {:parent :get :args {:coll {:as :outcome :type :keyword-map}
+                                     :key {:value :ok} :default false}}
+          :then {:parent :html-ok-response :args {:body :_pkg-panel-html}}
+          :else {:parent :json-envelope-response
+                 :args {:envelope {:as :outcome :type :keyword-map}}}}}
   {:name :_uninstall-handler
    :lambda-params [:request]
-   :description "Ring handler for DELETE /api/packages/uninstall — removes the pin and returns the refreshed Packages panel as text/html."
+   :description "Ring handler for DELETE /api/packages/uninstall — 409 while a selected graph or branch graph still uses the pin; otherwise returns the refreshed panel."
    :parent :if
    :args {:test :_uninstall-identity-mismatch?
           :then :_uninstall-err-identity
-          :else {:parent :html-ok-response :args {:body :_uninstall-then-panel}}
+          :else {:parent :_uninstall-after-apply :args {:outcome :_uninstall-do}}
           :pin-row :_pin-row :pkg-name :_uninstall-pkg-name}}
   {:name :api-packages-uninstall
    :description "DELETE /api/packages/uninstall?name=<pkg> — uninstall (unpin) a package from the current branch. Auth-required."

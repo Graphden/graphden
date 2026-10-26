@@ -127,9 +127,14 @@
 
 
 (defn- cleanup-lifecycle!
-  [consumer author pin releases namespaces]
+  [consumer author pin releases namespaces caller-binding]
   (let [consumer-id (parse-uuid (:id consumer))
         on-consumer (bootstrap-on consumer-id)]
+    (let [blocked (setup/via-graph on-consumer :_uninstall-handler
+                                   (delete-request {"name" "tutorial-greet"
+                                                    "expected-id" (str (:id pin))}))]
+      (is (= 409 (:status blocked)) "A live graph reference keeps the pin"))
+    (sp/delete-entity (:storage on-consumer) :binding (:id caller-binding))
     ;; The ordinary uninstall endpoint returns the refreshed HTMX panel,
     ;; not a JSON envelope. Its decisive outcome is exact pin removal.
     (let [response (setup/via-graph on-consumer :_uninstall-handler
@@ -201,7 +206,7 @@
           (is (= second-ref (:ref-fn-id (sp/read-entity consumer-view :binding (:id caller)))))
           (is (= (:id (:pin installed)) (:id (:pin updated))))
           (cleanup-lifecycle! consumer author (:pin updated)
-                              [first-release second-release] [source-ns shop first-ns second-ns])
+                              [first-release second-release] [source-ns shop first-ns second-ns] caller)
           (is (= before (raw-lifecycle-counts))
               "Same branch/package/namespace/function names can repeat with baseline physical counts"))))))
 

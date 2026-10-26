@@ -56,6 +56,17 @@
     (is (= (frequencies (priority/browser-order nil)) (frequencies ordered)))))
 
 
+(deftest package-http-routes-prioritize-browser-consumers
+  (doseq [source ["resources/packages/registry/registry/fns.edn"
+                  "resources/packages/registry/registry/impls.clj"
+                  "src/graphden/packages/pin_usage.clj"]]
+    (let [early (set (priority/browser-first #{source}))]
+      (is (contains? early "edit-tutorial-package-lifecycle.test.js") source)
+      (is (contains? early "edit-packages-panel.test.js") source)
+      (is (= (frequencies (priority/browser-order nil))
+             (frequencies (priority/browser-order #{source}))) source))))
+
+
 (deftest shared-popover-impact-includes-the-personal-theme-walk
   (doseq [source ["resources/packages/app/editor/editor-edit-modes.js"
                   "resources/packages/web/runtime/graphden-popover.js"]]

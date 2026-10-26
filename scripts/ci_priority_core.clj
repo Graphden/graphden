@@ -124,6 +124,36 @@
     (concat direct (browser-local-consumers browser-files helpers))))
 
 
+(def ^:private cached-package-impl-sources
+  (memoize (fn []
+             (into {} (map (fn [path] [(str path) (slurp (str path))]))
+                   (fs/glob "resources/packages" "**/impls.clj")))))
+
+
+(defn- browser-api-consumers
+  "Follow a changed package module, or a Clojure source required by its impl,
+   to the package's declared HTTP roots and browser tests that call them."
+  [browser-files path]
+  (let [modules (if (re-matches #"resources/packages/[^/]+/[^/]+/(?:fns\.edn|impls\.clj)" path)
+                  [path]
+                  (when-let [[_ source] (re-matches #"src/(graphden/.+)\.clj" path)]
+                    (let [ns-name (-> source (str/replace "/" ".")
+                                      (str/replace "_" "-"))]
+                      (->> (cached-package-impl-sources)
+                           (keep (fn [[impl body]]
+                                   (when (str/includes? body (str "[" ns-name " ")) impl)))))))]
+    (for [module-path modules
+          :let [definitions (str/replace module-path #"(?:fns\.edn|impls\.clj)$" "fns.edn")]
+          :when (fs/exists? definitions)
+          :let [roots (->> (re-seq #":path\s+\"/([a-z][a-z0-9-]*)" (slurp definitions))
+                           (map second) (filter #(>= (count %) 4)) set)
+                markers (set (map #(str "/api/" %) roots))]
+          file browser-files
+          :when (let [source (slurp (str "tools/browser-test/" file))]
+                  (some #(str/includes? source %) markers))]
+      file)))
+
+
 (defn changed-paths
   "Use the same path set as CI scoping. A missing base yields no early hints;
    the full gate widens as usual."
@@ -143,30 +173,35 @@
                              sort
                              vec)
           graph (cached-browser-source-graph)]
-      (->> changed
-           sort
-           (mapcat (fn [path]
-                     (cond
-                       (re-matches #"tools/browser-test/edit-[^/]+\.test\.js" path)
-                       [(str (fs/file-name path))]
+      (->> (concat
+             (->> changed
+                  sort
+                  (filter #(re-matches #"tools/browser-test/edit-[^/]+\.test\.js" %))
+                  (map (comp str fs/file-name)))
+             (mapcat #(browser-api-consumers browser-files %) (sort changed))
+             (mapcat (fn [path]
+                       (cond
+                         (re-matches #"tools/browser-test/edit-[^/]+\.test\.js" path)
+                         []
 
-                       (re-matches #"tools/browser-test/[^/]+\.js" path)
-                       (browser-local-consumers browser-files
-                                                #{(str (fs/file-name path))})
+                         (re-matches #"tools/browser-test/[^/]+\.js" path)
+                         (browser-local-consumers browser-files
+                                                  #{(str (fs/file-name path))})
 
-                       (str/starts-with? path "resources/packages/app/editor/")
-                       (let [basename (str (fs/file-name path))
-                             stem (-> basename
-                                      (str/replace #"^editor-" "")
-                                      (str/replace #"\.(js|css)$" "")
-                                      (str/replace #"-graph$" ""))
-                             prefix (str "edit-" stem "-")]
-                         (concat (filter #(or (= % (str "edit-" stem ".test.js"))
-                                              (str/starts-with? % prefix))
-                                         browser-files)
-                                 (browser-source-consumers browser-files graph path)))
+                         (str/starts-with? path "resources/packages/app/editor/")
+                         (let [basename (str (fs/file-name path))
+                               stem (-> basename
+                                        (str/replace #"^editor-" "")
+                                        (str/replace #"\.(js|css)$" "")
+                                        (str/replace #"-graph$" ""))
+                               prefix (str "edit-" stem "-")]
+                           (concat (filter #(or (= % (str "edit-" stem ".test.js"))
+                                                (str/starts-with? % prefix))
+                                           browser-files)
+                                   (browser-source-consumers browser-files graph path)))
 
-                       :else (browser-source-consumers browser-files graph path))))
+                         :else (browser-source-consumers browser-files graph path)))
+                     (sort changed)))
            distinct
            (filter #(fs/exists? (str "tools/browser-test/" %)))
            vec))))

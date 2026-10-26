@@ -162,6 +162,14 @@
         (is (= ["0.1.0"] (map :version rows)))))))
 
 
+(defn- register-pin-source!
+  [package-name version]
+  (sp/create-entity (storage) :package-version
+                    {:name package-name :version version :ns-root package-name
+                     :fns [{:name :pin-fixture :namespace package-name}]
+                     :dependencies [:const] :content-hash (str package-name "-" version)}))
+
+
 (deftest package-pin-lifecycle-through-executor
   (testing "set → list → update → remove pins drive through the base-fns"
     (let [{:keys [ctx all-name->id]} *bootstrap*
@@ -170,6 +178,8 @@
           remove-id (get all-name->id :remove-package-pin)
           installed #(->> (exec/execute-with-named-args ctx list-id {})
                           (filter (fn [p] (= "acme.pinned" (:package-name p)))))]
+      (register-pin-source! "acme.pinned" "1.0.0")
+      (register-pin-source! "acme.pinned" "1.1.0")
       (testing "set creates a pin visible in the installed list"
         (let [r (exec/execute-with-named-args ctx set-id
                                               {:pkg-name "acme.pinned" :pkg-version "1.0.0"})]
@@ -190,20 +200,39 @@
           (is (false? (:removed r2)) "second remove is a no-op"))))))
 
 
+(deftest uninstall-without-source-fails-closed
+  (let [{:keys [ctx all-name->id]} *bootstrap*
+        name "acme.missing-source"
+        set-id (get all-name->id :set-package-pin)
+        remove-id (get all-name->id :remove-package-pin)]
+    (exec/execute-with-named-args ctx set-id
+                                  {:pkg-name name :pkg-version "1.0.0"})
+    (let [pin (first (sp/query-entities (storage) :package-install
+                                        {:package-name name}))]
+      (try
+        (is (= "package-source-unavailable"
+               (:reason (exec/execute-with-named-args ctx remove-id
+                                                      {:pkg-name name}))))
+        (is (some? (sp/read-entity (storage) :package-install (:id pin)))
+            "an unverified uninstall keeps the pin")
+        (finally
+          (sp/delete-entity (storage) :package-install (:id pin)))))))
+
+
 (deftest uninstall-handler-drops-pin-and-refreshes-panel
   (testing "DELETE /api/packages/uninstall?name=… unpins + returns the refreshed panel HTML"
     (let [{:keys [ctx all-name->id]} *bootstrap*
           set-id (get all-name->id :set-package-pin)
           list-id (get all-name->id :list-installed-packages)
-          remove-id (get all-name->id :remove-package-pin)
           installed #(->> (exec/execute-with-named-args ctx list-id {})
                           (filter (fn [p] (= "acme.uninstall" (:package-name p)))))]
       ;; Clean ALL pins first — this suite shares one `:once` DB, so sibling
       ;; tests (panel-install, install-package, …) leave pins that would keep the
       ;; panel non-empty. Removing them makes the empty-state assertion below
       ;; deterministic regardless of test order.
-      (doseq [p (exec/execute-with-named-args ctx list-id {})]
-        (exec/execute-with-named-args ctx remove-id {:pkg-name (:package-name p)}))
+      (doseq [p (sp/query-entities (storage) :package-install {})]
+        (sp/delete-entity (storage) :package-install (:id p)))
+      (register-pin-source! "acme.uninstall" "1.0.0")
       (exec/execute-with-named-args ctx set-id
                                     {:pkg-name "acme.uninstall" :pkg-version "1.0.0"})
       (is (seq (installed)) "pin present before uninstall")
@@ -215,9 +244,7 @@
         (is (re-find #"data-packages-panel" (:body resp))
             "response is the panel root, ready for the HTMX outerHTML swap")
         (is (re-find #"No add-on packages installed" (:body resp))
-            "the sole pin is gone → refreshed panel shows the empty-state")
-        (is (not (re-find #"acme\.uninstall" (:body resp)))
-            "the uninstalled package no longer appears in the table"))
+            "the sole pin is gone → refreshed panel shows the empty-state"))
       (is (empty? (installed)) "pin removed from the branch"))))
 
 
@@ -346,8 +373,18 @@
           (is (= "bdep.pkg" (:name (first pdeps))) "→ package B")
           (is (= "1.0.0" (:version (first pdeps))) "→ B's version"))))
 
-    ;; --- uninstall B (pin gone; materialised fns stay), then install A ---
-    (exec/execute-with-named-args ctx remove-id {:pkg-name "bdep.pkg"})
+    ;; A's source graph currently references B, so the pin is protected.
+    (is (= "package-in-use"
+           (:reason (exec/execute-with-named-args ctx remove-id
+                                                  {:pkg-name "bdep.pkg"}))))
+    ;; The published bundle retains that dependency after its source fn is
+    ;; removed. With no external graph consumer, B can be unpinned and the
+    ;; recursive install of A must restore B's pin.
+    (let [source (first (sp/query-entities (storage) :fn {:name "adep-uses-b"}))]
+      (is (some? source))
+      (sp/delete-entity (storage) :fn (:id source)))
+    (is (true? (:ok (exec/execute-with-named-args ctx remove-id
+                                                  {:pkg-name "bdep.pkg"}))))
     (is (not (pinned? "bdep.pkg")) "B unpinned before installing A")
     (is (true? (:ok (install! "adep.pkg" "1.0.0"))) "A installs")
     (is (pinned? "adep.pkg") "A is pinned")

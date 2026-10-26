@@ -90,6 +90,11 @@
               [(into (if native-style? ["cljstyle" "check"] ["clojure" "-M:cljstyle" "check"]) clj)])
             (when large-form-input?
               [large-forms-command])
+            ;; Generated-source drift is cheap to detect. Reject it before
+            ;; focused JVM suites, which can take tens of minutes.
+            (when devtour-input? [["bb" "devtour-check"]])
+            (when (and plan-input? (not ui-template?))
+              [["clojure" "-M:dev" "tools/ui_preview/generate_builtin_plans.clj" "--check"]])
             (when (seq changed-tests)
               [(into ["bb" "wt" "test"] (mapcat (fn [ns] ["--focus" ns]) changed-tests))])
             ;; Personal templates and browser plans share dynamic graph
@@ -112,10 +117,7 @@
             ;; even when its own plan compiles. Check before building a live
             ;; instance; the normal CI roster still runs the same sweep once.
             (when graph? [["bb" "graph-lint"] ["bb" "reachability"]
-                          ["bb" "type-sweep"]])
-            (when devtour-input? [["bb" "devtour-check"]])
-            (when (and plan-input? (not ui-template?))
-              [["clojure" "-M:dev" "tools/ui_preview/generate_builtin_plans.clj" "--check"]]))))))
+                          ["bb" "type-sweep"]]))))))
 
 
 (defn default-base

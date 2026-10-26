@@ -37,10 +37,11 @@
         broader (first (filter #(some #{"graphden.editor.component-bundle-test"} %) commands))]
     (is (= ["cljstyle" "check"] (vec (take 2 (first commands)))))
     (is (= guard (second commands)))
-    (is (= direct (nth commands 2)))
+    (is (= ["bb" "devtour-check"] (nth commands 2)))
+    (is (= direct (nth commands 3)))
     (is (some? broader))
     (is (not-any? #{"graphden.editor.config-resolution-test"} broader))
-    (is (some #{broader} (drop 3 commands)))))
+    (is (some #{broader} (drop 4 commands)))))
 
 
 (deftest changed-clojure-source-triggers-large-form-guard-before-broad-checks
@@ -77,6 +78,8 @@
     (is (some #{["bb" "reachability"]} commands))
     (is (some #{["bb" "type-sweep"]} commands))
     (is (some #{["bb" "devtour-check"]} commands))
+    (is (< (.indexOf commands ["bb" "devtour-check"])
+           (.indexOf commands ["bb" "type-sweep"])))
     (is (not-any? #{["clojure" "-M:dev" "tools/ui_preview/generate_builtin_plans.clj" "--check"]}
                   commands))))
 
@@ -89,7 +92,8 @@
 
 
 (deftest deleted-graph-source-still-runs-semantic-checks
-  (is (= [["bb" "wt" "test"
+  (is (= [["bb" "devtour-check"]
+          ["bb" "wt" "test"
            "--focus" "graphden.editor.root-compatibility-integration-test"
            "--focus" "graphden.editor.component-bundle-test"
            "--focus" "graphden.editor.component-config-test"
@@ -98,8 +102,7 @@
            "--focus" "graphden.executor.builtin-plans-test"]
           ["bb" "graph-lint"]
           ["bb" "reachability"]
-          ["bb" "type-sweep"]
-          ["bb" "devtour-check"]]
+          ["bb" "type-sweep"]]
          (fast/commands [] ["resources/packages/app/ui-inspector/fns.edn"] true true true)))
   (is (= [["bb" "devtour-check"]]
          (fast/commands [] ["resources/packages/app/editor/removed.js"] true true true))))

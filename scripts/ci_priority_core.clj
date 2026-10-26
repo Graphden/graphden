@@ -99,7 +99,7 @@
   [browser-files {:keys [sources] reverse-graph :reverse} path]
   (let [package-module (second (re-matches #"resources/packages/[^/]+/([^/]+)/fns\.edn" path))
         module-tokens (when package-module
-                        #{package-module (str/replace package-module #"^ui-" "")})
+                        (set [package-module (str/replace package-module #"^ui-" "")]))
         seeds (cond
                 (contains? sources path) #{path}
                 (and package-module (str/includes? package-module "-"))

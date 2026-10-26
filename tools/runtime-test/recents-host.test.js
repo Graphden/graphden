@@ -96,12 +96,28 @@ vm.runInContext(fs.readFileSync(path.join(__dirname, '../../resources/packages/a
   resolvePreviousIdentity({run() { throw new Error('previous identity candidate must not execute'); }});
   await previousIdentityLoad;
   assert.equal(mounted, 2, 'root identity change remounts only a fresh component');
+  saved.delete('graphden.recentFns');
+  listeners.get('gd-editor-root-changing')();
+  ctx.gdEditorRoot.componentNow = () => null;
+  ctx.gdEditorRoot.component = () => new Promise(resolve => { resolveLoad = resolve; });
+  ctx.gdPushRecentFn('22222222-2222-4222-8222-222222222222');
+  const resolveQueuedLoad = resolveLoad;
+  listeners.get('gd-editor-root-changing')();
+  ctx.gdEditorRoot.componentNow = builtin;
+  ctx.gdEditorRoot.component = async () => builtin();
+  listeners.get('gd-editor-root-ready')();
+  await ctx.gdRecentsGraph.reload();
+  resolveQueuedLoad(builtin());
+  assert.deepEqual(JSON.parse(saved.get('graphden.recentFns')).map(row => row.id),
+    ['22222222-2222-4222-8222-222222222222'],
+    'a selection queued before root readiness survives the next root generation');
+  const disposedBeforePagehide = disposed;
   ctx.gdEditorRoot.component = () => new Promise(resolve => { resolveLoad = resolve; });
   const late = ctx.gdRecentsGraph.reload();
   listeners.get('pagehide')();
   resolveLoad({run() { throw new Error('late candidate must not execute'); }});
   await late;
-  assert.equal(disposed, 2);
+  assert.equal(disposed, disposedBeforePagehide + 1);
   assert.equal(accepted, null, 'root disposal retires the host receipt');
   assert.equal(callbacks.size, 0, 'dispose releases delegated events');
   assert(renderCount > 2);

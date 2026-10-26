@@ -214,6 +214,17 @@ const {
     console.error('FAIL:', err.message);
     try {
       console.error('  tour at failure:', await tourWhere(page));
+      console.error('  recent trail at failure:', await page.evaluate(() => ({
+        stored: localStorage.getItem('graphden.recentFns'),
+        rootId: window.gdEditorRoot?.rootId(),
+        selected: typeof selectedFnId === 'undefined' ? null : selectedFnId,
+        search: typeof searchFilter === 'undefined' ? null : searchFilter,
+        recentHost: (() => {
+          const host = document.getElementById('gd-recent-fns');
+          return host ? {hidden: host.hidden, rows: host.querySelectorAll('.gd-recent-row').length,
+            text: host.textContent.slice(0, 160)} : null;
+        })(),
+      })));
       await page.screenshot({path: '/tmp/edit-tutorial-tour-ux-trace.test-fail.png'});
       console.error('  screenshot: /tmp/edit-tutorial-tour-ux-trace.test-fail.png');
     } catch (_) { /* page may be gone */ }

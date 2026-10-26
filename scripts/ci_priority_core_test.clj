@@ -50,6 +50,12 @@
                  "edit-account-menu-graph.test.js")))
 
 
+(deftest package-module-without-ui-prefix-keeps-browser-order-valid
+  (let [source "resources/packages/app/editor/fns.edn"
+        ordered (priority/browser-order #{source})]
+    (is (= (frequencies (priority/browser-order nil)) (frequencies ordered)))))
+
+
 (deftest shared-popover-impact-includes-the-personal-theme-walk
   (doseq [source ["resources/packages/app/editor/editor-edit-modes.js"
                   "resources/packages/web/runtime/graphden-popover.js"]]

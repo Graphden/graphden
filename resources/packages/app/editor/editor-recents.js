@@ -206,7 +206,7 @@ function renderRecentFns() {
 window.gdRecentsGraph = {
   reload: gdReloadRecents,
   replaceRuntime(candidate) { gdReplaceRecentsRuntime(candidate); renderRecentFns(); },
-  dispose() {
+  dispose({preserveEvents = false} = {}) {
     gdRecentsLoadGeneration++;
     gdRecentsPending?.controller.abort();
     gdRecentsPending = null;
@@ -216,10 +216,13 @@ window.gdRecentsGraph = {
     gdRecentsController?.dispose();
     gdRecentsController = null;
     gdRecentsSnapshot = null;
-    gdRecentsEvents = [];
+    if (!preserveEvents) gdRecentsEvents = [];
   },
 };
 window.addEventListener('pagehide', () => window.gdRecentsGraph.dispose());
-window.addEventListener('gd-editor-root-changing', () => window.gdRecentsGraph.dispose());
+// A selection can arrive while the next root is loading. Keep its graph event
+// for the new root; page exit and account changes still discard pending work.
+window.addEventListener('gd-editor-root-changing', () => window.gdRecentsGraph.dispose({preserveEvents: true}));
+window.addEventListener('gd-auth-changed', () => { gdRecentsEvents = []; });
 window.addEventListener('gd-editor-root-ready', () => { void gdReloadRecents(); });
 window.addEventListener('storage', event => { if (event.key === RECENT_FNS_KEY || event.key === PINNED_FNS_KEY) renderRecentFns(); });

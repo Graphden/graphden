@@ -18,7 +18,12 @@
     [babashka.process :as p])
   (:import
     (java.lang
-      ProcessHandle)))
+      ProcessHandle
+      ProcessHandle$Info)
+    (java.time
+      Duration)
+    (java.util
+      Optional)))
 
 
 (defn destroy-tree!
@@ -36,6 +41,52 @@
   [proc]
   (destroy-tree! proc)
   (try (deref proc 5000 nil) (catch Exception _ nil)))
+
+
+(defn- cpu-times
+  [proc]
+  (try
+    (let [root (Process/.toHandle (:proc proc))
+          children (-> root ProcessHandle/.descendants .iterator iterator-seq doall)]
+      (into {}
+            (keep (fn [handle]
+                    (when-let [duration (Optional/.orElse
+                                          (ProcessHandle$Info/.totalCpuDuration
+                                            (ProcessHandle/.info handle)) nil)]
+                      [(ProcessHandle/.pid handle) (Duration/.toMillis duration)])))
+            (cons root children)))
+    (catch Exception _ {})))
+
+
+(defn await-active-result
+  "Wait for a check. Its configured timeout is the normal ceiling. If the
+   process tree is still using CPU near that ceiling, allow up to ten more
+   minutes (or one original timeout, whichever is shorter). A quiet check
+   still times out at the normal ceiling; every check retains a hard cap."
+  ([proc timeout-ms]
+   (await-active-result proc timeout-ms {}))
+  ([proc timeout-ms {:keys [poll-ms stale-ms extension-ms]
+                     :or {poll-ms 1000}}]
+   (let [started (System/nanoTime)
+         base-ns (* 1000000 timeout-ms)
+         hard-ns (+ base-ns (* 1000000 (or extension-ms (min timeout-ms 600000))))
+         stale-ns (* 1000000 (or stale-ms (min 180000 (max 1000 (quot timeout-ms 4)))))]
+     (loop [previous (cpu-times proc)
+            last-active started]
+       (let [result (deref proc poll-ms ::pending)]
+         (if (not= ::pending result)
+           result
+           (let [now (System/nanoTime)
+                 current (cpu-times proc)
+                 active? (some (fn [[pid used]]
+                                 (> used (get previous pid 0))) current)
+                 last-active (if active? now last-active)
+                 elapsed (- now started)]
+             (if (or (>= elapsed hard-ns)
+                     (and (>= elapsed base-ns)
+                          (>= (- now last-active) stale-ns)))
+               ::timeout
+               (recur current last-active)))))))))
 
 
 (defn run-bounded!

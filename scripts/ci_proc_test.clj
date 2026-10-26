@@ -35,6 +35,39 @@
         "no orphaned grandchild keeps running after the timeout")))
 
 
+(deftest active-check-can-finish-past-its-normal-ceiling
+  (let [proc (p/process {:cmd ["bash" "-c"
+                               "yes > /dev/null & worker=$!; sleep 1.2; kill $worker; wait $worker 2>/dev/null; exit 0"]
+                         :out :string :err :string})]
+    (try
+      (is (zero? (:exit (ci-proc/await-active-result
+                          proc 500 {:poll-ms 50 :stale-ms 800 :extension-ms 2000}))))
+      (finally (ci-proc/kill-and-salvage! proc)))))
+
+
+(deftest active-check-still-has-a-hard-cap
+  (let [proc (p/process {:cmd ["bash" "-c" "yes > /dev/null & wait"]
+                         :out :string :err :string})]
+    (try
+      (is (= :ci-proc/timeout
+             (ci-proc/await-active-result
+               proc 300 {:poll-ms 50 :stale-ms 800 :extension-ms 400})))
+      (finally (ci-proc/kill-and-salvage! proc)))))
+
+
+(deftest quiet-check-times-out-at-normal-ceiling
+  (let [proc (p/process {:cmd ["bash" "-c" "sleep 5"]
+                         :out :string :err :string})
+        started (System/nanoTime)]
+    (try
+      (is (= :ci-proc/timeout
+             (ci-proc/await-active-result
+               proc 500 {:poll-ms 50 :stale-ms 100 :extension-ms 2000})))
+      (is (< (/ (- (System/nanoTime) started) 1000000) 1500)
+          "a quiet hang does not consume the active-work allowance")
+      (finally (ci-proc/kill-and-salvage! proc)))))
+
+
 (defn- fake-run-check
   "ci.clj's run-check contract over a script: `outcomes` maps a check name to
    the statuses its successive runs end in."

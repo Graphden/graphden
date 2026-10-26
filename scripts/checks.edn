@@ -170,7 +170,9 @@
  ;; The priority scheduler serializes the graph-owned builtin-plan namespace
  ;; inside a later dependency layer. Its measured 323s plus the registry layer
  ;; left <12% headroom at 900s; two C3 trains reached that ceiling while still
- ;; running tests. Keep a finite 18m cap until the expensive layer is reduced.
+ ;; running tests. The 18m normal ceiling now extends only while this check's
+ ;; process tree is using CPU, up to a hard 28m cap. A quiet hang still ends
+ ;; at 18m. Split the expensive dependency layer before increasing either cap.
  {:name "tests-unit"    :bb "test-unit"     :timeout 1080000 :group :test
   :relevant ["^src/" "^test/" "^resources/" "^scripts/" "^external-packages/"
              "^(bb|deps|tests)\\.edn$" "^build\\.clj$" "^dev-resources/" "^development/src/"]}

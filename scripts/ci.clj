@@ -12,7 +12,7 @@
 
    Hang containment: every check has a hard timeout (see `check-timeout`
    below). A wedged check (Docker stall, kaocha deadlock, network hiccup
-   on antq) is killed at the deadline, reported as failed-by-timeout,
+   on antq) is killed at a bounded deadline, reported as failed-by-timeout,
    and the suite continues so the user always gets a result line."
   (:require
     [babashka.process :as p]
@@ -65,9 +65,11 @@
 
 ;; ===========================================================================
 ;; Per-check timeouts live in the registry (`scripts/checks.edn`) alongside each
-;; check's bb task + group — one source of truth, read below. Each value is a
-;; CEILING: a healthy run finishes well below it; a true hang (docker stall,
-;; kaocha deadlock, antq network hiccup) is killed at the deadline and reported.
+;; check's bb task + group — one source of truth, read below. Each value is
+;; the normal ceiling. The shared process runner grants bounded extra time
+;; while the process tree is using CPU, up to a hard cap, so a healthy but
+;; slower randomized suite is not killed for crossing one wall deadline.
+;; A quiet hang still times out at the normal ceiling.
 ;; ===========================================================================
 
 ;; Selection core (registry read + validation + --groups/--since/--skip
@@ -228,17 +230,15 @@
         proc (p/process (cond-> {:cmd cmd :out :string :err :string}
                           (:extra-env c) (assoc :extra-env (:extra-env c))))
         _ (swap! live-procs conj proc)
-        result (deref proc timeout-ms ::timeout)
+        result (ci-proc/await-active-result proc timeout-ms)
         ;; Wall time of THIS check, recorded whatever the outcome. The run used
         ;; to report one number — total elapsed — which cannot answer "which
-        ;; check got slower", and the per-check `:timeout` ceilings in
-        ;; `checks.edn` were set from numbers nobody kept. A timed-out check
-        ;; still gets a duration: it is the ceiling, and seeing it sit at the
-        ;; ceiling is the point.
+        ;; check got slower". A timed-out check retains its actual duration,
+        ;; including any bounded active-work extension.
         duration-ms (quot (- (System/nanoTime) started) 1000000)]
     (swap! live-procs disj proc)
     (cond
-      (= result ::timeout)
+      (= result :ci-proc/timeout)
       ;; Kill the check's whole tree, then salvage what it printed BEFORE the
       ;; axe: kaocha's dots-so-far name the namespace that was still running,
       ;; which is the whole diagnosis. Discarding it made a timeout verdict
@@ -247,7 +247,8 @@
       (let [r (ci-proc/kill-and-salvage! proc)]
         (swap! results assoc check-name
                {:exit -1
-                :output (str "TIMEOUT after " (/ timeout-ms 1000) " s\n"
+                :output (str "TIMEOUT after " (quot duration-ms 1000) " s"
+                             " (normal ceiling " (/ timeout-ms 1000) " s)\n"
                              "Command: " (pr-str cmd)
                              (when (:out r) (str "\n--- partial stdout ---\n" (:out r)))
                              (when (seq (:err r)) (str "\n--- partial stderr ---\n" (:err r))))

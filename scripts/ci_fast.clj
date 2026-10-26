@@ -90,19 +90,11 @@
               [(into (if native-style? ["cljstyle" "check"] ["clojure" "-M:cljstyle" "check"]) clj)])
             (when large-form-input?
               [large-forms-command])
-            ;; Generated-source drift is cheap to detect. Reject it before
-            ;; focused JVM suites, which can take tens of minutes.
+            ;; Finish cheap source, generated-artifact and corpus checks
+            ;; before focused JVM suites, which can take tens of minutes.
             (when devtour-input? [["bb" "devtour-check"]])
             (when (and plan-input? (not ui-template?))
               [["clojure" "-M:dev" "tools/ui_preview/generate_builtin_plans.clj" "--check"]])
-            (when (seq changed-tests)
-              [(into ["bb" "wt" "test"] (mapcat (fn [ns] ["--focus" ns]) changed-tests))])
-            ;; Personal templates and browser plans share dynamic graph
-            ;; references that a namespace require graph cannot infer. Check
-            ;; these consumers before broader linters and corpus audits.
-            (when (seq remaining-consumers)
-              [(into ["bb" "wt" "test"]
-                     (mapcat (fn [ns] ["--focus" ns]) remaining-consumers))])
             (when (seq clj)
               [(into ["clojure" "-M:splint"] clj)
                (into (if native-kondo? ["clj-kondo" "--lint"] ["clojure" "-M:kondo" "--lint"]) clj)])
@@ -117,7 +109,14 @@
             ;; even when its own plan compiles. Check before building a live
             ;; instance; the normal CI roster still runs the same sweep once.
             (when graph? [["bb" "graph-lint"] ["bb" "reachability"]
-                          ["bb" "type-sweep"]]))))))
+                          ["bb" "type-sweep"]])
+            (when (seq changed-tests)
+              [(into ["bb" "wt" "test"] (mapcat (fn [ns] ["--focus" ns]) changed-tests))])
+            ;; Personal templates and browser plans share dynamic graph
+            ;; references that a namespace require graph cannot infer.
+            (when (seq remaining-consumers)
+              [(into ["bb" "wt" "test"]
+                     (mapcat (fn [ns] ["--focus" ns]) remaining-consumers))]))))))
 
 
 (defn default-base

@@ -27,21 +27,25 @@
   (is (= [] (fast/commands [] true true true))))
 
 
-(deftest edited-jvm-test-runs-immediately-after-changed-file-formatting
+(deftest edited-jvm-test-runs-after-cheap-checks-and-before-broad-consumers
   (let [commands (fast/commands
                    ["test/graphden/editor/config_resolution_test.clj"
                     "resources/packages/app/ui-inspector/fns.edn"]
                    true true true)
         direct ["bb" "wt" "test" "--focus" "graphden.editor.config-resolution-test"]
         guard fast/large-forms-command
-        broader (first (filter #(some #{"graphden.editor.component-bundle-test"} %) commands))]
+        splint (first (filter #(= ["clojure" "-M:splint"] (vec (take 2 %))) commands))
+        broader (first (filter #(some #{"graphden.editor.component-bundle-test"} %) commands))
+        position (fn [command] (count (take-while #(not= command %) commands)))]
     (is (= ["cljstyle" "check"] (vec (take 2 (first commands)))))
     (is (= guard (second commands)))
     (is (= ["bb" "devtour-check"] (nth commands 2)))
-    (is (= direct (nth commands 3)))
+    (is (some? splint))
+    (is (< (position splint) (position direct)))
+    (is (< (position ["bb" "type-sweep"]) (position direct)))
     (is (some? broader))
     (is (not-any? #{"graphden.editor.config-resolution-test"} broader))
-    (is (some #{broader} (drop 4 commands)))))
+    (is (< (position direct) (position broader)))))
 
 
 (deftest changed-clojure-source-triggers-large-form-guard-before-broad-checks
@@ -78,8 +82,8 @@
     (is (some #{["bb" "reachability"]} commands))
     (is (some #{["bb" "type-sweep"]} commands))
     (is (some #{["bb" "devtour-check"]} commands))
-    (is (< (.indexOf commands ["bb" "devtour-check"])
-           (.indexOf commands ["bb" "type-sweep"])))
+    (is (< (count (take-while #(not= ["bb" "devtour-check"] %) commands))
+           (count (take-while #(not= ["bb" "type-sweep"] %) commands))))
     (is (not-any? #{["clojure" "-M:dev" "tools/ui_preview/generate_builtin_plans.clj" "--check"]}
                   commands))))
 
@@ -93,16 +97,16 @@
 
 (deftest deleted-graph-source-still-runs-semantic-checks
   (is (= [["bb" "devtour-check"]
+          ["bb" "graph-lint"]
+          ["bb" "reachability"]
+          ["bb" "type-sweep"]
           ["bb" "wt" "test"
            "--focus" "graphden.editor.root-compatibility-integration-test"
            "--focus" "graphden.editor.component-bundle-test"
            "--focus" "graphden.editor.component-config-test"
            "--focus" "graphden.editor.config-resolution-test"
            "--focus" "graphden.executor.structural-projection-test"
-           "--focus" "graphden.executor.builtin-plans-test"]
-          ["bb" "graph-lint"]
-          ["bb" "reachability"]
-          ["bb" "type-sweep"]]
+           "--focus" "graphden.executor.builtin-plans-test"]]
          (fast/commands [] ["resources/packages/app/ui-inspector/fns.edn"] true true true)))
   (is (= [["bb" "devtour-check"]]
          (fast/commands [] ["resources/packages/app/editor/removed.js"] true true true))))

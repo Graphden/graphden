@@ -21,6 +21,9 @@ const WHEEL_LINE_HEIGHT = 16; // px per line, the usual approximation
 const viewport = {
   pan: {x: 0, y: 0},
   zoom: 1,
+  // Keep an automatically fitted graph inside the visible area when the
+  // bottom-sheet Inspector grows after its server partial arrives.
+  autoFit: false,
   // Suspended while another gesture owns the pointer — the overlay drag handle
   // moves a node, and without this a touch drag would pan the canvas too,
   // doubling the movement and pulling the node out from under the finger.
@@ -30,6 +33,7 @@ const viewport = {
 const _viewportListeners = [];
 let _viewportInputInstalled = false;
 let _viewportAnimation = null;
+let _inspectorSizeObserver = null;
 
 /** Register a handler for pan/zoom. Handlers must stay O(1) — these fire hot. */
 function onViewportChanged(cb) {
@@ -62,6 +66,7 @@ function _cancelViewportAnimation() {
 
 function setViewportPan(x, y) {
   _cancelViewportAnimation();
+  viewport.autoFit = false;
   viewport.pan.x = x;
   viewport.pan.y = y;
   _notifyViewportChanged();
@@ -70,6 +75,7 @@ function setViewportPan(x, y) {
 /** Set both at once, without an anchor point. Used by fit-to-content. */
 function setViewportTransform(zoom, panX, panY) {
   _cancelViewportAnimation();
+  viewport.autoFit = true;
   viewport.zoom = clampZoom(zoom);
   viewport.pan.x = panX;
   viewport.pan.y = panY;
@@ -91,6 +97,7 @@ function _startsOnGraphLayer(e) {
  */
 function setViewportZoom(level, screenPoint) {
   _cancelViewportAnimation();
+  viewport.autoFit = false;
   const next = clampZoom(level);
   const anchor = screenPoint || viewportCentreScreen();
   const g = viewportScreenToGraph(anchor.x, anchor.y);
@@ -177,6 +184,15 @@ function installViewportInput() {
   const container = viewportContainer();
   if (!container) return;
   _viewportInputInstalled = true;
+
+  const inspector = document.getElementById('gd-inspector');
+  if (inspector && !_inspectorSizeObserver && typeof ResizeObserver === 'function') {
+    _inspectorSizeObserver = new ResizeObserver(() => {
+      if (viewport.autoFit && typeof graphRenderSettled === 'function'
+          && graphRenderSettled()) fitInVisibleArea(50);
+    });
+    _inspectorSizeObserver.observe(inspector);
+  }
 
   // ── Wheel: zoom about the cursor ─────────────────────────────────────────
   container.addEventListener('wheel', (e) => {

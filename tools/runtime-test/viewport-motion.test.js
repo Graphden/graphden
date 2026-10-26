@@ -78,6 +78,39 @@ for (const duration of ['0', '-1', 'NaN', 'Infinity', 'undefined']) {
 }
 console.log('PASS viewport motion: replacement, interruption, reduced motion and immediate durations');
 
+// Async Inspector content changes the bottom sheet's height after the first
+// graph fit. Follow that resize only while the reader still uses auto-fit.
+{
+  let resized;
+  let fits = 0;
+  let settled = true;
+  const surface = {addEventListener() {}};
+  const inspector = {};
+  const context = vm.createContext({
+    document: {getElementById: id => id === 'graph-surface' ? surface
+      : id === 'gd-inspector' ? inspector : null,
+    addEventListener() {}},
+    ResizeObserver: class {
+      constructor(callback) { resized = callback; }
+      observe(target) { assert.equal(target, inspector); }
+    },
+  });
+  vm.runInContext(source, context);
+  context.graphRenderSettled = () => settled;
+  context.fitInVisibleArea = () => { fits++; };
+  context.installViewportInput();
+  context.setViewportTransform(1, 0, 0);
+  resized();
+  assert.equal(fits, 1, 'auto-fit follows a late Inspector resize');
+  context.setViewportPan(12, 34);
+  resized();
+  assert.equal(fits, 1, 'manual pan keeps its owner');
+  context.setViewportTransform(1, 0, 0);
+  settled = false;
+  resized();
+  assert.equal(fits, 1, 'a pending graph render owns its own fit');
+}
+
 // A bottom-sheet Inspector covers the canvas; its animation must not make
 // the fitted area transiently larger. Desktop grid panels are already excluded.
 {

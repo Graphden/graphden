@@ -9,6 +9,9 @@
   let selected = null;
   let rejected = false;
   let wired = false;
+  const recordingScope = () => JSON.stringify([window.gdPrefOwner,
+    typeof graphdenCurrentOrg === 'string' ? graphdenCurrentOrg : 'public',
+    typeof getCurrentBranchName === 'function' ? getCurrentBranchName() : 'main']);
 
   const pref = () => window.gdPrefRead?.('keymap') || null;
   const overrides = () => ({...(pref()?.payload?.bindings || {})});
@@ -100,7 +103,8 @@
   }
   function onRecordKey(event) {
     if (!recording) return;
-    if (!recording.row?.isConnected || document.body.getAttribute('data-surface') !== recording.surface) {
+    if (!recording.row?.isConnected || document.body.getAttribute('data-surface') !== recording.surface
+        || recording.scope !== recordingScope()) {
       stopRecording();
       return;
     }
@@ -131,7 +135,7 @@
     if (!entry || id === 'help') return;
     if (recording) stopRecording();
     recording = {id, keys: [], leader: entry.leader, row: null,
-      surface: document.body.getAttribute('data-surface')};
+      surface: document.body.getAttribute('data-surface'), scope: recordingScope()};
     window.addEventListener('keydown', onRecordKey, true);
     window.addEventListener('pointerdown', onRecordPointer, true);
     render();
@@ -188,7 +192,9 @@
     window.addEventListener('gd-editor-root-changing', () => {
       selected = null;
       rejected = false;
-      if (recording) stopRecording();
+      // A same-account graph refresh may finish between Change and Enter.
+      // Keep the keyboard gesture; its row is rebound when the root is ready.
+      if (recording && recording.scope !== recordingScope()) stopRecording();
     });
     window.addEventListener('gd-editor-root-ready', () => {
       if (document.getElementById('gd-keymap-root')?.isConnected) render();

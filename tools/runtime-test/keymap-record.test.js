@@ -70,6 +70,7 @@ function boot() {
   const winListeners = {};
   const writes = [];
   const win = {
+    gdPrefOwner: 'owner-a',
     addEventListener(t, fn) { (winListeners[t] = winListeners[t] || []).push(fn); },
     removeEventListener(t, fn) { winListeners[t] = (winListeners[t] || []).filter((f) => f !== fn); },
     gdShortcutEntries: () => [{ id: 'find', group: 'Go', description: 'Find', keys: 'f', leader: true,
@@ -90,7 +91,7 @@ function boot() {
   };
   const change = () => root.dispatch('click', {target: doc.querySelector('.gd-km-change')});
   const recording = () => doc.querySelector('.gd-km-recording');
-  return { doc, root, writes, fire, change, recording };
+  return { doc, root, win, writes, fire, change, recording };
 }
 
 console.log(' typed keys show in the recorded row');
@@ -121,6 +122,30 @@ console.log(' a pointerdown outside the row ends recording');
   assert(!t.recording(), 'recorder gone');
   const k = t.fire('keydown', { key: 'x' });
   assert(!k.defaultPrevented, 'key not swallowed afterwards');
+}
+
+console.log(' a same-owner graph root refresh keeps the current key gesture');
+{
+  const t = boot();
+  t.change();
+  t.fire('gd-editor-root-changing');
+  assert(!!t.recording(), 'the recorder remains visible during a root refresh');
+  t.fire('gd-editor-root-ready');
+  t.fire('keydown', {key: 'p'});
+  t.fire('keydown', {key: 'Enter'});
+  assert(t.writes.length === 1 && t.writes[0][1].payload.bindings.find.keys === 'p',
+    'Enter commits the keys after the root refresh');
+}
+
+console.log(' a changed preference owner cancels the key gesture');
+{
+  const t = boot();
+  t.change();
+  t.win.gdPrefOwner = 'owner-b';
+  t.fire('gd-editor-root-changing');
+  assert(!t.recording(), 'the old owner recorder is gone');
+  const key = t.fire('keydown', {key: 'Enter'});
+  assert(!key.defaultPrevented && t.writes.length === 0, 'the new owner receives no stale override');
 }
 
 if (fails) { console.error(`✗ ${fails} failed, ${passes} passed`); process.exit(1); }

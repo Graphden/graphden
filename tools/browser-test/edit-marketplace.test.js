@@ -120,6 +120,10 @@ const PAPER = '#123456';
     await page.click('#gd-keymap-root .gd-km-row[data-shortcut="graph-fit"] .gd-km-change');
     await page.waitForSelector('#gd-keymap-root .gd-km-recording', {timeout: 5000});
     await page.keyboard.press('p');
+    // A theme or graph refresh may replace the selected UI root mid-gesture.
+    // The same account's recorder must survive that refresh through Enter.
+    await page.evaluate(() => window.gdEditorRoot.reload());
+    await page.waitForSelector('#gd-keymap-root .gd-km-recording', {timeout: 15000});
     await page.keyboard.press('q');
     await page.keyboard.press('Enter');
     await page.waitForFunction(() => {

@@ -85,6 +85,31 @@
     (is (some #{"edit-tutorial-tour.test.js"} early))))
 
 
+(deftest browser-links-follow-unique-globals-and-specific-selectors
+  (let [source "resources/packages/app/editor/editor-feature.js"
+        consumer "resources/packages/app/editor/editor-consumer.js"
+        test-path "tools/browser-test/edit-feature.test.js"
+        indirect-test "tools/browser-test/edit-consumer.test.js"
+        sources {source "function featureGlobal() {}\nconst selector = 'gd-specific-widget';"
+                 consumer "function consumeFeature() { featureGlobal(); }"
+                 test-path "document.querySelector('.gd-specific-widget');"
+                 indirect-test "consumeFeature();"}
+        graph (#'priority/browser-source-graph sources [source consumer] [test-path indirect-test])
+        distances (#'priority/dependency-distances (:reverse graph) #{source})]
+    (is (= 1 (get distances test-path)) "the selector links the source directly to its test")
+    (is (= 1 (get distances consumer)) "a unique global links dependent modules")
+    (is (= 2 (get distances indirect-test)) "a test of the dependent module is reachable"))
+  (let [source-a "resources/packages/app/editor/editor-a.js"
+        source-b "resources/packages/app/editor/editor-b.js"
+        test-path "tools/browser-test/edit-ambiguous.test.js"
+        sources {source-a "function sharedGlobal() {}"
+                 source-b "function sharedGlobal() {}"
+                 test-path "sharedGlobal();"}
+        graph (#'priority/browser-source-graph sources [source-a source-b] [test-path])]
+    (is (nil? (get (#'priority/dependency-distances (:reverse graph) #{source-a}) test-path))
+        "an ambiguous owner must not invent a dependency")))
+
+
 (deftest backend-priority-covers-direct-and-transitive-consumers
   (let [layers (priority/unit-layers #{"src/graphden/types/core.clj"})
         direct (first layers)

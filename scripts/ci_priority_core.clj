@@ -8,43 +8,6 @@
     [clojure.string :as str]))
 
 
-(def ^:private browser-by-editor
-  {"editor-undo.js" ["edit-undo.test.js"]
-   "editor-shortcuts.js" ["edit-shortcuts.test.js"]
-   "editor-tour-cleanup.js" ["edit-tutorial-cleanup-retry.test.js"]
-   "editor-sidebar.js" ["edit-sidebar-lazy.test.js" "edit-sidebar-filter.test.js"]
-   "editor-type-format.js" ["edit-canvas-types-bindings-passive.test.js"
-                            "edit-canvas-values-passive.test.js"]
-   "editor-fn-picker-rank.js" ["edit-fn-picker-tiers.test.js"]
-   "editor-problems.js" ["edit-problem-lenses.test.js"]})
-
-
-(def ^:private browser-impact
-  ;; A module can affect consumers that do not mention its name. Keep this
-  ;; dependency map explicit; filename matching below is only a fallback.
-  {"resources/packages/app/editor/editor-root.js"
-   ["edit-ui-components-selective.test.js" "edit-account-menu-graph.test.js"
-    "edit-recents-graph.test.js" "edit-fn-picker.test.js" :tutorial]
-   "resources/packages/app/editor/editor-prefs.js"
-   ["edit-prefs.test.js" "edit-ui-components-selective.test.js" :tutorial]
-   "resources/packages/app/editor/editor-ui-components.js"
-   ["edit-ui-components-selective.test.js" "edit-ui-components.test.js"
-    "edit-account-menu-graph.test.js" "edit-recents-graph.test.js" :tutorial]
-   "resources/packages/app/editor/editor-edit-modes.js"
-   ["edit-ui-components.test.js" "edit-arg-value.test.js" "edit-secret-inline.test.js"]
-   "resources/packages/web/runtime/graphden-popover.js"
-   ["edit-ui-components.test.js" "edit-arg-value.test.js" "edit-value-card-display.test.js"]
-   "resources/packages/app/editor/editor-tour-picker.js"
-   ["edit-tutorial-tour-picker.test.js" :tutorial]
-   "resources/packages/app/editor/editor-tour-catalog-graph.js"
-   ["edit-tutorial-tour-picker.test.js" "edit-ui-components-selective.test.js" :tutorial]
-   "resources/packages/app/editor/editor-row-actions.js"
-   [:row-actions]
-   "resources/packages/app/ui-tutorial-catalog/fns.edn"
-   ["edit-tutorial-tour-picker.test.js" "edit-ui-components-selective.test.js" :tutorial]
-   "tools/browser-test/tutorial-tour-helpers.js" [:tutorial]})
-
-
 (declare dependency-distances)
 
 
@@ -71,25 +34,94 @@
          (sort-by (juxt distances identity)))))
 
 
-(defn- browser-contract-consumers
-  [browser-files marker]
-  (let [owners (->> (fs/glob "tools/browser-test" "*.js")
-                    (keep (fn [path]
-                            (when (str/includes? (slurp (str path)) marker)
-                              (str (fs/file-name path)))))
-                    set)]
-    (browser-local-consumers browser-files owners)))
+(defn- script-definitions
+  "Top-level browser globals. Only uniquely owned names form graph edges."
+  [source]
+  (->> (concat (map second (re-seq #"(?m)^(?:async )?(?:function|class|const|let|var)\s+([A-Za-z_$][\w$]*)\b"
+                                   source))
+               (map second (re-seq #"\b(?:window|globalThis)\.([A-Za-z_$][\w$]*)\s*="
+                                   source)))
+       (filter #(>= (count %) 7))
+       set))
 
 
-(defn- impacted-browser-files
-  [browser-files path]
-  (mapcat (fn [entry]
-            (case entry
-              :tutorial (filter #(str/starts-with? % "edit-tutorial-") browser-files)
-              :row-actions (browser-contract-consumers browser-files
-                                                       "row-actions-popover")
-              [entry]))
-          (get browser-impact path)))
+(defn- browser-selectors
+  [source]
+  (set (re-seq #"\b(?:gd|fn|node|execute|tour)-[a-z][a-z0-9-]{5,}\b" source)))
+
+
+(defn- browser-source-graph
+  ([]
+   (let [scripts (mapv str (fs/glob "resources/packages" "**/*.js"))
+         browser (mapv str (fs/glob "tools/browser-test" "*.js"))
+         sources (into {} (map (fn [path] [path (slurp path)]) (concat scripts browser)))]
+     (browser-source-graph sources scripts browser)))
+  ([sources scripts browser]
+   (let [owners (reduce (fn [acc path]
+                          (reduce (fn [a identifier] (update a identifier (fnil conj #{}) path))
+                                  acc (script-definitions (get sources path))))
+                        {} scripts)
+         unique-owners (into {} (keep (fn [[identifier paths]]
+                                        (when (= 1 (count paths)) [identifier (first paths)])))
+                             owners)
+         selector-consumers (reduce (fn [acc path]
+                                      (reduce (fn [a selector] (update a selector (fnil conj #{}) path))
+                                              acc (browser-selectors (get sources path))))
+                                    {} browser)
+         reverse-graph (reduce-kv
+                         (fn [graph path source]
+                           (reduce (fn [g identifier]
+                                     (if-let [owner (get unique-owners identifier)]
+                                       (if (= owner path) g (update g owner (fnil conj #{}) path))
+                                       g))
+                                   graph
+                                   (distinct (re-seq #"\b[A-Za-z_$][\w$]{6,}\b" source))))
+                         {} sources)
+         reverse-graph (reduce
+                         (fn [graph path]
+                           (reduce (fn [g selector]
+                                     (let [consumers (get selector-consumers selector)]
+                                       (if (<= (count consumers) 15)
+                                         (update g path (fnil into #{}) consumers)
+                                         g)))
+                                   graph (browser-selectors (get sources path))))
+                         reverse-graph scripts)]
+     {:sources sources :reverse reverse-graph})))
+
+
+(def ^:private cached-browser-source-graph
+  ;; The CLI computes one immutable candidate plan per process. Tests may ask
+  ;; for several changed paths in that same process.
+  (memoize browser-source-graph))
+
+
+(defn- browser-source-consumers
+  [browser-files {:keys [sources] reverse-graph :reverse} path]
+  (let [package-module (second (re-matches #"resources/packages/[^/]+/([^/]+)/fns\.edn" path))
+        module-tokens (when package-module
+                        #{package-module (str/replace package-module #"^ui-" "")})
+        seeds (cond
+                (contains? sources path) #{path}
+                (and package-module (str/includes? package-module "-"))
+                (into #{} (keep (fn [[script source]]
+                                  (when (and (str/starts-with? script "resources/packages/")
+                                             (some #(str/includes? source %) module-tokens))
+                                    script))) sources)
+                :else #{})
+        distances (dependency-distances reverse-graph seeds)
+        reached (->> distances
+                     (filter (fn [[candidate depth]]
+                               (and (<= depth 3)
+                                    (str/starts-with? candidate "tools/browser-test/"))))
+                     (sort-by (juxt second first))
+                     (map first))
+        tests (set browser-files)
+        direct (keep (fn [candidate]
+                       (let [name (str (fs/file-name candidate))]
+                         (when (contains? tests name) name))) reached)
+        helpers (into #{} (map (comp str fs/file-name))
+                      (remove #(contains? tests (str (fs/file-name %))) reached))]
+    (concat direct (browser-local-consumers browser-files helpers))))
 
 
 (defn changed-paths
@@ -101,15 +133,16 @@
 
 
 (defn browser-first
-  "Existing browser files directly changed, declared as consumers of a module,
-   or sharing its specific filename stem. This only moves tests earlier; the
-   shell runner validates the complete suite again before use."
+  "Existing browser files directly changed, reachable through JS globals,
+   selectors and local helper imports, or sharing a filename stem. This only
+   moves tests earlier; the shell runner validates the complete suite."
   [changed]
   (when changed
     (let [browser-files (->> (fs/glob "tools/browser-test" "edit-*.test.js")
                              (map (comp str fs/file-name))
                              sort
-                             vec)]
+                             vec)
+          graph (cached-browser-source-graph)]
       (->> changed
            sort
            (mapcat (fn [path]
@@ -118,9 +151,8 @@
                        [(str (fs/file-name path))]
 
                        (re-matches #"tools/browser-test/[^/]+\.js" path)
-                       (concat (browser-local-consumers browser-files
-                                                        #{(str (fs/file-name path))})
-                               (impacted-browser-files browser-files path))
+                       (browser-local-consumers browser-files
+                                                #{(str (fs/file-name path))})
 
                        (str/starts-with? path "resources/packages/app/editor/")
                        (let [basename (str (fs/file-name path))
@@ -129,13 +161,12 @@
                                       (str/replace #"\.(js|css)$" "")
                                       (str/replace #"-graph$" ""))
                              prefix (str "edit-" stem "-")]
-                         (concat (impacted-browser-files browser-files path)
-                                 (get browser-by-editor basename)
-                                 (filter #(or (= % (str "edit-" stem ".test.js"))
+                         (concat (filter #(or (= % (str "edit-" stem ".test.js"))
                                               (str/starts-with? % prefix))
-                                         browser-files)))
+                                         browser-files)
+                                 (browser-source-consumers browser-files graph path)))
 
-                       :else (impacted-browser-files browser-files path))))
+                       :else (browser-source-consumers browser-files graph path))))
            distinct
            (filter #(fs/exists? (str "tools/browser-test/" %)))
            vec))))

@@ -901,9 +901,11 @@ precede the full suites. Source-related namespaces and runtime JS files run
 earlier within their authoritative full suite, each once.
 
 CI requires the same committed HEAD and a clean nonignored tree at the start and
-end; changing the candidate invalidates the run. Retry receipts only rank work,
-including browser files, and never cache a previous pass. Every selected check
-remains mandatory; timeout and strict-flake rules are unchanged.
+end; changing the candidate invalidates the run. An interrupted native train
+can credit completed checks and browser files from durable receipts for the
+identical assembled SHA, base, roster and verified image. Completed red trains
+use receipts only to rank retry work. Every selected check remains mandatory;
+timeout and strict-flake rules are unchanged.
 
 For optional local diagnostics, use `bb scripts/ci.clj --preflight-only` or
 focused tests through `bb wt test`; `bb lint` and its group aliases accept

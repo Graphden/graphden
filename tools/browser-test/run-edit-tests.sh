@@ -101,7 +101,7 @@ if [ -n "${GRAPHDEN_E2E_PRIORITY_BASE:-}" ]; then
   echo "browser order: $(printf '%s\n' "$FILES" | head -n 5 | tr '\n' ' ') ..."
 fi
 
-# Receipts affect order only. The normal checkout includes this helper; a
+# Exact-candidate interrupted gate receipts may also credit completed files. The normal checkout includes this helper; a
 # copied standalone verdict-test fixture deliberately has no repository planner.
 BROWSER_PROGRESS=""
 if [ -f ../../scripts/ci_resume_cli.clj ]; then
@@ -569,6 +569,12 @@ if [ "${GD_E2E_BOOTSTRAP_HOME:-0}" = 1 ]; then
   echo "isolated personal home fixture ready"
 fi
 for f in $FILES; do
+  if [ "${GRAPHDEN_RESUME_CREDIT:-0}" = 1 ] && [ -n "$BROWSER_PROGRESS" ] \
+     && [ "$(cd ../.. && bb scripts/ci_resume_cli.clj status browser "$BROWSER_PROGRESS" "$f")" = passed ]; then
+    PASS=$((PASS+1))
+    echo "─── $f: resumed PASS from exact-candidate checkpoint ───"
+    continue
+  fi
   if [ "$SKIP_AFTER_CASCADE" = "1" ]; then
     REMAINING_FILES="$REMAINING_FILES $f"
     continue
@@ -863,12 +869,22 @@ for f in $FILES; do
   TIMINGS="$TIMINGS$FILE_SECS	$FILE_MEM	$f
 "
   echo
-  if [ "$passed" = 1 ]; then browser_progress "$f" passed
+  # Only a final per-file verdict can survive a reboot. Strict flakes/leaks
+  # and allowed skips are provisional; spotlight must pass for this file now,
+  # before its audit directory can disappear in a later completed suite.
+  file_credit=1
+  if [ "$passed" != 1 ] || [ -n "$skip_reason" ]; then file_credit=0; fi
+  case " $STRICT_FLAKES $STRICT_LEAKS " in
+    *" $f "*|*" $f("*) file_credit=0 ;;
+  esac
+  if [ "$file_credit" = 1 ] && [ -d "$GRAPHDEN_TOUR_AUDIT" ] \
+     && ! node tour-spotlight-report.js --gate "$GRAPHDEN_TOUR_AUDIT"; then
+    file_credit=0
+  fi
+  if [ "$file_credit" = 1 ]; then browser_progress "$f" passed
+  elif [ "$passed" = 1 ]; then browser_progress "$f" pending
   else browser_progress "$f" failed; fi
   # Keep strict failures visible even when the underlying attempt passed.
-  case " $STRICT_FLAKES $STRICT_LEAKS " in
-    *" $f "*|*" $f("*) browser_progress "$f" failed ;;
-  esac
   if [ "$SWEEP_DELAY" != "0" ]; then sleep "$SWEEP_DELAY"; fi
 done
 

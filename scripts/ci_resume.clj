@@ -30,6 +30,32 @@
       (catch Exception _ nil))))
 
 
+(defn exact-credit?
+  "Only an interrupted invocation of the identical candidate and roster can
+   supply pass credit. Inherited hints and completed red runs supply order only."
+  [prior sha roster]
+  (and prior (not (:inherited prior)) (= sha (:sha prior))
+       (= (set roster) (set (:roster prior)))
+       (= (count roster) (count (:roster prior)))))
+
+
+(defn credited
+  [prior sha roster]
+  (if (exact-credit? prior sha roster)
+    (set (for [id roster :when (= :passed (get-in prior [:status id]))] id))
+    #{}))
+
+
+(defn interrupted-gate?
+  "The former train must have died without a verdict on this exact assembled
+   commit and base. A completed red gate never lends pass credit."
+  [gate expected sha base]
+  (and (= 1 (:schema gate)) (false? (:complete gate))
+       (= sha (:sha gate) (:sha expected))
+       (= base (get-in expected [:scope :since]))
+       (nil? (:exit gate))))
+
+
 (defn carry-hints!
   "Carry detailed scheduling hints across a run that never reaches that kind.
    The caller has validated the source member/base lineage. Keep the original
@@ -88,14 +114,25 @@
 
 
 (defn begin!
-  [path kind sha roster prior]
-  (let [ordered (cond-> (order roster prior) (= kind "stages") stage-dependencies)
-        state (atom {:schema 1 :kind kind :sha sha :roster ordered
-                     :status (zipmap ordered (repeat :pending))})]
-    (when-not (valid-receipt? @state kind)
-      (throw (ex-info "Invalid current progress receipt" {:kind kind})))
-    (report/write-atomic! path @state)
-    {:path path :state state :prior prior :roster ordered}))
+  ([path kind sha roster prior] (begin! path kind sha roster prior false))
+  ([path kind sha roster prior credit?]
+   (let [ordered (cond-> (order roster prior) (= kind "stages") stage-dependencies)
+         passed (when credit?
+                  (let [candidates (credited prior sha roster)]
+                    (if (= kind "checks")
+                      (set (filter #(let [p (get-in prior [:proof %])]
+                                      (and (zero? (get p :exit -1))
+                                           (number? (:duration-ms p))
+                                           (not (#{"tests-perf" "perf"} %))))
+                                   candidates))
+                      candidates)))
+         state (atom {:schema 1 :kind kind :sha sha :roster ordered
+                      :status (zipmap ordered (map #(if (contains? passed %) :passed :pending) ordered))
+                      :proof (select-keys (:proof prior) passed)})]
+     (when-not (valid-receipt? @state kind)
+       (throw (ex-info "Invalid current progress receipt" {:kind kind})))
+     (report/write-atomic! path @state)
+     {:path path :state state :prior prior :roster ordered :credited passed})))
 
 
 (defn mark!
@@ -105,6 +142,18 @@
       (throw (ex-info "Unknown progress check/status" {:id id :status status})))
     (swap! state assoc-in [:status id] status)
     (report/write-atomic! path @state)))
+
+
+(defn mark-proof!
+  [run id proof]
+  (let [state (:state run)]
+    (locking state
+      (when-not (and (= :passed (get-in @state [:status id]))
+                     (map? proof) (zero? (:exit proof))
+                     (number? (:duration-ms proof)))
+        (throw (ex-info "Cannot credit a check without a passing proof" {:id id})))
+      (swap! state assoc-in [:proof id] proof)
+      (report/write-atomic! (:path run) @state))))
 
 
 (defn record-order!
@@ -139,4 +188,5 @@
                              (zero? (:exit (p/shell {:out :string :err :string :continue true}
                                                     "git" "merge-base" "--is-ancestor" (:sha prior) sha)))))
                 prior)]
-    (begin! path kind sha roster prior)))
+    (begin! path kind sha roster prior
+            (= "1" (System/getenv "GRAPHDEN_RESUME_CREDIT")))))

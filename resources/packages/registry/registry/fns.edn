@@ -2411,11 +2411,14 @@
    :parent :json-envelope-response
    :args {:envelope {:value {:ok false :reason "identity-changed" :http-status 409}}}}
 
+  {:name :_uninstall-outcome-ok?
+   :parent :get
+   :args {:coll {:as :outcome :type :keyword-map}
+          :key {:value :ok} :default false}}
   {:name :_uninstall-after-apply
    :lambda-params [:outcome]
    :parent :if
-   :args {:test {:parent :get :args {:coll {:as :outcome :type :keyword-map}
-                                     :key {:value :ok} :default false}}
+   :args {:test :_uninstall-outcome-ok?
           :then {:parent :html-ok-response :args {:body :_pkg-panel-html}}
           :else {:parent :json-envelope-response
                  :args {:envelope {:as :outcome :type :keyword-map}}}}}

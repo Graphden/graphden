@@ -6,9 +6,11 @@ const {assert, newContext, waitForServerHealthy, BASE} = require('./edit-test-he
   await waitForServerHealthy();
   const {browser, page} = await newContext(chromium, {boot: false});
   const errors = [];
+  let initialTheme;
   page.on('pageerror', error => errors.push(error.message));
   try {
     await page.goto(BASE + '/');
+    initialTheme = await page.evaluate(() => gdPrefRead('theme') || null);
     await page.waitForFunction(() => !!gdEditorRoot.componentNow('appearance'), null, {timeout: 30000});
     await page.evaluate(() => { gdShellSurface('settings'); gdActivateSettingsSection('appearance'); });
     await page.waitForSelector('#gd-theme-root #gd-theme-edit');
@@ -34,5 +36,16 @@ const {assert, newContext, waitForServerHealthy, BASE} = require('./edit-test-he
     assert(errors.length === 0, 'no browser page errors: ' + JSON.stringify(errors));
     await page.screenshot({path: '/tmp/graphden-d2-appearance.png'});
     console.log('PASS appearance graph: selected root, complete editor, focused draft and scale');
-  } finally { await browser.close(); }
+  } finally {
+    try {
+      if (initialTheme !== undefined) {
+        const restored = await page.evaluate(async value => {
+          const saved = await gdPrefWrite('theme', value);
+          if (saved) gdApplyThemePayload(value?.payload || null);
+          return saved;
+        }, initialTheme);
+        assert(restored, 'appearance test restores the original theme preference');
+      }
+    } finally { await browser.close(); }
+  }
 })().catch(error => { console.error(error); process.exitCode = 1; });

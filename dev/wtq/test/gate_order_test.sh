@@ -328,10 +328,12 @@ unset FAIL_HINTS
 (
   unset -f git
   source <(sed -n '/^prior_failed_stage() {/,/^}/p' "$SCRIPT_DIR/wt")
+  source <(sed -n '/^prior_train_for_members() {/,/^}/p' "$SCRIPT_DIR/wt")
   source <(sed -n '/^record_failed_stage() {/,/^}/p' "$SCRIPT_DIR/wt")
   MAIN_WT="$TEST_DIR/repo"
   FAILURE_DIR="$TEST_DIR/hints"
-  mkdir -p "$FAILURE_DIR"
+  PRIOR_TRAIN_DIR="$TEST_DIR/prior-train"
+  mkdir -p "$FAILURE_DIR" "$PRIOR_TRAIN_DIR"
   git init -q -b develop "$MAIN_WT"
   git -C "$MAIN_WT" config user.email t@example.invalid
   git -C "$MAIN_WT" config user.name wtq-test
@@ -343,6 +345,17 @@ unset FAIL_HINTS
   git -C "$MAIN_WT" commit -q --allow-empty -m member
   member="$(git -C "$MAIN_WT" rev-parse HEAD)"
   declare -A M_BRANCH=([test]=feature/test) M_SHA=([test]="$member")
+  [ -z "$(prior_train_for_members test || true)" ]
+  printf '20261026-050000\n' > "$PRIOR_TRAIN_DIR/$member"
+  [ "$(prior_train_for_members test)" = 20261026-050000 ]
+  M_SHA[other]="$base"
+  [ -z "$(prior_train_for_members test other || true)" ]
+  printf '20261026-043000\n' > "$PRIOR_TRAIN_DIR/$base"
+  [ -z "$(prior_train_for_members test other || true)" ]
+  printf '20261026-050000\n' > "$PRIOR_TRAIN_DIR/$base"
+  [ "$(prior_train_for_members test other)" = 20261026-050000 ]
+  printf 'invalid\n' > "$PRIOR_TRAIN_DIR/$base"
+  [ -z "$(prior_train_for_members test other || true)" ]
   [ -z "$(prior_failed_stage test)" ]
   record_failed_stage integration "$base" test
   [ "$(prior_failed_stage test)" = integration ]

@@ -1353,6 +1353,21 @@ prior_failed_stage() {
   done
 }
 
+# Pass credit may come only from the immediately preceding train shared by
+# every member. A stale failure hint can outlive a later completed red train.
+prior_train_for_members() {
+  local m previous="" current
+  for m in "$@"; do
+    [ -f "$PRIOR_TRAIN_DIR/${M_SHA[$m]}" ] || return 1
+    current="$(cat "$PRIOR_TRAIN_DIR/${M_SHA[$m]}")" || return 1
+    [[ "$current" =~ ^[0-9]{8}-[0-9]{6}$ ]] || return 1
+    [ -z "$previous" ] || [ "$previous" = "$current" ] || return 1
+    previous="$current"
+  done
+  [ -n "$previous" ] || return 1
+  printf '%s\n' "$previous"
+}
+
 record_failed_stage() {
   local stage="$1" base="$2"; shift 2
   local m tmp suffix="" receipt="${WTQ_FAILURE_RECEIPT:-}"
@@ -2060,8 +2075,9 @@ train_run() {
     [ "${M_DEPLOY[$m]}" = 1 ] && deploy=1
     [ "${M_RELEASE[$m]}" = 1 ] && release=1
   done
+  local previous_train_ts="" prior_fail=0 prior_tmp
+  previous_train_ts="$(prior_train_for_members "${gated[@]}")" || previous_train_ts=""
   state_lock
-  local prior_fail=0 prior_tmp
   for m in "${gated[@]}"; do
     prior_tmp="$PRIOR_TRAIN_DIR/.${M_SHA[$m]}.$$"
     if ! { printf '%s\n' "$ts" > "$prior_tmp" && mv -f "$prior_tmp" "$PRIOR_TRAIN_DIR/${M_SHA[$m]}"; }; then
@@ -2107,7 +2123,8 @@ train_run() {
   resume_from="$(WTQ_HINT_RECEIPT=1 prior_failed_stage "${gated[@]}")"
   gate_base="$(git -C "$MAIN_WT" rev-parse "$TARGET")"
   local reuse_from=""
-  if [ -n "$resume_from" ] && (cd "$TRAIN_WT" && bb scripts/ci_resume_cli.clj eligible gate \
+  if [ -n "$previous_train_ts" ] && [ "$resume_from" = "$LOG_DIR/_train-$previous_train_ts" ] \
+    && (cd "$TRAIN_WT" && bb scripts/ci_resume_cli.clj eligible gate \
        "$resume_from.report.edn" "$resume_from.ci-expected.edn" \
        "$(git -C "$TRAIN_WT" rev-parse HEAD)" "$gate_base"); then
     reuse_from="$resume_from"

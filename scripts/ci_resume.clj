@@ -146,13 +146,14 @@
 
 (defn mark-proof!
   [run id proof]
-  (locking (:state run)
-    (when-not (and (= :passed (get-in @(:state run) [:status id]))
-                   (map? proof) (zero? (:exit proof))
-                   (number? (:duration-ms proof)))
-      (throw (ex-info "Cannot credit a check without a passing proof" {:id id})))
-    (swap! (:state run) assoc-in [:proof id] proof)
-    (report/write-atomic! (:path run) @(:state run))))
+  (let [state (:state run)]
+    (locking state
+      (when-not (and (= :passed (get-in @state [:status id]))
+                     (map? proof) (zero? (:exit proof))
+                     (number? (:duration-ms proof)))
+        (throw (ex-info "Cannot credit a check without a passing proof" {:id id})))
+      (swap! state assoc-in [:proof id] proof)
+      (report/write-atomic! (:path run) @state))))
 
 
 (defn record-order!

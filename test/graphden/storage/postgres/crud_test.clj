@@ -429,13 +429,17 @@
           _ (sp/initialize storage schema)
           id1 #uuid "11111111-1111-1111-1111-111111111111"
           id2 #uuid "22222222-2222-2222-2222-222222222222"
+          id3 #uuid "33333333-3333-3333-3333-333333333333"
           _ (sp/create-entity storage :user {:id id1 :name "Alice"})
           _ (sp/create-entity storage :user {:id id2 :name "Bob"})
-          results (sp/read-entities storage :user [id1 id2])]
+          _ (sp/create-entity storage :user {:id id3 :name "Carol"})
+          results (binding [util/*max-statement-params* 2]
+                    (sp/read-entities storage :user [id1 id2 id3]))]
       (try
-        (is (= 2 (count results)))
+        (is (= 3 (count results)))
         (is (= "Alice" (:name (get results id1))))
         (is (= "Bob" (:name (get results id2))))
+        (is (= "Carol" (:name (get results id3))))
         (finally
           (sp/close storage)))))
 
@@ -479,14 +483,14 @@
           _ (sp/create-entity storage :user {:id id1 :name "Alice"})
           _ (sp/create-entity storage :user {:id id2 :name "Bob"})
           _ (sp/create-entity storage :user {:id id3 :name "Charlie"})
-          deleted-count (sp/delete-entities storage :user [id1 id2])]
+          deleted-count (binding [util/*max-statement-params* 2]
+                          (sp/delete-entities storage :user [id1 id2 id3]))]
       (try
-        (is (= 2 deleted-count))
+        (is (= 3 deleted-count))
         ;; Verify entities are gone
         (is (nil? (sp/read-entity storage :user id1)))
         (is (nil? (sp/read-entity storage :user id2)))
-        ;; Charlie should still exist
-        (is (= "Charlie" (:name (sp/read-entity storage :user id3))))
+        (is (nil? (sp/read-entity storage :user id3)))
         (finally
           (sp/close storage)))))
 

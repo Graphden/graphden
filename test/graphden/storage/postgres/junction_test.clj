@@ -5,6 +5,7 @@
     [graphden.storage.postgres.ddl :as ddl]
     [graphden.storage.postgres.junction :as junction]
     [graphden.storage.postgres.test-setup :as setup]
+    [graphden.storage.postgres.util :as util]
     [graphden.storage.protocol.core :as sp]))
 
 
@@ -311,17 +312,22 @@
           owner1  (sp/create-entity storage :fn {:name "b-owner-1"})
           owner2  (sp/create-entity storage :fn {:name "b-owner-2"})
           owner3  (sp/create-entity storage :fn {:name "b-owner-3"})
+          owner4  (sp/create-entity storage :fn {:name "b-owner-4"})
           ds      (:pool storage)]
       (try
         (junction/insert-junction-rows! ds :fn :parent-ids (:id owner1) [(:id parent)])
         (junction/insert-junction-rows! ds :fn :parent-ids (:id owner2) [(:id parent)])
-        ;; owner3 intentionally has no junction rows — should be absent.
-        (let [batch (junction/read-junction-rows-batch
-                      ds :fn :parent-ids
-                      [(:id owner1) (:id owner2) (:id owner3)])]
+        (junction/insert-junction-rows! ds :fn :parent-ids (:id owner3) [(:id parent)])
+        ;; owner4 intentionally has no junction rows — should be absent.
+        (let [batch (binding [util/*max-statement-params* 2]
+                      (junction/read-junction-rows-batch
+                        ds :fn :parent-ids
+                        [(:id owner1) (:id owner2) (:id owner3) (:id owner4)]))]
           (is (= [(:id parent)] (get batch (:id owner1))))
           (is (= [(:id parent)] (get batch (:id owner2))))
-          (is (nil? (get batch (:id owner3)))
+          (is (= [(:id parent)] (get batch (:id owner3)))
+              "the next chunk contributes its owner rows")
+          (is (nil? (get batch (:id owner4)))
               "owner with no rows is absent from the batch result"))
 
         (testing "empty owner-id list short-circuits to {} (no SQL)"

@@ -41,16 +41,6 @@
   (mapv (fn [row] (mapv #(get row %) columns)) rows))
 
 
-(def ^:private max-statement-params
-  "PostgreSQL's JDBC driver caps one PreparedStatement at 65,535 bind
-   parameters. Parameters scale with rows × columns, so a ROW-count cap
-   can't guard this: the bundled-package bootstrap legitimately writes
-   10k+ `:binding-version` rows × 7 columns = 70k+ params in one batch
-   (the fresh-DB boot killer). Budget kept under the cap
-   with headroom."
-  60000)
-
-
 (defn- chunk-rows
   "Split `rows` into chunks that each stay under the statement
    parameter budget for `n-cols` columns — one chunk for any batch
@@ -60,7 +50,7 @@
    sequence in the sync path (no new transaction is opened here — `ds`
    may already BE a caller's transaction, and nesting would break it)."
   [rows n-cols]
-  (partition-all (max 1 (quot max-statement-params (max 1 n-cols))) rows))
+  (partition-all (max 1 (quot util/*max-statement-params* (max 1 n-cols))) rows))
 
 
 (defn- merge-back-ref-many
@@ -524,13 +514,15 @@
   ([ds entity-name ids fields]
    (if (empty? ids)
      {}
-     (let [table-name (keyword (util/kw->snake-case entity-name))
-           query (sql/format {:select [:*]
-                              :from [table-name]
-                              :where [:in :id (vec ids)]}
-                             {:quoted true})]
+     (let [table-name (keyword (util/kw->snake-case entity-name))]
        (util/with-sql-error-handling "Database error" :read-entities {:entity-name entity-name :count (count ids)}
-                                     (let [rows (util/exec! ds query)
+                                     (let [rows (mapcat (fn [chunk]
+                                                          (util/exec! ds
+                                                                      (sql/format {:select [:*]
+                                                                                   :from [table-name]
+                                                                                   :where [:in :id (vec chunk)]}
+                                                                                  {:quoted true})))
+                                                        (chunk-rows ids 1))
                                            ;; Decode WITHOUT field-specs on purpose: the
                                            ;; versioned-resolution + compile paths that call
                                            ;; `read-entities` (versioning/storage/*) rely on the
@@ -773,9 +765,18 @@
   (if (empty? ids)
     0
     (let [table-name (keyword (util/kw->snake-case entity-name))
-          query (sql/format {:delete-from table-name
-                             :where [:in :id (vec ids)]}
-                            {:quoted true})]
+          delete-chunks (fn [connection]
+                          (reduce (fn [deleted chunk]
+                                    (+ deleted
+                                       (:next.jdbc/update-count
+                                         (util/exec-one! connection
+                                                         (sql/format {:delete-from table-name
+                                                                      :where [:in :id (vec chunk)]}
+                                                                     {:quoted true})))))
+                                  0
+                                  (chunk-rows ids 1)))]
       (util/with-sql-error-handling "Database error" :delete-entities {:entity-name entity-name :count (count ids)}
-                                    (:next.jdbc/update-count
-                                      (util/exec-one! ds query))))))
+                                    (if (<= (count ids) util/*max-statement-params*)
+                                      (delete-chunks ds)
+                                      (jdbc/with-transaction [transaction ds]
+                                                             (delete-chunks transaction)))))))

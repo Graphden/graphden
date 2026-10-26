@@ -115,18 +115,21 @@
   [ds entity-name field-name owner-ids]
   (if (empty? owner-ids)
     {}
-    (let [jt (ddl/junction-table-name entity-name field-name)
-          query (sql/format {:select [:owner_id :target_id]
-                             :from [(keyword jt)]
-                             :where [:in :owner_id (vec owner-ids)]
-                             :order-by [:owner_id :ord]})]
+    (let [jt (ddl/junction-table-name entity-name field-name)]
       (util/with-sql-error-handling "Database error" :read-junction-batch
                                     {:entity-name entity-name :field-name field-name}
-                                    (let [rows (util/exec! ds query)]
-                                      (reduce (fn [acc row]
-                                                (update acc (:owner_id row) (fnil conj []) (:target_id row)))
-                                              {}
-                                              rows))))))
+                                    (reduce
+                                      (fn [acc chunk]
+                                        (let [query (sql/format {:select [:owner_id :target_id]
+                                                                 :from [(keyword jt)]
+                                                                 :where [:in :owner_id (vec chunk)]
+                                                                 :order-by [:owner_id :ord]})]
+                                          (reduce (fn [rows row]
+                                                    (update rows (:owner_id row) (fnil conj []) (:target_id row)))
+                                                  acc
+                                                  (util/exec! ds query))))
+                                      {}
+                                      (partition-all util/*max-statement-params* (distinct owner-ids)))))))
 
 
 (defn populate-ref-many-fields
@@ -189,16 +192,22 @@
 
 
 (defn- delete-junction-rows-multi!
-  "DELETE rows for many owner-ids in one statement. No-op when empty."
+  "DELETE rows for many owner-ids within the bind budget. No-op when empty."
   [ds entity-name field-name owner-ids]
   (when (seq owner-ids)
     (let [jt (ddl/junction-table-name entity-name field-name)
-          query (sql/format {:delete-from [(keyword jt)]
-                             :where [:in :owner_id (vec owner-ids)]})]
+          delete-chunks (fn [connection]
+                          (doseq [chunk (partition-all util/*max-statement-params* owner-ids)]
+                            (util/exec! connection
+                                        (sql/format {:delete-from [(keyword jt)]
+                                                     :where [:in :owner_id (vec chunk)]}))))]
       (util/with-sql-error-handling "Database error" :delete-junction-batch
                                     {:entity-name entity-name :field-name field-name
                                      :owner-count (count owner-ids)}
-                                    (util/exec! ds query)))))
+                                    (if (<= (count owner-ids) util/*max-statement-params*)
+                                      (delete-chunks ds)
+                                      (jdbc/with-transaction [transaction ds]
+                                                             (delete-chunks transaction)))))))
 
 
 (defn write-ref-many-fields-batch!

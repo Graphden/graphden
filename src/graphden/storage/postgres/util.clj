@@ -26,6 +26,12 @@
 
 
 ;; === Configuration ===
+;; Leave headroom below PostgreSQL/JDBC's 65,535 bind-parameter limit. Both
+;; multi-row writes and ID-based reads use this budget; the dynamic binding
+;; lets small fixtures prove chunking without creating tens of thousands of rows.
+(def ^:dynamic *max-statement-params* 60000)
+
+
 ;; Query timeout is centralized in storage-protocol.config; this
 ;; namespace just aliases the public helpers so postgres call sites
 ;; can `(:require [.util :as util])` once and reach both timeout and

@@ -231,9 +231,34 @@
         (println "candidate preflight:" (cond
                                           (and (not complete) alive?) "RUNNING"
                                           (not complete) "INTERRUPTED"
+                                          (= 124 exit) "TIMEOUT"
                                           (zero? exit) "PASS"
                                           :else "FAIL")
                  "sha" sha "checks" passed "/" (count items)
                  "started" started-at-ms "finished" finished-at-ms)
         (when current (println "current:" (:argv current)))
         (println "receipt:" path)))))
+
+
+(defn mark-timeout!
+  "The parent owns the deadline. Record its verdict when it kills the child,
+   whose normal exception handler cannot run after a forced process-tree stop."
+  [path parent-started-at-ms]
+  (when (fs/exists? path)
+    (let [receipt (edn/read-string (slurp path))
+          started (:started-at-ms receipt)]
+      (when (and (not (:complete receipt)) (number? started)
+                 (>= started parent-started-at-ms))
+        (let [now (System/currentTimeMillis)
+              commands (:commands receipt)
+              last-index (dec (count commands))
+              updated (cond-> receipt
+                        (and (<= 0 last-index) (nil? (:exit (last commands))))
+                        (update-in [:commands last-index] assoc
+                                   :exit 124 :duration-ms (- now (:started-at-ms (last commands))))
+                        true (assoc :complete true :exit 124 :finished-at-ms now
+                                    :reason :watchdog-timeout))
+              archive (str "target/preflight/" (:sha receipt) "-" started ".edn")]
+          (report/write-atomic! archive updated)
+          (report/write-atomic! path updated)
+          true)))))

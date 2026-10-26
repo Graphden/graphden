@@ -122,6 +122,23 @@
       (is (= ["fixture" "red"] (get-in receipt [:commands 0 :argv]))))))
 
 
+(deftest parent-watchdog-records-a-timeout-in-the-current-receipt
+  (let [written (atom [])
+        receipt {:schema 1 :complete false :sha "abc" :started-at-ms 200
+                 :commands [{:argv ["slow"] :started-at-ms 210}]}
+        write! (fn [path value] (swap! written conj [path value]))]
+    (with-redefs [fs/exists? (constantly true)
+                  clojure.core/slurp (constantly (pr-str receipt))
+                  report/write-atomic! write!]
+      (is (true? (fast/mark-timeout! "target/preflight/latest.edn" 190)))
+      (is (= 124 (get-in (last @written) [1 :exit])))
+      (is (= 124 (get-in (last @written) [1 :commands 0 :exit])))
+      (is (= :watchdog-timeout (get-in (last @written) [1 :reason])))
+      (reset! written [])
+      (is (nil? (fast/mark-timeout! "target/preflight/latest.edn" 201)))
+      (is (empty? @written)))))
+
+
 (def all-paths fast/clj-scan-paths)
 
 

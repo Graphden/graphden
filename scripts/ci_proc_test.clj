@@ -84,6 +84,7 @@
                               (do (Thread/sleep 10) (recur (inc tries))))))]
     (is (seq grandchildren) "preflight is owned while its descendant is alive")
     (is (= 1000 (:timeout-ms @run)))
+    (is (true? (:timed-out? @run)))
     (is (empty? @live))
     (Thread/sleep 200)
     (is (not-any? ProcessHandle/.isAlive grandchildren))))

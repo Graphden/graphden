@@ -49,7 +49,8 @@
       (let [result (deref proc timeout-ms ::timeout)]
         (when (or (= ::timeout result) (not= 0 (:exit result)))
           (throw (ex-info (if (= ::timeout result) "Changed-file preflight timed out" "Changed-file preflight failed")
-                          {:command command :timeout-ms timeout-ms :exit (:exit result)}))))
+                          {:command command :timeout-ms timeout-ms :exit (:exit result)
+                           :timed-out? (= ::timeout result)}))))
       (finally
         (kill-and-salvage! proc)
         (swap! live-procs disj proc)))))

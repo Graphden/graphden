@@ -16,6 +16,7 @@
    and the suite continues so the user always gets a result line."
   (:require
     [babashka.process :as p]
+    [ci-fast]
     [ci-priority-core :as priority]
     [ci-proc]
     [ci-report]
@@ -570,8 +571,20 @@
 
 (defn- run-preflight!
   [since]
-  (ci-proc/run-bounded! (cond-> ["bb" "scripts/ci_fast_cli.clj"] since (conj since))
-                        900000 live-procs))
+  (let [started (System/currentTimeMillis)]
+    (try
+      ;; A changed graph may select several independent focused JVM commands.
+      ;; The prior 15-minute cap killed the process after a green 14-minute
+      ;; block, leaving the next command's receipt falsely INTERRUPTED.
+      (ci-proc/run-bounded! (cond-> ["bb" "scripts/ci_fast_cli.clj"] since (conj since))
+                            3600000 live-procs)
+      (catch Exception error
+        (when (:timed-out? (ex-data error))
+          (try (ci-fast/mark-timeout! "target/preflight/latest.edn" started)
+               (catch Exception receipt-error
+                 (binding [*out* *err*]
+                   (println "Could not record preflight timeout:" (.getMessage receipt-error))))))
+        (throw error)))))
 
 
 (defn- assert-candidate!

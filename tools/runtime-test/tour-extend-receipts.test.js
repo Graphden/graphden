@@ -12,6 +12,7 @@ function setup(outcome = 'success') {
     window: {}, document: {createElement: () => ({}), addEventListener: () => {}},
     _tourState: {lessonId: '14', principal: {...active}, created: []},
     _tourStep: () => ({creates: {type: 'fn', name: 'handler'}}),
+    _tourSessionBranch: () => 'main',
     _tourPrincipalMatches: state => state?.principal?.accountId === active.accountId
       && state?.principal?.orgId === active.orgId,
     _tourSaveState: () => {},

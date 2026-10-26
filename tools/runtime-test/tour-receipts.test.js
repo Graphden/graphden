@@ -26,6 +26,16 @@ const installed = {ok: true, name: 'greetings', version: '1.0.0', 'package-versi
   'content-hash': 'hash', pin: {id: 'pin-id', 'package-name': 'greetings', version: '1.0.0', 'branch-id': 'site-id'},
   'created-namespaces': [{id: 'materialized-id', name: 'source@1-0-0', 'parent-id': null}]};
 {
+  const {ctx} = context();
+  ctx._tourStep = () => ({creates: {type: 'fn', name: 'welcome'}});
+  const ticket = ctx.gdTourBeginEntityCreation('fn', 'welcome', {'namespace-id': 'shop-id'});
+  const receipt = ctx._tourState.created.at(-1);
+  assert.equal(receipt['branch-id'], 'site-id', 'function creation captures its exact owned branch');
+  assert.equal(ctx.gdTourRecordEntityCreation(ticket,
+    {ok: true, headers: {get: () => 'fn-id'}}), true);
+  assert.equal(receipt.id, 'fn-id');
+}
+{
   const {ctx, saves} = context();
   const pending = ctx.gdTourBeginPackagePublish({name: 'greetings', version: '1.0.0', 'ns-root': 'source'});
   assert.equal(ctx._tourState.created.at(-1).receipt, 'pending');

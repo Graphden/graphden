@@ -374,6 +374,41 @@ async function _tourUnpinPackages(created) {
   return failed;
 }
 
+// A pin cannot be removed while the lesson's own branch graph refers to its
+// materialized functions. Remove only functions with exact creation receipts
+// on that same verified branch, before asking the server to unpin. The server
+// still refuses a delete if someone has since added another dependent edge.
+async function _tourDeletePinnedBranchFns(created) {
+  const failed = [];
+  const branches = created.filter(row => row.type === 'branch' && row.id);
+  const pinBranchIds = new Set(created.filter(row => row.type === 'package-install')
+    .map(row => row['branch-id']).filter(Boolean));
+  if (!pinBranchIds.size) return failed;
+  let rows;
+  try {
+    const response = await authFetch(API.api_branches);
+    if (!response.ok) throw new Error('Branches unavailable');
+    const body = await response.json();
+    rows = Array.isArray(body) ? body : body?.branches;
+    if (!Array.isArray(rows)) throw new Error('Invalid branches response');
+  } catch (_) {
+    return created.filter(row => row.type === 'fn' && pinBranchIds.has(row['branch-id']));
+  }
+  for (const branch of branches) {
+    if (!pinBranchIds.has(branch.id)) continue;
+    const entries = created.filter(row => row.type === 'fn' && row['branch-id'] === branch.id);
+    if (!entries.length) continue;
+    const current = rows.find(row => row.id === branch.id);
+    if (!current || current.name !== branch.name
+        || current['base-branch-id'] !== branch['base-branch-id']) {
+      failed.push(...entries);
+      continue;
+    }
+    failed.push(...await _tourDeleteFns(entries, {headers: {'X-Graphden-Branch': branch.id}}));
+  }
+  return failed;
+}
+
 async function _tourRemovePackages(created, options) {
   const failed = [];
   for (const entry of created.filter(row => row.type === 'package-version')) {
@@ -499,12 +534,15 @@ async function _tourDeleteCreated(created, options) {
     if (typeof _tourSaveState === 'function') _tourSaveState();
     return {failed: created.filter(row => row.receipt !== 'removed')};
   }
-  const unpinned = await _tourUnpinPackages(created);
+  const branchFns = await _tourDeletePinnedBranchFns(created);
+  const unpinned = branchFns.length ? created.filter(row => row.type === 'package-install')
+    : await _tourUnpinPackages(created);
   if (typeof _tourSaveState === 'function') _tourSaveState();
   const blocked = new Set(unpinned.map(row => row['branch-id']));
   const raw = [
     ...await _tourDeleteHttpPublications(created),
     ...(created.some(row => row.type === 'api-token') ? await _tourDeleteTokens(created) : []),
+    ...branchFns,
     ...unpinned,
     ...await _tourDeleteCreatedBranches(created, blocked),
     ...await _tourDeleteFns(created, options),      // fns first — a namespace deletes once empty

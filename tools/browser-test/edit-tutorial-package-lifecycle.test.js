@@ -140,6 +140,10 @@ async function ledger(page) {
     await runWelcome(page);
     await waitTourTitle(page, 'Return for cleanup');
     owned = await ledger(page);
+    const consumerBranch = owned.find(row => row.type === 'branch' && row.name === 'tutorial-site');
+    assert(consumerBranch && owned.some(row => row.type === 'fn' && row.name === 'welcome'
+      && row['branch-id'] === consumerBranch.id),
+    'consumer function receipt records its exact branch for ordered cleanup');
     assert(owned.filter(row => row.type === 'package-version' && row.id && row['content-hash']).length === 2,
       'both ordinary Publish replies saved distinct exact version receipts');
     assert(owned.filter(row => row.type === 'package-install').length === 1,

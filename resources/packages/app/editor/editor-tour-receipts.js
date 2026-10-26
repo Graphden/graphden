@@ -14,7 +14,9 @@ function _tourReceiptTicket(type, name, fields = {}) {
       || step?.creates?.type !== type || step.creates.name !== name
       || (step.creates.version && step.creates.version !== fields.version)) return null;
   const token = 'receipt-' + Date.now() + '-' + Math.random().toString(36).slice(2);
-  const entry = {type, name, ...fields, receipt: 'pending', token};
+  const branchId = (type === 'fn' || type === 'ns') ? _tourReceiptBranch() : null;
+  const entry = {type, name, ...fields, ...(branchId ? {'branch-id': branchId} : {}),
+    receipt: 'pending', token};
   _tourState.created.push(entry);
   _tourSaveState();
   return {token, lessonId: _tourState.lessonId, principal: {..._tourState.principal}};

@@ -53,8 +53,10 @@ function test(name, fn) {
 function makeCtx(world) {
   const w = Object.assign({fns: [], namespaces: [], packages: [], installed: [], branches: [], refuse: () => false}, world);
   const calls = [];
-  const respond = (method, url) => {
+  const requests = [];
+  const respond = (method, url, options = {}) => {
     calls.push(method + ' ' + url);
+    requests.push({method, url, headers: options.headers || {}});
     const refusal = w.refuse(method, url, calls);
     if (refusal === 'throw') throw new Error('network down');
     let status = refusal ? (refusal === true ? 409 : refusal) : 200;
@@ -98,7 +100,7 @@ function makeCtx(world) {
     graphData: {namespaces: w.namespaces},
     initGraph: () => Promise.resolve(),
     _tourFindFn: (name) => w.fns.find((f) => f.name === name) || null,
-    authFetch: (url, opts) => respond((opts && opts.method) || 'GET', url),
+    authFetch: (url, opts) => respond((opts && opts.method) || 'GET', url, opts),
     authMutate: (method, url) => respond(method, url),
     API: {
       api_packages: '/api/packages',
@@ -112,7 +114,7 @@ function makeCtx(world) {
     },
   });
   vm.runInContext(source, ctx);
-  return {ctx, calls};
+  return {ctx, calls, requests};
 }
 
 const FN = (name, ns) => ({id: 'id-' + name, name, 'namespace-id': ns || null});
@@ -380,6 +382,29 @@ const tests = [
     assert(calls.filter(c => c.includes('/packages/withdraw')).length === 1
       && calls[withdraw].includes('expected-id=release-1.0.0'), 'never withdraw another visible version with the same name');
     assert(calls[unpin].includes('expected-id=pin-id'), 'conditional deletion targets the actual pin UUID');
+  }),
+
+  test('owned consumer fn is deleted on its verified branch before unpin', async () => {
+    let consumerPresent = true;
+    const consumer = {...FN('welcome', 'shop-id'), type: 'fn', receipt: 'created',
+      'branch-id': 'site-id'};
+    const branch = {type: 'branch', id: 'site-id', name: 'site', 'base-branch-id': 'main-id'};
+    const {ctx, calls, requests} = makeCtx({
+      fns: [consumer], branches: [branch], packages: [PV()],
+      installed: [{id: PIN.id, 'package-name': PIN.name, version: PIN.version,
+        'branch-id': PIN['branch-id']}],
+      refuse(method, url) {
+        if (method === 'DELETE' && url === '/api/entities/fn/id-welcome') consumerPresent = false;
+        return method === 'DELETE' && url.startsWith('/api/packages/uninstall') && consumerPresent;
+      },
+    });
+    const result = await ctx._tourDeleteCreated([branch, consumer, PV(), {...PIN}]);
+    const deleteIndex = calls.indexOf('DELETE /api/entities/fn/id-welcome');
+    const unpinIndex = calls.findIndex(call => call.includes('/api/packages/uninstall'));
+    assert(result.failed.length === 0 && deleteIndex >= 0 && unpinIndex > deleteIndex,
+      'the exact consumer is removed before uninstall');
+    assert(requests[deleteIndex].headers['X-Graphden-Branch'] === 'site-id',
+      'the consumer delete uses its verified branch UUID');
   }),
 
   test('lost branch reply uses the staged UUID and exact base, never its name replacement', async () => {

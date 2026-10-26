@@ -250,12 +250,12 @@
       (when (and (not (:complete receipt)) (number? started)
                  (>= started parent-started-at-ms))
         (let [now (System/currentTimeMillis)
-              commands (:commands receipt)
-              last-index (dec (count commands))
+              items (:commands receipt)
+              last-index (dec (count items))
               updated (cond-> receipt
-                        (and (<= 0 last-index) (nil? (:exit (last commands))))
+                        (and (<= 0 last-index) (nil? (:exit (last items))))
                         (update-in [:commands last-index] assoc
-                                   :exit 124 :duration-ms (- now (:started-at-ms (last commands))))
+                                   :exit 124 :duration-ms (- now (:started-at-ms (last items))))
                         true (assoc :complete true :exit 124 :finished-at-ms now
                                     :reason :watchdog-timeout))
               archive (str "target/preflight/" (:sha receipt) "-" started ".edn")]

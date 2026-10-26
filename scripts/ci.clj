@@ -583,7 +583,7 @@
           (try (ci-fast/mark-timeout! "target/preflight/latest.edn" started)
                (catch Exception receipt-error
                  (binding [*out* *err*]
-                   (println "Could not record preflight timeout:" (.getMessage receipt-error))))))
+                   (println "Could not record preflight timeout:" (ex-message receipt-error))))))
         (throw error)))))
 
 

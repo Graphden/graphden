@@ -101,7 +101,7 @@
             (check-copy! (str graph-ns "@1-0-0") (set/union source-ids shipped-ids)))))
       (testing "update and rollback recheck the changed consumer before returning"
         (check-updates! graph-ns template package-args))
-      (testing "a second project forks the published bundle without the publisher's graph"
+      (testing "a second project imports the published bundle without the publisher's graph"
         (let [recipient (setup/bootstrap-crud-graph-from-golden!
                           "registry-theme-recipient" ["core" "web" "app" "registry" "mcp"])]
           (binding [rf/*bootstrap* recipient]
@@ -111,4 +111,11 @@
               (is (:ok result) (pr-str result))
               (when (:ok result)
                 (check-copy! graph-ns shipped-ids)
-                (is (empty? (sp/query-entities (rf/storage) :package-install {:package-name package-name})))))))))))
+                (is (empty? (sp/query-entities (rf/storage) :package-install {:package-name package-name})))))
+            (let [result (rf/run-named "install-package" package-args)]
+              (is (:ok result) (pr-str result))
+              (when (:ok result)
+                (check-copy! (str graph-ns "@1-0-0") (set/union source-ids shipped-ids))
+                (is (= "1.0.0" (:version (first (sp/query-entities
+                                                  (rf/storage) :package-install
+                                                  {:package-name package-name})))))))))))))

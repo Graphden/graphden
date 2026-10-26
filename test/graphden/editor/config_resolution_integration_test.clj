@@ -627,15 +627,7 @@
           (is (= resolution/defaults-id (:id selected-reference)))
           (is (nil? (validate-with-safe-provenance-diagnostic! storage captured resolution/resolver-id policy)))
           (is (nil? (validate-with-safe-provenance-diagnostic! storage default-snapshot resolution/defaults-id policy)))
-          (is (= default-component-roles (set (keys configuration))))
-          (let [body (source/collect-closure storage (mapcat vals (vals configuration)) authorize!)
-                paths (set (vals (ns-path/path-map (source/collect-namespaces storage body))))]
-            ;; Safe namespace metadata only, retained for the subsequent
-            ;; normal namespace-grant publication audit; no source values.
-            (spit "/tmp/gd-personal-config-default-source-namespaces.edn" (pr-str (sort paths)))
-            (is (every? #(or (= % "core") (= % "web") (= % "app")
-                             (str/starts-with? % "core.") (= % "web.html")
-                             (str/starts-with? % "app.ui-")) paths))))))))
+          (is (= default-component-roles (set (keys configuration)))))))))
 
 
 (deftest installed-default-component-bodies-export-from-certified-storage-input
@@ -645,7 +637,8 @@
     (source/with-snapshot
       (:storage ga/*bootstrap*)
       (fn [storage authorize!]
-        (let [resolved (resolution/capture storage authorize! policy)]
+        (let [resolved (resolution/capture storage authorize! policy)
+              paths (atom #{})]
           (doseq [[component entries] (:configuration resolved)]
             (let [body (source/collect-closure storage (vals entries) authorize!)
                   captured {:graph body :namespaces (source/collect-namespaces storage body)}
@@ -660,7 +653,15 @@
                                                                               [:type :expected :actual :declared :computed])})
                                               (throw error))))]
                          (snapshot/export-snapshot captured (:base-fns ctx) entries policy))]
-              (is (map? plan) (name component)))))))))
+              (swap! paths into (vals (ns-path/path-map (:namespaces captured))))
+              (is (map? plan) (name component))))
+          ;; Audit the union of the same bounded component exports used by the
+          ;; browser. One artificial all-component closure exceeds its per-call
+          ;; safety limit as UI groups grow.
+          (spit "/tmp/gd-personal-config-default-source-namespaces.edn" (pr-str (sort @paths)))
+          (is (every? #(or (= % "core") (= % "web") (= % "app")
+                           (str/starts-with? % "core.") (= % "web.html")
+                           (str/starts-with? % "app.ui-")) @paths)))))))
 
 
 (deftest actual-personal-editor-child-resolves-with-shared-default-dependencies

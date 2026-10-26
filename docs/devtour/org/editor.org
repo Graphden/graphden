@@ -718,13 +718,13 @@ Evaluates the current interactive lesson step against editor state. Lesson data 
 :PROPERTIES:
 :CUSTOM_ID: editor/gdTourBeginBranchCreation
 :FILE: resources/packages/app/editor/editor-tour-receipts.js
-:LINE: 52
+:LINE: 54
 :MINS: 1.3
 :END:
 
 Records a proposed branch UUID, its actual base branch UUID, and the current signed-in user before sending the create request. A lost response does not prove creation failed: cleanup checks these exact identities rather than deleting similarly named branches. A definite rejection clears the attempt; a transport failure keeps it for reconciliation.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-tour-receipts.js::async function gdTourBeginBranchCreation(name, baseRef) {][resources/packages/app/editor/editor-tour-receipts.js:52]]
+- source :: [[file:../../../resources/packages/app/editor/editor-tour-receipts.js::async function gdTourBeginBranchCreation(name, baseRef) {][resources/packages/app/editor/editor-tour-receipts.js:54]]
 - see also :: [[file:editor.org::#editor/authFetch][authFetch]]
 - same file :: [[file:editor.org::#editor/gdTourRecordPackageInstall][gdTourRecordPackageInstall]]
 - referenced from :: [[file:editor.org::#editor/gdTourRecordPackageInstall][gdTourRecordPackageInstall]], [[file:editor.org::#editor/gdTourRecordAppCreation][gdTourRecordAppCreation]]
@@ -733,13 +733,13 @@ Records a proposed branch UUID, its actual base branch UUID, and the current sig
 :PROPERTIES:
 :CUSTOM_ID: editor/gdTourRecordPackageInstall
 :FILE: resources/packages/app/editor/editor-tour-receipts.js
-:LINE: 123
+:LINE: 125
 :MINS: 1.9
 :END:
 
 Records a successful lesson installation using the returned pin, branch, package-version, content hash, and newly created namespace identities. Cleanup removes only resources attributed to this lesson. Existing namespaces and installations remain untouched; a missing or mismatched response cannot establish ownership.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-tour-receipts.js::function gdTourRecordPackageInstall(ticket, body) {][resources/packages/app/editor/editor-tour-receipts.js:123]]
+- source :: [[file:../../../resources/packages/app/editor/editor-tour-receipts.js::function gdTourRecordPackageInstall(ticket, body) {][resources/packages/app/editor/editor-tour-receipts.js:125]]
 - see also :: [[file:packages.org::#packages/sync-namespaces!][sync-namespaces!]], [[file:editor.org::#editor/gdTourBeginBranchCreation][gdTourBeginBranchCreation]]
 - same file :: [[file:editor.org::#editor/gdTourBeginBranchCreation][gdTourBeginBranchCreation]]
 

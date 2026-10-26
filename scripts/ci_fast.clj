@@ -34,6 +34,15 @@
        distinct sort vec))
 
 
+(defn package-impl-consumer-tests
+  "Find tests that explicitly opt in to changes in dynamically loaded impls.clj."
+  []
+  (->> (fs/glob "test" "**/*_test.clj")
+       (filter #(re-find #"\(ns\s+\^:ci/package-impl-consumer\b" (slurp (str %))))
+       (map str)
+       changed-test-namespaces))
+
+
 (defn syntax-commands
   "Syntax guards outside the narrower biome and runtime test scan sets."
   [paths]
@@ -57,6 +66,7 @@
          css (filter #(or (re-find #"^resources/packages/app/(editor|ui-preview)/.*\.css$" %)
                           (= % "scripts/devtour/tour.css")) paths)
          graph? (some #(re-find #"^resources/packages/.+/fns\.edn$" %) changed)
+         impls? (some #(re-find #"^resources/packages/.+/impls\.clj$" %) changed)
          ci-tool? (some #(or (re-find #"^scripts/ci(?:_|\.)" %)
                              (= % "scripts/checks.edn")
                              (= % "bb.edn")) changed)
@@ -72,7 +82,8 @@
                                 (re-find #"^tools/ui_preview/(builtin_plans|generate_builtin_plans)\.clj$" %)) changed)
          devtour-input? (some #(or (re-find #"^(src|resources/packages|development/src)/.*\.(clj|cljc|cljs|edn|js)$" %)
                                    (= % "docs/devtour/tour.edn")) changed)
-         changed-tests (vec (remove #{"graphden.large-forms-guard-test"}
+         impl-consumers (when impls? (package-impl-consumer-tests))
+         changed-tests (vec (remove (into #{"graphden.large-forms-guard-test"} impl-consumers)
                                     (changed-test-namespaces paths)))
          large-form-input? (some #(re-find #"^(src|test)/.*\.clj[c]?$" %) changed)
          template-consumers ["graphden.editor.component-bundle-test"
@@ -110,6 +121,10 @@
             ;; instance; the normal CI roster still runs the same sweep once.
             (when graph? [["bb" "graph-lint"] ["bb" "reachability"]
                           ["bb" "type-sweep"]])
+            ;; Dynamic impl guards are cheap and must fail before a broad JVM suite.
+            (when (seq impl-consumers)
+              [(into ["bb" "wt" "test"]
+                     (mapcat (fn [ns] ["--focus" ns]) impl-consumers))])
             (when (seq changed-tests)
               [(into ["bb" "wt" "test"] (mapcat (fn [ns] ["--focus" ns]) changed-tests))])
             ;; Personal templates and browser plans share dynamic graph

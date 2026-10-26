@@ -95,6 +95,19 @@
             (fast/commands [] ["scripts/ci_runner_order_test.clj"] true true true))))
 
 
+(deftest package-impl-preflight-runs-declared-consumers
+  (let [paths ["resources/packages/registry/registry/impls.clj"
+               "test/graphden/editor/component_config_test.clj"]
+        commands (fast/commands paths true true true)
+        jvm (filter #(= ["bb" "wt" "test"] (vec (take 3 %))) commands)]
+    (is (= ["bb" "wt" "test" "--focus"
+            "graphden.types.taint-propagate-guard-test"]
+           (first jvm)))
+    (is (= ["bb" "wt" "test" "--focus"
+            "graphden.editor.component-config-test"]
+           (second jvm)))))
+
+
 (deftest deleted-graph-source-still-runs-semantic-checks
   (is (= [["bb" "devtour-check"]
           ["bb" "graph-lint"]

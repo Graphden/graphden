@@ -158,6 +158,7 @@
     :namespace-external-deps :neg :neq
     :nil? :non-blank? :not :notify-after-write :or :os-arch
     :os-load-average :os-name :os-processors :package-upsert-pin :package-pin-receipt
+    :remove-package-pin-apply
     :package-version-materialized? :pairs->map :parse-constraint
     :incompatible-dependency-bumps  :parse-edn :parse-graph-edn :parse-int :parse-json :parse-uuid :pg-execute
     :pg-notify :pg-query :pg-tx :pick-encoding
@@ -230,7 +231,8 @@
   #{:fork-package-fns :materialize-package-fns :materialize-package-receipt
     ;; Exact identity validation is not a declassification boundary.
     :parse-fn-delete-receipts :delete-fn-receipts
-    :package-pin-receipt :rewrite-refs-to-version
+    ;; Uninstall receipts echo the caller's package name.
+    :package-pin-receipt :remove-package-pin-apply :rewrite-refs-to-version
     ;; Parsing echoes command fields; preview/apply derive descriptors and
     ;; outcomes from those fields. None is a declassification boundary.
     :parse-inheritance-command :preview-inheritance :apply-inheritance

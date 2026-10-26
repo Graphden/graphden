@@ -15,6 +15,7 @@ const { createDocument, MiniElement } = require('./mini-dom');
 
 const SRC = fs.readFileSync(path.join(__dirname, '..', '..', 'resources', 'packages',
   'app', 'editor', 'editor-keymap.js'), 'utf8');
+const PREVIEW = path.join(__dirname, '..', '..', 'resources', 'packages', 'app', 'ui-preview');
 
 let fails = 0;
 let passes = 0;
@@ -25,6 +26,40 @@ function assert(cond, msg) {
 }
 
 MiniElement.prototype.focus = function focus() {};
+Object.defineProperties(MiniElement.prototype, {
+  firstElementChild: {configurable: true, get() { return this.children[0] || null; }},
+  childElementCount: {configurable: true, get() { return this.children.length; }},
+});
+
+function installGraph(ctx, doc, win) {
+  win.GraphdenPreact = {
+    h(type, props, ...children) { return {type, props: {...props, children}}; },
+    render(tree, host) {
+      function append(value, parent) {
+        if (value == null || value === false) return;
+        if (Array.isArray(value)) { value.forEach(child => append(child, parent)); return; }
+        if (typeof value !== 'object') {
+          parent.appendChild(doc.createTextNode(String(value)));
+          return;
+        }
+        const element = doc.createElement(value.type);
+        for (const [name, item] of Object.entries(value.props)) {
+          if (name === 'children' || name === 'key') continue;
+          if (name === 'className') element.className = String(item);
+          else element.setAttribute(name, String(item));
+        }
+        append(value.props.children, element);
+        parent.appendChild(element);
+      }
+      host.replaceChildren();
+      append(tree, host);
+    },
+  };
+  win.GraphdenStyles = {};
+  for (const file of ['browser-runtime.js', 'builtin-plans.js', 'graph-renderer.js']) {
+    vm.runInContext(fs.readFileSync(path.join(PREVIEW, file), 'utf8'), ctx, {filename: file});
+  }
+}
 
 function boot() {
   const doc = createDocument();
@@ -43,8 +78,9 @@ function boot() {
     gdPrefWrite: (k, v) => writes.push([k, v]),
     gdApplyKeymap() {},
   };
-  const ctx = vm.createContext({ console, document: doc, window: win });
-  vm.runInContext(SRC, ctx);
+  const ctx = vm.createContext({ console, document: doc, window: win, Map, Set, WeakSet, WeakMap, Symbol });
+  installGraph(ctx, doc, win);
+  vm.runInContext(SRC, ctx, {filename: 'editor-keymap.js'});
   win.gdRenderKeymapPane();
   const fire = (type, ev) => {
     const e = Object.assign({ defaultPrevented: false, preventDefault() { this.defaultPrevented = true; },
@@ -52,7 +88,7 @@ function boot() {
     for (const fn of [...(winListeners[type] || [])]) fn(e);
     return e;
   };
-  const change = () => doc.querySelector('.gd-km-change').click();
+  const change = () => root.dispatch('click', {target: doc.querySelector('.gd-km-change')});
   const recording = () => doc.querySelector('.gd-km-recording');
   return { doc, root, writes, fire, change, recording };
 }

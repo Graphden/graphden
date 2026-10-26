@@ -129,6 +129,29 @@
       (is (= ["fixture" "red"] (get-in receipt [:commands 0 :argv]))))))
 
 
+(deftest runtime-preflight-runs-before-focused-jvm-suites
+  (let [seen (atom [])]
+    (with-redefs [select/changed-files (constantly ["scripts/ci_fast.clj"])
+                  fast/commands (fn [& _]
+                                  [["bb" "devtour-check"]
+                                   ["bb" "wt" "test" "--focus" "fixture"]])
+                  fast/run-command! (fn [command] (swap! seen conj command))
+                  staged/roster (constantly [])
+                  staged/affected (fn [& _]
+                                    {:files ["tools/runtime-test/fixture.test.js"]
+                                     :reason :declared-dependency})
+                  p/shell (fn [& args]
+                            (when (:dir (first args))
+                              (swap! seen conj (vec (rest args))))
+                            {:out "0123456789012345678901234567890123456789\n" :exit 0})
+                  report/write-atomic! (fn [& _])]
+      (fast/run-checks! "base"))
+    (is (= [["bb" "devtour-check"]
+            ["node" "fixture.test.js"]
+            ["bb" "wt" "test" "--focus" "fixture"]]
+           @seen))))
+
+
 (deftest parent-watchdog-records-a-timeout-in-the-current-receipt
   (let [written (atom [])
         receipt {:schema 1 :complete false :sha "abc" :started-at-ms 200

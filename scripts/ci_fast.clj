@@ -171,6 +171,8 @@
                            (= pinned (second (re-find #"v([0-9.]+)"
                                                       (:out (p/shell {:out :string} "clj-kondo" "--version"))))))
         planned-commands (commands paths changed (boolean (fs/which "cljstyle")) native-kondo? (boolean (fs/which "shellcheck")))
+        [quick-commands jvm-commands]
+        (split-with #(not= ["bb" "wt" "test"] (vec (take 3 %))) planned-commands)
         {:keys [files reason]} (staged/affected :runtime (set changed) (staged/roster :runtime))
         sha (str/trim (:out (p/shell {:out :string} "git" "rev-parse" "HEAD")))
         started (System/currentTimeMillis)
@@ -205,10 +207,13 @@
     (fs/create-dirs directory)
     (save!)
     (try
-      (doseq [command planned-commands] (run-item! command nil))
+      (doseq [command quick-commands] (run-item! command nil))
+      ;; Runtime Node checks need no database. Run them before focused JVM
+      ;; suites so a stale fixture cannot invalidate a long green preflight.
       (println "runtime preflight:" (count files) "file(s), reason" (name reason))
       (doseq [runtime-path files]
         (run-item! ["node" (str (fs/file-name runtime-path))] "tools/runtime-test"))
+      (doseq [command jvm-commands] (run-item! command nil))
       (swap! state assoc :complete true :exit 0 :finished-at-ms (System/currentTimeMillis))
       (save!)
       (println "candidate preflight: PASS, receipt" path)

@@ -27,6 +27,11 @@ const form = ctx.GraphdenRenderer.vnode([k('label'),
   [k('textarea'), attrs({rows: 5, maxlength: 10000})]]);
 assert.equal(form.props.children[0].type, 'select');
 assert.equal(form.props.children[1].props.maxLength, 10000);
+const keyboardTable = ctx.GraphdenRenderer.vnode([k('table'),
+  [k('thead'), [k('tr'), [k('th'), 'Action']]],
+  [k('tbody'), [k('tr'), [k('td'), [k('kbd'), 'Space']]]]]);
+assert.equal(keyboardTable.type, 'table');
+assert.equal(keyboardTable.props.children[1].props.children.type, 'tr');
 assert.throws(() => ctx.GraphdenRenderer.vnode([k('textarea'), attrs({maxlength: 10001})]));
 assert.throws(() => ctx.GraphdenRenderer.vnode([k('div'), attrs({id: 'auth-lock-btn'})], 'gd-test'));
 assert.throws(() => ctx.GraphdenRenderer.vnode([k('div'), attrs({id: 'gd-test-option'})]));

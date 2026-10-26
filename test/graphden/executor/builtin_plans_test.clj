@@ -120,6 +120,7 @@
   {:accountMenu :account-menu :fnPicker :fn-picker :recents :recents
    :inspector :inspector :explorer :explorer :tutorialCatalog :tutorial-catalog
    :executionStatus :execution-status :executionPath :execution-path :feedback :feedback
+   :keymap :keymap
    :canvas :canvas :canvasValues :canvas-values
    :canvasInheritance :canvas-inheritance :canvasMetadata :canvas-metadata
    :canvasTypeStructure :canvas-type-structure :canvasBindings :canvas-bindings})
@@ -182,7 +183,7 @@
         (doseq [[kind compiled] (:plans artifact)]
           (is (= 1 (:format compiled) (:primitiveAbi compiled)))
           (is (= (case kind
-                   (:tutorialCatalog :executionStatus :executionPath :feedback
+                   (:tutorialCatalog :executionStatus :executionPath :feedback :keymap
                                      :canvas :canvasValues :canvasMetadata :canvasBindings) #{"view"}
                    (:canvasInheritance :canvasTypeStructure) #{"initial" "view"}
                    #{"initial" "update" "view"})

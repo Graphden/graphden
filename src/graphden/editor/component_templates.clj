@@ -142,6 +142,7 @@
                     ["execution-status" :app.ui-execution/status-view [[:view "status-view"]]]
                     ["execution-path" :app.ui-execution/path-view [[:view "path-view"]]]
                     ["feedback" :app.ui-feedback/feedback-view [[:view "feedback-view"]]]
+                    ["keymap" :app.ui-keymap/keymap-view [[:view "keymap-view"]]]
                     ["canvas" :app.ui-canvas/canvas-view [[:view "canvas-view"]]]
                     ["canvas-values" :app.ui-canvas-values/canvas-values-view [[:view "canvas-values-view"]]]
                     ["canvas-inheritance" :app.ui-canvas-inheritance/inheritance-view
@@ -181,6 +182,7 @@
         execution-status (str root ".execution-status")
         execution-path (str root ".execution-path")
         feedback (str root ".feedback")
+        keymap (str root ".keymap")
         canvas (str root ".canvas")
         canvas-values (str root ".canvas-values")
         canvas-inheritance (str root ".canvas-inheritance")
@@ -200,6 +202,7 @@
                                       (keyword root "_execution-status-descriptor")
                                       (keyword root "_execution-path-descriptor")
                                       (keyword root "_feedback-descriptor")
+                                      (keyword root "_keymap-descriptor")
                                       (keyword root "_canvas-descriptor")
                                       (keyword root "_canvas-values-descriptor")
                                       (keyword root "_canvas-inheritance-descriptor")
@@ -219,6 +222,7 @@
                     (copy-module "app/ui-execution" execution-status)
                     (copy-module "app/ui-execution" execution-path)
                     (copy-module "app/ui-feedback" feedback)
+                    (copy-module "app/ui-keymap" keymap)
                     (copy-module "app/ui-canvas" canvas) (copy-module "app/ui-canvas-values" canvas-values)
                     (copy-module "app/ui-canvas-inheritance" canvas-inheritance)
                     (copy-module "app/ui-canvas-metadata" canvas-metadata)
@@ -229,13 +233,13 @@
 
 (def namespace-suffixes
   "Owned child namespaces reserved for the installed personal template bundle."
-  ["theme" "menu" "picker" "recents" "inspector" "explorer" "tutorial-catalog" "execution-status" "execution-path" "feedback" "canvas" "canvas-values" "canvas-inheritance" "canvas-metadata" "canvas-type-structure" "canvas-bindings"])
+  ["theme" "menu" "picker" "recents" "inspector" "explorer" "tutorial-catalog" "execution-status" "execution-path" "feedback" "keymap" "canvas" "canvas-values" "canvas-inheritance" "canvas-metadata" "canvas-type-structure" "canvas-bindings"])
 
 
 (def groups
   "Fixed creation choices and their personal namespace/descriptor prefixes."
   {:account-menu "menu" :fn-picker "picker" :recents "recents" :inspector "inspector" :explorer "explorer"
-   :tutorial-catalog "tutorial-catalog" :execution-status "execution-status" :execution-path "execution-path" :feedback "feedback" :canvas "canvas" :canvas-values "canvas-values" :canvas-inheritance "canvas-inheritance" :canvas-metadata "canvas-metadata" :canvas-type-structure "canvas-type-structure" :canvas-bindings "canvas-bindings"})
+   :tutorial-catalog "tutorial-catalog" :execution-status "execution-status" :execution-path "execution-path" :feedback "feedback" :keymap "keymap" :canvas "canvas" :canvas-values "canvas-values" :canvas-inheritance "canvas-inheritance" :canvas-metadata "canvas-metadata" :canvas-type-structure "canvas-type-structure" :canvas-bindings "canvas-bindings"})
 
 
 (defn selected-definitions
@@ -294,4 +298,5 @@
    :tutorial-catalog-id (str (ids/fn-id (str root ".tutorial-catalog") :catalog-view))
    :execution-status-id (str (ids/fn-id (str root ".execution-status") :status-view))
    :execution-path-id (str (ids/fn-id (str root ".execution-path") :path-view))
-   :feedback-id (str (ids/fn-id (str root ".feedback") :feedback-view))})
+   :feedback-id (str (ids/fn-id (str root ".feedback") :feedback-view))
+   :keymap-id (str (ids/fn-id (str root ".keymap") :keymap-view))})

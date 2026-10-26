@@ -216,7 +216,7 @@ it cannot reactivate a built-in view. Root replacement retires pending and
 open catalogue work, styles and receipts. The same root's initial load may
 complete without cancelling the opening catalogue.
 
-## Execution and feedback roots
+## Execution, feedback and keyboard roots
 
 The editor root exposes `:execution-status`, `:execution-path` and `:feedback`
 as ordinary view callbacks. The shipped browser plans keep status and feedback
@@ -228,3 +228,10 @@ popover and secret frames cannot be unhidden by a personal graph. Feedback
 renders the form from the selected root or the shipped plan; the host keeps
 focus, consent, error collection and direct intake delivery. Failure counts
 are offered as an attachment only for an authenticated session.
+
+Keyboard settings use the `:keymap` view callback. The graph receives the live
+shortcut entries and personal source summary, renders the table, and marks
+duplicate key sequences. The host owns the keydown capture listener, IME
+boundary, shortcut dispatch, marketplace actions and owner-scoped preference
+write. A shipped browser plan keeps the settings panel usable while a personal
+root is unavailable.

@@ -1,0 +1,119 @@
+{:namespace "app.ui-keymap"
+ :description "Keyboard settings presentation and binding conflict model. The host owns key capture, shortcut execution and preference writes."
+ :fns
+ [{:name :_keymap-entry :type {:id :text :group :text :description :text :keys :text :key-parts [:list :text]
+                               :leader :bool :default-keys :text :default-leader :bool
+                               :active :bool :overridden :bool}}
+  {:name :_keymap-entries :list :_keymap-entry}
+  {:name :_keymap-inputs :type {:entries :_keymap-entries :source-name :text :source-version :text
+                                :change-count :int :marketplace :bool :recording-id :text
+                                :recording-keys :text}}
+  {:name :_keymap-envelope :type {:inputs :_keymap-inputs}}
+  {:name :_keymap-result :type {:tree :web.html/hiccup-node}}
+  {:name :_keymap-callable :fn-type [{:input :_keymap-envelope} :_keymap-result]}
+  {:name :keymap-root-component :type {:view :_keymap-callable}}
+  {:name :_inputs-value :parent :const :args {:value {:as :inputs :type :_keymap-inputs}}}
+  {:name :_entries-value :parent :get :args {:coll :_inputs-value :key {:value :entries} :default {:value []}}}
+  {:name :_source-name :parent :get :args {:coll :_inputs-value :key {:value :source-name} :default ""}}
+  {:name :_source-version :parent :get :args {:coll :_inputs-value :key {:value :source-version} :default ""}}
+  {:name :_change-count :parent :get :args {:coll :_inputs-value :key {:value :change-count} :default 0}}
+  {:name :_marketplace :parent :get :args {:coll :_inputs-value :key {:value :marketplace} :default false}}
+  {:name :_recording-id :parent :get :args {:coll :_inputs-value :key {:value :recording-id} :default ""}}
+  {:name :_recording-keys :parent :get :args {:coll :_inputs-value :key {:value :recording-keys} :default ""}}
+  {:name :_entry-id :parent :get :args {:coll {:as :entry :type :_keymap-entry} :key {:value :id} :default ""}}
+  {:name :_entry-keys :parent :get :args {:coll {:as :entry :type :_keymap-entry} :key {:value :keys} :default ""}}
+  {:name :_entry-leader :parent :get :args {:coll {:as :entry :type :_keymap-entry} :key {:value :leader} :default false}}
+  {:name :_binding-prefix :parent :if :args {:test :_entry-leader :then "L " :else "B "}}
+  {:name :_binding-key :parent :str :lambda-params [:entry] :args {:parts [:_binding-prefix :_entry-keys]}}
+  {:name :_binding-groups :parent :group-by :args {:key-fn :_binding-key :coll :_entries-value}}
+  {:name :_matching-entries :parent :get :args {:coll :_binding-groups :key :_binding-key :default {:value []}}}
+  {:name :_entry-count :parent :count :args {:coll :_matching-entries}}
+  {:name :_entry-conflict :parent :lte :lambda-params [:entry] :args {:nums [2 :_entry-count]}}
+  {:name :_conflicted-entries :parent :filter :args {:pred :_entry-conflict :coll :_entries-value}}
+  {:name :_conflict-count :parent :count :args {:coll :_conflicted-entries}}
+  {:name :_conflict? :parent :lte :args {:nums [1 :_conflict-count]}}
+  {:name :_entry-group :parent :get :args {:coll {:as :entry :type :_keymap-entry} :key {:value :group} :default ""}}
+  {:name :_entry-description :parent :get :args {:coll {:as :entry :type :_keymap-entry} :key {:value :description} :default ""}}
+  {:name :_entry-active :parent :get :args {:coll {:as :entry :type :_keymap-entry} :key {:value :active} :default false}}
+  {:name :_entry-overridden :parent :get :args {:coll {:as :entry :type :_keymap-entry} :key {:value :overridden} :default false}}
+  {:name :_entry-default-keys :parent :get :args {:coll {:as :entry :type :_keymap-entry} :key {:value :default-keys} :default ""}}
+  {:name :_entry-default-leader :parent :get :args {:coll {:as :entry :type :_keymap-entry} :key {:value :default-leader} :default false}}
+  {:name :_row-conflict-class :parent :if :args {:test :_entry-conflict :then " is-conflict" :else ""}}
+  {:name :_row-inert-class :parent :if :args {:test :_entry-active :then "" :else " is-inert"}}
+  {:name :_row-class :parent :str :args {:parts ["gd-km-row" :_row-conflict-class :_row-inert-class]}}
+  {:name :_recording? :parent :equal? :args {:a :_entry-id :b :_recording-id}}
+  {:name :_recording-text :parent :if :args {:test {:parent :equal? :args {:a :_recording-keys :b ""}}
+                                             :then "Press the keys… (Enter to keep, Esc to cancel)"
+                                             :else {:parent :str :args {:parts [:_recording-keys "  (Enter to keep, Esc to cancel)"]}}}}
+  {:name :_recording-node :parent :hiccup :args {:tag "span" :attrs {:value {:class "gd-km-recording"}} :children [:_recording-text]}}
+  {:name :_key-parts :parent :get :args {:coll {:as :entry :type :_keymap-entry} :key {:value :key-parts} :default {:value []}}}
+  {:name :_keycap :parent :hiccup :lambda-params [:key] :args {:tag "kbd" :attrs {:value {:class "gd-key-cap"}} :children [{:as :key}]}}
+  {:name :_keycaps :parent :map :args {:func :_keycap :coll :_key-parts}}
+  {:name :_leader-cap :parent :hiccup :args {:tag "kbd" :attrs {:value {:class "gd-key-cap"}} :children ["Space"]}}
+  {:name :_leader-caps :parent :if :args {:test :_entry-leader :then {:parent :list :args {:items [:_leader-cap]}} :else {:value []}}}
+  {:name :_all-caps :parent :concat :args {:colls [:_leader-caps :_keycaps]}}
+  {:name :_default-prefix :parent :if :args {:test :_entry-default-leader :then "Space " :else ""}}
+  {:name :_default-text :parent :str :args {:parts [" (default: " :_default-prefix :_entry-default-keys ")"]}}
+  {:name :_default-node :parent :hiccup :args {:tag "span" :attrs {:value {:class "gd-km-default"}} :children [:_default-text]}}
+  {:name :_optional-default :parent :if :args {:test :_entry-overridden :then :_default-node :else nil}}
+  {:name :_keys-content :parent :if :args {:test :_recording? :then {:parent :list :args {:items [:_recording-node]}}
+                                           :else {:parent :concat :args {:colls [:_all-caps {:parent :list :args {:items [:_optional-default]}}]}}}}
+  {:name :_keys-cell :parent :hiccup :args {:tag "td" :attrs {:value {:class "gd-km-keys"}} :children :_keys-content}}
+  {:name :_change-label :parent :str :args {:parts ["Change keys for " :_entry-description]}}
+  {:name :_change-text :parent :if :args {:test :_recording? :then "Recording…" :else "Change"}}
+  {:name :_change-attrs :parent :zipmap :args {:keys [{:value :type} {:value :class} {:value :data-action} {:value :data-shortcut} {:value :aria-label}]
+                                               :vals ["button" "gd-set-btn gd-km-change" "change" :_entry-id :_change-label]}}
+  {:name :_change-button :parent :hiccup :args {:tag "button" :attrs :_change-attrs :children [:_change-text]}}
+  {:name :_leader-label :parent :str :args {:parts ["Behind Space for " :_entry-description]}}
+  {:name :_leader-attrs :parent :zipmap :args {:keys [{:value :type} {:value :class} {:value :data-shortcut} {:value :aria-label} {:value :checked}]
+                                               :vals ["checkbox" "gd-km-leader" :_entry-id :_leader-label :_entry-leader]}}
+  {:name :_leader-input :parent :hiccup :args {:tag "input" :attrs :_leader-attrs :children []}}
+  {:name :_leader-label-node :parent :hiccup :args {:tag "label" :attrs {:value {:class "gd-km-leader-l"}} :children [:_leader-input " Space"]}}
+  {:name :_undo-label :parent :str :args {:parts ["Default keys for " :_entry-description]}}
+  {:name :_undo-attrs :parent :zipmap :args {:keys [{:value :type} {:value :class} {:value :data-action} {:value :data-shortcut} {:value :title} {:value :aria-label}]
+                                             :vals ["button" "packages-uninstall gd-km-undo" "undo" :_entry-id "Back to the default keys" :_undo-label]}}
+  {:name :_undo-node :parent :hiccup :args {:tag "button" :attrs :_undo-attrs :children ["×"]}}
+  {:name :_optional-undo :parent :if :args {:test :_entry-overridden :then :_undo-node :else nil}}
+  {:name :_help? :parent :equal? :args {:a :_entry-id :b "help"}}
+  {:name :_actions :parent :if :args {:test :_help? :then {:value []} :else {:parent :list :args {:items [:_change-button :_leader-label-node :_optional-undo]}}}}
+  {:name :_actions-cell :parent :hiccup :args {:tag "td" :attrs {:value {:class "gd-km-actions"}} :children :_actions}}
+  {:name :_group-cell :parent :hiccup :args {:tag "td" :attrs {:value {}} :children [:_entry-group]}}
+  {:name :_description-cell :parent :hiccup :args {:tag "td" :attrs {:value {}} :children [:_entry-description]}}
+  {:name :_row-attrs :parent :zipmap :args {:keys [{:value :class} {:value :data-shortcut} {:value :key}]
+                                            :vals [:_row-class :_entry-id :_entry-id]}}
+  {:name :keymap-row :parent :hiccup :lambda-params [:entry] :args {:tag "tr" :attrs :_row-attrs :children [:_group-cell :_description-cell :_keys-cell :_actions-cell]}}
+  {:name :_rows :parent :map :args {:func :keymap-row :coll :_entries-value}}
+  {:name :_head-row :parent :hiccup :args {:tag "tr" :attrs {:value {}} :children [{:parent :hiccup :args {:tag "th" :attrs {:value {}} :children ["Group"]}}
+                                                                                   {:parent :hiccup :args {:tag "th" :attrs {:value {}} :children ["Action"]}}
+                                                                                   {:parent :hiccup :args {:tag "th" :attrs {:value {}} :children ["Keys"]}}
+                                                                                   {:parent :hiccup :args {:tag "th" :attrs {:value {}} :children [""]}}]}}
+  {:name :_head :parent :hiccup :args {:tag "thead" :attrs {:value {}} :children [:_head-row]}}
+  {:name :_body :parent :hiccup :args {:tag "tbody" :attrs {:value {}} :children :_rows}}
+  {:name :_table :parent :hiccup :args {:tag "table" :attrs {:value {:class "packages-panel-table gd-km-table"}} :children [:_head :_body]}}
+  {:name :_has-source? :parent :if :args {:test {:parent :equal? :args {:a :_source-name :b ""}} :then false :else true}}
+  {:name :_has-changes? :parent :lte :args {:nums [1 :_change-count]}}
+  {:name :_source-hint :parent :str :args {:parts ["Based on " :_source-name "@" :_source-version]}}
+  {:name :_changes-hint :parent :str :args {:parts [:_change-count " binding(s) changed from the defaults"]}}
+  {:name :_hint :parent :if :args {:test :_has-source? :then :_source-hint
+                                   :else {:parent :if :args {:test :_has-changes? :then :_changes-hint
+                                                             :else "The default bindings. Change a key below; Space is the leader for everything marked with it."}}}}
+  {:name :_status-copy :parent :hiccup :args {:tag "div" :attrs {:value {:class "gd-set-copy"}} :children [{:parent :hiccup :args {:tag "div" :attrs {:value {:class "gd-set-label"}} :children ["Keyboard layout"]}}
+                                                                                                           {:parent :hiccup :args {:tag "div" :attrs {:value {:class "gd-set-hint"}} :children [:_hint]}}]}}
+  {:name :_reset? :parent :if :args {:test :_has-source? :then true :else :_has-changes?}}
+  {:name :_reset-button :parent :hiccup :args {:tag "button" :attrs {:value {:type "button" :class "gd-set-btn" :id "gd-keymap-reset" :data-action "reset"}} :children ["Reset to defaults"]}}
+  {:name :_optional-reset :parent :if :args {:test :_reset? :then :_reset-button :else nil}}
+  {:name :_save-button :parent :hiccup :args {:tag "button" :attrs {:value {:type "button" :class "packages-install-btn gd-theme-save" :id "gd-keymap-save" :data-action "save"}} :children ["Save / share…"]}}
+  {:name :_browse-button :parent :hiccup :args {:tag "button" :attrs {:value {:type "button" :class "gd-set-btn" :id "gd-keymap-browse" :data-action "browse"}} :children ["Browse marketplace"]}}
+  {:name :_market-actions :parent :if :args {:test :_marketplace :then {:parent :list :args {:items [:_save-button :_browse-button]}} :else {:value []}}}
+  {:name :_buttons :parent :hiccup :args {:tag "div" :attrs {:value {:class "gd-theme-btns"}} :children {:parent :concat :args {:colls [{:parent :list :args {:items [:_optional-reset]}} :_market-actions]}}}}
+  {:name :_status-row :parent :hiccup :args {:tag "div" :attrs {:value {:class "gd-set-row"}} :children [:_status-copy :_buttons]}}
+  {:name :_conflict-note :parent :hiccup :args {:tag "div" :attrs {:value {:class "packages-fork-note packages-fork-err gd-km-conflict"}} :children ["Two bindings share the same keys — the first registered wins; change one of them."]}}
+  {:name :_optional-conflict :parent :if :args {:test :_conflict? :then :_conflict-note :else nil}}
+  {:name :_footer :parent :hiccup :args {:tag "p" :attrs {:value {:class "gd-set-hint"}} :children ["Not listed: the canvas arrows / h j k l walk, the Explorer tree keys and Escape / Enter inside dialogs — those are fixed (docs/ACCESSIBILITY.md)."]}}
+  {:name :_tree :parent :hiccup :args {:tag "div" :attrs {:value {}} :children [:_status-row :_optional-conflict :_table :_footer]}}
+  {:name :keymap-view :parent :zipmap :return-type :_keymap-result :args {:keys [{:value :tree}] :vals [:_tree]}}
+  {:name :root-view :parent :keymap-view :lambda-params [:input] :return-type :_keymap-result
+   :args {:inputs {:parent :get :args {:coll {:as :input :type :_keymap-envelope} :key {:value :inputs}}}}}
+  {:name :_view-assoc :parent :assoc-fn :args {:value {:as :value :type :_keymap-callable}}}
+  {:name :keymap-component :parent :_view-assoc :return-type :keymap-root-component
+   :args {:map {} :key {:value :view} :value {:ref :root-view}}}]}

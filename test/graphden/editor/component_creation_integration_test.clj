@@ -202,6 +202,7 @@
     (doseq [[component root-key] [["execution-status" :execution-status-id]
                                   ["execution-path" :execution-path-id]
                                   ["feedback" :feedback-id]
+                                  ["keymap" :keymap-id]
                                   ["canvas-inheritance" :canvas-inheritance-id]
                                   ["canvas-metadata" :canvas-metadata-id]
                                   ["canvas-type-structure" :canvas-type-structure-id]

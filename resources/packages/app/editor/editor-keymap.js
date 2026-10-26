@@ -1,244 +1,186 @@
-// Editor Keymap pane — Settings → Keyboard (docs/MARKETPLACE.md § Keymaps).
-//
-// Every binding the shortcut registry knows (editor-shortcuts.js) in a table:
-// group, what it does, its keys, and a "Change" control that records the
-// next key sequence. Only the registry's bindings are rebindable — the
-// canvas's arrow / hjkl navigation and the dialogs' Escape / Enter are the
-// platform's, documented in docs/ACCESSIBILITY.md. The layout is the
-// `keymap` preference `{source, payload: {bindings: {id: {keys, leader}}}}`
-// — only overrides are stored; saving publishes it as a KEYMAP package.
-
+// Settings → Keyboard: the graph owns presentation; the host captures keys and writes preferences.
 (() => {
-  
+  const api = window.GraphdenBrowser;
+  const key = api.keyword;
+  const builtin = api.createRuntime(window.GraphdenBuiltinPlans.plans.keymap, {operationLimit: 100000});
+  const record = value => new Map(Object.entries(value).map(([name, item]) => [key(name), item]));
+  let host = null;
+  let recording = null;
+  let selected = null;
+  let rejected = false;
+  let wired = false;
 
-  let _root = null;
-  let _recording = null; // {id, keys: [], row}
-
-  function present() { return typeof window.gdMarketPresent === 'function' && window.gdMarketPresent(); }
-  function pref() { return (typeof window.gdPrefRead === 'function') ? window.gdPrefRead('keymap') : null; }
-  function overrides() { return Object.assign({}, pref()?.payload?.bindings || {}); }
-
+  const pref = () => window.gdPrefRead?.('keymap') || null;
+  const overrides = () => ({...(pref()?.payload?.bindings || {})});
   function commit(bindings, source) {
-    const value = { source: source || null, payload: { bindings } };
-    if (typeof window.gdApplyKeymap === 'function') window.gdApplyKeymap(bindings);
-    if (typeof window.gdPrefWrite === 'function') window.gdPrefWrite('keymap', value);
+    window.gdApplyKeymap?.(bindings);
+    window.gdPrefWrite?.('keymap', {source: source || null, payload: {bindings}});
   }
-
-  function keycaps(keys, leader) {
-    const frag = document.createDocumentFragment();
-    const parts = (leader ? ['Space'] : []).concat(String(keys).split(' '));
-    parts.forEach((k, i) => {
-      if (i) frag.appendChild(document.createTextNode(' '));
-      const cap = document.createElement('kbd');
-      cap.className = 'gd-key-cap';
-      cap.textContent = k;
-      frag.appendChild(cap);
-    });
-    return frag;
+  function inputs() {
+    const current = pref();
+    const bindings = overrides();
+    return {
+      entries: window.gdShortcutEntries().map(entry => record({
+        id: entry.id, group: entry.group, description: entry.description,
+        keys: entry.keys, 'key-parts': String(entry.keys).split(' '),
+        leader: entry.leader, 'default-keys': entry.defaultKeys,
+        'default-leader': entry.defaultLeader, active: entry.active,
+        overridden: !!bindings[entry.id],
+      })),
+      'source-name': current?.source?.name || '',
+      'source-version': current?.source?.version || '',
+      'change-count': Object.keys(bindings).length,
+      marketplace: !!window.gdMarketPresent?.(),
+      'recording-id': recording?.id || '',
+      'recording-keys': recording?.keys.join(' ') || '',
+    };
   }
-
-  function conflicts(entries) {
-    const seen = new Map();
-    const bad = new Set();
-    for (const e of entries) {
-      const k = (e.leader ? 'L ' : 'B ') + e.keys;
-      if (seen.has(k)) { bad.add(e.id); bad.add(seen.get(k)); } else seen.set(k, e.id);
+  function view(runtime, data) {
+    const output = runtime.run('view', {inputs: record(data)});
+    if (!(output instanceof Map) || output.size !== 1 || !output.has(key('tree'))) {
+      throw new Error('Invalid keyboard graph view');
     }
-    return bad;
+    const vnode = window.GraphdenRenderer.vnode(output.get(key('tree')), 'gd-keymap', 3000);
+    const scratch = document.createElement('div');
+    window.GraphdenPreact.render(vnode, scratch);
+    if (scratch.childElementCount !== 1) throw new Error('Invalid keyboard graph tree');
+    const pane = scratch.firstElementChild;
+    const rows = [...pane.querySelectorAll('.gd-km-row[data-shortcut]')];
+    if (rows.length !== data.entries.length || rows.some((row, index) =>
+      row.dataset.shortcut !== data.entries[index].get(key('id')))) {
+      throw new Error('Invalid keyboard graph rows');
+    }
+    return pane;
   }
-
-  function el(tag, cls, text) {
-    const e = document.createElement(tag);
-    if (cls) e.className = cls;
-    if (text != null) e.textContent = text;
-    return e;
+  function render() {
+    host = document.getElementById('gd-keymap-root');
+    if (!host || typeof window.gdShortcutEntries !== 'function') return;
+    const data = inputs();
+    if (!selected && !rejected) {
+      try { selected = window.gdEditorRoot?.componentNow('keymap') || null; }
+      catch (_) { rejected = true; window.gdUIComponentFailed?.('keymap'); }
+    }
+    let pane;
+    if (selected) {
+      try {
+        pane = view(selected, data);
+        if (!window.gdEditorRoot.acceptComponent(selected)) throw new Error('Editor root changed');
+      } catch (_) {
+        window.gdEditorRoot?.releaseComponent(selected);
+        selected = null;
+        rejected = true;
+        window.gdUIComponentFailed?.('keymap');
+      }
+    }
+    host.replaceChildren(pane || view(builtin, data));
+    if (recording) recording.row = [...host.querySelectorAll('.gd-km-row')]
+      .find(row => row.dataset.shortcut === recording.id) || null;
   }
-
   function stopRecording() {
-    if (!_recording) return;
+    if (!recording) return;
     window.removeEventListener('keydown', onRecordKey, true);
     window.removeEventListener('pointerdown', onRecordPointer, true);
-    _recording = null;
+    recording = null;
     render();
   }
-  // Recording swallows EVERY key through a window-level capture listener,
-  // so it must not outlive the row it records for: leaving Settings (Escape,
-  // the exit button, a leader surface key) or clicking anywhere else ends it.
-  // It used to keep swallowing keys across the whole editor, and a stray
-  // Enter saved whatever it had collected as the binding.
-  function recordingLive() {
-    return !!_recording && !!_recording.row?.isConnected
-      && document.body.getAttribute('data-surface') === _recording.surface;
+  function onRecordPointer(event) {
+    if (recording && !recording.row?.contains(event.target)) stopRecording();
   }
-  function onRecordPointer(e) {
-    if (_recording && !_recording.row?.contains(e.target)) stopRecording();
-  }
-  function onRecordKey(e) {
-    if (!_recording) return;
-    if (!recordingLive()) { stopRecording(); return; }   // the key is not ours
-    e.preventDefault();
-    e.stopPropagation();
-    const k = e.key;
-    if (k === 'Escape') { stopRecording(); return; }
-    if (k === 'Enter') {
-      if (_recording.keys.length) {
-        const ov = overrides();
-        ov[_recording.id] = { keys: _recording.keys.join(' '), leader: _recording.leader };
-        commit(ov, pref()?.source ? Object.assign({}, pref().source) : null);
+  function onRecordKey(event) {
+    if (!recording) return;
+    if (!recording.row?.isConnected || document.body.getAttribute('data-surface') !== recording.surface) {
+      stopRecording();
+      return;
+    }
+    // Composition is owned by the IME, never by the shortcut recorder.
+    if (event.isComposing || event.key === 'Process' || event.key === 'Dead') return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.key === 'Escape') { stopRecording(); return; }
+    if (event.key === 'Enter') {
+      if (recording.keys.length) {
+        const bindings = overrides();
+        bindings[recording.id] = {keys: recording.keys.join(' '), leader: recording.leader};
+        commit(bindings, pref()?.source);
       }
       stopRecording();
       return;
     }
-    if (k === 'Backspace') { _recording.keys.pop(); showRecording(); return; }
-    if (['Shift', 'Control', 'Alt', 'Meta', 'Tab'].includes(k)) return;
-    if (_recording.keys.length >= 3) return;
-    _recording.keys.push(k === ' ' ? 'Space' : k);
-    showRecording();
+    if (event.key === 'Backspace') recording.keys.pop();
+    else if (!['Shift', 'Control', 'Alt', 'Meta', 'Tab'].includes(event.key)
+      && recording.keys.length < 3) recording.keys.push(event.key === ' ' ? 'Space' : event.key);
+    const output = recording.row.querySelector('.gd-km-recording');
+    if (output) output.textContent = recording.keys.length
+      ? recording.keys.join(' ') + '  (Enter to keep, Esc to cancel)'
+      : 'Press the keys… (Enter to keep, Esc to cancel)';
   }
-  function showRecording() {
-    const out = _recording?.row?.querySelector('.gd-km-recording');
-    if (out) out.textContent = _recording.keys.length ? _recording.keys.join(' ') + '  (Enter to keep, Esc to cancel)' : 'Press the keys… (Enter to keep, Esc to cancel)';
-  }
-
-  function render() {
-    _root = document.getElementById('gd-keymap-root');
-    if (!_root || typeof window.gdShortcutEntries !== 'function') return;
-    const entries = window.gdShortcutEntries();
-    const ov = overrides();
-    const bad = conflicts(entries);
-    const current = pref();
-    _root.replaceChildren();
-
-    // status row
-    const row = el('div', 'gd-set-row');
-    const copy = el('div', 'gd-set-copy');
-    copy.appendChild(el('div', 'gd-set-label', 'Keyboard layout'));
-    const src = current?.source;
-    const n = Object.keys(ov).length;
-    copy.appendChild(el('div', 'gd-set-hint', src?.name
-      ? 'Based on ' + src.name + '@' + src.version + (n ? ' — ' + n + ' binding(s) changed' : '')
-      : (n ? n + ' binding(s) changed from the defaults' : 'The default bindings. Change a key below; Space is the leader for everything marked with it.')));
-    row.appendChild(copy);
-    const btns = el('div', 'gd-theme-btns');
-    if (n || src) {
-      const reset = el('button', 'gd-set-btn', 'Reset to defaults');
-      reset.type = 'button';
-      reset.id = 'gd-keymap-reset';
-      reset.addEventListener('click', () => {
-        if (typeof window.gdApplyKeymap === 'function') window.gdApplyKeymap(null);
-        if (typeof window.gdPrefWrite === 'function') window.gdPrefWrite('keymap', null);
-        render();
-      });
-      btns.appendChild(reset);
-    }
-    if (present()) {
-      const save = el('button', 'packages-install-btn gd-theme-save', 'Save / share…');
-      save.type = 'button';
-      save.id = 'gd-keymap-save';
-      save.addEventListener('click', () => {
-        window.gdMarketOpenPublishDialog({
-          kind: 'keymap', payload: { bindings: overrides() }, name: src?.name || '',
-          onDone: (j) => { commit(overrides(), { name: j.name, version: j.version }); render(); },
-        });
-      });
-      btns.appendChild(save);
-      const browse = el('button', 'gd-set-btn', 'Browse marketplace');
-      browse.type = 'button';
-      browse.id = 'gd-keymap-browse';
-      browse.addEventListener('click', () => { if (typeof window.gdMarketOpen === 'function') window.gdMarketOpen({ kind: 'keymap' }); });
-      btns.appendChild(browse);
-    }
-    row.appendChild(btns);
-    _root.appendChild(row);
-
-    if (bad.size) {
-      _root.appendChild(el('div', 'packages-fork-note packages-fork-err gd-km-conflict', 'Two bindings share the same keys — the first registered wins; change one of them.'));
-    }
-
-    // table
-    const table = el('table', 'packages-panel-table gd-km-table');
-    const thead = el('thead');
-    const hr = el('tr');
-    for (const h of ['Group', 'Action', 'Keys', '']) hr.appendChild(el('th', null, h));
-    thead.appendChild(hr);
-    table.appendChild(thead);
-    const tbody = el('tbody');
-    for (const e of entries) {
-      const tr = el('tr', 'gd-km-row' + (bad.has(e.id) ? ' is-conflict' : '') + (e.active ? '' : ' is-inert'));
-      tr.dataset.shortcut = e.id;
-      tr.appendChild(el('td', null, e.group));
-      tr.appendChild(el('td', null, e.description));
-      const kt = el('td', 'gd-km-keys');
-      if (_recording?.id === e.id) {
-        // This render replaced the row the recording started on — follow it,
-        // or the typed keys are written into a detached node.
-        _recording.row = tr;
-        kt.appendChild(el('span', 'gd-km-recording', 'Press the keys… (Enter to keep, Esc to cancel)'));
-      } else {
-        kt.appendChild(keycaps(e.keys, e.leader));
-        if (ov[e.id]) {
-          const d = el('span', 'gd-km-default', ' (default: ' + (e.defaultLeader ? 'Space ' : '') + e.defaultKeys + ')');
-          kt.appendChild(d);
-        }
-      }
-      tr.appendChild(kt);
-      const at = el('td', 'gd-km-actions');
-      if (e.id !== 'help') {
-        const change = el('button', 'gd-set-btn gd-km-change', _recording?.id === e.id ? 'Recording…' : 'Change');
-        change.type = 'button';
-        change.setAttribute('aria-label', 'Change keys for ' + e.description);
-        change.addEventListener('click', () => {
-          if (_recording) stopRecording();
-          _recording = { id: e.id, keys: [], leader: e.leader, row: tr,
-                         surface: document.body.getAttribute('data-surface') };
-          window.addEventListener('keydown', onRecordKey, true);
-          window.addEventListener('pointerdown', onRecordPointer, true);
-          render();
-          _root.querySelector('.gd-km-row[data-shortcut="' + e.id + '"] .gd-km-leader')?.focus();
-        });
-        at.appendChild(change);
-        const leaderL = el('label', 'gd-km-leader-l');
-        const leader = document.createElement('input');
-        leader.type = 'checkbox';
-        leader.className = 'gd-km-leader';
-        leader.checked = !!e.leader;
-        leader.setAttribute('aria-label', 'Behind Space for ' + e.description);
-        leader.addEventListener('change', () => {
-          const o = overrides();
-          o[e.id] = { keys: e.keys, leader: leader.checked };
-          if (leader.checked === e.defaultLeader && e.keys === e.defaultKeys) delete o[e.id];
-          commit(o, src ? Object.assign({}, src) : null);
-          render();
-        });
-        leaderL.appendChild(leader);
-        leaderL.appendChild(document.createTextNode(' Space'));
-        at.appendChild(leaderL);
-        if (ov[e.id]) {
-          const undo = el('button', 'packages-uninstall gd-km-undo', '×');
-          undo.type = 'button';
-          undo.title = 'Back to the default keys';
-          undo.setAttribute('aria-label', 'Default keys for ' + e.description);
-          undo.addEventListener('click', () => { const o = overrides(); delete o[e.id]; commit(o, src ? Object.assign({}, src) : null); render(); });
-          at.appendChild(undo);
-        }
-      }
-      tr.appendChild(at);
-      tbody.appendChild(tr);
-    }
-    table.appendChild(tbody);
-    _root.appendChild(table);
-    _root.appendChild(el('p', 'gd-set-hint', 'Not listed: the canvas arrows / h j k l walk, the Explorer tree keys and Escape / Enter inside dialogs — those are fixed (docs/ACCESSIBILITY.md).'));
-    if (_recording) showRecording();
-  }
-
-  let _wired = false;
-  function gdRenderKeymapPane() {
+  function change(id) {
+    const entry = window.gdShortcutEntries().find(candidate => candidate.id === id);
+    if (!entry || id === 'help') return;
+    if (recording) stopRecording();
+    recording = {id, keys: [], leader: entry.leader, row: null,
+      surface: document.body.getAttribute('data-surface')};
+    window.addEventListener('keydown', onRecordKey, true);
+    window.addEventListener('pointerdown', onRecordPointer, true);
     render();
-    if (!_wired && typeof window.gdPrefOnChange === 'function') {
-      _wired = true;
-      window.gdPrefOnChange((key) => { if (key === 'keymap' && document.getElementById('gd-keymap-root')?.isConnected && !_recording) render(); });
+    recording.row?.querySelector('.gd-km-leader')?.focus();
+  }
+  function click(event) {
+    const button = event.target.closest?.('button[data-action]');
+    if (!button || !host?.contains(button)) return;
+    const id = button.dataset.shortcut;
+    const current = pref();
+    if (button.dataset.action === 'change') change(id);
+    else if (button.dataset.action === 'undo' && window.gdShortcutEntries().some(entry => entry.id === id)) {
+      const bindings = overrides();
+      delete bindings[id];
+      commit(bindings, current?.source);
+      render();
+    } else if (button.dataset.action === 'reset') {
+      window.gdApplyKeymap?.(null);
+      window.gdPrefWrite?.('keymap', null);
+      render();
+    } else if (button.dataset.action === 'save' && window.gdMarketPresent?.()) {
+      window.gdMarketOpenPublishDialog({kind: 'keymap', payload: {bindings: overrides()},
+        name: current?.source?.name || '',
+        onDone: result => { commit(overrides(), {name: result.name, version: result.version}); render(); }});
+    } else if (button.dataset.action === 'browse' && window.gdMarketPresent?.()) {
+      window.gdMarketOpen?.({kind: 'keymap'});
     }
+  }
+  function changeLeader(event) {
+    const control = event.target.closest?.('.gd-km-leader[data-shortcut]');
+    if (!control || !host?.contains(control)) return;
+    const entry = window.gdShortcutEntries().find(candidate => candidate.id === control.dataset.shortcut);
+    if (!entry || entry.id === 'help') return;
+    const bindings = overrides();
+    bindings[entry.id] = {keys: entry.keys, leader: control.checked};
+    if (control.checked === entry.defaultLeader && entry.keys === entry.defaultKeys) delete bindings[entry.id];
+    commit(bindings, pref()?.source);
+    render();
+  }
+  function gdRenderKeymapPane() {
+    const next = document.getElementById('gd-keymap-root');
+    if (host !== next) {
+      host?.removeEventListener('click', click);
+      host?.removeEventListener('change', changeLeader);
+      next?.addEventListener('click', click);
+      next?.addEventListener('change', changeLeader);
+    }
+    render();
+    if (wired) return;
+    wired = true;
+    window.gdPrefOnChange?.(name => {
+      if (name === 'keymap' && document.getElementById('gd-keymap-root')?.isConnected && !recording) render();
+    });
+    window.addEventListener('gd-editor-root-changing', () => {
+      selected = null;
+      rejected = false;
+      if (recording) stopRecording();
+    });
+    window.addEventListener('gd-editor-root-ready', () => {
+      if (document.getElementById('gd-keymap-root')?.isConnected) render();
+    });
   }
   window.gdRenderKeymapPane = gdRenderKeymapPane;
-  window.gdKeymapConflicts = conflicts;
 })();

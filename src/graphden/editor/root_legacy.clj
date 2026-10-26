@@ -36,7 +36,10 @@
                     :wrapper {:view :root-path-view} :root-component :execution-path-component}
    :feedback {:namespace "app.ui-feedback" :prefix "feedback"
               :roles [:view] :inputs {:view #{"inputs"}}
-              :wrapper {:view :root-view} :root-component :feedback-component-value}})
+              :wrapper {:view :root-view} :root-component :feedback-component-value}
+   :keymap {:namespace "app.ui-keymap" :prefix "keymap"
+            :roles [:view] :inputs {:view #{"inputs"}}
+            :wrapper {:view :root-view} :root-component :keymap-component}})
 
 
 (defn default-role-id

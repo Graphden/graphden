@@ -213,7 +213,7 @@
 
 (deftest manual-priority-precedes-derived-tests-without-a-second-run
   (let [manual (priority/manual-hints
-                 "runtime:org-switcher.test.js,browser:edit-appearance-graph.test.js,unit:graphden.executor.builtin-plans-test,runtime:org-switcher.test.js")
+                 "runtime:org-switcher.test.js,browser:edit-appearance-graph.test.js,unit:graphden.executor.builtin-plans-test,unit:graphden.editor.component-config-test,runtime:org-switcher.test.js")
         runtime (priority/runtime-order #{"tools/runtime-test/undo-journal.test.js"}
                                         (:runtime manual))
         browser (priority/browser-order #{"tools/browser-test/edit-a11y-audit.test.js"}
@@ -225,6 +225,9 @@
     (is (= ["edit-appearance-graph.test.js" "edit-a11y-audit.test.js"]
            (subvec browser 0 2)))
     (is (= "graphden.executor.builtin-plans-test" (first (:unit plan))))
+    (is (= [["graphden.executor.builtin-plans-test"]
+            ["graphden.editor.component-config-test"]]
+           (subvec (:unit-layers plan) 0 2)))
     (is (= (frequencies (priority/runtime-order nil)) (frequencies runtime)))
     (is (= (frequencies (priority/browser-order nil)) (frequencies browser)))
     (is (= (count (:unit plan)) (count (distinct (:unit plan)))))))

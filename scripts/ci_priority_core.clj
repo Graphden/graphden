@@ -563,12 +563,11 @@
                   (let [names (get manual kind [])
                         first-names (manual-prefix (when (seq names) (eligible kind)) names kind)
                         selected (set first-names)]
-                    (cond-> []
-                      (seq first-names) (conj first-names)
-                      true (into (keep (fn [layer]
-                                         (let [remaining (vec (remove selected layer))]
-                                           (when (seq remaining) remaining)))
-                                       automatic)))))
+                    (into (mapv vector first-names)
+                          (keep (fn [layer]
+                                  (let [remaining (vec (remove selected layer))]
+                                    (when (seq remaining) remaining)))
+                                automatic))))
          unit-groups (layers :unit (unit-layers changed))
          integration-groups (layers :integration (integration-layers changed))]
      {:runtime (vec (distinct (concat (map #(str "tools/runtime-test/" %)

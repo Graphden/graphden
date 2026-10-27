@@ -83,15 +83,29 @@ let phase = 'boot';
       const response = await route.fetch();
       let release;
       const ready = new Promise(resolve => { release = resolve; });
-      held.push({release, fnId: JSON.parse(route.request().postData() || '{}')['fn-id']});
+      const read = {release, fnId: JSON.parse(route.request().postData() || '{}')['fn-id'], delivered: false};
+      held.push(read);
       releases.add(release);
       await ready; releases.delete(release);
-      await route.fulfill({response}).catch(() => {});
+      try { await route.fulfill({response}); read.delivered = true; }
+      catch (_) { /* The owner may cancel an older read. */ }
     });
     async function heldReadFor(fnId, since, label) {
       const matching = () => held.slice(since).find(read => read.fnId === fnId);
       assert(await waitFor(() => !!matching(), 30000), label);
       return matching();
+    }
+    async function releaseCurrentReads(fnId, since, locator, label) {
+      const released = new Set();
+      const visible = await waitFor(async () => {
+        for (const read of held.slice(since)) {
+          if (read.fnId !== fnId || released.has(read)) continue;
+          released.add(read);
+          read.release();
+        }
+        return [...released].some(read => read.delivered) && await locator.isVisible();
+      }, 45000);
+      assert(visible, label);
     }
     await page.setViewportSize({width: 1000, height: 850});
     let since = held.length;
@@ -100,9 +114,9 @@ let phase = 'boot';
     await page.evaluate(() => { window.usagesHost = document.querySelector('[data-gd-usages-host]'); gdInspectorGraph.close(); });
     since = held.length;
     await page.setViewportSize({width: 1400, height: 900});
-    const resumedRead = await heldReadFor(selection.id, since, 'wide viewport resumes the same owner with a fresh read');
-    resumedRead.release();
-    await filter.waitFor({state: 'visible'});
+    await heldReadFor(selection.id, since, 'wide viewport resumes the same owner with a fresh read');
+    await page.evaluate(() => window.dispatchEvent(new Event('gd-editor-root-ready')));
+    await releaseCurrentReads(selection.id, since, filter, 'resumed owner renders after every current A read is released');
     await filter.fill('retained-query-3141');
     await page.evaluate(() => { window.resumedFilter = document.querySelector('.gd-insp-usage-filter'); });
     initialRead.release();
@@ -124,10 +138,9 @@ let phase = 'boot';
     const refreshedB = await heldReadFor(other, since, 'root refresh adds an independent B read');
     since = held.length;
     await page.evaluate(id => gdInspectorRender(id), selection.id);
-    const newestA = await heldReadFor(selection.id, since, 'newest A gets a distinct read generation');
-    newestA.release();
+    await heldReadFor(selection.id, since, 'newest A gets a distinct read generation');
     phase = 'stale-context-newest-a-visible';
-    await filter.waitFor({state: 'visible'});
+    await releaseCurrentReads(selection.id, since, filter, 'newest A renders after every current A read is released');
     phase = 'stale-context-late-responses';
     await page.evaluate(() => { window.newestUsages = document.querySelector('[data-gd-usages-host]'); });
     staleA.release(); staleB.release(); refreshedB.release();

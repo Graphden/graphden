@@ -809,7 +809,8 @@
 
    Those last two used to live in tools/browser-test as `type-system-ui-*.test.js`, driving a real chromium at a LOADED editor because they read editor globals. That put them in no runner at all — this task excluded them, run-edit-tests.sh's glob excluded them, so `shortTypeLabel(['list','text']) = '[text]'` was asserted nowhere. They now take their globals as fixtures (a 3-line `richTypes`, a `lookups` mock) and their DOM from `tools/runtime-test/mini-dom.js`, which is the smaller and more honest test anyway: the inputs are written down instead of being whatever the server shipped."
    :task (let [changed (priority/changed-paths (System/getenv "GRAPHDEN_CI_SINCE"))
-               files (priority/runtime-order changed)
+               manual (priority/manual-hints (System/getenv "GRAPHDEN_CI_FIRST_TESTS"))
+               files (priority/runtime-order changed (:runtime manual))
                failed (atom [])]
            (doseq [path files
                    :let [dir (str (fs/parent path))

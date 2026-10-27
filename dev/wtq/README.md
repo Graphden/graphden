@@ -174,6 +174,11 @@ Details that are deliberate:
   cleanup and host admission. It may inspect uncommitted edits; it is optional
   and does not provide reusable gate proof. Full local CI or lint may also be
   chosen for diagnosis, but is never required before queueing.
+  `bb wt merge --first-test=unit:<namespace>` (or `integration`, `runtime`,
+  `browser`) moves an explicitly suspected test ahead of derived neighbors
+  within its authoritative suite. Repeat the flag for an ordered prefix;
+  the queued hint survives train retries and bisection. An unknown test is
+  rejected before queueing. The remainder still runs exactly once.
 - **Machine receipts.** The same directory holds `_train-<ts>.report.edn`
   (exact assembled SHA, scope, exit, failed stage, phase durations, queue wait, image ID and
   jar hash), `_train-<ts>.ci-expected.edn` (check roster computed before CI),

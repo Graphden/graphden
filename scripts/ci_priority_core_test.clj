@@ -211,6 +211,32 @@
     (is (= all (priority/runtime-order #{"unknown"})))))
 
 
+(deftest manual-priority-precedes-derived-tests-without-a-second-run
+  (let [manual (priority/manual-hints
+                 "runtime:org-switcher.test.js,browser:edit-appearance-graph.test.js,unit:graphden.executor.builtin-plans-test,runtime:org-switcher.test.js")
+        runtime (priority/runtime-order #{"tools/runtime-test/undo-journal.test.js"}
+                                        (:runtime manual))
+        browser (priority/browser-order #{"tools/browser-test/edit-a11y-audit.test.js"}
+                                        (:browser manual))
+        plan (priority/plan #{"test/graphden/types/core_test.clj"} manual)]
+    (is (= ["org-switcher.test.js"] (:runtime manual)))
+    (is (= ["tools/runtime-test/org-switcher.test.js"
+            "tools/runtime-test/undo-journal.test.js"] (subvec runtime 0 2)))
+    (is (= ["edit-appearance-graph.test.js" "edit-a11y-audit.test.js"]
+           (subvec browser 0 2)))
+    (is (= "graphden.executor.builtin-plans-test" (first (:unit plan))))
+    (is (= (frequencies (priority/runtime-order nil)) (frequencies runtime)))
+    (is (= (frequencies (priority/browser-order nil)) (frequencies browser)))
+    (is (= (count (:unit plan)) (count (distinct (:unit plan)))))))
+
+
+(deftest manual-priority-rejects-typos-before-running
+  (is (thrown? Exception (priority/manual-hints "unit:bad/name")))
+  (is (thrown? Exception (priority/runtime-order nil ["missing.test.js"])))
+  (is (thrown? Exception (priority/browser-order nil ["missing.test.js"])))
+  (is (thrown? Exception (priority/plan nil {:unit ["missing.namespace-test"]}))))
+
+
 (deftest fresh-bb-task-executes-full-roster-once-in-its-own-directory
   ;; A real child BB process compiles the task with ONLY bb.edn's :requires.
   ;; Evaluating its body in this test ns would mask a missing priority alias.
@@ -225,10 +251,12 @@
       (p/shell "chmod" "+x" stub)
       (let [result (p/shell {:out :string :err :string :continue true
                              :extra-env {"PATH" (str dir (System/getProperty "path.separator") (System/getenv "PATH"))
-                                         "CI_JS_TASK_CALL_LOG" log "GRAPHDEN_CI_SINCE" ""}}
+                                         "CI_JS_TASK_CALL_LOG" log "GRAPHDEN_CI_SINCE" ""
+                                         "GRAPHDEN_CI_FIRST_TESTS" "runtime:org-switcher.test.js"}}
                             "bb" "test-js")
             calls (if (fs/exists? log) (mapv #(str/split % #"\t") (str/split-lines (slurp log))) [])]
         (is (zero? (:exit result)) (str (:out result) (:err result)))
+        (is (= "org-switcher.test.js" (last (first calls))))
         (is (= expected (set calls)))
         (is (= (count expected) (count calls))))
       (finally (fs/delete-tree dir)))))

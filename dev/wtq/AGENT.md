@@ -95,14 +95,18 @@ You were started in one of two ways:
    build (not just a detail with a sane default), **stop and ask the user** —
    don't guess load-bearing decisions.
 2. **Implement** in small commits, inside your worktree.
-3. **Candidate readiness:** before queueing a UI graph or editor change, run
-   `bb scripts/ci.clj --preflight-only` in the claimed worktree. It selects
-   changed-file formatting, graph audits, generated-plan/devtour checks and
-   directly affected Node runtime tests from the Git diff. Inspect
-   `bb scripts/ci_fast_cli.clj --status` or `target/preflight/latest.edn` for
-   the command/time/exit journal. For focused JVM debugging use
-   **`bb wt test --focus <ns>`**. Preflight is an editing aid; its worktree
-   receipt does not replace the merged candidate's mandatory gate. Do not
+3. **Candidate readiness:** queue the complete committed change so the native
+   gate runs each selected check once. During editing, use
+   `bb scripts/ci.clj --preflight-only` only when its changed-file diagnostics
+   answer a concrete question; it repeats work in the mandatory gate. Its
+   journal is at `bb scripts/ci_fast_cli.clj --status` or
+   `target/preflight/latest.edn`. For focused JVM debugging use
+   **`bb wt test --focus <ns>`** only when the result will change the edit.
+   To move a suspected test ahead of automatically selected and remaining
+   tests in the one gate, pass `--first-test=unit:<namespace>`,
+   `--first-test=integration:<namespace>`, `--first-test=runtime:<file>` or
+   `--first-test=browser:<file>` to `bb wt merge`; repeat the flag as needed.
+   The full suite still runs each test once. Do not
    run raw `clojure -M:dev:test -m kaocha.runner`. The wrapper waits while the
    gate is in a heavy phase (`.git/wtq/gate-heavy`) or `MemAvailable` is below
    `WTQ_AGENT_MEM_MIN_MB` (default 3000); `bb wt up` waits the same way.

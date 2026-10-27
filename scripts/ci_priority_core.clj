@@ -35,6 +35,41 @@
          (sort-by (juxt distances identity)))))
 
 
+(def ^:private manual-kinds #{:runtime :unit :integration :browser})
+
+
+(defn manual-hints
+  "Comma-separated kind:name entries from the queue. Invalid hints fail before
+   the gate starts; a typo must never silently lose the requested first test."
+  [encoded]
+  (reduce (fn [acc entry]
+            (let [[kind name] (str/split entry #":" 2)
+                  kind (keyword kind)]
+              (when-not (and (contains? manual-kinds kind)
+                             (re-matches #"[A-Za-z0-9_.-]+" (or name "")))
+                (throw (ex-info "Invalid manual test priority" {:entry entry})))
+              (update acc kind (fn [names]
+                                 (if (some #{name} names) names (conj (or names []) name))))))
+          {}
+          (remove str/blank? (str/split (or encoded "") #","))))
+
+
+(defn- manual-prefix
+  [all names kind]
+  (let [available (set all)
+        missing (remove available names)]
+    (when (seq missing)
+      (throw (ex-info "Unknown manual test priority" {:kind kind :missing (vec missing)})))
+    (vec names)))
+
+
+(defn- priority-order
+  [all manual automatic kind]
+  (let [prefix (manual-prefix all manual kind)
+        seen (set prefix)]
+    (vec (distinct (concat prefix (remove seen automatic) all)))))
+
+
 (defn- script-definitions
   "Top-level browser globals. Only uniquely owned names form graph edges."
   [source]
@@ -260,14 +295,13 @@
 
 (defn browser-order
   "Priority is a permutation of the existing browser suite, never a filter."
-  [changed]
-  (let [all (->> (fs/glob "tools/browser-test" "edit-*.test.js")
-                 (map (comp str fs/file-name))
-                 sort
-                 vec)
-        first-files (browser-first changed)
-        first-set (set first-files)]
-    (into (vec first-files) (remove first-set) all)))
+  ([changed] (browser-order changed []))
+  ([changed manual]
+   (let [all (->> (fs/glob "tools/browser-test" "edit-*.test.js")
+                  (map (comp str fs/file-name))
+                  sort
+                  vec)]
+     (priority-order all manual (browser-first changed) :browser))))
 
 
 (defn runtime-first
@@ -290,11 +324,11 @@
 
 (defn runtime-order
   "Move directly related JS files first while retaining the full file roster."
-  [changed]
-  (let [all (mapv str (sort (fs/glob "tools/runtime-test" "*.test.js")))
-        first-files (runtime-first changed)
-        first-set (set first-files)]
-    (into (vec first-files) (remove first-set) all)))
+  ([changed] (runtime-order changed []))
+  ([changed manual]
+   (let [all (mapv str (sort (fs/glob "tools/runtime-test" "*.test.js")))
+         paths (mapv #(str "tools/runtime-test/" %) manual)]
+     (priority-order all paths (runtime-first changed) :runtime))))
 
 
 (def ^:private non-unit-tags [:integration :container-e2e :perf])
@@ -520,12 +554,29 @@
 
 
 (defn plan
-  [changed]
-  (let [unit-groups (unit-layers changed)
-        integration-groups (integration-layers changed)]
-    {:runtime (runtime-first changed)
-     :unit (vec (mapcat identity unit-groups))
-     :unit-layers unit-groups
-     :integration (vec (mapcat identity integration-groups))
-     :integration-layers integration-groups
-     :browser (browser-first changed)}))
+  ([changed] (plan changed {}))
+  ([changed manual]
+   (let [eligible (fn [kind]
+                    (into #{} (keep #(focused-namespace (str %) kind))
+                          (fs/glob "test" "**/*_test.clj")))
+         layers (fn [kind automatic]
+                  (let [names (get manual kind [])
+                        first-names (manual-prefix (when (seq names) (eligible kind)) names kind)
+                        selected (set first-names)]
+                    (cond-> []
+                      (seq first-names) (conj first-names)
+                      true (into (keep (fn [layer]
+                                         (let [remaining (vec (remove selected layer))]
+                                           (when (seq remaining) remaining)))
+                                       automatic)))))
+         unit-groups (layers :unit (unit-layers changed))
+         integration-groups (layers :integration (integration-layers changed))]
+     {:runtime (vec (distinct (concat (map #(str "tools/runtime-test/" %)
+                                           (get manual :runtime []))
+                                      (runtime-first changed))))
+      :unit (vec (mapcat identity unit-groups))
+      :unit-layers unit-groups
+      :integration (vec (mapcat identity integration-groups))
+      :integration-layers integration-groups
+      :browser (vec (distinct (concat (get manual :browser [])
+                                      (browser-first changed))))})))

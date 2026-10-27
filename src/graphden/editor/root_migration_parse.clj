@@ -3,6 +3,7 @@
   (:require
     [clojure.edn :as edn]
     [clojure.java.io :as io]
+    [clojure.set :as set]
     [clojure.string :as str]
     [graphden.editor.cohort-parser :as cohort]
     [graphden.editor.component-templates :as components]
@@ -34,6 +35,15 @@
         (map #(assoc % :namespace "app.ui-config")
              (filter #(= :_editor-bootstrap-result (:name %))
                      (packaged-definitions "app.ui-config")))
+        legacy-namespaces (into #{} (map :namespace) (vals legacy/components))
+        bootstrap-namespaces (into #{} (keep namespace)
+                                   (mapcat (comp vals :type) config-declarations))
+        additional-types
+        (mapcat (fn [path]
+                  (map #(assoc % :namespace path)
+                       (filter #(or (:type %) (:fn-type %))
+                               (packaged-definitions path))))
+                (sort (set/difference bootstrap-namespaces legacy-namespaces)))
         call-declaration
         (assoc (some #(when (= :call (:name %)) %)
                      (packaged-definitions "core.system"))
@@ -43,7 +53,8 @@
                (components/identity-interface (keyword path (name root-component))))
              legacy/components)]
     (into (components/interface-definitions)
-          (concat component-declarations config-declarations [call-declaration] component-identities
+          (concat component-declarations additional-types config-declarations
+                  [call-declaration] component-identities
                   [(components/identity-interface :app.ui-config/component-editor-root)
                    (components/identity-interface :app.ui-account-menu/_root-common-tree)]))))
 

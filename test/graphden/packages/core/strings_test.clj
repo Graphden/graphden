@@ -27,6 +27,22 @@
       (t))))
 
 
+(deftest bounded-literal-separator-does-not-wait-for-regex-worker
+  (let [split (impls/impl-of :str-split)
+        separator (str "literal-" (random-uuid) ",")
+        timed (ns-resolve 'graphden.packages.core.strings.impls 'compile-regex-timed)]
+    (binding [sp-config/*regex-compile-timeout-ms* 1]
+      (with-redefs-fn {timed (fn [_] (throw (ex-info "literal entered regex worker" {})))}
+        #(is (= ["left" "right"]
+                (split {:string (delay (str "left" separator "right"))
+                        :separator (delay separator)
+                        :limit (delay nil)} nil)))))
+    (is (= ["left" "right"]
+           (split {:string (delay "left:right")
+                   :separator (delay "[:]")
+                   :limit (delay nil)} nil)))))
+
+
 ;; ============================================================================
 ;; :re-replace — regex replace (the regex sibling of literal :str-replace).
 ;; Added for the :render-prometheus graph decomposition (key sanitising).

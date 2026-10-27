@@ -104,9 +104,20 @@
   (java.util.concurrent.ConcurrentHashMap.))
 
 
+(def ^:private regex-metacharacters "\\.^$|?*+()[]{}")
+
+
+(defn- literal-regex?
+  "A bounded pattern without regex syntax compiles directly. A future's
+   scheduling delay must not turn a plain separator into a complexity error."
+  [pattern-str]
+  (every? #(neg? (String/.indexOf regex-metacharacters (int %))) pattern-str))
+
+
 (defn- safe-compile-regex
-  "`compile-regex-timed` behind a bounded pattern-string cache. The timed
-   compile starts a future per call; uncached, every query-string parse,
+  "Literal patterns compile on the caller; regex syntax uses
+   `compile-regex-timed`. Both share a bounded pattern-string cache. Uncached,
+   every query-string parse,
    URI split, Prometheus metric and `:filter` element paid one (measured
    ~16 µs vs ~4 µs per `re-find` over a cached pattern). The length cap
    is checked on every call — it is a dynamic var, and cheap. The limits
@@ -116,7 +127,9 @@
   [pattern-str]
   (check-regex-length! pattern-str)
   (or (java.util.concurrent.ConcurrentHashMap/.get regex-cache pattern-str)
-      (let [p (compile-regex-timed pattern-str)]
+      (let [p (if (literal-regex? pattern-str)
+                (re-pattern pattern-str)
+                (compile-regex-timed pattern-str))]
         (when (>= (java.util.concurrent.ConcurrentHashMap/.size regex-cache) regex-cache-cap)
           (java.util.concurrent.ConcurrentHashMap/.clear regex-cache))
         (java.util.concurrent.ConcurrentHashMap/.put regex-cache pattern-str p)

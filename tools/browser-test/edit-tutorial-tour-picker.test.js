@@ -4,7 +4,8 @@
 const {chromium} = require('playwright');
 const {assert, newContext, api} = require('./edit-test-helpers');
 const {
-  hardCleanup, waitTourTitle, clickTourButton, tourTitle, tourWhere, openTutorialCatalog,
+  hardCleanup, waitTourTitle, settleTourRing, filterAndSelect,
+  clickTourButton, tourTitle, tourWhere, openTutorialCatalog,
 } = require('./tutorial-tour-helpers');
 
 (async () => {
@@ -89,9 +90,14 @@ const {
         JSON.stringify({lessonId: '04', step: 2, created: []}));
     });
     await page.reload();
+    // This saved step expects str-upper's own card. Restore the reader's
+    // selection before opening the catalogue so its spotlight is real.
+    await filterAndSelect(page, 'str-upper', 'str-upper');
     // Script availability precedes initGraph's async saved-lesson restore.
     // Open the catalogue only after that restore has published its real step.
     await waitTourTitle(page, 'Make the first child', 60000);
+    await page.waitForSelector('.node-overlay[data-fn-name="str-upper"] .ancestor-line[data-level="0"] button.more-actions-trigger', {timeout: 30000});
+    await settleTourRing(page, 20000);
     await openTutorialCatalog(page);
     const cat = await page.evaluate(() => {
       const pop = document.querySelector('#gd-tour-pop');

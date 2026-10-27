@@ -915,8 +915,14 @@ if [ -n "$STRICT_FLAKES$STRICT_LEAKS" ]; then
     echo "  (run-level thrash: env degraded — strict flakes/leaks are REPORT-ONLY this run, NOT a red RESULT)" >&2
   else
     # Healthy host: escalate exactly as strict mode did before this change.
-    for x in $STRICT_FLAKES; do FAILED_NAMES="$FAILED_NAMES $x(flaked-passed-on-retry)"; done
-    for x in $STRICT_LEAKS;  do FAILED_NAMES="$FAILED_NAMES $x(leaked)"; done
+    for x in $STRICT_FLAKES; do
+      FAILED_NAMES="$FAILED_NAMES $x(flaked-passed-on-retry)"
+      browser_progress "${x%%(*}" failed
+    done
+    for x in $STRICT_LEAKS; do
+      FAILED_NAMES="$FAILED_NAMES $x(leaked)"
+      browser_progress "${x%%(*}" failed
+    done
     WORST=1
   fi
 fi

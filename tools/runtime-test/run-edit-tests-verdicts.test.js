@@ -282,8 +282,8 @@ console.log(' strict retry-pass flake is red while later files still run');
   assert(gate.code !== 0 && gate.attempts('edit-a.test.js') === 2 && gate.attempts('edit-b.test.js') === 1,
     'strict flake does not prevent later files from running', gate.out);
   assert(/flaked-passed-on-retry/.test(gate.out), 'strict flake remains a named red verdict', gate.out);
-  assert(gate.receipt.includes('"edit-a.test.js" :pending') && gate.receipt.includes('"edit-b.test.js" :passed'),
-    'strict retry-pass stays provisional in receipt while later pass is recorded', gate.receipt);
+  assert(gate.receipt.includes('"edit-a.test.js" :failed') && gate.receipt.includes('"edit-b.test.js" :passed'),
+    'completed red gate records the strict flake as failed for the next priority order', gate.receipt);
 }
 console.log(' exact-candidate checkpoint skips only confirmed browser passes');
 {

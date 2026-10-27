@@ -126,6 +126,7 @@ async function gdUndoLast() {
          && document.body?.classList?.contains('editor-busy'); i++) {
       await new Promise((r) => setTimeout(r, 100));
     }
+    if (typeof gdWaitForGraphReady === 'function') await gdWaitForGraphReady();
     if (typeof entry.verify === 'function') {
       let stale = null;
       try { stale = await entry.verify(); } catch (_) { stale = null; }

@@ -301,6 +301,15 @@ function beginGraphRefresh() {
   };
 }
 
+// Undo can be offered as soon as a write succeeds, while the write's
+// follow-up refresh is still replacing the graph shell. Keep its inverse
+// behind that refresh so the two reloads cannot install out of order.
+function gdWaitForGraphReady() {
+  if (_graphRefreshDepth === 0) return Promise.resolve();
+  return new Promise((resolve) => window.addEventListener('gd-graph-ready', resolve, {once: true}));
+}
+window.gdWaitForGraphReady = gdWaitForGraphReady;
+
 function resetGraphCaches() {
   if (typeof hideAllInlineHosts === 'function') hideAllInlineHosts();
   for (const chip of document.querySelectorAll?.('.arg-type-chip[role="button"]') || []) {

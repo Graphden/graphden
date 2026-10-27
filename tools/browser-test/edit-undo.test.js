@@ -72,6 +72,7 @@ const undoToast = (page) => page.evaluate(() => {
 
 (async () => {
   const {browser, page} = await newContext(chromium, {boot: false});
+  let releaseDeleteTree;
   page.on('dialog', (d) => { d.accept().catch(() => {}); });
   console.log('edit-undo — the 30-second Undo: extend / rename / refused-in-use / Space u');
 
@@ -322,6 +323,11 @@ const undoToast = (page) => page.evaluate(() => {
     await page.click('#gd-undo-toast .gd-undo-toast-btn');
     await page.waitForFunction((n) => Array.from(document.querySelectorAll('.ns-header'))
       .some((x) => x.querySelector('.ns-label')?.textContent.trim() === n), NS, {timeout: 30000, polling: 200});
+    // The old label can be painted before Undo's refresh has finished.
+    // Browser clicks cannot reach inert Explorer rows until it completes;
+    // page.evaluate(...click()) can, so keep this test on the user path.
+    await page.waitForFunction(() => _graphRefreshDepth === 0 && !_gdUndoBusy,
+      null, {timeout: 30000, polling: 100});
     assert(await nsHeader(NS) && !(await nsHeader(NS_RENAMED)), 'the old namespace name is back');
     console.log('  G1: namespace rename → Undo → old name ✓');
 
@@ -344,17 +350,60 @@ const undoToast = (page) => page.evaluate(() => {
     await page.waitForFunction((n) => !!Array.from(document.querySelectorAll('#entity-list .entity-item'))
       .find((e) => e.querySelector('.name')?.textContent.trim() === n)?.querySelector('.ns-delete-btn'),
     NSFN, {timeout: 30000, polling: 200});
-    await page.evaluate((n) => {
-      const row = Array.from(document.querySelectorAll('#entity-list .entity-item'))
-        .find((e) => e.querySelector('.name')?.textContent.trim() === n);
-      row.querySelector('.ns-delete-btn').click();
-    }, NSFN);
-    await page.waitForFunction((n) => !(graphData?.fns || []).some((f) => f.name === n), NSFN, {timeout: 30000, polling: 200});
+    // Hold the delete's graph refresh after the write succeeds. The Undo
+    // button is already offered then; its inverse must wait for that refresh
+    // instead of racing a second initGraph against the first one.
+    const deleteTreeRelease = new Promise((resolve) => { releaseDeleteTree = resolve; });
+    let sawDeleteTree;
+    const deleteTreeHeld = new Promise((resolve) => { sawDeleteTree = resolve; });
+    let holdNextTree = true;
+    let heldTreeRequest;
+    const treeRoute = (url) => url.pathname.endsWith('/api/graph/entities')
+      && url.searchParams.get('scope') === 'tree';
+    await page.route(treeRoute, async (route) => {
+      if (!holdNextTree) return route.continue();
+      holdNextTree = false;
+      heldTreeRequest = route.request();
+      sawDeleteTree();
+      await deleteTreeRelease;
+      await route.continue();
+    });
+    let reviveRequests = 0;
+    page.on('request', (request) => {
+      if (request.method() === 'POST' && /\/api\/entities\/fn\/[^/]+\/revive(?:\?|$)/.test(request.url())) {
+        reviveRequests++;
+      }
+    });
+    await page.locator('#entity-list .entity-item').filter({has: page.locator('.name', {hasText: NSFN})})
+      .locator('.ns-delete-btn').click();
+    let heldTreeTimeout;
+    await Promise.race([
+      deleteTreeHeld,
+      new Promise((_, reject) => {
+        heldTreeTimeout = setTimeout(() => reject(new Error('delete graph refresh did not start')), 15000);
+      }),
+    ]).finally(() => clearTimeout(heldTreeTimeout));
+    await page.waitForFunction(() => gdUndoLastLabel()?.startsWith('Deleted '),
+      null, {timeout: 30000, polling: 100});
     toast = await undoToast(page);
     assert(toast && toast.visible && /^Deleted /.test(toast.label || ''),
       'the toast offers to undo the Explorer delete: ' + JSON.stringify(toast));
+    assert(await page.evaluate(() => gdUndoAvailable() && gdUndoLastLabel()?.startsWith('Deleted ')),
+      'the Explorer delete is the current, runnable Undo entry');
     await page.click('#gd-undo-toast .gd-undo-toast-btn');
+    await page.waitForFunction(() => _gdUndoBusy, null, {timeout: 5000, polling: 50});
+    await page.waitForTimeout(500);
+    const revivedBeforeRefresh = reviveRequests;
+    const treeResponse = page.waitForResponse((response) => response.request() === heldTreeRequest,
+      {timeout: 30000});
+    releaseDeleteTree();
+    await treeResponse;
+    assert(revivedBeforeRefresh === 0, 'Undo waits for the preceding graph refresh');
     await page.waitForFunction((n) => (graphData?.fns || []).some((f) => f.name === n), NSFN, {timeout: 30000, polling: 200});
+    await page.waitForFunction(() => _graphRefreshDepth === 0 && !_gdUndoBusy,
+      null, {timeout: 30000, polling: 100});
+    assert((await getEntities(page, NSFN)).fns.some((f) => f.name === NSFN),
+      'the Explorer delete Undo revived the server row');
     console.log('  G2: Explorer trash on a graph → Undo → revived ✓');
 
     // … then empty the namespace for real and delete IT; Undo re-creates it.
@@ -381,8 +430,17 @@ const undoToast = (page) => page.evaluate(() => {
 
     console.log('PASS');
   } catch (e) {
+    releaseDeleteTree?.();
     console.error('FAIL:', e.message);
     try {
+      console.error('  undo state: ' + JSON.stringify(await page.evaluate(() => ({
+        busy: _gdUndoBusy, available: gdUndoAvailable(), label: gdUndoLastLabel(),
+        refreshDepth: _graphRefreshDepth, selectedFnId,
+        toastVisible: document.getElementById('gd-undo-toast')?.classList.contains('gd-undo-toast-visible'),
+        graphHasFn: (graphData?.fns || []).some((f) => f.name.startsWith('undo-nsfn')),
+      }))));
+      console.error('  server fn: ' + JSON.stringify((await getEntities(page, NSFN)).fns
+        .filter((f) => f.name === NSFN).map((f) => ({id: f.id, name: f.name}))));
       await page.screenshot({path: '/tmp/edit-undo-fail.png'});
       console.error('  overlays: ' + JSON.stringify(await page.evaluate(() =>
         Array.from(document.querySelectorAll('.node-overlay')).map((o) =>

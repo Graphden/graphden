@@ -7,6 +7,7 @@ let phase = 'boot';
   const {browser, page} = await newContext(chromium, {boot: false});
   const errors = [];
   const releases = new Set();
+  const held = [];
   page.on('pageerror', error => {
     errors.push(error.name);
     console.log('[Used-by frames]', JSON.stringify(error.stack.split('\n').slice(1, 5).map(line => {
@@ -77,27 +78,34 @@ let phase = 'boot';
     await page.keyboard.press('Escape');
     await page.locator('#gd-settings').waitFor({state: 'hidden'});
     phase = 'read-resume';
-    const held = [];
     const routePath = '**/api/fns/usages';
     await page.route(routePath, async route => {
       const response = await route.fetch();
       let release;
       const ready = new Promise(resolve => { release = resolve; });
-      held.push({release}); releases.add(release);
+      held.push({release, fnId: JSON.parse(route.request().postData() || '{}')['fn-id']});
+      releases.add(release);
       await ready; releases.delete(release);
       await route.fulfill({response}).catch(() => {});
     });
+    async function heldReadFor(fnId, since, label) {
+      const matching = () => held.slice(since).find(read => read.fnId === fnId);
+      assert(await waitFor(() => !!matching(), 30000), label);
+      return matching();
+    }
     await page.setViewportSize({width: 1000, height: 850});
+    let since = held.length;
     await page.evaluate(id => gdInspectorRender(id), selection.id);
-    assert(await waitFor(() => held.length === 1, 30000), 'real usages read reaches the controlled response boundary');
+    const initialRead = await heldReadFor(selection.id, since, 'real usages read reaches the controlled response boundary');
     await page.evaluate(() => { window.usagesHost = document.querySelector('[data-gd-usages-host]'); gdInspectorGraph.close(); });
+    since = held.length;
     await page.setViewportSize({width: 1400, height: 900});
-    assert(await waitFor(() => held.length === 2, 30000), 'wide viewport resumes the same owner with a fresh read');
-    held[1].release();
+    const resumedRead = await heldReadFor(selection.id, since, 'wide viewport resumes the same owner with a fresh read');
+    resumedRead.release();
     await filter.waitFor({state: 'visible'});
     await filter.fill('retained-query-3141');
     await page.evaluate(() => { window.resumedFilter = document.querySelector('.gd-insp-usage-filter'); });
-    held[0].release();
+    initialRead.release();
     assert(await page.evaluate(() => window.usagesHost === document.querySelector('[data-gd-usages-host]')
       && window.resumedFilter === document.querySelector('.gd-insp-usage-filter')
       && window.resumedFilter.value === 'retained-query-3141'), 'late canceled read preserves exact host, input and query');
@@ -105,27 +113,37 @@ let phase = 'boot';
     phase = 'stale-context';
     const other = await page.evaluate(id => [...lookups.fnMap.values()].find(fn => fn.id !== id && fn.name)?.id, selection.id);
     assert(!!other, 'a second actual function identity is available');
+    since = held.length;
     await page.evaluate(id => gdInspectorRender(id), selection.id);
-    assert(await waitFor(() => held.length === 3, 30000), 'next selection starts a fresh owned read');
+    const staleA = await heldReadFor(selection.id, since, 'next selection starts a fresh owned read');
+    since = held.length;
     await page.evaluate(id => gdInspectorRender(id), other);
-    assert(await waitFor(() => held.length === 4, 30000), 'B starts its own authorized usages read');
+    const staleB = await heldReadFor(other, since, 'B starts its own authorized usages read');
+    since = held.length;
+    await page.evaluate(() => window.dispatchEvent(new Event('gd-editor-root-ready')));
+    const refreshedB = await heldReadFor(other, since, 'root refresh adds an independent B read');
+    since = held.length;
     await page.evaluate(id => gdInspectorRender(id), selection.id);
-    assert(await waitFor(() => held.length === 5, 30000), 'newest A gets a distinct read generation');
-    held[4].release();
+    const newestA = await heldReadFor(selection.id, since, 'newest A gets a distinct read generation');
+    newestA.release();
+    phase = 'stale-context-newest-a-visible';
     await filter.waitFor({state: 'visible'});
+    phase = 'stale-context-late-responses';
     await page.evaluate(() => { window.newestUsages = document.querySelector('[data-gd-usages-host]'); });
-    held[2].release(); held[3].release();
+    staleA.release(); staleB.release(); refreshedB.release();
     assert(await page.evaluate(() => window.newestUsages === document.querySelector('[data-gd-usages-host]')
       && document.getElementById('gd-inspector').dataset.fnId !== ''), 'late A/B responses cannot replace the newest A host');
+    since = held.length;
     await page.evaluate(id => gdInspectorRender(id), selection.id);
-    assert(await waitFor(() => held.length === 6, 30000), 'context-reset read reaches its controlled boundary');
+    const contextRead = await heldReadFor(selection.id, since, 'context-reset read reaches its controlled boundary');
     await page.evaluate(() => { window.disposedUsages = document.querySelector('[data-gd-usages-host]'); gdInspectorContextChanged(); });
-    held[5].release();
+    contextRead.release();
     assert(await page.evaluate(() => !window.disposedUsages.isConnected && !document.querySelector('[data-gd-usages-host]')), 'context reset disposes the pending section before detach');
+    since = held.length;
     await page.evaluate(id => gdInspectorRender(id), selection.id);
-    assert(await waitFor(() => held.length === 7, 30000), 'account-reset read reaches its controlled boundary');
+    const accountRead = await heldReadFor(selection.id, since, 'account-reset read reaches its controlled boundary');
     await page.evaluate(() => { window.accountUsages = document.querySelector('[data-gd-usages-host]'); window.dispatchEvent(new Event('gd-auth-changed')); });
-    held[6].release();
+    accountRead.release();
     assert(await page.evaluate(() => !window.accountUsages.isConnected && !document.querySelector('[data-gd-usages-host]')), 'account change disposes its pending owner');
     await page.unroute(routePath);
     // Auth replacement clears the old graph cache. Re-prime the server tree

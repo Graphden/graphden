@@ -243,3 +243,9 @@ colour and font values, applies CSS, writes the owner-scoped preference and
 evaluates the separately selected ordinary theme graph. Typing in a font or
 colour control does not replace that focused control. The shipped browser plan
 is the fallback when the selected component cannot be used.
+
+The organization switcher uses the `:org-switcher` view callback for its
+membership list. The graph receives names, owner flags, plan labels and the
+current organization; it receives no session cookie, token or credential.
+The host verifies every rendered switch target against the fetched membership
+set and owns navigation, creation, focus and account-change invalidation.

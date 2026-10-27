@@ -1,9 +1,9 @@
 // `gdRenderOrgPopover` (editor-org-switcher.js) — the org chip's popover,
-// built from a plain {orgs, current} model: one row per org (the current one
+// built from a plain {orgs, current} model through the shipped graph: one row per org (the current one
 // inert and marked, owner badge + plan where known) and the inline
 // "New organization…" form, whose submit hands the normalised name to the
 // creator and either switches into the new org or shows the server's own
-// refusal message. Pure DOM over mini-dom; no browser, no stack.
+// refusal message. Real graph runtime and renderer over mini-dom; no browser or stack.
 //
 // Run:  node tools/runtime-test/org-switcher.test.js
 // Exit: 0 on pass, 1 on failure.
@@ -33,7 +33,14 @@ async function test(name, fn) {
 
 function load() {
   const document = createDocument();
-  const ctx = vm.createContext({ console, document, window: { location: { hostname: 'localhost' } } });
+  const ctx = vm.createContext({console, document, Map, Set, WeakSet, Symbol,
+    location: {hostname: 'localhost'}});
+  ctx.window = ctx;
+  for (const file of ['web/vendor/preact.min.js', 'app/ui-preview/browser-runtime.js',
+    'app/ui-preview/graph-renderer.js', 'app/ui-preview/builtin-plans.js']) {
+    vm.runInContext(fs.readFileSync(path.join(EDITOR, '..', '..', file), 'utf8'), ctx,
+      {filename: file});
+  }
   vm.runInContext(fs.readFileSync(path.join(EDITOR, 'editor-org-switcher.js'), 'utf8'), ctx,
                   { filename: 'editor-org-switcher.js' });
   return { ctx, document };
@@ -70,6 +77,25 @@ const tick = () => new Promise((r) => setImmediate(r));
     assert(pop.querySelectorAll('.org-popover-badge').length === 0 && pop.querySelectorAll('.org-popover-plan').length === 0,
            'no badge, no plan');
     assert(pop.querySelector('.org-popover-new') != null, 'the New organization… entry is there even with one org');
+  });
+
+  await test('an invalid selected graph is released and cannot replace membership rows', () => {
+    const {ctx, document} = load();
+    let released = 0;
+    let failed = 0;
+    const selected = {run: () => new Map([[ctx.GraphdenBrowser.keyword('tree'), null]])};
+    ctx.gdEditorRoot = {
+      componentNow: () => selected,
+      acceptComponent: () => true,
+      releaseComponent: () => { released += 1; },
+    };
+    ctx.gdUIComponentFailed = () => { failed += 1; };
+    const pop = document.createElement('div');
+    ctx.gdRenderOrgPopover(pop, {orgs: [{name: 'acme'}], current: 'acme'},
+      {onSwitch() {}, onCreate: async () => ({ok: true})});
+    assert(released === 1 && failed === 1, 'invalid graph is released and reported');
+    assert(pop.querySelectorAll('button[data-org]').length === 1,
+      'the shipped graph still renders the authorized organization');
   });
 
   await test('New organization…: the form opens, submit normalises the name, success switches', async () => {

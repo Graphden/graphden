@@ -1,0 +1,48 @@
+{:namespace "app.ui-org-switcher"
+ :description "Pure organization list presentation. Membership checks, navigation and creation remain host-owned."
+ :fns
+ [{:name :_org :type {:name :text :owner :bool :plan :text}}
+  {:name :_orgs :list :_org}
+  {:name :_org-switcher-inputs :type {:orgs :_orgs :current :text}}
+  {:name :_envelope :type {:inputs :_org-switcher-inputs}}
+  {:name :_result :type {:tree :web.html/hiccup-node}}
+  {:name :_callable :fn-type [{:input :_envelope} :_result]}
+  {:name :org-switcher-root-component :type {:view :_callable}}
+  {:name :_input :parent :const :args {:value {:as :inputs :type :_org-switcher-inputs}}}
+  {:name :_orgs-value :parent :get :args {:coll :_input :key {:value :orgs} :default {:value []}}}
+  {:name :_current :parent :get :args {:coll :_input :key {:value :current} :default ""}}
+  {:name :_name :parent :get :args {:coll {:as :org :type :_org} :key {:value :name} :default ""}}
+  {:name :_owner :parent :get :args {:coll {:as :org :type :_org} :key {:value :owner} :default false}}
+  {:name :_plan :parent :get :args {:coll {:as :org :type :_org} :key {:value :plan} :default ""}}
+  {:name :_active :parent :equal? :args {:a :_name :b :_current}}
+  {:name :_class :parent :if :args {:test :_active
+                                    :then "org-popover-item org-popover-item-current"
+                                    :else "org-popover-item"}}
+  {:name :_title :parent :if :args {:test :_active :then "You are here"
+                                    :else {:parent :str :args {:parts ["Switch to " :_name]}}}}
+  {:name :_aria-current :parent :if :args {:test :_active :then "true" :else "false"}}
+  {:name :_attrs :parent :zipmap
+   :args {:keys [{:value :type} {:value :class} {:value :data-org} {:value :disabled}
+                 {:value :aria-current} {:value :title}]
+          :vals ["button" :_class :_name :_active :_aria-current :_title]}}
+  {:name :_name-node :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "org-popover-name"}} :children [:_name]}}
+  {:name :_owner-node :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "org-popover-badge"}} :children ["owner"]}}
+  {:name :_maybe-owner :parent :if :args {:test :_owner :then :_owner-node :else nil}}
+  {:name :_plan-node :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "org-popover-plan"}} :children [:_plan]}}
+  {:name :_maybe-plan :parent :if
+   :args {:test {:parent :equal? :args {:a :_plan :b ""}} :then nil :else :_plan-node}}
+  {:name :_row :parent :hiccup :lambda-params [:org]
+   :args {:tag "button" :attrs :_attrs :children [:_name-node :_maybe-owner :_maybe-plan]}}
+  {:name :_rows :parent :map :args {:func :_row :coll :_orgs-value}}
+  {:name :_tree :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "org-popover-list"}} :children :_rows}}
+  {:name :org-switcher-view :parent :zipmap :return-type :_result
+   :args {:keys [{:value :tree}] :vals [:_tree]}}
+  {:name :root-view :parent :org-switcher-view :lambda-params [:input] :return-type :_result
+   :args {:inputs {:parent :get :args {:coll {:as :input :type :_envelope} :key {:value :inputs}}}}}
+  {:name :_view-assoc :parent :assoc-fn :args {:value {:as :value :type :_callable}}}
+  {:name :org-switcher-component :parent :_view-assoc :return-type :org-switcher-root-component
+   :args {:map {} :key {:value :view} :value {:ref :root-view}}}]}

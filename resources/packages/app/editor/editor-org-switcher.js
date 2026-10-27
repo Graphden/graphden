@@ -22,11 +22,57 @@
 // Globals consumed: authFetch (bearer/cookie-transparent fetch),
 // installPopoverDismiss / focusIntoDialog (graphden-popover).
 
-// Builds the popover's contents from a plain model — pure DOM, so it runs
-// under tools/runtime-test/mini-dom too.
+// The graph builds the organization rows; the host owns membership-checked
+// switching, creation, focus and stale-account invalidation.
 //   model:    {orgs: [{name, 'owner?', plan}], current}  (the /api/memberships rows)
 //   handlers: {onSwitch(name), onCreate(name) → Promise<{ok, org?, message?}>}
 // Returns {showForm, hideForm} so the owner can reset the inline form on close.
+let gdOrgEpoch = 0;
+
+function gdOrgGraphList(orgs, current) {
+  const api = window.GraphdenBrowser;
+  const key = api.keyword;
+  const record = value => new Map(Object.entries(value).map(([name, item]) => [key(name), item]));
+  const inputs = record({current, orgs: orgs.map(org => record({
+    name: org.name, owner: !!(org['owner?'] ?? org.owner), plan: org.plan || '',
+  }))});
+  const builtin = api.createRuntime(window.GraphdenBuiltinPlans.plans.orgSwitcher,
+    {operationLimit: 100000});
+  let selected = null;
+  try { selected = window.gdEditorRoot?.componentNow('org-switcher') || null; }
+  catch (_) { window.gdUIComponentFailed?.('org-switcher'); }
+  function render(runtime) {
+    const output = runtime.run('view', {inputs});
+    if (!(output instanceof Map) || output.size !== 1 || !output.has(key('tree'))) {
+      throw new Error('Invalid organization graph view');
+    }
+    const vnode = window.GraphdenRenderer.vnode(output.get(key('tree')), 'gd-org', 3000);
+    const scratch = document.createElement('div');
+    window.GraphdenPreact.render(vnode, scratch);
+    const list = scratch.firstElementChild || scratch.firstChild;
+    const buttons = list?.querySelectorAll('button[data-org]') || [];
+    const allowed = new Set(orgs.map(org => org.name));
+    if (list?.classList.contains('org-popover-list') !== true
+        || buttons.length !== orgs.length
+        || new Set([...buttons].map(button => button.dataset.org)).size !== orgs.length
+        || [...buttons].some(button => !allowed.has(button.dataset.org))) {
+      throw new Error('Invalid organization graph rows');
+    }
+    return list;
+  }
+  if (selected) {
+    try {
+      const list = render(selected);
+      if (!window.gdEditorRoot.acceptComponent(selected)) throw new Error('Editor root changed');
+      return list;
+    } catch (_) {
+      window.gdEditorRoot?.releaseComponent(selected);
+      window.gdUIComponentFailed?.('org-switcher');
+    }
+  }
+  return render(builtin);
+}
+
 function gdRenderOrgPopover(popover, model, handlers) {
   popover.replaceChildren();
   const orgs = Array.isArray(model?.orgs) ? model.orgs : [];
@@ -37,35 +83,15 @@ function gdRenderOrgPopover(popover, model, handlers) {
   head.textContent = 'Organizations';
   popover.appendChild(head);
 
-  const list = document.createElement('div');
-  list.className = 'org-popover-list';
-  for (const org of orgs) {
-    const isCurrent = org.name === current;
-    const item = document.createElement('button');
-    item.type = 'button';
-    item.className = 'org-popover-item' + (isCurrent ? ' org-popover-item-current' : '');
-    if (isCurrent) item.setAttribute('aria-current', 'true');
-    item.disabled = isCurrent;
-    item.title = isCurrent ? 'You are here' : 'Switch to ' + org.name;
-    const name = document.createElement('span');
-    name.className = 'org-popover-name';
-    name.textContent = org.name;
-    item.appendChild(name);
-    // The wire key is `owner?` (cheshire keeps the keyword's `?`).
-    if (org['owner?'] ?? org.owner) {
-      const badge = document.createElement('span');
-      badge.className = 'org-popover-badge';
-      badge.textContent = 'owner';
-      item.appendChild(badge);
+  const list = gdOrgGraphList(orgs, current);
+  const allowed = new Set(orgs.map(org => org.name));
+  for (const button of list.querySelectorAll('button[data-org]')) {
+    const name = button.dataset.org;
+    button.disabled = name === current;
+    button.setAttribute('aria-current', name === current ? 'true' : 'false');
+    if (name !== current && allowed.has(name)) {
+      button.addEventListener('click', () => handlers.onSwitch(name));
     }
-    if (org.plan) {
-      const plan = document.createElement('span');
-      plan.className = 'org-popover-plan';
-      plan.textContent = org.plan;
-      item.appendChild(plan);
-    }
-    if (!isCurrent) item.addEventListener('click', () => handlers.onSwitch(org.name));
-    list.appendChild(item);
   }
   popover.appendChild(list);
 
@@ -193,9 +219,12 @@ async function gdCreateOrg(name) {
 async function initOrgSwitcher() {
   const mount = document.getElementById('org-mount');
   if (!mount || typeof authFetch !== 'function') return;
+  const epoch = ++gdOrgEpoch;
+  mount.replaceChildren();
   // Orgs exist only under the accounts addon — wait for its boot probe and
   // skip entirely when it's absent (no wasted fetch on single-tenant boots).
   if (!(await window.gdAccountsReady)) return;
+  if (epoch !== gdOrgEpoch || !window.gdAccount?.id) return;
   // /auth/me told us this deployment has no org surface — don't fire a
   // doomed /api/memberships probe (a guaranteed console 404 per load).
   if (window.gdOrgsAvailable === false) return;
@@ -210,6 +239,7 @@ async function initOrgSwitcher() {
   } catch (_) {
     return;
   }
+  if (epoch !== gdOrgEpoch || !window.gdAccount?.id) return;
   // `orgs` carries owner/plan per row; an older server answers names only.
   const orgs = Array.isArray(data?.orgs) && data.orgs.length
     ? data.orgs
@@ -252,6 +282,14 @@ async function initOrgSwitcher() {
       getReturnFocus: () => btn,
     });
   }
+}
+
+if (typeof window.addEventListener === 'function') {
+  window.addEventListener('gd-auth-changed', () => {
+    gdOrgEpoch++;
+    document.getElementById('org-mount')?.replaceChildren();
+    if (window.gdAccount?.id) Promise.resolve().then(initOrgSwitcher);
+  });
 }
 
 // Derive the base domain by dropping the current host's leftmost label (its

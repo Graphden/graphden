@@ -34,9 +34,11 @@
 #   wt start <name>        launch an autonomous agent inside an existing worktree
 #   wt task  <name>        print the feature's task spec
 #   wt list                show every worktree, branch, ahead/behind, dirty, result
-#   wt merge [--no-e2e] [--no-fleet] [--no-visual] [--deploy] [--release]
+#   wt merge [--first-test=kind:name] [--no-e2e] [--no-fleet] [--no-visual] [--deploy] [--release]
 #                          (inside a worktree) enqueue -> ride a merge train ->
 #                          land on develop; exits with THIS branch's verdict
+#                          --first-test: repeatable priority within the full
+#                          unit/integration/runtime/browser test suite
 #                          --deploy: also reset the develop DB schema on landing
 #   wt test <kaocha args>  focused tests — waits while the gate is in a heavy
 #                          phase or memory is short, then runs kaocha
@@ -1121,7 +1123,7 @@ decide() {   # <name> <verdict> <train> <detail>
 }
 
 # Load an entry into the M_* maps the conductor works from.
-declare -A M_SHA M_BRANCH M_WT M_NO_E2E M_NO_FLEET M_NO_VISUAL M_DEPLOY M_RELEASE M_TRAIN_TS
+declare -A M_SHA M_BRANCH M_WT M_NO_E2E M_NO_FLEET M_NO_VISUAL M_DEPLOY M_RELEASE M_TRAIN_TS M_FIRST_TESTS
 load_entry() {
   local n="$1"
   M_SHA[$n]="$(qget "$n" sha)";            M_BRANCH[$n]="$(qget "$n" branch)"
@@ -1129,6 +1131,7 @@ load_entry() {
   M_NO_FLEET[$n]="$(qget "$n" no_fleet)";  M_NO_VISUAL[$n]="$(qget "$n" no_visual)"
   M_DEPLOY[$n]="$(qget "$n" deploy)";      M_RELEASE[$n]="$(qget "$n" release)"
   M_TRAIN_TS[$n]="$(qget "$n" train_ts)"
+  M_FIRST_TESTS[$n]="$(qget "$n" first_tests)"
 }
 
 # A process killed after fast-forward but before promotion/receipt completion
@@ -1481,8 +1484,9 @@ gate_suites() {
   local GRAPHDEN_RESUME_FROM="${WTQ_RESUME_FROM:-}"
   local WTQ_REUSE_FROM="${WTQ_REUSE_FROM:-}"
   local GRAPHDEN_RESUME_CREDIT=0
+  local GRAPHDEN_CI_FIRST_TESTS="${WTQ_FIRST_TESTS:-}"
   [ -n "${WTQ_REUSE_FROM:-}" ] && GRAPHDEN_RESUME_CREDIT=1
-  export GRAPHDEN_RESUME_OUT GRAPHDEN_RESUME_FROM GRAPHDEN_RESUME_CREDIT
+  export GRAPHDEN_RESUME_OUT GRAPHDEN_RESUME_FROM GRAPHDEN_RESUME_CREDIT GRAPHDEN_CI_FIRST_TESTS
   local -a stages=(ci) ordered=()
   base_sha="$(git -C "$wt" rev-parse "$TARGET")"
   ci_sha="$(git -C "$wt" rev-parse HEAD)"
@@ -2075,6 +2079,23 @@ train_run() {
     [ "${M_DEPLOY[$m]}" = 1 ] && deploy=1
     [ "${M_RELEASE[$m]}" = 1 ] && release=1
   done
+  local first_tests="" entry
+  local -a entries=()
+  local -A first_seen=()
+  for m in "${gated[@]}"; do
+    IFS=',' read -r -a entries <<< "${M_FIRST_TESTS[$m]}"
+    for entry in "${entries[@]}"; do
+      [ -n "$entry" ] || continue
+      [ -n "${first_seen[$entry]:-}" ] && continue
+      first_seen[$entry]=1
+      first_tests="${first_tests:+$first_tests,}$entry"
+    done
+  done
+  if [ -n "$first_tests" ]; then
+    echo "  manual first tests: $first_tests"
+    (cd "$TRAIN_WT" && GRAPHDEN_CI_FIRST_TESTS="$first_tests" bb scripts/ci_priority.clj validate-manual) \
+      || { echo "FAIL: invalid manual first test in assembled train"; return 20; }
+  fi
   local previous_train_ts="" prior_fail=0 prior_tmp
   previous_train_ts="$(prior_train_for_members "${gated[@]}")" || previous_train_ts=""
   state_lock
@@ -2131,7 +2152,7 @@ train_run() {
     echo "  exact-candidate interrupted checkpoint: $reuse_from"
   fi
   start_sampler "$resources"
-  ( WTQ_PROGRESS_MEMBERS=("${gated[@]}"); WTQ_RESUME_FROM="$resume_from" WTQ_REUSE_FROM="$reuse_from" WTQ_FIRST_STAGE="$first_stage" WTQ_REPORT_TS="$ts" gate_body "$TRAIN_WT" "$no_e2e" "$deploy" "$no_fleet" "$no_visual" "${gated[@]}" ) 2>&1 | tee "$gate_out"
+  ( WTQ_PROGRESS_MEMBERS=("${gated[@]}"); WTQ_RESUME_FROM="$resume_from" WTQ_REUSE_FROM="$reuse_from" WTQ_FIRST_STAGE="$first_stage" WTQ_FIRST_TESTS="$first_tests" WTQ_REPORT_TS="$ts" gate_body "$TRAIN_WT" "$no_e2e" "$deploy" "$no_fleet" "$no_visual" "${gated[@]}" ) 2>&1 | tee "$gate_out"
   grc="${PIPESTATUS[0]}"
   stop_sampler
   if ! bb "$SCRIPT_DIR/report.clj" finish "$report" "$(git -C "$TRAIN_WT" rev-parse HEAD)" "$queue_ms" "$gate_out" "$ci_report" "$resources" "$grc"; then
@@ -2419,6 +2440,7 @@ queue_refused() {   # <name> <branch> <sha> <why> — PRECOND, never queued
 
 cmd_merge() {
   local no_e2e=0 deploy=0 no_fleet=0 no_visual=0 release=0
+  local first_tests=""
   for a in "$@"; do
     case "$a" in
       --no-e2e) no_e2e=1 ;;
@@ -2426,7 +2448,13 @@ cmd_merge() {
       --no-visual) no_visual=1 ;;
       --deploy) deploy=1 ;;   # branch changes the schema: reset the target DB on landing
       --release) release=1 ;; # after a GREEN landing, chain `bb release --push` from ../graphden-cloud
-      *) die "unknown flag '$a' (wt merge [--no-e2e] [--no-fleet] [--no-visual] [--deploy] [--release])" ;;
+      --first-test=*)
+        if [[ "$a" =~ ^--first-test=(unit|integration|runtime|browser):[A-Za-z0-9_.-]+$ ]]; then
+          first_tests="${first_tests:+$first_tests,}${a#--first-test=}"
+        else
+          die "invalid first test '$a' (use --first-test=unit:graphden.example-test or browser:edit-example.test.js)"
+        fi ;;
+      *) die "unknown flag '$a' (wt merge [--first-test=kind:name] [--no-e2e] [--no-fleet] [--no-visual] [--deploy] [--release])" ;;
     esac
   done
   local wt; wt="$(git rev-parse --show-toplevel)"
@@ -2447,6 +2475,10 @@ cmd_merge() {
   [ -z "$(git -C "$wt" status --porcelain)" ] \
     || { queue_refused "$name" "$branch" "$sha" "worktree dirty — commit before queueing"; return 3; }
   bootstrap_node_modules "$wt"
+  if [ -n "$first_tests" ]; then
+    (cd "$wt" && GRAPHDEN_CI_FIRST_TESTS="$first_tests" bb scripts/ci_priority.clj validate-manual) \
+      || { queue_refused "$name" "$branch" "$sha" "unknown manual first test"; return 3; }
+  fi
   [ "$(git -C "$wt" rev-parse HEAD)" = "$sha" ] \
     || { queue_refused "$name" "$branch" "$sha" "the branch changed before queueing"; return 3; }
 
@@ -2463,6 +2495,7 @@ cmd_merge() {
       "$name" "$branch" "$sha" "$wt" "$(date +%s%N)" "$$"
     printf 'no_e2e=%s\nno_fleet=%s\nno_visual=%s\ndeploy=%s\nrelease=%s\n' \
       "$no_e2e" "$no_fleet" "$no_visual" "$deploy" "$release"
+    printf 'first_tests=%s\n' "$first_tests"
   } > "$tmp"
   mv -f "$tmp" "$(qfile "$name")"
   rm -f "$RESULT_DIR/$name" "$SOON_DIR/$name"

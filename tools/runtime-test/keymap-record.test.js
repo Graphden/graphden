@@ -137,6 +137,22 @@ console.log(' a same-owner graph root refresh keeps the current key gesture');
     'Enter commits the keys after the root refresh');
 }
 
+console.log(' keys typed while the graph row is detached survive the same-owner refresh');
+{
+  const t = boot();
+  t.change();
+  t.fire('keydown', {key: 'p'});
+  t.fire('gd-editor-root-changing');
+  t.root.replaceChildren();
+  const key = t.fire('keydown', {key: 'q'});
+  assert(key.defaultPrevented, 'the recorder owns the key during row replacement');
+  t.fire('gd-editor-root-ready');
+  assert(t.recording()?.textContent.startsWith('p q'), 'replacement row shows both keys');
+  t.fire('keydown', {key: 'Enter'});
+  assert(t.writes.length === 1 && t.writes[0][1].payload.bindings.find.keys === 'p q',
+    'Enter commits the gesture spanning the row replacement');
+}
+
 console.log(' a changed preference owner cancels the key gesture');
 {
   const t = boot();

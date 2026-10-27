@@ -98,12 +98,22 @@
     recording = null;
     render();
   }
+  function recordingRow() {
+    const pane = document.getElementById('gd-keymap-root');
+    if (!pane?.isConnected) return null;
+    if (!recording.row?.isConnected || !pane.contains(recording.row)) {
+      recording.row = [...pane.querySelectorAll('.gd-km-row')]
+        .find(row => row.dataset.shortcut === recording.id) || null;
+    }
+    return recording.row;
+  }
   function onRecordPointer(event) {
-    if (recording && !recording.row?.contains(event.target)) stopRecording();
+    if (recording && !recordingRow()?.contains(event.target)) stopRecording();
   }
   function onRecordKey(event) {
     if (!recording) return;
-    if (!recording.row?.isConnected || document.body.getAttribute('data-surface') !== recording.surface
+    if (!document.getElementById('gd-keymap-root')?.isConnected
+        || document.body.getAttribute('data-surface') !== recording.surface
         || recording.scope !== recordingScope()) {
       stopRecording();
       return;
@@ -125,7 +135,7 @@
     if (event.key === 'Backspace') recording.keys.pop();
     else if (!['Shift', 'Control', 'Alt', 'Meta', 'Tab'].includes(event.key)
       && recording.keys.length < 3) recording.keys.push(event.key === ' ' ? 'Space' : event.key);
-    const output = recording.row.querySelector('.gd-km-recording');
+    const output = recordingRow()?.querySelector('.gd-km-recording');
     if (output) output.textContent = recording.keys.length
       ? recording.keys.join(' ') + '  (Enter to keep, Esc to cancel)'
       : 'Press the keys… (Enter to keep, Esc to cancel)';

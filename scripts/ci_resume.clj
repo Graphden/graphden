@@ -78,11 +78,14 @@
   (if-not prior
     (vec roster)
     (let [rank {:failed 0 :running 0 :pending 1 :passed 2}
-          position (zipmap (:roster prior) (range))
+          prior-position (zipmap (:roster prior) (range))
           current-position (zipmap roster (range))]
       (vec (sort-by (fn [id]
-                      [(get rank (get-in prior [:status id] :pending))
-                       (get position id (+ (count position) (get current-position id)))])
+                      (let [status (get-in prior [:status id] :pending)]
+                        [(get rank status)
+                         (if (= :pending status)
+                           (get current-position id)
+                           (get prior-position id (get current-position id)))]))
                     roster)))))
 
 

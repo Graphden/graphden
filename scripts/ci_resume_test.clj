@@ -19,14 +19,24 @@
 (deftest failed-unrun-then-passed-with-full-current-roster
   (let [old (hint ["a" "b" "c" "d" "e"] [:passed :passed :failed :pending :pending])]
     (is (= ["c" "d" "e" "a" "b"] (resume/order (:roster old) old)))
-    (is (= ["c" "e" "new" "a"] (resume/order ["new" "a" "c" "e"] old)))
-    (is (= ["d" "e" "a" "b" "c"]
+    (is (= ["c" "new" "e" "a"] (resume/order ["new" "a" "c" "e"] old)))
+    (is (= ["d" "a" "b" "e" "c"]
            (resume/order (:roster old) (hint ["c" "d" "e" "a" "b"]
                                              [:passed :failed :pending :pending :pending])))))
   (doseq [a resume/statuses b resume/statuses c resume/statuses]
     (let [roster ["a" "b" "c" "new"]
           prior (hint ["a" "b" "c" "deleted"] [a b c :failed])]
       (is (= (frequencies roster) (frequencies (resume/order roster prior)))))))
+
+
+(deftest red-browser-hint-preserves-new-priority-among-pending-files
+  (let [previous (assoc (hint ["old-pass" "old-pending" "old-fail"]
+                              [:passed :pending :failed])
+                        :kind "browser")
+        priority ["new-priority" "old-pending" "old-fail" "old-pass"]]
+    (is (= ["old-fail" "new-priority" "old-pending" "old-pass"]
+           (resume/order priority previous)))
+    (is (= #{} (resume/credited previous (str/join (repeat 40 "b")) priority)))))
 
 
 (deftest malformed-progress-cannot-author-a-roster

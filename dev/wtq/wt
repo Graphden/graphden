@@ -1476,7 +1476,15 @@ gate_suites() {
   echo "  (bb ci runs diff-scoped: checks whose scripts/checks.edn :relevant"
   echo "   paths saw no change are skipped visibly. Unrecognised -> everything.)"
 
-  local base_sha ci_sha ci_receipt ci_expected stage stage_order priority="${WTQ_FIRST_STAGE:-}"
+  local base_sha ci_sha ci_receipt ci_expected stage stage_order priority="${WTQ_FIRST_STAGE:-}" entry
+  local -a manual_first=()
+  IFS=',' read -r -a manual_first <<< "${WTQ_FIRST_TESTS:-}"
+  for entry in "${manual_first[@]}"; do
+    case "$entry" in
+      integration:*) priority=integration; break ;;
+      browser:*) priority=e2e; break ;;
+    esac
+  done
   local stage_credits="" image_credit=0 reused=0
   local pending_browser_headroom=0
   local -a WTQ_PROGRESS_MEMBERS=("${WTQ_PROGRESS_MEMBERS[@]}")

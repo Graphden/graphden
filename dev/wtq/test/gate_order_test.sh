@@ -262,6 +262,22 @@ run_case
 assert_events 'expect,ci,verify,uber,build,image,integration,fleet,headroom,visual,e2e'
 unset WTQ_RESUME_FROM
 
+# Explicit integration test priority moves its stage ahead of browser tests,
+# even when a previous interrupted train suggested a browser-stage retry.
+WTQ_FIRST_TESTS=integration:graphden.integration.branches-lifecycle-test
+WTQ_FIRST_STAGE=e2e
+WTQ_REPORT_TS=manual-integration
+run_case
+assert_events 'expect,ci,verify,uber,build,image,integration,fleet,headroom,visual,e2e'
+unset WTQ_FIRST_TESTS WTQ_FIRST_STAGE
+
+WTQ_FIRST_TESTS=browser:edit-account-menu-graph.test.js
+WTQ_FIRST_STAGE=integration
+WTQ_REPORT_TS=manual-browser
+run_case
+assert_events 'expect,ci,verify,uber,build,image,e2e,integration,fleet,headroom,visual'
+unset WTQ_FIRST_TESTS WTQ_FIRST_STAGE
+
 # R1 browser b fails; R2 fails build; R3 must retain b,c,a without manual hints.
 WTQ_REPORT_TS=browser-r1
 FAIL_E2E=1

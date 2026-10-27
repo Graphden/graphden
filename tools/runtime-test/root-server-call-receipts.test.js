@@ -16,6 +16,10 @@ const events = [
 const failure = {kind: 'console', text: 'Failed to load resource: the server responded with a status of 422', url: 'http://localhost/api/ui/server-call'};
 assert.equal(recoveredStaleCalls(events), 1);
 assert.deepEqual(withoutRecoveredServerErrors([failure], events), []);
+const cloneAborted = [...events.map(event => event.kind === 'response' && event.status === 422
+  ? {...event, code: null} : event), {kind: 'stale', ...old, order: 2.5}];
+assert.equal(recoveredStaleCalls(cloneAborted), 1);
+assert.deepEqual(withoutRecoveredServerErrors([failure], cloneAborted), []);
 const modify = (index, patch) => events.map((event, i) => i === index ? {...event, ...patch} : event);
 for (const rejected of [
   modify(3, {code: null}), modify(3, {code: 'policy-refresh-required'}), modify(3, {status: 403}),

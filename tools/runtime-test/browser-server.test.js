@@ -43,5 +43,16 @@ const deferred = () => { let resolve; const promise = new Promise(r => { resolve
   assert.equal(states.at(-1).phase, 'error');
   lifetime.dispose();
   await assert.rejects(lifetime.invoke(query, input), /disposed/);
+
+  let staleCount = 0;
+  const staleStates = [];
+  const staleLifetime = server.createLifetime({scope: () => scope,
+    transport: async () => ({status: 422, ok: false,
+      json: async () => ({ok: false, code: 'server-call-stale'})}),
+    onState: state => staleStates.push(state),
+    onStale() { staleCount++; staleLifetime.dispose(); }});
+  await staleLifetime.invoke(query, input);
+  assert.equal(staleCount, 1);
+  assert.deepEqual(staleStates.map(state => state.phase), ['loading']);
   console.log('browser server lifetime: PASS');
 })().catch(error => { console.error(error); process.exitCode = 1; });

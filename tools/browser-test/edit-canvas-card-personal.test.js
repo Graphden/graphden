@@ -4,7 +4,7 @@ const {chromium} = require('playwright');
 const {assert, newContext, api, BASE, waitForServerHealthy, getEntities, synthArgs} = require('./edit-test-helpers');
 const {undoConfiguration} = require('./configuration-undo-test-helpers');
 const {unexpectedSelectiveCopyErrors} = require('./selective-copy-errors');
-const {observeRootServerCalls, withoutRecoveredServerErrors} = require('./root-server-call-test-helpers');
+const {observeRootServerCalls, withoutRecoveredServerErrors, rootServerDiagnostic} = require('./root-server-call-test-helpers');
 const {observeUIPlanLoads, captureLoadedUIComponents, waitForLoadedUIComponents, drainUIPlanReplies} = require('./ui-component-runtime-test-helpers');
 (async () => {
   await waitForServerHealthy();
@@ -88,6 +88,9 @@ const {observeUIPlanLoads, captureLoadedUIComponents, waitForLoadedUIComponents,
     await page.mouse.move(5, 5);
   }
   async function activate(copy) {
+    // Direct fixture API writes do not carry the editor's mutation lifecycle.
+    // Let the currently owned root query finish before changing its source.
+    await serverCalls.settle();
     await page.evaluate(() => gdCaptureUIConfiguration());
     const state = await page.evaluate(() => gdUIConfigurationState());
     const preview = await api(page, 'POST', '/api/ui/configuration/preview', {operation: 'activate', command: {
@@ -268,7 +271,11 @@ const {observeUIPlanLoads, captureLoadedUIComponents, waitForLoadedUIComponents,
     const metadataRuntimes = await captureLoadedUIComponents(page);
     await settleComponents(metadataRuntimes);
     await editLiteral(metadata, '_style-effect', 'vals', 'none', 0);
-    await page.evaluate(() => gdCanvasMetadataGraph.reload());
+    await page.evaluate(async () => {
+      window.dispatchEvent(new Event('gd-graph-changed'));
+      await gdEditorRoot.component('account-menu');
+      await gdCanvasMetadataGraph.reload();
+    });
     await page.waitForFunction(() => getComputedStyle(metadataFocusProof.effect.querySelector('.gd-canvas-metadata-effect')).display === 'none',
       null, {timeout: 60000});
     await settleComponents(metadataRuntimes);
@@ -298,7 +305,11 @@ const {observeUIPlanLoads, captureLoadedUIComponents, waitForLoadedUIComponents,
     await page.keyboard.press('Escape');
     phase = 'restore-visible-metadata';
     await editLiteral(metadata, '_style-effect', 'vals', 'inline-flex', 0);
-    await page.evaluate(() => gdCanvasMetadataGraph.reload());
+    await page.evaluate(async () => {
+      window.dispatchEvent(new Event('gd-graph-changed'));
+      await gdEditorRoot.component('account-menu');
+      await gdCanvasMetadataGraph.reload();
+    });
     await page.waitForFunction(() => getComputedStyle(metadataFocusProof.effect.querySelector('.gd-canvas-metadata-effect')).display === 'inline-flex',
       null, {timeout: 60000});
     await settleComponents(metadataRuntimes);
@@ -320,6 +331,7 @@ const {observeUIPlanLoads, captureLoadedUIComponents, waitForLoadedUIComponents,
     assert(unexpectedSelectiveCopyErrors(browserErrors, plans, true).length === 0, 'no unexpected browser/source errors');
     console.log('PASS persisted canvas inheritance and metadata personal plans, native controls, geometry and restore');
   } catch (error) {
+    console.log('bounded server call diagnostics', JSON.stringify(rootServerDiagnostic(error, serverCalls.events)));
     console.log('bounded card proof failure', JSON.stringify({phase, errors,
       requests: sourceRequests.slice(-32).map(({component, status, loadId, abortError, signalAborted}) =>
         ({component, status, loadId, abortError, signalAborted})),

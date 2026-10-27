@@ -8,7 +8,7 @@
     requests.add(request);
     return request;
   }
-  function createLifetime({transport, scope, onState = () => {}}) {
+  function createLifetime({transport, scope, onState = () => {}, onStale}) {
     if (typeof transport !== 'function' || typeof scope !== 'function') throw new Error('Server lifetime requires transport and scope');
     let generation = 0;
     let pending = null;
@@ -35,6 +35,11 @@
         if (!current()) return;
         const result = await response.json();
         if (!current()) return;
+        if (response.status === 422 && result?.ok === false && result.code === 'server-call-stale'
+          && typeof onStale === 'function') {
+          onStale();
+          return;
+        }
         if (!response.ok || result.ok !== true || Object.keys(result).some(key => !['ok', 'value'].includes(key))) throw new Error('Server call is unavailable');
         const value = host.GraphdenBrowser.decode(result.value);
         if (!current()) return;

@@ -11,7 +11,8 @@ function recoveredStaleCalls(events) {
   const failed = responses.filter(event => event.status >= 400);
   for (const response of failed) {
     const request = calls.find(call => sameCall(call, response));
-    assert(request?.owned && response.status === 422 && response.code === 'server-call-stale',
+    const handledStale = request && events.some(event => sameCall(request, event) && event.kind === 'stale' && event.owned);
+    assert(request?.owned && response.status === 422 && (response.code === 'server-call-stale' || handledStale),
       'server refusal has no exact finite stale receipt');
     assert(!events.some(state => sameCall(request, state) && state.kind === 'state' && state.phase === 'error'),
       'current server consumer handled the refusal before supersession');
@@ -94,6 +95,11 @@ async function observeRootServerCalls(page) {
               window.__gdRootServerState = {root: owner, installed, phase: next.phase, owned,
                 hostReady: window.gdShellMenuGraph?.ready === true};
               publish({kind: 'state', lifetime, invocation, ...window.__gdRootServerState});
+            },
+            onStale() {
+              const owned = owner !== null && owner === installed && facade === window.gdShellMenuGraph?.runtime;
+              publish({kind: 'stale', lifetime, invocation, root: owner, owned});
+              options.onStale?.();
             },
           });
         }});

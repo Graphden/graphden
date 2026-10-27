@@ -247,6 +247,10 @@
                 headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
             },
             scope: () => String(requestGeneration),
+            onStale() {
+              if (generation === requestGeneration && !controller.signal.aborted)
+                void window.gdEditorRoot?.reload();
+            },
             onState(next) {
               if (generation !== requestGeneration || controller.signal.aborted) return;
               server = new Map([[key('phase'), next.phase],

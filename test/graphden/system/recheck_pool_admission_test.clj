@@ -40,6 +40,29 @@
        (catch clojure.lang.ExceptionInfo e (:type (ex-data e)))))
 
 
+(deftest timed-admission-waits-for-the-active-owner
+  (let [datasource (Object.)
+        entered (promise)
+        release (promise)
+        holder (future
+                 (tx/try-with-background-admission
+                   datasource #(do (deliver entered true) @release)))]
+    (try
+      (is (true? (deref entered 1000 ::timeout)))
+      (let [waiting (promise)
+            waiter (future
+                     (deliver waiting true)
+                     (tx/try-with-background-admission datasource 2000 (constantly :admitted)))]
+        (is (true? (deref waiting 1000 ::timeout)))
+        (is (= ::waiting (deref waiter 100 ::waiting))
+            "timed admission waits instead of returning busy")
+        (deliver release true)
+        (is (= :admitted (deref waiter 2000 ::timeout))))
+      (finally
+        (deliver release true)
+        (deref holder 2000 ::timeout)))))
+
+
 (deftest two-recovery-contexts-leave-a-foreground-connection
   (let [storage (pg/create-storage (assoc (pth/get-container-config *container*) :pool-size 2))
         schema (ig/init-key :db/schema {})

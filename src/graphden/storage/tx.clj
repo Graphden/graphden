@@ -57,17 +57,21 @@
 (defn try-with-background-admission
   "Run at most one background storage task per datasource. Busy callers
    own no connection and retry outside their transaction. A retired pool
-   rejects queued tasks before they can borrow from it."
-  [datasource f]
-  (let [{:keys [^Semaphore permit retired?]} (background-admission datasource)]
-    (when @retired?
-      (throw (ex-info "Background storage has retired" {:type :storage/background-retired})))
-    (when (Semaphore/.tryAcquire permit)
-      (try
-        (when @retired?
-          (throw (ex-info "Background storage has retired" {:type :storage/background-retired})))
-        (f)
-        (finally (Semaphore/.release permit))))))
+   rejects queued tasks before they can borrow from it. A positive wait uses
+   the fair semaphore queue, so a coordinated caller cannot be starved by
+   nonblocking background retries."
+  ([datasource f]
+   (try-with-background-admission datasource 0 f))
+  ([datasource wait-ms f]
+   (let [{:keys [^Semaphore permit retired?]} (background-admission datasource)]
+     (when @retired?
+       (throw (ex-info "Background storage has retired" {:type :storage/background-retired})))
+     (when (Semaphore/.tryAcquire permit wait-ms TimeUnit/MILLISECONDS)
+       (try
+         (when @retired?
+           (throw (ex-info "Background storage has retired" {:type :storage/background-retired})))
+         (f)
+         (finally (Semaphore/.release permit)))))))
 
 
 (defn retire-background-admission!

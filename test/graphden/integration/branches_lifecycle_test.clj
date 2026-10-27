@@ -1054,15 +1054,11 @@
             "create admission child")
     (await-merge-type-baseline! feat moved)
     (let [holder (future
-                   (loop []
-                     (if (realized? release)
-                       :released
-                       (or (tx/try-with-background-admission
-                             datasource
-                             #(do (deliver entered true) @release :released))
-                           (do (Thread/sleep 25) (recur))))))]
+                   (tx/try-with-background-admission
+                     datasource 30000
+                     #(do (deliver entered true) @release :released)))]
       (try
-        (let [acquired? (deref entered 5000 ::timeout)]
+        (let [acquired? (deref entered 31000 ::timeout)]
           (is (true? acquired?) "the controlled recovery owns admission")
           (when-not (true? acquired?)
             (throw (ex-info "Controlled recovery admission was not acquired"

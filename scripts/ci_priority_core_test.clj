@@ -56,6 +56,19 @@
     (is (= (frequencies (priority/browser-order nil)) (frequencies ordered)))))
 
 
+(deftest shipped-component-contracts-link-graphs-to-explicit-js-consumers
+  (let [keymap #{"resources/packages/app/ui-keymap/fns.edn"}
+        appearance #{"resources/packages/app/ui-appearance/fns.edn"}
+        keymap-first (priority/browser-first keymap)]
+    (is (= "edit-keymap-graph.test.js" (first keymap-first)))
+    (is (= "edit-appearance-graph.test.js"
+           (first (priority/browser-first appearance))))
+    (is (not-any? #{"edit-a11y-audit.test.js"} keymap-first)
+        "a plain mention of keymap does not make an unrelated test early")
+    (is (= (frequencies (priority/browser-order nil))
+           (frequencies (priority/browser-order keymap))))))
+
+
 (deftest package-http-routes-prioritize-browser-consumers
   (doseq [source ["resources/packages/registry/registry/fns.edn"
                   "resources/packages/registry/registry/impls.clj"

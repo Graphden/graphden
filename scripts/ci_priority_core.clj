@@ -4,6 +4,7 @@
   (:require
     [babashka.fs :as fs]
     [ci-select]
+    [clojure.edn :as edn]
     [clojure.java.io :as io]
     [clojure.string :as str]))
 
@@ -95,13 +96,63 @@
   (memoize browser-source-graph))
 
 
+(defn- component-roles
+  "Read the shipped namespace→role contract without loading the JVM app."
+  []
+  (try
+    (with-open [reader (java.io.PushbackReader.
+                         (io/reader "src/graphden/ui/component_contracts.clj"))]
+      (binding [*read-eval* false]
+        (loop []
+          (let [form (read {:eof nil} reader)]
+            (cond
+              (nil? form) {}
+              (and (seq? form) (= 'def (first form))
+                   (= 'component-contracts (second form)))
+              (reduce-kv (fn [roles role contract]
+                           (update roles (namespace (:reference contract))
+                                   (fnil conj #{}) (name role)))
+                         {} (last form))
+              :else (recur))))))
+    (catch Exception e
+      (println (str "⚠ component roles unavailable: " (ex-message e)
+                    " — using conservative browser hints"))
+      {})))
+
+
+(def ^:private cached-component-roles (memoize component-roles))
+
+
+(defn- component-source-seeds
+  "A component graph reaches JS and tests that name its shipped role in a
+   runtime access. Plain word matches are too broad for names such as keymap."
+  [sources roles]
+  (let [accesses (for [role roles
+                       :let [camel (str/replace role #"-([a-z])"
+                                                (fn [[_ letter]] (str/upper-case letter)))]]
+                   (re-pattern (str "(?:\\.plans\\." (java.util.regex.Pattern/quote camel)
+                                    "\\b|(?:componentNow|gdLoadUIComponentRuntime|gdUIComponentFailed)\\(\\s*['\"]"
+                                    (java.util.regex.Pattern/quote role) "['\"])")))]
+    (set (keep (fn [[path source]]
+                 (when (and (or (str/starts-with? path "resources/packages/")
+                                (str/starts-with? path "tools/browser-test/"))
+                            (some #(re-find % source) accesses))
+                   path)) sources))))
+
+
 (defn- browser-source-consumers
   [browser-files {:keys [sources] reverse-graph :reverse} path]
   (let [package-module (second (re-matches #"resources/packages/[^/]+/([^/]+)/fns\.edn" path))
+        roles (when (and package-module (fs/exists? path))
+                (try (get (cached-component-roles)
+                          (:namespace (edn/read-string (slurp path))))
+                     (catch Exception _ nil)))
+        exact-seeds (when (seq roles) (component-source-seeds sources roles))
         module-tokens (when package-module
                         (set [package-module (str/replace package-module #"^ui-" "")]))
         seeds (cond
                 (contains? sources path) #{path}
+                (seq exact-seeds) exact-seeds
                 (and package-module (str/includes? package-module "-"))
                 (into #{} (keep (fn [[script source]]
                                   (when (and (str/starts-with? script "resources/packages/")

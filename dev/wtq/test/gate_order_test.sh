@@ -266,10 +266,11 @@ unset WTQ_RESUME_FROM
 # even when a previous interrupted train suggested a browser-stage retry.
 WTQ_FIRST_TESTS=integration:graphden.integration.branches-lifecycle-test
 WTQ_FIRST_STAGE=e2e
+WTQ_RESUME_FROM="$LOG_DIR/_train-first-red"
 WTQ_REPORT_TS=manual-integration
 run_case
-assert_events 'expect,ci,verify,uber,build,image,integration,fleet,headroom,visual,e2e'
-unset WTQ_FIRST_TESTS WTQ_FIRST_STAGE
+assert_events 'expect,ci,verify,uber,build,image,integration,headroom,visual,fleet,headroom,e2e'
+unset WTQ_FIRST_TESTS WTQ_FIRST_STAGE WTQ_RESUME_FROM
 
 WTQ_FIRST_TESTS=browser:edit-account-menu-graph.test.js
 WTQ_FIRST_STAGE=integration

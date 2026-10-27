@@ -1476,13 +1476,13 @@ gate_suites() {
   echo "  (bb ci runs diff-scoped: checks whose scripts/checks.edn :relevant"
   echo "   paths saw no change are skipped visibly. Unrecognised -> everything.)"
 
-  local base_sha ci_sha ci_receipt ci_expected stage stage_order priority="${WTQ_FIRST_STAGE:-}" entry
+  local base_sha ci_sha ci_receipt ci_expected stage stage_order priority="${WTQ_FIRST_STAGE:-}" entry manual_stage=""
   local -a manual_first=()
   IFS=',' read -r -a manual_first <<< "${WTQ_FIRST_TESTS:-}"
   for entry in "${manual_first[@]}"; do
     case "$entry" in
-      integration:*) priority=integration; break ;;
-      browser:*) priority=e2e; break ;;
+      integration:*) manual_stage=integration; priority=$manual_stage; break ;;
+      browser:*) manual_stage=e2e; priority=$manual_stage; break ;;
     esac
   done
   local stage_credits="" image_credit=0 reused=0
@@ -1538,7 +1538,7 @@ gate_suites() {
   # GRAPHDEN_RESUME_FROM was selected through member/base ancestry validation.
   (cd "$wt" && bb scripts/ci_resume_cli.clj carry "$GRAPHDEN_RESUME_OUT" "$GRAPHDEN_RESUME_FROM") \
     || { echo "FAIL: cannot preserve detailed scheduling hints"; return 1; }
-  stage_order="$(cd "$wt" && bb scripts/ci_resume_cli.clj start stages \
+  stage_order="$(cd "$wt" && WTQ_MANUAL_FIRST_STAGE="$manual_stage" bb scripts/ci_resume_cli.clj start stages \
     "$GRAPHDEN_RESUME_OUT.stages.edn" "${GRAPHDEN_RESUME_FROM:+$GRAPHDEN_RESUME_FROM.stages.edn}" \
     "$ci_sha" "${ordered[@]}")" || { echo "FAIL: cannot initialize stage progress"; return 1; }
   mapfile -t ordered <<< "$stage_order"

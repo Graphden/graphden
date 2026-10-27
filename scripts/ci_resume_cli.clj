@@ -10,8 +10,15 @@
     "carry" (resume/carry-hints! kind (first args))
     "start" (let [[path source sha & roster] args
                   run (resume/begin! path kind sha roster (resume/read-hint source kind)
-                                     (= "1" (System/getenv "GRAPHDEN_RESUME_CREDIT")))]
-              (println (str/join "\n" (:roster run))))
+                                     (= "1" (System/getenv "GRAPHDEN_RESUME_CREDIT")))
+                  manual-stage (System/getenv "WTQ_MANUAL_FIRST_STAGE")
+                  ordered (if (and (= kind "stages") (some #{manual-stage} (:roster run)))
+                            (resume/stage-dependencies
+                              (into [manual-stage] (remove #{manual-stage} (:roster run))))
+                            (:roster run))]
+              (when (not= ordered (:roster run))
+                (resume/record-order! run ordered))
+              (println (str/join "\n" ordered)))
     "auto" (println (str/join "\n" (:roster (resume/invocation! kind args))))
     "mark" (let [[path id status] args
                  receipt (resume/read-hint path kind)]

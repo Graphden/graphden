@@ -35,7 +35,7 @@
 
 
 (def ^:private default-component-roles
-  #{:account-menu :fn-picker :recents :inspector :explorer :tutorial-catalog
+  #{:account-menu :org-switcher :fn-picker :recents :inspector :explorer :tutorial-catalog
     :execution-status :execution-path :feedback :keymap :appearance :canvas :canvas-values
     :canvas-inheritance :canvas-metadata :canvas-type-structure :canvas-bindings})
 

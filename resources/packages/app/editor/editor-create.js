@@ -169,40 +169,14 @@ function openNsPublishPopover(anchorEl, nsPath) {
   const pop = document.createElement('div');
   pop.id = 'gd-nspub-pop';
   pop.className = 'gd-pop';
-  pop.innerHTML = ''
-    + '<h5>Publish namespace</h5>'
-    + '<div class="gd-nspub-sub"></div>'
-    + '<div class="gd-nspub-field"><label>Package name</label>'
-    +   '<input type="text" class="packages-publish-input" id="gd-nspub-name"></div>'
-    + '<div class="gd-nspub-field"><label>Version</label>'
-    +   '<input type="text" class="packages-publish-input" id="gd-nspub-version" placeholder="1.0.0"></div>'
-    // Marketplace listing (docs/MARKETPLACE.md): what the card shows.
-    // Categories come from the graph's vocabulary (editor-marketplace.js
-    // fetched it at boot); tags are a comma list.
-    + '<div class="gd-nspub-field"><label>Description</label>'
-    +   '<textarea class="packages-publish-input" id="gd-nspub-desc" rows="2" maxlength="2000" placeholder="What it does, for the marketplace card"></textarea></div>'
-    + '<div class="gd-nspub-field"><label>Category</label>'
-    +   '<select class="packages-publish-input" id="gd-nspub-category"><option value="">— none —</option></select></div>'
-    + '<div class="gd-nspub-field"><label>Tags</label>'
-    +   '<input type="text" class="packages-publish-input" id="gd-nspub-tags" placeholder="comma, separated, tags"></div>'
-    // Public opt-in (spec §5): only meaningful under the tenancy addon — a
-    // tenant publish is private to its org unless this is checked. Single-
-    // tenant / operator publishes are always platform-visible, so the
-    // checkbox is omitted there rather than shown pre-checked and disabled.
-    + (typeof window.graphdenTenancyActive === 'function' && window.graphdenTenancyActive()
-      ? '<label class="gd-nspub-public"><input type="checkbox" id="gd-nspub-public"> '
-        + 'Public — visible outside your organization</label>'
-      : '')
-    + '<div class="gd-nspub-actions">'
-    +   '<button type="button" class="packages-install-btn" id="gd-nspub-go">Publish</button></div>'
-    + '<div id="gd-nspub-result" class="gd-nspub-result"></div>';
+  const tenancy = typeof window.graphdenTenancyActive === 'function' && window.graphdenTenancyActive();
+  pop.appendChild(window.gdPublishGraphForm('fns', tenancy, nsPath));
   // A form with a Publish button and nothing else: no Cancel, and the scrim
   // behind it is transparent, so backing out was an unguessable click on
   // whatever the panel happened to cover.
   if (typeof ensurePopoverClose === 'function') {
     ensurePopoverClose(pop, closeNsPublishPopover, 'Close publish form', {prepend: true});
   }
-  pop.querySelector('.gd-nspub-sub').textContent = nsPath;
   const nameInput = pop.querySelector('#gd-nspub-name');
   const versionInput = pop.querySelector('#gd-nspub-version');
   nameInput.value = nsPath.split('.').pop() || nsPath;

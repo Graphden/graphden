@@ -22,6 +22,10 @@ for (const limit of [0, 10001, NaN]) assert.throws(() => ctx.GraphdenRenderer.vn
 assert.throws(() => ctx.GraphdenRenderer.vnode([k('div'), 'child'], null, 1));
 assert.equal(ctx.GraphdenRenderer.vnode([k('div'), attrs({id: 'gd-test-option'})], 'gd-test').props.id, 'gd-test-option');
 assert.equal(ctx.GraphdenRenderer.vnode([k('pre'), 'read-only error detail']).type, 'pre');
+assert.equal(ctx.GraphdenRenderer.vnode([k('h5'), 'Publish namespace']).type, 'h5');
+assert.equal(ctx.GraphdenRenderer.vnode([k('label'), attrs({for: 'gd-form-name'}), 'Name'], 'gd').props.htmlFor,
+  'gd-form-name');
+assert.throws(() => ctx.GraphdenRenderer.vnode([k('label'), attrs({for: 'auth-secret'}), 'Name'], 'gd'));
 const form = ctx.GraphdenRenderer.vnode([k('label'),
   [k('select'), [k('option'), attrs({value: 'bug'}), 'Bug']],
   [k('textarea'), attrs({rows: 5, maxlength: 10000})]]);

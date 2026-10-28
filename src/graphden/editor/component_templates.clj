@@ -136,6 +136,7 @@
                     ["menu" :app.ui-account-menu/account-menu-view
                      [[:initial "account-menu-initial"] [:update "account-menu-update"] [:view "account-menu-view"]]]
                     ["account-methods" :app.ui-account/account-methods-view [[:view "account-methods-view"]]]
+                    ["publish-form" :app.ui-publish/publish-form-view [[:view "publish-form-view"]]]
                     ["org-switcher" :app.ui-org-switcher/org-switcher-view [[:view "org-switcher-view"]]]
                     ["picker" :app.ui-fn-picker/picker-view [[:view "picker-view"]]]
                     ["recents" :app.ui-recents/recents-view
@@ -179,6 +180,7 @@
                                          color-parent reference))) theme-definitions)
         menu-definitions (personal-menu-definitions theme menu)
         account-methods (str root ".account-methods")
+        publish-form (str root ".publish-form")
         org-switcher (str root ".org-switcher")
         recents (str root ".recents")
         inspector (str root ".inspector")
@@ -201,6 +203,7 @@
                        :description "Your ordinary component manifest. Each descriptor selects entry identities; browser effects remain host-owned."
                        :args {:items [(keyword root "_menu-descriptor")
                                       (keyword root "_account-methods-descriptor")
+                                      (keyword root "_publish-form-descriptor")
                                       (keyword root "_org-switcher-descriptor")
                                       (keyword root "_picker-descriptor")
                                       (keyword root "_recents-descriptor")
@@ -227,6 +230,7 @@
       (into [(assoc color-const :namespace theme) configuration]
             (concat descriptors theme-definitions menu-definitions (copy-module "app/ui-fn-picker" picker)
                     (copy-module "app/ui-account" account-methods)
+                    (copy-module "app/ui-publish" publish-form)
                     (copy-module "app/ui-org-switcher" org-switcher)
                     (copy-module "app/ui-recents" recents) (copy-module "app/ui-inspector" inspector)
                     (copy-module "app/ui-explorer" explorer) (copy-module "app/ui-tutorial-catalog" tutorial-catalog)
@@ -245,12 +249,12 @@
 
 (def namespace-suffixes
   "Owned child namespaces reserved for the installed personal template bundle."
-  ["theme" "menu" "account-methods" "org-switcher" "picker" "recents" "inspector" "explorer" "tutorial-catalog" "execution-status" "execution-path" "feedback" "keymap" "appearance" "canvas" "canvas-values" "canvas-inheritance" "canvas-metadata" "canvas-type-structure" "canvas-bindings"])
+  ["theme" "menu" "account-methods" "publish-form" "org-switcher" "picker" "recents" "inspector" "explorer" "tutorial-catalog" "execution-status" "execution-path" "feedback" "keymap" "appearance" "canvas" "canvas-values" "canvas-inheritance" "canvas-metadata" "canvas-type-structure" "canvas-bindings"])
 
 
 (def groups
   "Fixed creation choices and their personal namespace/descriptor prefixes."
-  {:account-menu "menu" :account-methods "account-methods" :org-switcher "org-switcher" :fn-picker "picker" :recents "recents" :inspector "inspector" :explorer "explorer"
+  {:account-menu "menu" :account-methods "account-methods" :publish-form "publish-form" :org-switcher "org-switcher" :fn-picker "picker" :recents "recents" :inspector "inspector" :explorer "explorer"
    :tutorial-catalog "tutorial-catalog" :execution-status "execution-status" :execution-path "execution-path" :feedback "feedback" :keymap "keymap" :appearance "appearance" :canvas "canvas" :canvas-values "canvas-values" :canvas-inheritance "canvas-inheritance" :canvas-metadata "canvas-metadata" :canvas-type-structure "canvas-type-structure" :canvas-bindings "canvas-bindings"})
 
 

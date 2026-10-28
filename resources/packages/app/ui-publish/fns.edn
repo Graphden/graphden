@@ -1,0 +1,141 @@
+{:namespace "app.ui-publish"
+ :description "Pure publish form presentation for namespace, theme and keymap; writes and authorization stay in the host."
+ :fns
+ [{:name :_publish-inputs :type {:kind :text :tenancy :bool :namespace :text}}
+  {:name :_publish-envelope :type {:inputs :_publish-inputs}}
+  {:name :_publish-result :type {:tree :web.html/hiccup-node}}
+  {:name :_publish-callable :fn-type [{:input :_publish-envelope} :_publish-result]}
+  {:name :publish-root-component :type {:view :_publish-callable}}
+  {:name :_publish-inputs-value :parent :const :args {:value {:as :inputs :type :_publish-inputs}}}
+  {:name :_kind :parent :get :args {:coll :_publish-inputs-value :key {:value :kind} :default "fns"}}
+  {:name :_tenancy :parent :get :args {:coll :_publish-inputs-value :key {:value :tenancy} :default false}}
+  {:name :_namespace :parent :get :args {:coll :_publish-inputs-value :key {:value :namespace} :default ""}}
+  {:name :_ns? :parent :equal? :args {:a :_kind :b "fns"}}
+  {:name :_keymap? :parent :equal? :args {:a :_kind :b "keymap"}}
+  {:name :_label :parent :if :args {:test :_keymap? :then "keyboard layout" :else "theme"}}
+  {:name :_title-text :parent :if
+   :args {:test :_ns? :then "Publish namespace"
+          :else {:parent :str :args {:parts ["Save " :_label]}}}}
+  {:name :_title :parent :hiccup
+   :args {:tag "h5" :attrs {:value {:id "gd-mkpub-title"}} :children [:_title-text]}}
+  {:name :_market-sub :parent :str
+   :args {:parts ["A saved " :_label " is a versioned package in the registry. Keep it private to yourself"
+                  {:parent :if :args {:test :_tenancy :then " / your organization" :else ""}}
+                  ", or tick Public to list it in the marketplace for everyone."]}}
+  {:name :_sub-text :parent :if :args {:test :_ns? :then :_namespace :else :_market-sub}}
+  {:name :_sub-tag :parent :if :args {:test :_ns? :then "div" :else "p"}}
+  {:name :_sub-class :parent :if :args {:test :_ns? :then "gd-nspub-sub" :else "gd-mkpub-sub"}}
+  {:name :_sub :parent :hiccup
+   :args {:tag :_sub-tag :attrs {:parent :zipmap
+                                 :args {:keys [{:value :class}] :vals [:_sub-class]}}
+          :children [:_sub-text]}}
+  {:name :_prefix :parent :if :args {:test :_ns? :then "gd-nspub-" :else "gd-mkpub-"}}
+  {:name :_name-id :parent :str :args {:parts [:_prefix "name"]}}
+  {:name :_version-id :parent :str :args {:parts [:_prefix "version"]}}
+  {:name :_desc-id :parent :str :args {:parts [:_prefix "desc"]}}
+  {:name :_category-id :parent :str :args {:parts [:_prefix "category"]}}
+  {:name :_tags-id :parent :str :args {:parts [:_prefix "tags"]}}
+  {:name :_public-id :parent :str :args {:parts [:_prefix "public"]}}
+  {:name :_go-id :parent :str :args {:parts [:_prefix "go"]}}
+  {:name :_result-id :parent :str :args {:parts [:_prefix "result"]}}
+  {:name :_name-label :parent :if :args {:test :_ns? :then "Package name" :else "Name"}}
+  {:name :_name-placeholder :parent :if
+   :args {:test :_ns? :then ""
+          :else {:parent :str :args {:parts ["my-" {:parent :if :args {:test :_keymap? :then "keyboard-layout" :else "theme"}}]}}}}
+  {:name :_name-control :parent :hiccup
+   :args {:tag "input" :attrs {:parent :zipmap
+                               :args {:keys [{:value :type} {:value :class} {:value :id} {:value :placeholder}]
+                                      :vals ["text" "packages-publish-input" :_name-id :_name-placeholder]}}
+          :children []}}
+  {:name :_name-caption :parent :hiccup
+   :args {:tag "label" :attrs {:parent :zipmap :args {:keys [{:value :for}] :vals [:_name-id]}}
+          :children [:_name-label]}}
+  {:name :_name-row :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "gd-nspub-field"}} :children [:_name-caption :_name-control]}}
+  {:name :_version-control :parent :hiccup
+   :args {:tag "input" :attrs {:parent :zipmap
+                               :args {:keys [{:value :type} {:value :class} {:value :id} {:value :placeholder}]
+                                      :vals ["text" "packages-publish-input" :_version-id "1.0.0"]}}
+          :children []}}
+  {:name :_version-caption :parent :hiccup
+   :args {:tag "label" :attrs {:parent :zipmap :args {:keys [{:value :for}] :vals [:_version-id]}}
+          :children ["Version"]}}
+  {:name :_version-row :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "gd-nspub-field"}} :children [:_version-caption :_version-control]}}
+  {:name :_desc-control :parent :hiccup
+   :args {:tag "textarea" :attrs {:parent :zipmap
+                                  :args {:keys [{:value :class} {:value :id} {:value :rows} {:value :maxlength}]
+                                         :vals ["packages-publish-input" :_desc-id 2 2000]}}
+          :children []}}
+  {:name :_desc-caption :parent :hiccup
+   :args {:tag "label" :attrs {:parent :zipmap :args {:keys [{:value :for}] :vals [:_desc-id]}}
+          :children ["Description"]}}
+  {:name :_desc-row :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "gd-nspub-field"}} :children [:_desc-caption :_desc-control]}}
+  {:name :_category-empty :parent :hiccup
+   :args {:tag "option" :attrs {:value {:value ""}} :children ["— none —"]}}
+  {:name :_category-control :parent :hiccup
+   :args {:tag "select" :attrs {:parent :zipmap
+                                :args {:keys [{:value :class} {:value :id}]
+                                       :vals ["packages-publish-input" :_category-id]}}
+          :children [:_category-empty]}}
+  {:name :_category-caption :parent :hiccup
+   :args {:tag "label" :attrs {:parent :zipmap :args {:keys [{:value :for}] :vals [:_category-id]}}
+          :children ["Category"]}}
+  {:name :_category-row :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "gd-nspub-field"}} :children [:_category-caption :_category-control]}}
+  {:name :_tags-control :parent :hiccup
+   :args {:tag "input" :attrs {:parent :zipmap
+                               :args {:keys [{:value :type} {:value :class} {:value :id} {:value :placeholder}]
+                                      :vals ["text" "packages-publish-input" :_tags-id "comma, separated, tags"]}}
+          :children []}}
+  {:name :_tags-caption :parent :hiccup
+   :args {:tag "label" :attrs {:parent :zipmap :args {:keys [{:value :for}] :vals [:_tags-id]}}
+          :children ["Tags"]}}
+  {:name :_tags-row :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "gd-nspub-field"}} :children [:_tags-caption :_tags-control]}}
+  {:name :_public-control :parent :hiccup
+   :args {:tag "input" :attrs {:parent :zipmap
+                               :args {:keys [{:value :type} {:value :id}]
+                                      :vals ["checkbox" :_public-id]}}
+          :children []}}
+  {:name :_public-label-text :parent :if
+   :args {:test :_ns? :then " Public — visible outside your organization"
+          :else " Public — list it in the marketplace"}}
+  {:name :_public-label :parent :hiccup
+   :args {:tag "label" :attrs {:value {:class "gd-nspub-public"}}
+          :children [:_public-control :_public-label-text]}}
+  {:name :_show-public? :parent :if :args {:test :_ns? :then :_tenancy :else true}}
+  {:name :_maybe-public :parent :if :args {:test :_show-public? :then :_public-label :else nil}}
+  {:name :_go-label :parent :if :args {:test :_ns? :then "Publish" :else "Save"}}
+  {:name :_go-class :parent :if :args {:test :_ns? :then "packages-install-btn" :else "packages-install-btn gd-mkpub-go"}}
+  {:name :_go :parent :hiccup
+   :args {:tag "button" :attrs {:parent :zipmap
+                                :args {:keys [{:value :type} {:value :class} {:value :id}]
+                                       :vals ["button" :_go-class :_go-id]}}
+          :children [:_go-label]}}
+  {:name :_cancel :parent :hiccup
+   :args {:tag "button" :attrs {:value {:type "button" :class "gd-set-btn" :id "gd-mkpub-cancel"}}
+          :children ["Cancel"]}}
+  {:name :_maybe-cancel :parent :if :args {:test :_ns? :then nil :else :_cancel}}
+  {:name :_actions :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "gd-nspub-actions"}} :children [:_maybe-cancel :_go]}}
+  {:name :_result :parent :hiccup
+   :args {:tag "div" :attrs {:parent :zipmap
+                             :args {:keys [{:value :id} {:value :class} {:value :aria-live}]
+                                    :vals [:_result-id "gd-nspub-result" "polite"]}}
+          :children []}}
+  {:name :_tree :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "gd-publish-form"}}
+          :children [:_title :_sub :_name-row :_version-row :_desc-row :_category-row :_tags-row
+                     :_maybe-public :_actions :_result]}}
+  {:name :publish-form-view :parent :zipmap :return-type :_publish-result
+   :args {:keys [{:value :tree}] :vals [:_tree]}}
+  {:name :root-view :parent :publish-form-view :lambda-params [:input] :return-type :_publish-result
+   :args {:inputs {:parent :get
+                   :args {:coll {:as :input :type :_publish-envelope} :key {:value :inputs}}}}}
+  {:name :_view-assoc :parent :assoc-fn
+   :args {:value {:as :value :type :_publish-callable}}}
+  {:name :publish-form-component :parent :_view-assoc
+   :return-type :publish-root-component
+   :args {:map {} :key {:value :view} :value {:ref :root-view}}}]}

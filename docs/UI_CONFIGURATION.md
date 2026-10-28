@@ -256,3 +256,8 @@ availability and configured OAuth providers, with no password, TOTP secret,
 session cookie or API token. The host fetches session-scoped data, verifies
 every rendered unlink target and OAuth link, owns all account actions and
 discards responses after an account change.
+
+The `:publish-form` view supplies the namespace, theme and keymap publish
+fields from one graph. Inputs contain only the kind, tenancy availability and
+namespace display path. The host checks the exact control set and owns the
+publish endpoint, authorization, payload, submission, dialog lifetime and focus.

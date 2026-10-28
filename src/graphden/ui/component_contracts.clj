@@ -15,6 +15,8 @@
                   :roles #{:initial :update :view}}
    :account-methods {:id (ids/fn-id "app.ui-account" :account-methods-view)
                      :reference :app.ui-account/account-methods-view :roles #{:view}}
+   :publish-form {:id (ids/fn-id "app.ui-publish" :publish-form-view)
+                  :reference :app.ui-publish/publish-form-view :roles #{:view}}
    :org-switcher {:id (ids/fn-id "app.ui-org-switcher" :org-switcher-view)
                   :reference :app.ui-org-switcher/org-switcher-view :roles #{:view}}
    :fn-picker {:id (ids/fn-id "app.ui-fn-picker" :picker-view)

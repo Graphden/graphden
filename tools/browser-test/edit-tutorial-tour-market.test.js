@@ -86,6 +86,11 @@ const {waitTourTitle, clickTourButton, finishAndDelete, tourWhere} = require('./
     // --- Save it as a version: the share dialog.
     await page.evaluate(() => document.getElementById('gd-theme-save').click());
     await page.waitForSelector('#gd-mkpub-pop #gd-mkpub-name', {timeout: 30000});
+    assert(await page.evaluate(() => {
+      const box = document.getElementById('gd-mkpub-pop').getBoundingClientRect();
+      return box.width > 0 && box.height > 0 && box.left >= 0 && box.top >= 0
+        && box.right <= window.innerWidth && box.bottom <= window.innerHeight;
+    }), 'share dialog is fully visible in the viewport');
     // aria-modal="true" is kept: everything but the dialog, its scrim (the
     // click-outside close) and the tour's own layers is inert while it is up.
     const modal = await page.evaluate(() => [...document.body.children]

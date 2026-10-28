@@ -5,7 +5,7 @@
   const styles = window.GraphdenStyles;
   const name = (value) => value instanceof api.Keyword ? (value.namespace ? value.namespace + '/' : '') + value.name : value;
   const owners = new WeakSet();
-  const tags = new Set(['div', 'span', 'button', 'input', 'label', 'ul', 'li', 'p', 'pre', 'strong', 'small', 'section', 'select', 'option', 'optgroup', 'textarea', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'kbd', 'details', 'summary', 'code']);
+  const tags = new Set(['div', 'span', 'button', 'input', 'label', 'ul', 'li', 'p', 'pre', 'strong', 'small', 'section', 'select', 'option', 'optgroup', 'textarea', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'kbd', 'details', 'summary', 'code', 'h5']);
   const textAttributes = new Set(['class', 'role', 'type', 'title', 'name', 'value', 'placeholder', 'autocomplete', 'label']);
   const booleanAttributes = new Set(['disabled', 'hidden', 'readonly', 'checked', 'selected', 'open']);
 
@@ -18,6 +18,10 @@
         if (!idPrefix || typeof item !== 'string' || !item.startsWith(idPrefix + '-')
           || !/^[a-z][a-z0-9_-]{1,150}$/.test(item)) throw new Error('Graph element ID must belong to this component');
         result.id = item;
+      } else if (attr === 'for') {
+        if (!idPrefix || typeof item !== 'string' || !item.startsWith(idPrefix + '-')
+          || !/^[a-z][a-z0-9_-]{1,150}$/.test(item)) throw new Error('Graph label target must belong to this component');
+        result.htmlFor = item;
       } else if (attr === 'key') {
         if (typeof item !== 'string' && !Number.isSafeInteger(item)) throw new Error('Invalid graph element key');
         result.key = String(item);

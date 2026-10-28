@@ -211,7 +211,6 @@
   async function gdMarketOpenPublishDialog(opts) {
     closeDialog();
     const kind = opts.kind === 'keymap' ? 'keymap' : 'theme';
-    const label = kind === 'keymap' ? 'keyboard layout' : 'theme';
     // Fetched BEFORE the dialog exists: every listener below is wired the
     // moment the dialog appears, so a Save right after the name input shows
     // cannot race this request.
@@ -227,19 +226,7 @@
     el.setAttribute('aria-modal', 'true');
     el.setAttribute('aria-labelledby', 'gd-mkpub-title');
     const tenancy = typeof window.graphdenTenancyActive === 'function' && window.graphdenTenancyActive();
-    el.innerHTML = ''
-      + '<h5 id="gd-mkpub-title">Save ' + label + '</h5>'
-      + '<p class="gd-mkpub-sub">A saved ' + label + ' is a versioned package in the registry. Keep it private to yourself'
-      + (tenancy ? ' / your organization' : '') + ', or tick <b>Public</b> to list it in the marketplace for everyone.</p>'
-      + '<div class="gd-nspub-field"><label for="gd-mkpub-name">Name</label><input type="text" class="packages-publish-input" id="gd-mkpub-name" placeholder="my-' + label.replace(' ', '-') + '"></div>'
-      + '<div class="gd-nspub-field"><label for="gd-mkpub-version">Version</label><input type="text" class="packages-publish-input" id="gd-mkpub-version" placeholder="1.0.0"></div>'
-      + '<div class="gd-nspub-field"><label for="gd-mkpub-desc">Description</label><textarea class="packages-publish-input" id="gd-mkpub-desc" rows="2" maxlength="2000"></textarea></div>'
-      + '<div class="gd-nspub-field"><label for="gd-mkpub-category">Category</label><select class="packages-publish-input" id="gd-mkpub-category"><option value="">— none —</option></select></div>'
-      + '<div class="gd-nspub-field"><label for="gd-mkpub-tags">Tags</label><input type="text" class="packages-publish-input" id="gd-mkpub-tags" placeholder="comma, separated"></div>'
-      + '<label class="gd-nspub-public"><input type="checkbox" id="gd-mkpub-public"> Public — list it in the marketplace</label>'
-      + '<div class="gd-nspub-actions"><button type="button" class="gd-set-btn" id="gd-mkpub-cancel">Cancel</button>'
-      + '<button type="button" class="packages-install-btn gd-mkpub-go" id="gd-mkpub-go">Save</button></div>'
-      + '<div id="gd-mkpub-result" class="gd-nspub-result" aria-live="polite"></div>';
+    el.appendChild(window.gdPublishGraphForm(kind, tenancy));
     document.body.appendChild(el);
     const nameIn = el.querySelector('#gd-mkpub-name');
     const verIn = el.querySelector('#gd-mkpub-version');

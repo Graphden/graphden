@@ -7,7 +7,7 @@ Loading, graph-backed controls, actions, forms, and preferences.
 
 after: web, layout
 
-[[file:index.org][index]] · ~186 min
+[[file:index.org][index]] · ~187 min
 
 * 1. initGraph
 :PROPERTIES:
@@ -310,13 +310,13 @@ The Explorer trail executes the shipped ~app.ui-recents~ initial and view graphs
 :PROPERTIES:
 :CUSTOM_ID: editor/mount
 :FILE: resources/packages/app/ui-preview/graph-renderer.js
-:LINE: 88
+:LINE: 92
 :MINS: 2.7
 :END:
 
 Gives a graph component its own empty DOM host. ~render~ validates live Hiccup and scoped style rules before applying them, preserving keyed elements across updates. ~dispose~ removes the subtree and releases its stylesheet. The renderer consumes values rather than executing graph functions; host code still owns the control's events and authorized callbacks. Follow this lifecycle when changing a graph-backed menu or picker.
 
-- source :: [[file:../../../resources/packages/app/ui-preview/graph-renderer.js::  function mount(host, {idPrefix = null, nodeLimit = 5000} = {}) {][resources/packages/app/ui-preview/graph-renderer.js:88]]
+- source :: [[file:../../../resources/packages/app/ui-preview/graph-renderer.js::  function mount(host, {idPrefix = null, nodeLimit = 5000} = {}) {][resources/packages/app/ui-preview/graph-renderer.js:92]]
 - see also :: [[file:editor.org::#editor/createRuntime][createRuntime]], [[file:web.org::#web/hiccup-element][hiccup-element]]
 - referenced from :: [[file:editor.org::#editor/createRuntime][createRuntime]], [[file:editor.org::#editor/create][create]], [[file:editor.org::#editor/mountRow][mountRow]], [[file:editor.org::#editor/mountNamespace][mountNamespace]], [[file:editor.org::#editor/renderRecentFns][renderRecentFns]], [[file:editor.org::#editor/mountCanvasBody][mountCanvasBody]]
 
@@ -555,26 +555,26 @@ Each server partial captures a latest-wins read token and exact native host. Tab
 :PROPERTIES:
 :CUSTOM_ID: editor/definitions
 :FILE: src/graphden/editor/component_templates.clj
-:LINE: 164
-:MINS: 6.2
+:LINE: 165
+:MINS: 6.4
 :END:
 
 Copies the fixed shipped theme, menu, picker, Recents, Inspector, Explorer, tutorial catalogue, passive canvas, value/type, inheritance and function metadata definitions into a fresh named namespace. An ordinary descriptor list selects component entry identities. Shared menu colors reference copied theme leaves; menu hover owns a local literal. Color wrappers retain the canonical color type and ordinary editor form. This is an advanced legacy compatibility path; Lesson 25 instead creates a small inherited menu child and captures its free theme input.
 
-- source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn definitions][src/graphden/editor/component_templates.clj:164]]
+- source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn definitions][src/graphden/editor/component_templates.clj:165]]
 - same file :: [[file:editor.org::#editor/selected-definitions][selected-definitions]]
 
 * 42. selected-definitions
 :PROPERTIES:
 :CUSTOM_ID: editor/selected-definitions
 :FILE: src/graphden/editor/component_templates.clj
-:LINE: 257
+:LINE: 261
 :MINS: 2.5
 :END:
 
 The retained legacy selective-copy compatibility path keeps only the chosen component and its owned reference closure. A new ordinary concat manifest references the previous authored manifest and the new descriptor list, preserving existing identities and edits. Legacy slots are adapted to descriptors without copying their bodies. Retained identities are outside the create-only receipt; group creation does not activate a theme.
 
-- source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn selected-definitions][src/graphden/editor/component_templates.clj:257]]
+- source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn selected-definitions][src/graphden/editor/component_templates.clj:261]]
 - same file :: [[file:editor.org::#editor/definitions][definitions]]
 
 * 43. apply!

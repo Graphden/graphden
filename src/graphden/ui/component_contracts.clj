@@ -13,6 +13,8 @@
    :account-menu {:id (ids/fn-id "app.ui-account-menu" :account-menu-view)
                   :reference :app.ui-account-menu/account-menu-view
                   :roles #{:initial :update :view}}
+   :account-methods {:id (ids/fn-id "app.ui-account" :account-methods-view)
+                     :reference :app.ui-account/account-methods-view :roles #{:view}}
    :org-switcher {:id (ids/fn-id "app.ui-org-switcher" :org-switcher-view)
                   :reference :app.ui-org-switcher/org-switcher-view :roles #{:view}}
    :fn-picker {:id (ids/fn-id "app.ui-fn-picker" :picker-view)

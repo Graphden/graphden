@@ -249,3 +249,10 @@ membership list. The graph receives names, owner flags, plan labels and the
 current organization; it receives no session cookie, token or credential.
 The host verifies every rendered switch target against the fetched membership
 set and owns navigation, creation, focus and account-change invalidation.
+
+The Settings sign-in methods section uses the `:account-methods` view callback.
+The graph receives provider names, display email, verification state, unlink
+availability and configured OAuth providers, with no password, TOTP secret,
+session cookie or API token. The host fetches session-scoped data, verifies
+every rendered unlink target and OAuth link, owns all account actions and
+discards responses after an account change.

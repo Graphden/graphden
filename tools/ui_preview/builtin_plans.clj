@@ -32,7 +32,7 @@
 (def script-path "resources/packages/app/ui-preview/builtin-plans.js")
 
 
-(def ^:private modules ["ui-account-menu" "ui-org-switcher" "ui-fn-picker" "ui-recents" "ui-inspector" "ui-explorer" "ui-tutorial-catalog" "ui-execution" "ui-feedback" "ui-keymap" "ui-appearance" "ui-canvas" "ui-canvas-values" "ui-canvas-inheritance" "ui-canvas-metadata" "ui-canvas-type-structure" "ui-canvas-bindings"])
+(def ^:private modules ["ui-account-menu" "ui-account" "ui-org-switcher" "ui-fn-picker" "ui-recents" "ui-inspector" "ui-explorer" "ui-tutorial-catalog" "ui-execution" "ui-feedback" "ui-keymap" "ui-appearance" "ui-canvas" "ui-canvas-values" "ui-canvas-inheritance" "ui-canvas-metadata" "ui-canvas-type-structure" "ui-canvas-bindings"])
 
 
 (def ^:private entries
@@ -45,6 +45,7 @@
    :accountMenu {:initial (ids/fn-id "app.ui-account-menu" :account-menu-initial)
                  :update (ids/fn-id "app.ui-account-menu" :account-menu-update)
                  :view (ids/fn-id "app.ui-account-menu" :account-menu-view)}
+   :accountMethods {:view (ids/fn-id "app.ui-account" :account-methods-view)}
    :orgSwitcher {:view (ids/fn-id "app.ui-org-switcher" :org-switcher-view)}
    :recents {:initial (ids/fn-id "app.ui-recents" :recents-initial)
              :update (ids/fn-id "app.ui-recents" :recents-update)

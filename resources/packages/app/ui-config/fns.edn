@@ -1,15 +1,17 @@
 {:namespace "app.ui-config"
  :description "Pure shared editor configuration and a protected authenticated metadata resolver. No component body copies or per-user selector table."
  :fns
- [{:name :_editor-bootstrap-result :type {:legacy :bool :account-menu :app.ui-account-menu/root-component :org-switcher :app.ui-org-switcher/org-switcher-root-component :recents :app.ui-recents/root-component :fn-picker :app.ui-fn-picker/root-component :tutorial-catalog :app.ui-tutorial-catalog/root-component :execution-status :app.ui-execution/status-component :execution-path :app.ui-execution/path-component :feedback :app.ui-feedback/feedback-component :keymap :app.ui-keymap/keymap-root-component :appearance :app.ui-appearance/appearance-root-component}}
+ [{:name :_editor-bootstrap-result :type {:legacy :bool :account-menu :app.ui-account-menu/root-component :account-methods :app.ui-account/account-methods-root-component :org-switcher :app.ui-org-switcher/org-switcher-root-component :recents :app.ui-recents/root-component :fn-picker :app.ui-fn-picker/root-component :tutorial-catalog :app.ui-tutorial-catalog/root-component :execution-status :app.ui-execution/status-component :execution-path :app.ui-execution/path-component :feedback :app.ui-feedback/feedback-component :keymap :app.ui-keymap/keymap-root-component :appearance :app.ui-appearance/appearance-root-component}}
   {:name :legacy-editor-root :parent :const
    :description "Explicit adapter retaining the editor hosts not yet selected through root callable records."
    :return-type {:legacy :bool} :lambda-params []
    :args {:value {:value {:legacy true}}}}
   {:name :_root-account-menu :parent :assoc
    :args {:map :legacy-editor-root :key {:value :account-menu} :value :app.ui-account-menu/account-menu-component}}
+  {:name :_root-account-methods :parent :assoc
+   :args {:map :_root-account-menu :key {:value :account-methods} :value :app.ui-account/account-methods-component}}
   {:name :_root-org-switcher :parent :assoc
-   :args {:map :_root-account-menu :key {:value :org-switcher} :value :app.ui-org-switcher/org-switcher-component}}
+   :args {:map :_root-account-methods :key {:value :org-switcher} :value :app.ui-org-switcher/org-switcher-component}}
   {:name :_root-recents :parent :assoc
    :args {:map :_root-org-switcher :key {:value :recents} :value :app.ui-recents/recents-component}}
   {:name :_root-fn-picker :parent :assoc
@@ -126,6 +128,12 @@
    :args {:keys [{:value :role} {:value :fn-id}] :vals [{:value :view} :_keymap-view-id]}}
   {:name :_keymap-entries :parent :list :return-type :_component-entries
    :args {:items [:_keymap-view-entry]}}
+  {:name :_account-methods-view-id :parent :const :return-type :fn-ref
+   :args {:value {:ref :app.ui-account/account-methods-view :type :fn-ref}}}
+  {:name :_account-methods-view-entry :parent :zipmap :return-type :_component-entry
+   :args {:keys [{:value :role} {:value :fn-id}] :vals [{:value :view} :_account-methods-view-id]}}
+  {:name :_account-methods-entries :parent :list :return-type :_component-entries
+   :args {:items [:_account-methods-view-entry]}}
   {:name :_org-switcher-view-id :parent :const :return-type :fn-ref
    :args {:value {:ref :app.ui-org-switcher/org-switcher-view :type :fn-ref}}}
   {:name :_org-switcher-view-entry :parent :zipmap :return-type :_component-entry
@@ -184,8 +192,8 @@
    :args {:items [:_canvas-bindings-view-entry]}}
   {:name :editor-defaults :parent :zipmap
    :description "Shared editor defaults. Personal ordinary graphs may reference these entries or override exposed constructor slots without copying their component bodies."
-   :args {:keys [:_account-menu-view-id :_org-switcher-view-id :_fn-picker-view-id :_recents-view-id :_inspector-view-id :_explorer-view-id :_tutorial-catalog-view-id :_execution-status-view-id :_execution-path-view-id :_feedback-view-id :_keymap-view-id :_appearance-view-id :_canvas-view-id :_canvas-values-view-id :_canvas-inheritance-view-id :_canvas-metadata-view-id :_canvas-type-structure-view-id :_canvas-bindings-view-id]
-          :vals [:_account-menu-entries :_org-switcher-entries :_fn-picker-entries :_recents-entries :_inspector-entries :_explorer-entries :_tutorial-catalog-entries :_execution-status-entries :_execution-path-entries :_feedback-entries :_keymap-entries :_appearance-entries :_canvas-entries :_canvas-values-entries :_canvas-inheritance-entries :_canvas-metadata-entries :_canvas-type-structure-entries :_canvas-bindings-entries]}}
+   :args {:keys [:_account-menu-view-id :_account-methods-view-id :_org-switcher-view-id :_fn-picker-view-id :_recents-view-id :_inspector-view-id :_explorer-view-id :_tutorial-catalog-view-id :_execution-status-view-id :_execution-path-view-id :_feedback-view-id :_keymap-view-id :_appearance-view-id :_canvas-view-id :_canvas-values-view-id :_canvas-inheritance-view-id :_canvas-metadata-view-id :_canvas-type-structure-view-id :_canvas-bindings-view-id]
+          :vals [:_account-menu-entries :_account-methods-entries :_org-switcher-entries :_fn-picker-entries :_recents-entries :_inspector-entries :_explorer-entries :_tutorial-catalog-entries :_execution-status-entries :_execution-path-entries :_feedback-entries :_keymap-entries :_appearance-entries :_canvas-entries :_canvas-values-entries :_canvas-inheritance-entries :_canvas-metadata-entries :_canvas-type-structure-entries :_canvas-bindings-entries]}}
   {:name :_descriptor-component-id :parent :get
    :args {:coll {:as :item :type :_component-descriptor} :key {:value :component-id} :default {:value nil}}}
   {:name :_descriptor-entries :parent :get

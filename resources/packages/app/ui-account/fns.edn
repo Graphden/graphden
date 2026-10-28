@@ -1,0 +1,78 @@
+{:namespace "app.ui-account"
+ :description "Pure sign-in methods presentation; credentials and account actions stay in the browser host."
+ :fns
+ [{:name :_account-methods-identity :type {:provider :text :email :text :verified :bool :can-unlink :bool}}
+  {:name :_account-methods-identities :list :_account-methods-identity}
+  {:name :_account-methods-links :list :text}
+  {:name :_account-methods-inputs :type {:identities :_account-methods-identities :links :_account-methods-links}}
+  {:name :_account-methods-envelope :type {:inputs :_account-methods-inputs}}
+  {:name :_account-methods-result :type {:tree :web.html/hiccup-node}}
+  {:name :_account-methods-callable :fn-type [{:input :_account-methods-envelope} :_account-methods-result]}
+  {:name :account-methods-root-component :type {:view :_account-methods-callable}}
+  {:name :_input :parent :const :args {:value {:as :inputs :type :_account-methods-inputs}}}
+  {:name :_account-methods-identities-value :parent :get
+   :args {:coll :_input :key {:value :identities} :default {:value []}}}
+  {:name :_account-methods-links-value :parent :get
+   :args {:coll :_input :key {:value :links} :default {:value []}}}
+  {:name :_provider :parent :get
+   :args {:coll {:as :identity :type :_account-methods-identity} :key {:value :provider} :default ""}}
+  {:name :_email :parent :get
+   :args {:coll {:as :identity :type :_account-methods-identity} :key {:value :email} :default ""}}
+  {:name :_verified :parent :get
+   :args {:coll {:as :identity :type :_account-methods-identity} :key {:value :verified} :default true}}
+  {:name :_can-unlink :parent :get
+   :args {:coll {:as :identity :type :_account-methods-identity} :key {:value :can-unlink} :default false}}
+  {:name :_provider-label :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "gd-set-label"}} :children [:_provider]}}
+  {:name :_unverified :parent :if
+   :args {:test {:parent :equal? :args {:a :_provider :b "password"}}
+          :then {:parent :if :args {:test :_verified :then "" :else " · unverified"}}
+          :else ""}}
+  {:name :_email-hint :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "gd-set-hint"}}
+          :children [{:parent :str :args {:parts [:_email :_unverified]}}]}}
+  {:name :_copy :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "gd-set-copy"}}
+          :children [:_provider-label :_email-hint]}}
+  {:name :_unlink :parent :hiccup
+   :args {:tag "button"
+          :attrs {:parent :zipmap
+                  :args {:keys [{:value :type} {:value :class} {:value :data-unlink-provider}]
+                         :vals ["button" "gd-set-btn" :_provider]}}
+          :children ["Unlink"]}}
+  {:name :_maybe-unlink :parent :if
+   :args {:test :_can-unlink :then :_unlink :else nil}}
+  {:name :_account-methods-identity-row :parent :hiccup :lambda-params [:identity]
+   :args {:tag "div" :attrs {:value {:class "gd-acct-row"}}
+          :children [:_copy :_maybe-unlink]}}
+  {:name :_account-methods-identity-rows :parent :map
+   :args {:func :_account-methods-identity-row :coll :_account-methods-identities-value}}
+  {:name :_account-methods-identity-list :parent :hiccup
+   :args {:tag "div" :attrs {:value {:id "gd-acct-idents" :class "gd-set-hint"}}
+          :children :_account-methods-identity-rows}}
+  {:name :_link-label :parent :if
+   :args {:test {:parent :equal? :args {:a {:as :provider :type :text} :b "github"}}
+          :then "Link GitHub" :else "Link Google"}}
+  {:name :_link :parent :hiccup :lambda-params [:provider]
+   :args {:tag "button"
+          :attrs {:parent :zipmap
+                  :args {:keys [{:value :type} {:value :class} {:value :data-link-provider}]
+                         :vals ["button" "gd-set-btn" {:as :provider :type :text}]}}
+          :children [:_link-label]}}
+  {:name :_link-rows :parent :map :args {:func :_link :coll :_account-methods-links-value}}
+  {:name :_link-list :parent :hiccup
+   :args {:tag "div" :attrs {:value {:id "gd-acct-links" :class "gd-acct-btns"}}
+          :children :_link-rows}}
+  {:name :_tree :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "gd-acct-methods"}}
+          :children [:_account-methods-identity-list :_link-list]}}
+  {:name :account-methods-view :parent :zipmap :return-type :_account-methods-result
+   :args {:keys [{:value :tree}] :vals [:_tree]}}
+  {:name :root-view :parent :account-methods-view :lambda-params [:input] :return-type :_account-methods-result
+   :args {:inputs {:parent :get
+                   :args {:coll {:as :input :type :_account-methods-envelope} :key {:value :inputs}}}}}
+  {:name :_view-assoc :parent :assoc-fn
+   :args {:value {:as :value :type :_account-methods-callable}}}
+  {:name :account-methods-component :parent :_view-assoc
+   :return-type :account-methods-root-component
+   :args {:map {} :key {:value :view} :value {:ref :root-view}}}]}

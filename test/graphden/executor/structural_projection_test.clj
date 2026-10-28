@@ -119,6 +119,7 @@
                    :execution-path ["app.ui-execution" "path" #{:view}]
                    :feedback ["app.ui-feedback" "feedback" #{:view}]
                    :keymap ["app.ui-keymap" "keymap" #{:view}]
+                   :account-methods ["app.ui-account" "account-methods" #{:view}]
                    :org-switcher ["app.ui-org-switcher" "org-switcher" #{:view}]
                    :appearance ["app.ui-appearance" "appearance" #{:view}]
                    :canvas ["app.ui-canvas" "canvas" #{:view}]

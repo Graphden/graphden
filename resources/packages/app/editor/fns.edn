@@ -626,6 +626,7 @@
                   [:button {:id "gd-ui-components-reset" :type "button" :class "gd-set-btn"} "Use built-in components"]]
                  [:div {:class "gd-theme-actions gd-ui-components-actions"}
                   [:button {:type "button" :class "gd-set-btn" :data-ui-component "account-menu" :data-ui-label "account menu"} "Personalize account menu"]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-component "account-methods" :data-ui-label "sign-in methods"} "Personalize sign-in methods"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-component "org-switcher" :data-ui-label "organization switcher"} "Personalize organization switcher"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-component "fn-picker" :data-ui-label "function picker"} "Personalize function picker"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-component "recents" :data-ui-label "recent functions"} "Personalize recent functions"]

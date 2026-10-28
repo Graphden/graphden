@@ -8,10 +8,8 @@
 // addon answered the boot probe (editor-auth.js's accountsMode); the
 // standalone /account page remains as the headless-deployment fallback.
 //
-// graph-first-exception: everything here is the CALLER's session state read
-// from the accounts addon's /auth/* JSON API (cookie-authenticated) — a graph
-// partial can't render another principal's session, so the card body is
-// client-built from the same endpoints the standalone page used.
+// The sign-in methods view is a typed browser graph over the caller's
+// session-scoped /auth/* responses. Fetches, credentials and writes stay here.
 
 // Attach a delegated click handler to `host` exactly once (guarded via a
 // dataset flag so repeated list re-renders don't stack listeners). Reading
@@ -65,41 +63,113 @@ async function gdAcctPostForm(url, fields) {
 
 // ---- Sign-in methods -------------------------------------------------------
 
-async function gdAcctLoadIdents() {
-  const host = document.getElementById('gd-acct-idents');
+let _gdAcctMethodsEpoch = 0;
+
+function gdAcctGraphMethods(identities, links) {
+  const api = window.GraphdenBrowser;
+  const key = api.keyword;
+  const record = value => new Map(Object.entries(value).map(([name, item]) => [key(name), item]));
+  const inputs = record({identities: identities.map(record), links});
+  const builtin = api.createRuntime(window.GraphdenBuiltinPlans.plans.accountMethods,
+    {operationLimit: 100000});
+  let selected = null;
+  try { selected = window.gdEditorRoot?.componentNow('account-methods') || null; }
+  catch (_) { window.gdUIComponentFailed?.('account-methods'); }
+  function render(runtime) {
+    const output = runtime.run('view', {inputs});
+    if (!(output instanceof Map) || output.size !== 1 || !output.has(key('tree'))) {
+      throw new Error('Invalid account methods graph view');
+    }
+    const vnode = window.GraphdenRenderer.vnode(output.get(key('tree')), 'gd-acct', 3000);
+    const scratch = document.createElement('div');
+    window.GraphdenPreact.render(vnode, scratch);
+    const tree = scratch.firstElementChild || scratch.firstChild;
+    const rows = tree?.querySelectorAll('#gd-acct-idents .gd-acct-row') || [];
+    const unlink = tree?.querySelectorAll('[data-unlink-provider]') || [];
+    const linkButtons = tree?.querySelectorAll('[data-link-provider]') || [];
+    const providers = new Set(identities.map(i => i.provider));
+    const unlinkTargets = new Set([...unlink].map(el => el.dataset.unlinkProvider));
+    const allowedLinks = new Set(links);
+    if (!tree?.classList.contains('gd-acct-methods')
+        || tree.querySelectorAll('#gd-acct-idents').length !== 1
+        || tree.querySelectorAll('#gd-acct-links').length !== 1
+        || rows.length !== identities.length
+        || unlink.length !== (identities.length > 1 ? identities.length : 0)
+        || unlinkTargets.size !== unlink.length
+        || (identities.length > 1 && [...providers].some(provider => !unlinkTargets.has(provider)))
+        || linkButtons.length !== links.length
+        || [...linkButtons].some(el => el.tagName !== 'BUTTON' || !allowedLinks.has(el.dataset.linkProvider))
+        || new Set([...linkButtons].map(el => el.dataset.linkProvider)).size !== links.length) {
+      throw new Error('Invalid account methods graph rows');
+    }
+    for (const button of unlink) {
+      const provider = button.dataset.unlinkProvider;
+      button.addEventListener('click', () => gdAcctUnlink(provider));
+    }
+    for (const button of linkButtons) {
+      const provider = button.dataset.linkProvider;
+      button.addEventListener('click', () => {
+        window.location.href = '/auth/' + provider + '/start';
+      });
+    }
+    return tree;
+  }
+  if (selected) {
+    try {
+      const tree = render(selected);
+      if (!window.gdEditorRoot.acceptComponent(selected)) throw new Error('Editor root changed');
+      return tree;
+    } catch (_) {
+      window.gdEditorRoot?.releaseComponent(selected);
+      window.gdUIComponentFailed?.('account-methods');
+    }
+  }
+  return render(builtin);
+}
+
+async function gdAcctLoadMethods() {
+  const host = document.getElementById('gd-acct-methods-mount');
   if (!host) return;
-  const [s, j] = await gdAcctGet('/auth/identities');
-  if (s !== 200 || !Array.isArray(j.identities)) { host.textContent = '—'; return; }
-  const n = j.identities.length;
-  host.innerHTML = j.identities.map((i) =>
-    "<div class='gd-acct-row'><div class='gd-set-copy'>"
-    + "<div class='gd-set-label'>" + gdEscapeHtml(i.provider) + '</div>'
-    + "<div class='gd-set-hint'>" + gdEscapeHtml(i.email || '')
-    + (i.provider === 'password' && !i['email-verified?'] ? ' · unverified' : '') + '</div></div>'
-    + (n > 1
-      ? "<button type='button' class='gd-set-btn' data-unlink-provider='" + gdEscapeHtml(i.provider) + "'>Unlink</button>"
-      : '')
-    + '</div>').join('');
-  gdAcctDelegate(host, '[data-unlink-provider]', (el) => gdAcctUnlink(el.dataset.unlinkProvider));
+  const epoch = ++_gdAcctMethodsEpoch;
+  const principal = gdAcctTokenPrincipal();
+  let identityResponse;
+  let providerResponse;
+  try {
+    [identityResponse, providerResponse] = await Promise.all([
+      gdAcctGet('/auth/identities'), gdAcctGet('/auth/providers').catch(() => [0, {}]),
+    ]);
+  } catch (_) {
+    if (epoch === _gdAcctMethodsEpoch && gdAcctTokenPrincipalMatches(principal)) host.textContent = '—';
+    return;
+  }
+  if (epoch !== _gdAcctMethodsEpoch || !gdAcctTokenPrincipalMatches(principal)
+      || document.getElementById('gd-acct-methods-mount') !== host) return;
+  const [identityStatus, identityData] = identityResponse;
+  const [providerStatus, providerData] = providerResponse;
+  if (identityStatus !== 200 || !Array.isArray(identityData.identities)) {
+    host.textContent = '—';
+    return;
+  }
+  if (!identityData.identities.every(i => i && typeof i === 'object')) {
+    host.textContent = '—';
+    return;
+  }
+  const count = identityData.identities.length;
+  const identities = identityData.identities.map(i => ({
+    provider: String(i.provider || ''), email: String(i.email || ''),
+    verified: !!i['email-verified?'], 'can-unlink': count > 1,
+  }));
+  const links = providerStatus === 200
+    ? ['github', 'google'].filter(provider => providerData.providers?.[provider]) : [];
+  host.replaceChildren(gdAcctGraphMethods(identities, links));
 }
 
 async function gdAcctUnlink(provider) {
+  const principal = gdAcctTokenPrincipal();
   const [s] = await gdAcctPost('/auth/unlink', { provider });
-  if (s === 200) { gdAcctLoadIdents(); gdAcctSay('Unlinked ' + provider + '.', true); }
+  if (!gdAcctTokenPrincipalMatches(principal)) return;
+  if (s === 200) { gdAcctLoadMethods(); gdAcctSay('Unlinked ' + provider + '.', true); }
   else gdAcctSay('Could not unlink.');
-}
-
-// Provider LINK buttons — same /auth/<p>/start flow as sign-in; while a
-// session cookie is live the callback links the identity to this account.
-async function gdAcctRenderLinks() {
-  const host = document.getElementById('gd-acct-links');
-  if (!host) return;
-  const [s, j] = await gdAcctGet('/auth/providers');
-  if (s !== 200 || !j.providers) return;
-  let html = '';
-  if (j.providers.github) html += "<a class='gd-set-btn' href='/auth/github/start'>Link GitHub</a>";
-  if (j.providers.google) html += "<a class='gd-set-btn' href='/auth/google/start'>Link Google</a>";
-  host.innerHTML = html;
 }
 
 // ---- Two-factor ------------------------------------------------------------
@@ -273,7 +343,11 @@ async function gdAcctRevokeToken(id) {
 
 // ---- Card render (called by gdRenderSettings on every Settings open) -------
 
+let _gdAcctCardEpoch = 0;
+
 async function gdRenderAccountCard() {
+  const epoch = ++_gdAcctCardEpoch;
+  ++_gdAcctMethodsEpoch;
   ++_gdAcctTokenEpoch;
   ++_gdAcctTokenListEpoch;
   const card = document.getElementById('gd-set-account');
@@ -286,6 +360,7 @@ async function gdRenderAccountCard() {
   const accounts = window.gdAccountsReady
     ? await window.gdAccountsReady
     : ((typeof window.graphdenAccountsMode === 'function') && window.graphdenAccountsMode());
+  if (epoch !== _gdAcctCardEpoch) return;
   // Visibility belongs to the NAV entry; the pane itself is shown/hidden by
   // the section switcher (activateOpSection via gdActivateSettingsSection).
   if (navBtn) navBtn.hidden = !accounts;
@@ -298,6 +373,7 @@ async function gdRenderAccountCard() {
   if (!accounts) return;
 
   const [s, j] = await gdAcctGet('/auth/me');
+  if (epoch !== _gdAcctCardEpoch || document.getElementById('gd-acct-root') !== root) return;
   if (s !== 200 || !j.account) {
     root.innerHTML =
       "<div class='gd-set-hint'>Sign in to manage your sign-in methods, two-factor auth and API tokens.</div>"
@@ -309,8 +385,7 @@ async function gdRenderAccountCard() {
     "<div class='gd-set-hint' id='gd-acct-who'></div>"
     + "<div id='gd-acct-verify'></div>"
     + "<h3 class='gd-acct-h'>Sign-in methods</h3>"
-    + "<div id='gd-acct-idents' class='gd-set-hint'>Loading…</div>"
-    + "<div id='gd-acct-links' class='gd-acct-btns'></div>"
+    + "<div id='gd-acct-methods-mount' class='gd-set-hint'>Loading…</div>"
     + "<h3 class='gd-acct-h'>Two-factor authentication</h3>"
     + "<div id='gd-acct-tfa' class='gd-set-hint'>Loading…</div>"
     + "<div id='gd-acct-tok-sec' hidden>"
@@ -355,8 +430,7 @@ async function gdRenderAccountCard() {
         + "<button type='button' class='gd-set-btn' onclick='gdAcctResendVerify()'>Resend verification email</button></div>";
     }
   }
-  gdAcctLoadIdents();
-  gdAcctRenderLinks();
+  gdAcctLoadMethods();
   gdAcctLoadTfa();
   gdAcctLoadTokens();
 }
@@ -367,3 +441,13 @@ async function gdAcctResendVerify() {
 }
 
 window.gdRenderAccountCard = gdRenderAccountCard;
+if (typeof window.addEventListener === 'function') {
+  window.addEventListener('gd-auth-changed', () => {
+    ++_gdAcctCardEpoch;
+    ++_gdAcctMethodsEpoch;
+    ++_gdAcctTokenEpoch;
+    ++_gdAcctTokenListEpoch;
+    document.getElementById('gd-acct-root')?.replaceChildren();
+    if (document.getElementById('gd-set-account')?.hidden === false) gdRenderAccountCard();
+  });
+}

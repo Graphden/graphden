@@ -75,4 +75,115 @@
    :args {:value {:as :value :type :_account-methods-callable}}}
   {:name :account-methods-component :parent :_view-assoc
    :return-type :account-methods-root-component
-   :args {:map {} :key {:value :view} :value {:ref :root-view}}}]}
+   :args {:map {} :key {:value :view} :value {:ref :root-view}}}
+
+  {:name :_security-token :type {:id :text :label :text :scopes :text :expiry :text}}
+  {:name :_security-tokens :list :_security-token}
+  {:name :_security-inputs :type {:kind :text :enabled :bool :tokens :_security-tokens}}
+  {:name :_security-envelope :type {:inputs :_security-inputs}}
+  {:name :_security-result :type {:tree :web.html/hiccup-node}}
+  {:name :_security-callable :fn-type [{:input :_security-envelope} :_security-result]}
+  {:name :account-security-root-component :type {:view :_security-callable}}
+  {:name :_security-input :parent :const :args {:value {:as :inputs :type :_security-inputs}}}
+  {:name :_security-kind :parent :get
+   :args {:coll :_security-input :key {:value :kind} :default ""}}
+  {:name :_security-enabled :parent :get
+   :args {:coll :_security-input :key {:value :enabled} :default false}}
+  {:name :_security-token-values :parent :get
+   :args {:coll :_security-input :key {:value :tokens} :default {:value []}}}
+  {:name :_security-tfa-hint :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "gd-set-hint"}}
+          :children [{:parent :if :args {:test :_security-enabled
+                                         :then "Two-factor is on."
+                                         :else "Add a second factor with an authenticator app."}}]}}
+  {:name :_security-tfa-action :parent :if
+   :args {:test :_security-enabled :then "disable" :else "enroll"}}
+  {:name :_security-tfa-label :parent :if
+   :args {:test :_security-enabled :then "Disable 2FA" :else "Enable 2FA"}}
+  {:name :_security-tfa-button :parent :hiccup
+   :args {:tag "button"
+          :attrs {:parent :zipmap
+                  :args {:keys [{:value :type} {:value :class} {:value :data-tfa-action}]
+                         :vals ["button" "gd-set-btn" :_security-tfa-action]}}
+          :children [:_security-tfa-label]}}
+  {:name :_security-tfa-tree :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "gd-acct-tfa-state"}}
+          :children [:_security-tfa-hint :_security-tfa-button]}}
+  {:name :_security-token-id :parent :get
+   :args {:coll {:as :token :type :_security-token} :key {:value :id} :default ""}}
+  {:name :_security-token-label-value :parent :get
+   :args {:coll {:as :token :type :_security-token} :key {:value :label} :default ""}}
+  {:name :_security-token-label-empty :parent :equal?
+   :args {:a :_security-token-label-value :b ""}}
+  {:name :_security-token-label :parent :if
+   :args {:test :_security-token-label-empty
+          :then "(unlabeled)" :else :_security-token-label-value}}
+  {:name :_security-token-scopes-value :parent :get
+   :args {:coll {:as :token :type :_security-token} :key {:value :scopes} :default ""}}
+  {:name :_security-token-scopes-empty :parent :equal?
+   :args {:a :_security-token-scopes-value :b ""}}
+  {:name :_security-token-scopes :parent :if
+   :args {:test :_security-token-scopes-empty
+          :then "unscoped" :else :_security-token-scopes-value}}
+  {:name :_security-token-expiry-value :parent :get
+   :args {:coll {:as :token :type :_security-token} :key {:value :expiry} :default ""}}
+  {:name :_security-token-expiry-empty :parent :equal?
+   :args {:a :_security-token-expiry-value :b ""}}
+  {:name :_security-token-expiry-date :parent :str
+   :args {:parts ["expires " :_security-token-expiry-value]}}
+  {:name :_security-token-expiry :parent :if
+   :args {:test :_security-token-expiry-empty
+          :then "no expiry" :else :_security-token-expiry-date}}
+  {:name :_security-token-title :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "gd-set-label"}}
+          :children [:_security-token-label]}}
+  {:name :_security-token-hint :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "gd-set-hint"}}
+          :children [{:parent :str :args {:parts [:_security-token-scopes " · " :_security-token-expiry]}}]}}
+  {:name :_security-token-copy :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "gd-set-copy"}}
+          :children [:_security-token-title :_security-token-hint]}}
+  {:name :_security-token-revoke :parent :hiccup
+   :args {:tag "button"
+          :attrs {:parent :zipmap
+                  :args {:keys [{:value :type} {:value :class} {:value :data-revoke-token}]
+                         :vals ["button" "gd-set-btn" :_security-token-id]}}
+          :children ["Revoke"]}}
+  {:name :_security-token-row :parent :hiccup :lambda-params [:token]
+   :args {:tag "div"
+          :attrs {:parent :zipmap
+                  :args {:keys [{:value :class} {:value :data-token-id}]
+                         :vals ["gd-acct-row" :_security-token-id]}}
+          :children [:_security-token-copy :_security-token-revoke]}}
+  {:name :_security-token-rows :parent :map
+   :args {:func :_security-token-row :coll :_security-token-values}}
+  {:name :_security-empty-tokens :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "gd-set-hint"}}
+          :children ["No API tokens yet."]}}
+  {:name :_security-empty-token-rows :parent :list
+   :args {:items [:_security-empty-tokens]}}
+  {:name :_security-token-values-empty :parent :equal?
+   :args {:a :_security-token-values :b {:value []}}}
+  {:name :_security-token-contents :parent :if
+   :args {:test :_security-token-values-empty
+          :then :_security-empty-token-rows :else :_security-token-rows}}
+  {:name :_security-token-tree :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "gd-acct-token-list"}}
+          :children :_security-token-contents}}
+  {:name :_security-is-tfa :parent :equal?
+   :args {:a :_security-kind :b "tfa"}}
+  {:name :_security-tree :parent :if
+   :args {:test :_security-is-tfa
+          :then :_security-tfa-tree :else :_security-token-tree}}
+  {:name :account-security-view :parent :zipmap :return-type :_security-result
+   :args {:keys [{:value :tree}] :vals [:_security-tree]}}
+  {:name :account-security-root-view :parent :account-security-view
+   :lambda-params [:input] :return-type :_security-result
+   :args {:inputs {:parent :get
+                   :args {:coll {:as :input :type :_security-envelope} :key {:value :inputs}}}}}
+  {:name :_security-view-assoc :parent :assoc-fn
+   :args {:value {:as :value :type :_security-callable}}}
+  {:name :account-security-component :parent :_security-view-assoc
+   :return-type :account-security-root-component
+   :args {:map {} :key {:value :view}
+          :value {:ref :account-security-root-view}}}]}

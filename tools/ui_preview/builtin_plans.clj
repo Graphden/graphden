@@ -46,6 +46,7 @@
                  :update (ids/fn-id "app.ui-account-menu" :account-menu-update)
                  :view (ids/fn-id "app.ui-account-menu" :account-menu-view)}
    :accountMethods {:view (ids/fn-id "app.ui-account" :account-methods-view)}
+   :accountSecurity {:view (ids/fn-id "app.ui-account" :account-security-view)}
    :publishForm {:view (ids/fn-id "app.ui-publish" :publish-form-view)}
    :orgSwitcher {:view (ids/fn-id "app.ui-org-switcher" :org-switcher-view)}
    :recents {:initial (ids/fn-id "app.ui-recents" :recents-initial)

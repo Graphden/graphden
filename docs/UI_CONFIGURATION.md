@@ -257,6 +257,11 @@ session cookie or API token. The host fetches session-scoped data, verifies
 every rendered unlink target and OAuth link, owns all account actions and
 discards responses after an account change.
 
+The Settings 2FA status and API token list use the `:account-security` view
+callback. The graph receives only enabled state and token display metadata;
+the host validates action targets and owns enrollment, one-time secrets,
+revocation, and session-change invalidation.
+
 The `:publish-form` view supplies the namespace, theme and keymap publish
 fields from one graph. Inputs contain only the kind, tenancy availability and
 namespace display path. The host checks the exact control set and owns the

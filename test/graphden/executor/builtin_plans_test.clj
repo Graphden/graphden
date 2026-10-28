@@ -117,7 +117,7 @@
 
 
 (def ^:private plan-components
-  {:accountMenu :account-menu :accountMethods :account-methods :publishForm :publish-form :orgSwitcher :org-switcher :fnPicker :fn-picker :recents :recents
+  {:accountMenu :account-menu :accountMethods :account-methods :accountSecurity :account-security :publishForm :publish-form :orgSwitcher :org-switcher :fnPicker :fn-picker :recents :recents
    :inspector :inspector :explorer :explorer :tutorialCatalog :tutorial-catalog
    :executionStatus :execution-status :executionPath :execution-path :feedback :feedback
    :keymap :keymap :appearance :appearance

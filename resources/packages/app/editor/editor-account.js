@@ -174,20 +174,86 @@ async function gdAcctUnlink(provider) {
 
 // ---- Two-factor ------------------------------------------------------------
 
+let _gdAcctTfaEpoch = 0;
+
+function gdAcctGraphSecurity(kind, enabled, tokens) {
+  const api = window.GraphdenBrowser;
+  const key = api.keyword;
+  const record = value => new Map(Object.entries(value).map(([name, item]) => [key(name), item]));
+  const inputs = record({kind, enabled, tokens: tokens.map(record)});
+  const builtin = api.createRuntime(window.GraphdenBuiltinPlans.plans.accountSecurity,
+    {operationLimit: 100000});
+  let selected = null;
+  try { selected = window.gdEditorRoot?.componentNow('account-security') || null; }
+  catch (_) { window.gdUIComponentFailed?.('account-security'); }
+  function render(runtime) {
+    const output = runtime.run('view', {inputs});
+    if (!(output instanceof Map) || output.size !== 1 || !output.has(key('tree'))) {
+      throw new Error('Invalid account security graph view');
+    }
+    const vnode = window.GraphdenRenderer.vnode(output.get(key('tree')), 'gd-acct', 3000);
+    const scratch = document.createElement('div');
+    window.GraphdenPreact.render(vnode, scratch);
+    const tree = scratch.firstElementChild || scratch.firstChild;
+    if (kind === 'tfa') {
+      const buttons = tree?.querySelectorAll('[data-tfa-action]') || [];
+      if (!tree?.classList.contains('gd-acct-tfa-state') || buttons.length !== 1
+          || tree.querySelectorAll('button').length !== 1
+          || buttons[0].tagName !== 'BUTTON' || buttons[0].getAttribute('type') !== 'button'
+          || buttons[0].dataset.tfaAction !== (enabled ? 'disable' : 'enroll')) {
+        throw new Error('Invalid account security 2FA controls');
+      }
+      buttons[0].addEventListener('click', enabled ? gdAcctTotpDisable : gdAcctTotpEnroll);
+    } else {
+      const rows = tree?.querySelectorAll('.gd-acct-row') || [];
+      const buttons = tree?.querySelectorAll('[data-revoke-token]') || [];
+      if (!tree?.classList.contains('gd-acct-token-list') || rows.length !== tokens.length
+          || buttons.length !== tokens.length
+          || tree.querySelectorAll('button').length !== tokens.length
+          || tokens.some((token, index) => rows[index].dataset.tokenId !== token.id
+            || buttons[index].tagName !== 'BUTTON' || buttons[index].getAttribute('type') !== 'button'
+            || buttons[index].dataset.revokeToken !== token.id
+            || !rows[index].contains(buttons[index]))) {
+        throw new Error('Invalid account security token controls');
+      }
+    }
+    return tree;
+  }
+  if (selected) {
+    try {
+      const tree = render(selected);
+      if (!window.gdEditorRoot.acceptComponent(selected)) throw new Error('Editor root changed');
+      return tree;
+    } catch (_) {
+      window.gdEditorRoot?.releaseComponent(selected);
+      window.gdUIComponentFailed?.('account-security');
+    }
+  }
+  return render(builtin);
+}
+
 async function gdAcctLoadTfa() {
   const host = document.getElementById('gd-acct-tfa');
   if (!host) return;
-  const [, j] = await gdAcctGet('/auth/tfa-state');
-  host.innerHTML = j?.enabled
-    ? "<div class='gd-set-hint'>Two-factor is <b>on</b>.</div>"
-      + "<button type='button' class='gd-set-btn' onclick='gdAcctTotpDisable()'>Disable 2FA</button>"
-    : "<div class='gd-set-hint'>Add a second factor with an authenticator app.</div>"
-      + "<button type='button' class='gd-set-btn' onclick='gdAcctTotpEnroll()'>Enable 2FA</button>";
+  const epoch = ++_gdAcctTfaEpoch;
+  const principal = gdAcctTokenPrincipal();
+  let status;
+  let state;
+  try { [status, state] = await gdAcctGet('/auth/tfa-state'); }
+  catch (_) { status = 0; }
+  if (epoch !== _gdAcctTfaEpoch || !gdAcctTokenPrincipalMatches(principal)
+      || document.getElementById('gd-acct-tfa') !== host) return;
+  if (status !== 200 || typeof state?.enabled !== 'boolean') { host.textContent = '—'; return; }
+  host.replaceChildren(gdAcctGraphSecurity('tfa', state.enabled, []));
 }
 
 async function gdAcctTotpEnroll() {
   const host = document.getElementById('gd-acct-tfa');
+  const epoch = ++_gdAcctTfaEpoch;
+  const principal = gdAcctTokenPrincipal();
   const [s, j] = await gdAcctPost('/auth/totp/enroll');
+  if (epoch !== _gdAcctTfaEpoch || !gdAcctTokenPrincipalMatches(principal)
+      || document.getElementById('gd-acct-tfa') !== host) return;
   if (s !== 200 || !host) { gdAcctSay('Could not start enrollment.'); return; }
   host.innerHTML =
     "<div class='gd-set-hint'>Add this key to your authenticator app, then enter the code.</div>"
@@ -236,18 +302,20 @@ async function gdAcctLoadTokens() {
   if (epoch !== _gdAcctTokenListEpoch || !gdAcctTokenPrincipalMatches(principal)
       || document.getElementById('gd-acct-toks') !== host) return;
   if (s !== 200 || !Array.isArray(j)) return; // addon absent → section stays hidden
+  if (!j.every(t => t && typeof t.id === 'string' && t.id && typeof t === 'object')
+      || new Set(j.map(t => t.id)).size !== j.length) { host.textContent = '—'; return; }
+  const tokens = j.map(t => ({id: t.id, label: String(t.label || ''),
+    scopes: String(t.scopes || ''),
+    expiry: t['expires-at'] ? gdAcctFmtDate(t['expires-at']) : ''}));
+  const tree = gdAcctGraphSecurity('tokens', false, tokens);
   sec.hidden = false;
-  host.innerHTML = j.length
-    ? j.map((t) =>
-      "<div class='gd-acct-row' data-token-id='" + gdEscapeHtml(t.id) + "'"
-      + (typeof _tourTokenEntry === 'function' && _tourTokenEntry(t.label)?.id === t.id ? ' data-tour-token' : '')
-      + "><div class='gd-set-copy'>"
-      + "<div class='gd-set-label'>" + (gdEscapeHtml(t.label) || '(unlabeled)') + '</div>'
-      + "<div class='gd-set-hint'>" + gdEscapeHtml(t.scopes || 'unscoped') + ' · '
-      + (t['expires-at'] ? 'expires ' + gdAcctFmtDate(t['expires-at']) : 'no expiry')
-      + '</div></div>'
-      + "<button type='button' class='gd-set-btn' data-revoke-token='" + gdEscapeHtml(t.id) + "'>Revoke</button></div>").join('')
-    : "<div class='gd-set-hint'>No API tokens yet.</div>";
+  host.replaceChildren(tree);
+  if (typeof _tourTokenEntry === 'function') {
+    const rows = tree.querySelectorAll('.gd-acct-row');
+    j.forEach((token, index) => {
+      if (_tourTokenEntry(token.label)?.id === token.id) rows[index].dataset.tourToken = '';
+    });
+  }
   gdAcctDelegate(host, '[data-revoke-token]', (el) => gdAcctRevokeToken(el.dataset.revokeToken));
 }
 
@@ -348,6 +416,7 @@ let _gdAcctCardEpoch = 0;
 async function gdRenderAccountCard() {
   const epoch = ++_gdAcctCardEpoch;
   ++_gdAcctMethodsEpoch;
+  ++_gdAcctTfaEpoch;
   ++_gdAcctTokenEpoch;
   ++_gdAcctTokenListEpoch;
   const card = document.getElementById('gd-set-account');
@@ -445,6 +514,7 @@ if (typeof window.addEventListener === 'function') {
   window.addEventListener('gd-auth-changed', () => {
     ++_gdAcctCardEpoch;
     ++_gdAcctMethodsEpoch;
+    ++_gdAcctTfaEpoch;
     ++_gdAcctTokenEpoch;
     ++_gdAcctTokenListEpoch;
     document.getElementById('gd-acct-root')?.replaceChildren();

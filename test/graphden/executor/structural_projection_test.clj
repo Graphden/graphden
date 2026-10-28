@@ -120,6 +120,7 @@
                    :feedback ["app.ui-feedback" "feedback" #{:view}]
                    :keymap ["app.ui-keymap" "keymap" #{:view}]
                    :account-methods ["app.ui-account" "account-methods" #{:view}]
+                   :account-security ["app.ui-account" "account-security" #{:view}]
                    :publish-form ["app.ui-publish" "publish-form" #{:view}]
                    :org-switcher ["app.ui-org-switcher" "org-switcher" #{:view}]
                    :appearance ["app.ui-appearance" "appearance" #{:view}]

@@ -628,6 +628,7 @@
                  [:div {:class "gd-theme-actions gd-ui-components-actions"}
                   [:button {:type "button" :class "gd-set-btn" :data-ui-component "account-menu" :data-ui-label "account menu"} "Personalize account menu"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-component "account-methods" :data-ui-label "sign-in methods"} "Personalize sign-in methods"]
+                  [:button {:type "button" :class "gd-set-btn" :data-ui-component "account-security" :data-ui-label "account security"} "Personalize account security"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-component "publish-form" :data-ui-label "publish form"} "Personalize publish form"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-component "org-switcher" :data-ui-label "organization switcher"} "Personalize organization switcher"]
                   [:button {:type "button" :class "gd-set-btn" :data-ui-component "fn-picker" :data-ui-label "function picker"} "Personalize function picker"]

@@ -147,6 +147,7 @@ async function cleanup(page, receipts, scope = 'final') {
   const serverCalls = await observeRootServerCalls(page);
   const receipts = [];
   const failures = [];
+  const rootPlans = [], rootPlanByRequest = new WeakMap();
   const replies = planLoads.replies, themeReplies = [], pendingReplies = [], requestSequences = new WeakMap();
   async function settle() {
     await page.waitForFunction(() => gdUIConfigurationState()?.revision);
@@ -162,6 +163,16 @@ async function cleanup(page, receipts, scope = 'final') {
   page.on('console', message => { if (message.type() === 'error') failures.push({kind: 'console', text: message.text(), url: message.location().url}); });
   page.on('response', response => pendingReplies.push((async () => {
     const path = new URL(response.url()).pathname;
+    if (path === '/api/ui/root/plan') {
+      const entry = rootPlanByRequest.get(response.request());
+      if (entry) {
+        Object.assign(entry, {status: response.status(), elapsedMs: Date.now() - entry.started});
+        if (response.status() !== 200) {
+          const refusal = await response.json().catch(() => null);
+          Object.assign(entry, {code: refusal?.code, retryable: refusal?.retryable === true});
+        }
+      }
+    }
     if (response.request().method() === 'POST' && path.endsWith('/ui/theme/evaluate')) {
       const body = await response.json().catch(() => null);
       const command = response.request().postDataJSON();
@@ -178,6 +189,15 @@ async function cleanup(page, receipts, scope = 'final') {
   let phase = 'boot';
   page.on('request', request => {
     requestSequences.set(request, ++sequence);
+    if (new URL(request.url()).pathname === '/api/ui/root/plan') {
+      const entry = {started: Date.now(), status: 'pending'};
+      rootPlans.push(entry); rootPlanByRequest.set(request, entry);
+    }
+  });
+  page.on('requestfailed', request => {
+    const entry = rootPlanByRequest.get(request);
+    if (entry) Object.assign(entry, {status: 'failed', elapsedMs: Date.now() - entry.started,
+      aborted: request.failure()?.errorText?.includes('ERR_ABORTED') === true});
   });
   try {
     await page.goto(require('./edit-test-helpers').BASE);
@@ -336,8 +356,16 @@ async function cleanup(page, receipts, scope = 'final') {
       menuVisible: !!document.querySelector('.auth-menu-item[data-item="Settings"]')?.getClientRects().length,
       pickerVisible: !!document.querySelector('.fn-picker-popover')?.getClientRects().length,
       ready: !!gdPrefsReady, authenticated: isAuthenticated(),
-      configurationReady: !!gdUIConfigurationState()?.revision, menuReady: gdShellMenuGraph?.ready === true})).catch(() => null);
+      configurationReady: !!gdUIConfigurationState()?.revision,
+      rootReady: !!gdEditorRoot?.rootId(),
+      accountMenuCallback: (() => { try { return !!gdEditorRoot?.componentNow('account-menu'); } catch (_) { return false; } })(),
+      menuRuntime: !!gdShellMenuGraph?.runtime,
+      menuReady: gdShellMenuGraph?.ready === true,
+      rootError: document.getElementById('app')?.previousElementSibling?.getAttribute('role') === 'status',
+      componentFailure: !!gdUIComponentsStatus?.()})).catch(() => null);
     console.error('Selective phase diagnostic:', JSON.stringify({phase, kind: require('./safe-diagnostics').errorKind(error), state,
+      rootPlans: rootPlans.slice(-12).map(({started, ...entry}) => ({...entry,
+        elapsedMs: entry.elapsedMs ?? Date.now() - started})),
       replies: replies.map(({component, status, code, retryable, ok}) => ({component, status, code, retryable, ok}))}));
     throw error;
   } finally {

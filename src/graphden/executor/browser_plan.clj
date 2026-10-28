@@ -19,8 +19,10 @@
 
 (def max-functions
   "Maximum browser plan size, including legacy personal-component adapters.
-   The source collector's separate closure bound remains 2048."
-  1536)
+   Keep the final composed-plan bound aligned with the source collector's
+   2048-function closure bound: the editor root combines several authorized
+   component plans, including one adapter per selected callback."
+  2048)
 
 
 (def ^:private max-call-depth 128)

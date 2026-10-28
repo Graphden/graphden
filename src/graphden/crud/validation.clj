@@ -880,10 +880,14 @@
    Returns the first `{:reason :type}` rejection or nil if all pass.
    Centralised so generic `create-entity` / `update-entity` and the
    form-driven `process-*` paths share the same checks in the same
-   order."
-  [storage entity-type entity-data]
-  (or (some-> (cycle-check-rej storage entity-type entity-data)
-              (assoc :type :constraint-violation/dependency-cycle))
+   order. `proven-acyclic?` is reserved for internally generated edges
+   whose target graph is established by construction."
+  ([storage entity-type entity-data]
+   (write-rej storage entity-type entity-data false))
+  ([storage entity-type entity-data proven-acyclic?]
+   (or (some-> (when-not proven-acyclic?
+                 (cycle-check-rej storage entity-type entity-data))
+               (assoc :type :constraint-violation/dependency-cycle))
       (some-> (constraint-shape-rej storage entity-type entity-data)
               (assoc :type :constraint-violation/constraint-shape))
       (some-> (mi-collision-rej storage entity-type entity-data)
@@ -902,4 +906,4 @@
       (some-> (route-handler-shape-rej storage entity-type entity-data)
               (assoc :type :constraint-violation/route-handler-shape))
       (some-> (branch-local-rej storage entity-type entity-data)
-              (assoc :type :constraint-violation/branch-local-widening))))
+              (assoc :type :constraint-violation/branch-local-widening)))))

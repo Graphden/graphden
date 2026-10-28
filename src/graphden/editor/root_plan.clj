@@ -1,6 +1,7 @@
 (ns graphden.editor.root-plan
   "Export the editor's graph-selected HOF root under snapshot source policy."
   (:require
+    [clojure.tools.logging :as log]
     [graphden.editor.components :as components]
     [graphden.editor.config-resolution :as resolution]
     [graphden.editor.root-binding :as binding]
@@ -37,8 +38,7 @@
              (when-not row (reject! :source-missing))
              (authorize! row {:execute? true})
              (components/assert-current-policy! storage)
-             (let [graph (source/collect-client-closure storage [root] authorize!)
-                   plan (server/export-client-plan
+             (let [plan (server/export-client-plan
                           ctx storage authorize! policy {:root root} request
                           {:handler-root handler-root :selected-root root})
                    adapted (if personal? {:plan plan}
@@ -51,7 +51,7 @@
                ;; one invocation input. Remaining free captures need a caller
                ;; environment and must not silently become client arguments.
                (when (or (> (count required) 1)
-                         (and (= [] (:lambda-params (some #(when (= root (:id %)) %) (:fns graph))))
+                         (and (= [] (:lambda-params row))
                               (seq required)))
                  (reject! :root-captures))
                (components/assert-current-policy! storage)
@@ -60,4 +60,7 @@
                {:ok true :plan plan :argument-name argument :root-id (str root)
                 :component-selection-id (:component-selection-id adapted)})))))
      (catch Exception error
+       (let [{:keys [type reason]} (ex-data error)]
+         (when-not (= reason :policy-refresh-required)
+           (log/warn "Editor root export refused" {:type type :reason reason})))
        (assoc (components/failure-response error) :reason "Editor root is unavailable.")))))

@@ -30,11 +30,22 @@ const PROBE_FN = 'e2e-uses-const-probe-' + RUN_ID;
   let failed = false;
   const ownedViews = new Set();
   const ownedAdapters = new Set();
+  const saveStarted = new WeakMap();
   let ownedProbeId = null;
   page.on('request', request => {
     if (request.method() !== 'POST' || new URL(request.url()).pathname !== '/api/views/save') return;
+    saveStarted.set(request, Date.now());
     const command = request.postDataJSON();
     if ([VIEW_A, VIEW_C, VIEW_D].includes(command?.name) && command['create-id']) ownedViews.add(command['create-id']);
+  });
+  page.on('response', response => {
+    const started = saveStarted.get(response.request());
+    if (started) console.log('View save receipt:', JSON.stringify({status: response.status(), elapsedMs: Date.now() - started}));
+  });
+  page.on('requestfailed', request => {
+    const started = saveStarted.get(request);
+    if (started) console.log('View save request failed:', JSON.stringify({elapsedMs: Date.now() - started,
+      aborted: request.failure()?.errorText?.includes('ERR_ABORTED') === true}));
   });
   async function recordFreshAdapters(id) {
     const data = await api(page, 'GET', '/api/graph/entities?scope=subtree&root-id=' + encodeURIComponent(id));

@@ -136,10 +136,10 @@
 
 
 (defn- assert-write-valid!
-  [storage entity-type data]
+  [storage entity-type data proven-acyclic?]
   (when-let [rej (or (when (= entity-type :fn)
                        (secret-leaf-capability-rej storage data))
-                     (validation/write-rej storage entity-type data))]
+                     (validation/write-rej storage entity-type data proven-acyclic?))]
     (throw (ex-info (:reason rej)
                     (cond-> (assoc rej :entity-type entity-type)
                       (:id data) (assoc :id (:id data)))))))
@@ -168,7 +168,7 @@
 
 
 (defn- create-entity-impl
-  [entity-type data ctx]
+  [entity-type data ctx proven-acyclic?]
   (shield/run!
     (fn []
       (let [storage (request/require-storage ctx)
@@ -180,7 +180,7 @@
             result (writer/with-write [storage {:entity et :rows [data]}]
                                       (res/call-with-fresh-memos
                                         (fn []
-                                          (assert-write-valid! storage et data)
+                                          (assert-write-valid! storage et data proven-acyclic?)
                                           (sp/create-entity storage et (dissoc data :_admin-secret-create)))))]
         (when publish? (publish-write! ctx storage et result))
         result))))
@@ -190,7 +190,18 @@
   [entity-type data ctx]
   (if-let [f *create-entity-override*]
     (f entity-type data ctx)
-    (create-entity-impl entity-type data ctx)))
+    (create-entity-impl entity-type data ctx false)))
+
+
+(defn create-entity-proven-acyclic
+  "For an internally constructed edge whose target cannot depend on its
+   owner. Run the ordinary writer, authorization and every other validation
+   guard; omit only the redundant full-graph cycle walk. The caller must
+   establish the acyclicity proof before invoking this function."
+  [entity-type data ctx]
+  (if-let [f *create-entity-override*]
+    (f entity-type data ctx)
+    (create-entity-impl entity-type data ctx true)))
 
 
 (def ^:private owner-identity-fields
@@ -216,7 +227,7 @@
                                                              (merge (select-keys (sp/read-entity storage et id) ks)
                                                                     (assoc data :id id))
                                                              (assoc data :id id))]
-                                            (assert-write-valid! storage et check-data)
+                                            (assert-write-valid! storage et check-data false)
                                             (sp/update-entity storage et id data)))))]
         (when publish? (publish-write! ctx storage et (assoc result :id id)))
         result))))

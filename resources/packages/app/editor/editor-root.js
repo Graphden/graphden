@@ -73,7 +73,16 @@
     const {signal} = pending;
     dispose();
     let scope;
-    const current = () => own === generation && (scope === undefined || scope === stamp()) && !signal.aborted;
+    const current = () => {
+      if (own !== generation || signal.aborted) return false;
+      if (scope !== undefined && scope !== stamp()) {
+        // A preference may advance while its plan is in flight. The stale
+        // response is unusable, but it must leave a successor load behind.
+        void reload();
+        return false;
+      }
+      return true;
+    };
     loading = (async () => {
       try {
         if (window.gdAccountsReady) await window.gdAccountsReady;
@@ -115,10 +124,18 @@
   window.gdEditorRoot = {
     reload, componentNow, acceptComponent, releaseComponent, componentIdentity, rootId,
     async component(name) {
-      await (loading || reload());
-      const result = componentNow(name);
-      if (!result) throw new Error('Editor root component is unavailable');
-      return result;
+      for (;;) {
+        const awaited = loading || reload();
+        await awaited;
+        const result = componentNow(name);
+        if (result) return result;
+        if (loading !== awaited) continue;
+        if (installed && installed.scope !== stamp()) {
+          void reload();
+          continue;
+        }
+        throw new Error('Editor root component is unavailable');
+      }
     },
     dispose() { generation++; pending?.abort(); dispose(); },
   };

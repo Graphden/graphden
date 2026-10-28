@@ -65,9 +65,12 @@
 
 
 (defn- create!
-  [ctx entity data]
-  (assert-package-writable! (:storage ctx) entity data)
-  (checked (entities/create-entity entity data ctx)))
+  ([ctx entity data] (create! ctx entity data false))
+  ([ctx entity data proven-acyclic?]
+   (assert-package-writable! (:storage ctx) entity data)
+   (checked ((if proven-acyclic?
+               entities/create-entity-proven-acyclic
+               entities/create-entity) entity data ctx))))
 
 
 (defn- delete-binding!
@@ -108,7 +111,9 @@
         (assert-package-writable! storage :fn existing)
         (writer/assert-write-authorized! storage :fn (merge existing data) id)
         (checked (entities/update-entity :fn id data ctx)))
-      (create! ctx :fn data))))
+      ;; The new UUID has no incoming references. The installed base cannot
+      ;; depend on an identity that did not exist before this transaction.
+      (create! ctx :fn data true))))
 
 
 (defn- slot-map
@@ -128,9 +133,11 @@
   [ctx {:keys [const-id value-slot]} owner axis target-id]
   (let [id (random-uuid)
         row (create! ctx :fn {:id id :name (str "_view-" (name axis) "-" (subs (str id) 0 8))
-                              :namespace-id (:namespace-id owner) :parent-ids [const-id]})]
+                              :namespace-id (:namespace-id owner) :parent-ids [const-id]} true)]
+    ;; The adapter has only the immutable const parent and an identity
+    ;; binding. Neither can depend on this newly generated UUID.
     (create! ctx :binding {:fn-id id :slot-id value-slot :ref-fn-id target-id
-                           :type-override-fn-id ids/fn-ref-type-id})
+                           :type-override-fn-id ids/fn-ref-type-id} true)
     row))
 
 
@@ -146,7 +153,7 @@
 
 
 (defn- bind-identities!
-  [ctx indices slots owner axis target-ids]
+  [ctx indices slots owner axis target-ids fresh-owner?]
   (let [storage (:storage ctx)
         [legacy list-axis] (case axis :uses [:uses :uses-all] :views [:also :also-all])
         list-slot (or (get slots list-axis) (command/reject! "This deployment cannot save all view references"))
@@ -156,10 +163,16 @@
     (remove-own-axis! storage (:id owner) [(get slots legacy) list-slot])
     (let [binding-row (create! ctx :binding {:fn-id (:id owner) :slot-id list-slot :list-append true})]
       (mapv (fn [position target-id]
-              (let [adapter (or (get reusable target-id)
+              (let [existing (get reusable target-id)
+                    adapter (or existing
                                 (identity-constant! ctx const-spec owner axis target-id))]
+                ;; A fresh view UUID had no incoming edges before this write.
+                ;; Fresh adapters only add a const parent and an identity
+                ;; binding, so none can lead back to that view. An updated
+                ;; view or a reused adapter keeps the ordinary cycle check.
                 (create! ctx :binding-list-item {:binding-id (:id binding-row) :position position
-                                                 :ref-fn-id (:id adapter)})
+                                                 :ref-fn-id (:id adapter)}
+                         (and fresh-owner? (nil? existing)))
                 adapter))
             (range) target-ids))))
 
@@ -231,7 +244,8 @@
         changed (filter #(not= (clause-value (get old %)) (clause-value (get filters %))) (keys filters))
         adapters (reduce (fn [rows axis]
                            (if (contains? #{:uses :views} axis)
-                             (into rows (bind-identities! ctx indices slots owner axis (get filters axis)))
+                             (into rows (bind-identities! ctx indices slots owner axis (get filters axis)
+                                                         (nil? (:id command))))
                              (do (bind-value! ctx slots owner axis (get filters axis)) rows)))
                          [] changed)
         after (graph storage)

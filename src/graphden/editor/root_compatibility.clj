@@ -3,6 +3,7 @@
    source is checked in the root request snapshot before mechanical projection."
   (:require
     [clojure.set :as set]
+    [clojure.tools.logging :as log]
     [graphden.editor.component-config :as config]
     [graphden.editor.components :as components]
     [graphden.editor.config-resolution :as resolution]
@@ -148,6 +149,8 @@
                       plan selected)))))
             plan legacy/components)]
       (when (> (count (:functions result)) browser/max-functions)
+        (log/warn "Personal root adapter exceeds browser function budget"
+                  {:count (count (:functions result)) :limit browser/max-functions})
         (reject! :function-limit))
       {:plan result :component-selection-id id})))
 

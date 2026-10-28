@@ -183,7 +183,7 @@
         (doseq [[kind compiled] (:plans artifact)]
           (is (= 1 (:format compiled) (:primitiveAbi compiled)))
           (is (= (case kind
-                   (:tutorialCatalog :executionStatus :executionPath :feedback :keymap :appearance :orgSwitcher :accountMethods :publishForm
+                   (:tutorialCatalog :executionStatus :executionPath :feedback :keymap :appearance :orgSwitcher :accountMethods :accountSecurity :publishForm
                                      :canvas :canvasValues :canvasMetadata :canvasBindings) #{"view"}
                    (:canvasInheritance :canvasTypeStructure) #{"initial" "view"}
                    #{"initial" "update" "view"})

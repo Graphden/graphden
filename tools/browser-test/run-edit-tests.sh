@@ -543,8 +543,9 @@ CONSECUTIVE_DOWN=0
 CASCADE_CAP=${CASCADE_CAP:-3}
 SKIP_AFTER_CASCADE=0
 REMAINING_FILES=""
-# A red file does not stop the suite. The full set of file verdicts is needed
-# to fix independent regressions before paying for another landing gate.
+# Ad-hoc sweeps collect every file verdict. The landing gate opts into stopping
+# after a real retry-pass flake on a healthy host: that verdict is already red,
+# and exact-candidate checkpoints retain earlier passes for the next attempt.
 run_is_degraded() {
   local env_count=0 x
   for x in $ENV_FLAKED; do env_count=$((env_count+1)); done
@@ -884,6 +885,12 @@ for f in $FILES; do
   if [ "$file_credit" = 1 ]; then browser_progress "$f" passed
   elif [ "$passed" = 1 ]; then browser_progress "$f" pending
   else browser_progress "$f" failed; fi
+  if [ "${WTQ_STOP_ON_REAL_FLAKE:-0}" = 1 ] && [ "${WTQ_FLAKE_STRICT:-0}" = 1 ] \
+     && [ "$passed" = 1 ] && [ "$real_flake" = 1 ] && [ "$env_signed" = 0 ] \
+     && ! run_is_degraded; then
+    echo "  (stopping strict gate at first real retry-pass flake: $f; remaining files retain unrun checkpoints)" >&2
+    break
+  fi
   # Keep strict failures visible even when the underlying attempt passed.
   if [ "$SWEEP_DELAY" != "0" ]; then sleep "$SWEEP_DELAY"; fi
 done

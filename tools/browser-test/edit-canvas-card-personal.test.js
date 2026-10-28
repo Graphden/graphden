@@ -314,6 +314,13 @@ const {observeUIPlanLoads, captureLoadedUIComponents, waitForLoadedUIComponents,
       null, {timeout: 60000});
     await settleComponents(metadataRuntimes);
     phase = 'restore';
+    // Undo below writes through the fixture API, outside the editor mutation
+    // lifecycle. Retire the old root before revoking its source so an in-flight
+    // server query cannot be treated as a current consumer of the new policy.
+    await page.evaluate(async () => {
+      gdEditorRoot.dispose();
+      await window.__gdFlushRootServerReceipts();
+    });
     for (const activation of [...activations].reverse()) {
       const undone = await undoConfiguration(page, activation); assert(undone.ok, 'exact configuration restored');
       activations.pop();

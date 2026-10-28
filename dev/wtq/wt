@@ -1411,9 +1411,9 @@ run_gate_stage() {
         || { echo "FAIL: save candidate image proof"; return 1; } ;;
     e2e)
       step "bb test-e2e"
-      # Preserve strict flake/leak verdicts, server-window triage and the
-      # runner's host-thrash diagnosis. Only scheduling changes here.
-      ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" WTQ_FLAKE_STRICT=1 E2E_BASELINE_LOCAL="$E2E_BASELINE_LOCAL" \
+      # A healthy-host retry-pass flake is already a red gate verdict. Stop
+      # there and keep prior file checkpoints instead of paying for the tail.
+      ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" WTQ_FLAKE_STRICT=1 WTQ_STOP_ON_REAL_FLAKE=1 E2E_BASELINE_LOCAL="$E2E_BASELINE_LOCAL" \
           GRAPHDEN_E2E_PRIORITY_BASE="$base_sha" bb test-e2e ) || { echo "FAIL: e2e"; return 1; } ;;
     visual)
       step "bb test-visual"

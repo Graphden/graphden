@@ -285,6 +285,21 @@ console.log(' strict retry-pass flake is red while later files still run');
   assert(gate.receipt.includes('"edit-a.test.js" :failed') && gate.receipt.includes('"edit-b.test.js" :passed'),
     'completed red gate records the strict flake as failed for the next priority order', gate.receipt);
 }
+console.log(' landing gate stops on the first healthy-host flake and keeps the unrun tail pending');
+{
+  const prior = '{:schema 1 :kind "browser" :sha "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"'
+    + ' :roster ["edit-a.test.js" "edit-b.test.js" "edit-c.test.js"]'
+    + ' :status {"edit-a.test.js" :pending "edit-b.test.js" :pending "edit-c.test.js" :pending}}';
+  const gate = runSuite({'edit-a.test.js': ['pass'], 'edit-b.test.js': ['fail:race', 'pass'],
+    'edit-c.test.js': ['pass']}, {STUB_RESUME: prior, WTQ_STOP_ON_REAL_FLAKE: '1'});
+  assert(gate.code !== 0 && gate.attempts('edit-a.test.js') === 1
+    && gate.attempts('edit-b.test.js') === 2 && gate.attempts('edit-c.test.js') === 0,
+  'strict gate stops before the unrun tail', gate.out);
+  assert(gate.receipt.includes('"edit-a.test.js" :passed')
+    && gate.receipt.includes('"edit-b.test.js" :failed')
+    && gate.receipt.includes('"edit-c.test.js" :pending'),
+  'receipt retains passed, failed and unrun file states', gate.receipt);
+}
 console.log(' exact-candidate checkpoint skips only confirmed browser passes');
 {
   const prior = '{:schema 1 :kind "browser" :sha "@SHA@"'

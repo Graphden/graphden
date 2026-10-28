@@ -70,6 +70,15 @@ async function domClick(locator) {
   await locator.evaluate((el) => el.click());
 }
 
+async function clickForPartial(page, trigger, pathname, expectedClass) {
+  const response = page.waitForResponse((reply) => new URL(reply.url()).pathname === pathname,
+    { timeout: 30_000 });
+  await domClick(trigger);
+  const reply = await response;
+  expect(reply.status()).toBe(200);
+  expect(await reply.text()).toContain(expectedClass);
+}
+
 test.describe('Editor — visual baselines', () => {
   test('web-server loaded, light theme', async ({ page }) => {
     await page.goto('/#web-server');
@@ -108,7 +117,7 @@ test.describe('Editor — visual baselines', () => {
     await expect(badge).toHaveAttribute(
       'title', /Narrowed at :assoc-fn .* click for full chain/);
 
-    await domClick(badge);
+    await clickForPartial(page, badge, '/partials/provenance', 'type-inline-resolution-tier');
     const popover = page.locator('.provenance-popover.visible');
     await expect(popover).toBeVisible();
     await expect(popover.locator('.provenance-popover-title'))
@@ -142,7 +151,7 @@ test.describe('Editor — visual baselines', () => {
     await expect(trigger).toHaveAttribute(
       'title', /Computed by :assoc's :return-type-rule/);
 
-    await domClick(trigger);
+    await clickForPartial(page, trigger, '/partials/return-type-rule', 'provenance-popover-intro');
     const popover = page.locator('.provenance-popover.visible');
     await expect(popover).toBeVisible();
     await expect(popover.locator('.provenance-popover-title'))

@@ -555,26 +555,26 @@ Each server partial captures a latest-wins read token and exact native host. Tab
 :PROPERTIES:
 :CUSTOM_ID: editor/definitions
 :FILE: src/graphden/editor/component_templates.clj
-:LINE: 163
-:MINS: 6.0
+:LINE: 164
+:MINS: 6.2
 :END:
 
 Copies the fixed shipped theme, menu, picker, Recents, Inspector, Explorer, tutorial catalogue, passive canvas, value/type, inheritance and function metadata definitions into a fresh named namespace. An ordinary descriptor list selects component entry identities. Shared menu colors reference copied theme leaves; menu hover owns a local literal. Color wrappers retain the canonical color type and ordinary editor form. This is an advanced legacy compatibility path; Lesson 25 instead creates a small inherited menu child and captures its free theme input.
 
-- source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn definitions][src/graphden/editor/component_templates.clj:163]]
+- source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn definitions][src/graphden/editor/component_templates.clj:164]]
 - same file :: [[file:editor.org::#editor/selected-definitions][selected-definitions]]
 
 * 42. selected-definitions
 :PROPERTIES:
 :CUSTOM_ID: editor/selected-definitions
 :FILE: src/graphden/editor/component_templates.clj
-:LINE: 253
+:LINE: 257
 :MINS: 2.5
 :END:
 
 The retained legacy selective-copy compatibility path keeps only the chosen component and its owned reference closure. A new ordinary concat manifest references the previous authored manifest and the new descriptor list, preserving existing identities and edits. Legacy slots are adapted to descriptors without copying their bodies. Retained identities are outside the create-only receipt; group creation does not activate a theme.
 
-- source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn selected-definitions][src/graphden/editor/component_templates.clj:253]]
+- source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn selected-definitions][src/graphden/editor/component_templates.clj:257]]
 - same file :: [[file:editor.org::#editor/definitions][definitions]]
 
 * 43. apply!

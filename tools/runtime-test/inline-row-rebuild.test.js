@@ -38,6 +38,19 @@ function el(tag, cls, attrs) {
   for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, v);
   return e;
 }
+// This test owns the row lifecycle. Supply the graph's validated DOM shape
+// without loading its runtime, which has a separate authoring-graph test.
+ctx.window = ctx;
+ctx.gdAuthoringInlineRow = (placeholder, initialValue) => {
+  const row = el('div', 'inline-input-row');
+  const input = el('input', 'inline-input', {type: 'text', placeholder});
+  input.value = initialValue;
+  row.appendChild(input);
+  row.appendChild(el('button', 'inline-btn inline-btn-save', {type: 'button'}));
+  row.appendChild(el('button', 'inline-btn inline-btn-cancel', {type: 'button'}));
+  row.appendChild(el('span', 'inline-error'));
+  return row;
+};
 const newRow = () => ctx.buildInlineInputRow({
   placeholder: 'x', onSubmit: async () => {}, onCancel: () => {},
 });

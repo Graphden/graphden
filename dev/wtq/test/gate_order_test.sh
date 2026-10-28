@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Exercise the real gate_suites body with harmless command stubs. No queue,
 # Docker daemon, JVM, or browser stack is touched.
-# shellcheck disable=SC1090,SC2034
+# Sourced gate functions call the deliberately replaced functions below.
+# Subshell variables isolate test cases; their values are not meant to escape.
+# shellcheck disable=SC1090,SC2034,SC2030,SC2031,SC2329
 set -euo pipefail
 
 # A nested CI run inherits the enclosing train's scheduling hints. Each case
@@ -10,6 +12,10 @@ unset WTQ_FIRST_STAGE WTQ_FIRST_TESTS WTQ_RESUME_FROM
 
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 source <(sed -n '/^run_scoped_ci_gate() {/,/^}/p' "$SCRIPT_DIR/wt")
+source <(sed -n '/^remote_proof_cloud_dir() {/,/^}/p' "$SCRIPT_DIR/wt")
+source <(sed -n '/^remote_proof_eligible() {/,/^}/p' "$SCRIPT_DIR/wt")
+source <(sed -n '/^start_remote_integration_proof() {/,/^}/p' "$SCRIPT_DIR/wt")
+source <(sed -n '/^credit_remote_integration() {/,/^}/p' "$SCRIPT_DIR/wt")
 source <(sed -n '/^run_gate_stage() {/,/^}/p' "$SCRIPT_DIR/wt")
 source <(sed -n '/^gate_suites() {/,/^}/p' "$SCRIPT_DIR/wt")
 
@@ -107,6 +113,20 @@ CASE_INTEGRATION=1 CASE_E2E=1 CASE_VISUAL=0
 run_case
 assert_events 'expect,ci,verify,uber,build,image,e2e,integration'
 [ "$built_candidate" = 1 ]
+
+# A verified remote proof can replace only the integration stage. A missing
+# or refused proof executes the same local integration roster as before.
+(
+  WTQ_REMOTE_INTEGRATION_PROOF=1
+  start_remote_integration_proof() { echo remote-start >> "$TEST_LOG"; }
+  credit_remote_integration() { echo remote-check >> "$TEST_LOG"; [ "${REMOTE_OK:-0}" = 1 ]; }
+  REMOTE_OK=1
+  run_case
+  assert_events 'expect,ci,verify,uber,build,image,remote-start,e2e,remote-check'
+  REMOTE_OK=0
+  run_case
+  assert_events 'expect,ci,verify,uber,build,image,remote-start,e2e,remote-check,integration'
+)
 
 CASE_INTEGRATION=0 CASE_E2E=1 CASE_VISUAL=0
 FAIL_E2E=1
@@ -404,6 +424,53 @@ unset FAIL_HINTS
   unset EXPECT_PROGRESS_POINTER
   record_failed_stage invalid "$base" test
   [ -z "$(prior_failed_stage test)" ]
+)
+
+# Exercise the real proof boundary without GitHub access. A local green marker
+# alone never grants credit: the release helper must reverify it successfully.
+(
+  mkdir -p "$TEST_DIR/cloud/scripts" "$TEST_DIR/cloud/target/core-proof-early" "$TEST_DIR/bin" "$TEST_DIR/.github/workflows"
+  : > "$TEST_DIR/cloud/scripts/core_proof_early.clj"
+  printf '%s\n' '"integration (testcontainers)"' > "$TEST_DIR/cloud/scripts/release_core.clj"
+  printf '%s\n' 'run: bb test-integration' > "$TEST_DIR/.github/workflows/checks.yml"
+  cat > "$TEST_DIR/bin/bb" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" > "$FAKE_PROOF_ARGS"
+[ "${FAKE_REMOVE_RECEIPT:-0}" != 1 ] || rm -f "$FAKE_RECEIPT_PATH"
+exit "$FAKE_PROOF_RC"
+EOF
+  chmod +x "$TEST_DIR/bin/bb"
+  export PATH="$TEST_DIR/bin:$PATH" WTQ_REMOTE_INTEGRATION_PROOF=1
+  export FAKE_PROOF_ARGS="$TEST_DIR/proof-args" FAKE_PROOF_RC=0
+  WTQ_PROOF_CLOUD_DIR="$TEST_DIR/cloud"
+  GRAPHDEN_RESUME_OUT="$TEST_DIR/proof-gate"
+  NEED_INTEGRATION=1
+  sha=0000000000000000000000000000000000000001
+  receipt="$WTQ_PROOF_CLOUD_DIR/target/core-proof-early/$sha.edn"
+  (
+    bb() { printf '%s\n' "$*" > "$TEST_DIR/start-args"; }
+    start_remote_integration_proof "$TEST_DIR" "$sha" "$sha" > /dev/null
+    wait
+  )
+  [ "$(cat "$TEST_DIR/start-args")" = "core-proof-early $sha $TEST_DIR" ]
+  printf '{:schema 1 :sha "%s" :status :green :run-id 42}\n' "$sha" > "$receipt"
+  credit_remote_integration "$TEST_DIR" "$sha" "$sha" > /dev/null
+  [ -f "$GRAPHDEN_RESUME_OUT.remote-proof.edn" ]
+  [ "$(cat "$FAKE_PROOF_ARGS")" = "core-proof-early $sha $TEST_DIR" ]
+  rm -f "$GRAPHDEN_RESUME_OUT.remote-proof.edn"
+  FAKE_PROOF_RC=1
+  if credit_remote_integration "$TEST_DIR" "$sha" "$sha" > /dev/null; then exit 1; fi
+  [ ! -e "$GRAPHDEN_RESUME_OUT.remote-proof.edn" ]
+  FAKE_PROOF_RC=0
+  export FAKE_REMOVE_RECEIPT=1 FAKE_RECEIPT_PATH="$receipt"
+  if credit_remote_integration "$TEST_DIR" "$sha" "$sha" > /dev/null; then exit 1; fi
+  [ ! -e "$GRAPHDEN_RESUME_OUT.remote-proof.edn" ]
+  FAKE_REMOVE_RECEIPT=0
+  printf '{:schema 1 :sha "%s" :status :green :run-id 42}\n' "$sha" > "$receipt"
+  sed -i 's/:green/:running/' "$receipt"
+  if credit_remote_integration "$TEST_DIR" "$sha" "$sha" > /dev/null; then exit 1; fi
+  git() { [ "$3" = diff ] && return 1; printf '%s\n' "$sha"; }
+  if remote_proof_eligible "$TEST_DIR" "$sha" "$sha"; then exit 1; fi
 )
 
 echo 'gate order: default, all priorities, fail-fast, scope and override cases passed'

@@ -47,10 +47,22 @@ stops only for a real decision that is yours.
   no full local CI, pre-queue lint or lint stamp is required. The native gate
   validates the immutable merged candidate once. Optional local diagnostics
   share the existing CI admission lock and heavy-work limits.
-- **Heavy checks are serialized.** `integration` + `e2e` run
-  against the canonical `graphden-executor:latest`, so exactly one may build it
-  at a time. `bb wt merge` enforces that with a machine-wide `flock`; whoever
-  holds it gates a whole *train* of queued branches at once (next section).
+- **Heavy checks are serialized.** E2E uses the verified candidate image;
+  integration uses a real PostgreSQL testcontainer without that image. The
+  native gate runs them sequentially on this host under a machine-wide
+  `flock`; whoever holds it gates a whole *train* of queued branches at once
+  (next section).
+- **Optional exact-SHA integration proof pilot.** Set
+  `WTQ_REMOTE_INTEGRATION_PROOF=1` on `bb wt merge` to dispatch the sibling
+  `graphden-cloud` release proof when the E2E stage starts. GitHub CI then runs
+  beside the local browser suite. At the integration stage WTQ accepts only a
+  completed green proof reverified against GitHub for the assembled SHA,
+  dispatch identity and full required-job roster; a changed `checks.yml`,
+  absent sibling checkout/token, pending or refused proof runs the ordinary
+  local `bb test-integration`. The gate writes a separate
+  `_train-<ts>.remote-proof.edn` only after verification. A remote candidate
+  ref may remain after a red train; clean it with `bb core-proof-early
+  <sha> <core-checkout> --cleanup` after its run is terminal.
 - **Every agent gets its own instance.** `bb wt up` raises a private stack
   (own containers, volumes, image tag, and a reserved port block), so agents can
   click through their own changes in a browser in parallel without touching the

@@ -1387,10 +1387,57 @@ record_failed_stage() {
   done
 }
 
+# Optional pilot: let the already-required exact-SHA release CI run while the
+# browser suite uses this host. The sibling release controller owns dispatch,
+# immutable run identity and the full required-job verdict. Without it, keep
+# the ordinary local integration stage. Never credit a changed checks.yml:
+# that candidate could have replaced the integration command with a no-op.
+remote_proof_cloud_dir() {
+  printf '%s\n' "${WTQ_PROOF_CLOUD_DIR:-$(dirname "$MAIN_WT")/graphden-cloud}"
+}
+
+remote_proof_eligible() {
+  local wt="$1" base_sha="$2" sha="$3"
+  [ "${WTQ_REMOTE_INTEGRATION_PROOF:-0}" = 1 ] && [ "$NEED_INTEGRATION" = 1 ] \
+    && git -C "$wt" diff --quiet "$base_sha" "$sha" -- .github/workflows/checks.yml
+}
+
+start_remote_integration_proof() {
+  local wt="$1" base_sha="$2" sha="$3" cloud
+  remote_proof_eligible "$wt" "$base_sha" "$sha" || return 0
+  cloud="$(remote_proof_cloud_dir)"
+  [ -f "$cloud/scripts/core_proof_early.clj" ] || { echo "  remote integration proof unavailable — local fallback"; return 0; }
+  (cd "$cloud" && bb core-proof-early "$sha" "$wt") \
+    > "$GRAPHDEN_RESUME_OUT.remote-proof.log" 2>&1 &
+  echo "  exact-SHA GitHub proof started in background (pid $!); integration will use it only after verification"
+}
+
+credit_remote_integration() {
+  local wt="$1" base_sha="$2" sha="$3" cloud receipt
+  remote_proof_eligible "$wt" "$base_sha" "$sha" || return 1
+  cloud="$(remote_proof_cloud_dir)"
+  receipt="$cloud/target/core-proof-early/$sha.edn"
+  [ -f "$cloud/scripts/core_proof_early.clj" ] && [ -f "$receipt" ] \
+    && grep -Fq '"integration (testcontainers)"' "$cloud/scripts/release_core.clj" \
+    && grep -Fq 'run: bb test-integration' "$wt/.github/workflows/checks.yml" \
+    && grep -Eq ':status :green([,}[:space:]]|$)' "$receipt" || return 1
+  # The receipt is only a hint. Recheck the live GitHub run, exact SHA,
+  # dispatch request and every required job before writing a gate pass.
+  if (cd "$cloud" && timeout -k 5 60 bb core-proof-early "$sha" "$wt") \
+      > "$GRAPHDEN_RESUME_OUT.remote-proof-verify.log" 2>&1; then
+    cp -- "$receipt" "$GRAPHDEN_RESUME_OUT.remote-proof.edn" \
+      || { echo "  GitHub proof receipt could not be saved — running local integration"; return 1; }
+    echo "  ✓ integration credited from verified exact-SHA GitHub run ($GRAPHDEN_RESUME_OUT.remote-proof.edn)"
+    return 0
+  fi
+  echo "  GitHub proof could not be reverified — running local integration"
+  return 1
+}
+
 # The only execution path for each stage. Image consumers always follow build;
 # CI roster selection and verification remain independent of execution order.
 run_gate_stage() {
-  local stage="$1" wt="$2" base_sha="$3" ci_receipt="$4" ci_expected="$5"
+  local stage="$1" wt="$2" base_sha="$3" ci_receipt="$4" ci_expected="$5" ci_sha="$6"
   case "$stage" in
     ci) run_scoped_ci_gate "$wt" "$base_sha" "$ci_receipt" "$ci_expected" ;;
     build)
@@ -1419,8 +1466,12 @@ run_gate_stage() {
       step "bb test-visual"
       ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" bb test-visual ) || { echo "FAIL: visual"; return 1; } ;;
     integration)
-      step "bb test-integration"
-      ( cd "$wt" && bb test-integration ) || { echo "FAIL: integration"; return 1; } ;;
+      if credit_remote_integration "$wt" "$base_sha" "$ci_sha"; then
+        step "integration: verified GitHub exact-SHA proof"
+      else
+        step "bb test-integration"
+        ( cd "$wt" && bb test-integration ) || { echo "FAIL: integration"; return 1; }
+      fi ;;
     fleet)
       step "bb test-fleet-e2e"
       # This remains the real two-pod shared-Postgres control-plane check.
@@ -1581,6 +1632,12 @@ gate_suites() {
       echo "  ✓ resumed $stage from exact-candidate checkpoint"
       continue
     fi
+    # An E2E roster leaves enough time for the independent GitHub CI to
+    # finish before integration. A resumed browser stage can reattach to its
+    # durable request instead of dispatching a second run.
+    if [ "$stage" = e2e ]; then
+      start_remote_integration_proof "$wt" "$base_sha" "$ci_sha"
+    fi
     (cd "$wt" && bb scripts/ci_resume_cli.clj mark stages "$GRAPHDEN_RESUME_OUT.stages.edn" "$stage" pending) || return 1
     if [ "$stage" = build ]; then GRAPHDEN_RESUME_CREDIT=0; export GRAPHDEN_RESUME_CREDIT; fi
     case "$stage" in
@@ -1601,7 +1658,7 @@ gate_suites() {
     if [ "${#WTQ_PROGRESS_MEMBERS[@]}" -gt 0 ]; then
       WTQ_FAILURE_RECEIPT="$GRAPHDEN_RESUME_OUT" record_failed_stage "$stage" "$base_sha" "${WTQ_PROGRESS_MEMBERS[@]}"
     fi
-    if ! run_gate_stage "$stage" "$wt" "$base_sha" "$ci_receipt" "$ci_expected"; then
+    if ! run_gate_stage "$stage" "$wt" "$base_sha" "$ci_receipt" "$ci_expected" "$ci_sha"; then
       (cd "$wt" && bb scripts/ci_resume_cli.clj mark stages "$GRAPHDEN_RESUME_OUT.stages.edn" "$stage" failed) || return 1
       echo "WTQ_FAILED_STAGE=$stage"
       return 1

@@ -182,13 +182,13 @@ Orders function-picker candidates without accessing the [[file:glossary.org::#te
 :PROPERTIES:
 :CUSTOM_ID: editor/export-plan
 :FILE: src/graphden/executor/browser_plan.clj
-:LINE: 366
+:LINE: 368
 :MINS: 2.7
 :END:
 
 The ordinary account menu, function picker and Explorer navigation trail use bundled graph plans for their local state or markup. This exporter resolves inheritance, bindings, and renames on the server and emits an ID-based plan for supported primitives; the browser does not resolve graph names itself. Shipped plans are generated during development. The generic editable-graph export takes a whole snapshot and remains unavailable under tenancy. Personal components instead use ~graphden.editor.components/export-current~, which authorizes every source dependency and exports only a bounded component plan. See the [[file:../../../resources/packages/app/ui-preview/README.md][graph-backed UI contract]].
 
-- source :: [[file:../../../src/graphden/executor/browser_plan.clj::(defn export-plan][src/graphden/executor/browser_plan.clj:366]]
+- source :: [[file:../../../src/graphden/executor/browser_plan.clj::(defn export-plan][src/graphden/executor/browser_plan.clj:368]]
 - see also :: [[file:executor.org::#executor/build-lookups][build-lookups]], [[file:editor.org::#editor/createRuntime][createRuntime]]
 - referenced from :: [[file:editor.org::#editor/export-current][export-current]]
 
@@ -196,13 +196,13 @@ The ordinary account menu, function picker and Explorer navigation trail use bun
 :PROPERTIES:
 :CUSTOM_ID: editor/export-current
 :FILE: src/graphden/editor/root_plan.clj
-:LINE: 21
-:MINS: 3.6
+:LINE: 22
+:MINS: 3.8
 :END:
 
 The editor root endpoint reads the ordinary root HOF binding from its server-owned handler configuration. It checks root execute permission and every dependency's source visibility in one snapshot, then exports a bounded plan. The browser invokes the root through the same call ABI as other graph callables. Its initial typed bootstrap contract selects the explicit legacy editor adapter; it does not export the server handler body.
 
-- source :: [[file:../../../src/graphden/editor/root_plan.clj::(defn export-current][src/graphden/editor/root_plan.clj:21]]
+- source :: [[file:../../../src/graphden/editor/root_plan.clj::(defn export-current][src/graphden/editor/root_plan.clj:22]]
 - see also :: [[file:editor.org::#editor/export-plan][export-plan]], [[file:editor.org::#editor/createRuntime][createRuntime]]
 
 * 16. createRuntime

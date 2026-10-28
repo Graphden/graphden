@@ -245,7 +245,7 @@
         adapters (reduce (fn [rows axis]
                            (if (contains? #{:uses :views} axis)
                              (into rows (bind-identities! ctx indices slots owner axis (get filters axis)
-                                                         (nil? (:id command))))
+                                                          (nil? (:id command))))
                              (do (bind-value! ctx slots owner axis (get filters axis)) rows)))
                          [] changed)
         after (graph storage)

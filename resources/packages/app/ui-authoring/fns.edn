@@ -1,0 +1,179 @@
+{:namespace "app.ui-authoring"
+ :description "Pure authoring choice presentation; the browser owns focus, identity lookup and writes."
+ :fns
+ [{:name :_namespace-choice :type {:key :text :path :text}}
+  {:name :_namespace-choices :list :_namespace-choice}
+  {:name :_authoring-inputs :type {:surface :text :query :text :active-key :text :namespaces :_namespace-choices
+                                   :kind :text :editing :bool :namespace :text :name :text :description :text
+                                   :placeholder :text :initial-value :text}}
+  {:name :_authoring-envelope :type {:inputs :_authoring-inputs}}
+  {:name :_authoring-result :type {:tree :web.html/hiccup-node}}
+  {:name :_authoring-callable :fn-type [{:input :_authoring-envelope} :_authoring-result]}
+  {:name :authoring-root-component :type {:view :_authoring-callable}}
+  {:name :_inputs :parent :const :args {:value {:as :inputs :type :_authoring-inputs}}}
+  {:name :_query :parent :get :args {:coll :_inputs :key {:value :query} :default ""}}
+  {:name :_query-lower :parent :str-lower :args {:string {:parent :str-trim :args {:string :_query}}}}
+  {:name :_choices :parent :get :args {:coll :_inputs :key {:value :namespaces} :default {:value []}}}
+  {:name :_active-key :parent :get :args {:coll :_inputs :key {:value :active-key} :default ""}}
+  {:name :_choice-key :parent :get :args {:coll {:as :choice :type :_namespace-choice} :key {:value :key}}}
+  {:name :_choice-path :parent :get :args {:coll {:as :choice :type :_namespace-choice} :key {:value :path}}}
+  {:name :_choice-lower :parent :str-lower :args {:string :_choice-path}}
+  {:name :_choice-matches :parent :str-contains? :lambda-params [:choice]
+   :args {:string :_choice-lower :substring :_query-lower}}
+  {:name :_matching :parent :filter :args {:pred :_choice-matches :coll :_choices}}
+  {:name :_visible :parent :take :args {:count 80 :coll :_matching}}
+  {:name :_choice-active? :parent :equal? :args {:a :_choice-key :b :_active-key}}
+  {:name :_choice-class :parent :if
+   :args {:test :_choice-active? :then "fn-picker-row fn-picker-row-active" :else "fn-picker-row"}}
+  {:name :_choice-selected :parent :if :args {:test :_choice-active? :then "true" :else "false"}}
+  {:name :_choice-id :parent :str :args {:parts ["gd-authoring-ns-" :_choice-key]}}
+  {:name :_choice-attrs :parent :zipmap
+   :args {:keys [{:value :key} {:value :id} {:value :class} {:value :role} {:value :aria-selected} {:value :data-ns-key}]
+          :vals [:_choice-key :_choice-id :_choice-class "option" :_choice-selected :_choice-key]}}
+  {:name :_choice-label :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "fn-picker-row-name"}} :children [:_choice-path]}}
+  {:name :_namespace-choice-row :parent :hiccup :lambda-params [:choice]
+   :args {:tag "div" :attrs :_choice-attrs :children [:_choice-label]}}
+  {:name :_rows :parent :map :args {:func :_namespace-choice-row :coll :_visible}}
+  {:name :_empty? :parent :equal? :args {:a {:parent :count :args {:coll :_visible}} :b 0}}
+  {:name :_empty :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "fn-picker-empty"}} :children ["No matches"]}}
+  {:name :_content :parent :if :args {:test :_empty? :then {:parent :list :args {:items [:_empty]}} :else :_rows}}
+  {:name :_tree :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "ns-picker-graph-body"}} :children :_content}}
+  {:name :_surface :parent :get :args {:coll :_inputs :key {:value :surface} :default "namespace-picker"}}
+  {:name :_type-shell? :parent :equal? :args {:a :_surface :b "type-shell"}}
+  {:name :_type-kind :parent :get :args {:coll :_inputs :key {:value :kind} :default "refinement"}}
+  {:name :_type-editing :parent :get :args {:coll :_inputs :key {:value :editing} :default false}}
+  {:name :_type-namespace :parent :get :args {:coll :_inputs :key {:value :namespace} :default ""}}
+  {:name :_type-name :parent :get :args {:coll :_inputs :key {:value :name} :default ""}}
+  {:name :_type-description :parent :get :args {:coll :_inputs :key {:value :description} :default ""}}
+  {:name :_type-prefix :parent :if :args {:test :_type-editing :then "Edit " :else "New "}}
+  {:name :_type-in-namespace :parent :if
+   :args {:test {:parent :equal? :args {:a :_type-namespace :b ""}} :then ""
+          :else {:parent :str :args {:parts [" in " :_type-namespace]}}}}
+  {:name :_type-suffix :parent :if :args {:test :_type-editing :then "" :else :_type-in-namespace}}
+  {:name :_type-title-text :parent :str :args {:parts [:_type-prefix :_type-kind :_type-suffix]}}
+  {:name :_type-title :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "type-create-title"}} :children [:_type-title-text]}}
+  {:name :_type-close :parent :hiccup
+   :args {:tag "button" :attrs {:value {:type "button" :class "type-create-close" :title "Close"}} :children ["×"]}}
+  {:name :_type-head :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "type-create-head"}} :children [:_type-title :_type-close]}}
+  {:name :_type-placeholders :parent :zipmap
+   :args {:keys ["refinement" "record" "union" "variant" "list"]
+          :vals ["positive-int" "user" "nullable-int" "result-int" "list-of-int"]}}
+  {:name :_type-name-placeholder :parent :get
+   :args {:coll :_type-placeholders :key :_type-kind :default "type-name"}}
+  {:name :_type-name-input :parent :hiccup
+   :args {:tag "input" :attrs {:parent :zipmap
+                               :args {:keys [{:value :type} {:value :class} {:value :placeholder} {:value :value}]
+                                      :vals ["text" "type-create-input" :_type-name-placeholder :_type-name]}}
+          :children []}}
+  {:name :_type-name-label :parent :hiccup
+   :args {:tag "label" :attrs {:value {:class "type-create-field"}}
+          :children [{:parent :hiccup :args {:tag "span" :attrs {:value {:class "type-create-field-label"}} :children ["name"]}}
+                     :_type-name-input]}}
+  {:name :_type-tab-kind :parent :get :args {:coll {:as :tab} :key {:value :kind}}}
+  {:name :_type-tab-label :parent :get :args {:coll {:as :tab} :key {:value :label}}}
+  {:name :_type-tab-hint :parent :get :args {:coll {:as :tab} :key {:value :hint}}}
+  {:name :_type-tab-active? :parent :equal? :args {:a :_type-tab-kind :b :_type-kind}}
+  {:name :_type-tab-class :parent :if
+   :args {:test :_type-tab-active? :then "type-create-tab type-create-tab-active" :else "type-create-tab"}}
+  {:name :_type-tab-selected :parent :if :args {:test :_type-tab-active? :then "true" :else "false"}}
+  {:name :_type-tab-attrs :parent :zipmap
+   :args {:keys [{:value :type} {:value :class} {:value :title} {:value :data-kind} {:value :role} {:value :aria-selected}]
+          :vals ["button" :_type-tab-class :_type-tab-hint :_type-tab-kind "tab" :_type-tab-selected]}}
+  {:name :_type-tab :parent :hiccup :lambda-params [:tab]
+   :args {:tag "button" :attrs :_type-tab-attrs :children [:_type-tab-label]}}
+  {:name :_type-kinds :parent :const
+   :args {:value {:value [{:kind "refinement" :label "Refinement" :hint "Subtype of a primitive constrained by a predicate."}
+                          {:kind "record" :label "Record" :hint "Product type — named fields, each with a type."}
+                          {:kind "union" :label "Union" :hint "Sum type — value is one of N branch types."}
+                          {:kind "variant" :label "Variant" :hint "Tagged union — branches discriminated by a :tag."}
+                          {:kind "list" :label "List" :hint "Homogeneous collection of an element type."}]}}}
+  {:name :_type-tab-rows :parent :map :args {:func :_type-tab :coll :_type-kinds}}
+  {:name :_type-tabs :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "type-create-tabs" :role "tablist"}} :children :_type-tab-rows}}
+  {:name :_type-maybe-tabs :parent :if :args {:test :_type-editing :then nil :else :_type-tabs}}
+  {:name :_type-extra-host :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "type-create-extra-host"}} :children []}}
+  {:name :_type-desc-input :parent :hiccup
+   :args {:tag "textarea" :attrs {:value {:class "type-create-input type-create-textarea" :placeholder "(optional) — what this type means, when to use it" :rows 2}}
+          :children [:_type-description]}}
+  {:name :_type-desc-label :parent :hiccup
+   :args {:tag "label" :attrs {:value {:class "type-create-field"}}
+          :children [{:parent :hiccup :args {:tag "span" :attrs {:value {:class "type-create-field-label"}} :children ["description"]}}
+                     :_type-desc-input]}}
+  {:name :_type-error :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "type-create-error"}} :children []}}
+  {:name :_type-cancel :parent :hiccup
+   :args {:tag "button" :attrs {:value {:type "button" :class "type-create-back"}} :children ["Cancel"]}}
+  {:name :_type-submit-label :parent :if :args {:test :_type-editing :then "Save" :else "Create"}}
+  {:name :_type-submit :parent :hiccup
+   :args {:tag "button" :attrs {:value {:type "submit" :class "type-create-submit"}} :children [:_type-submit-label]}}
+  {:name :_type-actions :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "type-create-actions"}} :children [:_type-cancel :_type-submit]}}
+  {:name :_type-form :parent :hiccup
+   :args {:tag "form" :attrs {:value {:class "type-create-form"}}
+          :children [:_type-name-label :_type-maybe-tabs :_type-extra-host :_type-desc-label :_type-error :_type-actions]}}
+  {:name :_type-shell :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "type-create-shell"}} :children [:_type-head :_type-form]}}
+  {:name :_view-tree :parent :if :args {:test :_type-shell? :then :_type-shell :else :_tree}}
+  {:name :_inline? :parent :equal? :args {:a :_surface :b "inline-row"}}
+  {:name :_inline-placeholder :parent :get :args {:coll :_inputs :key {:value :placeholder} :default ""}}
+  {:name :_inline-value :parent :get :args {:coll :_inputs :key {:value :initial-value} :default ""}}
+  {:name :_inline-input :parent :hiccup
+   :args {:tag "input" :attrs {:parent :zipmap
+                               :args {:keys [{:value :type} {:value :class} {:value :placeholder} {:value :value} {:value :autocomplete}]
+                                      :vals ["text" "inline-input" :_inline-placeholder :_inline-value "off"]}}
+          :children []}}
+  {:name :_inline-save :parent :hiccup
+   :args {:tag "button" :attrs {:value {:type "button" :class "inline-btn inline-btn-save" :title "Save"}} :children []}}
+  {:name :_inline-cancel :parent :hiccup
+   :args {:tag "button" :attrs {:value {:type "button" :class "inline-btn inline-btn-cancel" :title "Cancel"}} :children []}}
+  {:name :_inline-error :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "inline-error"}} :children []}}
+  {:name :_inline-tree :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "inline-input-row"}}
+          :children [:_inline-input :_inline-save :_inline-cancel :_inline-error]}}
+  {:name :_menu? :parent :equal? :args {:a :_surface :b "create-menu"}}
+  {:name :_menu-ns :parent :hiccup
+   :args {:tag "button" :attrs {:value {:type "button" :class "create-menu-item" :data-type "ns" :role "menuitem"}} :children ["New namespace…"]}}
+  {:name :_menu-fn :parent :hiccup
+   :args {:tag "button" :attrs {:value {:type "button" :class "create-menu-item" :data-type "fn" :role "menuitem"}} :children ["New graph…"]}}
+  {:name :_menu-type :parent :hiccup
+   :args {:tag "button" :attrs {:value {:type "button" :class "create-menu-item" :data-type "type" :role "menuitem"}} :children ["New type…"]}}
+  {:name :_menu-tree :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "create-menu" :role "menu"}} :children [:_menu-ns :_menu-fn :_menu-type]}}
+  {:name :_chooser? :parent :equal? :args {:a :_surface :b "namespace-chooser"}}
+  {:name :_chooser-opt-value :parent :get :args {:coll {:as :choice :type :_namespace-choice} :key {:value :key}}}
+  {:name :_chooser-opt-label :parent :get :args {:coll {:as :choice :type :_namespace-choice} :key {:value :path}}}
+  {:name :_chooser-option :parent :hiccup :lambda-params [:choice]
+   :args {:tag "option" :attrs {:parent :zipmap :args {:keys [{:value :value}] :vals [:_chooser-opt-value]}}
+          :children [:_chooser-opt-label]}}
+  {:name :_chooser-options :parent :map :args {:func :_chooser-option :coll :_choices}}
+  {:name :_chooser-root-option :parent :hiccup
+   :args {:tag "option" :attrs {:value {:value ""}} :children ["(root)"]}}
+  {:name :_chooser-all-options :parent :concat
+   :args {:colls [{:parent :list :args {:items [:_chooser-root-option]}} :_chooser-options]}}
+  {:name :_chooser-select :parent :hiccup
+   :args {:tag "select" :attrs {:value {:class "extend-ns-select"}} :children :_chooser-all-options}}
+  {:name :_chooser-cap :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "extend-ns-cap"}} :children ["in"]}}
+  {:name :_chooser-up :parent :hiccup
+   :args {:tag "button" :attrs {:value {:type "button" :class "extend-ns-btn extend-ns-up" :title "Up one level — the parent namespace" :aria-label "Up one level — the parent namespace"}} :children ["↑"]}}
+  {:name :_chooser-plus :parent :hiccup
+   :args {:tag "button" :attrs {:value {:type "button" :class "extend-ns-btn extend-ns-plus" :title "New sub-namespace under this one" :aria-label "New sub-namespace under this one"}} :children ["+"]}}
+  {:name :_chooser-tree :parent :hiccup
+   :args {:tag "label" :attrs {:value {:class "extend-ns-row"}} :children [:_chooser-cap :_chooser-select :_chooser-up :_chooser-plus]}}
+  {:name :_other-tree :parent :if :args {:test :_chooser? :then :_chooser-tree :else :_view-tree}}
+  {:name :_menu-or-other :parent :if :args {:test :_menu? :then :_menu-tree :else :_other-tree}}
+  {:name :_surface-tree :parent :if :args {:test :_inline? :then :_inline-tree :else :_menu-or-other}}
+  {:name :authoring-view :parent :zipmap :return-type :_authoring-result
+   :args {:keys [{:value :tree}] :vals [:_surface-tree]}}
+  {:name :root-view :parent :authoring-view :lambda-params [:input] :return-type :_authoring-result
+   :args {:inputs {:parent :get :args {:coll {:as :input :type :_authoring-envelope} :key {:value :inputs}}}}}
+  {:name :_view-assoc :parent :assoc-fn :args {:value {:as :value :type :_authoring-callable}}}
+  {:name :authoring-component :parent :_view-assoc :return-type :authoring-root-component
+   :args {:map {} :key {:value :view} :value {:ref :root-view}}}]}

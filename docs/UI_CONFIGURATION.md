@@ -250,6 +250,14 @@ current organization; it receives no session cookie, token or credential.
 The host verifies every rendered switch target against the fetched membership
 set and owns navigation, creation, focus and account-change invalidation.
 
+The `:authoring` view supplies the namespace picker choices, the create menu,
+the function edit namespace chooser, the shared create/rename input row and
+the type form shell from one ordinary graph. The
+host projects only authorized namespace IDs and paths, verifies every returned
+choice against that set, and retains focus, IME, in-progress values, geometry,
+validation and writes. Type-specific constraint editors remain native controls
+inside the graph-provided shell; switching a kind preserves the shared draft.
+
 The Settings sign-in methods section uses the `:account-methods` view callback.
 The graph receives provider names, display email, verification state, unlink
 availability and configured OAuth providers, with no password, TOTP secret,

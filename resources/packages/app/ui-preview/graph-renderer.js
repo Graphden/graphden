@@ -5,7 +5,7 @@
   const styles = window.GraphdenStyles;
   const name = (value) => value instanceof api.Keyword ? (value.namespace ? value.namespace + '/' : '') + value.name : value;
   const owners = new WeakSet();
-  const tags = new Set(['div', 'span', 'button', 'input', 'label', 'ul', 'li', 'p', 'pre', 'strong', 'small', 'section', 'select', 'option', 'optgroup', 'textarea', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'kbd', 'details', 'summary', 'code', 'h5']);
+  const tags = new Set(['div', 'span', 'button', 'input', 'label', 'form', 'ul', 'li', 'p', 'pre', 'strong', 'small', 'section', 'select', 'option', 'optgroup', 'textarea', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'kbd', 'details', 'summary', 'code', 'h5']);
   const textAttributes = new Set(['class', 'role', 'type', 'title', 'name', 'value', 'placeholder', 'autocomplete', 'label']);
   const booleanAttributes = new Set(['disabled', 'hidden', 'readonly', 'checked', 'selected', 'open']);
 

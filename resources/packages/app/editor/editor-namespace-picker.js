@@ -34,10 +34,9 @@ function closeNamespacePicker() {
   }
 }
 
-// graph-first-exception: the namespace tree is walked + rendered from the
-// in-memory `graphData.namespaces` cache and must appear instantly on click; a
-// server partial would add a round-trip per open for data the client already
-// holds (§6.1 perf).
+// Candidate identities and namespace paths come from the authorized in-memory
+// tree. The selected authoring graph filters and presents those choices; the
+// host keeps focus, popup geometry and the exact callback identity.
 function openNamespacePicker(opts) {
   closeNamespacePicker();
   if (!opts?.anchorEl) return;
@@ -57,10 +56,11 @@ function openNamespacePicker(opts) {
     return parts.join('.');
   };
   // "(root)" sentinel = no namespace; null id propagates to clear.
-  const candidates = [{ id: null, path: '(root)' }]
-    .concat(graphData.namespaces.map(ns => ({ id: ns.id, path: pathFor(ns) })))
+  const candidates = [{ id: null, key: 'root', path: '(root)' }]
+    .concat(graphData.namespaces.map(ns => ({ id: ns.id, key: ns.id, path: pathFor(ns) })))
     .sort((a, b) => a.path === '(root)' ? -1 : b.path === '(root)' ? 1
                   : a.path.localeCompare(b.path));
+  const byKey = new Map(candidates.map(candidate => [candidate.key, candidate]));
 
   const el = document.createElement('div');
   el.className = 'fn-picker-popover';  // reuse fn-picker styling
@@ -104,30 +104,20 @@ function openNamespacePicker(opts) {
   let activeIdx = 0;
   let filtered = [];
   function render() {
-    const q = search.value.trim().toLowerCase();
-    filtered = candidates
-      .filter(c => !q || c.path.toLowerCase().includes(q))
-      .slice(0, 80);
-    list.innerHTML = '';
-    if (filtered.length === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'fn-picker-empty';
-      empty.textContent = 'No matches';
-      list.appendChild(empty);
-      return;
+    const activeKey = filtered[activeIdx]?.key || '';
+    const body = window.gdAuthoringNamespaceRows(candidates, search.value, activeKey);
+    list.replaceChildren(...body.childNodes);
+    const rows = [...list.querySelectorAll('.fn-picker-row')];
+    filtered = rows.map(row => byKey.get(row.dataset.nsKey));
+    activeIdx = Math.max(0, rows.findIndex(row => row.getAttribute('aria-selected') === 'true'));
+    if (rows[activeIdx] && rows[activeIdx].getAttribute('aria-selected') !== 'true') {
+      rows[activeIdx].classList.add('fn-picker-row-active');
+      rows[activeIdx].setAttribute('aria-selected', 'true');
     }
-    if (activeIdx >= filtered.length) activeIdx = 0;
-    filtered.forEach((c, i) => {
-      const row = document.createElement('div');
-      row.className = 'fn-picker-row' + (i === activeIdx ? ' fn-picker-row-active' : '');
-      row.id = 'ns-picker-opt-' + i;
-      row.setAttribute('role', 'option');
-      row.setAttribute('aria-selected', i === activeIdx ? 'true' : 'false');
-      if (i === activeIdx) search.setAttribute('aria-activedescendant', row.id);
-      const nm = document.createElement('span');
-      nm.className = 'fn-picker-row-name';
-      nm.textContent = c.path;
-      row.appendChild(nm);
+    if (rows[activeIdx]) search.setAttribute('aria-activedescendant', rows[activeIdx].id);
+    else search.removeAttribute('aria-activedescendant');
+    rows.forEach((row, i) => {
+      const c = filtered[i];
       row.addEventListener('mouseenter', () => {
         activeIdx = i;
         list.querySelectorAll('.fn-picker-row-active')
@@ -143,12 +133,11 @@ function openNamespacePicker(opts) {
         closeNamespacePicker();
         if (typeof opts.onPick === 'function') opts.onPick(c);
       });
-      list.appendChild(row);
     });
   }
   render();
 
-  search.addEventListener('input', () => { activeIdx = 0; render(); });
+  search.addEventListener('input', () => { activeIdx = 0; filtered = []; render(); });
   search.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowDown') {
       e.preventDefault();

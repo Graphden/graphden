@@ -123,6 +123,7 @@
                    :account-security ["app.ui-account" "account-security" #{:view}]
                    :publish-form ["app.ui-publish" "publish-form" #{:view}]
                    :org-switcher ["app.ui-org-switcher" "org-switcher" #{:view}]
+                   :authoring ["app.ui-authoring" "authoring" #{:view}]
                    :appearance ["app.ui-appearance" "appearance" #{:view}]
                    :canvas ["app.ui-canvas" "canvas" #{:view}]
                    :canvas-values ["app.ui-canvas-values" "canvas-values" #{:view}]

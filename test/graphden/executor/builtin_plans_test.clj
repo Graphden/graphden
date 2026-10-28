@@ -117,7 +117,7 @@
 
 
 (def ^:private plan-components
-  {:accountMenu :account-menu :accountMethods :account-methods :accountSecurity :account-security :publishForm :publish-form :orgSwitcher :org-switcher :fnPicker :fn-picker :recents :recents
+  {:accountMenu :account-menu :accountMethods :account-methods :accountSecurity :account-security :publishForm :publish-form :orgSwitcher :org-switcher :authoring :authoring :fnPicker :fn-picker :recents :recents
    :inspector :inspector :explorer :explorer :tutorialCatalog :tutorial-catalog
    :executionStatus :execution-status :executionPath :execution-path :feedback :feedback
    :keymap :keymap :appearance :appearance
@@ -183,7 +183,7 @@
         (doseq [[kind compiled] (:plans artifact)]
           (is (= 1 (:format compiled) (:primitiveAbi compiled)))
           (is (= (case kind
-                   (:tutorialCatalog :executionStatus :executionPath :feedback :keymap :appearance :orgSwitcher :accountMethods :accountSecurity :publishForm
+                   (:tutorialCatalog :executionStatus :executionPath :feedback :keymap :appearance :orgSwitcher :authoring :accountMethods :accountSecurity :publishForm
                                      :canvas :canvasValues :canvasMetadata :canvasBindings) #{"view"}
                    (:canvasInheritance :canvasTypeStructure) #{"initial" "view"}
                    #{"initial" "update" "view"})

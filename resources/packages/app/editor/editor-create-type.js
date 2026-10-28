@@ -60,24 +60,6 @@ function ensureTypeCreatePopover() {
   return el;
 }
 
-// Kind metadata shared between the tab strip (create-flow) and the
-// "Edit refinement" / "Edit record" titles. Hint is exposed via
-// `title=` on the tab button so it still reaches the user via
-// hover/tooltip even after we collapsed the separate kind-picker
-// step.
-const TYPE_KINDS = [
-  { key: 'refinement', label: 'Refinement',
-    hint: 'Subtype of a primitive constrained by a predicate.' },
-  { key: 'record',     label: 'Record',
-    hint: 'Product type — named fields, each with a type.' },
-  { key: 'union',      label: 'Union',
-    hint: 'Sum type — value is one of N branch types.' },
-  { key: 'variant',    label: 'Variant',
-    hint: 'Tagged union — branches discriminated by a :tag.' },
-  { key: 'list',       label: 'List',
-    hint: 'Homogeneous collection of an element type.' },
-];
-
 // Entry point — called from the sidebar's `+ Type` button. Opens
 // the unified create form at the refinement tab by default; the
 // user switches via the tab strip at the top of the form, which
@@ -115,14 +97,8 @@ function buildTypeNameDatalist() {
   return id;
 }
 
-// graph-first-exception: the per-kind form is built client-side because
-// (a) switching kind tabs carries the in-progress name+description across
-// without a round-trip, (b) edit-mode prefill reshapes client-cached
-// structure live, and (c) the interactive constraint builders
-// (drag-reorder rows, base-aware op dropdowns) are keystroke-speed
-// client machinery. The DATA the form autocompletes from is server-fed
-// (`/partials/type-name-datalist`); the submit POSTs to the graph
-// (/api/entities/fn etc.).
+// The graph owns the shell, kind tabs and stable controls. Per-kind constraint
+// builders are native typing-speed editors; the datalist is a server partial.
 function showTypeCreateForm(kind) {
   const el = typeCreatePopoverEl;
   if (!el) return;
@@ -132,145 +108,39 @@ function showTypeCreateForm(kind) {
   const listId = buildTypeNameDatalist();
   const editing = !!ctx.editFnId;
 
-  const head = document.createElement('div');
-  head.className = 'type-create-head';
-  const title = document.createElement('span');
-  title.className = 'type-create-title';
-  title.textContent = (editing ? 'Edit ' : 'New ') + kind
-    + (!editing && ctx.nsPath ? ' in ' + ctx.nsPath : '');
-  head.appendChild(title);
-  const close = document.createElement('button');
-  close.type = 'button';
-  close.className = 'type-create-close';
-  close.textContent = '×';
-  close.title = 'Close';
-  close.addEventListener('click', (e) => { e.stopPropagation(); hideTypeCreatePopover(); });
-  head.appendChild(close);
-  el.appendChild(head);
-
-  const form = document.createElement('form');
-  form.className = 'type-create-form';
-  form.addEventListener('submit', (e) => e.preventDefault());
-
-  // Name input — present in every kind, and placed ABOVE the kind tabs to
-  // say so. It used to sit under the tab strip like the kind-specific
-  // fields, and read as "each tab has its own name field" (a reader asked
-  // whether that duplication was a bug). It is one field: the
-  // name belongs to the type, the tabs only pick its shape. The value is
-  // carried across a tab switch by the re-render below.
-  const nameLabel = document.createElement('label');
-  nameLabel.className = 'type-create-field';
-  const nameSpan = document.createElement('span');
-  nameSpan.className = 'type-create-field-label';
-  nameSpan.textContent = 'name';
-  const nameIn = document.createElement('input');
-  nameIn.type = 'text';
-  nameIn.className = 'type-create-input';
-  nameIn.placeholder = kind === 'refinement' ? 'positive-int'
-    : kind === 'record' ? 'user'
-    : kind === 'union' ? 'nullable-int'
-    : kind === 'variant' ? 'result-int'
-    : 'list-of-int';
+  // The selected authoring graph owns the stable shell and tab presentation.
+  // Native controls retain their live nodes until an explicit kind switch;
+  // kind-specific editors remain local because they update at typing speed.
+  const shell = window.gdAuthoringTypeShell(kind, editing, ctx.nsPath || '',
+    ctx.prefill?.name || '', ctx.prefill?.description || '');
+  el.replaceChildren(shell);
+  const form = shell.querySelector('.type-create-form');
+  const nameIn = form.querySelector('input.type-create-input');
+  const descIn = form.querySelector('textarea.type-create-textarea');
+  const errEl = form.querySelector('.type-create-error');
+  const submit = form.querySelector('.type-create-submit');
   nameIn.required = true;
-  nameLabel.appendChild(nameSpan);
-  nameLabel.appendChild(nameIn);
-  form.appendChild(nameLabel);
-
-  // Kind-tab strip — only on the create flow. Editing a refinement
-  // can't switch to "make this a variant" mid-flight without a
-  // separate convert-kind operation; we surface the tabs only when
-  // they actually do something. Between the name and the kind fields:
-  // everything BELOW the strip is what the tab decides.
-  if (!editing) {
-    const tabs = document.createElement('div');
-    tabs.className = 'type-create-tabs';
-    tabs.setAttribute('role', 'tablist');
-    for (const k of TYPE_KINDS) {
-      const tab = document.createElement('button');
-      tab.type = 'button';
-      tab.className = 'type-create-tab'
-        + (k.key === kind ? ' type-create-tab-active' : '');
-      tab.textContent = k.label;
-      tab.title = k.hint;
-      // The kind as data, for the tutorial's step checks and the e2e suite
-      // — matching a tab by its label text is what they had to do before.
-      tab.dataset.kind = k.key;
-      tab.setAttribute('role', 'tab');
-      tab.setAttribute('aria-selected', k.key === kind ? 'true' : 'false');
-      tab.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (k.key === kind) return;
-        // Carry the in-progress name+description across kind switches
-        // so the user doesn't lose them when exploring options.
-        const nameVal = nameIn.value || '';
-        const descVal = el.querySelector('.type-create-form textarea.type-create-textarea')?.value
-                     || el.querySelector('.type-create-form .type-create-field textarea')?.value
-                     || '';
-        const savedPrefill = typeCreateContext.prefill;
-        typeCreateContext.prefill = Object.assign({}, savedPrefill || {}, {
-          name: nameVal, description: descVal,
-        });
-        showTypeCreateForm(k.key);
-        // Don't keep the bogus prefill after re-render — only the
-        // first showTypeCreateForm pass should see it.
-        typeCreateContext.prefill = savedPrefill;
-      });
-      tabs.appendChild(tab);
-    }
-    form.appendChild(tabs);
-  }
-
-  // Kind-specific fields.
-  const extras = buildKindFields(kind, listId, ctx.prefill);
-  form.appendChild(extras.el);
-
-  // Description — optional, applies to every kind. Pre-filled in
-  // edit mode so the existing text isn't silently dropped.
-  const descLabel = document.createElement('label');
-  descLabel.className = 'type-create-field';
-  const descSpan = document.createElement('span');
-  descSpan.className = 'type-create-field-label';
-  descSpan.textContent = 'description';
-  const descIn = document.createElement('textarea');
-  descIn.className = 'type-create-input type-create-textarea';
-  descIn.placeholder = '(optional) — what this type means, when to use it';
-  descIn.rows = 2;
-  // Description prefill: carries across edit mode AND kind switches
-  // (the create flow stashes the in-progress description before
-  // re-rendering the form for a different kind).
-  if (ctx.prefill?.description) descIn.value = ctx.prefill.description;
-  descLabel.appendChild(descSpan);
-  descLabel.appendChild(descIn);
-  form.appendChild(descLabel);
-
-  // Name prefill: edit mode AND kind-switch carry-over.
-  if (ctx.prefill?.name) nameIn.value = ctx.prefill.name;
-
-  // Error message slot.
-  const errEl = document.createElement('div');
-  errEl.className = 'type-create-error';
+  nameIn.value = ctx.prefill?.name || '';
+  descIn.value = ctx.prefill?.description || '';
   errEl.style.display = 'none';
-  form.appendChild(errEl);
-
-  // Submit + cancel row.
-  const actions = document.createElement('div');
-  actions.className = 'type-create-actions';
-  const back = document.createElement('button');
-  back.type = 'button';
-  back.className = 'type-create-back';
-  back.textContent = 'Cancel';
-  back.addEventListener('click', (e) => {
-    e.stopPropagation();
-    hideTypeCreatePopover();
-  });
-  const submit = document.createElement('button');
-  submit.type = 'submit';
-  submit.className = 'type-create-submit';
-  submit.textContent = editing ? 'Save' : 'Create';
-  actions.appendChild(back);
-  actions.appendChild(submit);
-  form.appendChild(actions);
-  el.appendChild(form);
+  form.addEventListener('submit', (e) => e.preventDefault());
+  for (const button of [shell.querySelector('.type-create-close'), form.querySelector('.type-create-back')]) {
+    button.addEventListener('click', (e) => { e.stopPropagation(); hideTypeCreatePopover(); });
+  }
+  for (const tab of form.querySelectorAll('.type-create-tab')) {
+    tab.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (tab.dataset.kind === kind) return;
+      const savedPrefill = typeCreateContext.prefill;
+      typeCreateContext.prefill = Object.assign({}, savedPrefill || {}, {
+        name: nameIn.value || '', description: descIn.value || '',
+      });
+      showTypeCreateForm(tab.dataset.kind);
+      typeCreateContext.prefill = savedPrefill;
+    });
+  }
+  const extras = buildKindFields(kind, listId, ctx.prefill);
+  form.querySelector('.type-create-extra-host').replaceWith(extras.el);
 
   submit.addEventListener('click', async (e) => {
     e.preventDefault();

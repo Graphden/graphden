@@ -112,6 +112,7 @@
             :account-security {:view (ids/fn-id (str root ".account-security") :account-security-view)}
             :publish-form {:view (ids/fn-id (str root ".publish-form") :publish-form-view)}
             :org-switcher {:view (ids/fn-id (str root ".org-switcher") :org-switcher-view)}
+            :authoring {:view (ids/fn-id (str root ".authoring") :authoring-view)}
             :fn-picker {:view (ids/fn-id (str root ".picker") :picker-view)}
             :recents {:initial (ids/fn-id (str root ".recents") :recents-initial)
                       :update (ids/fn-id (str root ".recents") :recents-update)

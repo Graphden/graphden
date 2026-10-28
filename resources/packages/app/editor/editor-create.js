@@ -358,12 +358,7 @@ let activeChildMenu = null;
 
 function openChildCreateMenu(anchorEl, parentNsId, parentNsPath) {
   closeChildCreateMenu();
-  const menu = document.createElement('div');
-  menu.className = 'create-menu';
-  menu.innerHTML =
-    '<button class="create-menu-item" data-type="ns">New namespace…</button>' +
-    '<button class="create-menu-item" data-type="fn">New graph…</button>' +
-    '<button class="create-menu-item" data-type="type">New type…</button>';
+  const menu = window.gdAuthoringCreateMenu();
   // Position fixed under the anchor.
   const rect = anchorEl.getBoundingClientRect();
   menu.style.position = 'fixed';
@@ -379,7 +374,6 @@ function openChildCreateMenu(anchorEl, parentNsId, parentNsPath) {
   // closes it and returns focus to the `+` that opened it (consumed, so a
   // running tour does not end). ↑ / ↓ walk the items.
   const items = Array.from(menu.querySelectorAll('.create-menu-item'));
-  for (const b of items) b.setAttribute('role', 'menuitem');
   menu.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       e.preventDefault();

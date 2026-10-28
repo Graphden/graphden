@@ -26,39 +26,18 @@ const X_SVG = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" strok
 // return a Promise — while pending the row is disabled. `onCancel()`
 // is called when user hits Escape, clicks cancel, or blurs (without
 // committing). `initialValue` pre-fills the input.
-// graph-first-exception: an inline single text input that must appear the
-// instant the user clicks "+" (§6.4 speed) — a partial fetch to render one
-// field would make the create gesture feel laggy. The SUBMIT already POSTs to
-// the server (POST /api/entities); only the transient input row is client-built.
+// The shipped or selected authoring graph builds the row synchronously. The
+// host retains the same input node across tree refreshes and owns its write.
 function buildInlineInputRow({ placeholder, indent, initialValue, onSubmit, onCancel }) {
-  const row = document.createElement('div');
-  row.className = 'inline-input-row';
+  const row = window.gdAuthoringInlineRow(placeholder || '', initialValue || '');
   row.style.paddingLeft = (indent || 0) + 'px';
-
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.className = 'inline-input';
-  input.placeholder = placeholder || '';
+  const input = row.querySelector('.inline-input');
   input.value = initialValue || '';
-  input.autocomplete = 'off';
-
-  const saveBtn = document.createElement('button');
-  saveBtn.className = 'inline-btn inline-btn-save';
-  saveBtn.title = 'Save';
+  const saveBtn = row.querySelector('.inline-btn-save');
   saveBtn.innerHTML = CHECK_SVG;
-
-  const cancelBtn = document.createElement('button');
-  cancelBtn.className = 'inline-btn inline-btn-cancel';
-  cancelBtn.title = 'Cancel';
+  const cancelBtn = row.querySelector('.inline-btn-cancel');
   cancelBtn.innerHTML = X_SVG;
-
-  const errorEl = document.createElement('span');
-  errorEl.className = 'inline-error';
-
-  row.appendChild(input);
-  row.appendChild(saveBtn);
-  row.appendChild(cancelBtn);
-  row.appendChild(errorEl);
+  const errorEl = row.querySelector('.inline-error');
 
   let pending = false;
 

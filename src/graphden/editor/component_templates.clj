@@ -139,6 +139,7 @@
                     ["account-security" :app.ui-account/account-security-view [[:view "account-security-view"]]]
                     ["publish-form" :app.ui-publish/publish-form-view [[:view "publish-form-view"]]]
                     ["org-switcher" :app.ui-org-switcher/org-switcher-view [[:view "org-switcher-view"]]]
+                    ["authoring" :app.ui-authoring/authoring-view [[:view "authoring-view"]]]
                     ["picker" :app.ui-fn-picker/picker-view [[:view "picker-view"]]]
                     ["recents" :app.ui-recents/recents-view
                      [[:initial "recents-initial"] [:update "recents-update"] [:view "recents-view"]]]
@@ -184,6 +185,7 @@
         account-security (str root ".account-security")
         publish-form (str root ".publish-form")
         org-switcher (str root ".org-switcher")
+        authoring (str root ".authoring")
         recents (str root ".recents")
         inspector (str root ".inspector")
         explorer (str root ".explorer")
@@ -208,6 +210,7 @@
                                       (keyword root "_account-security-descriptor")
                                       (keyword root "_publish-form-descriptor")
                                       (keyword root "_org-switcher-descriptor")
+                                      (keyword root "_authoring-descriptor")
                                       (keyword root "_picker-descriptor")
                                       (keyword root "_recents-descriptor")
                                       (keyword root "_inspector-descriptor")
@@ -236,6 +239,7 @@
                     (copy-module "app/ui-account" account-security)
                     (copy-module "app/ui-publish" publish-form)
                     (copy-module "app/ui-org-switcher" org-switcher)
+                    (copy-module "app/ui-authoring" authoring)
                     (copy-module "app/ui-recents" recents) (copy-module "app/ui-inspector" inspector)
                     (copy-module "app/ui-explorer" explorer) (copy-module "app/ui-tutorial-catalog" tutorial-catalog)
                     (copy-module "app/ui-execution" execution-status)
@@ -253,12 +257,12 @@
 
 (def namespace-suffixes
   "Owned child namespaces reserved for the installed personal template bundle."
-  ["theme" "menu" "account-methods" "account-security" "publish-form" "org-switcher" "picker" "recents" "inspector" "explorer" "tutorial-catalog" "execution-status" "execution-path" "feedback" "keymap" "appearance" "canvas" "canvas-values" "canvas-inheritance" "canvas-metadata" "canvas-type-structure" "canvas-bindings"])
+  ["theme" "menu" "account-methods" "account-security" "publish-form" "org-switcher" "authoring" "picker" "recents" "inspector" "explorer" "tutorial-catalog" "execution-status" "execution-path" "feedback" "keymap" "appearance" "canvas" "canvas-values" "canvas-inheritance" "canvas-metadata" "canvas-type-structure" "canvas-bindings"])
 
 
 (def groups
   "Fixed creation choices and their personal namespace/descriptor prefixes."
-  {:account-menu "menu" :account-methods "account-methods" :account-security "account-security" :publish-form "publish-form" :org-switcher "org-switcher" :fn-picker "picker" :recents "recents" :inspector "inspector" :explorer "explorer"
+  {:account-menu "menu" :account-methods "account-methods" :account-security "account-security" :publish-form "publish-form" :org-switcher "org-switcher" :authoring "authoring" :fn-picker "picker" :recents "recents" :inspector "inspector" :explorer "explorer"
    :tutorial-catalog "tutorial-catalog" :execution-status "execution-status" :execution-path "execution-path" :feedback "feedback" :keymap "keymap" :appearance "appearance" :canvas "canvas" :canvas-values "canvas-values" :canvas-inheritance "canvas-inheritance" :canvas-metadata "canvas-metadata" :canvas-type-structure "canvas-type-structure" :canvas-bindings "canvas-bindings"})
 
 
@@ -321,4 +325,5 @@
    :feedback-id (str (ids/fn-id (str root ".feedback") :feedback-view))
    :keymap-id (str (ids/fn-id (str root ".keymap") :keymap-view))
    :org-switcher-id (str (ids/fn-id (str root ".org-switcher") :org-switcher-view))
+   :authoring-id (str (ids/fn-id (str root ".authoring") :authoring-view))
    :appearance-id (str (ids/fn-id (str root ".appearance") :appearance-view))})

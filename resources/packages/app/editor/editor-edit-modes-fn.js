@@ -57,44 +57,18 @@ function nsParentIdOf(nsId) {
 // Inline rather than a nested picker: a nested popover fights the
 // inline-editor's outside-click dismissal.
 function buildNsChooser(defaultNsId, ariaLabel) {
-  const row = document.createElement('label');
-  row.className = 'extend-ns-row';
-  const cap = document.createElement('span');
-  cap.className = 'extend-ns-cap';
-  cap.textContent = 'in';
-  const sel = document.createElement('select');
-  sel.className = 'extend-ns-select';
-  sel.setAttribute('aria-label', ariaLabel);
-  const rootOpt = document.createElement('option');
-  rootOpt.value = '';
-  rootOpt.textContent = '(root)';
-  sel.appendChild(rootOpt);
   const paths = [];
   if (typeof lookups !== 'undefined' && lookups?.nsPathMap) {
     for (const [id, path] of lookups.nsPathMap) paths.push([path, id]);
   }
   paths.sort((a, b) => a[0].localeCompare(b[0]));
-  for (const [path, id] of paths) {
-    const opt = document.createElement('option');
-    opt.value = id;
-    opt.textContent = path;
-    sel.appendChild(opt);
-  }
+  const row = window.gdAuthoringNamespaceChooser(paths.map(([path, id]) => ({key: id, path})));
+  const sel = row.querySelector('.extend-ns-select');
+  sel.setAttribute('aria-label', ariaLabel);
   sel.value = defaultNsId || '';
   if (sel.value !== (defaultNsId || '')) sel.value = '';
-
-  const up = document.createElement('button');
-  up.type = 'button';
-  up.className = 'extend-ns-btn extend-ns-up';
-  up.textContent = '↑';
-  up.title = 'Up one level — the parent namespace';
-  up.setAttribute('aria-label', 'Up one level — the parent namespace');
-  const plus = document.createElement('button');
-  plus.type = 'button';
-  plus.className = 'extend-ns-btn extend-ns-plus';
-  plus.textContent = '+';
-  plus.title = 'New sub-namespace under this one';
-  plus.setAttribute('aria-label', 'New sub-namespace under this one');
+  const up = row.querySelector('.extend-ns-up');
+  const plus = row.querySelector('.extend-ns-plus');
 
   // The inline "new sub-namespace" row: `<prefix>.` + one segment.
   const sub = document.createElement('div');
@@ -136,11 +110,6 @@ function buildNsChooser(defaultNsId, ariaLabel) {
     if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); }
   });
   refresh();
-
-  row.appendChild(cap);
-  row.appendChild(sel);
-  row.appendChild(up);
-  row.appendChild(plus);
 
   return {
     row, sub, select: sel,

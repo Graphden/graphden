@@ -32,7 +32,7 @@
 (def script-path "resources/packages/app/ui-preview/builtin-plans.js")
 
 
-(def ^:private modules ["ui-account-menu" "ui-account" "ui-publish" "ui-org-switcher" "ui-fn-picker" "ui-recents" "ui-inspector" "ui-explorer" "ui-tutorial-catalog" "ui-execution" "ui-feedback" "ui-keymap" "ui-appearance" "ui-canvas" "ui-canvas-values" "ui-canvas-inheritance" "ui-canvas-metadata" "ui-canvas-type-structure" "ui-canvas-bindings"])
+(def ^:private modules ["ui-account-menu" "ui-account" "ui-publish" "ui-org-switcher" "ui-authoring" "ui-fn-picker" "ui-recents" "ui-inspector" "ui-explorer" "ui-tutorial-catalog" "ui-execution" "ui-feedback" "ui-keymap" "ui-appearance" "ui-canvas" "ui-canvas-values" "ui-canvas-inheritance" "ui-canvas-metadata" "ui-canvas-type-structure" "ui-canvas-bindings"])
 
 
 (def ^:private entries
@@ -49,6 +49,7 @@
    :accountSecurity {:view (ids/fn-id "app.ui-account" :account-security-view)}
    :publishForm {:view (ids/fn-id "app.ui-publish" :publish-form-view)}
    :orgSwitcher {:view (ids/fn-id "app.ui-org-switcher" :org-switcher-view)}
+   :authoring {:view (ids/fn-id "app.ui-authoring" :authoring-view)}
    :recents {:initial (ids/fn-id "app.ui-recents" :recents-initial)
              :update (ids/fn-id "app.ui-recents" :recents-update)
              :view (ids/fn-id "app.ui-recents" :recents-view)}

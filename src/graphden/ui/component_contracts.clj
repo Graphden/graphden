@@ -21,6 +21,8 @@
                   :reference :app.ui-publish/publish-form-view :roles #{:view}}
    :org-switcher {:id (ids/fn-id "app.ui-org-switcher" :org-switcher-view)
                   :reference :app.ui-org-switcher/org-switcher-view :roles #{:view}}
+   :authoring {:id (ids/fn-id "app.ui-authoring" :authoring-view)
+               :reference :app.ui-authoring/authoring-view :roles #{:view}}
    :fn-picker {:id (ids/fn-id "app.ui-fn-picker" :picker-view)
                :reference :app.ui-fn-picker/picker-view :roles #{:view}}
    :inspector {:id (ids/fn-id "app.ui-inspector" :inspector-view)

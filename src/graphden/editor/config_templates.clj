@@ -119,7 +119,8 @@
   [root component roles prior-id]
   (let [ordered (filterv #(contains? roles %) [:initial :update :view])]
     (when-not (and (contains? config/component-contracts component)
-                   (= (get-in config/component-contracts [component :roles]) (set ordered) (set (keys roles)))
+                   (= (set ordered) (set (keys roles)))
+                   (config/valid-roles? component ordered)
                    (every? uuid? (vals roles)) (or (nil? prior-id) (uuid? prior-id)))
       (throw (ex-info "Invalid component inheritance"
                       {:type :browser-plan/unsupported :reason :invalid-configuration})))

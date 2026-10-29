@@ -184,8 +184,8 @@
           (is (= 1 (:format compiled) (:primitiveAbi compiled)))
           (is (= (case kind
                    (:tutorialCatalog :executionStatus :executionPath :feedback :keymap :appearance :orgSwitcher :authoring :accountMethods :accountSecurity :publishForm
-                                     :canvas :canvasValues :canvasMetadata :canvasBindings) #{"view"}
-                   (:canvasInheritance :canvasTypeStructure) #{"initial" "view"}
+                                     :canvas :canvasValues :canvasMetadata) #{"view"}
+                   (:canvasInheritance :canvasTypeStructure :canvasBindings) #{"initial" "view"}
                    #{"initial" "update" "view"})
                  (set (keys (:entries compiled)))))))
       (is (= {:by-id {} :by-name {}} @rich))

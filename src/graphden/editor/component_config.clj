@@ -67,6 +67,16 @@
   shipped/component-contracts)
 
 
+(defn valid-roles?
+  "Allow the historical view-only canvas-bindings component to retain its
+   personal view; the native adapter supplies its missing initial role from
+   the builtin. Every other component still requires its exact role set."
+  [component roles]
+  (let [actual (set roles)]
+    (or (= actual (get-in component-contracts [component :roles]))
+        (and (= component :canvas-bindings) (= actual #{:view})))))
+
+
 (defn- projected-manifest
   [graph fn-id]
   (projection/project graph fn-id
@@ -123,9 +133,9 @@
     (let [value (projected-manifest graph fn-id)
           manifest (checked-manifest-entries value)]
       {:format (if (map? value) :map :list)
-       :configuration (into {} (keep (fn [[component {:keys [id roles]}]]
+       :configuration (into {} (keep (fn [[component {:keys [id]}]]
                                        (when-let [entry (get manifest id)]
-                                         (when-not (= roles (set (keys entry))) (reject!))
+                                         (when-not (valid-roles? component (keys entry)) (reject!))
                                          [component entry]))) component-contracts)})))
 
 

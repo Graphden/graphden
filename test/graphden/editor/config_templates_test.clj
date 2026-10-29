@@ -157,6 +157,7 @@
                        :app.ui-canvas-metadata/metadata-view
                        :app.ui-canvas-type-structure/type-structure-view
                        :app.ui-canvas-type-structure/type-structure-initial
+                       :app.ui-canvas-bindings/bindings-initial
                        :app.ui-canvas-bindings/bindings-view]
             :let [matches (filter #(= reference (keyword (:namespace %) (name (:name %)))) interfaces)]]
       (is (seq matches))

@@ -156,7 +156,8 @@
                     ["canvas-metadata" :app.ui-canvas-metadata/metadata-view [[:view "metadata-view"]]]
                     ["canvas-type-structure" :app.ui-canvas-type-structure/type-structure-view
                      [[:initial "type-structure-initial"] [:view "type-structure-view"]]]
-                    ["canvas-bindings" :app.ui-canvas-bindings/bindings-view [[:view "bindings-view"]]]]]
+                    ["canvas-bindings" :app.ui-canvas-bindings/bindings-view
+                     [[:initial "bindings-initial"] [:view "bindings-view"]]]]]
     (mapcat (fn [[prefix shipped roles]]
               (component-definitions root prefix shipped
                                      (mapv (fn [[role name]]

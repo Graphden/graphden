@@ -100,6 +100,17 @@
              :list-items (:binding-list-item grouped)}}))
 
 
+(deftest historical-canvas-bindings-view-keeps-its-selection
+  (let [{:keys [id root graph]} (parsed-configuration)
+        initial-entry (ids/fn-id root :_canvas-bindings-initial-entry)
+        historical (update graph :list-items
+                           #(vec (remove (fn [row] (= initial-entry (:ref-fn-id row))) %)))]
+    (is (= {:view (ids/fn-id (str root ".canvas-bindings") :bindings-view)}
+           (get (config/configuration historical id) :canvas-bindings)))
+    (is (false? (config/valid-roles? :canvas-bindings #{:initial})))
+    (is (false? (config/valid-roles? :canvas-type-structure #{:view})))))
+
+
 (deftest ordinary-manifest-projects-only-terminal-identity-values
   (let [{:keys [id root graph]} (parsed-configuration)]
     (is (= {:explorer {:initial (ids/fn-id (str root ".explorer") :explorer-toolbar-initial)
@@ -124,7 +135,8 @@
             :canvas-metadata {:view (ids/fn-id (str root ".canvas-metadata") :metadata-view)}
             :canvas-type-structure {:initial (ids/fn-id (str root ".canvas-type-structure") :type-structure-initial)
                                     :view (ids/fn-id (str root ".canvas-type-structure") :type-structure-view)}
-            :canvas-bindings {:view (ids/fn-id (str root ".canvas-bindings") :bindings-view)}
+            :canvas-bindings {:initial (ids/fn-id (str root ".canvas-bindings") :bindings-initial)
+                              :view (ids/fn-id (str root ".canvas-bindings") :bindings-view)}
             :tutorial-catalog {:view (ids/fn-id (str root ".tutorial-catalog") :catalog-view)}
             :execution-status {:view (ids/fn-id (str root ".execution-status") :status-view)}
             :execution-path {:view (ids/fn-id (str root ".execution-path") :path-view)}

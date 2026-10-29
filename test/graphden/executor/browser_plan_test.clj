@@ -1172,7 +1172,7 @@
         "old view callers omit diff without changing the chrome")
     (is (= "gd-insp-chrome" (get-in values [0 :tree 1 :class])))
     (is (= "gd-diff-insp-graph-head" (get-in values [3 :tree 1 :class])))
-    (is (= "branch-diff-fn-name" (get-in values [4 :tree 2 1 :class])))
+    (is (= "branch-diff-fn-name" (get-in values [4 :tree 3 1 :class])))
     (is (= "gd-diff-insp-graph-entry" (get-in values [5 :tree 1 :class])))))
 
 

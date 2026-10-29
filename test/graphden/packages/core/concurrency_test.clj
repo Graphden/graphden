@@ -18,6 +18,7 @@
 
 (use-fixtures :once (impls/impls-fixture "core" "concurrency"))
 
+
 (defn- await-condition
   "Poll an asynchronous state transition for at most five seconds. An exit
    atom may be set before its worker has finished logging and terminated."

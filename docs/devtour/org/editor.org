@@ -555,26 +555,26 @@ Each server partial captures a latest-wins read token and exact native host. Tab
 :PROPERTIES:
 :CUSTOM_ID: editor/definitions
 :FILE: src/graphden/editor/component_templates.clj
-:LINE: 168
+:LINE: 169
 :MINS: 6.8
 :END:
 
 Copies the fixed shipped theme, menu, picker, Recents, Inspector, Explorer, tutorial catalogue, passive canvas, value/type, inheritance and function metadata definitions into a fresh named namespace. An ordinary descriptor list selects component entry identities. Shared menu colors reference copied theme leaves; menu hover owns a local literal. Color wrappers retain the canonical color type and ordinary editor form. This is an advanced legacy compatibility path; Lesson 25 instead creates a small inherited menu child and captures its free theme input.
 
-- source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn definitions][src/graphden/editor/component_templates.clj:168]]
+- source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn definitions][src/graphden/editor/component_templates.clj:169]]
 - same file :: [[file:editor.org::#editor/selected-definitions][selected-definitions]]
 
 * 42. selected-definitions
 :PROPERTIES:
 :CUSTOM_ID: editor/selected-definitions
 :FILE: src/graphden/editor/component_templates.clj
-:LINE: 270
+:LINE: 271
 :MINS: 2.5
 :END:
 
 The retained legacy selective-copy compatibility path keeps only the chosen component and its owned reference closure. A new ordinary concat manifest references the previous authored manifest and the new descriptor list, preserving existing identities and edits. Legacy slots are adapted to descriptors without copying their bodies. Retained identities are outside the create-only receipt; group creation does not activate a theme.
 
-- source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn selected-definitions][src/graphden/editor/component_templates.clj:270]]
+- source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn selected-definitions][src/graphden/editor/component_templates.clj:271]]
 - same file :: [[file:editor.org::#editor/definitions][definitions]]
 
 * 43. apply!
@@ -705,13 +705,13 @@ Sends authenticated editor requests and handles 401 by clearing the stored crede
 :PROPERTIES:
 :CUSTOM_ID: editor/_tourTick
 :FILE: resources/packages/app/editor/editor-tour.js
-:LINE: 326
+:LINE: 322
 :MINS: 3.7
 :END:
 
 Evaluates the current interactive lesson step against editor state. Lesson data comes from ~app.tour/_tour-lessons~; this engine ensures required panels and targets are visible, checks the declared completion condition, and advances when it succeeds.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-tour.js::function _tourTick() {][resources/packages/app/editor/editor-tour.js:326]]
+- source :: [[file:../../../resources/packages/app/editor/editor-tour.js::function _tourTick() {][resources/packages/app/editor/editor-tour.js:322]]
 - referenced from :: [[file:editor.org::#editor/_tourStartPositioning][_tourStartPositioning]]
 
 * 54. gdTourBeginBranchCreation

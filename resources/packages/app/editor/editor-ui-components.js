@@ -51,7 +51,8 @@
   }
   function runtime(plan, options) {
     const evaluator = window.GraphdenBrowser.createRuntime(plan, options);
-    return {...evaluator, run(entry, supplied = {}, operationBudget = null) {
+    return {...evaluator, hasEntry(entry) { return Object.hasOwn(plan.entries, entry); },
+      run(entry, supplied = {}, operationBudget = null) {
       const identity = plan.entries[entry];
       const accepted = new Set(plan.inputs[identity].accepted);
       // A graph edit can remove a formerly free input. Only the fixed host's

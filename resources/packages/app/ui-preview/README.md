@@ -574,9 +574,12 @@ interruptible. A fresh builtin retry has no personal batch deadline. No new
 user type-depth limit is imposed.
 
 The view renders structure labels, headings, descriptions, constraints and
-resolution decorations. The separate view-only
-`app.ui-canvas-bindings/bindings-view` renders argument/source labels,
-provenance explanations and seal presentation. Inputs contain finite authorized
+resolution decorations. The separate `app.ui-canvas-bindings/bindings-view`
+renders argument/source labels, provenance explanations, seal presentation and
+flag-form copy. Its pure `bindings-initial` entry supplies the λ and branch-local
+form's initial mode, checked and disabled state. An older personal component
+with only `view` keeps its view while the builtin supplies `initial`.
+Inputs contain finite authorized
 metadata, never registries, raw binding values or callbacks. Literal string-key
 lookup tables are ordinary `zipmap` compositions so stored JVM execution and
 browser plans retain identical key semantics.
@@ -588,6 +591,8 @@ native popover flow separates optional scrolling content from action rows;
 pan/zoom only reanchors cached hosts. Collapsing, Escape, host reaping and auth
 changes dispose nested renderers/styles and reject late replies. Seal editability,
 checked/disabled state, writes and the nonempty binder-blocking reason stay native.
+Flag policy receipts are checked against the supplied facts before native controls
+consume them; flag writes stay native.
 Constraint display messages likewise never decide whether a literal is valid.
 
 ## Explicit read-only server calls

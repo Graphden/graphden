@@ -91,10 +91,11 @@ and accessible anchors when presentation changes. See the
 
 Expanded type structure and human/compact formatting use
 `app.ui-canvas-type-structure/type-structure-view` with a pure `initial` entry.
-Argument/source labels and seal explanations use the separate view-only
-`app.ui-canvas-bindings/bindings-view`. Formatting is presentation: picker values,
-type references, native validation, binder blocking and writes retain their
-canonical authority. Runtime changes update retained passive children without
+Argument/source labels, seal explanations and flag-form copy use
+`app.ui-canvas-bindings/bindings-view`. Its pure `bindings-initial` entry supplies
+the λ and branch-local form's initial mode, checked and disabled state. Picker
+values, type references, native validation, binder blocking and writes retain
+their canonical authority. Runtime changes update retained passive children without
 replacing focused native controls. See the
 [expanded type/binding contract](../resources/packages/app/ui-preview/README.md#expanded-type-and-binding-presentation).
 

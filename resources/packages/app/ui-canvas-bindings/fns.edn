@@ -1,6 +1,6 @@
 {:namespace "app.ui-canvas-bindings",
  :description
- "Passive binding labels and seal explanations. Native controls retain authority, visibility, checked state and handlers.",
+ "Binding display and finite flag-form policy. Native controls retain authority, focus, writes and handlers.",
  :fns
  [{:name :_checkbox-label-table,
    :parent :zipmap,
@@ -12,6 +12,41 @@
      "Require it here"
      "Optional"]}}
   {:name :_entry, :type {:name :text, :first :bool}}
+  {:name :_flag-policy-input
+   :type {:surface [:refine :text {:constraint [:in #{"lambda" "branch-local"}]}]
+          :declared :bool :names-count :int :own :bool :inherited :bool}}
+  {:name :_flag-policy-result :type {:mode :text :checked :bool :disabled :bool}}
+  {:name :_flag-input :parent :const
+   :args {:value {:as :inputs :type :_flag-policy-input}}}
+  {:name :_flag-surface :parent :get
+   :args {:coll :_flag-input :key {:value :surface} :default ""}}
+  {:name :_flag-declared :parent :get
+   :args {:coll :_flag-input :key {:value :declared} :default false}}
+  {:name :_flag-names-count :parent :get
+   :args {:coll :_flag-input :key {:value :names-count} :default 0}}
+  {:name :_flag-own :parent :get
+   :args {:coll :_flag-input :key {:value :own} :default false}}
+  {:name :_flag-inherited :parent :get
+   :args {:coll :_flag-input :key {:value :inherited} :default false}}
+  {:name :_flag-no-names :parent :equal?
+   :args {:a :_flag-names-count :b 0}}
+  {:name :_flag-declared-mode :parent :if
+   :args {:test :_flag-no-names :then "none" :else "named"}}
+  {:name :_flag-lambda-mode :parent :if
+   :args {:test :_flag-declared :then :_flag-declared-mode :else "derived"}}
+  {:name :_flag-is-lambda :parent :equal?
+   :args {:a :_flag-surface :b "lambda"}}
+  {:name :_flag-mode :parent :if
+   :args {:test :_flag-is-lambda :then :_flag-lambda-mode :else ""}}
+  {:name :_flag-branch-checked :parent :if
+   :args {:test :_flag-inherited :then true :else :_flag-own}}
+  {:name :_flag-checked :parent :if
+   :args {:test :_flag-is-lambda :then false :else :_flag-branch-checked}}
+  {:name :_flag-disabled :parent :if
+   :args {:test :_flag-is-lambda :then false :else :_flag-inherited}}
+  {:name :bindings-initial :parent :zipmap :return-type :_flag-policy-result
+   :args {:keys [{:value :mode} {:value :checked} {:value :disabled}]
+          :vals [:_flag-mode :_flag-checked :_flag-disabled]}}
   {:name :_inputs,
    :type
    {:terminal :bool,
@@ -45,7 +80,16 @@
          "seal-hint"
          "provenance"
          "seal-inherited"
-         "seal-checkbox"}]}],
+         "seal-checkbox"
+         "lambda-head"
+         "lambda-mode-derived-label"
+         "lambda-mode-derived-hint"
+         "lambda-mode-none-label"
+         "lambda-mode-none-hint"
+         "lambda-mode-named-label"
+         "lambda-mode-named-hint"
+         "branch-local-label"
+         "branch-local-hint"}]}],
     :any :bool}}
   {:name :_surface,
    :parent :get,
@@ -470,6 +514,35 @@
   {:name :_empty-seal,
    :parent :if,
    :args {:test :_any, :then "", :else "No seal on this slot."}}
+  {:name :_flag-copy-table :parent :zipmap
+   :args {:keys ["lambda-head"
+                  "lambda-mode-derived-label" "lambda-mode-derived-hint"
+                  "lambda-mode-none-label" "lambda-mode-none-hint"
+                  "lambda-mode-named-label" "lambda-mode-named-hint"
+                  "branch-local-label"]
+          :vals ["λ call-site parameters — what a HOF or a route fills per call when it hands this fn over as a callable"
+                 " Derived" " — the compile picks the one unambiguous free arg; refuses when several qualify"
+                 " None — []" " — everything is captured from the graph; the callable takes no per-call input (a handler chain)"
+                 " These, in order" " — the listed free args are filled per call; the rest is captured"
+                 " Branch-local — version rows of this fn stay on the branch they were written on; a merge never carries them"]}}
+  {:name :_flag-display-copy :parent :get
+   :args {:coll :_flag-copy-table :key :_surface :default :_label}}
+  {:name :_branch-hint-source-empty :parent :equal?
+   :args {:a :_source :b ""}}
+  {:name :_branch-hint-source-name :parent :str
+   :args {:parts [":" :_source]}}
+  {:name :_branch-hint-source :parent :if
+   :args {:test :_branch-hint-source-empty :then "an ancestor" :else :_branch-hint-source-name}}
+  {:name :_branch-inherited-hint :parent :str
+   :args {:parts ["Inherited from " :_branch-hint-source
+                  " — a sticky-local ancestor makes every descendant branch-local; re-parent off it to change that."]}}
+  {:name :_branch-hint :parent :if
+   :args {:test :_ancestor :then :_branch-inherited-hint
+          :else "For per-environment configuration: a web-server port, a secret path, a schedule. The flag is on the fn identity — every branch sees the same setting."}}
+  {:name :_surface-branch-hint? :parent :equal?
+   :args {:a :_surface :b "branch-local-hint"}}
+  {:name :_flag-display :parent :if
+   :args {:test :_surface-branch-hint? :then :_branch-hint :else :_flag-display-copy}}
   {:name :_surface-seal-reason?,
    :parent :equal?,
    :args {:a :_surface, :b "seal-reason"}}
@@ -478,7 +551,7 @@
    :args
    {:test :_surface-seal-reason?,
     :then :_read-only-why,
-    :else :_label}}
+    :else :_flag-display}}
   {:name :_surface-seal-empty?,
    :parent :equal?,
    :args {:a :_surface, :b "seal-empty"}}

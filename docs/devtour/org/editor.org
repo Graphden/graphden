@@ -324,13 +324,13 @@ Gives a graph component its own empty DOM host. ~render~ validates live Hiccup a
 :PROPERTIES:
 :CUSTOM_ID: editor/mountCanvasBody
 :FILE: resources/packages/app/editor/editor-passive-canvas.js
-:LINE: 231
+:LINE: 234
 :MINS: 3.5
 :END:
 
 Mounts passive canvas bodies through one shared lifetime and stylesheet mechanism. The app.ui-canvas binding keeps its original display ABI; app.ui-canvas-values separately presents value labels, type chips and inherited type history over finite display facts. Native overlays retain Run, actions, service controls, edit guards, focus and geometry. All bodies share a checked scoped stylesheet; overlay removal disposes their renderers. Scope reconciliation retires old owner facts before refresh, while first preference hydration keeps bodies only within the same authenticated location. Personal markup cannot claim native controls or identities; a malformed surface selects the builtin component. Existing sanitized representation previews stay native siblings. Values styles stay in flow; one measured grid pass reserves card widths, edge labels and type-history row envelopes.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-passive-canvas.js::  function mountCanvasBody(owner, host, surface, facts, options = {}) {][resources/packages/app/editor/editor-passive-canvas.js:231]]
+- source :: [[file:../../../resources/packages/app/editor/editor-passive-canvas.js::  function mountCanvasBody(owner, host, surface, facts, options = {}) {][resources/packages/app/editor/editor-passive-canvas.js:234]]
 - see also :: [[file:editor.org::#editor/createRuntime][createRuntime]], [[file:editor.org::#editor/mount][mount]]
 - referenced from :: [[file:editor.org::#editor/groups][groups]], [[file:editor.org::#editor/projection][projection]], [[file:editor.org::#editor/format][format]], [[file:editor.org::#editor/projection~2][projection]]
 
@@ -377,13 +377,13 @@ Captures immutable authorized type facts before running one selected formatter o
 :PROPERTIES:
 :CUSTOM_ID: editor/projection~2
 :FILE: resources/packages/app/editor/editor-canvas-bindings-graph.js
-:LINE: 11
-:MINS: 1.2
+:LINE: 14
+:MINS: 1.3
 :END:
 
-Projects authorized source labels and finite seal facts into a view-only graph. Native code retains IDs, editability, checkbox state, writes and the binder's nonempty blocking reason. Graph explanations are optional. Unscoped native marks and viewport-bound flow keep controls usable when a personal label is empty, hidden or oversized.
+Projects authorized source labels, finite seal facts and flag-form copy into a passive graph view. The pure initial role supplies checked and disabled flag-form state, validated before native controls consume it. Native code retains IDs, seal editability, writes and the binder's nonempty blocking reason. Unscoped native marks and viewport-bound flow keep controls usable when a personal label is empty, hidden or oversized.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-canvas-bindings-graph.js::  function projection(surface, facts) {][resources/packages/app/editor/editor-canvas-bindings-graph.js:11]]
+- source :: [[file:../../../resources/packages/app/editor/editor-canvas-bindings-graph.js::  function projection(surface, facts) {][resources/packages/app/editor/editor-canvas-bindings-graph.js:14]]
 - see also :: [[file:editor.org::#editor/mountCanvasBody][mountCanvasBody]]
 
 * 29. mountCatalog

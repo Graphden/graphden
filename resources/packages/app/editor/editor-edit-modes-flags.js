@@ -212,21 +212,26 @@ function _lambdaCandidateNames(fn) {
 function enterLambdaParamsEditMode(fn, anchorEl) {
   if (!fn) return;
   const declared = fn['lambda-params'];
-  const mode0 = declared == null ? 'derived' : (declared.length === 0 ? 'none' : 'named');
+  const policy = window.gdCanvasBindingsGraph.flagPolicy({surface: 'lambda',
+    declared: declared != null, 'names-count': Array.isArray(declared) ? declared.length : 0,
+    own: false, inherited: false});
+  let passiveOwner = null;
   openInlineEditPopover({
     anchorEl,
     ariaLabel: 'Call-site parameters',
+    onClosed: () => { if (passiveOwner) window.gdCanvasBindingsGraph.disposeWithin(passiveOwner); },
     makeControl(root) {
+      passiveOwner = root;
       const wrap = document.createElement('div');
       wrap.className = 'lambda-params-edit';
       const head = document.createElement('div');
       head.className = 'lambda-params-edit-head';
-      head.textContent = 'λ call-site parameters — what a HOF or a route fills per call when it hands this fn over as a callable';
+      window.gdMountBindingBody(root, head, 'lambda-head', {});
       wrap.appendChild(head);
       const radios = [
-        ['derived', 'Derived', 'the compile picks the one unambiguous free arg; refuses when several qualify'],
-        ['none', 'None — []', 'everything is captured from the graph; the callable takes no per-call input (a handler chain)'],
-        ['named', 'These, in order', 'the listed free args are filled per call; the rest is captured'],
+        ['derived', 'lambda-mode-derived-label', 'lambda-mode-derived-hint'],
+        ['none', 'lambda-mode-none-label', 'lambda-mode-none-hint'],
+        ['named', 'lambda-mode-named-label', 'lambda-mode-named-hint'],
       ];
       const list = document.createElement('div');
       list.className = 'lambda-params-edit-names';
@@ -268,22 +273,22 @@ function enterLambdaParamsEditMode(fn, anchorEl) {
         for (const cb of list.querySelectorAll('input[type="checkbox"]')) cb.disabled = !named;
         list.classList.toggle('lambda-params-edit-names-off', !named);
       };
-      for (const [value, label, hint] of radios) {
+      for (const [value, labelSurface, hintSurface] of radios) {
         const row = document.createElement('label');
         row.className = 'lambda-params-edit-mode';
         const r = document.createElement('input');
         r.type = 'radio';
         r.name = 'lp-mode';
         r.value = value;
-        r.checked = value === mode0;
+        r.checked = value === policy.mode;
         r.addEventListener('change', refresh);
         row.appendChild(r);
         const text = document.createElement('span');
-        text.textContent = ' ' + label;
+        window.gdMountBindingBody(root, text, labelSurface, {});
         row.appendChild(text);
         const h = document.createElement('span');
         h.className = 'lambda-params-edit-hint';
-        h.textContent = ' — ' + hint;
+        window.gdMountBindingBody(root, h, hintSurface, {});
         row.appendChild(h);
         wrap.appendChild(row);
         if (value === 'named') {
@@ -357,10 +362,15 @@ function enterLambdaParamsEditMode(fn, anchorEl) {
 function enterBranchLocalEditMode(fn, anchorEl, facts) {
   if (!fn) return;
   const inherited = !!(facts && !facts.own);
+  const policy = window.gdCanvasBindingsGraph.flagPolicy({surface: 'branch-local',
+    declared: false, 'names-count': 0, own: fn['branch-local?'] === true, inherited});
+  let passiveOwner = null;
   openInlineEditPopover({
     anchorEl,
     ariaLabel: 'Branch-local',
+    onClosed: () => { if (passiveOwner) window.gdCanvasBindingsGraph.disposeWithin(passiveOwner); },
     makeControl(root) {
+      passiveOwner = root;
       const wrap = document.createElement('div');
       wrap.className = 'branch-local-edit';
       const row = document.createElement('label');
@@ -368,16 +378,15 @@ function enterBranchLocalEditMode(fn, anchorEl, facts) {
       const cb = document.createElement('input');
       cb.type = 'checkbox';
       cb.dataset.branchLocal = 'toggle';
-      cb.checked = !!(facts) || fn['branch-local?'] === true;
-      cb.disabled = inherited;
+      cb.checked = policy.checked;
+      cb.disabled = policy.disabled;
       row.appendChild(cb);
-      row.appendChild(document.createTextNode(' Branch-local — version rows of this fn stay on the branch they were written on; a merge never carries them'));
+      window.gdMountBindingBody(root, row, 'branch-local-label', {});
       wrap.appendChild(row);
       const hint = document.createElement('div');
       hint.className = 'branch-local-edit-hint';
-      hint.textContent = inherited
-        ? ('Inherited from ' + (facts.seed ? ':' + facts.seed : 'an ancestor') + ' — a sticky-local ancestor makes every descendant branch-local; re-parent off it to change that.')
-        : 'For per-environment configuration: a web-server port, a secret path, a schedule. The flag is on the fn identity — every branch sees the same setting.';
+      window.gdMountBindingBody(root, hint, 'branch-local-hint',
+        {ancestor: inherited, source: facts?.seed || ''});
       wrap.appendChild(hint);
       wrap._cb = cb;
       root.insertBefore(wrap, root.firstChild);

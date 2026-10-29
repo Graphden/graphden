@@ -210,10 +210,14 @@
    :args {:items [:_canvas-type-structure-initial-entry :_canvas-type-structure-view-entry]}}
   {:name :_canvas-bindings-view-id :parent :const :return-type :fn-ref
    :args {:value {:ref :app.ui-canvas-bindings/bindings-view :type :fn-ref}}}
+  {:name :_canvas-bindings-initial-id :parent :const :return-type :fn-ref
+   :args {:value {:ref :app.ui-canvas-bindings/bindings-initial :type :fn-ref}}}
+  {:name :_canvas-bindings-initial-entry :parent :zipmap :return-type :_component-entry
+   :args {:keys [{:value :role} {:value :fn-id}] :vals [{:value :initial} :_canvas-bindings-initial-id]}}
   {:name :_canvas-bindings-view-entry :parent :zipmap :return-type :_component-entry
    :args {:keys [{:value :role} {:value :fn-id}] :vals [{:value :view} :_canvas-bindings-view-id]}}
   {:name :_canvas-bindings-entries :parent :list :return-type :_component-entries
-   :args {:items [:_canvas-bindings-view-entry]}}
+   :args {:items [:_canvas-bindings-initial-entry :_canvas-bindings-view-entry]}}
   {:name :editor-defaults :parent :zipmap
    :description "Shared editor defaults. Personal ordinary graphs may reference these entries or override exposed constructor slots without copying their component bodies."
    :args {:keys [:_account-menu-view-id :_account-methods-view-id :_account-security-view-id :_publish-form-view-id :_org-switcher-view-id :_authoring-view-id :_fn-picker-view-id :_recents-view-id :_inspector-view-id :_explorer-view-id :_tutorial-catalog-view-id :_execution-status-view-id :_execution-path-view-id :_feedback-view-id :_keymap-view-id :_appearance-view-id :_canvas-view-id :_canvas-values-view-id :_canvas-inheritance-view-id :_canvas-metadata-view-id :_canvas-type-structure-view-id :_canvas-bindings-view-id]

@@ -7,7 +7,10 @@
     editable: false, optional: false, terminal: false, 'list-closed': false,
     required: false, entries: []};
   const surfaces = new Set(['label', 'source', 'provenance', 'seal-badge', 'seal-header',
-    'seal-inherited', 'seal-checkbox', 'seal-hint', 'seal-empty', 'seal-reason']);
+    'seal-inherited', 'seal-checkbox', 'seal-hint', 'seal-empty', 'seal-reason',
+    'lambda-head', 'lambda-mode-derived-label', 'lambda-mode-derived-hint',
+    'lambda-mode-none-label', 'lambda-mode-none-hint', 'lambda-mode-named-label',
+    'lambda-mode-named-hint', 'branch-local-label', 'branch-local-hint']);
   function projection(surface, facts) {
     const input = {surface, ...defaults, ...facts};
     if (!surfaces.has(surface) || input.surface !== surface
@@ -33,7 +36,30 @@
       return layout;
     },
   });
+  const field = (value, name) => value instanceof Map
+    ? value.get(window.GraphdenBrowser.keyword(name)) : undefined;
+  function flagPolicy(facts) {
+    if (!facts || !['lambda', 'branch-local'].includes(facts.surface)
+      || typeof facts.declared !== 'boolean' || !Number.isSafeInteger(facts['names-count'])
+      || facts['names-count'] < 0 || typeof facts.own !== 'boolean'
+      || typeof facts.inherited !== 'boolean') throw new Error('Invalid flag facts');
+    return component.initialBatch(run => run(facts, output => {
+      const mode = field(output, 'mode');
+      const checked = field(output, 'checked');
+      const disabled = field(output, 'disabled');
+      const expectedMode = facts.declared
+        ? (facts['names-count'] === 0 ? 'none' : 'named') : 'derived';
+      if (!(output instanceof Map) || output.size !== 3
+        || mode !== (facts.surface === 'lambda' ? expectedMode : '')
+        || checked !== (facts.surface === 'branch-local' && (facts.inherited || facts.own))
+        || disabled !== (facts.surface === 'branch-local' && facts.inherited)) {
+        throw new Error('Invalid flag policy');
+      }
+      return {mode, checked, disabled};
+    }));
+  }
   window.gdCanvasBindingsGraph = {...component,
+    flagPolicy,
     bindGeometry(owner, callback) { geometry.set(owner, callback); },
     dispose(owner) { geometry.delete(owner); component.dispose(owner); },
     disposeWithin(root) {

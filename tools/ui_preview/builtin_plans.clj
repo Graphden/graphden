@@ -60,7 +60,8 @@
    :canvasMetadata {:view (ids/fn-id "app.ui-canvas-metadata" :metadata-view)}
    :canvasTypeStructure {:initial (ids/fn-id "app.ui-canvas-type-structure" :type-structure-initial)
                          :view (ids/fn-id "app.ui-canvas-type-structure" :type-structure-view)}
-   :canvasBindings {:view (ids/fn-id "app.ui-canvas-bindings" :bindings-view)}
+   :canvasBindings {:initial (ids/fn-id "app.ui-canvas-bindings" :bindings-initial)
+                    :view (ids/fn-id "app.ui-canvas-bindings" :bindings-view)}
    :tutorialCatalog {:view (ids/fn-id "app.ui-tutorial-catalog" :catalog-view)}
    :executionStatus {:view (ids/fn-id "app.ui-execution" :status-view)}
    :executionPath {:view (ids/fn-id "app.ui-execution" :path-view)}

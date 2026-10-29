@@ -142,6 +142,16 @@ function boot(narrow = true) {
   batch.ctx.component.invalidate();
   assert(batch.ctx.component.revision() > revision, 'cache revision retires synchronously before microtasks');
 
+  const oldPersonal = boot();
+  oldPersonal.select({hasEntry: entry => entry !== 'initial', run: () => oldPersonal.output('personal')});
+  await oldPersonal.ctx.component.reload();
+  const personalView = oldPersonal.mount();
+  assert.equal(personalView.host.textContent, 'personal');
+  const builtinPolicy = oldPersonal.ctx.component.initialBatch(run => run(new Map([['value', 7]]), value => value));
+  assert.equal(builtinPolicy, 7, 'missing personal initial uses builtin policy');
+  personalView.body.refresh();
+  assert.equal(personalView.host.textContent, 'personal', 'policy fallback keeps the personal view selected');
+
   const late = boot();
   let completeLoad;
   late.select(new Promise(resolve => { completeLoad = resolve; }));

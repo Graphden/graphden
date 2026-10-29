@@ -167,7 +167,10 @@ window.gdCreatePassiveCanvas = config => {
   // adapter validates it before the native owner consumes any receipt.
   function initialBatch(build) {
     reconcileScopes();
-    const runtime = selected && !rejected.has(selected) ? selected : builtin();
+    // Older personal components may have a valid view but no newer initial
+    // policy. Keep their view selected and use the builtin for that role.
+    const runtime = selected && !rejected.has(selected) && selected.hasEntry?.('initial') !== false
+      ? selected : builtin();
     const own = generation;
     const started = context();
     const run = current => {

@@ -1522,9 +1522,10 @@
      :see [[:editor "mountCanvasBody"] [:editor "createRuntime"]]}
 
     {:file "resources/packages/app/editor/editor-canvas-bindings-graph.js" :defn projection
-     :say "Projects authorized source labels and finite seal facts into a view-only graph. Native
-           code retains IDs, editability, checkbox state, writes and the binder's nonempty blocking
-           reason. Graph explanations are optional. Unscoped native marks and viewport-bound flow
+     :say "Projects authorized source labels, finite seal facts and flag-form copy into a passive
+           graph view. The pure initial role supplies checked and disabled flag-form state, validated
+           before native controls consume it. Native code retains IDs, seal editability, writes and
+           the binder's nonempty blocking reason. Unscoped native marks and viewport-bound flow
            keep controls usable when a personal label is empty, hidden or oversized."
      :see [[:editor "mountCanvasBody"]]}
 

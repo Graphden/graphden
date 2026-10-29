@@ -821,12 +821,37 @@ async function cleanup(page) {
       document.querySelector('.branch-diff-header')?.textContent || '');
     assert(/Review:/.test(reviewHead) && /→ main/.test(reviewHead),
            'review dialog frames the proposal against its BASE: ' + reviewHead);
-    // The change list is client-rendered from diff-view; open it.
+    // The change list keeps native anchors around passive graph entry bodies.
     await page.evaluate(() => {
       const d = document.querySelector('.bd-review-changes');
       if (d && !d.open) d.open = true;
     });
     await page.waitForSelector('.bd-review-changes .branch-diff-row', {timeout: 15000});
+    const reviewHeads = await page.evaluate(() => {
+      const heads = [...document.querySelectorAll('.bd-review-changes .branch-diff-row-head')];
+      return {count: heads.length, graph: heads.every(head => {
+        const host = head.querySelector('.gd-diff-graph-host');
+        return host && GraphdenRenderer.ownsTarget(host)
+          && !!host.querySelector('.gd-diff-insp-graph-head .branch-diff-fn-name');
+      })};
+    });
+    assert(reviewHeads.count > 0 && reviewHeads.graph,
+           'review group headings use the graph view: ' + JSON.stringify(reviewHeads));
+    const reviewEntries = await page.evaluate(() => {
+      const list = document.querySelector('.bd-review-changes');
+      const entries = [...list.querySelectorAll('.branch-diff-entry')];
+      return {count: entries.length,
+        graph: entries.every(row => {
+          const host = row.querySelector('.gd-diff-graph-host');
+          return host && GraphdenRenderer.ownsTarget(host)
+            && !!host.querySelector('.gd-diff-insp-graph-entry')
+            && !GraphdenRenderer.ownsTarget(row);
+        }),
+        anchors: entries.every(row => !!row.dataset.anchorId)};
+    });
+    assert(reviewEntries.count > 0 && reviewEntries.graph && reviewEntries.anchors,
+           'review entries use graph content under native anchors: '
+           + JSON.stringify(reviewEntries));
 
     // The probe's group row carries data-anchor attrs; open its composer.
     const rowSel = '.branch-diff-row[data-diff-fn-name="' + PROBE_FN + '"]';
@@ -905,6 +930,16 @@ async function cleanup(page) {
                          || /no differences/i.test(d.textContent));
     }, {timeout: 20000});
     assert(true, 'suggestion Δ preview lazy-loads its diff on expand');
+    const previewEntries = await page.evaluate(() => {
+      const entries = [...document.querySelectorAll('.bd-sugg-preview .branch-diff-entry')];
+      return {count: entries.length,
+        graph: entries.every(row => GraphdenRenderer.ownsTarget(
+          row.querySelector('.gd-diff-graph-host'))),
+        comments: document.querySelectorAll('.bd-sugg-preview .branch-diff-comment-btn').length};
+    });
+    assert(previewEntries.count > 0 && previewEntries.graph && previewEntries.comments === 0,
+           'suggestion preview uses passive graph entries without comment actions: '
+           + JSON.stringify(previewEntries));
     const newBtn = await page.evaluate(() =>
       !!document.querySelector('.branch-diff-suggest-new'));
     assert(newBtn, '"+ Suggest a change" affordance present');

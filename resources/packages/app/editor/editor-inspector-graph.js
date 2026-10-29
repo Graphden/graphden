@@ -30,7 +30,7 @@
   const compareInputs = (surface) => value({...metadata, narrow: narrow.matches, surface,
     usages: value({rows: [], count: 0, truncated: false})});
   function compareView(surface, diff) {
-    if (surface !== 'compare-head' && surface !== 'compare-entry') throw new Error('Invalid Inspector compare surface');
+    if (!['compare-head', 'compare-entry', 'compare-review-head'].includes(surface)) throw new Error('Invalid Inspector compare surface');
     if (!Array.isArray(diff.fields)) throw new Error('Invalid Inspector compare fields');
     const supplied = {inputs: compareInputs(surface),
       state: value({tab: 'overview', open: false, handled: false}),
@@ -41,7 +41,7 @@
       const tree = window.GraphdenRenderer.vnode(field(view, 'tree'), 'gd-inspdiff', 10000);
       function passive(node) {
         if (!node || typeof node !== 'object') return;
-        if (node.type !== 'span' && node.type !== 'div') throw new Error('Inspector compare must be passive');
+        if (!['span', 'div', 'strong'].includes(node.type)) throw new Error('Inspector compare must be passive');
         if (Object.keys(node.props).some(name => !['className', 'title', 'aria-hidden', 'aria-label', 'children', 'key'].includes(name))) throw new Error('Inspector compare cannot own actions or anchors');
         if (String(node.props.className || '').split(/\s+/).some(name => nativeCompareClasses.has(name))) throw new Error('Inspector compare cannot forge native owners');
         for (const child of children(node)) passive(child);

@@ -302,6 +302,8 @@
        {:name :_inspector-diff-local-node :parent :hiccup :args {:tag "span" :attrs {:value {:class "branch-diff-row-local-badge" :title "Won't propagate on merge — branch-local fn"}} :children ["📍 branch-local"]}}
        {:name :_inspector-diff-local-visible :parent :if :args {:test :_inspector-diff-local :then :_inspector-diff-local-node :else nil}}
        {:name :_inspector-diff-head-tree :parent :hiccup :args {:tag "span" :attrs {:value {:class "gd-diff-insp-graph-head"}} :children [:_inspector-diff-marker :_inspector-diff-vs-node :_inspector-diff-effects-visible :_inspector-diff-local-visible]}}
+       {:name :_inspector-diff-review-name :parent :hiccup :args {:tag "strong" :attrs {:value {:class "branch-diff-fn-name"}} :children [:_inspector-diff-branch]}}
+       {:name :_inspector-diff-review-head-tree :parent :hiccup :args {:tag "span" :attrs {:value {:class "gd-diff-insp-graph-head"}} :children [:_inspector-diff-marker :_inspector-diff-review-name :_inspector-diff-local-visible]}}
        {:name :_inspector-diff-slot-empty :parent :equal? :args {:a :_inspector-diff-slot :b ""}}
        {:name :_inspector-diff-slot-display :parent :if :args {:test :_inspector-diff-slot-empty :then "?" :else :_inspector-diff-slot}}
        {:name :_inspector-diff-position-empty :parent :equal? :args {:a :_inspector-diff-position :b ""}}
@@ -336,10 +338,13 @@
        {:name :_inspector-diff-entry-content :parent :if :args {:test :_inspector-diff-fields-empty :then :_inspector-diff-preview-node :else :_inspector-diff-fields-node}}
        {:name :_inspector-diff-entry-tree :parent :hiccup :args {:tag "span" :attrs {:value {:class "gd-diff-insp-graph-entry"}} :children [:_inspector-diff-marker :_inspector-diff-entry-label :_inspector-diff-entry-content]}}
        {:name :_inspector-diff-head-surface :parent :equal? :args {:a :_inspector-surface :b "compare-head"}}
+       {:name :_inspector-diff-review-head-surface :parent :equal? :args {:a :_inspector-surface :b "compare-review-head"}}
        {:name :_inspector-diff-entry-surface :parent :equal? :args {:a :_inspector-surface :b "compare-entry"}}
-       {:name :_inspector-diff-tree :parent :if :args {:test :_inspector-diff-head-surface :then :_inspector-diff-head-tree :else :_inspector-diff-entry-tree}}
+       {:name :_inspector-diff-review-or-entry :parent :if :args {:test :_inspector-diff-review-head-surface :then :_inspector-diff-review-head-tree :else :_inspector-diff-entry-tree}}
+       {:name :_inspector-diff-tree :parent :if :args {:test :_inspector-diff-head-surface :then :_inspector-diff-head-tree :else :_inspector-diff-review-or-entry}}
        {:name :_inspector-diff-styles :parent :list :args {:items [{:value {:selector "& .gd-diff-insp-graph-head" :declarations {"display" "inline-flex" "align-items" "center" "gap" "6px"}}} {:value {:selector "& .gd-diff-insp-graph-entry" :declarations {"display" "contents"}}}]}}
        {:name :_inspector-diff-view :parent :_inspector-view-fields :args {:vals [:_inspector-diff-tree :_inspector-diff-styles "overview" false false]}}
-       {:name :_inspector-diff-surface :parent :if :args {:test :_inspector-diff-head-surface :then true :else :_inspector-diff-entry-surface}}
+       {:name :_inspector-diff-review-or-entry-surface :parent :if :args {:test :_inspector-diff-review-head-surface :then true :else :_inspector-diff-entry-surface}}
+       {:name :_inspector-diff-surface :parent :if :args {:test :_inspector-diff-head-surface :then true :else :_inspector-diff-review-or-entry-surface}}
        {:name :_inspector-diff-or-chrome-view :parent :if :args {:test :_inspector-diff-surface :then :_inspector-diff-view :else :_inspector-chrome-view}}
        {:name :inspector-view, :parent :if, :args {:test :_inspector-usages-surface, :then :_usages-view, :else :_inspector-diff-or-chrome-view}}]}

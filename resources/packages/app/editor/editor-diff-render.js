@@ -1,11 +1,7 @@
-// Client renderer of DIFF-VIEW GROUPS — the DOM the retired server
-// partial used to emit, extracted from editor-diff-mode.js so the one
-// renderer three surfaces share (the review dialog's "What changed"
-// list, per-suggestion Δ previews, the inspector's diff panel) is its
-// own module rather than a compare-mode internal. Same classes → same
-// CSS; rows/entries carry the data-anchor-* hooks the thread attacher
-// (editor-branch-diff.js) binds against. Loads BEFORE branch-diff and
-// diff-mode in _editor-script-paths.
+// Native group/anchor owner for the review dialog and suggestion previews.
+// Passive entry content uses the Inspector compare graph. The native fallback
+// remains for an unavailable or invalid personal view. Loads before the
+// Inspector graph owner; look it up only when a list is rendered.
 //
 // `opts` on the render fns (row CLICK behaviour is the caller's job —
 // the renderer only builds DOM):
@@ -124,7 +120,12 @@ function gdDiffRenderGroup(g, opts) {
     e['entity-name'] !== 'fn' || e.fields?.length || e.preview);
   const entries = document.createElement('div');
   entries.className = 'branch-diff-entries';
-  keep.forEach((e) => { entries.appendChild(gdDiffRenderEntry(e, opts)); });
+  keep.forEach((e) => {
+    const host = opts.graph ? gdDiffInspectorHost() : null;
+    const row = gdDiffRenderEntry(e, host ? {...opts, body: () => host} : opts);
+    if (host) _gdReviewDiffEntries.set(row, e);
+    entries.appendChild(row);
+  });
   if (opts.entriesOnly) return entries;
 
   const row = document.createElement('div');
@@ -139,17 +140,22 @@ function gdDiffRenderGroup(g, opts) {
   }
   const head = document.createElement('div');
   head.className = 'branch-diff-row-head';
-  head.appendChild(gdDiffMarkerEl(g.change));
-  const name = document.createElement('strong');
-  name.className = 'branch-diff-fn-name';
-  name.textContent = g['fn-label'] || '?';
-  head.appendChild(name);
-  if (g['branch-local?']) {
-    const badge = document.createElement('span');
-    badge.className = 'branch-diff-row-local-badge';
-    badge.title = "Won't propagate on merge — branch-local fn";
-    badge.textContent = '📍 branch-local';
-    head.appendChild(badge);
+  if (opts.graph) {
+    head.appendChild(gdDiffInspectorHost());
+    _gdReviewDiffGroups.set(row, g);
+  } else {
+    head.appendChild(gdDiffMarkerEl(g.change));
+    const name = document.createElement('strong');
+    name.className = 'branch-diff-fn-name';
+    name.textContent = g['fn-label'] || '?';
+    head.appendChild(name);
+    if (g['branch-local?']) {
+      const badge = document.createElement('span');
+      badge.className = 'branch-diff-row-local-badge';
+      badge.title = "Won't propagate on merge — branch-local fn";
+      badge.textContent = '📍 branch-local';
+      head.appendChild(badge);
+    }
   }
   if (opts.comments !== false && g['fn-id']) {
     head.appendChild(gdDiffCommentBtnEl('fn', g['fn-id']));
@@ -159,8 +165,73 @@ function gdDiffRenderGroup(g, opts) {
   return row;
 }
 
+const _gdReviewDiffEntries = new WeakMap();
+const _gdReviewDiffGroups = new WeakMap();
+const _gdReviewDiffLists = new Set();
+let _gdReviewDiffSubscription = null;
+
+function gdDiffReviewEntryInput(entry) {
+  return {change: entry.change, branch: '', effects: '', local: false,
+    entity: entry['entity-name'], slot: entry['slot-name'] || '',
+    position: Number.isSafeInteger(entry.position) ? String(entry.position) : '',
+    preview: entry.preview || '',
+    fields: (entry.fields || []).map(field => ({name: field.field,
+      old: String(field.target ?? '∅'), new: String(field.source ?? '∅'),
+      'show-name': field.field !== 'value'}))};
+}
+
+function gdDiffPaintReviewList(container) {
+  const rules = new Map();
+  for (const row of container.querySelectorAll('.branch-diff-row')) {
+    const group = _gdReviewDiffGroups.get(row);
+    const host = row.querySelector('.branch-diff-row-head .gd-diff-graph-host');
+    if (group && host) gdDiffInspectorPaint(host, 'compare-review-head',
+      {change: group.change, branch: group['fn-label'] || '?', effects: '',
+        local: !!group['branch-local?'], entity: '', slot: '', position: '',
+        preview: '', fields: []}, rules);
+  }
+  for (const row of container.querySelectorAll('.branch-diff-entry')) {
+    const entry = _gdReviewDiffEntries.get(row);
+    const host = row.querySelector('.gd-diff-graph-host');
+    if (entry && host) gdDiffInspectorPaint(host, 'compare-entry',
+      gdDiffReviewEntryInput(entry), rules, entry);
+  }
+  gdDiffInspectorSheet(container, rules);
+}
+
+function gdDiffDisposeReviewGroups(container) {
+  if (!container || !_gdReviewDiffLists.delete(container)) return;
+  for (const host of container.querySelectorAll('.gd-diff-graph-host')) gdDiffInspectorUnmount(host);
+  window.GraphdenStyles?.release(_gdDiffInspectorSheets.get(container)?.sheet);
+  _gdDiffInspectorSheets.delete(container);
+  if (!_gdReviewDiffLists.size && _gdReviewDiffSubscription) {
+    _gdReviewDiffSubscription();
+    _gdReviewDiffSubscription = null;
+  }
+}
+
+function gdDiffDisposeReviewWithin(root) {
+  for (const list of _gdReviewDiffLists) {
+    if (root.contains(list)) gdDiffDisposeReviewGroups(list);
+  }
+}
+
 function gdDiffRenderGroups(container, groups, opts) {
+  gdDiffDisposeReviewGroups(container);
+  container.replaceChildren();
+  const graph = !!(window.gdInspectorGraph?.compareView && window.GraphdenRenderer?.mount)
+    && !container.closest('.branch-diff-modal.hidden');
   const frag = document.createDocumentFragment();
-  (groups || []).forEach((g) => { frag.appendChild(gdDiffRenderGroup(g, opts)); });
+  (groups || []).forEach((g) => { frag.appendChild(gdDiffRenderGroup(g, {...opts, graph})); });
   container.appendChild(frag);
+  if (!graph) return;
+  _gdReviewDiffLists.add(container);
+  gdDiffPaintReviewList(container);
+  if (!_gdReviewDiffSubscription) {
+    let first = true;
+    _gdReviewDiffSubscription = window.gdInspectorGraph.subscribeRuntime(() => {
+      if (first) { first = false; return; }
+      for (const list of _gdReviewDiffLists) gdDiffPaintReviewList(list);
+    });
+  }
 }

@@ -164,3 +164,41 @@ test('review and suggestion renderer keep their original DOM without the Inspect
   assert.equal(suggestion.querySelectorAll('.branch-diff-comment-btn').length, 0);
   assert.equal(review.querySelectorAll('.gd-diff-graph-host').length, 0);
 });
+
+test('review and suggestion lists share graph entry bodies while native anchors survive runtime replacement', () => {
+  const f = fixture();
+  const modal = f.document.createElement('div');
+  const review = f.document.createElement('div');
+  const suggestion = f.document.createElement('div');
+  modal.appendChild(review);
+  modal.appendChild(suggestion);
+  f.document.body.appendChild(modal);
+  f.ctx.gdDiffRenderGroups(review, [f.group]);
+  f.ctx.gdDiffRenderGroups(suggestion, [f.group], {comments: false});
+  assert.equal(review.querySelectorAll('.gd-diff-graph-host').length, 3);
+  assert.equal(review.querySelector('.branch-diff-row-head .gd-diff-insp-graph-head .branch-diff-fn-name').textContent,
+    '?', 'the reviewed function label comes from the graph head surface');
+  assert.equal(review.querySelectorAll('.branch-diff-comment-btn').length, 3);
+  assert.equal(suggestion.querySelectorAll('.branch-diff-comment-btn').length, 0);
+  assert.equal(review.querySelector('.bd-old').textContent, '1');
+  assert.equal(review.querySelector('.bd-new').textContent, '2');
+  const row = review.querySelector('.branch-diff-entry[data-anchor-id="b"]');
+  const button = row.querySelector('.branch-diff-comment-btn');
+  const draft = f.document.createElement('textarea');
+  row.appendChild(draft);
+  f.document.activeElement = draft;
+  const chrome = f.document.createElement('div');
+  f.inspector.appendChild(chrome);
+  f.ctx.gdInspectorGraph.render(chrome, {selected: true, name: 'demo', namespace: 'app',
+    description: '', parents: [], 'has-return': false},
+  {panel: f.document.createElement('div'), load() {}, close() {}, resume() {}});
+  assert.equal(review.querySelector('.branch-diff-entry[data-anchor-id="b"]'), row);
+  assert.equal(row.querySelector('.branch-diff-comment-btn'), button);
+  assert.equal(row.querySelector('textarea'), draft);
+  assert.equal(f.document.activeElement, draft);
+  assert.equal(review.querySelectorAll('.gd-diff-graph-host[data-gd-ui-style]').length, 3);
+  const beforeDispose = f.counts();
+  f.ctx.gdDiffDisposeReviewWithin(modal);
+  assert.equal(f.counts().released, beforeDispose.released + 2,
+    'the two review surfaces release their sheets on dialog close');
+});

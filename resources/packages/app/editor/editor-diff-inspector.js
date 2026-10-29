@@ -37,14 +37,21 @@ function gdDiffInspectorNativeBody(host, surface, diff, nativeEntry) {
     return;
   }
   host.appendChild(gdDiffMarkerEl(diff.change));
-  const title = document.createElement('span');
-  title.textContent = 'vs ' + diff.branch;
-  host.appendChild(title);
-  if (diff.effects) {
-    const fx = document.createElement('span');
-    fx.className = 'bd-effects-chip';
-    fx.textContent = diff.effects;
-    host.appendChild(fx);
+  if (surface === 'compare-review-head') {
+    const name = document.createElement('strong');
+    name.className = 'branch-diff-fn-name';
+    name.textContent = diff.branch;
+    host.appendChild(name);
+  } else {
+    const title = document.createElement('span');
+    title.textContent = 'vs ' + diff.branch;
+    host.appendChild(title);
+    if (diff.effects) {
+      const fx = document.createElement('span');
+      fx.className = 'bd-effects-chip';
+      fx.textContent = diff.effects;
+      host.appendChild(fx);
+    }
   }
   if (diff.local) {
     const badge = document.createElement('span');

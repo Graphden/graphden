@@ -53,6 +53,7 @@ function ensureBranchDiffModal() {
 function closeBranchDiffModal() {
   if (!_branchDiffModal) return;
   const hadFocus = _branchDiffModal.contains(document.activeElement);
+  gdDiffDisposeReviewWithin(_branchDiffModal);
   _branchDiffModal.classList.add('hidden');
   setSiblingsInert(_branchDiffModal, false);
   if (hadFocus) returnFocusTo(_branchDiffTrigger);
@@ -72,6 +73,7 @@ async function showReviewDialog(sourceName, sourceRef) {
   }
   modal.classList.remove('hidden');
   setSiblingsInert(modal, true);
+  gdDiffDisposeReviewWithin(modal);
   modal.innerHTML =
     '<div class="branch-diff-overlay"></div>'
     + '<div class="branch-diff-card">'

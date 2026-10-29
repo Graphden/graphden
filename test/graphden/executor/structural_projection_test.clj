@@ -114,7 +114,7 @@
                    :recents ["app.ui-recents" "recents" #{:initial :update :view}]
                    :inspector ["app.ui-inspector" "inspector" #{:initial :update :view}]
                    :explorer ["app.ui-explorer" "explorer-toolbar" #{:initial :update :view}]
-                   :tutorial-catalog ["app.ui-tutorial-catalog" "catalog" #{:view}]
+                   :tutorial-catalog ["app.ui-tutorial-catalog" "catalog" #{:view :query}]
                    :execution-status ["app.ui-execution" "status" #{:view}]
                    :execution-path ["app.ui-execution" "path" #{:view}]
                    :feedback ["app.ui-feedback" "feedback" #{:view}]

@@ -54,8 +54,8 @@ draft controls across graph reloads and compare refreshes; graph nodes cannot
 claim their IDs or actions. Review and suggestion previews keep the shared
 native diff renderer's existing behavior.
 
-The tutorial catalogue is another ordinary view-only component:
-`app.ui-tutorial-catalog/catalog-view`. It receives ordered lesson display
+The tutorial catalogue is another ordinary graph component:
+`app.ui-tutorial-catalog/catalog-view` and `session-view`. Its catalogue view receives ordered lesson display
 facts and a browser-local filter, then composes counts, adjacent chapter runs,
 status badges, row and introduction bodies, resume copy and scoped styles.
 The filter groups rows *after* matching, so an A/B/A source list can become
@@ -207,9 +207,10 @@ the next root replacement still retires it immediately.
 
 ## Tutorial catalogue root callback
 
-The handler-selected editor root exposes `:tutorial-catalog {:view callback}` as
-an ordinary graph value. Its unary callback receives `{:inputs ...}` with the
-ordered lesson display facts and returns the existing catalogue view model.
+The handler-selected editor root exposes `:tutorial-catalog {:view callback :query callback}`
+as an ordinary graph value. Each unary callback receives `{:inputs ...}`;
+`:view` returns the catalogue view model, and `:query` returns passive step or
+end-card nodes.
 The native host keeps history, requirements, navigation, focus and lesson
 actions. It validates row identities and passive Hiccup before painting, and
 accepts the root render receipt only after the complete host paint succeeds.

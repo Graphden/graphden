@@ -48,7 +48,9 @@
                 (templates/component-definitions path "menu" :app.ui-account-menu/account-menu-view (roles menu "account-menu"))
                 (templates/component-definitions path "recents" :app.ui-recents/recents-view (roles recents "recents"))
                 (templates/component-definitions path "picker" :app.ui-fn-picker/picker-view [[:view (keyword picker "picker-view")]])
-                (templates/component-definitions path "catalog" :app.ui-tutorial-catalog/catalog-view [[:view (keyword catalog "catalog-view")]])
+                (templates/component-definitions path "catalog" :app.ui-tutorial-catalog/catalog-view
+                                                 [[:view (keyword catalog "catalog-view")]
+                                                  [:query (keyword catalog "session-view")]])
                 [{:name :selection :namespace path :parent :list
                   :return-type :app.ui-components/ui-component-manifest
                   :args {:items [(keyword path "_menu-descriptor") (keyword path "_recents-descriptor") (keyword path "_picker-descriptor") (keyword path "_catalog-descriptor")]}}])
@@ -76,7 +78,9 @@
                     "const pickerView=g.invoke(field(field(root,'fn-picker'),'view'),m({model:m({sections:[],'empty-kind':'all','show-other-toggle':false,'show-other':false,'hidden-other':0})}));"
                     "const catalogInputs=m({lessons:[],query:'',resume:m({active:false,ended:false,id:'',title:'',step:0,steps:0}),'text-only-copy':'text only'});"
                     "const catalogView=g.invoke(field(field(root,'tutorial-catalog'),'view'),m({inputs:catalogInputs}));"
-                    "process.stdout.write(JSON.stringify([g.encode(menuView),g.encode(recentView),g.encode(pickerView),g.encode(catalogView)]));});")]
+                    "const sessionInputs=m({surface:'step',lesson:'01',index:1,total:2,title:'Step',body:'Body',manual:true,'next-label':'','next-note':''});"
+                    "const catalogQuery=g.invoke(field(field(root,'tutorial-catalog'),'query'),m({inputs:sessionInputs}));"
+                    "process.stdout.write(JSON.stringify([g.encode(menuView),g.encode(recentView),g.encode(pickerView),g.encode(catalogView),g.encode(catalogQuery)]));});")]
     (sh/sh "node" "-e" script :in (json/generate-string plan))))
 
 
@@ -117,7 +121,8 @@
           (is (re-find #"Personal settings" (:out rendered "")))
           (is (re-find #"My trail" (:out rendered "")))
           (is (re-find #"var\(--success-fg\)" (:out rendered "")))
-          (is (re-find #"Personal catalogue" (:out rendered ""))))
+          (is (re-find #"Personal catalogue" (:out rendered "")))
+          (is (re-find #"Lesson 01" (:out rendered ""))))
         (with-redefs [tenancy/current-user-id (constantly (str (random-uuid)))]
           (let [result (export-root ctx)]
             (is (:ok result) (pr-str result))

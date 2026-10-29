@@ -111,6 +111,7 @@
 (deftest selected-tutorial-catalog-retains-ordinary-adjacent-partition
   (let [root "users.alice.ui-catalog"
         selected (templates/selected-definitions root :tutorial-catalog nil nil)
+        by-name (into {} (map (juxt (juxt :namespace :name) identity)) selected)
         parents (set (map :parent selected))
         interfaces (set (map #(keyword (:namespace %) (name (:name %)))
                              (templates/interface-definitions)))]
@@ -119,7 +120,8 @@
     (is (contains? interfaces :core.hof/partition-by))
     (is (every? #(contains? #{root (str root ".tutorial-catalog")} (:namespace %)) selected))
     (is (some #(= :catalog-view (:name %)) selected))
-    (is (some #(= :catalog-query (:name %)) selected))))
+    (is (= {:ref (keyword (str root ".tutorial-catalog") "session-view") :type :fn-ref}
+           (get-in by-name [[root :_tutorial-catalog-query-id] :args :value])))))
 
 
 (deftest explorer-template-stays-finite-and-within-existing-receipt-bounds

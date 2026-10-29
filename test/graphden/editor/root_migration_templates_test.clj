@@ -17,30 +17,33 @@
   (let [root "migration-probe"
         menu-view (random-uuid)
         catalog-view (random-uuid)
+        catalog-query (random-uuid)
         status-view (random-uuid)
         path-view (random-uuid)
         feedback-view (random-uuid)
         selected {:account-menu {:initial (legacy/default-role-id :account-menu :initial)
                                  :view menu-view}
-                  :tutorial-catalog {:view catalog-view}
+                  :tutorial-catalog {:view catalog-view :query catalog-query}
                   :execution-status {:view status-view}
                   :execution-path {:view path-view}
                   :feedback {:view feedback-view}}
         {:keys [definitions references overrides]} (templates/definitions root selected)
         by-name (into {} (map (juxt :name identity)) definitions)]
     (is (= {:account-menu {:view menu-view}
-            :tutorial-catalog {:view catalog-view}
+            :tutorial-catalog {:view catalog-view :query catalog-query}
             :execution-status {:view status-view}
             :execution-path {:view path-view}
             :feedback {:view feedback-view}} overrides))
     (is (= {(keyword root "_migration-account-menu-view-source") menu-view
             (keyword root "_migration-tutorial-catalog-view-source") catalog-view
+            (keyword root "_migration-tutorial-catalog-query-source") catalog-query
             (keyword root "_migration-execution-status-view-source") status-view
             (keyword root "_migration-execution-path-view-source") path-view
             (keyword root "_migration-feedback-view-source") feedback-view}
            references))
     (is (= #{:_migration-account-menu-view-wrapper
              :_migration-tutorial-catalog-view-wrapper
+             :_migration-tutorial-catalog-query-wrapper
              :_migration-execution-status-view-wrapper
              :_migration-execution-path-view-wrapper
              :_migration-feedback-view-wrapper}

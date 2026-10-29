@@ -27,7 +27,7 @@
                :wrapper {:view :root-view} :root-component :picker-component}
    :tutorial-catalog {:namespace "app.ui-tutorial-catalog" :prefix "catalog"
                       :roles [:view :query] :inputs {:view #{"inputs"} :query #{"inputs"}}
-                      :wrapper {:view :root-view} :root-component :catalog-component}
+                      :wrapper {:view :root-view :query :catalog-query} :root-component :catalog-component}
    :execution-status {:namespace "app.ui-execution" :prefix "status"
                       :roles [:view] :inputs {:view #{"inputs"}}
                       :wrapper {:view :root-view} :root-component :execution-status-component}

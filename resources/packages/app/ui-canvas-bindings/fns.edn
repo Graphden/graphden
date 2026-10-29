@@ -516,10 +516,10 @@
    :args {:test :_any, :then "", :else "No seal on this slot."}}
   {:name :_flag-copy-table :parent :zipmap
    :args {:keys ["lambda-head"
-                  "lambda-mode-derived-label" "lambda-mode-derived-hint"
-                  "lambda-mode-none-label" "lambda-mode-none-hint"
-                  "lambda-mode-named-label" "lambda-mode-named-hint"
-                  "branch-local-label"]
+                 "lambda-mode-derived-label" "lambda-mode-derived-hint"
+                 "lambda-mode-none-label" "lambda-mode-none-hint"
+                 "lambda-mode-named-label" "lambda-mode-named-hint"
+                 "branch-local-label"]
           :vals ["λ call-site parameters — what a HOF or a route fills per call when it hands this fn over as a callable"
                  " Derived" " — the compile picks the one unambiguous free arg; refuses when several qualify"
                  " None — []" " — everything is captured from the graph; the callable takes no per-call input (a handler chain)"

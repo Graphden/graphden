@@ -276,6 +276,7 @@
                   "packages/app/editor/editor-tour-ui-components.js"
                   "packages/app/editor/editor-tour-checks.js"
                   "packages/app/editor/editor-tour-cleanup.js"
+                  "packages/app/editor/editor-tour-session-graph.js"
                   "packages/app/editor/editor-tour.js"
                   "packages/app/editor/editor-tour-session.js"
                   "packages/app/editor/editor-tour-receipts.js"

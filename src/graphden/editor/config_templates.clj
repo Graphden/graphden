@@ -117,7 +117,7 @@
   "Create only ordinary role children and descriptor constructors. Parents
    are actual current role identities; existing edits remain inherited."
   [root component roles prior-id]
-  (let [ordered (filterv #(contains? roles %) [:initial :update :view])]
+  (let [ordered (filterv #(contains? roles %) [:initial :update :view :query])]
     (when-not (and (contains? config/component-contracts component)
                    (= (set ordered) (set (keys roles)))
                    (config/valid-roles? component ordered)

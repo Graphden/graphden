@@ -55,6 +55,8 @@
     (is (= (ids/fn-id "app.ui-recents" :recents-view) (get-in configuration [:recents :view])))
     (is (= (ids/fn-id "app.ui-tutorial-catalog" :catalog-view)
            (get-in configuration [:tutorial-catalog :view])))
+    (is (= (ids/fn-id "app.ui-tutorial-catalog" :catalog-query)
+           (get-in configuration [:tutorial-catalog :query])))
     (let [changed (mapv #(if (= :_menu-view-id (:name %))
                            (assoc-in % [:args :value :ref] :app.ui-inspector/inspector-view) %) definitions)]
       (is (= (ids/fn-id "app.ui-inspector" :inspector-view)

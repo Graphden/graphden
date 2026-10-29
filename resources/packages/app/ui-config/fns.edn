@@ -108,8 +108,12 @@
    :args {:value {:ref :app.ui-tutorial-catalog/catalog-view :type :fn-ref}}}
   {:name :_tutorial-catalog-view-entry :parent :zipmap :return-type :_component-entry
    :args {:keys [{:value :role} {:value :fn-id}] :vals [{:value :view} :_tutorial-catalog-view-id]}}
+  {:name :_tutorial-catalog-query-id :parent :const :return-type :fn-ref
+   :args {:value {:ref :app.ui-tutorial-catalog/catalog-query :type :fn-ref}}}
+  {:name :_tutorial-catalog-query-entry :parent :zipmap :return-type :_component-entry
+   :args {:keys [{:value :role} {:value :fn-id}] :vals [{:value :query} :_tutorial-catalog-query-id]}}
   {:name :_tutorial-catalog-entries :parent :list :return-type :_component-entries
-   :args {:items [:_tutorial-catalog-view-entry]}}
+   :args {:items [:_tutorial-catalog-view-entry :_tutorial-catalog-query-entry]}}
   {:name :_execution-status-view-id :parent :const :return-type :fn-ref
    :args {:value {:ref :app.ui-execution/status-view :type :fn-ref}}}
   {:name :_execution-status-view-entry :parent :zipmap :return-type :_component-entry

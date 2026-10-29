@@ -253,6 +253,17 @@ async function _tourEnd(nextLessonId = null) {
 function _tourDialog({ title, body, primary, quiet, next }) {
   const { pop } = _tourEnsureEls();
   _tourSpotHide();
+  let view;
+  try {
+    view = window.gdTourSessionGraph.view({surface: 'end', lesson: '', index: 0,
+      total: 0, title, body, manual: true, 'next-label': next?.label || '',
+      'next-note': next?.note || ''});
+  } catch (_) {
+    window.gdUIComponentFailed?.('tutorial-catalog');
+    _tourTeardown(true); // Preserve the cleanup ledger for a later retry.
+    if (typeof gdToast === 'function') gdToast('Tutorial presentation unavailable', 'error');
+    return;
+  }
   pop.replaceChildren();
   pop.onkeydown = null;   // the catalogue's Escape→Cancel, if it was open
   pop.classList.add('gd-tour-visible');
@@ -260,16 +271,12 @@ function _tourDialog({ title, body, primary, quiet, next }) {
   // Same rule as a step: on a phone this is a bottom sheet, not a 360px box
   // floating in a 390px window.
   pop.classList.toggle('gd-tour-sheet', _tourNarrow());
-  const titleEl = document.createElement('div');
-  titleEl.className = 'gd-tour-title';
-  titleEl.id = 'gd-tour-title';
-  titleEl.textContent = title;
-  const bodyEl = document.createElement('div');
-  bodyEl.className = 'gd-tour-body';
-  bodyEl.id = 'gd-tour-body';
-  _tourRenderBody(bodyEl, body);
-  const foot = document.createElement('div');
-  foot.className = 'gd-tour-foot';
+  const titleEl = view.title;
+  const bodyEl = view.body;
+  const bodyCopy = bodyEl.textContent;
+  bodyEl.replaceChildren();
+  _tourRenderBody(bodyEl, bodyCopy);
+  const foot = view.foot;
   // `primary` is optional: a card whose real action is "read the next lesson"
   // has no decision to make here, and dressing its Close up as the answer
   // would say otherwise.
@@ -283,23 +290,14 @@ function _tourDialog({ title, body, primary, quiet, next }) {
   // stays BELOW the cleanup decision — that decision is what the dialog is
   // about — but it is where the reader is already looking when they finish.
   if (next && (next.actions || []).length) {
-    const box = document.createElement('div');
-    box.className = 'gd-tour-next';
-    const head = document.createElement('div');
-    head.className = 'gd-tour-next-label';
-    head.textContent = next.label;
-    box.appendChild(head);
+    const box = view.next;
+    const note = box.querySelector('.gd-tour-next-note');
     for (const [text, cls, onClick] of next.actions) {
-      box.appendChild(_tourBtn(text, cls, onClick));
-    }
-    if (next.note) {
-      const note = document.createElement('div');
-      note.className = 'gd-tour-hint gd-tour-next-note';
-      note.textContent = next.note;
-      box.appendChild(note);
+      box.insertBefore(_tourBtn(text, cls, onClick), note);
     }
     pop.appendChild(box);
   }
+  view.accept();
   // Same reason the steps announce themselves (ACCESSIBILITY.md — the tour is
   // deliberately not focus-trapped, so a rebuilt popup is otherwise silent):
   // the lesson just ended and this card is the only thing that says so. The

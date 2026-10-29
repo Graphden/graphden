@@ -26,7 +26,7 @@
                :roles [:view] :inputs {:view #{"model"}}
                :wrapper {:view :root-view} :root-component :picker-component}
    :tutorial-catalog {:namespace "app.ui-tutorial-catalog" :prefix "catalog"
-                      :roles [:view] :inputs {:view #{"inputs"}}
+                      :roles [:view :query] :inputs {:view #{"inputs"} :query #{"inputs"}}
                       :wrapper {:view :root-view} :root-component :catalog-component}
    :execution-status {:namespace "app.ui-execution" :prefix "status"
                       :roles [:view] :inputs {:view #{"inputs"}}

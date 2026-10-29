@@ -180,33 +180,34 @@ function _tourRenderStep() {
   const step = _tourStep();
   if (!lesson || !step) return;
   const { pop } = _tourEnsureEls();
+  const isManual = !step.check || step.check.kind === 'manual';
+  let view;
+  try {
+    view = window.gdTourSessionGraph.view({surface: 'step', lesson: lesson.id,
+      index: _tourState.step + 1, total: lesson.steps.length, title: step.title || '',
+      body: step.body || '', manual: isManual, 'next-label': '', 'next-note': ''});
+  } catch (_) {
+    window.gdUIComponentFailed?.('tutorial-catalog');
+    _tourPause();
+    if (typeof gdToast === 'function') gdToast('Tutorial presentation unavailable', 'error');
+    return;
+  }
   pop.replaceChildren();
   pop.onkeydown = null;   // the catalogue's Escape→Cancel, if it was open
 
-  const head = document.createElement('div');
-  head.className = 'gd-tour-head';
-  const progress = document.createElement('span');
-  progress.className = 'gd-tour-progress';
-  progress.textContent = 'Lesson ' + lesson.id + ' · step '
-    + (_tourState.step + 1) + '/' + lesson.steps.length;
+  const {head, title, body, foot} = view;
+  const hint = foot.querySelector('.gd-tour-hint');
+  foot.replaceChildren();
   // Two ways out, and they are different promises. "Pause" keeps everything
   // and simply stops showing steps — the state is already in localStorage, so
   // the catalogue offers to continue. "End tour" is the one that asks about
   // deleting what the lesson made. Before this, the only exit was the second,
   // which made stepping away look like a decision about your data.
-  head.appendChild(progress);
   head.appendChild(_tourBtn('Pause', 'gd-tour-btn-quiet', () => _tourPause()));
   head.appendChild(_tourBtn('End tour', 'gd-tour-btn-quiet', () => _tourEnd()));
-
-  const title = document.createElement('div');
-  title.className = 'gd-tour-title';
-  title.id = 'gd-tour-title';
-  title.textContent = step.title || '';
-
-  const body = document.createElement('div');
-  body.className = 'gd-tour-body';
-  body.id = 'gd-tour-body';
-  _tourRenderBody(body, step.body);
+  const bodyCopy = body.textContent;
+  body.replaceChildren();
+  _tourRenderBody(body, bodyCopy);
   // The last step is where the tour hands over to the text: the steps are
   // behind the reader, and what the written lesson adds is the next move.
   if (_tourState.step >= lesson.steps.length - 1) {
@@ -214,8 +215,6 @@ function _tourRenderStep() {
     if (readOn) body.appendChild(readOn);
   }
 
-  const foot = document.createElement('div');
-  foot.className = 'gd-tour-foot';
   // A reader who skipped a step, or simply wants to re-read the one before,
   // had no way back: the tour only ever moved forward. Going back never
   // un-does anything — the step's own check decides whether it is satisfied,
@@ -223,16 +222,12 @@ function _tourRenderStep() {
   if (_tourState.step > 0) {
     foot.appendChild(_tourBtn('Back', 'gd-tour-btn-quiet', () => _tourBack()));
   }
-  const isManual = !step.check || step.check.kind === 'manual';
   if (isManual) {
     const last = _tourState.step >= lesson.steps.length - 1;
     foot.appendChild(_tourBtn(last ? 'Finish' : 'Next', 'gd-tour-btn-primary',
       () => _tourAdvance(false)));
   } else {
-    const hint = document.createElement('span');
-    hint.className = 'gd-tour-hint';
-    hint.textContent = 'Advances automatically when done';
-    foot.appendChild(hint);
+    if (hint) foot.appendChild(hint);
     foot.appendChild(_tourBtn('Skip step', 'gd-tour-btn-quiet',
       () => _tourAdvance(true)));
   }
@@ -241,6 +236,7 @@ function _tourRenderStep() {
   pop.appendChild(title);
   pop.appendChild(body);
   pop.appendChild(foot);
+  view.accept();
   pop.classList.add('gd-tour-visible');
   // When this step appeared on screen — the auto-advance below waits a
   // beat past this, so a check that is ALREADY true (satisfied by stale

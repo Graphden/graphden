@@ -62,7 +62,8 @@
                          :view (ids/fn-id "app.ui-canvas-type-structure" :type-structure-view)}
    :canvasBindings {:initial (ids/fn-id "app.ui-canvas-bindings" :bindings-initial)
                     :view (ids/fn-id "app.ui-canvas-bindings" :bindings-view)}
-   :tutorialCatalog {:view (ids/fn-id "app.ui-tutorial-catalog" :catalog-view)}
+   :tutorialCatalog {:view (ids/fn-id "app.ui-tutorial-catalog" :catalog-view)
+                     :query (ids/fn-id "app.ui-tutorial-catalog" :session-view)}
    :executionStatus {:view (ids/fn-id "app.ui-execution" :status-view)}
    :executionPath {:view (ids/fn-id "app.ui-execution" :path-view)}
    :feedback {:view (ids/fn-id "app.ui-feedback" :feedback-view)}

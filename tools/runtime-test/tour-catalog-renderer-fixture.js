@@ -32,7 +32,7 @@ function catalogRenderer(document, api) {
     }
     return el;
   }
-  return {vnode, mount(host) {
+  return {vnode, element, mount(host) {
     return {render(tree) {
       host.replaceChildren();
       delete host.dataset.gdUiStyle;

@@ -118,7 +118,8 @@
     (is (contains? parents :core.hof/partition-by))
     (is (contains? interfaces :core.hof/partition-by))
     (is (every? #(contains? #{root (str root ".tutorial-catalog")} (:namespace %)) selected))
-    (is (some #(= :catalog-view (:name %)) selected))))
+    (is (some #(= :catalog-view (:name %)) selected))
+    (is (some #(= :catalog-query (:name %)) selected))))
 
 
 (deftest explorer-template-stays-finite-and-within-existing-receipt-bounds

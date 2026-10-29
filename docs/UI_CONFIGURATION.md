@@ -64,6 +64,10 @@ history, requirement checks, URLs, focus, navigation and all Read/Unmark/Clear
 controls. Personal styles are scoped to passive graph body hosts and cannot
 cover those native controls; an older personal manifest can use the shared
 catalogue view without replacing its other selected components.
+The same component's `:query` callback renders step and end-card layout from
+the active lesson's display facts. Native controls, copy chips, step predicates,
+spotlight and cleanup retain their existing owners. A historical personal
+catalogue with only `:view` uses the shipped `:query` callback.
 
 The canvas has a separate view-only `app.ui-canvas/canvas-view` component.
 It presents ordinary function names, secret classification marks, root

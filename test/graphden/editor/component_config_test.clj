@@ -111,6 +111,16 @@
     (is (false? (config/valid-roles? :canvas-type-structure #{:view})))))
 
 
+(deftest historical-tutorial-catalog-view-keeps-its-selection
+  (let [{:keys [id root graph]} (parsed-configuration)
+        query-entry (ids/fn-id root :_tutorial-catalog-query-entry)
+        historical (update graph :list-items
+                           #(vec (remove (fn [row] (= query-entry (:ref-fn-id row))) %)))]
+    (is (= {:view (ids/fn-id (str root ".tutorial-catalog") :catalog-view)}
+           (get (config/configuration historical id) :tutorial-catalog)))
+    (is (false? (config/valid-roles? :tutorial-catalog #{:query})))))
+
+
 (deftest ordinary-manifest-projects-only-terminal-identity-values
   (let [{:keys [id root graph]} (parsed-configuration)]
     (is (= {:explorer {:initial (ids/fn-id (str root ".explorer") :explorer-toolbar-initial)
@@ -137,7 +147,8 @@
                                     :view (ids/fn-id (str root ".canvas-type-structure") :type-structure-view)}
             :canvas-bindings {:initial (ids/fn-id (str root ".canvas-bindings") :bindings-initial)
                               :view (ids/fn-id (str root ".canvas-bindings") :bindings-view)}
-            :tutorial-catalog {:view (ids/fn-id (str root ".tutorial-catalog") :catalog-view)}
+            :tutorial-catalog {:view (ids/fn-id (str root ".tutorial-catalog") :catalog-view)
+                               :query (ids/fn-id (str root ".tutorial-catalog") :catalog-query)}
             :execution-status {:view (ids/fn-id (str root ".execution-status") :status-view)}
             :execution-path {:view (ids/fn-id (str root ".execution-path") :path-view)}
             :feedback {:view (ids/fn-id (str root ".feedback") :feedback-view)}

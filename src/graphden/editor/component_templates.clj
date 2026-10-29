@@ -143,7 +143,8 @@
                     ["picker" :app.ui-fn-picker/picker-view [[:view "picker-view"]]]
                     ["recents" :app.ui-recents/recents-view
                      [[:initial "recents-initial"] [:update "recents-update"] [:view "recents-view"]]]
-                    ["tutorial-catalog" :app.ui-tutorial-catalog/catalog-view [[:view "catalog-view"]]]
+                    ["tutorial-catalog" :app.ui-tutorial-catalog/catalog-view
+                     [[:view "catalog-view"] [:query "catalog-query"]]]
                     ["execution-status" :app.ui-execution/status-view [[:view "status-view"]]]
                     ["execution-path" :app.ui-execution/path-view [[:view "path-view"]]]
                     ["feedback" :app.ui-feedback/feedback-view [[:view "feedback-view"]]]

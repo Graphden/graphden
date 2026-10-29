@@ -28,7 +28,7 @@
 
 
 (def ^:private literal-fields
-  (into #{:component-id :entries :role :fn-id :initial :update :view} (keys entry-slots)))
+  (into #{:component-id :entries :role :fn-id :initial :update :view :query} (keys entry-slots)))
 
 
 (defn- reject!
@@ -68,13 +68,13 @@
 
 
 (defn valid-roles?
-  "Allow the historical view-only canvas-bindings component to retain its
-   personal view; the native adapter supplies its missing initial role from
-   the builtin. Every other component still requires its exact role set."
+  "Retain historical view-only component manifests after a shipped optional
+   role was added. Native adapters supply the missing role from the builtin."
   [component roles]
   (let [actual (set roles)]
     (or (= actual (get-in component-contracts [component :roles]))
-        (and (= component :canvas-bindings) (= actual #{:view})))))
+        (and (contains? #{:canvas-bindings :tutorial-catalog} component)
+             (= actual #{:view})))))
 
 
 (defn- projected-manifest
@@ -107,7 +107,7 @@
                                  (when-not (map? entry) (reject!))
                                  (let [{role :role target :fn-id} entry]
                                    (when-not (and (= #{:role :fn-id} (set (keys entry)))
-                                                  (contains? #{:initial :update :view} role)
+                                                  (contains? #{:initial :update :view :query} role)
                                                   (projection/identity-value? target)
                                                   (not (contains? roles role))) (reject!))
                                    (assoc roles role (:id target)))) {} entry-list))))

@@ -1,5 +1,5 @@
 {:namespace "app.ui-tutorial-catalog"
- :description "Pure browser-local presentation of the ordered lesson catalogue. History, requirements, links, and actions remain editor-owned."
+ :description "Pure browser-local presentation of the lesson catalogue, active step, and end card. History, requirements, links, and actions remain editor-owned."
  :fns
  [{:name :_root-view-input :type {:inputs :_catalog-inputs}}
   {:name :_root-view-result
@@ -7,14 +7,77 @@
           :intro :web.html/hiccup-node :resume-label :text
           :styles [:list {:selector :text :declarations [:map [:union :keyword :text] :text]}]}}
   {:name :_root-view-callable :fn-type [{:input :app.ui-tutorial-catalog/_root-view-input} :app.ui-tutorial-catalog/_root-view-result]}
-  {:name :root-component :type {:view :app.ui-tutorial-catalog/_root-view-callable}}
+  {:name :_root-query-input :type {:inputs :_session-input}}
+  {:name :_session-result
+   :type {:head :web.html/hiccup-node :title :web.html/hiccup-node
+          :body :web.html/hiccup-node :foot :web.html/hiccup-node
+          :next :web.html/hiccup-node}}
+  {:name :_root-query-callable :fn-type [{:input :app.ui-tutorial-catalog/_root-query-input} :app.ui-tutorial-catalog/_session-result]}
+  {:name :root-component :type {:view :app.ui-tutorial-catalog/_root-view-callable
+                                :query :app.ui-tutorial-catalog/_root-query-callable}}
   {:name :root-view :parent :catalog-view :lambda-params [:input]
    :return-type :app.ui-tutorial-catalog/_root-view-result
    :args {:inputs {:parent :get :args {:coll {:as :input :type :app.ui-tutorial-catalog/_root-view-input} :key {:value :inputs}}}}}
   {:name :_root-view-assoc :parent :assoc-fn
    :args {:value {:as :value :type :app.ui-tutorial-catalog/_root-view-callable}}}
+  {:name :_root-query-assoc :parent :assoc-fn
+   :args {:value {:as :value :type :app.ui-tutorial-catalog/_root-query-callable}}}
+  {:name :_query-component :parent :_root-query-assoc
+   :args {:map {} :key {:value :query} :value {:ref :catalog-query}}}
   {:name :catalog-component :parent :_root-view-assoc :return-type :app.ui-tutorial-catalog/root-component
-   :args {:map {} :key {:value :view} :value {:ref :root-view}}}
+   :args {:map :_query-component :key {:value :view} :value {:ref :root-view}}}
+  {:name :catalog-query :parent :session-view :lambda-params [:input]
+   :return-type :app.ui-tutorial-catalog/_session-result
+   :args {:inputs {:parent :get :args {:coll {:as :input :type :app.ui-tutorial-catalog/_root-query-input}
+                                       :key {:value :inputs}}}}}
+  {:name :_session-input
+   :type {:surface [:refine :text {:constraint [:in #{"step" "end"}]}]
+          :lesson :text :index :int :total :int :title :text :body :text :manual :bool
+          :next-label :text :next-note :text}}
+  {:name :_session-surface :parent :get
+   :args {:coll {:as :inputs :type :_session-input} :key {:value :surface}}}
+  {:name :_session-lesson :parent :get
+   :args {:coll {:as :inputs :type :_session-input} :key {:value :lesson} :default ""}}
+  {:name :_session-index :parent :get :args {:coll {:as :inputs :type :_session-input} :key {:value :index} :default 0}}
+  {:name :_session-total :parent :get :args {:coll {:as :inputs :type :_session-input} :key {:value :total} :default 0}}
+  {:name :_session-title-text :parent :get :args {:coll {:as :inputs :type :_session-input} :key {:value :title} :default ""}}
+  {:name :_session-body-text :parent :get :args {:coll {:as :inputs :type :_session-input} :key {:value :body} :default ""}}
+  {:name :_session-manual :parent :get :args {:coll {:as :inputs :type :_session-input} :key {:value :manual} :default true}}
+  {:name :_session-next-label :parent :get :args {:coll {:as :inputs :type :_session-input} :key {:value :next-label} :default ""}}
+  {:name :_session-next-note :parent :get :args {:coll {:as :inputs :type :_session-input} :key {:value :next-note} :default ""}}
+  {:name :_session-step? :parent :equal? :args {:a :_session-surface :b "step"}}
+  {:name :_session-progress-text :parent :str
+   :args {:parts ["Lesson " :_session-lesson " · step " :_session-index "/" :_session-total]}}
+  {:name :_session-progress :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "gd-tour-progress"}} :children [:_session-progress-text]}}
+  {:name :_session-head-tree :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "gd-tour-head"}} :children [:_session-progress]}}
+  {:name :_session-head :parent :if :args {:test :_session-step? :then :_session-head-tree :else nil}}
+  {:name :_session-title :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "gd-tour-title" :id "gd-tour-title"}} :children [:_session-title-text]}}
+  {:name :_session-body :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "gd-tour-body" :id "gd-tour-body"}} :children [:_session-body-text]}}
+  {:name :_session-hint :parent :hiccup
+   :args {:tag "span" :attrs {:value {:class "gd-tour-hint"}} :children ["Advances automatically when done"]}}
+  {:name :_session-maybe-hint :parent :if
+   :args {:test :_session-manual :then nil :else :_session-hint}}
+  {:name :_session-foot :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "gd-tour-foot"}} :children [:_session-maybe-hint]}}
+  {:name :_session-next-head :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "gd-tour-next-label"}} :children [:_session-next-label]}}
+  {:name :_session-next-note-tree :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "gd-tour-hint gd-tour-next-note"}} :children [:_session-next-note]}}
+  {:name :_session-no-next-note :parent :equal? :args {:a :_session-next-note :b ""}}
+  {:name :_session-maybe-next-note :parent :if
+   :args {:test :_session-no-next-note :then nil :else :_session-next-note-tree}}
+  {:name :_session-next-tree :parent :hiccup
+   :args {:tag "div" :attrs {:value {:class "gd-tour-next"}}
+          :children [:_session-next-head :_session-maybe-next-note]}}
+  {:name :_session-has-next :parent :equal? :args {:a :_session-next-label :b ""}}
+  {:name :_session-next :parent :if :args {:test :_session-has-next :then nil :else :_session-next-tree}}
+  {:name :session-view :parent :zipmap :return-type :_session-result
+   :args {:keys [{:value :head} {:value :title} {:value :body} {:value :foot} {:value :next}]
+          :vals [:_session-head :_session-title :_session-body :_session-foot :_session-next]}}
   {:name :_catalog-lesson
    :type {:id :text :title :text :chapter :text :done :bool :stale :bool :fresh :bool
           :allowed :bool :text-only :bool :need-short :text :done-version :int :version :int}}

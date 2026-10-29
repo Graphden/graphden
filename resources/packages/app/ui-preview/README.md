@@ -399,7 +399,7 @@ Toolbar layout/count rules are structured graph
 styles. Appearance can personalize this complete toolbar as one component while
 retaining unrelated authored descriptors and themes.
 
-The tutorial catalogue is a view-only `app.ui-tutorial-catalog` component.
+The tutorial catalogue uses the `app.ui-tutorial-catalog` component.
 Its `inputs` record contains ordered, authorized lesson display facts, a
 browser-local query, resume display facts and a text-only copy string. The
 ordinary graph filters first, then uses pure `core.hof/partition-by` to form
@@ -411,6 +411,13 @@ keeps local reading history, requirement checks, URLs, native controls, focus
 and actions. One shared stylesheet is attached only to passive graph hosts,
 never the dialog or its controls. Old personal manifests without this view use
 the shared default while other selected components keep their identities.
+Its `query` callback renders the passive layout of the current step and the
+end-of-lesson card. The browser supplies the lesson's display copy and finite
+step position. It validates the returned nodes before attaching native Pause,
+End tour, Back, Next/Finish, Skip, cleanup and next-lesson controls. The host
+also turns the lesson's `[[keycap]]` and backtick marks into interactive chips,
+keeps spotlight geometry and step predicates, and owns cleanup. Historical
+personal catalogue views without `query` use the shipped query callback.
 
 ### Passive canvas presentation
 

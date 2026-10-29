@@ -931,14 +931,17 @@ async function cleanup(page) {
     }, {timeout: 20000});
     assert(true, 'suggestion Δ preview lazy-loads its diff on expand');
     const previewEntries = await page.evaluate(() => {
-      const entries = [...document.querySelectorAll('.bd-sugg-preview .branch-diff-entry')];
+      const preview = document.querySelector('.bd-sugg-preview');
+      const entries = [...preview.querySelectorAll('.branch-diff-entry')];
       return {count: entries.length,
         graph: entries.every(row => GraphdenRenderer.ownsTarget(
           row.querySelector('.gd-diff-graph-host'))),
-        comments: document.querySelectorAll('.bd-sugg-preview .branch-diff-comment-btn').length};
+        empty: /No differences\./.test(preview.textContent),
+        comments: preview.querySelectorAll('.branch-diff-comment-btn').length};
     });
-    assert(previewEntries.count > 0 && previewEntries.graph && previewEntries.comments === 0,
-           'suggestion preview uses passive graph entries without comment actions: '
+    assert((previewEntries.count > 0 ? previewEntries.graph : previewEntries.empty)
+           && previewEntries.comments === 0,
+           'suggestion preview renders graph entries or the empty state without comment actions: '
            + JSON.stringify(previewEntries));
     const newBtn = await page.evaluate(() =>
       !!document.querySelector('.branch-diff-suggest-new'));

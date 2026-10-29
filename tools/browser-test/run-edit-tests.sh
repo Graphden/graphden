@@ -477,11 +477,12 @@ SLOW_MIN_EXTRA="${SLOW_MIN_EXTRA:-30}"
 # = 305 s against the 300 s cap) means that file can never be judged slow. At
 # the cap, only an attempt that ran into the timeout itself counts.
 timeout_for() {
-  # Selective UI performs five exact graph cleanups. A focused candidate-image
-  # run took 288s, including 31s of final cleanup; 300s made a routine registry
-  # pause kill it after its behavior assertions. Keep other files at 300s.
+  # Selective UI walks six authored components and then deletes their exact
+  # receipts. The previous 360s cap killed the first gate attempt during the
+  # final undo, after all behavior assertions had passed. Allow the cleanup
+  # its measured worst-case room; the ordinary files remain bounded at 300s.
   case "$1" in
-    edit-ui-components-selective.test.js) printf '%s' "${PER_TEST_TIMEOUT:-360}" ;;
+    edit-ui-components-selective.test.js) printf '%s' "${PER_TEST_TIMEOUT:-480}" ;;
     *) printf '%s' "${PER_TEST_TIMEOUT:-300}" ;;
   esac
 }
@@ -636,6 +637,7 @@ for f in $FILES; do
   passed=0
   rc=0
   is_timeout=0
+  dirty_abort=0
   real_flake=0
   env_signed=0        # some failed attempt carried an environment signature
   deterministic=0     # stopped early: the same REAL assertion failure twice in a row
@@ -719,8 +721,26 @@ for f in $FILES; do
       if [ "${attempt_real:-0}" = 1 ]; then
         sig="$(failure_signature "$attempt_out")"
       fi
+      # A timed-out test can leave thousands of graph rows behind. Retrying it
+      # against that same stack repeats a different experiment, and the next
+      # file then reports collateral failures. Keep the original red verdict
+      # and the unrun files pending instead of spending the retry budget on a
+      # contaminated fixture.
+      if [ "$FN_BEFORE" -ge 0 ] && [ "$NS_BEFORE" -ge 0 ] && [ "$BR_BEFORE" -ge 0 ] \
+         && [ "$(counters_restarted "$CTR_BEFORE" "$CTR_FAILURE")" != 1 ]; then
+        read -r FN_FAILED NS_FAILED BR_FAILED <<<"$(graph_counts)"
+        if [ "${FN_FAILED:--1}" -ge 0 ] && [ "${NS_FAILED:--1}" -ge 0 ] \
+           && [ "${BR_FAILED:--1}" -ge 0 ] \
+           && { [ "$FN_FAILED" -gt "$FN_BEFORE" ] \
+             || [ "$NS_FAILED" -gt "$NS_BEFORE" ] \
+             || [ "$BR_FAILED" -gt "$BR_BEFORE" ]; }; then
+          dirty_abort=1
+          echo "  (failed attempt left graph rows behind — stopping retries and preserving the remaining files as pending)" >&2
+        fi
+      fi
       rm -f "$attempt_out"
       attempt_real=0
+      if [ "$dirty_abort" = 1 ]; then break; fi
       if [ -n "$sig" ] && [ "$sig" = "$prev_real_sig" ]; then
         deterministic=1
         echo "  (same REAL failure twice in a row — deterministic, not retrying: $sig)" >&2
@@ -885,6 +905,10 @@ for f in $FILES; do
   if [ "$file_credit" = 1 ]; then browser_progress "$f" passed
   elif [ "$passed" = 1 ]; then browser_progress "$f" pending
   else browser_progress "$f" failed; fi
+  if [ "$dirty_abort" = 1 ]; then
+    SKIP_AFTER_CASCADE=1
+    continue
+  fi
   if [ "${WTQ_STOP_ON_REAL_FLAKE:-0}" = 1 ] && [ "${WTQ_FLAKE_STRICT:-0}" = 1 ] \
      && [ "$passed" = 1 ] && [ "$real_flake" = 1 ] && [ "$env_signed" = 0 ] \
      && ! run_is_degraded; then

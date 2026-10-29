@@ -50,6 +50,7 @@ case "$step" in
   recentfail:*) echo 1 > "$STUB_STATE/rebuilds"; echo 140 > "$STUB_STATE/clock"; echo "  ✗ compilation window" >&2; exit 1 ;;
   restartfail:*) echo 0 > "$STUB_STATE/rebuilds"; echo "  ✗ server restart" >&2; exit 1 ;;
   envfail:*) touch "$STUB_STATE/probe-dead-once"; echo "  ✗ \${step#envfail:}" >&2; exit 1 ;;
+  dirtyfail:*) echo 5 > "$STUB_STATE/graph-rows"; echo "  ✗ \${step#dirtyfail:}" >&2; exit 1 ;;
 esac
 `;
   fs.writeFileSync(path.join(dir, name), body);
@@ -94,7 +95,7 @@ while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift ;; --max-time|-H) shift 
 case "$url" in *scope=index*) [ "$out" = /dev/null ] && probe=1 ;; esac
 if [ "$probe" = 1 ] && [ -e "$STUB_STATE/probe-dead-once" ]; then rm -f "$STUB_STATE/probe-dead-once"; exit 22; fi
 case "$url" in
-  *scope=index*) body='{"fns":[],"namespaces":[]}' ;;
+  *scope=index*) rows=$(cat "$STUB_STATE/graph-rows" 2>/dev/null || echo 0); body=$(printf '{"fns":[%s],"namespaces":[]}' "$(seq -s, 1 "$rows" 2>/dev/null)") ;;
   */api/branches) body='{"branches":[]}' ;;
   */metrics) body="{\\"counters\\":{\\"registry/rebuild\\":$(cat "$STUB_STATE/rebuilds" 2>/dev/null || echo 0)}}" ;;
   *) body='{}' ;;
@@ -131,6 +132,18 @@ if [ -n "$out" ]; then [ "$out" = /dev/null ] || printf '%s' "$body" > "$out"; e
 }
 
 console.log(' two REAL races in one run are two red files, not host jitter');
+
+console.log(' a failed attempt that dirties the graph stops retries and leaves the rest pending');
+{
+  const r = runSuite({
+    'edit-a.test.js': ['dirtyfail:aborted mid-cleanup', 'pass'],
+    'edit-b.test.js': ['pass'],
+  });
+  assert(r.code !== 0 && r.attempts('edit-a.test.js') === 1
+         && r.attempts('edit-b.test.js') === 0
+         && /failed attempt left graph rows behind/.test(r.out),
+  'a contaminated fixture is not reused by retries or the next file', r.out);
+}
 
 console.log(' declared skips are visible and an unregistered skip is red');
 {
@@ -378,7 +391,7 @@ console.log(' slow_limit stays under the per-attempt hard timeout');
   assert(limit(null) === '150', 'no baseline → THRASH_FILE_SECS (got ' + limit(null) + ')');
   assert(limit(null, 'THRASH_FILE_SECS=400') === '299', 'a no-baseline limit is capped too (got ' + limit(null, 'THRASH_FILE_SECS=400') + ')');
   assert(limit(122, 'PER_TEST_TIMEOUT=200') === '199', 'the cap follows PER_TEST_TIMEOUT (got ' + limit(122, 'PER_TEST_TIMEOUT=200') + ')');
-  assert(limit(200, '', 'edit-ui-components-selective.test.js') === '359', 'the selective cleanup cap follows its measured 360s timeout');
+  assert(limit(200, '', 'edit-ui-components-selective.test.js') === '479', 'the selective cleanup cap follows its measured 480s timeout');
   assert(limit(200, 'PER_TEST_TIMEOUT=200', 'edit-ui-components-selective.test.js') === '199', 'an explicit timeout overrides the selective default');
 }
 

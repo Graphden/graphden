@@ -18,6 +18,17 @@
 
 (use-fixtures :once (impls/impls-fixture "core" "concurrency"))
 
+(defn- await-condition
+  "Poll an asynchronous state transition for at most five seconds. An exit
+   atom may be set before its worker has finished logging and terminated."
+  [ready?]
+  (let [deadline (+ (System/nanoTime) 5000000000)]
+    (loop []
+      (cond
+        (ready?) true
+        (>= (System/nanoTime) deadline) false
+        :else (do (Thread/sleep 10) (recur))))))
+
 
 ;; ============================================================================
 ;; :do — sequential side effects in declaration order
@@ -403,14 +414,12 @@
       (is (true? (alive?)))
       (is (nil? @exit))
       (deliver gate :go)
-      (Thread/sleep 100)
-      (is (false? (alive?)))
+      (is (await-condition #(false? (alive?))))
       (is (= :done @exit))))
   (testing "an uncaught throw is recorded as :failed"
     (let [stop ((impls/impl-of :future) {:body (fn [] (throw (ex-info "boom" {})))} nil)]
-      (Thread/sleep 100)
-      (is (= :failed @(:exit (meta stop))))
-      (is (false? ((:alive? (meta stop))))))))
+      (is (await-condition #(= :failed @(:exit (meta stop)))))
+      (is (await-condition #(false? ((:alive? (meta stop)))))))))
 
 
 (deftest with-heartbeat-beats-while-the-body-runs-test
@@ -462,12 +471,10 @@
       (is (true? (alive?)) "alive while the children run")
       (is (nil? @exit))
       (deliver gate-a :go)
-      (Thread/sleep 100)
       (is (true? (alive?)) "still alive while ANY child runs")
       (is (nil? @exit) "not :done until every child is")
       (deliver gate-b :go)
-      (Thread/sleep 100)
-      (is (false? (alive?)))
+      (is (await-condition #(false? (alive?))))
       (is (= :done @exit))
       (is (nil? (stop)) "stopping an already-finished set is harmless")))
   (testing "a child that threw makes the whole set :failed — the restart policy sees the crash"
@@ -476,12 +483,11 @@
                 {:triggers [(delay ((impls/impl-of :future) {:body (fn [] @gate)} nil))
                             (delay ((impls/impl-of :future) {:body (fn [] (throw (ex-info "boom" {})))} nil))]}
                 nil)]
-      (Thread/sleep 100)
-      (is (= :failed @(:exit (meta stop))))
+      (is (await-condition #(= :failed @(:exit (meta stop)))))
       (is (true? ((:alive? (meta stop)))) "the healthy sibling is still running")
       (stop)
-      (Thread/sleep 100)
-      (is (false? ((:alive? (meta stop)))) "the one stopper interrupted the survivor")))
+      (is (await-condition #(false? ((:alive? (meta stop)))))
+          "the one stopper interrupted the survivor")))
   (testing "the same trigger listed twice is refused, and the started copies are stopped"
     (let [gate (promise)
           stop ((impls/impl-of :future) {:body (fn [] @gate)} nil)
@@ -490,11 +496,8 @@
                   (catch clojure.lang.ExceptionInfo e e))]
       (is (= :start-all/duplicate-trigger (:type (ex-data ex))))
       ;; Interrupt requests shutdown; the worker may finish after stop returns.
-      (let [deadline (+ (System/nanoTime) 2000000000)]
-        (while (and ((:alive? (meta stop)))
-                    (< (System/nanoTime) deadline))
-          (Thread/sleep 20)))
-      (is (false? ((:alive? (meta stop)))) "the duplicate's loop was interrupted, not leaked")))
+      (is (await-condition #(false? ((:alive? (meta stop)))))
+          "the duplicate's loop was interrupted, not leaked")))
   (testing "an empty trigger list is a no-op service: not alive, no exit"
     (let [stop ((impls/impl-of :start-all) {:triggers []} nil)]
       (is (false? ((:alive? (meta stop)))))

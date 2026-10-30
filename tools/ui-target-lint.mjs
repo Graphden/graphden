@@ -33,11 +33,17 @@ function literals(source) {
 }
 
 const roots = process.argv.slice(2);
-const directories = roots.length ? roots : ['resources/packages/app/editor'];
+const directories = roots.length ? roots : [
+  'resources/packages/app/editor',
+  'resources/packages/app/ui-preview',
+];
 const failures = [];
 for (const directory of directories) {
   if (!statSync(directory, { throwIfNoEntry: false })?.isDirectory()) continue;
   for (const file of javascriptFiles(directory)) {
+    // Generated graph plans contain stable function IDs by design. Their source
+    // fns.edn files are checked by the EDN half of this lint.
+    if (file === 'resources/packages/app/ui-preview/builtin-plans.js') continue;
     for (const node of literals(readFileSync(file, 'utf8'))) {
       if (targetName.test(node.value) || uuid.test(node.value)) {
         failures.push(`${relative('.', file)}:${node.loc.start.line}: hardcoded UI target literal`);
@@ -47,4 +53,4 @@ for (const directory of directories) {
 }
 for (const failure of failures) console.error(failure);
 if (failures.length) process.exitCode = 1;
-else console.log('Editor JS target literals: OK');
+else console.log('UI JavaScript target literals: OK');

@@ -32,6 +32,7 @@ E2E_BASELINE_LOCAL="$TEST_DIR/baseline"
 
 step() { :; }
 wait_for_headroom() { echo headroom >> "$TEST_LOG"; [ "${FAIL_HEADROOM:-0}" != 1 ]; }
+ensure_disk_headroom() { [ "${FAIL_DISK:-0}" != 1 ]; }
 git() { printf '%s\n' 0000000000000000000000000000000000000001; }
 node() { :; }
 clojure() { echo uber >> "$TEST_LOG"; }
@@ -360,6 +361,14 @@ if gate_suites "$TEST_DIR" 0 0 0 > "$TEST_DIR/fast.out"; then exit 1; fi
 assert_events expect
 if grep -q '^WTQ_FAILED_STAGE=' "$TEST_DIR/fast.out"; then exit 1; fi
 unset FAIL_HINTS
+
+# Low disk refuses the next stage before it spends a CI/browser hour.
+FAIL_DISK=1
+: > "$TEST_LOG"
+if gate_suites "$TEST_DIR" 0 0 0 > "$TEST_DIR/disk.out"; then exit 1; fi
+assert_events expect
+grep -q 'ABORT: insufficient disk for ci' "$TEST_DIR/disk.out"
+unset FAIL_DISK
 
 # Validate durable hints against real git ancestry without touching the queue.
 (

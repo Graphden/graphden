@@ -68,6 +68,7 @@
 #   WTQ_TRAIN_MAX  most branches one train gates together (default 4)
 #   WTQ_POLL_SECS  how often a queued waiter re-checks the queue (default 30)
 #   WTQ_MEM_MIN_MB  MemAvailable a gate needs to start (default 6000)
+#   WTQ_DISK_MIN_MB free space a gate stage needs before it starts (default 12000)
 #   WTQ_AGENT_MEM_MIN_MB  MemAvailable `wt test` / `wt up` / lint wait for (default 3000)
 #   WTQ_CI_SKIP  comma list of check names/groups force-skipped in the gate's
 #                `bb ci` (passed through as `bb ci --skip`). Announced loudly in
@@ -631,6 +632,26 @@ gc_gate_leftovers() {
   info "Removing stale test temp dirs (Playwright crash artifacts, tour audits older than a day) ..."
   find /tmp -maxdepth 1 \( -name 'playwright-artifacts-*' -o -name 'tour-audit.*' \) -mtime +1 \
     -exec rm -rf {} + 2>/dev/null || true
+
+  # Train logs have two hardlinked names. Archiving both old names preserves
+  # their diagnostics while releasing the shared inode. Receipts stay intact.
+  info "Archiving gate logs older than two days ..."
+  find "$LOG_DIR" -maxdepth 1 -type f -name '*.log' -mtime +2 -print0 \
+    | xargs -0 -r -P 2 -n 1 gzip -f
+}
+
+ensure_disk_headroom() {
+  local minimum available
+  minimum="$(int_or "${WTQ_DISK_MIN_MB:-}" 12000)"
+  available="$(disk_avail_mb)"
+  [ "$available" -ge "$minimum" ] && return 0
+  warn "disk free ${available} MB < ${minimum} MB — reclaiming disposable caches and archiving old logs"
+  gc_gate_leftovers
+  available="$(disk_avail_mb)"
+  if [ "$available" -lt "$minimum" ]; then
+    warn "disk free ${available} MB < ${minimum} MB after cleanup — stop before a doomed stage"
+    return 1
+  fi
 }
 
 cmd_gc() {
@@ -1206,6 +1227,7 @@ queue_state() {
 GATE_HEAVY="$WTQ_DIR/gate-heavy"
 
 mem_avail_mb() { awk '/^MemAvailable:/{print int($2 / 1024)}' /proc/meminfo; }
+disk_avail_mb() { df -Pm "$WTQ_DIR" | awk 'NR == 2 {print $4}'; }
 int_or() { case "$1" in ''|*[!0-9]*) echo "$2" ;; *) echo "$1" ;; esac; }
 
 # The marker names the phase and the CONDUCTOR's pid ($$ — the same in every
@@ -1632,6 +1654,7 @@ gate_suites() {
       echo "  ✓ resumed $stage from exact-candidate checkpoint"
       continue
     fi
+    ensure_disk_headroom || { echo "ABORT: insufficient disk for $stage"; return 3; }
     # An E2E roster leaves enough time for the independent GitHub CI to
     # finish before integration. A resumed browser stage can reattach to its
     # durable request instead of dispatching a second run.

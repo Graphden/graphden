@@ -126,44 +126,44 @@
           (copy-module "app/ui-account-menu" menu))))
 
 
+(def ^:private template-components
+  "Template names and role implementations. Shipped discriminators come from
+   the component contract, so adding a component cannot silently fork its ID."
+  [[:explorer "explorer" [[:initial "explorer-toolbar-initial"] [:update "explorer-toolbar-update"]
+                          [:view "explorer-toolbar-view"]]]
+   [:inspector "inspector" [[:initial "inspector-initial"] [:update "inspector-update"] [:view "inspector-view"]]]
+   [:account-menu "menu" [[:initial "account-menu-initial"] [:update "account-menu-update"] [:view "account-menu-view"]]]
+   [:account-methods "account-methods" [[:view "account-methods-view"]]]
+   [:account-security "account-security" [[:view "account-security-view"]]]
+   [:publish-form "publish-form" [[:view "publish-form-view"]]]
+   [:org-switcher "org-switcher" [[:view "org-switcher-view"]]]
+   [:authoring "authoring" [[:view "authoring-view"]]]
+   [:fn-picker "picker" [[:view "picker-view"]]]
+   [:recents "recents" [[:initial "recents-initial"] [:update "recents-update"] [:view "recents-view"]]]
+   [:tutorial-catalog "tutorial-catalog" [[:view "catalog-view"] [:query "session-view"]]]
+   [:execution-status "execution-status" [[:view "status-view"]]]
+   [:execution-path "execution-path" [[:view "path-view"]]]
+   [:feedback "feedback" [[:view "feedback-view"]]]
+   [:keymap "keymap" [[:view "keymap-view"]]]
+   [:appearance "appearance" [[:view "appearance-view"]]]
+   [:canvas "canvas" [[:view "canvas-view"]]]
+   [:canvas-values "canvas-values" [[:view "canvas-values-view"]]]
+   [:canvas-inheritance "canvas-inheritance" [[:initial "inheritance-initial"] [:view "inheritance-view"]]]
+   [:canvas-metadata "canvas-metadata" [[:view "metadata-view"]]]
+   [:canvas-type-structure "canvas-type-structure" [[:initial "type-structure-initial"] [:view "type-structure-view"]]]
+   [:canvas-bindings "canvas-bindings" [[:initial "bindings-initial"] [:view "bindings-view"]]]])
+
+
 (defn- component-descriptors
   [root]
-  (let [components [["explorer" :app.ui-explorer/explorer-toolbar-view
-                     [[:initial "explorer-toolbar-initial"] [:update "explorer-toolbar-update"]
-                      [:view "explorer-toolbar-view"]]]
-                    ["inspector" :app.ui-inspector/inspector-view
-                     [[:initial "inspector-initial"] [:update "inspector-update"] [:view "inspector-view"]]]
-                    ["menu" :app.ui-account-menu/account-menu-view
-                     [[:initial "account-menu-initial"] [:update "account-menu-update"] [:view "account-menu-view"]]]
-                    ["account-methods" :app.ui-account/account-methods-view [[:view "account-methods-view"]]]
-                    ["account-security" :app.ui-account/account-security-view [[:view "account-security-view"]]]
-                    ["publish-form" :app.ui-publish/publish-form-view [[:view "publish-form-view"]]]
-                    ["org-switcher" :app.ui-org-switcher/org-switcher-view [[:view "org-switcher-view"]]]
-                    ["authoring" :app.ui-authoring/authoring-view [[:view "authoring-view"]]]
-                    ["picker" :app.ui-fn-picker/picker-view [[:view "picker-view"]]]
-                    ["recents" :app.ui-recents/recents-view
-                     [[:initial "recents-initial"] [:update "recents-update"] [:view "recents-view"]]]
-                    ["tutorial-catalog" :app.ui-tutorial-catalog/catalog-view
-                     [[:view "catalog-view"] [:query "session-view"]]]
-                    ["execution-status" :app.ui-execution/status-view [[:view "status-view"]]]
-                    ["execution-path" :app.ui-execution/path-view [[:view "path-view"]]]
-                    ["feedback" :app.ui-feedback/feedback-view [[:view "feedback-view"]]]
-                    ["keymap" :app.ui-keymap/keymap-view [[:view "keymap-view"]]]
-                    ["appearance" :app.ui-appearance/appearance-view [[:view "appearance-view"]]]
-                    ["canvas" :app.ui-canvas/canvas-view [[:view "canvas-view"]]]
-                    ["canvas-values" :app.ui-canvas-values/canvas-values-view [[:view "canvas-values-view"]]]
-                    ["canvas-inheritance" :app.ui-canvas-inheritance/inheritance-view
-                     [[:initial "inheritance-initial"] [:view "inheritance-view"]]]
-                    ["canvas-metadata" :app.ui-canvas-metadata/metadata-view [[:view "metadata-view"]]]
-                    ["canvas-type-structure" :app.ui-canvas-type-structure/type-structure-view
-                     [[:initial "type-structure-initial"] [:view "type-structure-view"]]]
-                    ["canvas-bindings" :app.ui-canvas-bindings/bindings-view
-                     [[:initial "bindings-initial"] [:view "bindings-view"]]]]]
-    (mapcat (fn [[prefix shipped roles]]
+  (mapcat (fn [[group prefix roles]]
+            (let [shipped (get-in config/component-contracts [group :reference])]
+              (when-not shipped
+                (throw (ex-info "Missing shipped UI component contract" {:group group})))
               (component-definitions root prefix shipped
                                      (mapv (fn [[role name]]
-                                             [role (keyword (str root "." prefix) name)]) roles)))
-            components)))
+                                             [role (keyword (str root "." prefix) name)]) roles))))
+          template-components))
 
 
 (defn definitions
@@ -264,8 +264,7 @@
 
 (def groups
   "Fixed creation choices and their personal namespace/descriptor prefixes."
-  {:account-menu "menu" :account-methods "account-methods" :account-security "account-security" :publish-form "publish-form" :org-switcher "org-switcher" :authoring "authoring" :fn-picker "picker" :recents "recents" :inspector "inspector" :explorer "explorer"
-   :tutorial-catalog "tutorial-catalog" :execution-status "execution-status" :execution-path "execution-path" :feedback "feedback" :keymap "keymap" :appearance "appearance" :canvas "canvas" :canvas-values "canvas-values" :canvas-inheritance "canvas-inheritance" :canvas-metadata "canvas-metadata" :canvas-type-structure "canvas-type-structure" :canvas-bindings "canvas-bindings"})
+  (into {} (map (fn [[group prefix _]] [group prefix])) template-components))
 
 
 (defn selected-definitions

@@ -211,9 +211,15 @@ context, the two permissive public SELECT policies, and their global-visibility
 clauses before counting. It fails if those conditions change. These are
 conservative candidates, not proof of an active selection:
 inspect any nonzero cohort through the authenticated read-only root migration
-preview, then apply each exact proposal under current ACL/CAS. Keep the
+preview, then apply each exact proposal under current ACL/CAS. A migration
+created personal root can be replaced by another checked proposal after the
+ordinary selection changes; the prior root is renamed and retained by identity.
+The proposal refuses an authored root without the migration marker, so it
+cannot silently replace a user's independent HOF composition. This explicit
+refresh is still separate from ordinary configuration activation. Keep the
 compatibility adapter until every installation has zero candidates and the
-old read/write paths are confirmed unused.
+old read/write paths are confirmed unused, and configuration activation and
+root selection share one atomic operation.
 Root replacement immediately closes a mounted picker and retires its render
 receipt; old asynchronous loads cannot reactivate it.
 Completing the same root's load preserves a native picker opened during loading.

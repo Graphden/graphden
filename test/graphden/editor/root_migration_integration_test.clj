@@ -41,10 +41,71 @@
           (let [policy (snapshot/capture-context-policy ctx)
                 authorize! (tenancy/browser-source-policy storage)]
             (is (= (:id applied) (:id (resolution/root-choice storage authorize! policy)))))
-          (is (= :already-migrated
+          (is (= :stale-configuration
                  (try (migration/apply! ctx request) nil
                       (catch clojure.lang.ExceptionInfo error
                         (:reason (ex-data error)))))))))))
+
+
+(deftest a-personal-root-can-be-replaced-after-the-ordinary-selection-changes
+  (let [ctx (:ctx ga/*bootstrap*)
+        storage (:storage ctx)
+        home-name (str "root-replacement-" (random-uuid))
+        home (sp/create-entity storage :ns {:name home-name})]
+    (binding [tenancy/*seams-override* (atom (tenancy/seams-isolation-seed))]
+      (tenancy/install-personal-namespace-fn!
+        (constantly {:namespace-path home-name :source :fixture :isolated? false}))
+      (epoch/seed-watermark! storage)
+      (let [first-preview (migration/preview! ctx {})
+            first-root (:id (migration/apply! ctx (:request first-preview)))]
+        (epoch/seed-watermark! storage)
+        (let [current (source/with-snapshot
+                        storage #(resolution/capture %1 %2 (snapshot/capture-context-policy ctx)))
+              selected (activation/personalize!
+                         ctx {:component "fn-picker"
+                              :expected-preference {:present false :value nil}
+                              :expected-configuration-revision (:revision current)})]
+          (epoch/seed-watermark! storage)
+          (let [preview (migration/preview! ctx {})
+                receipt (:receipt preview)]
+            (is (= (str (:id selected)) (:selection-id receipt)))
+            (is (= [(str first-root)] (:changed-functions receipt)))
+            (is (= (str first-root) (get-in receipt [:previous :id])))
+            (is (empty? (sp/read-entities storage :fn
+                                          (mapv parse-uuid (:functions receipt)))))
+            (let [applied (migration/apply! ctx (:request preview))]
+              (is (true? (:committed applied)))
+              (is (not= first-root (:id applied)))
+              (is (= (:id home) (:namespace-id (sp/read-entity storage :fn (:id applied)))))
+              (is (= (get-in receipt [:previous :name])
+                     (:name (sp/read-entity storage :fn first-root))))
+              (epoch/seed-watermark! storage)
+              (let [policy (snapshot/capture-context-policy ctx)
+                    authorize! (tenancy/browser-source-policy storage)
+                    prior-graph (source/collect-client-closure storage [first-root] authorize!)]
+                (is (= (get-in receipt [:previous :revision])
+                       (resolution/source-revision
+                         first-root {:graph prior-graph}
+                         (:scope (resolution/root-choice storage authorize! policy)))))
+                (is (= (:id applied)
+                       (:id (resolution/root-choice storage authorize! policy))))))))))))
+
+
+(deftest migration-does-not-replace-an-unmanaged-personal-root
+  (let [ctx (:ctx ga/*bootstrap*)
+        storage (:storage ctx)
+        home-name (str "unmanaged-root-" (random-uuid))
+        home (sp/create-entity storage :ns {:name home-name})
+        root (sp/create-entity storage :fn {:name "editor-root" :namespace-id (:id home)})]
+    (binding [tenancy/*seams-override* (atom (tenancy/seams-isolation-seed))]
+      (tenancy/install-personal-namespace-fn!
+        (constantly {:namespace-path home-name :source :fixture :isolated? false}))
+      (epoch/seed-watermark! storage)
+      (is (= :unmanaged-personal-root
+             (try (migration/preview! ctx {}) nil
+                  (catch clojure.lang.ExceptionInfo error (:reason (ex-data error))))))
+      (is (= root (select-keys (sp/read-entity storage :fn (:id root))
+                               [:id :name :namespace-id]))))))
 
 
 (deftest migration-retains-an-authored-callback-and-its-ordinary-root

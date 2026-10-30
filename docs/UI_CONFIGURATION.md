@@ -199,6 +199,17 @@ source authorization and snapshot checks. Missing or revoked selected source
 refuses the root export; it never selects an older plan. A custom root's
 ordinary refs are authoritative. Remove the compatibility projection after the
 deterministic personal-root migration has replaced its readers and records.
+For C6, `scripts/ui_legacy_audit.sql` inventories only counts of old
+`components` preferences and non-shipped `editor`/`editor-root` identities.
+Run it against each installation with
+`psql -X -v ON_ERROR_STOP=1 -f scripts/ui_legacy_audit.sql` using a role that
+can see every tenant. It sets
+`row_security=off` so a role filtered by RLS fails instead of reporting a false
+zero. These are conservative candidates, not proof of an active selection:
+inspect any nonzero cohort through the authenticated read-only root migration
+preview, then apply each exact proposal under current ACL/CAS. Keep the
+compatibility adapter until every installation has zero candidates and the
+old read/write paths are confirmed unused.
 Root replacement immediately closes a mounted picker and retires its render
 receipt; old asynchronous loads cannot reactivate it.
 Completing the same root's load preserves a native picker opened during loading.

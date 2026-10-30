@@ -53,6 +53,7 @@
   (:import
     (java.util.concurrent
       Callable
+      ExecutorCompletionService
       ExecutorService
       Executors
       TimeUnit)))
@@ -292,16 +293,67 @@
       (testable/run-testable test test-plan))))
 
 
+(defn- skipped-indexed
+  [indexed]
+  (mapv (fn [[index test]] [index (assoc test ::testable/skip true)]) indexed))
+
+
+(defn- failed-indexed?
+  [indexed]
+  (some (comp result/failed? second) indexed))
+
+
+(defn- run-indexed-serial
+  [indexed test-plan load-error?]
+  (loop [done [] remaining (seq indexed)]
+    (if-let [[index test] (first remaining)]
+      (let [result (run-one test test-plan load-error?)
+            done (conj done [index result])]
+        (if (and testable/*fail-fast?* (result/failed? result))
+          (into done (skipped-indexed (rest remaining)))
+          (recur done (next remaining))))
+      done)))
+
+
 (defn- run-testables-parallel
   [parallel-tests test-plan n load-error?]
   (let [pool (Executors/newFixedThreadPool ^int n)]
     (try
-      (let [futures (mapv (fn [test]
-                            (let [work (bound-fn []
-                                         (run-one test test-plan load-error?))]
-                              (ExecutorService/.submit pool ^Callable work)))
-                          parallel-tests)]
-        (mapv deref futures))
+      (if-not testable/*fail-fast?*
+        (let [futures (mapv (fn [test]
+                              (let [work (bound-fn []
+                                           (run-one test test-plan load-error?))]
+                                (ExecutorService/.submit pool ^Callable work)))
+                            parallel-tests)]
+          (mapv deref futures))
+        ;; Keep at most N namespaces admitted. A failed result prevents new
+        ;; submissions; already-running fixtures finish their cleanup.
+        (let [completion (ExecutorCompletionService. pool)
+              total (count parallel-tests)
+              submit! (fn [index]
+                        (.submit completion ^Callable
+                                 (bound-fn []
+                                   (run-one (nth parallel-tests index) test-plan load-error?))))
+              admitted (min n total)]
+          (loop [next-index admitted
+                 active (into {} (map (fn [index] [(submit! index) index])
+                                      (range admitted)))
+                 results {}
+                 failed? false]
+            (if (empty? active)
+              (mapv (fn [index test]
+                      (get results index (assoc test ::testable/skip true)))
+                    (range total) parallel-tests)
+              (let [completed (.take completion)
+                    index (get active completed)
+                    result (.get completed)
+                    failed? (or failed? (result/failed? result))
+                    active (dissoc active completed)
+                    admit? (and (not failed?) (< next-index total))]
+                (recur (if admit? (inc next-index) next-index)
+                       (if admit? (assoc active (submit! next-index) next-index) active)
+                       (assoc results index result)
+                       failed?))))))
       (finally
         (ExecutorService/.shutdown pool)
         (ExecutorService/.awaitTermination pool 5 TimeUnit/MINUTES)))))
@@ -314,17 +366,18 @@
   [testables test-plan n hints]
   (let [load-error? (some ::testable/load-error testables)
         {:keys [remaining] priority-set :priority} (priority/indexed-order testables hints)
-        priority-results (mapv (fn [[i t]]
-                                 [i (run-one t test-plan load-error?)])
-                               priority-set)
+        priority-results (run-indexed-serial priority-set test-plan load-error?)
         {serial-set true parallel-set false}
         (group-by (comp ns-serial? second) remaining)
-        serial-results (mapv (fn [[i t]]
-                               [i (run-one t test-plan load-error?)])
-                             serial-set)
+        serial-results (if (and testable/*fail-fast?* (failed-indexed? priority-results))
+                         (skipped-indexed serial-set)
+                         (run-indexed-serial serial-set test-plan load-error?))
         parallel-set (heavy-first parallel-set)
         parallel-tests (mapv second parallel-set)
-        parallel-raw (run-testables-parallel parallel-tests test-plan n load-error?)
+        parallel-raw (if (and testable/*fail-fast?*
+                              (failed-indexed? (concat priority-results serial-results)))
+                       (mapv #(assoc % ::testable/skip true) parallel-tests)
+                       (run-testables-parallel parallel-tests test-plan n load-error?))
         parallel-results (mapv vector (map first parallel-set) parallel-raw)]
     (->> (concat priority-results serial-results parallel-results)
          (sort-by first)
@@ -337,11 +390,13 @@
    per-thread isolation and bounded parallelism."
   [indexed test-plan n load-error?]
   (let [{serial true parallel false} (group-by (comp ns-serial? second) indexed)
-        serial-results (mapv (fn [[i t]] [i (run-one t test-plan load-error?)]) serial)
+        serial-results (run-indexed-serial serial test-plan load-error?)
         parallel (heavy-first parallel)
-        results (if (> n 1)
-                  (run-testables-parallel (mapv second parallel) test-plan n load-error?)
-                  (mapv #(run-one (second %) test-plan load-error?) parallel))]
+        results (if (and testable/*fail-fast?* (failed-indexed? serial-results))
+                  (mapv #(assoc (second %) ::testable/skip true) parallel)
+                  (if (> n 1)
+                    (run-testables-parallel (mapv second parallel) test-plan n load-error?)
+                    (mapv second (run-indexed-serial parallel test-plan load-error?))))]
     (into serial-results (map vector (map first parallel) results))))
 
 

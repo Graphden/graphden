@@ -1,7 +1,7 @@
 {
   "name": "graphden",
   "private": true,
-  "description": "Frontend tooling root for graphden \u2014 biome lint over editor JS/CSS.",
+  "description": "Frontend tooling root for graphden — biome lint over editor JS/CSS.",
   "scripts": {
     "lint": "biome check resources/packages/app/editor",
     "lint:fix": "biome check --write resources/packages/app/editor"
@@ -10,6 +10,7 @@
     "@biomejs/biome": "^2.5.15",
     "@commitlint/cli": "^21.2.3",
     "@commitlint/config-conventional": "^21.2.3",
+    "acorn": "^8.19.0",
     "markdownlint-cli2": "^0.23.3",
     "stylelint": "^17.16.0",
     "stylelint-config-standard": "^40.0.0",

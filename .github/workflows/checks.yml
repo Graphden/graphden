@@ -502,6 +502,12 @@ jobs:
         with:
           bb: '1.13.226'
 
+      - name: Install UI lint parser
+        run: npm ci --ignore-scripts
+
+      - name: Check graph UI target boundaries
+        run: bb ui-target-lint
+
       - name: Run no-stack JS tests
         run: bb test-js
 

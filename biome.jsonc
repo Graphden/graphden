@@ -22,6 +22,9 @@
 			// why: the devtour page script is authored the same way (a classic
 			// script inlined into the baked HTML) and deserves the same linter.
 			"**/scripts/devtour/tour.js",
+			// why: C5's source boundary scanner is authored JS and must pass the
+			// same checks as the editor code it protects.
+			"**/tools/ui-target-lint*.mjs",
 			"!**/node_modules/**",
 			"!**/tools/browser-test/**"
 		]

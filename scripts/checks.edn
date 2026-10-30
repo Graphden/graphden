@@ -42,6 +42,9 @@
   :relevant ["\\.(clj|cljc|cljs|edn|bb)$" "^\\.cljstyle$"]}
  {:name "syntax"       :bb "syntax"       :timeout 120000 :group :infra :stage :affected
   :relevant ["\\.(js|mjs|cjs|json)$" "^scripts/ci_fast" "^bb\\.edn$"]}
+ {:name "ui-target-lint" :bb "ui-target-lint" :timeout 30000 :group :web
+  :relevant ["^src/" "^resources/packages/" "^tools/ui-target-lint(?:\\.test)?\\.mjs$"
+             "^scripts/ui_target_lint(?:_test)?\\.clj$" "^package(-lock)?\\.json$" "^bb\\.edn$"]}
  {:name "biome-affected" :bb "staged-biome-affected" :timeout 60000 :group :web :stage :affected
   :relevant ["^resources/packages/app/(editor|ui-preview)/" "^scripts/devtour/tour\\.js$" "^biome\\.jsonc$" "^package(-lock)?\\.json$" "^bb\\.edn$"
              "^scripts/(ci_staged|ci_select|ci_resume)\\.clj$" "^scripts/checks\\.edn$"]}

@@ -800,6 +800,13 @@
    :task (do (require (quote [ci-fast :as fast]))
              (fast/run-syntax! (System/getenv "GRAPHDEN_CI_SINCE")))}
 
+  ui-target-lint
+  {:doc "Reject hardcoded shipped UI target lookups in Clojure, graph EDN and editor JS."
+   :task (do (shell "bb" "scripts/ui_target_lint_test.clj")
+             (shell "node" "--test" "tools/ui-target-lint.test.mjs")
+             (shell "bb" "scripts/ui_target_lint.clj")
+             (shell "node" "tools/ui-target-lint.mjs"))}
+
   ci-priority
   {:doc "Print source-related ordering hints; never launch tests. GRAPHDEN_CI_SINCE is set by bb ci."
    :task (load-file "scripts/ci_priority.clj")}

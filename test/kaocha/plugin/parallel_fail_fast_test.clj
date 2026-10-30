@@ -26,7 +26,7 @@
 (deftest parallel-fail-fast-admits-only-in-flight-namespaces
   (let [{:keys [started outputs]} (run-synthetic 0)]
     (is (= #{0 1} (set started)))
-    (is (= true (:failed? (first outputs))))
+    (is (true? (:failed? (first outputs))))
     (is (every? :kaocha.testable/skip (drop 2 outputs)))))
 
 

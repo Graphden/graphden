@@ -55,6 +55,7 @@
       Callable
       ExecutorService
       Executors
+      Future
       TimeUnit)))
 
 
@@ -342,9 +343,9 @@
               (mapv (fn [index test]
                       (get results index (assoc test ::testable/skip true)))
                     (range total) parallel-tests)
-              (if-let [completed (some (fn [[task _]] (when (.isDone task) task)) active)]
+              (if-let [completed (some (fn [[task _]] (when (Future/.isDone task) task)) active)]
                 (let [index (get active completed)
-                      result (.get completed)
+                      result (Future/.get completed)
                       failed? (or failed? (result/failed? result))
                       active (dissoc active completed)
                       admit? (and (not failed?) (< next-index total))]

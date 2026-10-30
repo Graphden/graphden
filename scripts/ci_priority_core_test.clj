@@ -50,6 +50,15 @@
                  "edit-account-menu-graph.test.js")))
 
 
+(deftest exact-catalog-role-consumers-precede-broad-editor-matches
+  (let [changed #{"resources/packages/app/editor/editor-tour.js"
+                  "resources/packages/app/ui-tutorial-catalog/fns.edn"}
+        ordered (priority/browser-order changed)]
+    (is (= ["edit-ui-components-selective.test.js" "edit-ui-components.test.js"]
+           (subvec ordered 0 2)))
+    (is (= (frequencies (priority/browser-order nil)) (frequencies ordered)))))
+
+
 (deftest package-module-without-ui-prefix-keeps-browser-order-valid
   (let [source "resources/packages/app/editor/fns.edn"
         ordered (priority/browser-order #{source})]

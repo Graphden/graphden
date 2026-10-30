@@ -166,7 +166,7 @@
                        :let [camel (str/replace role #"-([a-z])"
                                                 (fn [[_ letter]] (str/upper-case letter)))]]
                    (re-pattern (str "(?:\\.plans\\." (java.util.regex.Pattern/quote camel)
-                                    "\\b|(?:componentNow|gdLoadUIComponentRuntime|gdUIComponentFailed)\\(\\s*['\"]"
+                                    "\\b|(?:componentNow|componentIdentity|gdUIComponentRuntimeIdentity|gdLoadUIComponentRuntime|gdUIComponentFailed)\\(\\s*['\"]"
                                     (java.util.regex.Pattern/quote role) "['\"])")))]
     (set (keep (fn [[path source]]
                  (when (and (or (str/starts-with? path "resources/packages/")
@@ -175,13 +175,39 @@
                    path)) sources))))
 
 
+(defn- package-component-roles
+  [path]
+  (when (and (re-matches #"resources/packages/[^/]+/[^/]+/fns\.edn" path)
+             (fs/exists? path))
+    (try (get (cached-component-roles)
+              (:namespace (edn/read-string (slurp path))))
+         (catch Exception _ nil))))
+
+
+(defn- precise-component-consumers
+  "Explicit component runtime reads and their local helper importers precede
+   broad shared-global and selector matches. Smaller helper fanout goes first."
+  [browser-files {:keys [sources]} path]
+  (when-let [roles (seq (package-component-roles path))]
+    (let [seeds (component-source-seeds sources roles)
+          tests (set browser-files)
+          browser-seeds (->> seeds
+                             (filter #(str/starts-with? % "tools/browser-test/"))
+                             (map (comp str fs/file-name)))
+          direct (sort (filter tests browser-seeds))
+          helper-groups (for [helper (remove tests browser-seeds)
+                              :let [consumers (browser-local-consumers browser-files #{helper})]
+                              :when (seq consumers)]
+                          [helper consumers])]
+      (concat direct
+              (mapcat second (sort-by (fn [[helper consumers]] [(count consumers) helper])
+                                      helper-groups))))))
+
+
 (defn- browser-source-consumers
   [browser-files {:keys [sources] reverse-graph :reverse} path]
   (let [package-module (second (re-matches #"resources/packages/[^/]+/([^/]+)/fns\.edn" path))
-        roles (when (and package-module (fs/exists? path))
-                (try (get (cached-component-roles)
-                          (:namespace (edn/read-string (slurp path))))
-                     (catch Exception _ nil)))
+        roles (when package-module (package-component-roles path))
         exact-seeds (when (seq roles) (component-source-seeds sources roles))
         module-tokens (when package-module
                         (set [package-module (str/replace package-module #"^ui-" "")]))
@@ -264,6 +290,8 @@
                   sort
                   (filter #(re-matches #"tools/browser-test/edit-[^/]+\.test\.js" %))
                   (map (comp str fs/file-name)))
+             (mapcat #(precise-component-consumers browser-files graph %)
+                     (sort changed))
              (mapcat #(browser-api-consumers browser-files %) (sort changed))
              (mapcat (fn [path]
                        (cond

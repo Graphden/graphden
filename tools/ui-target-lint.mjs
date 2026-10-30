@@ -3,7 +3,7 @@ import { join, relative } from 'node:path';
 import { parse } from 'acorn';
 
 const targetName = /\bapp\.ui-[A-Za-z0-9_-]+[/.:]/;
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const uuid = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;
 
 function* javascriptFiles(directory) {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
@@ -21,8 +21,8 @@ function literals(source) {
     const node = pending.pop();
     if (!node || typeof node !== 'object') continue;
     if (node.type === 'Literal' && typeof node.value === 'string') found.push(node);
-    if (node.type === 'TemplateElement' && typeof node.value.cooked === 'string') {
-      found.push({ value: node.value.cooked, loc: node.loc });
+    if (node.type === 'TemplateElement') {
+      found.push({ value: node.value.cooked ?? node.value.raw, loc: node.loc });
     }
     for (const value of Object.values(node)) {
       if (Array.isArray(value)) pending.push(...value);

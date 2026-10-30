@@ -15,6 +15,9 @@ test('JS AST lint rejects executable target literals and ignores comments', () =
     writeFileSync(file, '// app.ui-canvas/canvas-view\nexport const target = `app.ui-canvas/canvas-view`;\n');
     assert.throws(() => execFileSync(process.execPath, ['tools/ui-target-lint.mjs', root],
       { stdio: 'pipe' }), /hardcoded UI target literal/);
+    writeFileSync(file, 'export const target = "/fn/00000000-0000-0000-0000-000000000001";\n');
+    assert.throws(() => execFileSync(process.execPath, ['tools/ui-target-lint.mjs', root],
+      { stdio: 'pipe' }), /hardcoded UI target literal/);
     writeFileSync(file, '// app.ui-canvas/canvas-view\nexport const target = "canvas";\n');
     assert.doesNotThrow(() => execFileSync(process.execPath, ['tools/ui-target-lint.mjs', root],
       { stdio: 'pipe' }));

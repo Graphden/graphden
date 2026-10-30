@@ -53,7 +53,6 @@
   (:import
     (java.util.concurrent
       Callable
-      ExecutorCompletionService
       ExecutorService
       Executors
       TimeUnit)))
@@ -328,12 +327,11 @@
           (mapv deref futures))
         ;; Keep at most N namespaces admitted. A failed result prevents new
         ;; submissions; already-running fixtures finish their cleanup.
-        (let [completion (ExecutorCompletionService. pool)
-              total (count parallel-tests)
+        (let [total (count parallel-tests)
               submit! (fn [index]
-                        (.submit completion ^Callable
-                                 (bound-fn []
-                                   (run-one (nth parallel-tests index) test-plan load-error?))))
+                        (let [work (bound-fn []
+                                     (run-one (nth parallel-tests index) test-plan load-error?))]
+                          (ExecutorService/.submit pool ^Callable work)))
               admitted (min n total)]
           (loop [next-index admitted
                  active (into {} (map (fn [index] [(submit! index) index])
@@ -344,16 +342,18 @@
               (mapv (fn [index test]
                       (get results index (assoc test ::testable/skip true)))
                     (range total) parallel-tests)
-              (let [completed (.take completion)
-                    index (get active completed)
-                    result (.get completed)
-                    failed? (or failed? (result/failed? result))
-                    active (dissoc active completed)
-                    admit? (and (not failed?) (< next-index total))]
-                (recur (if admit? (inc next-index) next-index)
-                       (if admit? (assoc active (submit! next-index) next-index) active)
-                       (assoc results index result)
-                       failed?))))))
+              (if-let [completed (some (fn [[task _]] (when (.isDone task) task)) active)]
+                (let [index (get active completed)
+                      result (.get completed)
+                      failed? (or failed? (result/failed? result))
+                      active (dissoc active completed)
+                      admit? (and (not failed?) (< next-index total))]
+                  (recur (if admit? (inc next-index) next-index)
+                         (if admit? (assoc active (submit! next-index) next-index) active)
+                         (assoc results index result)
+                         failed?))
+                (do (Thread/sleep 20)
+                    (recur next-index active results failed?)))))))
       (finally
         (ExecutorService/.shutdown pool)
         (ExecutorService/.awaitTermination pool 5 TimeUnit/MINUTES)))))

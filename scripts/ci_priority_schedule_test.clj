@@ -10,6 +10,7 @@
          (pos? (get testable :kaocha.result/error 0))
          (some failed? (:kaocha.result/tests testable))))
    (ns kaocha.testable)
+   (def ^:dynamic *fail-fast?* false)
    (defmulti -run {:arglists '([testable plan])}
      (fn [testable _] (:kaocha.testable/type testable)))
    (defn run-testable [testable _] testable)

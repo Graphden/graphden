@@ -148,7 +148,7 @@
             :canvas-bindings {:initial (ids/fn-id (str root ".canvas-bindings") :bindings-initial)
                               :view (ids/fn-id (str root ".canvas-bindings") :bindings-view)}
             :tutorial-catalog {:view (ids/fn-id (str root ".tutorial-catalog") :catalog-view)
-                               :query (ids/fn-id (str root ".tutorial-catalog") :catalog-query)}
+                               :query (ids/fn-id (str root ".tutorial-catalog") :session-view)}
             :execution-status {:view (ids/fn-id (str root ".execution-status") :status-view)}
             :execution-path {:view (ids/fn-id (str root ".execution-path") :path-view)}
             :feedback {:view (ids/fn-id (str root ".feedback") :feedback-view)}

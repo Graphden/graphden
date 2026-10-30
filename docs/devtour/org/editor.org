@@ -568,13 +568,13 @@ Copies the fixed shipped theme, menu, picker, Recents, Inspector, Explorer, tuto
 :PROPERTIES:
 :CUSTOM_ID: editor/selected-definitions
 :FILE: src/graphden/editor/component_templates.clj
-:LINE: 271
+:LINE: 270
 :MINS: 2.5
 :END:
 
 The retained legacy selective-copy compatibility path keeps only the chosen component and its owned reference closure. A new ordinary concat manifest references the previous authored manifest and the new descriptor list, preserving existing identities and edits. Legacy slots are adapted to descriptors without copying their bodies. Retained identities are outside the create-only receipt; group creation does not activate a theme.
 
-- source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn selected-definitions][src/graphden/editor/component_templates.clj:271]]
+- source :: [[file:../../../src/graphden/editor/component_templates.clj::(defn selected-definitions][src/graphden/editor/component_templates.clj:270]]
 - same file :: [[file:editor.org::#editor/definitions][definitions]]
 
 * 43. apply!

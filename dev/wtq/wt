@@ -178,6 +178,22 @@ bootstrap_node_modules() {
   done < <(git -C "$MAIN_WT" ls-files '*package.json' | xargs -r -n1 dirname | sort -u)
 }
 
+# A feature may change the root lockfile while the main checkout still has the
+# previous dependency tree. The train must install that exact lock before CI
+# starts its parallel checks; installing from an individual check would race
+# Biome/stylelint readers of node_modules.
+sync_train_root_node_modules() {
+  local lock="$TRAIN_WT/package-lock.json" modules="$TRAIN_WT/node_modules"
+  [ -f "$lock" ] || return 0
+  local digest
+  digest="$(sha256sum "$lock" | cut -d' ' -f1)"
+  if [ ! -d "$modules" ] || [ "$(cat "$modules/.graphden-lock-sha256" 2>/dev/null)" != "$digest" ]; then
+    info "Installing train root npm dependencies for its package-lock.json"
+    (cd "$TRAIN_WT" && npm ci --ignore-scripts --no-audit --no-fund) || return 1
+    printf '%s\n' "$digest" > "$modules/.graphden-lock-sha256"
+  fi
+}
+
 # --- governance drift -------------------------------------------------------
 # The rules an agent works under reach it ONCE: CLAUDE.md at session start,
 # AGENT.md in its first minutes. Nothing re-reads them. An agent that has been
@@ -2151,6 +2167,11 @@ train_run() {
     # dockerized non-root linters (shellcheck/hadolint/lychee) can't read
     # 0600 files and fail the gate on ENVIRONMENT, not code.
     chmod -R a+rX "$TRAIN_WT" || true
+    if ! sync_train_root_node_modules; then
+      echo "ABORT: could not install train npm dependencies"
+      for m in "${gated[@]}"; do decide "$m" PRECOND "$ts" "train npm dependencies could not be installed"; done
+      return 20
+    fi
   fi
   if [ "${#gated[@]}" -eq 0 ]; then
     echo "(no member left to gate)"

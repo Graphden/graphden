@@ -205,7 +205,11 @@ Run it against each installation with
 `psql -X -v ON_ERROR_STOP=1 -f scripts/ui_legacy_audit.sql` using a role that
 can see every tenant. It sets
 `row_security=off` so a role filtered by RLS fails instead of reporting a false
-zero. These are conservative candidates, not proof of an active selection:
+zero. The deployed cloud app role uses forced RLS; for that exact policy shape,
+pass `-v app_role_rls=1` instead. The script verifies an empty organization
+context, the two permissive public SELECT policies, and their global-visibility
+clauses before counting. It fails if those conditions change. These are
+conservative candidates, not proof of an active selection:
 inspect any nonzero cohort through the authenticated read-only root migration
 preview, then apply each exact proposal under current ACL/CAS. Keep the
 compatibility adapter until every installation has zero candidates and the

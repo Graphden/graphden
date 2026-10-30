@@ -232,19 +232,25 @@ async function walkUIComponentsLesson(page, {onReceipt = async () => {}, onStage
   previous, {timeout: 60000});
   // Configuration publication can precede another component's bounded policy
   // retry. Wait for the actual previously loaded runtimes, not just the picker.
+  // The catalogue shares the root with the lesson. Once the finished lesson
+  // closes, it has no host and must release its render receipt.
+  const persistentComponents = {...loadedComponents,
+    names: loadedComponents.names.filter(name => name !== 'tutorial-catalog')};
   try {
-    await waitForLoadedUIComponents(page, loadedComponents);
+    await waitForLoadedUIComponents(page, persistentComponents);
   } catch (error) {
     const runtime = await page.evaluate(expected => ({
       selectionMatches: gdUIConfigurationState()?.selection?.['fn-id'] === expected.configuration,
       components: expected.names.map(name => ({name,
         matches: gdUIComponentRuntimeIdentity(name) === expected.configuration})),
       status: gdUIComponentsStatus(),
-    }), loadedComponents).catch(() => ({unavailable: true}));
+    }), persistentComponents).catch(() => ({unavailable: true}));
     console.error(JSON.stringify({diagnostic: 'cleanup-component-runtime', runtime}));
     throw error;
   }
-  await settleComponents(loadedComponents);
+  await settleComponents(persistentComponents);
+  assert(await page.evaluate(() => gdUIComponentRuntimeIdentity('tutorial-catalog') === null),
+    'closing the last tutorial host releases its root receipt');
   assert(await page.evaluate(() => gdShellMenuGraph.ready && !gdUIComponentsStatus()),
     'cleanup restores the loaded component runtimes without a terminal fallback');
   const after = await page.evaluate(() => ({components: gdPrefRead('components'),

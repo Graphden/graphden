@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 // A lazy catalogue view receives a root receipt only after its native host
 // finishes checked paint. Closing it resumes the original lesson owner.
 async function verifyTourCatalogRootSelection(page, selection) {
+  const returningToLesson = await page.evaluate(() => !!document.querySelector('#gd-tour-pop.gd-tour-visible #gd-tour-title'));
   await page.evaluate(() => openTutorialMenu());
   try {
     await page.waitForFunction(selection =>
@@ -15,8 +16,8 @@ async function verifyTourCatalogRootSelection(page, selection) {
     selection), 'local catalogue filtering preserves the checked root paint receipt');
     await page.locator('.gd-tour-filter').fill('');
     await page.locator('.gd-tour-filter').press('Escape');
-    assert(await page.evaluate(() => gdEditorRoot.componentIdentity('tutorial-catalog') === null),
-      'closing the last catalogue host releases its root receipt');
+    await page.waitForFunction(expected => gdEditorRoot.componentIdentity('tutorial-catalog') === expected
+      && !document.querySelector('.gd-tour-lesson-list'), returningToLesson ? selection : null);
   } finally {
     await page.evaluate(() => { gdTourCatalogClose?.(); });
   }

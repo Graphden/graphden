@@ -158,9 +158,14 @@ Details that are deliberate:
   within the required phase and producer dependencies. A browser file failure
   moves that file and its unrun tail before earlier passing files. New checks
   join the unrun set; deleted or out-of-scope checks leave the current roster.
-  A completed red run lends ordering hints only. An interrupted run may credit
-  completed passes when the assembled SHA, base, selected roster and image proof
-  match exactly; in-flight checks and provisional browser verdicts run again.
+  A completed failed-check run lends ordering hints only. An interrupted run or
+  a completed host PRECOND between stages may credit completed passes when the
+  assembled SHA, base, selected roster and image proof match exactly; in-flight
+  checks and provisional browser verdicts run again. The gate checks that visual
+  Playwright can launch its Chromium before CI and again before visual, so a
+  missing browser cache is a resumable host PRECOND rather than a late suite
+  failure. Disk admission reclaims the downloaded Trivy DB and archives old
+  hidden gate output when needed.
   Missing or malformed proof runs the check rather than waiving it. CI preserves canonical resource
   batches (it may split, never combine them); readers follow their measuring
   tests, and the verified build precedes image consumers. Browser admission

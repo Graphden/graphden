@@ -35,6 +35,10 @@ wait_for_headroom() { echo headroom >> "$TEST_LOG"; [ "${FAIL_HEADROOM:-0}" != 1
 ensure_disk_headroom() { [ "${FAIL_DISK:-0}" != 1 ]; }
 git() { printf '%s\n' 0000000000000000000000000000000000000001; }
 node() { :; }
+visual_browser_ready() {
+  VISUAL_BROWSER_CALLS=$(( ${VISUAL_BROWSER_CALLS:-0} + 1 ))
+  [ "${FAIL_VISUAL_BROWSER_AT:-0}" != "$VISUAL_BROWSER_CALLS" ]
+}
 clojure() { echo uber >> "$TEST_LOG"; }
 docker-compose() { echo build >> "$TEST_LOG"; }
 verify_candidate_image() {
@@ -102,6 +106,7 @@ assert_events() {
 run_case() {
   : > "$TEST_LOG"
   built_candidate=0
+  VISUAL_BROWSER_CALLS=0
   gate_suites "$TEST_DIR" 0 0 0 >/dev/null
 }
 
@@ -109,6 +114,26 @@ CASE_BUILD=1 CASE_INTEGRATION=0 CASE_E2E=1 CASE_VISUAL=1
 run_case
 assert_events 'expect,ci,verify,uber,build,image,visual,e2e'
 [ "$built_candidate" = 1 ]
+
+# Missing Chromium is a host precondition before CI, and is rechecked before
+# visual if a cleanup removes the cache while earlier stages are running.
+FAIL_VISUAL_BROWSER_AT=1
+: > "$TEST_LOG"
+VISUAL_BROWSER_CALLS=0
+browser_rc=0
+gate_suites "$TEST_DIR" 0 0 0 > "$TEST_DIR/browser-preflight.out" || browser_rc=$?
+[ "$browser_rc" = 3 ]
+assert_events ''
+grep -q '^ABORT: visual Playwright' "$TEST_DIR/browser-preflight.out"
+FAIL_VISUAL_BROWSER_AT=2
+: > "$TEST_LOG"
+VISUAL_BROWSER_CALLS=0
+browser_rc=0
+gate_suites "$TEST_DIR" 0 0 0 > "$TEST_DIR/browser-boundary.out" || browser_rc=$?
+[ "$browser_rc" = 3 ]
+assert_events 'expect,ci,verify,uber,build,image'
+grep -q '^ABORT: visual Chromium disappeared' "$TEST_DIR/browser-boundary.out"
+unset FAIL_VISUAL_BROWSER_AT
 
 CASE_INTEGRATION=1 CASE_E2E=1 CASE_VISUAL=0
 run_case

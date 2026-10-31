@@ -649,6 +649,14 @@ gc_gate_leftovers() {
   info "Dropping build cache unused for 3 days ..."
   docker builder prune -f --filter unused-for=72h 2>/dev/null | tail -1 || true
 
+  # Trivy's downloaded vulnerability DB can outlive a selected CI check and
+  # occupy several GiB. It is reproducible cache data, not a test artifact.
+  local trivy_db="${WTQ_TRIVY_CACHE_DIR:-/tmp/trivy-cache}/trivy/db"
+  if [ -f "$trivy_db/trivy.db" ]; then
+    info "Reclaiming the downloaded Trivy DB ..."
+    find "$trivy_db" -maxdepth 1 -type f \( -name trivy.db -o -name metadata.json \) -delete
+  fi
+
   info "Removing stale test temp dirs (Playwright crash artifacts, tour audits older than a day) ..."
   find /tmp -maxdepth 1 \( -name 'playwright-artifacts-*' -o -name 'tour-audit.*' \) -mtime +1 \
     -exec rm -rf {} + 2>/dev/null || true
@@ -656,7 +664,7 @@ gc_gate_leftovers() {
   # Train logs have two hardlinked names. Archiving both old names preserves
   # their diagnostics while releasing the shared inode. Receipts stay intact.
   info "Archiving gate logs older than two days ..."
-  find "$LOG_DIR" -maxdepth 1 -type f -name '*.log' -mtime +2 -print0 \
+  find "$LOG_DIR" -maxdepth 1 -type f \( -name '*.log' -o -name '.gate-*.out' \) -mtime +2 -print0 \
     | xargs -0 -r -P 2 -n 1 gzip -f
 }
 
@@ -1522,6 +1530,16 @@ run_gate_stage() {
   esac
 }
 
+visual_browser_ready() {
+  local wt="$1"
+  ( cd "$wt/tools/visual-tests" && node -e '
+    const config = require("./playwright.config.js");
+    require("playwright").chromium.launch(config.use.launchOptions)
+      .then(browser => browser.close())
+      .catch(() => process.exit(1))
+  ' ) >/dev/null 2>&1
+}
+
 gate_suites() {
   local wt="$1" no_e2e="$2" no_fleet="$3" no_visual="$4"
 
@@ -1534,8 +1552,9 @@ gate_suites() {
   # Preflight. The e2e suite needs playwright to be resolvable from
   # tools/browser-test; a broken install there does not surface until the
   # suite runs — 40 minutes into the gate — as a wall of
-  # "Cannot find module 'playwright'". Cost of asking now: ~50 ms.
-  step "preflight: e2e runner dependencies"
+  # "Cannot find module 'playwright'". Visual also needs a launchable browser;
+  # check both before the first expensive stage.
+  step "preflight: browser runner dependencies"
   if [ "$NEED_E2E" = 1 ] && ! ( cd "$wt/tools/browser-test" && node -e "require.resolve('playwright')" ) 2>/dev/null; then
     echo "ABORT: cannot resolve 'playwright' from $wt/tools/browser-test."
     echo "  The e2e suite would fail an hour from now with MODULE_NOT_FOUND."
@@ -1544,6 +1563,12 @@ gate_suites() {
     return 3
   fi
   if [ "$NEED_E2E" = 1 ]; then echo "ok"; else echo "not needed — e2e out of scope"; fi
+  if [ "$NEED_VISUAL" = 1 ] && ! visual_browser_ready "$wt"; then
+    echo "ABORT: visual Playwright cannot launch its installed Chromium."
+    echo "  Fix the browser cache before the long gate:"
+    echo "      (cd $MAIN_WT/tools/visual-tests && npx playwright install chromium)"
+    return 3
+  fi
   echo "  $CHANGED_N file(s) changed vs $TARGET"
   if [ "$DEPS_DEVTOOL_ONLY" = 1 ]; then
     echo "  deps.edn: only the audited :watson devtool coordinate changed"
@@ -1673,6 +1698,10 @@ gate_suites() {
       (cd "$wt" && bb scripts/ci_resume_cli.clj mark stages "$GRAPHDEN_RESUME_OUT.stages.edn" "$stage" passed) || return 1
       echo "  ✓ resumed $stage from exact-candidate checkpoint"
       continue
+    fi
+    if [ "$stage" = visual ] && ! visual_browser_ready "$wt"; then
+      echo "ABORT: visual Chromium disappeared after preflight; restore it before resuming."
+      return 3
     fi
     ensure_disk_headroom || { echo "ABORT: insufficient disk for $stage"; return 3; }
     # An E2E roster leaves enough time for the independent GitHub CI to

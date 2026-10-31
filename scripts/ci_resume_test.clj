@@ -166,10 +166,13 @@
       (finally (fs/delete-tree dir)))))
 
 
-(deftest gate-credit-requires-an-unfinished-exact-train
+(deftest gate-credit-requires-an-exact-unfinished-or-preconditioned-train
   (let [expected {:schema 1 :sha sha :scope {:since "base"}}
         gate {:schema 1 :sha sha :complete false :exit nil}]
     (is (resume/interrupted-gate? gate expected sha "base"))
+    (is (resume/interrupted-gate? (assoc gate :complete true :exit 3) expected sha "base"))
+    (is (not (resume/interrupted-gate? (assoc gate :complete true :exit 3
+                                              :failed-stage :visual) expected sha "base")))
     (is (not (resume/interrupted-gate? (assoc gate :complete true :exit 1) expected sha "base")))
     (is (not (resume/interrupted-gate? gate expected sha "other")))
     (is (not (resume/interrupted-gate? gate expected (str/join (repeat 40 "b")) "base")))))

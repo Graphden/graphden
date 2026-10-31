@@ -47,13 +47,15 @@
 
 
 (defn interrupted-gate?
-  "The former train must have died without a verdict on this exact assembled
-   commit and base. A completed red gate never lends pass credit."
+  "An exact candidate interrupted by the host, including a completed PRECOND
+   before the next stage, may reuse proven passes. A failed check never does."
   [gate expected sha base]
-  (and (= 1 (:schema gate)) (false? (:complete gate))
+  (and (= 1 (:schema gate))
        (= sha (:sha gate) (:sha expected))
        (= base (get-in expected [:scope :since]))
-       (nil? (:exit gate))))
+       (or (and (false? (:complete gate)) (nil? (:exit gate)))
+           (and (true? (:complete gate)) (= 3 (:exit gate))
+                (nil? (:failed-stage gate))))))
 
 
 (defn carry-hints!

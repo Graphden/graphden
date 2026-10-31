@@ -99,21 +99,26 @@
 ;; In-memory query matching
 ;; =============================================================================
 
+(defn- compile-where
+  [where]
+  (mapv (fn [[k v]] [k (if (vector? v) (set v) v)]) where))
+
+
 (defn- matches?
-  "Row matches `where` iff every `[k v]` matches: a vector/set `v` is a
-   membership test (`{:id [ids]}` / `{:fn-id [ids]}`), any other `v` is
-   equality (`{:name x}`). Covers every where-shape the executor emits."
+  "Match a row against a query whose vector membership values were compiled
+   to sets once before scanning rows."
   [where row]
   (every? (fn [[k v]]
-            (if (or (vector? v) (set? v))
-              (contains? (set v) (get row k))
+            (if (set? v)
+              (contains? v (get row k))
               (= v (get row k))))
           where))
 
 
 (defn- query-rows
   [rows entity where]
-  (filterv #(matches? where %) (get rows entity)))
+  (let [compiled (compile-where where)]
+    (filterv #(matches? compiled %) (get rows entity))))
 
 
 (defn- read-only!
@@ -181,7 +186,7 @@
     (when version-source
       (throw (ex-info "Snapshot has no version-history candidate source"
                       {:type :storage-error/bounded-query-unsupported :entity-name entity})))
-    (let [candidate-where (bounded/candidate-where entity where max-candidates)
+    (let [candidate-where (compile-where (bounded/candidate-where entity where max-candidates))
           candidates (->> (get @rows entity)
                           (filter #(matches? candidate-where %))
                           (take (inc max-candidates))
@@ -194,8 +199,9 @@
   (query-bounded-entities
     [this entity where max-candidates]
     (let [candidates (sp/query-identity-candidates this entity where nil max-candidates)
+          compiled (compile-where where)
           ids (set (map :id candidates))]
-      (with-meta (filterv #(and (contains? ids (:id %)) (matches? where %)) (get @rows entity))
+      (with-meta (filterv #(and (contains? ids (:id %)) (matches? compiled %)) (get @rows entity))
         (meta candidates))))
 
 

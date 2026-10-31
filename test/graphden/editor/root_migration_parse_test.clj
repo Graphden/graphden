@@ -26,3 +26,16 @@
     (is (= [(:root-id parsed)]
            (mapv :id (filter #(= :fn (:kind %)) (:records parsed)))))
     (is (= {} (:reference-identities parsed)))))
+
+
+(deftest duplicate-interface-type-names-retain-their-qualified-identity
+  (let [parsed (migration/parse (str "root-migration." (random-uuid))
+                                {:fn-picker {:view (random-uuid)}})
+        records (:records parsed)
+        getter-id (:fn-id (first (filter #(and (= :binding (:kind %))
+                                               (= :model (:value %))) records)))
+        input-slot-id (:slot-id (first (filter #(and (= :fn-slot (:kind %))
+                                                     (= getter-id (:fn-id %))) records)))
+        input-slot (first (filter #(= input-slot-id (:id %)) records))]
+    (is (= (ids/fn-id "app.ui-fn-picker" :_root-view-input)
+           (:type-fn-id input-slot)))))

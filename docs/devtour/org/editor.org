@@ -630,51 +630,51 @@ Explicit profile infrastructure setup follows the configured personal namespace 
 :PROPERTIES:
 :CUSTOM_ID: editor/apply-proposal!
 :FILE: src/graphden/editor/config_activation.clj
-:LINE: 338
+:LINE: 364
 :MINS: 1.8
 :END:
 
 Rebuilds the exact scoped preview and source expectations before writes. Small ordinary role children inherit selected definitions; the editor root merges defaults, retained prior and new entries. Replacing editor privately renames the old root in this branch and creates a new UUID, never rewriting its shared identity-plane parent junctions. All new IDs and original restore witnesses are staged before APPLY; source, policy or CAS changes refuse the transaction.
 
-- source :: [[file:../../../src/graphden/editor/config_activation.clj::(defn apply-proposal!][src/graphden/editor/config_activation.clj:338]]
+- source :: [[file:../../../src/graphden/editor/config_activation.clj::(defn apply-proposal!][src/graphden/editor/config_activation.clj:364]]
 
 * 48. cleanup-preview!
 :PROPERTIES:
 :CUSTOM_ID: editor/cleanup-preview!
 :FILE: src/graphden/editor/config_receipts.clj
-:LINE: 186
+:LINE: 268
 :MINS: 1.1
 :END:
 
 Read-only proposal for a new visible deletion decision on intentionally edited tutorial graphs. Original creation receipts remain immutable. The exact new-ID set and unchanged prior anchor retain normal home, write, source, package, secret and external-reference checks. The dialog shows current names and restore target before consent; another edit requires a new review.
 
-- source :: [[file:../../../src/graphden/editor/config_receipts.clj::(defn cleanup-preview!][src/graphden/editor/config_receipts.clj:186]]
+- source :: [[file:../../../src/graphden/editor/config_receipts.clj::(defn cleanup-preview!][src/graphden/editor/config_receipts.clj:268]]
 - same file :: [[file:editor.org::#editor/reconcile-undo!][reconcile-undo!]]
 
 * 49. reconcile-undo!
 :PROPERTIES:
 :CUSTOM_ID: editor/reconcile-undo!
 :FILE: src/graphden/editor/config_receipts.clj
-:LINE: 136
+:LINE: 185
 :MINS: 1.0
 :END:
 
 After a lost UNDO response, confirms only exact restored source and absence in the saved scoped resolved view, using the witness staged before DELETE. It never repeats deletion or adopts a newer stamp. This proves current state, not physical global absence or historical exactly-once.
 
-- source :: [[file:../../../src/graphden/editor/config_receipts.clj::(defn reconcile-undo!][src/graphden/editor/config_receipts.clj:136]]
+- source :: [[file:../../../src/graphden/editor/config_receipts.clj::(defn reconcile-undo!][src/graphden/editor/config_receipts.clj:185]]
 - same file :: [[file:editor.org::#editor/cleanup-preview!][cleanup-preview!]]
 
 * 50. gdTourRestoreUIComponentPreferences
 :PROPERTIES:
 :CUSTOM_ID: editor/gdTourRestoreUIComponentPreferences
 :FILE: resources/packages/app/editor/editor-tour-ui-components.js
-:LINE: 238
+:LINE: 261
 :MINS: 2.6
 :END:
 
 Restores Appearance preferences before deleting the lesson's exact selected graph UUID. Unrelated selections survive. Failed persistence retains the graph and lesson ledger and retries even when the preference owner's optimistic local value already changed.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-tour-ui-components.js::async function gdTourRestoreUIComponentPreferences(created, failed) {][resources/packages/app/editor/editor-tour-ui-components.js:238]]
+- source :: [[file:../../../resources/packages/app/editor/editor-tour-ui-components.js::async function gdTourRestoreUIComponentPreferences(created, failed) {][resources/packages/app/editor/editor-tour-ui-components.js:261]]
 
 * 51. gdApplyKeymap
 :PROPERTIES:

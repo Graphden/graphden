@@ -53,6 +53,8 @@
   ([storage home selected authorize! policy]
    (prepared-records storage home selected authorize! policy (random-uuid)))
   ([storage home selected authorize! policy nonce]
+   (prepared-records storage home selected authorize! policy nonce {}))
+  ([storage home selected authorize! policy nonce {:keys [derive-policy?]}]
    (when-not (uuid? nonce) (refuse! :invalid-request))
    ;; Reject an unknown storage wrapper before parsing or source access.
    (when-not (versioned/versioned-storage? storage) (refuse! :unsupported-storage))
@@ -63,7 +65,7 @@
      (cohort/prepare storage home parsed
                      {:authorize! authorize! :policy policy :source-root resolution/defaults-id
                       :validate-result! (fn [graph root-id] (config/configuration graph root-id))
-                      :root-metadata selected}))))
+                      :root-metadata selected :derive-policy? derive-policy?}))))
 
 
 (defn create-records!

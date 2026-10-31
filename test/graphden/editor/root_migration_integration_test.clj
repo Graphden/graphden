@@ -2,7 +2,9 @@
   (:require
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.editor.config-activation :as activation]
+    [graphden.editor.config-receipts :as receipts]
     [graphden.editor.config-resolution :as resolution]
+    [graphden.editor.config-undo :as undo]
     [graphden.editor.root-migration :as migration]
     [graphden.executor.browser-snapshot :as snapshot]
     [graphden.executor.browser-source :as source]
@@ -14,6 +16,27 @@
 
 
 (use-fixtures :once (ga/fixture (ns-name *ns*)))
+
+
+(defn- current-configuration-revision
+  [ctx storage]
+  (:revision (source/with-snapshot
+               storage #(resolution/capture %1 %2 (snapshot/capture-context-policy ctx)))))
+
+
+(defn- undo-command
+  [receipt]
+  (cond-> {:current-id (:id receipt)
+           :expected-configuration-revision (:configuration-revision receipt)
+           :cohort-revision (:cohort-revision receipt)
+           :previous (:previous receipt)
+           :functions (:function-receipts receipt)}
+    (:root receipt)
+    (assoc :root {:current-id (get-in receipt [:root :id])
+                  :cohort-revision (get-in receipt [:root :cohort-revision])
+                  :restore-revision (get-in receipt [:root :restore-revision])
+                  :previous (get-in receipt [:root :previous])
+                  :functions (get-in receipt [:root :function-receipts])})))
 
 
 (deftest preview-creates-nothing-and-apply-selects-a-personal-root-once
@@ -66,11 +89,13 @@
                               :expected-preference {:present false :value nil}
                               :expected-configuration-revision (:revision current)})]
           (epoch/seed-watermark! storage)
-          (let [preview (migration/preview! ctx {})
+          (let [selected-root (get-in selected [:root :id])
+                preview (migration/preview! ctx {})
                 receipt (:receipt preview)]
+            (is (not= first-root selected-root))
             (is (= (str (:id selected)) (:selection-id receipt)))
-            (is (= [(str first-root)] (:changed-functions receipt)))
-            (is (= (str first-root) (get-in receipt [:previous :id])))
+            (is (= [(str selected-root)] (:changed-functions receipt)))
+            (is (= (str selected-root) (get-in receipt [:previous :id])))
             (is (empty? (sp/read-entities storage :fn
                                           (mapv parse-uuid (:functions receipt)))))
             (let [applied (migration/apply! ctx (:request preview))]
@@ -78,17 +103,112 @@
               (is (not= first-root (:id applied)))
               (is (= (:id home) (:namespace-id (sp/read-entity storage :fn (:id applied)))))
               (is (= (get-in receipt [:previous :name])
-                     (:name (sp/read-entity storage :fn first-root))))
+                     (:name (sp/read-entity storage :fn selected-root))))
               (epoch/seed-watermark! storage)
               (let [policy (snapshot/capture-context-policy ctx)
                     authorize! (tenancy/browser-source-policy storage)
-                    prior-graph (source/collect-client-closure storage [first-root] authorize!)]
+                    prior-graph (source/collect-client-closure storage [selected-root] authorize!)]
                 (is (= (get-in receipt [:previous :revision])
                        (resolution/source-revision
-                         first-root {:graph prior-graph}
+                         selected-root {:graph prior-graph}
                          (:scope (resolution/root-choice storage authorize! policy)))))
                 (is (= (:id applied)
                        (:id (resolution/root-choice storage authorize! policy))))))))))))
+
+
+(deftest personalizing-a-migrated-component-selects-the-new-root-in-one-write
+  (let [ctx (:ctx ga/*bootstrap*)
+        storage (:storage ctx)
+        home-name (str "atomic-root-selection-" (random-uuid))
+        _home (sp/create-entity storage :ns {:name home-name})]
+    (binding [tenancy/*seams-override* (atom (tenancy/seams-isolation-seed))]
+      (tenancy/install-personal-namespace-fn!
+        (constantly {:namespace-path home-name :source :fixture :isolated? false}))
+      (epoch/seed-watermark! storage)
+      (let [preview (migration/preview! ctx {})
+            original-root (:id (migration/apply! ctx (:request preview)))]
+        (epoch/seed-watermark! storage)
+        (let [before (source/with-snapshot
+                       storage #(resolution/capture %1 %2 (snapshot/capture-context-policy ctx)))
+              preview (activation/preview!
+                        ctx {:operation "personalize"
+                             :command {:component "fn-picker"
+                                       :expected-preference {:present false :value nil}
+                                       :expected-configuration-revision
+                                       (current-configuration-revision ctx storage)}})
+              receipt (:receipt preview)
+              activated (activation/apply-proposal! ctx (:request preview))
+              undo-input (undo-command receipt)]
+          (epoch/seed-watermark! storage)
+          (let [authorize! (tenancy/browser-source-policy storage)
+                choice (resolution/root-choice storage authorize! (snapshot/capture-context-policy ctx))]
+            (is (:created activated))
+            (is (not= original-root (:id choice)))
+            (is (= "editor-root" (:name (sp/read-entity storage :fn (:id choice)))))
+            (is (= (:id choice) (get-in activated [:root :id])))
+            (is (true? (:confirmed (receipts/reconcile! ctx undo-input))))
+            (let [review (receipts/cleanup-preview!
+                           ctx {:receipt undo-input :scope (activation/request-scope (:scope before))
+                                :restore-revision (:restore-revision receipt)})]
+              (is (= (set (concat (:functions receipt) (get-in receipt [:root :functions])))
+                     (set (map (comp str :id) (:delete review)))))
+              (let [undone (undo/undo! ctx (:request review))]
+                (is (= (set (concat (:functions receipt) (get-in receipt [:root :functions])))
+                       (set (map str (:deleted undone)))))
+                (epoch/seed-watermark! storage)
+                (is (= original-root (:id (resolution/root-choice
+                                            storage authorize! (snapshot/capture-context-policy ctx)))))))))))))
+
+
+(deftest activating-another-configuration-updates-and-restores-the-personal-root
+  (let [ctx (:ctx ga/*bootstrap*)
+        storage (:storage ctx)
+        home-name (str "atomic-root-switch-" (random-uuid))
+        _home (sp/create-entity storage :ns {:name home-name})
+        expected-preference {:present false :value nil}]
+    (binding [tenancy/*seams-override* (atom (tenancy/seams-isolation-seed))]
+      (tenancy/install-personal-namespace-fn!
+        (constantly {:namespace-path home-name :source :fixture :isolated? false}))
+      (epoch/seed-watermark! storage)
+      (migration/apply! ctx (:request (migration/preview! ctx {})))
+      (epoch/seed-watermark! storage)
+      (let [first-activation (activation/personalize!
+                               ctx {:component "fn-picker" :expected-preference expected-preference
+                                    :expected-configuration-revision
+                                    (current-configuration-revision ctx storage)})]
+        (epoch/seed-watermark! storage)
+        (let [second-activation (activation/personalize!
+                                  ctx {:component "recents" :expected-preference expected-preference
+                                       :expected-configuration-revision
+                                       (current-configuration-revision ctx storage)})]
+          (epoch/seed-watermark! storage)
+          (let [before (source/with-snapshot
+                         storage #(resolution/capture %1 %2 (snapshot/capture-context-policy ctx)))
+                preview (activation/preview!
+                          ctx {:operation "activate"
+                               :command {:selection-id (:id first-activation)
+                                         :expected-preference expected-preference
+                                         :expected-configuration-revision
+                                         (current-configuration-revision ctx storage)}})
+                receipt (:receipt preview)
+                applied (activation/apply-proposal! ctx (:request preview))
+                authorize! (tenancy/browser-source-policy storage)]
+            (epoch/seed-watermark! storage)
+            (is (not= (get-in second-activation [:root :id]) (get-in applied [:root :id])))
+            (is (= (get-in applied [:root :id])
+                   (:id (resolution/root-choice storage authorize!
+                                                (snapshot/capture-context-policy ctx)))))
+            (is (true? (:confirmed (receipts/reconcile! ctx (undo-command receipt)))))
+            (let [review (receipts/cleanup-preview!
+                           ctx {:receipt (undo-command receipt)
+                                :scope (activation/request-scope (:scope before))
+                                :restore-revision (:restore-revision receipt)})]
+              (is (= (get-in second-activation [:root :id]) (get-in review [:restore :root :id])))
+              (is (seq (:deleted (undo/undo! ctx (:request review))))))
+            (epoch/seed-watermark! storage)
+            (is (= (get-in second-activation [:root :id])
+                   (:id (resolution/root-choice storage authorize!
+                                                (snapshot/capture-context-policy ctx)))))))))))
 
 
 (deftest migration-does-not-replace-an-unmanaged-personal-root
@@ -105,7 +225,17 @@
              (try (migration/preview! ctx {}) nil
                   (catch clojure.lang.ExceptionInfo error (:reason (ex-data error))))))
       (is (= root (select-keys (sp/read-entity storage :fn (:id root))
-                               [:id :name :namespace-id]))))))
+                               [:id :name :namespace-id])))
+      (let [current (source/with-snapshot
+                      storage #(resolution/capture %1 %2 (snapshot/capture-context-policy ctx)))
+            selected (activation/personalize!
+                       ctx {:component "fn-picker" :expected-preference {:present false :value nil}
+                            :expected-configuration-revision (:revision current)})]
+        (is (:created selected))
+        (epoch/seed-watermark! storage)
+        (is (= (:id root)
+               (:id (resolution/root-choice storage (tenancy/browser-source-policy storage)
+                                            (snapshot/capture-context-policy ctx)))))))))
 
 
 (deftest migration-retains-an-authored-callback-and-its-ordinary-root

@@ -49,10 +49,12 @@
 
 (deftest query-matching-covers-executor-where-shapes
   (let [id1 (random-uuid) id2 (random-uuid) id3 (random-uuid)
+        binding-id (random-uuid)
         rs (remote/from-bundle
              {:fn [{:id id1 :name "a" :fn-id nil}
                    {:id id2 :name "b" :fn-id id1}
-                   {:id id3 :name "c" :fn-id id1}]})]
+                   {:id id3 :name "c" :fn-id id1}]
+              :binding [{:id binding-id :fn-id id1}]})]
     (testing "empty where → all rows"
       (is (= 3 (count (sp/query-entities rs :fn {})))))
     (testing "scalar equality {:name v}"
@@ -61,6 +63,11 @@
       (is (= #{id1 id3} (set (map :id (sp/query-entities rs :fn {:id [id1 id3]}))))))
     (testing "{:fn-id [ids]} membership"
       (is (= #{id2 id3} (set (map :id (sp/query-entities rs :fn {:fn-id [id1]}))))))
+    (testing "bounded owner queries compile vector membership too"
+      (is (= [binding-id]
+             (mapv :id (sp/query-identity-candidates rs :binding {:fn-id [id1]} nil 2))))
+      (is (= [binding-id]
+             (mapv :id (sp/query-bounded-entities rs :binding {:fn-id [id1]} 2)))))
     (testing "read-entity by id, read-entities by ids"
       (is (= "b" (:name (sp/read-entity rs :fn id2))))
       (is (nil? (sp/read-entity rs :fn (random-uuid))))

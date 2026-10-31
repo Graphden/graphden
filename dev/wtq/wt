@@ -176,22 +176,26 @@ bootstrap_node_modules() {
     [ -e "$dst" ] && continue
     cp -al "$src" "$dst" 2>/dev/null || cp -a "$src" "$dst"
   done < <(git -C "$MAIN_WT" ls-files '*package.json' | xargs -r -n1 dirname | sort -u)
+  sync_root_node_modules "$path"
 }
 
-# A feature may change the root lockfile while the main checkout still has the
-# previous dependency tree. The train must install that exact lock before CI
-# starts its parallel checks; installing from an individual check would race
-# Biome/stylelint readers of node_modules.
-sync_train_root_node_modules() {
-  local lock="$TRAIN_WT/package-lock.json" modules="$TRAIN_WT/node_modules"
+# Feature worktrees can inherit an incomplete main checkout dependency tree.
+# Install the exact lock before any local check; the train calls the same
+# helper before its parallel checks so installs never race linter readers.
+sync_root_node_modules() {
+  local path="$1" lock="$1/package-lock.json" modules="$1/node_modules"
   [ -f "$lock" ] || return 0
   local digest
   digest="$(sha256sum "$lock" | cut -d' ' -f1)"
   if [ ! -d "$modules" ] || [ "$(cat "$modules/.graphden-lock-sha256" 2>/dev/null)" != "$digest" ]; then
-    info "Installing train root npm dependencies for its package-lock.json"
-    (cd "$TRAIN_WT" && npm ci --ignore-scripts --no-audit --no-fund) || return 1
+    info "Installing root npm dependencies for $path/package-lock.json"
+    (cd "$path" && npm ci --ignore-scripts --no-audit --no-fund) || return 1
     printf '%s\n' "$digest" > "$modules/.graphden-lock-sha256"
   fi
+}
+
+sync_train_root_node_modules() {
+  sync_root_node_modules "$TRAIN_WT"
 }
 
 # --- governance drift -------------------------------------------------------

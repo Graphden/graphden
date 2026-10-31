@@ -74,7 +74,9 @@ function gdTourStageEditorConfiguration(request, original) {
   if (!_tourEditorConfigurationContext(receipt)) throw new Error('Tutorial configuration context changed.');
   const fields = {creation: 'editor-configuration', token: receipt.token, receipt: 'pending',
     'branch-id': request.scope['branch-id'], 'branch-name': receipt['branch-name']};
-  for (const row of original['function-receipts']) _tourState.created.push({type: 'fn', ...row, ...fields});
+  for (const row of [...original['function-receipts'], ...(original.root?.['function-receipts'] || [])]) {
+    _tourState.created.push({type: 'fn', ...row, ...fields});
+  }
   _tourState.editorConfigurations ||= [];
   _tourState.editorConfigurations.push(receipt);
   _tourSaveState();
@@ -105,8 +107,16 @@ function gdTourRejectEditorConfiguration(ticket) {
 }
 
 function _tourEditorUndoInput(original) {
-  return {'current-id': original.id, 'expected-configuration-revision': original['configuration-revision'],
+  return { ...(original.root ? {root: {'current-id': original.root.id,
+    'cohort-revision': original.root['cohort-revision'],
+    'restore-revision': original.root['restore-revision'], previous: original.root.previous,
+    functions: original.root['function-receipts']}} : {}),
+    'current-id': original.id, 'expected-configuration-revision': original['configuration-revision'],
     'cohort-revision': original['cohort-revision'], previous: original.previous, functions: original['function-receipts']};
+}
+
+function _tourEditorCreatedIds(original) {
+  return [...original.functions, ...(original.root?.functions || [])];
 }
 
 async function _tourEditorConfigurationRequest(route, body, retryPolicy) {
@@ -134,7 +144,9 @@ async function _tourEditorUndoConfirmed(receipt) {
   const result = await _tourEditorConfigurationRequest(API.api_ui_configuration_reconcile_undo, expected);
   return _tourEditorConfigurationContext(receipt) && result.confirmed === true && result.undone === true
     && result.id === (expected.receipt.previous?.id || receipt.original['restore-id'])
-    && result['restore-revision'] === expected['restore-revision'];
+    && result['restore-revision'] === expected['restore-revision']
+    && (!expected.receipt.root || (result['root-id'] === expected.receipt.root.previous.id
+      && result['root-restore-revision'] === expected.receipt.root['restore-revision']));
 }
 
 async function gdTourUndoEditorConfigurations(created, options = {}) {
@@ -151,7 +163,9 @@ async function gdTourUndoEditorConfigurations(created, options = {}) {
         const confirmed = await _tourEditorConfigurationRequest(API.api_ui_configuration_reconcile, input);
         if (_tourState !== state || !_tourEditorConfigurationContext(receipt) || !confirmed.confirmed
           || confirmed['cohort-revision'] !== receipt.original['cohort-revision']
-          || confirmed['configuration-revision'] !== receipt.original['configuration-revision']) return rows;
+          || confirmed['configuration-revision'] !== receipt.original['configuration-revision']
+          || (receipt.original.root && (confirmed.root?.['current-id'] !== receipt.original.root.id
+            || confirmed.root?.['cohort-revision'] !== receipt.original.root['cohort-revision']))) return rows;
         receipt.receipt = 'created';
         for (const row of rows) row.receipt = 'created';
         _tourSaveState();
@@ -165,7 +179,8 @@ async function gdTourUndoEditorConfigurations(created, options = {}) {
         try {
           const result = await _tourEditorConfigurationRequest(API.api_ui_configuration_undo, input,
             () => _tourEditorConfigurationContext(receipt));
-          if (JSON.stringify([...(result.deleted || [])].sort()) !== JSON.stringify([...receipt.original.functions].sort())) return rows;
+          if (JSON.stringify([...(result.deleted || [])].sort())
+            !== JSON.stringify(_tourEditorCreatedIds(receipt.original).sort())) return rows;
         } catch (error) {
           if (error.definite) { delete receipt.undoAttempt; _tourSaveState(); return rows; }
           if (!await _tourEditorUndoConfirmed(receipt)) return rows;
@@ -199,7 +214,11 @@ async function gdTourReviewEditorConfigurationCleanup(nextLessonId) {
         _tourEditorUndoInput(receipt.original));
       if (_tourState !== state || !_tourEditorConfigurationContext(receipt) || !confirmed.confirmed
         || confirmed['cohort-revision'] !== receipt.original['cohort-revision']
-        || confirmed['configuration-revision'] !== receipt.original['configuration-revision']) throw new Error('Apply outcome uncertain');
+        || confirmed['configuration-revision'] !== receipt.original['configuration-revision']
+        || (receipt.original.root && (confirmed.root?.['current-id'] !== receipt.original.root.id
+          || confirmed.root?.['cohort-revision'] !== receipt.original.root['cohort-revision']))) {
+        throw new Error('Apply outcome uncertain');
+      }
       receipt.receipt = 'created';
       for (const row of state.created) if (row.token === receipt.token) row.receipt = 'created';
       _tourSaveState();
@@ -211,13 +230,17 @@ async function gdTourReviewEditorConfigurationCleanup(nextLessonId) {
       || review.kind !== 'editor-configuration-cleanup-review'
       || review.request?.['current-id'] !== receipt.original.id
       || !_tourEditorReceiptMatches({previous: receipt.original.previous}, review.request)
-      || JSON.stringify(review.delete?.map(row => row.id).sort()) !== JSON.stringify([...receipt.original.functions].sort())) {
+      || (receipt.original.root && review.request?.root?.previous?.id !== receipt.original.root.previous.id)
+      || JSON.stringify(review.delete?.map(row => row.id).sort())
+        !== JSON.stringify(_tourEditorCreatedIds(receipt.original).sort())) {
       throw new Error('Review does not match receipt');
     }
     _tourDialog({title: 'Delete these tutorial UI graphs?',
       body: 'Delete these exact tutorial graphs, including your edits: '
         + review.delete.map(row => JSON.stringify(row.name || row.id)).join(', ')
-        + '. Restore ' + JSON.stringify(review.restore.name) + '. Other graphs are kept.',
+        + '. Restore ' + JSON.stringify(review.restore.name)
+        + (review.restore.root ? ' and ' + JSON.stringify(review.restore.root.name) : '')
+        + '. Other graphs are kept.',
       primary: ['Delete these graphs & restore', async () => {
         if (_tourState !== state || !_tourEditorConfigurationContext(receipt)) return;
         const failed = await gdTourUndoEditorConfigurations(state.created, {token: receipt.token, review});

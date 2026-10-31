@@ -10,6 +10,7 @@
     [graphden.editor.config-preparation :as preparation]
     [graphden.editor.config-resolution :as resolution]
     [graphden.editor.preference-write :as preferences]
+    [graphden.editor.root-migration-plan :as root-plan]
     [graphden.executor.browser-snapshot :as snapshot]
     [graphden.executor.browser-source :as source]
     [graphden.executor.context :as context]
@@ -225,33 +226,53 @@
             prior-row (when prior? (sp/read-entity storage :fn (:id current)))
             _ (when prior? (writer/assert-write-authorized! storage :fn prior-row (:id prior-row)))
             selected (selection-for-write storage input current prior-row authorize! policy)
+            root-choice (resolution/root-choice storage authorize! policy)
+            root-row (when-not (= resolution/default-root-id (:id root-choice))
+                       (sp/read-entity storage :fn (:id root-choice)))
+            _ (when (and (not= resolution/default-root-id (:id root-choice)) (nil? root-row))
+                (refuse! :source-missing))
+            migrated-root? (root-plan/migration-owned? root-row (:id namespace-row))
             prepared (preparation/prepared-records
-                       storage namespace-row selected authorize! policy nonce)
+                       storage namespace-row selected authorize! policy nonce
+                       {:derive-policy? migrated-root?})
             private-name (str "_editor-prior-" nonce)
+            projected (cond-> (:snapshot prepared)
+                        prior-row (renamed-snapshot (:id prior-row) private-name))
+            root-plan (when migrated-root?
+                        (root-plan/proposal
+                          storage (:derived-policy prepared) nonce
+                          {:selection {:id (:id prepared) :home home
+                                       :configuration (config/configuration
+                                                        (:graph projected) (:id prepared))
+                                       :snapshot projected}
+                           :staged-source projected
+                           :renames (when prior-row {(:id prior-row) private-name})}))
             ids (mapv :id (filter #(= :fn (:kind %)) (:records prepared)))
             prior-snapshot (when prior?
                              (renamed-snapshot (:snapshot current) (:id prior-row) private-name))
             revisions (expected-revisions prepared prior-row private-name (:scope current) authorize!)]
-        {:prepared prepared :prior-row prior-row :private-name private-name :scope (:scope current)
+        {:prepared prepared :root-plan root-plan
+         :prior-row prior-row :private-name private-name :scope (:scope current)
          :authorize! authorize!
          :receipt (merge revisions
-                         {:id (:id prepared) :created true :functions ids
-                          :restore-revision (:revision current)
-                          :restore-id (:id current)
-                          :entry-id (when-let [component (:component input)]
-                                      (get-in (config/configuration (get-in prepared [:snapshot :graph]) (:id prepared))
-                                              [component :view]))
-                          :namespaces (if existing-home [] [(:id namespace-row)])
-                          :function-receipts (mapv #(select-keys % [:id :name :namespace-id])
-                                                   (filter #(= :fn (:kind %)) (:records prepared)))
-                          :changed-functions (if prior? [(:id prior-row)] [])
-                          :previous (when prior?
-                                      {:id (:id prior-row) :name private-name :namespace-id (:id namespace-row)
-                                       :revision (resolution/source-revision (:id prior-row) prior-snapshot (:scope current))})})}))))
+                         (cond-> {:id (:id prepared) :created true :functions ids
+                                  :restore-revision (:revision current)
+                                  :restore-id (:id current)
+                                  :entry-id (when-let [component (:component input)]
+                                              (get-in (config/configuration (get-in prepared [:snapshot :graph]) (:id prepared))
+                                                      [component :view]))
+                                  :namespaces (if existing-home [] [(:id namespace-row)])
+                                  :function-receipts (mapv #(select-keys % [:id :name :namespace-id])
+                                                           (filter #(= :fn (:kind %)) (:records prepared)))
+                                  :changed-functions (if prior? [(:id prior-row)] [])
+                                  :previous (when prior?
+                                              {:id (:id prior-row) :name private-name :namespace-id (:id namespace-row)
+                                               :revision (resolution/source-revision (:id prior-row) prior-snapshot (:scope current))})}
+                           root-plan (assoc :root (:receipt root-plan))))}))))
 
 
 (defn- commit-plan!
-  [storage {:keys [prepared prior-row private-name scope authorize! receipt]}]
+  [storage {:keys [prepared root-plan prior-row private-name scope authorize! receipt]}]
   (if-not (:created receipt)
     receipt
     (do
@@ -264,7 +285,11 @@
       (let [revisions (committed-revision! storage prepared prior-row private-name scope authorize!)]
         (when-not (= revisions (select-keys receipt [:configuration-revision :cohort-revision]))
           (source-mismatch! :preview-revisions))
-        (assoc receipt :committed true)))))
+        (when root-plan (root-plan/commit! storage root-plan))
+        (cond-> (assoc receipt :committed true)
+          root-plan (update :changed-functions into
+                            (concat (get-in root-plan [:receipt :functions])
+                                    (get-in root-plan [:receipt :changed-functions]))))))))
 
 
 (defn call-with-current-configuration
@@ -304,13 +329,14 @@
 
 (defn- proposal-seal
   [plan operation command nonce policy]
-  (let [{:keys [prepared prior-row private-name scope receipt]} plan
+  (let [{:keys [prepared prior-row private-name scope receipt root-plan]} plan
         expected (cond-> (:snapshot prepared)
                    prior-row (renamed-snapshot (:id prior-row) private-name))
         ids (mapv :id (get-in expected [:graph :fns]))]
     (provenance/fingerprint-data
       {:operation operation :command command :nonce nonce :scope scope :receipt receipt
        :source (when prepared (resolution/source-revision (:id prepared) expected scope))
+       :root-seal (:seal root-plan)
        ;; Freeze the original semantic upper bounds as well as source rows.
        ;; Compiled functions and mutable registry objects are never serialized.
        :policy (into {} (map (fn [id]

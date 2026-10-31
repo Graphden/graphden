@@ -159,11 +159,11 @@ These authenticated POST routes live under `/api/ui/configuration/`.
 |---|---|
 | `plan` | Resolve and export one selected component under source ACL; return configuration revision and authoritative legacy preference expectation. |
 | `prepare` | Migrate an actual legacy selection by reference, or explicitly set up the home with `{home:true}`. Home setup creates no editor function. |
-| `preview` | Read-only scoped plan for `personalize` or `activate`; return all original created IDs, source witnesses and expected restore state before APPLY. |
-| `apply` | Rebuild and compare that exact proposal under current policy/source/CAS; create only planned new identities atomically. |
-| `reconcile` | Read-only confirmation of the original uncertain APPLY state; partial, edited or missing state remains uncertain. Never recreate reserved identities. |
-| `cleanup-preview` | Read-only new deletion proposal using the original exact cohort and unchanged prior restore anchor; show current names and source stamps before consent. |
-| `undo` | Atomically validate/delete the exact cohort and restore the previous root's versioned name; later changes cause conflict. |
+| `preview` | Read-only scoped plan for `personalize` or `activate`; return created IDs, source witnesses and restore state, including a replacement HOF root when the current root is migration-owned. |
+| `apply` | Rebuild and compare the exact proposal under current policy/source/CAS; create the configuration and HOF cohorts in one writer transaction. |
+| `reconcile` | Read-only confirmation of both cohorts after an uncertain APPLY; partial, edited or missing state remains uncertain. Never recreate reserved identities. |
+| `cleanup-preview` | Read-only new deletion proposal using the exact cohorts and unchanged prior restore anchors; show current names and source stamps before consent. |
+| `undo` | Atomically validate/delete both exact cohorts and restore the previous configuration and HOF root names; later changes cause conflict. |
 | `reconcile-undo` | Read-only scoped resolved-absence and exact restored-source confirmation against a witness staged before DELETE; no repeated mutation or newly adopted stamp. |
 
 Preview and creation receipts are immutable. A failed activation of a previously
@@ -212,14 +212,14 @@ clauses before counting. It fails if those conditions change. These are
 conservative candidates, not proof of an active selection:
 inspect any nonzero cohort through the authenticated read-only root migration
 preview, then apply each exact proposal under current ACL/CAS. A migration
-created personal root can be replaced by another checked proposal after the
-ordinary selection changes; the prior root is renamed and retained by identity.
+created personal root is replaced in the same writer transaction when ordinary
+configuration activation changes its callbacks. Prior graph identities are retained
+under private names, and one receipt covers confirmation and LIFO undo. An
+explicit root refresh remains available for changes made outside activation.
 The proposal refuses an authored root without the migration marker, so it
-cannot silently replace a user's independent HOF composition. This explicit
-refresh is still separate from ordinary configuration activation. Keep the
+cannot silently replace a user's independent HOF composition. Keep the
 compatibility adapter until every installation has zero candidates and the
-old read/write paths are confirmed unused, and configuration activation and
-root selection share one atomic operation.
+old read/write paths are confirmed unused.
 Root replacement immediately closes a mounted picker and retires its render
 receipt; old asynchronous loads cannot reactivate it.
 Completing the same root's load preserves a native picker opened during loading.

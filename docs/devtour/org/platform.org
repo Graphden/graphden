@@ -127,13 +127,13 @@ Relays branch and organisation [[file:glossary.org::#term/invalidation][invalida
 :PROPERTIES:
 :CUSTOM_ID: platform/RemoteStorage
 :FILE: src/graphden/storage/remote/core.clj
-:LINE: 133
+:LINE: 138
 :MINS: 5.1
 :END:
 
 Implements read-only ~StorageCRUD~ over graph rows fetched from the hub through HTTP. Writes are rejected. ~refresh!~ replaces the in-memory bundle, and the [[file:glossary.org::#term/sse][SSE]] relay described above triggers refresh after [[file:glossary.org::#term/invalidation][invalidation]] events.
 
-- source :: [[file:../../../src/graphden/storage/remote/core.clj::(defrecord RemoteStorage][src/graphden/storage/remote/core.clj:133]]
+- source :: [[file:../../../src/graphden/storage/remote/core.clj::(defrecord RemoteStorage][src/graphden/storage/remote/core.clj:138]]
 - see also :: [[file:storage.org::#storage/StorageCRUD][StorageCRUD]]
 
 * 11. start-byo!

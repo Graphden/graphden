@@ -206,15 +206,20 @@ async function viewTree(page) {
     activation = proposal;
     await page.evaluate(async () => { await loadGraphData(); gdRefreshUIConfiguration(); });
     const before = await checkedRoot(page);
-    assert(before.functions.some(fn => fn.id === wrapper.id), 'actual root exporter includes selected ordinary user graph');
-    assert.equal(argument(before.functions.find(fn => fn.id === wrapper.id), 'func').fn, callbackA.id);
+    const rootGraph = await subtree(branchApi, before.entries.root);
+    const [derivedView] = rootGraph.fns.filter(fn => fn['parent-ids']?.includes(wrapper.id));
+    assert(derivedView && rootGraph.fns.some(fn => fn.id === wrapper.id),
+      'selected ordinary user graph is an ancestor of the migrated view');
+    const effectiveView = before.functions.find(fn => fn.id === derivedView.id);
+    assert(effectiveView, 'exporter includes the migrated view derived from the selected wrapper');
+    assert.equal(argument(effectiveView, 'func').fn, callbackA.id);
 
     successful(await branchApi('PUT', '/api/entities/binding/' + hof.id,
       new URLSearchParams({'ref-fn-id': callbackB.id}).toString()), 'persist user-owned HOF reference');
     const stored = await subtree(branchApi, wrapper.id);
     assert.equal(stored.bindings.find(row => row.id === hof.id)['ref-fn-id'], callbackB.id);
     const changed = await checkedRoot(page);
-    assert.equal(argument(changed.functions.find(fn => fn.id === wrapper.id), 'func').fn, callbackB.id,
+    assert.equal(argument(changed.functions.find(fn => fn.id === derivedView.id), 'func').fn, callbackB.id,
       'actual checker/export returns the persisted HOF replacement');
     await page.locator('#auth-lock-btn').click();
     await page.getByRole('menuitem', {name: 'Persisted root settings', exact: true}).waitFor();

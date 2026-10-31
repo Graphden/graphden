@@ -8,6 +8,7 @@
     [graphden.editor.root-migration-parse :as migration-parse]
     [graphden.editor.root-migration-selection :as selection]
     [graphden.editor.root-migration-slots :as migration-slots]
+    [graphden.editor.root-migration-templates :as migration-templates]
     [graphden.executor.browser-snapshot :as snapshot]
     [graphden.executor.browser-source :as source]
     [graphden.executor.source-contract :as contract]
@@ -87,7 +88,12 @@
                             {:graph (renamed-graph prior-graph
                                                    (assoc renames (:id prior-row) prior-name))}
                             (:scope choice)))
-         parsed (migration-parse/parse (str "root-migration." nonce) (:configuration selection))
+         selected-role-ids (vec (mapcat vals (vals (migration-templates/overrides
+                                                     (:configuration selection)))))
+         callback-graph (when (seq selected-role-ids)
+                          (source/collect-client-closure storage selected-role-ids authorize!))
+         parsed (migration-parse/parse (str "root-migration." nonce)
+                                       (:configuration selection) callback-graph)
          _ (when (sp/read-entity storage :fn (:root-id parsed))
              (refuse! :stale-configuration))
          role-ids (vec (vals (:reference-identities parsed)))

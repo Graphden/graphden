@@ -62,10 +62,14 @@
            (set (map :name (filter #(str/ends-with? (name (:name %)) "-wrapper") definitions)))))
     (is (= (keyword root "_migration-account-menu-view-source")
            (get-in by-name [:_migration-account-menu-view-base :parent])))
+    (is (= :assoc
+           (get-in by-name [:_migration-account-menu-view-wrapper :parent])))
     (is (= (keyword root "_migration-account-menu-view-base")
            (get-in by-name [:_migration-account-menu-view-wrapper :args :map])))
-    (is (= :app.ui-account-menu/_root-common-tree
+    (is (= (keyword root "_migration-account-menu-view-common-tree")
            (get-in by-name [:_migration-account-menu-view-wrapper :args :value])))
+    (is (= :app.ui-account-menu/_root-common-tree
+           (get-in by-name [:_migration-account-menu-view-common-tree :args :default])))
     (is (= [:input]
            (get-in by-name [:_migration-account-menu-view-wrapper :lambda-params])))
     (is (= :call (get-in by-name [:editor-root :parent])))

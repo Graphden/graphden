@@ -120,20 +120,23 @@
     (let [bridge (assoc (rebase/rewrite-references template qualify)
                         :name (local-name component role (if full-view "base" "wrapper"))
                         :namespace root
-                        :parent (keyword root (name (local-name component role "source"))))
-          ;; The authored account-menu view has no reachable :theme slot: its
-          ;; color-const leaves retain their own value bindings. Do not write
-          ;; a placeholder binding against that absent callback slot.
-          bridge (if full-view (update bridge :args dissoc :theme) bridge)]
+                        :parent (keyword root (name (local-name component role "source"))))]
       (if full-view
-        ;; The old account-menu callback supplies state/theme. The shipped
-        ;; root-view adds the server/common-tree envelope expected by the new
-        ;; root-component contract; retain that composition by reference.
-        [bridge
-         (-> full-view
-             (rebase/rewrite-references qualify)
-             (assoc :name (local-name component role "wrapper") :namespace root)
-             (assoc-in [:args :map] (keyword root (name (:name bridge)))))]
+        ;; Keep the selected callback's authored common-tree when present;
+        ;; the shipped server tree fills a callback that omits that field.
+        (let [tree-name (local-name component role "common-tree")
+              tree {:name tree-name :namespace root :parent :get
+                    :args {:coll {:ref (keyword root (name (:name bridge)))
+                                  :type (:return-type full-view)}
+                           :key (get-in full-view [:args :key])
+                           :default (qualify (get-in full-view [:args :value]))}}]
+          [bridge tree
+           (-> full-view
+               (rebase/rewrite-references qualify)
+               (assoc :name (local-name component role "wrapper") :namespace root
+                      :args {:map (keyword root (name (:name bridge)))
+                             :key (get-in full-view [:args :key])
+                             :value (keyword root (name tree-name))}))])
         [bridge]))))
 
 

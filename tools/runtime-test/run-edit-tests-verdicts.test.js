@@ -391,7 +391,7 @@ console.log(' slow_limit stays under the per-attempt hard timeout');
   assert(limit(null) === '150', 'no baseline → THRASH_FILE_SECS (got ' + limit(null) + ')');
   assert(limit(null, 'THRASH_FILE_SECS=400') === '299', 'a no-baseline limit is capped too (got ' + limit(null, 'THRASH_FILE_SECS=400') + ')');
   assert(limit(122, 'PER_TEST_TIMEOUT=200') === '199', 'the cap follows PER_TEST_TIMEOUT (got ' + limit(122, 'PER_TEST_TIMEOUT=200') + ')');
-  assert(limit(200, '', 'edit-ui-components-selective.test.js') === '479', 'the selective cleanup cap follows its measured 480s timeout');
+  assert(limit(500, '', 'edit-ui-components-selective.test.js') === '1199', 'the selective slow limit stays below its measured 1200s hard timeout');
   assert(limit(200, 'PER_TEST_TIMEOUT=200', 'edit-ui-components-selective.test.js') === '199', 'an explicit timeout overrides the selective default');
 }
 

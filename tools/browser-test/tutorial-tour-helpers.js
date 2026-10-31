@@ -38,6 +38,28 @@ async function retryingDelete(fn) {
 }
 
 
+async function cleanupTourNamespaces(page) {
+  try {
+    const tree = await api(page, 'GET', '/api/graph/entities?scope=tree');
+    for (const nsName of [NS_NAME, 'tests', 'mycorp', 'mycorp@1-0-0']) {
+      // Only root fixtures belong to this cleanup. Package namespaces such as
+      // core.tests are unrelated even though their final segment matches.
+      const ns = (tree.namespaces || []).find(
+        (n) => n.name === nsName && !n['parent-id']);
+      if (!ns) continue;
+      const sub = await api(
+        page, 'GET', '/api/graph/entities?scope=namespace&namespace-id=' + ns.id);
+      for (const f of (sub.fns || [])) {
+        if (f['namespace-id'] === ns.id) {
+          await api(page, 'DELETE', '/api/entities/fn/' + f.id);
+        }
+      }
+      await api(page, 'DELETE', '/api/entities/ns/' + ns.id);
+    }
+  } catch (_) { /* best-effort; isolation test checks its own clean baseline */ }
+}
+
+
 async function hardCleanup(page) {
   // Belt for a mid-test failure: remove the tutorial fn + ns via the API
   // so the runner's leak counter stays clean even when the tour's own
@@ -113,29 +135,7 @@ async function hardCleanup(page) {
   try {
     await api(page, 'DELETE', '/api/packages/uninstall?name=mycorp-hello');
   } catch (_) { /* not installed */ }
-  try {
-    const tree = await api(page, 'GET', '/api/graph/entities?scope=tree');
-    for (const nsName of [NS_NAME, 'tests', 'mycorp', 'mycorp@1-0-0']) {
-    // ROOT namespaces only. `name` is a SEGMENT: the platform ships its own
-    // `core.tests` / `web.tests` self-test modules, so a bare `n.name ===
-    // 'tests'` match walks one of THOSE and spends a doomed round trip per
-    // fn in it (403 package-owned / 409 still referenced) — 88 s of this
-    // helper, per call, which is what pushed this file past the runner's
-    // 5-minute cap. The lessons create their namespaces at the root.
-    const ns = (tree.namespaces || []).find(
-      (n) => n.name === nsName && !n['parent-id']);
-    if (ns) {
-      const sub = await api(
-        page, 'GET', '/api/graph/entities?scope=namespace&namespace-id=' + ns.id);
-      for (const f of (sub.fns || [])) {
-        if (f['namespace-id'] === ns.id) {
-          await api(page, 'DELETE', '/api/entities/fn/' + f.id);
-        }
-      }
-      await api(page, 'DELETE', '/api/entities/ns/' + ns.id);
-    }
-    }
-  } catch (_) { /* best-effort */ }
+  await cleanupTourNamespaces(page);
   // A published package-version whose namespace is gone answers 404 on
   // install ("entities not found"), so a crashed lesson-17 run would poison
   // the next one. The tour withdraws its own release; this is the belt.
@@ -186,6 +186,9 @@ async function hardCleanup(page) {
       }
     }
   } catch (_) { /* best-effort */ }
+  // A leaked branch can keep a namespace in use. The first namespace pass
+  // may receive 409; dropping the branch above unblocks this exact cleanup.
+  await cleanupTourNamespaces(page);
 }
 
 

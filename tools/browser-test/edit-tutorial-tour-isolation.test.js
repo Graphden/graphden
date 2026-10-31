@@ -17,6 +17,11 @@ const {
   let failed = false;
   try {
     await hardCleanup(page);
+    const initialTree = await api(page, 'GET', '/api/graph/entities?scope=tree');
+    const initialTutorial = (initialTree.namespaces || []).filter((n) => n.name === NS_NAME);
+    if (initialTutorial.length) console.error('  preexisting tutorial namespace: '
+      + JSON.stringify(initialTutorial));
+    assert(initialTutorial.length === 0, 'tutorial namespace absent before isolation');
     const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
     // ---------- Branch isolation × LESSON STEPS ----------
     // The intersection the reparent bug and the lesson-11 breakage both
@@ -85,6 +90,13 @@ const {
     assert(await clickTourButton(page, 'Next'), 'branch isolation: look-step Next');
     await waitTourTitle(page, "That's the whole loop", 150000);
     console.log('  branch isolation: all lesson-01 steps walked on the branch');
+    const createdNamespaces = await page.evaluate(() =>
+      (_tourState?.created || []).filter((row) => row.type === 'ns'));
+    const exactNamespace = createdNamespaces.find((row) =>
+      row.name === NS_NAME && row.id && row.receipt === 'created');
+    if (!exactNamespace) console.error('  namespace receipts: '
+      + JSON.stringify(createdNamespaces));
+    assert(exactNamespace, 'tutorial namespace has an exact creation receipt');
 
     // Finish → the branch-rollback dialog (not the per-item cleanup).
     assert(await clickTourButton(page, 'Finish'), 'Finish button');
@@ -119,8 +131,10 @@ const {
       'no tutorial-* branch leaked (got: '
       + JSON.stringify(leakedTutorial.map((b) => b.name)) + ')');
     const mainTree = await api(page, 'GET', '/api/graph/entities?scope=tree');
-    assert(!(mainTree.namespaces || []).some((n) => n.name === NS_NAME),
-      'main never saw the lesson namespace');
+    const leakedNamespaces = (mainTree.namespaces || []).filter((n) => n.name === NS_NAME);
+    if (leakedNamespaces.length) console.error('  visible namespace vs receipt: '
+      + JSON.stringify({createdNamespaces, leakedNamespaces}));
+    assert(leakedNamespaces.length === 0, 'main never saw the lesson namespace');
     console.log('  branch isolation: rolled back — branch deleted, main clean');
 
     // ---------- and straight into the next lesson --------------------------

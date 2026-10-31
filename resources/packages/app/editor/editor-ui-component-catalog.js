@@ -83,7 +83,10 @@
     const ids = new Set(receipt.functions);
     const root = receipt.root;
     const rootValid = !root || (root.created === true && uuid.test(root.id || '')
-      && uuid.test(root['restore-id'] || '') && /^[0-9a-f]{64}$/.test(root['restore-revision'] || '')
+      && uuid.test(root['restore-id'] || '')
+      && (root.previous
+        ? /^[0-9a-f]{64}$/.test(root['restore-revision'] || '')
+        : root['restore-revision'] === null)
       && /^[0-9a-f]{64}$/.test(root['cohort-revision'] || '')
       && Array.isArray(root.functions) && root.functions.length > 0 && root.functions.length <= 512
       && Array.isArray(root['function-receipts'])
@@ -92,11 +95,11 @@
       && new Set(root['function-receipts'].map(row => row.id)).size === root.functions.length
       && root['function-receipts'].every(row => uuid.test(row.id) && uuid.test(row['namespace-id'])
         && typeof row.name === 'string' && row.name.length > 0 && root.functions.includes(row.id))
-      && root.previous && uuid.test(root.previous.id)
-      && root['restore-id'] === root.previous.id && typeof root.previous.name === 'string'
-      && uuid.test(root.previous['namespace-id'])
-      && /^[0-9a-f]{64}$/.test(root.previous.revision || '')
-      && !root.functions.includes(root.previous.id)
+      && (!root.previous || (uuid.test(root.previous.id)
+        && root['restore-id'] === root.previous.id && typeof root.previous.name === 'string'
+        && uuid.test(root.previous['namespace-id'])
+        && /^[0-9a-f]{64}$/.test(root.previous.revision || '')
+        && !root.functions.includes(root.previous.id)))
       && !root.functions.some(id => ids.has(id)));
     return rootValid && ids.size === receipt.functions.length && ids.has(receipt.id)
       && receipt.namespaces.every(id => uuid.test(id))

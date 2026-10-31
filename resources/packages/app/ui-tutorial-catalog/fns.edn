@@ -30,8 +30,9 @@
    :return-type :app.ui-tutorial-catalog/_session-result
    :args {:inputs {:parent :get :args {:coll {:as :input :type :app.ui-tutorial-catalog/_root-query-input}
                                        :key {:value :inputs}}}}}
+  {:name :_session-surface-type :refine {:base :text :constraint [:in #{"step" "end"}]}}
   {:name :_session-input
-   :type {:surface [:refine :text {:constraint [:in #{"step" "end"}]}]
+   :type {:surface :_session-surface-type
           :lesson :text :index :int :total :int :title :text :body :text :manual :bool
           :next-label :text :next-note :text}}
   {:name :_session-surface :parent :get

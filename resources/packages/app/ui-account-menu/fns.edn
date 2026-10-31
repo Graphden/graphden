@@ -63,7 +63,8 @@
    :args {:map {:ref :_root-view-field :type :app.ui-account-menu/_root-view-record} :key {:value :query} :value {:ref :account-menu-query}}}
   {:name :_account-menu-event :type {:kind :text :key :text :index :int}}
   {:name :_account-menu-state :type {:phase :text :active :int :handled :bool}}
-  {:name :_account-menu-context :type {:items [:list :text]}}
+  {:name :_account-menu-text-list :list :text}
+  {:name :_account-menu-context :type {:items :_account-menu-text-list}}
   {:name :_account-menu-theme :type {:accent :core.refinements/color :canvas-background :core.refinements/color}}
   {:name :account-menu-initial :parent :const :return-type :_account-menu-state
    :args {:value {:value {:phase "closed" :active 0 :handled false}}}}

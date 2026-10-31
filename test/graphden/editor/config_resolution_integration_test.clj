@@ -67,6 +67,26 @@
       id)))
 
 
+(defn- activation-receipt
+  [receipt]
+  (cond-> {:current-id (:id receipt)
+           :expected-configuration-revision (:configuration-revision receipt)
+           :cohort-revision (:cohort-revision receipt)
+           :previous (:previous receipt)
+           :functions (:function-receipts receipt)}
+    (:root receipt)
+    (assoc :root {:current-id (get-in receipt [:root :id])
+                  :cohort-revision (get-in receipt [:root :cohort-revision])
+                  :restore-revision (get-in receipt [:root :restore-revision])
+                  :previous (get-in receipt [:root :previous])
+                  :functions (get-in receipt [:root :function-receipts])})))
+
+
+(defn- activation-created-ids
+  [receipt]
+  (set (concat (:functions receipt) (get-in receipt [:root :functions]))))
+
+
 (deftest explorer-optional-diff-preserves-a-stored-pinned-personal-child
   (let [storage (:storage ga/*bootstrap*)
         path (str "pinned-explorer-" (random-uuid))
@@ -206,16 +226,13 @@
         (is (nil? (:previous original)))
         (is (= (get-in initial [:body :configuration-revision]) (:restore-revision original)))
         (let [applied (submit "apply" (get-in preview [:body :request]))
-              receipt {:current-id (:id original)
-                       :expected-configuration-revision (:configuration-revision original)
-                       :cohort-revision (:cohort-revision original)
-                       :previous (:previous original) :functions (:function-receipts original)}
+              receipt (activation-receipt original)
               confirmed (submit "reconcile" receipt)
               undone (submit "undo" receipt)]
           (is (= 200 (:status applied) (:status confirmed) (:status undone)))
           (is (true? (get-in applied [:body :committed])))
           (is (true? (get-in confirmed [:body :confirmed])))
-          (is (= (set (:functions original)) (set (get-in undone [:body :deleted]))))
+          (is (= (activation-created-ids original) (set (get-in undone [:body :deleted]))))
           (is (empty? (sp/query-entities storage :fn {:namespace-id home-id})))
           (is (some? (sp/read-entity storage :ns home-id)))
           (let [confirmation {:receipt receipt :scope (get-in preview [:body :request :scope])
@@ -246,9 +263,7 @@
       (let [before (current-configuration storage)
             result (activation/personalize! ctx {:component "fn-picker" :expected-preference {:present false :value nil}
                                                  :expected-configuration-revision (:revision before)})
-            original {:current-id (:id result) :expected-configuration-revision (:configuration-revision result)
-                      :cohort-revision (:cohort-revision result) :previous (:previous result)
-                      :functions (:function-receipts result)}
+            original (activation-receipt result)
             input {:receipt original :scope (activation/request-scope (:scope before))
                    :restore-revision (:restore-revision result)}
             role-id (:entry-id result)]
@@ -262,7 +277,7 @@
               review (receipts/cleanup-preview! ctx input)]
           (is (= rows (sp/read-entities storage :fn (:functions result))))
           (is (= original (:receipt input)))
-          (is (= (set (:functions result)) (set (map :id (:delete review)))))
+          (is (= (activation-created-ids result) (set (map :id (:delete review)))))
           (is (not= (:cohort-revision original) (get-in review [:request :cohort-revision])))
           (is (= resolution/defaults-id (get-in review [:restore :id])))
           (let [external (sp/create-entity storage :fn {:name "kept-caller" :namespace-id (:id home)})
@@ -285,7 +300,7 @@
           (epoch/seed-watermark! storage)
           (let [review (receipts/cleanup-preview! ctx input)
                 outcome (undo/undo! ctx (:request review))]
-            (is (= (set (:functions result)) (set (:deleted outcome))))
+            (is (= (activation-created-ids result) (set (:deleted outcome))))
             (epoch/seed-watermark! storage)
             (is (:undone (receipts/reconcile-undo! ctx (assoc input :receipt (:request review)
                                                               :restore-revision (:restore-revision review)))))
@@ -330,10 +345,7 @@
                  (try (activation/apply-proposal! ctx request) nil
                       (catch clojure.lang.ExceptionInfo error (:reason (ex-data error))))))
           (epoch/seed-watermark! storage)
-          (let [original-receipt {:current-id (:id receipt)
-                                  :expected-configuration-revision (:configuration-revision receipt)
-                                  :cohort-revision (:cohort-revision receipt)
-                                  :previous (:previous receipt) :functions (:function-receipts receipt)}
+          (let [original-receipt (activation-receipt receipt)
                 rows-before (sp/read-entities storage :fn (:functions applied))
                 confirmed (receipts/reconcile! ctx original-receipt)
                 role-id (:entry-id applied)
@@ -351,7 +363,7 @@
             (sp/update-entity storage :fn role-id {:description original-description})
             (epoch/seed-watermark! storage)
             (let [undone (undo/undo! ctx original-receipt)]
-              (is (= (set (:functions applied)) (set (:deleted undone))))
+              (is (= (activation-created-ids applied) (set (:deleted undone))))
               (is (= (:id before) (:id (current-configuration storage))))))
           (epoch/seed-watermark! storage)
           (is (= :identity-collision
@@ -511,9 +523,7 @@
             (is (= before (sp/query-entities child :fn {:namespace-id (:id home)}))))
           (let [policy (snapshot/capture-policy @(registry/active-rich-types-atom))
                 current (source/with-snapshot child #(resolution/capture %1 %2 policy))
-                undo-input {:current-id (:id result) :expected-configuration-revision (:configuration-revision result)
-                            :cohort-revision (:cohort-revision result)
-                            :previous (:previous result) :functions (:function-receipts result)}
+                undo-input (activation-receipt result)
                 original-create pg-crud/create-entity
                 deletes (atom 0) denied-renames (atom 0)]
             (is (= (:revision current) (:configuration-revision result)))
@@ -544,7 +554,7 @@
               (is (= :authz/forbidden
                      (try (undo/undo! child-ctx undo-input) nil
                           (catch clojure.lang.ExceptionInfo error (:type (ex-data error)))))))
-            (is (= (count (:functions result)) @deletes))
+            (is (= (count (activation-created-ids result)) @deletes))
             (is (= 1 @denied-renames))
             (is (= (:name old-active) (:name (sp/read-entity child :fn (:id initial)))))
             (is (= (set (:functions result)) (set (keys (sp/read-entities child :fn (:functions result))))))
@@ -556,7 +566,7 @@
             (epoch/seed-watermark! child)
             (let [restored (undo/undo! child-ctx undo-input)]
               (is (= (:id initial) (:id restored)))
-              (is (= (set (:functions result)) (set (:deleted restored))))
+              (is (= (activation-created-ids result) (set (:deleted restored))))
               (is (= "editor" (:name (sp/read-entity child :fn (:id initial)))))
               (is (= (:parent-ids original) (:parent-ids (sp/read-entity child :fn (:id initial)))))
               (is (nil? (sp/read-entity child :fn (:id result))))

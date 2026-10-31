@@ -5,12 +5,14 @@
     [graphden.editor.components :as components]
     [graphden.editor.config-resolution :as resolution]
     [graphden.editor.root-binding :as binding]
-    [graphden.editor.root-compatibility :as compatibility]
+    [graphden.editor.root-migration-plan :as migration]
     [graphden.executor.browser-server :as server]
     [graphden.executor.browser-snapshot :as snapshot]
     [graphden.executor.browser-source :as source]
     [graphden.executor.context :as context]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.graph.metadata :as metadata]
+    [graphden.storage.protocol.core :as sp]
+    [graphden.tenancy.context :as tenancy]))
 
 
 (defn- reject!
@@ -33,17 +35,20 @@
            (let [{handler-root :root} (binding/capture! storage)
                  choice (resolution/root-choice storage authorize! policy)
                  root (binding/selected-root handler-root choice)
-                 personal? (not= resolution/default-root-id (:id choice))
-                 row (sp/read-entity storage :fn root)]
+                 row (sp/read-entity storage :fn root)
+                 selected-configuration? (and (tenancy/current-user-id)
+                                              (or (= resolution/default-root-id root)
+                                                  (let [home (tenancy/current-personal-namespace)
+                                                        home-row (when home
+                                                                   (metadata/namespace-row storage (:namespace-path home)
+                                                                                           (tenancy/current-org)))]
+                                                    (migration/migration-owned? row (:id home-row)))))]
              (when-not row (reject! :source-missing))
              (authorize! row {:execute? true})
              (components/assert-current-policy! storage)
              (let [plan (server/export-client-plan
                           ctx storage authorize! policy {:root root} request
                           {:handler-root handler-root :selected-root root})
-                   adapted (if personal? {:plan plan}
-                               (compatibility/adapt-root ctx storage authorize! policy root plan))
-                   plan (:plan adapted)
                    input (get-in plan [:inputs (str root)])
                    required (:required input)
                    argument (first required)]
@@ -58,7 +63,9 @@
                (when-not (= epoch (context/invalidation-epoch ctx))
                  (reject! :policy-refresh-required))
                {:ok true :plan plan :argument-name argument :root-id (str root)
-                :component-selection-id (:component-selection-id adapted)})))))
+                :component-selection-id
+                (when selected-configuration?
+                  (:id (resolution/capture storage authorize! policy)))})))))
      (catch Exception error
        (let [{:keys [type reason]} (ex-data error)]
          (when-not (= reason :policy-refresh-required)

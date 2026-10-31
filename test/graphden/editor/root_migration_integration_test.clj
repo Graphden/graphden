@@ -39,6 +39,35 @@
                   :functions (get-in receipt [:root :function-receipts])})))
 
 
+(deftest first-personalization-selects-a-personal-root-without-explicit-migration
+  (let [ctx (:ctx ga/*bootstrap*)
+        storage (:storage ctx)
+        home-name (str "first-personal-root-" (random-uuid))
+        _home (sp/create-entity storage :ns {:name home-name})]
+    (binding [tenancy/*seams-override* (atom (tenancy/seams-isolation-seed))]
+      (tenancy/install-personal-namespace-fn!
+        (constantly {:namespace-path home-name :source :fixture :isolated? false}))
+      (epoch/seed-watermark! storage)
+      (let [policy (snapshot/capture-context-policy ctx)
+            authorize! (tenancy/browser-source-policy storage)]
+        (is (= resolution/default-root-id
+               (:id (resolution/root-choice storage authorize! policy))))
+        (let [preview (activation/preview!
+                        ctx {:operation "personalize"
+                             :command {:component "fn-picker"
+                                       :expected-preference {:present false :value nil}
+                                       :expected-configuration-revision
+                                       (current-configuration-revision ctx storage)}})
+              receipt (:receipt preview)
+              applied (activation/apply-proposal! ctx (:request preview))]
+          (is (some? (:root receipt)))
+          (is (= (:id receipt) (str (:id applied))))
+          (is (= (get-in receipt [:root :id]) (str (get-in applied [:root :id]))))
+          (epoch/seed-watermark! storage)
+          (is (= (get-in applied [:root :id])
+                 (:id (resolution/root-choice storage authorize! policy)))))))))
+
+
 (deftest preview-creates-nothing-and-apply-selects-a-personal-root-once
   (let [ctx (:ctx ga/*bootstrap*)
         storage (:storage ctx)

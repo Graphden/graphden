@@ -5,8 +5,8 @@
     [graphden.editor.config-preparation :as preparation]
     [graphden.editor.config-resolution :as resolution]
     [graphden.editor.root-binding :as binding]
-    [graphden.editor.root-compatibility :as compatibility]
     [graphden.editor.root-migration-parse :as migration-parse]
+    [graphden.editor.root-migration-selection :as selection]
     [graphden.editor.root-migration-slots :as migration-slots]
     [graphden.executor.browser-snapshot :as snapshot]
     [graphden.executor.browser-source :as source]
@@ -61,7 +61,7 @@
          choice (resolution/root-choice storage authorize! policy)
          _ (when-not (= resolution/default-root-id (:root handler))
              (refuse! :custom-handler-root))
-         selection (or selection (compatibility/capture-selection storage authorize! policy))
+         selection (or selection (selection/capture storage authorize! policy))
          home (:home selection)
          _ (when-not home (refuse! :personal-home-unavailable))
          home-row (metadata/namespace-row storage (:namespace-path home) (tenancy/current-org))

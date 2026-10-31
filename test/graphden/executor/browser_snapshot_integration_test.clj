@@ -7,6 +7,7 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.crud.entities :as entities]
+    [graphden.crud.type-check :as type-check]
     [graphden.editor.components :as components]
     [graphden.editor.root-plan :as root-plan]
     [graphden.executor.browser-plan :as plan]
@@ -19,6 +20,7 @@
     [graphden.packages.owned :as owned]
     [graphden.packages.records :as records]
     [graphden.packages.records.ids :as ids]
+    [graphden.packages.records.types :as record-types]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
     [graphden.system.branch-router.epoch :as epoch]
@@ -404,3 +406,35 @@
             body (json/parse-string (:body response) true)]
         (is (= 422 (:status response)))
         (is (= {:type "browser-plan/unsupported" :reason "invalid-entries"} body))))))
+
+
+(deftest actual-jsonb-generic-callback-is-restored-only-from-its-exact-contract
+  (let [storage (:storage (:ctx ga/*bootstrap*))
+        declaration (first (filter #(= :assoc-fn (:name %))
+                                   (:fns (edn/read-string (slurp "resources/packages/core/collections/fns.edn")))))
+        expected (first (filter #(= :fn (:kind %))
+                                (record-types/inline-fn-type-rows-from-form (get-in declaration [:args :value :type]))))
+        stored (sp/read-entity storage :fn (:id expected))
+        captured {:graph {:fns [stored] :slots [] :fn-slots [] :bindings [] :list-items []}
+                  :namespaces []}
+        read-checked #(sp/read-entity (#'snapshot/snapshot-storage %) :fn (:id expected))]
+    (is (some? stored))
+    (is (not= (:constraint expected) (:constraint stored)) "Actual PG preserves JSONB generic variable spellings as strings")
+    (is (= (:constraint expected) (:constraint (read-checked captured))) "Trusted boot ownership plus exact canonical type restores checker variables")
+    (is (= (:constraint stored) (:constraint (sp/read-entity storage :fn (:id expected)))) "Source rows remain unchanged")
+    (is (= :type-contract-source-mismatch
+           (try
+             (read-checked (assoc-in captured [:graph :fns 0 :constraint 1 :arg] :b))
+             nil
+             (catch clojure.lang.ExceptionInfo error (:reason (ex-data error))))))))
+
+
+(deftest actual-jsonb-account-styles-retain-their-element-contract
+  (let [storage (:storage (:ctx ga/*bootstrap*))
+        producer (ids/fn-id "app.ui-account-menu" :account-menu-styles)
+        style-list (ids/fn-id "app.ui-account-menu" :_account-menu-styles)
+        style (ids/fn-id "app.ui-account-menu" :_account-menu-style)]
+    (is (= style-list (:return-type-fn-id (sp/read-entity storage :fn producer))))
+    (is (= style (:element-fn-id (sp/read-entity storage :fn style-list))))
+    (is (= :app.ui-account-menu/_account-menu-styles
+           (:return-type (type-check/reconstruct-fn-def storage producer))))))

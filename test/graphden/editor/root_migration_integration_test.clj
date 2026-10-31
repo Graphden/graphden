@@ -125,7 +125,24 @@
                    (:id (resolution/root-choice storage
                                                 (tenancy/browser-source-policy storage)
                                                 (snapshot/capture-context-policy ctx)))))
-            (is (seq (:deleted (undo/undo! ctx (undo-command (:receipt preview))))))))))))
+            (let [next-proposed (creation/preview ctx {:owner (tenancy/current-user-id)
+                                                       :namespace-id nil :component "recents"})
+                  next-created (creation/apply! ctx (:request next-proposed))]
+              (is (:committed next-created))
+              (epoch/seed-watermark! storage)
+              (let [next-preview (activation/preview!
+                                   ctx {:operation "activate"
+                                        :command {:selection-id (get-in next-proposed [:manifest :roots :configuration-id])
+                                                  :expected-preference {:present false :value nil}
+                                                  :expected-configuration-revision
+                                                  (current-configuration-revision ctx storage)}})
+                    next-applied (activation/apply-proposal! ctx (:request next-preview))]
+                (is (= (get-in next-preview [:receipt :root :id])
+                       (str (get-in next-applied [:root :id]))))
+                (epoch/seed-watermark! storage)
+                (is (seq (:deleted (undo/undo! ctx (undo-command (:receipt next-preview))))))
+                (epoch/seed-watermark! storage)
+                (is (seq (:deleted (undo/undo! ctx (undo-command (:receipt preview))))))))))))))
 
 
 (deftest preview-creates-nothing-and-apply-selects-a-personal-root-once

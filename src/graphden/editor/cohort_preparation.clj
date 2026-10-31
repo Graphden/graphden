@@ -24,7 +24,8 @@
                   {:type :browser-plan/unsupported :reason reason})))
 
 
-(defn- merge-source
+(defn merge-source
+  "Combine source row sets by identity; conflicting snapshots are refused."
   [left right]
   (merge-with
     (fn [a b]
@@ -39,7 +40,8 @@
     left right))
 
 
-(defn- staged-closure
+(defn staged-closure
+  "Read only newly prepared rows reachable from staged roots."
   [snapshot roots staged-ids]
   (when (seq roots)
     (let [graph (:graph snapshot)

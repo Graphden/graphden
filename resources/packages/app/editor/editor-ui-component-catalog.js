@@ -44,6 +44,20 @@
     }
     return result;
   }
+  async function configurationPreview(body, signal, current) {
+    const {response, result} = await window.gdReadGraphResponse(
+      () => window.authFetch(window.API.api_ui_configuration_preview, {method: 'POST', signal,
+        headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)}),
+      signal, current,
+      (reply, payload) => reply.status === 422 && payload?.ok === false
+        && payload.code === 'policy-refresh-required' && payload.retryable === true);
+    if (!response.ok || !result.ok) {
+      const error = new Error(result.reason || 'UI graphs could not be created.');
+      error.status = response.status; error.body = result;
+      throw error;
+    }
+    return result;
+  }
   function validManifest(manifest) {
     const fullLimit = window.GraphdenAtomicFunctionBatchMax;
     if (!manifest || !Array.isArray(manifest.namespaces) || !Array.isArray(manifest.functions)
@@ -117,9 +131,9 @@
   async function previewApply(operation, command, controller, current) {
     const state = window.gdUIConfigurationState?.();
     if (!state?.revision || !state.preference) throw new Error('Refresh the editor configuration before changing it.');
-    const preview = await json(window.API.api_ui_configuration_preview, {operation,
+    const preview = await configurationPreview({operation,
       command: {...command, 'expected-preference': state.preference,
-        'expected-configuration-revision': state.revision}}, controller.signal);
+        'expected-configuration-revision': state.revision}}, controller.signal, current);
     if (!current()) return null;
     if (!validConfigurationReceipt(preview.receipt) || preview.request?.operation !== operation
       || preview.request?.scope?.org !== organization() || !uuid.test(preview.request?.scope?.['branch-id'] || '')

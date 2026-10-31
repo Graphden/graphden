@@ -2,6 +2,7 @@
   "Checked proposal and same-transaction commit for personal HOF roots."
   (:require
     [graphden.editor.cohort-preparation :as cohort]
+    [graphden.editor.component-bundle :as bundle]
     [graphden.editor.config-preparation :as preparation]
     [graphden.editor.config-resolution :as resolution]
     [graphden.editor.root-binding :as binding]
@@ -53,6 +54,27 @@
                      row)) %)))
 
 
+(def ^:private source-kinds
+  [[:fn :fns] [:slot :slots] [:fn-slot :fn-slots]
+   [:binding :bindings] [:binding-list-item :list-items]])
+
+
+(defn- callback-source
+  [storage authorize! role-ids staged-source staged-function-ids]
+  (let [staged-ids (set staged-function-ids)
+        staged-roots (filterv staged-ids role-ids)
+        staged (when (seq staged-roots)
+                 (select-keys (cohort/staged-closure staged-source staged-roots staged-ids)
+                              (map second source-kinds)))
+        staged-records (mapcat (fn [[kind key]]
+                                 (map #(assoc % :kind kind) (get staged key))) source-kinds)
+        persisted-roots (into (set (remove staged-ids role-ids))
+                              (bundle/external-identities staged-records))
+        persisted (when (seq persisted-roots)
+                    (source/collect-client-closure storage persisted-roots authorize!))]
+    (cohort/merge-source persisted staged)))
+
+
 (defn proposal
   ([storage policy nonce]
    (proposal storage policy nonce {}))
@@ -91,7 +113,8 @@
          selected-role-ids (vec (mapcat vals (vals (migration-templates/overrides
                                                      (:configuration selection)))))
          callback-graph (when (seq selected-role-ids)
-                          (source/collect-client-closure storage selected-role-ids authorize!))
+                          (callback-source storage authorize! selected-role-ids
+                                           staged-source staged-function-ids))
          parsed (migration-parse/parse (str "root-migration." nonce)
                                        (:configuration selection) callback-graph)
          _ (when (sp/read-entity storage :fn (:root-id parsed))

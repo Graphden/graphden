@@ -43,6 +43,7 @@ const {waitForLoadedUIComponents, drainUIPlanReplies, observeUIPlanLoads} = requ
   const errors = [];
   const themeReplies = [];
   const rootPlans = [];
+  const configurationReplies = [];
   const pendingReplies = [];
   const requestSequences = new WeakMap();
   let sequence = 0;
@@ -77,6 +78,11 @@ const {waitForLoadedUIComponents, drainUIPlanReplies, observeUIPlanLoads} = requ
   const captureResponse = async response => {
     if (response.request().method() === 'DELETE') deletes.push({url: response.url(), status: response.status()});
     const path = new URL(response.url()).pathname;
+    if (path.startsWith('/api/ui/configuration/') && ['prepare', 'preview', 'apply'].includes(path.split('/').at(-1))) {
+      const body = await response.json().catch(() => null);
+      configurationReplies.push({path, status: response.status(), code: body?.code,
+        created: body?.created, committed: body?.committed, reason: body?.reason});
+    }
     if (path === '/api/ui/configuration/undo' && response.ok()) cleanupCommitted = true;
     if (path === '/api/ui/root/plan') {
       const body = await response.json().catch(() => null);
@@ -201,6 +207,17 @@ const {waitForLoadedUIComponents, drainUIPlanReplies, observeUIPlanLoads} = requ
       throw new Error('Unexpected browser errors');
     }
   } catch (error) {
+    console.error(JSON.stringify({diagnostic: 'ui-configuration-failure',
+      replies: configurationReplies.slice(-12),
+      state: await page.evaluate(() => ({status: document.querySelector('#gd-ui-components-status')?.textContent,
+        selected: gdUIComponentsSelection?.()?.['fn-id'],
+        runtime: gdUIComponentRuntimeIdentity?.('account-menu'),
+        theme: {accent: gdThemeTokenValue('--gd-flow'), background: gdThemeTokenValue('--bg')},
+        menuReady: gdShellMenuGraph?.ready, rootId: gdEditorRoot?.rootId?.(),
+        rootError: document.querySelector('#app + [role="status"]')?.textContent,
+        checkResult: _tourStep?.()?.check ? gdTourUIComponentCheck(_tourStep().check) : null,
+        receipts: _tourState?.editorConfigurations?.map(row => ({receipt: row.receipt,
+          created: row.original?.created, operation: row.request?.operation}))})).catch(() => null)}));
     console.error('Root server receipt diagnostic:', JSON.stringify(rootServerDiagnostic(error, serverCalls.events)));
     console.error(JSON.stringify({diagnostic: 'recent-root-plans', replies: rootPlans.slice(-12)}));
     console.error(JSON.stringify({diagnostic: 'recent-component-plans', replies: planReplies.slice(-16).map(reply => ({

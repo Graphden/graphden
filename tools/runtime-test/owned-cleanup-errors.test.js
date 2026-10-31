@@ -3,6 +3,7 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const {unexpectedCleanupErrors} = require('../browser-test/owned-cleanup-errors');
 const {componentCleanupTimeout} = require('../browser-test/tutorial-ui-components-helpers');
+const {undoRequest} = require('../browser-test/configuration-undo-test-helpers');
 const url = 'http://localhost/api/entities/fn/owned';
 const error = {kind: 'console', url, text: 'Failed to load resource: the server responded with a status of 409 (Conflict)'};
 const responses = [{url, status: 409}, {url, status: 204}];
@@ -37,7 +38,7 @@ function lessonCleanupFixture({absent = false, confirmed = true, foreign = false
       if (path.endsWith('cleanup-preview')) return {ok: true, kind: 'editor-configuration-cleanup-review', request: reviewed, delete: rows};
       throw Error('unexpected cleanup endpoint');
     }};
-    if (name === './configuration-undo-test-helpers') return {undoConfiguration: async (_page, _proposal, command) => {
+    if (name === './configuration-undo-test-helpers') return {undoRequest, undoConfiguration: async (_page, _proposal, command) => {
       calls.push({method: 'UNDO', command}); return {ok: true};
     }};
     if (name === './picker-root-test-helpers') return require('../browser-test/picker-root-test-helpers');

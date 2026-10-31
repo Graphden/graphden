@@ -159,7 +159,7 @@ These authenticated POST routes live under `/api/ui/configuration/`.
 |---|---|
 | `plan` | Resolve and export one selected component under source ACL; return configuration revision and authoritative legacy preference expectation. |
 | `prepare` | Migrate an actual legacy selection by reference, or explicitly set up the home with `{home:true}`. Home setup creates no editor function. |
-| `preview` | Read-only scoped plan for `personalize` or `activate`; return created IDs, source witnesses and restore state, including a replacement HOF root when the current root is migration-owned. |
+| `preview` | Read-only scoped plan for `personalize` or `activate`; return created IDs, source witnesses and restore state, including a new HOF root when the default root is selected or a replacement when the current root is migration-owned. |
 | `apply` | Rebuild and compare the exact proposal under current policy/source/CAS; create the configuration and HOF cohorts in one writer transaction. |
 | `reconcile` | Read-only confirmation of both cohorts after an uncertain APPLY; partial, edited or missing state remains uncertain. Never recreate reserved identities. |
 | `cleanup-preview` | Read-only new deletion proposal using the exact cohorts and unchanged prior restore anchors; show current names and source stamps before consent. |
@@ -192,16 +192,16 @@ ordinary graph value. Its unary callback receives `{:model ...}` and returns
 compatibility, events, focus and keyboard navigation. The passive renderer
 validates Hiccup and scoped styles; callbacks cannot supply DOM handlers.
 
-For the shipped default root only, the temporary read-only compatibility
-adapter projects the current user's existing personal picker view into that
-unary envelope. The selected source closure passes the root request's current
-source authorization and snapshot checks. Missing or revoked selected source
-refuses the root export; it never selects an older plan. A custom root's
-ordinary refs are authoritative. Remove the compatibility projection after the
-deterministic personal-root migration has replaced its readers and records.
+The shipped default root exports its own graph callbacks. Ordinary
+configuration activation creates a personal HOF root with the selected
+callbacks in the same checked writer transaction, or replaces an existing
+migration-owned root. The root response includes the authorized ordinary
+configuration identity as a render receipt; it does not project that
+configuration's callbacks into the default plan. A custom root's graph refs
+remain authoritative.
 For C6, `scripts/ui_legacy_audit.sql` inventories only counts of old
 `components` preferences and non-shipped `editor`/`editor-root` identities.
-Run it against each installation with
+Operators can run it against their installation with
 `psql -X -v ON_ERROR_STOP=1 -f scripts/ui_legacy_audit.sql` using a role that
 can see every tenant. It sets
 `row_security=off` so a role filtered by RLS fails instead of reporting a false
@@ -217,9 +217,7 @@ configuration activation changes its callbacks. Prior graph identities are retai
 under private names, and one receipt covers confirmation and LIFO undo. An
 explicit root refresh remains available for changes made outside activation.
 The proposal refuses an authored root without the migration marker, so it
-cannot silently replace a user's independent HOF composition. Keep the
-compatibility adapter until every installation has zero candidates and the
-old read/write paths are confirmed unused.
+cannot silently replace a user's independent HOF composition.
 Root replacement immediately closes a mounted picker and retires its render
 receipt; old asynchronous loads cannot reactivate it.
 Completing the same root's load preserves a native picker opened during loading.
@@ -236,9 +234,9 @@ The native host keeps history, requirements, navigation, focus and lesson
 actions. It validates row identities and passive Hiccup before painting, and
 accepts the root render receipt only after the complete host paint succeeds.
 
-The shipped default root's temporary read-only compatibility adapter projects
-an existing personal catalogue view through the checked source closure. A
-missing, revoked or malformed selected root callback closes the catalogue;
+The shipped default root provides its own catalogue callback. A selected
+personal root holds authored callbacks by graph reference; source authorization
+checks them before export. A missing, revoked or malformed callback closes the catalogue;
 it cannot reactivate a built-in view. Root replacement retires pending and
 open catalogue work, styles and receipts. The same root's initial load may
 complete without cancelling the opening catalogue.

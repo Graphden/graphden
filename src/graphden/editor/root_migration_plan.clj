@@ -112,9 +112,11 @@
                   :source-revision (resolution/source-revision (:id prepared) (:snapshot prepared) scope)
                   :cohort-revision (resolution/cohort-revision function-ids (:snapshot prepared) scope)
                   :restore-id (:id choice)
-                  :restore-revision (when prior-row
+                  :restore-revision (if prior-row
                                       (resolution/source-revision (:id prior-row)
-                                                                  {:graph prior-graph} scope))
+                                                                  {:graph prior-graph} scope)
+                                      (resolution/root-source-revision
+                                        storage authorize! policy resolution/default-root-id scope))
                   :namespaces []
                   :changed-functions (if prior-row [(:id prior-row)] [])
                   :previous (when prior-row {:id (:id prior-row) :name prior-name

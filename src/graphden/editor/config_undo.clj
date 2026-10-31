@@ -57,7 +57,7 @@
         previous (parse-previous (:previous input))
         functions (deletion/parse-receipts {:functions (:functions input)})
         ids (set (map :id functions))]
-    (when-not (and previous (contains? ids current-id)
+    (when-not (and (contains? ids current-id)
                    (not (contains? ids (:id previous))))
       (refuse! :invalid-request))
     (assoc input :current-id current-id :previous previous :functions functions)))
@@ -131,8 +131,8 @@
                    (= (:expected-configuration-revision input) (:revision current)))
       (refuse! :stale-configuration))
     (let [previous (previous-row! storage (:previous input) home (:scope current) authorize! policy)
-          root-previous (when-let [root (:root input)]
-                          (root-previous-row! storage (:previous root) home
+          root-previous (when-let [previous (get-in input [:root :previous])]
+                          (root-previous-row! storage previous home
                                               (:scope root-choice) authorize! policy))
           cohort {:graph (source/collect-manifests storage (mapv :id (:functions input)) authorize!)}
           _ (when-not (= (:cohort-revision input)
@@ -160,7 +160,7 @@
       {:rows (:rows deleted)
        :result (cond-> (assoc (:result deleted) :id (or (:id previous) resolution/defaults-id)
                               :functions [] :changed-functions (vec (keep :id [previous root-previous])))
-                 root-previous (assoc :root-id (:id root-previous)))})))
+                 (:root input) (assoc :root-id (or (:id root-previous) resolution/default-root-id)))})))
 
 
 (defn undo!

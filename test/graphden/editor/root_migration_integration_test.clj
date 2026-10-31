@@ -48,7 +48,9 @@
       (tenancy/install-personal-namespace-fn!
         (constantly {:namespace-path home-name :source :fixture :isolated? false}))
       (epoch/seed-watermark! storage)
-      (let [policy (snapshot/capture-context-policy ctx)
+      (let [before (source/with-snapshot
+                     storage #(resolution/capture %1 %2 (snapshot/capture-context-policy ctx)))
+            policy (snapshot/capture-context-policy ctx)
             authorize! (tenancy/browser-source-policy storage)]
         (is (= resolution/default-root-id
                (:id (resolution/root-choice storage authorize! policy))))
@@ -65,7 +67,21 @@
           (is (= (get-in receipt [:root :id]) (str (get-in applied [:root :id]))))
           (epoch/seed-watermark! storage)
           (is (= (get-in applied [:root :id])
-                 (:id (resolution/root-choice storage authorize! policy)))))))))
+                 (:id (resolution/root-choice storage authorize! policy))))
+          (is (true? (:confirmed (receipts/reconcile! ctx (undo-command receipt)))))
+          (let [scope (activation/request-scope (:scope before))
+                review (receipts/cleanup-preview!
+                         ctx {:receipt (undo-command receipt) :scope scope
+                              :restore-revision (:restore-revision receipt)})]
+            (is (= resolution/default-root-id (get-in review [:restore :root :id])))
+            (is (seq (:deleted (undo/undo! ctx (:request review)))))
+            (epoch/seed-watermark! storage)
+            (is (= resolution/default-root-id
+                   (:id (resolution/root-choice storage authorize!
+                                                (snapshot/capture-context-policy ctx)))))
+            (is (true? (:confirmed (receipts/reconcile-undo!
+                                     ctx {:receipt (:request review) :scope scope
+                                          :restore-revision (:restore-revision receipt)}))))))))))
 
 
 (deftest preview-creates-nothing-and-apply-selects-a-personal-root-once

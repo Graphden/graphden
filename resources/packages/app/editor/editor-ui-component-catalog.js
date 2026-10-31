@@ -84,9 +84,7 @@
     const root = receipt.root;
     const rootValid = !root || (root.created === true && uuid.test(root.id || '')
       && uuid.test(root['restore-id'] || '')
-      && (root.previous
-        ? /^[0-9a-f]{64}$/.test(root['restore-revision'] || '')
-        : root['restore-revision'] === null)
+      && /^[0-9a-f]{64}$/.test(root['restore-revision'] || '')
       && /^[0-9a-f]{64}$/.test(root['cohort-revision'] || '')
       && Array.isArray(root.functions) && root.functions.length > 0 && root.functions.length <= 512
       && Array.isArray(root['function-receipts'])

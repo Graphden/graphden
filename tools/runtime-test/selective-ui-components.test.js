@@ -107,7 +107,7 @@ test('shared custom view remains a Personalize action until server metadata prov
 });
 test('first personalization accepts the new personal root in the preview receipt', async () => {
   const f = fixture('fn-picker');
-  f.receipt.root = {created: true, id: id(40), 'restore-id': id(41), 'restore-revision': null,
+  f.receipt.root = {created: true, id: id(40), 'restore-id': id(41), 'restore-revision': revision,
     previous: null, 'cohort-revision': revision, functions: [id(40), id(42)],
     'function-receipts': [{id: id(40), name: 'editor-root', 'namespace-id': id(1)},
       {id: id(42), name: '_personal-picker', 'namespace-id': id(1)}]};

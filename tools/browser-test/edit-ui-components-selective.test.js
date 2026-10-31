@@ -37,7 +37,12 @@ async function activate(page, selectionId, settle) {
   const proposal = await api(page, 'POST', '/api/ui/configuration/preview', {operation: 'activate',
     command: {'selection-id': selectionId, 'expected-preference': state.preference,
       'expected-configuration-revision': state.revision}});
-  assert(proposal.ok, 'compatibility selection receives an ordinary activation preview');
+  let refusal;
+  if (!proposal.ok) {
+    try { refusal = JSON.parse(proposal.body); } catch (_) { refusal = {}; }
+  }
+  assert(proposal.ok, 'compatibility selection receives an ordinary activation preview'
+    + (refusal ? ` (status ${proposal.status}, code ${refusal.code || 'unknown'})` : ''));
   const result = await api(page, 'POST', '/api/ui/configuration/apply', proposal.request);
   assert(result.ok && result.committed, 'compatibility selection activates by reference');
   await page.evaluate(async () => { await loadGraphData(); gdRefreshUIConfiguration(); });

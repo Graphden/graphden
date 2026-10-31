@@ -13,6 +13,18 @@
        (catch clojure.lang.ExceptionInfo error (:reason (ex-data error)))))
 
 
+(deftest legacy-role-assoc-parents-follow-shipped-component-chain
+  (doseq [[component {:keys [roles]}] legacy/components]
+    (is (= (set roles)
+           (set (keys (templates/role-assoc-parents component))))))
+  (is (= :app.ui-appearance/_view-assoc
+         (get (templates/role-assoc-parents :appearance) :view)))
+  (is (= :app.ui-appearance/appearance-root-component
+         (templates/root-component-return-type :appearance)))
+  (is (= :app.ui-account-menu/_root-view-assoc
+         (get (templates/role-assoc-parents :account-menu) :view))))
+
+
 (deftest migration-declarations-reference-only-changed-role-identities
   (let [root "migration-probe"
         menu-view (random-uuid)

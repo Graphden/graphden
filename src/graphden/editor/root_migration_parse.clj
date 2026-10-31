@@ -23,10 +23,11 @@
    are used to parse the new cohort."
   []
   (let [component-declarations
-        (mapcat (fn [[_ {path :namespace :keys [roles]}]]
+        (mapcat (fn [[component {path :namespace}]]
                   (let [definitions (packaged-definitions path)
                         wanted (into #{:root-component}
-                                     (map #(keyword (str "_root-" (name %) "-assoc"))) roles)]
+                                     (map #(keyword (name %)))
+                                     (vals (templates/role-assoc-parents component)))]
                     (map #(assoc % :namespace path)
                          (filter #(or (contains? wanted (:name %))
                                       (:type %) (:fn-type %)) definitions))))

@@ -55,7 +55,7 @@
 (defn proposal
   ([storage policy nonce]
    (proposal storage policy nonce {}))
-  ([storage policy nonce {:keys [selection staged-source renames]}]
+  ([storage policy nonce {:keys [selection staged-source staged-function-ids renames]}]
    (let [authorize! (tenancy/browser-source-policy storage)
          handler (binding/capture! storage)
          choice (resolution/root-choice storage authorize! policy)
@@ -96,6 +96,7 @@
                     {:authorize! authorize! :policy policy :source-root component-root-id
                      :source-roots (conj role-ids component-root-id)
                      :staged-source staged-source
+                     :staged-function-ids staged-function-ids
                      :collect-external! source/collect-client-closure
                      :normalize-records #(migration-slots/resolve-bindings
                                            %1 (:definitions parsed) %2)

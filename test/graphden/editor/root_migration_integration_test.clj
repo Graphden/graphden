@@ -1,6 +1,7 @@
 (ns ^:integration ^:serial graphden.editor.root-migration-integration-test
   (:require
     [clojure.test :refer [deftest is use-fixtures]]
+    [graphden.editor.component-creation :as creation]
     [graphden.editor.config-activation :as activation]
     [graphden.editor.config-receipts :as receipts]
     [graphden.editor.config-resolution :as resolution]
@@ -82,6 +83,49 @@
             (is (true? (:confirmed (receipts/reconcile-undo!
                                      ctx {:receipt (:request review) :scope scope
                                           :restore-revision (:restore-revision receipt)}))))))))))
+
+
+(deftest first-activation-of-a-created-partial-configuration-selects-a-personal-root
+  (let [ctx (:ctx ga/*bootstrap*)
+        storage (:storage ctx)
+        home-name (str "partial-personal-root-" (random-uuid))
+        _home (sp/create-entity storage :ns {:name home-name})]
+    (binding [tenancy/*seams-override* (atom (tenancy/seams-isolation-seed))]
+      (tenancy/install-personal-namespace-fn!
+        (constantly {:namespace-path home-name :source :fixture :isolated? false}))
+      (epoch/seed-watermark! storage)
+      (let [proposed (creation/preview ctx {:owner (tenancy/current-user-id)
+                                            :namespace-id nil :component "fn-picker"})
+            created (creation/apply! ctx (:request proposed))]
+        (is (:ok proposed))
+        (is (:committed created))
+        (epoch/seed-watermark! storage)
+        (let [preview (try
+                        (activation/preview!
+                          ctx {:operation "activate"
+                               :command {:selection-id (get-in proposed [:manifest :roots :configuration-id])
+                                         :expected-preference {:present false :value nil}
+                                         :expected-configuration-revision
+                                         (current-configuration-revision ctx storage)}})
+                        (catch Exception error
+                          (let [id (:fn-id (ex-data error))]
+                            (throw (ex-info "Partial activation preview refused"
+                                            {:reason (:reason (ex-data error))
+                                             :source-name (:name (sp/read-entity storage :fn id))
+                                             :copied? (boolean (some #(= (str id) (:id %))
+                                                                     (get-in proposed [:manifest :functions])))
+                                             :publication-warnings (:publication-warnings created)}
+                                            error)))))]
+          (is (some? (get-in preview [:receipt :root])))
+          (let [applied (activation/apply-proposal! ctx (:request preview))]
+            (is (= (get-in preview [:receipt :root :id])
+                   (str (get-in applied [:root :id]))))
+            (epoch/seed-watermark! storage)
+            (is (= (get-in applied [:root :id])
+                   (:id (resolution/root-choice storage
+                                                (tenancy/browser-source-policy storage)
+                                                (snapshot/capture-context-policy ctx)))))
+            (is (seq (:deleted (undo/undo! ctx (undo-command (:receipt preview))))))))))))
 
 
 (deftest preview-creates-nothing-and-apply-selects-a-personal-root-once

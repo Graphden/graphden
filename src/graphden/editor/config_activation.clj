@@ -250,6 +250,7 @@
                                                         (:graph projected) (:id prepared))
                                        :snapshot projected}
                            :staged-source projected
+                           :staged-function-ids (mapv :id (filter #(= :fn (:kind %)) (:records prepared)))
                            :renames (when prior-row {(:id prior-row) private-name})}))
             ids (mapv :id (filter #(= :fn (:kind %)) (:records prepared)))
             prior-snapshot (when prior?

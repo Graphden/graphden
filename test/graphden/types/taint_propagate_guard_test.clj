@@ -82,6 +82,9 @@
     ;; carry fn names / ids / the engine's message — server-derived, and
     ;; the `suppressed` arg only FILTERS them, never flows through.
     :branch-lint-findings
+    ;; The fn ID and page controls select server-owned history metadata;
+    ;; no caller content is copied into the result.
+    :load-fn-change-events
     ;; :unresolved-failure-counts tallies audit rows per fn — fn ids /
     ;; names / counts, all server-derived; `days` is a window, not content.
     :unresolved-failure-counts

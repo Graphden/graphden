@@ -305,7 +305,7 @@
 
   {:name :_partial-fnv-change-kind
    :parent :get
-          :args {:coll {:as :item} :key {:value :kinds} :default {:value "change"}}}
+   :args {:coll {:as :item} :key {:value :kinds} :default {:value "change"}}}
 
   {:name :_partial-fnv-change-legacy-note
    :parent :if

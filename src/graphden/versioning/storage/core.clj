@@ -90,7 +90,7 @@
   [entity-name row]
   (let [{:keys [version-id-field]} (get res/entity-config entity-name)]
     (cond-> (dissoc row :branch-id :change-id :created-at :deleted-at
-                     :author-id :author-label)
+                    :author-id :author-label)
       version-id-field (dissoc version-id-field))))
 
 

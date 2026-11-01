@@ -527,6 +527,7 @@
 (def ^:private resource-override-version-author-id-field-uuid #uuid "50000000-0000-4000-8000-000000000009")
 (def ^:private resource-override-version-author-label-field-uuid #uuid "50000000-0000-4000-8000-00000000000a")
 
+
 ;; A null change-id identifies pre-migration history whose cross-entity
 ;; transaction membership cannot be reconstructed safely from timestamps.
 (def ^:private fn-version-change-id-field-uuid #uuid "50000000-0000-4000-8000-00000000000b")

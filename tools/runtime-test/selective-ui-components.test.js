@@ -41,6 +41,11 @@ function fixture(component = 'recents') {
     API: {api_ui_configuration_prepare: '/prepare', api_ui_configuration_preview: '/preview',
       api_ui_configuration_apply: '/apply', api_ui_components_create_preview: '/full-preview', api_ui_components_create_apply: '/full-apply'},
     gdPrefRead: () => preference, gdUIComponentsSelection: () => selection, gdUIComponentsRoots: () => roots,
+    gdUIComponentsEditableRoot: kind => roots[kind],
+    gdReadGraphResponse: async request => {
+      const response = await request();
+      return {response, result: await response.json()};
+    },
     gdShellSurface() {}, gdUIConfigurationState: () => state, gdUIComponentsStatus: () => '', gdPrefOnChange() {},
     addEventListener: (name, callback) => events.set(name, callback), gdRefreshUIConfiguration() {},
     gdCaptureUIConfiguration: async () => state,

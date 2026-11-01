@@ -2,6 +2,25 @@
  :description "Branch/version UI partials — fn-versions popover (+ per-version executions sub-panel), branch-diff modal, and the merge-conflicts resolution card."
  :fns
  [;; ---------------------------------------------------------------------
+  ;; The SQL boundary is local to this module so the editor's own partial can
+  ;; resolve it before the later app.branches module is loaded.
+  {:name :load-fn-change-events
+   :description "A bounded page of transaction groups for fn, fn-slot, binding and list-item versions; payload values are never included. Nil for an unreadable fn."
+   :args {:fn-id {:type :nullable-uuid :required false}
+          :limit {:type :int}
+          :offset {:type :int}}
+   :return-type [:union :null
+                 {:groups [:list {:group-id :text :kinds :text
+                                  :branch-id :nullable-text
+                                  :change-id :nullable-text
+                                  :created-at :text :deleted? :bool
+                                  :event-count :int
+                                  :author-label :nullable-text
+                                  :has-change-id? :bool}]
+                  :next-offset :nullable-int}]
+   :effects #{:db}}
+
+  ;; ---------------------------------------------------------------------
   ;; fn-versions popover (second migration). Pulls the existing
   ;; `:list-fn-versions` data chain (in `app.branches`) for one fn-id
   ;; from a query-string param, then maps each enriched version row
@@ -274,6 +293,64 @@
           :attrs {:value {:class "fn-versions-list" :role "list"}}
           :children :_partial-fnv-rendered-rows}}
 
+  {:name :_partial-fnv-change-page
+   :description "The first bounded page of owned graph changes. Field versions above keep their existing Restore behavior."
+   :parent :load-fn-change-events
+   :args {:fn-id :fn-id-param :limit {:value 30} :offset {:value 0}}}
+
+  {:name :_partial-fnv-change-rows
+   :parent :get
+   :args {:coll :_partial-fnv-change-page
+          :key {:value :groups} :default {:value []}}}
+
+  {:name :_partial-fnv-change-kind
+   :parent :get
+          :args {:coll {:as :item} :key {:value :kinds} :default {:value "change"}}}
+
+  {:name :_partial-fnv-change-legacy-note
+   :parent :if
+   :args {:test {:parent :get
+                 :args {:coll {:as :item} :key {:value :has-change-id?}
+                        :default {:value false}}}
+          :then {:value ""}
+          :else {:value " · partial history"}}}
+
+  {:name :_partial-fnv-change-row-text
+   :parent :str-join
+   :args {:coll [:_partial-fnv-row-ts-short {:value " · "}
+                 :_partial-fnv-change-kind
+                 :_partial-fnv-change-legacy-note]
+          :separator {:value ""}}}
+
+  {:name :_partial-fnv-change-row
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "fn-versions-row fn-versions-change-row"
+                          :role "listitem"}}
+          :children [:_partial-fnv-change-row-text]}}
+
+  {:name :_partial-fnv-change-rendered-rows
+   :parent :map
+   :args {:func :_partial-fnv-change-row :coll :_partial-fnv-change-rows}}
+
+  {:name :_partial-fnv-change-list
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "fn-versions-list" :role "list"}}
+          :children :_partial-fnv-change-rendered-rows}}
+
+  {:name :_partial-fnv-change-heading
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "fn-versions-header"}}
+          :children ["Graph changes · latest 30 groups"]}}
+
+  {:name :_partial-fnv-change-section
+   :parent :hiccup
+   :args {:tag {:value "section"}
+          :attrs {:value {:class "fn-versions-changes"}}
+          :children [:_partial-fnv-change-heading :_partial-fnv-change-list]}}
+
   {:name :_partial-fnv-header-title
    :description "`<{name}> · {N} versions` — concise header line. Title text passed via `?title=` so the JS doesn't need to fetch the fn first."
    :parent :query-param
@@ -320,7 +397,8 @@
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "fn-versions-content"}}
-          :children [:_partial-fnv-header :_partial-fnv-body]}}
+          :children [:_partial-fnv-header :_partial-fnv-body
+                     :_partial-fnv-change-section]}}
 
   {:name :_partial-fnv-html
    :parent :render-hiccup

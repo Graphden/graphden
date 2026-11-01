@@ -20,6 +20,7 @@
     [graphden.storage.protocol.postgres-test-helpers :as th]
     [graphden.tenancy.context :as tenancy-context]
     [graphden.versioning.storage.core :as vs]
+    [graphden.versioning.storage.history :as history]
     [graphden.versioning.storage.merge :as mrg]
     [graphden.versioning.storage.resolution :as res]))
 
@@ -853,11 +854,43 @@
         (is (uuid? (:change-id fn-version)))
         (is (= (:change-id fn-version) (:change-id binding-version)))
         (is (not (contains? (sp/read-entity storage :fn (:id f)) :change-id)))
+        (let [events (history/change-events storage (:id f) 10 0)]
+          (is (= #{"fn" "binding"} (set (map :kind (:events events)))))
+          (is (every? :has-change-id? (:events events)))
+          (is (= 1 (count (set (map :change-id (:events events))))))
+          (is (nil? (:next-offset events)))
+          (is (every? #(not (contains? % :value)) (:events events))))
+        (let [groups (history/change-groups storage (:id f) 10 0)]
+          (is (= 1 (count (:groups groups))))
+          (is (= 2 (get-in groups [:groups 0 :event-count])))
+          (is (= "binding, fn" (get-in groups [:groups 0 :kinds])))
+          (is (get-in groups [:groups 0 :has-change-id?])))
         (sp/update-entity storage :binding (:id binding-row) {:value "after"})
         (let [versions (sp/query-entities base :binding-version
                                           {:binding-id (:id binding-row)})]
           (is (= 2 (count versions)))
-          (is (= 2 (count (set (map :change-id versions)))))))
+          (is (= 2 (count (set (map :change-id versions))))))
+        (let [first-page (history/change-events storage (:id f) 1 0)
+              second-page (history/change-events storage (:id f) 1 1)]
+          (is (= 1 (:next-offset first-page)))
+          (is (not= (get-in first-page [:events 0 :version-id])
+                    (get-in second-page [:events 0 :version-id]))))
+        (let [first-page (history/change-groups storage (:id f) 1 0)
+              second-page (history/change-groups storage (:id f) 1 1)]
+          (is (= 1 (:next-offset first-page)))
+          (is (not= (get-in first-page [:groups 0 :group-id])
+                    (get-in second-page [:groups 0 :group-id]))))
+        (sp/create-entity base :binding-version
+                          (assoc binding-version :id (random-uuid)
+                                 :created-at (java.time.Instant/now)
+                                 :change-id nil))
+        (is (some (complement :has-change-id?)
+                  (:events (history/change-events storage (:id f) 10 0))))
+        (is (some (complement :has-change-id?)
+                  (:groups (history/change-groups storage (:id f) 10 0))))
+        (is (= :history/invalid-page
+               (:type (ex-data (try (history/change-events storage (:id f) 101 0)
+                                    (catch clojure.lang.ExceptionInfo e e)))))))
       (finally (sp/close base)))))
 
 

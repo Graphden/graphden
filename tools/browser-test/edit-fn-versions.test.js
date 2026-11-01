@@ -133,6 +133,8 @@ async function putDescription(page, fnId, branch, desc) {
         rowCount: rows.length || switchBtns.length,
         switchTargets: switchBtns.map((b) => b.getAttribute('data-switch-to-branch')),
         mentionsFeat: text.includes('feat'),
+        graphChanges: Array.from(p?.querySelectorAll('.fn-versions-change-row') || [])
+          .map((row) => row.textContent.trim()),
       };
     });
     assert(popoverState.visible,
@@ -140,6 +142,10 @@ async function putDescription(page, fnId, branch, desc) {
     assert(popoverState.switchTargets.length >= 1,
            'popover has ≥ 1 switch button: '
            + JSON.stringify(popoverState.switchTargets));
+    assert(popoverState.graphChanges.length >= 2
+           && popoverState.graphChanges.every((row) => row.includes('fn')),
+           'graph-change timeline includes both function writes: '
+           + JSON.stringify(popoverState.graphChanges));
 
     // ===================================================================
     // Phase B: click the feat switch button → switchToBranch invoked.

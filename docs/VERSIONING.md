@@ -628,6 +628,16 @@ it leaves names, argument bindings and inherited structure unchanged. The
 action is disabled when those visible fields already match the effective
 current branch, including an older equal state or an inherited version.
 
+The **Graph changes** section also lists bounded transaction groups for the
+fn row, its fn-slot membership, bindings, and binding list items. Each new
+version row carries a server-generated `change-id`; all version rows written
+in one storage transaction share it. The page groups by that ID, so a binding
+edit and its related writes appear together. Existing rows without an ID
+remain separate and are labelled partial history. This section currently
+shows metadata only; it does not claim to reconstruct an old graph or offer
+whole-graph restore. The storage read is paginated (maximum 100 groups per
+page) and checks visibility of the fn and branches before returning metadata.
+
 Consequence: two `:fn-execution` rows pointing at the same
 `:fn-version-id` can have produced different results if a binding
 changed in between. The history filter ("show me runs of the

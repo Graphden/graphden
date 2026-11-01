@@ -909,6 +909,10 @@ for f in $FILES; do
     SKIP_AFTER_CASCADE=1
     continue
   fi
+  if [ "$passed" != 1 ]; then
+    echo "  (stopping at first final failed file: $f; remaining files retain unrun checkpoints)" >&2
+    break
+  fi
   if [ "${WTQ_STOP_ON_REAL_FLAKE:-0}" = 1 ] && [ "${WTQ_FLAKE_STRICT:-0}" = 1 ] \
      && [ "$passed" = 1 ] && [ "$real_flake" = 1 ] && [ "$env_signed" = 0 ] \
      && ! run_is_degraded; then

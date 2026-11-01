@@ -253,20 +253,20 @@ console.log(' an env-signed failure between two identical real ones does not cou
   assert(r.attempts('edit-a.test.js') === 4, 'retried through to attempt 4', r.out);
 }
 
-console.log(' strict gate collects independent failures and still returns red');
+console.log(' final failed file stops the gate and leaves unrelated checks pending');
 {
   const r = runSuite({
     'edit-a.test.js': ['fail:first'],
     'edit-b.test.js': ['pass'],
     'edit-c.test.js': ['fail:second'],
   });
-  assert(r.code !== 0 && r.attempts('edit-a.test.js') === 2 && r.attempts('edit-c.test.js') === 2,
-         'both deterministic failures are triaged', r.out);
-  assert(r.attempts('edit-b.test.js') === 1, 'the file between failures ran', r.out);
-  assert(/edit suite: 1 pass \/ 2 fail \/ 3 total/.test(r.out)
+  assert(r.code !== 0 && r.attempts('edit-a.test.js') === 2 && r.attempts('edit-c.test.js') === 0,
+         'deterministic failure stops before later checks', r.out);
+  assert(r.attempts('edit-b.test.js') === 0, 'unrelated check stays pending', r.out);
+  assert(/edit suite: 0 pass \/ 1 fail \/ 1 total/.test(r.out)
          && /edit-a\.test\.js\(deterministic\)/.test(r.out)
-         && /edit-c\.test\.js\(deterministic\)/.test(r.out),
-         'summary names every failed file', r.out);
+         && /remaining files retain unrun checkpoints/.test(r.out),
+         'summary names the failure and pending tail', r.out);
   assert(/entities leaked into the graph/.test(r.out), 'normal post-loop accounting still runs', r.out);
 }
 console.log(' receipts automatically resume failed file, unrun tail, then prior passes');
@@ -280,11 +280,11 @@ console.log(' receipts automatically resume failed file, unrun tail, then prior 
   assert(r.code === 0 && order.join(',') === 'edit-b.test.js,edit-c.test.js,edit-a.test.js', 'receipt reorders complete suite', r.out);
   assert(Object.keys(files).every(name => r.attempts(name) === 1), 'every current file executes once', r.out);
   const red = runSuite({...files, 'edit-b.test.js': ['fail:same'], 'edit-c.test.js': ['fail:later']}, {STUB_RESUME: prior});
-  assert(red.code !== 0 && red.attempts('edit-b.test.js') === 2 && red.attempts('edit-c.test.js') === 2
-    && red.attempts('edit-a.test.js') === 1, 'two failures do not leave any mandatory file unrun', red.out);
-  assert(red.receipt.includes('"edit-b.test.js" :failed') && red.receipt.includes('"edit-c.test.js" :failed')
-    && red.receipt.includes('"edit-a.test.js" :passed'),
-    'receipt preserves both failures and final passing file', red.receipt);
+  assert(red.code !== 0 && red.attempts('edit-b.test.js') === 2 && red.attempts('edit-c.test.js') === 0
+    && red.attempts('edit-a.test.js') === 0, 'first failed file stops the reordered suite', red.out);
+  assert(red.receipt.includes('"edit-b.test.js" :failed') && red.receipt.includes('"edit-c.test.js" :pending')
+    && red.receipt.includes('"edit-a.test.js" :pending'),
+    'receipt preserves the failure and unrun tail', red.receipt);
 }
 console.log(' strict retry-pass flake is red while later files still run');
 {

@@ -21,8 +21,11 @@ async function personalize(page, component, receipts) {
   await appearance(page);
   const preview = page.waitForResponse(response => response.request().method() === 'POST'
     && new URL(response.url()).pathname.endsWith('/ui/configuration/preview'));
+  // APPLY compiles the personal root and its component graph. On the isolated
+  // stack it can exceed Playwright's 45 s default while still committing;
+  // wait for its receipt before attempting an exact undo.
   const applied = page.waitForResponse(response => response.request().method() === 'POST'
-    && new URL(response.url()).pathname.endsWith('/ui/configuration/apply'));
+    && new URL(response.url()).pathname.endsWith('/ui/configuration/apply'), {timeout: 180000});
   await page.locator('[data-ui-component="' + component + '"]').click();
   const proposal = await (await preview).json();
   assert(proposal.ok && proposal.receipt.created, 'visible Personalize previews a new ordinary configuration');
@@ -94,10 +97,15 @@ async function personalize(page, component, receipts) {
     phase = 'undo';
     for (const proposal of [...receipts].reverse()) {
       const result = await undoConfiguration(page, proposal);
-      const expected = new Set(proposal.receipt['function-receipts'].map(row => row.id));
-      assert(result.ok && result.deleted.length === expected.size
-        && result.deleted.every(id => expected.has(id)),
-      'original receipt atomically deletes only its new graphs and restores its prior');
+      const expected = new Set([
+        ...proposal.receipt['function-receipts'],
+        ...(proposal.receipt.root?.['function-receipts'] || []),
+      ].map(row => row.id));
+      const exact = result.ok && result.deleted?.length === expected.size
+        && result.deleted.every(id => expected.has(id));
+      assert(exact, 'original receipt atomically deletes only its new graphs and restores its prior'
+        + (exact ? '' : ': ' + JSON.stringify({status: result.status, body: result.body,
+          expected: [...expected], deleted: result.deleted})));
     }
     phase = 'defaults';
     if (receipts.length) {
@@ -115,5 +123,6 @@ async function personalize(page, component, receipts) {
 })().catch(error => {
   const kind = error?.name === 'TimeoutError' ? 'timeout' : 'assertion-or-request';
   process.stderr.write('personal configuration browser proof failed: ' + phase + ': ' + kind + '\n');
+  process.stderr.write((error?.stack || String(error)) + '\n');
   process.exitCode = 1;
 });

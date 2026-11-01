@@ -62,6 +62,12 @@
              :bindings bindings
              :list-items (filterv #(contains? binding-ids (:binding-id %)) (:list-items closure))))))
 
+(defn- source-records
+  [source]
+  (mapcat (fn [[kind key]] (map #(assoc % :kind kind) (get source key)))
+          [[:fn :fns] [:slot :slots] [:fn-slot :fn-slots]
+           [:binding :bindings] [:binding-list-item :list-items]]))
+
 
 (defn prepare
   "Validate source, types, creation ACL and raw identity absence before any
@@ -77,15 +83,18 @@
                                  (and (= (:root-id parsed) (:id %))
                                       (contains? root-metadata :description))
                                  (assoc :description (:description root-metadata))) (:records parsed))
-        external-ids (bundle/external-identities initial-records)
+        direct-external-ids (bundle/external-identities initial-records)
         staged-ids (set staged-function-ids)
         _ (when-not (every? (set (map :id (get-in staged-source [:graph :fns]))) staged-ids)
             (refuse! :staged-source-mismatch))
-        staged-roots (filterv staged-ids external-ids)
+        staged-roots (filterv staged-ids direct-external-ids)
+        staged (staged-closure staged-source staged-roots staged-ids)
+        ;; A staged child can inherit a persisted callback that the new root
+        ;; references only through that child. Authorize its full closure too.
+        external-ids (into direct-external-ids
+                           (bundle/external-identities (source-records staged)))
         external (collect-external! storage (remove staged-ids external-ids) authorize!)
-        external (if (seq staged-roots)
-                   (merge-source external (staged-closure staged-source staged-roots staged-ids))
-                   external)
+        external (if staged (merge-source external staged) external)
         captured {:graph external :namespaces (source/collect-namespaces storage external)}]
     (doseq [id (or source-roots [source-root])]
       (snapshot/validate-source! captured id policy))

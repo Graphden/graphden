@@ -41,7 +41,7 @@
 
 
 (defn- create-legacy-record!
-  [storage namespace-row]
+  [storage namespace-row menu-view]
   (let [path (:name namespace-row)
         interfaces (templates/interfaces)
         index (fn [value-fn]
@@ -52,7 +52,7 @@
         definition {:name :legacy :namespace path :parent :app.ui-components/ui-components
                     :args {:menu-initial {:ref :app.ui-account-menu/account-menu-initial}
                            :menu-update {:ref :app.ui-account-menu/account-menu-update}
-                           :menu-view {:ref :app.ui-fn-picker/picker-view}
+                           :menu-view {:ref menu-view}
                            :picker-view {:ref :app.ui-fn-picker/picker-view}}}
         records (composition/fn-defs->records
                   [definition] (merge (ids/primitive-fn-ids) (index #(ids/fn-id (:namespace %) (:name %))))
@@ -494,7 +494,7 @@
       (epoch/seed-watermark! storage)
       (let [initial (preparation/prepare! ctx {:create true})
             original (sp/read-entity storage :fn (:id initial))
-            legacy-id (create-legacy-record! storage home)
+            legacy-id (create-legacy-record! storage home :app.ui-account-menu/account-menu-view)
             branch (versioned/create-branch! storage (str "personal-" (random-uuid)))
             child (versioned/switch-branch storage (:id branch))
             child-ctx (context/create-context {:storage child})
@@ -740,7 +740,7 @@
         storage (:storage ctx)
         home-name (str "legacy-profile-" (random-uuid))
         home (sp/create-entity storage :ns {:name home-name})
-        old-id (create-legacy-record! storage home)
+        old-id (create-legacy-record! storage home :app.ui-fn-picker/picker-view)
         preference (sp/create-entity storage :ui-pref
                                      {:owner-id (tenancy/current-user-id) :key "components"
                                       :org-id (tenancy/current-org)

@@ -230,12 +230,12 @@
               (reject! :type-source-mismatch {:fn-id id}))))
         (try
           (check/check-fn-def! definition)
-          (when-not (registry/rich-type-of-id id)
-            (reject! :type-unresolved {:fn-id id}))
           (catch Exception _
             ;; Checker diagnostics may contain literal data. Export errors do
             ;; not carry their message, cause, or original ex-data.
-            (reject! :type-check-failed {:fn-id id})))))))
+            (reject! :type-check-failed {:fn-id id})))
+        (when-not (registry/rich-type-of-id id)
+          (reject! :type-unresolved {:fn-id id}))))))
 
 
 (defn- checked-source

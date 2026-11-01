@@ -171,10 +171,10 @@ jobs:
       || github.event_name == 'pull_request'
       || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    # Measured ~6 min on the dev box; a hosted runner is slower and pulls
-    # two container images cold. Generous, but bounded — a hang must not
-    # burn the default 6 h.
-    timeout-minutes: 45
+    # The full suite took 82 min in the 2026-11-01 landing gate. The old
+    # 45 min limit cancelled the release proof before it could finish.
+    # Allow headroom for a cold hosted runner while still bounding a hang.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v7
 

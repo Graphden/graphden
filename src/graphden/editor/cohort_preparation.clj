@@ -62,6 +62,7 @@
              :bindings bindings
              :list-items (filterv #(contains? binding-ids (:binding-id %)) (:list-items closure))))))
 
+
 (defn- source-records
   [source]
   (mapcat (fn [[kind key]] (map #(assoc % :kind kind) (get source key)))

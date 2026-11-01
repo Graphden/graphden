@@ -196,13 +196,13 @@ The ordinary account menu, function picker and Explorer navigation trail use bun
 :PROPERTIES:
 :CUSTOM_ID: editor/export-current
 :FILE: src/graphden/editor/root_plan.clj
-:LINE: 24
-:MINS: 4.1
+:LINE: 48
+:MINS: 4.4
 :END:
 
 The editor root endpoint reads the ordinary root HOF binding from its server-owned handler configuration. It checks root execute permission and every dependency's source visibility in one snapshot, then exports a bounded plan. The browser invokes the root through the same call ABI as other graph callables. The selected root is the shipped default or the owner's personal graph; it does not export the server handler body.
 
-- source :: [[file:../../../src/graphden/editor/root_plan.clj::(defn export-current][src/graphden/editor/root_plan.clj:24]]
+- source :: [[file:../../../src/graphden/editor/root_plan.clj::(defn export-current][src/graphden/editor/root_plan.clj:48]]
 - see also :: [[file:editor.org::#editor/export-plan][export-plan]], [[file:editor.org::#editor/createRuntime][createRuntime]]
 
 * 16. createRuntime

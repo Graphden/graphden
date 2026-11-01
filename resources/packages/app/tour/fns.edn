@@ -2037,11 +2037,11 @@
             {:id "25"
              :slug "asset-overrides"
              :chapter "The editor"
-             :version 6
+             :version 7
              :in-place true
              :requires "personal-ui-graphs"
              :title "Editing the editor"
-             :reads "covers an ordinary personal editor configuration, inherited menu graphs and a local capture of a shared component's free theme input."
+             :reads "covers an ordinary personal editor configuration, inherited menu graphs and a local theme binding on the editable migrated view."
              :steps
              [{:title "Personal graphs, shared definitions"
                :body "The menu, picker, recents, Inspector, Explorer and tutorial catalogue are ordinary graphs. Your profile's editor graph selects them by reference. Personalize creates small inherited children: shared component definitions remain shared, and other personal edits remain in place."

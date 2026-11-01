@@ -2057,13 +2057,13 @@
                :target "[data-ui-component=\"account-menu\"]"
                :check {:kind "ui-component" :action "personalized" :component "account-menu"}}
               {:title "Open your menu view"
-               :body "Click [[Menu view]]. Your view inherits the shared menu. Its free [[theme]] input reaches the color readers inside the composition; capturing that input locally does not edit their shared bodies."
+               :body "Click [[Menu view]]. This editable view inherits your original menu callback. Its theme binding supplies the color readers without changing their shared bodies."
                :target "[data-ui-graph=\"menu-id\"]"
                :check {:kind "ui-component" :action "personal-open" :component "account-menu" :root "menu-id"}}
               {:title "Capture a personal theme input"
-               :body "On the view's root, click the [[+]] next to [[theme]], then [[Bind literal]]. In the color form set [[accent]] to `#7c3aed` and [[canvas-background]] to `#f5f3ff`, then [[Save]]. This own binding supplies the shared readers with your values. The selected theme preference is unchanged."
+               :body "On the view's theme binding, choose [[Remove binding]] in the ⋯ menu. Then click the [[+]] next to [[theme]] and [[Bind literal]]. Set [[accent]] to `#7c3aed` and [[canvas-background]] to `#f5f3ff`, then [[Save]]. The selected theme preference stays unchanged."
                :target ".placeholder-binder[data-arg-name=\"theme\"]"
-               :targets [".placeholder-binder[data-arg-name=\"theme\"]" ".arg-value-edit-popover"]
+               :targets [".node-overlay button.more-actions-trigger" ".placeholder-binder[data-arg-name=\"theme\"]" ".arg-value-edit-popover"]
                :check {:kind "ui-component" :action "personal-theme" :component "account-menu" :accent "#7c3aed" :background "#f5f3ff"}}
               {:title "Shared helpers stay shared"
                :body "Open the account menu to see your colors. Its rows, keyboard decisions, motion and styles still come from shared dependencies. An already-filled ancestor binding is sealed: to vary it, compose at an exposed free input or create the precise local dependency path you need. Inheritance does not redirect every nested reference."

@@ -146,11 +146,22 @@
     return window.gdUIConfigurationState();
   };
   window.gdRefreshUIConfiguration = refresh;
+  const editableRoles = {'menu-id': ['account-menu', 'view'], 'menu-update-id': ['account-menu', 'update'],
+      'picker-id': ['fn-picker', 'view'], 'recents-id': ['recents', 'view'],
+      'recents-initial-id': ['recents', 'initial'], 'recents-update-id': ['recents', 'update'],
+      'tutorial-catalog-id': ['tutorial-catalog', 'view'],
+      'execution-status-id': ['execution-status', 'view'], 'execution-path-id': ['execution-path', 'view'],
+      'feedback-id': ['feedback', 'view'], 'keymap-id': ['keymap', 'view'], 'appearance-id': ['appearance', 'view']};
   window.gdUIComponentsRoots = () => {
     const selected = selection();
     const theme = window.gdPrefRead('theme')?.graph;
     return {...(catalog?.stamp === stamp() ? catalog.roots : {}),
       'configuration-id': selected?.['fn-id'],
       'theme-id': theme?.org === organization() ? theme['fn-id'] : null};
+  };
+  window.gdUIComponentsEditableRoot = key => {
+    const source = window.gdUIComponentsRoots()[key];
+    const [component, role] = editableRoles[key] || [];
+    return window.gdEditorRoot?.editableRoleId(component, role, source) || source;
   };
 })();

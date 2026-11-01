@@ -258,7 +258,7 @@
   }
   async function open(kind) {
     const chosen = selected();
-    const id = window.gdUIComponentsRoots()[kind];
+    const id = window.gdUIComponentsEditableRoot(kind);
     if (!uuid.test(id || '')) return;
     const destination = kind === 'theme-id' ? window.gdPrefRead('theme')?.graph : chosen;
     if (!destination) return;

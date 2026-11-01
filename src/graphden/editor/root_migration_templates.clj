@@ -56,6 +56,13 @@
   (keyword (str "_migration-" (name component) "-" (name role) "-" suffix)))
 
 
+(defn bridge-name
+  "The editable child of a preserved callback in a migrated root."
+  [component role]
+  (local-name component role (if (and (= component :account-menu) (= role :view))
+                               "base" "wrapper")))
+
+
 (defn role-assoc-parents
   "Find each legacy role's assoc-fn from the shipped root component chain."
   [component]
@@ -118,7 +125,7 @@
     (when-not (and template (or (not (and (= component :account-menu) (= role :view))) full-view))
       (refuse!))
     (let [bridge (assoc (rebase/rewrite-references template qualify)
-                        :name (local-name component role (if full-view "base" "wrapper"))
+                        :name (bridge-name component role)
                         :namespace root
                         :parent (keyword root (name (local-name component role "source"))))]
       (if full-view

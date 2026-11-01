@@ -357,12 +357,13 @@ function _tourPersonalComponentCheck(check) {
   if (check.action === 'retained-open') {
     const menu = _tourPersonalComponentReceipt('account-menu') || _tourExistingPersonalComponent();
     const previous = menu?.previousRoots?.[check.root];
-    return !!previous && previous === window.gdUIComponentsRoots?.()[check.root] && selectedFnId === previous;
+    return !!previous && previous === window.gdUIComponentsRoots?.()[check.root]
+      && selectedFnId === window.gdUIComponentsEditableRoot?.(check.root);
   }
   const receipt = _tourPersonalComponentReceipt(check.component)
     || (check.component === 'account-menu' ? _tourExistingPersonalComponent() : null);
   if (!receipt || !lookups) return false;
-  const entry = receipt.original['entry-id'];
+  const entry = window.gdUIComponentsEditableRoot?.(check.component === 'account-menu' ? 'menu-id' : 'picker-id');
   if (check.action === 'personalized') return receipt.original.id === window.gdUIComponentsSelection?.()?.['fn-id']
     && window.gdUIComponentRuntimeIdentity?.(check.component) === receipt.original.id;
   if (check.action === 'personal-open') return selectedFnId === entry;

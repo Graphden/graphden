@@ -250,4 +250,11 @@ const {waitForLoadedUIComponents, drainUIPlanReplies, observeUIPlanLoads} = requ
       process.exitCode = 1;
     }
   }
-})().catch(() => { console.error('FAIL personal UI fixture; details withheld'); process.exitCode = 1; });
+})().catch(error => {
+  console.error(JSON.stringify({diagnostic: 'personal-ui-fixture-failure', kind: error.name,
+    frames: String(error.stack || '').split('\n').flatMap(line => {
+      const match = line.match(/\/(partial-ui-components-fixture|picker-root-test-helpers|edit-ui-components(?:\.test)?)\.js:(\d+):(\d+)\)?$/);
+      return match ? [{file: match[1], line: Number(match[2]), column: Number(match[3])}] : [];
+    })}));
+  process.exitCode = 1;
+});

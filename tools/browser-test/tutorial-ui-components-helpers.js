@@ -116,6 +116,30 @@ async function reviewEditorConfigurationCleanup(page, timeout) {
 }
 
 async function bindPersonalMenuTheme(page, entry, accent, background) {
+  const bound = await page.waitForFunction(entry => {
+    if (typeof _singleEditableIncomingArg !== 'function' || !gv.ready() || graph.animating) return false;
+    for (const overlay of document.querySelectorAll('.node-overlay[data-original-fn-id]')) {
+      const arg = _singleEditableIncomingArg(overlay.dataset.nodeId);
+      const trigger = overlay.querySelector('.ancestor-line[data-level="0"] button.more-actions-trigger');
+      if (arg?.['fn-id'] === entry && arg.name === 'theme' && arg['binding-id'] && trigger) {
+        return {nodeId: overlay.dataset.nodeId, bindingId: arg['binding-id']};
+      }
+    }
+    return false;
+  }, entry, {timeout: 30000});
+  const {nodeId, bindingId} = await bound.jsonValue();
+  await bound.dispose();
+  await page.evaluate(({nodeId, bindingId}) => {
+    const overlay = document.querySelector('.node-overlay[data-node-id="' + CSS.escape(nodeId) + '"]');
+    const arg = overlay && _singleEditableIncomingArg(nodeId);
+    const trigger = overlay?.querySelector('.ancestor-line[data-level="0"] button.more-actions-trigger');
+    if (!trigger || arg?.['binding-id'] !== bindingId) throw new Error('Theme binding owner changed');
+    trigger.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
+  }, {nodeId, bindingId});
+  const remove = page.locator('.row-actions-popover [data-binding-id="' + bindingId
+    + '"] [data-action="remove-use-site-binding"]');
+  await remove.waitFor({state: 'visible'});
+  await remove.evaluate(button => button.dispatchEvent(new MouseEvent('click', {bubbles: true})));
   await page.waitForFunction(entry => [...document.querySelectorAll('.placeholder-binder[data-arg-name="theme"]')]
     .some(el => el.dataset.fnName === lookups.fnMap.get(entry)?.name), entry);
   const selector = await page.evaluate(entry => {
@@ -190,18 +214,23 @@ async function walkUIComponentsLesson(page, {onReceipt = async () => {}, onStage
   const manifest = {namespaces: [], functions: receipt.original['function-receipts'], roots};
   await onReceipt({...receipt, manifest});
   assert(manifest.functions.length < 20, 'the lesson creates a small inherited component instead of a full closure copy');
-  assert(roots['menu-id'] === receipt.original['entry-id'], 'the personal view is the exact previewed entry');
+  assert(roots['menu-id'] === receipt.original['entry-id'], 'the original view remains the exact previewed entry');
   assert(roots['picker-id'] === previous.picker, 'personalizing the menu retains the previous picker identity');
   assert(selectionWaitedForPersistence, 'selection publication waits for the actual APPLY commit');
   assert(await page.evaluate(theme => JSON.stringify(gdPrefRead('theme')) === JSON.stringify(theme), previous.theme),
     'personalization keeps the theme preference');
   await settleComponents(await captureLoadedUIComponents(page));
+  await page.waitForFunction(source => gdUIComponentsEditableRoot('menu-id') !== source,
+    roots['menu-id'], {timeout: 60000});
+  const editableMenu = await page.evaluate(() => gdUIComponentsEditableRoot('menu-id'));
+  assert(receipt.original.root['function-receipts'].some(row => row.id === editableMenu),
+    'the editable view bridge belongs to the exact previewed migration');
   if (cleanupOnly) {
     await page.keyboard.press('Escape');
   } else {
     await page.locator('[data-ui-graph="menu-id"]').click();
     await waitTourTitle(page, 'Capture a personal theme input');
-    await bindPersonalMenuTheme(page, roots['menu-id'], '#7c3aed', '#f5f3ff');
+    await bindPersonalMenuTheme(page, editableMenu, '#7c3aed', '#f5f3ff');
     await waitTourTitle(page, 'Shared helpers stay shared', 60000);
     await page.locator('.auth-avatar:visible, #auth-lock-btn:visible').first().click();
     assert(await page.evaluate(() => gdThemeTokenValue('--gd-flow') === '#7c3aed'
@@ -210,7 +239,9 @@ async function walkUIComponentsLesson(page, {onReceipt = async () => {}, onStage
     await waitTourTitle(page, 'Other components keep their identities');
     await openGroup(page, 'picker-id');
     await waitTourTitle(page, 'The boundary and cleanup');
-    assert(await page.evaluate(id => selectedFnId === id, previous.picker), 'the picker identity remains unchanged');
+    assert(await page.evaluate(id => gdUIComponentsRoots()['picker-id'] === id
+      && selectedFnId === gdUIComponentsEditableRoot('picker-id'), previous.picker),
+    'the picker source identity remains unchanged');
     await page.screenshot({path: '/tmp/graphden-personal-ui-components.png'});
     await settleComponents(await captureLoadedUIComponents(page));
     assert(await clickTourButton(page, 'Finish'), 'Finish button');

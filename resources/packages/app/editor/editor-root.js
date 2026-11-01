@@ -66,6 +66,10 @@
     return installed?.scope === stamp() && installed.accepted.has(name) ? installed.selection : null;
   }
   function rootId() { return installed?.scope === stamp() ? installed.rootId : null; }
+  function editableRoleId(component, role, sourceId) {
+    const candidate = installed?.scope === stamp() ? installed.editableRoles?.[component]?.[role] : null;
+    return candidate && candidate['source-id'] === sourceId ? candidate['editable-id'] : null;
+  }
   function reload() {
     const own = ++generation;
     pending?.abort();
@@ -106,7 +110,15 @@
         if (selection != null && (typeof selection !== 'string' || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(selection))) throw new Error('Invalid editor selection receipt');
         const rootId = result['root-id'];
         if (typeof rootId !== 'string' || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(rootId)) throw new Error('Invalid editor root identity');
-        installed = {scope, output, selection: selection ?? null, rootId, accepted: new Map()};
+        const editableRoles = result['editable-role-ids'] || {};
+        if (typeof editableRoles !== 'object' || Array.isArray(editableRoles)
+          || Object.values(editableRoles).some(roles => !roles || typeof roles !== 'object'
+            || Object.values(roles).some(identity => !identity || typeof identity !== 'object'
+              || !['source-id', 'editable-id'].every(key => typeof identity[key] === 'string'
+                && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(identity[key]))))) {
+          throw new Error('Invalid editor role identities');
+        }
+        installed = {scope, output, selection: selection ?? null, rootId, editableRoles, accepted: new Map()};
         legacy.dataset.gdRootAdapter = 'legacy';
         window.dispatchEvent(new Event('gd-editor-root-ready'));
       } catch (error) {
@@ -122,7 +134,7 @@
     return loading;
   }
   window.gdEditorRoot = {
-    reload, componentNow, acceptComponent, releaseComponent, componentIdentity, rootId,
+    reload, componentNow, acceptComponent, releaseComponent, componentIdentity, rootId, editableRoleId,
     async component(name) {
       for (;;) {
         const awaited = loading || reload();

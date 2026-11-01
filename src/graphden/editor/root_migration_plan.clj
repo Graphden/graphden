@@ -2,12 +2,14 @@
   "Checked proposal and same-transaction commit for personal HOF roots."
   (:require
     [graphden.editor.cohort-preparation :as cohort]
+    [graphden.editor.component-bundle :as bundle]
     [graphden.editor.config-preparation :as preparation]
     [graphden.editor.config-resolution :as resolution]
     [graphden.editor.root-binding :as binding]
-    [graphden.editor.root-compatibility :as compatibility]
     [graphden.editor.root-migration-parse :as migration-parse]
+    [graphden.editor.root-migration-selection :as selection]
     [graphden.editor.root-migration-slots :as migration-slots]
+    [graphden.editor.root-migration-templates :as migration-templates]
     [graphden.executor.browser-snapshot :as snapshot]
     [graphden.executor.browser-source :as source]
     [graphden.executor.source-contract :as contract]
@@ -52,16 +54,37 @@
                      row)) %)))
 
 
+(def ^:private source-kinds
+  [[:fn :fns] [:slot :slots] [:fn-slot :fn-slots]
+   [:binding :bindings] [:binding-list-item :list-items]])
+
+
+(defn- callback-source
+  [storage authorize! role-ids staged-source staged-function-ids]
+  (let [staged-ids (set staged-function-ids)
+        staged-roots (filterv staged-ids role-ids)
+        staged (when (seq staged-roots)
+                 (select-keys (cohort/staged-closure staged-source staged-roots staged-ids)
+                              (map second source-kinds)))
+        staged-records (mapcat (fn [[kind key]]
+                                 (map #(assoc % :kind kind) (get staged key))) source-kinds)
+        persisted-roots (into (set (remove staged-ids role-ids))
+                              (bundle/external-identities staged-records))
+        persisted (when (seq persisted-roots)
+                    (source/collect-client-closure storage persisted-roots authorize!))]
+    (cohort/merge-source persisted staged)))
+
+
 (defn proposal
   ([storage policy nonce]
    (proposal storage policy nonce {}))
-  ([storage policy nonce {:keys [selection staged-source renames]}]
+  ([storage policy nonce {:keys [selection staged-source staged-function-ids renames]}]
    (let [authorize! (tenancy/browser-source-policy storage)
          handler (binding/capture! storage)
          choice (resolution/root-choice storage authorize! policy)
          _ (when-not (= resolution/default-root-id (:root handler))
              (refuse! :custom-handler-root))
-         selection (or selection (compatibility/capture-selection storage authorize! policy))
+         selection (or selection (selection/capture storage authorize! policy))
          home (:home selection)
          _ (when-not home (refuse! :personal-home-unavailable))
          home-row (metadata/namespace-row storage (:namespace-path home) (tenancy/current-org))
@@ -87,7 +110,13 @@
                             {:graph (renamed-graph prior-graph
                                                    (assoc renames (:id prior-row) prior-name))}
                             (:scope choice)))
-         parsed (migration-parse/parse (str "root-migration." nonce) (:configuration selection))
+         selected-role-ids (vec (mapcat vals (vals (migration-templates/overrides
+                                                     (:configuration selection)))))
+         callback-graph (when (seq selected-role-ids)
+                          (callback-source storage authorize! selected-role-ids
+                                           staged-source staged-function-ids))
+         parsed (migration-parse/parse (str "root-migration." nonce)
+                                       (:configuration selection) callback-graph)
          _ (when (sp/read-entity storage :fn (:root-id parsed))
              (refuse! :stale-configuration))
          role-ids (vec (vals (:reference-identities parsed)))
@@ -96,6 +125,7 @@
                     {:authorize! authorize! :policy policy :source-root component-root-id
                      :source-roots (conj role-ids component-root-id)
                      :staged-source staged-source
+                     :staged-function-ids staged-function-ids
                      :collect-external! source/collect-client-closure
                      :normalize-records #(migration-slots/resolve-bindings
                                            %1 (:definitions parsed) %2)
@@ -112,9 +142,11 @@
                   :source-revision (resolution/source-revision (:id prepared) (:snapshot prepared) scope)
                   :cohort-revision (resolution/cohort-revision function-ids (:snapshot prepared) scope)
                   :restore-id (:id choice)
-                  :restore-revision (when prior-row
+                  :restore-revision (if prior-row
                                       (resolution/source-revision (:id prior-row)
-                                                                  {:graph prior-graph} scope))
+                                                                  {:graph prior-graph} scope)
+                                      (resolution/root-source-revision
+                                        storage authorize! policy resolution/default-root-id scope))
                   :namespaces []
                   :changed-functions (if prior-row [(:id prior-row)] [])
                   :previous (when prior-row {:id (:id prior-row) :name prior-name

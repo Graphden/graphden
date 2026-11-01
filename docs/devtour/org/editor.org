@@ -7,7 +7,7 @@ Loading, graph-backed controls, actions, forms, and preferences.
 
 after: web, layout
 
-[[file:index.org][index]] · ~187 min
+[[file:index.org][index]] · ~188 min
 
 * 1. initGraph
 :PROPERTIES:
@@ -196,13 +196,13 @@ The ordinary account menu, function picker and Explorer navigation trail use bun
 :PROPERTIES:
 :CUSTOM_ID: editor/export-current
 :FILE: src/graphden/editor/root_plan.clj
-:LINE: 22
-:MINS: 3.8
+:LINE: 48
+:MINS: 4.4
 :END:
 
-The editor root endpoint reads the ordinary root HOF binding from its server-owned handler configuration. It checks root execute permission and every dependency's source visibility in one snapshot, then exports a bounded plan. The browser invokes the root through the same call ABI as other graph callables. Its initial typed bootstrap contract selects the explicit legacy editor adapter; it does not export the server handler body.
+The editor root endpoint reads the ordinary root HOF binding from its server-owned handler configuration. It checks root execute permission and every dependency's source visibility in one snapshot, then exports a bounded plan. The browser invokes the root through the same call ABI as other graph callables. The selected root is the shipped default or the owner's personal graph; it does not export the server handler body.
 
-- source :: [[file:../../../src/graphden/editor/root_plan.clj::(defn export-current][src/graphden/editor/root_plan.clj:22]]
+- source :: [[file:../../../src/graphden/editor/root_plan.clj::(defn export-current][src/graphden/editor/root_plan.clj:48]]
 - see also :: [[file:editor.org::#editor/export-plan][export-plan]], [[file:editor.org::#editor/createRuntime][createRuntime]]
 
 * 16. createRuntime
@@ -630,38 +630,38 @@ Explicit profile infrastructure setup follows the configured personal namespace 
 :PROPERTIES:
 :CUSTOM_ID: editor/apply-proposal!
 :FILE: src/graphden/editor/config_activation.clj
-:LINE: 364
+:LINE: 369
 :MINS: 1.8
 :END:
 
-Rebuilds the exact scoped preview and source expectations before writes. Small ordinary role children inherit selected definitions; the editor root merges defaults, retained prior and new entries. Replacing editor privately renames the old root in this branch and creates a new UUID, never rewriting its shared identity-plane parent junctions. All new IDs and original restore witnesses are staged before APPLY; source, policy or CAS changes refuse the transaction.
+Rebuilds the exact scoped preview and source expectations before writes. Small ordinary role children inherit selected definitions. First activation creates the personal editor root in the same transaction; later migration replaces an owned root with a new UUID without rewriting its shared identity-plane parent junctions. All new IDs and original restore witnesses are staged before APPLY; source, policy or CAS changes refuse the transaction.
 
-- source :: [[file:../../../src/graphden/editor/config_activation.clj::(defn apply-proposal!][src/graphden/editor/config_activation.clj:364]]
+- source :: [[file:../../../src/graphden/editor/config_activation.clj::(defn apply-proposal!][src/graphden/editor/config_activation.clj:369]]
 
 * 48. cleanup-preview!
 :PROPERTIES:
 :CUSTOM_ID: editor/cleanup-preview!
 :FILE: src/graphden/editor/config_receipts.clj
-:LINE: 268
+:LINE: 275
 :MINS: 1.1
 :END:
 
 Read-only proposal for a new visible deletion decision on intentionally edited tutorial graphs. Original creation receipts remain immutable. The exact new-ID set and unchanged prior anchor retain normal home, write, source, package, secret and external-reference checks. The dialog shows current names and restore target before consent; another edit requires a new review.
 
-- source :: [[file:../../../src/graphden/editor/config_receipts.clj::(defn cleanup-preview!][src/graphden/editor/config_receipts.clj:268]]
+- source :: [[file:../../../src/graphden/editor/config_receipts.clj::(defn cleanup-preview!][src/graphden/editor/config_receipts.clj:275]]
 - same file :: [[file:editor.org::#editor/reconcile-undo!][reconcile-undo!]]
 
 * 49. reconcile-undo!
 :PROPERTIES:
 :CUSTOM_ID: editor/reconcile-undo!
 :FILE: src/graphden/editor/config_receipts.clj
-:LINE: 185
+:LINE: 188
 :MINS: 1.0
 :END:
 
 After a lost UNDO response, confirms only exact restored source and absence in the saved scoped resolved view, using the witness staged before DELETE. It never repeats deletion or adopts a newer stamp. This proves current state, not physical global absence or historical exactly-once.
 
-- source :: [[file:../../../src/graphden/editor/config_receipts.clj::(defn reconcile-undo!][src/graphden/editor/config_receipts.clj:185]]
+- source :: [[file:../../../src/graphden/editor/config_receipts.clj::(defn reconcile-undo!][src/graphden/editor/config_receipts.clj:188]]
 - same file :: [[file:editor.org::#editor/cleanup-preview!][cleanup-preview!]]
 
 * 50. gdTourRestoreUIComponentPreferences

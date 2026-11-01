@@ -73,9 +73,6 @@
          ui-template? (some #(or (re-find #"^resources/packages/app/ui-[^/]+/fns\.edn$" %)
                                  (re-find #"^src/graphden/editor/component_(?:bundle|config|templates)\.clj$" %)
                                  (= % "tools/ui_preview/builtin_plans.clj")) changed)
-         root-browser? (or ui-template?
-                           (some #{"src/graphden/editor/root_compatibility.clj"
-                                   "src/graphden/executor/browser_plan.clj"} changed))
          browser-plan? (some #{"src/graphden/executor/browser_plan.clj"} changed)
          plan-input? (some #(or (re-find #"^resources/packages/.+/(fns\.edn|impls\.clj)$" %)
                                 (re-find #"^resources/packages/app/ui-preview/builtin-plans\.(json|js)$" %)
@@ -92,7 +89,6 @@
                              "graphden.executor.structural-projection-test"
                              "graphden.executor.builtin-plans-test"]
          consumers (concat
-                     (when root-browser? ["graphden.editor.root-compatibility-integration-test"])
                      (when browser-plan? ["graphden.executor.browser-plan-test"])
                      (when ui-template? template-consumers))
          remaining-consumers (remove (set changed-tests) consumers)]

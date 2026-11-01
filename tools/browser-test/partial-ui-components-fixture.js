@@ -1,7 +1,7 @@
 'use strict';
 const {assert, api, BASE} = require('./edit-test-helpers');
 const {verifyPickerRootSelection} = require('./picker-root-test-helpers');
-const {undoConfiguration} = require('./configuration-undo-test-helpers');
+const {undoConfiguration, undoRequest} = require('./configuration-undo-test-helpers');
 
 // A controlled prior partial manifest makes lesson25's restore/fallback
 // contract independent of which editor spec happened to run before it.
@@ -56,7 +56,7 @@ async function preparePickerOnlySelection(page, remember, homeSetup) {
 async function restoreLessonSelection(page, lesson) {
   if (!lesson) return;
   const {request, original} = lesson;
-  const rows = original['function-receipts'];
+  const rows = [...original['function-receipts'], ...(original.root?.['function-receipts'] || [])];
   assert(original.created === true && rows.length > 0
     && new Set(rows.map(row => row.id)).size === rows.length
     && rows.some(row => row.id === original.id), 'lesson cleanup has an exact created cohort');
@@ -68,9 +68,7 @@ async function restoreLessonSelection(page, lesson) {
   const entities = await api(page, 'GET', '/api/graph/entities?scope=index', undefined,
     {'X-Graphden-Branch': request.scope['branch-id']});
   const byId = new Map(entities.fns.map(row => [row.id, row]));
-  const command = {'current-id': original.id,
-    'expected-configuration-revision': original['configuration-revision'],
-    'cohort-revision': original['cohort-revision'], previous: original.previous, functions: rows};
+  const command = undoRequest(original);
   const proof = {receipt: command, scope: request.scope, 'restore-revision': original['restore-revision']};
   const headers = {'X-Graphden-Branch': request.scope['branch-id']};
   if (rows.every(row => !byId.has(row.id))) {

@@ -13,6 +13,18 @@
        (catch clojure.lang.ExceptionInfo error (:reason (ex-data error)))))
 
 
+(deftest legacy-role-assoc-parents-follow-shipped-component-chain
+  (doseq [[component {:keys [roles]}] legacy/components]
+    (is (= (set roles)
+           (set (keys (templates/role-assoc-parents component))))))
+  (is (= :app.ui-appearance/_view-assoc
+         (get (templates/role-assoc-parents :appearance) :view)))
+  (is (= :app.ui-appearance/appearance-root-component
+         (templates/root-component-return-type :appearance)))
+  (is (= :app.ui-account-menu/_root-view-assoc
+         (get (templates/role-assoc-parents :account-menu) :view))))
+
+
 (deftest migration-declarations-reference-only-changed-role-identities
   (let [root "migration-probe"
         menu-view (random-uuid)
@@ -50,10 +62,14 @@
            (set (map :name (filter #(str/ends-with? (name (:name %)) "-wrapper") definitions)))))
     (is (= (keyword root "_migration-account-menu-view-source")
            (get-in by-name [:_migration-account-menu-view-base :parent])))
+    (is (= :assoc
+           (get-in by-name [:_migration-account-menu-view-wrapper :parent])))
     (is (= (keyword root "_migration-account-menu-view-base")
            (get-in by-name [:_migration-account-menu-view-wrapper :args :map])))
-    (is (= :app.ui-account-menu/_root-common-tree
+    (is (= (keyword root "_migration-account-menu-view-common-tree")
            (get-in by-name [:_migration-account-menu-view-wrapper :args :value])))
+    (is (= :app.ui-account-menu/_root-common-tree
+           (get-in by-name [:_migration-account-menu-view-common-tree :args :default])))
     (is (= [:input]
            (get-in by-name [:_migration-account-menu-view-wrapper :lambda-params])))
     (is (= :call (get-in by-name [:editor-root :parent])))

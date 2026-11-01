@@ -41,6 +41,11 @@ function fixture(component = 'recents') {
     API: {api_ui_configuration_prepare: '/prepare', api_ui_configuration_preview: '/preview',
       api_ui_configuration_apply: '/apply', api_ui_components_create_preview: '/full-preview', api_ui_components_create_apply: '/full-apply'},
     gdPrefRead: () => preference, gdUIComponentsSelection: () => selection, gdUIComponentsRoots: () => roots,
+    gdUIComponentsEditableRoot: kind => roots[kind],
+    gdReadGraphResponse: async request => {
+      const response = await request();
+      return {response, result: await response.json()};
+    },
     gdShellSurface() {}, gdUIConfigurationState: () => state, gdUIComponentsStatus: () => '', gdPrefOnChange() {},
     addEventListener: (name, callback) => events.set(name, callback), gdRefreshUIConfiguration() {},
     gdCaptureUIConfiguration: async () => state,
@@ -104,6 +109,16 @@ test('shared custom view remains a Personalize action until server metadata prov
   const f = fixture(); assert.equal(f.group.textContent, 'Personalize recents');
   f.group.click(); await until(() => f.requests.some(row => row.route === '/apply'));
   assert.equal(f.selections.length, 0); f.apply(); await until(() => f.confirms.length === 1);
+});
+test('first personalization accepts the new personal root in the preview receipt', async () => {
+  const f = fixture('fn-picker');
+  f.receipt.root = {created: true, id: id(40), 'restore-id': id(41), 'restore-revision': revision,
+    previous: null, 'cohort-revision': revision, functions: [id(40), id(42)],
+    'function-receipts': [{id: id(40), name: 'editor-root', 'namespace-id': id(1)},
+      {id: id(42), name: '_personal-picker', 'namespace-id': id(1)}]};
+  f.group.click(); await until(() => f.requests.some(row => row.route === '/apply'));
+  assert.deepEqual(f.stages[0].root, f.receipt.root);
+  f.apply(); await until(() => f.confirms.length === 1);
 });
 test('stale source refusal retains original receipt and never writes a selector preference', async () => {
   const f = fixture(); f.conflict(); f.group.click();

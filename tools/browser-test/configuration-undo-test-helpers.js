@@ -2,10 +2,15 @@
 const {api} = require('./edit-test-helpers');
 
 function undoRequest(receipt) {
-  return {'current-id': receipt.id,
+  const command = {'current-id': receipt.id,
     'expected-configuration-revision': receipt['configuration-revision'],
     'cohort-revision': receipt['cohort-revision'], previous: receipt.previous,
     functions: receipt['function-receipts']};
+  if (receipt.root) command.root = {'current-id': receipt.root.id,
+    'cohort-revision': receipt.root['cohort-revision'],
+    'restore-revision': receipt.root['restore-revision'],
+    previous: receipt.root.previous, functions: receipt.root['function-receipts']};
+  return command;
 }
 
 async function undoConfiguration(page, proposal, command = undoRequest(proposal.receipt)) {
@@ -25,4 +30,4 @@ async function undoConfiguration(page, proposal, command = undoRequest(proposal.
   return result;
 }
 
-module.exports = {undoConfiguration};
+module.exports = {undoConfiguration, undoRequest};

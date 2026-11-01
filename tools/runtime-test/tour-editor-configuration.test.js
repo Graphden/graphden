@@ -23,7 +23,9 @@ function fixture() {
         : {ok: true, deleted: input.functions.map(row => row.id)}};
     },
   });
-  ctx.window = ctx; vm.runInContext(source, ctx);
+  ctx.window = ctx;
+  ctx.gdUIComponentsEditableRoot = key => ctx.gdUIComponentsRoots()[key];
+  vm.runInContext(source, ctx);
   const request = {operation: 'personalize', nonce: 'nonce', scope: {'principal-id': 'alice', org: 'acme', 'branch-id': 'branch-id'}};
   const original = n => ({id: 'root-' + n, created: true, functions: ['root-' + n, 'child-' + n], namespaces: [],
     'configuration-revision': 'config-stamp-' + n, 'cohort-revision': 'cohort-stamp-' + n,

@@ -111,14 +111,15 @@
   {:name :recents-view :parent :zipmap  :args {:keys [{:value :tree} {:value :styles} {:value :hidden}] :vals [:_tree :recents-styles :_model-hidden]}}
   {:name :_recents-entry :type {:id :text :name :text :qname :text}}
   {:name :_recents-entry-list :list :_recents-entry}
-  {:name :_recents-state :type {:pins [:list :_recents-entry] :trail [:list :_recents-entry]}}
-  {:name :_recents-inputs :type {:pins [:list :_recents-entry] :trail [:list :_recents-entry] :selected [:union :null :text] :searching :bool}}
+  {:name :_recents-state :type {:pins :_recents-entry-list :trail :_recents-entry-list}}
+  {:name :_recents-selected :union [:null :text]}
+  {:name :_recents-inputs :type {:pins :_recents-entry-list :trail :_recents-entry-list :selected :_recents-selected :searching :bool}}
   {:name :_recents-event :type {:kind :text :entry :_recents-entry}}
-  {:name :_recents-persist-request :type {:kind :text :entries [:list :_recents-entry]}}
+  {:name :_recents-persist-request :type {:kind :text :entries :_recents-entry-list}}
   {:name :_recents-navigate-request :type {:kind :text :fn-id :text :qname :text}}
   {:name :_recents-request :union [:_recents-persist-request :_recents-navigate-request]}
   {:name :_recents-requests :list :_recents-request}
-  {:name :_recents-transition :type {:state :_recents-state :requests [:list :_recents-request]}}
+  {:name :_recents-transition :type {:state :_recents-state :requests :_recents-requests}}
   {:name :_sync-event :parent :equal? :args {:a :_event-kind :b "sync"}}
   {:name :_next-state :parent :if :args {:test :_sync-event :then :recents-initial :else :_event-state}}
   {:name :_next-trail :parent :get :args {:coll :_next-state :key {:value :trail} :default {:value []}}}

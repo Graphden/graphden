@@ -24,7 +24,8 @@
                   {:type :browser-plan/unsupported :reason reason})))
 
 
-(defn- merge-source
+(defn merge-source
+  "Combine source row sets by identity; conflicting snapshots are refused."
   [left right]
   (merge-with
     (fn [a b]
@@ -39,21 +40,41 @@
     left right))
 
 
-(defn- staged-closure
-  [snapshot roots]
+(defn staged-closure
+  "Read only newly prepared rows reachable from staged roots."
+  [snapshot roots staged-ids]
   (when (seq roots)
     (let [graph (:graph snapshot)
           storage (remote/from-bundle {:fn (:fns graph) :slot (:slots graph)
                                        :fn-slot (:fn-slots graph) :binding (:bindings graph)
-                                       :binding-list-item (:list-items graph)})]
-      (source/collect-client-closure storage roots (constantly nil)))))
+                                       :binding-list-item (:list-items graph)})
+          closure (source/collect-client-closure storage roots (constantly nil))
+          fn-slots (filterv #(contains? staged-ids (:fn-id %)) (:fn-slots closure))
+          bindings (filterv #(contains? staged-ids (:fn-id %)) (:bindings closure))
+          slot-ids (set (map :slot-id fn-slots))
+          binding-ids (set (map :id bindings))]
+      ;; A manifest may carry existing fn identities without their bodies.
+      ;; Only newly prepared functions may be sourced from this staged view.
+      (assoc closure
+             :fns (filterv #(contains? staged-ids (:id %)) (:fns closure))
+             :fn-slots fn-slots
+             :slots (filterv #(contains? slot-ids (:id %)) (:slots closure))
+             :bindings bindings
+             :list-items (filterv #(contains? binding-ids (:binding-id %)) (:list-items closure))))))
+
+
+(defn- source-records
+  [source]
+  (mapcat (fn [[kind key]] (map #(assoc % :kind kind) (get source key)))
+          [[:fn :fns] [:slot :slots] [:fn-slot :fn-slots]
+           [:binding :bindings] [:binding-list-item :list-items]]))
 
 
 (defn prepare
   "Validate source, types, creation ACL and raw identity absence before any
    CREATE. `validate-result!` checks the caller's root-specific shape."
   [storage home parsed {:keys [authorize! policy source-root source-roots validate-result! root-metadata
-                               collect-external! normalize-records staged-source derive-policy?]
+                               collect-external! normalize-records staged-source staged-function-ids derive-policy?]
                         :or {collect-external! source/collect-manifests}}]
   ;; Unknown decorators may hide tombstones on resolved reads. The supported
   ;; writer stack has VersionedStorage outermost and preserves raw checks.
@@ -63,13 +84,18 @@
                                  (and (= (:root-id parsed) (:id %))
                                       (contains? root-metadata :description))
                                  (assoc :description (:description root-metadata))) (:records parsed))
-        external-ids (bundle/external-identities initial-records)
-        staged-ids (set (map :id (get-in staged-source [:graph :fns])))
-        staged-roots (filterv staged-ids external-ids)
+        direct-external-ids (bundle/external-identities initial-records)
+        staged-ids (set staged-function-ids)
+        _ (when-not (every? (set (map :id (get-in staged-source [:graph :fns]))) staged-ids)
+            (refuse! :staged-source-mismatch))
+        staged-roots (filterv staged-ids direct-external-ids)
+        staged (staged-closure staged-source staged-roots staged-ids)
+        ;; A staged child can inherit a persisted callback that the new root
+        ;; references only through that child. Authorize its full closure too.
+        external-ids (into direct-external-ids
+                           (bundle/external-identities (source-records staged)))
         external (collect-external! storage (remove staged-ids external-ids) authorize!)
-        external (if (seq staged-roots)
-                   (merge-source external (staged-closure staged-source staged-roots))
-                   external)
+        external (if staged (merge-source external staged) external)
         captured {:graph external :namespaces (source/collect-namespaces storage external)}]
     (doseq [id (or source-roots [source-root])]
       (snapshot/validate-source! captured id policy))

@@ -477,12 +477,12 @@ SLOW_MIN_EXTRA="${SLOW_MIN_EXTRA:-30}"
 # = 305 s against the 300 s cap) means that file can never be judged slow. At
 # the cap, only an attempt that ran into the timeout itself counts.
 timeout_for() {
-  # Selective UI walks six authored components and then deletes their exact
-  # receipts. The previous 360s cap killed the first gate attempt during the
-  # final undo, after all behavior assertions had passed. Allow the cleanup
-  # its measured worst-case room; the ordinary files remain bounded at 300s.
+  # Selective UI walks seven authored components through personal-root
+  # activation and deletes their exact receipts. A clean isolated run after
+  # that migration took 902s, including 93s of cleanup. Keep a 20-minute
+  # hard bound for this journey; ordinary files remain bounded at 300s.
   case "$1" in
-    edit-ui-components-selective.test.js) printf '%s' "${PER_TEST_TIMEOUT:-480}" ;;
+    edit-ui-components-selective.test.js) printf '%s' "${PER_TEST_TIMEOUT:-1200}" ;;
     *) printf '%s' "${PER_TEST_TIMEOUT:-300}" ;;
   esac
 }
@@ -908,6 +908,10 @@ for f in $FILES; do
   if [ "$dirty_abort" = 1 ]; then
     SKIP_AFTER_CASCADE=1
     continue
+  fi
+  if [ "$passed" != 1 ]; then
+    echo "  (stopping at first final failed file: $f; remaining files retain unrun checkpoints)" >&2
+    break
   fi
   if [ "${WTQ_STOP_ON_REAL_FLAKE:-0}" = 1 ] && [ "${WTQ_FLAKE_STRICT:-0}" = 1 ] \
      && [ "$passed" = 1 ] && [ "$real_flake" = 1 ] && [ "$env_signed" = 0 ] \

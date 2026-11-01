@@ -8,6 +8,7 @@
     [graphden.editor.cohort-parser :as cohort]
     [graphden.editor.component-templates :as components]
     [graphden.editor.root-legacy :as legacy]
+    [graphden.editor.root-migration-slots :as slots]
     [graphden.editor.root-migration-templates :as templates]))
 
 
@@ -23,10 +24,11 @@
    are used to parse the new cohort."
   []
   (let [component-declarations
-        (mapcat (fn [[_ {path :namespace :keys [roles]}]]
+        (mapcat (fn [[component {path :namespace}]]
                   (let [definitions (packaged-definitions path)
                         wanted (into #{:root-component}
-                                     (map #(keyword (str "_root-" (name %) "-assoc"))) roles)]
+                                     (map #(keyword (name %)))
+                                     (vals (templates/role-assoc-parents component)))]
                     (map #(assoc % :namespace path)
                          (filter #(or (contains? wanted (:name %))
                                       (:type %) (:fn-type %)) definitions))))
@@ -63,7 +65,12 @@
   "Parse fresh wrappers and a new personal editor-root. The caller must check
    source and ACL for every original role UUID and installed dependency before
    using the returned records as a write proposal."
-  [root configuration]
-  (let [{:keys [definitions references overrides]} (templates/definitions root configuration)]
-    (assoc (cohort/parse-cohort root :editor-root definitions references (interfaces))
-           :overrides overrides)))
+  ([root configuration]
+   (parse root configuration nil))
+  ([root configuration callback-graph]
+   (let [{:keys [definitions references overrides]} (templates/definitions root configuration)
+         definitions (if callback-graph
+                       (slots/prune-absent-callback-args definitions references callback-graph)
+                       definitions)]
+     (assoc (cohort/parse-cohort root :editor-root definitions references (interfaces))
+            :overrides overrides))))

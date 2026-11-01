@@ -185,6 +185,15 @@
                     vec)}))
 
 
+(defn root-source-revision
+  "Capture an authorized root source witness for a later exact restore."
+  [storage authorize! policy id scope]
+  (let [graph (source/collect-client-closure storage [id] authorize!)
+        selected {:graph graph :namespaces (source/collect-namespaces storage graph)}]
+    (snapshot/validate-source! selected id policy)
+    (source-revision id selected scope)))
+
+
 (defn cohort-revision
   "Digest exact own source of newly created compositions under the ingress
    scope. Manifest references alone do not cover a role target's body."

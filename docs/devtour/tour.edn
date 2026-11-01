@@ -1409,8 +1409,8 @@
      :say "The editor root endpoint reads the ordinary root HOF binding from its server-owned
            handler configuration. It checks root execute permission and every dependency's source
            visibility in one snapshot, then exports a bounded plan. The browser invokes the root
-           through the same call ABI as other graph callables. Its initial typed bootstrap contract
-           selects the explicit legacy editor adapter; it does not export the server handler body."
+           through the same call ABI as other graph callables. The selected root is the shipped
+           default or the owner's personal graph; it does not export the server handler body."
      :see [[:editor "export-plan"] [:editor "createRuntime"]]}
 
     {:file "resources/packages/app/ui-preview/browser-runtime.js" :defn createRuntime
@@ -1667,9 +1667,9 @@
            is created here, and profile infrastructure is excluded from lesson cleanup."}
     {:ns graphden.editor.config-activation :defn apply-proposal!
      :say "Rebuilds the exact scoped preview and source expectations before writes. Small ordinary role
-           children inherit selected definitions; the editor root merges defaults, retained prior and new entries.
-           Replacing editor privately renames the old root in this branch and creates a new UUID,
-           never rewriting its shared identity-plane parent junctions. All new IDs and original restore
+           children inherit selected definitions. First activation creates the personal editor root
+           in the same transaction; later migration replaces an owned root with a new UUID without
+           rewriting its shared identity-plane parent junctions. All new IDs and original restore
            witnesses are staged before APPLY; source, policy or CAS changes refuse the transaction."}
     {:ns graphden.editor.config-receipts :defn cleanup-preview!
      :say "Read-only proposal for a new visible deletion decision on intentionally edited tutorial graphs.

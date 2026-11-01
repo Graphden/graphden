@@ -54,18 +54,19 @@
 
 (defn- assert-root-previous!
   [storage previous home-id scope authorize! policy]
-  (let [row (sp/read-entity storage :fn (:id previous))]
-    (when-not (and row (= home-id (:namespace-id previous) (:namespace-id row))
-                   (= (:name previous) (:name row)))
-      (refuse!))
-    (writer/assert-write-authorized! storage :fn row (:id row))
-    (let [graph (source/collect-client-closure storage [(:id row)] authorize!)
-          selected {:graph graph :namespaces (source/collect-namespaces storage graph)}]
-      (snapshot/validate-source! selected (:id row) policy)
-      (when-not (= (:revision previous)
-                   (resolution/source-revision (:id row) selected scope))
+  (when previous
+    (let [row (sp/read-entity storage :fn (:id previous))]
+      (when-not (and row (= home-id (:namespace-id previous) (:namespace-id row))
+                     (= (:name previous) (:name row)))
         (refuse!))
-      selected)))
+      (writer/assert-write-authorized! storage :fn row (:id row))
+      (let [graph (source/collect-client-closure storage [(:id row)] authorize!)
+            selected {:graph graph :namespaces (source/collect-namespaces storage graph)}]
+        (snapshot/validate-source! selected (:id row) policy)
+        (when-not (= (:revision previous)
+                     (resolution/source-revision (:id row) selected scope))
+          (refuse!))
+        selected))))
 
 
 (defn- assert-root-receipt!
@@ -162,8 +163,10 @@
                    (= expected-id (:id current)) (= restore-revision (:revision current))
                    (empty? (sp/read-entities storage :fn (into ids root-ids)))
                    (or (nil? root)
-                       (and (= (get-in root [:previous :id]) (:id root-choice))
-                            (= (:id home-row) (get-in root [:previous :namespace-id])))))
+                       (if-let [previous (:previous root)]
+                         (and (= (:id previous) (:id root-choice))
+                              (= (:id home-row) (:namespace-id previous)))
+                         (= resolution/default-root-id (:id root-choice)))))
       (refuse!))
     (when root
       (let [authorize! (tenancy/browser-source-policy storage)
@@ -202,15 +205,17 @@
 
 
 (defn- restored-root-revision
-  [previous selected scope ordinary-previous]
-  (let [id (:id previous)
-        names (cond-> {id "editor-root"}
-                ordinary-previous (assoc (:id ordinary-previous) "editor"))
-        restored (update-in selected [:graph :fns]
-                            #(mapv (fn [row]
-                                     (if-let [restored-name (get names (:id row))]
-                                       (assoc row :name restored-name) row)) %))]
-    (resolution/source-revision id restored scope)))
+  [storage previous selected scope ordinary-previous authorize! policy]
+  (if previous
+    (let [id (:id previous)
+          names (cond-> {id "editor-root"}
+                  ordinary-previous (assoc (:id ordinary-previous) "editor"))
+          restored (update-in selected [:graph :fns]
+                              #(mapv (fn [row]
+                                       (if-let [restored-name (get names (:id row))]
+                                         (assoc row :name restored-name) row)) %))]
+      (resolution/source-revision id restored scope))
+    (resolution/root-source-revision storage authorize! policy resolution/default-root-id scope)))
 
 
 (defn- cleanup-review-locked
@@ -245,8 +250,9 @@
             restored (restored-source-revision storage (:previous receipt) previous (:scope current) authorize! policy)
             root-previous (when root (assert-root-previous! storage (:previous root) (:id home)
                                                             (:scope root-choice) authorize! policy))
-            root-restored (when root (restored-root-revision (:previous root) root-previous
-                                                             (:scope root-choice) (:previous receipt)))
+            root-restored (when root (restored-root-revision storage (:previous root) root-previous
+                                                             (:scope root-choice) (:previous receipt)
+                                                             authorize! policy))
             root-cohort (when root {:graph (source/collect-client-closure storage root-ids authorize!)})
             request (undo/parse-command
                       (cond-> (assoc receipt :functions functions
@@ -262,7 +268,8 @@
          :delete (into functions root-functions)
          :restore {:id (or (get-in receipt [:previous :id]) resolution/defaults-id)
                    :name (if (:previous receipt) "editor" "Shared defaults")
-                   :root (when root {:id (get-in root [:previous :id]) :name "editor-root"})}}))))
+                   :root (when root {:id (or (get-in root [:previous :id]) resolution/default-root-id)
+                                     :name (if (:previous root) "editor-root" "Shared default")})}}))))
 
 
 (defn cleanup-preview!

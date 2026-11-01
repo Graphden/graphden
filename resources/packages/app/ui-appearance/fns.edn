@@ -4,12 +4,16 @@
  [{:name :_saved-theme :type {:label :text :value :text :active :bool}}
   {:name :_font-field :type {:id :text :label :text :value :text}}
   {:name :_color-token :type {:name :text :label :text :value :text}}
-  {:name :_token-group :type {:name :text :open :bool :items [:list :_color-token]}}
+  {:name :_color-tokens :list :_color-token}
+  {:name :_token-group :type {:name :text :open :bool :items :_color-tokens}}
+  {:name :_saved-themes :list :_saved-theme}
+  {:name :_font-fields :list :_font-field}
+  {:name :_token-group-list-type :list :_token-group}
   {:name :_appearance-inputs
    :type {:hint :text :graph-status :text :has-graph :bool :has-payload :bool
           :can-create :bool :editing :bool :marketplace :bool
-          :saved [:list :_saved-theme] :mode :text :scale :int :scale-min :text :scale-max :text
-          :fonts [:list :_font-field] :groups [:list :_token-group]
+          :saved :_saved-themes :mode :text :scale :int :scale-min :text :scale-max :text
+          :fonts :_font-fields :groups :_token-group-list-type
           :contrast :text :low-contrast :bool}}
   {:name :_appearance-envelope :type {:inputs :_appearance-inputs}}
   {:name :_appearance-result :type {:tree :web.html/hiccup-node}}

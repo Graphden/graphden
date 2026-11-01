@@ -10,6 +10,7 @@
     [graphden.editor.config-preparation :as preparation]
     [graphden.editor.config-resolution :as resolution]
     [graphden.editor.preference-write :as preferences]
+    [graphden.editor.root-binding :as root-binding]
     [graphden.editor.root-migration-plan :as root-plan]
     [graphden.executor.browser-snapshot :as snapshot]
     [graphden.executor.browser-source :as source]
@@ -232,13 +233,16 @@
             _ (when (and (not= resolution/default-root-id (:id root-choice)) (nil? root-row))
                 (refuse! :source-missing))
             migrated-root? (root-plan/migration-owned? root-row (:id namespace-row))
+            default-root? (and (= resolution/default-root-id (:id root-choice))
+                               (= resolution/default-root-id (:root (root-binding/capture! storage))))
+            update-root? (or migrated-root? default-root?)
             prepared (preparation/prepared-records
                        storage namespace-row selected authorize! policy nonce
-                       {:derive-policy? migrated-root?})
+                       {:derive-policy? update-root?})
             private-name (str "_editor-prior-" nonce)
             projected (cond-> (:snapshot prepared)
                         prior-row (renamed-snapshot (:id prior-row) private-name))
-            root-plan (when migrated-root?
+            root-plan (when update-root?
                         (root-plan/proposal
                           storage (:derived-policy prepared) nonce
                           {:selection {:id (:id prepared) :home home
@@ -246,6 +250,7 @@
                                                         (:graph projected) (:id prepared))
                                        :snapshot projected}
                            :staged-source projected
+                           :staged-function-ids (mapv :id (filter #(= :fn (:kind %)) (:records prepared)))
                            :renames (when prior-row {(:id prior-row) private-name})}))
             ids (mapv :id (filter #(= :fn (:kind %)) (:records prepared)))
             prior-snapshot (when prior?

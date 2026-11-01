@@ -56,6 +56,59 @@
   (keyword (str "_migration-" (name component) "-" (name role) "-" suffix)))
 
 
+(defn bridge-name
+  "The editable child of a preserved callback in a migrated root."
+  [component role]
+  (local-name component role (if (and (= component :account-menu) (= role :view))
+                               "base" "wrapper")))
+
+
+(defn role-assoc-parents
+  "Find each legacy role's assoc-fn from the shipped root component chain."
+  [component]
+  (let [{path :namespace :keys [roles root-component]} (get legacy/components component)
+        definitions (into {} (map (juxt :name identity)) (packaged-definitions path))
+        role-set (set roles)]
+    (loop [current (get definitions root-component) seen #{} found {}]
+      (if-not current
+        (if (= role-set (set (keys found))) found (refuse!))
+        (let [current-name (:name current)
+              role (get-in current [:args :key :value])
+              parent (:parent current)
+              local-parent (when (and (keyword? parent)
+                                      (or (nil? (namespace parent)) (= path (namespace parent))))
+                             (keyword (name parent)))
+              parent-definition (get definitions local-parent)
+              map-argument (get-in current [:args :map])
+              map-reference (if (map? map-argument) (:ref map-argument) map-argument)
+              next-name (when (and (keyword? map-reference)
+                                   (or (nil? (namespace map-reference)) (= path (namespace map-reference))))
+                          (keyword (name map-reference)))]
+          (when (contains? seen current-name) (refuse!))
+          (when (and (contains? role-set role)
+                     (or (nil? parent-definition)
+                         (not= "assoc-fn" (some-> parent-definition :parent name))
+                         (contains? found role)))
+            (refuse!))
+          (recur (get definitions next-name)
+                 (conj seen current-name)
+                 (cond-> found (contains? role-set role)
+                         (assoc role (keyword path (name local-parent))))))))))
+
+
+(defn root-component-return-type
+  "Use the shipped component value's declared result type as migration ABI."
+  [component]
+  (let [{path :namespace :keys [root-component]} (get legacy/components component)
+        definition (some #(when (= root-component (:name %)) %)
+                         (packaged-definitions path))
+        result (:return-type definition)]
+    (if (and (keyword? result)
+             (or (nil? (namespace result)) (= path (namespace result))))
+      (keyword path (name result))
+      (refuse!))))
+
+
 (defn- wrapper-definitions
   [root component role]
   (let [{path :namespace wrappers :wrapper} (get legacy/components component)
@@ -72,30 +125,38 @@
     (when-not (and template (or (not (and (= component :account-menu) (= role :view))) full-view))
       (refuse!))
     (let [bridge (assoc (rebase/rewrite-references template qualify)
-                        :name (local-name component role (if full-view "base" "wrapper"))
+                        :name (bridge-name component role)
                         :namespace root
                         :parent (keyword root (name (local-name component role "source"))))]
       (if full-view
-        ;; The old account-menu callback supplies state/theme. The shipped
-        ;; root-view adds the server/common-tree envelope expected by the new
-        ;; root-component contract; retain that composition by reference.
-        [bridge
-         (-> full-view
-             (rebase/rewrite-references qualify)
-             (assoc :name (local-name component role "wrapper") :namespace root)
-             (assoc-in [:args :map] (keyword root (name (:name bridge)))))]
+        ;; Keep the selected callback's authored common-tree when present;
+        ;; the shipped server tree fills a callback that omits that field.
+        (let [tree-name (local-name component role "common-tree")
+              tree {:name tree-name :namespace root :parent :get
+                    :args {:coll {:ref (keyword root (name (:name bridge)))
+                                  :type (:return-type full-view)}
+                           :key (get-in full-view [:args :key])
+                           :default (qualify (get-in full-view [:args :value]))}}]
+          [bridge tree
+           (-> full-view
+               (rebase/rewrite-references qualify)
+               (assoc :name (local-name component role "wrapper") :namespace root
+                      :args {:map (keyword root (name (:name bridge)))
+                             :key (get-in full-view [:args :key])
+                             :value (keyword root (name tree-name))}))])
         [bridge]))))
 
 
 (defn- component-definitions
   [root component changed]
   (let [{path :namespace base :root-component} (get legacy/components component)
+        assoc-parents (role-assoc-parents component)
         roles (vec (keys changed))]
     (mapv (fn [index role]
             {:name (local-name component role "component")
              :namespace root
-             :parent (keyword path (str "_root-" (name role) "-assoc"))
-             :return-type (keyword path "root-component")
+             :parent (get assoc-parents role)
+             :return-type (root-component-return-type component)
              :args {:map (if (zero? index)
                            (keyword path (name base))
                            (keyword root (name (local-name component

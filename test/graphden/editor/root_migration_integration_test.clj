@@ -1,6 +1,7 @@
 (ns ^:integration ^:serial graphden.editor.root-migration-integration-test
   (:require
     [clojure.test :refer [deftest is use-fixtures]]
+    [graphden.editor.component-creation :as creation]
     [graphden.editor.config-activation :as activation]
     [graphden.editor.config-receipts :as receipts]
     [graphden.editor.config-resolution :as resolution]
@@ -37,6 +38,116 @@
                   :restore-revision (get-in receipt [:root :restore-revision])
                   :previous (get-in receipt [:root :previous])
                   :functions (get-in receipt [:root :function-receipts])})))
+
+
+(deftest first-personalization-selects-a-personal-root-without-explicit-migration
+  (let [ctx (:ctx ga/*bootstrap*)
+        storage (:storage ctx)
+        home-name (str "first-personal-root-" (random-uuid))
+        _home (sp/create-entity storage :ns {:name home-name})]
+    (binding [tenancy/*seams-override* (atom (tenancy/seams-isolation-seed))]
+      (tenancy/install-personal-namespace-fn!
+        (constantly {:namespace-path home-name :source :fixture :isolated? false}))
+      (epoch/seed-watermark! storage)
+      (let [before (source/with-snapshot
+                     storage #(resolution/capture %1 %2 (snapshot/capture-context-policy ctx)))
+            policy (snapshot/capture-context-policy ctx)
+            authorize! (tenancy/browser-source-policy storage)]
+        (is (= resolution/default-root-id
+               (:id (resolution/root-choice storage authorize! policy))))
+        (let [preview (activation/preview!
+                        ctx {:operation "personalize"
+                             :command {:component "fn-picker"
+                                       :expected-preference {:present false :value nil}
+                                       :expected-configuration-revision
+                                       (current-configuration-revision ctx storage)}})
+              receipt (:receipt preview)
+              applied (activation/apply-proposal! ctx (:request preview))]
+          (is (some? (:root receipt)))
+          (is (= (:id receipt) (str (:id applied))))
+          (is (= (get-in receipt [:root :id]) (str (get-in applied [:root :id]))))
+          (epoch/seed-watermark! storage)
+          (is (= (get-in applied [:root :id])
+                 (:id (resolution/root-choice storage authorize! policy))))
+          (is (true? (:confirmed (receipts/reconcile! ctx (undo-command receipt)))))
+          (let [scope (activation/request-scope (:scope before))
+                review (receipts/cleanup-preview!
+                         ctx {:receipt (undo-command receipt) :scope scope
+                              :restore-revision (:restore-revision receipt)})]
+            (is (= resolution/default-root-id (get-in review [:restore :root :id])))
+            (is (seq (:deleted (undo/undo! ctx (:request review)))))
+            (epoch/seed-watermark! storage)
+            (is (= resolution/default-root-id
+                   (:id (resolution/root-choice storage authorize!
+                                                (snapshot/capture-context-policy ctx)))))
+            (is (true? (:confirmed (receipts/reconcile-undo!
+                                     ctx {:receipt (:request review) :scope scope
+                                          :restore-revision (:restore-revision receipt)}))))))))))
+
+
+(deftest first-activation-of-a-created-partial-configuration-selects-a-personal-root
+  (let [ctx (:ctx ga/*bootstrap*)
+        storage (:storage ctx)
+        home-name (str "partial-personal-root-" (random-uuid))
+        _home (sp/create-entity storage :ns {:name home-name})]
+    (binding [tenancy/*seams-override* (atom (tenancy/seams-isolation-seed))]
+      (tenancy/install-personal-namespace-fn!
+        (constantly {:namespace-path home-name :source :fixture :isolated? false}))
+      (epoch/seed-watermark! storage)
+      (let [proposed (creation/preview ctx {:owner (tenancy/current-user-id)
+                                            :namespace-id nil :component "fn-picker"})
+            created (creation/apply! ctx (:request proposed))]
+        (is (:ok proposed))
+        (is (:committed created))
+        (epoch/seed-watermark! storage)
+        (let [preview (try
+                        (activation/preview!
+                          ctx {:operation "activate"
+                               :command {:selection-id (get-in proposed [:manifest :roots :configuration-id])
+                                         :expected-preference {:present false :value nil}
+                                         :expected-configuration-revision
+                                         (current-configuration-revision ctx storage)}})
+                        (catch Exception error
+                          (let [id (:fn-id (ex-data error))]
+                            (throw (ex-info "Partial activation preview refused"
+                                            {:reason (:reason (ex-data error))
+                                             :source-name (:name (sp/read-entity storage :fn id))
+                                             :copied? (boolean (some #(= (str id) (:id %))
+                                                                     (get-in proposed [:manifest :functions])))
+                                             :publication-warnings (:publication-warnings created)}
+                                            error)))))]
+          (is (some? (get-in preview [:receipt :root])))
+          (let [applied (activation/apply-proposal! ctx (:request preview))]
+            (is (= (get-in preview [:receipt :root :id])
+                   (str (get-in applied [:root :id]))))
+            (epoch/seed-watermark! storage)
+            (is (= (get-in applied [:root :id])
+                   (:id (resolution/root-choice storage
+                                                (tenancy/browser-source-policy storage)
+                                                (snapshot/capture-context-policy ctx)))))
+            (let [successor-receipts
+                  (reduce (fn [receipts component]
+                            (let [proposed (creation/preview ctx {:owner (tenancy/current-user-id)
+                                                                  :namespace-id nil :component component})
+                                  created (creation/apply! ctx (:request proposed))]
+                              (is (:committed created))
+                              (epoch/seed-watermark! storage)
+                              (let [activated (activation/preview!
+                                                ctx {:operation "activate"
+                                                     :command {:selection-id (get-in proposed [:manifest :roots :configuration-id])
+                                                               :expected-preference {:present false :value nil}
+                                                               :expected-configuration-revision
+                                                               (current-configuration-revision ctx storage)}})
+                                    applied (activation/apply-proposal! ctx (:request activated))]
+                                (is (= (get-in activated [:receipt :root :id])
+                                       (str (get-in applied [:root :id]))))
+                                (epoch/seed-watermark! storage)
+                                (conj receipts (:receipt activated)))))
+                          [] ["recents" "tutorial-catalog"])]
+              (doseq [receipt (reverse successor-receipts)]
+                (is (seq (:deleted (undo/undo! ctx (undo-command receipt)))))
+                (epoch/seed-watermark! storage))
+              (is (seq (:deleted (undo/undo! ctx (undo-command (:receipt preview)))))))))))))
 
 
 (deftest preview-creates-nothing-and-apply-selects-a-personal-root-once

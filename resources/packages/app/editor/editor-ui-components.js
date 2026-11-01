@@ -7,7 +7,6 @@
   let catalog = null;
   const organization = () => typeof graphdenCurrentOrg === 'string' && graphdenCurrentOrg ? graphdenCurrentOrg : 'public';
   let configuration = null;
-  let prepared = null;
   let generation = 0;
   const branch = () => typeof getCurrentBranchName === 'function' ? getCurrentBranchName() : 'main';
   function contextStamp() {
@@ -21,28 +20,6 @@
     return !!window.gdPrefsReady && !!window.gdPrefOwner
       && !(typeof window.graphdenAccountsMode === 'function' && window.graphdenAccountsMode()
         && !window.isAuthenticated?.());
-  }
-  async function prepareLegacy(started, signal) {
-    const value = window.gdPrefRead('components');
-    if (!value || value.org !== organization() || !uuid.test(value['fn-id'] || '')) return;
-    const key = contextStamp() + ':' + JSON.stringify(value);
-    if (prepared?.key !== key) {
-      // The explicit compatibility operation preserves existing edits by ref;
-      // it never creates a new root when the ordinary editor already exists.
-      const promise = window.authFetch(window.API.api_ui_configuration_prepare, {
-        method: 'POST', cache: 'no-store', headers: {'Content-Type': 'application/json'},
-        body: '{}',
-      }).then(async response => {
-        const result = await response.json();
-        if (!response.ok || !result.ok) throw new Error('Legacy migration unavailable');
-      }).catch(error => {
-        if (prepared?.promise === promise) prepared = null;
-        throw error;
-      });
-      prepared = {key, promise};
-    }
-    await prepared.promise;
-    if (started !== stamp() || signal?.aborted) throw new DOMException('Selection changed', 'AbortError');
   }
   function status(component, message) {
     if (statuses.get(component) === message) return;
@@ -94,7 +71,6 @@
     }
     const started = stamp();
     try {
-      if (window.gdPrefRead('components')) await prepareLegacy(started, signal);
       const {response, result} = await loadPlan(component, started, signal);
       // A partial personal manifest deliberately leaves other components built in.
       if (response.status === 422 && !response.ok && result.ok === false
@@ -137,7 +113,6 @@
   }
   window.gdPrefOnChange((key, _value, detail) => { if (key === 'components') refresh(!detail?.initial); });
   window.addEventListener('gd-auth-changed', () => {
-    prepared = null;
     statuses.clear();
     refresh(false);
     window.dispatchEvent(new Event('gd-ui-components-status'));
@@ -171,11 +146,22 @@
     return window.gdUIConfigurationState();
   };
   window.gdRefreshUIConfiguration = refresh;
+  const editableRoles = {'menu-id': ['account-menu', 'view'], 'menu-update-id': ['account-menu', 'update'],
+      'picker-id': ['fn-picker', 'view'], 'recents-id': ['recents', 'view'],
+      'recents-initial-id': ['recents', 'initial'], 'recents-update-id': ['recents', 'update'],
+      'tutorial-catalog-id': ['tutorial-catalog', 'view'],
+      'execution-status-id': ['execution-status', 'view'], 'execution-path-id': ['execution-path', 'view'],
+      'feedback-id': ['feedback', 'view'], 'keymap-id': ['keymap', 'view'], 'appearance-id': ['appearance', 'view']};
   window.gdUIComponentsRoots = () => {
     const selected = selection();
     const theme = window.gdPrefRead('theme')?.graph;
     return {...(catalog?.stamp === stamp() ? catalog.roots : {}),
       'configuration-id': selected?.['fn-id'],
       'theme-id': theme?.org === organization() ? theme['fn-id'] : null};
+  };
+  window.gdUIComponentsEditableRoot = key => {
+    const source = window.gdUIComponentsRoots()[key];
+    const [component, role] = editableRoles[key] || [];
+    return window.gdEditorRoot?.editableRoleId(component, role, source) || source;
   };
 })();

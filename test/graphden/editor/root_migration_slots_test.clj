@@ -26,3 +26,23 @@
            (try (slots/resolve-bindings records definitions (assoc graph :slots []))
                 nil
                 (catch clojure.lang.ExceptionInfo error (:reason (ex-data error))))))))
+
+
+(deftest unused-callback-input-is-removed-before-parsing
+  (let [callback-id (random-uuid)
+        slot-id (random-uuid)
+        source-alias :migration/source
+        bridge {:name :bridge :parent source-alias
+                :args {:model {:ref :input-model} :theme {:ref :input-theme}}}
+        ordinary {:name :ordinary :parent :core.collections/assoc
+                  :args {:theme {:ref :input-theme}}}
+        graph {:fns [{:id callback-id :parent-ids []}]
+               :slots [{:id slot-id :name "model"}]
+               :fn-slots [{:fn-id callback-id :slot-id slot-id :position 0}]
+               :bindings [] :list-items []}]
+    (is (= [(assoc bridge :args {:model {:ref :input-model}}) ordinary]
+           (slots/prune-absent-callback-args [bridge ordinary] {source-alias callback-id} graph)))
+    (is (= :legacy-callback-slots
+           (try (slots/prune-absent-callback-args [bridge] {source-alias (random-uuid)} graph)
+                nil
+                (catch clojure.lang.ExceptionInfo error (:reason (ex-data error))))))))

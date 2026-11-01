@@ -44,6 +44,20 @@
     }
     return result;
   }
+  async function configurationPreview(body, signal, current) {
+    const {response, result} = await window.gdReadGraphResponse(
+      () => window.authFetch(window.API.api_ui_configuration_preview, {method: 'POST', signal,
+        headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)}),
+      signal, current,
+      (reply, payload) => reply.status === 422 && payload?.ok === false
+        && payload.code === 'policy-refresh-required' && payload.retryable === true);
+    if (!response.ok || !result.ok) {
+      const error = new Error(result.reason || 'UI graphs could not be created.');
+      error.status = response.status; error.body = result;
+      throw error;
+    }
+    return result;
+  }
   function validManifest(manifest) {
     const fullLimit = window.GraphdenAtomicFunctionBatchMax;
     if (!manifest || !Array.isArray(manifest.namespaces) || !Array.isArray(manifest.functions)
@@ -83,7 +97,8 @@
     const ids = new Set(receipt.functions);
     const root = receipt.root;
     const rootValid = !root || (root.created === true && uuid.test(root.id || '')
-      && uuid.test(root['restore-id'] || '') && /^[0-9a-f]{64}$/.test(root['restore-revision'] || '')
+      && uuid.test(root['restore-id'] || '')
+      && /^[0-9a-f]{64}$/.test(root['restore-revision'] || '')
       && /^[0-9a-f]{64}$/.test(root['cohort-revision'] || '')
       && Array.isArray(root.functions) && root.functions.length > 0 && root.functions.length <= 512
       && Array.isArray(root['function-receipts'])
@@ -92,11 +107,11 @@
       && new Set(root['function-receipts'].map(row => row.id)).size === root.functions.length
       && root['function-receipts'].every(row => uuid.test(row.id) && uuid.test(row['namespace-id'])
         && typeof row.name === 'string' && row.name.length > 0 && root.functions.includes(row.id))
-      && root.previous && uuid.test(root.previous.id)
-      && root['restore-id'] === root.previous.id && typeof root.previous.name === 'string'
-      && uuid.test(root.previous['namespace-id'])
-      && /^[0-9a-f]{64}$/.test(root.previous.revision || '')
-      && !root.functions.includes(root.previous.id)
+      && (!root.previous || (uuid.test(root.previous.id)
+        && root['restore-id'] === root.previous.id && typeof root.previous.name === 'string'
+        && uuid.test(root.previous['namespace-id'])
+        && /^[0-9a-f]{64}$/.test(root.previous.revision || '')
+        && !root.functions.includes(root.previous.id)))
       && !root.functions.some(id => ids.has(id)));
     return rootValid && ids.size === receipt.functions.length && ids.has(receipt.id)
       && receipt.namespaces.every(id => uuid.test(id))
@@ -116,9 +131,9 @@
   async function previewApply(operation, command, controller, current) {
     const state = window.gdUIConfigurationState?.();
     if (!state?.revision || !state.preference) throw new Error('Refresh the editor configuration before changing it.');
-    const preview = await json(window.API.api_ui_configuration_preview, {operation,
+    const preview = await configurationPreview({operation,
       command: {...command, 'expected-preference': state.preference,
-        'expected-configuration-revision': state.revision}}, controller.signal);
+        'expected-configuration-revision': state.revision}}, controller.signal, current);
     if (!current()) return null;
     if (!validConfigurationReceipt(preview.receipt) || preview.request?.operation !== operation
       || preview.request?.scope?.org !== organization() || !uuid.test(preview.request?.scope?.['branch-id'] || '')
@@ -243,7 +258,7 @@
   }
   async function open(kind) {
     const chosen = selected();
-    const id = window.gdUIComponentsRoots()[kind];
+    const id = window.gdUIComponentsEditableRoot(kind);
     if (!uuid.test(id || '')) return;
     const destination = kind === 'theme-id' ? window.gdPrefRead('theme')?.graph : chosen;
     if (!destination) return;

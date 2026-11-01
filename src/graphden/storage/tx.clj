@@ -193,7 +193,8 @@
           (try
             (binding [jdbc-tx/*nested-tx* :ignore]
               (jdbc/with-transaction [conn ds]
-                                     (let [root {:connection conn :active? (atom true)
+                                     (let [root {:connection conn :change-id (random-uuid)
+                                                 :active? (atom true)
                                                  :owned? owned? :writer-scope (atom nil)}]
                                        (vreset! context root)
                                        (binding [*transaction-context* root]

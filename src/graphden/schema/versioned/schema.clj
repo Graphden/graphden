@@ -527,6 +527,14 @@
 (def ^:private resource-override-version-author-id-field-uuid #uuid "50000000-0000-4000-8000-000000000009")
 (def ^:private resource-override-version-author-label-field-uuid #uuid "50000000-0000-4000-8000-00000000000a")
 
+;; A null change-id identifies pre-migration history whose cross-entity
+;; transaction membership cannot be reconstructed safely from timestamps.
+(def ^:private fn-version-change-id-field-uuid #uuid "50000000-0000-4000-8000-00000000000b")
+(def ^:private fn-slot-version-change-id-field-uuid #uuid "50000000-0000-4000-8000-00000000000c")
+(def ^:private binding-version-change-id-field-uuid #uuid "50000000-0000-4000-8000-00000000000d")
+(def ^:private binding-list-item-version-change-id-field-uuid #uuid "50000000-0000-4000-8000-00000000000e")
+(def ^:private resource-override-version-change-id-field-uuid #uuid "50000000-0000-4000-8000-00000000000f")
+
 
 ;; =============================================================================
 ;; Version-mirror derivation — ONE base declaration, no hand-kept copy
@@ -676,6 +684,7 @@
                   :type :ref :ref-entity :branch}
       :created-at {:uuid fn-version-created-at-field-uuid
                    :type :timestamptz}
+      :change-id {:uuid fn-version-change-id-field-uuid :type :uuid :nullable? true}
       :author-id {:uuid fn-version-author-id-field-uuid :type :text :nullable? true}
       :author-label {:uuid fn-version-author-label-field-uuid :type :text :nullable? true}
       :deleted-at {:uuid fn-version-deleted-at-field-uuid
@@ -689,6 +698,7 @@
                   :type :ref :ref-entity :branch}
       :created-at {:uuid fn-slot-version-created-at-field-uuid
                    :type :timestamptz}
+      :change-id {:uuid fn-slot-version-change-id-field-uuid :type :uuid :nullable? true}
       :author-id {:uuid fn-slot-version-author-id-field-uuid :type :text :nullable? true}
       :author-label {:uuid fn-slot-version-author-label-field-uuid :type :text :nullable? true}
       :deleted-at {:uuid fn-slot-version-deleted-at-field-uuid
@@ -702,6 +712,7 @@
                   :type :ref :ref-entity :branch}
       :created-at {:uuid binding-version-created-at-field-uuid
                    :type :timestamptz}
+      :change-id {:uuid binding-version-change-id-field-uuid :type :uuid :nullable? true}
       :author-id {:uuid binding-version-author-id-field-uuid :type :text :nullable? true}
       :author-label {:uuid binding-version-author-label-field-uuid :type :text :nullable? true}
       :deleted-at {:uuid binding-version-deleted-at-field-uuid
@@ -716,6 +727,7 @@
                   :type :ref :ref-entity :branch}
       :created-at {:uuid binding-list-item-version-created-at-field-uuid
                    :type :timestamptz}
+      :change-id {:uuid binding-list-item-version-change-id-field-uuid :type :uuid :nullable? true}
       :author-id {:uuid binding-list-item-version-author-id-field-uuid :type :text :nullable? true}
       :author-label {:uuid binding-list-item-version-author-label-field-uuid :type :text :nullable? true}
       :deleted-at {:uuid binding-list-item-version-deleted-at-field-uuid
@@ -730,6 +742,7 @@
                   :type :ref :ref-entity :branch}
       :created-at {:uuid resource-override-version-created-at-field-uuid
                    :type :timestamptz}
+      :change-id {:uuid resource-override-version-change-id-field-uuid :type :uuid :nullable? true}
       :author-id {:uuid resource-override-version-author-id-field-uuid :type :text :nullable? true}
       :author-label {:uuid resource-override-version-author-label-field-uuid :type :text :nullable? true}
       :deleted-at {:uuid resource-override-version-deleted-at-field-uuid
@@ -739,7 +752,7 @@
 (def ^:private framework-fields
   "The version-framework columns present on every mirror — excluded from
    `version-data-fields` (they are versioning plumbing, not entity data)."
-  #{:branch-id :created-at :deleted-at :author-id :author-label})
+  #{:branch-id :change-id :created-at :deleted-at :author-id :author-label})
 
 
 ;; =============================================================================

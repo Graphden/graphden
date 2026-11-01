@@ -15,6 +15,7 @@
     [graphden.schema.versioned.schema :as vds]
     [graphden.storage.postgres.core :as pg]
     [graphden.storage.postgres.crud :as pg-crud]
+    [graphden.storage.tx :as tx]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as th]
     [graphden.tenancy.context :as tenancy-context]
@@ -829,6 +830,34 @@
                                                 {:fn-id (:id created)}))]
           (is (= "account-42" (:author-id version)))
           (is (= "Artem" (:author-label version)))))
+      (finally (sp/close base)))))
+
+
+(deftest versions-share-the-owning-transaction-change-id
+  (let [base (base-storage)
+        storage (vs/wrap-with-versioning base)]
+    (try
+      (let [[f binding-row]
+            (tx/in-transaction
+              storage
+              (fn [st]
+                (let [f (sp/create-entity st :fn {:name "change-group" :parent-ids []})
+                      slot (sp/create-entity st :slot {:name "value" :type-fn-id (:id f)})
+                      binding-row (sp/create-entity st :binding
+                                                    {:fn-id (:id f) :slot-id (:id slot)
+                                                     :value "before"})]
+                  [f binding-row])))
+            fn-version (first (sp/query-entities base :fn-version {:fn-id (:id f)}))
+            binding-version (first (sp/query-entities base :binding-version
+                                                      {:binding-id (:id binding-row)}))]
+        (is (uuid? (:change-id fn-version)))
+        (is (= (:change-id fn-version) (:change-id binding-version)))
+        (is (not (contains? (sp/read-entity storage :fn (:id f)) :change-id)))
+        (sp/update-entity storage :binding (:id binding-row) {:value "after"})
+        (let [versions (sp/query-entities base :binding-version
+                                          {:binding-id (:id binding-row)})]
+          (is (= 2 (count versions)))
+          (is (= 2 (count (set (map :change-id versions)))))))
       (finally (sp/close base)))))
 
 

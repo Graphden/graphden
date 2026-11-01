@@ -70,6 +70,8 @@
         (assoc :id (random-uuid)
                version-id-field entity-id
                :branch-id branch-id
+               :change-id (or (:change-id tx/*transaction-context*)
+                              (random-uuid))
                :created-at timestamp
                ;; Server-stamped from the authenticated request scope.
                ;; The selected payload above prevents client spoofing.
@@ -87,7 +89,8 @@
    legitimate identity column on any versioned entity."
   [entity-name row]
   (let [{:keys [version-id-field]} (get res/entity-config entity-name)]
-    (cond-> (dissoc row :branch-id :created-at :deleted-at :author-id :author-label)
+    (cond-> (dissoc row :branch-id :change-id :created-at :deleted-at
+                     :author-id :author-label)
       version-id-field (dissoc version-id-field))))
 
 

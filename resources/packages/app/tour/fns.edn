@@ -2062,7 +2062,7 @@
                :check {:kind "ui-component" :action "personal-open" :component "account-menu" :root "menu-id"}}
               {:title "Capture a personal theme input"
                :body "On the view's theme binding, choose [[Remove binding]] in the ⋯ menu. Then click the [[+]] next to [[theme]] and [[Bind literal]]. Set [[accent]] to `#7c3aed` and [[canvas-background]] to `#f5f3ff`, then [[Save]]. The selected theme preference stays unchanged."
-               :target ".placeholder-binder[data-arg-name=\"theme\"]"
+               :target ".node-overlay button.more-actions-trigger"
                :targets [".node-overlay button.more-actions-trigger" ".placeholder-binder[data-arg-name=\"theme\"]" ".arg-value-edit-popover"]
                :check {:kind "ui-component" :action "personal-theme" :component "account-menu" :accent "#7c3aed" :background "#f5f3ff"}}
               {:title "Shared helpers stay shared"

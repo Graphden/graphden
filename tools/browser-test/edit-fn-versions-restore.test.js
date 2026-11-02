@@ -19,7 +19,7 @@
 const {chromium} = require('playwright');
 const {assert, newContext, api, getEntities, deleteFnByName} =
   require('./edit-test-helpers');
-const {openRowActionsFor} = require('./tutorial-tour-helpers');
+const {openRowActionsFor, waitUntil} = require('./tutorial-tour-helpers');
 
 
 const RUN_ID = '-' + process.pid + '-' + Date.now().toString(36);
@@ -216,19 +216,19 @@ async function putDescription(page, fnId, desc) {
     assert(review.message().includes('description: v1-seed → v2-mid'),
            'graph restore previews the changed field values');
     await review.accept();
-    await page.waitForFunction(async (id) => {
+    assert(await waitUntil(page, async (id) => {
       const response = await fetch('/api/graph/entities?scope=subtree&root-id=' + id);
       const body = await response.json();
       return body.fns.find((f) => f.id === id)?.description === 'v2-mid';
-    }, fn.id, {timeout: 15000});
+    }, fn.id, 15000), 'graph restore landed');
     assert(await page.locator('#gd-undo-toast').isVisible(),
            'graph restore offers Undo immediately');
     assert(await page.evaluate(() => gdUndoLast()), 'Undo restores the prior graph revision');
-    await page.waitForFunction(async (id) => {
+    assert(await waitUntil(page, async (id) => {
       const response = await fetch('/api/graph/entities?scope=subtree&root-id=' + id);
       const body = await response.json();
       return body.fns.find((f) => f.id === id)?.description === 'v1-seed';
-    }, fn.id, {timeout: 15000});
+    }, fn.id, 15000), 'Undo restored the prior description');
 
     console.log('✓ fn-versions restore verified — fields, graph preview/CAS, Undo');
   } catch (e) {

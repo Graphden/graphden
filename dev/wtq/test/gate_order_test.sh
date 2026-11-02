@@ -59,14 +59,20 @@ bb() {
       command bb -cp "$SCRIPT_DIR/../../scripts" "$SCRIPT_DIR/../../$1" "${@:2}" ;;
     scripts/ci_priority.clj)
       [ "${FAIL_HINTS:-0}" != 1 ] || return 1
-      printf '%s\n' '{:unit [] :integration []}' ;;
+      case "$2" in
+        integration) printf '%s\n' "${TEST_PRIORITY_INTEGRATION:-}" ;;
+        browser) printf '%s\n' "${TEST_PRIORITY_BROWSER:-}" ;;
+        *) printf '%s\n' '{:unit [] :integration []}' ;;
+      esac ;;
     scripts/ci_fast_cli.clj) echo 'gate bypassed admitted preflight' >&2; return 1 ;;
     scripts/ci_gate.clj)
       echo "$2" >> "$TEST_LOG"
       if [ "$2" = verify ]; then [ "${FAIL_VERIFY:-0}" != 1 ]; fi ;;
     ci) echo ci >> "$TEST_LOG"; [ "${FAIL_CI:-0}" != 1 ] ;;
     test-e2e)
-      echo e2e >> "$TEST_LOG"
+      if [ -n "${GRAPHDEN_E2E_ONLY_FILES:-}" ]; then echo e2e-early >> "$TEST_LOG"
+      elif [ -n "${GRAPHDEN_E2E_EXCLUDE_FILES:-}" ]; then echo e2e-rest >> "$TEST_LOG"
+      else echo e2e >> "$TEST_LOG"; fi
       if [ "${EXPECT_PROGRESS_POINTER:-0}" = 1 ]; then
         [ "$(prior_failed_stage test)" = e2e ] || return 1
         grep -q '"e2e" :running' "$LOG_DIR/_train-$WTQ_REPORT_TS.stages.edn" || return 1
@@ -80,7 +86,11 @@ bb() {
       fi
       [ "${FAIL_E2E:-0}" != 1 ] ;;
     test-visual) echo visual >> "$TEST_LOG"; [ "${FAIL_VISUAL:-0}" != 1 ] ;;
-    test-integration) echo integration >> "$TEST_LOG"; [ "${FAIL_INTEGRATION:-0}" != 1 ] ;;
+    test-integration)
+      if [ -n "${GRAPHDEN_INTEGRATION_ONLY:-}" ]; then echo integration-early >> "$TEST_LOG"
+      elif [ -n "${GRAPHDEN_INTEGRATION_EXCLUDE:-}" ]; then echo integration-rest >> "$TEST_LOG"
+      else echo integration >> "$TEST_LOG"; fi
+      [ "${FAIL_INTEGRATION:-0}" != 1 ] ;;
     test-fleet-e2e) echo fleet >> "$TEST_LOG"; [ "${FAIL_FLEET:-0}" != 1 ] ;;
     *) echo "unexpected bb $*" >&2; return 1 ;;
   esac
@@ -139,6 +149,23 @@ CASE_INTEGRATION=1 CASE_E2E=1 CASE_VISUAL=0
 run_case
 assert_events 'expect,ci,verify,uber,build,image,e2e,integration'
 [ "$built_candidate" = 1 ]
+
+# Related namespaces/files cross the suite boundary before either full tail.
+TEST_PRIORITY_INTEGRATION=graphden.editor.root-migration-integration-test
+TEST_PRIORITY_BROWSER=edit-ui-components-selective.test.js
+WTQ_REPORT_TS=related-wave
+run_case
+assert_events 'expect,ci,verify,uber,build,image,integration-early,headroom,e2e-early,e2e-rest,integration-rest'
+[ "$built_candidate" = 1 ]
+
+# A forced browser file beats automatically related integration namespaces.
+WTQ_FIRST_TESTS=browser:edit-ui-components-selective.test.js
+WTQ_REPORT_TS=forced-browser-wave
+run_case
+assert_events 'expect,ci,verify,uber,build,image,e2e-early,integration-early,e2e-rest,integration-rest'
+[ "$built_candidate" = 1 ]
+unset WTQ_FIRST_TESTS
+unset TEST_PRIORITY_INTEGRATION TEST_PRIORITY_BROWSER
 
 # A verified remote proof can replace only the integration stage. A missing
 # or refused proof executes the same local integration roster as before.

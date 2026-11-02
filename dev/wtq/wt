@@ -1490,6 +1490,37 @@ run_gate_stage() {
   local stage="$1" wt="$2" base_sha="$3" ci_receipt="$4" ci_expected="$5" ci_sha="$6"
   case "$stage" in
     ci) run_scoped_ci_gate "$wt" "$base_sha" "$ci_receipt" "$ci_expected" ;;
+    priority)
+      local wave wave_integration wave_browser
+      for wave in manual automatic; do
+        if [ "$wave" = manual ]; then
+          wave_integration="$MANUAL_INTEGRATION"
+          wave_browser="$MANUAL_BROWSER"
+        else
+          wave_integration="$AUTO_INTEGRATION"
+          wave_browser="$AUTO_BROWSER"
+        fi
+        if [ -n "$wave_integration" ]; then
+          step "$wave related integration namespaces"
+          ( cd "$wt" && GRAPHDEN_INTEGRATION_ONLY="$wave_integration" bb test-integration ) \
+            || { echo "FAIL: $wave related integration"; return 1; }
+        fi
+        if [ -n "$wave_browser" ]; then
+          if [ -n "$wave_integration" ]; then
+            step "$wave related browser: host headroom after integration"
+            if ! wait_for_headroom; then
+              WTQ_STAGE_ABORT=1
+              echo "ABORT: related browser headroom admission interrupted"
+              return 1
+            fi
+          fi
+          step "$wave related browser files"
+          ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" WTQ_FLAKE_STRICT=1 \
+              E2E_BASELINE_LOCAL="$E2E_BASELINE_LOCAL" GRAPHDEN_E2E_PRIORITY_BASE="$base_sha" \
+              GRAPHDEN_E2E_ONLY_FILES="$wave_browser" bb test-e2e ) \
+            || { echo "FAIL: $wave related browser"; return 1; }
+        fi
+      done ;;
     build)
       step "build the CANDIDATE image from the merged tree"
       # Never overwrite the canonical tag before all mandatory suites pass.
@@ -1507,20 +1538,27 @@ run_gate_stage() {
       save_candidate_proof "$wt" "$GRAPHDEN_RESUME_OUT.image.tsv" \
         || { echo "FAIL: save candidate image proof"; return 1; } ;;
     e2e)
-      step "bb test-e2e"
-      # A healthy-host retry-pass flake is already a red gate verdict. Stop
-      # there and keep prior file checkpoints instead of paying for the tail.
-      ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" WTQ_FLAKE_STRICT=1 WTQ_STOP_ON_REAL_FLAKE=1 E2E_BASELINE_LOCAL="$E2E_BASELINE_LOCAL" \
-          GRAPHDEN_E2E_PRIORITY_BASE="$base_sha" bb test-e2e ) || { echo "FAIL: e2e"; return 1; } ;;
+      if [ -n "${PRIORITY_BROWSER:-}" ] \
+         && [ "$(printf '%s\n' "$PRIORITY_BROWSER" | wc -l)" -eq "$(find "$wt/tools/browser-test" -maxdepth 1 -name 'edit-*.test.js' | wc -l)" ]; then
+        step "browser roster passed in related-test wave"
+        return 0
+      fi
+      step "bb test-e2e: remaining files"
+      # Retry-passes are credited with diagnostics; hard failures still stop
+      # at the failed file and preserve earlier browser checkpoints.
+      ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" WTQ_FLAKE_STRICT=1 E2E_BASELINE_LOCAL="$E2E_BASELINE_LOCAL" \
+          GRAPHDEN_E2E_PRIORITY_BASE="$base_sha" GRAPHDEN_E2E_EXCLUDE_FILES="${PRIORITY_BROWSER:-}" \
+          bb test-e2e ) || { echo "FAIL: e2e"; return 1; } ;;
     visual)
       step "bb test-visual"
       ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" bb test-visual ) || { echo "FAIL: visual"; return 1; } ;;
     integration)
-      if credit_remote_integration "$wt" "$base_sha" "$ci_sha"; then
+      if [ -z "${PRIORITY_INTEGRATION:-}" ] && credit_remote_integration "$wt" "$base_sha" "$ci_sha"; then
         step "integration: verified GitHub exact-SHA proof"
       else
-        step "bb test-integration"
-        ( cd "$wt" && bb test-integration ) || { echo "FAIL: integration"; return 1; }
+        step "bb test-integration: remaining namespaces"
+        ( cd "$wt" && GRAPHDEN_INTEGRATION_EXCLUDE="${PRIORITY_INTEGRATION:-}" bb test-integration ) \
+          || { echo "FAIL: integration"; return 1; }
       fi ;;
     fleet)
       step "bb test-fleet-e2e"
@@ -1595,12 +1633,24 @@ gate_suites() {
   echo "   paths saw no change are skipped visibly. Unrecognised -> everything.)"
 
   local base_sha ci_sha ci_receipt ci_expected stage stage_order priority="${WTQ_FIRST_STAGE:-}" entry manual_stage=""
+  local PRIORITY_INTEGRATION="" PRIORITY_BROWSER=""
+  local MANUAL_INTEGRATION="" MANUAL_BROWSER="" AUTO_INTEGRATION="" AUTO_BROWSER=""
   local -a manual_first=()
   IFS=',' read -r -a manual_first <<< "${WTQ_FIRST_TESTS:-}"
   for entry in "${manual_first[@]}"; do
     case "$entry" in
       integration:*) manual_stage=integration; priority=$manual_stage; break ;;
       browser:*) manual_stage=e2e; priority=$manual_stage; break ;;
+    esac
+  done
+  for entry in "${manual_first[@]}"; do
+    case "$entry" in
+      integration:*)
+        [ -z "$MANUAL_INTEGRATION" ] || MANUAL_INTEGRATION+=$'\n'
+        MANUAL_INTEGRATION+="${entry#integration:}" ;;
+      browser:*)
+        [ -z "$MANUAL_BROWSER" ] || MANUAL_BROWSER+=$'\n'
+        MANUAL_BROWSER+="${entry#browser:}" ;;
     esac
   done
   local stage_credits="" image_credit=0 reused=0
@@ -1621,6 +1671,21 @@ gate_suites() {
   ( cd "$wt" && bb scripts/ci_gate.clj expect "$ci_expected" "$ci_sha" "$base_sha" "${WTQ_CI_SKIP:-}" ) \
     || { echo "FAIL: cannot calculate required CI checks"; return 1; }
 
+  if [ "$NEED_INTEGRATION" = 1 ]; then
+    PRIORITY_INTEGRATION="$(cd "$wt" && bb scripts/ci_priority.clj integration "$base_sha")" \
+      || { echo "FAIL: cannot select related integration tests"; return 1; }
+  fi
+  if [ "$NEED_E2E" = 1 ]; then
+    PRIORITY_BROWSER="$(cd "$wt" && bb scripts/ci_priority.clj browser "$base_sha")" \
+      || { echo "FAIL: cannot select related browser tests"; return 1; }
+  fi
+  [ "$NEED_INTEGRATION" = 1 ] || MANUAL_INTEGRATION=""
+  [ "$NEED_E2E" = 1 ] || MANUAL_BROWSER=""
+  AUTO_INTEGRATION="$(awk 'NR==FNR {manual[$0]=1; next} !manual[$0]' \
+    <(printf '%s\n' "$MANUAL_INTEGRATION") <(printf '%s\n' "$PRIORITY_INTEGRATION"))"
+  AUTO_BROWSER="$(awk 'NR==FNR {manual[$0]=1; next} !manual[$0]' \
+    <(printf '%s\n' "$MANUAL_BROWSER") <(printf '%s\n' "$PRIORITY_BROWSER"))"
+
   if [ "$NEED_BUILD" = 1 ] || [ "$NEED_E2E" = 1 ] \
      || [ "$NEED_FLEET" = 1 ] || [ "$NEED_VISUAL" = 1 ]; then
     stages+=(build)
@@ -1629,6 +1694,7 @@ gate_suites() {
   # the same verified image. Run the short visual suite first so a changed
   # screenshot cannot fail only after the long browser roster.
   [ "$NEED_VISUAL" = 1 ] && stages+=(visual)
+  if [ -n "$PRIORITY_INTEGRATION" ] || [ -n "$PRIORITY_BROWSER" ]; then stages+=(priority); fi
   [ "$NEED_E2E" = 1 ] && stages+=(e2e)
   [ "$NEED_INTEGRATION" = 1 ] && stages+=(integration)
   [ "$NEED_FLEET" = 1 ] && stages+=(fleet)
@@ -1691,6 +1757,8 @@ gate_suites() {
           fi ;;
         e2e|visual|fleet)
           [ "$image_credit" = 1 ] && reused=1 ;;
+        priority)
+          if [ -z "$PRIORITY_BROWSER" ] || [ "$image_credit" = 1 ]; then reused=1; fi ;;
         integration) reused=1 ;;
       esac
     fi
@@ -1707,7 +1775,7 @@ gate_suites() {
     # An E2E roster leaves enough time for the independent GitHub CI to
     # finish before integration. A resumed browser stage can reattach to its
     # durable request instead of dispatching a second run.
-    if [ "$stage" = e2e ]; then
+    if [ "$stage" = e2e ] && [ -z "$PRIORITY_INTEGRATION" ]; then
       start_remote_integration_proof "$wt" "$base_sha" "$ci_sha"
     fi
     (cd "$wt" && bb scripts/ci_resume_cli.clj mark stages "$GRAPHDEN_RESUME_OUT.stages.edn" "$stage" pending) || return 1
@@ -1730,7 +1798,12 @@ gate_suites() {
     if [ "${#WTQ_PROGRESS_MEMBERS[@]}" -gt 0 ]; then
       WTQ_FAILURE_RECEIPT="$GRAPHDEN_RESUME_OUT" record_failed_stage "$stage" "$base_sha" "${WTQ_PROGRESS_MEMBERS[@]}"
     fi
+    WTQ_STAGE_ABORT=0
     if ! run_gate_stage "$stage" "$wt" "$base_sha" "$ci_receipt" "$ci_expected" "$ci_sha"; then
+      if [ "$WTQ_STAGE_ABORT" = 1 ]; then
+        (cd "$wt" && bb scripts/ci_resume_cli.clj mark stages "$GRAPHDEN_RESUME_OUT.stages.edn" "$stage" pending) || return 1
+        return 3
+      fi
       (cd "$wt" && bb scripts/ci_resume_cli.clj mark stages "$GRAPHDEN_RESUME_OUT.stages.edn" "$stage" failed) || return 1
       echo "WTQ_FAILED_STAGE=$stage"
       return 1

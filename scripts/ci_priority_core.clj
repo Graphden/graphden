@@ -284,7 +284,33 @@
                              (map (comp str fs/file-name))
                              sort
                              vec)
-          graph (cached-browser-source-graph)]
+          graph (cached-browser-source-graph)
+          editor-js? #(and (str/starts-with? % "resources/packages/app/editor/")
+                           (str/ends-with? % ".js"))
+          changed-editor-js (sort (filter editor-js? changed))
+          changed-other (sort (remove editor-js? changed))
+          source-consumers (fn [path]
+                             (cond
+                               (re-matches #"tools/browser-test/edit-[^/]+\.test\.js" path)
+                               []
+
+                               (re-matches #"tools/browser-test/[^/]+\.js" path)
+                               (browser-local-consumers browser-files
+                                                        #{(str (fs/file-name path))})
+
+                               (str/starts-with? path "resources/packages/app/editor/")
+                               (let [basename (str (fs/file-name path))
+                                     stem (-> basename
+                                              (str/replace #"^editor-" "")
+                                              (str/replace #"\.(js|css)$" "")
+                                              (str/replace #"-graph$" ""))
+                                     prefix (str "edit-" stem "-")]
+                                 (concat (filter #(or (= % (str "edit-" stem ".test.js"))
+                                                      (str/starts-with? % prefix))
+                                                 browser-files)
+                                         (browser-source-consumers browser-files graph path)))
+
+                               :else (browser-source-consumers browser-files graph path)))]
       (->> (concat
              (->> changed
                   sort
@@ -292,30 +318,11 @@
                   (map (comp str fs/file-name)))
              (mapcat #(precise-component-consumers browser-files graph %)
                      (sort changed))
+             ;; Direct editor modules are stronger evidence than generic API
+             ;; roots or shared package graphs, which often reach every file.
+             (mapcat source-consumers changed-editor-js)
              (mapcat #(browser-api-consumers browser-files %) (sort changed))
-             (mapcat (fn [path]
-                       (cond
-                         (re-matches #"tools/browser-test/edit-[^/]+\.test\.js" path)
-                         []
-
-                         (re-matches #"tools/browser-test/[^/]+\.js" path)
-                         (browser-local-consumers browser-files
-                                                  #{(str (fs/file-name path))})
-
-                         (str/starts-with? path "resources/packages/app/editor/")
-                         (let [basename (str (fs/file-name path))
-                               stem (-> basename
-                                        (str/replace #"^editor-" "")
-                                        (str/replace #"\.(js|css)$" "")
-                                        (str/replace #"-graph$" ""))
-                               prefix (str "edit-" stem "-")]
-                           (concat (filter #(or (= % (str "edit-" stem ".test.js"))
-                                                (str/starts-with? % prefix))
-                                           browser-files)
-                                   (browser-source-consumers browser-files graph path)))
-
-                         :else (browser-source-consumers browser-files graph path)))
-                     (sort changed)))
+             (mapcat source-consumers changed-other))
            distinct
            (filter #(fs/exists? (str "tools/browser-test/" %)))
            vec))))
@@ -559,6 +566,22 @@
         []))))
 
 
+(def ^:private automatic-early-limit 20)
+
+
+(defn- bounded-layers
+  "Keep the highest-ranked automatic namespaces in the early wave. The gate
+   runs the untouched full roster as the exact complement."
+  [layers limit]
+  (loop [remaining limit, result [], layers layers]
+    (if (or (zero? remaining) (empty? layers))
+      result
+      (let [selected (vec (take remaining (first layers)))]
+        (recur (- remaining (count selected))
+               (conj result selected)
+               (rest layers))))))
+
+
 (defn unit-layers
   [changed]
   (test-layers changed :unit))
@@ -597,7 +620,9 @@
                                     (when (seq remaining) remaining)))
                                 automatic))))
          unit-groups (layers :unit (unit-layers changed))
-         integration-groups (layers :integration (integration-layers changed))]
+         integration-groups (layers :integration
+                                    (bounded-layers (integration-layers changed)
+                                                    automatic-early-limit))]
      {:runtime (vec (distinct (concat (map #(str "tools/runtime-test/" %)
                                            (get manual :runtime []))
                                       (runtime-first changed))))
@@ -606,4 +631,5 @@
       :integration (vec (mapcat identity integration-groups))
       :integration-layers integration-groups
       :browser (vec (distinct (concat (get manual :browser [])
-                                      (browser-first changed))))})))
+                                      (take automatic-early-limit
+                                            (browser-first changed)))))})))

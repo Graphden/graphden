@@ -45,6 +45,7 @@
     [clojure.string :as str]
     [clojure.test :as t]
     [kaocha.plugin :refer [defplugin]]
+    [kaocha.plugin.capture-output :as capture]
     [kaocha.plugin.priority :as priority]
     [kaocha.result :as result]
     [kaocha.testable :as testable]
@@ -322,7 +323,7 @@
   (let [test (cond-> test
                (and load-error? (not (::testable/load-error test)))
                (assoc ::testable/skip true))
-        progress *integration-progress*
+        progress (when-not (::testable/skip test) *integration-progress*)
         label (or (some-> (:kaocha.testable/id test) name) "unknown-namespace")]
     (when progress (swap! progress update :active conj label))
     (try
@@ -336,7 +337,7 @@
                                             (update :failed + failed)
                                             (update :done-ns inc)
                                             (update :active disj label))))]
-            (println (progress-line state))))
+            (capture/bypass (println (progress-line state)))))
         result)
       (catch Exception error
         (when progress
@@ -344,7 +345,8 @@
                                         (-> state
                                             (update :done-ns inc)
                                             (update :active disj label))))]
-            (println (str (progress-line state) "; runner error=" label))))
+            (capture/bypass
+              (println (str (progress-line state) "; runner error=" label)))))
         (throw error)))))
 
 
@@ -495,9 +497,10 @@
         progress (when (= :integration suite-id)
                    (atom {:passed 0 :failed 0
                           :total (transduce (map planned-var-count) + 0 children)
-                          :done-ns 0 :total-ns (count children)
+                          :done-ns 0 :total-ns (count (remove ::testable/skip children))
                           :active #{}}))
-        _ (when progress (println (progress-line @progress)))
+        _ (when progress
+            (capture/bypass (println (progress-line @progress))))
         results (binding [*integration-progress* progress]
                   (if (seq layers)
                     (run-children-layered children test-plan n layers suite-id)

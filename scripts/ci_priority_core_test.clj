@@ -17,6 +17,26 @@
               (priority/runtime-first changed)))))
 
 
+(deftest broad-dependencies-leave-a-real-second-wave
+  (let [changed #{"src/graphden/versioning/storage/resolution.clj"
+                  "resources/packages/app/editor-branches/fns.edn"
+                  "resources/packages/app/editor/editor-branch-context.js"}
+        manual {:browser ["edit-fn-versions-restore.test.js"]
+                :integration ["graphden.crud.branches-graph-test"]}
+        plan (priority/plan changed manual)]
+    (is (> (count (priority/integration-first changed)) 20))
+    (is (= 20 (count (:integration plan))))
+    (is (= "graphden.crud.branches-graph-test" (first (:integration plan))))
+    (is (= 21 (count (:browser plan)))
+        "the manual choice is additional to the bounded automatic wave")
+    (is (= "edit-fn-versions-restore.test.js" (first (:browser plan))))
+    (is (= "edit-account-menu-graph.test.js" (second (:browser plan)))
+        "direct editor consumers precede broad package and API matches")
+    (is (> (count (priority/browser-order changed)) (count (:browser plan))))
+    (is (= (count (:integration plan))
+           (count (distinct (:integration plan)))))))
+
+
 (deftest changed-browser-test-runs-first-but-unknown-editor-keeps-all
   (let [changed #{"tools/browser-test/edit-a11y-audit.test.js"}
         unknown #{"resources/packages/app/editor/components.css"}]

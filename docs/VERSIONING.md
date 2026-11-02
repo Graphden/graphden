@@ -638,6 +638,15 @@ shows metadata only; it does not claim to reconstruct an old graph or offer
 whole-graph restore. The storage read is paginated (maximum 100 groups per
 page) and checks visibility of the fn and branches before returning metadata.
 
+New graph version rows also carry `change-revision`: the first graph-epoch
+number assigned to their transaction under the semantic writer lock. All
+rows in that transaction share it, and revisions for one graph owner follow
+commit order. The history feed orders such groups by revision. Older rows
+without a revision remain visible as incomplete history; their timestamps
+cannot establish a coherent cross-entity snapshot. A revision by itself also
+does not record unversioned parent identities or the historical state of a
+branch merge, so the graph restore action is still unavailable.
+
 Consequence: two `:fn-execution` rows pointing at the same
 `:fn-version-id` can have produced different results if a binding
 changed in between. The history filter ("show me runs of the

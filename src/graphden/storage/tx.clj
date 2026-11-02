@@ -194,6 +194,7 @@
             (binding [jdbc-tx/*nested-tx* :ignore]
               (jdbc/with-transaction [conn ds]
                                      (let [root {:connection conn :change-id (random-uuid)
+                                                 :change-revision (atom nil)
                                                  :active? (atom true)
                                                  :owned? owned? :writer-scope (atom nil)}]
                                        (vreset! context root)

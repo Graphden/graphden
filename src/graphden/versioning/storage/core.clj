@@ -72,6 +72,8 @@
                :branch-id branch-id
                :change-id (or (:change-id tx/*transaction-context*)
                               (random-uuid))
+               :change-revision (some-> tx/*transaction-context*
+                                        :change-revision deref)
                :created-at timestamp
                ;; Server-stamped from the authenticated request scope.
                ;; The selected payload above prevents client spoofing.
@@ -89,7 +91,8 @@
    legitimate identity column on any versioned entity."
   [entity-name row]
   (let [{:keys [version-id-field]} (get res/entity-config entity-name)]
-    (cond-> (dissoc row :branch-id :change-id :created-at :deleted-at
+    (cond-> (dissoc row :branch-id :change-id :change-revision
+                    :created-at :deleted-at
                     :author-id :author-label)
       version-id-field (dissoc version-id-field))))
 
@@ -144,6 +147,12 @@
    that may not have rolled back."
   [base-storage entity-name write!]
   (let [v (epoch/bump! base-storage entity-name)]
+    ;; The first graph-epoch bump under this transaction's semantic writer
+    ;; lock orders its commit against other writes to the same owner. Later
+    ;; rows in this transaction share the revision even when they bump again.
+    (when-let [revision (and v (some-> tx/*transaction-context*
+                                       :change-revision))]
+      (compare-and-set! revision nil v))
     (try
       (write!)
       (catch Exception t

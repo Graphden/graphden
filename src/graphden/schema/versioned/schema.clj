@@ -537,6 +537,16 @@
 (def ^:private resource-override-version-change-id-field-uuid #uuid "50000000-0000-4000-8000-00000000000f")
 
 
+;; The first graph-epoch bump of a semantic writer transaction orders its
+;; commits for the same graph owner. Older rows and non-graph overrides lack
+;; this proof and must not be treated as exact historical snapshots.
+(def ^:private fn-version-change-revision-field-uuid #uuid "50000000-0000-4000-8000-000000000010")
+(def ^:private fn-slot-version-change-revision-field-uuid #uuid "50000000-0000-4000-8000-000000000011")
+(def ^:private binding-version-change-revision-field-uuid #uuid "50000000-0000-4000-8000-000000000012")
+(def ^:private binding-list-item-version-change-revision-field-uuid #uuid "50000000-0000-4000-8000-000000000013")
+(def ^:private resource-override-version-change-revision-field-uuid #uuid "50000000-0000-4000-8000-000000000014")
+
+
 ;; =============================================================================
 ;; Version-mirror derivation — ONE base declaration, no hand-kept copy
 ;; =============================================================================
@@ -686,6 +696,7 @@
       :created-at {:uuid fn-version-created-at-field-uuid
                    :type :timestamptz}
       :change-id {:uuid fn-version-change-id-field-uuid :type :uuid :nullable? true}
+      :change-revision {:uuid fn-version-change-revision-field-uuid :type :int :nullable? true}
       :author-id {:uuid fn-version-author-id-field-uuid :type :text :nullable? true}
       :author-label {:uuid fn-version-author-label-field-uuid :type :text :nullable? true}
       :deleted-at {:uuid fn-version-deleted-at-field-uuid
@@ -700,6 +711,7 @@
       :created-at {:uuid fn-slot-version-created-at-field-uuid
                    :type :timestamptz}
       :change-id {:uuid fn-slot-version-change-id-field-uuid :type :uuid :nullable? true}
+      :change-revision {:uuid fn-slot-version-change-revision-field-uuid :type :int :nullable? true}
       :author-id {:uuid fn-slot-version-author-id-field-uuid :type :text :nullable? true}
       :author-label {:uuid fn-slot-version-author-label-field-uuid :type :text :nullable? true}
       :deleted-at {:uuid fn-slot-version-deleted-at-field-uuid
@@ -714,6 +726,7 @@
       :created-at {:uuid binding-version-created-at-field-uuid
                    :type :timestamptz}
       :change-id {:uuid binding-version-change-id-field-uuid :type :uuid :nullable? true}
+      :change-revision {:uuid binding-version-change-revision-field-uuid :type :int :nullable? true}
       :author-id {:uuid binding-version-author-id-field-uuid :type :text :nullable? true}
       :author-label {:uuid binding-version-author-label-field-uuid :type :text :nullable? true}
       :deleted-at {:uuid binding-version-deleted-at-field-uuid
@@ -729,6 +742,7 @@
       :created-at {:uuid binding-list-item-version-created-at-field-uuid
                    :type :timestamptz}
       :change-id {:uuid binding-list-item-version-change-id-field-uuid :type :uuid :nullable? true}
+      :change-revision {:uuid binding-list-item-version-change-revision-field-uuid :type :int :nullable? true}
       :author-id {:uuid binding-list-item-version-author-id-field-uuid :type :text :nullable? true}
       :author-label {:uuid binding-list-item-version-author-label-field-uuid :type :text :nullable? true}
       :deleted-at {:uuid binding-list-item-version-deleted-at-field-uuid
@@ -744,6 +758,7 @@
       :created-at {:uuid resource-override-version-created-at-field-uuid
                    :type :timestamptz}
       :change-id {:uuid resource-override-version-change-id-field-uuid :type :uuid :nullable? true}
+      :change-revision {:uuid resource-override-version-change-revision-field-uuid :type :int :nullable? true}
       :author-id {:uuid resource-override-version-author-id-field-uuid :type :text :nullable? true}
       :author-label {:uuid resource-override-version-author-label-field-uuid :type :text :nullable? true}
       :deleted-at {:uuid resource-override-version-deleted-at-field-uuid
@@ -753,7 +768,8 @@
 (def ^:private framework-fields
   "The version-framework columns present on every mirror — excluded from
    `version-data-fields` (they are versioning plumbing, not entity data)."
-  #{:branch-id :change-id :created-at :deleted-at :author-id :author-label})
+  #{:branch-id :change-id :change-revision :created-at :deleted-at
+    :author-id :author-label})
 
 
 ;; =============================================================================

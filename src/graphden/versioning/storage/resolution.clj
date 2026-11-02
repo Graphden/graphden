@@ -217,7 +217,8 @@
    (the crud rollback replay hit exactly that once hard-deleted
    identities started being purged)."
   [version-record version-id-field]
-  (dissoc version-record :id :branch-id :change-id :created-at :deleted-at
+  (dissoc version-record :id :branch-id :change-id :change-revision
+          :created-at :deleted-at
           version-id-field))
 
 

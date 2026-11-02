@@ -853,10 +853,15 @@
                                                       {:binding-id (:id binding-row)}))]
         (is (uuid? (:change-id fn-version)))
         (is (= (:change-id fn-version) (:change-id binding-version)))
+        (is (pos-int? (:change-revision fn-version)))
+        (is (= (:change-revision fn-version)
+               (:change-revision binding-version)))
         (is (not (contains? (sp/read-entity storage :fn (:id f)) :change-id)))
+        (is (not (contains? (sp/read-entity storage :fn (:id f)) :change-revision)))
         (let [events (history/change-events storage (:id f) 10 0)]
           (is (= #{"fn" "binding"} (set (map :kind (:events events)))))
           (is (every? :has-change-id? (:events events)))
+          (is (every? :has-change-revision? (:events events)))
           (is (= 1 (count (set (map :change-id (:events events))))))
           (is (nil? (:next-offset events)))
           (is (every? #(not (contains? % :value)) (:events events))))
@@ -865,11 +870,15 @@
           (is (= 2 (get-in groups [:groups 0 :event-count])))
           (is (= "binding, fn" (get-in groups [:groups 0 :kinds])))
           (is (get-in groups [:groups 0 :has-change-id?])))
+        (is (get-in (history/change-groups storage (:id f) 10 0)
+                    [:groups 0 :has-change-revision?]))
         (sp/update-entity storage :binding (:id binding-row) {:value "after"})
         (let [versions (sp/query-entities base :binding-version
                                           {:binding-id (:id binding-row)})]
           (is (= 2 (count versions)))
-          (is (= 2 (count (set (map :change-id versions))))))
+          (is (= 2 (count (set (map :change-id versions)))))
+          (is (< (:change-revision binding-version)
+                 (apply max (map :change-revision versions)))))
         (let [first-page (history/change-events storage (:id f) 1 0)
               second-page (history/change-events storage (:id f) 1 1)]
           (is (= 1 (:next-offset first-page)))
@@ -883,10 +892,13 @@
         (sp/create-entity base :binding-version
                           (assoc binding-version :id (random-uuid)
                                  :created-at (java.time.Instant/now)
-                                 :change-id nil))
+                                 :change-id nil
+                                 :change-revision nil))
         (is (some (complement :has-change-id?)
                   (:events (history/change-events storage (:id f) 10 0))))
         (is (some (complement :has-change-id?)
+                  (:groups (history/change-groups storage (:id f) 10 0))))
+        (is (some (complement :has-change-revision?)
                   (:groups (history/change-groups storage (:id f) 10 0))))
         (is (= :history/invalid-page
                (:type (ex-data (try (history/change-events storage (:id f) 101 0)

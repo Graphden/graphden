@@ -14,30 +14,30 @@
 
 
 (def ^:private event-source-sql
-  (str "SELECT entity_kind, entity_id, branch_id, change_id, created_at, "
+  (str "SELECT entity_kind, entity_id, branch_id, change_id, change_revision, created_at, "
        "deleted_at, author_label FROM ("
-       "SELECT 'fn' AS entity_kind, id AS entity_id, branch_id, change_id, "
+       "SELECT 'fn' AS entity_kind, id AS entity_id, branch_id, change_id, change_revision, "
        "created_at, deleted_at, author_label FROM fn_version WHERE fn_id = ? "
        "UNION ALL "
-       "SELECT 'fn-slot', id, branch_id, change_id, created_at, deleted_at, "
+       "SELECT 'fn-slot', id, branch_id, change_id, change_revision, created_at, deleted_at, "
        "author_label FROM fn_slot_version WHERE fn_id = ? "
        "UNION ALL "
-       "SELECT 'binding', id, branch_id, change_id, created_at, deleted_at, "
+       "SELECT 'binding', id, branch_id, change_id, change_revision, created_at, deleted_at, "
        "author_label FROM binding_version WHERE fn_id = ? "
        "UNION ALL "
-       "SELECT 'list-item', v.id, v.branch_id, v.change_id, v.created_at, "
+       "SELECT 'list-item', v.id, v.branch_id, v.change_id, v.change_revision, v.created_at, "
        "v.deleted_at, v.author_label FROM binding_list_item_version v "
        "JOIN binding b ON b.id = v.binding_id WHERE b.fn_id = ?"
        ") e WHERE branch_id IN (%s) "))
 
 
 (def ^:private event-order-sql
-  "ORDER BY created_at DESC, entity_id DESC LIMIT ? OFFSET ?")
+  "ORDER BY change_revision DESC NULLS LAST, created_at DESC, entity_id DESC LIMIT ? OFFSET ?")
 
 
 (def ^:private group-order-sql
   (str "GROUP BY COALESCE(change_id, entity_id), change_id "
-       "ORDER BY created_at DESC, group_id DESC LIMIT ? OFFSET ?"))
+       "ORDER BY change_revision DESC NULLS LAST, created_at DESC, group_id DESC LIMIT ? OFFSET ?"))
 
 
 (defn- page-params
@@ -55,23 +55,27 @@
    :version-id (str (:entity_id row))
    :branch-id (some-> (:branch_id row) str)
    :change-id (some-> (:change_id row) str)
+   :change-revision (:change_revision row)
    :created-at (str (:created_at row))
    :deleted? (some? (:deleted_at row))
    :author-label (:author_label row)
-   :has-change-id? (some? (:change_id row))})
+   :has-change-id? (some? (:change_id row))
+   :has-change-revision? (some? (:change_revision row))})
 
 
 (defn- group-view
   [row]
   {:group-id (str (:group_id row))
    :change-id (some-> (:change_id row) str)
+   :change-revision (:change_revision row)
    :created-at (str (:created_at row))
    :branch-id (some-> (:branch_id row) str)
    :kinds (:kinds row)
    :event-count (:event_count row)
    :deleted? (:deleted row)
    :author-label (:author_label row)
-   :has-change-id? (some? (:change_id row))})
+   :has-change-id? (some? (:change_id row))
+   :has-change-revision? (some? (:change_revision row))})
 
 
 (defn- visible-page
@@ -114,7 +118,8 @@
              (visible-page
                storage fn-id limit offset
                #(str "SELECT COALESCE(change_id, entity_id) AS group_id, "
-                     "change_id, MAX(created_at) AS created_at, "
+                     "change_id, MAX(change_revision) AS change_revision, "
+                     "MAX(created_at) AS created_at, "
                      "MIN(branch_id::text) AS branch_id, "
                      "STRING_AGG(DISTINCT entity_kind, ', ' ORDER BY entity_kind) AS kinds, "
                      "COUNT(*) AS event_count, "

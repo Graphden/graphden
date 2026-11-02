@@ -79,13 +79,13 @@ Keeps decisive graph reads, validation and all related writes in one database tr
 :PROPERTIES:
 :CUSTOM_ID: versioning/entity-config
 :FILE: src/graphden/versioning/storage/resolution.clj
-:LINE: 147
+:LINE: 169
 :MINS: 3.1
 :END:
 
 Lists the versioned entities: ~:fn~, ~:fn-slot~, ~:binding~, ~:binding-list-item~, and ~:resource-override~. For each entity it distinguishes identity fields in the base table from ~version-data-fields~ stored in [[file:glossary.org::#term/branch-view][version rows]]. Resolution and writes use this configuration.
 
-- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(def entity-config][src/graphden/versioning/storage/resolution.clj:147]]
+- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(def entity-config][src/graphden/versioning/storage/resolution.clj:169]]
 - same file :: [[file:versioning.org::#versioning/resolve-version][resolve-version]], [[file:versioning.org::#versioning/collect-branch-chain][collect-branch-chain]], [[file:versioning.org::#versioning/resolve-version-from-cache][resolve-version-from-cache]]
 
 * 7. derive-version-fields
@@ -104,39 +104,39 @@ Derives version-table fields from the base entity declarations. Identity-level f
 :PROPERTIES:
 :CUSTOM_ID: versioning/resolve-version
 :FILE: src/graphden/versioning/storage/resolution.clj
-:LINE: 300
+:LINE: 322
 :MINS: 1.6
 :END:
 
 Resolves one entity as visible on a branch by reading and combining its version candidates. The selected version is returned, or nil when a [[file:glossary.org::#term/tombstone][deletion marker]] wins.
 
-- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(defn resolve-version][src/graphden/versioning/storage/resolution.clj:300]]
+- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(defn resolve-version][src/graphden/versioning/storage/resolution.clj:322]]
 - same file :: [[file:versioning.org::#versioning/entity-config][entity-config]], [[file:versioning.org::#versioning/collect-branch-chain][collect-branch-chain]], [[file:versioning.org::#versioning/resolve-version-from-cache][resolve-version-from-cache]]
 
 * 9. collect-branch-chain
 :PROPERTIES:
 :CUSTOM_ID: versioning/collect-branch-chain
 :FILE: src/graphden/versioning/storage/resolution.clj
-:LINE: 502
+:LINE: 524
 :MINS: 1.9
 :END:
 
 Follows ~:base-branch-id~ from a branch to its parent and root, caching the resulting chain. Version resolution and [[file:glossary.org::#term/invalidation][cache invalidation]] use it to determine which branches can contribute visible data. This is branch ancestry, separate from [[file:glossary.org::#term/inheritance][function inheritance]] through ~:parent-ids~.
 
-- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(defn collect-branch-chain][src/graphden/versioning/storage/resolution.clj:502]]
+- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(defn collect-branch-chain][src/graphden/versioning/storage/resolution.clj:524]]
 - same file :: [[file:versioning.org::#versioning/entity-config][entity-config]], [[file:versioning.org::#versioning/resolve-version][resolve-version]], [[file:versioning.org::#versioning/resolve-version-from-cache][resolve-version-from-cache]]
 
 * 10. resolve-version-from-cache
 :PROPERTIES:
 :CUSTOM_ID: versioning/resolve-version-from-cache
 :FILE: src/graphden/versioning/storage/resolution.clj
-:LINE: 693
+:LINE: 741
 :MINS: 1.4
 :END:
 
 Resolves cached version candidates along a branch's ancestry. At each level it considers locally written and merged versions using their effective timestamps. Single-entity and whole-graph resolution share this algorithm.
 
-- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(defn- resolve-version-from-cache][src/graphden/versioning/storage/resolution.clj:693]]
+- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(defn- resolve-version-from-cache][src/graphden/versioning/storage/resolution.clj:741]]
 - same file :: [[file:versioning.org::#versioning/entity-config][entity-config]], [[file:versioning.org::#versioning/resolve-version][resolve-version]], [[file:versioning.org::#versioning/collect-branch-chain][collect-branch-chain]]
 
 * 11. effective-branch-local?

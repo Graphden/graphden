@@ -42,6 +42,7 @@
    pre-load covers both."
   {:clj-kondo/config '{:linters {:unresolved-symbol {:level :off}}}}
   (:require
+    [clojure.string :as str]
     [clojure.test :as t]
     [kaocha.plugin :refer [defplugin]]
     [kaocha.plugin.priority :as priority]
@@ -284,13 +285,67 @@
         isolation-vars))
 
 
+(def ^:dynamic *integration-progress* nil)
+
+
+(defn- planned-var-count
+  [testable]
+  (cond
+    (::testable/skip testable) 0
+    (= :kaocha.type/var (:kaocha.testable/type testable)) 1
+    :else (transduce (map planned-var-count) + 0
+                     (:kaocha.test-plan/tests testable))))
+
+
+(defn- completed-var-counts
+  [testable]
+  (if (= :kaocha.type/var (:kaocha.testable/type testable))
+    (if (pos? (::result/count testable 0))
+      (if (result/failed? testable) {:passed 0 :failed 1}
+          {:passed 1 :failed 0})
+      {:passed 0 :failed 0})
+    (reduce (fn [counts child]
+              (merge-with + counts (completed-var-counts child)))
+            {:passed 0 :failed 0}
+            (:kaocha.result/tests testable))))
+
+
+(defn- progress-line
+  [{:keys [passed failed total done-ns total-ns active]}]
+  (str "integration progress: " passed "/" total " passed, " failed
+       " failed, " done-ns "/" total-ns " namespaces; active="
+       (if (seq active) (str/join "," (sort active)) "none")))
+
+
 (defn- run-one
   [test test-plan load-error?]
   (let [test (cond-> test
                (and load-error? (not (::testable/load-error test)))
-               (assoc ::testable/skip true))]
-    (with-bindings (resolve-isolation-vars)
-      (testable/run-testable test test-plan))))
+               (assoc ::testable/skip true))
+        progress *integration-progress*
+        label (or (some-> (:kaocha.testable/id test) name) "unknown-namespace")]
+    (when progress (swap! progress update :active conj label))
+    (try
+      (let [result (with-bindings (resolve-isolation-vars)
+                     (testable/run-testable test test-plan))]
+        (when progress
+          (let [{:keys [passed failed]} (completed-var-counts result)
+                state (swap! progress (fn [state]
+                                        (-> state
+                                            (update :passed + passed)
+                                            (update :failed + failed)
+                                            (update :done-ns inc)
+                                            (update :active disj label))))]
+            (println (progress-line state))))
+        result)
+      (catch Throwable error
+        (when progress
+          (let [state (swap! progress (fn [state]
+                                        (-> state
+                                            (update :done-ns inc)
+                                            (update :active disj label))))]
+            (println (str (progress-line state) "; runner error=" label))))
+        (throw error)))))
 
 
 (defn- skipped-indexed
@@ -434,16 +489,27 @@
         suite-id (:kaocha.testable/id testable)
         layers (priority/namespace-layers encoded suite-id)
         hints (priority/namespace-hints encoded suite-id)
-        results (if (seq layers)
-                  (run-children-layered children test-plan n layers suite-id)
-                  (if (> n 1)
-                    (run-children-mixed children test-plan n hints)
-                    (let [{:keys [priority remaining]} (priority/indexed-order children hints)
-                          ordered (concat priority remaining)
-                          results (testable/run-testables (mapv second ordered) test-plan)]
-                      (->> (map vector (map first ordered) results)
-                           (sort-by first)
-                           (mapv second)))))
+        progress (when (= :integration suite-id)
+                   (atom {:passed 0 :failed 0
+                          :total (transduce (map planned-var-count) + 0 children)
+                          :done-ns 0 :total-ns (count children)
+                          :active #{}}))
+        _ (when progress (println (progress-line @progress)))
+        results (binding [*integration-progress* progress]
+                  (if (seq layers)
+                    (run-children-layered children test-plan n layers suite-id)
+                    (if (> n 1)
+                      (run-children-mixed children test-plan n hints)
+                      (let [{:keys [priority remaining]} (priority/indexed-order children hints)
+                            ordered (concat priority remaining)
+                            results (if progress
+                                      (mapv second
+                                            (run-indexed-serial ordered test-plan
+                                                                (some ::testable/load-error children)))
+                                      (testable/run-testables (mapv second ordered) test-plan))]
+                        (->> (map vector (map first ordered) results)
+                             (sort-by first)
+                             (mapv second))))))
         testable (-> testable
                      (dissoc :kaocha.test-plan/tests)
                      (assoc :kaocha.result/tests results))]

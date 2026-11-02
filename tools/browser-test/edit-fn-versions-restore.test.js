@@ -215,14 +215,21 @@ async function putDescription(page, fnId, desc) {
     const review = await graphDialog;
     assert(review.message().includes('description: v1-seed → v2-mid'),
            'graph restore previews the changed field values');
+    const commitResponse = page.waitForResponse((response) =>
+      response.request().method() === 'POST'
+      && response.url().includes('/history/restore'), {timeout: 15000});
     await review.accept();
+    const committed = await commitResponse;
+    const commitBody = await committed.json();
+    assert(committed.ok() && commitBody.status === 'committed',
+           'graph restore commit succeeded: HTTP ' + committed.status()
+           + ' ' + JSON.stringify(commitBody));
     assert(await waitUntil(page, async (id) => {
       const response = await fetch('/api/graph/entities?scope=subtree&root-id=' + id);
       const body = await response.json();
       return body.fns.find((f) => f.id === id)?.description === 'v2-mid';
     }, fn.id, 15000), 'graph restore landed');
-    assert(await page.locator('#gd-undo-toast').isVisible(),
-           'graph restore offers Undo immediately');
+    await page.locator('#gd-undo-toast').waitFor({state: 'visible', timeout: 15000});
     assert(await page.evaluate(() => gdUndoLast()), 'Undo restores the prior graph revision');
     assert(await waitUntil(page, async (id) => {
       const response = await fetch('/api/graph/entities?scope=subtree&root-id=' + id);

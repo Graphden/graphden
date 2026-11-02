@@ -199,12 +199,44 @@
           :revision :_history-restore-commit-revision
           :expected-current :_history-restore-commit-token}}
 
+  {:name :_history-restore-commit-status
+   :parent :get
+   :args {:coll :_history-restore-commit-loaded
+          :key {:value :status} :default nil}}
+
   {:name :_history-restore-commit-conflict?
    :parent :equal?
-   :args {:a {:parent :get
-              :args {:coll :_history-restore-commit-loaded
-                     :key {:value :status} :default nil}}
+   :args {:a :_history-restore-commit-status
           :b {:value :conflict}}}
+
+  {:name :_history-restore-commit-committed?
+   :parent :equal?
+   :args {:a :_history-restore-commit-status
+          :b {:value :committed}}}
+
+  {:name :_history-restore-commit-payload
+   :parent :assoc
+   :args {:map {:value {}} :key {:value :id}
+          :value :_history-diff-fn-id}}
+
+  {:name :_history-restore-commit-invalidate
+   :parent :invalidate-after-write
+   :args {:entity-type {:value "fn"}
+          :entity-data :_history-restore-commit-payload}}
+
+  {:name :_history-restore-commit-notify
+   :parent :notify-after-write
+   :args {:entity-type {:value "fn"} :op {:value "write"}
+          :entity-data :_history-restore-commit-payload}}
+
+  {:name :_history-restore-commit-fresh
+   :parent :if
+   :args {:test :_history-restore-commit-committed?
+          :then {:parent :do
+                 :args {:steps [:_history-restore-commit-invalidate
+                                :_history-restore-commit-notify
+                                :_history-restore-commit-loaded]}}
+          :else :_history-restore-commit-loaded}}
 
   {:name :_history-restore-commit-success
    :parent :if
@@ -213,7 +245,7 @@
                  :args {:map {:parent :assert-some
                               :args {:value :_history-restore-commit-loaded}}
                         :key {:value :http-status} :value {:value 409}}}
-          :else :_history-restore-commit-loaded}}
+          :else :_history-restore-commit-fresh}}
 
   {:name :_history-restore-commit-envelope
    :parent :if

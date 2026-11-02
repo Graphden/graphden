@@ -608,11 +608,12 @@
                             [version-id-field :branch-id]))
          ;; Phase 2: merge source branches — full history (small slice).
          source-versions (if (seq source-branch-ids)
-                           (sp/query-entities
-                             base-storage version-entity
-                             (merge entity-where
-                                    {:branch-id (vec source-branch-ids)})
-                             (when as-of-revision {:limit 10001}))
+                           (let [where (merge entity-where
+                                              {:branch-id (vec source-branch-ids)})]
+                             (if as-of-revision
+                               (sp/query-entities base-storage version-entity where
+                                                  {:limit 10001})
+                               (sp/query-entities base-storage version-entity where)))
                            [])
          _ (when (and as-of-revision
                       (or (> (count chain-versions) 10000)

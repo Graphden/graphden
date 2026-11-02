@@ -130,13 +130,13 @@ Follows ~:base-branch-id~ from a branch to its parent and root, caching the resu
 :PROPERTIES:
 :CUSTOM_ID: versioning/resolve-version-from-cache
 :FILE: src/graphden/versioning/storage/resolution.clj
-:LINE: 741
+:LINE: 742
 :MINS: 1.4
 :END:
 
 Resolves cached version candidates along a branch's ancestry. At each level it considers locally written and merged versions using their effective timestamps. Single-entity and whole-graph resolution share this algorithm.
 
-- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(defn- resolve-version-from-cache][src/graphden/versioning/storage/resolution.clj:741]]
+- source :: [[file:../../../src/graphden/versioning/storage/resolution.clj::(defn- resolve-version-from-cache][src/graphden/versioning/storage/resolution.clj:742]]
 - same file :: [[file:versioning.org::#versioning/entity-config][entity-config]], [[file:versioning.org::#versioning/resolve-version][resolve-version]], [[file:versioning.org::#versioning/collect-branch-chain][collect-branch-chain]]
 
 * 11. effective-branch-local?

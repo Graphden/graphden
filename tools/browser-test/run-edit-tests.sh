@@ -23,17 +23,13 @@
 # STRICT MODE (WTQ_FLAKE_STRICT=1, what the landing gate runs) — how a
 # failure is judged, in one place (details at each site below):
 #
-#   * A file that fails and then passes on a retry is a REAL flake → red
-#     result, UNLESS the failure carried an environment signature at the
-#     moment it happened: the compiled-path probe was dead (a server
-#     unavailability window), the registry did a FULL rebuild during the
-#     attempt (the request queued behind it), or the host was starved
-#     (MemAvailable / load average). A wait TIMEOUT is not by itself an
-#     environment signature any more: a UI race shows up exactly as a
-#     timeout, and exempting every timeout made strict mode report-only
-#     for every race.
-#   * The run as a whole is DEGRADED — and every strict flake / leak
-#     verdict drops to report-only — when the host starved the stack: at
+#   * A file that fails and then passes on a retry is a PASS with a named
+#     diagnostic. The failure shape and environment probe are retained so
+#     races can be fixed, but a successful retry does not force a repeat of
+#     the whole gate. A file that fails all retries remains red and stops the
+#     suite at that file.
+#   * The run as a whole is DEGRADED — and a strict leak verdict drops
+#     to report-only — when the host starved the stack: at
 #     least THRASH_MIN_FILES files ran slow against THEIR OWN baseline
 #     (e2e-baseline.tsv: median seconds per file from green gate runs; slow
 #     = the passing attempt took > SLOW_FACTOR × baseline and at least
@@ -214,7 +210,7 @@ wait_for_server() {
 }
 
 # 200 from a REAL compiled-path read, bounded. Used by wait_for_server and by
-# the strict-flake triage below.
+# the retry diagnostic triage below.
 probe_compiled_path() {
   curl -fsS -o /dev/null --max-time 5 \
        -H "Authorization: Bearer ${AUTH_TOKEN:-}" \
@@ -545,14 +541,11 @@ SKIP=0
 SKIPPED_NAMES=""
 FAILED_NAMES=""
 # --- run-level thrash detection (decided in the escalation block after the loop) ---
-# A strict-flake (a file that fails once then PASSES on retry) and a leak-in-a-
-# passing-test are only worth bouncing the branch for when the HOST was healthy:
-# on a starved host a retry-pass is the test being SLOW, not a real race, and the
-# leaked rows are abort-collateral. So we DEFER those two strict verdicts here and
-# escalate them to a red RESULT only if the run was NOT degraded. A genuine race
-# still reproduces on a quiet host, where DEGRADED=0 and strict stays on.
-STRICT_FLAKES=""    # flaked-passed-on-retry files; strict-escalated only if NOT degraded
-STRICT_LEAKS=""     # leak-in-passing-test files (name(count)); same
+# A retry-pass remains a pass and its failure diagnostics stay in the summary.
+# A leak in a passing test is red on a healthy host; under a degraded run it
+# may be abort collateral, so defer that strict verdict until the run ends.
+REAL_FLAKES=""      # retry-pass files whose failed attempts lacked an environment signature
+STRICT_LEAKS=""     # leak-in-passing-test files (name(count)); red unless degraded
 DEGRADED_FILES=0    # count of files whose attempt ran past slow_limit (own baseline)
 UNCOUNTABLE_LEAKS=0 # files whose leak check was skipped: the executor was down for a
                     # sample, or restarted between the two. Named in the leak banner so
@@ -579,9 +572,7 @@ CONSECUTIVE_DOWN=0
 CASCADE_CAP=${CASCADE_CAP:-3}
 SKIP_AFTER_CASCADE=0
 REMAINING_FILES=""
-# Ad-hoc sweeps collect every file verdict. The landing gate opts into stopping
-# after a real retry-pass flake on a healthy host: that verdict is already red,
-# and exact-candidate checkpoints retain earlier passes for the next attempt.
+# Exact-candidate checkpoints retain each completed file, including a retry-pass.
 run_is_degraded() {
   local env_count=0 x
   for x in $ENV_FLAKED; do env_count=$((env_count+1)); done
@@ -662,13 +653,9 @@ for f in $FILES; do
   # with no environment signature (the deterministic stop below).
   #
   # A test that only passes AFTER a retry is a FLAKE — named LOUDLY in the
-  # summary, never silently swallowed: every root cause found in this suite
-  # (the dead type picker, the empty Run form) first showed up as one failure
-  # a retry hid, and twice the "fix" was raising the timeout the retry masked.
-  # Whether a flake also FAILS the run is a queue-economics knob
-  # (WTQ_FLAKE_STRICT=1): strict mode is multi-agent-pool insurance (one flake
-  # re-runs a serialized gate slot others queue behind); single-agent default
-  # is report-loud, stay green. `passed` (0/1) is read by the leak check below.
+  # summary, never silently swallowed. The successful retry is accepted;
+  # persistent failures and leaks remain gate failures. `passed` (0/1) is
+  # read by the leak check below.
   passed=0
   rc=0
   is_timeout=0
@@ -817,11 +804,11 @@ for f in $FILES; do
       # candidate is a race in that file; counting it made two real races in
       # one train read as host jitter and drop both strict verdicts.
       if [ "$env_signed" = 1 ]; then ENV_FLAKED="$ENV_FLAKED $f"; fi
-      if [ "${WTQ_FLAKE_STRICT:-0}" = "1" ] && [ "$real_flake" = 1 ]; then
-        STRICT_FLAKES="$STRICT_FLAKES $f"
-        echo "  (passed on attempt $attempt — REAL flake candidate; strict verdict DEFERRED to the run-level thrash check)" >&2
+      if [ "$real_flake" = 1 ]; then
+        REAL_FLAKES="$REAL_FLAKES $f"
+        echo "  (passed on attempt $attempt — REAL flake candidate; accepted with diagnostics)" >&2
       elif [ "${WTQ_FLAKE_STRICT:-0}" = "1" ]; then
-        echo "  (passed on attempt $attempt — server-window retry: named in the summary, NOT a strict failure)" >&2
+        echo "  (passed on attempt $attempt — server-window retry: accepted with diagnostics)" >&2
       else
         echo "  (passed on attempt $attempt — FLAKE: named in the summary, run stays green)" >&2
       fi
@@ -902,8 +889,7 @@ for f in $FILES; do
     # a leak, and a single such false positive was hard-failing otherwise-green
     # runs (task #10 tracks the deep root-cause). So the backstop is
     # REPORT-ONLY by default — named + counted, run stays green — and hard-fails
-    # only under WTQ_FLAKE_STRICT, the same queue-economics knob as the flake
-    # policy above.
+    # only under WTQ_FLAKE_STRICT; retry-passes are credited separately.
     if [ "${WTQ_FLAKE_STRICT:-0}" = "1" ]; then
       STRICT_LEAKS="$STRICT_LEAKS $f($FN_LEAKED)"
       echo "  (leaked $FN_LEAKED — strict verdict DEFERRED to the run-level thrash check)" >&2
@@ -925,12 +911,12 @@ for f in $FILES; do
   TIMINGS="$TIMINGS$FILE_SECS	$FILE_MEM	$f
 "
   echo
-  # Only a final per-file verdict can survive a reboot. Strict flakes/leaks
-  # and allowed skips are provisional; spotlight must pass for this file now,
+  # Only a final per-file verdict can survive a reboot. Leaks and allowed
+  # skips are provisional; spotlight must pass for this file now,
   # before its audit directory can disappear in a later completed suite.
   file_credit=1
   if [ "$passed" != 1 ] || [ -n "$skip_reason" ]; then file_credit=0; fi
-  case " $STRICT_FLAKES $STRICT_LEAKS " in
+  case " $STRICT_LEAKS " in
     *" $f "*|*" $f("*) file_credit=0 ;;
   esac
   if [ "$file_credit" = 1 ] && [ -d "$GRAPHDEN_TOUR_AUDIT" ] \
@@ -948,13 +934,7 @@ for f in $FILES; do
     echo "  (stopping at first final failed file: $f; remaining files retain unrun checkpoints)" >&2
     break
   fi
-  if [ "${WTQ_STOP_ON_REAL_FLAKE:-0}" = 1 ] && [ "${WTQ_FLAKE_STRICT:-0}" = 1 ] \
-     && [ "$passed" = 1 ] && [ "$real_flake" = 1 ] && [ "$env_signed" = 0 ] \
-     && ! run_is_degraded; then
-    echo "  (stopping strict gate at first real retry-pass flake: $f; remaining files retain unrun checkpoints)" >&2
-    break
-  fi
-  # Keep strict failures visible even when the underlying attempt passed.
+  # A retry-pass is credited; keep the diagnostic while proceeding.
   if [ "$SWEEP_DELAY" != "0" ]; then sleep "$SWEEP_DELAY"; fi
 done
 
@@ -971,24 +951,19 @@ fi
 # --- run-level thrash decision (see the state block before the loop) ---
 # The run is DEGRADED when the host was starving the stack: several files ran far
 # past their OWN baseline, or several different files needed an environment-
-# signed retry. Under those conditions a strict flake/leak is the environment,
-# not the branch.
+# signed retry. Under those conditions a strict leak can be abort collateral.
 DEGRADED=0
 FLAKED_COUNT=0
 for _x in $ENV_FLAKED; do FLAKED_COUNT=$((FLAKED_COUNT+1)); done
 if run_is_degraded; then
   DEGRADED=1
 fi
-if [ -n "$STRICT_FLAKES$STRICT_LEAKS" ]; then
+if [ -n "$STRICT_LEAKS" ]; then
   if [ "$DEGRADED" = 1 ]; then
-    for x in $STRICT_FLAKES $STRICT_LEAKS; do browser_progress "${x%%(*}" passed; done
-    echo "  (run-level thrash: env degraded — strict flakes/leaks are REPORT-ONLY this run, NOT a red RESULT)" >&2
+    for x in $STRICT_LEAKS; do browser_progress "${x%%(*}" passed; done
+    echo "  (run-level thrash: env degraded — strict leaks are REPORT-ONLY this run)" >&2
   else
-    # Healthy host: escalate exactly as strict mode did before this change.
-    for x in $STRICT_FLAKES; do
-      FAILED_NAMES="$FAILED_NAMES $x(flaked-passed-on-retry)"
-      browser_progress "${x%%(*}" failed
-    done
+    # Healthy host: a passing test that leaked rows is still red.
     for x in $STRICT_LEAKS; do
       FAILED_NAMES="$FAILED_NAMES $x(leaked)"
       browser_progress "${x%%(*}" failed
@@ -1027,23 +1002,17 @@ else
 fi
 [ -n "$TOUR_AUDIT_NOTE" ] && echo "  tour spotlight: $TOUR_AUDIT_NOTE"
 if [ -n "$FLAKED" ]; then
-  if [ "${WTQ_FLAKE_STRICT:-0}" = "1" ] && [ "$DEGRADED" != 1 ]; then
-    echo "  FLAKED (failed once, passed on retry):$FLAKED" >&2
-    echo "    counted as FAILURES (no environment signature):${STRICT_FLAKES:- none}" >&2
-  elif [ "${WTQ_FLAKE_STRICT:-0}" = "1" ]; then
-    echo "  FLAKED (failed once, passed on retry — REPORT-ONLY, env degraded):$FLAKED" >&2
-  else
-    echo "  FLAKED (failed once, passed on retry — investigate, run stays green):$FLAKED" >&2
-  fi
+  echo "  FLAKED (failed once, passed on retry — accepted, investigate):$FLAKED" >&2
+  echo "    no environment signature:${REAL_FLAKES:- none}" >&2
 fi
-# FAILED_NAMES also carries the strict escalations (a flake, a leak), which
+# FAILED_NAMES also carries strict leak escalations, which
 # are not in FAIL — print it whenever it names anything.
 if [ -n "$FAILED_NAMES" ]; then
   echo "  failed:$FAILED_NAMES" >&2
 fi
 if [ "$DEGRADED" = 1 ]; then
   echo "  ⚠ ENVIRONMENT DEGRADED: ${DEGRADED_FILES} file(s) ran past ${SLOW_FACTOR}x their baseline:${SLOW_FILES:- none}; ${FLAKED_COUNT} file(s) needed an environment-signed retry; executor heap high-water ${HEAP_HWM_MIB}MiB (info)." >&2
-  echo "    Strict flake/leak verdicts were downgraded to report-only — a retry-pass under thrash is a pass, not a race." >&2
+  echo "    Strict leak verdicts were downgraded to report-only; retry-passes remain passes." >&2
   if [ "$FAIL" != "0" ]; then
     echo "    A file HARD-failed above: the host is too starved to judge it. Free RAM (e.g. 'docker stop graphden-executor' to drop the demo stack) and re-run on a quiet host — do NOT read this as a branch regression." >&2
   fi

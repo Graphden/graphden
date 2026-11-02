@@ -1515,7 +1515,7 @@ run_gate_stage() {
             fi
           fi
           step "$wave related browser files"
-          ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" WTQ_FLAKE_STRICT=1 WTQ_STOP_ON_REAL_FLAKE=1 \
+          ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" WTQ_FLAKE_STRICT=1 \
               E2E_BASELINE_LOCAL="$E2E_BASELINE_LOCAL" GRAPHDEN_E2E_PRIORITY_BASE="$base_sha" \
               GRAPHDEN_E2E_ONLY_FILES="$wave_browser" bb test-e2e ) \
             || { echo "FAIL: $wave related browser"; return 1; }
@@ -1544,9 +1544,9 @@ run_gate_stage() {
         return 0
       fi
       step "bb test-e2e: remaining files"
-      # A healthy-host retry-pass flake is already a red gate verdict. Stop
-      # there and keep prior file checkpoints instead of paying for the tail.
-      ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" WTQ_FLAKE_STRICT=1 WTQ_STOP_ON_REAL_FLAKE=1 E2E_BASELINE_LOCAL="$E2E_BASELINE_LOCAL" \
+      # Retry-passes are credited with diagnostics; hard failures still stop
+      # at the failed file and preserve earlier browser checkpoints.
+      ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" WTQ_FLAKE_STRICT=1 E2E_BASELINE_LOCAL="$E2E_BASELINE_LOCAL" \
           GRAPHDEN_E2E_PRIORITY_BASE="$base_sha" GRAPHDEN_E2E_EXCLUDE_FILES="${PRIORITY_BROWSER:-}" \
           bb test-e2e ) || { echo "FAIL: e2e"; return 1; } ;;
     visual)

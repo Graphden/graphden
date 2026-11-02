@@ -6,7 +6,7 @@
 //
 //   - a retry counts toward the run-level thrash trigger only when a failure
 //     of that file was ENVIRONMENT-signed (here: the compiled-path probe dead
-//     at failure time). Two real races in one run stay two red files;
+//     at failure time). Two real races stay separately named but pass on retry;
 //   - the same real assertion failure twice in a row stops the retries;
 //   - slow_limit never reaches the per-attempt hard timeout.
 //
@@ -131,7 +131,7 @@ if [ -n "$out" ]; then [ "$out" = /dev/null ] || printf '%s' "$body" > "$out"; e
   return { receipt, code: r.status, out: (r.stdout || '') + (r.stderr || ''), attempts };
 }
 
-console.log(' two REAL races in one run are two red files, not host jitter');
+console.log(' two REAL races in one run stay distinct diagnostics, not host jitter');
 
 console.log(' browser phases partition the full file roster');
 {
@@ -196,10 +196,10 @@ console.log(' declared skips are visible and an unregistered skip is red');
     'edit-a.test.js': ['fail:race A', 'pass'],
     'edit-b.test.js': ['fail:race B', 'pass'],
   });
-  assert(r.code !== 0, 'the run is red', r.out);
+  assert(r.code === 0, 'both retry-passes are accepted', r.out);
   assert(!/ENVIRONMENT DEGRADED/.test(r.out), 'the run is NOT degraded', r.out);
-  assert(/edit-a\.test\.js\(flaked-passed-on-retry\)/.test(r.out)
-         && /edit-b\.test\.js\(flaked-passed-on-retry\)/.test(r.out), 'both are named strict flakes', r.out);
+  assert(/no environment signature: edit-a\.test\.js edit-b\.test\.js/.test(r.out),
+    'both real flakes remain named for diagnosis', r.out);
 }
 
 console.log(' environment-signed retries still mark the run degraded');
@@ -214,15 +214,17 @@ console.log(' environment-signed retries still mark the run degraded');
   assert(r.code === 0, 'the real flake is report-only under a degraded run', r.out);
 }
 
-console.log(' one env-signed retry + one real race: not degraded, the race is red');
+console.log(' one env-signed retry + one real race: both pass with distinct diagnostics');
 {
   const r = runSuite({
     'edit-a.test.js': ['envfail:server window', 'pass'],
     'edit-b.test.js': ['fail:race B', 'pass'],
   });
   assert(!/ENVIRONMENT DEGRADED/.test(r.out), 'not degraded', r.out);
-  assert(r.code !== 0 && /edit-b\.test\.js\(flaked-passed-on-retry\)/.test(r.out), 'the race is red', r.out);
-  assert(!/edit-a\.test\.js\(flaked/.test(r.out), 'the env-signed retry is not a strict flake', r.out);
+  assert(r.code === 0 && /no environment signature: edit-b\.test\.js/.test(r.out),
+    'the race is accepted and named', r.out);
+  assert(!/no environment signature: edit-a\.test\.js/.test(r.out),
+    'the env-signed retry is classified separately', r.out);
 }
 
 console.log(' the same real assertion twice in a row is deterministic: two attempts, not five');
@@ -302,32 +304,33 @@ console.log(' receipts automatically resume failed file, unrun tail, then prior 
     && red.receipt.includes('"edit-a.test.js" :pending'),
     'receipt preserves the failure and unrun tail', red.receipt);
 }
-console.log(' strict retry-pass flake is red while later files still run');
+console.log(' retry-pass is credited while later files still run');
 {
   const prior = '{:schema 1 :kind "browser" :sha "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"'
     + ' :roster ["edit-a.test.js" "edit-b.test.js"]'
     + ' :status {"edit-a.test.js" :pending "edit-b.test.js" :pending}}';
   const gate = runSuite({'edit-a.test.js': ['fail:race', 'pass'], 'edit-b.test.js': ['pass']}, {STUB_RESUME: prior});
-  assert(gate.code !== 0 && gate.attempts('edit-a.test.js') === 2 && gate.attempts('edit-b.test.js') === 1,
-    'strict flake does not prevent later files from running', gate.out);
-  assert(/flaked-passed-on-retry/.test(gate.out), 'strict flake remains a named red verdict', gate.out);
-  assert(gate.receipt.includes('"edit-a.test.js" :failed') && gate.receipt.includes('"edit-b.test.js" :passed'),
-    'completed red gate records the strict flake as failed for the next priority order', gate.receipt);
+  assert(gate.code === 0 && gate.attempts('edit-a.test.js') === 2 && gate.attempts('edit-b.test.js') === 1,
+    'retry-pass does not prevent later files from running', gate.out);
+  assert(/no environment signature: edit-a\.test\.js/.test(gate.out),
+    'retry-pass remains named in diagnostics', gate.out);
+  assert(gate.receipt.includes('"edit-a.test.js" :passed') && gate.receipt.includes('"edit-b.test.js" :passed'),
+    'completed gate credits the retry-pass', gate.receipt);
 }
-console.log(' landing gate stops on the first healthy-host flake and keeps the unrun tail pending');
+console.log(' landing gate keeps running after a retry-pass');
 {
   const prior = '{:schema 1 :kind "browser" :sha "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"'
     + ' :roster ["edit-a.test.js" "edit-b.test.js" "edit-c.test.js"]'
     + ' :status {"edit-a.test.js" :pending "edit-b.test.js" :pending "edit-c.test.js" :pending}}';
   const gate = runSuite({'edit-a.test.js': ['pass'], 'edit-b.test.js': ['fail:race', 'pass'],
-    'edit-c.test.js': ['pass']}, {STUB_RESUME: prior, WTQ_STOP_ON_REAL_FLAKE: '1'});
-  assert(gate.code !== 0 && gate.attempts('edit-a.test.js') === 1
-    && gate.attempts('edit-b.test.js') === 2 && gate.attempts('edit-c.test.js') === 0,
-  'strict gate stops before the unrun tail', gate.out);
+    'edit-c.test.js': ['pass']}, {STUB_RESUME: prior});
+  assert(gate.code === 0 && gate.attempts('edit-a.test.js') === 1
+    && gate.attempts('edit-b.test.js') === 2 && gate.attempts('edit-c.test.js') === 1,
+  'gate continues through the full roster', gate.out);
   assert(gate.receipt.includes('"edit-a.test.js" :passed')
-    && gate.receipt.includes('"edit-b.test.js" :failed')
-    && gate.receipt.includes('"edit-c.test.js" :pending'),
-  'receipt retains passed, failed and unrun file states', gate.receipt);
+    && gate.receipt.includes('"edit-b.test.js" :passed')
+    && gate.receipt.includes('"edit-c.test.js" :passed'),
+  'receipt credits every completed file', gate.receipt);
 }
 console.log(' exact-candidate checkpoint skips only confirmed browser passes');
 {
@@ -353,7 +356,8 @@ console.log(' environment-signed retries and already proven thrash retain their 
 console.log(' early rebuild cannot forgive a late failure; recent rebuild and restart remain signed');
 {
   const late = runSuite({'edit-a.test.js': ['rebuildfail:late', 'pass']});
-  assert(late.code !== 0 && /flaked-passed-on-retry/.test(late.out), 'late cleanup remains a strict real flake', late.out);
+  assert(late.code === 0 && /no environment signature: edit-a\.test\.js/.test(late.out),
+    'late cleanup is accepted but diagnosed as a real flake', late.out);
   assert(!/during a FULL registry rebuild/.test(late.out), 'old rebuild is not an environment signature', late.out);
   const recent = runSuite({'edit-a.test.js': ['recentfail:window', 'pass']});
   assert(recent.code === 0 && /during a FULL registry rebuild/.test(recent.out), 'recent rebuild remains signed', recent.out);

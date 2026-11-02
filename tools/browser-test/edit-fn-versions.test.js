@@ -135,6 +135,7 @@ async function putDescription(page, fnId, branch, desc) {
         mentionsFeat: text.includes('feat'),
         graphChanges: Array.from(p?.querySelectorAll('.fn-versions-change-row') || [])
           .map((row) => row.textContent.trim()),
+        graphChangesDistinct: !p?.querySelector('.fn-versions-change-row.fn-versions-row'),
       };
     });
     assert(popoverState.visible,
@@ -146,6 +147,8 @@ async function putDescription(page, fnId, branch, desc) {
            && popoverState.graphChanges.every((row) => row.includes('fn')),
            'graph-change timeline includes both function writes: '
            + JSON.stringify(popoverState.graphChanges));
+    assert(popoverState.graphChangesDistinct,
+           'graph-change groups do not count as restorable fn field versions');
 
     // ===================================================================
     // Phase B: click the feat switch button → switchToBranch invoked.

@@ -325,7 +325,7 @@
   {:name :_partial-fnv-change-row
    :parent :hiccup
    :args {:tag {:value "div"}
-          :attrs {:value {:class "fn-versions-row fn-versions-change-row"
+          :attrs {:value {:class "fn-versions-change-row"
                           :role "listitem"}}
           :children [:_partial-fnv-change-row-text]}}
 

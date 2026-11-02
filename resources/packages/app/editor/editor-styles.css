@@ -1277,10 +1277,12 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
   max-height: 280px; overflow-y: auto;
   gap: 4px;
 }
-.fn-versions-row {
+.fn-versions-row, .fn-versions-change-row {
   display: flex; flex-direction: column; gap: 2px;
   padding: 4px 6px; border-radius: 3px;
   background: var(--hover-bg);
+}
+.fn-versions-row {
   cursor: pointer;
 }
 .fn-versions-row-top {

@@ -15,6 +15,7 @@
     "kaocha-hints" (prn (select-keys (priority/plan changed manual)
                                      [:unit :unit-layers :integration :integration-layers]))
     "runtime-order" (println (str/join "\n" (priority/runtime-order changed (:runtime manual))))
+    "integration" (println (str/join "\n" (:integration (priority/plan changed manual))))
     "browser" (println (str/join "\n" (:browser (priority/plan changed manual))))
     "browser-order" (println (str/join "\n" (priority/browser-order changed (:browser manual))))
     "validate-manual" (do (priority/runtime-order nil (:runtime manual))

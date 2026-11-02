@@ -1,7 +1,25 @@
 (ns kaocha.plugin.priority
   "Portable ordering hints for the authoritative Kaocha namespace roster."
   (:require
-    [clojure.edn :as edn]))
+    [clojure.edn :as edn]
+    [clojure.string :as str]))
+
+
+(defn select-phase
+  "Restrict only the integration run to one side of the early gate wave.
+   Names come from the validated changed-file planner; other suites are intact."
+  [testables suite-id only exclude]
+  (if (not= :integration suite-id)
+    testables
+    (let [names #(set (remove str/blank? (str/split-lines (or % ""))))
+          only-names (names only)
+          excluded (names exclude)]
+      (when (and (some? only) (some? exclude))
+        (throw (ex-info "Integration phase cannot include and exclude together" {})))
+      (cond
+        (some? only) (filterv #(contains? only-names (some-> (:kaocha.testable/id %) name)) testables)
+        (some? exclude) (filterv #(not (contains? excluded (some-> (:kaocha.testable/id %) name))) testables)
+        :else testables))))
 
 
 (defn namespace-hints

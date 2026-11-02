@@ -245,27 +245,21 @@ questions (`bb coverage` docstring + `feedback_coverage_measurement`):
 
 `tools/browser-test/run-edit-tests.sh` runs every `edit-*.test.js`
 against a live editor; the landing gate runs it through `bb test-e2e`
-with `WTQ_FLAKE_STRICT=1`. What strict mode turns red, and what it
-forgives:
+with `WTQ_FLAKE_STRICT=1`. A passed retry is credited and every failed
+attempt remains in the log with its diagnostic signature. What remains red:
 
-- **A file that passes only on a retry** is a real flake — red — unless
-  its failure carried an environment signature at the moment it
-  happened: the compiled-path probe was dead (a server unavailability
-  window), the registry did a FULL rebuild during the attempt
-  (`registry/invalidate-full` / `registry/rebuild` moved on `/metrics`),
-  or the host was starved (`MemAvailable` under `HOST_MEM_MIN_MB`, load
-  over `HOST_LOAD_PER_CPU` per CPU). A wait **timeout** is not such a
-  signature on its own: a UI race fails exactly as a timeout, and the
-  old "every timeout is the environment" rule turned strict mode off for
-  races.
-- **The run is DEGRADED** — every strict flake/leak verdict drops to
+- **A file that still fails after its retries** stops the suite at that
+  file. Previously completed files retain exact-candidate checkpoints.
+- **A passing file that leaks graph rows** fails the healthy-host gate.
+  An environment-degraded run reports the leak without turning red.
+- **The run is DEGRADED** — strict leak verdicts drop to
   report-only — when at least `THRASH_MIN_FILES` (3) files ran slow
   against their **own** baseline, or `THRASH_MIN_FLAKED` (2) different
   files needed an **environment-signed** retry (one of the file's
-  failures carried a signature from the bullet above). A retry whose
-  failures were all real candidates does not count toward it: two real
-  races in one train are two races, and counting them used to mark the
-  run degraded and drop both verdicts. Slow = the passing attempt took more than
+  failures had a dead compiled-path probe, full registry rebuild or host
+  starvation). A retry whose
+  failures were all real candidates does not count toward it: they remain
+  separately named in the log. Slow = the passing attempt took more than
   `SLOW_FACTOR` (2.5) × the file's median in
   `tools/browser-test/e2e-baseline.tsv` and at least `SLOW_MIN_EXTRA`
   (30) s over it, capped just under `PER_TEST_TIMEOUT` (300 s) — no

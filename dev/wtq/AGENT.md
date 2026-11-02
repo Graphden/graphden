@@ -106,7 +106,10 @@ You were started in one of two ways:
    tests in the one gate, pass `--first-test=unit:<namespace>`,
    `--first-test=integration:<namespace>`, `--first-test=runtime:<file>` or
    `--first-test=browser:<file>` to `bb wt merge`; repeat the flag as needed.
-   The full suite still runs each test once. Do not
+   The gate runs manual integration/browser choices, then automatically related
+   integration/browser cases, before the remaining cases of either suite. Each
+   namespace/file runs once across those waves. Unit/runtime tests keep their
+   existing ordered CI waves. Do not
    run raw `clojure -M:dev:test -m kaocha.runner`. The wrapper waits while the
    gate is in a heavy phase (`.git/wtq/gate-heavy`) or `MemAvailable` is below
    `WTQ_AGENT_MEM_MIN_MB` (default 3000); `bb wt up` waits the same way.
@@ -127,24 +130,25 @@ You were started in one of two ways:
    the run, not a hang. It
    may land you in a **merge train**: every branch that is ready at the same
    time is merged on top of the latest develop together and gated ONCE
-   (CI → build image → visual → browser → integration → fleet → fast-forward
+   (CI → build image → short visual checks → related integration/browser wave
+   → remaining browser, integration and fleet suites → fast-forward
    develop → advance the demo instance — only if it was running when the gate started; a `--deploy`
    landing with the demo down leaves `.git/wtq/demo-needs-reset`, which the
    next `bb instance-up` honours). You still get **your own** verdict and exit
    code. The single native gate runs quick CI checks before full selected
-   suites on the immutable assembled candidate. Source-related cases run first
-   inside the full unit/integration/JS suite, each namespace or file once.
+   suites on the immutable assembled candidate. Related cases run before the
+   full-suite tails, with each namespace or file executed once.
    After an interrupted train, durable receipts may credit completed stages,
    CI checks and browser files only for the identical assembled SHA, base and
    selected roster. The image ID and jar are verified before image stages are
    credited; an in-flight or provisional browser verdict runs again. A finished
    red train, changed candidate, missing receipt or changed roster gets ordering
    hints only. CI rejects a changed HEAD or nonignored tree between
-   start and finish. Full selected checks, timeouts and strict-flake rules
+   start and finish. Full selected checks, timeouts and retry/leak rules
    remain mandatory.
 
-   A full run takes **~30–50 min**, a docs-only / diff-scoped one ~10 —
-   plus the queue — longer than a foreground command may run, so **launch it
+   A full run recently took **~2.5–4 h** (Oct–Nov 2026); a docs-only
+   run is shorter. Queue time can add more. **Launch it
    with `run_in_background: true`** and wait to be re-invoked when it exits.
 
    - **Don't commit to the branch while it is queued.** The queue pinned the
@@ -177,21 +181,17 @@ You were started in one of two ways:
      weaken a test or skip a check to go green. A FAIL is final for your
      branch even though the train you started in may have landed others —
      fix and re-queue.
-   - **FLAKE in the gate's e2e** (failed once, passed on retry) — the gate
-     runs `bb test-e2e` with `WTQ_FLAKE_STRICT=1` UNCONDITIONALLY, and the
-     runner TRIAGES each failure at the moment it happens by probing a
-     real compiled-path endpoint: probe DEAD → the file died inside a
-     server unavailability window (request-path recompile parks the
-     worker pool while `/health` stays 200) — logged loudly as
-     `server-window retry`, retried, NOT a strict failure; probe OK → a
-     REAL flake → RED result (a red train like any other, so bisection
-     finds whose change it is) that bounces the branch: fix it, don't
-     re-roll the dice. Lessons already banked: a wait bound sized at the
-     operation's median is a flake source (size to honest worst case —
-     the poll still returns early), and file-start bursts need the
-     double-probe `waitForServerHealthy`. Green-on-retry remains only
-     the AD-HOC default when you run `run-edit-tests.sh` / `bb test-e2e`
-     by hand outside the gate.
+   - **FLAKE in the gate's e2e** (failed once, passed on retry) — the file
+     is credited as passed. The runner logs each failed attempt, its
+     compiled-path probe and whether the failure had an environment
+     signature; investigate recurring entries from the receipt/log. A
+     persistent failure after retries remains red and stops at that file.
+     `WTQ_FLAKE_STRICT=1` still makes a leaked graph fixture red on a
+     healthy host. This policy avoids repeating a multi-hour gate solely
+     because a retry succeeded. Lessons already banked: a wait bound sized
+     at the operation's median is a flake source (size to honest worst
+     case — the poll still returns early), and file-start bursts need the
+     double-probe `waitForServerHealthy`.
    - If the queue is busy your `bb wt merge` waits its turn (or is carried by
      another agent's train) — expected; let the background run wait.
 

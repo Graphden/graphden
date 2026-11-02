@@ -484,7 +484,10 @@
         ;; `bb test-sequential` force n=1 without editing tests.edn.
         env-n (some-> (System/getenv "KAOCHA_PARALLELISM") parse-long)
         n (or env-n (:kaocha/parallelism testable) 1)
-        children (:kaocha.test-plan/tests testable)
+        children (priority/select-phase (:kaocha.test-plan/tests testable)
+                                        (:kaocha.testable/id testable)
+                                        (System/getenv "GRAPHDEN_INTEGRATION_ONLY")
+                                        (System/getenv "GRAPHDEN_INTEGRATION_EXCLUDE"))
         encoded (System/getenv "GRAPHDEN_CI_PRIORITY_HINTS")
         suite-id (:kaocha.testable/id testable)
         layers (priority/namespace-layers encoded suite-id)

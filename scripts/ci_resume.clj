@@ -107,15 +107,26 @@
 
 
 (defn stage-dependencies
-  "Keep CI quick checks first and insert build before its first image consumer."
+  "Keep CI and short visual checks first, then related tests before full tails."
   [ordered]
   (let [ordered (if (some #{"ci"} ordered)
                   (into ["ci"] (remove #{"ci"}) ordered)
-                  ordered)]
-    (if (some #{"build"} ordered)
-      (vec (distinct (mapcat #(if (#{"e2e" "visual" "integration" "fleet"} %)
-                                ["build" %] [%]) ordered)))
-      ordered)))
+                  ordered)
+        build? (some #{"build"} ordered)
+        visual? (some #{"visual"} ordered)
+        priority? (some #{"priority"} ordered)]
+    (vec (distinct
+           (mapcat (fn [stage]
+                     (cond
+                       (#{"e2e" "integration" "fleet"} stage)
+                       (cond-> [] build? (conj "build")
+                               (and visual? priority?) (conj "visual")
+                               priority? (conj "priority") true (conj stage))
+                       (= "visual" stage) (cond-> [] build? (conj "build") true (conj stage))
+                       (= "priority" stage) (cond-> [] build? (conj "build")
+                                                    visual? (conj "visual") true (conj stage))
+                       :else [stage]))
+                   ordered)))))
 
 
 (defn begin!

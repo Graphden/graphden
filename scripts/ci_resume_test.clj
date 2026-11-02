@@ -91,6 +91,13 @@
     (is (= (frequencies ordered) (frequencies (resume/stage-dependencies ordered))))))
 
 
+(deftest related-tests-precede-full-suites-even-after-a-retry-reorders-stages
+  (let [ordered ["integration" "e2e" "visual" "priority" "build" "ci"]]
+    (is (= ["ci" "build" "visual" "priority" "integration" "e2e"]
+           (resume/stage-dependencies ordered)))
+    (is (= (frequencies ordered) (frequencies (resume/stage-dependencies ordered))))))
+
+
 (deftest standalone-retry-is-automatic-and-rejects-rewritten-history
   (let [dir (fs/create-temp-dir)
         scripts (str (fs/absolutize "scripts"))

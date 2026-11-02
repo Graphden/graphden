@@ -82,10 +82,11 @@
     ;; carry fn names / ids / the engine's message — server-derived, and
     ;; the `suppressed` arg only FILTERS them, never flows through.
     :branch-lint-findings
-    ;; IDs and revision/page controls only select stored history. The diff
-    ;; enforces source ACL and redacts resolver paths before returning data;
-    ;; neither reader copies caller argument content into its result.
+    ;; IDs, revision and CAS token select stored history. The preview/commit
+    ;; enforce source ACL and redact resolver paths; their results are fresh
+    ;; server data and do not echo caller argument content.
     :load-fn-change-events :load-fn-history-diff
+    :preview-fn-history-restore :commit-fn-history-restore
     ;; :unresolved-failure-counts tallies audit rows per fn — fn ids /
     ;; names / counts, all server-derived; `days` is a window, not content.
     :unresolved-failure-counts

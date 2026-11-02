@@ -84,10 +84,10 @@
 
   {:name :_history-diff-too-large?
    :parent :equal?
-   :args {:values [{:parent :get
-                    :args {:coll :_history-diff-loaded
-                           :key {:value :error-code} :default nil}}
-                   {:value :history/too-large}]}}
+   :args {:a {:parent :get
+              :args {:coll :_history-diff-loaded
+                     :key {:value :error-code} :default nil}}
+          :b {:value :history/too-large}}}
 
   {:name :_history-diff-success-or-not-found
    :parent :if

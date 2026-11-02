@@ -75,6 +75,17 @@
     (is (= [] (priority/namespace-layers "{:unit-layers [[\"a\"]]}" :perf)))))
 
 
+(deftest integration-phases-partition-the-authoritative-roster
+  (let [children (mapv #(hash-map :kaocha.testable/id %) [:a :b :c])
+        early (priority/select-phase children :integration "a\nc" nil)
+        remaining (priority/select-phase children :integration nil "a\nc")]
+    (is (= [:a :c] (mapv :kaocha.testable/id early)))
+    (is (= [:b] (mapv :kaocha.testable/id remaining)))
+    (is (= (frequencies children) (frequencies (concat early remaining))))
+    (is (= children (priority/select-phase children :unit "a" nil)))
+    (is (thrown? Exception (priority/select-phase children :integration "a" "b")))))
+
+
 (deftest real-runner-keeps-red-priority-and-restores-full-results-in-both-modes
   (let [serial-ns (create-ns 'priority-fixture-serial)
         _ (alter-meta! serial-ns assoc :serial true)

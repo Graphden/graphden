@@ -133,6 +133,22 @@ if [ -n "$out" ]; then [ "$out" = /dev/null ] || printf '%s' "$body" > "$out"; e
 
 console.log(' two REAL races in one run are two red files, not host jitter');
 
+console.log(' browser phases partition the full file roster');
+{
+  const tests = {'edit-a.test.js': ['pass'], 'edit-b.test.js': ['pass'], 'edit-c.test.js': ['pass']};
+  const selected = 'edit-a.test.js\nedit-c.test.js';
+  const early = runSuite(tests, {GRAPHDEN_E2E_ONLY_FILES: selected});
+  const rest = runSuite(tests, {GRAPHDEN_E2E_EXCLUDE_FILES: selected});
+  const unknown = runSuite(tests, {GRAPHDEN_E2E_ONLY_FILES: 'edit-unknown.test.js'});
+  assert(early.code === 0 && rest.code === 0
+         && early.attempts('edit-a.test.js') === 1 && early.attempts('edit-b.test.js') === 0
+         && early.attempts('edit-c.test.js') === 1 && rest.attempts('edit-a.test.js') === 0
+         && rest.attempts('edit-b.test.js') === 1 && rest.attempts('edit-c.test.js') === 0,
+  'related and remaining waves execute each file once', early.out + rest.out);
+  assert(unknown.code !== 0 && /unknown browser phase file/.test(unknown.out),
+  'unknown early file fails before silently narrowing the gate', unknown.out);
+}
+
 console.log(' a failed attempt that dirties the graph stops retries and leaves the rest pending');
 {
   const r = runSuite({

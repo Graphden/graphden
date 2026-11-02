@@ -121,6 +121,41 @@ elif [ -n "${GRAPHDEN_RESUME_OUT:-}" ]; then
   echo "missing browser progress planner" >&2
   exit 2
 fi
+
+# The gate may run related files before the remaining integration/browser
+# rosters. Keep the receipt's authoritative full roster above, then execute
+# exactly one side here. Both sides are required by the gate.
+if [ -n "${GRAPHDEN_E2E_ONLY_FILES:-}" ] && [ -n "${GRAPHDEN_E2E_EXCLUDE_FILES:-}" ]; then
+  echo "browser phase cannot include and exclude together" >&2
+  exit 2
+fi
+if [ -n "${GRAPHDEN_E2E_ONLY_FILES:-}" ] || [ -n "${GRAPHDEN_E2E_EXCLUDE_FILES:-}" ]; then
+  PHASE_ROSTER="$FILES"
+  PHASE_FILES="${GRAPHDEN_E2E_ONLY_FILES:-${GRAPHDEN_E2E_EXCLUDE_FILES:-}}"
+  while IFS= read -r phase_file; do
+    [ -n "$phase_file" ] || continue
+    case "
+$PHASE_ROSTER
+" in *"
+$phase_file
+"*) ;; *) echo "unknown browser phase file: $phase_file" >&2; exit 2 ;; esac
+  done <<< "$PHASE_FILES"
+  SELECTED_FILES=""
+  for f in $FILES; do
+    case "
+$PHASE_FILES
+" in *"
+$f
+"*) selected=1 ;; *) selected=0 ;; esac
+    if { [ -n "${GRAPHDEN_E2E_ONLY_FILES:-}" ] && [ "$selected" = 1 ]; } \
+       || { [ -n "${GRAPHDEN_E2E_EXCLUDE_FILES:-}" ] && [ "$selected" = 0 ]; }; then
+      SELECTED_FILES="${SELECTED_FILES}${SELECTED_FILES:+
+}$f"
+    fi
+  done
+  FILES="$SELECTED_FILES"
+  echo "browser phase: $(printf '%s\n' "$FILES" | wc -l) of $(printf '%s\n' "$PHASE_ROSTER" | wc -l) files"
+fi
 browser_progress() {
   [ -n "$BROWSER_PROGRESS" ] || return 0
   (cd ../.. && bb scripts/ci_resume_cli.clj mark browser "$BROWSER_PROGRESS" "$1" "$2") || exit 2

@@ -106,7 +106,10 @@ You were started in one of two ways:
    tests in the one gate, pass `--first-test=unit:<namespace>`,
    `--first-test=integration:<namespace>`, `--first-test=runtime:<file>` or
    `--first-test=browser:<file>` to `bb wt merge`; repeat the flag as needed.
-   The full suite still runs each test once. Do not
+   The gate runs manual integration/browser choices, then automatically related
+   integration/browser cases, before the remaining cases of either suite. Each
+   namespace/file runs once across those waves. Unit/runtime tests keep their
+   existing ordered CI waves. Do not
    run raw `clojure -M:dev:test -m kaocha.runner`. The wrapper waits while the
    gate is in a heavy phase (`.git/wtq/gate-heavy`) or `MemAvailable` is below
    `WTQ_AGENT_MEM_MIN_MB` (default 3000); `bb wt up` waits the same way.
@@ -127,13 +130,14 @@ You were started in one of two ways:
    the run, not a hang. It
    may land you in a **merge train**: every branch that is ready at the same
    time is merged on top of the latest develop together and gated ONCE
-   (CI → build image → visual → browser → integration → fleet → fast-forward
+   (CI → build image → short visual checks → related integration/browser wave
+   → remaining browser, integration and fleet suites → fast-forward
    develop → advance the demo instance — only if it was running when the gate started; a `--deploy`
    landing with the demo down leaves `.git/wtq/demo-needs-reset`, which the
    next `bb instance-up` honours). You still get **your own** verdict and exit
    code. The single native gate runs quick CI checks before full selected
-   suites on the immutable assembled candidate. Source-related cases run first
-   inside the full unit/integration/JS suite, each namespace or file once.
+   suites on the immutable assembled candidate. Related cases run before the
+   full-suite tails, with each namespace or file executed once.
    After an interrupted train, durable receipts may credit completed stages,
    CI checks and browser files only for the identical assembled SHA, base and
    selected roster. The image ID and jar are verified before image stages are

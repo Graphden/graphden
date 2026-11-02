@@ -179,17 +179,27 @@ window.graphdenIsFnOwned = graphdenIsFnOwned;
 // the default one. Guarded by a flag so a burst of parallel 400s (boot fires
 // a dozen) triggers exactly one reload.
 let _branchRecoveryStarted = false;
+let _deletedBranchRecoveryHolds = 0;
+
+// Tour rollback deletes its branch before cleaning up global namespace rows.
+// Background requests on that branch may return 400 during the cleanup; a
+// recovery reload then aborts the cleanup and leaves those rows on main.
+async function withDeletedBranchRecoverySuspended(operation) {
+  _deletedBranchRecoveryHolds++;
+  try { return await operation(); }
+  finally { _deletedBranchRecoveryHolds--; }
+}
 
 // `sentBranch` is the branch the REQUEST named, not the one the tab stands
 // on: the diff ghost and compare mode ask about another branch with an
 // explicit header, and that branch being gone says nothing about ours.
 function maybeRecoverFromDeletedBranch(resp, sentBranch) {
-  if (_branchRecoveryStarted) return;
+  if (_branchRecoveryStarted || _deletedBranchRecoveryHolds) return;
   if (resp?.status !== 400) return;
   const branch = getCurrentBranchName();
   if (!branch || branch === DEFAULT_BRANCH || sentBranch !== branch) return;
   resp.clone().json().then((body) => {
-    if (_branchRecoveryStarted) return;
+    if (_branchRecoveryStarted || _deletedBranchRecoveryHolds) return;
     if (!/unknown branch/i.test(body?.error || '')) return;
     _branchRecoveryStarted = true;
     try { localStorage.removeItem(BRANCH_STORAGE_KEY); } catch (_) { /* ignore */ }

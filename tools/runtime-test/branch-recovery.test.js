@@ -82,6 +82,19 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
     assert(seen.replaced !== null, 'recovery runs');
   }
 
+  console.log(' intentional branch rollback defers recovery until cleanup finishes');
+  {
+    const { ctx, seen } = boot('feature-a');
+    await ctx.withDeletedBranchRecoverySuspended(async () => {
+      await ctx.window.fetch('/api/graph/entities');
+      await tick();
+      assert(seen.replaced === null, 'background 400 cannot reload during cleanup');
+    });
+    await ctx.window.fetch('/api/graph/entities');
+    await tick();
+    assert(seen.replaced !== null, 'recovery resumes after cleanup');
+  }
+
   {
     const {ctx} = boot('feature-a');
     ctx.switchToBranch('main');

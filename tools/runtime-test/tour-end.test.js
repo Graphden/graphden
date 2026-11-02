@@ -108,6 +108,11 @@ function makeWorld(opts) {
       return { ok: true, json: async () => ({ ok: !o.branchFailure }) };
     },
     switchToBranch: (b) => calls.push('switchToBranch ' + b),
+    withDeletedBranchRecoverySuspended: async (operation) => {
+      calls.push('suspend branch recovery');
+      try { return await operation(); }
+      finally { calls.push('resume branch recovery'); }
+    },
     getCurrentBranchName: () => o.branch ?? o.state?.sandboxBranch ?? o.state?.branch ?? 'main',
     gdToast: (m) => calls.push('toast ' + m),
     // The cleanup module is NOT loaded — these are its seams, recorded.
@@ -200,6 +205,9 @@ const finishedOn = (id, extra) => Object.assign(
     assert(w.calls.includes('DELETE /api/branches/tutorial-01-ab12'),
       'continuing rolls the branch back first (got: ' + JSON.stringify(w.calls) + ')');
     assert(w.calls.includes('switchToBranch null'), 'and returns to main');
+    assert(w.calls.indexOf('suspend branch recovery') < w.calls.indexOf('DELETE /api/branches/tutorial-01-ab12')
+      && w.calls.indexOf('resume branch recovery') > w.calls.indexOf('switchToBranch null'),
+    'automatic recovery stays paused through branch and namespace cleanup');
     assert(w.queued() === '02',
       'the next lesson is parked for after the reload (got: ' + w.queued() + ')');
     assert(!w.calls.some((c) => /^startIsolated/.test(c)),

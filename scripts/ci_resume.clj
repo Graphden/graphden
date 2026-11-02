@@ -120,11 +120,11 @@
                      (cond
                        (#{"e2e" "integration" "fleet"} stage)
                        (cond-> [] build? (conj "build")
-                         (and visual? priority?) (conj "visual")
-                         priority? (conj "priority") true (conj stage))
+                               (and visual? priority?) (conj "visual")
+                               priority? (conj "priority") true (conj stage))
                        (= "visual" stage) (cond-> [] build? (conj "build") true (conj stage))
                        (= "priority" stage) (cond-> [] build? (conj "build")
-                                              visual? (conj "visual") true (conj stage))
+                                                    visual? (conj "visual") true (conj stage))
                        :else [stage]))
                    ordered)))))
 

@@ -19,7 +19,10 @@
     [graphden.layout.graph :as lg]
     [graphden.layout.strip-facts :as strip-facts]
     [graphden.storage.protocol.core :as sp]
-    [graphden.test-infra.golden-app :as ga]))
+    [graphden.tenancy.context :as tenancy]
+    [graphden.test-infra.golden-app :as ga]
+    [graphden.versioning.storage.core :as vs]
+    [graphden.versioning.storage.history :as history]))
 
 
 (use-fixtures :once (ga/fixture (ns-name *ns*)))
@@ -203,6 +206,19 @@
   (let [{:keys [status body]} (versions-resp (random-uuid))]
     (is (= 404 status) "no history for a fn the viewer's storage cannot read")
     (is (false? (:ok body)))))
+
+
+(deftest historical-diff-checks-source-permission-before-loading-values
+  (let [fn-id (ga/fn-id :web-server)
+        branch-id (vs/current-branch-id (storage))]
+    (tenancy/install-browser-source-policy!
+      (fn [_] (fn [_] (throw (ex-info "Source denied" {:type :authz/forbidden})))))
+    (try
+      (is (= :authz/forbidden
+             (:type (ex-data
+                      (try (history/diff-at (storage) fn-id branch-id 1 2)
+                           (catch clojure.lang.ExceptionInfo e e))))))
+      (finally (tenancy/install-browser-source-policy! nil)))))
 
 
 (deftest versions-of-a-hidden-fn-carry-no-composition-columns

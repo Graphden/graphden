@@ -149,12 +149,21 @@
             id    (:id bnd)
             feature (vs/create-branch! v "req-iso-feature")
             vf      (vs/switch-branch v (:id feature))
-            _       (sp/update-entity vf :binding id {:required true})]
+            _       (sp/update-entity vf :binding id {:required true})
+            revision (apply max (map :change-revision
+                                     (sp/query-entities base :binding-version
+                                                        {:binding-id id})))]
         (testing "a branch-only :required change does NOT leak to main"
           (is (not (true? (:required (sp/read-entity v :binding id))))
               "main keeps the binding non-required")
           (is (true? (:required (sp/read-entity vf :binding id)))
-              "feature branch sees the narrowed :required true")))
+              "feature branch sees the narrowed :required true")
+          (is (not (true? (-> (history/snapshot-at v (:id owner)
+                                                   (vs/current-branch-id v) revision)
+                              :bindings first :required))))
+          (is (true? (-> (history/snapshot-at vf (:id owner)
+                                              (:id feature) revision)
+                         :bindings first :required)))))
       (finally (sp/close base)))))
 
 
@@ -352,8 +361,11 @@
       (let [main-id (vs/current-branch-id v)
             feature (vs/create-branch! v "merge-feature")
             vf      (vs/switch-branch v (:id feature))
-            _       (sp/create-entity vf :fn {:name "merged-fn" :parent-ids []
-                                              :description "h"})]
+            merged-fn (sp/create-entity vf :fn {:name "merged-fn" :parent-ids []
+                                                :description "h"})
+            source-revision (:change-revision
+                              (first (sp/query-entities base :fn-version
+                                                        {:fn-id (:id merged-fn)})))]
         (testing "no entity touched on both sides → detect-conflicts is empty"
           (let [{:keys [conflicts]} (vs/detect-conflicts v (:id feature))]
             (is (empty? conflicts))))
@@ -363,7 +375,12 @@
             (is (= (:id feature) (:source-branch-id record)))
             (is (= main-id (:target-branch-id record)))
             (is (pos-int? (:change-revision record)))
-            (is (some? (sp/read-entity base :branch-merge (:id record)))))))
+            (is (some? (sp/read-entity base :branch-merge (:id record))))
+            (is (nil? (:fn (history/snapshot-at v (:id merged-fn)
+                                                main-id source-revision))))
+            (is (= "merged-fn"
+                   (:name (:fn (history/snapshot-at v (:id merged-fn)
+                                                    main-id (:change-revision record)))))))))
       (finally (sp/close base)))))
 
 
@@ -666,7 +683,16 @@
         (testing "tombstone delete on the creating branch hides it"
           (binding [vs/*tombstone-delete?* true]
             (sp/delete-entity v :fn (:id f)))
-          (is (nil? (sp/read-entity v :fn (:id f)))))
+          (is (nil? (sp/read-entity v :fn (:id f))))
+          (let [versions (sort-by :change-revision
+                                  (sp/query-entities base :fn-version {:fn-id (:id f)}))
+                branch-id (vs/current-branch-id v)]
+            (is (= "td-own" (:name (:fn (history/snapshot-at
+                                          v (:id f) branch-id
+                                          (:change-revision (first versions)))))))
+            (is (nil? (:fn (history/snapshot-at
+                             v (:id f) branch-id
+                             (:change-revision (last versions))))))))
         (let [g (sp/create-entity v :fn {:name "td-hard" :parent-ids [] :description "d"})]
           (testing "default (hard) delete removes the row outright"
             (sp/delete-entity v :fn (:id g))
@@ -717,6 +743,20 @@
         (binding [vs/*tombstone-delete?* true]
           (sp/delete-entity v :binding (:id first-b)))
         (is (nil? (sp/read-entity v :binding (:id first-b))) "unbound → absent")
+        (let [versions (sort-by :change-revision
+                                (sp/query-entities base :binding-version
+                                                   {:binding-id (:id first-b)}))
+              branch-id (vs/current-branch-id v)
+              before (:change-revision (first versions))
+              after (:change-revision (last versions))]
+          (is (= [(:id first-b)]
+                 (mapv :id (:bindings (history/snapshot-at v (:id owner)
+                                                           branch-id before)))))
+          (is (empty? (:bindings (history/snapshot-at v (:id owner)
+                                                      branch-id after))))
+          (is (some #(and (= "binding" (:kind %)) (= "removed" (:status %)))
+                    (:entries (history/diff-at v (:id owner) branch-id
+                                               before after)))))
         (let [again (sp/create-entity v :binding {:fn-id (:id owner) :slot-id (:id slot) :value "two"})]
           (is (= (:id first-b) (:id again)) "the dead identity is re-used, not duplicated")
           (is (= "two" (:value (sp/read-entity v :binding (:id again))))
@@ -839,16 +879,17 @@
   (let [base (base-storage)
         storage (vs/wrap-with-versioning base)]
     (try
-      (let [[f binding-row]
+      (let [[dep f binding-row]
             (tx/in-transaction
               storage
               (fn [st]
-                (let [f (sp/create-entity st :fn {:name "change-group" :parent-ids []})
-                      slot (sp/create-entity st :slot {:name "value" :type-fn-id (:id f)})
+                (let [dep (sp/create-entity st :fn {:name "change-group-dep" :parent-ids []})
+                      f (sp/create-entity st :fn {:name "change-group" :parent-ids []})
+                      slot (sp/create-entity st :slot {:name "value" :type-fn-id (:id dep)})
                       binding-row (sp/create-entity st :binding
                                                     {:fn-id (:id f) :slot-id (:id slot)
                                                      :value "before"})]
-                  [f binding-row])))
+                  [dep f binding-row])))
             fn-version (first (sp/query-entities base :fn-version {:fn-id (:id f)}))
             binding-version (first (sp/query-entities base :binding-version
                                                       {:binding-id (:id binding-row)}))]
@@ -857,6 +898,22 @@
         (is (pos-int? (:change-revision fn-version)))
         (is (= (:change-revision fn-version)
                (:change-revision binding-version)))
+        (is (= "before"
+               (get-in (res/winning-candidates-at
+                         base :binding [(:id binding-row)] (:branch-id binding-version)
+                         (:change-revision binding-version))
+                       [(:id binding-row) :version :value])))
+        (is (= "before"
+               (get-in (history/snapshot-at storage (:id f) (:branch-id binding-version)
+                                            (:change-revision binding-version))
+                       [:bindings 0 :value])))
+        (is (= [{:fn-id (str (:id dep))
+                 :version-id (str (:id (first (sp/query-entities
+                                                base :fn-version {:fn-id (:id dep)}))))
+                 :name "change-group-dep" :revision-pinned? true :deleted? false}]
+               (:dependency-versions
+                 (history/snapshot-at storage (:id f) (:branch-id binding-version)
+                                      (:change-revision binding-version)))))
         (is (not (contains? (sp/read-entity storage :fn (:id f)) :change-id)))
         (is (not (contains? (sp/read-entity storage :fn (:id f)) :change-revision)))
         (let [events (history/change-events storage (:id f) 10 0)]
@@ -879,7 +936,48 @@
           (is (= 2 (count versions)))
           (is (= 2 (count (set (map :change-id versions)))))
           (is (< (:change-revision binding-version)
-                 (apply max (map :change-revision versions)))))
+                 (apply max (map :change-revision versions))))
+          (is (= "before"
+                 (get-in (res/winning-candidates-at
+                           base :binding [(:id binding-row)] (:branch-id binding-version)
+                           (:change-revision binding-version))
+                         [(:id binding-row) :version :value])))
+          (is (= "after"
+                 (get-in (res/winning-candidates-at
+                           base :binding [(:id binding-row)] (:branch-id binding-version)
+                           (apply max (map :change-revision versions)))
+                         [(:id binding-row) :version :value])))
+          (is (= "after"
+                 (get-in (history/snapshot-at
+                           storage (:id f) (:branch-id binding-version)
+                           (apply max (map :change-revision versions)))
+                         [:bindings 0 :value])))
+          (is (some #(= {:field "value" :before "before" :after "after"
+                         :redacted? false} %)
+                    (get-in (history/diff-at
+                              storage (:id f) (:branch-id binding-version)
+                              (:change-revision binding-version)
+                              (apply max (map :change-revision versions)))
+                            [:entries 0 :fields]))))
+        (let [before-secret (apply max (map :change-revision
+                                            (sp/query-entities base :binding-version
+                                                               {:binding-id (:id binding-row)})))]
+          (sp/update-entity storage :binding (:id binding-row)
+                            {:value "secret/path" :resolver-fn-id (:id f)})
+          (let [secret-revision (apply max (map :change-revision
+                                                (sp/query-entities base :binding-version
+                                                                   {:binding-id (:id binding-row)})))]
+            (is (= {:value nil :value-redacted? true}
+                   (select-keys (first (:bindings
+                                         (history/snapshot-at storage (:id f)
+                                                              (:branch-id binding-version)
+                                                              secret-revision)))
+                                [:value :value-redacted?])))
+            (is (some #(and (= "value" (:field %)) (:redacted? %)
+                            (= "•••" (:before %)) (= "•••" (:after %)))
+                      (get-in (history/diff-at storage (:id f) (:branch-id binding-version)
+                                               before-secret secret-revision)
+                              [:entries 0 :fields])))))
         (let [first-page (history/change-events storage (:id f) 1 0)
               second-page (history/change-events storage (:id f) 1 1)]
           (is (= 1 (:next-offset first-page)))
@@ -895,6 +993,17 @@
                                  :created-at (java.time.Instant/now)
                                  :change-id nil
                                  :change-revision nil))
+        (is (= :history/incomplete-provenance
+               (:type (ex-data
+                        (try (res/winning-candidates-at
+                               base :binding [(:id binding-row)] (:branch-id binding-version)
+                               (:change-revision binding-version))
+                             (catch clojure.lang.ExceptionInfo e e))))))
+        (is (= {:branch-id (str (:branch-id binding-version))
+                :revision (:change-revision binding-version)
+                :complete? false :reason :legacy-provenance}
+               (history/snapshot-at storage (:id f) (:branch-id binding-version)
+                                    (:change-revision binding-version))))
         (is (some (complement :has-change-id?)
                   (:events (history/change-events storage (:id f) 10 0))))
         (is (some (complement :has-change-id?)
@@ -1116,7 +1225,64 @@
         (testing "main sees neither sibling's item — both are branch-local"
           (let [main-rows (sp/query-entities v :binding-list-item
                                              {:binding-id (:id b)})]
-            (is (empty? main-rows)))))
+            (is (empty? main-rows))))
+        (testing "historical snapshots preserve branch-local list membership"
+          (let [revision (apply max (map :change-revision
+                                         (sp/query-entities base :binding-list-item-version
+                                                            {:item-id [(:id item-a) (:id item-b)]})))
+                owner-id (:fn-id b)
+                before (apply min (map :change-revision
+                                       (sp/query-entities base :binding-version
+                                                          {:binding-id (:id b)})))
+                after-a (:change-revision
+                          (first (sp/query-entities base :binding-list-item-version
+                                                    {:item-id (:id item-a)})))]
+            (is (empty? (:list-items (history/snapshot-at v owner-id
+                                                          (vs/current-branch-id v) revision))))
+            (is (= ["a-val"] (mapv :value (:list-items
+                                            (history/snapshot-at va owner-id
+                                                                 (:id branch-a) revision)))))
+            (is (= ["b-val"] (mapv :value (:list-items
+                                            (history/snapshot-at vb owner-id
+                                                                 (:id branch-b) revision)))))
+            (is (some #(and (= "list-item" (:kind %)) (= "added" (:status %)))
+                      (:entries (history/diff-at va owner-id (:id branch-a)
+                                                 before after-a)))))))
+      (finally (sp/close base)))))
+
+
+(deftest historical-list-item-value-is-redacted-with-its-resolver-binding
+  (let [base (base-storage)
+        v (vs/wrap-with-versioning base)]
+    (try
+      (let [b (make-list-binding! v "secret-history")
+            item (sp/create-entity v :binding-list-item
+                                   {:binding-id (:id b) :position 0
+                                    :value "secret/before"})
+            before (:change-revision
+                     (first (sp/query-entities base :binding-list-item-version
+                                               {:item-id (:id item)})))
+            branch-id (vs/current-branch-id v)]
+        (sp/update-entity v :binding (:id b) {:resolver-fn-id (:fn-id b)})
+        (sp/update-entity v :binding-list-item (:id item)
+                          {:value "secret/after"})
+        (let [after (apply max (map :change-revision
+                                    (sp/query-entities base :binding-list-item-version
+                                                       {:item-id (:id item)})))
+              snapshot (history/snapshot-at v (:fn-id b) branch-id after)
+              entries (:entries (history/diff-at v (:fn-id b) branch-id
+                                                 before after))]
+          (is (= {:value nil :value-redacted? true}
+                 (select-keys (first (:list-items snapshot))
+                              [:value :value-redacted?])))
+          (is (some #(and (= "list-item" (:kind %))
+                          (some (fn [field]
+                                  (and (= "value" (:field field))
+                                       (:redacted? field)
+                                       (= "•••" (:before field))
+                                       (= "•••" (:after field))))
+                                (:fields %)))
+                    entries))))
       (finally (sp/close base)))))
 
 

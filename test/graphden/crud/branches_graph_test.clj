@@ -228,6 +228,41 @@
       (is (string? (:created-at v))))))
 
 
+(deftest fn-history-diff-handler-shows-a-versioned-field
+  (let [fn-id (mk-fn! (uniq "history-diff"))
+        branch-id (vs/current-branch-id *storage*)
+        base (vs/unwrap *storage*)
+        before (:change-revision
+                 (first (sp/query-entities base :fn-version {:fn-id fn-id})))]
+    (sp/update-entity *storage* :fn fn-id {:description "new description"})
+    (let [after (apply max (map :change-revision
+                                (sp/query-entities base :fn-version {:fn-id fn-id})))
+          uri (str "/api/fns/" fn-id "/history/diff?branch-id=" branch-id
+                   "&from=" before "&to=" after)
+          body (json-body (gh/via :fn-history-diff-handler (get-req uri)))]
+      (is (:ok body))
+      (is (:complete? body))
+      (is (some #(and (= "fn" (:kind %))
+                      (some (fn [field]
+                              (and (= "description" (:field field))
+                                   (= "new description" (:after field))))
+                            (:fields %)))
+                (:entries body))))))
+
+
+(deftest fn-history-diff-handler-conceals-unreadable-and-invalid-targets
+  (let [branch-id (vs/current-branch-id *storage*)
+        url (fn [fn-id from]
+              (str "/api/fns/" fn-id "/history/diff?branch-id=" branch-id
+                   "&from=" from "&to=1"))]
+    (is (false? (:ok (json-body
+                       (gh/via :fn-history-diff-handler
+                               (get-req (url (random-uuid) 1)))))))
+    (is (false? (:ok (json-body
+                       (gh/via :fn-history-diff-handler
+                               (get-req (url (random-uuid) "bad")))))))))
+
+
 (deftest list-fn-versions-cross-branch
   ;; Same fn touched on two branches → two version rows, latest
   ;; created-at first.

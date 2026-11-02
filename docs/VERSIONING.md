@@ -644,8 +644,27 @@ rows in that transaction share it, and revisions for one graph owner follow
 commit order. The history feed orders such groups by revision. Older rows
 without a revision remain visible as incomplete history; their timestamps
 cannot establish a coherent cross-entity snapshot. A revision by itself also
-does not reconstruct unversioned parent identities or a branch's historical
-merge view, so the graph restore action is still unavailable.
+does not reconstruct unversioned parent identities, so the graph restore
+action is still unavailable.
+
+The historical read resolves a fn and its owned fn-slots, bindings and list
+items on one branch at a positive revision. It uses one read-only,
+repeatable-read transaction for the whole view, includes merge records up to
+that revision, and refuses to invent an exact result when legacy rows lack
+revision provenance. It also pins readable referenced fns to their
+historical version IDs. Current namespace, parent and branch topology are
+labelled as current, because those links are not versioned. Resolver-bound values are
+redacted. Reads are bounded to 2,000 owned identities and 10,000 historical
+versions or merge records per query; an oversized graph is refused rather
+than truncated into a misleading diff (HTTP 413 on the diff route).
+
+`GET /api/fns/:fn-id/history/diff?branch-id=<uuid>&from=<revision>&to=<revision>`
+returns a bounded field diff for this owned graph. A deleted binding or list
+item appears as removed; changed values and references are displayed with
+short, historically safe labels. The route checks source-disclosure permission
+inside the same storage snapshot, then returns an incomplete result instead
+of a fabricated diff when
+legacy provenance prevents reconstruction. It does not restore state.
 
 Merge records carry the same revision as any conflict-resolution versions
 written in that merge transaction. Resolution rows receive the same

@@ -20,6 +20,102 @@
                   :next-offset :nullable-int}]
    :effects #{:db}}
 
+  {:name :load-fn-history-diff
+   :description "Storage boundary for a redacted field diff between two exact graph revisions. Nil for an invalid or unreadable target. The JSON variant is exact or incomplete when legacy provenance prevents a truthful snapshot."
+   :args {:fn-id {:type :nullable-uuid :required false}
+          :branch-id {:type :nullable-uuid :required false}
+          :from-revision {:type :nullable-int :required false}
+          :to-revision {:type :nullable-int :required false}}
+   :return-type :nullable-jsonb
+   :effects #{:db}}
+
+  ;; GET /api/fns/:fn-id/history/diff?branch-id=X&from=N&to=M.
+  ;; Parse request data in the graph. The storage primitive accepts typed
+  ;; values only and enforces the scoped identity read inside one transaction.
+  {:name :_history-diff-fn-id
+   :parent :parse-uuid
+   :args {:string {:parent :uri-segment-after
+                   :args {:marker {:value "fns"}}}}}
+
+  {:name :_history-diff-branch-id
+   :parent :parse-uuid
+   :args {:string {:parent :query-param
+                   :args {:request {:as :request}
+                          :param-name {:value "branch-id"}}}}}
+
+  {:name :_history-diff-from-raw
+   :parent :query-param
+   :args {:request {:as :request} :param-name {:value "from"}}}
+
+  {:name :_history-diff-to-raw
+   :parent :query-param
+   :args {:request {:as :request} :param-name {:value "to"}}}
+
+  {:name :_history-diff-from-parsed
+   :parent :parse-int
+   :args {:s :_history-diff-from-raw}}
+
+  {:name :_history-diff-to-parsed
+   :parent :parse-int
+   :args {:s :_history-diff-to-raw}}
+
+  {:name :_history-diff-from
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_history-diff-from-raw}}
+          :then {:parent :try
+                 :args {:body :_history-diff-from-parsed
+                        :on-throw {:parent :const :args {:value nil}}}}
+          :else nil}}
+
+  {:name :_history-diff-to
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_history-diff-to-raw}}
+          :then {:parent :try
+                 :args {:body :_history-diff-to-parsed
+                        :on-throw {:parent :const :args {:value nil}}}}
+          :else nil}}
+
+  {:name :_history-diff-loaded
+   :parent :load-fn-history-diff
+   :args {:fn-id :_history-diff-fn-id
+          :branch-id :_history-diff-branch-id
+          :from-revision :_history-diff-from
+          :to-revision :_history-diff-to}}
+
+  {:name :_history-diff-too-large?
+   :parent :equal?
+   :args {:values [{:parent :get
+                    :args {:coll :_history-diff-loaded
+                           :key {:value :error-code} :default nil}}
+                   {:value :history/too-large}]}}
+
+  {:name :_history-diff-success-or-not-found
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_history-diff-loaded}}
+          :then {:parent :assoc
+                 :args {:map {:parent :assert-some
+                              :args {:value :_history-diff-loaded}}
+                        :key {:value :ok} :value {:value true}}}
+          :else {:parent :const
+                 :return-type :error-result-status-shape
+                 :args {:value {:ok false :error "History not found or invalid"
+                                :http-status 404}}}}}
+
+  {:name :_history-diff-data
+   :parent :if
+   :args {:test :_history-diff-too-large?
+          :then {:parent :const
+                 :return-type :error-result-status-shape
+                 :args {:value {:ok false :error "History exceeds its size limit"
+                                :http-status 413}}}
+          :else :_history-diff-success-or-not-found}}
+
+  {:name :fn-history-diff-handler
+   :lambda-params [:request]
+   :description "GET a bounded redacted graph diff at two revisions, or 404 for invalid/unreadable targets."
+   :parent :json-envelope-response
+   :args {:envelope :_history-diff-data}}
+
   ;; ---------------------------------------------------------------------
   ;; fn-versions popover (second migration). Pulls the existing
   ;; `:list-fn-versions` data chain (in `app.branches`) for one fn-id

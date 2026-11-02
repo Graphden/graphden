@@ -876,6 +876,11 @@
    :parent :get-auth-required
    :args {:path "/fns/:fn-id/versions" :handler :list-fn-versions-handler}}
 
+  {:name :api-fn-history-diff
+   :description "GET /api/fns/:fn-id/history/diff?branch-id=X&from=N&to=M — redacted owned-graph diff with revision-pinned dependency references."
+   :parent :get-auth-required
+   :args {:path "/fns/:fn-id/history/diff" :handler :fn-history-diff-handler}}
+
   {:name :api-fn-usages
    :description "POST /api/fns/usages — every fn that USES the given fn: children (`parent-of`), ref-bindings and list items (`ref-of`), resolvers (`resolver-of`), plus the type-plane kinds when the target doubles as a type. Body: `{fn-id}`. Same handler as /api/types/usages — one graph walk serves both planes; this alias exists so the inspector's Used-by section doesn't call a 'types' URL for a composition question. Auth-required when auth is active; open when auth is off."
    :parent :post
@@ -1025,6 +1030,7 @@
                   :api-branch-approvals
                   :api-branch-comments
                   :api-fn-versions
+                  :api-fn-history-diff
                   :api-fn-usages
                   ;; The registry's `/api/packages/*` + `/api/export/*` routes
                   ;; live in the OPTIONAL `registry` package now and are served

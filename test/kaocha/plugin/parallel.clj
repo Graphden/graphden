@@ -338,7 +338,7 @@
                                             (update :active disj label))))]
             (println (progress-line state))))
         result)
-      (catch Throwable error
+      (catch Exception error
         (when progress
           (let [state (swap! progress (fn [state]
                                         (-> state

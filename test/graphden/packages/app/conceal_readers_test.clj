@@ -22,7 +22,8 @@
     [graphden.tenancy.context :as tenancy]
     [graphden.test-infra.golden-app :as ga]
     [graphden.versioning.storage.core :as vs]
-    [graphden.versioning.storage.history :as history]))
+    [graphden.versioning.storage.history :as history]
+    [graphden.versioning.storage.restore :as restore]))
 
 
 (use-fixtures :once (ga/fixture (ns-name *ns*)))
@@ -217,6 +218,10 @@
       (is (= :authz/forbidden
              (:type (ex-data
                       (try (history/diff-at (storage) fn-id branch-id 1 2)
+                           (catch clojure.lang.ExceptionInfo e e))))))
+      (is (= :authz/forbidden
+             (:type (ex-data
+                      (try (restore/preview (storage) fn-id branch-id 1)
                            (catch clojure.lang.ExceptionInfo e e))))))
       (finally (tenancy/install-browser-source-policy! nil)))))
 

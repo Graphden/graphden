@@ -1,6 +1,5 @@
 // fn-versions restore e2e — extends the switch-only flow tested in
-// edit-fn-versions.test.js with the Restore action that promotes a
-// historic version's fn-level fields onto the current branch.
+// edit-fn-versions.test.js with field restore and graph-history restore.
 //
 // Coverage:
 //   • Create a fn-def on main, mutate its description three times so
@@ -12,6 +11,7 @@
 //     /api/entities/fn PUT lands with v1's data → page reloads.
 //   • After reload, /api/graph/entities reports the fn's current
 //     description as "v1-seed" — the restored value.
+//   • Preview and commit the older owned-graph revision, then Undo it.
 //
 // Run from this directory:  node edit-fn-versions-restore.test.js
 // Exit code 0 = PASS, 1 = FAIL.
@@ -198,7 +198,39 @@ async function putDescription(page, fnId, desc) {
            'after restore, fn.description = "v1-seed" (historic data): '
            + JSON.stringify(restored?.description));
 
-    console.log('✓ fn-versions restore verified — confirm / PUT / reload / state');
+    // Graph history restores a complete owned revision through preview/CAS,
+    // then offers a short undo path back to the state before that commit.
+    await page.getByRole('tab', {name: 'Versions'}).click();
+    await page.waitForSelector('.fn-versions-restore-graph', {timeout: 10000});
+    const target = await page.evaluate(() => {
+      const rows = [...document.querySelectorAll('.fn-versions-restore-graph')];
+      return rows.at(-2)?.dataset.revision;
+    });
+    assert(target, 'second oldest graph revision is available');
+    const graphDialog = page.waitForEvent('dialog', {timeout: 10000});
+    await page.evaluate((revision) => {
+      [...document.querySelectorAll('.fn-versions-restore-graph')]
+        .find((button) => button.dataset.revision === revision)?.click();
+    }, target);
+    const review = await graphDialog;
+    assert(review.message().includes('description: v1-seed → v2-mid'),
+           'graph restore previews the changed field values');
+    await review.accept();
+    await page.waitForFunction(async (id) => {
+      const response = await fetch('/api/graph/entities?scope=subtree&root-id=' + id);
+      const body = await response.json();
+      return body.fns.find((f) => f.id === id)?.description === 'v2-mid';
+    }, fn.id, {timeout: 15000});
+    assert(await page.locator('#gd-undo-toast').isVisible(),
+           'graph restore offers Undo immediately');
+    assert(await page.evaluate(() => gdUndoLast()), 'Undo restores the prior graph revision');
+    await page.waitForFunction(async (id) => {
+      const response = await fetch('/api/graph/entities?scope=subtree&root-id=' + id);
+      const body = await response.json();
+      return body.fns.find((f) => f.id === id)?.description === 'v1-seed';
+    }, fn.id, {timeout: 15000});
+
+    console.log('✓ fn-versions restore verified — fields, graph preview/CAS, Undo');
   } catch (e) {
     process.exitCode = 1;
     console.error('✗ test failed:', e.message);

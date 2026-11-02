@@ -1302,13 +1302,15 @@ body.gd-tenancy .branch-adv { display: block; margin-top: 4px; }
   margin-left: auto;
 }
 .fn-versions-switch,
-.fn-versions-restore {
+.fn-versions-restore,
+.fn-versions-restore-graph {
   font-size: 0.625rem; padding: 1px 6px; cursor: pointer;
   background: transparent; color: var(--fg);
   border: 1px solid var(--border); border-radius: 2px;
 }
 .fn-versions-switch:hover,
-.fn-versions-restore:not(:disabled):hover { background: var(--hover-bg); }
+.fn-versions-restore:not(:disabled):hover,
+.fn-versions-restore-graph:hover { background: var(--hover-bg); }
 .fn-versions-restore:disabled {
   color: var(--muted-fg); cursor: default;
 }
@@ -2068,6 +2070,7 @@ body.gd-no-write .ns-edit-btn,
 body.gd-no-write .ns-plus-btn,
 body.gd-no-write .ns-delete-btn,
 body.gd-no-write .fn-versions-restore,
+body.gd-no-write .fn-versions-restore-graph,
 body.gd-no-write .branch-popover-create,
 body.gd-no-write .branch-popover-hub,
 body.gd-no-write .branch-row-merge,

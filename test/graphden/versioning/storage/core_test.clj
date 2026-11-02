@@ -7,6 +7,7 @@
    Storage stack: PostgreSQL testcontainer + graph + versioning +
    traits schema, mirroring `versioning.merge.core-test`."
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.schema.graph.schema :as gds]
     [graphden.schema.malli.core :as mds]
@@ -22,7 +23,8 @@
     [graphden.versioning.storage.core :as vs]
     [graphden.versioning.storage.history :as history]
     [graphden.versioning.storage.merge :as mrg]
-    [graphden.versioning.storage.resolution :as res]))
+    [graphden.versioning.storage.resolution :as res]
+    [graphden.versioning.storage.restore :as restore]))
 
 
 (def ^:dynamic *container* nil)
@@ -2536,4 +2538,178 @@
           (is (= :constraint-violation/fn-name-collision (:type (ex-data ex)))))
         (testing "neither row was written"
           (is (empty? (sp/query-entities v :fn {:name "twin"})))))
+      (finally (sp/close base)))))
+
+
+(deftest restore-owned-binding-checks-current-version-test
+  (let [base (base-storage)
+        storage (vs/wrap-with-versioning base)]
+    (try
+      (let [owner (sp/create-entity storage :fn
+                                    {:name "restore-owned" :parent-ids []})
+            slot (sp/create-entity storage :slot
+                                   {:name "value" :type-fn-id (:id owner)})
+            binding (sp/create-entity storage :binding
+                                      {:fn-id (:id owner) :slot-id (:id slot)
+                                       :value "first"})
+            branch-id (vs/current-branch-id storage)
+            revision (:change-revision
+                       (first (sp/query-entities base :binding-version
+                                                 {:binding-id (:id binding)})))]
+        (sp/update-entity storage :binding (:id binding) {:value "second"})
+        (is (= :history/future-revision
+               (:reason (restore/preview storage (:id owner) branch-id
+                                         Long/MAX_VALUE))))
+        (let [proposal (restore/preview storage (:id owner) branch-id revision)]
+          (is (= :ready (:status proposal)))
+          (is (= ["value"]
+                 (mapv :field (get-in proposal [:changes 0 :fields]))))
+          (is (= :committed
+                 (:status (restore/apply-restore!
+                            storage (:id owner) branch-id revision
+                            (:expected-current proposal)))))
+          (is (= "first" (:value (sp/read-entity storage :binding (:id binding)))))
+          (is (= :no-op (:status (restore/preview storage (:id owner)
+                                                  branch-id revision)))))
+        (sp/update-entity storage :binding (:id binding) {:value "third"})
+        (let [proposal (restore/preview storage (:id owner) branch-id revision)]
+          (sp/update-entity storage :binding (:id binding) {:value "fourth"})
+          (is (= :history/stale-current
+                 (:reason (restore/apply-restore!
+                            storage (:id owner) branch-id revision
+                            (:expected-current proposal)))))
+          (is (= "fourth" (:value (sp/read-entity storage :binding (:id binding)))))))
+      (finally (sp/close base)))))
+
+
+(deftest restore-owned-membership-and-list-items-test
+  (let [base (base-storage)
+        storage (vs/wrap-with-versioning base)]
+    (try
+      (let [owner (sp/create-entity storage :fn
+                                    {:name "restore-list" :parent-ids []})
+            slot (sp/create-entity storage :slot
+                                   {:name "items" :type-fn-id (:id owner)})
+            membership (sp/create-entity storage :fn-slot
+                                         {:fn-id (:id owner) :slot-id (:id slot)
+                                          :position 0})
+            binding-row (sp/create-entity storage :binding
+                                          {:fn-id (:id owner) :slot-id (:id slot)
+                                           :list-append true})
+            first-item (sp/create-entity storage :binding-list-item
+                                         {:binding-id (:id binding-row) :position 0
+                                          :value "first"})
+            second-item (sp/create-entity storage :binding-list-item
+                                          {:binding-id (:id binding-row) :position 1
+                                           :value "second"})
+            branch-id (vs/current-branch-id storage)
+            revision (:change-revision
+                       (first (sp/query-entities base :binding-list-item-version
+                                                 {:item-id (:id second-item)})))]
+        (is (some? (sp/read-entity base :binding-list-item (:id second-item))))
+        (is (some? revision))
+        (sp/update-entity storage :fn-slot (:id membership) {:position 5})
+        (binding [vs/*tombstone-delete?* true]
+          (sp/delete-entity storage :binding-list-item (:id second-item)))
+        (is (some? (sp/read-entity base :binding-list-item (:id second-item))))
+        (let [new-item (sp/create-entity storage :binding-list-item
+                                         {:binding-id (:id binding-row) :position 2
+                                          :value "new"})
+              proposal (restore/preview storage (:id owner) branch-id revision)]
+          (is (some #(= revision (:change-revision %))
+                    (sp/query-entities base :binding-list-item-version
+                                       {:item-id (:id second-item)})))
+          (is (= #{(:id first-item) (:id second-item)}
+                 (set (map :id (:list-items
+                                 (history/snapshot-at storage (:id owner)
+                                                      branch-id revision))))))
+          (is (= :ready (:status proposal)))
+          (is (= :committed
+                 (:status (restore/apply-restore!
+                            storage (:id owner) branch-id revision
+                            (:expected-current proposal)))))
+          (is (zero? (:position (sp/read-entity storage :fn-slot (:id membership)))))
+          (is (= "first" (:value (sp/read-entity storage :binding-list-item
+                                                 (:id first-item)))))
+          (is (= "second" (:value (sp/read-entity storage :binding-list-item
+                                                  (:id second-item)))))
+          (is (nil? (sp/read-entity storage :binding-list-item (:id new-item))))
+          (is (= :no-op (:status (restore/preview storage (:id owner)
+                                                  branch-id revision))))
+          (sp/update-entities storage :binding-list-item
+                              [{:id (:id first-item) :position 1}
+                               {:id (:id second-item) :position 0}])
+          (let [reorder (restore/preview storage (:id owner) branch-id revision)]
+            (is (= :committed
+                   (:status (restore/apply-restore!
+                              storage (:id owner) branch-id revision
+                              (:expected-current reorder)))))
+            (is (= [(:id first-item) (:id second-item)]
+                   (->> (sp/query-entities storage :binding-list-item
+                                           {:binding-id (:id binding-row)})
+                        (sort-by :position)
+                        (mapv :id)))))))
+      (finally (sp/close base)))))
+
+
+(deftest restore-refuses-changed-resolver-binding-test
+  (let [base (base-storage)
+        storage (vs/wrap-with-versioning base)]
+    (try
+      (let [owner (sp/create-entity storage :fn
+                                    {:name "restore-secret" :parent-ids []})
+            slot (sp/create-entity storage :slot
+                                   {:name "path" :type-fn-id (:id owner)})
+            secret (sp/create-entity storage :binding
+                                     {:fn-id (:id owner) :slot-id (:id slot)
+                                      :value "secret/old"
+                                      :resolver-fn-id (:id owner)})
+            branch-id (vs/current-branch-id storage)
+            revision (:change-revision
+                       (first (sp/query-entities base :binding-version
+                                                 {:binding-id (:id secret)})))]
+        (sp/update-entity storage :binding (:id secret) {:value "secret/new"})
+        (let [proposal (restore/preview storage (:id owner) branch-id revision)]
+          (is (= :conflict (:status proposal)))
+          (is (= :history/secret-change (:reason proposal)))
+          (is (not (str/includes? (pr-str proposal) "secret/old")))
+          (is (not (str/includes? (pr-str proposal) "secret/new")))
+          (is (= :history/secret-change
+                 (:reason (restore/apply-restore!
+                            storage (:id owner) branch-id revision
+                            (:expected-current proposal)))))
+          (is (= "secret/new" (:value (sp/read-entity storage :binding
+                                                      (:id secret)))))))
+      (finally (sp/close base)))))
+
+
+(deftest restore-inherited-revision-on-child-branch-test
+  (let [base (base-storage)
+        main (vs/wrap-with-versioning base)]
+    (try
+      (let [owner (sp/create-entity main :fn
+                                    {:name "restore-inherited" :parent-ids []})
+            slot (sp/create-entity main :slot
+                                   {:name "value" :type-fn-id (:id owner)})
+            binding-row (sp/create-entity main :binding
+                                          {:fn-id (:id owner) :slot-id (:id slot)
+                                           :value "original"})
+            revision (:change-revision
+                       (first (sp/query-entities base :binding-version
+                                                 {:binding-id (:id binding-row)})))
+            child-id (:id (vs/create-branch! main "restore-child"))
+            child (vs/switch-branch main child-id)]
+        (sp/update-entity child :binding (:id binding-row) {:value "child-edit"})
+        (let [proposal (restore/preview child (:id owner) child-id revision)]
+          (is (= :ready (:status proposal)))
+          (is (= :committed
+                 (:status (restore/apply-restore!
+                            child (:id owner) child-id revision
+                            (:expected-current proposal)))))
+          (is (= "original" (:value (sp/read-entity child :binding
+                                                    (:id binding-row)))))
+          (is (= "original" (:value (sp/read-entity main :binding
+                                                    (:id binding-row)))))
+          (is (< 1 (count (sp/query-entities base :binding-version
+                                             {:binding-id (:id binding-row)}))))))
       (finally (sp/close base)))))

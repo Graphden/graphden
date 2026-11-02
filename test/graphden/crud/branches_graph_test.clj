@@ -263,6 +263,38 @@
                                (get-req (url (random-uuid) "bad")))))))))
 
 
+(deftest fn-history-restore-handlers-preview-and-commit
+  (let [fn-id (mk-fn! (uniq "history-restore"))
+        branch-id (vs/current-branch-id *storage*)
+        base (vs/unwrap *storage*)
+        revision (:change-revision
+                   (first (sp/query-entities base :fn-version {:fn-id fn-id})))
+        path (str "/api/fns/" fn-id "/history/restore")]
+    (sp/update-entity *storage* :fn fn-id {:description "later"})
+    (let [preview! #(json-body
+                      (gh/via :fn-history-restore-preview-handler
+                              (get-req (str path "/preview?branch-id=" branch-id
+                                            "&revision=" revision))))
+          commit! #(gh/via :fn-history-restore-commit-handler
+                           (json-req path {:branch-id (str branch-id)
+                                           :revision revision
+                                           :expected-current %}))
+          preview (preview!)]
+      (is (:ok preview))
+      (is (= "ready" (:status preview)))
+      (is (seq (:changes preview)))
+      (sp/update-entity *storage* :fn fn-id {:description "newer"})
+      (let [stale (commit! (:expected-current preview))]
+        (is (= 409 (:status stale)))
+        (is (false? (:ok (json-body stale))))
+        (is (= "history/stale-current"
+               (:reason (json-body stale)))))
+      (let [commit (json-body (commit! (:expected-current (preview!))))]
+        (is (:ok commit))
+        (is (= "committed" (:status commit)))
+        (is (nil? (:description (sp/read-entity *storage* :fn fn-id))))))))
+
+
 (deftest list-fn-versions-cross-branch
   ;; Same fn touched on two branches → two version rows, latest
   ;; created-at first.

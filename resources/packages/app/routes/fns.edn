@@ -881,6 +881,18 @@
    :parent :get-auth-required
    :args {:path "/fns/:fn-id/history/diff" :handler :fn-history-diff-handler}}
 
+  {:name :api-fn-history-restore-preview
+   :description "GET a redacted restore preview with a current-state CAS token."
+   :parent :get-auth-required
+   :args {:path "/fns/:fn-id/history/restore/preview"
+          :handler :fn-history-restore-preview-handler}}
+
+  {:name :api-fn-history-restore-commit
+   :description "POST a reviewed restore plan; atomically append new versions after rechecking its token."
+   :parent :post
+   :args {:path "/fns/:fn-id/history/restore"
+          :handler :fn-history-restore-commit-handler}}
+
   {:name :api-fn-usages
    :description "POST /api/fns/usages — every fn that USES the given fn: children (`parent-of`), ref-bindings and list items (`ref-of`), resolvers (`resolver-of`), plus the type-plane kinds when the target doubles as a type. Body: `{fn-id}`. Same handler as /api/types/usages — one graph walk serves both planes; this alias exists so the inspector's Used-by section doesn't call a 'types' URL for a composition question. Auth-required when auth is active; open when auth is off."
    :parent :post
@@ -1031,6 +1043,8 @@
                   :api-branch-comments
                   :api-fn-versions
                   :api-fn-history-diff
+                  :api-fn-history-restore-preview
+                  :api-fn-history-restore-commit
                   :api-fn-usages
                   ;; The registry's `/api/packages/*` + `/api/export/*` routes
                   ;; live in the OPTIONAL `registry` package now and are served

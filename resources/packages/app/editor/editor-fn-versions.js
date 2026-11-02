@@ -147,6 +147,83 @@ function bindFnVersionsActions(popover, fnEntity) {
       await restoreFnVersion(fnEntity, btn.getAttribute('data-fn-version-id'));
     });
   });
+  popover.querySelectorAll('.fn-versions-restore-graph').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await restoreGraphRevision(fnEntity, btn.dataset.branchId, btn.dataset.revision);
+    });
+  });
+}
+
+async function runGraphRestore(fnEntity, branchId, revision, review) {
+  if (!fnEntity?.id || !branchId || !revision) {
+    return { ok: false, error: 'Missing history revision' };
+  }
+  const url = '/api/fns/' + encodeURIComponent(fnEntity.id) + '/history/restore';
+  const query = new URLSearchParams({ 'branch-id': branchId, revision });
+  const previewResponse = await window.authFetch(url + '/preview?' + query);
+  if (!previewResponse.ok) {
+    return { ok: false, error: 'Preview failed: HTTP ' + previewResponse.status };
+  }
+  const proposal = await previewResponse.json();
+  const status = String(proposal.status || '').replace(/^:/, '');
+  if (status === 'no-op') return { ok: true, noOp: true };
+  if (status !== 'ready') {
+    return { ok: false, error: 'Restore unavailable: ' + (proposal.reason || status) };
+  }
+  if (review) {
+    const changes = proposal.changes || [];
+    const value = (entry) => {
+      const shown = typeof entry === 'string' ? entry : JSON.stringify(entry);
+      return (shown || '∅').slice(0, 80);
+    };
+    const lines = changes.slice(0, 15).map((change) => {
+      const fields = (change.fields || []).slice(0, 4).map((field) =>
+        field.field + ': ' + value(field.before) + ' → ' + value(field.after)).join('; ');
+      return change.kind + ' ' + change.status + (fields ? ': ' + fields : '');
+    });
+    if (changes.length > lines.length) lines.push('…and ' + (changes.length - lines.length) + ' more');
+    const message = 'Restore graph "' + (fnEntity.name || '(anonymous)') + '"?\n\n'
+      + lines.join('\n') + '\n\nThis creates a new graph revision. Parent and namespace topology stay current.';
+    if (!confirm(message)) return { ok: false, cancelled: true };
+  }
+  const commitResponse = await window.authFetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ 'branch-id': branchId, revision,
+                           'expected-current': proposal['expected-current'] }),
+  });
+  const result = await commitResponse.json();
+  if (!commitResponse.ok || String(result.status || '').replace(/^:/, '') !== 'committed') {
+    return { ok: false, error: 'Restore conflicted: ' + (result.reason || result.error || commitResponse.status) };
+  }
+  if (typeof gdWaitForGraphReady === 'function') await gdWaitForGraphReady();
+  if (typeof loadGraphData === 'function') await loadGraphData();
+  return { ok: true, previousRevision: proposal['current-revision'] };
+}
+
+async function restoreGraphRevision(fnEntity, branchId, revision) {
+  try {
+    const result = await runGraphRestore(fnEntity, branchId, revision, true);
+    if (result.cancelled) return;
+    if (result.noOp) {
+      if (typeof gdToast === 'function') gdToast('Graph already matches this revision');
+      return;
+    }
+    if (!result.ok) {
+      alert(result.error);
+      return;
+    }
+    closeFnVersionsPopover();
+    if (typeof gdUndoRecord === 'function' && result.previousRevision > 0) {
+      gdUndoRecord({
+        label: 'Restored graph ' + (fnEntity.name || '(anonymous)'),
+        undo: async () => runGraphRestore(fnEntity, branchId, result.previousRevision, false),
+      });
+    }
+  } catch (err) {
+    alert('Restore failed: ' + (err?.message || 'network error'));
+  }
 }
 
 

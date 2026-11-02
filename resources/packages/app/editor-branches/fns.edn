@@ -29,6 +29,23 @@
    :return-type :nullable-jsonb
    :effects #{:db}}
 
+  {:name :preview-fn-history-restore
+   :description "Redacted plan for restoring an exact owned-graph revision on the current branch."
+   :args {:fn-id {:type :nullable-uuid :required false}
+          :branch-id {:type :nullable-uuid :required false}
+          :revision {:type :nullable-int :required false}}
+   :return-type :nullable-jsonb
+   :effects #{:db}}
+
+  {:name :commit-fn-history-restore
+   :description "Atomically restore after a preview-token CAS; the storage layer rechecks ACL and dependencies."
+   :args {:fn-id {:type :nullable-uuid :required false}
+          :branch-id {:type :nullable-uuid :required false}
+          :revision {:type :nullable-int :required false}
+          :expected-current {:type :nullable-text :required false}}
+   :return-type :nullable-jsonb
+   :effects #{:db}}
+
   ;; GET /api/fns/:fn-id/history/diff?branch-id=X&from=N&to=M.
   ;; Parse request data in the graph. The storage primitive accepts typed
   ;; values only and enforces the scoped identity read inside one transaction.
@@ -115,6 +132,107 @@
    :description "GET a bounded redacted graph diff at two revisions, or 404 for invalid/unreadable targets."
    :parent :json-envelope-response
    :args {:envelope :_history-diff-data}}
+
+  {:name :_history-restore-revision-raw
+   :parent :query-param
+   :args {:request {:as :request} :param-name {:value "revision"}}}
+
+  {:name :_history-restore-revision
+   :parent :try
+   :args {:body {:parent :parse-int
+                 :args {:s {:parent :assert-some
+                            :args {:value :_history-restore-revision-raw}}}}
+          :on-throw {:parent :const :args {:value nil}}}}
+
+  {:name :_history-restore-preview-loaded
+   :parent :preview-fn-history-restore
+   :args {:fn-id :_history-diff-fn-id
+          :branch-id :_history-diff-branch-id
+          :revision :_history-restore-revision}}
+
+  {:name :_history-restore-preview-envelope
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_history-restore-preview-loaded}}
+          :then {:parent :assoc
+                 :args {:map {:parent :assert-some
+                              :args {:value :_history-restore-preview-loaded}}
+                        :key {:value :ok} :value {:value true}}}
+          :else {:parent :const
+                 :return-type :error-result-status-shape
+                 :args {:value {:ok false :error "History not found or invalid"
+                                :http-status 404}}}}}
+
+  {:name :fn-history-restore-preview-handler
+   :lambda-params [:request]
+   :parent :json-envelope-response
+   :args {:envelope :_history-restore-preview-envelope}}
+
+  {:name :_history-restore-commit-body
+   :parent :parse-json-body
+   :args {:request {:as :request}}}
+
+  {:name :_history-restore-commit-branch
+   :parent :parse-uuid
+   :args {:string {:parent :get
+                   :args {:coll :_history-restore-commit-body
+                          :key {:value :branch-id} :default nil}}}}
+
+  {:name :_history-restore-commit-revision
+   :parent :try
+   :args {:body {:parent :parse-int
+                 :args {:s {:parent :to-str
+                            :args {:value {:parent :get
+                                           :args {:coll :_history-restore-commit-body
+                                                  :key {:value :revision}
+                                                  :default nil}}}}}}
+          :on-throw {:parent :const :args {:value nil}}}}
+
+  {:name :_history-restore-commit-token
+   :parent :get
+   :args {:coll :_history-restore-commit-body
+          :key {:value :expected-current} :default nil}}
+
+  {:name :_history-restore-commit-loaded
+   :parent :commit-fn-history-restore
+   :args {:fn-id :_history-diff-fn-id
+          :branch-id :_history-restore-commit-branch
+          :revision :_history-restore-commit-revision
+          :expected-current :_history-restore-commit-token}}
+
+  {:name :_history-restore-commit-conflict?
+   :parent :equal?
+   :args {:a {:parent :get
+              :args {:coll :_history-restore-commit-loaded
+                     :key {:value :status} :default nil}}
+          :b {:value :conflict}}}
+
+  {:name :_history-restore-commit-success
+   :parent :if
+   :args {:test :_history-restore-commit-conflict?
+          :then {:parent :assoc
+                 :args {:map {:parent :assert-some
+                              :args {:value :_history-restore-commit-loaded}}
+                        :key {:value :http-status} :value {:value 409}}}
+          :else :_history-restore-commit-loaded}}
+
+  {:name :_history-restore-commit-envelope
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_history-restore-commit-loaded}}
+          :then {:parent :assoc
+                 :args {:map {:parent :assert-some
+                              :args {:value :_history-restore-commit-success}}
+                        :key {:value :ok}
+                        :value {:parent :not
+                                :args {:value :_history-restore-commit-conflict?}}}}
+          :else {:parent :const
+                 :return-type :error-result-status-shape
+                 :args {:value {:ok false :error "Invalid restore request"
+                                :http-status 400}}}}}
+
+  {:name :fn-history-restore-commit-handler
+   :lambda-params [:request]
+   :parent :json-envelope-response
+   :args {:envelope :_history-restore-commit-envelope}}
 
   ;; ---------------------------------------------------------------------
   ;; fn-versions popover (second migration). Pulls the existing
@@ -418,12 +536,43 @@
                  :_partial-fnv-change-legacy-note]
           :separator {:value ""}}}
 
+  {:name :_partial-fnv-change-restore-attrs
+   :parent :assoc
+   :args {:map {:parent :assoc
+                :args {:map {:value {:class "fn-versions-restore-graph"
+                                     :type "button"
+                                     :title "Preview and restore this graph revision on the current branch"}}
+                       :key {:value :data-branch-id}
+                       :value {:parent :get
+                               :args {:coll {:as :item}
+                                      :key {:value :branch-id} :default nil}}}}
+          :key {:value :data-revision}
+          :value {:parent :get
+                  :args {:coll {:as :item}
+                         :key {:value :change-revision} :default nil}}}}
+
+  {:name :_partial-fnv-change-restore-btn
+   :parent :if
+   :args {:test {:parent :get
+                 :args {:coll {:as :item}
+                        :key {:value :has-change-revision?}
+                        :default {:value false}}}
+          :then {:parent :hiccup
+                 :args {:tag {:value "button"}
+                        :attrs :_partial-fnv-change-restore-attrs
+                        :children ["Preview restore"]}}
+          :else {:parent :hiccup
+                 :args {:tag {:value "span"}
+                        :attrs {:value {:class "fn-versions-change-legacy"}}
+                        :children ["Historical state unavailable"]}}}}
+
   {:name :_partial-fnv-change-row
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "fn-versions-change-row"
                           :role "listitem"}}
-          :children [:_partial-fnv-change-row-text]}}
+          :children [:_partial-fnv-change-row-text
+                     :_partial-fnv-change-restore-btn]}}
 
   {:name :_partial-fnv-change-rendered-rows
    :parent :map

@@ -237,6 +237,27 @@
      :items items}))
 
 
+(defn- current-version-anchors
+  "The effective version IDs are a value-free CAS basis. One batched lookup
+   per entity kind also captures winning tombstones and branch merges."
+  [base branch-id {:keys [fn-identity slots bindings items]}]
+  (->> [[:fn (some-> fn-identity :id vector)]
+        [:fn-slot (mapv :id slots)]
+        [:binding (mapv :id bindings)]
+        [:binding-list-item (mapv :id items)]]
+       (mapcat (fn [[kind ids]]
+                 (when (seq ids)
+                   (let [winners (resolution/winning-candidates-at
+                                   base kind ids branch-id Long/MAX_VALUE)]
+                     (keep (fn [id]
+                             (when-let [version (get-in winners [id :version])]
+                               [(name kind) (str id) (str (:id version))
+                                (:change-revision version)]))
+                           ids)))))
+       (sort-by (juxt first second))
+       vec))
+
+
 (defn- snapshot-data
   [storage fn-id branch-id revision {:keys [fn-identity slots bindings items]}]
   (let [base (vs/unwrap storage)
@@ -336,6 +357,42 @@
            (snapshot-data st fn-id branch-id revision (graph-identities st fn-id)))))))
 
 
+(defn restore-snapshots-in-transaction
+  "Trusted restore planner input: the historical target, current effective
+   graph and their identity rows from ONE caller-owned transaction. The
+   snapshots are unredacted; never return them to an HTTP client. Authorization
+   is repeated here because apply calls this under a new writer transaction."
+  [storage fn-id branch-id revision]
+  (when-not (instance? Connection (tx/datasource storage))
+    (throw (ex-info "Restore snapshots require a transaction-bound storage"
+                    {:type :history/transaction-required})))
+  (when-not (and (integer? revision) (pos? revision))
+    (throw (ex-info "Restore revision must be positive"
+                    {:type :history/invalid-revision})))
+  (let [base (vs/unwrap storage)]
+    (when-let [fn-identity (sp/read-entity base :fn fn-id)]
+      (when (sp/read-entity storage :branch branch-id)
+        ((tenancy/browser-source-policy storage) fn-identity)
+        (binding [resolution/*branch-chain-cache* (atom {})
+                  resolution/*merges-memo* (atom {})
+                  branch-local/*storage-caches-override* (atom {})]
+          (let [identities (graph-identities storage fn-id)]
+            {:target (snapshot-data storage fn-id branch-id revision identities)
+             :current (snapshot-data storage fn-id branch-id Long/MAX_VALUE identities)
+             :current-anchors (current-version-anchors base branch-id identities)
+             :identities identities}))))))
+
+
+(defn with-restore-snapshots
+  "Run a trusted planner within one read-only REPEATABLE READ transaction.
+   The raw snapshots never escape the transaction or an HTTP response."
+  [storage fn-id branch-id revision f]
+  (with-coherent-read storage fn-id branch-id
+    #(when-let [pair (restore-snapshots-in-transaction
+                       % fn-id branch-id revision)]
+       (f % pair))))
+
+
 (defn- snapshot-index
   [snapshot]
   (into {}
@@ -368,6 +425,38 @@
              fields)})))
 
 
+(defn diff-snapshots
+  "Redacted owned-row diff for two snapshots already read in one transaction.
+   The caller supplies the revision labels; values under resolver bindings
+   remain masked even when the caller has their raw storage rows."
+  [before-snapshot after-snapshot]
+  (let [before (snapshot-index before-snapshot)
+        after (snapshot-index after-snapshot)
+        secret-binding-ids (into #{}
+                                 (comp (filter :resolver-fn-id) (map :id))
+                                 (concat (:bindings before-snapshot)
+                                         (:bindings after-snapshot)))
+        secret-item-ids (into #{}
+                              (comp (filter #(contains? secret-binding-ids
+                                                        (:binding-id %)))
+                                    (map :id))
+                              (concat (:list-items before-snapshot)
+                                      (:list-items after-snapshot)))
+        ids (sort-by (fn [[kind id]] [(name kind) (str id)])
+                     (set/union (set (keys before)) (set (keys after))))
+        entries (into []
+                      (keep (fn [id]
+                              (diff-entry id (get before id) (get after id)
+                                          secret-item-ids)))
+                      ids)]
+    (when (> (count entries) max-snapshot-rows)
+      (throw (ex-info "Historical diff exceeds its row bound"
+                      {:type :history/too-large})))
+    {:from-dependency-versions (:dependency-versions before-snapshot)
+     :to-dependency-versions (:dependency-versions after-snapshot)
+     :entries entries}))
+
+
 (defn diff-at
   "A bounded, redacted field diff between two exact revisions on one branch.
    Both snapshots share one REPEATABLE READ transaction; dependency labels are
@@ -384,33 +473,9 @@
                 before-snapshot (snapshot-data st fn-id branch-id from-revision
                                                identities)
                 after-snapshot (snapshot-data st fn-id branch-id to-revision
-                                              identities)
-                before (snapshot-index before-snapshot)
-                after (snapshot-index after-snapshot)
-                secret-binding-ids (into #{}
-                                         (comp (filter :resolver-fn-id) (map :id))
-                                         (concat (:bindings before-snapshot)
-                                                 (:bindings after-snapshot)))
-                secret-item-ids (into #{}
-                                      (comp (filter #(contains? secret-binding-ids
-                                                                (:binding-id %)))
-                                            (map :id))
-                                      (concat (:list-items before-snapshot)
-                                              (:list-items after-snapshot)))
-                ids (sort-by (fn [[kind id]] [(name kind) (str id)])
-                             (set/union (set (keys before)) (set (keys after))))
-                entries (into []
-                              (keep (fn [id]
-                                      (diff-entry id (get before id) (get after id)
-                                                  secret-item-ids)))
-                              ids)]
-            (when (> (count entries) max-snapshot-rows)
-              (throw (ex-info "Historical diff exceeds its row bound"
-                              {:type :history/too-large})))
-            {:branch-id (str branch-id)
-             :from-revision from-revision
-             :to-revision to-revision
-             :complete? true
-             :from-dependency-versions (:dependency-versions before-snapshot)
-             :to-dependency-versions (:dependency-versions after-snapshot)
-             :entries entries}))))))
+                                              identities)]
+            (merge {:branch-id (str branch-id)
+                    :from-revision from-revision
+                    :to-revision to-revision
+                    :complete? true}
+                   (diff-snapshots before-snapshot after-snapshot))))))))

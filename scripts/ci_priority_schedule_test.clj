@@ -16,6 +16,8 @@
    (defn run-testable [testable _] testable)
    (defn run-testables [testables plan]
      (mapv #(run-testable % plan) testables))
+   (ns kaocha.plugin.capture-output)
+   (defmacro bypass [& body] `(do ~@body))
    (ns kaocha.type.clojure.test)
    (ns kaocha.type.ns)
    (ns kaocha.type.var)

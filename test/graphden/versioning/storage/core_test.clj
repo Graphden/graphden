@@ -362,6 +362,7 @@
           (let [record (vs/merge-branch! v (:id feature))]
             (is (= (:id feature) (:source-branch-id record)))
             (is (= main-id (:target-branch-id record)))
+            (is (pos-int? (:change-revision record)))
             (is (some? (sp/read-entity base :branch-merge (:id record)))))))
       (finally (sp/close base)))))
 
@@ -2020,8 +2021,14 @@
             (is (nil? (:target-version (first conflicts))) "target side is a deletion")
             (is (some? (:source-version (first conflicts))) "source side is live")))
         (testing "choosing :target keeps the deletion — the entity stays gone"
-          (vs/merge-branch! vb (:id a-src)
-                            {:conflict-resolutions {[:fn id] :target}})
+          (let [merge-record (vs/merge-branch! vb (:id a-src)
+                                               {:conflict-resolutions {[:fn id] :target}})
+                versions (sp/query-entities base :fn-version
+                                            {:fn-id id :branch-id (:id b-tgt)})
+                resolution (apply max-key :change-revision versions)]
+            (is (uuid? (:change-id resolution)))
+            (is (= (:change-revision merge-record)
+                   (:change-revision resolution))))
           (is (nil? (sp/read-entity vb :fn id))
               "the entity must NOT resurrect against the user's :target choice")))
       (finally (sp/close base)))))

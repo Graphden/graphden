@@ -196,6 +196,10 @@
   #uuid "15161718-1920-4890-2a3b-4c5d6e7f8a9b")
 
 
+(def ^:private branch-merge-change-revision-field-uuid
+  #uuid "50000000-0000-4000-8000-000000000015")
+
+
 ;; =============================================================================
 ;; Field UUIDs — :branch-approval
 ;; =============================================================================
@@ -889,7 +893,9 @@
                       :target-timestamp {:uuid branch-merge-target-timestamp-field-uuid
                                          :type :timestamptz}
                       :created-at {:uuid branch-merge-created-at-field-uuid
-                                   :type :timestamptz}})
+                                   :type :timestamptz}
+                      :change-revision {:uuid branch-merge-change-revision-field-uuid
+                                        :type :int :nullable? true}})
 
       ;; -----------------------------------------------------------------
       ;; branch-approval — one row per reviewer approval of a proposal.

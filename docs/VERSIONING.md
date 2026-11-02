@@ -644,8 +644,12 @@ rows in that transaction share it, and revisions for one graph owner follow
 commit order. The history feed orders such groups by revision. Older rows
 without a revision remain visible as incomplete history; their timestamps
 cannot establish a coherent cross-entity snapshot. A revision by itself also
-does not record unversioned parent identities or the historical state of a
-branch merge, so the graph restore action is still unavailable.
+does not reconstruct unversioned parent identities or a branch's historical
+merge view, so the graph restore action is still unavailable.
+
+Merge records carry the same revision as any conflict-resolution versions
+written in that merge transaction. Resolution rows receive the same
+server-owned change identity and author stamp as ordinary graph edits.
 
 Consequence: two `:fn-execution` rows pointing at the same
 `:fn-version-id` can have produced different results if a binding

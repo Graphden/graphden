@@ -42,6 +42,15 @@
   nil)
 
 
+(defn note-change-revision!
+  "Keep the first graph-epoch number acquired inside this transaction.
+   It orders versions written under the semantic writer lock."
+  [revision]
+  (when-let [cell (some-> *transaction-context* :change-revision)]
+    (compare-and-set! cell nil revision))
+  revision)
+
+
 (def ^:private background-admissions (WeakHashMap.))
 
 

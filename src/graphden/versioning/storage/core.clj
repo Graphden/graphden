@@ -46,6 +46,7 @@
     [graphden.versioning.storage.merge :as mrg]
     [graphden.versioning.storage.purge :as purge]
     [graphden.versioning.storage.resolution :as res]
+    [graphden.versioning.storage.stamp :as stamp]
     [graphden.versioning.storage.uniqueness :as uniq])
   (:import
     (java.time
@@ -59,32 +60,10 @@
   (Instant/now))
 
 
-(defn- prepare-version-record
-  "Build a row for the version table from a versioned-entity payload:
-   pull the version-data fields off `data`, stamp identity (`:id`,
-   `<version-id-field>`, branch/timestamp, and server-authenticated author
-   metadata. Used by both single-entity and batch write paths."
-  [version-config entity-id branch-id timestamp data]
-  (let [{:keys [version-id-field version-data-fields]} version-config]
-    (-> (select-keys data version-data-fields)
-        (assoc :id (random-uuid)
-               version-id-field entity-id
-               :branch-id branch-id
-               :change-id (or (:change-id tx/*transaction-context*)
-                              (random-uuid))
-               :change-revision (some-> tx/*transaction-context*
-                                        :change-revision deref)
-               :created-at timestamp
-               ;; Server-stamped from the authenticated request scope.
-               ;; The selected payload above prevents client spoofing.
-               :author-id (tenancy-context/current-user-id)
-               :author-label (tenancy-context/current-user-label)))))
-
-
 (defn- strip-version-framework-cols
   "Version-plane bookkeeping must never reach an identity-plane INSERT
    (the identity table has no such columns). The version INSERT is
-   whitelisted via `prepare-version-record`; this is its symmetric
+   whitelisted via `stamp/version-record`; this is its symmetric
    guard for the base row — strips `:branch-id` / `:created-at` /
    `:deleted-at` / the entity's version-id-field from a row a caller
    may have echoed from a raw version-row read. None of these is a
@@ -117,7 +96,7 @@
   "Creates a version record in the version table for a versioned entity."
   [base-storage entity-name entity-id branch-id data]
   (let [config (get res/entity-config entity-name)
-        version-data (prepare-version-record config entity-id branch-id (now) data)]
+        version-data (stamp/version-record config entity-id branch-id (now) data)]
     (sp/create-entity base-storage (:version-entity config) version-data)))
 
 
@@ -150,9 +129,7 @@
     ;; The first graph-epoch bump under this transaction's semantic writer
     ;; lock orders its commit against other writes to the same owner. Later
     ;; rows in this transaction share the revision even when they bump again.
-    (when-let [revision (and v (some-> tx/*transaction-context*
-                                       :change-revision))]
-      (compare-and-set! revision nil v))
+    (when v (tx/note-change-revision! v))
     (try
       (write!)
       (catch Exception t
@@ -188,7 +165,7 @@
         current (res/resolve-version base-storage entity-name id branch-id)]
     (when current
       (let [ts (now)
-            version-data (-> (prepare-version-record config id branch-id ts current)
+            version-data (-> (stamp/version-record config id branch-id ts current)
                              (assoc :deleted-at ts))]
         (sp/create-entity base-storage (:version-entity config) version-data)))
     (some? current)))
@@ -537,8 +514,8 @@
                 (:version-data-fields config)))
             ;; Prepare and batch create version records
             (let [timestamp (now)
-                  version-records (mapv #(prepare-version-record config (:id %) branch-id
-                                                                 timestamp %)
+                  version-records (mapv #(stamp/version-record config (:id %) branch-id
+                                                               timestamp %)
                                         data-with-ids)]
               (sp/create-entities st (:version-entity config) version-records)))
           data-with-ids)]
@@ -642,8 +619,8 @@
                             merged-data (select-keys merged version-data-fields)]
                         (when (or (not= current-data merged-data)
                                   (contains? versionless-ids id))
-                          (prepare-version-record config id branch-id
-                                                  timestamp merged)))))
+                          (stamp/version-record config id branch-id
+                                                timestamp merged)))))
               data-seq)]
     ;; Batch create all version records
     (when (seq version-records)

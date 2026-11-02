@@ -17,12 +17,13 @@
   (:require
     [clojure.set :as set]
     [graphden.storage.graph-writer :as writer]
+    [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.tx :as tx]
-    [graphden.tenancy.context :as tenancy-context]
     [graphden.versioning.branch-local :as bl]
     [graphden.versioning.storage.field-diff :as fd]
     [graphden.versioning.storage.resolution :as res]
+    [graphden.versioning.storage.stamp :as stamp]
     [graphden.versioning.storage.uniqueness :as uniq])
   (:import
     (java.time
@@ -354,7 +355,9 @@
                       :source-timestamp ts
                       :target-branch-id target-branch-id
                       :target-timestamp ts
-                      :created-at ts}]
+                      :created-at ts
+                      :change-revision (some-> tx/*transaction-context*
+                                               :change-revision deref)}]
     (sp/create-entity base-storage :branch-merge merge-record)
     ;; The request's memoised merge rows for the target chain are stale
     ;; the moment this row exists — the post-merge reads of this same
@@ -365,19 +368,10 @@
 
 
 (defn- conflict-resolution->version-record
-  "Build the version record for a single resolution. Same shape as
-   `prepare-version-record` in the versioning storage core, but
-   inlined here so the merge module stays decoupled."
+  "Build a resolution row with the same server stamp as ordinary CRUD."
   [entity-name entity-id chosen-data target-branch-id ts]
-  (let [{:keys [version-id-field version-data-fields]}
-        (get res/entity-config entity-name)]
-    (-> (select-keys chosen-data version-data-fields)
-        (assoc :id (random-uuid)
-               version-id-field entity-id
-               :branch-id target-branch-id
-               :created-at ts
-               :author-id (tenancy-context/current-user-id)
-               :author-label (tenancy-context/current-user-label)))))
+  (stamp/version-record (get res/entity-config entity-name)
+                        entity-id target-branch-id ts chosen-data))
 
 
 (defn- apply-resolutions!
@@ -860,18 +854,21 @@
                              :plan plan
                              :source-branch-id source-branch-id
                              :target-branch-id target-branch-id})))))
-             (let [merge-record (create-merge-record! storage source-branch-id
-                                                      target-branch-id merge-ts)]
-               (apply-resolutions! storage conflicts conflict-resolutions
-                                   target-branch-id merge-ts)
-               ;; POST-merge, still inside the tx: reject a merge that
-               ;; would leave two live entities sharing a per-branch
-               ;; unique key (fn name / list-item position) on the
-               ;; target — a collision detect-conflicts can't see
-               ;; (distinct ids). Throwing rolls the whole merge back.
-               (assert-merge-preserves-uniqueness! storage source-branch-id
-                                                   target-branch-id)
-               merge-record)))]
+             (let [revision (epoch/bump! storage :branch-merge)]
+               (when revision (tx/note-change-revision! revision))
+               (try
+                 (let [merge-record (create-merge-record! storage source-branch-id
+                                                          target-branch-id merge-ts)]
+                   (apply-resolutions! storage conflicts conflict-resolutions
+                                       target-branch-id merge-ts)
+                   ;; The merge may introduce a resolved-view name or list
+                   ;; position collision between distinct identities.
+                   (assert-merge-preserves-uniqueness! storage source-branch-id
+                                                       target-branch-id)
+                   merge-record)
+                 (catch Exception t
+                   (when revision (epoch/note-applied! storage [revision]))
+                   (throw t))))))]
      (writer/call-with-write base-storage :branch-merge
                              #(res/call-with-fresh-memos (fn [] (write! %)))))))
 

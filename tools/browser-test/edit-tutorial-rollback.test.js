@@ -14,21 +14,30 @@ const CHILD = BRANCH + '-child';
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   try {
-    await nodeApi('POST', '/api/branches', {name: BRANCH, 'base-branch-id': 'main'});
-    await nodeApi('POST', '/api/branches', {name: CHILD, 'base-branch-id': BRANCH});
+    const sandbox = (await nodeApiJson('POST', '/api/branches',
+      {name: BRANCH, 'base-branch-id': 'main'})).branch;
+    const childBranch = (await nodeApiJson('POST', '/api/branches',
+      {name: CHILD, 'base-branch-id': BRANCH})).branch;
+    assert(sandbox?.id && sandbox['base-branch-id'] && childBranch?.id
+      && childBranch['base-branch-id'] === sandbox.id,
+    'rollback fixture captures exact sandbox and child branch receipts');
     await page.goto(BASE + '/?branch=' + BRANCH);
     await page.waitForFunction((name) => typeof _tourEnd === 'function'
       && document.querySelector('#branch-chip-name')?.textContent.trim() === name, BRANCH);
-    await page.evaluate(async ({branch, child}) => {
+    await page.evaluate(async ({sandbox, childBranch}) => {
       _tourLessons = {lessons: [{id: '01', steps: [{}]}]};
-      _tourState = {lessonId: '01', step: 1, sandboxBranch: branch, principal: _tourSessionPrincipal(),
-        created: [{type: 'branch', name: child}, {type: 'fn', name: 'created'}]};
+      _tourState = {lessonId: '01', step: 1, sandboxBranch: sandbox.name,
+        sandboxBranchId: sandbox.id, sandboxBaseBranchId: sandbox['base-branch-id'],
+        activeBranch: sandbox.name, principal: _tourSessionPrincipal(),
+        created: [{type: 'branch', id: childBranch.id, name: childBranch.name,
+          'base-branch-id': childBranch['base-branch-id'], receipt: 'created'},
+        {type: 'fn', name: 'created'}]};
       history.replaceState(null, '', location.pathname + location.search + '#tutorial.created');
       await _tourEnd();
-    }, {branch: BRANCH, child: CHILD});
+    }, {sandbox, childBranch});
     // The first attempt removes the child but the parent refuses. The second
     // must accept that the child is already gone and finish the same rollback.
-    await page.route('**/api/branches/' + BRANCH, async (route) => {
+    await page.route('**/api/branches/' + sandbox.id, async (route) => {
       if (route.request().method() === 'DELETE') await route.fulfill({
         status: 200, contentType: 'application/json', body: '{"ok":false}'});
       else await route.continue();
@@ -38,7 +47,7 @@ const CHILD = BRANCH + '-child';
     assert(new URL(page.url()).searchParams.get('branch') === BRANCH,
       'refused cleanup keeps the reader on the sandbox');
     await page.screenshot({path: '/tmp/tutorial-rollback-refusal.png'});
-    await page.unroute('**/api/branches/' + BRANCH);
+    await page.unroute('**/api/branches/' + sandbox.id);
     await page.getByRole('button', {name: 'Delete branch & return', exact: true}).click();
     await page.waitForFunction(() => !location.search.includes('branch=')
       && document.querySelector('#branch-chip-name')?.textContent.trim() === 'main');

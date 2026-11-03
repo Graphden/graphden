@@ -649,13 +649,16 @@ gc_gate_leftovers() {
   info "Dropping build cache unused for 3 days ..."
   docker builder prune -f --filter unused-for=72h 2>/dev/null | tail -1 || true
 
-  # Trivy's downloaded vulnerability DB can outlive a selected CI check and
-  # occupy several GiB. It is reproducible cache data, not a test artifact.
-  local trivy_db="${WTQ_TRIVY_CACHE_DIR:-/tmp/trivy-cache}/trivy/db"
-  if [ -f "$trivy_db/trivy.db" ]; then
-    info "Reclaiming the downloaded Trivy DB ..."
-    find "$trivy_db" -maxdepth 1 -type f \( -name trivy.db -o -name metadata.json \) -delete
-  fi
+  # Trivy downloads separate OS and Java vulnerability DBs. The Java DB can
+  # exceed a GiB; reclaiming only db/ left the gate below its disk admission
+  # threshold even after cleanup. Both are reproducible caches.
+  local trivy_cache="${WTQ_TRIVY_CACHE_DIR:-/tmp/trivy-cache}/trivy" trivy_db
+  for trivy_db in "$trivy_cache/db" "$trivy_cache/java-db"; do
+    if [ -f "$trivy_db/trivy.db" ] || [ -f "$trivy_db/trivy-java.db" ]; then
+      info "Reclaiming the downloaded Trivy DB in $trivy_db ..."
+      find "$trivy_db" -maxdepth 1 -type f \( -name trivy.db -o -name trivy-java.db -o -name metadata.json \) -delete
+    fi
+  done
 
   info "Removing stale test temp dirs (Playwright crash artifacts, tour audits older than a day) ..."
   find /tmp -maxdepth 1 \( -name 'playwright-artifacts-*' -o -name 'tour-audit.*' \) -mtime +1 \

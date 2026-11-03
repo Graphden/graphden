@@ -27,10 +27,24 @@
   (res/call-with-fresh-memos #(plan/build storage command)))
 
 
+(defn- ancestor-order
+  "Nearest ancestors first, preserving each parent's declared order. Diamond
+   joins appear once so the picker offers one identity per candidate."
+  [rows source-id]
+  (loop [frontier [source-id] seen #{} result []]
+    (if (empty? frontier)
+      result
+      (let [new-ids (vec (distinct (remove seen frontier)))
+            seen (into seen new-ids)]
+        (recur (into [] (mapcat #(get-in rows [% :parent-ids])) new-ids)
+               seen (into result new-ids))))))
+
+
 (defn- candidates
   [storage command]
-  (snap/required-fn storage (:target-fn-id command))
-  (let [source (snap/required-fn storage (:source-fn-id command))
+  (let [target (snap/required-fn storage (:target-fn-id command))
+        edge-index (plan/selected-parent-index! target command)
+        source (snap/required-fn storage (:source-fn-id command))
         ancestor-rows (snap/closure storage [(:id source)])
         descriptors (snap/descriptors storage (vals ancestor-rows))]
     {:ok true
@@ -38,23 +52,100 @@
      (mapv (fn [id]
              (merge (get descriptors id) {:current? (= id (:id source))}
                     (:model (fresh-plan storage {:action "reparent" :kind "parent-edge"
-                                                 :target-fn-id (:target-fn-id command) :parent-ids [id]}))))
-           ;; The bounded single-parent chain is a recommendation list, never
-           ;; advertised as a catalogue of every compatible function.
-           (loop [ids [] current (:id source) seen #{}]
-             (if (or (nil? current) (contains? seen current)) ids
-                 (let [row (get ancestor-rows current)]
-                   (recur (conj ids current)
-                          (when (= 1 (count (:parent-ids row))) (first (:parent-ids row)))
-                          (conj seen current))))))}))
+                                                 :target-fn-id (:target-fn-id command)
+                                                 :parent-ids (assoc (vec (:parent-ids target)) edge-index id)}))))
+           (ancestor-order ancestor-rows (:id source)))}))
+
+
+(defn- batch-rows
+  [plans]
+  (let [rows (reduce (fn [result {:keys [rows]}]
+                       (reduce-kv (fn [result entity entries]
+                                    (update result entity (fnil merge {})
+                                            (into {} (map (juxt :id identity)) entries)))
+                                  result rows)) {} plans)]
+    (update-vals rows #(vec (vals %)))))
+
+
+(defn- dependent-batch-targets?
+  [plans]
+  (let [target-ids (set (map (comp :id :target) plans))]
+    (some (fn [{:keys [target rows]}]
+            (some #(and (not= (:id target) (:id %))
+                        (contains? target-ids (:id %))) (:fn rows)))
+          plans)))
+
+
+(defn- colliding-batch-identities?
+  [plans]
+  (let [target-ids (set (map (comp :id :target) plans))
+        clone-ids (mapcat #(map :id (get-in % [:clones :fn])) plans)]
+    (or (not= (count clone-ids) (count (set clone-ids)))
+        (some target-ids clone-ids))))
+
+
+(defn- row-ids
+  [rows]
+  (->> rows (map :id) distinct (sort-by str) vec))
+
+
+(defn- batch-write-set
+  [plans]
+  {:fn (row-ids (concat (map :target plans) (mapcat #(get-in % [:clones :fn]) plans)))
+   :fn-slot (row-ids (mapcat #(get-in % [:clones :fn-slot]) plans))
+   :binding (row-ids (concat (mapcat :orphans plans)
+                             (mapcat #(get-in % [:clones :binding]) plans)))
+   :binding-list-item (row-ids (concat (mapcat :orphan-items plans)
+                                       (mapcat #(get-in % [:clones :binding-list-item]) plans)))})
+
+
+(defn- batch-plan
+  [storage command]
+  (let [plans (mapv #(fresh-plan storage %) (:commands command))
+        targets (mapv :model plans)
+        refusal (some #(when-not (:allowed %) %) targets)
+        related? (and (not refusal) (dependent-batch-targets? plans))
+        collision? (and (not refusal) (colliding-batch-identities? plans))]
+    (cond
+      refusal {:model {:ok true :action "batch" :allowed false :targets targets
+                       :type (:type refusal) :reason (:reason refusal)}}
+      related? {:model {:ok true :action "batch" :allowed false :targets targets
+                        :type :inheritance/batch-dependent-targets
+                        :reason "Targets depend on one another; split this batch into independent changes"}}
+      collision? {:model {:ok true :action "batch" :allowed false :targets targets
+                          :type :inheritance/batch-identity-collision
+                          :reason "Batch changes create overlapping function identities"}}
+      :else (let [rows (batch-rows plans)
+                  normalized (assoc command :commands (mapv (comp :request :model) plans))
+                  read-set (update-vals rows row-ids)
+                  write-set (batch-write-set plans)
+                  read-ids (:fn read-set)
+                  write-ids (:fn write-set)
+                  orphan-ids (vec (mapcat #(get-in % [:model :orphan-binding-ids]) plans))
+                  orphan-item-ids (vec (mapcat #(get-in % [:model :orphan-item-ids]) plans))]
+              {:plans plans :rows rows
+               :model {:ok true :action "batch" :allowed true :request normalized
+                       :targets targets :read-set read-set :write-set write-set
+                       :read-fn-ids read-ids :write-fn-ids write-ids
+                       :orphan-binding-ids orphan-ids
+                       :orphan-item-ids orphan-item-ids
+                       :expected-state (snap/fingerprint storage normalized rows)}}))))
+
+
+(defn- mutation-ids
+  [command]
+  (if (= "batch" (:action command))
+    (mapv :target-fn-id (:commands command))
+    [(or (:target-fn-id command) (:owner-fn-id command))]))
 
 
 (defn preview
   [ctx command]
   (let [storage (request/require-storage ctx)]
-    (writer/with-write [storage {:entity :fn :ids [(or (:target-fn-id command) (:owner-fn-id command))]}]
-                       (if (= "candidates" (:action command))
-                         (candidates storage command)
+    (writer/with-write [storage {:entity :fn :ids (mutation-ids command)}]
+                       (case (:action command)
+                         "candidates" (candidates storage command)
+                         "batch" (:model (batch-plan storage command))
                          (:model (fresh-plan storage command))))))
 
 
@@ -107,13 +198,38 @@
         (plan/reject! :inheritance/write-refused "The parent replacement did not land"))))
   (let [command (:command plan)
         clone-id (:proposed-fn-id command)
-        target-id (:id (:target plan))]
+        target-id (:id (:target plan))
+        publication-ids (into [target-id] (map :id) (get-in plan [:clones :fn]))]
     {:response (cond-> {:ok true :action (:action command) :kind (:kind command)
                         :fn-id (or clone-id target-id) :target-fn-id target-id}
                  clone-id (assoc :created-fn-id clone-id)
                  (:binding plan) (assoc :binding-id (:id (:binding plan))))
-     :publication-rows (mapv #(snap/required-fn storage %)
-                             (cond-> [target-id] clone-id (conj clone-id)))}))
+     :publication-rows (mapv #(snap/required-fn storage %) publication-ids)}))
+
+
+(defn- apply-batch!
+  [storage batch command]
+  (let [model (:model batch)]
+    (when-not (:allowed model)
+      (plan/reject! (:type model) (:reason model)))
+    (when-not (and (string? (:expected-state command))
+                   (= (:expected-state command) (:expected-state model)))
+      (plan/reject! :inheritance/stale-preview "The batch changed. Review a fresh preview before applying"))
+    (when-not (= (set (:accepted-orphan-binding-ids command))
+                 (set (:orphan-binding-ids model)))
+      (plan/reject! :inheritance/orphans-not-accepted
+                    "Accept exactly the orphan bindings shown in this batch preview"))
+    (let [results (mapv (fn [item]
+                          (apply-plan! storage item
+                                       (assoc (:command item)
+                                              :expected-state (get-in item [:model :expected-state])
+                                              :accepted-orphan-binding-ids
+                                              (get-in item [:model :orphan-binding-ids]))))
+                        (:plans batch))]
+      {:response {:ok true :action "batch"
+                  :target-fn-ids (mapv (comp :id :target) (:plans batch))
+                  :targets (mapv :response results)}
+       :publication-rows (vec (mapcat :publication-rows results))})))
 
 
 (defn- publication-step!
@@ -166,9 +282,10 @@
   [storage command]
   (try
     (tx/assert-owns-commit! storage)
-    (writer/with-write [storage {:entity :fn :ids [(or (:target-fn-id command) (:owner-fn-id command))]}]
-                       (let [plan (fresh-plan storage command)]
-                         (apply-plan! storage plan command)))
+    (writer/with-write [storage {:entity :fn :ids (mutation-ids command)}]
+                       (if (= "batch" (:action command))
+                         (apply-batch! storage (batch-plan storage command) command)
+                         (apply-plan! storage (fresh-plan storage command) command)))
     (catch clojure.lang.ExceptionInfo e
       (let [reason (or (:reason (ex-data e)) (ex-message e))]
         {:response {:ok false :committed false :type (:type (ex-data e))

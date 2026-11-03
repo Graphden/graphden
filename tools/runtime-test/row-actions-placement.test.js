@@ -23,7 +23,7 @@ function harness(width, height, zoom) {
 // covered. It also cancels a pending async reveal from the previous step.
 {
   const {ctx, el, dispatch} = harness(1600, 900, 1);
-  const anchor = {isConnected: true, setAttribute() {}};
+  const anchor = {isConnected: true, setAttribute() {}, closest: () => null};
   ctx.ensureRowActionsPopover = () => el;
   ctx.ensureRowActionsCyHandlers = () => {};
   ctx.positionRowActionsPopover = () => { el.style.display = 'inline-block'; };
@@ -77,7 +77,8 @@ console.log('✓ row-actions geometry: narrow top/middle/bottom, zoom, scroll bo
 {
   const {ctx, el} = harness(1600, 900, 1);
   let complete;
-  const anchor = {isConnected: true, setAttribute() {}, contains: other => other === anchor};
+  const anchor = {isConnected: true, setAttribute() {}, closest: () => null,
+    contains: other => other === anchor};
   ctx.anchor = anchor;
   ctx.host = el;
   vm.runInContext('rowActionsPopoverEl = host;', ctx);
@@ -99,7 +100,7 @@ console.log('✓ row-actions geometry: narrow top/middle/bottom, zoom, scroll bo
 // row must not make that second row's click look like a toggle-close.
 {
   const {ctx, el} = harness(1600, 900, 1);
-  const makeAnchor = () => ({isConnected: true, setAttribute() {}});
+  const makeAnchor = () => ({isConnected: true, setAttribute() {}, closest: () => null});
   const first = makeAnchor(), second = makeAnchor();
   ctx.ensureRowActionsPopover = () => el;
   ctx.ensureRowActionsCyHandlers = () => {};

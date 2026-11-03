@@ -44,6 +44,11 @@ function fadeOutPopover() {
   }, 90);
 }
 
+function clearRowActionsPreview(anchor) {
+  const nodeId = anchor?.closest('.node-overlay')?.dataset.nodeId;
+  if (nodeId && typeof clearPreview === 'function') clearPreview(nodeId);
+}
+
 function dismissRowActionsPopover({immediate = false, restoreFocus = false} = {}) {
   if (rowActionsPopoverHideTimer) clearTimeout(rowActionsPopoverHideTimer);
   rowActionsPopoverHideTimer = null;
@@ -61,6 +66,7 @@ function dismissRowActionsPopover({immediate = false, restoreFocus = false} = {}
   } else {
     fadeOutPopover();
   }
+  clearRowActionsPreview(anchor);
   if (restoreFocus && anchor) {
     try { anchor.focus({preventScroll: true}); } catch (_) { anchor.focus(); }
   }
@@ -281,12 +287,14 @@ function hideRowActionsPopover() {
   if (rowActionsPopoverSticky) return;
   if (rowActionsPopoverHideTimer) clearTimeout(rowActionsPopoverHideTimer);
   rowActionsPopoverHideTimer = setTimeout(() => {
+    const anchor = rowActionsPopoverAnchor;
     if (rowActionsPopoverAnchor) {
       rowActionsPopoverAnchor.setAttribute('aria-expanded', 'false');
     }
     rowActionsPopoverAnchor = null;
     rowActionsPopoverHideTimer = null;
     fadeOutPopover();
+    clearRowActionsPreview(anchor);
   }, 120);
 }
 

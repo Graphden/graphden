@@ -16,6 +16,15 @@
    :parent :equal?
    :args {:a {:parent :get :args {:coll :_inheritance-intent-command :key {:value :kind} :default nil}}
           :b "parent-edge"}}
+  {:name :_inheritance-long-path?
+   :parent :some?
+   :args {:value {:parent :get
+                  :args {:coll :_inheritance-intent-command
+                         :key {:value :occurrence-path} :default nil}}}}
+  {:name :_inheritance-ancestor-choice?
+   :parent :and
+   :args {:values [:_inheritance-parent-edge?
+                   {:parent :not :args {:value :_inheritance-long-path?}}]}}
   {:name :_inheritance-source-id
    :parent :get
    :args {:coll :_inheritance-intent-command :key {:value :source-fn-id} :default nil}}
@@ -77,7 +86,7 @@
           :children [:_inheritance-variation-label]}}
   {:name :_inheritance-ancestor-button
    :parent :if
-   :args {:test :_inheritance-parent-edge?
+   :args {:test :_inheritance-ancestor-choice?
           :then {:parent :hiccup
                  :args {:tag "button"
                         :attrs {:value {:type "button" :data-action "inheritance-ancestors"}}
@@ -86,12 +95,90 @@
   {:name :_inheritance-scope
    :parent :if
    :args {:test :_inheritance-parent-edge?
-          :then "Changes this function for all its consumers in this branch. Preserves the source."
-          :else "Replaces this own reference. All consumers of its owner see the change. Preserves the source."}}
+          :then "Changes this function for all its consumers in this branch. Other children of the source keep the original."
+          :else "Replaces this own reference. All consumers of its owner see the change. Other references to the source stay unchanged."}}
   {:name :_inheritance-scope-node
    :parent :hiccup
    :args {:tag "p" :attrs {:value {:id "inheritance-intent-scope" :class "inheritance-intent-scope"}}
           :children [:_inheritance-scope]}}
+  {:name :_inheritance-effective-slots
+   :parent :get
+   :args {:coll :_inheritance-intent-preview :key {:value :effective-slots} :default {:value []}}}
+  {:name :_inheritance-slot-line
+   :lambda-params [:slot]
+   :parent :hiccup
+   :args {:tag "li"
+          :attrs {:value {:class "inheritance-intent-slot"}}
+          :children [{:parent :to-str
+                      :args {:value {:parent :get
+                                     :args {:coll {:as :slot} :key {:value :name} :default ""}}}}
+                     " — declared by "
+                     {:parent :str-join
+                      :args {:coll {:parent :get
+                                    :args {:coll {:as :slot} :key {:value :declared-by-names}
+                                           :default {:value []}}}
+                             :separator ", "}}
+                     {:parent :if
+                      :args {:test {:parent :gt
+                                    :args {:nums [{:parent :count
+                                                   :args {:coll {:parent :get
+                                                                 :args {:coll {:as :slot}
+                                                                        :key {:value :via-parent-ids}
+                                                                        :default {:value []}}}}}
+                                                  {:value 1}]}}
+                             :then " (shared through multiple parents)"
+                             :else ""}}
+                     {:parent :if
+                      :args {:test {:parent :get
+                                    :args {:coll {:as :slot} :key {:value :competing-overlay?}
+                                           :default false}}
+                             :then " — different bindings from the parents"
+                             :else ""}}]}}
+  {:name :_inheritance-slot-lines
+   :parent :map
+   :args {:func :_inheritance-slot-line :coll :_inheritance-effective-slots}}
+  {:name :_inheritance-slot-list
+   :parent :hiccup
+   :args {:tag "ul" :attrs {:value {:class "inheritance-intent-slots"}}
+          :children [:_inheritance-slot-lines]}}
+  {:name :_inheritance-slot-count
+   :parent :to-str
+   :args {:value {:parent :count :args {:coll :_inheritance-effective-slots}}}}
+  {:name :_inheritance-slot-impact
+   :parent :get
+   :args {:coll :_inheritance-intent-preview :key {:value :slot-impact} :default {:value {}}}}
+  {:name :_inheritance-added-count
+   :parent :to-str
+   :args {:value {:parent :count
+                  :args {:coll {:parent :get
+                                :args {:coll :_inheritance-slot-impact
+                                       :key {:value :added-slot-ids} :default {:value []}}}}}}}
+  {:name :_inheritance-removed-count
+   :parent :to-str
+   :args {:value {:parent :count
+                  :args {:coll {:parent :get
+                                :args {:coll :_inheritance-slot-impact
+                                       :key {:value :removed-slot-ids} :default {:value []}}}}}}}
+  {:name :_inheritance-renamed-count
+   :parent :to-str
+   :args {:value {:parent :count
+                  :args {:coll {:parent :get
+                                :args {:coll :_inheritance-slot-impact
+                                       :key {:value :renamed-slot-ids} :default {:value []}}}}}}}
+  {:name :_inheritance-slot-summary
+   :parent :str
+   :args {:parts ["Effective slots (" :_inheritance-slot-count "; +" :_inheritance-added-count
+                  ", -" :_inheritance-removed-count ", renamed " :_inheritance-renamed-count ")"]}}
+  {:name :_inheritance-slot-details
+   :parent :if
+   :args {:test :_inheritance-allowed?
+          :then {:parent :hiccup
+                 :args {:tag "details" :attrs {:value {:class "inheritance-intent-slot-details"}}
+                        :children [{:parent :hiccup
+                                    :args {:tag "summary" :attrs {:value {}}
+                                           :children [:_inheritance-slot-summary]}}
+                                   :_inheritance-slot-list]}}
+          :else nil}}
   {:name :_inheritance-reason-node
    :parent :hiccup
    :args {:tag "p" :attrs {:value {:id "inheritance-intent-reason" :class "inheritance-intent-reason"}}
@@ -107,7 +194,8 @@
           :attrs {:parent :assoc
                   :args {:map {:value {:class "inheritance-intent"}}
                          :key {:value :data-preview} :value :_inheritance-preview-json}}
-          :children [:_inheritance-actions :_inheritance-reason-node :_inheritance-scope-node]}}
+          :children [:_inheritance-actions :_inheritance-reason-node :_inheritance-scope-node
+                     :_inheritance-slot-details]}}
   {:name :_partial-inheritance-intent-handler
    :lambda-params [:request]
    :parent :html-ok-response

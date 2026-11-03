@@ -466,6 +466,30 @@ function getInheritanceChain(fnId) {
   return getInheritanceLevels(fnId).flat();
 }
 
+// Return a use-site path only when the source has one route from this card.
+// A diamond needs an explicit route choice; the BFS row alone cannot name it.
+function uniqueInheritancePath(targetId, sourceId) {
+  let found = null;
+  let inspected = 0;
+  const visit = (id, path) => {
+    if (found === false) return;
+    if (++inspected > 256 || path.length > 64) { found = false; return; }
+    if (path.slice(0, -1).includes(id)) return;
+    if (id === sourceId) {
+      if (found) found = false;
+      else found = path;
+      return;
+    }
+    const fn = lookups?.fnMap?.get(id);
+    for (const parentId of fn?.['parent-ids'] || []) {
+      visit(parentId, [...path, parentId]);
+      if (found === false) return;
+    }
+  };
+  visit(targetId, [targetId]);
+  return found || null;
+}
+
 // ============================================================================
 // ARG RESOLUTION
 // ============================================================================

@@ -237,6 +237,15 @@ function applyHoverSpec(nodeId, depth, fnId, allFnsAtDepth) {
 }
 
 function clearPreview(nodeId) {
+  const menuOwner = typeof rowActionsPopoverAnchor !== 'undefined'
+    ? rowActionsPopoverAnchor?.closest('.node-overlay')?.dataset.nodeId : null;
+  const intentOwner = typeof inheritanceIntentAnchor !== 'undefined'
+    ? inheritanceIntentAnchor?.closest('.node-overlay')?.dataset.nodeId : null;
+  if ((menuOwner === nodeId && rowActionsPopoverAnchor)
+      || (intentOwner === nodeId && inheritanceIntentEl)) {
+    holdPreviewForRowMenu();
+    return;
+  }
   if (previewDebounceTimer) {
     clearTimeout(previewDebounceTimer);
     previewDebounceTimer = null;
@@ -248,6 +257,13 @@ function clearPreview(nodeId) {
     renderGraph(false);
     anchorNodeId = null;
   }, PREVIEW_DEBOUNCE_MS);
+}
+
+// Opening a deep ancestor's row menu must not queue a layout redraw that
+// replaces its trigger while the user is moving into the menu.
+function holdPreviewForRowMenu() {
+  if (previewDebounceTimer) clearTimeout(previewDebounceTimer);
+  previewDebounceTimer = null;
 }
 
 

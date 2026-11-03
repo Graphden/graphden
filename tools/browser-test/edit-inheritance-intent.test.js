@@ -90,6 +90,18 @@ async function revealTrigger(page, fnName) {
     await openIntent(page, names.F);
     assert(/all its consumers in this branch/.test(await page.textContent('.inheritance-intent-scope')),
       'menu explains function identity scope');
+    assert(/Other children of the source keep the original/.test(
+      await page.textContent('.inheritance-intent-scope')),
+    'menu explains impact on the source sibling branches');
+    const effective = page.locator('.inheritance-intent-slot-details');
+    assert(await effective.count() === 1, 'preview offers effective slot provenance');
+    assert(/Effective slots \(\d+; \+\d+, -\d+, renamed \d+\)/.test(
+      await effective.locator('summary').textContent()),
+    'preview names added, removed and renamed slot counts');
+    await effective.locator('summary').click();
+    assert(await effective.locator('li').count() > 0, 'effective slots are rendered');
+    assert((await effective.textContent()).includes('declared by'),
+      'slot rows identify their declaring function');
     await page.click('[data-action="inheritance-source"]');
     await page.waitForFunction(id => selectedFnId === id, P.id);
     await page.waitForSelector('.node-overlay[data-fn-name="' + names.P + '"]');

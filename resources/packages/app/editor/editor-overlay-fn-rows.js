@@ -242,11 +242,19 @@ function renderMiRow(line, levelInfo, idx, ctx) {
     span.style.textOverflow = 'ellipsis';
     span.style.position = 'relative';
     bindFullNameHover(span, span, f.name);
-    const miClearPreview = () => { onPreviewLeave(); clearPreview(nodeId); restoreStyles(); };
+    const miClearPreview = () => {
+      onPreviewLeave();
+      if (levelInfo.depth > 1) holdPreviewForRowMenu();
+      else clearPreview(nodeId);
+      restoreStyles();
+    };
     const cardFnEntity = lookups?.fnMap?.get(ctx.originalFnId) || null;
     const miEditable = levelInfo.depth === 1
       && typeof isAuthenticated === 'function' && isAuthenticated()
       && implementationFnIds?.has(ctx.originalFnId);
+    const editableCard = !!miEditable && !!cardFnEntity
+      && ((typeof graphdenIsFnOwned !== 'function') || graphdenIsFnOwned(cardFnEntity));
+    const inheritanceCommand = inheritanceVariationCommand(ctx.originalFnId, f.fnId);
     // HTMX migration Phase A2: server-renders the MI cell's
     // toolbar (ns / i / ↗ shared with col-header + when editable
     // × Remove-MI / + Add-MI). Server-side gating on `editable=true`
@@ -260,9 +268,9 @@ function renderMiRow(line, levelInfo, idx, ctx) {
         // Ownership (tenancy): the × Remove-MI / + Add-MI edits mutate the
         // CARD's parent-set, so they're offered only on a card the principal
         // OWNS. A public / other-org card is read-only.
-        editable: !!miEditable && !!cardFnEntity
-                  && ((typeof graphdenIsFnOwned !== 'function') || graphdenIsFnOwned(cardFnEntity)),
-        cardFnId: cardFnEntity ? cardFnEntity.id : null
+        editable: editableCard,
+        cardFnId: cardFnEntity ? cardFnEntity.id : null,
+        inheritanceCommand,
       });
     };
     if (typeof createMoreActionsTrigger === 'function') {
@@ -270,6 +278,7 @@ function renderMiRow(line, levelInfo, idx, ctx) {
         onEnter: miClearPreview,
         buildContent: buildCellPopoverContent
       });
+      trigger.dataset.inheritanceSourceFnId = f.fnId;
       span.appendChild(trigger);
     }
     if (i < levelInfo.fns.length - 1) {
@@ -339,6 +348,22 @@ function fnRowChrome(isRoot, entity) {
   return {run, runLabel, rightPadding: icon + pin + 3 + runWidth};
 }
 
+function inheritanceVariationCommand(cardId, sourceId) {
+  const card = lookups?.fnMap?.get(cardId);
+  if (!card || !isAuthenticated() || !implementationFnIds?.has(cardId)
+      || (typeof graphdenIsFnOwned === 'function' && !graphdenIsFnOwned(card))) return null;
+  const path = uniqueInheritancePath(cardId, sourceId);
+  if (!path || path.length < 2) return null;
+  const edgeIndex = card['parent-ids']?.indexOf(path[1]) ?? -1;
+  if (edgeIndex < 0) return null;
+  return {
+    action: 'variation', kind: 'parent-edge', 'target-fn-id': cardId,
+    'source-fn-id': sourceId, 'expected-parent-id': path[1],
+    'parent-edge-index': edgeIndex,
+    ...(path.length > 2 ? {'occurrence-path': path} : {}),
+  };
+}
+
 function renderSingleFnRow(line, levelInfo, ctx) {
   const { nodeId, isNavRoot, fullDepth, partialFns,
           paint: { applyPreviewStyle, restoreStyles } } = ctx;
@@ -406,7 +431,12 @@ function renderSingleFnRow(line, levelInfo, ctx) {
     const badge = gdDiffAncestorBadgeEl(lineFn.fnId);
     if (badge) line.appendChild(badge);
   }
-  const lineClearPreview = () => { onPreviewLeave(); clearPreview(nodeId); restoreStyles(); };
+  const lineClearPreview = () => {
+    onPreviewLeave();
+    if (levelInfo.depth > 1) holdPreviewForRowMenu();
+    else clearPreview(nodeId);
+    restoreStyles();
+  };
   if (chrome.run) {
     // graph-first-exception: selected canvas controls attach to in-page overlay identity.
     // Delegate to the single Inspector Run owner.
@@ -430,11 +460,8 @@ function renderSingleFnRow(line, levelInfo, ctx) {
   // hover-driven expansion as before. `buildPopoverContent` defers
   // building the icons until the popover actually opens, so unhovered
   // rows pay no DOM cost.
-  const directParents = cardFnEntity?.['parent-ids'] || [];
-  const parentIntent = lineSignedIn && levelInfo.depth === 1
-    && directParents.length === 1 && directParents[0] === lineFn.fnId
-    ? { action: 'variation', kind: 'parent-edge', 'target-fn-id': ctx.originalFnId,
-      'source-fn-id': lineFn.fnId, 'expected-parent-id': lineFn.fnId } : null;
+  const parentIntent = levelInfo.depth > 0
+    ? inheritanceVariationCommand(ctx.originalFnId, lineFn.fnId) : null;
   const refBinding = useSiteArg && lookups?.bindingMap?.get(useSiteArg['binding-id']);
   const refIntent = lineSignedIn && useSiteArg?.['binding-id'] && !useSiteArg['item-id']
     && gv.node(nodeId)?.incomingEdges().length === 1
@@ -593,6 +620,7 @@ function renderSingleFnRow(line, levelInfo, ctx) {
       onEnter: lineClearPreview,
       buildContent: buildPopoverContent
     });
+    trigger.dataset.inheritanceSourceFnId = lineFn.fnId;
     // The root row's ⋯ is the stable way back to this fn's actions after a
     // rebuild (editor-service-popover.js closeServicePopoverAndRebuild).
     if (lineIsRoot) trigger.dataset.rootFnId = lineFn.fnId;

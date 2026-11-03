@@ -2,6 +2,7 @@
 // owns focus, anchoring and dispatching canonical server commands.
 let inheritanceIntentEl = null;
 let inheritanceIntentAnchor = null;
+let inheritanceIntentCard = null;
 let inheritanceIntentCommand = null;
 let stopInheritanceAnchorObservation = null;
 let inheritanceIntentPending = false;
@@ -12,18 +13,23 @@ installPopoverDismiss({
   isVisible: () => !!inheritanceIntentEl, onDismiss: closeInheritanceIntent, trapFocus: true,
 });
 
-function closeInheritanceIntent() {
-  if (inheritanceIntentPending) return;
+function closeInheritanceIntent({restoreDetachedCard = true} = {}) {
+  if (inheritanceIntentPending || !inheritanceIntentEl) return;
   stopInheritanceAnchorObservation?.();
   stopInheritanceAnchorObservation = null;
   inheritanceAnchorObserver?.disconnect();
   inheritanceAnchorObserver = null;
   const hadFocus = inheritanceIntentEl?.contains(document.activeElement);
+  const cardDisconnected = !inheritanceIntentCard?.isConnected;
+  const nodeId = inheritanceIntentCard?.dataset.nodeId;
   inheritanceIntentEl?.remove();
   inheritanceIntentEl = null;
   inheritanceIntentCommand = null;
   if (hadFocus) returnFocusTo(inheritanceIntentAnchor);
   inheritanceIntentAnchor = null;
+  inheritanceIntentCard = null;
+  if (nodeId) clearPreview(nodeId);
+  if (cardDisconnected && restoreDetachedCard) void renderGraph(false);
 }
 
 async function openInheritanceIntent(anchor, command) {
@@ -38,9 +44,33 @@ async function openInheritanceIntent(anchor, command) {
   inheritanceIntentEl = host;
   inheritanceIntentAnchor = anchor;
   inheritanceIntentCommand = command;
+  const originalCard = anchor.closest('.node-overlay');
+  inheritanceIntentCard = originalCard;
+  const cardNodeId = originalCard?.dataset.nodeId;
+  const sourceFnId = anchor.dataset.inheritanceSourceFnId;
+  const reanchor = () => {
+    if (!cardNodeId || !sourceFnId) return false;
+    const card = [...document.querySelectorAll('.node-overlay')]
+      .find(node => node.dataset.nodeId === cardNodeId);
+    const replacement = [...(card?.querySelectorAll('.more-actions-trigger') || [])]
+      .find(button => button.dataset.inheritanceSourceFnId === sourceFnId);
+    if (!replacement) return false;
+    stopInheritanceAnchorObservation?.();
+    inheritanceIntentAnchor = replacement;
+    inheritanceIntentCard = card;
+    stopInheritanceAnchorObservation = observePopoverAnchor(host, replacement, place, onViewportChanged);
+    return true;
+  };
   const place = () => {
-    const rect = anchor.getBoundingClientRect();
-    if (!anchor.isConnected || rect.width === 0 || rect.height === 0
+    if (!inheritanceIntentAnchor?.isConnected && !reanchor()) {
+      // A graph redraw can remove the whole card while a preview is open.
+      // Keep the dialog at its last position; removing only its button is
+      // an explicit anchor loss and still dismisses it.
+      if (originalCard?.isConnected) closeInheritanceIntent();
+      return;
+    }
+    const rect = inheritanceIntentAnchor.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0
         || rect.right < 0 || rect.bottom < 0 || rect.left > window.innerWidth || rect.top > window.innerHeight) {
       closeInheritanceIntent();
       return;
@@ -56,12 +86,11 @@ async function openInheritanceIntent(anchor, command) {
     host.style.top = Math.max(top + 8, Math.min(rect.bottom + 6, top + height - host.offsetHeight - 8)) + 'px';
   };
   stopInheritanceAnchorObservation = observePopoverAnchor(host, anchor, place, onViewportChanged);
-  const cardLayer = anchor.closest('.node-overlay')?.parentNode;
-  if (cardLayer && typeof MutationObserver === 'function') {
+  if (cardNodeId && typeof MutationObserver === 'function') {
     inheritanceAnchorObserver = new MutationObserver(() => {
-      if (!anchor.isConnected) closeInheritanceIntent();
+      if (!inheritanceIntentAnchor?.isConnected) place();
     });
-    inheritanceAnchorObserver.observe(cardLayer, { childList: true, subtree: true });
+    inheritanceAnchorObserver.observe(document.body, { childList: true, subtree: true });
   }
   focusSafely(host.querySelector('[data-gd-pop-x]'));
   place();
@@ -89,7 +118,7 @@ async function navigateInheritanceSource(fnId) {
   if (!fnId) return;
   await ensureSubtreeFor(fnId);
   if (!lookups?.fnMap?.has(fnId)) throw new Error('Source is unavailable.');
-  closeInheritanceIntent();
+  closeInheritanceIntent({restoreDetachedCard: false});
   // IDs remain authoritative even for anonymous or duplicate-named sources.
   selectFn(fnId, false);
 }
@@ -109,7 +138,7 @@ async function applyIntentPreview(preview, proposedName) {
     });
     inheritanceIntentPending = false;
     if (!result) return;
-    closeInheritanceIntent();
+    closeInheritanceIntent({restoreDetachedCard: false});
     if (typeof _tourLoadInheritanceCheckSource === 'function') {
       try { await _tourLoadInheritanceCheckSource(preview); }
       catch (error) { gdToast('Change saved. ' + error.message); }
@@ -158,14 +187,15 @@ registerActionHandler('inheritance-ancestors', async (_button, event) => {
   try {
     const result = await inheritanceRequest('preview', {
       action: 'candidates', 'target-fn-id': command['target-fn-id'], 'source-fn-id': command['source-fn-id'],
+      ...('parent-edge-index' in command ? {'parent-edge-index': command['parent-edge-index']} : {}),
     });
     if (inheritanceIntentCommand !== command) return;
-    const candidates = (result.candidates || []).filter(c => !c.current).map(c => ({
+    const candidates = (result.candidates || []).filter(c => !c['current?']).map(c => ({
       ...c, qualified: c['qualified-name'] || c.name || c.id,
       ns: lookups?.nsPathMap?.get(c['namespace-id']) || null,
       compatible: !!c.allowed, effects: [], flatReturn: null, richReturn: null,
     }));
-    closeInheritanceIntent();
+    closeInheritanceIntent({restoreDetachedCard: false});
     openFnPicker({ anchorEl: anchor, label: 'Choose ancestor', candidates,
       onPick: async (_fn, candidate) => {
         try { if (await applyInheritancePreview(candidate)) await initGraph(); }

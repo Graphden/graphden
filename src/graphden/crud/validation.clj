@@ -66,7 +66,7 @@
 ;; set and renders the refusal (its client-side copy judged some valid
 ;; sets wrong and was removed), so every API consumer gets one rule.
 
-(defn- canonical-slot-id
+(defn canonical-slot-id
   "The root of `slot-id`'s `:source-slot-id` chain — a renamed VIEW
    and the slot it renames are one arg, not two (`ring-response`'s
    `:body` is `assoc`'s `:value` under a new name). Stops on a cycle

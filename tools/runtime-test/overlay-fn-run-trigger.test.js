@@ -17,6 +17,7 @@ function fixture({signedIn = true, isNavRoot = true, depth = 0, known = true} = 
     gdCanvasInheritanceGraph: {mount(owner, host, surface, facts) { presentations.push({owner, host, surface, facts}); }}},
     document: {createElement: element},
     lookups: {fnMap: new Map(known ? [['root', entity]] : [])},
+    uniqueInheritancePath: () => null,
     implementationFnIds: new Set(['root']), isAuthenticated: () => signedIn,
     measureCanvasText: text => text.length * 7, displayLabel: name => name, bindFullNameHover() {}, onPreviewLeave() {},
     clearPreview() {}, attachPreviewHandlers() {}, _singleEditableIncomingArg: () => null,

@@ -775,7 +775,7 @@
   ([versioned-storage source-branch-id]
    (merge-branch! versioned-storage source-branch-id {}))
   ([versioned-storage source-branch-id {:keys [conflict-resolutions inherited-checked?
-                                             trusted-precommit-check!]}]
+                                               trusted-precommit-check!]}]
    (let [base-storage (:base-storage versioned-storage)
          target-branch-id (:branch-id versioned-storage)
          ;; A branch cannot be merged into itself. `fork-point` degenerates

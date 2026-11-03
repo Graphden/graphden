@@ -972,7 +972,7 @@
   {:name :_diff-view-group-sort-key
    :parent :vec
    :args {:coll [{:parent :if :args {:test {:parent :some? :args {:value :_diff-view-group-name}}
-                                    :then {:value 0} :else {:value 1}}}
+                                     :then {:value 0} :else {:value 1}}}
                  {:parent :coalesce :args {:value :_diff-view-group-name :default {:value ""}}}
                  {:parent :coalesce
                   :args {:value {:parent :get :args {:coll {:as :item} :key {:value :fn-id} :default nil}}

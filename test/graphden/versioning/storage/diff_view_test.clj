@@ -65,7 +65,7 @@
             fresh (sp/create-entity vf :fn {:name "dv-fresh" :parent-ids []
                                             :description "hi"})
             {:keys [rows] :as view} (dv/diff-branches-view-facts
-                                        base (:id feature) main-id)
+                                      base (:id feature) main-id)
             owner-rows (filter #(= (str (:id owner)) (:fn-id %)) rows)
             fresh-rows (filter #(= (str (:id fresh)) (:fn-id %)) rows)]
 

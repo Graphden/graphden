@@ -145,13 +145,13 @@ Stages a create-only publication UUID before sending the request. The graph part
 :PROPERTIES:
 :CUSTOM_ID: editor/_tourTrackHttpPublication
 :FILE: resources/packages/app/editor/editor-tour-session.js
-:LINE: 304
+:LINE: 436
 :MINS: 1.1
 :END:
 
 Records the exact lease, handler, namespace, branch, lesson session, and principal before publication. Cleanup can revoke that lease after its lesson branches disappear without guessing identity from a name or deleting another account's publication.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-tour-session.js::function _tourTrackHttpPublication(id, fn) {][resources/packages/app/editor/editor-tour-session.js:304]]
+- source :: [[file:../../../resources/packages/app/editor/editor-tour-session.js::function _tourTrackHttpPublication(id, fn) {][resources/packages/app/editor/editor-tour-session.js:436]]
 
 * 12. applyInheritancePreview
 :PROPERTIES:

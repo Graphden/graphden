@@ -303,9 +303,9 @@
         ;;   non-author-unless-allowed) approvals (throws
         ;;   :branch/approval-required).
         ;; Both judge the same switched-to-target storage the merge uses.
-        gate! (fn [bid]
-                (merge-policy/validate-branch-policy! storage bid)
-                (merge-policy/validate-approval-policy! storage bid))
+        gate! (fn [step-storage bid]
+                (merge-policy/validate-branch-policy! step-storage bid)
+                (merge-policy/validate-approval-policy! step-storage bid))
         t1 (System/nanoTime)
         record (merge-policy/merge-transitively! storage source-branch-id
                                                  {:conflict-resolutions resolutions}

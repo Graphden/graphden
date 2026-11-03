@@ -342,14 +342,20 @@
             ;; The check ran here; the storage layer need not repeat its
             ;; queries. Sound for the steps too: a step's own inheritance is
             ;; inside the source's, and the plan lands root-most first.
-            opts (assoc opts :inherited-checked? true)]
+            opts (assoc opts :inherited-checked? true)
+            checked-opts (fn [bid]
+                           (assoc opts :trusted-precommit-check!
+                                  (fn [transaction-storage]
+                                    (gate! (assoc versioned-storage
+                                                  :base-storage transaction-storage)
+                                           bid))))]
         (loop [steps plan
                done []]
           (if-let [{:keys [id] :as step} (first steps)]
             (let [bid (java.util.UUID/fromString id)]
               (try
-                (gate! bid)
-                (vs/merge-branch! versioned-storage bid opts)
+                (gate! versioned-storage bid)
+                (vs/merge-branch! versioned-storage bid (checked-opts bid))
                 (catch clojure.lang.ExceptionInfo e
                   (throw (ex-info (str "While merging \"" (:name step) "\" first (step "
                                        (inc (count done)) " of " (inc (count plan)) "): "
@@ -358,8 +364,9 @@
                                   e))))
               (recur (rest steps) (conj done step)))
             (do
-              (gate! source-branch-id)
-              (assoc (vs/merge-branch! versioned-storage source-branch-id opts)
+              (gate! versioned-storage source-branch-id)
+              (assoc (vs/merge-branch! versioned-storage source-branch-id
+                                       (checked-opts source-branch-id))
                      :merged-first done))))))))
 
 
@@ -369,9 +376,9 @@
   ([versioned-storage source-branch-id {:keys [skip-protection-check] :as opts}]
    (merge-transitively! versioned-storage source-branch-id
                         (dissoc opts :skip-protection-check)
-                        (fn [bid]
+                        (fn [storage bid]
                           (when-not skip-protection-check
-                            (validate-merge! versioned-storage bid))))))
+                            (validate-merge! storage bid))))))
 
 
 (defn has-merge-protected-trait?

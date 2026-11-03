@@ -834,7 +834,9 @@
         (let [grp (some #(when (= probe (:fn-name %)) %) (:groups body))]
           (is (some? grp) "the branch-only fn groups under its own name")
           (is (= "added-in-source" (:change grp)))
-          (is (= (str ":" probe) (:fn-label grp))))))
+          (is (= (str ":" probe) (:fn-label grp)))
+          (is (= ["fn"] (mapv :entity-name (:entries grp))))
+          (is (= "added-in-source" (:change (first (:entries grp))))))))
 
     (testing "the payload names the fns that changed INSIDE — own rows equal, a dependency in the diff"
       ;; base ← child on main; the branch retunes base's description.
@@ -863,10 +865,17 @@
                                             :path "/api/branches/main/diff-view"
                                             :query (str "against=" feat)}))
                 affected (:affected body)
+                base-group (some #(when (= base-nm (:fn-name %)) %) (:groups body))
                 entry (get affected (keyword (str (:id child-fn))))]
             (is (true? (:ok body)))
-            (is (some #(= base-nm (:fn-name %)) (:groups body))
-                "base is a changed group")
+            (is (some? base-group) "base is a changed group")
+            (is (= "modified" (:change base-group)))
+            (is (= "fn" (:entity-name (first (:entries base-group)))))
+            (is (some #(= "description" (:field %))
+                      (:fields (first (:entries base-group)))))
+            (is (= (sort (keep :fn-name (:groups body)))
+                   (keep :fn-name (:groups body)))
+                "graph groups named fns in stable name order")
             (is (not-any? #(= child-nm (:fn-name %)) (:groups body))
                 "child's own rows are equal — not a group")
             (is (some? entry) (str "child is affected: " (pr-str (keys affected))))

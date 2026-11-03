@@ -1,8 +1,8 @@
 (ns ^:serial graphden.versioning.storage.diff-view-unit-test
   "Unit tests for `versioning.storage.diff-view` — the pure display
    helpers (value rendering, label resolution, previews, per-entry
-   assembly) driven directly with literal row maps, and the full
-   `diff-branches-view` grouping / ordering contract driven over a
+   assembly) driven directly with literal row maps, and the enriched
+   `diff-branches-view-facts` contract driven over a
    stubbed `mrg/diff-branches` + protocol stub (the DB-backed path
    stays covered by the `^:integration` `diff-view-test`).
 
@@ -252,10 +252,10 @@
       (is (= {} (resolve-fn-names :stub [] src-b tgt-b))))))
 
 
-;; === diff-branches-view =====================================================
+;; === diff-branches-view-facts ===============================================
 
 (defn- read-only-storage
-  "Protocol stub for `diff-branches-view`'s two `sp/read-entities`
+  "Protocol stub for `diff-branches-view-facts`'s `sp/read-entities`
    pre-reads. Everything else must not run."
   [tables]
   (reify
@@ -298,7 +298,7 @@
       (throw (AssertionError. "query-ref-many-owners")))))
 
 
-(deftest diff-branches-view-groups-labels-and-orders-test
+(deftest diff-branches-view-facts-labels-test
   (let [src-b #uuid "00000000-0000-4000-8000-00000000000a"
         tgt-b #uuid "00000000-0000-4000-8000-00000000000b"
         fn-a #uuid "11111111-1111-4111-8111-111111111111"
@@ -365,65 +365,64 @@
 
                            bl/effective-branch-local?
                            (fn [_ fn-id] (= fn-id fn-a))]
-               (dv/diff-branches-view storage src-b tgt-b))
-        [alpha-g assets-g anon-g :as groups] (:groups view)]
+               (dv/diff-branches-view-facts storage src-b tgt-b))
+        rows (:rows view)
+        alpha-rows (filter #(= (str fn-a) (:fn-id %)) rows)
+        alpha-entries (map :entry alpha-rows)
+        assets-row (first (filter #(nil? (:fn-id %)) rows))
+        anon-row (first (filter #(= (str fn-anon) (:fn-id %)) rows))]
     (testing "envelope: branch ids + total row count"
       (is (= src-b (:source-branch-id view)))
       (is (= tgt-b (:target-branch-id view)))
       (is (= 6 (:count view))))
 
-    (testing "group order: named fns first, then ownerless before
-              anonymous (sort key name-presence / name / id)"
-      (is (= 3 (count groups)))
-      (is (= [(str fn-a) nil (str fn-anon)] (mapv :fn-id groups))))
+    (testing "every source diff has one enriched fact row"
+      (is (= 6 (count rows)))
+      (is (= #{(str fn-a) nil (str fn-anon)} (set (map :fn-id rows)))))
 
-    (testing "the group carries its owning fn's namespace PATH — the
+    (testing "owner facts carry the fn's namespace PATH — the
               Explorer can't derive it for compared-branch-only fns"
-      (is (= "web.http" (:ns-path alpha-g)))
-      (is (nil? (:ns-path anon-g)) "no fn row → no path"))
+      (is (= "web.http" (:ns-path (first alpha-rows))))
+      (is (nil? (:ns-path anon-row)) "no fn row → no path"))
 
-    (testing "named owner group: label, own change, branch-local flag"
-      (is (= "alpha" (:fn-name alpha-g)))
-      (is (= ":alpha" (:fn-label alpha-g)))
-      (is (= :modified (:change alpha-g)))
-      (is (true? (:branch-local? alpha-g))))
+    (testing "named owner facts carry label and branch-local flag"
+      (is (= "alpha" (:fn-name (first alpha-rows))))
+      (is (= ":alpha" (:fn-label (first alpha-rows))))
+      (is (every? :branch-local? alpha-rows)))
 
-    (testing "entries rank fn-row → fn-slot → binding → list-item"
-      (is (= [:fn :fn-slot :binding :binding-list-item]
-             (mapv :entity-name (:entries alpha-g)))))
+    (testing "all entry kinds reach the graph for ordering"
+      (is (= #{:fn :fn-slot :binding :binding-list-item}
+             (set (map :entity-name alpha-entries)))))
 
     (testing "modified fn row pairs before/after per changed field"
       (is (= [{:field "description" :source "new" :target "old"}]
-             (:fields (first (:entries alpha-g))))))
+             (:fields (first (filter #(= :fn (:entity-name %)) alpha-entries))))))
 
     (testing "slot names resolve through the pre-read slot rows, and a
               ref-fn-id resolved only on the TARGET branch still names"
-      (let [binding-e (nth (:entries alpha-g) 2)]
+      (let [binding-e (first (filter #(= :binding (:entity-name %)) alpha-entries))]
         (is (= "port" (:slot-name binding-e)))
         (is (= [{:field "ref-fn-id" :source ":handler" :target "∅"}
                 {:field "value" :source "9090" :target "8080"}]
                (:fields binding-e)))))
 
     (testing "list item resolves its slot through the binding pre-read"
-      (let [li-e (nth (:entries alpha-g) 3)]
+      (let [li-e (first (filter #(= :binding-list-item (:entity-name %)) alpha-entries))]
         (is (= "port" (:slot-name li-e)))
         (is (= 3 (:position li-e)))
         (is (= "10" (:preview li-e)))))
 
-    (testing "ownerless asset overrides group under the (assets) label,
-              defaulting to :modified (no fn row of their own)"
-      (is (= "(assets)" (:fn-label assets-g)))
-      (is (nil? (:fn-name assets-g)))
-      (is (= :modified (:change assets-g)))
-      (is (false? (:branch-local? assets-g)))
-      (is (= ["/editor.css"] (mapv :preview (:entries assets-g)))))
+    (testing "ownerless asset override carries its fallback label"
+      (is (= "(assets)" (:fn-label assets-row)))
+      (is (nil? (:fn-name assets-row)))
+      (is (false? (:branch-local? assets-row)))
+      (is (= "/editor.css" (:preview (:entry assets-row)))))
 
-    (testing "anonymous fn group falls back to a short-id label and takes
-              the fn row's own change"
-      (is (nil? (:fn-name anon-g)))
-      (is (= "#99999999" (:fn-label anon-g)))
-      (is (= :added-in-source (:change anon-g)))
-      (is (false? (:branch-local? anon-g))))))
+    (testing "anonymous fn falls back to a short-id label"
+      (is (nil? (:fn-name anon-row)))
+      (is (= "#99999999" (:fn-label anon-row)))
+      (is (= :added-in-source (:change (:entry anon-row))))
+      (is (false? (:branch-local? anon-row))))))
 
 
 (deftest affected-fns-walks-the-reverse-index-test

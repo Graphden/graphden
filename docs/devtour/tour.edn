@@ -621,11 +621,10 @@
      :say "Compares the resolved contents of two branches, considering entities visible from either
            side. This read-only comparison reports their differences without deciding how a merge
            should resolve conflicts."}
-    {:ns graphden.versioning.storage.diff-view :defn diff-branches-view
-     :say "Groups branch differences by owning function and adds per-field before/after values. It
-           also resolves [slot](#term/slot) names and function references in batches. The editor's
-           comparison and review interfaces consume this display model; the older API retains its flat
-           row format."}
+    {:ns graphden.versioning.storage.diff-view :defn diff-branches-view-facts
+     :say "Reads branch differences, resolves [slot](#term/slot) names and function references in
+           batches, and attaches each entry's owning function. The app.branches fn graph groups and
+           orders these facts for comparison and review; the older API retains its flat row format."}
     {:ns graphden.versioning.storage.merge :defn detect-conflicts
      :say "Finds entities changed to different content on both branches after their fork point,
            excluding [branch-local functions](#term/branch-local). Effective timestamps include

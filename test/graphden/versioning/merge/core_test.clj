@@ -658,25 +658,26 @@
     (is (= "v0" (bmain)))
     (testing "one call carries R's change; the gate saw R and then S"
       (let [record (mp/merge-transitively! (vs/switch-branch storage main) (:id s2) {}
-                                           (fn [bid] (swap! gated conj bid)))]
+                                           (fn [_ bid] (swap! gated conj bid)))]
         (is (= [{:id (str (:id r)) :name "tr-R"}] (:merged-first record)))
-        (is (= [(:id r) (:id s2)] @gated) "every step passes the policy gate, root-most first")
+        (is (= [(:id r) (:id r) (:id s2) (:id s2)] @gated)
+            "every step is checked before the write and under its locks")
         (is (= "vR" (bmain)))))
     (testing "a fork off the target inherits nothing the target lacks — no steps, no gate calls for others"
       (let [f (vs/create-branch! (vs/switch-branch storage main) "tr-F")
             _ (sp/update-entity (vs/switch-branch storage (:id f)) :binding (:id b) {:value "vF"})
             seen (atom [])
             record (mp/merge-transitively! (vs/switch-branch storage main) (:id f) {}
-                                           (fn [bid] (swap! seen conj bid)))]
+                                           (fn [_ bid] (swap! seen conj bid)))]
         (is (= [] (:merged-first record)))
-        (is (= [(:id f)] @seen))
+        (is (= [(:id f) (:id f)] @seen))
         (is (= "vF" (bmain)))))
     (testing "a step the gate refuses stops the run and names the step"
       (let [r2 (vs/create-branch! (vs/switch-branch storage main) "tr-R2")
             _ (sp/update-entity (vs/switch-branch storage (:id r2)) :binding (:id b) {:value "vR2"})
             s3 (vs/create-branch! (vs/switch-branch storage (:id r2)) "tr-S3")
             ex (try (mp/merge-transitively! (vs/switch-branch storage main) (:id s3) {}
-                                            (fn [bid]
+                                            (fn [_ bid]
                                               (when (= bid (:id r2))
                                                 (throw (ex-info "no" {:type :branch/approval-required})))))
                     (catch clojure.lang.ExceptionInfo e e))]
@@ -684,3 +685,65 @@
         (is (= "tr-R2" (:name (:step (ex-data ex)))))
         (is (= [] (:merged-first (ex-data ex))))
         (is (= "vF" (bmain)) "nothing landed")))))
+
+
+(deftest a-policy-change-between-precheck-and-commit-refuses-the-merge-test
+  (let [{:keys [storage base fn-id]} (create-test-storage)
+        main (vs/current-branch-id storage)
+        source (vs/create-branch! storage "policy-race")
+        source-view (vs/switch-branch storage (:id source))
+        calls (atom 0)]
+    (try
+      (sp/update-entity source-view :fn fn-id {:description "proposal"})
+      (let [error (try
+                    (mp/merge-transitively!
+                      storage (:id source) {}
+                      (fn [step-storage bid]
+                        (let [call (swap! calls inc)]
+                          (mp/validate-approval-policy! step-storage bid)
+                          (when (= 1 call)
+                            (sp/update-entity base :branch main {:required-approvals 1})))))
+                    nil
+                    (catch clojure.lang.ExceptionInfo e e))]
+        (is (= :branch/approval-required (:type (ex-data error))))
+        (is (= 2 @calls) "the precommit check sees the changed policy")
+        (is (nil? (:description (sp/read-entity storage :fn fn-id))))
+        (is (empty? (sp/query-entities base :branch-merge
+                                       {:target-branch-id main}))))
+      (finally
+        (sp/close base)))))
+
+
+(deftest a-proposal-change-after-approval-and-precheck-refuses-the-merge-test
+  (let [{:keys [storage base fn-id]} (create-test-storage)
+        main (vs/current-branch-id storage)
+        source (vs/create-branch! storage "stale-proposal-race")
+        source-view (vs/switch-branch storage (:id source))
+        calls (atom 0)]
+    (try
+      (sp/update-entity source-view :fn fn-id {:description "approved proposal"})
+      (sp/update-entity base :branch main {:required-approvals 1})
+      (sp/create-entity base :branch-approval
+                        {:source-branch-id (:id source)
+                         :target-branch-id main
+                         :approver-id "reviewer"
+                         :content-stamp (mp/branch-content-stamp base (:id source))
+                         :created-at (java.time.Instant/now)})
+      (let [error (try
+                    (mp/merge-transitively!
+                      storage (:id source) {}
+                      (fn [step-storage bid]
+                        (let [call (swap! calls inc)]
+                          (mp/validate-approval-policy! step-storage bid)
+                          (when (= 1 call)
+                            (sp/update-entity source-view :fn fn-id
+                                              {:description "unreviewed revision"})))))
+                    nil
+                    (catch clojure.lang.ExceptionInfo e e))]
+        (is (= :branch/approval-required (:type (ex-data error))))
+        (is (= 2 @calls))
+        (is (nil? (:description (sp/read-entity storage :fn fn-id))))
+        (is (empty? (sp/query-entities base :branch-merge
+                                       {:target-branch-id main}))))
+      (finally
+        (sp/close base)))))

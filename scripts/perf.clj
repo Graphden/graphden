@@ -30,6 +30,7 @@
    promoting one to a budget later is a one-line edit."
   (:require
     [babashka.fs :as fs]
+    [babashka.process :as p]
     [clojure.edn :as edn]
     [clojure.pprint :as pp]
     [clojure.string :as str]))
@@ -222,6 +223,9 @@
                         updated
                         (get budgets trend-key))]
     (spit budgets-path (str budgets-header (with-out-str (pp/pprint updated))))
+    ;; pprint's map indentation differs from the repository's required
+    ;; cljstyle format. Keep the generated budget immediately CI-ready.
+    (p/shell {:out :string} "clojure" "-M:cljstyle" "fix" budgets-path)
     (println (str "\n" green "✓ wrote " budgets-path reset
                   " — review the diff before committing it."))))
 

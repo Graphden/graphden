@@ -774,7 +774,8 @@
    Returns the branch-merge record."
   ([versioned-storage source-branch-id]
    (merge-branch! versioned-storage source-branch-id {}))
-  ([versioned-storage source-branch-id {:keys [conflict-resolutions inherited-checked?]}]
+  ([versioned-storage source-branch-id {:keys [conflict-resolutions inherited-checked?
+                                               trusted-precommit-check!]}]
    (let [base-storage (:base-storage versioned-storage)
          target-branch-id (:branch-id versioned-storage)
          ;; A branch cannot be merged into itself. `fork-point` degenerates
@@ -820,6 +821,13 @@
            (when-not (sp/read-entity storage :branch target-branch-id)
              (throw (ex-info "Merge target branch not found"
                              {:type :not-found :branch-id target-branch-id})))
+           ;; The policy layer checked before entering this write. Check it
+           ;; again on the transaction-bound storage after the writer and
+           ;; branch locks, so a changed approval or proposal cannot ride an
+           ;; earlier decision into this merge. This callback is supplied by
+           ;; trusted host code only; user graph code never runs here.
+           (when trusted-precommit-check!
+             (trusted-precommit-check! storage))
            ;; Conflict detection now reads a lock-stable view (inside the
            ;; tx, after the lock) instead of the pre-tx snapshot.
            (let [{:keys [conflicts]} (detect-conflicts storage source-branch-id

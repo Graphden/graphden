@@ -155,8 +155,9 @@ async function _tourDeleteCreatedBranches(created, blocked = new Set()) {
 
 async function _tourDeleteOwnedBranch(created) {
   if (created.name === 'main') return false;
-  if (created.receipt === 'pending' && (!created.id || !created['base-branch-id'])) return false;
-  if (!created.id) return _tourDeleteBranch(created.name); // older lesson ledgers
+  // A legacy name-only ledger cannot prove ownership. Keep it for review;
+  // another branch may have taken that name after the lesson branch vanished.
+  if (!created.id || !created['base-branch-id']) return false;
   try {
     const response = await authFetch(API.api_branches);
     if (!response.ok) return false;

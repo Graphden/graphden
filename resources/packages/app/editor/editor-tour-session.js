@@ -18,7 +18,7 @@ function gdTourRecordBranchCreation(branch) {
       || !branch.id || !branch['base-branch-id']) return;
   if (_tourState.created.some((row) => row.type === 'branch' && row.name === branch.name)) return;
   _tourState.created.push({type: 'branch', id: branch.id, name: branch.name,
-    'base-branch-id': branch['base-branch-id']});
+    'base-branch-id': branch['base-branch-id'], receipt: 'created'});
   _tourSaveState();
 }
 window.gdTourRecordBranchCreation = gdTourRecordBranchCreation;
@@ -45,25 +45,19 @@ function _tourRejectGraphViewCreation(command) {
 async function _tourExpectedBranch(saved, current = () => true) {
   const lesson = (_tourLessons?.lessons || []).find((l) => l.id === saved.lessonId);
   const check = lesson?.steps?.[saved.step]?.check;
-  if (check?.kind === 'on-branch') return check.name;
-  if (check?.kind !== 'created-branch') return null;
-  const receipt = saved.created?.find(row => row.type === 'branch'
-    && row.name === check.name && row.receipt === 'created' && row.id && row['base-branch-id']);
-  if (!receipt || !await _tourConfirmPrincipal(saved, current)) return null;
-  if (!current()) return null;
-  try {
-    const response = await authFetch(API.api_branches);
-    if (!response.ok) return null;
-    const body = await response.json();
-    const rows = Array.isArray(body) ? body : body?.branches;
-    return current() && _tourPrincipalMatches(saved) && rows?.some(row => row.id === receipt.id
-      && row.name === receipt.name && row['base-branch-id'] === receipt['base-branch-id'])
-      ? receipt.name : null;
-  } catch (_) { return null; }
+  if (check?.kind === 'on-branch' && check.name === 'main') return 'main';
+  if (!['on-branch', 'created-branch'].includes(check?.kind)) return null;
+  const receipt = _tourBranchReceipt(saved, check.name);
+  if (!receipt || receipt.receipt === 'pending'
+      || !await _tourConfirmPrincipal(saved, current)) return null;
+  const status = await _tourBranchStatus(saved, receipt.name);
+  return current() && _tourPrincipalMatches(saved) && status === 'available'
+    ? receipt.name : null;
 }
 
 function _tourOwnedBranch(saved) {
-  return saved?.sandboxBranch || null;
+  return saved?.sandboxBranch && saved.sandboxBranchId && saved.sandboxBaseBranchId
+    ? saved.sandboxBranch : null;
 }
 
 function _tourCleanupBranch(saved) {
@@ -123,16 +117,56 @@ async function _tourConfirmPrincipal(saved, current = () => true) {
   return false;
 }
 
-async function _tourBranchAvailable(branch) {
-  if (branch === 'main') return true;
-  if (!(window.API && API.api_branches)) return false;
+function _tourBranchReceipt(saved, branch) {
+  if (saved?.restartPending?.name === branch && saved.restartPending.id
+      && saved.restartPending['base-branch-id']) return saved.restartPending;
+  if (saved?.sandboxBranch === branch && saved.sandboxBranchId && saved.sandboxBaseBranchId) {
+    return {id: saved.sandboxBranchId, name: branch,
+      'base-branch-id': saved.sandboxBaseBranchId};
+  }
+  return saved?.created?.find(row => row.type === 'branch' && row.name === branch
+    && row.id && row['base-branch-id'] && row.receipt === 'created') || null;
+}
+
+// A successful, parseable listing can prove absence. Network failures, 403s,
+// and malformed replies cannot; never turn them into a destructive recovery.
+async function _tourBranchStatus(saved, branch) {
+  if (branch === 'main') return 'available';
+  if (!(window.API && API.api_branches)) return 'unavailable';
   try {
     const response = await authFetch(API.api_branches);
-    if (!response.ok) return false;
+    if (!response.ok) return 'unavailable';
     const payload = await response.json();
     const rows = Array.isArray(payload) ? payload : payload?.branches;
-    return Array.isArray(rows) && rows.some((row) => row.name === branch);
-  } catch (_) { return false; }
+    if (!Array.isArray(rows)) return 'unavailable';
+    const receipt = _tourBranchReceipt(saved, branch);
+    const found = receipt
+      ? rows.some(row => row.id === receipt.id && row.name === receipt.name
+        && row['base-branch-id'] === receipt['base-branch-id'])
+      : rows.some(row => row.name === branch);
+    return found ? 'available' : 'missing';
+  } catch (_) { return 'unavailable'; }
+}
+
+async function _tourCheckSavedBranches(saved, ticket, activeBranch) {
+  const current = () => _tourStartCurrent(ticket) && !_tourState
+    && _tourPrincipalMatches(saved);
+  const watched = [...new Set([saved.recoveryBranch, saved.sandboxBranch, activeBranch]
+    .filter(name => name && name !== 'main'))];
+  if (watched.length && !await _tourConfirmPrincipal(saved, current)) return false;
+  for (const name of watched) {
+    const status = await _tourBranchStatus(saved, name);
+    if (!current()) return false;
+    if (status === 'missing') {
+      _tourMissingBranch(saved, name);
+      return false;
+    }
+    if (status !== 'available') {
+      _tourUnavailableContext(name);
+      return false;
+    }
+  }
+  return true;
 }
 
 function _tourUnavailableContext(branch) {
@@ -145,6 +179,100 @@ function _tourUnavailableContext(branch) {
   });
 }
 
+function _tourMissingBranch(saved, branch) {
+  // Replace the state object so every in-flight check that captured the old
+  // generation refuses to publish a result after this dialog appears.
+  const state = {...saved, recoveryBranch: branch};
+  _tourStartGeneration++;
+  _tourState = state;
+  _tourSaveState();
+  if (_tourTimer) { clearInterval(_tourTimer); _tourTimer = null; }
+  _tourStopFollowing();
+  document.removeEventListener('keydown', _tourOnKey);
+  _tourDialog({
+    title: 'Tutorial branch was deleted',
+    body: 'Branch “' + branch + '” no longer exists. This lesson is paused.'
+      + ' Restart it on a new branch, or exit and keep any remaining items for review.',
+    primary: ['Restart lesson', () => _tourRestartMissing(state)],
+    quiet: ['Exit lesson', () => {
+      if (_tourState === state) _tourTeardown();
+    }],
+  });
+}
+
+async function _tourRestartMissing(state) {
+  if (_tourState !== state) return false;
+  const ticket = _tourStartTicket();
+  const current = () => _tourState === state && _tourStartCurrent(ticket)
+    && _tourPrincipalMatches(state);
+  if (!await _tourConfirmPrincipal(state, current) || !current()) return false;
+  const oldStatus = await _tourBranchStatus(state, state.recoveryBranch);
+  if (!current()) return false;
+  if (oldStatus !== 'missing') {
+    _tourUnavailableContext(state.recoveryBranch);
+    return false;
+  }
+  if (_tourSessionBranch() !== 'main') {
+    if (typeof switchToBranch === 'function') switchToBranch(null, {clearSelection: true});
+    return false;
+  }
+  const lesson = ((await _tourFetchLessons())?.lessons || []).find(l => l.id === state.lessonId);
+  if (!current() || !lesson) return false;
+  let pending = state.restartPending;
+  if (pending) {
+    const pendingStatus = await _tourBranchStatus(state, pending.name);
+    if (!current()) return false;
+    if (pendingStatus === 'unavailable') return false;
+    if (pendingStatus === 'missing') {
+      delete state.restartPending;
+      _tourSaveState();
+      pending = null;
+    }
+  }
+  if (!pending) {
+    let base;
+    try { base = await _tourReadBranchBase('main'); }
+    catch (_) { return false; }
+    if (!current() || !base?.id) return false;
+    pending = {type: 'branch', name: 'tutorial-' + state.lessonId + '-'
+      + Math.random().toString(36).slice(2, 6), id: crypto.randomUUID(),
+    'base-branch-id': base.id, receipt: 'pending'};
+    state.restartPending = pending;
+    _tourSaveState();
+    try {
+      const response = await authFetch(API.api_branches, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id: pending.id, name: pending.name,
+          'base-branch-id': pending['base-branch-id']}),
+      });
+      const body = await response.json().catch(() => null);
+      if (!current()) return false;
+      if (response.ok && body?.ok === true && body.branch?.id === pending.id
+          && body.branch.name === pending.name
+          && body.branch['base-branch-id'] === pending['base-branch-id']) {
+        pending.receipt = 'created';
+      } else if (response.status >= 400 && response.status < 500) {
+        delete state.restartPending;
+        _tourSaveState();
+        return false;
+      }
+    } catch (_) { /* Reconcile the exact generated ID below. */ }
+  }
+  if (pending.receipt !== 'created') {
+    const pendingStatus = await _tourBranchStatus(state, pending.name);
+    if (!current() || pendingStatus !== 'available') return false;
+  }
+  if (!current() || !await _tourConfirmPrincipal(state, current)) return false;
+  _tourState = {lessonId: state.lessonId, lessonVersion: lesson.version || 1,
+    step: 0, created: [{...pending, receipt: 'created'}],
+    sandboxBranch: pending.name, sandboxBranchId: pending.id,
+    sandboxBaseBranchId: pending['base-branch-id'], activeBranch: pending.name,
+    principal: state.principal};
+  _tourSaveState();
+  switchToBranch(pending.name);
+  return true;
+}
+
 async function _tourConfirmCleanupContext(branch) {
   if (!await _tourConfirmPrincipal(_tourState)) return false;
   // Revoking a public URL is identity/owner-scoped, so it is safe even if
@@ -153,11 +281,13 @@ async function _tourConfirmCleanupContext(branch) {
   if (typeof _tourDeleteHttpPublications === 'function') {
     await _tourDeleteHttpPublications(_tourState?.created || []);
   }
-  if (branch === _tourSessionBranch() && await _tourBranchAvailable(branch)) {
+  const status = await _tourBranchStatus(_tourState, branch);
+  if (branch === _tourSessionBranch() && status === 'available') {
     // The response may have refreshed the org header while it was in flight.
     return _tourConfirmPrincipal(_tourState);
   }
-  _tourUnavailableContext(branch);
+  if (status === 'missing') _tourMissingBranch(_tourState, branch);
+  else _tourUnavailableContext(branch);
   return false;
 }
 
@@ -182,10 +312,12 @@ async function _tourRestoreSession(saved, cleanup = false, nextLessonId = null,
   const branch = ending ? _tourCleanupBranch(saved)
     : saved.activeBranch || saved.sandboxBranch || saved.branch || 'main';
   if (branch !== _tourSessionBranch() && typeof switchToBranch === 'function') {
-    const available = await _tourBranchAvailable(branch);
-    if (_tourState !== state || !_tourStartCurrent(ticket)) return false;
-    if (!available) {
-      _tourUnavailableContext(branch);
+    const status = await _tourBranchStatus(saved, branch);
+    if (_tourState !== state || !_tourStartCurrent(ticket)
+        || !_tourPrincipalMatches(state)) return false;
+    if (status !== 'available') {
+      if (status === 'missing') _tourMissingBranch(state, branch);
+      else _tourUnavailableContext(branch);
       return false;
     }
     switchToBranch(branch, { clearSelection: true });

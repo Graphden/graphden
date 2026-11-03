@@ -103,7 +103,10 @@ branch, and ending it offers branch deletion = full rollback. The tour's
 step scripts live in the graph (`app.tour/_tour-lessons`) and are
 drift-guarded by `tools/browser-test/edit-tutorial-tour*.test.js` —
 keep the written lesson's “Try it” section and the tour steps in
-sync when either changes.
+sync when either changes. If the lesson branch is deleted elsewhere, the
+editor pauses the lesson and offers **Restart lesson** on a fresh branch or
+**Exit lesson**. Restart begins at step one; it never treats a new branch
+with the old name as the deleted branch.
 
 The catalogue remembers what you have read (in your browser, not in the
 graph) and marks it `✓ done`. That mark is yours: the `↺` beside a

@@ -103,7 +103,12 @@ function makeWorld(opts) {
       if (url === '/api/branches' && !init?.method) {
         const names = o.availableBranches || [o.branch, o.state?.sandboxBranch,
           o.state?.branch, o.saved?.sandboxBranch, o.saved?.branch, o.saved?.activeBranch];
-        return {ok: true, json: async () => o.branchRows || names.filter(Boolean).map((name) => ({name}))};
+        return {ok: true, json: async () => o.branchRows || names.filter(Boolean).map((name) => {
+          const owner = [o.state, o.saved].find(state => state?.sandboxBranch === name
+            && state.sandboxBranchId && state.sandboxBaseBranchId);
+          return owner ? {name, id: owner.sandboxBranchId,
+            'base-branch-id': owner.sandboxBaseBranchId} : {name};
+        })};
       }
       return { ok: true, json: async () => ({ ok: !o.branchFailure }) };
     },
@@ -182,9 +187,13 @@ function makeWorld(opts) {
 }
 
 // A lesson whose step index ran PAST its last step — the finished shape.
-const finishedOn = (id, extra) => Object.assign(
-  { lessonId: id, step: (LESSONS.lessons.find((l) => l.id === id).steps.length),
-    created: [], ...(extra?.branch ? {sandboxBranch: extra.branch} : {}) }, extra || {});
+const finishedOn = (id, extra) => {
+  const sandbox = extra?.sandboxBranch || extra?.branch;
+  return Object.assign(
+    {lessonId: id, step: (LESSONS.lessons.find(l => l.id === id).steps.length),
+      created: [], ...(sandbox ? {sandboxBranch: sandbox,
+        sandboxBranchId: 'sandbox-id', sandboxBaseBranchId: 'main-id'} : {})}, extra || {});
+};
 
 (async () => {
   await test('a branch run offers the rollback, and parks the next lesson across it',
@@ -202,10 +211,10 @@ const finishedOn = (id, extra) => Object.assign(
 
     w.btn('Start 02 · Slots').click();
     await new Promise((r) => setTimeout(r, 0));
-    assert(w.calls.includes('DELETE /api/branches/tutorial-01-ab12'),
+    assert(w.calls.includes('DELETE /api/branches/sandbox-id'),
       'continuing rolls the branch back first (got: ' + JSON.stringify(w.calls) + ')');
     assert(w.calls.includes('switchToBranch null'), 'and returns to main');
-    assert(w.calls.indexOf('suspend branch recovery') < w.calls.indexOf('DELETE /api/branches/tutorial-01-ab12')
+    assert(w.calls.indexOf('suspend branch recovery') < w.calls.indexOf('DELETE /api/branches/sandbox-id')
       && w.calls.indexOf('resume branch recovery') > w.calls.indexOf('switchToBranch null'),
     'automatic recovery stays paused through branch and namespace cleanup');
     assert(w.queued() === '02',
@@ -249,7 +258,7 @@ const finishedOn = (id, extra) => Object.assign(
       assert(w.queued() === null, 'no next lesson starts after failed cleanup');
       assert(w.btn('Delete branch & return'), 'the reader can retry cleanup');
       assert(w.calls.some((c) => c.includes('could not be deleted')), 'failure is reported');
-      if (failure.failedBranches) assert(!w.calls.includes('DELETE /api/branches/tutorial-01-refused'),
+      if (failure.failedBranches) assert(!w.calls.includes('DELETE /api/branches/sandbox-id'),
         'the sandbox is retained when a child could not be removed');
     });
   }
@@ -381,6 +390,7 @@ const finishedOn = (id, extra) => Object.assign(
 
   await test('Lessons restores an interruption from its original branch', async () => {
     const saved = {lessonId: '01', step: 1, sandboxBranch: 'tutorial-owned',
+      sandboxBranchId: 'sandbox-id', sandboxBaseBranchId: 'main-id',
       activeBranch: 'tutorial-child', created: [{type: 'branch', name: 'tutorial-child'}]};
     const w = makeWorld({state: null, saved, branch: 'main'});
     assert(await w.ctx.maybeStartTutorial() === false, 'boot stays on the chosen branch');
@@ -432,8 +442,10 @@ const finishedOn = (id, extra) => Object.assign(
   });
 
   await test('an explicitly requested lesson branch switch still resumes automatically', async () => {
-    const saved = {lessonId: '01', step: 1, activeBranch: 'main', created: []};
-    const w = makeWorld({state: null, saved, branch: 'lesson-branch'});
+    const receipt = {type: 'branch', name: 'lesson-branch', id: 'owned-id',
+      'base-branch-id': 'main-id', receipt: 'created'};
+    const saved = {lessonId: '01', step: 1, activeBranch: 'main', created: [receipt]};
+    const w = makeWorld({state: null, saved, branch: 'lesson-branch', branchRows: [receipt]});
     vm.runInContext('_tourLessons.lessons[0].steps[1].check = {kind: "on-branch", name: "lesson-branch"};', w.ctx);
     w.ctx.startTutorial = async (_id, _step, _created, session) => {
       w.calls.push('resume ' + session.activeBranch);
@@ -441,6 +453,18 @@ const finishedOn = (id, extra) => Object.assign(
     };
     assert(await w.ctx.maybeStartTutorial(), 'the branch lesson resumes after its requested reload');
     assert(w.calls.includes('resume lesson-branch'), 'the new active branch is passed to the engine');
+  });
+
+  await test('an on-branch step refuses a same-name replacement', async () => {
+    const receipt = {type: 'branch', name: 'lesson-branch', id: 'owned-id',
+      'base-branch-id': 'main-id', receipt: 'created'};
+    const saved = {lessonId: '01', step: 1, activeBranch: 'main', created: [receipt]};
+    const w = makeWorld({state: null, saved, branch: 'lesson-branch',
+      branchRows: [{...receipt, id: 'replacement-id'}]});
+    vm.runInContext('_tourLessons.lessons[0].steps[1].check = {kind: "on-branch", name: "lesson-branch"};', w.ctx);
+    w.ctx.startTutorial = async () => { w.calls.push('unsafe resume'); return true; };
+    assert(!await w.ctx.maybeStartTutorial(), 'a name collision does not certify the old branch');
+    assert(!w.calls.includes('unsafe resume'), 'the old lesson never runs on the replacement');
   });
 
   await test('created-branch reload resumes only the exact successful receipt and principal', async () => {
@@ -496,6 +520,7 @@ const finishedOn = (id, extra) => Object.assign(
 
   await test('sandbox ownership survives resuming on a lesson child branch', async () => {
     const saved = {lessonId: '01', step: 1, sandboxBranch: 'tutorial-owned',
+      sandboxBranchId: 'sandbox-id', sandboxBaseBranchId: 'main-id',
       activeBranch: 'child', created: [{type: 'branch', name: 'child'}]};
     const w = makeWorld({state: null, saved, branch: 'child'});
     w.ctx._tourRenderStep = () => {};
@@ -524,19 +549,19 @@ const finishedOn = (id, extra) => Object.assign(
     assert(w.calls.includes('startIsolated 02'), 'a successful retry launches the requested lesson');
   });
 
-  await test('a missing original branch cannot turn recovery into a name sweep on main', async () => {
+  await test('a missing original branch offers recovery without a name sweep on main', async () => {
     const saved = {lessonId: '01', step: 1, activeBranch: 'deleted-work',
       created: [{type: 'fn', name: 'same-name-on-main'}]};
     const w = makeWorld({state: null, saved, branch: 'main', availableBranches: []});
     await w.ctx.openTutorialMenu();
     w.btn('End lesson & clean up').click();
     await new Promise((r) => setTimeout(r, 0));
-    assert(w.title() === 'Tutorial branch unavailable', 'the recovery dialog explains the missing context');
+    assert(w.title() === 'Tutorial branch was deleted', 'confirmed deletion offers recovery');
     assert(!w.calls.some((c) => /^deleteCreated|^DELETE|^switchToBranch/.test(c)),
       'recovery neither writes on main nor reloads into a deleted branch');
-    w.btn('Cancel').click();
-    assert(w.saved().created[0].name === 'same-name-on-main', 'Cancel retains the ledger for a later recovery');
-    assert(w.pop() === null, 'Cancel dismisses the blocked recovery dialog');
+    assert(w.saved().created[0].name === 'same-name-on-main', 'the decision retains the exact ledger');
+    w.btn('Exit lesson').click();
+    assert(w.saved() === null && w.pop() === null, 'Exit closes the old session without cleanup');
   });
 
   for (const changed of [{accountId: 'other', orgId: 'org'},

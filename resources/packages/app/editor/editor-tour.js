@@ -510,6 +510,10 @@ function _tourResume() {
     _tourTeardown(true);
     return;
   }
+  if (_tourState.recoveryBranch) {
+    _tourMissingBranch(_tourState, _tourState.recoveryBranch);
+    return;
+  }
   if (_tourState.phase === 'cleanup') { _tourEnd(_tourState.nextLessonId); return; }
   _tourRenderStep();
   _tourArm();
@@ -760,6 +764,7 @@ async function maybeStartTutorial() {
   if (saved?.lessonId) {
     const branch = saved.phase === 'cleanup' ? _tourCleanupBranch(saved)
       : saved.activeBranch || saved.sandboxBranch || saved.branch || 'main';
+    if (!await _tourCheckSavedBranches(saved, ticket, branch)) return false;
     if (branch !== _tourSessionBranch()) {
       // Branch lessons explicitly ask for a reload onto another branch.
       await _tourFetchLessons();

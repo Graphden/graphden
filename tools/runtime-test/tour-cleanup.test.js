@@ -227,16 +227,27 @@ const tests = [
   }),
 
   test('branch cleanup deletes children first and reports HTTP 200 refusals', async () => {
-    const created = [{type: 'branch', name: 'parent'}, {type: 'branch', name: 'child'}];
-    const success = makeCtx({});
+    const created = [{type: 'branch', name: 'parent', id: 'parent-id',
+      'base-branch-id': 'main-id'}, {type: 'branch', name: 'child', id: 'child-id',
+      'base-branch-id': 'parent-id'}];
+    const branches = created.map(({id, name, 'base-branch-id': base}) =>
+      ({id, name, 'base-branch-id': base}));
+    const success = makeCtx({branches});
     assert((await success.ctx._tourDeleteCreatedBranches(created)).length === 0,
       'successful cleanup reports no survivors');
-    assert(success.calls.join(',') === 'DELETE /api/branches/child,DELETE /api/branches/parent',
+    assert(success.calls.filter(call => call.startsWith('DELETE')).join(',')
+      === 'DELETE /api/branches/child-id,DELETE /api/branches/parent-id',
       'children are deleted before their parent');
-    const failure = makeCtx({branchFailure: true});
+    const failure = makeCtx({branches, branchFailure: true});
     const failed = await failure.ctx._tourDeleteCreatedBranches(created);
     assert(failed.length === 2, 'HTTP 200 with ok:false is a failure after retry');
-    assert(failure.calls.length === 4, 'both failed deletions are retried once');
+    assert(failure.calls.filter(call => call.startsWith('DELETE')).length === 4,
+      'both failed deletions are retried once');
+    const legacy = makeCtx({branches});
+    assert((await legacy.ctx._tourDeleteCreatedBranches([{type: 'branch', name: 'child'}])).length === 1,
+      'a name-only legacy receipt cannot prove ownership');
+    assert(!legacy.calls.some(call => call.startsWith('DELETE')),
+      'legacy cleanup never deletes a replacement by name');
   }),
 
   test('retry accepts a child removed by the previous rollback attempt', async () => {

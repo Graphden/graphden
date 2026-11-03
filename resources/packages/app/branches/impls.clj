@@ -95,16 +95,13 @@
 
 
 (defbase diff-branches-view
-  "Single library call over `dv/diff-branches-view` — the GROUPED
-   display model the branch-diff partial renders: entries grouped
-   under their owning fn, per-field before/after pairs for modified
-   rows, ids resolved to names. The JSON API keeps serving the flat
-   v1 shape via `diff-branches`."
+  "Fetch the flat enriched diff facts from `dv/diff-branches-view-facts`.
+   Graph fn-defs group and order them for the editor compare view."
   [source-branch-id target-branch-id]
   (cr/record-effect! :db)
-  (dv/diff-branches-view (branches/base-storage ctx)
-                         source-branch-id
-                         target-branch-id))
+  (dv/diff-branches-view-facts (branches/base-storage ctx)
+                               source-branch-id
+                               target-branch-id))
 
 
 ;; =============================================================================

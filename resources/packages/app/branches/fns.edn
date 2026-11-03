@@ -754,7 +754,7 @@
    :effects #{:db}}
 
   {:name :diff-branches-view
-   :description "Atomic library boundary over `dv/diff-branches-view` — the GROUPED display model of the branch diff for the editor modal: `{:source-branch-id :target-branch-id :count :groups [{:fn-id :fn-name :fn-label :change :branch-local? :entries [...]}]}`. Rendering-only projection; the JSON API keeps the flat v1 `:diff-branches` shape."
+   :description "Atomic read boundary over `dv/diff-branches-view-facts`: flat enriched rows with owner labels, namespace paths, branch-local facts, and before/after entries. Grouping, ordering and display decisions are composed below in graph fn-defs."
    :args {:source-branch-id {:type :uuid :description "Source branch id."}
           :target-branch-id {:type :uuid :description "Target branch id."}}
    :return-type :keyword-map
@@ -871,7 +871,7 @@
   ;; guards + branch resolution as the v1 endpoint above.
 
   {:name :_diff-view-apply-raw
-   :description "Run the grouped display-model diff — same free-arg threading (`:source-branch` / `:target-branch` via the parent `:cond`) and `:assert-some` narrowing bridges as `:_diff-apply-raw`."
+   :description "Read flat enriched diff facts — same free-arg threading and narrowing bridges as `:_diff-apply-raw`."
    :parent :diff-branches-view
    :args {:source-branch-id {:parent :assert-some
                              :args {:value {:parent :get
@@ -884,6 +884,106 @@
                                                    :key {:value :id}
                                                    :default nil}}}}}}
 
+  {:name :_diff-view-rows
+   :parent :get
+   :args {:coll :_diff-view-apply-raw :key {:value :rows} :default {:value []}}}
+
+  {:name :_diff-row-owner
+   :parent :get
+   :args {:coll {:as :item} :key {:value :fn-id} :default nil}}
+
+  {:name :_diff-view-buckets
+   :parent :group-by
+   :args {:key-fn :_diff-row-owner :coll :_diff-view-rows}}
+
+  {:name :_diff-view-bucket-list
+   :parent :vals
+   :args {:map :_diff-view-buckets}}
+
+  {:name :_diff-bucket-first
+   :parent :first
+   :args {:coll {:as :item}}}
+
+  {:name :_diff-bucket-entry
+   :parent :get
+   :args {:coll {:as :item} :key {:value :entry} :default nil}}
+
+  {:name :_diff-bucket-entries
+   :parent :map
+   :args {:func :_diff-bucket-entry :coll {:as :item}}}
+
+  {:name :_diff-entry-order-kind
+   :parent :get
+   :args {:coll {:as :item} :key {:value :entity-name} :default nil}}
+
+  {:name :_diff-entry-order-rank
+   :parent :case
+   :args {:value :_diff-entry-order-kind
+          :clauses {:fn 0 :fn-slot 1 :binding 2 :binding-list-item 3 :resource-override 4}
+          :default {:value 9}}}
+
+  {:name :_diff-entry-order-key
+   :parent :vec
+   :args {:coll [:_diff-entry-order-rank
+                 {:parent :coalesce
+                  :args {:value {:parent :get :args {:coll {:as :item} :key {:value :slot-name} :default nil}}
+                         :default {:value ""}}}
+                 {:parent :coalesce
+                  :args {:value {:parent :get :args {:coll {:as :item} :key {:value :position} :default nil}}
+                         :default {:value 0}}}]}}
+
+  {:name :_diff-bucket-sorted-entries
+   :parent :sort-by
+   :args {:key-fn :_diff-entry-order-key :coll :_diff-bucket-entries}}
+
+  {:name :_diff-bucket-fn-row?
+   :parent :equal?
+   :args {:a {:parent :get :args {:coll :_diff-bucket-entry :key {:value :entity-name} :default nil}}
+          :b {:value :fn}}}
+
+  {:name :_diff-bucket-fn-row
+   :parent :find-first
+   :args {:pred :_diff-bucket-fn-row? :coll {:as :item}}}
+
+  {:name :_diff-bucket-change
+   :parent :get
+   :args {:coll {:parent :get :args {:coll :_diff-bucket-fn-row :key {:value :entry} :default nil}}
+          :key {:value :change}
+          :default {:value :modified}}}
+
+  {:name :_diff-view-group
+   :description "Pure HOF projection of one owner's flat rows into a sorted compare group."
+   :parent :zipmap
+   :args {:keys [{:value :fn-id} {:value :fn-name} {:value :fn-label}
+                 {:value :ns-path} {:value :change} {:value :branch-local?}
+                 {:value :entries}]
+          :vals [{:parent :get :args {:coll :_diff-bucket-first :key {:value :fn-id} :default nil}}
+                 {:parent :get :args {:coll :_diff-bucket-first :key {:value :fn-name} :default nil}}
+                 {:parent :get :args {:coll :_diff-bucket-first :key {:value :fn-label} :default nil}}
+                 {:parent :get :args {:coll :_diff-bucket-first :key {:value :ns-path} :default nil}}
+                 :_diff-bucket-change
+                 {:parent :get :args {:coll :_diff-bucket-first :key {:value :branch-local?} :default {:value false}}}
+                 :_diff-bucket-sorted-entries]}}
+
+  {:name :_diff-view-group-name
+   :parent :get
+   :args {:coll {:as :item} :key {:value :fn-name} :default nil}}
+
+  {:name :_diff-view-group-sort-key
+   :parent :vec
+   :args {:coll [{:parent :if :args {:test {:parent :some? :args {:value :_diff-view-group-name}}
+                                    :then {:value 0} :else {:value 1}}}
+                 {:parent :coalesce :args {:value :_diff-view-group-name :default {:value ""}}}
+                 {:parent :coalesce
+                  :args {:value {:parent :get :args {:coll {:as :item} :key {:value :fn-id} :default nil}}
+                         :default {:value ""}}}]}}
+
+  {:name :_diff-view-groups
+   :description "Graph-owned grouping and stable ordering of compare entries."
+   :parent :sort-by
+   :args {:key-fn :_diff-view-group-sort-key
+          :coll {:parent :map :args {:func :_diff-view-group :coll :_diff-view-bucket-list}}}}
+
   {:name :_diff-view-apply
    :description "Success branch — `{:ok true :target :source :count :groups :affected}`. Group ids are already strings (display model), so no per-row reshape is needed; `:affected` is the changed-inside map over the same groups."
    :parent :zipmap
@@ -895,11 +995,6 @@
                  {:parent :get :args {:coll :_diff-view-apply-raw :key {:value :count} :default {:value 0}}}
                  :_diff-view-groups
                  {:parent :diff-affected :args {:groups :_diff-view-groups}}]}}
-
-  {:name :_diff-view-groups
-   :description "The grouped entries of the diff — served as `:groups` and seeding `:diff-affected`."
-   :parent :get
-   :args {:coll :_diff-view-apply-raw :key {:value :groups} :default {:value []}}}
 
   {:name :_diff-view-data
    :description "GET /api/branches/:ref/diff-view?against=<source> — the v1 guards, the v2 grouped payload, over the request's parsed refs."

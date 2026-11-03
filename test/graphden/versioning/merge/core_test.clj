@@ -712,3 +712,38 @@
                                        {:target-branch-id main}))))
       (finally
         (sp/close base)))))
+
+
+(deftest a-proposal-change-after-approval-and-precheck-refuses-the-merge-test
+  (let [{:keys [storage base fn-id]} (create-test-storage)
+        main (vs/current-branch-id storage)
+        source (vs/create-branch! storage "stale-proposal-race")
+        source-view (vs/switch-branch storage (:id source))
+        calls (atom 0)]
+    (try
+      (sp/update-entity source-view :fn fn-id {:description "approved proposal"})
+      (sp/update-entity base :branch main {:required-approvals 1})
+      (sp/create-entity base :branch-approval
+                        {:source-branch-id (:id source)
+                         :target-branch-id main
+                         :approver-id "reviewer"
+                         :content-stamp (mp/branch-content-stamp base (:id source))
+                         :created-at (java.time.Instant/now)})
+      (let [error (try
+                    (mp/merge-transitively!
+                      storage (:id source) {}
+                      (fn [step-storage bid]
+                        (let [call (swap! calls inc)]
+                          (mp/validate-approval-policy! step-storage bid)
+                          (when (= 1 call)
+                            (sp/update-entity source-view :fn fn-id
+                                              {:description "unreviewed revision"})))))
+                    nil
+                    (catch clojure.lang.ExceptionInfo e e))]
+        (is (= :branch/approval-required (:type (ex-data error))))
+        (is (= 2 @calls))
+        (is (nil? (:description (sp/read-entity storage :fn fn-id))))
+        (is (empty? (sp/query-entities base :branch-merge
+                                       {:target-branch-id main}))))
+      (finally
+        (sp/close base)))))

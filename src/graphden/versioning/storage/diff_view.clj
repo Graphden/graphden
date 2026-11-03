@@ -1,16 +1,14 @@
 (ns graphden.versioning.storage.diff-view
-  "Display model for the branch-diff surface (diff v2).
+  "Read-only facts for the branch-diff surface (diff v2).
 
-   `diff-branches-view` lifts the flat symmetric `mrg/diff-branches`
-   result into the structure the editor's diff modal renders: entries
-   GROUPED under the fn that owns them, each entry carrying human
+   `diff-branches-view-facts` enriches the flat symmetric `mrg/diff-branches`
+   result with facts the fn graph groups for the editor. Each entry carries human
    labels (slot name, item position) and — for `:modified` rows — the
    per-field before/after pairs (`field-diff`, shared with the merge
    conflict payload). Id-like values are resolved to names where one
    exists (owning fn, slot, fn-typed ref fields) and ids are
-   stringified: this is a read-only projection for rendering, not a
-   wire schema. The JSON API keeps serving the v1 shape from
-   `diff-branches` unchanged."
+   stringified. Grouping, ordering and the response shape live in the
+   app.branches fn graph; the flat v1 diff JSON remains unchanged."
   (:require
     [clojure.string :as str]
     [graphden.storage.protocol.core :as sp]
@@ -118,32 +116,25 @@
       (assoc :preview (entry-preview fn-names diff)))))
 
 
-(def ^:private entry-rank
-  {:fn 0 :fn-slot 1 :binding 2 :binding-list-item 3 :resource-override 4})
-
-
 (defn- ns-path-fn
   "A `namespace-id → \"a.b.c\"` resolver over one read of the ns table."
   [base-storage]
   (ns-path/path-map (sp/query-entities base-storage :ns {})))
 
 
-(defn diff-branches-view
-  "Grouped display model of `mrg/diff-branches`:
+(defn diff-branches-view-facts
+  "Enriched diff rows for graph-side grouping:
 
      {:source-branch-id <uuid> :target-branch-id <uuid>
       :count <total diff rows>
-      :groups [{:fn-id \"<uuid>\"          ; nil only if ownerless (defensive)
+      :rows [{:fn-id \"<uuid>\"            ; nil only if ownerless
                 :fn-name \"web-server\"    ; nil for anonymous fns
                 :fn-label \":web-server\"  ; always printable
-                :change :added-in-source | :added-in-target | :modified
                 :branch-local? bool
-                :entries [<entry> …]}]}
+                :entry <enriched diff row>}]}
 
-   Group `:change` is the owning fn row's own change when the fn itself
-   differs, else `:modified` (only its parts moved). Entries are sorted
-   fn-row first, then slots / bindings / list-items by slot name and
-   position."
+   The graph groups rows by `:fn-id`, derives each group's change from
+   its fn entry, and sorts entries and groups."
   [base-storage source-branch-id target-branch-id]
   (let [{:keys [diffs]} (mrg/diff-branches base-storage
                                            source-branch-id target-branch-id)
@@ -162,7 +153,7 @@
         slots-by-id (if (seq slot-ids)
                       (sp/read-entities base-storage :slot slot-ids)
                       {})
-        rows (map #(assoc % ::owner (owner-fn-id % bindings-by-id)) diffs)
+        rows (mapv #(assoc % ::owner (owner-fn-id % bindings-by-id)) diffs)
         ref-ids (fd/ref-ids (mapcat (juxt :source-version :target-version) diffs))
         name-ids (into ref-ids (keep ::owner rows))
         fn-names (fd/resolve-fn-names base-storage name-ids
@@ -178,40 +169,31 @@
                     (sp/read-entities base-storage :fn owner-ids)
                     {})
         ns-path (ns-path-fn base-storage)
-        groups
-        (vec
-          (sort-by (fn [g]
-                     [(if (:fn-name g) 0 1) (or (:fn-name g) "")
-                      (or (:fn-id g) "")])
-                   (for [[owner rs] (group-by ::owner rows)]
-                     (let [fn-row (first (filter #(= :fn (:entity-name %)) rs))
-                           entries (->> rs
-                                        (mapv #(entry fn-names slots-by-id
-                                                      bindings-by-id %))
-                                        (sort-by (fn [e]
-                                                   [(entry-rank (:entity-name e) 9)
-                                                    (or (:slot-name e) "")
-                                                    (or (:position e) 0)]))
-                                        (vec))]
-                       {:fn-id (some-> owner str)
-                        :fn-name (get fn-names owner)
-                        :fn-label (if owner
-                                    (fd/fn-label fn-names owner)
-                                    (if (every? #(= :resource-override (:entity-name %)) rs)
-                                      "(assets)"
-                                      "(unowned)"))
-                        :ns-path (some-> (get owner-fns owner)
-                                         :namespace-id ns-path)
-                        :change (if fn-row (:change fn-row) :modified)
-                        :branch-local? (boolean
-                                         (when owner
-                                           (bl/effective-branch-local?
-                                             base-storage owner)))
-                        :entries entries}))))]
+        ownerless (filter #(nil? (::owner %)) rows)
+        owner-info (into {}
+                         (map (fn [owner]
+                                [owner {:fn-id (some-> owner str)
+                                        :fn-name (get fn-names owner)
+                                        :fn-label (if owner
+                                                    (fd/fn-label fn-names owner)
+                                                    (if (every? #(= :resource-override (:entity-name %))
+                                                                ownerless)
+                                                      "(assets)" "(unowned)"))
+                                        :ns-path (some-> (get owner-fns owner)
+                                                         :namespace-id ns-path)
+                                        :branch-local? (boolean
+                                                         (when owner
+                                                           (bl/effective-branch-local?
+                                                             base-storage owner)))}])
+                              (distinct (map ::owner rows))))
+        prepared (mapv (fn [diff]
+                         (assoc (get owner-info (::owner diff))
+                                :entry (entry fn-names slots-by-id bindings-by-id diff)))
+                       rows)]
     {:source-branch-id source-branch-id
      :target-branch-id target-branch-id
      :count (count diffs)
-     :groups groups}))
+     :rows prepared}))
 
 
 (defn affected-fns

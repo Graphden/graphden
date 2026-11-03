@@ -1,6 +1,6 @@
 (ns ^:integration graphden.versioning.storage.diff-view-test
-  "Tests for `graphden.versioning.storage.diff-view` — the grouped
-   display model over `diff-branches` (diff v2): per-owning-fn groups,
+  "Tests for `graphden.versioning.storage.diff-view` — enriched facts
+   for the graph-owned diff v2 display model: owning fn identities,
    slot-name labels, field-level before/after pairs, ref-value name
    resolution and one-sided previews.
 
@@ -64,28 +64,25 @@
                                 {:description "d1-on-feature"})
             fresh (sp/create-entity vf :fn {:name "dv-fresh" :parent-ids []
                                             :description "hi"})
-            {:keys [groups] :as view} (dv/diff-branches-view
+            {:keys [rows] :as view} (dv/diff-branches-view-facts
                                         base (:id feature) main-id)
-            by-fn-id (into {} (map (juxt :fn-id identity)) groups)
-            owner-g (get by-fn-id (str (:id owner)))
-            fresh-g (get by-fn-id (str (:id fresh)))]
+            owner-rows (filter #(= (str (:id owner)) (:fn-id %)) rows)
+            fresh-rows (filter #(= (str (:id fresh)) (:fn-id %)) rows)]
 
         (testing "envelope carries branch ids + total row count"
           (is (= (:id feature) (:source-branch-id view)))
           (is (= main-id (:target-branch-id view)))
           (is (pos? (:count view))))
 
-        (testing "modified owner fn groups its own row and its binding"
-          (is (some? owner-g))
-          (is (= :modified (:change owner-g)))
-          (is (= "dv-owner" (:fn-name owner-g)))
-          (is (= ":dv-owner" (:fn-label owner-g)))
-          (is (false? (:branch-local? owner-g)))
-          (let [entries (:entries owner-g)
+        (testing "modified owner fn facts identify its own row and binding"
+          (is (seq owner-rows))
+          (is (= "dv-owner" (:fn-name (first owner-rows))))
+          (is (= ":dv-owner" (:fn-label (first owner-rows))))
+          (is (false? (:branch-local? (first owner-rows))))
+          (let [entries (map :entry owner-rows)
                 fn-e (first (filter #(= :fn (:entity-name %)) entries))
                 b-e  (first (filter #(= :binding (:entity-name %)) entries))]
-            (is (= :fn (:entity-name (first entries)))
-                "fn's own row sorts first in the group")
+            (is (= :modified (:change fn-e)))
             (is (some #(= "description" (:field %)) (:fields fn-e)))
             (is (= "port" (:slot-name b-e)) "binding labeled by its slot")
             (is (= (str (:id slot)) (:slot-id b-e)))
@@ -96,20 +93,19 @@
               (is (= "9090" (:source vf-field)))
               (is (= "8080" (:target vf-field))))))
 
-        (testing "a fn present only on the source is its own added group"
-          (is (some? fresh-g))
-          (is (= :added-in-source (:change fresh-g)))
-          (is (= "dv-fresh" (:fn-name fresh-g)))
+        (testing "a fn present only on the source has its own owner facts"
+          (is (seq fresh-rows))
+          (is (= "dv-fresh" (:fn-name (first fresh-rows))))
           (let [fn-e (first (filter #(= :fn (:entity-name %))
-                                    (:entries fresh-g)))]
+                                    (map :entry fresh-rows)))]
             (is (= :added-in-source (:change fn-e)))
             (is (nil? (:fields fn-e)) "one-sided rows carry a preview, not fields")
             (is (= "“hi”" (:preview fn-e)))))
 
-        (testing "diffing a branch against itself yields no groups"
-          (let [self (dv/diff-branches-view base (:id feature) (:id feature))]
+        (testing "diffing a branch against itself yields no rows"
+          (let [self (dv/diff-branches-view-facts base (:id feature) (:id feature))]
             (is (zero? (:count self)))
-            (is (empty? (:groups self))))))
+            (is (empty? (:rows self))))))
       (finally (sp/close base)))))
 
 
@@ -210,14 +206,14 @@
                                              :ref-fn-id (:id type-fn)})
             ;; and the list ITEM is retuned
             _ (sp/update-entity vf :binding-list-item (:id item) {:value 2})
-            {:keys [groups]} (dv/diff-branches-view base (:id feature) main-id)
-            owner-g (first (filter #(= (str (:id owner)) (:fn-id %)) groups))
-            entries (:entries owner-g)
+            {:keys [rows]} (dv/diff-branches-view-facts base (:id feature) main-id)
+            owner-rows (filter #(= (str (:id owner)) (:fn-id %)) rows)
+            entries (map :entry owner-rows)
             by-kind (group-by :entity-name entries)]
 
-        (testing "everything groups under the one owning fn"
-          (is (some? owner-g))
-          (is (= :modified (:change owner-g))
+        (testing "everything carries the one owning fn"
+          (is (seq owner-rows))
+          (is (not-any? #(= :fn (:entity-name %)) entries)
               "the fn itself didn't change — only its parts moved"))
 
         (testing "a slot newly exposed on the branch → fn-slot entry"

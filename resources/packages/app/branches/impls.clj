@@ -511,15 +511,11 @@
     nil))
 
 
-(defbase merge-skipped-branch-local
-  "Audit read — fns that have a version on the source branch but won't
-   surface on the target after merge because their effective
-   `:branch-local?` filtered them out at the resolver. One library
-   call (`mrg/skipped-as-branch-local`); the `{:branch-local […]}`
-   wrapper and its attachment to the merge record are graph steps."
+(defbase merge-skipped-facts
+  "Bounded bulk read with effective inheritance and viewer visibility intact."
   [source-branch-id]
   (cr/record-effect! :db)
-  (mrg/skipped-as-branch-local (branches/base-storage ctx) source-branch-id))
+  (mrg/branch-local-source-rows (branches/base-storage ctx) source-branch-id))
 
 
 (defbase set-branch-policy!
@@ -898,7 +894,7 @@
    :detect-conflicts           detect-conflicts
    :merge-branch!              {:impl merge-branch! :taint-propagate? true}
    :merge-post-commit!         merge-post-commit!
-   :merge-skipped-branch-local merge-skipped-branch-local
+   :_merge-skipped-facts       merge-skipped-facts
    :set-branch-policy!         set-branch-policy!
    :set-branch-require-merge!  {:impl set-branch-require-merge! :taint-propagate? true}
    :set-review-state!          {:impl set-review-state! :taint-propagate? true}

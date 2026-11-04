@@ -2616,11 +2616,34 @@
    :return-type :null
    :effects #{:db}}
 
-  {:name :merge-skipped-branch-local
-   :description "Audit read — fns with a version on the source branch that won't surface on the target after merge (effective `:branch-local?` filtered them at the resolver). One library call; empty vector = everything visible propagated."
+  {:name :_merge-skipped-facts
+   :description "Bulk acquisition of visible source identity/name facts with effective branch-local inheritance; no per-item graph reads."
    :args {:source-branch-id {:type :uuid :description "Source branch id."}}
-   :return-type [:list :keyword-map]
+   :return-type [:list {:id :uuid :name :nullable-text}]
    :effects #{:db}}
+
+  {:name :_merge-skipped-audit-row
+   :parent :zipmap
+   :args {:keys [{:value :entity-name} {:value :entity-id} {:value :fn-name}]
+          :vals [{:value :fn}
+                 {:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}
+                 {:parent :get :args {:coll {:as :item} :key {:value :name} :default nil}}]}}
+
+  {:name :_merge-skipped-audit-rows
+   :parent :map
+   :args {:func :_merge-skipped-audit-row :coll :_merge-skipped-facts}}
+
+  {:name :_merge-skipped-sort-key
+   :parent :coalesce
+   :args {:value {:parent :get :args {:coll {:as :item} :key {:value :fn-name} :default nil}}
+          :default {:value ""}}}
+
+  {:name :merge-skipped-branch-local
+   :description "Merge audit: acquire visible branch-local identities once, project the audit rows, then stably sort by name (nil sorts as empty text)."
+   :parent :vec
+   :args {:coll {:parent :sort-by
+                 :args {:key-fn :_merge-skipped-sort-key :coll :_merge-skipped-audit-rows}}}
+   :return-type [:list :keyword-map]}
 
   ;; --- Success path: the merge WRITE SEQUENCE, graph-visible
   ;;     (formerly one opaque Clojure body): commit → post-commit →

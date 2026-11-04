@@ -162,7 +162,7 @@
     :view-members :explorer-view :explorer-views
     :loop-until-interrupted :lt :lte :map :map-xf
     :materialize-package-fns :materialize-package-receipt :max-memory :merge :merge-branch!
-    :merge-post-commit! :merge-skipped-branch-local
+    :merge-post-commit! :_merge-skipped-facts
     :middleware :missing-package-dependencies :mod :mul :name
     :namespace-external-deps :neg :neq
     :nil? :non-blank? :not :notify-after-write :or :os-arch

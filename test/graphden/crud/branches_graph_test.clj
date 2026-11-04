@@ -1,4 +1,4 @@
-(ns ^:integration graphden.crud.branches-graph-test
+(ns ^{:integration true :serial true} graphden.crud.branches-graph-test
   "Graph-path tests for the branches HTTP handlers
    (`:list-branches-handler` / `:get-branch-handler` /
    `:diff-branches-handler` / `:create-branch-handler` /
@@ -27,7 +27,8 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.test-infra.graph-harness :as gh :refer [*graph* json-req uniq]]
     [graphden.versioning.storage.core :as vs]
-    [graphden.versioning.storage.diff-view :as dv]))
+    [graphden.versioning.storage.diff-view :as dv]
+    [graphden.versioning.storage.merge :as mrg]))
 
 
 ;; =============================================================================
@@ -839,3 +840,53 @@
       (is (= (str ":" fn-name) (:fn-label group)))
       (is (some #(some (fn [field] (= "label parity" (:source field))) (:fields %))
                 (:entries group))))))
+
+
+(deftest merge-skipped-graph-projects-and-stably-sorts-one-bulk-read
+  (let [source (random-uuid)
+        rows [{:id (random-uuid) :name "z" :unrelated "not audit data"}
+              {:id (random-uuid) :name nil}
+              {:id (random-uuid) :name ""}
+              {:id (random-uuid) :name "a"}
+              {:id (random-uuid) :name "a"}]]
+    (doseq [facts [[] rows (vec (mapcat identity (repeat 32 rows)))]]
+      (let [calls (atom 0)
+            result (with-redefs [mrg/branch-local-source-rows
+                                (fn [_ source-id]
+                                  (is (= source source-id))
+                                  (swap! calls inc)
+                                  facts)]
+                     (gh/exec-name :merge-skipped-branch-local {:source-branch-id source}))
+            expected (->> facts
+                          (map (fn [row] {:entity-name :fn :entity-id (:id row) :fn-name (:name row)}))
+                          (sort-by #(or (:fn-name %) ""))
+                          vec)]
+        (is (= 1 @calls) "one acquisition independent of batch size")
+        (is (vector? result))
+        (is (= expected result) "exact projection, stable ties, duplicates and nil names")))))
+
+
+(deftest merge-skipped-graph-retains-effective-inheritance-and-audit-envelope
+  (let [parent (sp/create-entity *storage* :fn {:id (random-uuid) :name (uniq "local-parent")
+                                               :parent-ids [] :branch-local? true})
+        child (sp/create-entity *storage* :fn {:id (random-uuid) :name (uniq "local-child")
+                                              :parent-ids [(:id parent)]})
+        ordinary (mk-fn! (uniq "ordinary"))
+        target (mk-branch! (uniq "audit-target"))
+        source (mk-branch! (uniq "audit-source") (:name target))
+        source-id (parse-uuid (:id source))
+        on-source (vs/switch-branch *storage* source-id)]
+    (doseq [id [(:id parent) (:id child) ordinary]]
+      (sp/update-entity on-source :fn id {:description "source change"}))
+    ;; More than one version for a single identity must still produce one row.
+    (sp/update-entity on-source :fn (:id child) {:description "second change"})
+    (let [expected (->> [parent child]
+                        (map (fn [row] {:entity-name :fn :entity-id (:id row) :fn-name (:name row)}))
+                        (sort-by :fn-name) vec)]
+      (is (= expected (gh/exec-name :merge-skipped-branch-local {:source-branch-id source-id})))
+      (let [body (json-body (gh/via :merge-branch-handler
+                                   (json-req (str "/api/branches/" (:name target) "/merge")
+                                             {:source (:name source)})))]
+        (is (:ok body))
+        (is (= {:branch-local (mapv #(-> % (update :entity-name name) (update :entity-id str)) expected)}
+               (get-in body [:merge :skipped])))))))

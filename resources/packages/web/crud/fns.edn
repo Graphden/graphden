@@ -380,6 +380,7 @@
 
   {:name :_rich-type-wire-entry
    :description "Lean bulk entry: preserve type and future fields, omit metadata unused by chip and strip paint."
+   :lambda-params [:entry]
    :parent :dissoc
    :args {:map {:parent :dissoc
                 :args {:map {:parent :dissoc

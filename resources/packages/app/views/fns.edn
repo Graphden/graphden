@@ -248,6 +248,7 @@
     :else :_vc-trimmed}}
 
   {:name :_vc-axis-dispatch,
+   :lambda-params [:candidate],
    :parent :if,
    :args
    {:test :_vc-uuid-axis,
@@ -256,13 +257,11 @@
      :args {:candidate :_vc-candidate, :axis :_vc-axis}}}}
 
   {:name :_vc-axis-item,
-   :lambda-params [:candidate],
    :parent :_vc-axis-dispatch,
    :args {:else {:parent :_vc-text,
                  :args {:candidate :_vc-candidate, :axis :_vc-axis}}}}
 
   {:name :_vc-normalized-item,
-   :lambda-params [:candidate],
    :parent :_vc-axis-dispatch,
    :args
    {:else

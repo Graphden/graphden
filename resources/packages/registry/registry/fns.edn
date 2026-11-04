@@ -630,25 +630,57 @@
   ;; Dependency indexes preserve the native oracle's string normalization and
   ;; last duplicate wins. Sort OLD names before matching, so additions and
   ;; removals never enter the incompatible-version predicate.
+  {:name :_dep-row-name-value
+   :parent :get
+   :args {:coll {:as :item :type :package-dependency-shape}
+          :key {:value :name} :default nil}}
+
+  {:name :_dep-row-version-value
+   :parent :get
+   :args {:coll {:as :item :type :package-dependency-shape}
+          :key {:value :version} :default nil}}
+
   {:name :_dep-name
    :parent :str
-   :args {:parts [{:parent :get :args {:coll {:as :item :type :package-dependency-shape}
-                                       :key {:value :name} :default nil}}]}}
+   :args {:parts [:_dep-row-name-value]}}
 
   {:name :_dep-version
    :parent :str
-   :args {:parts [{:parent :get :args {:coll {:as :item :type :package-dependency-shape}
-                                       :key {:value :version} :default nil}}]}}
+   :args {:parts [:_dep-row-version-value]}}
+
+  {:name :_dep-old-map
+   :parent :map
+   :args {:coll {:as :old-deps :type [:list :package-dependency-shape]}}}
+
+  {:name :_dep-new-map
+   :parent :map
+   :args {:coll {:as :new-deps :type [:list :package-dependency-shape]}}}
+
+  {:name :_dep-old-names
+   :parent :_dep-old-map
+   :args {:func :_dep-name}}
+
+  {:name :_dep-old-versions
+   :parent :_dep-old-map
+   :args {:func :_dep-version}}
+
+  {:name :_dep-new-names
+   :parent :_dep-new-map
+   :args {:func :_dep-name}}
+
+  {:name :_dep-new-versions
+   :parent :_dep-new-map
+   :args {:func :_dep-version}}
 
   {:name :_dep-old-index
    :parent :zipmap
-   :args {:keys {:parent :map :args {:func :_dep-name :coll {:as :old-deps :type [:list :package-dependency-shape]}}}
-          :vals {:parent :map :args {:func :_dep-version :coll {:as :old-deps :type [:list :package-dependency-shape]}}}}}
+   :args {:keys :_dep-old-names
+          :vals :_dep-old-versions}}
 
   {:name :_dep-new-index
    :parent :zipmap
-   :args {:keys {:parent :map :args {:func :_dep-name :coll {:as :new-deps :type [:list :package-dependency-shape]}}}
-          :vals {:parent :map :args {:func :_dep-version :coll {:as :new-deps :type [:list :package-dependency-shape]}}}}}
+   :args {:keys :_dep-new-names
+          :vals :_dep-new-versions}}
 
   {:name :_dep-old-version
    :parent :get
@@ -673,16 +705,26 @@
           :vals [{:value :dependency-incompatible} {:as :item :type :text}
                  :_dep-old-version :_dep-new-version]}}
 
+  {:name :_dep-old-index-keys
+   :parent :keys
+   :args {:map :_dep-old-index}}
+
+  {:name :_dep-old-names-sorted
+   :parent :sort
+   :args {:coll :_dep-old-index-keys}}
+
+  {:name :_dep-incompatible-names
+   :parent :filter
+   :args {:pred :_dep-incompatible? :coll :_dep-old-names-sorted}}
+
+  {:name :_dep-change-rows
+   :parent :map
+   :args {:func :_dep-change-row :coll :_dep-incompatible-names}}
+
   {:name :incompatible-dependency-bumps
    :description "Package dependencies whose new version left the old one's caret range. String-normalized names, last duplicate wins, sorted by name; added or dropped dependencies alone are not breaks. Pure graph composition over the shared semver predicate."
    :parent :vec
-   :args {:coll {:parent :map
-                 :args {:func :_dep-change-row
-                        :coll {:parent :filter
-                               :args {:pred :_dep-incompatible?
-                                      :coll {:parent :sort
-                                             :args {:coll {:parent :keys
-                                                           :args {:map :_dep-old-index}}}}}}}}}}
+   :args {:coll :_dep-change-rows}}
 
   {:name :semver-compatible?
    :description "Is `:to` inside `:from`'s caret range (`^from` — same major; below 1.0 the same minor)? The range a `^` / `~>` consumer would auto-advance into, so a breaking change must leave it."

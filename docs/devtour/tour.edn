@@ -1261,10 +1261,13 @@
      :say "Acquires the augmented, scoped [rich-types registry](#term/rich-types) snapshot.
            The graph's `api-rich-types` maps its wire projection over this single snapshot,
            removing metadata unused by the editor while preserving type fields."}
-    {:ns graphden.crud.types-api :defn candidate-fit
-     :say "Ranks already-admissible function candidates by how their parameters fit a callable
-           [slot](#term/slot). `:exact` uses the supplied parameter count, `:captures` needs
-           additional [captured input](#term/capture), and `:ignores` consumes fewer parameters.
+    {:file "resources/packages/web/crud-types/impls.clj" :defn fn-type-args-fn
+     :say "Reads a callable type's argument map through the canonical type accessor; non-callable
+           types return nil. The `candidate-fit` composition in
+           [crud-types/fns.edn](../../resources/packages/web/crud-types/fns.edn) counts these arguments
+           and ranks already-admissible candidates: `:exact` matches the supplied count,
+           `:captures` needs additional [captured input](#term/capture), and `:ignores` consumes
+           fewer parameters. Value [slots](#term/slot) compare with zero; identity slots are exact.
            Ranking changes display order, not whether the type checker admits a candidate."}
     {:file "resources/packages/storage/branches/impls.clj" :defn sync-fn-defs-branch!
      :say "Synchronizes function definitions into a specified branch for [MCP](#term/mcp) and
@@ -1395,8 +1398,8 @@
     {:file "resources/packages/app/editor/editor-fn-picker-rank.js" :defn pickerArrange
      :say "Orders function-picker candidates without accessing the [DOM](#term/hiccup) or network.
            Exact-name matches come first, followed by namespace groups and compatibility/fit ranking.
-           Typed searches show all matches; browsing can fold groups. The server's `candidate-fit` in
-           the Web block supplies fit metadata without changing type admissibility."}
+           Typed searches show all matches; browsing can fold groups. The server's `candidate-fit` graph composition, described in
+           the Web block, supplies fit metadata without changing type admissibility."}
 
     {:ns graphden.executor.browser-plan :defn export-plan
      :say "The ordinary account menu, function picker and Explorer navigation trail use bundled graph plans for their local

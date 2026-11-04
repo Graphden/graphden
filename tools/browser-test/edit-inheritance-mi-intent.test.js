@@ -112,6 +112,7 @@ async function waitForFn(name) {
     await page.goto(base + '/#' + namespaceName + '.' + names.deepTarget);
     const deepRow = page.locator('.node-overlay[data-fn-name="' + names.deepTarget
       + '"] .ancestor-line[data-level="2"]');
+    await page.waitForFunction(() => graphRenderReady());
     await deepRow.waitFor();
     assert(await page.evaluate(([targetId, ancestorId]) =>
       uniqueInheritancePath(targetId, ancestorId), [deepTarget.id, constFn.id]) === null,
@@ -126,12 +127,14 @@ async function waitForFn(name) {
     'deep MI action names the unique occurrence path');
     assert(deepCommand['expected-parent-id'] === left.id && deepCommand['parent-edge-index'] === 0,
       'deep action names the first selected edge');
-    const deepPartialResponse = page.waitForResponse((response) =>
-      response.url().includes('/partials/inheritance-intent'), {timeout: 20000});
-    await deepAction.click();
-    assert((await deepPartialResponse).ok(), 'deep path preview loaded');
+    const [deepPartialResponse] = await Promise.all([
+      page.waitForResponse((response) =>
+        response.url().includes('/partials/inheritance-intent'), {timeout: 20000}),
+      deepAction.click(),
+    ]);
+    assert(deepPartialResponse.ok(), 'deep path preview loaded');
+    await page.evaluate(() => renderGraph(false));
     await intent.waitFor();
-    await page.waitForTimeout(2200);
     assert(await page.locator('.inheritance-intent-popover [data-preview]').count() === 1,
       'deep preview survives its card redraw');
     assert(await page.locator('.inheritance-intent-popover [data-action="inheritance-ancestors"]').count() === 0,

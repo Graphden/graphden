@@ -114,9 +114,10 @@ async function openInheritanceIntent(anchor, command) {
   }
 }
 
-async function navigateInheritanceSource(fnId) {
-  if (!fnId) return;
+async function navigateInheritanceSource(fnId, expectedHash) {
+  if (!fnId || (expectedHash && window.location.hash !== expectedHash)) return;
   await ensureSubtreeFor(fnId);
+  if (expectedHash && window.location.hash !== expectedHash) return;
   if (!lookups?.fnMap?.has(fnId)) throw new Error('Source is unavailable.');
   closeInheritanceIntent({restoreDetachedCard: false});
   // IDs remain authoritative even for anonymous or duplicate-named sources.
@@ -126,6 +127,7 @@ async function navigateInheritanceSource(fnId) {
 async function applyIntentPreview(preview, proposedName) {
   if (inheritanceIntentPending) return;
   const host = inheritanceIntentEl;
+  const viewHash = window.location.hash;
   inheritanceIntentPending = true;
   for (const control of host?.querySelectorAll('button, input') || []) control.disabled = true;
   try {
@@ -138,13 +140,14 @@ async function applyIntentPreview(preview, proposedName) {
     });
     inheritanceIntentPending = false;
     if (!result) return;
-    closeInheritanceIntent({restoreDetachedCard: false});
+    if (inheritanceIntentEl === host) closeInheritanceIntent({restoreDetachedCard: false});
     if (typeof _tourLoadInheritanceCheckSource === 'function') {
       try { await _tourLoadInheritanceCheckSource(preview); }
       catch (error) { gdToast('Change saved. ' + error.message); }
     }
+    if (window.location.hash !== viewHash) return;
     await initGraph();
-    if (result['created-fn-id']) await navigateInheritanceSource(result['created-fn-id']);
+    if (result['created-fn-id']) await navigateInheritanceSource(result['created-fn-id'], viewHash);
   } catch (error) {
     gdToast(error.message);
   } finally {

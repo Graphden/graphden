@@ -120,10 +120,624 @@
    :parent :json-handler
    :args {:data :_vm-members}}
 
-  {:name :parse-view-command
-   :description "Validate a full filter set and the optional existing view identity."
-   :args {:body {:type :keyword-map}}
-   :return-type :keyword-map}
+  ;; Save command is ordinary graph composition. Guards finish before the writer.
+  {:name :_vc-body,
+   :parent :const,
+   :args {:value {:as :body, :type :jsonb}}}
+
+  {:name :_vc-candidate,
+   :parent :const,
+   :args {:value {:as :candidate, :type [:union :jsonb :uuid]}}}
+
+  {:name :_vc-axis,
+   :parent :const,
+   :args {:value {:as :axis, :type :keyword}}}
+
+  {:name :_vc-reason,
+   :parent :const,
+   :args {:value {:as :reason, :type :text}}}
+
+  {:name :_vc-reject,
+   :parent :throw,
+   :args
+   {:exception
+    {:parent :ex-info,
+     :args
+     {:message :_vc-reason,
+      :data
+      {:parent :zipmap,
+       :args
+       {:keys [{:value :type} {:value :reason}],
+        :vals
+        [{:parent :str-to-keyword,
+          :args {:string "validation-error/view-command"}}
+         :_vc-reason]}}}}}}
+
+  {:name :_vc-body-field,
+   :parent :get,
+   :args
+   {:coll
+    {:parent :ensure-type,
+     :args {:value :_vc-body, :type {:value :keyword-map}}},
+    :default nil}}
+
+  {:name :_vc-filters,
+   :parent :_vc-body-field,
+   :args {:key {:value :filters}}}
+
+  {:name :_vc-name,
+   :parent :_vc-body-field,
+   :args {:key {:value :name}}}
+
+  {:name :_vc-text-error,
+   :parent :str,
+   :args {:parts [:_vc-axis " must be text of at most 512 characters"]}}
+
+  {:name :_vc-text,
+   :parent :if,
+   :args
+   {:test
+    {:parent :is-a?,
+     :args {:value :_vc-candidate, :type {:value :text}}},
+    :then
+    {:parent :if,
+     :args
+     {:test
+      {:parent :lte,
+       :args
+       {:nums [{:parent :count, :args {:coll {:parent :ensure-type
+                                              :args {:value :_vc-candidate :type {:value :text}}}}} 512]}},
+      :then :_vc-candidate,
+      :else {:parent :_vc-reject, :args {:reason :_vc-text-error}}}},
+    :else {:parent :_vc-reject, :args {:reason :_vc-text-error}}}}
+
+  {:name :_vc-uuid-error,
+   :parent :str,
+   :args {:parts [:_vc-axis " must be a UUID"]}}
+
+  {:name :_vc-parsed-uuid,
+   :parent :parse-uuid,
+   :args {:string :_vc-candidate}}
+
+  {:name :_vc-uuid,
+   :parent :if,
+   :args
+   {:test
+    {:parent :is-a?,
+     :args {:value :_vc-candidate, :type {:value :uuid}}},
+    :then :_vc-candidate,
+    :else
+    {:parent :if,
+     :args
+     {:test {:parent :some?, :args {:value :_vc-parsed-uuid}},
+      :then :_vc-parsed-uuid,
+      :else {:parent :_vc-reject, :args {:reason :_vc-uuid-error}}}}}}
+
+  {:name :_vc-uuid-axis,
+   :parent :some?,
+   :args
+   {:value
+    {:parent :position-in,
+     :args {:coll [{:value :uses} {:value :views}], :value :_vc-axis}}}}
+
+  {:name :_vc-keyword-axis,
+   :parent :some?,
+   :args
+   {:value
+    {:parent :position-in,
+     :args
+     {:coll [{:value :effects} {:value :kinds} {:value :problems}],
+      :value :_vc-axis}}}}
+
+  {:name :_vc-trimmed,
+   :parent :str-trim,
+   :args
+   {:string
+    {:parent :ensure-type,
+     :args {:value :_vc-candidate, :type {:value :text}}}}}
+
+  {:name :_vc-trim-text,
+   :parent :if,
+   :args
+   {:test
+    {:parent :blank?,
+     :args
+     {:string
+      {:parent :ensure-type,
+       :args {:value :_vc-candidate, :type {:value :text}}}}},
+    :then nil,
+    :else :_vc-trimmed}}
+
+  {:name :_vc-uuid-or,
+   :parent :if,
+   :args
+   {:test :_vc-uuid-axis,
+    :then
+    {:parent :_vc-uuid,
+     :args {:candidate :_vc-candidate, :axis :_vc-axis}}}}
+
+  {:name :_vc-axis-item,
+   :lambda-params [:candidate],
+   :parent :_vc-uuid-or,
+   :args {:else {:parent :_vc-text,
+                 :args {:candidate :_vc-candidate, :axis :_vc-axis}}}}
+
+  {:name :_vc-normalized-item,
+   :lambda-params [:candidate],
+   :parent :_vc-uuid-or,
+   :args
+   {:else
+    {:parent :if,
+     :args
+     {:test :_vc-keyword-axis,
+      :then
+      {:parent :str-to-keyword,
+       :args
+       {:string
+        {:parent :re-replace,
+         :args
+         {:string
+          {:parent :ensure-type,
+           :args {:value :_vc-candidate, :type {:value :text}}},
+          :pattern "^:",
+          :replacement ""}}}},
+      :else
+      {:parent :_vc-trim-text, :args {:candidate :_vc-candidate}}}}}}
+
+  {:name :_vc-non-nil,
+   :lambda-params [:candidate],
+   :parent :some?,
+   :args {:value {:as :candidate, :type :nullable-jsonb}}}
+
+  {:name :_vc-axis-values,
+   :parent :get,
+   :args {:coll :_vc-filters, :key :_vc-axis}}
+
+  {:name :_vc-axis-error,
+   :parent :str,
+   :args {:parts [:_vc-axis " must contain at most 64 values"]}}
+
+  {:name :_vc-check-axis,
+   :parent :if,
+   :args
+   {:test
+    {:parent :contains?, :args {:coll :_vc-filters, :key :_vc-axis}},
+    :then
+    {:parent :if,
+     :args
+     {:test
+      {:parent :is-a?,
+       :args {:value :_vc-axis-values, :type {:value :sequence}}},
+      :then
+      {:parent :if,
+       :args
+       {:test
+        {:parent :lte,
+         :args
+         {:nums [{:parent :count, :args {:coll :_vc-axis-values}} 64]}},
+        :then
+        {:parent :map,
+         :args {:func :_vc-axis-item, :coll :_vc-axis-values}},
+        :else {:parent :_vc-reject, :args {:reason :_vc-axis-error}}}},
+      :else {:parent :_vc-reject, :args {:reason :_vc-axis-error}}}},
+    :else nil}}
+
+  {:name :_vc-normalize-axis,
+   :parent :vec,
+   :args
+   {:coll
+    {:parent :distinct,
+     :args
+     {:coll
+      {:parent :filter,
+       :args
+       {:pred :_vc-non-nil,
+        :coll
+        {:parent :map,
+         :args
+         {:func :_vc-normalized-item,
+          :coll
+          {:parent :get,
+           :args
+           {:coll :_vc-filters, :key :_vc-axis, :default []}}}}}}}}}}
+
+  {:name :_vc-allowed-key,
+   :lambda-params [:candidate],
+   :parent :some?,
+   :args
+   {:value
+    {:parent :position-in,
+     :args
+     {:coll
+      [{:value :uses}
+       {:value :views}
+       {:value :effects}
+       {:value :kinds}
+       {:value :problems}
+       {:value :namespaces}
+       {:value :exclude}
+       {:value :name}
+       {:value :unused}],
+      :value {:as :candidate, :type :keyword}}}}}
+
+  {:name :_vc-check-name,
+   :parent :if,
+   :args
+   {:test
+    {:parent :if,
+     :args
+     {:test
+      {:parent :is-a?, :args {:value :_vc-name, :type {:value :text}}},
+      :then
+      {:parent :if,
+       :args
+       {:test {:parent :blank?, :args {:string :_vc-name}},
+        :then false,
+        :else
+        {:parent :lte,
+         :args
+         {:nums [{:parent :count, :args {:coll :_vc-name}} 160]}}}},
+      :else false}},
+    :then nil,
+    :else
+    {:parent :_vc-reject,
+     :args
+     {:reason
+      "Give the view a non-empty name of at most 160 characters"}}}}
+
+  {:name :_vc-check-filters,
+   :parent :if,
+   :args
+   {:test
+    {:parent :if,
+     :args
+     {:test
+      {:parent :is-a?, :args {:value :_vc-filters, :type {:value :map}}},
+      :then
+      {:parent :every?,
+       :args
+       {:pred :_vc-allowed-key,
+        :coll {:parent :keys, :args {:map :_vc-filters}}}},
+      :else false}},
+    :then nil,
+    :else
+    {:parent :_vc-reject,
+     :args {:reason "Unknown or missing filter axes"}}}}
+
+  {:name :_vc-filter-name,
+   :parent :get,
+   :args {:coll :_vc-filters, :key {:value :name}, :default nil}}
+
+  {:name :_vc-check-filter-name,
+   :parent :if,
+   :args
+   {:test {:parent :some?, :args {:value :_vc-filter-name}},
+    :then
+    {:parent :_vc-text,
+     :args {:candidate :_vc-filter-name, :axis {:value :name}}},
+    :else nil}}
+
+  {:name :_vc-check-unused,
+   :parent :if,
+   :args
+   {:test
+    {:parent :if,
+     :args
+     {:test
+      {:parent :contains?,
+       :args {:coll :_vc-filters, :key {:value :unused}}},
+      :then
+      {:parent :is-a?,
+       :args
+       {:value
+        {:parent :get,
+         :args
+         {:coll :_vc-filters, :key {:value :unused}, :default nil}},
+        :type {:value :bool}}},
+      :else true}},
+    :then nil,
+    :else
+    {:parent :_vc-reject, :args {:reason "unused must be a boolean"}}}}
+
+  {:name :_vc-uses,
+   :parent :_vc-normalize-axis,
+   :args {:axis {:value :uses}}}
+
+  {:name :_vc-views,
+   :parent :_vc-normalize-axis,
+   :args {:axis {:value :views}}}
+
+  {:name :_vc-effects,
+   :parent :_vc-normalize-axis,
+   :args {:axis {:value :effects}}}
+
+  {:name :_vc-kinds,
+   :parent :_vc-normalize-axis,
+   :args {:axis {:value :kinds}}}
+
+  {:name :_vc-problems,
+   :parent :_vc-normalize-axis,
+   :args {:axis {:value :problems}}}
+
+  {:name :_vc-namespaces,
+   :parent :_vc-normalize-axis,
+   :args {:axis {:value :namespaces}}}
+
+  {:name :_vc-exclude,
+   :parent :_vc-normalize-axis,
+   :args {:axis {:value :exclude}}}
+
+  {:name :_vc-normalized-name,
+   :parent :if,
+   :args
+   {:test {:parent :some?, :args {:value :_vc-filter-name}},
+    :then {:parent :_vc-trim-text, :args {:candidate :_vc-filter-name}},
+    :else nil}}
+
+  {:name :_vc-normalized-unused,
+   :parent :get,
+   :args {:coll :_vc-filters, :key {:value :unused}, :default false}}
+
+  {:name :_vc-normalized-filters,
+   :parent :zipmap,
+   :args
+   {:keys
+    [{:value :name}
+     {:value :uses}
+     {:value :views}
+     {:value :effects}
+     {:value :kinds}
+     {:value :problems}
+     {:value :namespaces}
+     {:value :exclude}
+     {:value :unused}],
+    :vals
+    [:_vc-normalized-name
+     :_vc-uses
+     :_vc-views
+     :_vc-effects
+     :_vc-kinds
+     :_vc-problems
+     :_vc-namespaces
+     :_vc-exclude
+     :_vc-normalized-unused]}}
+
+  {:name :_vc-enum-item,
+   :lambda-params [:candidate],
+   :parent :some?,
+   :args
+   {:value
+    {:parent :position-in,
+     :args
+     {:coll {:as :allowed, :type [:list :keyword]},
+      :value {:as :candidate, :type :keyword}}}}}
+
+  {:name :_vc-effect-keywords,
+   :parent :map,
+   :args {:func :str-to-keyword, :coll :declarable-effect-categories}}
+
+  {:name :_vc-check-kinds,
+   :parent :if,
+   :args
+   {:test
+    {:parent :every?,
+     :args
+     {:pred
+      {:parent :_vc-enum-item,
+       :lambda-params [:candidate],
+       :args
+       {:allowed
+        [{:value :fn}
+         {:value :types}
+         {:value :secrets}
+         {:value :services}
+         {:value :apps}
+         {:value :tests}]}},
+      :coll :_vc-kinds}},
+    :then nil,
+    :else {:parent :_vc-reject, :args {:reason "Unknown kinds value"}}}}
+
+  {:name :_vc-check-problems,
+   :parent :if,
+   :args
+   {:test
+    {:parent :every?,
+     :args
+     {:pred
+      {:parent :_vc-enum-item,
+       :lambda-params [:candidate],
+       :args
+       {:allowed
+        [{:value :failed} {:value :type-errors} {:value :lint}]}},
+      :coll :_vc-problems}},
+    :then nil,
+    :else
+    {:parent :_vc-reject, :args {:reason "Unknown problems value"}}}}
+
+  {:name :_vc-check-effects,
+   :parent :if,
+   :args
+   {:test
+    {:parent :every?,
+     :args
+     {:pred
+      {:parent :_vc-enum-item,
+       :lambda-params [:candidate],
+       :args
+       {:allowed
+        {:parent :ensure-type,
+         :args
+         {:value :_vc-effect-keywords,
+          :type {:value [:list :keyword]}}}}},
+      :coll :_vc-effects}},
+    :then nil,
+    :else {:parent :_vc-reject, :args {:reason "Unknown effects value"}}}}
+
+  {:name :_vc-command,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :name} {:value :filters}],
+    :vals
+    [{:parent :str-trim, :args {:string :_vc-name}}
+     :_vc-normalized-filters]}}
+
+  {:name :_vc-command-id,
+   :parent :if,
+   :args
+   {:test
+    {:parent :get,
+     :args
+     {:coll
+      {:parent :ensure-type,
+       :args {:value :_vc-body, :type {:value :keyword-map}}},
+      :key {:value :id},
+      :default nil}},
+    :then
+    {:parent :assoc,
+     :args
+     {:map :_vc-command,
+      :key {:value :id},
+      :value
+      {:parent :_vc-uuid,
+       :args
+       {:candidate
+        {:parent :get,
+         :args
+         {:coll
+          {:parent :ensure-type,
+           :args {:value :_vc-body, :type {:value :keyword-map}}},
+          :key {:value :id},
+          :default nil}},
+        :axis {:value :id}}}}},
+    :else :_vc-command}}
+
+  {:name :_vc-command-create-id,
+   :parent :if,
+   :args
+   {:test
+    {:parent :contains?,
+     :args
+     {:coll
+      {:parent :ensure-type,
+       :args {:value :_vc-body, :type {:value :keyword-map}}},
+      :key {:value :create-id}}},
+    :then
+    {:parent :assoc,
+     :args
+     {:map :_vc-command-id,
+      :key {:value :create-id},
+      :value
+      {:parent :_vc-uuid,
+       :args
+       {:candidate
+        {:parent :get,
+         :args
+         {:coll
+          {:parent :ensure-type,
+           :args {:value :_vc-body, :type {:value :keyword-map}}},
+          :key {:value :create-id},
+          :default nil}},
+        :axis {:value :create-id}}}}},
+    :else :_vc-command-id}}
+
+  {:name :_vc-command-namespace-id,
+   :parent :if,
+   :args
+   {:test
+    {:parent :contains?,
+     :args
+     {:coll
+      {:parent :ensure-type,
+       :args {:value :_vc-body, :type {:value :keyword-map}}},
+      :key {:value :namespace-id}}},
+    :then
+    {:parent :assoc,
+     :args
+     {:map :_vc-command-create-id,
+      :key {:value :namespace-id},
+      :value
+      {:parent :if,
+       :args
+       {:test
+        {:parent :get,
+         :args
+         {:coll
+          {:parent :ensure-type,
+           :args {:value :_vc-body, :type {:value :keyword-map}}},
+          :key {:value :namespace-id},
+          :default nil}},
+        :then
+        {:parent :_vc-uuid,
+         :args
+         {:candidate
+          {:parent :get,
+           :args
+           {:coll
+            {:parent :ensure-type,
+             :args {:value :_vc-body, :type {:value :keyword-map}}},
+            :key {:value :namespace-id},
+            :default nil}},
+          :axis {:value :namespace-id}}},
+        :else nil}}}},
+    :else :_vc-command-create-id}}
+
+  {:name :parse-view-command,
+   :description
+   "Validate, normalize and assemble a bounded Save view command before the atomic writer is called. Guards execute in declaration order; the save primitive may record its :db effect before demanding the command.",
+   :return-type :keyword-map,
+   :parent :do,
+   :args
+   {:steps
+    [{:parent :if,
+      :args
+      {:test
+       {:parent :is-a?, :args {:value :_vc-body, :type {:value :map}}},
+       :then nil,
+       :else
+       {:parent :_vc-reject,
+        :args {:reason "Save view requires a JSON object"}}}}
+     {:parent :if,
+      :args
+      {:test
+       {:parent :not,
+        :args
+        {:value
+         {:parent :and,
+          :args
+          {:values
+           [{:parent :contains?,
+             :args
+             {:coll
+              {:parent :ensure-type,
+               :args {:value :_vc-body, :type {:value :keyword-map}}},
+              :key {:value :id}}}
+            {:parent :contains?,
+             :args
+             {:coll
+              {:parent :ensure-type,
+               :args {:value :_vc-body, :type {:value :keyword-map}}},
+              :key {:value :create-id}}}]}}}},
+       :then nil,
+       :else
+       {:parent :_vc-reject,
+        :args
+        {:reason
+         "Use id to update or create-id to create, never both"}}}}
+     :_vc-check-name
+     :_vc-check-filters
+     {:parent :_vc-check-axis, :args {:axis {:value :exclude}}}
+     {:parent :_vc-check-axis, :args {:axis {:value :namespaces}}}
+     {:parent :_vc-check-axis, :args {:axis {:value :problems}}}
+     {:parent :_vc-check-axis, :args {:axis {:value :uses}}}
+     {:parent :_vc-check-axis, :args {:axis {:value :effects}}}
+     {:parent :_vc-check-axis, :args {:axis {:value :views}}}
+     {:parent :_vc-check-axis, :args {:axis {:value :kinds}}}
+     :_vc-check-filter-name
+     :_vc-check-unused
+     :_vc-check-kinds
+     :_vc-check-problems
+     :_vc-check-effects
+     :_vc-command-namespace-id]}}
 
   {:name :save-explorer-view
    :description "Atomically create or update an ordinary explorer-view fn and every filter binding; publish only after commit."

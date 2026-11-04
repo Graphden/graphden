@@ -129,12 +129,13 @@
       :count <total diff rows>
       :rows [{:fn-id \"<uuid>\"            ; nil only if ownerless
                 :fn-name \"web-server\"    ; nil for anonymous fns
-                :fn-label \":web-server\"  ; always printable
+                :assets-only? bool        ; ownerless asset bucket
                 :branch-local? bool
                 :entry <enriched diff row>}]}
 
-   The graph groups rows by `:fn-id`, derives each group's change from
-   its fn entry, and sorts entries and groups."
+   No raw versions or additional stored fields cross this boundary. The
+   graph adds owner display labels, groups rows by `:fn-id`, derives each
+   group's change from its fn entry, and sorts entries and groups."
   [base-storage source-branch-id target-branch-id]
   (let [{:keys [diffs]} (mrg/diff-branches base-storage
                                            source-branch-id target-branch-id)
@@ -174,11 +175,9 @@
                          (map (fn [owner]
                                 [owner {:fn-id (some-> owner str)
                                         :fn-name (get fn-names owner)
-                                        :fn-label (if owner
-                                                    (fd/fn-label fn-names owner)
-                                                    (if (every? #(= :resource-override (:entity-name %))
-                                                                ownerless)
-                                                      "(assets)" "(unowned)"))
+                                        :assets-only? (and (nil? owner)
+                                                           (every? #(= :resource-override (:entity-name %))
+                                                                   ownerless))
                                         :ns-path (some-> (get owner-fns owner)
                                                          :namespace-id ns-path)
                                         :branch-local? (boolean
@@ -231,19 +230,18 @@
                  acc'))))))
 
 
-(defn affected-view
-  "`affected-fns` for the diff-view `groups`, each entry carrying the
-   fn's `:ns-path` (the Explorer aggregates the ∿ marks onto namespace
-   rows exactly like the +/±/− ones, and it cannot know the namespace
-   of a fn it has not loaded yet). One read of the affected fn rows +
-   one of the ns table."
+(defn affected-view-facts
+  "One compiler reverse-dependency BFS, one bulk fn read and one namespace
+   table read. Keep the deterministic nearest-via/depth calculation native.
+   Export only affected IDs, their dependency info and their visible namespace
+   paths; unreadable/missing identities retain nil paths. Graph composition
+   attaches those paths to the response map."
   [base-storage reverse-deps groups]
   (let [affected (affected-fns reverse-deps (keep :fn-id groups))
         ids (->> (keys affected) (keep parse-uuid) (vec))
         fns (if (seq ids) (sp/read-entities base-storage :fn ids) {})
         ns-path (if (seq ids) (ns-path-fn base-storage) (constantly nil))]
-    (into {}
-          (map (fn [[id info]]
-                 [id (assoc info :ns-path
-                            (some-> (get fns (parse-uuid id)) :namespace-id ns-path))]))
+    (mapv (fn [[id info]]
+            {:fn-id id :info info
+             :ns-path (some-> (get fns (parse-uuid id)) :namespace-id ns-path)})
           affected)))

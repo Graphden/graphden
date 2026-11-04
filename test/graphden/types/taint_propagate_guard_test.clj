@@ -133,9 +133,9 @@
     :current-org-id :current-slot-value :current-time-ms :declarable-effect-categories
     :decode-row :delete-branch! :delete-entity :revive-entity :deref
     :describe-type-mismatch :detect-conflicts :diff-branches
-    ;; diff-branches-view returns previews of user-authored binding
+    ;; _diff-view-input returns previews of user-authored binding
     ;; values — same read-projection class as :diff-branches.
-    :diff-affected :diff-branches-view
+    :_diff-affected-facts :_diff-view-input
     :diff-value-against-type :digest-hex :dispatch-to-branch :dissoc
     :distinct :div :do :drop :empty? :env
     :encode-unreadable-kws :equal? :error-boundary-wrap :every? :ex-data :execute-trace-rows :viewer-path-trace
@@ -162,7 +162,7 @@
     :view-members :explorer-view :explorer-views
     :loop-until-interrupted :lt :lte :map :map-xf
     :materialize-package-fns :materialize-package-receipt :max-memory :merge :merge-branch!
-    :merge-post-commit! :merge-skipped-branch-local
+    :merge-post-commit! :_merge-skipped-facts
     :middleware :missing-package-dependencies :mod :mul :name
     :namespace-external-deps :neg :neq
     :nil? :non-blank? :not :notify-after-write :or :os-arch

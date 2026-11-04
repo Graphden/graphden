@@ -753,18 +753,75 @@
    :return-type :keyword-map
    :effects #{:db}}
 
-  {:name :diff-branches-view
-   :description "Atomic read boundary over `dv/diff-branches-view-facts`: flat enriched rows with owner labels, namespace paths, branch-local facts, and before/after entries. Grouping, ordering and display decisions are composed below in graph fn-defs."
+  {:name :_diff-view-input
+   :description "One native read boundary: resolved display entries, owner names, namespace paths and branch-local facts. Does not export raw versions; label policy is composed by diff-branches-view."
    :args {:source-branch-id {:type :uuid :description "Source branch id."}
           :target-branch-id {:type :uuid :description "Target branch id."}}
-   :return-type :keyword-map
+   :return-type {:source-branch-id :uuid :target-branch-id :uuid :count :int
+                 :rows [:list {:fn-id :nullable-text :fn-name :nullable-text
+                               :assets-only? :bool :ns-path :nullable-text
+                               :branch-local? :bool :entry :keyword-map}]}
    :effects #{:db}}
 
-  {:name :diff-affected
-   :description "Atomic library boundary over `dv/affected-view` — the fns that changed INSIDE (own rows equal, a dependency in the diff), `{fn-id-str {:via changed-fn-id-str :depth n :ns-path \"a.b\"}}`, walked over the compiler's reverse-dependency index of the branch on screen."
-   :args {:groups {:type :sequence :description "The `:groups` of `:diff-branches-view` — their `:fn-id`s seed the walk."}}
-   :return-type :keyword-map
+  {:name :_diff-display-owner-id
+   :parent :get
+   :args {:coll {:as :item} :key {:value :fn-id} :default nil}}
+
+  {:name :_diff-display-owner-name
+   :parent :get
+   :args {:coll {:as :item} :key {:value :fn-name} :default nil}}
+
+  {:name :_diff-display-owner-label
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_diff-display-owner-id}}
+          :then {:parent :if
+                 :args {:test {:parent :some? :args {:value :_diff-display-owner-name}}
+                        :then {:parent :str :args {:parts [{:value ":"} :_diff-display-owner-name]}}
+                        :else {:parent :str
+                               :args {:parts [{:value "#"}
+                                              {:parent :str-clip
+                                               :args {:string {:parent :assert-some :args {:value :_diff-display-owner-id}}
+                                                      :limit 8}}]}}}}
+          :else {:parent :if
+                 :args {:test {:parent :get :args {:coll {:as :item} :key {:value :assets-only?} :default false}}
+                        :then {:value "(assets)"}
+                        :else {:value "(unowned)"}}}}}
+
+  {:name :_diff-display-row
+   :description "Format one enriched row without storage reads. Entry previews and field pairs retain their native bounded rendering; owner label policy is editable here."
+   :parent :assoc
+   :args {:map {:parent :dissoc :args {:map {:as :item} :key {:value :assets-only?}}}
+          :key {:value :fn-label}
+          :value :_diff-display-owner-label}}
+
+  {:name :diff-branches-view
+   :description "Enriched branch comparison with graph-composed owner labels. One shared acquisition supplies every row; formatting performs no per-entry reads."
+   :parent :assoc
+   :args {:map :_diff-view-input
+          :key {:value :rows}
+          :value {:parent :map
+                  :args {:func :_diff-display-row
+                         :coll {:parent :get :args {:coll :_diff-view-input :key {:value :rows} :default []}}}}}}
+
+  {:name :_diff-affected-facts
+   :description "Shared compiler reverse-dependency BFS with deterministic nearest via/depth; one bulk identity read and one namespace read acquire only visible path facts."
+   :args {:groups {:type :sequence :description "Diff groups whose fn IDs seed the dependency walk."}}
+   :return-type [:list {:fn-id :text :info {:via :text :depth :int} :ns-path :nullable-text}]
    :effects #{:db}}
+
+  {:name :_diff-affected-entry
+   :parent :vec
+   :args {:coll [{:parent :get :args {:coll {:as :item} :key {:value :fn-id} :default nil}}
+                 {:parent :assoc
+                  :args {:map {:parent :get :args {:coll {:as :item} :key {:value :info} :default nil}}
+                         :key {:value :ns-path}
+                         :value {:parent :get :args {:coll {:as :item} :key {:value :ns-path} :default nil}}}}]}}
+
+  {:name :diff-affected
+   :description "Fns changed inside: native BFS and shared bulk reads supply bounded facts; the graph attaches each visible namespace path to its nearest-via/depth info and indexes the result by fn ID text."
+   :parent :pairs->map
+   :args {:entries {:parent :map :args {:func :_diff-affected-entry :coll :_diff-affected-facts}}}
+   :return-type [:map :text {:via :text :depth :int :ns-path :nullable-text}]}
 
   {:name :_diff-apply-raw
    :description "Stage 1 — run the diff. The `:source-branch` / `:target-branch` free args come from the parent `:cond` which threaded them through `:_diff-source-branch` / `:_target-branch`. The `:assert-some` wraps mirror the `:cond` guards (`:_diff-source-missing?` / `:_diff-target-missing?` reject nil branches upstream) — they bridge the type-checker's per-arm narrowing gap."
@@ -2573,11 +2630,34 @@
    :return-type :null
    :effects #{:db}}
 
-  {:name :merge-skipped-branch-local
-   :description "Audit read — fns with a version on the source branch that won't surface on the target after merge (effective `:branch-local?` filtered them at the resolver). One library call; empty vector = everything visible propagated."
+  {:name :_merge-skipped-facts
+   :description "Bulk acquisition of visible source identity/name facts with effective branch-local inheritance; no per-item graph reads."
    :args {:source-branch-id {:type :uuid :description "Source branch id."}}
-   :return-type [:list :keyword-map]
+   :return-type [:list {:id :uuid :name :nullable-text}]
    :effects #{:db}}
+
+  {:name :_merge-skipped-audit-row
+   :parent :zipmap
+   :args {:keys [{:value :entity-name} {:value :entity-id} {:value :fn-name}]
+          :vals [{:value :fn}
+                 {:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}
+                 {:parent :get :args {:coll {:as :item} :key {:value :name} :default nil}}]}}
+
+  {:name :_merge-skipped-audit-rows
+   :parent :map
+   :args {:func :_merge-skipped-audit-row :coll :_merge-skipped-facts}}
+
+  {:name :_merge-skipped-sort-key
+   :parent :coalesce
+   :args {:value {:parent :get :args {:coll {:as :item} :key {:value :fn-name} :default nil}}
+          :default {:value ""}}}
+
+  {:name :merge-skipped-branch-local
+   :description "Merge audit: acquire visible branch-local identities once, project the audit rows, then stably sort by name (nil sorts as empty text)."
+   :parent :vec
+   :args {:coll {:parent :sort-by
+                 :args {:key-fn :_merge-skipped-sort-key :coll :_merge-skipped-audit-rows}}}
+   :return-type [:list :keyword-map]}
 
   ;; --- Success path: the merge WRITE SEQUENCE, graph-visible
   ;;     (formerly one opaque Clojure body): commit → post-commit →
@@ -2708,7 +2788,7 @@
                  :_merge-apply-created-at-str]}}
 
   {:name :_merge-apply-skipped
-   :description "Audit log: `{:branch-local [<entity-row> …]}`. Pulled straight from `merge-branch!`'s `:skipped` field which the defbase populates via `mrg/skipped-as-branch-local`. Empty `:branch-local` vec means every visible-on-source fn propagated."
+   :description "Audit log: `{:branch-local [<entity-row> …]}`. Reads the `:skipped` field attached by `:_merge-record-with-skipped`: `:merge-skipped-branch-local` projects and sorts audit rows in graph from the native `:_merge-skipped-facts` bulk inheritance/visibility read. Empty `:branch-local` vec means every visible-on-source fn propagated."
    :parent :get
    :args {:coll :_merge-apply-record :key {:value :skipped} :default nil}}
 

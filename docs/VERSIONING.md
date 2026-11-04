@@ -277,9 +277,9 @@ it and a merge carries nothing new, but the branch now holds its own
 version row of that entity.
 
 The editor does NOT render this flat wire shape. It renders the
-GROUPED display model from
-`graphden.versioning.storage.diff-view/diff-branches-view` (exposed
-as the `:diff-branches-view` base-fn behind
+GROUPED display model composed by `app.branches/:diff-branches-view` over
+the native `graphden.versioning.storage.diff-view/diff-branches-view-facts`
+read boundary (exposed behind
 `GET /api/branches/:ref/diff-view?against=`; the client renderer in
 `editor-diff-mode.js` consumes it for the inspector diff panel and
 the Review dialog's change list):

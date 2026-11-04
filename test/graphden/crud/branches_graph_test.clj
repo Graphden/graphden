@@ -1,4 +1,4 @@
-(ns ^:integration graphden.crud.branches-graph-test
+(ns ^:integration ^:serial graphden.crud.branches-graph-test
   "Graph-path tests for the branches HTTP handlers
    (`:list-branches-handler` / `:get-branch-handler` /
    `:diff-branches-handler` / `:create-branch-handler` /
@@ -26,7 +26,9 @@
     [graphden.lint.graph :as graph-lint]
     [graphden.storage.protocol.core :as sp]
     [graphden.test-infra.graph-harness :as gh :refer [*graph* json-req uniq]]
-    [graphden.versioning.storage.core :as vs]))
+    [graphden.versioning.storage.core :as vs]
+    [graphden.versioning.storage.diff-view :as dv]
+    [graphden.versioning.storage.merge :as mrg]))
 
 
 ;; =============================================================================
@@ -783,3 +785,189 @@
                                       :entity-id (str fn-id)
                                       :choice "elsewhere"}]})))]
       (is (:ok body) "bad resolutions don't break the merge"))))
+
+
+(deftest diff-view-graph-formats-labels-with-one-read
+  (let [source (random-uuid)
+        target (random-uuid)
+        named "11111111-1111-4111-8111-111111111111"
+        anon "22222222-2222-4222-8222-222222222222"
+        ;; The formatter sees only the same bounded display entry as before,
+        ;; including ref IDs and any secret marker already in that entry.
+        entry {:entity-name :binding :entity-id "binding" :change :modified
+               :source-ref named :target-ref anon :slot-name "in"
+               :fields [{:field "value" :source "{:secret true}" :target "∅"}]}
+        row {:fn-id named :fn-name "owner" :assets-only? false
+             :ns-path "app" :branch-local? true :entry entry}
+        cases [[row ":owner"]
+               [(assoc row :fn-name "") ":"]
+               [(assoc row :fn-id anon :fn-name nil) "#22222222"]
+               [(assoc row :fn-id nil :fn-name nil :assets-only? true) "(assets)"]
+               [(assoc row :fn-id nil :fn-name nil) "(unowned)"]]]
+    (doseq [rows [(mapv first cases) [] (vec (repeat 128 row))]]
+      (let [calls (atom 0)
+            input {:source-branch-id source :target-branch-id target
+                   :count (count rows) :rows rows}
+            result (with-redefs [dv/diff-branches-view-facts
+                                 (fn [_ s t]
+                                   (is (= [source target] [s t]))
+                                   (swap! calls inc)
+                                   input)]
+                     (gh/exec-name :diff-branches-view
+                                   {:source-branch-id source :target-branch-id target}))
+            labels (if (= 5 (count rows)) (mapv second cases)
+                       (vec (repeat (count rows) ":owner")))]
+        (is (= 1 @calls) "one shared acquisition even for a large row batch")
+        (is (= (dissoc input :rows) (dissoc result :rows)))
+        (is (= labels (mapv :fn-label (:rows result))))
+        (is (= (mapv #(dissoc % :assets-only?) rows)
+               (mapv #(dissoc % :fn-label) (:rows result)))
+            "entry fields, reference IDs, order and existing marker text are preserved")))))
+
+
+(deftest diff-view-handler-uses-graph-owner-labels
+  (let [fn-name (uniq "diff-label")
+        fn-id (mk-fn! fn-name)
+        branch (mk-branch! (uniq "diff-label-branch"))
+        on-branch (vs/switch-branch *storage* (parse-uuid (:id branch)))]
+    (sp/update-entity on-branch :fn fn-id {:description "label parity"})
+    (let [response (gh/via :diff-view-handler
+                           (get-req (str "/api/branches/main/diff-view?against=" (:id branch))))
+          body (json-body response)
+          group (some #(when (= (str fn-id) (:fn-id %)) %) (:groups body))]
+      (is (= 200 (:status response)))
+      (is (:ok body))
+      (is (= (str ":" fn-name) (:fn-label group)))
+      (is (some #(some (fn [field] (= "label parity" (:source field))) (:fields %))
+                (:entries group))))))
+
+
+(deftest merge-skipped-graph-projects-and-stably-sorts-one-bulk-read
+  (let [source (random-uuid)
+        rows [{:id (random-uuid) :name "z" :unrelated "not audit data"}
+              {:id (random-uuid) :name nil}
+              {:id (random-uuid) :name ""}
+              {:id (random-uuid) :name "a"}
+              {:id (random-uuid) :name "a"}]]
+    (doseq [facts [[] rows (vec (mapcat identity (repeat 32 rows)))]]
+      (let [calls (atom 0)
+            result (with-redefs [mrg/branch-local-source-rows
+                                 (fn [_ source-id]
+                                   (is (= source source-id))
+                                   (swap! calls inc)
+                                   facts)]
+                     (gh/exec-name :merge-skipped-branch-local {:source-branch-id source}))
+            expected (->> facts
+                          (map (fn [row] {:entity-name :fn :entity-id (:id row) :fn-name (:name row)}))
+                          (sort-by #(or (:fn-name %) ""))
+                          vec)]
+        (is (= 1 @calls) "one acquisition independent of batch size")
+        (is (vector? result))
+        (is (= expected result) "exact projection, stable ties, duplicates and nil names")))))
+
+
+(deftest merge-skipped-graph-retains-effective-inheritance-and-audit-envelope
+  (let [parent (sp/create-entity *storage* :fn {:id (random-uuid) :name (uniq "local-parent")
+                                                :parent-ids [] :branch-local? true})
+        child (sp/create-entity *storage* :fn {:id (random-uuid) :name (uniq "local-child")
+                                               :parent-ids [(:id parent)]})
+        ordinary (mk-fn! (uniq "ordinary"))
+        target (mk-branch! (uniq "audit-target"))
+        source (mk-branch! (uniq "audit-source") (:name target))
+        source-id (parse-uuid (:id source))
+        on-source (vs/switch-branch *storage* source-id)]
+    (doseq [id [(:id parent) (:id child) ordinary]]
+      (sp/update-entity on-source :fn id {:description "source change"}))
+    ;; More than one version for a single identity must still produce one row.
+    (sp/update-entity on-source :fn (:id child) {:description "second change"})
+    (let [expected (->> [parent child]
+                        (map (fn [row] {:entity-name :fn :entity-id (:id row) :fn-name (:name row)}))
+                        (sort-by :fn-name) vec)]
+      (is (= expected (gh/exec-name :merge-skipped-branch-local {:source-branch-id source-id})))
+      (let [body (json-body (gh/via :merge-branch-handler
+                                    (json-req (str "/api/branches/" (:name target) "/merge")
+                                              {:source (:name source)})))]
+        (is (:ok body))
+        (is (= {:branch-local (mapv #(-> % (update :entity-name name) (update :entity-id str)) expected)}
+               (:skipped body)))))))
+
+
+(deftest diff-affected-graph-enriches-shared-bfs-facts-with-visible-paths
+  (let [a #uuid "11111111-0000-4000-8000-000000000001"
+        b #uuid "22222222-0000-4000-8000-000000000002"
+        shared (random-uuid)
+        child (random-uuid)
+        hidden (random-uuid)
+        root-ns (random-uuid)
+        leaf-ns (random-uuid)
+        unrelated-ns (random-uuid)
+        reverse-deps {a #{shared hidden} b #{shared} shared #{child}}
+        acquire dv/affected-view-facts]
+    (doseq [groups [[] [{:fn-id (str b)} {:fn-id (str a)} {:fn-id (str a)}
+                        {:fn-id nil} {:fn-id "junk"}]]]
+      (let [calls (atom [])
+            unexpected (fn [op]
+                         (throw (ex-info "Unexpected storage call in diff affected test"
+                                         {:op op})))
+            storage (reify
+                      sp/StorageCRUD
+                      (query-entities
+                        [_ entity where]
+                        (swap! calls conj [:query entity where])
+                        (is (= :ns entity))
+                        [{:id root-ns :name "app"}
+                         {:id leaf-ns :name "visible" :parent-id root-ns}
+                         {:id unrelated-ns :name "unrelated"}])
+
+                      (query-entities [_ _ _ _] (unexpected :query-entities-opts))
+
+                      (create-entity [_ _ _] (unexpected :create-entity))
+
+                      (read-entity [_ _ _] (unexpected :read-entity))
+
+                      (update-entity [_ _ _ _] (unexpected :update-entity))
+
+                      (delete-entity [_ _ _] (unexpected :delete-entity))
+
+                      (query-latest-per-group [_ _ _ _] (unexpected :query-latest-per-group))
+
+
+                      sp/StorageBatchCRUD
+
+                      (read-entities
+                        [_ entity ids]
+                        (swap! calls conj [:bulk entity (set ids)])
+                        (is (= :fn entity))
+                        ;; ACL-filtered batch omits hidden; its namespace path
+                        ;; must remain nil even though the dependency ID is known.
+                        (select-keys {shared {:id shared :namespace-id leaf-ns}
+                                      child {:id child :namespace-id unrelated-ns}}
+                                     ids))
+
+                      (create-entities [_ _ _] (unexpected :create-entities))
+
+                      (update-entities [_ _ _] (unexpected :update-entities))
+
+                      (upsert-entities [_ _ _] (unexpected :upsert-entities))
+
+                      (delete-entities [_ _ _] (unexpected :delete-entities))
+
+                      (query-ref-many-owners [_ _ _ _] (unexpected :query-ref-many-owners)))
+            acquisitions (atom 0)
+            result (with-redefs [dv/affected-view-facts
+                                 (fn [_ _ supplied-groups]
+                                   (swap! acquisitions inc)
+                                   (is (= groups supplied-groups))
+                                   (acquire storage reverse-deps supplied-groups))]
+                     (gh/exec-name :diff-affected {:groups groups}))]
+        (is (= 1 @acquisitions))
+        (if (empty? groups)
+          (do (is (= {} result)) (is (= [] @calls)))
+          (do
+            (is (= {(str shared) {:via (str a) :depth 1 :ns-path "app.visible"}
+                    (str child) {:via (str a) :depth 2 :ns-path "unrelated"}
+                    (str hidden) {:via (str a) :depth 1 :ns-path nil}}
+                   result)
+                "nearest via uses sorted seed tie-breaking; missing identities disclose no path")
+            (is (= [[:bulk :fn #{shared child hidden}] [:query :ns {}]] @calls)
+                "one shared identity batch and namespace read, with no per-row calls")))))))

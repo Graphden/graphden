@@ -456,6 +456,33 @@
                                 :args {:old-deps {:value [{:name "a" :version "1.0.0"}]}
                                        :new-deps {:value [{:name "a" :version "1.4.0"}]}}}}}}}
 
+  {:name :dependency-bumps-sort-and-use-the-last-coordinate
+   :parent :assert-eq
+   :args {:actual {:parent :incompatible-dependency-bumps
+                   :args {:old-deps {:value [{:name "z" :version "1.0.0"}
+                                             {:name "a" :version "1.0.0"}
+                                             {:name "a" :version "1.2.0"}]}
+                          :new-deps {:value [{:name "z" :version "2.0.0"}
+                                             {:name "a" :version "1.9.0"}
+                                             {:name "a" :version "2.0.0"}]}}}
+          :expected {:value [{:kind :dependency-incompatible :name "a" :old "1.2.0" :new "2.0.0"}
+                             {:kind :dependency-incompatible :name "z" :old "1.0.0" :new "2.0.0"}]}}}
+
+  {:name :dependency-bumps-reject-minor-below-one-and-downgrade
+   :parent :assert-eq
+   :args {:actual {:parent :incompatible-dependency-bumps
+                   :args {:old-deps {:value [{:name "a" :version "0.3.1"} {:name "b" :version "2.5.0"}]}
+                          :new-deps {:value [{:name "a" :version "0.4.0"} {:name "b" :version "2.1.0"}]}}}
+          :expected {:value [{:kind :dependency-incompatible :name "a" :old "0.3.1" :new "0.4.0"}
+                             {:kind :dependency-incompatible :name "b" :old "2.5.0" :new "2.1.0"}]}}}
+
+  {:name :dependency-bumps-skip-unchanged-invalid-versions
+   :parent :assert-eq
+   :args {:actual {:parent :incompatible-dependency-bumps
+                   :args {:old-deps {:value [{:name "a" :version "invalid"}]}
+                          :new-deps {:value [{:name "a" :version "invalid"}]}}}
+          :expected {:value []}}}
+
   {:name :breaking-changes-are-empty-for-identical-bundles
    :parent :assert
    :args {:value {:parent :empty?

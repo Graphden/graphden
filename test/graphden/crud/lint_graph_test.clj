@@ -174,3 +174,34 @@
         ;; branch raises nothing beyond their own probes (random order).
         (doseq [fid [a b]] (entities/delete-entity "fn" fid ctx))))
     (is (empty? (findings-naming ctx a #{})) "the probes leave no finding behind")))
+
+
+(deftest branch-lint-findings-normalization-test
+  (let [{:keys [ctx all-name->id]} *graph*
+        a (random-uuid)
+        b (random-uuid)
+        captured (atom nil)
+        raw {:rule :duplicate-definition :message "same shape" :weight 4
+             :fn-ids [b a]
+             :fns [[nil :second] ["tools" :first]]}
+        run #(exec/execute-with-named-args ctx (get all-name->id :branch-lint-findings)
+                                           {:suppressed %})]
+    (with-redefs [lg/lint-branch (fn [_ suppress]
+                                   (reset! captured suppress)
+                                   [raw])]
+      (is (= [{:rule "duplicate-definition" :message "same shape" :weight 4
+               :fn-ids [(str b) (str a)]
+               :fns [{:id (str b) :name "second" :ns nil}
+                     {:id (str a) :name "first" :ns "tools"}]}]
+             (run [{:rule "duplicate-definition" :fn-ids [(str b) (str a)]}])))
+      (is (= [[:duplicate-definition (vec (sort [(str a) (str b)]))]] @captured))
+      (testing "empty suppression input and empty findings stay empty"
+        (with-redefs [lg/lint-branch (fn [_ suppress]
+                                       (reset! captured suppress)
+                                       [])]
+          (is (= [] (run [])))
+          (is (= [] @captured))))
+      (testing "member pairing stops at the shorter input"
+        (with-redefs [lg/lint-branch (fn [_ _] [(assoc raw :fns [[nil :second]])])]
+          (is (= [{:id (str b) :name "second" :ns nil}]
+                 (:fns (first (run []))))))))))

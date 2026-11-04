@@ -385,9 +385,9 @@
       (is (= "web.http" (:ns-path (first alpha-rows))))
       (is (nil? (:ns-path anon-row)) "no fn row → no path"))
 
-    (testing "named owner facts carry label and branch-local flag"
+    (testing "named owner facts carry a name and branch-local flag"
       (is (= "alpha" (:fn-name (first alpha-rows))))
-      (is (= ":alpha" (:fn-label (first alpha-rows))))
+      (is (false? (:assets-only? (first alpha-rows))))
       (is (every? :branch-local? alpha-rows)))
 
     (testing "all entry kinds reach the graph for ordering"
@@ -412,15 +412,15 @@
         (is (= 3 (:position li-e)))
         (is (= "10" (:preview li-e)))))
 
-    (testing "ownerless asset override carries its fallback label"
-      (is (= "(assets)" (:fn-label assets-row)))
+    (testing "ownerless asset override identifies the assets bucket"
+      (is (true? (:assets-only? assets-row)))
       (is (nil? (:fn-name assets-row)))
       (is (false? (:branch-local? assets-row)))
       (is (= "/editor.css" (:preview (:entry assets-row)))))
 
-    (testing "anonymous fn falls back to a short-id label"
+    (testing "anonymous fn supplies its id for graph label formatting"
       (is (nil? (:fn-name anon-row)))
-      (is (= "#99999999" (:fn-label anon-row)))
+      (is (false? (:assets-only? anon-row)))
       (is (= :added-in-source (:change (:entry anon-row))))
       (is (false? (:branch-local? anon-row))))))
 

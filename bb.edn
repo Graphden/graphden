@@ -1061,6 +1061,7 @@
   {:doc "Merge train tests: image identity, stubbed gate order, and real queue/landing in throwaway repos. No docker or network. Runs inside bb lint / bb ci as wtq-train."
    :task (do (p/shell "bash" "dev/wtq/test/image_test.sh")
              (p/shell "bash" "dev/wtq/test/gate_order_test.sh")
+             (p/shell "bash" "dev/wtq/test/disk_headroom_test.sh")
              (p/shell "bash" "dev/wtq/test/train_test.sh"))}
 
   ci-test

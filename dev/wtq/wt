@@ -132,13 +132,21 @@ branch_of() { git -C "$1" rev-parse --abbrev-ref HEAD; }
 
 # Newest-first gate logs. `find -printf` rather than `ls -t` so a filename is
 # never re-parsed by the shell: usage `newest_logs <n> [feature]`.
-# Anchored on the `<name>-<YYYYmmdd>-<HHMMSS>.log` shape: a bare `<name>-*`
-# glob made `wt log foo` answer with `foo-bar`'s newest log.
+# Anchored on the `<name>-<YYYYmmdd>-<HHMMSS>.log[.gz]` shape: a bare
+# `<name>-*` glob made `wt log foo` answer with `foo-bar`'s newest log.
 newest_logs() {
-  local n="$1" name="${2:-}" re='.*\.log'
-  [ -n "$name" ] && re=".*/${name//./\\.}-[0-9]{8}-[0-9]{6}\\.log"
+  local n="$1" name="${2:-}" re='.*\.log(\.gz)?$'
+  [ -n "$name" ] && re=".*/${name//./\\.}-[0-9]{8}-[0-9]{6}\\.log(\\.gz)?$"
   find "$LOG_DIR" -maxdepth 1 -type f -regextype posix-extended -regex "$re" -printf '%T@ %p\n' 2>/dev/null \
     | sort -rn | head -"$n" | cut -d' ' -f2-
+}
+
+gate_log_tail() {
+  local n="$1" f="$2"
+  case "$f" in
+    *.gz) gzip -cd -- "$f" | tail -n "$n" ;;
+    *) tail -n "$n" -- "$f" ;;
+  esac
 }
 
 # node_modules/ is gitignored, so a fresh worktree gets every package.json but
@@ -664,10 +672,15 @@ gc_gate_leftovers() {
   find /tmp -maxdepth 1 \( -name 'playwright-artifacts-*' -o -name 'tour-audit.*' \) -mtime +1 \
     -exec rm -rf {} + 2>/dev/null || true
 
-  # Train logs have two hardlinked names. Archiving both old names preserves
-  # their diagnostics while releasing the shared inode. Receipts stay intact.
-  info "Archiving gate logs older than two days ..."
-  find "$LOG_DIR" -maxdepth 1 -type f \( -name '*.log' -o -name '.gate-*.out' \) -mtime +2 -print0 \
+  archive_gate_logs
+}
+
+archive_gate_logs() {
+  # Train logs have two hardlinked names. Archiving both after a day preserves
+  # diagnostics while releasing the shared inode before adjacent full gates
+  # exhaust the disk. Receipts stay intact; wt log reads the .gz files.
+  info "Archiving gate logs older than 24 hours ..."
+  find "$LOG_DIR" -maxdepth 1 -type f \( -name '*.log' -o -name '.gate-*.out' \) -mmin +1440 -print0 \
     | xargs -0 -r -P 2 -n 1 gzip -f
 }
 
@@ -679,6 +692,14 @@ ensure_disk_headroom() {
   warn "disk free ${available} MB < ${minimum} MB — reclaiming disposable caches and archiving old logs"
   gc_gate_leftovers
   available="$(disk_avail_mb)"
+  if [ "$available" -lt "$minimum" ]; then
+    # The age-bounded prune above preserves recently used build layers. When
+    # they are the last reclaimable bytes, rebuild them instead of aborting a
+    # train before CI (observed after several adjacent full gates).
+    info "Dropping remaining reproducible Docker build cache ..."
+    docker builder prune -a -f >/dev/null 2>&1 || true
+    available="$(disk_avail_mb)"
+  fi
   if [ "$available" -lt "$minimum" ]; then
     warn "disk free ${available} MB < ${minimum} MB after cleanup — stop before a doomed stage"
     return 1
@@ -701,7 +722,7 @@ cmd_gc() {
   done < <(docker images --format '{{.Repository}}:{{.Tag}}' | grep -E '^graphden-wt-.+-executor:latest$' || true)
 
   info "Pruning gate logs older than 30 days ..."
-  find "$LOG_DIR" -type f \( -name '*.log' -o -name '*.resources.csv' \) -mtime +30 -delete 2>/dev/null || true
+  find "$LOG_DIR" -type f \( -name '*.log' -o -name '*.log.gz' -o -name '.gate-*.out' -o -name '.gate-*.out.gz' -o -name '*.resources.csv' \) -mtime +30 -delete 2>/dev/null || true
 
   # Tags from the OLD directory-derived naming (`<worktree>-executor:latest`),
   # left behind by worktrees that predate the explicit GD_IMAGE tag. Never -f:
@@ -930,22 +951,20 @@ cmd_status() {
   cmd_list
   echo
   printf '%sRecent gate runs:%s\n' "$BLD" "$RST"
-  # A member's log is a hard link to its train's; list each run once.
-  find "$LOG_DIR" -maxdepth 1 -type f -name '*.log' \( -name '_train-*' -o -links 1 \) -printf '%T@ %f\n' 2>/dev/null \
+  # Archive compression breaks hard links, so derive members from the common
+  # train timestamp and still list each run once.
+  find "$LOG_DIR" -maxdepth 1 -type f \( -name '_train-*.log' -o -name '_train-*.log.gz' \) -printf '%T@ %f\n' 2>/dev/null \
     | sort -rn | head -5 | cut -d' ' -f2- | while read -r f; do
-      if [ "${f#_train-}" != "$f" ]; then
-        # name the members: every other link to the same inode
-        say "  $f  [ $(find "$LOG_DIR" -maxdepth 1 -samefile "$LOG_DIR/$f" ! -name "$f" -printf '%f\n' | sed -E 's/-[0-9]{8}-[0-9]{6}\.log$//' | sort | tr '\n' ' ')]"
-      else
-        say "  $f"
-      fi
+      local ts="${f#_train-}"
+      ts="${ts%.log*}"
+      say "  $f  [ $(find "$LOG_DIR" -maxdepth 1 -type f \( -name "*-$ts.log" -o -name "*-$ts.log.gz" \) ! -name '_train-*' -printf '%f\n' | sed -E "s/-${ts}\\.log(\\.gz)?$//" | sort | tr '\n' ' ') ]"
     done
 }
 cmd_log() {
   local name="${1:-}"; [ -n "$name" ] || die "usage: wt log <name>"
   local f; f="$(newest_logs 1 "$name")"
   [ -n "$f" ] || die "no gate log for '$name'"
-  info "== $f =="; tail -n 120 "$f"
+  info "== $f =="; gate_log_tail 120 "$f"
 }
 
 # =====================================================================
@@ -984,7 +1003,7 @@ cmd_watch() {
     f="$(newest_logs 1 "$name")"
     if [ -n "$f" ]; then
       echo "--- $now  load $load  ${qs:+$qs  }$(basename "$f")"
-      tail -n 3 "$f"
+      gate_log_tail 3 "$f"
     else
       echo "--- $now  load $load  ${qs:-no gate log yet (queued, or the gate was never started)}"
     fi

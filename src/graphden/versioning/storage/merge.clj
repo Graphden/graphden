@@ -881,38 +881,20 @@
                              #(res/call-with-fresh-memos (fn [] (write! %)))))))
 
 
-(defn skipped-as-branch-local
-  "Enumerate the `:fn` rows that have a version on `source-branch-id`
-   but won't surface on `target-branch-id` after a merge because their
-   effective `:branch-local?` is true. Returned shape:
-
-     [{:entity-name :fn :entity-id <uuid> :fn-name \"my-server\"} …]
-
-   The resolver filter in `versioning.storage.resolution` is the
-   load-bearing path — this fn is the audit-log front-end so API
-   consumers can SEE what didn't propagate without having to diff
-   pre / post-merge views themselves. Sorted by fn-name for
-   determinism.
-
-   Doesn't observe the merge transaction directly — runs against
-   `base-storage` AFTER the merge record lands, which is fine since
-   the filter is deterministic from the (fn-id, branch-local? flag)
-   pair and neither changes during merge."
+(defn branch-local-source-rows
+  "Read the visible source fn identities excluded by effective branch-local
+   inheritance. Stable distinct version IDs and the bulk identity read stay
+   together: graph projection must not introduce per-row storage reads.
+   Returns only the identity/name facts needed by the merge audit, in source
+   ID order; missing or unreadable identities are omitted."
   [base-storage source-branch-id]
-  (let [;; Fns whose only version overlay on the entire chain landed
-        ;; on the merged-in source branch.
-        src-fn-versions (sp/query-entities base-storage :fn-version
+  (let [src-fn-versions (sp/query-entities base-storage :fn-version
                                            {:branch-id source-branch-id})
-        ;; Stable, distinct fn-ids — one fn can have many versions on
-        ;; the source.
         src-fn-ids (into [] (distinct) (map :fn-id src-fn-versions))
         local-ids (filter #(bl/effective-branch-local? base-storage %) src-fn-ids)
         rows (when (seq local-ids)
-               (sp/read-entities base-storage :fn (vec local-ids)))
-        named (->> local-ids
-                   (keep (fn [fid]
-                           (when-let [row (get rows fid)]
-                             {:entity-name :fn
-                              :entity-id fid
-                              :fn-name (:name row)}))))]
-    (vec (sort-by (fn [r] (or (:fn-name r) "")) named))))
+               (sp/read-entities base-storage :fn (vec local-ids)))]
+    (into [] (keep (fn [fid]
+                     (when-let [row (get rows fid)]
+                       {:id fid :name (:name row)})))
+          local-ids)))

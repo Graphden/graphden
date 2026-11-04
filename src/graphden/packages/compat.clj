@@ -197,6 +197,12 @@
         [(change :type-changed fn-name :old (:shape old) :new (:shape new))]))))
 
 
+(defn fn-def-changes
+  "Compare the canonical signatures of two matched exported fn-defs."
+  [old new]
+  (vec (fn-changes (:name old) (signature old) (signature new))))
+
+
 (defn breaking-changes
   "Every consumer-visible incompatibility going from `old-fns` to
    `new-fns` (two seqs of exported fn-def maps), as
@@ -214,7 +220,7 @@
     (vec
       (mapcat (fn [[k d]]
                 (if-let [n (get new k)]
-                  (fn-changes (:name d) (signature d) (signature n))
+                  (fn-def-changes d n)
                   [(change :fn-removed (:name d))]))
               (sort-by (comp str first) old)))))
 

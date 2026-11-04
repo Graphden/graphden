@@ -10,6 +10,7 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
+    [graphden.packages.compat :as compat]
     [graphden.packages.records.wire :as wire]
     [graphden.packages.registry-fixture :as rf :refer [*bootstrap* publish-req storage run-named]]
     [graphden.packages.registry-shared :as shared]
@@ -641,3 +642,69 @@
       (is (re-find #"packages-fork-err" (:body resp)))
       (is (re-find #"paneltest\.brk@1\.1\.0 breaks 1\.0\.0: fn-removed brk-greeting" (:body resp)))
       (is (empty? (sp/query-entities (storage) :package-version {:name "paneltest.brk" :version "1.1.0"}))))))
+
+
+(deftest dependency-bumps-graph-preserves-native-parity
+  (doseq [[label old new]
+          [["sorted, last duplicate wins; additions and removals ignored"
+            [{:name "z" :version "1.0.0"} {:name "a" :version "1.0.0"}
+             {:name "dropped" :version "1.0.0"} {:name "a" :version "1.2.0"}]
+            [{:name "z" :version "2.0.0"} {:name "added" :version "8.0.0"}
+             {:name "a" :version "1.9.0"} {:name "a" :version "2.0.0"}]]
+           ["unchanged invalid versions short-circuit the range predicate"
+            [{:name "a" :version "invalid"}] [{:name "a" :version "invalid"}]]
+           ["compatible advancement and equal versions"
+            [{:name "a" :version "1.2.0"} {:name "b" :version "0.3.1"}]
+            [{:name "a" :version "1.9.0"} {:name "b" :version "0.3.1"}]]
+           ["minor bump below one and downgrade"
+            [{:name "a" :version "0.3.1"} {:name "b" :version "2.5.0"}]
+            [{:name "a" :version "0.4.0"} {:name "b" :version "2.1.0"}]]
+           ["empty previous dependencies" [] [{:name "a" :version "2.0.0"}]]
+           ["empty candidate dependencies" [{:name "a" :version "1.0.0"}] []]
+           ["empty bundles" [] []]]]
+    (testing label
+      (is (= (compat/incompatible-dependency-bumps old new)
+             (run-named "incompatible-dependency-bumps" {:old-deps old :new-deps new}))))))
+
+
+(deftest breaking-changes-graph-matches-native-oracle
+  (doseq [[label old new]
+          [["empty" [] []]
+           ["private and anonymous names"
+            [{:name :_hidden} {:name :other/_hidden} {:name 'other/_hidden} {} {:name nil}]
+            []]
+           ["namespace normalization, nil versus empty, and stable string-key order"
+            [{:namespace "z" :name :a} {:namespace "a" :name :z}
+             {:namespace nil :name :same} {:namespace "" :name :same}
+             {:namespace :x :name :same} {:namespace "n" :name "a"}]
+            [{:namespace ":x" :name :same} {:namespace "" :name :same}]]
+           ["last duplicate wins on both sides"
+            [{:name :f :return-type :text :args {:x :int}}
+             {:name :f :return-type :text :args {:x :text}}]
+            [{:name :f :return-type :int :args {:x :int}}
+             {:name :f :return-type :text :args {:x :text}}]]
+           ["removed and added public fns"
+            [{:name :removed} {:name :kept}]
+            [{:name :kept} {:name :added}]]
+           ["slot ordering, requiredness, returns and effect contracts"
+            [{:name :f :return-type :int :args {:z :text :a :any}
+              :expects-effects #{:db}}
+             {:name :g :return-type :int :expects-effects #{}}]
+            [{:name :f :return-type :text :args {:a :text :b :int :optional {:type :int :required false}}
+              :expects-effects #{:db :net}}
+             {:name :g :return-type :int}]]
+           ["composed binding, rename and parent changes"
+            [{:name :f :parent :old :args {:bound {:value 1} :renamed {:as :x}}}]
+            [{:name :f :parent :new :args {:renamed {:as :y}}}]]
+           ["role and type shape changes"
+            [{:name :role :return-type :text} {:name :shape :list :text}
+             {:name :record :type {:field :text}}]
+            [{:name :role :parent :p} {:name :shape :list :int}
+             {:name :record :type {}}]]
+           ["unknown type equality fallback"
+            [{:name :f :return-type :unknown :args {:x :unknown}}]
+            [{:name :f :return-type :unknown :args {:x :unknown}}]]]]
+    (testing label
+      (let [actual (run-named "breaking-changes-between" {:old-fns old :new-fns new})]
+        (is (vector? actual))
+        (is (= (compat/breaking-changes old new) actual))))))

@@ -82,10 +82,10 @@
     :assert :assert-eq :assert-some :assoc :assoc-in :atom :auth-active?
     :ensure-type :encode-view :as-ui-view
     :authenticate-request :blank? :branch-diagnostics-flat
-    ;; :branch-lint-findings reads the branch's graph snapshot; its rows
+    ;; :branch-lint-raw-findings reads the branch's graph snapshot; its rows
     ;; carry fn names / ids / the engine's message — server-derived, and
     ;; the `suppressed` arg only FILTERS them, never flows through.
-    :branch-lint-findings
+    :branch-lint-raw-findings
     ;; IDs, revision and CAS token select stored history. The preview/commit
     ;; enforce source ACL and redact resolver paths; their results are fresh
     ;; server data and do not echo caller argument content.
@@ -94,7 +94,7 @@
     ;; :unresolved-failure-counts tallies audit rows per fn — fn ids /
     ;; names / counts, all server-derived; `days` is a window, not content.
     :unresolved-failure-counts
-    :breaking-changes-between :brotli-bytes :build-form
+    :_compat-local-name :_compat-fn-changes :brotli-bytes :build-form
     ;; Marketplace (docs/MARKETPLACE.md): identity + roster reads are
     ;; server-derived; :round / :url-encode / / :ui-pref-write!
     ;; return caller content and carry :taint-propagate?.
@@ -133,9 +133,9 @@
     :current-org-id :current-slot-value :current-time-ms :declarable-effect-categories
     :decode-row :delete-branch! :delete-entity :revive-entity :deref
     :describe-type-mismatch :detect-conflicts :diff-branches
-    ;; diff-branches-view returns previews of user-authored binding
+    ;; _diff-view-input returns previews of user-authored binding
     ;; values — same read-projection class as :diff-branches.
-    :diff-affected :diff-branches-view
+    :_diff-affected-facts :_diff-view-input
     :diff-value-against-type :digest-hex :dispatch-to-branch :dissoc
     :distinct :div :do :drop :empty? :env
     :encode-unreadable-kws :equal? :error-boundary-wrap :every? :ex-data :execute-trace-rows :viewer-path-trace
@@ -162,14 +162,14 @@
     :view-members :explorer-view :explorer-views
     :loop-until-interrupted :lt :lte :map :map-xf
     :materialize-package-fns :materialize-package-receipt :max-memory :merge :merge-branch!
-    :merge-post-commit! :merge-skipped-branch-local
+    :merge-post-commit! :_merge-skipped-facts
     :middleware :missing-package-dependencies :mod :mul :name
     :namespace-external-deps :neg :neq
     :nil? :non-blank? :not :notify-after-write :or :os-arch
     :os-load-average :os-name :os-processors :package-upsert-pin :package-pin-receipt
     :remove-package-pin-apply
     :package-version-materialized? :pairs->map :parse-constraint
-    :incompatible-dependency-bumps  :parse-edn :parse-graph-edn :parse-int :parse-json :parse-uuid :pg-execute
+    :parse-edn :parse-graph-edn :parse-int :parse-json :parse-uuid :pg-execute
     :pg-notify :pg-query :pg-tx :pick-encoding
     ;; :pkg-delete-guard-reason reads server rows (fn name via the
     ;; owned registry) — the reason string carries no caller content.
@@ -266,7 +266,7 @@
     :_ui-components-plan :_ui-components-create-preview :_ui-components-create-apply
     :parse-view-command :save-explorer-view
     ;; Wide-slot audit: conservatively propagate every content-derived result.
-    :_apply-create-list-type-body :_apply-create-record-type-body :_apply-create-record-type-rollback :_apply-inline-bind-body :_apply-secret-rollback :_apply-update-record-type-body :_apply-update-record-type-rollback :_execute-apply :_layout-build-apply :_layout-place-apply :_layout-strip-facts-apply :_layout-literal-reprs-apply :_parse-layout-body :_rotate-secret-not-owned? :_seq-append-load-binding :_seq-move-load-item :_seq-update-load-item :_tests-run-apply :_tests-status-apply :approvals-report :authenticate-request :branch-lint-findings :breaking-changes-between :brotli-bytes :build-form :byte-count :fn-type-args :classify-literal :closed-enum-of :count-tour-event! :count-tour-step! :count-valid-approvals :create-entity :cron-fire-after :decode-row :describe-type-mismatch :diff-value-against-type :dispatch-to-branch :error-boundary-wrap :extract-entity-params :fix :fn-type-bound-effects :gzip-bytes :json-to-type :merge-branch! :middleware :missing-package-dependencies :package-version-materialized? :pg-execute :pg-query :pg-tx :pkg-delete-guard-reason :pkg-write-guard-reason :platform-owned-def? :publish-package-apply :query-entities :query-param :realize-request-body :resolve-fn :resolve-form :ring-create-default-handler :ring-handler :ring-router :secret-path-args :set-branch-archived! :set-branch-require-merge! :set-branch-review-policy! :set-review-state! :slot-shaped-type-row? :sql-exec :sql-query :sse-stream :storage-query-identities :stringify-response-headers :strip-hidden-impl :strip-secret-paths :subtype? :sync-fn-defs-branch! :try-apply-create :try-apply-seq-append :try-apply-seq-move :try-apply-seq-update :try-apply-tighten :try-apply-update :update-entity :utf8-bytes :viewer-path-trace :write-rej
+    :_apply-create-list-type-body :_apply-create-record-type-body :_apply-create-record-type-rollback :_apply-inline-bind-body :_apply-secret-rollback :_apply-update-record-type-body :_apply-update-record-type-rollback :_execute-apply :_layout-build-apply :_layout-place-apply :_layout-strip-facts-apply :_layout-literal-reprs-apply :_parse-layout-body :_rotate-secret-not-owned? :_seq-append-load-binding :_seq-move-load-item :_seq-update-load-item :_tests-run-apply :_tests-status-apply :approvals-report :authenticate-request :_compat-fn-changes :_compat-local-name :branch-lint-raw-findings :brotli-bytes :build-form :byte-count :fn-type-args :classify-literal :closed-enum-of :count-tour-event! :count-tour-step! :count-valid-approvals :create-entity :cron-fire-after :decode-row :describe-type-mismatch :diff-value-against-type :dispatch-to-branch :error-boundary-wrap :extract-entity-params :fix :fn-type-bound-effects :gzip-bytes :json-to-type :merge-branch! :middleware :missing-package-dependencies :package-version-materialized? :pg-execute :pg-query :pg-tx :pkg-delete-guard-reason :pkg-write-guard-reason :platform-owned-def? :publish-package-apply :query-entities :query-param :realize-request-body :resolve-fn :resolve-form :ring-create-default-handler :ring-handler :ring-router :secret-path-args :set-branch-archived! :set-branch-require-merge! :set-branch-review-policy! :set-review-state! :slot-shaped-type-row? :sql-exec :sql-query :sse-stream :storage-query-identities :stringify-response-headers :strip-hidden-impl :strip-secret-paths :subtype? :sync-fn-defs-branch! :try-apply-create :try-apply-seq-append :try-apply-seq-move :try-apply-seq-update :try-apply-tighten :try-apply-update :update-entity :utf8-bytes :viewer-path-trace :write-rej
     :round :ui-pref-write! :ui-pref-compare-write! :url-encode :moderate-package-version! ; marketplace: answer caller content
     ;; registry: the pick / store / import filters echo caller content
     :semver-pick :mirror-store-package-version! :drop-orphan-anon-defs
@@ -462,3 +462,20 @@
     (is (empty? (:args definition)))
     (is (= :text (:return-type definition)))
     (is (not (:taint-propagate? definition)))))
+
+
+(deftest compatibility-boundaries-preserve-bundle-markers
+  (let [definitions (:base-fn-defs (loader/load-packages ["registry"]))]
+    (doseq [primitive [:_compat-local-name :_compat-fn-changes]
+            :let [definition (get definitions primitive)
+                  plain (:args definition)
+                  return-type (:return-type definition)]]
+      (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
+                registry/*per-org-rich-override* (atom {})]
+        (registry/record-rich-types! primitive definition)
+        (doseq [[slot {:keys [type]}] plain]
+          (is (= [:secret return-type]
+                 (check/rule-return primitive
+                                    (assoc-in plain [slot :type] [:secret type])
+                                    return-type))
+              (str primitive " preserves marked " slot)))))))

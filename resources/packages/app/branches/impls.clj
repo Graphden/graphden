@@ -82,19 +82,14 @@
                      target-branch-id))
 
 
-(defbase diff-affected
-  "Single library call over `dv/affected-view` for the diff-view groups:
-   the fns that changed INSIDE — their own rows are equal on both
-   branches, but something they depend on (an ancestor, a ref target, a
-   type) is in the diff — keyed by fn-id string with the nearest changed
-   fn (`:via`), the hop count and the fn's `:ns-path`. The dependency index is the compiler's
-   own (`cr/ctx-reverse-deps` on THIS branch's ctx)."
+(defbase diff-affected-facts
+  "Shared reverse-dependency BFS and bounded namespace-path acquisition."
   [groups]
   (cr/record-effect! :db)
-  (dv/affected-view (branches/base-storage ctx) (cr/ctx-reverse-deps ctx) groups))
+  (dv/affected-view-facts (branches/base-storage ctx) (cr/ctx-reverse-deps ctx) groups))
 
 
-(defbase diff-branches-view
+(defbase _diff-view-input
   "Fetch the flat enriched diff facts from `dv/diff-branches-view-facts`.
    Graph fn-defs group and order them for the editor compare view."
   [source-branch-id target-branch-id]
@@ -511,15 +506,11 @@
     nil))
 
 
-(defbase merge-skipped-branch-local
-  "Audit read — fns that have a version on the source branch but won't
-   surface on the target after merge because their effective
-   `:branch-local?` filtered them out at the resolver. One library
-   call (`mrg/skipped-as-branch-local`); the `{:branch-local […]}`
-   wrapper and its attachment to the merge record are graph steps."
+(defbase merge-skipped-facts
+  "Bounded bulk read with effective inheritance and viewer visibility intact."
   [source-branch-id]
   (cr/record-effect! :db)
-  (mrg/skipped-as-branch-local (branches/base-storage ctx) source-branch-id))
+  (mrg/branch-local-source-rows (branches/base-storage ctx) source-branch-id))
 
 
 (defbase set-branch-policy!
@@ -891,14 +882,14 @@
 (def impls
   {:resolve-branch-ref         resolve-branch-ref
    :diff-branches              diff-branches
-   :diff-branches-view         diff-branches-view
-   :diff-affected              diff-affected
+   :_diff-view-input           _diff-view-input
+   :_diff-affected-facts       diff-affected-facts
    :create-branch!             create-branch!
    :delete-branch!             delete-branch!
    :detect-conflicts           detect-conflicts
    :merge-branch!              {:impl merge-branch! :taint-propagate? true}
    :merge-post-commit!         merge-post-commit!
-   :merge-skipped-branch-local merge-skipped-branch-local
+   :_merge-skipped-facts       merge-skipped-facts
    :set-branch-policy!         set-branch-policy!
    :set-branch-require-merge!  {:impl set-branch-require-merge! :taint-propagate? true}
    :set-review-state!          {:impl set-review-state! :taint-propagate? true}

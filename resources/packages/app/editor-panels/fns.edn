@@ -136,13 +136,80 @@
   ;; finding is keyed by its member ids, so a group that later gains a
   ;; member comes back on its own.
   ;; ---------------------------------------------------------------------
-  {:name :branch-lint-findings
-   :description "The graph lint's WARNINGS over the current branch (docs/GRAPH_LINT.md) as wire data — `[{:rule :message :weight :fn-ids :fns [{:id :name :ns} …]} …]`, minus the findings listed in `:suppressed`. One `lint.graph/lint-branch` call over the request's graph snapshot; recomputed only when the snapshot or the suppression set changed."
-   :args {:suppressed {:type [:list :jsonb]
-                       :description "Findings marked as not-an-issue — the `lint-suppressions` const's value, `[{:rule <text> :fn-ids [<uuid-text> …]} …]`."}}
-   :return-type [:list {:rule :text :message :text :weight :numeric :fn-ids [:list :text]
-                        :fns [:list {:id :text :name :text :ns :nullable-text}]}]
+  {:name :branch-lint-raw-findings
+   :description "Native current-branch analyzer over normalized suppression keys. Owns graph visibility and incremental lint caching; normalization and wire formatting are graph composition."
+   :args {:suppression-keys {:type [:list [:list :any]]}}
+   :return-type [:list {:rule :keyword :message :text :weight :numeric
+                        :fn-ids [:list :uuid]
+                        :fns [:list [:list [:union :null :text :keyword]]]}]
    :effects #{:db}}
+
+  {:name :_lint-suppression-field
+   :parent :get
+   :args {:coll {:as :item} :default nil}}
+  {:name :_lint-suppression-key
+   :lambda-params [:item]
+   :parent :vec
+   :args {:coll [{:parent :str-to-keyword
+                  :args {:string {:parent :_lint-suppression-field :args {:key {:value :rule}}}}}
+                 {:parent :sort
+                  :args {:coll {:parent :map
+                                :args {:func {:parent :to-str :args {:value {:as :item}}}
+                                       :coll {:parent :_lint-suppression-field
+                                              :args {:key {:value :fn-ids}}}}}}}]}}
+  {:name :_lint-suppression-keys
+   :parent :map
+   :args {:func :_lint-suppression-key :coll {:as :suppressed :type [:list :jsonb]}}}
+  {:name :_lint-raw-findings
+   :parent :branch-lint-raw-findings
+   :args {:suppression-keys :_lint-suppression-keys}}
+
+  ;; Keep the finding row distinct from the member callback's index.
+  {:name :_lint-raw-field
+   :parent :get
+   :args {:coll {:as :finding} :default nil}}
+  {:name :_lint-raw-ids
+   :parent :_lint-raw-field :args {:key {:value :fn-ids}}}
+  {:name :_lint-raw-members
+   :parent :_lint-raw-field :args {:key {:value :fns}}}
+  {:name :_lint-member-indexes
+   :parent :take
+   :args {:count {:parent :count :args {:coll :_lint-raw-ids}}
+          :coll {:parent :range
+                 :args {:start {:value 0}
+                        :end {:parent :count :args {:coll :_lint-raw-members}}
+                        :step {:value 1}}}}}
+  {:name :_lint-member-pair
+   :parent :get
+   :args {:coll :_lint-raw-members :key {:as :item} :default nil}}
+  {:name :_lint-wire-member
+   :lambda-params [:item]
+   :parent :zipmap
+   :args {:keys [{:value :id} {:value :name} {:value :ns}]
+          :vals [{:parent :to-str
+                  :args {:value {:parent :get
+                                 :args {:coll :_lint-raw-ids :key {:as :item} :default nil}}}}
+                 {:parent :name
+                  :args {:value {:parent :get
+                                 :args {:coll :_lint-member-pair :key {:value 1} :default nil}}}}
+                 {:parent :get
+                  :args {:coll :_lint-member-pair :key {:value 0} :default nil}}]}}
+  {:name :_lint-wire-finding
+   :lambda-params [:finding]
+   :parent :zipmap
+   :args {:keys [{:value :rule} {:value :message} {:value :weight} {:value :fn-ids} {:value :fns}]
+          :vals [{:parent :name
+                  :args {:value {:parent :_lint-raw-field :args {:key {:value :rule}}}}}
+                 {:parent :_lint-raw-field :args {:key {:value :message}}}
+                 {:parent :_lint-raw-field :args {:key {:value :weight}}}
+                 {:parent :map
+                  :args {:func {:parent :to-str :args {:value {:as :item}}} :coll :_lint-raw-ids}}
+                 {:parent :map
+                  :args {:func :_lint-wire-member :coll :_lint-member-indexes}}]}}
+  {:name :branch-lint-findings
+   :description "Current-branch lint warnings as wire rows. Graph composition normalizes suppression keys and formats rule names, UUID text and paired namespace/name members around the native analyzer."
+   :parent :map
+   :args {:func :_lint-wire-finding :coll :_lint-raw-findings}}
 
   {:name :_lint-finding-field
    :parent :get

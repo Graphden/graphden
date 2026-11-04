@@ -169,7 +169,7 @@
     :os-load-average :os-name :os-processors :package-upsert-pin :package-pin-receipt
     :remove-package-pin-apply
     :package-version-materialized? :pairs->map :parse-constraint
-    :incompatible-dependency-bumps  :parse-edn :parse-graph-edn :parse-int :parse-json :parse-uuid :pg-execute
+    :parse-edn :parse-graph-edn :parse-int :parse-json :parse-uuid :pg-execute
     :pg-notify :pg-query :pg-tx :pick-encoding
     ;; :pkg-delete-guard-reason reads server rows (fn name via the
     ;; owned registry) — the reason string carries no caller content.

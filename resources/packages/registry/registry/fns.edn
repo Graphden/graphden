@@ -553,11 +553,62 @@
           :new-fns {:type [:list :keyword-map] :description "The candidate version's fn-defs."}}
    :return-type [:list :keyword-map]}
 
+  ;; Dependency indexes preserve the native oracle's string normalization and
+  ;; last duplicate wins. Sort OLD names before matching, so additions and
+  ;; removals never enter the incompatible-version predicate.
+  {:name :_dep-name
+   :parent :str
+   :args {:parts [{:parent :get :args {:coll {:as :item :type :package-dependency-shape}
+                                      :key {:value :name} :default nil}}]}}
+
+  {:name :_dep-version
+   :parent :str
+   :args {:parts [{:parent :get :args {:coll {:as :item :type :package-dependency-shape}
+                                      :key {:value :version} :default nil}}]}}
+
+  {:name :_dep-old-index
+   :parent :zipmap
+   :args {:keys {:parent :map :args {:func :_dep-name :coll {:as :old-deps :type [:list :package-dependency-shape]}}}
+          :vals {:parent :map :args {:func :_dep-version :coll {:as :old-deps :type [:list :package-dependency-shape]}}}}}
+
+  {:name :_dep-new-index
+   :parent :zipmap
+   :args {:keys {:parent :map :args {:func :_dep-name :coll {:as :new-deps :type [:list :package-dependency-shape]}}}
+          :vals {:parent :map :args {:func :_dep-version :coll {:as :new-deps :type [:list :package-dependency-shape]}}}}}
+
+  {:name :_dep-old-version
+   :parent :get
+   :args {:coll :_dep-old-index :key {:as :item :type :text} :default nil}}
+
+  {:name :_dep-new-version
+   :parent :get
+   :args {:coll :_dep-new-index :key {:as :item :type :text} :default nil}}
+
+  {:name :_dep-incompatible?
+   :parent :and
+   :args {:values [{:parent :some? :args {:value :_dep-new-version}}
+                   {:parent :neq :args {:values [:_dep-old-version :_dep-new-version]}}
+                   {:parent :not
+                    :args {:value {:parent :semver-compatible?
+                                   :args {:from {:ref :_dep-old-version :type :text}
+                                          :to {:ref :_dep-new-version :type :text}}}}}]}}
+
+  {:name :_dep-change-row
+   :parent :zipmap
+   :args {:keys [{:value :kind} {:value :name} {:value :old} {:value :new}]
+          :vals [{:value :dependency-incompatible} {:as :item :type :text}
+                 :_dep-old-version :_dep-new-version]}}
+
   {:name :incompatible-dependency-bumps
-   :description "Package dependencies (`{:name :version}` lists, a bundle's `:package-dependencies`) whose new version left the old one's caret range — `[{:kind :dependency-incompatible :name … :old … :new …}]`; a dependency added or dropped is not a break. Pure."
-   :args {:old-deps {:type [:list :package-dependency-shape] :description "The previous version's package dependencies."}
-          :new-deps {:type [:list :package-dependency-shape] :description "The candidate version's package dependencies."}}
-   :return-type [:list :keyword-map]}
+   :description "Package dependencies whose new version left the old one's caret range. String-normalized names, last duplicate wins, sorted by name; added or dropped dependencies alone are not breaks. Pure graph composition over the shared semver predicate."
+   :parent :vec
+   :args {:coll {:parent :map
+                 :args {:func :_dep-change-row
+                        :coll {:parent :filter
+                               :args {:pred :_dep-incompatible?
+                                      :coll {:parent :sort
+                                             :args {:coll {:parent :keys
+                                                            :args {:map :_dep-old-index}}}}}}}}}}
 
   {:name :semver-compatible?
    :description "Is `:to` inside `:from`'s caret range (`^from` — same major; below 1.0 the same minor)? The range a `^` / `~>` consumer would auto-advance into, so a breaking change must leave it."

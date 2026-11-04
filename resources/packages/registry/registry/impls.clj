@@ -175,13 +175,6 @@
   (compat/breaking-changes old-fns new-fns))
 
 
-(defbase incompatible-dependency-bumps
-  "Package dependencies whose version left the old one's caret range —
-   `compat/incompatible-dependency-bumps`, pure."
-  [old-deps new-deps]
-  (compat/incompatible-dependency-bumps old-deps new-deps))
-
-
 (defbase semver-compatible?
   "Is `to` inside `from`'s caret range (`^from`: same major, or same
    minor below 1.0) — the range a consumer pinned with a constraint
@@ -805,7 +798,6 @@
    :graph-rows graph-rows
    :publish-package-apply {:impl publish-package-apply :taint-propagate? true}
    :breaking-changes-between {:impl breaking-changes-between :taint-propagate? true}
-   :incompatible-dependency-bumps incompatible-dependency-bumps
    :semver-compatible? semver-compatible?
    :withdraw-package-apply withdraw-package-apply
    ;; taint-propagate: answers one of the caller's own version strings.

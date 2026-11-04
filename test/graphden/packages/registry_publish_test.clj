@@ -10,6 +10,7 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
+    [graphden.packages.compat :as compat]
     [graphden.packages.records.wire :as wire]
     [graphden.packages.registry-fixture :as rf :refer [*bootstrap* publish-req storage run-named]]
     [graphden.packages.registry-shared :as shared]
@@ -641,3 +642,26 @@
       (is (re-find #"packages-fork-err" (:body resp)))
       (is (re-find #"paneltest\.brk@1\.1\.0 breaks 1\.0\.0: fn-removed brk-greeting" (:body resp)))
       (is (empty? (sp/query-entities (storage) :package-version {:name "paneltest.brk" :version "1.1.0"}))))))
+
+
+(deftest dependency-bumps-graph-preserves-native-parity
+  (doseq [[label old new]
+          [["sorted, last duplicate wins; additions and removals ignored"
+            [{:name "z" :version "1.0.0"} {:name "a" :version "1.0.0"}
+             {:name "dropped" :version "1.0.0"} {:name "a" :version "1.2.0"}]
+            [{:name "z" :version "2.0.0"} {:name "added" :version "8.0.0"}
+             {:name "a" :version "1.9.0"} {:name "a" :version "2.0.0"}]]
+           ["unchanged invalid versions short-circuit the range predicate"
+            [{:name "a" :version "invalid"}] [{:name "a" :version "invalid"}]]
+           ["compatible advancement and equal versions"
+            [{:name "a" :version "1.2.0"} {:name "b" :version "0.3.1"}]
+            [{:name "a" :version "1.9.0"} {:name "b" :version "0.3.1"}]]
+           ["minor bump below one and downgrade"
+            [{:name "a" :version "0.3.1"} {:name "b" :version "2.5.0"}]
+            [{:name "a" :version "0.4.0"} {:name "b" :version "2.1.0"}]]
+           ["empty previous dependencies" [] [{:name "a" :version "2.0.0"}]]
+           ["empty candidate dependencies" [{:name "a" :version "1.0.0"}] []]
+           ["empty bundles" [] []]]]
+    (testing label
+      (is (= (compat/incompatible-dependency-bumps old new)
+             (run-named :incompatible-dependency-bumps {:old-deps old :new-deps new}))))))

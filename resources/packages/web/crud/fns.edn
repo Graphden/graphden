@@ -318,9 +318,9 @@
 
   {:name :_graph-index-rows
    :parent :map
-   :args {:func {:ref :_graph-index-row :type [:fn {:row :keyword-map} :keyword-map]}
+   :args {:func :_graph-index-row
           :coll {:parent :get
-                 :args {:map :_graph-index-facts :key :fns :default []}}}
+                 :args {:coll :_graph-index-facts :key :fns :default []}}}
    :return-type [:list :keyword-map]}
 
   {:name :graph-index

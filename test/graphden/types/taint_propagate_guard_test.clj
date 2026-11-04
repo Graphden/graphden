@@ -61,7 +61,7 @@
     ;; These commands return selected plans, derived manifests or normalized
     ;; caller fields. Their return values are not declassification boundaries.
     :_ui-components-plan :_ui-components-create-preview :_ui-components-create-apply
-    :save-explorer-view
+    :parse-view-command :save-explorer-view
     ;; Configuration only assembles four UUID identities from narrow :fn-ref
     ;; slots; it neither accepts marked values nor executes the targets.
     :ui-components
@@ -262,7 +262,7 @@
     ;; Component plans/manifests and view parse/save outcomes derive from
     ;; caller input, including content inside their wide record slots.
     :_ui-components-plan :_ui-components-create-preview :_ui-components-create-apply
-    :save-explorer-view
+    :parse-view-command :save-explorer-view
     ;; Wide-slot audit: conservatively propagate every content-derived result.
     :_apply-create-list-type-body :_apply-create-record-type-body :_apply-create-record-type-rollback :_apply-inline-bind-body :_apply-secret-rollback :_apply-update-record-type-body :_apply-update-record-type-rollback :_execute-apply :_layout-build-apply :_layout-place-apply :_layout-strip-facts-apply :_layout-literal-reprs-apply :_parse-layout-body :_rotate-secret-not-owned? :_seq-append-load-binding :_seq-move-load-item :_seq-update-load-item :_tests-run-apply :_tests-status-apply :approvals-report :authenticate-request :_compat-fn-changes :_compat-local-name :branch-lint-raw-findings :brotli-bytes :build-form :byte-count :candidate-fit :classify-literal :closed-enum-of :compatible-type-names :count-tour-event! :count-tour-step! :count-valid-approvals :create-entity :cron-fire-after :decode-row :describe-type-mismatch :diff-value-against-type :dispatch-to-branch :error-boundary-wrap :extract-entity-params :fix :fn-type-bound-effects :gzip-bytes :json-to-type :merge-branch! :middleware :missing-package-dependencies :package-version-materialized? :pg-execute :pg-query :pg-tx :pkg-delete-guard-reason :pkg-write-guard-reason :platform-owned-def? :publish-package-apply :query-entities :query-param :realize-request-body :resolve-fn :resolve-form :ring-create-default-handler :ring-handler :ring-router :secret-path-args :set-branch-archived! :set-branch-require-merge! :set-branch-review-policy! :set-review-state! :slot-shaped-type-row? :sql-exec :sql-query :sse-stream :storage-query-identities :stringify-response-headers :strip-hidden-impl :strip-secret-paths :subtype? :sync-fn-defs-branch! :try-apply-create :try-apply-seq-append :try-apply-seq-move :try-apply-seq-update :try-apply-tighten :try-apply-update :update-entity :utf8-bytes :viewer-path-trace :write-rej
     :round :ui-pref-write! :ui-pref-compare-write! :url-encode :moderate-package-version! ; marketplace: answer caller content
@@ -389,7 +389,7 @@
 (deftest component-and-view-commands-preserve-and-redact-input-taint
   (let [definitions (:base-fn-defs (loader/load-packages ["app"]))]
     (doseq [primitive [:_ui-components-plan :_ui-components-create-preview
-                       :_ui-components-create-apply :save-explorer-view]]
+                       :_ui-components-create-apply :parse-view-command :save-explorer-view]]
       (let [definition (get definitions primitive)
             plain (:args definition)]
         (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})

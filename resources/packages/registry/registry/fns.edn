@@ -570,13 +570,14 @@
    :args {:coll {:as :item :type :keyword-map} :key {:value :namespace} :default nil}}
 
   {:name :_compat-key
-   :parent :list
-   :args {:items [{:parent :if
-                   :args {:test {:parent :some? :args {:value :_compat-namespace}}
-                          :then {:parent :str :args {:parts [:_compat-namespace]}}
-                          :else nil}}
-                  {:parent :get :args {:coll {:as :item :type :keyword-map}
-                                       :key {:value :name} :default nil}}]}}
+   :parent :vec
+   :args {:coll {:parent :list
+                 :args {:items [{:parent :if
+                                 :args {:test {:parent :some? :args {:value :_compat-namespace}}
+                                        :then {:parent :str :args {:parts [:_compat-namespace]}}
+                                        :else nil}}
+                                {:parent :get :args {:coll {:as :item :type :keyword-map}
+                                                     :key {:value :name} :default nil}}]}}}}
 
   {:name :_compat-old-public
    :parent :filter
@@ -617,6 +618,11 @@
                                                {:parent :get
                                                 :args {:coll :_compat-old-fn :key {:value :name} :default nil}}]}}]}}}}
 
+  {:name :_compat-key-sort-text
+   :lambda-params [:item]
+   :parent :str
+   :args {:parts [{:as :item}]}}
+
   {:name :breaking-changes-between
    :description "Consumer-visible incompatibilities between bundles. Public filtering, namespace/name matching (last duplicate wins), stable string-key order and flattening are graph composition; matched signatures use the shared canonical compatibility algorithm."
    :parent :vec
@@ -624,7 +630,7 @@
                  :args {:colls {:parent :map
                                 :args {:func :_compat-changes-for-key
                                        :coll {:parent :sort-by
-                                              :args {:key-fn {:parent :str :args {:parts [{:as :item}]}}
+                                              :args {:key-fn :_compat-key-sort-text
                                                      :coll {:parent :keys :args {:map :_compat-old-index}}}}}}}}}}
 
   ;; Dependency indexes preserve the native oracle's string normalization and

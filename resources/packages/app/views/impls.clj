@@ -39,6 +39,11 @@
   (entities/list-explorer-views ctx))
 
 
+(defbase parse-view-command
+  [body]
+  (views/parse-command body))
+
+
 (defbase save-explorer-view
   [command _request]
   (cr/record-effect! :db)
@@ -49,4 +54,5 @@
   {:view-members   view-members
    :explorer-view  explorer-view
    :explorer-views explorer-views
+   :parse-view-command {:impl parse-view-command :taint-propagate? true}
    :save-explorer-view {:impl save-explorer-view :taint-propagate? true}})

@@ -52,9 +52,7 @@
 
 (defn- save!
   [ctx body]
-  ;; Transaction tests supply trusted command fixtures. Wire validation is
-  ;; exercised through the shipped graph in view-save-graph-test.
-  (views/save! ctx (update body :filters read-views/normalise-filters)))
+  (views/save! ctx (views/parse-command body)))
 
 
 (defn- counts
@@ -75,10 +73,16 @@
   (with-storage
     (fn [storage ctx _]
       (let [proposed (random-uuid)
-            body {:create-id proposed :name "proposed-view" :filters {:name "match"}}
+            body {:create-id (str proposed) :name "proposed-view" :filters {:name "match"}}
             result (save! ctx body)]
         (is (true? (:committed result)))
         (is (= proposed (get-in result [:view :id])))
+        (doseq [invalid [(assoc body :id proposed)
+                         (assoc body :id nil)
+                         (assoc body :create-id "invalid")
+                         (assoc body :create-id nil)]]
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"(never both|must be a UUID)"
+                (views/parse-command invalid))))
         (binding [vs/*tombstone-delete?* true]
           (sp/delete-entity storage :fn proposed))
         (let [before (counts storage)

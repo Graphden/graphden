@@ -664,7 +664,7 @@
            ["empty bundles" [] []]]]
     (testing label
       (is (= (compat/incompatible-dependency-bumps old new)
-             (run-named :incompatible-dependency-bumps {:old-deps old :new-deps new}))))))
+             (run-named "incompatible-dependency-bumps" {:old-deps old :new-deps new}))))))
 
 
 (deftest breaking-changes-graph-matches-native-oracle
@@ -705,6 +705,6 @@
             [{:name :f :return-type :unknown :args {:x :unknown}}]
             [{:name :f :return-type :unknown :args {:x :unknown}}]]]]
     (testing label
-      (let [actual (run-named :breaking-changes-between {:old-fns old :new-fns new})]
+      (let [actual (run-named "breaking-changes-between" {:old-fns old :new-fns new})]
         (is (vector? actual))
         (is (= (compat/breaking-changes old new) actual))))))

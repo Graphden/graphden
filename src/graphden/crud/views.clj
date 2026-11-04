@@ -6,12 +6,16 @@
     [graphden.crud.entities :as entities]
     [graphden.crud.request :as request]
     [graphden.crud.type-check :as type-check]
+    [graphden.crud.views.command :as command]
     [graphden.crud.views.write :as write]
     [graphden.storage.graph-writer :as writer]
     [graphden.storage.tx :as tx]
     [graphden.util.abort-shield :as shield]
     [graphden.versioning.storage.resolution :as resolution]
     [graphden.web.errors :as errors]))
+
+
+(def parse-command command/parse-command)
 
 
 (defn- transact!

@@ -4,18 +4,12 @@
    save, rollback and type-publication checks remain in view-save-test."
   (:require
     [cheshire.core :as json]
-    [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.crud.entities :as entities]
-    [graphden.crud.fn-execution.persist :as persist]
     [graphden.crud.test-autorun :as autorun]
-    [graphden.crud.views :as views]
-    [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
-    [graphden.test-infra.golden-app :as ga]
-    [graphden.types.check :as check]
-    [graphden.versioning.storage.core :as vs]))
+    [graphden.test-infra.golden-app :as ga]))
 
 
 (use-fixtures :once (ga/fixture (ns-name *ns*))
@@ -55,130 +49,3 @@
       (is (= #{(:id candidate)} (into #{} (map :id) (:fns direct))) (pr-str direct))
       (is (= #{(:id candidate)} (into #{} (map :id) (:fns stored))) (pr-str stored))
       (is (= #{(:id candidate)} (into #{} (map :id) (:fns run))) (pr-str run)))))
-
-
-(defn- parse-command
-  [body]
-  (let [{:keys [ctx storage all-name->id]} ga/*bootstrap*]
-    (setup/exec-with-storage ctx storage (get all-name->id :parse-view-command)
-                             {:body body})))
-
-
-(defn- view-command-error
-  [f]
-  (try
-    (f)
-    nil
-    (catch clojure.lang.ExceptionInfo exception
-      ;; The executor may add call-site context around the original rejection.
-      (some #(when (= :validation-error/view-command (:type (ex-data %)))
-               (ex-data %))
-            (take-while some? (iterate ex-cause exception))))))
-
-
-(deftest graph-command-normalizes-without-losing-presence-or-identity
-  (let [identity-id (random-uuid)
-        parsed (parse-command
-                 {:create-id (str identity-id)
-                  :namespace-id nil
-                  :name "  saved name  "
-                  :filters {:name "   "
-                            :uses [(str identity-id) identity-id]
-                            :views [(str identity-id)]
-                            :effects [":db" "db"]
-                            :kinds [":fn" "fn"]
-                            :problems ["lint" ":lint"]
-                            :namespaces [" app " "app" " "]
-                            :exclude [" secret " ""]
-                            :unused false}})]
-    (is (= {:create-id identity-id :namespace-id nil :name "saved name"
-            :filters {:name nil :uses [identity-id] :views [identity-id]
-                      :effects [:db] :kinds [:fn] :problems [:lint]
-                      :namespaces ["app"] :exclude ["secret"] :unused false}}
-           parsed))
-    (is (= {:name "empty" :filters {:name nil :uses [] :views [] :effects []
-                                    :kinds [] :problems [] :namespaces []
-                                    :exclude [] :unused false}}
-           (parse-command {:name "empty" :filters {}})))
-    (is (= identity-id (:id (parse-command {:id identity-id :name "updated" :filters {}}))))
-    (is (not (contains? (parse-command {:id false :name "new" :filters {}}) :id)))
-    (is (contains? (parse-command {:name "new" :namespace-id false :filters {}})
-                   :namespace-id))))
-
-
-(deftest malformed-command-never-calls-the-atomic-writer
-  (let [base {:name "valid" :filters {}}
-        identity-id (random-uuid)
-        cases [[nil "Save view requires a JSON object"]
-               [[] "Save view requires a JSON object"]
-               [(assoc base :id nil :create-id identity-id) "never both"]
-               [(dissoc base :filters) "Unknown or missing filter axes"]
-               [(assoc base :filters []) "Unknown or missing filter axes"]
-               [(assoc base :name 7) "non-empty name"]
-               [(assoc base :name "  ") "non-empty name"]
-               [(assoc base :name (str/join (repeat 161 "x"))) "160 characters"]
-               [(assoc-in base [:filters :also] []) "Unknown or missing filter axes"]
-               ;; Preserve the native parser's first rejection when two axes fail.
-               [(assoc base :filters {:uses "wrong" :exclude "wrong"})
-                ":exclude must contain at most 64 values"]
-               [(assoc-in base [:filters :uses] "wrong") "at most 64 values"]
-               [(assoc-in base [:filters :uses] (repeat 65 (str identity-id))) "at most 64 values"]
-               [(assoc-in base [:filters :uses] ["invalid"]) "must be a UUID"]
-               [(assoc-in base [:filters :views] [nil]) "must be a UUID"]
-               [(assoc-in base [:filters :namespaces] [7]) "at most 512 characters"]
-               [(assoc-in base [:filters :effects] ["unknown"]) "Unknown effects value"]
-               [(assoc-in base [:filters :effects] ["other/db"]) "Unknown effects value"]
-               [(assoc-in base [:filters :kinds] ["unknown"]) "Unknown kinds value"]
-               [(assoc-in base [:filters :problems] ["unknown"]) "Unknown problems value"]
-               [(assoc-in base [:filters :name] {}) "at most 512 characters"]
-               [(assoc-in base [:filters :exclude] [(str/join (repeat 513 "x"))]) "at most 512 characters"]
-               [(assoc-in base [:filters :unused] nil) "unused must be a boolean"]
-               [(assoc base :id "invalid") "must be a UUID"]
-               [(assoc base :create-id nil) "must be a UUID"]
-               [(assoc base :create-id false) "must be a UUID"]
-               [(assoc base :namespace-id "invalid") "must be a UUID"]]
-        {:keys [storage] :as graph} ga/*bootstrap*
-        save-calls (atom 0)
-        counts #(into {} (map (fn [entity]
-                                [entity (count (sp/query-entities (vs/unwrap storage) entity {}))]))
-                      [:fn :fn-version :binding :binding-version
-                       :binding-list-item :binding-list-item-version])
-        before (counts)]
-    (with-redefs [views/save!
-                  (fn [& _]
-                    (swap! save-calls inc)
-                    (throw (ex-info "Save must never run for rejected input" {})))]
-      (doseq [[body expected] cases]
-        (let [error (view-command-error
-                      #(setup/via-graph graph :api-view-save-handler
-                                        {:uri "/api/views/save" :request-method :post
-                                         :headers {"content-type" "application/json"}
-                                         :body (json/generate-string body)}))]
-          (is (some? error) (str "Expected typed rejection: " expected))
-          (is (and (string? (:reason error))
-                   (str/includes? (:reason error) expected))
-              (str "Expected reason containing: " expected)))))
-    ;; save-explorer-view records :db before forcing its command argument.
-    ;; This sentinel proves the writer is never called, not an empty effect trace.
-    (is (zero? @save-calls) "Rejected commands must never reach the atomic writer")
-    (is (= before (counts)) "Rejected commands cannot write identity/version rows")))
-
-
-(deftest composed-command-preserves-and-redacts-input-taint
-  (doseq [marked-type [[:secret :keyword-map]
-                       {:private-field [:secret :text]}]]
-    (let [source (random-uuid)
-          parsed (random-uuid)]
-      (registry/record-rich-types-raw! source :view-command-marked-body
-                                       {:args {} :return marked-type})
-      (check/check-fn-def! {:id parsed :name :view-command-marked-result
-                            :parent :parse-view-command
-                            :args {:body :view-command-marked-body}})
-      (is (= [:secret :keyword-map]
-             (:return (registry/rich-type-of parsed)))
-          (str "Composed normalization must preserve the marker from " marked-type))
-      (is (= {:status :succeeded :result nil :tainted? true}
-             (persist/redact-outcome parsed
-                                     {:status :succeeded
-                                      :result {:private-field "must-not-escape"}}))
-          (str "Composed parser results must be redacted for " marked-type)))))

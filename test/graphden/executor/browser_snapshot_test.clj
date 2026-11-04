@@ -91,6 +91,60 @@
   (snapshot/export-snapshot snapshot {} {:view id} (or policy (policy-of f))))
 
 
+(defn- export-check-observation
+  [f memo?]
+  (let [check-definition! check/check-fn-def!
+        root-base registry/root-base-fn-name
+        scopes (atom [])
+        calls (atom 0)
+        signatures (atom {})]
+    (with-redefs [registry/root-base-fn-name
+                  (fn [reference]
+                    (swap! calls inc)
+                    (root-base reference))
+                  check/check-fn-def!
+                  (fn [definition]
+                    (swap! scopes conj check/*ref-return-memo*)
+                    (let [result (if memo?
+                                   (check-definition! definition)
+                                   (binding [check/*ref-return-memo* nil]
+                                     (check-definition! definition)))]
+                      (reset! signatures (registry/effective-rich-types))
+                      result))]
+      {:plan (export f) :scopes @scopes :calls @calls :signatures @signatures})))
+
+
+(deftest source-check-memo-is-private-to-one-snapshot-pass
+  (let [make-fixture (fn [value]
+                       (fixture [{:name :inner :parent :const :args {:value {:value value}}}]
+                                {:args {:value :inner}}))
+        first-source (make-fixture 7)
+        next-source (make-fixture "changed")
+        ambient (atom {})
+        first-run (binding [check/*ref-return-memo* ambient]
+                    (export-check-observation first-source true))
+        next-run (binding [check/*ref-return-memo* ambient]
+                   (export-check-observation next-source true))]
+    (testing "memoization preserves plans and inferred types on both revisions"
+      (doseq [[source observed] [[first-source first-run] [next-source next-run]]]
+        (let [uncached (export-check-observation source false)]
+          (is (= (:plan uncached) (:plan observed)))
+          (is (<= (:calls observed) (:calls uncached)))
+          (is (= (:signatures uncached) (:signatures observed))))))
+    (testing "one pass shares a memo but another revision cannot reuse it"
+      (doseq [observed [first-run next-run]]
+        (let [scopes (:scopes observed)
+              memo (first scopes)]
+          (is (instance? clojure.lang.Atom memo))
+          (is (every? #(identical? memo %) scopes))
+          (is (seq (some-> memo deref)))))
+      (is (not (identical? (first (:scopes first-run)) (first (:scopes next-run)))))
+      (is (= {} @ambient)))
+    (testing "checking a new revision does not grant old provenance authority"
+      (is (= :type-source-mismatch
+             (:reason (failure #(export (assoc first-source :snapshot (:snapshot next-source))))))))))
+
+
 (defn- checked-marker-policy
   "Run a real checker with an authored marker-bearing return. The callback
    changes registries only after the checker has captured its input flags."

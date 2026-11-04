@@ -217,25 +217,29 @@
         {:keys [ordered cyclic]} (deps/dependency-order reverse-deps reachable)]
     (when (> (count reachable) 2048) (reject! :type-closure-limit {}))
     (when (seq cyclic) (reject! :type-cycle {:fn-id (first cyclic)}))
-    (doseq [id ordered]
-      (when-let [definition (type-check/reconstruct-fn-def storage id)]
-        (when-not (let [signature (get-in original-rich [:by-id id])]
-                    (or (provenance/matches? signature (check/checker-view definition))
-                        (provenance/matches-storage-input? signature (get source-fingerprints id))))
-          (let [{:keys [status pending-ids]} recovery]
-            (if (and (contains? #{:pending :running} status)
-                     (not (owned/owned-fn-id? id))
-                     (or (nil? pending-ids) (contains? pending-ids id)))
-              (reject! :policy-refresh-required {:fn-id id})
-              (reject! :type-source-mismatch {:fn-id id}))))
-        (try
-          (check/check-fn-def! definition)
-          (catch Exception _
-            ;; Checker diagnostics may contain literal data. Export errors do
-            ;; not carry their message, cause, or original ex-data.
-            (reject! :type-check-failed {:fn-id id})))
-        (when-not (registry/rich-type-of-id id)
-          (reject! :type-unresolved {:fn-id id}))))))
+    ;; Dependencies are final before consumers run in this isolated registry.
+    ;; Never reuse an ambient memo: another snapshot may use the same identities
+    ;; with different source, aliases, markers or primitive signatures.
+    (binding [check/*ref-return-memo* (atom {})]
+      (doseq [id ordered]
+        (when-let [definition (type-check/reconstruct-fn-def storage id)]
+          (when-not (let [signature (get-in original-rich [:by-id id])]
+                      (or (provenance/matches? signature (check/checker-view definition))
+                          (provenance/matches-storage-input? signature (get source-fingerprints id))))
+            (let [{:keys [status pending-ids]} recovery]
+              (if (and (contains? #{:pending :running} status)
+                       (not (owned/owned-fn-id? id))
+                       (or (nil? pending-ids) (contains? pending-ids id)))
+                (reject! :policy-refresh-required {:fn-id id})
+                (reject! :type-source-mismatch {:fn-id id}))))
+          (try
+            (check/check-fn-def! definition)
+            (catch Exception _
+              ;; Checker diagnostics may contain literal data. Export errors do
+              ;; not carry their message, cause, or original ex-data.
+              (reject! :type-check-failed {:fn-id id})))
+          (when-not (registry/rich-type-of-id id)
+            (reject! :type-unresolved {:fn-id id})))))))
 
 
 (defn- checked-source

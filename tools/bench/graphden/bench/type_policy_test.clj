@@ -6,7 +6,8 @@
 
    Writes target/type-policy-benchmark.edn. Both implementations execute
    through the same executor over ONE captured scoped rich-type snapshot.
-   Cold means a fresh execution context, not a fresh JVM/JIT or database.
+   Cold means a fresh execution context with a primed shared compiler cache,
+   not a fresh JVM/JIT or database. Any measured compiler miss invalidates A/B.
    Warm samples alternate implementation order after paired warmup.
    Allocation counts are current-thread bytes, not process-wide allocation;
    cold compilation worker allocation, if any, is explicitly not covered.
@@ -14,8 +15,8 @@
   (:require
     [clojure.java.io :as io]
     [clojure.java.shell :as shell]
-    [clojure.string :as str]
     [clojure.pprint :as pprint]
+    [clojure.string :as str]
     [clojure.test :refer [deftest use-fixtures]]
     [graphden.crud.types-api :as ta]
     [graphden.executor.compile-runtime :as cr]
@@ -25,11 +26,14 @@
     [graphden.perf.sql :as psql]
     [graphden.storage.protocol.core :as sp]
     [graphden.test-infra.graph-harness :as gh :refer [*graph*]]
+    [graphden.util.counters :as counters]
     [next.jdbc :as jdbc]
     [next.jdbc.result-set :as rs])
   (:import
-    (com.sun.management ThreadMXBean)
-    (java.lang.management ManagementFactory)))
+    (com.sun.management
+      ThreadMXBean)
+    (java.lang.management
+      ManagementFactory)))
 
 
 (use-fixtures :once
@@ -74,10 +78,10 @@
                 (assoc (select-keys row [:calls :rows])
                        :read? (boolean (re-find #"(?is)^\s*(select|with)\b" (:query row))))]))
         (jdbc/execute! ds
-          ["SELECT queryid, calls, rows, query FROM pg_stat_statements
+                       ["SELECT queryid, calls, rows, query FROM pg_stat_statements
             WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
               AND query NOT ILIKE '%pg_stat_statements%'"]
-          {:builder-fn rs/as-unqualified-maps})))
+                       {:builder-fn rs/as-unqualified-maps})))
 
 
 (defn- sql-delta
@@ -94,7 +98,7 @@
   []
   (let [bean (ManagementFactory/getThreadMXBean)]
     (when-not (and (instance? ThreadMXBean bean)
-                  (.isThreadAllocatedMemorySupported ^ThreadMXBean bean))
+                   (.isThreadAllocatedMemorySupported ^ThreadMXBean bean))
       (throw (ex-info "Current-thread allocation measurement unavailable" {})))
     (.setThreadAllocatedMemoryEnabled ^ThreadMXBean bean true)
     (let [id (.getId (Thread/currentThread))]
@@ -104,16 +108,26 @@
 (defn- measure
   [ds allocated expected invoke]
   (let [sql-before (sql-snapshot ds)
+        counters-before (counters/snapshot)
         bytes-before (allocated)
         start (System/nanoTime)
         result (invoke)
         elapsed (- (System/nanoTime) start)
         bytes (- (allocated) bytes-before)
+        compile-counts (counters/delta-since counters-before)
+        compile-hits (get compile-counts :compile/all-hit 0)
+        compile-misses (get compile-counts :compile/all-miss 0)
         statements (sql-delta sql-before (sql-snapshot ds))]
+    (when (pos? compile-misses)
+      (throw (ex-info "Shared compiler cache missed; A/B samples are not comparable"
+                      {:compile-all-hits compile-hits
+                       :compile-all-misses compile-misses})))
     ;; Equality/retention happens outside measurement, but every result is used.
     (when-not (= expected result)
       (throw (ex-info "Projection parity failed; no valid timing comparison" {})))
     {:elapsed-ns elapsed
+     :compile-all-hits compile-hits
+     :compile-all-misses compile-misses
      :current-thread-allocated-bytes bytes
      :sql-calls (reduce + 0 (map :calls (vals statements)))
      :sql-read-calls (reduce + 0 (map :calls (filter :read? (vals statements))))
@@ -152,32 +166,40 @@
       ;; Do not pad/duplicate a small fixture and pretend it was a real corpus.
       (when-not (<= 3000 (count snapshot) 10000)
         (throw (ex-info "Expected a real package snapshot around 4000 entries"
-                       {:entries (count snapshot)})))
+                        {:entries (count snapshot)})))
       (registry/record-rich-types! (:id baseline) baseline-name
                                    {:args {} :return-type :keyword-map :effects #{:db}})
       (psql/ensure-extension! ds)
       ;; The snapshot object is shared by both paths, including cold calls.
       ;; No acquisition, schema change or test mutation occurs inside the window.
       (with-redefs [ta/all-rich-types (constantly snapshot)]
+        ;; The synthetic baseline changes the process-global compiler cache key.
+        ;; Prime that final key once so the first native sample does not pay for
+        ;; compilation shared by both paths. Fresh contexts still measure their
+        ;; own registry/graph setup; compiler misses invalidate every sample.
+        (when-not (= expected ((invoke (new-context) :graph)))
+          (throw (ex-info "Projection parity failed during compiler priming" {})))
         (let [cold (vec (for [round (range 2)
-                             kind (if (even? round) [:native :graph] [:graph :native])]
-                         (assoc (measure ds allocated expected (invoke (new-context) kind))
-                                :kind kind :round round)))
+                              kind (if (even? round) [:native :graph] [:graph :native])]
+                          (assoc (measure ds allocated expected (invoke (new-context) kind))
+                                 :kind kind :round round)))
               warm-context (new-context)
               _ (dotimes [_ 10]
                   ((invoke warm-context :native))
                   ((invoke warm-context :graph)))
               warm (vec (for [round (range 30)
-                             kind (if (even? round) [:native :graph] [:graph :native])]
-                         (assoc (measure ds allocated expected (invoke warm-context kind))
-                                :kind kind :round round)))
+                              kind (if (even? round) [:native :graph] [:graph :native])]
+                          (assoc (measure ds allocated expected (invoke warm-context kind))
+                                 :kind kind :round round)))
               report {:baseline baseline-source
                       :candidate-head (str/trim (:out revision))
                       :candidate-dirty? (not (str/blank? (:out working-tree)))
                       :snapshot-entries (count snapshot)
                       :snapshot-hash (hash snapshot)
                       :jvm (System/getProperty "java.version")
-                      :cold-definition :fresh-context-warm-jvm-and-db
+                      :cold-definition :fresh-context-warm-shared-compiler
+                      :jvm-and-db-state :warm
+                      :compile-counter-scope :process-wide
                       :allocation-scope :current-thread-only
                       :sql-scope :all-statements-in-fixture-database
                       :sql-read-classification :select-or-with-prefix
@@ -186,7 +208,7 @@
                       :warm-summary
                       (into {} (for [[kind samples] (group-by :kind warm)]
                                  [kind (into {} (for [field [:elapsed-ns :current-thread-allocated-bytes :sql-calls :sql-read-calls]]
-                                                 [field (distribution samples field)]))]))}
+                                                  [field (distribution samples field)]))]))}
               output (io/file "target/type-policy-benchmark.edn")]
           (io/make-parents output)
           (spit output (with-out-str (pprint/pprint report)))

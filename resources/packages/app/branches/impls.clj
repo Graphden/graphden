@@ -82,16 +82,11 @@
                      target-branch-id))
 
 
-(defbase diff-affected
-  "Single library call over `dv/affected-view` for the diff-view groups:
-   the fns that changed INSIDE — their own rows are equal on both
-   branches, but something they depend on (an ancestor, a ref target, a
-   type) is in the diff — keyed by fn-id string with the nearest changed
-   fn (`:via`), the hop count and the fn's `:ns-path`. The dependency index is the compiler's
-   own (`cr/ctx-reverse-deps` on THIS branch's ctx)."
+(defbase diff-affected-facts
+  "Shared reverse-dependency BFS and bounded namespace-path acquisition."
   [groups]
   (cr/record-effect! :db)
-  (dv/affected-view (branches/base-storage ctx) (cr/ctx-reverse-deps ctx) groups))
+  (dv/affected-view-facts (branches/base-storage ctx) (cr/ctx-reverse-deps ctx) groups))
 
 
 (defbase _diff-view-input
@@ -888,7 +883,7 @@
   {:resolve-branch-ref         resolve-branch-ref
    :diff-branches              diff-branches
    :_diff-view-input           _diff-view-input
-   :diff-affected              diff-affected
+   :_diff-affected-facts       diff-affected-facts
    :create-branch!             create-branch!
    :delete-branch!             delete-branch!
    :detect-conflicts           detect-conflicts

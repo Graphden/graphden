@@ -135,7 +135,7 @@
     :describe-type-mismatch :detect-conflicts :diff-branches
     ;; _diff-view-input returns previews of user-authored binding
     ;; values — same read-projection class as :diff-branches.
-    :diff-affected :_diff-view-input
+    :_diff-affected-facts :_diff-view-input
     :diff-value-against-type :digest-hex :dispatch-to-branch :dissoc
     :distinct :div :do :drop :empty? :env
     :encode-unreadable-kws :equal? :error-boundary-wrap :every? :ex-data :execute-trace-rows :viewer-path-trace

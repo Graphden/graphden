@@ -803,11 +803,25 @@
                   :args {:func :_diff-display-row
                          :coll {:parent :get :args {:coll :_diff-view-input :key {:value :rows} :default []}}}}}}
 
-  {:name :diff-affected
-   :description "Atomic library boundary over `dv/affected-view` — the fns that changed INSIDE (own rows equal, a dependency in the diff), `{fn-id-str {:via changed-fn-id-str :depth n :ns-path \"a.b\"}}`, walked over the compiler's reverse-dependency index of the branch on screen."
-   :args {:groups {:type :sequence :description "The `:groups` of `:diff-branches-view` — their `:fn-id`s seed the walk."}}
-   :return-type :keyword-map
+  {:name :_diff-affected-facts
+   :description "Shared compiler reverse-dependency BFS with deterministic nearest via/depth; one bulk identity read and one namespace read acquire only visible path facts."
+   :args {:groups {:type :sequence :description "Diff groups whose fn IDs seed the dependency walk."}}
+   :return-type [:list {:fn-id :text :info {:via :text :depth :int} :ns-path :nullable-text}]
    :effects #{:db}}
+
+  {:name :_diff-affected-entry
+   :parent :vec
+   :args {:coll [{:parent :get :args {:coll {:as :item} :key {:value :fn-id} :default nil}}
+                 {:parent :assoc
+                  :args {:map {:parent :get :args {:coll {:as :item} :key {:value :info} :default nil}}
+                         :key {:value :ns-path}
+                         :value {:parent :get :args {:coll {:as :item} :key {:value :ns-path} :default nil}}}}]}}
+
+  {:name :diff-affected
+   :description "Fns changed inside: native BFS and shared bulk reads supply bounded facts; the graph attaches each visible namespace path to its nearest-via/depth info and indexes the result by fn ID text."
+   :parent :pairs->map
+   :args {:entries {:parent :map :args {:func :_diff-affected-entry :coll :_diff-affected-facts}}}
+   :return-type [:map :text {:via :text :depth :int :ns-path :nullable-text}]}
 
   {:name :_diff-apply-raw
    :description "Stage 1 — run the diff. The `:source-branch` / `:target-branch` free args come from the parent `:cond` which threaded them through `:_diff-source-branch` / `:_target-branch`. The `:assert-some` wraps mirror the `:cond` guards (`:_diff-source-missing?` / `:_diff-target-missing?` reject nil branches upstream) — they bridge the type-checker's per-arm narrowing gap."

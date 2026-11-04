@@ -890,3 +890,54 @@
         (is (:ok body))
         (is (= {:branch-local (mapv #(-> % (update :entity-name name) (update :entity-id str)) expected)}
                (get-in body [:merge :skipped])))))))
+
+
+(deftest diff-affected-graph-enriches-shared-bfs-facts-with-visible-paths
+  (let [a #uuid "11111111-0000-4000-8000-000000000001"
+        b #uuid "22222222-0000-4000-8000-000000000002"
+        shared (random-uuid)
+        child (random-uuid)
+        hidden (random-uuid)
+        root-ns (random-uuid)
+        leaf-ns (random-uuid)
+        unrelated-ns (random-uuid)
+        reverse-deps {a #{shared hidden} b #{shared} shared #{child}}
+        acquire dv/affected-view-facts]
+    (doseq [groups [[] [{:fn-id (str b)} {:fn-id (str a)} {:fn-id (str a)}
+                       {:fn-id nil} {:fn-id "junk"}]]]
+      (let [calls (atom [])
+            storage (reify
+                      sp/StorageCRUD
+                      (query-entities [_ entity where]
+                        (swap! calls conj [:query entity where])
+                        (is (= :ns entity))
+                        [{:id root-ns :name "app"}
+                         {:id leaf-ns :name "visible" :parent-id root-ns}
+                         {:id unrelated-ns :name "unrelated"}])
+                      sp/StorageBatchCRUD
+                      (read-entities [_ entity ids]
+                        (swap! calls conj [:bulk entity (set ids)])
+                        (is (= :fn entity))
+                        ;; ACL-filtered batch omits hidden; its namespace path
+                        ;; must remain nil even though the dependency ID is known.
+                        (select-keys {shared {:id shared :namespace-id leaf-ns}
+                                      child {:id child :namespace-id unrelated-ns}}
+                                     ids)))
+            acquisitions (atom 0)
+            result (with-redefs [dv/affected-view-facts
+                                (fn [_ _ supplied-groups]
+                                  (swap! acquisitions inc)
+                                  (is (= groups supplied-groups))
+                                  (acquire storage reverse-deps supplied-groups))]
+                     (gh/exec-name :diff-affected {:groups groups}))]
+        (is (= 1 @acquisitions))
+        (if (empty? groups)
+          (do (is (= {} result)) (is (= [] @calls)))
+          (do
+            (is (= {(str shared) {:via (str a) :depth 1 :ns-path "app.visible"}
+                    (str child) {:via (str a) :depth 2 :ns-path "unrelated"}
+                    (str hidden) {:via (str a) :depth 1 :ns-path nil}}
+                   result)
+                "nearest via uses sorted seed tie-breaking; missing identities disclose no path")
+            (is (= [[:bulk :fn #{shared child hidden}] [:query :ns {}]] @calls)
+                "one shared identity batch and namespace read, with no per-row calls")))))))

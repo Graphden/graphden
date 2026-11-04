@@ -19,11 +19,17 @@
     [cheshire.core :as cheshire]
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.crud.fn-execution.persist :as persist]
+    [graphden.crud.type-check :as tc]
     [graphden.crud.types-api :as ta]
+    [graphden.executor.context :as exec-ctx]
     [graphden.executor.registry.core :as registry]
-    [graphden.types.core :as types]
     [graphden.executor.test-setup :as setup]
-    [graphden.test-infra.graph-harness :as gh :refer [*graph*]]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.tenancy.context :as tenancy]
+    [graphden.test-infra.graph-harness :as gh :refer [*graph*]]
+    [graphden.types.check :as check]
+    [graphden.types.core :as types]))
 
 
 (use-fixtures :once
@@ -375,3 +381,93 @@
                  :tags :arg-effects :call-time-effects :primary-parent]]
     (is (seq full))
     (is (= (update-vals full #(apply dissoc % omitted)) lean))))
+
+
+(defn- check-stored-type-policies!
+  []
+  (let [{:keys [storage all-name->id]} *graph*]
+    ;; Dependency order matters: ordinary golden clones intentionally do not
+    ;; run the package sweep. Check the persisted definitions, not source copies.
+    (doseq [nm [:_type-name-wire-row :_type-name-compatible? :type-name-kinds
+                :compatible-type-names :_rich-type-wire-entry :api-rich-types]]
+      (let [id (get all-name->id nm)]
+        (is (some? (tc/reconstruct-fn-def storage id)) (str nm " is composed"))
+        (is (nil? (tc/type-check-fn-after-mutation! storage id))
+            (str nm " checks after storage reconstruction"))))))
+
+
+(deftest stored-type-policies-have-precise-contracts-test
+  (check-stored-type-policies!)
+  (doseq [[nm args return]
+          [[:type-name-kinds {} [:list {:name :text :kind :text}]]
+           [:compatible-type-names {:expected :type-expression}
+            [:list {:name :text :kind :text}]]
+           [:api-rich-types {} :keyword-map]]]
+    (let [rich (registry/rich-type-of-id (get (:all-name->id *graph*) nm))]
+      (is (= args (:args rich)) (str nm " exposes only its public inputs"))
+      (is (types/subtype? (:return rich) return) (str nm " retains its public return"))
+      (is (= #{:db} (:effects rich)) (str nm " retains scoped-read effects")))))
+
+
+(deftest secret-expected-taints-picker-selection-test
+  (check-stored-type-policies!)
+  (let [source (keyword (gh/uniq "secret-picker-expected"))
+        consumer (keyword (gh/uniq "secret-picker-selection"))]
+    (registry/record-rich-types! source
+                                 {:args {} :return-type [:secret :type-expression]})
+    (check/check-fn-def! {:name consumer :parent :compatible-type-names
+                         :args {:expected {:ref source}}})
+    (let [rich (registry/rich-type-of consumer)
+          id (:fn-id rich)]
+      (is (types/contains-secret? (:return rich))
+          "Filtering by a secret must taint the selection, even for public rows")
+      (is (= {:status :succeeded :result nil :tainted? true}
+             (persist/redact-outcome id
+               {:status :succeeded :result [{:name "int" :kind "primitive"}]}))))))
+
+
+(deftest picker-identity-and-acl-survive-the-complete-graph-test
+  (let [{:keys [storage ctx]} *graph*
+        stem (gh/uniq "picker-type")
+        left (sp/create-entity storage :ns {:name (gh/uniq "picker-a")})
+        hidden (sp/create-entity storage :ns {:name (gh/uniq "picker-z")})
+        int-id (get setup/primitive-fn-ids :int)
+        text-id (get setup/primitive-fn-ids :text)
+        root (sp/create-entity storage :fn
+                               {:name stem :base-fn-id int-id :constraint [:>= 0]})
+        twin (sp/create-entity storage :fn
+                               {:name stem :namespace-id (:id left)
+                                :base-fn-id text-id :constraint [:not= ""]})
+        concealed (sp/create-entity storage :fn
+                                    {:name stem :namespace-id (:id hidden)
+                                     :base-fn-id int-id :constraint [:>= 1]})
+        ids (mapv :id [root twin concealed])
+        root-name (str "/" stem)
+        left-name (str (:name left) "/" stem)
+        hidden-name (str (:name hidden) "/" stem)]
+    (try
+      (exec-ctx/invalidate-graph-cache! ctx ids)
+      (binding [types/*type-aliases-override* (atom (types/aliases-snapshot))
+                tenancy/*seams-override*
+                (atom {:graph-read-filter-fn
+                       #(update % :fns
+                                (fn [rows] (filterv (fn [row] (not= (:id concealed) (:id row))) rows)))})]
+        (types/register-type-alias! (keyword "" stem) [:refine :int [:>= 0]])
+        (types/register-type-alias! (keyword (:name left) stem) [:refine :text [:not= ""]])
+        (types/register-type-alias! (keyword (:name hidden) stem) [:refine :int [:>= 1]])
+        (let [all (gh/exec-name :type-name-kinds {})
+              compatible (gh/exec-name :compatible-type-names {:expected :int})
+              fixture-rows #(filterv (fn [row] (str/includes? (:name row) stem)) %)]
+          (is (= [{:name root-name :kind "refinement"}
+                  {:name left-name :kind "refinement"}]
+                 (fixture-rows all)) "colliding visible rows retain canonical selection spelling")
+          (is (= [{:name root-name :kind "refinement"}] (fixture-rows compatible))
+              "the text twin and concealed int subtype never enter the int picker")
+          (is (= (sort (map :name all)) (map :name all)))
+          (is (not-any? #(= hidden-name (:name %)) all))
+          (is (not-any? #(contains? % :type-ref) (concat all compatible)))))
+      (finally
+        (doseq [id ids] (sp/delete-entity storage :fn id))
+        (sp/delete-entity storage :ns (:id left))
+        (sp/delete-entity storage :ns (:id hidden))
+        (exec-ctx/invalidate-graph-cache! ctx ids)))))

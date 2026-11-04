@@ -109,6 +109,25 @@
              (frequencies (priority/browser-order #{source}))) source))))
 
 
+(deftest transitive-backend-api-dependencies-prioritize-browser-contracts
+  ;; Registry impls require pin-usage, which requires graph-refs. No browser
+  ;; file imports this backend helper or shares its filename.
+  (let [changed #{"src/graphden/crud/graph_refs.clj"}
+        early (priority/browser-first changed)
+        plan (priority/plan changed)
+        ordered (priority/browser-order changed)]
+    (is (some #{"edit-tutorial-package-lifecycle.test.js"} early))
+    (is (some #{"edit-packages-panel.test.js"} (:browser plan)))
+    (is (not-any? #{"edit-secrets-rotate.test.js" "edit-undo.test.js"} early)
+        "unrelated API and editor contracts do not become early")
+    (is (< (count early) 20) "the concrete helper has a narrow API fanout")
+    (is (= (frequencies (priority/browser-order nil)) (frequencies ordered))))
+  (let [changed #{"src/graphden/executor/defbase.clj"}]
+    (is (<= (count (:browser (priority/plan changed))) 20)
+        "a common backend dependency retains the automatic early-wave bound"))
+  (is (= [] (priority/browser-first #{"src/graphden/no_such_file.clj"}))))
+
+
 (deftest shared-popover-impact-includes-the-personal-theme-walk
   (doseq [source ["resources/packages/app/editor/editor-edit-modes.js"
                   "resources/packages/web/runtime/graphden-popover.js"]]

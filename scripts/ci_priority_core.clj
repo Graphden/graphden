@@ -9,7 +9,7 @@
     [clojure.string :as str]))
 
 
-(declare dependency-distances)
+(declare dependency-distances namespace-entry)
 
 
 (defn- browser-local-consumers
@@ -236,24 +236,52 @@
     (concat direct (browser-local-consumers browser-files helpers))))
 
 
-(def ^:private cached-package-impl-sources
-  (memoize (fn []
-             (into {} (map (fn [path] [(str path) (slurp (str path))]))
-                   (fs/glob "resources/packages" "**/impls.clj")))))
+(def ^:private cached-api-source-graph
+  ;; Parse namespace forms without loading the application or its packages.
+  (memoize
+    (fn []
+      (reduce
+        (fn [graph path]
+          (let [path (str path)
+                {:keys [name deps]} (namespace-entry path)]
+            (-> graph
+                (assoc-in [:by-path path] name)
+                (cond-> (str/starts-with? path "resources/packages/")
+                  (assoc-in [:packages name] path))
+                (update :reverse
+                        (fn [consumers]
+                          (reduce #(update %1 %2 (fnil conj #{}) name)
+                                  consumers deps))))))
+        {:by-path {} :packages {} :reverse {}}
+        (concat (fs/glob "src" "**/*.clj")
+                (fs/glob "resources/packages" "**/impls.clj"))))))
+
+
+(defn- source-api-modules
+  [path]
+  (when (str/starts-with? path "src/")
+    (try
+      (let [{:keys [by-path packages] consumers :reverse} (cached-api-source-graph)
+            source (get by-path path)
+            distances (dependency-distances consumers (if source #{source} #{}))]
+        (->> packages
+             (keep (fn [[name module]]
+                     (when-let [depth (get distances name)] [depth module])))
+             (sort-by (juxt first second))
+             (map second)))
+      (catch Exception e
+        (println (str "⚠ API namespace graph unavailable: " (ex-message e)
+                      " — running the full browser suite without API hints"))
+        []))))
 
 
 (defn- browser-api-consumers
-  "Follow a changed package module, or a Clojure source required by its impl,
+  "Follow a changed package module, or a transitive Clojure dependency of its impl,
    to the package's declared HTTP roots and browser tests that call them."
   [browser-files path]
   (let [modules (if (re-matches #"resources/packages/[^/]+/[^/]+/(?:fns\.edn|impls\.clj)" path)
                   [path]
-                  (when-let [[_ source] (re-matches #"src/(graphden/.+)\.clj" path)]
-                    (let [ns-name (-> source (str/replace "/" ".")
-                                      (str/replace "_" "-"))]
-                      (->> (cached-package-impl-sources)
-                           (keep (fn [[impl body]]
-                                   (when (str/includes? body (str "[" ns-name " ")) impl)))))))]
+                  (source-api-modules path))]
     (for [module-path modules
           :let [definitions (str/replace module-path #"(?:fns\.edn|impls\.clj)$" "fns.edn")]
           :when (fs/exists? definitions)

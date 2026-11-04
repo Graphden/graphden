@@ -2774,7 +2774,7 @@
                  :_merge-apply-created-at-str]}}
 
   {:name :_merge-apply-skipped
-   :description "Audit log: `{:branch-local [<entity-row> …]}`. Pulled straight from `merge-branch!`'s `:skipped` field which the defbase populates via `mrg/skipped-as-branch-local`. Empty `:branch-local` vec means every visible-on-source fn propagated."
+   :description "Audit log: `{:branch-local [<entity-row> …]}`. Reads the `:skipped` field attached by `:_merge-record-with-skipped`: `:merge-skipped-branch-local` projects and sorts audit rows in graph from the native `:_merge-skipped-facts` bulk inheritance/visibility read. Empty `:branch-local` vec means every visible-on-source fn propagated."
    :parent :get
    :args {:coll :_merge-apply-record :key {:value :skipped} :default nil}}
 

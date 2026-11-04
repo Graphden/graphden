@@ -490,12 +490,23 @@
 
 
 (defn- bind-subtype-variables!
-  "Extract substitutions after subtype succeeds. Containers can fit :jsonb
-   without value unification, but execution variables still require bounds."
-  [{:keys [expected actual] :as ctx} subst]
+  "Extract substitutions after subtype succeeds, then check the resolved
+   direction. A free type variable makes subtype? permissive even if an
+   earlier sibling bound it incompatibly. Containers can fit :jsonb without
+   value unification, but execution variables still require bounds."
+  [{:keys [expected actual binding] :as ctx} subst]
   (if (or (has-type-var? expected) (has-type-var? actual))
-    (let [next-subst (types/unify expected actual subst)]
-      (if (types/fail? next-subst)
+    (let [next-subst (types/unify expected actual subst)
+          failed? (types/fail? next-subst)
+          resolved-subst (if failed? subst next-subst)
+          literal-values (if (and (some? binding) (literal-binding? binding))
+                           [(literal-binding-value binding)]
+                           [])]
+      (when-not (gradual/fits? (types/resolve resolved-subst actual)
+                               (types/resolve resolved-subst expected)
+                               literal-values)
+        (throw-mismatch! ctx))
+      (if failed?
         (if (or (types/has-execution-vars? expected)
                 (types/has-execution-vars? actual))
           (throw-mismatch! ctx)
@@ -1690,8 +1701,11 @@
    slot's structural call-site arg names. Closure-capture semantics
    (docs/CLOSURE_CAPTURE.md § Implementation Contract): call-site args are supplied per invocation by the
    parent's impl; captured args must come from the outer binding-
-   chain and therefore widen the calling fn-def's free-arg surface."
-  [args parent-args]
+   chain and therefore widen the calling fn-def's free-arg surface.
+
+   A binding of the SAME name as its own ref's free arg is an input to
+   that ref (e.g. `:routes :_coerced-routes`), not a local discharge."
+  [args parent-args discharged]
   (let [fresh (fn [fn-name]
                 (when-let [ents (:args (registry/rich-type-of fn-name))]
                   (types/freshen-args ents)))
@@ -1705,25 +1719,18 @@
                                      (hof-call-site-arg-names parent-args arg-name)))
                             ref-args)))]
     (reduce-kv (fn [acc arg-name b-form]
-                 (cond
-                   ;; Identity edge: nothing of the target lifts.
-                   (identity-slot-form? parent-args arg-name b-form)
-                   acc
-
-                   (keyword? b-form)
-                   (merge acc (lift-for-slot arg-name b-form))
-
-                   (and (map? b-form) (contains? b-form :ref))
-                   (merge acc (lift-for-slot arg-name (:ref b-form)))
-
-                   ;; List items aren't HOF-wrapped — they're inlined
-                   ;; into the outer evaluation context, so ALL their
-                   ;; free args lift regardless of the slot's HOF-ness.
-                   (vector? b-form)
-                   (reduce (fn [a item] (merge a (item-free-args item)))
-                           acc b-form)
-
-                   :else acc))
+                 (let [lifted (cond
+                                ;; Identity edge: nothing of the target lifts.
+                                (identity-slot-form? parent-args arg-name b-form) {}
+                                (keyword? b-form) (lift-for-slot arg-name b-form)
+                                (and (map? b-form) (contains? b-form :ref))
+                                (lift-for-slot arg-name (:ref b-form))
+                                ;; List items are inlined, not HOF-wrapped.
+                                (vector? b-form)
+                                (reduce (fn [a item] (merge a (item-free-args item)))
+                                        {} b-form)
+                                :else {})]
+                   (merge acc (apply dissoc lifted (disj discharged arg-name)))))
                {}
                args)))
 
@@ -1784,8 +1791,8 @@
                                                (contains? type-pinned a))
                                    [a (types/resolve subst t)])))
                          parent-args)]
-    (merge (apply dissoc (ref-free-args args parent-args)
-                  (into real-bound renamed-original-names))
+    (merge (ref-free-args args parent-args
+                          (into real-bound renamed-original-names))
            local-free)))
 
 

@@ -75,13 +75,22 @@
   (is (= {:item :text} (:args (registry/rich-type-of :closure-repeat)))))
 
 
+(deftest binding-own-ref-with-the-same-free-name-keeps-the-input
+  (check/check-fn-def! {:name :closure-inner-get :parent :get
+                        :args {:key {:value :foo}}})
+  (check/check-fn-def! {:name :closure-outer-get :parent :get
+                        :args {:coll :closure-inner-get
+                               :key {:value :bar}}})
+  (is (contains? (:args (registry/rich-type-of :closure-outer-get)) :coll)))
+
+
 (deftest authored-parameter-domain-survives-capture-projection
   ;; A concrete callback return avoids the unrelated gradual :any escape
   ;; of the get-based callback above. Its second argument is captured.
   (registry/record-rich-types-raw!
     :closure-keyword-label {:args {:column :keyword :record :keyword-map}
-                           :lambda-params [:column]
-                           :return :text})
+                            :lambda-params [:column]
+                            :return :text})
   (check/check-fn-def! {:name :closure-valid-domain :parent :map
                         :args {:func :closure-keyword-label
                                :coll {:value [:a :b]}}})

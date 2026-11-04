@@ -3,6 +3,7 @@
     [babashka.fs :as fs]
     [babashka.process :as p]
     [ci-priority-core :as priority]
+    [clojure.edn :as edn]
     [clojure.string :as str]
     [clojure.test :refer [deftest is run-tests]]))
 
@@ -126,6 +127,41 @@
     (is (<= (count (:browser (priority/plan changed))) 20)
         "a common backend dependency retains the automatic early-wave bound"))
   (is (= [] (priority/browser-first #{"src/graphden/no_such_file.clj"}))))
+
+
+(deftest short-api-roots-select-exact-ui-contracts
+  (let [changed #{"resources/packages/app/ui-components/impls.clj"}
+        early (:browser (priority/plan changed))]
+    (doseq [file ["edit-personal-configuration.test.js"
+                  "edit-ui-components-selective.test.js" "edit-server-call.test.js"]]
+      (is (some #{file} early) file))
+    (is (not-any? #{"edit-ui-graph-theme.test.js" "edit-undo.test.js"} early))
+    (is (<= (count early) 20))
+    (is (= (frequencies (priority/browser-order nil))
+           (frequencies (priority/browser-order changed))))))
+
+
+(deftest exact-route-consumers-follow-local-helper-imports
+  (let [dir (fs/create-temp-dir {:prefix "priority-api-"})
+        scripts (str (fs/absolutize "scripts"))
+        files {"resources/packages/demo/endpoint/fns.edn"
+               "{:namespace \"demo.endpoint\" :fns [{:name :route :args {:path \"/ui/configuration/apply\" :handler :handler}}]}"
+               "tools/browser-test/helper.js" "fetch('/api/ui/configuration/apply');"
+               "tools/browser-test/indirect.js" "require('./helper');"
+               "tools/browser-test/edit-helper.test.js" "require('./indirect');"
+               "tools/browser-test/edit-unrelated.test.js" "fetch('/api/ui/theme/evaluate');"
+               "tools/browser-test/edit-boundary.test.js" "fetch('/api/ui/configuration/apply-extra');"}]
+    (try
+      (doseq [[path body] files]
+        (let [file (fs/path dir path)]
+          (fs/create-dirs (fs/parent file))
+          (spit (str file) body)))
+      (let [result (p/shell {:dir (str dir) :out :string :err :string :continue true}
+                            "bb" "-cp" scripts "-e"
+                            "(require '[ci-priority-core :as p]) (prn (p/browser-first #{\"resources/packages/demo/endpoint/impls.clj\"}))")]
+        (is (zero? (:exit result)) (:err result))
+        (is (= ["edit-helper.test.js"] (edn/read-string (:out result)))))
+      (finally (fs/delete-tree dir)))))
 
 
 (deftest shared-popover-impact-includes-the-personal-theme-walk

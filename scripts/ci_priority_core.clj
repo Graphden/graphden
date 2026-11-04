@@ -275,23 +275,64 @@
         []))))
 
 
+(defn- package-api-paths
+  "Read literal HTTP declarations, excluding ordinary resource path arguments."
+  [definitions]
+  (->> (:fns (edn/read-string (slurp definitions)))
+       (keep (fn [{:keys [args]}]
+               (let [path (:path args)]
+                 (when (and (contains? args :handler) (string? path)
+                            (str/starts-with? path "/"))
+                   (str "/api" path)))))
+       set))
+
+
+(defn- literal-api-consumer?
+  [paths source]
+  (let [literals (map second (re-seq #"['\"`](/api/[^'\"`\s]*)" source))]
+    (some (fn [path]
+            (let [dynamic-at (str/index-of path ":")
+                  prefix (if dynamic-at (subs path 0 dynamic-at) path)]
+              (some (fn [literal]
+                      (if dynamic-at
+                        (str/starts-with? literal prefix)
+                        (or (= literal prefix)
+                            (str/starts-with? literal (str prefix "?"))
+                            (str/starts-with? literal (str prefix "#")))))
+                    literals)))
+          paths)))
+
+
 (defn- browser-api-consumers
-  "Follow a changed package module, or a transitive Clojure dependency of its impl,
-   to the package's declared HTTP roots and browser tests that call them."
+  "Follow backend dependencies to declared literal HTTP paths, then direct
+   browser consumers and transitive local helper importers."
   [browser-files path]
   (let [modules (if (re-matches #"resources/packages/[^/]+/[^/]+/(?:fns\.edn|impls\.clj)" path)
                   [path]
-                  (source-api-modules path))]
-    (for [module-path modules
-          :let [definitions (str/replace module-path #"(?:fns\.edn|impls\.clj)$" "fns.edn")]
-          :when (fs/exists? definitions)
-          :let [roots (->> (re-seq #":path\s+\"/([a-z][a-z0-9-]*)" (slurp definitions))
-                           (map second) (filter #(>= (count %) 4)) set)
-                markers (set (map #(str "/api/" %) roots))]
-          file browser-files
-          :when (let [source (slurp (str "tools/browser-test/" file))]
-                  (some #(str/includes? source %) markers))]
-      file)))
+                  (source-api-modules path))
+        sources (into {} (map (fn [file] [(str (fs/file-name file)) (slurp (str file))]))
+                      (fs/glob "tools/browser-test" "*.js"))
+        tests (set browser-files)]
+    (mapcat
+      (fn [module-path]
+        (let [definitions (str/replace module-path #"(?:fns\.edn|impls\.clj)$" "fns.edn")]
+          (when (fs/exists? definitions)
+            (let [paths (package-api-paths definitions)
+                  consumers (->> sources
+                                 (keep (fn [[file source]]
+                                         (when (literal-api-consumer? paths source) file)))
+                                 sort)
+                  direct (filter tests consumers)
+                  ;; Common cleanup helpers mention many APIs; their whole
+                  ;; importer fanout is weaker evidence than a direct call.
+                  helper-groups (for [helper (remove tests consumers)
+                                      :let [files (browser-local-consumers browser-files #{helper})]
+                                      :when (<= (count files) 15)]
+                                  [helper files])]
+              (concat direct
+                      (mapcat second (sort-by (fn [[helper files]] [(count files) helper])
+                                              helper-groups)))))))
+      modules)))
 
 
 (defn changed-paths

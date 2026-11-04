@@ -636,38 +636,10 @@
 ;;
 ;; The endpoints' parse → validate stages (and all of /api/types/compatible
 ;; and the candidates enumeration) are graph fn-defs in
-;; `web/crud-types/fns.edn`; what stays here is the per-row ranking and
+;; `web/crud-types/fns.edn`; what stays here is the
 ;; namespace index the candidates chain calls, and the usages walk.
 
 ;; --- types-candidates — per-row helpers of the graph enumeration.
-
-(defn candidate-fit
-  "How a candidate's WHOLE signature sits in the slot — the picker's
-   ranking, computed from the same registry entry the admissibility
-   check used. `free-arity` is the candidate's remaining free-arg count.
-
-     :exact    fn slot: exactly as many free args as the slot passes
-               per call — nothing captured, nothing dropped. Value
-               slot: a ready value, no free args left to bind.
-     :captures more free args than the slot supplies. Admissible —
-               hof-wrap captures the rest / they surface as free args
-               of the binding fn — but the reader has more to wire.
-     :ignores  fewer than the slot passes (a nullary callee in a
-               1-arg slot): admissible by the positional rule in
-               `fn-args-subtype?`, the per-call value is dropped.
-
-   A `:fn-ref` slot takes an identity — arity is not a question.
-   Ranking only: admissibility stays `subtype?`'s call."
-  [expected free-arity]
-  (cond
-    (= :fn-ref expected) :exact
-    (types/fn-type? expected)
-    (let [k (count (types/fn-args expected))]
-      (cond (= free-arity k) :exact
-            (> free-arity k) :captures
-            :else :ignores))
-    :else (if (zero? free-arity) :exact :captures)))
-
 
 (defn candidate-ns-index
   "fn-id → `{:ns \"dotted.path\" :ns-id \"<uuid>\"}` for every fn the

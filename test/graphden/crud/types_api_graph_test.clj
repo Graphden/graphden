@@ -55,6 +55,36 @@
 ;; /api/types/candidates — Phase 5 HOF translation regression coverage
 ;; =============================================================================
 
+(deftest candidate-fit-graph-test
+  (doseq [[expected arity fit]
+          [['[:fn {:item a} b] 1 :exact]
+           ['[:fn {:item a} b] 0 :ignores]
+           ['[:fn {:item a} b] 3 :captures]
+           ['[:fn {:acc a :item b} a] 2 :exact]
+           [[:fn {} :any] 0 :exact]
+           [[:fn {} :any] 2 :captures]
+           [[:fn {:x :int} :text #{:db}] 1 :exact]
+           [[:fn {:x :int} :text #{} #{:jvm-server}] 0 :ignores]
+           [:fn-ref 5 :exact]
+           [:text 0 :exact]
+           [:text 2 :captures]]]
+    (is (= fit (gh/exec-name :candidate-fit {:expected expected :arity arity}))
+        (str expected " / " arity))))
+
+
+(deftest candidate-fit-stored-contract-test
+  (let [{:keys [storage all-name->id]} *graph*]
+    (doseq [nm [:_candidate-fit-args :_candidate-fit-expected-arity
+                :_candidate-fit-arity :candidate-fit]]
+      (let [id (get all-name->id nm)]
+        (is (some? (tc/reconstruct-fn-def storage id)))
+        (is (nil? (tc/type-check-fn-after-mutation! storage id)) (str nm))))
+    (let [rich (registry/rich-type-of-id (get all-name->id :candidate-fit))]
+      (is (= {:expected :type-expression :arity :non-negative-int} (:args rich)))
+      (is (= #{} (:effects rich)))
+      (is (types/subtype? (:return rich) :keyword)))))
+
+
 (deftest types-candidates-expected-any-returns-non-empty-test
   (testing "POST /api/types/candidates {expected: 'any'} → {:ok true :count >0 :candidates [...]}"
     (let [result (post-via :types-candidates-handler {:expected "any"})]
@@ -416,14 +446,14 @@
     (registry/record-rich-types! source
                                  {:args {} :return-type [:secret :type-expression]})
     (check/check-fn-def! {:name consumer :parent :compatible-type-names
-                         :args {:expected {:ref source}}})
+                          :args {:expected {:ref source}}})
     (let [rich (registry/rich-type-of consumer)
           id (:fn-id rich)]
       (is (types/contains-secret? (:return rich))
           "Filtering by a secret must taint the selection, even for public rows")
       (is (= {:status :succeeded :result nil :tainted? true}
              (persist/redact-outcome id
-               {:status :succeeded :result [{:name "int" :kind "primitive"}]}))))))
+                                     {:status :succeeded :result [{:name "int" :kind "primitive"}]}))))))
 
 
 (deftest picker-identity-and-acl-survive-the-complete-graph-test

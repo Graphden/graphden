@@ -70,10 +70,39 @@
    :args {:fn-name {:type :keyword-or-text :description "Name of the candidate fn."}}
    :return-type [:union :null :type-expression]}
 
+  {:name :fn-type-args
+   :description "Canonical callable argument map, or nil for a non-callable type expression."
+   :args {:type {:type :type-expression}}
+   :return-type :nullable-keyword-map}
+
+  {:name :_candidate-fit-args
+   :parent :fn-type-args
+   :args {:type {:as :expected :type :type-expression}}}
+
+  {:name :_candidate-fit-expected-arity
+   :parent :count
+   :args {:coll :_candidate-fit-args}}
+
+  {:name :_candidate-fit-arity
+   :parent :const
+   :args {:value {:as :arity :type :non-negative-int}}}
+
   {:name :candidate-fit
-   :description "How a candidate's WHOLE signature sits in the slot — the picker's ranking tier. `:exact` (a callable slot: exactly as many free args as the slot passes per call; a value slot: no free args left), `:captures` (more free args — admissible, they surface as free args of the binding fn), `:ignores` (fewer — a nullary callee in a 1-arg slot, admissible by the positional rule, the input is dropped). A `:fn-ref` slot is always `:exact`. Ranking only: admissibility is `:subtype?`'s call."
-   :args {:expected {:type :type-expression :description "The slot's expected type."}
-          :arity {:type :non-negative-int :description "The candidate's remaining free-arg count."}}
+   :description "Picker ranking only; admissibility stays with subtype?. Identity slots are exact. Callable slots compare free arity with their argument count; value slots compare with zero. Extra free arguments capture; fewer arguments ignore the supplied inputs."
+   :parent :cond
+   :args {:clauses
+          [{:parent :equal?
+            :args {:a {:as :expected :type :type-expression}
+                   :b {:value :fn-ref}}}
+           {:value :exact}
+           {:parent :equal?
+            :args {:a :_candidate-fit-arity
+                   :b :_candidate-fit-expected-arity}}
+           {:value :exact}
+           {:parent :gt
+            :args {:nums [:_candidate-fit-arity :_candidate-fit-expected-arity]}}
+           {:value :captures}
+           {:value true} {:value :ignores}]}
    :return-type :keyword}
 
   {:name :fn-ns-index

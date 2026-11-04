@@ -79,13 +79,10 @@
     (tcheck/assemble-fn-type (keyword fn-name))))
 
 
-(defbase candidate-fit-fn
-  "Atomic library boundary over `types-api/candidate-fit` — how a
-   candidate's WHOLE signature sits in the slot: `:exact` / `:captures`
-   / `:ignores` (see the src docstring). Ranking only — admissibility
-   stays `:subtype?`'s call."
-  [expected arity]
-  (types-api/candidate-fit expected arity))
+(defbase fn-type-args-fn
+  "Canonical callable argument projection; nil for non-callable types."
+  [type]
+  (types/fn-args type))
 
 
 (defbase fn-ns-index-fn
@@ -311,7 +308,7 @@
    :subtype? {:impl subtype?-fn :taint-propagate? true}
    :fn-type? {:impl fn-type?-fn :taint-propagate? true}
    :fn-signature {:impl fn-signature :taint-propagate? true}
-   :candidate-fit {:impl candidate-fit-fn :taint-propagate? true}
+   :fn-type-args {:impl fn-type-args-fn :taint-propagate? true}
    :fn-ns-index fn-ns-index-fn
    :describe-type-mismatch {:impl describe-type-mismatch-fn :taint-propagate? true}
    :classify-literal {:impl classify-literal :taint-propagate? true}

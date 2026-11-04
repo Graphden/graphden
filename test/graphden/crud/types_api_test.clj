@@ -4,7 +4,7 @@
    handlers call, plus the shared graph-cache loaders and role / rich-type derivations.
 
    The pure helpers (`compute-fn-role`, `json->type`, `describe-mismatch`,
-   `constraint-contains-type-ref?`, `candidate-fit`) need no fixture;
+   `constraint-contains-type-ref?`) need no fixture;
    the rest go through the shared container. The endpoints' parse /
    validate stages and the candidates enumeration are graph fn-defs —
    covered through the handlers in `types-api-graph-test`."
@@ -301,24 +301,6 @@
           (is (true? (:type-row? (get snap :rttr-rec))))
           (is (= "a record row" (:description (get snap :rttr-rec))))))
       (finally (sp/close storage)))))
-
-
-;; ============================================================================
-;; candidate-fit — the picker's whole-signature tier (pure). Admission and
-;; the enumeration itself run through the graph handler — see
-;; `types-api-graph-test`.
-;; ============================================================================
-
-(deftest candidate-fit-test
-  (is (= :exact (ta/candidate-fit '[:fn {:item a} b] 1)) "one free arg for a one-arg call")
-  (is (= :ignores (ta/candidate-fit '[:fn {:item a} b] 0)) "a constant drops the item")
-  (is (= :captures (ta/candidate-fit '[:fn {:item a} b] 3)) "two more are captured")
-  (is (= :exact (ta/candidate-fit '[:fn {:acc a :item b} a] 2)) "by-name slot, both names")
-  (is (= :exact (ta/candidate-fit [:fn {} :any] 0)) "nullary in a nullary slot")
-  (is (= :captures (ta/candidate-fit [:fn {} :any] 2)) "frees in a nullary slot are captured")
-  (is (= :exact (ta/candidate-fit :fn-ref 5)) "an identity slot asks no arity")
-  (is (= :exact (ta/candidate-fit :text 0)) "a finished value is ready")
-  (is (= :captures (ta/candidate-fit :text 2)) "a template with frees needs inputs"))
 
 
 ;; ============================================================================

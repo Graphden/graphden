@@ -19,6 +19,25 @@
     (is (= [:s1] (r/chain-source-slot-ids :s1 {})))))
 
 
+(deftest self-fed-env-ref-surfaces-when-an-earlier-path-covered-its-name
+  (let [graph {:fns [{:id :base :parent-ids []}
+                     {:id :outer :parent-ids [:base]}
+                     {:id :source :parent-ids []}]
+               :slots [{:id :then-slot :name "then"}
+                       {:id :candidate-slot :name "candidate"}]
+               :fn-slots [{:fn-id :base :slot-id :then-slot :position 0}
+                          {:fn-id :source :slot-id :candidate-slot :position 0}]
+               :bindings [{:id :direct :fn-id :outer :slot-id :then-slot
+                           :ref-fn-id :source}
+                          {:id :env :fn-id :outer :slot-id :candidate-slot
+                           :ref-fn-id :source}]
+               :list-items []}
+        lookups (l/build-lookups graph)]
+    (is (= [:candidate] (r/deep-free-ext-names :outer lookups)))
+    (is (= [{:ext-name :candidate :slot-id :candidate-slot}]
+           (r/deep-free-ext-entries :outer lookups)))))
+
+
 (deftest chain-source-slot-ids-walks-chain-test
   (testing "follows :source-slot-id down to a slot with no source"
     (let [slot-map {:a {:source-slot-id :b}

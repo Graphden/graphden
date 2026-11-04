@@ -34,6 +34,32 @@ that returned callable. The implementation then invokes the callable —
 once per element for `:map`, once with no input for `:future`, or as its
 own contract specifies.
 
+## Where a callable runs
+
+The full callable type is `[:fn args ret effects execution]`. An **execution
+profile** identifies a backend: `:jvm-server` for the Clojure executor or
+`:browser-main` for the browser interpreter. The execution field records
+proven support, an unknown contract, or an execution variable. The shorter
+type forms above leave support unknown. A pure Clojure implementation is not
+therefore browser-compatible: the browser needs an implemented primitive ABI
+and a supported composition. Invoking a callback also requires support for
+that invocation; passing a callable as data is a separate operation. See
+[TYPES.md — Callable execution contracts](../TYPES.md#callable-execution-contracts).
+
+**Authority** means permission to perform the operation in the current account,
+organization and branch. It is separate from execution support and effect
+permissions: being able to read a definition does not grant permission to
+execute it, and declaring an effect does not authorize it.
+
+`core.system/server-call` is an explicit browser-to-server call boundary.
+The current browser implementation supports a separate asynchronous entry
+for a checked, read-only server callable with statically closed configuration.
+The exported browser plan contains an opaque descriptor, not the server
+implementation or configured captures. The server checks the current source
+and execute permissions, context and typed input on every call. This is not a
+way to run arbitrary server functions in a browser expression. See the
+[server-call contract](../../resources/packages/app/ui-preview/README.md#explicit-read-only-server-calls).
+
 ## `:map` — the canonical example
 
 ```edn

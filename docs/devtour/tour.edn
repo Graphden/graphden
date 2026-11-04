@@ -106,6 +106,29 @@
            database write. Declared effect information supports checks; runtime enforcement checks
            actual recorded effects against the currently allowed set. A pure function has no such
            effects."}
+            {:id "execution-profile" :title "Callable execution profile"
+             :say "A backend supporting a callable: jvm-server or browser-main. The canonical type is
+           `[:fn args ret effects execution]`; unknown support is not proof of either backend.
+           Registered implementations and the trusted browser primitive ABI establish support;
+           purity and authored annotations cannot add it. See [callable execution
+           contracts](../../docs/TYPES.md#callable-execution-contracts)."}
+            {:id "authority" :title "Authority"
+             :say "Permission to perform an operation for the current account, organization and branch.
+           Source visibility, execute permission and allowed effects are separate checks. Backend
+           [execution support](#term/execution-profile) does not grant any of these permissions."}
+            {:id "server-call" :title "Explicit server call"
+             :say "core.system/server-call crosses from a browser callable to a server callable explicitly.
+           The current browser implementation accepts a separate asynchronous entry with checked,
+           read-only server operations and statically closed configuration. The browser receives an
+           opaque descriptor; each call rechecks [authority](#term/authority), context and typed input.
+           See the [server-call contract](../../resources/packages/app/ui-preview/README.md#explicit-read-only-server-calls)."}
+            {:id "ui-view" :title "UI view and data"
+             :say "web.html/UiView is checked [Hiccup](#term/hiccup) carrying the ui-view representation marker.
+           as-ui-view constructs that boundary; it does not install DOM behavior or extract form data.
+           encode-view explicitly projects a view back to data, preserving secret and other markers
+           without rewriting callable signatures. Encoding grants neither [authority](#term/authority)
+           nor [execution support](#term/execution-profile). See [values and UI
+           views](../../docs/TYPES.md#values-and-ui-views)."}
             {:id "invalidation" :title "Cache invalidation"
              :say "Marking cached data as no longer current, removing it, or updating affected entries after a
            change. An epoch is a counter used to detect whether cached data was built before relevant
@@ -701,7 +724,7 @@
            The companion checked-type returns the same canonical variant/alias shape used by
            the ensure-type return rule."}
     {:ns graphden.executor.capabilities :defn native-execution
-     :say "A real JVM implementation proves JVM support; the canonical identity-keyed browser
+     :say "A real JVM implementation proves JVM [execution support](#term/execution-profile); the canonical identity-keyed browser
            primitive ABI adds browser support only for implemented operations. Purity, a familiar
            name and authored type annotations cannot manufacture execution support."}
     {:ns graphden.types.core :defn make-union
@@ -741,10 +764,10 @@
      :see [[:types "subtype?"]]}
     {:ns graphden.types.core.view :defn encoded-type
      :say "Projects explicit encode-view results in data positions: remove only the non-hidden
-           ui-view representation label, preserving secret and other markers. Function signatures
+           [UI view](#term/ui-view) representation label, preserving secret and other markers. Function signatures
            remain unchanged because encoding a present value cannot rewrite future callback calls."}
     {:ns graphden.types.view :defn broad-sink-hints
-     :say "Reports where a UiView enters an intentionally broad any/jsonb data sink, including
+     :say "Reports where a [UiView](#term/ui-view) enters an intentionally broad any/jsonb data sink, including
            nested record/list/map paths. The checker retains consumed binding expectations so
            an inherited, already-bound argument keeps the same diagnostic in its descendants."}
     {:ns graphden.types.check.literals :defn classify-literal
@@ -1418,7 +1441,9 @@
            This backend supports a small part of the graph vocabulary, separate from the JVM
            executor. `editor-shell-menu-graph.js` and `editor-fn-picker-graph.js` connect shipped
            plans to real controls; native host code retains authentication, search, type verdicts,
-           authorized actions, and focus."
+           authorized actions, and focus. [Authority](#term/authority) is separate from backend
+           support. An explicit [server-call](#term/server-call) uses a checked asynchronous boundary;
+           it does not export the server implementation into this interpreter."
      :see [[:editor "mount"] [:editor "pickerArrange"]]}
 
     {:file "resources/packages/app/ui-preview/graph-component.js" :defn create

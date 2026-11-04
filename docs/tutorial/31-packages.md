@@ -132,10 +132,12 @@ fn-name keyword to its impl.
 Two things are required, and forgetting the second is the most
 common mistake:
 
-1. `defbase` turns a Clojure fn into a base-fn impl. Its body
-   should be a SINGLE library call (the "Base Function
-   Philosophy" rule in [CLAUDE.md](../../CLAUDE.md) — anything
-   longer belongs in the graph as a composed fn-def).
+1. `defbase` turns a Clojure fn into a base-fn impl. Keep each
+   primitive focused on one operation; express multi-step composition
+   through fn-defs. Length alone does not decide the boundary: database
+   transactions, cryptography and resource limits may require native
+   implementation. Follow the
+   [package decision matrix](../PACKAGES.md#5-base-function-vs-fn-def-decision-matrix).
 2. The `impls` map (read by the loader) links the fn-def's
    `:name` keyword to the impl. Without an entry, the fn-def in
    `fns.edn` loads with no impl and its consumers fail with a

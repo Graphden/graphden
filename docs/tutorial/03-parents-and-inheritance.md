@@ -22,8 +22,10 @@ When you write:
 …graphden stores `:hello-handler` as a `:fn` row whose
 `:parent-ids` field contains exactly one entry: `:const`'s row id.
 That's it. The field is called `parent-ids` (plural) even when
-you wrote `:parent` (singular) — both forms write into the same
-column. `:parent :const` is shorthand for `:parents [:const]`.
+you wrote `:parent` (singular) — both forms populate the same
+relationship. PostgreSQL stores this many-to-many relationship in a junction
+table, rather than a column containing a vector. `:parent :const` is shorthand
+for `:parents [:const]`.
 
 Two consequences:
 

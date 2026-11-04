@@ -62,17 +62,16 @@ promise persistent-service tracing.
 
 ## The contract lives in the graph
 
-For a larger application, define paths and response shapes once, then reference
-them from both the producer and consumer:
+For a larger application, define a path once, then reference it from both the
+producer and consumer:
 
 ```edn
-;; svc-orders.api — the contract: paths + shapes, owned by the producer's team
+;; svc-orders.api — shared path, owned by the producer's team
 {:name :orders-path :parent :const :args {:value "/orders"}}
-{:name :orders-shape :type {:orders [:list :int]}}
 
 ;; the producer's route, built from the contract
 {:name :orders-route :parent :get-route
- :args {:path :orders-path :handler-fn :orders-ok}}
+ :args {:path :orders-path :handler :orders-ok}}
 
 ;; the consumer, built from the same contract
 {:name :fetch-orders :parent :service-get-json
@@ -80,9 +79,18 @@ them from both the producer and consumer:
 ```
 
 Change the path constant's value and both the route and consumer use the new
-path. Narrow `:orders-shape` and the type-checker reports which graph no
-longer matches. The contract is an ordinary type function (lesson 08),
-so no separate interface-definition file is needed. With two teams in one
+path. `orders-ok` and `orders-service` stand for your existing producer
+handler and service.
+
+Sharing a response shape requires another explicit connection: declare a
+type such as `{:name :orders-shape :type {:orders [:list :int]}}` and use it
+in the producing function's return contract and consuming arguments. An
+unused type declaration cannot diagnose either graph. `service-get-json`
+only parses JSON; validate external data with `ensure-type` before relying
+on its shape. See [types](08-types.md) and
+[TYPES.md — Typed and Untyped Boundary](../TYPES.md#typed-and-untyped-boundary).
+
+With two teams in one
 org, the contract namespace belongs to the producer's team and the
 consumer's team holds `read` on it (lesson 28 — a role can be the
 grant's subject, so the team is one row).

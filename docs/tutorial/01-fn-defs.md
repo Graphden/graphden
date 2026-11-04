@@ -6,6 +6,13 @@ and explain each part of it.
 **Concepts introduced**: `fn-def`, `:name`, `:parent`, `:args`,
 `base function`, `fns.edn`.
 
+A **fn-def** is the source declaration of a graph function: a stored
+computation identified by an ID, with a name within a namespace. An
+**argument slot** identifies one named, typed input; a **binding** supplies
+that input for a function. See [slots and bindings](04-slots-and-bindings.md).
+A **type** describes allowed values. Types also use function rows, but have
+no executable implementation; [Lesson 08](08-types.md) explains that role.
+
 ## The smallest meaningful fn-def
 
 ```edn
@@ -39,20 +46,23 @@ Two places:
    This is the package source form. See [PACKAGES.md](../PACKAGES.md).
 2. **Inside the running editor** — when you click `+` in a
    namespace, the editor creates a fn entity directly via
-   `POST /api/entities/fn`. Same shape, different entry point.
+   `POST /api/entities/fn`. The editor writes entity fields and bindings;
+   the package loader translates source keys such as `:parent` and `:args`
+   into those stored entities. The source map is not that endpoint's
+   request shape.
 
 For this lesson assume you're typing into the editor. The
 `fns.edn` form is what you'd write for code review.
 
 ## Two kinds of fn
 
-Look at the `:parent` field. There are two kinds of fn you can
-parent to:
+Look at the `:parent` field. There are two kinds of executable fn you can
+parent to (type rows can also contribute argument structure; see Lesson 08):
 
 | Kind | What it is | Example | How to spot one |
 |---|---|---|---|
-| **Base function** | A small Clojure impl wrapping one library call | `:const`, `:add`, `:render-hiccup`, `:pg-query` | Has a `:return-type-fn-id`, no `:parent-ids` |
-| **fn-def** | A pure composition — no Clojure, just bindings | `:hello-handler`, `:web-server`, `:get-route` | Has at least one `:parent-ids` |
+| **Base function** | A focused native implementation | `:const`, `:add`, `:render-hiccup`, `:pg-query` | Has a `:return-type-fn-id`, no `:parent-ids` |
+| **fn-def** | A graph composition using parents and bindings | `:hello-handler`, `:web-server`, `:get-route` | Has at least one `:parent-ids` |
 
 You can parent a new fn-def to either kind. Inheritance works
 the same way for both.

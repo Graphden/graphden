@@ -285,10 +285,10 @@ Enforces a target branch's review policy. Required approvals must be distinct, c
 :CUSTOM_ID: versioning/branch-content-stamp
 :FILE: src/graphden/versioning/merge/core.clj
 :LINE: 141
-:MINS: 1.7
+:MINS: 1.8
 :END:
 
-Computes a content stamp from the count and latest timestamp of the branch's own [[file:glossary.org::#term/branch-view][version rows]]. An approval stores this stamp. Later edits append rows and change the stamp, so the approval no longer counts for the changed content.
+Computes a content stamp from the count and latest timestamp of the branch's own [[file:glossary.org::#term/branch-view][version rows]] and the merge records targeting that branch. An approval stores this stamp. Both direct edits and merges into the proposal change it, so an approval no longer counts after either operation changes the proposed content.
 
 - source :: [[file:../../../src/graphden/versioning/merge/core.clj::(defn branch-content-stamp][src/graphden/versioning/merge/core.clj:141]]
 - same file :: [[file:versioning.org::#versioning/merge-transitively!][merge-transitively!]], [[file:versioning.org::#versioning/validate-approval-policy!][validate-approval-policy!]]

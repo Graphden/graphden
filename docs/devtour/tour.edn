@@ -669,8 +669,9 @@
            Missing valid approvals produce `:branch/approval-required` rather than allowing the merge."}
     {:ns graphden.versioning.merge.core :defn branch-content-stamp
      :say "Computes a content stamp from the count and latest timestamp of the branch's own [version
-           rows](#term/branch-view). An approval stores this stamp. Later edits append rows and change
-           the stamp, so the approval no longer counts for the changed content."}
+           rows](#term/branch-view) and the merge records targeting that branch. An approval stores
+           this stamp. Both direct edits and merges into the proposal change it, so an approval
+           no longer counts after either operation changes the proposed content."}
     {:ns graphden.storage.postgres.graph-epoch :defn bump!
      :say "Increments the graph [epoch](#term/invalidation) before a graph-changing write. The branch
            router checks this counter when retrieving a context, so it can detect missed invalidations

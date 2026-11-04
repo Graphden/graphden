@@ -158,14 +158,14 @@ uses it for its own work.
 
 ## Try it
 
-1. Build the `:sum-to` chain above. Seven fn-defs; the fastest way is
+1. Build the `:sum-to` chain above. Eight named fn-defs; the fastest way is
    the editor's `+` on each slot, but pasting the block through the
    MCP endpoint ([docs/MCP_CLIENTS.md](../MCP_CLIENTS.md)) is
    legitimate too.
 2. Run `:sum-to` with `n = 4`. Expect `10`.
 3. Break the base case deliberately: change `:_sum-done?` to compare
-   against `-1` and run again with `n = 4`. The counter walks past
-   zero, the bound trips, and you get
+   against `5` and run again with `n = 4`. The counter only decreases,
+   so it never reaches `5`; the bound trips, and you get
    `:recursion-error/max-depth-exceeded` — a typed error naming the
    limit, not a crash.
 4. Put it back, then run with `n = 0`. The base case fires on the

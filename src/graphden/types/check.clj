@@ -1324,6 +1324,10 @@
      the residual `{}` is the variadic-ignore shape; re-adopt the
      slot's args.
 
+   An authored `:lambda-params` partitions call-site and capture args
+   before inference: parameter names may differ from the slot's names,
+   and an explicit empty vector captures even a structural-name match.
+
    If neither args nor effects changed, return `actual` unchanged
    (avoids needless allocation in the common path)."
   [expected actual b-form]
@@ -1333,9 +1337,12 @@
                                 (seq call-site-keys))
                          (types/fn-args expected)
                          raw-args)
-        extras         (when (> (count args-after-var)
-                                (count call-site-keys))
-                         (remove call-site-keys (keys args-after-var)))
+        declared       (:lambda-params (registry/rich-type-of b-form))
+        extras         (if (some? declared)
+                         (remove (set declared) (keys args-after-var))
+                         (when (> (count args-after-var)
+                                  (count call-site-keys))
+                           (remove call-site-keys (keys args-after-var))))
         stripped       (if (seq extras)
                          (apply dissoc args-after-var extras)
                          args-after-var)
@@ -1679,20 +1686,24 @@
    each var to a unique `'a-<n>` while keeping sharing within one ref.
 
    For a ref bound to a HOF slot, the lifted set is the ref's free
-   args MINUS the slot's structural call-site arg names. Closure-
-   capture semantics (docs/CLOSURE_CAPTURE.md § Implementation
-   Contract): call-site args are supplied per invocation by the
+   args MINUS the authored lambda parameters, falling back to the
+   slot's structural call-site arg names. Closure-capture semantics
+   (docs/CLOSURE_CAPTURE.md § Implementation Contract): call-site args are supplied per invocation by the
    parent's impl; captured args must come from the outer binding-
    chain and therefore widen the calling fn-def's free-arg surface."
   [args parent-args]
   (let [fresh (fn [fn-name]
                 (when-let [ents (:args (registry/rich-type-of fn-name))]
                   (types/freshen-args ents)))
-        lift-for-slot (fn [arg-name ref-args]
-                        (if (hof-slot? parent-args arg-name)
-                          (apply dissoc ref-args
-                                 (hof-call-site-arg-names parent-args arg-name))
-                          ref-args))]
+        lift-for-slot (fn [arg-name ref-name]
+                        (let [ref-args (or (fresh ref-name) {})
+                              declared (:lambda-params (registry/rich-type-of ref-name))]
+                          (if (hof-slot? parent-args arg-name)
+                            (apply dissoc ref-args
+                                   (if (some? declared)
+                                     declared
+                                     (hof-call-site-arg-names parent-args arg-name)))
+                            ref-args)))]
     (reduce-kv (fn [acc arg-name b-form]
                  (cond
                    ;; Identity edge: nothing of the target lifts.
@@ -1700,11 +1711,10 @@
                    acc
 
                    (keyword? b-form)
-                   (merge acc (lift-for-slot arg-name (or (fresh b-form) {})))
+                   (merge acc (lift-for-slot arg-name b-form))
 
                    (and (map? b-form) (contains? b-form :ref))
-                   (merge acc (lift-for-slot arg-name
-                                             (or (fresh (:ref b-form)) {})))
+                   (merge acc (lift-for-slot arg-name (:ref b-form)))
 
                    ;; List items aren't HOF-wrapped — they're inlined
                    ;; into the outer evaluation context, so ALL their
@@ -1721,7 +1731,8 @@
 (defn- collect-free-args
   "Compute the fn-def's remaining free-arg surface: parent's args
    MINUS those locally bound, PLUS renames (as new names), PLUS
-   transitive ref-free args (freshened per ref)."
+   transitive ref-free args (freshened per ref). Local bindings and
+   rename sources also discharge lifted captures from sibling refs."
   [fn-def parent-args subst]
   (let [args (:args fn-def)
         ;; Single pass over `args` partitions every binding into the
@@ -1773,7 +1784,9 @@
                                                (contains? type-pinned a))
                                    [a (types/resolve subst t)])))
                          parent-args)]
-    (merge (ref-free-args args parent-args) local-free)))
+    (merge (apply dissoc (ref-free-args args parent-args)
+                  (into real-bound renamed-original-names))
+           local-free)))
 
 
 ;; -----------------------------------------------------------------------------

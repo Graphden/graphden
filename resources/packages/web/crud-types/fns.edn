@@ -127,17 +127,36 @@
    :args {}
    :return-type [:list :text]}
 
-  {:name :type-name-kinds
-   :description "Sorted `{:name :kind}` rows for the editor's type-name datalist — named type-rows classified via `compute-fn-role` plus the bare primitives. Backs `/partials/type-name-datalist`."
+  {:name :_type-name-entries
+   :description "One ACL-filtered, sorted picker snapshot. Selection spelling and canonical type reference remain separate, including colliding root and namespace names."
    :args {}
-   :return-type [:list {:name :text :kind :text}]
+   :return-type [:list {:name :text :kind :text :type-ref :keyword}]
    :effects #{:db}}
 
+  {:name :_type-name-wire-row
+   :parent :dissoc
+   :args {:map {:as :item :type {:name :text :kind :text :type-ref :keyword}}
+          :key {:value :type-ref}}}
+
+  {:name :type-name-kinds
+   :description "Sorted type-picker names and kinds, with qualified selection spelling for collisions."
+   :parent :map
+   :args {:func :_type-name-wire-row
+          :coll :_type-name-entries}}
+
+  {:name :_type-name-compatible?
+   :parent :subtype?
+   :args {:candidate {:parent :get
+                      :args {:coll {:as :item :type {:name :text :kind :text :type-ref :keyword}}
+                             :key {:value :type-ref} :default nil}}}}
+
   {:name :compatible-type-names
-   :description "`type-name-kinds` rows filtered to the names that can legally narrow `expected` — one alias-aware `subtype?` sweep. Backs `/partials/compatible-type-options` (replaces the editor's per-name /api/types/compatible fan-out)."
-   :args {:expected {:type :type-expression :description "Type expression candidates must be subtypes of."}}
-   :return-type [:list {:name :text :kind :text}]
-   :effects #{:db}}
+   :description "Filter the shared picker snapshot by canonical type identity before removing internal type refs. Expected is the type candidates must narrow."
+   :parent :map
+   :args {:func :_type-name-wire-row
+          :coll {:parent :filter
+                 :args {:pred :_type-name-compatible?
+                        :coll :_type-name-entries}}}}
 
   ;; fn-id → registry entry (by id) → :return, all graph-visible. The row
   ;; → name hop below feeds only the callable-shape walk (`:_rsof-*`).

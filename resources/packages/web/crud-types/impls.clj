@@ -178,22 +178,11 @@
   (vec (sort (map name tcheck/known-effect-categories))))
 
 
-(defbase type-name-kinds
-  "Sorted `{:name :kind}` rows for the editor's type-name datalist —
-   named type-rows classified via `compute-fn-role` plus the bare
-   primitives. Single library call into `types-api/type-name-kinds`."
+(defbase _type-name-entries
+  "Acquire scoped picker rows without discarding their canonical type refs."
   []
   (cr/record-effect! :db)
-  (types-api/type-name-kinds ctx))
-
-
-(defbase compatible-type-names
-  "`type-name-kinds` rows filtered to the names that can legally
-   narrow `expected` — one alias-aware `subtype?` sweep server-side.
-   Single library call into `types-api/compatible-type-names`."
-  [expected]
-  (cr/record-effect! :db)
-  (types-api/compatible-type-names ctx expected))
+  (types-api/type-name-entries ctx))
 
 
 (defbase _types-usages-apply
@@ -333,8 +322,7 @@
    :rich-type-of-id rich-type-of-id
    :rule-owner-of-id rule-owner-of-id
    :declarable-effect-categories declarable-effect-categories
-   :type-name-kinds type-name-kinds
-   :compatible-type-names {:impl compatible-type-names :taint-propagate? true}
+   :_type-name-entries _type-name-entries
    :_types-usages-apply _types-usages-apply
    :_apply-create-record-type-body {:impl _apply-create-record-type-body :taint-propagate? true}
    :_apply-create-record-type-rollback {:impl _apply-create-record-type-rollback :taint-propagate? true}

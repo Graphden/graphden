@@ -19,7 +19,9 @@
     [cheshire.core :as cheshire]
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.crud.types-api :as ta]
     [graphden.executor.registry.core :as registry]
+    [graphden.types.core :as types]
     [graphden.executor.test-setup :as setup]
     [graphden.test-infra.graph-harness :as gh :refer [*graph*]]))
 
@@ -330,3 +332,46 @@
       (is (contains? names "shout") "a concrete one-arg callee is admitted")
       (is (not (contains? names "pair"))
           "a two-arg callee with neither arg named :item does not fit a one-arg slot"))))
+
+
+(deftest picker-policy-projects-after-canonical-filter-test
+  ;; Supply only the acquisition boundary. The real stored graph must capture
+  ;; expected in the predicate, retain order, and remove the internal reference.
+  (let [entries [{:name "a/same" :kind "refinement" :type-ref :a/same}
+                 {:name "b/same" :kind "refinement" :type-ref :b/same}
+                 {:name "int" :kind "primitive" :type-ref :int}]
+        reads (atom 0)]
+    (binding [types/*type-aliases-override*
+              (atom {:a/same [:refine :int [:>= 0]] :b/same :text})]
+      (with-redefs [ta/type-name-entries (fn [_] (swap! reads inc) entries)]
+        (is (= [{:name "a/same" :kind "refinement"}
+                {:name "int" :kind "primitive"}]
+               (gh/exec-name :compatible-type-names {:expected :int})))
+        (is (= 1 @reads) "one acquisition, never one query per candidate")
+        (is (= (mapv #(dissoc % :type-ref) entries)
+               (gh/exec-name :type-name-kinds {})))
+        (is (= [] (gh/exec-name :compatible-type-names {:expected :bool})))))))
+
+
+(deftest rich-type-wire-projection-preserves-unknown-fields-test
+  (let [omitted [:resolved-bindings :description :source-file :source-line
+                 :tags :arg-effects :call-time-effects :primary-parent]
+        full {:alpha (merge (zipmap omitted (repeat "metadata"))
+                            {:return :int :args {} :effects #{} :future-field 42})
+              :beta {:return [:list :text] :slot-types {:value :text}}}
+        reads (atom 0)]
+    (with-redefs [ta/all-rich-types (fn [_] (swap! reads inc) full)]
+      (is (= (update-vals full #(apply dissoc % omitted))
+             (gh/exec-name :api-rich-types {})))
+      (is (= 1 @reads) "wire projection shares one scoped snapshot"))
+    (with-redefs [ta/all-rich-types (constantly {})]
+      (is (= {} (gh/exec-name :api-rich-types {}))))))
+
+
+(deftest rich-type-wire-uses-production-snapshot-test
+  (let [full (gh/exec-name :all-rich-types {})
+        lean (gh/exec-name :api-rich-types {})
+        omitted [:resolved-bindings :description :source-file :source-line
+                 :tags :arg-effects :call-time-effects :primary-parent]]
+    (is (seq full))
+    (is (= (update-vals full #(apply dissoc % omitted)) lean))))

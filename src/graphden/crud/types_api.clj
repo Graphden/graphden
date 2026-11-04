@@ -186,7 +186,7 @@
   #{:refinement :list :union :variant :record :fn-type :primitive})
 
 
-(defn- type-name-entries
+(defn type-name-entries
   "Picker rows with an internal identity-preserving type reference.
    Selection spelling stays bare when unique, qualified when ambiguous."
   [ctx]
@@ -221,26 +221,6 @@
     (->> (concat rows prims)
          (sort-by :name)
          (vec))))
-
-
-(defn type-name-kinds
-  "Type-picker names and kinds. Unique names retain their existing spelling;
-   collisions use namespace-qualified selection values, including /name at root."
-  [ctx]
-  (mapv #(dissoc % :type-ref) (type-name-entries ctx)))
-
-
-(defn compatible-type-names
-  "`type-name-kinds` rows filtered by each row's canonical type alias,
-   independently of its display/selection spelling. Uses the same
-   alias-aware predicate `/api/types/compatible` answers per pair.
-   One call replaces the editor's former per-name fan-out (~50
-   parallel POSTs per type-picker open)."
-  [ctx expected]
-  (into []
-        (comp (filter #(types/subtype? (:type-ref %) expected))
-              (map #(dissoc % :type-ref)))
-        (type-name-entries ctx)))
 
 
 (defn project-rich-type-entry
@@ -888,35 +868,3 @@
    the HTTP wire-shaping (lean bulk / per-fn) lives in `api-rich-types`."
   [ctx]
   (rich-types-with-type-rows ctx))
-
-
-(def bulk-omitted-fields
-  "Per-entry fields dropped from the BULK `/api/types` payload — NO
-   editor code reads any of them off the type registry any more:
-   `:source-file` / `:source-line` / `:tags` / `:arg-effects` /
-   `:call-time-effects` (never read), `:description` (the editor
-   sources descriptions from graph rows), `:resolved-bindings` and
-   `:primary-parent` (their former readers moved server-side — the
-   return-type-rule partial and the layout strip facts read the RAW
-   registry directly). Measured: these
-   were ~57% of the 2.4 MB decoded payload, re-fetched on every mutation,
-   to paint chips for the handful of fns on screen. Kept in bulk:
-   `:return` / `:args` / `:effects` / `:slot-types` / `:nav-types` /
-   `:type-row?` — the fields the bulk chip/strip paint reads for every
-   rendered fn. `:primary-parent` joined the omitted set when the
-   client rule-owner walk that read it moved server-side (layout
-   strip facts). See docs/PERF_BUDGETS.md finding K."
-  [:resolved-bindings :description :source-file :source-line :tags
-   :arg-effects :call-time-effects :primary-parent])
-
-
-(defn api-rich-types
-  "Body of the `api-rich-types` base-fn — the wire-shaping layer over
-   the augmented snapshot: the lean BULK payload the editor loads at
-   boot + after each mutation, with `bulk-omitted-fields` stripped
-   from every entry. The former `?fn=<name>` per-fn FULL-entry branch
-   is gone with its one consumer (the deleted `ensureRichTypeFullEntry`
-   backfill — the return-type-rule popover is a server partial now)."
-  [ctx]
-  (update-vals (rich-types-with-type-rows ctx)
-               #(apply dissoc % bulk-omitted-fields)))

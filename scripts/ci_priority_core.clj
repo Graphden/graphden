@@ -291,15 +291,13 @@
   [paths source]
   (let [literals (map second (re-seq #"['\"`](/api/[^'\"`\s]*)" source))]
     (some (fn [path]
-            (let [dynamic-at (str/index-of path ":")
-                  prefix (if dynamic-at (subs path 0 dynamic-at) path)]
-              (some (fn [literal]
-                      (if dynamic-at
-                        (str/starts-with? literal prefix)
-                        (or (= literal prefix)
-                            (str/starts-with? literal (str prefix "?"))
-                            (str/starts-with? literal (str prefix "#")))))
-                    literals)))
+            (let [segments (map (fn [segment]
+                                  (if (str/starts-with? segment ":")
+                                    "[^/?#]+"
+                                    (java.util.regex.Pattern/quote segment)))
+                                (str/split path #"/" -1))
+                  pattern (re-pattern (str (str/join "/" segments) "(?:[?#].*)?"))]
+              (some #(re-matches pattern %) literals)))
           paths)))
 
 

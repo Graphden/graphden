@@ -141,6 +141,20 @@
            (frequencies (priority/browser-order changed))))))
 
 
+(deftest dynamic-api-routes-preserve-segments-and-literal-suffixes
+  (let [paths #{"/api/branches/:ref/diff" "/api/ui/configuration/apply"}
+        matches? (fn [path]
+                   (boolean (#'priority/literal-api-consumer?
+                             paths (str "fetch('" path "');"))))]
+    (doseq [path ["/api/branches/x/diff" "/api/branches/x/diff?full=1"
+                  "/api/branches/x/diff#entry" "/api/ui/configuration/apply"]]
+      (is (matches? path) path))
+    (doseq [path ["/api/branches/x/propose" "/api/branches/x/y/diff"
+                  "/api/branches//diff" "/api/branches/x/diff-extra"
+                  "/api/ui/configuration/apply-extra"]]
+      (is (not (matches? path)) path))))
+
+
 (deftest exact-route-consumers-follow-local-helper-imports
   (let [dir (fs/create-temp-dir {:prefix "priority-api-"})
         scripts (str (fs/absolutize "scripts"))

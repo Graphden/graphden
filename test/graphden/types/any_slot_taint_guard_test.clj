@@ -45,7 +45,8 @@
 ;; ---------------------------------------------------------------------
 
 (def ^:private allow-list
-  {:_editor-root-plan "Request only binds private issuance/session state; checked stored source and a fresh opaque token never echo request content or auth-carrier hashes."
+  {:_live-service-endpoint "Service rows contribute only their IDs to a branch-scoped live-instance query. The returned host, port, and URL come from fresh instance rows, not from the supplied service-row content."
+   :_editor-root-plan "Request only binds private issuance/session state; checked stored source and a fresh opaque token never echo request content or auth-carrier hashes."
    :_reconcile-services-apply "Ignores request content; returns generated started/stopped instance IDs."
    :debug-catch-disarm! "Ignores request content; returns the disarmed status."
    :debug-catch-status "Ignores request content; returns the current org-scoped trap state."

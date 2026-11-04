@@ -187,8 +187,8 @@
         run #(exec/execute-with-named-args ctx (get all-name->id :branch-lint-findings)
                                            {:suppressed %})]
     (with-redefs [lg/lint-branch (fn [_ suppress]
-                                 (reset! captured suppress)
-                                 [raw])]
+                                   (reset! captured suppress)
+                                   [raw])]
       (is (= [{:rule "duplicate-definition" :message "same shape" :weight 4
                :fn-ids [(str b) (str a)]
                :fns [{:id (str b) :name "second" :ns nil}
@@ -197,8 +197,8 @@
       (is (= [[:duplicate-definition (vec (sort [(str a) (str b)]))]] @captured))
       (testing "empty suppression input and empty findings stay empty"
         (with-redefs [lg/lint-branch (fn [_ suppress]
-                                     (reset! captured suppress)
-                                     [])]
+                                       (reset! captured suppress)
+                                       [])]
           (is (= [] (run [])))
           (is (= [] @captured))))
       (testing "member pairing stops at the shorter input"

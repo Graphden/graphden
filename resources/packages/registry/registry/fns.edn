@@ -633,12 +633,12 @@
   {:name :_dep-name
    :parent :str
    :args {:parts [{:parent :get :args {:coll {:as :item :type :package-dependency-shape}
-                                      :key {:value :name} :default nil}}]}}
+                                       :key {:value :name} :default nil}}]}}
 
   {:name :_dep-version
    :parent :str
    :args {:parts [{:parent :get :args {:coll {:as :item :type :package-dependency-shape}
-                                      :key {:value :version} :default nil}}]}}
+                                       :key {:value :version} :default nil}}]}}
 
   {:name :_dep-old-index
    :parent :zipmap
@@ -682,7 +682,7 @@
                                :args {:pred :_dep-incompatible?
                                       :coll {:parent :sort
                                              :args {:coll {:parent :keys
-                                                            :args {:map :_dep-old-index}}}}}}}}}}
+                                                           :args {:map :_dep-old-index}}}}}}}}}}
 
   {:name :semver-compatible?
    :description "Is `:to` inside `:from`'s caret range (`^from` — same major; below 1.0 the same minor)? The range a `^` / `~>` consumer would auto-advance into, so a breaking change must leave it."

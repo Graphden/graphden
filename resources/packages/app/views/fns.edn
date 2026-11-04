@@ -153,23 +153,20 @@
           :args {:string "validation-error/view-command"}}
          :_vc-reason]}}}}}}
 
-  {:name :_vc-filters,
+  {:name :_vc-body-get,
    :parent :get,
    :args
    {:coll
     {:parent :ensure-type,
-     :args {:value :_vc-body, :type {:value :keyword-map}}},
-    :key {:value :filters},
-    :default nil}}
+     :args {:value :_vc-body, :type {:value :keyword-map}}}}}
+
+  {:name :_vc-filters,
+   :parent :_vc-body-get,
+   :args {:key {:value :filters}, :default nil}}
 
   {:name :_vc-name,
-   :parent :get,
-   :args
-   {:coll
-    {:parent :ensure-type,
-     :args {:value :_vc-body, :type {:value :keyword-map}}},
-    :key {:value :name},
-    :default nil}}
+   :parent :_vc-body-get,
+   :args {:key {:value :name}, :default nil}}
 
   {:name :_vc-text-error,
    :parent :str,
@@ -188,7 +185,7 @@
       {:parent :lte,
        :args
        {:nums [{:parent :count, :args {:coll {:parent :ensure-type
-                       :args {:value :_vc-candidate :type {:value :text}}}}} 512]}},
+                                              :args {:value :_vc-candidate :type {:value :text}}}}} 512]}},
       :then :_vc-candidate,
       :else {:parent :_vc-reject, :args {:reason :_vc-text-error}}}},
     :else {:parent :_vc-reject, :args {:reason :_vc-text-error}}}}
@@ -250,27 +247,25 @@
     :then nil,
     :else :_vc-trimmed}}
 
-  {:name :_vc-axis-item,
-   :lambda-params [:candidate],
+  {:name :_vc-axis-dispatch,
    :parent :if,
    :args
    {:test :_vc-uuid-axis,
     :then
     {:parent :_vc-uuid,
-     :args {:candidate :_vc-candidate, :axis :_vc-axis}},
-    :else
-    {:parent :_vc-text,
      :args {:candidate :_vc-candidate, :axis :_vc-axis}}}}
+
+  {:name :_vc-axis-item,
+   :lambda-params [:candidate],
+   :parent :_vc-axis-dispatch,
+   :args {:else {:parent :_vc-text,
+                 :args {:candidate :_vc-candidate, :axis :_vc-axis}}}}
 
   {:name :_vc-normalized-item,
    :lambda-params [:candidate],
-   :parent :if,
+   :parent :_vc-axis-dispatch,
    :args
-   {:test :_vc-uuid-axis,
-    :then
-    {:parent :_vc-uuid,
-     :args {:candidate :_vc-candidate, :axis :_vc-axis}},
-    :else
+   {:else
     {:parent :if,
      :args
      {:test :_vc-keyword-axis,

@@ -74,7 +74,7 @@
           (is (types/contains-hide-result-marker? (:return (registry/rich-type-of row-name))))
           (is (= {:status :succeeded :result nil :tainted? true}
                  (persist/redact-outcome row-name
-                                        {:status :succeeded
-                                         :result {:kind :dependency-incompatible
-                                                  :name "private-package"
-                                                  :old "1.0.0" :new "2.0.0"}}))))))))
+                                         {:status :succeeded
+                                          :result {:kind :dependency-incompatible
+                                                   :name "private-package"
+                                                   :old "1.0.0" :new "2.0.0"}}))))))))

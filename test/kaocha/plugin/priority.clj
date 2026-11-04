@@ -46,6 +46,16 @@
     (catch Exception _ [])))
 
 
+(defn manual-unit-layer?
+  "Only an explicitly marked first unit layer collects all manual failures."
+  [encoded layers]
+  (try
+    (let [manual (:unit-manual (edn/read-string (or encoded "{}")))]
+      (and (vector? manual) (seq manual) (every? string? manual)
+           (= manual (first layers))))
+    (catch Exception _ false)))
+
+
 (defn indexed-layers
   "Select each existing testable once, preserving its original result index."
   [testables layers]

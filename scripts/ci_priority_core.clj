@@ -696,7 +696,9 @@
                   (let [names (get manual kind [])
                         first-names (manual-prefix (when (seq names) (eligible kind)) names kind)
                         selected (set first-names)]
-                    (into (mapv vector first-names)
+                    (into (if (and (= kind :unit) (seq first-names))
+                            [first-names]
+                            (mapv vector first-names))
                           (keep (fn [layer]
                                   (let [remaining (vec (remove selected layer))]
                                     (when (seq remaining) remaining)))
@@ -710,6 +712,7 @@
                                       (runtime-first changed))))
       :unit (vec (mapcat identity unit-groups))
       :unit-layers unit-groups
+      :unit-manual (vec (get manual :unit []))
       :integration (vec (mapcat identity integration-groups))
       :integration-layers integration-groups
       :browser (vec (distinct (concat (get manual :browser [])

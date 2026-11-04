@@ -13,7 +13,7 @@
   (case (or mode "run")
     "run" (prn (priority/plan changed manual))
     "kaocha-hints" (prn (select-keys (priority/plan changed manual)
-                                     [:unit :unit-layers :integration :integration-layers]))
+                                     [:unit :unit-layers :unit-manual :integration :integration-layers]))
     "runtime-order" (println (str/join "\n" (priority/runtime-order changed (:runtime manual))))
     "integration" (println (str/join "\n" (:integration (priority/plan changed manual))))
     "browser" (println (str/join "\n" (:browser (priority/plan changed manual))))

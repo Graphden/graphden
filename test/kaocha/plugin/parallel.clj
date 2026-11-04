@@ -459,7 +459,7 @@
 
 
 (defn- run-children-layered
-  [children test-plan n layers suite-id]
+  [children test-plan n layers suite-id manual-unit-layer?]
   (let [load-error? (some ::testable/load-error children)
         {:keys [layers remaining]} (priority/indexed-layers children layers)
         ordered-results (loop [done [] pending layers index 0]
@@ -467,7 +467,12 @@
                             (let [_ (println (str "CI " (name suite-id) " dependency layer "
                                                   (inc index) "/" (count layers) ": "
                                                   (count layer) " namespaces"))
-                                  batch (run-indexed-layer layer test-plan n load-error?)
+                                  ;; Finish all explicitly requested unit namespaces
+                                  ;; before deciding whether to admit the auto/tail wave.
+                                  batch (binding [testable/*fail-fast?*
+                                                  (if (and manual-unit-layer? (zero? index))
+                                                    false testable/*fail-fast?*)]
+                                          (run-indexed-layer layer test-plan n load-error?))
                                   done (into done batch)]
                               (if (some (comp result/failed? second) batch)
                                 (let [unrun (concat (mapcat identity (rest pending)) remaining)]
@@ -503,7 +508,9 @@
             (capture/bypass (println (progress-line @progress))))
         results (binding [*integration-progress* progress]
                   (if (seq layers)
-                    (run-children-layered children test-plan n layers suite-id)
+                    (run-children-layered children test-plan n layers suite-id
+                                          (and (= :unit suite-id)
+                                               (priority/manual-unit-layer? encoded layers)))
                     (if (> n 1)
                       (run-children-mixed children test-plan n hints)
                       (let [{:keys [priority remaining]} (priority/indexed-order children hints)

@@ -330,9 +330,10 @@
     (is (= ["edit-appearance-graph.test.js" "edit-a11y-audit.test.js"]
            (subvec browser 0 2)))
     (is (= "graphden.executor.builtin-plans-test" (first (:unit plan))))
-    (is (= [["graphden.executor.builtin-plans-test"]
-            ["graphden.editor.component-config-test"]]
-           (subvec (:unit-layers plan) 0 2)))
+    (is (= ["graphden.executor.builtin-plans-test"
+            "graphden.editor.component-config-test"]
+           (first (:unit-layers plan))))
+    (is (= (:unit manual) (:unit-manual plan)))
     (is (= (frequencies (priority/runtime-order nil)) (frequencies runtime)))
     (is (= (frequencies (priority/browser-order nil)) (frequencies browser)))
     (is (= (count (:unit plan)) (count (distinct (:unit plan)))))))

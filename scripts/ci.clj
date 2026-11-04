@@ -616,7 +616,7 @@
                    :worktree-status (ci-resume/git-output "status" "--porcelain" "--untracked-files=normal")}
         hints (select-keys (priority/plan (priority/changed-paths since)
                                           (priority/manual-hints (System/getenv "GRAPHDEN_CI_FIRST_TESTS")))
-                           [:unit :unit-layers :integration :integration-layers])
+                           [:unit :unit-layers :unit-manual :integration :integration-layers])
         checks (mapv #(assoc % :extra-env {"GRAPHDEN_CI_SINCE" (or since "")
                                            "GRAPHDEN_CI_PRIORITY_HINTS" (pr-str hints)}) selected-checks)
         report-path (ci-report-path)

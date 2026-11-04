@@ -37,6 +37,10 @@
    content?\" — if yes it needs `:taint-propagate?` and a `golden-tainted`
    entry; a REMOVED name just leaves both sets."
   #{:_fn-branch-local-seed :_fn-slot-seals :sql-query-public
+    ;; Service rows are server reads; the live endpoint uses their IDs to
+    ;; query instance rows. Resolver seams also return server-owned endpoints.
+    :_service-rows :_live-service-endpoint
+    :_temporary-service-endpoint :_addon-service-endpoint
     ;; Parsing retains caller fields; deletion returns caller receipt IDs.
     :parse-fn-delete-receipts :delete-fn-receipts
     ;; Inheritance commands and their outcomes retain caller-selected content.
@@ -186,7 +190,7 @@
     :rewrite-refs-to-version
     :rich-type-of-id :ring-create-default-handler :ring-handler
     :ring-router
-    :rule-owner-of-id :running-entry :running-state :secret-leaf :secret-path-args :semver-compatible? :service-endpoint
+    :rule-owner-of-id :running-entry :running-state :secret-leaf :secret-path-args :semver-compatible?
     :queue-publish :queue-take :queue-ack :queue-nack :queue-extend :queue-requeue
     :queue-stats :queue-dead-letters
     :call-with :call-traced :with-heartbeat :trace-headers

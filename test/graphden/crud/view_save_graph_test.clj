@@ -6,11 +6,10 @@
     [cheshire.core :as json]
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.crud.entities :as entities]
-    [graphden.crud.fn-execution.persist :as persist]
     [graphden.crud.test-autorun :as autorun]
     [graphden.crud.views :as views]
-    [graphden.executor.test-setup :as setup]
     [graphden.executor.registry.core :as registry]
+    [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
     [graphden.test-infra.golden-app :as ga]
     [graphden.types.check :as check]
@@ -139,7 +138,7 @@
         {:keys [storage] :as graph} ga/*bootstrap*
         save-calls (atom 0)
         counts #(into {} (map (fn [entity]
-                               [entity (count (sp/query-entities (vs/unwrap storage) entity {}))]))
+                                [entity (count (sp/query-entities (vs/unwrap storage) entity {}))]))
                       [:fn :fn-version :binding :binding-version
                        :binding-list-item :binding-list-item-version])
         before (counts)]
@@ -163,21 +162,20 @@
     (is (= before (counts)) "Rejected commands cannot write identity/version rows")))
 
 
-(deftest composed-command-preserves-and-redacts-input-taint
+(deftest composed-command-refuses-marked-input-before-normalization
   (doseq [marked-type [[:secret :keyword-map]
                        {:private-field [:secret :text]}]]
-    (let [source (random-uuid)
-          parsed (random-uuid)]
+    (let [source (random-uuid)]
       (registry/record-rich-types-raw! source :view-command-marked-body
-                                      {:args {} :return marked-type})
-      (check/check-fn-def! {:id parsed :name :view-command-marked-result
-                            :parent :parse-view-command
-                            :args {:body :view-command-marked-body}})
-      (is (= [:secret :keyword-map]
-             (:return (registry/rich-type-of parsed)))
-          (str "Composed normalization must preserve the marker from " marked-type))
-      (is (= {:status :succeeded :result nil :tainted? true}
-             (persist/redact-outcome parsed
-                                    {:status :succeeded
-                                     :result {:private-field "must-not-escape"}}))
-          (str "Composed parser results must be redacted for " marked-type)))))
+                                       {:args {} :return marked-type})
+      (let [error (try
+                    (check/check-fn-def!
+                      {:id (random-uuid) :name :view-command-marked-result
+                       :parent :parse-view-command
+                       :args {:body :view-command-marked-body}})
+                    nil
+                    (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+        (is (= {:type :types/check-failed :arg :body
+                :expected :jsonb :actual marked-type}
+               (select-keys error [:type :arg :expected :actual]))
+            (str "Wire JSON boundary must refuse marked input " marked-type))))))

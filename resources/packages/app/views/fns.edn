@@ -153,23 +153,21 @@
           :args {:string "validation-error/view-command"}}
          :_vc-reason]}}}}}}
 
-  {:name :_vc-filters,
+  {:name :_vc-body-field,
    :parent :get,
    :args
    {:coll
     {:parent :ensure-type,
      :args {:value :_vc-body, :type {:value :keyword-map}}},
-    :key {:value :filters},
     :default nil}}
 
+  {:name :_vc-filters,
+   :parent :_vc-body-field,
+   :args {:key {:value :filters}}}
+
   {:name :_vc-name,
-   :parent :get,
-   :args
-   {:coll
-    {:parent :ensure-type,
-     :args {:value :_vc-body, :type {:value :keyword-map}}},
-    :key {:value :name},
-    :default nil}}
+   :parent :_vc-body-field,
+   :args {:key {:value :name}}}
 
   {:name :_vc-text-error,
    :parent :str,
@@ -188,7 +186,7 @@
       {:parent :lte,
        :args
        {:nums [{:parent :count, :args {:coll {:parent :ensure-type
-                       :args {:value :_vc-candidate :type {:value :text}}}}} 512]}},
+                                              :args {:value :_vc-candidate :type {:value :text}}}}} 512]}},
       :then :_vc-candidate,
       :else {:parent :_vc-reject, :args {:reason :_vc-text-error}}}},
     :else {:parent :_vc-reject, :args {:reason :_vc-text-error}}}}
@@ -250,27 +248,25 @@
     :then nil,
     :else :_vc-trimmed}}
 
-  {:name :_vc-axis-item,
-   :lambda-params [:candidate],
+  {:name :_vc-uuid-or,
    :parent :if,
    :args
    {:test :_vc-uuid-axis,
     :then
     {:parent :_vc-uuid,
-     :args {:candidate :_vc-candidate, :axis :_vc-axis}},
-    :else
-    {:parent :_vc-text,
      :args {:candidate :_vc-candidate, :axis :_vc-axis}}}}
+
+  {:name :_vc-axis-item,
+   :lambda-params [:candidate],
+   :parent :_vc-uuid-or,
+   :args {:else {:parent :_vc-text,
+                 :args {:candidate :_vc-candidate, :axis :_vc-axis}}}}
 
   {:name :_vc-normalized-item,
    :lambda-params [:candidate],
-   :parent :if,
+   :parent :_vc-uuid-or,
    :args
-   {:test :_vc-uuid-axis,
-    :then
-    {:parent :_vc-uuid,
-     :args {:candidate :_vc-candidate, :axis :_vc-axis}},
-    :else
+   {:else
     {:parent :if,
      :args
      {:test :_vc-keyword-axis,
@@ -528,6 +524,7 @@
      :args
      {:pred
       {:parent :_vc-enum-item,
+       :lambda-params [:candidate],
        :args
        {:allowed
         [{:value :fn}
@@ -548,6 +545,7 @@
      :args
      {:pred
       {:parent :_vc-enum-item,
+       :lambda-params [:candidate],
        :args
        {:allowed
         [{:value :failed} {:value :type-errors} {:value :lint}]}},
@@ -564,6 +562,7 @@
      :args
      {:pred
       {:parent :_vc-enum-item,
+       :lambda-params [:candidate],
        :args
        {:allowed
         {:parent :ensure-type,

@@ -1,8 +1,6 @@
 (ns graphden.packages.web.service.impls
-  "Implementation for the web/service base function — resolve a
-   service fn to the address it answers on. The logic (row lookup,
-   the addon resolver seam, the not-running error) lives in
-   `graphden.services.endpoint`; the fn-graph templates
+  "Primitive reads for the graph-composed service endpoint policy.
+   The fn-graph templates
    (`:service-url`, `:service-get`, `:service-post`, …) compose this
    with `web/http-client`. Nothing here dials."
   (:require
@@ -12,13 +10,41 @@
     [graphden.services.endpoint :as endpoint]))
 
 
-(defbase service-endpoint
-  "Where the service named by `service` (a `:fn-ref` slot — the fn's
-   identity, never evaluated) currently answers: `{:host :port :url}`."
+(defbase service-rows
+  "Enabled service rows for this fn on the caller's branch."
   [service]
   (cr/record-effect! :db)
-  (endpoint/resolve-endpoint ctx (request/require-storage ctx) service))
+  (endpoint/service-rows-for (request/require-storage ctx) service))
+
+
+(defbase live-service-endpoint
+  "The preferred live listener, if any; row and heartbeat reads stay native."
+  [rows]
+  (cr/record-effect! :db)
+  (some-> (endpoint/live-instances-for (request/require-storage ctx)
+                                       rows (or (:executor-id ctx) "local"))
+          first
+          endpoint/instance-endpoint))
+
+
+(defbase temporary-service-endpoint
+  "Finite HTTP publication resolver seam; nil when not published."
+  [service]
+  (cr/record-effect! :db)
+  (when-let [resolver @endpoint/temporary-resolver]
+    (resolver ctx service)))
+
+
+(defbase addon-service-endpoint
+  "Deployment addon resolver seam; nil when no app route is active."
+  [service]
+  (cr/record-effect! :db)
+  (when-let [resolver @endpoint/resolver]
+    (resolver ctx service)))
 
 
 (def impls
-  {:service-endpoint service-endpoint})
+  {:_service-rows service-rows
+   :_live-service-endpoint live-service-endpoint
+   :_temporary-service-endpoint temporary-service-endpoint
+   :_addon-service-endpoint addon-service-endpoint})

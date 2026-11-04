@@ -16,7 +16,7 @@
 ;; return type, the consumer's `:service-get` + decode). One edit moves
 ;; both sides; the type-checker catches a drift at write time.
 ;;
-;;   :service-endpoint            {:host :port :url}     (base-fn, :db)
+;;   :service-endpoint            {:host :port :url}     (graph policy, :db)
 ;;     └─ :service-url            the `:url` field
 ;;          └─ :_service-url-join url + path
 ;;               ├─ :service-get       GET  <service>/<path>
@@ -37,12 +37,97 @@
           :port :port
           :url :url}}
 
-  {:name :service-endpoint
-   :description "The address the service named by `:service` currently answers on. Prefers a live listener endpoint on this branch, then an active temporary HTTP publication, then an ordinary app-route resolved by the deployment. Throws `service/not-running` when no endpoint is available — an honest failure a caller wraps in `:try` / a retry."
-   :args {:service {:type :fn-ref
-                    :description "The service fn — a `:fn-ref` slot: the fn's identity is passed, the fn is never evaluated (binding a listener here does not start it)."}}
-   :return-type :service-endpoint-shape
+  {:name :_service-rows
+   :description "Enabled service rows on the caller's branch. Native storage read."
+   :args {:service {:type :fn-ref}}
+   :return-type [:list :keyword-map]
    :effects #{:db}}
+
+  {:name :_live-service-endpoint
+   :description "Best live listener from the enabled service rows, or nil. Native heartbeat query and ordering."
+   :args {:rows {:type [:list :keyword-map]}}
+   :return-type [:union :null :service-endpoint-shape]
+   :effects #{:db}}
+
+  {:name :_temporary-service-endpoint
+   :description "Deployment's finite HTTP publication lookup, or nil. Native resolver seam."
+   :args {:service {:type :fn-ref}}
+   :return-type [:union :null :service-endpoint-shape]
+   :effects #{:db}}
+
+  {:name :_addon-service-endpoint
+   :description "Deployment's app-route lookup, or nil. Native resolver seam."
+   :args {:service {:type :fn-ref}}
+   :return-type [:union :null :service-endpoint-shape]
+   :effects #{:db}}
+
+  {:name :_service-no-rows?
+   :parent :empty?
+   :args {:coll :_service-rows}}
+
+  {:name :_service-missing-detail
+   :parent :if
+   :args {:test :_service-no-rows?
+          :then " (no enabled service row on this branch)"
+          :else " (the service row exists but no copy is alive, or it is not a listener)"}}
+
+  {:name :_service-missing-message
+   :parent :str
+   :args {:parts ["Service is not running: no live instance for fn "
+                  {:as :service :type :fn-ref}
+                  :_service-missing-detail]}}
+
+  {:name :_service-missing-type
+   :parent :assoc-empty
+   :args {:key {:value :type}
+          :value {:value :service/not-running}}}
+
+  {:name :_service-missing-id
+   :parent :assoc
+   :args {:map :_service-missing-type
+          :key {:value :fn-id}
+          :value {:as :service :type :fn-ref}}}
+
+  {:name :_service-rows-count
+   :parent :count
+   :args {:coll :_service-rows}}
+
+  {:name :_service-missing-data
+   :parent :assoc
+   :args {:map :_service-missing-id
+          :key {:value :service-rows}
+          :value :_service-rows-count}}
+
+  {:name :_service-missing-ex
+   :parent :ex-info
+   :args {:message :_service-missing-message
+          :data :_service-missing-data}}
+
+  {:name :_service-not-running
+   :parent :throw
+   :args {:exception :_service-missing-ex}}
+
+  {:name :_service-listener-endpoint
+   :parent :_live-service-endpoint
+   :args {:rows :_service-rows}}
+
+  {:name :_service-addon-or-miss
+   :parent :coalesce
+   :args {:value :_addon-service-endpoint
+          :default :_service-not-running}}
+
+  {:name :_service-public-or-addon
+   :parent :coalesce
+   :args {:value :_temporary-service-endpoint
+          :default :_service-addon-or-miss}}
+
+  {:name :service-endpoint
+   :description "The address the service named by `:service` currently answers on. The graph selects a live listener, then a finite HTTP publication, then an app-route resolver. Throws `service/not-running` when every source misses. The `:fn-ref` identity is never evaluated."
+   :parent :coalesce
+   :args {:value :_service-listener-endpoint
+          :default :_service-public-or-addon}
+   :return-type :service-endpoint-shape
+   :expects-effects #{:db}}
 
   {:name :service-url
    :description "The complete base URL a service or published handler answers on — `:service-endpoint`'s `url` field. Free: `:service`."

@@ -1,9 +1,6 @@
 (ns graphden.packages.web.service-test
-  "`:service-endpoint` impl — resolve a service fn (by id, the `:fn-ref`
-   slot's value) to `{:host :port :url}`: from the `:service` row the
-   reconciler wrote, from the addon-installed resolver seam, or an
-   honest `:service/not-running`. The impl is loaded through the
-   package loader; the storage is a real PG with the services schema."
+  "Native read primitives beneath the graph-composed service endpoint
+   priority. The storage is a real PG with the services schema."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.test-setup :as setup]
@@ -28,9 +25,11 @@
                      :started-at seen-at :seen-at seen-at}))
 
 
-(deftest service-endpoint-reads-a-live-instance-test
+(deftest service-endpoint-primitives-read-a-live-instance-test
   (let [storage (setup/create-branch-versioned-test-storage)
-        f (impls/impl-of :service-endpoint)
+        rows-f (impls/impl-of :_service-rows)
+        live-f (impls/impl-of :_live-service-endpoint)
+        ctx {:storage storage}
         now (java.time.Instant/now)]
     (try
       (let [svc-fn (setup/create-base-fn! storage "se-listener" :any)
@@ -38,43 +37,34 @@
             svc (sp/create-entity storage :service
                                   {:fn-id (:id svc-fn) :enabled? true :restart-policy :always
                                    :cardinality :per-pod})]
-        (testing "a fn with no service row is not running"
-          (try
-            (f {:service (:id other-fn)} {:storage storage})
-            (is false "should have thrown")
-            (catch clojure.lang.ExceptionInfo e
-              (is (= :service/not-running (:type (ex-data e))))
-              (is (zero? (:service-rows (ex-data e)))))))
-        (testing "a row with no live instance is not running either"
-          (try
-            (f {:service (:id svc-fn)} {:storage storage})
-            (is false "should have thrown")
-            (catch clojure.lang.ExceptionInfo e
-              (is (= :service/not-running (:type (ex-data e))))
-              (is (= 1 (:service-rows (ex-data e)))))))
+        (testing "no service row gives no listener candidate"
+          (let [rows (rows-f {:service (:id other-fn)} ctx)]
+            (is (empty? rows))
+            (is (nil? (live-f {:rows rows} ctx)))))
+        (testing "a service row without a live instance is still unavailable"
+          (let [rows (rows-f {:service (:id svc-fn)} ctx)]
+            (is (= 1 (count rows)))
+            (is (nil? (live-f {:rows rows} ctx)))))
         (let [remote (instance! storage (:id svc) "graphden-2.svc" "graphden-2.svc" 9001 now)]
           (testing "a live remote copy → host + port + a joined origin url"
             (is (= {:host "graphden-2.svc" :port 9001 :url "http://graphden-2.svc:9001"}
-                   (f {:service (:id svc-fn)} {:storage storage}))))
+                   (live-f {:rows (rows-f {:service (:id svc-fn)} ctx)} ctx))))
           (testing "this pod's own copy wins over a remote one"
             (instance! storage (:id svc) "local" "127.0.0.1" 9001 now)
-            (is (= "http://127.0.0.1:9001" (:url (f {:service (:id svc-fn)} {:storage storage})))))
+            (is (= "http://127.0.0.1:9001"
+                   (:url (live-f {:rows (rows-f {:service (:id svc-fn)} ctx)} ctx)))))
           (testing "a stale heartbeat is not a live copy"
             (doseq [row (sp/query-entities storage :service-instance {:service-id (:id svc)})]
               (sp/update-entity storage :service-instance (:id row)
                                 {:seen-at (java.time.Instant/.minusMillis now 120000)}))
-            (try
-              (f {:service (:id svc-fn)} {:storage storage})
-              (is false "should have thrown")
-              (catch clojure.lang.ExceptionInfo e
-                (is (= :service/not-running (:type (ex-data e)))))))
+            (is (nil? (live-f {:rows (rows-f {:service (:id svc-fn)} ctx)} ctx))))
           (sp/delete-entity storage :service-instance (:id remote))))
       (finally (sp/close storage)))))
 
 
-(deftest service-endpoint-falls-back-to-the-installed-resolver-test
+(deftest addon-resolver-primitive-uses-the-installed-resolver-test
   (let [storage (setup/create-branch-versioned-test-storage)
-        f (impls/impl-of :service-endpoint)
+        f (impls/impl-of :_addon-service-endpoint)
         resolver (resolver-atom)
         before @resolver]
     (try

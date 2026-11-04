@@ -15,9 +15,12 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
+    [graphden.packages.loader :as loader]
     [graphden.packages.records :as records]
+    [graphden.services.endpoint :as endpoint]
     [graphden.services.reconciler :as recon]
-    [graphden.storage.protocol.core :as sp])
+    [graphden.storage.protocol.core :as sp]
+    [graphden.types.check :as types-check])
   (:import
     (java.net
       ServerSocket)))
@@ -29,6 +32,12 @@
 (use-fixtures :once
   (fn [t]
     (binding [*bootstrap* (setup/bootstrap-crud-graph-from-golden!)]
+      ;; Golden bootstraps skip the package type sweep. This test asserts
+      ;; inherited effects, so check the service composition before syncing
+      ;; the consumer fn; production performs the full sweep at boot.
+      (types-check/check-all-defs!
+        (filterv #(= "web.service" (:namespace %))
+                 (:fn-defs (loader/load-packages ["web"]))))
       (t))))
 
 
@@ -36,6 +45,62 @@
   []
   (with-open [s (ServerSocket. 0)]
     (ServerSocket/.getLocalPort s)))
+
+
+(deftest endpoint-graph-prefers-publication-before-addon-test
+  (let [{:keys [ctx storage]} *bootstrap*
+        target-id (records/fn-id "web.response" :text-ok-response)
+        fn-id (records/fn-id nil :_e2e-endpoint-source-priority)
+        calls (atom [])
+        before-temporary @endpoint/temporary-resolver
+        before-addon @endpoint/resolver
+        temporary {:host "temporary.example" :port 443 :url "https://temporary.example/p/one"}
+        addon {:host "app.example" :port 443 :url "https://app.example"}]
+    (try
+      (setup/sync-and-invalidate!
+        ctx storage [{:name :_e2e-endpoint-source-priority
+                      :parent :service-endpoint
+                      :args {:service :text-ok-response}}])
+      (reset! endpoint/temporary-resolver
+              (fn [_ctx service]
+                (swap! calls conj :temporary)
+                (when (= target-id service) temporary)))
+      (reset! endpoint/resolver
+              (fn [_ctx service]
+                (swap! calls conj :addon)
+                (when (= target-id service) addon)))
+      (let [service-row (sp/create-entity storage :service
+                                          {:fn-id target-id :enabled? true
+                                           :restart-policy :always :cardinality :per-pod})
+            now (java.time.Instant/now)
+            instance-row (sp/create-entity storage :service-instance
+                                           {:service-id (:id service-row)
+                                            :executor-id "local" :host "127.0.0.1"
+                                            :port 9001 :started-at now :seen-at now})]
+        (try
+          (is (= {:host "127.0.0.1" :port 9001 :url "http://127.0.0.1:9001"}
+                 (exec/execute ctx fn-id {})))
+          (is (empty? @calls) "a live listener must avoid both resolvers")
+          (finally
+            (sp/delete-entity storage :service-instance (:id instance-row))
+            (sp/delete-entity storage :service (:id service-row)))))
+      (is (= temporary (exec/execute ctx fn-id {})))
+      (is (= [:temporary] @calls) "a publication must avoid the addon lookup")
+      (reset! calls [])
+      (reset! endpoint/temporary-resolver
+              (fn [_ctx _service] (swap! calls conj :temporary) nil))
+      (is (= addon (exec/execute ctx fn-id {})))
+      (is (= [:temporary :addon] @calls))
+      (reset! endpoint/resolver (fn [_ctx _service] nil))
+      (try
+        (exec/execute ctx fn-id {})
+        (is false "a missing endpoint must throw")
+        (catch clojure.lang.ExceptionInfo e
+          (is (= {:type :service/not-running :fn-id target-id :service-rows 0}
+                 (ex-data e)))))
+      (finally
+        (reset! endpoint/temporary-resolver before-temporary)
+        (reset! endpoint/resolver before-addon)))))
 
 
 (deftest consumer-reaches-producer-through-the-recorded-endpoint-test
@@ -83,7 +148,8 @@
           (exec/execute ctx fetch-id {})
           (is false "should have thrown")
           (catch clojure.lang.ExceptionInfo e
-            (is (= :service/not-running (:type (ex-data e)))))))
+            (is (= :service/not-running (:type (ex-data e))))
+            (is (= 1 (:service-rows (ex-data e)))))))
       (recon/reconcile-once! ctx running)
       (testing "the reconciler recorded where the producer answers"
         (is (= [{:host "127.0.0.1" :port port}]

@@ -125,7 +125,7 @@
 (defn reap-stale-instances!
   "Delete instance rows nobody has heartbeat for ten stale windows —
    the copies of a pod that crashed. Level-triggered, any pod; the rows
-   were already ignored by `resolve-endpoint` after one window. Runs at
+   were already ignored by `web.service/:service-endpoint` after one window. Runs at
    most once per stale window per reconciler (`reap-due?`)."
   [running-atom storage]
   (when (and storage (reap-due? running-atom (System/currentTimeMillis)))

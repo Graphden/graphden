@@ -283,7 +283,7 @@
 
 (def default-stale-after-ms
   "How old an instance's `seen-at` may be before the copy is presumed
-   dead — three reconcile ticks (15 s each). `resolve-endpoint` ignores
+   dead — three reconcile ticks (15 s each). The service endpoint graph ignores
    staler rows; the reconciler deletes rows past ten ticks."
   45000)
 

@@ -394,8 +394,8 @@ raises this instead of `:execution-error/fn-not-found`. Grant the org
 
 ### `:service/not-running`
 
-**Component:** services (`graphden.services.endpoint`, the
-`:service-endpoint` base-fn)
+**Component:** services (`graphden.services.endpoint` reads and the
+`web.service/:service-endpoint` graph function)
 **Description:** A consumer named a service fn (`:service-get`,
 `:service-endpoint`) but no address is known for it: no enabled
 `:service` row on this branch, the row exists but the listener hasn't

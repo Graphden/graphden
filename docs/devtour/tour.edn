@@ -1778,9 +1778,11 @@
            row and [execution permit](#term/cardinality); restart policy then determines whether to
            restart any exit, only a failure, or neither. Active instances refresh their
            [heartbeats](#term/fleet)."}
-    {:ns graphden.services.endpoint :defn resolve-endpoint
-     :say "Resolves a service identity to an active endpoint on the caller's branch, preferring a live
-           local instance, then a finite HTTP publication and an addon resolver; otherwise it reports
+    {:file "resources/packages/web/service/impls.clj" :defn live-service-endpoint
+     :say "Reads the freshest live listener on the caller's branch, preferring this pod. This is one
+           native read beneath the `web.service/:service-endpoint` [graph function](#term/graph-function):
+           its bindings in [web/service/fns.edn](../../resources/packages/web/service/fns.edn)
+           choose the listener, then a finite HTTP publication, then an addon resolver, and finally
            `:service/not-running`. The `:fn-ref` argument passes identity without executing the named
            function."}
     {:ns graphden.http-host.core :defn publish!

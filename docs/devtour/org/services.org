@@ -111,17 +111,17 @@ Checks service handles for liveness and exit status. A stopped instance loses it
 
 - source :: [[file:../../../src/graphden/services/liveness.clj::(defn check-liveness!][src/graphden/services/liveness.clj:119]]
 
-* 9. resolve-endpoint
+* 9. live-service-endpoint
 :PROPERTIES:
-:CUSTOM_ID: services/resolve-endpoint
-:FILE: src/graphden/services/endpoint.clj
-:LINE: 93
-:MINS: 1.7
+:CUSTOM_ID: services/live-service-endpoint
+:FILE: resources/packages/web/service/impls.clj
+:LINE: 20
+:MINS: 1.2
 :END:
 
-Resolves a service identity to an active endpoint on the caller's branch, preferring a live local instance, then a finite HTTP publication and an addon resolver; otherwise it reports ~:service/not-running~. The ~:fn-ref~ argument passes identity without executing the named function.
+Reads the freshest live listener on the caller's branch, preferring this pod. This is one native read beneath the ~web.service/:service-endpoint~ [[file:glossary.org::#term/graph-function][graph function]]: its bindings in [[file:../../../resources/packages/web/service/fns.edn][web/service/fns.edn]] choose the listener, then a finite HTTP publication, then an addon resolver, and finally ~:service/not-running~. The ~:fn-ref~ argument passes identity without executing the named function.
 
-- source :: [[file:../../../src/graphden/services/endpoint.clj::(defn resolve-endpoint][src/graphden/services/endpoint.clj:93]]
+- source :: [[file:../../../resources/packages/web/service/impls.clj::(defbase live-service-endpoint][resources/packages/web/service/impls.clj:20]]
 
 * 10. publish!
 :PROPERTIES:

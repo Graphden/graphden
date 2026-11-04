@@ -490,11 +490,11 @@ services want that address. The service fn IS the value:
    listener does not start a second one), its free args don't surface,
    and the edge is not a dependency — so two services may name each
    other ([CONSTRAINTS.md](CONSTRAINTS.md#1-no-dependency-cycle)).
-   `graphden.services.endpoint/resolve-endpoint` picks a LIVE listener
+   `web.service/:service-endpoint` picks a LIVE listener
    instance of the fn's enabled row on the caller's branch (a nil-branch
    row — package-seeded — serves every branch), this pod's own copy
    first (loopback beats a hop), then the freshest heartbeat; else it
-   asks the addon-installed `resolver` seam (on the cloud
+   checks a finite HTTP publication and then the addon-installed `resolver` seam (on the cloud
    an `:app-route`'s public origin — service-to-service traffic goes
    through the public domain like any outbound call, SSRF-guarded, no
    internal address to exempt), else throws `:service/not-running`.
@@ -712,7 +712,7 @@ all loaded packages.
 - Reconciler: `src/graphden/services/reconciler.clj` (the pass),
   `src/graphden/services/instances.clj` (instance rows, stop, stale reap),
   `src/graphden/services/liveness.clj` (exit detection, exit backoff)
-- Endpoint resolution: `src/graphden/services/endpoint.clj` (+ the `:service-endpoint` base-fn and call templates in `resources/packages/web/service/`)
+- Endpoint resolution: `src/graphden/services/endpoint.clj` (native row and heartbeat reads) and `resources/packages/web/service/` (graph source priority and call templates)
 - Queue: `src/graphden/schema/queue/schema.clj`, `resources/packages/storage/queue/` (primitives + the consumer templates)
 - Integrant: `src/graphden/system/core.clj` → `:exec/service-reconciler`
 - Form parser: graph-native — `resources/packages/app/execution/fns.edn`

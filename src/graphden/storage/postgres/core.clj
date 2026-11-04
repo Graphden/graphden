@@ -30,18 +30,6 @@
       SQLException)))
 
 
-;; === Pool re-exports (for API compatibility) ===
-
-(def create-pool
-  "Creates a HikariCP connection pool. See pool/create-pool for details."
-  pool/create-pool)
-
-
-(def close-pool
-  "Closes a HikariCP connection pool. See pool/close-pool for details."
-  pool/close-pool)
-
-
 ;; === Storage record ===
 
 (defn- evict-slot-rows!

@@ -15,9 +15,9 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.schema.malli.core :as mds]
     [graphden.schema.protocol.protocol :as ds]
-    [graphden.storage.postgres.core :as pg]
     [graphden.storage.postgres.introspection :as introspection]
     [graphden.storage.postgres.metadata :as metadata]
+    [graphden.storage.postgres.pool :as pool]
     [graphden.storage.postgres.test-setup :as setup]
     [graphden.storage.postgres.util :as util]
     [graphden.storage.protocol.core :as sp]
@@ -38,16 +38,16 @@
 
 (deftest close-pool-idempotency-test
   (testing "close-pool with nil pool returns true (no-op)"
-    (is (true? (pg/close-pool nil))))
+    (is (true? (pool/close-pool nil))))
 
   (testing "close-pool is idempotent - can be called multiple times"
-    (let [pool (pg/create-pool (merge (setup/get-container-config)
-                                      {:pool-size 1 :min-idle 1}))]
+    (let [pool (pool/create-pool (merge (setup/get-container-config)
+                                        {:pool-size 1 :min-idle 1}))]
       ;; First close - returns true on success
-      (is (true? (pg/close-pool pool)))
+      (is (true? (pool/close-pool pool)))
       (is (true? (HikariDataSource/.isClosed pool)))
       ;; Second close - returns true (pool already closed, no-op)
-      (is (true? (pg/close-pool pool)))
+      (is (true? (pool/close-pool pool)))
       (is (true? (HikariDataSource/.isClosed pool))))))
 
 
@@ -57,98 +57,98 @@
     (testing "jdbc-url is required"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"jdbc-url is required"
-            (pg/create-pool (dissoc valid-opts :jdbc-url)))))
+            (pool/create-pool (dissoc valid-opts :jdbc-url)))))
 
     (testing "jdbc-url must be a string"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"jdbc-url must be a string"
-            (pg/create-pool (assoc valid-opts :jdbc-url 12345)))))
+            (pool/create-pool (assoc valid-opts :jdbc-url 12345)))))
 
     (testing "jdbc-url must start with jdbc:postgresql://"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"jdbc-url must start with 'jdbc:postgresql://'"
-            (pg/create-pool (assoc valid-opts :jdbc-url "jdbc:mysql://localhost/db")))))
+            (pool/create-pool (assoc valid-opts :jdbc-url "jdbc:mysql://localhost/db")))))
 
     (testing "username is required and non-empty"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"username is required and cannot be empty"
-            (pg/create-pool (dissoc valid-opts :username))))
+            (pool/create-pool (dissoc valid-opts :username))))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"username is required and cannot be empty"
-            (pg/create-pool (assoc valid-opts :username ""))))
+            (pool/create-pool (assoc valid-opts :username ""))))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"username is required and cannot be empty"
-            (pg/create-pool (assoc valid-opts :username "   ")))))
+            (pool/create-pool (assoc valid-opts :username "   ")))))
 
     (testing "password is required and non-empty"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"password is required and cannot be empty"
-            (pg/create-pool (dissoc valid-opts :password))))
+            (pool/create-pool (dissoc valid-opts :password))))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"password is required and cannot be empty"
-            (pg/create-pool (assoc valid-opts :password ""))))
+            (pool/create-pool (assoc valid-opts :password ""))))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"password is required and cannot be empty"
-            (pg/create-pool (assoc valid-opts :password "   ")))))
+            (pool/create-pool (assoc valid-opts :password "   ")))))
 
     (testing "pool-size must be positive integer"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"pool-size must be a positive integer"
-            (pg/create-pool (assoc valid-opts :pool-size 0))))
+            (pool/create-pool (assoc valid-opts :pool-size 0))))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"pool-size must be a positive integer"
-            (pg/create-pool (assoc valid-opts :pool-size -1))))
+            (pool/create-pool (assoc valid-opts :pool-size -1))))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"pool-size must be a positive integer"
-            (pg/create-pool (assoc valid-opts :pool-size "10")))))
+            (pool/create-pool (assoc valid-opts :pool-size "10")))))
 
     (testing "min-idle must be positive integer"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"min-idle must be a positive integer"
-            (pg/create-pool (assoc valid-opts :min-idle 0))))
+            (pool/create-pool (assoc valid-opts :min-idle 0))))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"min-idle must be a positive integer"
-            (pg/create-pool (assoc valid-opts :min-idle -1)))))
+            (pool/create-pool (assoc valid-opts :min-idle -1)))))
 
     (testing "min-idle cannot exceed pool-size"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"min-idle cannot exceed pool-size"
-            (pg/create-pool (assoc valid-opts :pool-size 5 :min-idle 10)))))
+            (pool/create-pool (assoc valid-opts :pool-size 5 :min-idle 10)))))
 
     (testing "connection-timeout must be positive integer"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"connection-timeout must be a positive integer"
-            (pg/create-pool (assoc valid-opts :connection-timeout 0))))
+            (pool/create-pool (assoc valid-opts :connection-timeout 0))))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"connection-timeout must be a positive integer"
-            (pg/create-pool (assoc valid-opts :connection-timeout -1000)))))
+            (pool/create-pool (assoc valid-opts :connection-timeout -1000)))))
 
     (testing "pool-size cannot exceed 100"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"pool-size exceeds maximum allowed value of 100"
-            (pg/create-pool (assoc valid-opts :pool-size 101)))))
+            (pool/create-pool (assoc valid-opts :pool-size 101)))))
 
     (testing "idle-timeout must be less than max-lifetime"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"idle-timeout must be less than max-lifetime"
-            (pg/create-pool (assoc valid-opts
-                                   :idle-timeout 600000
-                                   :max-lifetime 500000))))
+            (pool/create-pool (assoc valid-opts
+                                     :idle-timeout 600000
+                                     :max-lifetime 500000))))
       ;; Equal values should also fail
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"idle-timeout must be less than max-lifetime"
-            (pg/create-pool (assoc valid-opts
-                                   :idle-timeout 600000
-                                   :max-lifetime 600000)))))
+            (pool/create-pool (assoc valid-opts
+                                     :idle-timeout 600000
+                                     :max-lifetime 600000)))))
 
     (testing "idle-timeout = 0 is allowed (never retire idle connections)"
       ;; idle-timeout = 0 is a special case meaning "never retire"
       ;; This should not throw even though 0 < max-lifetime
-      (let [pool (pg/create-pool (assoc valid-opts
-                                        :idle-timeout 0
-                                        :max-lifetime 1800000))]
+      (let [pool (pool/create-pool (assoc valid-opts
+                                          :idle-timeout 0
+                                          :max-lifetime 1800000))]
         (is (some? pool))
-        (pg/close-pool pool)))))
+        (pool/close-pool pool)))))
 
 
 ;; === Unknown PostgreSQL type coverage tests ===
@@ -461,13 +461,13 @@
 
                    (isWrapperFor [_ _] false)))]
     (testing "a wrap that delegates the JDBC Wrapper protocol closes the pool behind it"
-      (let [pool (pg/create-pool (merge (setup/get-container-config) {:pool-size 1 :min-idle 1}))]
-        (is (true? (pg/close-pool (delegating pool))))
+      (let [pool (pool/create-pool (merge (setup/get-container-config) {:pool-size 1 :min-idle 1}))]
+        (is (true? (pool/close-pool (delegating pool))))
         (is (true? (HikariDataSource/.isClosed pool)))
-        (is (true? (pg/close-pool (delegating pool))) "still idempotent through the wrap")))
+        (is (true? (pool/close-pool (delegating pool))) "still idempotent through the wrap")))
     (testing "a wrap that does not unwrap is left alone — no cast, no throw"
-      (let [pool (pg/create-pool (merge (setup/get-container-config) {:pool-size 1 :min-idle 1}))]
+      (let [pool (pool/create-pool (merge (setup/get-container-config) {:pool-size 1 :min-idle 1}))]
         (try
-          (is (true? (pg/close-pool (opaque pool))))
+          (is (true? (pool/close-pool (opaque pool))))
           (is (false? (HikariDataSource/.isClosed pool)) "the real pool was not reached, and is still open")
-          (finally (pg/close-pool pool)))))))
+          (finally (pool/close-pool pool)))))))

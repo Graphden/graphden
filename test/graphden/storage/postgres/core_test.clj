@@ -5,6 +5,7 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [graphden.storage.postgres.core :as core]
+    [graphden.storage.postgres.pool :as pool]
     [graphden.storage.postgres.util :as util]
     [graphden.storage.protocol.core :as sp])
   (:import
@@ -19,41 +20,41 @@
   (testing "rejects missing jdbc-url"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"jdbc-url is required"
-          (core/create-pool {:username "user" :password "pass"}))))
+          (pool/create-pool {:username "user" :password "pass"}))))
 
   (testing "rejects nil jdbc-url"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"jdbc-url is required"
-          (core/create-pool {:jdbc-url nil :username "user" :password "pass"}))))
+          (pool/create-pool {:jdbc-url nil :username "user" :password "pass"}))))
 
   (testing "rejects non-string jdbc-url"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"jdbc-url must be a string"
-          (core/create-pool {:jdbc-url 123 :username "user" :password "pass"})))
+          (pool/create-pool {:jdbc-url 123 :username "user" :password "pass"})))
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"jdbc-url must be a string"
-          (core/create-pool {:jdbc-url :keyword :username "user" :password "pass"}))))
+          (pool/create-pool {:jdbc-url :keyword :username "user" :password "pass"}))))
 
   (testing "rejects jdbc-url with wrong protocol"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"jdbc-url must start with 'jdbc:postgresql://'"
-          (core/create-pool {:jdbc-url "jdbc:mysql://localhost/db"
+          (pool/create-pool {:jdbc-url "jdbc:mysql://localhost/db"
                              :username "user"
                              :password "pass"})))
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"jdbc-url must start with 'jdbc:postgresql://'"
-          (core/create-pool {:jdbc-url "postgresql://localhost/db"
+          (pool/create-pool {:jdbc-url "postgresql://localhost/db"
                              :username "user"
                              :password "pass"})))
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"jdbc-url must start with 'jdbc:postgresql://'"
-          (core/create-pool {:jdbc-url "http://localhost/db"
+          (pool/create-pool {:jdbc-url "http://localhost/db"
                              :username "user"
                              :password "pass"}))))
 
   (testing "jdbc-url validation error does not leak url (security)"
     (try
-      (core/create-pool {:jdbc-url (str "jdbc:mysql://" (str/join (repeat 100 "x")))
+      (pool/create-pool {:jdbc-url (str "jdbc:mysql://" (str/join (repeat 100 "x")))
                          :username "user"
                          :password "pass"})
       (is false "should have thrown")
@@ -70,40 +71,40 @@
   (testing "rejects missing username"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"username is required"
-          (core/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
+          (pool/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
                              :password "pass"}))))
 
   (testing "rejects empty username"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"username is required"
-          (core/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
+          (pool/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
                              :username ""
                              :password "pass"}))))
 
   (testing "rejects whitespace-only username"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"username is required"
-          (core/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
+          (pool/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
                              :username "   "
                              :password "pass"}))))
 
   (testing "rejects missing password"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"password is required"
-          (core/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
+          (pool/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
                              :username "user"}))))
 
   (testing "rejects empty password"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"password is required"
-          (core/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
+          (pool/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
                              :username "user"
                              :password ""}))))
 
   (testing "rejects whitespace-only password"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"password is required"
-          (core/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
+          (pool/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
                              :username "user"
                              :password "   "})))))
 
@@ -112,13 +113,13 @@
   (testing "rejects non-positive pool-size"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"pool-size must be a positive integer"
-          (core/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
+          (pool/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
                              :username "user"
                              :password "pass"
                              :pool-size 0})))
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"pool-size must be a positive integer"
-          (core/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
+          (pool/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
                              :username "user"
                              :password "pass"
                              :pool-size -5}))))
@@ -126,7 +127,7 @@
   (testing "rejects non-integer pool-size"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"pool-size must be a positive integer"
-          (core/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
+          (pool/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
                              :username "user"
                              :password "pass"
                              :pool-size 5.5}))))
@@ -134,14 +135,14 @@
   (testing "rejects pool-size exceeding maximum"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"pool-size exceeds maximum allowed value"
-          (core/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
+          (pool/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
                              :username "user"
                              :password "pass"
                              :pool-size 101}))))
 
   (testing "pool-size exceeds max error includes details"
     (try
-      (core/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
+      (pool/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
                          :username "user"
                          :password "pass"
                          :pool-size 200})
@@ -157,13 +158,13 @@
   (testing "rejects non-positive min-idle"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"min-idle must be a positive integer"
-          (core/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
+          (pool/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
                              :username "user"
                              :password "pass"
                              :min-idle 0})))
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"min-idle must be a positive integer"
-          (core/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
+          (pool/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
                              :username "user"
                              :password "pass"
                              :min-idle -1}))))
@@ -171,7 +172,7 @@
   (testing "rejects min-idle greater than pool-size"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"min-idle cannot exceed pool-size"
-          (core/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
+          (pool/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
                              :username "user"
                              :password "pass"
                              :pool-size 5
@@ -179,7 +180,7 @@
 
   (testing "min-idle exceeds pool-size error includes details"
     (try
-      (core/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
+      (pool/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
                          :username "user"
                          :password "pass"
                          :pool-size 5
@@ -196,13 +197,13 @@
   (testing "rejects non-positive connection-timeout"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"connection-timeout must be a positive integer"
-          (core/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
+          (pool/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
                              :username "user"
                              :password "pass"
                              :connection-timeout 0})))
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"connection-timeout must be a positive integer"
-          (core/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
+          (pool/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
                              :username "user"
                              :password "pass"
                              :connection-timeout -1000}))))
@@ -210,14 +211,14 @@
   (testing "rejects idle-timeout >= max-lifetime (when idle-timeout > 0)"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"idle-timeout must be less than max-lifetime"
-          (core/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
+          (pool/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
                              :username "user"
                              :password "pass"
                              :idle-timeout 1800000
                              :max-lifetime 1800000})))
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"idle-timeout must be less than max-lifetime"
-          (core/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
+          (pool/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
                              :username "user"
                              :password "pass"
                              :idle-timeout 2000000
@@ -225,7 +226,7 @@
 
   (testing "idle-timeout vs max-lifetime error includes details"
     (try
-      (core/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
+      (pool/create-pool {:jdbc-url "jdbc:postgresql://localhost/db"
                          :username "user"
                          :password "pass"
                          :idle-timeout 2000000

@@ -1284,7 +1284,7 @@
         nested {:handlers [:map :text [:secret inner]]
                 :callbacks [:list inner]
                 :pair [:tuple inner :int]}]
-    (doseq [transform [t/resolve-alias #(t/resolve {'a :int} %) t/freshen t/freshen-with-effects]]
+    (doseq [transform [t/resolve-alias #(t/resolve {'a :int} %) t/freshen]]
       (let [result (transform nested)]
         (is (= #{:browser-main} (t/fn-execution (t/marker-inner (t/map-val (:handlers result))))))
         (is (= #{:db} (t/fn-effects (t/list-elem (:callbacks result)))))

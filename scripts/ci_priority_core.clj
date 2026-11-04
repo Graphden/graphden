@@ -442,7 +442,11 @@
    :packages (->> (re-seq #"\bimpls-fixture\s+\"([^\"]+)\"\s+\"([^\"]+)\""
                           source)
                   (map (fn [[_ package module]] [package module]))
-                  set)})
+                  set)
+   :fn-packages (->> (re-seq #"\bload-module-fns\s+\"([^\"]+)\"\s+\"([^\"]+)\""
+                             source)
+                     (map (fn [[_ package module]] [package module]))
+                     set)})
 
 
 (defn- namespace-entry
@@ -462,7 +466,8 @@
                           (mapcat libspec-names)
                           set)
                      (:deps links))
-         :packages (:packages links)}))))
+         :packages (:packages links)
+         :fn-packages (:fn-packages links)}))))
 
 
 (defn- clojure-files
@@ -489,12 +494,19 @@
                                       (update r [package module] (fnil conj #{})
                                               (:name entry)))
                                     consumers (:packages entry))))
+                  (update :package-fn-consumers
+                          (fn [consumers]
+                            (reduce (fn [r [package module]]
+                                      (update r [package module] (fnil conj #{})
+                                              (:name entry)))
+                                    consumers (:fn-packages entry))))
                   (update :reverse
                           (fn [consumers]
                             (reduce (fn [r dep]
                                       (update r dep (fnil conj #{}) (:name entry)))
                                     consumers (:deps entry)))))))
           {:by-path {} :by-name {} :reverse {} :package-consumers {}
+           :package-fn-consumers {}
            :package-impl-consumers #{}}
           (clojure-files)))
 
@@ -522,7 +534,7 @@
   [changed kind]
   (when changed
     (try
-      (let [{:keys [by-path package-consumers package-impl-consumers]
+      (let [{:keys [by-path package-consumers package-fn-consumers package-impl-consumers]
              consumers :reverse}
             (namespace-graph)
             sources (->> changed
@@ -533,11 +545,14 @@
                          set)
             package-sources (->> changed
                                  (keep (fn [path]
-                                         (when-let [[_ package module]
+                                         (when-let [[_ package module filename]
                                                     (re-matches
-                                                      #"resources/packages/([^/]+)/([^/]+)/impls\.clj"
+                                                      #"resources/packages/([^/]+)/([^/]+)/(impls\.clj|fns\.edn)"
                                                       path)]
-                                           (get package-consumers [package module]))))
+                                           (get (if (= filename "fns.edn")
+                                                  package-fn-consumers
+                                                  package-consumers)
+                                                [package module]))))
                                  (mapcat identity)
                                  set)
             package-impl-sources (when (some #(re-matches

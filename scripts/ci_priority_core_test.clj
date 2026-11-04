@@ -216,6 +216,9 @@
   (is (contains? (:packages (#'priority/namespace-entry
                              "test/graphden/packages/core/hof_test.clj"))
                  ["core" "hof"]))
+  (is (contains? (:fn-packages (#'priority/namespace-entry
+                                "test/graphden/packages/core/hof_test.clj"))
+                 ["core" "hof"]))
   (is (= ["graphden.packages.core.hof-test"
           "graphden.types.taint-propagate-guard-test"]
          (priority/unit-first
@@ -227,7 +230,11 @@
            (count (distinct (mapcat identity layers))))))
   (is (not-any? #{"graphden.types.taint-propagate-guard-test"}
                 (priority/unit-first
-                  #{"resources/packages/core/hof/fns.edn"}))))
+                  #{"resources/packages/core/hof/fns.edn"})))
+  (is (some #{"graphden.packages.core.hof-test"}
+            (priority/unit-first
+              #{"resources/packages/core/hof/fns.edn"}))
+      "a package graph edit must prioritize tests using its impls fixture"))
 
 
 (deftest runtime-order-preserves-full-roster-once

@@ -77,7 +77,7 @@
         (testing "modified owner fn facts identify its own row and binding"
           (is (seq owner-rows))
           (is (= "dv-owner" (:fn-name (first owner-rows))))
-          (is (= ":dv-owner" (:fn-label (first owner-rows))))
+          (is (false? (:assets-only? (first owner-rows))))
           (is (false? (:branch-local? (first owner-rows))))
           (let [entries (map :entry owner-rows)
                 fn-e (first (filter #(= :fn (:entity-name %)) entries))

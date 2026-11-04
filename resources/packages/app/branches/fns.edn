@@ -753,12 +753,55 @@
    :return-type :keyword-map
    :effects #{:db}}
 
-  {:name :diff-branches-view
-   :description "Atomic read boundary over `dv/diff-branches-view-facts`: flat enriched rows with owner labels, namespace paths, branch-local facts, and before/after entries. Grouping, ordering and display decisions are composed below in graph fn-defs."
+  {:name :_diff-view-input
+   :description "One native read boundary: resolved display entries, owner names, namespace paths and branch-local facts. Does not export raw versions; label policy is composed by diff-branches-view."
    :args {:source-branch-id {:type :uuid :description "Source branch id."}
           :target-branch-id {:type :uuid :description "Target branch id."}}
-   :return-type :keyword-map
+   :return-type {:source-branch-id :uuid :target-branch-id :uuid :count :int
+                 :rows [:list {:fn-id :nullable-text :fn-name :nullable-text
+                               :assets-only? :bool :ns-path :nullable-text
+                               :branch-local? :bool :entry :keyword-map}]}
    :effects #{:db}}
+
+  {:name :_diff-display-owner-id
+   :parent :get
+   :args {:coll {:as :item} :key {:value :fn-id} :default nil}}
+
+  {:name :_diff-display-owner-name
+   :parent :get
+   :args {:coll {:as :item} :key {:value :fn-name} :default nil}}
+
+  {:name :_diff-display-owner-label
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_diff-display-owner-id}}
+          :then {:parent :if
+                 :args {:test {:parent :some? :args {:value :_diff-display-owner-name}}
+                        :then {:parent :str :args {:parts [{:value ":"} :_diff-display-owner-name]}}
+                        :else {:parent :str
+                               :args {:parts [{:value "#"}
+                                              {:parent :str-clip
+                                               :args {:string {:parent :assert-some :args {:value :_diff-display-owner-id}}
+                                                      :limit 8}}]}}}}
+          :else {:parent :if
+                 :args {:test {:parent :get :args {:coll {:as :item} :key {:value :assets-only?} :default false}}
+                        :then {:value "(assets)"}
+                        :else {:value "(unowned)"}}}}}
+
+  {:name :_diff-display-row
+   :description "Format one enriched row without storage reads. Entry previews and field pairs retain their native bounded rendering; owner label policy is editable here."
+   :parent :assoc
+   :args {:map {:parent :dissoc :args {:map {:as :item} :key {:value :assets-only?}}}
+          :key {:value :fn-label}
+          :value :_diff-display-owner-label}}
+
+  {:name :diff-branches-view
+   :description "Enriched branch comparison with graph-composed owner labels. One shared acquisition supplies every row; formatting performs no per-entry reads."
+   :parent :assoc
+   :args {:map :_diff-view-input
+          :key {:value :rows}
+          :value {:parent :map
+                  :args {:func :_diff-display-row
+                         :coll {:parent :get :args {:coll :_diff-view-input :key {:value :rows} :default []}}}}}}
 
   {:name :diff-affected
    :description "Atomic library boundary over `dv/affected-view` — the fns that changed INSIDE (own rows equal, a dependency in the diff), `{fn-id-str {:via changed-fn-id-str :depth n :ns-path \"a.b\"}}`, walked over the compiler's reverse-dependency index of the branch on screen."

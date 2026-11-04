@@ -133,9 +133,9 @@
     :current-org-id :current-slot-value :current-time-ms :declarable-effect-categories
     :decode-row :delete-branch! :delete-entity :revive-entity :deref
     :describe-type-mismatch :detect-conflicts :diff-branches
-    ;; diff-branches-view returns previews of user-authored binding
+    ;; _diff-view-input returns previews of user-authored binding
     ;; values — same read-projection class as :diff-branches.
-    :diff-affected :diff-branches-view
+    :diff-affected :_diff-view-input
     :diff-value-against-type :digest-hex :dispatch-to-branch :dissoc
     :distinct :div :do :drop :empty? :env
     :encode-unreadable-kws :equal? :error-boundary-wrap :every? :ex-data :execute-trace-rows :viewer-path-trace

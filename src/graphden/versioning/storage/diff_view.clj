@@ -129,12 +129,13 @@
       :count <total diff rows>
       :rows [{:fn-id \"<uuid>\"            ; nil only if ownerless
                 :fn-name \"web-server\"    ; nil for anonymous fns
-                :fn-label \":web-server\"  ; always printable
+                :assets-only? bool        ; ownerless asset bucket
                 :branch-local? bool
                 :entry <enriched diff row>}]}
 
-   The graph groups rows by `:fn-id`, derives each group's change from
-   its fn entry, and sorts entries and groups."
+   No raw versions or additional stored fields cross this boundary. The
+   graph adds owner display labels, groups rows by `:fn-id`, derives each
+   group's change from its fn entry, and sorts entries and groups."
   [base-storage source-branch-id target-branch-id]
   (let [{:keys [diffs]} (mrg/diff-branches base-storage
                                            source-branch-id target-branch-id)
@@ -174,11 +175,9 @@
                          (map (fn [owner]
                                 [owner {:fn-id (some-> owner str)
                                         :fn-name (get fn-names owner)
-                                        :fn-label (if owner
-                                                    (fd/fn-label fn-names owner)
-                                                    (if (every? #(= :resource-override (:entity-name %))
-                                                                ownerless)
-                                                      "(assets)" "(unowned)"))
+                                        :assets-only? (and (nil? owner)
+                                                           (every? #(= :resource-override (:entity-name %))
+                                                                   ownerless))
                                         :ns-path (some-> (get owner-fns owner)
                                                          :namespace-id ns-path)
                                         :branch-local? (boolean

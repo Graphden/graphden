@@ -26,7 +26,8 @@
     [graphden.lint.graph :as graph-lint]
     [graphden.storage.protocol.core :as sp]
     [graphden.test-infra.graph-harness :as gh :refer [*graph* json-req uniq]]
-    [graphden.versioning.storage.core :as vs]))
+    [graphden.versioning.storage.core :as vs]
+    [graphden.versioning.storage.diff-view :as dv]))
 
 
 ;; =============================================================================
@@ -783,3 +784,58 @@
                                       :entity-id (str fn-id)
                                       :choice "elsewhere"}]})))]
       (is (:ok body) "bad resolutions don't break the merge"))))
+
+
+(deftest diff-view-graph-formats-labels-with-one-read
+  (let [source (random-uuid)
+        target (random-uuid)
+        named "11111111-1111-4111-8111-111111111111"
+        anon "22222222-2222-4222-8222-222222222222"
+        ;; The formatter sees only the same bounded display entry as before,
+        ;; including ref IDs and any secret marker already in that entry.
+        entry {:entity-name :binding :entity-id "binding" :change :modified
+               :source-ref named :target-ref anon :slot-name "in"
+               :fields [{:field "value" :source "{:secret true}" :target "∅"}]}
+        row {:fn-id named :fn-name "owner" :assets-only? false
+             :ns-path "app" :branch-local? true :entry entry}
+        cases [[row ":owner"]
+               [(assoc row :fn-name "") ":"]
+               [(assoc row :fn-id anon :fn-name nil) "#22222222"]
+               [(assoc row :fn-id nil :fn-name nil :assets-only? true) "(assets)"]
+               [(assoc row :fn-id nil :fn-name nil) "(unowned)"]]]
+    (doseq [rows [(mapv first cases) [] (vec (repeat 128 row))]]
+      (let [calls (atom 0)
+            input {:source-branch-id source :target-branch-id target
+                   :count (count rows) :rows rows}
+            result (with-redefs [dv/diff-branches-view-facts
+                                (fn [_ s t]
+                                  (is (= [source target] [s t]))
+                                  (swap! calls inc)
+                                  input)]
+                     (gh/exec-name :diff-branches-view
+                                   {:source-branch-id source :target-branch-id target}))
+            labels (if (= 5 (count rows)) (mapv second cases)
+                       (vec (repeat (count rows) ":owner")))]
+        (is (= 1 @calls) "one shared acquisition even for a large row batch")
+        (is (= (dissoc input :rows) (dissoc result :rows)))
+        (is (= labels (mapv :fn-label (:rows result))))
+        (is (= (mapv #(dissoc % :assets-only?) rows)
+               (mapv #(dissoc % :fn-label) (:rows result)))
+            "entry fields, reference IDs, order and existing marker text are preserved")))))
+
+
+(deftest diff-view-handler-uses-graph-owner-labels
+  (let [fn-name (uniq "diff-label")
+        fn-id (mk-fn! fn-name)
+        branch (mk-branch! (uniq "diff-label-branch"))
+        on-branch (vs/switch-branch *storage* (parse-uuid (:id branch)))]
+    (sp/update-entity on-branch :fn fn-id {:description "label parity"})
+    (let [response (gh/via :diff-view-handler
+                           (get-req (str "/api/branches/main/diff-view?against=" (:id branch))))
+          body (json-body response)
+          group (some #(when (= (str fn-id) (:fn-id %)) %) (:groups body))]
+      (is (= 200 (:status response)))
+      (is (:ok body))
+      (is (= (str ":" fn-name) (:fn-label group)))
+      (is (some #(some (fn [field] (= "label parity" (:source field))) (:fields %))
+                (:entries group))))))

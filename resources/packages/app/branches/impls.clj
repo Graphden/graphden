@@ -94,7 +94,7 @@
   (dv/affected-view (branches/base-storage ctx) (cr/ctx-reverse-deps ctx) groups))
 
 
-(defbase diff-branches-view
+(defbase _diff-view-input
   "Fetch the flat enriched diff facts from `dv/diff-branches-view-facts`.
    Graph fn-defs group and order them for the editor compare view."
   [source-branch-id target-branch-id]
@@ -891,7 +891,7 @@
 (def impls
   {:resolve-branch-ref         resolve-branch-ref
    :diff-branches              diff-branches
-   :diff-branches-view         diff-branches-view
+   :_diff-view-input           _diff-view-input
    :diff-affected              diff-affected
    :create-branch!             create-branch!
    :delete-branch!             delete-branch!

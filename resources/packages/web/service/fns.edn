@@ -77,14 +77,9 @@
                   {:as :service :type :fn-ref}
                   :_service-missing-detail]}}
 
-  {:name :_service-missing-type
-   :parent :assoc-empty
-   :args {:key {:value :type}
-          :value {:value :service/not-running}}}
-
   {:name :_service-missing-id
    :parent :assoc
-   :args {:map :_service-missing-type
+   :args {:map {:value {:type :service/not-running}}
           :key {:value :fn-id}
           :value {:as :service :type :fn-ref}}}
 

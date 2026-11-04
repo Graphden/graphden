@@ -82,8 +82,9 @@ bound to `:hello-handler` (the keyword form of its name). When
    and uses that as the value of `:value`.
 
 The same syntax in a `:fn`-typed slot would behave differently —
-the fn-id would be passed unchanged for the parent to invoke. We'll
-cover that in lesson 09 when we hit higher-order functions.
+the executor prepares a callable for the parent to invoke. If the
+reference returns a callable, the executor first evaluates that constructor.
+[Lesson 09](09-higher-order-functions.md) explains both cases.
 
 ## Try it
 

@@ -144,7 +144,7 @@ common mistake:
 ### Side note: `:effects` on base-fns
 
 Base-fns DECLARE the effect categories they touch — `:effects #{}`
-for a pure fn like the hash, `:effects #{:db}` for `:pg-query`.
+for a pure fn like the hash, `:effects #{:db :raw-sql}` for `:pg-query`.
 The type-checker propagates them transitively so editor effect
 strips show the full set. See [Lesson 16](16-effects-and-secrets.md).
 
@@ -170,6 +170,11 @@ publish / install / update / fork — is [Lesson 32](32-distributing-packages.md
 
 ## Try it
 
+For a source-checkout exercise, first read the
+[worktree contract](../../dev/wtq/AGENT.md), run
+`bb wt claim tutorial-package "Build the tutorial package"`, and change to
+the printed WORKTREE directory. Make the following edits there.
+
 1. Create `resources/packages/mycorp/package.edn`:
 
    ```edn
@@ -193,8 +198,9 @@ publish / install / update / fork — is [Lesson 32](32-distributing-packages.md
    ```
 
 3. Add `"mycorp"` to `:package-names` in
-   `resources/system-dev.edn`, then run `bb rebuild`. After the
-   JVM restarts, the editor's explorer shows `mycorp.hello.greet`.
+   `resources/system-dev.edn`, then run `bb wt up`. Open the isolated
+   instance at the URL it prints; the editor's explorer shows
+   `mycorp.hello.greet`.
    Open `⋯` → `▶ Run`, supply `:name = "world"`, get
    `"Hello, world!"`.
 

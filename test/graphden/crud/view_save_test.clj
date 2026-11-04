@@ -4,11 +4,13 @@
    because failure injection temporarily replaces the publication function."
   (:require
     [clojure.string :as str]
-    [clojure.test :refer [deftest is use-fixtures]]
+    [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.entities :as entities]
     [graphden.crud.entities.views :as read-views]
     [graphden.crud.type-check :as type-check]
+    [graphden.crud.types-api :as types-api]
     [graphden.crud.views :as views]
+    [graphden.executor.compile.lookups :as lookups]
     [graphden.executor.context :as context]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
@@ -325,3 +327,40 @@
             (is (false? (:committed result)))
             (is (= 409 (:http-status result)))
             (is (= before (counts storage)))))))))
+
+
+(deftest composed-explorer-view-is-not-a-compatible-base-replacement
+  ;; Counterexample for moving the public base into a graph composition:
+  ;; ordinary inherited axes still decode, but discovery and Save require
+  ;; the explorer-view identity to have no parents. A migration must change
+  ;; those contracts together; a runnable wrapper alone is insufficient.
+  (let [storage (setup/create-versioned-test-storage 6)]
+    (try
+      (let [native (setup/create-base-fn! storage "_view-evaluator")
+            name-slot (setup/create-slot! storage "name" :text)
+            _ (setup/attach-slot! storage (:id native) (:id name-slot) 0)
+            public (setup/create-composed-fn! storage "explorer-view" (:id native))
+            saved (setup/create-composed-fn! storage "saved-view" (:id public))
+            _ (setup/bind-value! storage (:id saved) (:id name-slot) "member-probe")
+            member (setup/create-base-fn! storage "member-probe")
+            ctx (context/create-context {:storage storage})
+            indices (lookups/build-lookups (types-api/cached-or-load-graph ctx))]
+        (testing "inherited literal axes remain individually decodable"
+          (is (= {:filters {:name "member-probe"}}
+                 (read-views/decode-view indices (:id saved)))))
+        (testing "ad-hoc evaluation works but saved-view discovery loses the identity"
+          (is (= [(:id member)]
+                 (mapv :id (:fns (entities/view-members ctx {:name "member-probe"})))))
+          (is (= [] (entities/list-explorer-views ctx)))
+          (let [answer (entities/view-members ctx {:name "member-probe" :views [(:id saved)]})]
+            (is (= [] (:fns answer)))
+            (is (= {:views [(:id saved)]} (:missing answer)))))
+        (testing "Save rejects the composed public root without writing"
+          (let [before (counts storage)
+                result (save! ctx {:id (:id saved) :name "saved-view"
+                                   :filters {:name "member-probe"}})]
+            (is (= {:committed false :http-status 400
+                    :message "The explorer-view function is not installed"}
+                   (select-keys result [:committed :http-status :message])))
+            (is (= before (counts storage))))))
+      (finally (sp/close storage)))))

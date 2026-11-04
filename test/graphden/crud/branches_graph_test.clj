@@ -889,7 +889,7 @@
                                               {:source (:name source)})))]
         (is (:ok body))
         (is (= {:branch-local (mapv #(-> % (update :entity-name name) (update :entity-id str)) expected)}
-               (get-in body [:merge :skipped])))))))
+               (:skipped body)))))))
 
 
 (deftest diff-affected-graph-enriches-shared-bfs-facts-with-visible-paths

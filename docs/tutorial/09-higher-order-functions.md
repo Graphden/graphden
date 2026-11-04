@@ -2,9 +2,9 @@
 
 **Goal**: by the end of this lesson you can write a fn-def that
 takes another fn as input, understand why `:fn`-typed slots
-behave differently from other slots, and reason about
-closure-capture (why `:request` from an outer Ring handler is
-available inside a deeply-nested callable).
+behave differently from other slots, and distinguish per-invocation
+input (`:request` in a Ring handler) from closure capture (a
+`:threshold` retained by a `:map` callback).
 
 **Concepts introduced**: `:fn`-typed slot, `HOF`,
 `closure-capture`, `lambda-params`, `iterating vs one-shot HOF`.

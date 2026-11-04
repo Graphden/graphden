@@ -547,11 +547,85 @@
                                                          :key {:value :name}
                                                          :value {:as :pkg-name :type :text}}}}}}}}}
 
-  {:name :breaking-changes-between
-   :description "Consumer-visible incompatibilities from one bundle's fn-defs to another's — removed public fn-defs, removed / narrowed / newly-required args, unbound bindings, changed renames or parents, widened returns, a grown or dropped `:expects-effects` contract, reshaped type-rows (`graphden.packages.compat`). `[]` = a compatible successor. Pure."
-   :args {:old-fns {:type [:list :keyword-map] :description "The previous version's fn-defs."}
-          :new-fns {:type [:list :keyword-map] :description "The candidate version's fn-defs."}}
+  {:name :_compat-local-name
+   :args {:fn-def {:type :keyword-map}}
+   :return-type :nullable-text}
+
+  {:name :_compat-fn-changes
+   :description "Compare one matched pair through the shared canonical signature and subtype algorithm."
+   :args {:old {:type :keyword-map} :new {:type :keyword-map}}
    :return-type [:list :keyword-map]}
+
+  {:name :_compat-public?
+   :parent :and
+   :args {:values [{:parent :some?
+                    :args {:value {:parent :_compat-local-name :args {:fn-def {:as :item}}}}}
+                   {:parent :not
+                    :args {:value {:parent :str-starts-with?
+                                   :args {:string {:parent :_compat-local-name :args {:fn-def {:as :item}}}
+                                          :prefix "_"}}}}]}}
+
+  {:name :_compat-namespace
+   :parent :get
+   :args {:coll {:as :item :type :keyword-map} :key {:value :namespace} :default nil}}
+
+  {:name :_compat-key
+   :parent :list
+   :args {:items [{:parent :if
+                   :args {:test {:parent :some? :args {:value :_compat-namespace}}
+                          :then {:parent :str :args {:parts [:_compat-namespace]}}
+                          :else nil}}
+                  {:parent :get :args {:coll {:as :item :type :keyword-map}
+                                       :key {:value :name} :default nil}}]}}
+
+  {:name :_compat-old-public
+   :parent :filter
+   :args {:pred :_compat-public? :coll {:as :old-fns :type [:list :keyword-map]}}}
+
+  {:name :_compat-new-public
+   :parent :filter
+   :args {:pred :_compat-public? :coll {:as :new-fns :type [:list :keyword-map]}}}
+
+  {:name :_compat-old-index
+   :parent :zipmap
+   :args {:keys {:parent :map :args {:func :_compat-key :coll :_compat-old-public}}
+          :vals :_compat-old-public}}
+
+  {:name :_compat-new-index
+   :parent :zipmap
+   :args {:keys {:parent :map :args {:func :_compat-key :coll :_compat-new-public}}
+          :vals :_compat-new-public}}
+
+  {:name :_compat-old-fn
+   :parent :get
+   :args {:coll :_compat-old-index :key {:as :item} :default nil}}
+
+  {:name :_compat-new-fn
+   :parent :get
+   :args {:coll :_compat-new-index :key {:as :item} :default nil}}
+
+  {:name :_compat-changes-for-key
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_compat-new-fn}}
+          :then {:parent :_compat-fn-changes
+                 :args {:old {:ref :_compat-old-fn :type :keyword-map}
+                        :new {:ref :_compat-new-fn :type :keyword-map}}}
+          :else {:parent :list
+                 :args {:items [{:parent :zipmap
+                                 :args {:keys [{:value :kind} {:value :fn}]
+                                        :vals [{:value :fn-removed}
+                                               {:parent :get
+                                                :args {:coll :_compat-old-fn :key {:value :name} :default nil}}]}}]}}}}
+
+  {:name :breaking-changes-between
+   :description "Consumer-visible incompatibilities between bundles. Public filtering, namespace/name matching (last duplicate wins), stable string-key order and flattening are graph composition; matched signatures use the shared canonical compatibility algorithm."
+   :parent :vec
+   :args {:coll {:parent :concat
+                 :args {:colls {:parent :map
+                                :args {:func :_compat-changes-for-key
+                                       :coll {:parent :sort-by
+                                              :args {:key-fn {:parent :str :args {:parts [{:as :item}]}}
+                                                     :coll {:parent :keys :args {:map :_compat-old-index}}}}}}}}}}
 
   ;; Dependency indexes preserve the native oracle's string normalization and
   ;; last duplicate wins. Sort OLD names before matching, so additions and

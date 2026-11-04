@@ -168,11 +168,16 @@
       #(publish-under-lock! storage pkg-name pkg-version bundle pkg-public listing))))
 
 
-(defbase breaking-changes-between
-  "Consumer-visible incompatibilities from `old-fns` to `new-fns` (two
-   bundles' fn-def lists) — `compat/breaking-changes`, pure."
-  [old-fns new-fns]
-  (compat/breaking-changes old-fns new-fns))
+(defbase _compat-local-name
+  "Clojure Named boundary for exported names, including qualified symbols."
+  [fn-def]
+  (some-> (:name fn-def) name))
+
+
+(defbase _compat-fn-changes
+  "Canonical signature normalization and subtype comparison for one matched pair."
+  [old new]
+  (compat/fn-def-changes old new))
 
 
 (defbase semver-compatible?
@@ -797,7 +802,8 @@
    :tenancy-active? tenancy-active?
    :graph-rows graph-rows
    :publish-package-apply {:impl publish-package-apply :taint-propagate? true}
-   :breaking-changes-between {:impl breaking-changes-between :taint-propagate? true}
+   :_compat-local-name {:impl _compat-local-name :taint-propagate? true}
+   :_compat-fn-changes {:impl _compat-fn-changes :taint-propagate? true}
    :semver-compatible? semver-compatible?
    :withdraw-package-apply withdraw-package-apply
    ;; taint-propagate: answers one of the caller's own version strings.

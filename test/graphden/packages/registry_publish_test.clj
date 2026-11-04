@@ -665,3 +665,46 @@
     (testing label
       (is (= (compat/incompatible-dependency-bumps old new)
              (run-named :incompatible-dependency-bumps {:old-deps old :new-deps new}))))))
+
+
+(deftest breaking-changes-graph-matches-native-oracle
+  (doseq [[label old new]
+          [["empty" [] []]
+           ["private and anonymous names"
+            [{:name :_hidden} {:name :other/_hidden} {:name 'other/_hidden} {} {:name nil}]
+            []]
+           ["namespace normalization, nil versus empty, and stable string-key order"
+            [{:namespace "z" :name :a} {:namespace "a" :name :z}
+             {:namespace nil :name :same} {:namespace "" :name :same}
+             {:namespace :x :name :same} {:namespace "n" :name "a"}]
+            [{:namespace ":x" :name :same} {:namespace "" :name :same}]]
+           ["last duplicate wins on both sides"
+            [{:name :f :return-type :text :args {:x :int}}
+             {:name :f :return-type :text :args {:x :text}}]
+            [{:name :f :return-type :int :args {:x :int}}
+             {:name :f :return-type :text :args {:x :text}}]]
+           ["removed and added public fns"
+            [{:name :removed} {:name :kept}]
+            [{:name :kept} {:name :added}]]
+           ["slot ordering, requiredness, returns and effect contracts"
+            [{:name :f :return-type :int :args {:z :text :a :any}
+              :expects-effects #{:db}}
+             {:name :g :return-type :int :expects-effects #{}}]
+            [{:name :f :return-type :text :args {:a :text :b :int :optional {:type :int :required false}}
+              :expects-effects #{:db :net}}
+             {:name :g :return-type :int}]]
+           ["composed binding, rename and parent changes"
+            [{:name :f :parent :old :args {:bound {:value 1} :renamed {:as :x}}}]
+            [{:name :f :parent :new :args {:renamed {:as :y}}}]]
+           ["role and type shape changes"
+            [{:name :role :return-type :text} {:name :shape :list :text}
+             {:name :record :type {:field :text}}]
+            [{:name :role :parent :p} {:name :shape :list :int}
+             {:name :record :type {}}]]
+           ["unknown type equality fallback"
+            [{:name :f :return-type :unknown :args {:x :unknown}}]
+            [{:name :f :return-type :unknown :args {:x :unknown}}]]]]
+    (testing label
+      (let [actual (run-named :breaking-changes-between {:old-fns old :new-fns new})]
+        (is (vector? actual))
+        (is (= (compat/breaking-changes old new) actual))))))

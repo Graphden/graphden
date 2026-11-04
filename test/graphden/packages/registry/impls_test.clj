@@ -83,14 +83,6 @@
     (is (false? (call :semver-compatible? {:from "1.3.0" :to "1.2.0"})))))
 
 
-(deftest breaking-changes-between-reports-consumer-visible-loss
-  (let [old [{:name :greet :args {:who {:type :text}}}]]
-    (testing "a removed fn is a breaking change"
-      (is (seq (call :breaking-changes-between {:old-fns old :new-fns []}))))
-    (testing "an unchanged bundle has none"
-      (is (empty? (call :breaking-changes-between {:old-fns old :new-fns old}))))))
-
-
 (deftest version-qualified-ns-renames-only-the-package-subtree
   (let [f (priv 'version-qualified-ns)]
     (testing "the root namespace itself is version-qualified"

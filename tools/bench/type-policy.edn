@@ -1,0 +1,6 @@
+#kaocha/v1
+{:tests [{:id :type-policy
+          :test-paths ["tools/bench"]
+          :ns-patterns ["graphden.bench.type-policy-test"]}]
+ :plugins [:kaocha.plugin/shared-container]
+ :reporter kaocha.report/documentation}

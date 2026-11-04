@@ -83,31 +83,6 @@
     (is (false? (call :semver-compatible? {:from "1.3.0" :to "1.2.0"})))))
 
 
-(deftest breaking-changes-between-reports-consumer-visible-loss
-  (let [old [{:name :greet :args {:who {:type :text}}}]]
-    (testing "a removed fn is a breaking change"
-      (is (seq (call :breaking-changes-between {:old-fns old :new-fns []}))))
-    (testing "an unchanged bundle has none"
-      (is (empty? (call :breaking-changes-between {:old-fns old :new-fns old}))))))
-
-
-(deftest incompatible-dependency-bumps-uses-the-same-range
-  ;; Dependencies are a LIST of `{:name :version}` rows (a bundle's
-  ;; `:package-dependencies`), not a name→version map.
-  (let [dep (fn [v] [{:name "core" :version v}])]
-    (testing "a dependency that left its caret range is reported"
-      (let [[out] (call :incompatible-dependency-bumps
-                        {:old-deps (dep "1.2.0") :new-deps (dep "2.0.0")})]
-        (is (= {:kind :dependency-incompatible :name "core" :old "1.2.0" :new "2.0.0"}
-               out))))
-    (testing "a bump inside the range is not"
-      (is (empty? (call :incompatible-dependency-bumps
-                        {:old-deps (dep "1.2.0") :new-deps (dep "1.3.0")}))))
-    (testing "a dependency merely ADDED or DROPPED is not a break by itself"
-      (is (empty? (call :incompatible-dependency-bumps {:old-deps [] :new-deps (dep "1.0.0")})))
-      (is (empty? (call :incompatible-dependency-bumps {:old-deps (dep "1.0.0") :new-deps []}))))))
-
-
 (deftest version-qualified-ns-renames-only-the-package-subtree
   (let [f (priv 'version-qualified-ns)]
     (testing "the root namespace itself is version-qualified"

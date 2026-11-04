@@ -547,17 +547,190 @@
                                                          :key {:value :name}
                                                          :value {:as :pkg-name :type :text}}}}}}}}}
 
-  {:name :breaking-changes-between
-   :description "Consumer-visible incompatibilities from one bundle's fn-defs to another's — removed public fn-defs, removed / narrowed / newly-required args, unbound bindings, changed renames or parents, widened returns, a grown or dropped `:expects-effects` contract, reshaped type-rows (`graphden.packages.compat`). `[]` = a compatible successor. Pure."
-   :args {:old-fns {:type [:list :keyword-map] :description "The previous version's fn-defs."}
-          :new-fns {:type [:list :keyword-map] :description "The candidate version's fn-defs."}}
+  {:name :_compat-local-name
+   :args {:fn-def {:type :keyword-map}}
+   :return-type :nullable-text}
+
+  {:name :_compat-fn-changes
+   :description "Compare one matched pair through the shared canonical signature and subtype algorithm."
+   :args {:old {:type :keyword-map} :new {:type :keyword-map}}
    :return-type [:list :keyword-map]}
 
+  {:name :_compat-public?
+   :parent :and
+   :args {:values [{:parent :some?
+                    :args {:value {:parent :_compat-local-name :args {:fn-def {:as :item}}}}}
+                   {:parent :not
+                    :args {:value {:parent :str-starts-with?
+                                   :args {:string {:parent :_compat-local-name :args {:fn-def {:as :item}}}
+                                          :prefix "_"}}}}]}}
+
+  {:name :_compat-namespace
+   :parent :get
+   :args {:coll {:as :item :type :keyword-map} :key {:value :namespace} :default nil}}
+
+  {:name :_compat-key
+   :parent :vec
+   :args {:coll {:parent :list
+                 :args {:items [{:parent :if
+                                 :args {:test {:parent :some? :args {:value :_compat-namespace}}
+                                        :then {:parent :str :args {:parts [:_compat-namespace]}}
+                                        :else nil}}
+                                {:parent :get :args {:coll {:as :item :type :keyword-map}
+                                                     :key {:value :name} :default nil}}]}}}}
+
+  {:name :_compat-old-public
+   :parent :filter
+   :args {:pred :_compat-public? :coll {:as :old-fns :type [:list :keyword-map]}}}
+
+  {:name :_compat-new-public
+   :parent :filter
+   :args {:pred :_compat-public? :coll {:as :new-fns :type [:list :keyword-map]}}}
+
+  {:name :_compat-old-index
+   :parent :zipmap
+   :args {:keys {:parent :map :args {:func :_compat-key :coll :_compat-old-public}}
+          :vals :_compat-old-public}}
+
+  {:name :_compat-new-index
+   :parent :zipmap
+   :args {:keys {:parent :map :args {:func :_compat-key :coll :_compat-new-public}}
+          :vals :_compat-new-public}}
+
+  {:name :_compat-old-fn
+   :parent :get
+   :args {:coll :_compat-old-index :key {:as :item} :default nil}}
+
+  {:name :_compat-new-fn
+   :parent :get
+   :args {:coll :_compat-new-index :key {:as :item} :default nil}}
+
+  {:name :_compat-changes-for-key
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_compat-new-fn}}
+          :then {:parent :_compat-fn-changes
+                 :args {:old {:ref :_compat-old-fn :type :keyword-map}
+                        :new {:ref :_compat-new-fn :type :keyword-map}}}
+          :else {:parent :list
+                 :args {:items [{:parent :zipmap
+                                 :args {:keys [{:value :kind} {:value :fn}]
+                                        :vals [{:value :fn-removed}
+                                               {:parent :get
+                                                :args {:coll :_compat-old-fn :key {:value :name} :default nil}}]}}]}}}}
+
+  {:name :_compat-key-sort-text
+   :lambda-params [:item]
+   :parent :str
+   :args {:parts [{:as :item}]}}
+
+  {:name :breaking-changes-between
+   :description "Consumer-visible incompatibilities between bundles. Public filtering, namespace/name matching (last duplicate wins), stable string-key order and flattening are graph composition; matched signatures use the shared canonical compatibility algorithm."
+   :parent :vec
+   :args {:coll {:parent :concat
+                 :args {:colls {:parent :map
+                                :args {:func :_compat-changes-for-key
+                                       :coll {:parent :sort-by
+                                              :args {:key-fn :_compat-key-sort-text
+                                                     :coll {:parent :keys :args {:map :_compat-old-index}}}}}}}}}}
+
+  ;; Dependency indexes preserve the native oracle's string normalization and
+  ;; last duplicate wins. Sort OLD names before matching, so additions and
+  ;; removals never enter the incompatible-version predicate.
+  {:name :_dep-row-name-value
+   :parent :get
+   :args {:coll {:as :item :type :package-dependency-shape}
+          :key {:value :name} :default nil}}
+
+  {:name :_dep-row-version-value
+   :parent :get
+   :args {:coll {:as :item :type :package-dependency-shape}
+          :key {:value :version} :default nil}}
+
+  {:name :_dep-name
+   :parent :str
+   :args {:parts [:_dep-row-name-value]}}
+
+  {:name :_dep-version
+   :parent :str
+   :args {:parts [:_dep-row-version-value]}}
+
+  {:name :_dep-old-map
+   :parent :map
+   :args {:coll {:as :old-deps :type [:list :package-dependency-shape]}}}
+
+  {:name :_dep-new-map
+   :parent :map
+   :args {:coll {:as :new-deps :type [:list :package-dependency-shape]}}}
+
+  {:name :_dep-old-names
+   :parent :_dep-old-map
+   :args {:func :_dep-name}}
+
+  {:name :_dep-old-versions
+   :parent :_dep-old-map
+   :args {:func :_dep-version}}
+
+  {:name :_dep-new-names
+   :parent :_dep-new-map
+   :args {:func :_dep-name}}
+
+  {:name :_dep-new-versions
+   :parent :_dep-new-map
+   :args {:func :_dep-version}}
+
+  {:name :_dep-old-index
+   :parent :zipmap
+   :args {:keys :_dep-old-names
+          :vals :_dep-old-versions}}
+
+  {:name :_dep-new-index
+   :parent :zipmap
+   :args {:keys :_dep-new-names
+          :vals :_dep-new-versions}}
+
+  {:name :_dep-old-version
+   :parent :get
+   :args {:coll :_dep-old-index :key {:as :item :type :text} :default nil}}
+
+  {:name :_dep-new-version
+   :parent :get
+   :args {:coll :_dep-new-index :key {:as :item :type :text} :default nil}}
+
+  {:name :_dep-incompatible?
+   :parent :and
+   :args {:values [{:parent :some? :args {:value :_dep-new-version}}
+                   {:parent :neq :args {:values [:_dep-old-version :_dep-new-version]}}
+                   {:parent :not
+                    :args {:value {:parent :semver-compatible?
+                                   :args {:from {:ref :_dep-old-version :type :text}
+                                          :to {:ref :_dep-new-version :type :text}}}}}]}}
+
+  {:name :_dep-change-row
+   :parent :zipmap
+   :args {:keys [{:value :kind} {:value :name} {:value :old} {:value :new}]
+          :vals [{:value :dependency-incompatible} {:as :item :type :text}
+                 :_dep-old-version :_dep-new-version]}}
+
+  {:name :_dep-old-index-keys
+   :parent :keys
+   :args {:map :_dep-old-index}}
+
+  {:name :_dep-old-names-sorted
+   :parent :sort
+   :args {:coll :_dep-old-index-keys}}
+
+  {:name :_dep-incompatible-names
+   :parent :filter
+   :args {:pred :_dep-incompatible? :coll :_dep-old-names-sorted}}
+
+  {:name :_dep-change-rows
+   :parent :map
+   :args {:func :_dep-change-row :coll :_dep-incompatible-names}}
+
   {:name :incompatible-dependency-bumps
-   :description "Package dependencies (`{:name :version}` lists, a bundle's `:package-dependencies`) whose new version left the old one's caret range — `[{:kind :dependency-incompatible :name … :old … :new …}]`; a dependency added or dropped is not a break. Pure."
-   :args {:old-deps {:type [:list :package-dependency-shape] :description "The previous version's package dependencies."}
-          :new-deps {:type [:list :package-dependency-shape] :description "The candidate version's package dependencies."}}
-   :return-type [:list :keyword-map]}
+   :description "Package dependencies whose new version left the old one's caret range. String-normalized names, last duplicate wins, sorted by name; added or dropped dependencies alone are not breaks. Pure graph composition over the shared semver predicate."
+   :parent :vec
+   :args {:coll :_dep-change-rows}}
 
   {:name :semver-compatible?
    :description "Is `:to` inside `:from`'s caret range (`^from` — same major; below 1.0 the same minor)? The range a `^` / `~>` consumer would auto-advance into, so a breaking change must leave it."

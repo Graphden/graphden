@@ -307,13 +307,13 @@ Stores a published bundle as an immutable ~:package-version~ row identified by v
 :PROPERTIES:
 :CUSTOM_ID: packages/upsert-pin!
 :FILE: resources/packages/registry/registry/impls.clj
-:LINE: 349
+:LINE: 347
 :MINS: 2.2
 :END:
 
 Creates or updates an [[file:glossary.org::#term/semver][installation pin]]. Only a new installation increments the global package statistic, using an atomic database upsert; moving an existing [[file:glossary.org::#term/semver][pin]] to another version does not. See [[file:../../../docs/MARKETPLACE.md][marketplace]].
 
-- source :: [[file:../../../resources/packages/registry/registry/impls.clj::(defn- upsert-pin!][resources/packages/registry/registry/impls.clj:349]]
+- source :: [[file:../../../resources/packages/registry/registry/impls.clj::(defn- upsert-pin!][resources/packages/registry/registry/impls.clj:347]]
 - same file :: [[file:packages.org::#packages/publish-package-apply][publish-package-apply]]
 
 * 24. moderate-package-version!

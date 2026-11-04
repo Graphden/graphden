@@ -153,6 +153,55 @@ which BFS-walks from the same registry.
 
 ## Feasibility notes (why it is shaped this way)
 
+### Native helper inventory
+
+`bb native-inventory > target/native-inventory.edn` produces advisory source
+data for reviewing logic hidden behind base functions. It reads literal
+`impls` registrations and their `fns.edn` declarations, then uses the pinned
+clj-kondo analyzer and existing `defbase` hook to resolve native var usages.
+It does not evaluate package code, connect to a database, or run graph roots.
+
+The EDN report contains registered graph identities, implementation symbols,
+declared types/effects, registration metadata (including taint), native source
+locations and dependency edges. Each registration has one shortest helper
+path per reachable source var. Paths follow calls **and var values**, so a
+callback passed to a higher-order function remains visible. These paths show
+static dependencies, not proof that a callback executes. Kondo may also infer
+a call at a callback's source position. Lexically shadowed symbols are not
+mistaken for same-named native helpers.
+
+The report embeds the existing `tools/graph-reachability.edn` registry for
+review context; the reachability audit remains responsible for its roots and
+external-consumer rules. The inventory never declares a function pure, dead,
+or suitable for graph composition. Reviewers must identify the actual
+parse/validate/decision/formatting seam and preserve security, transaction,
+runtime and resource-budget boundaries.
+
+Coverage is deliberately explicit: dynamic registration is unsupported,
+unresolved var usages remain edges, external library vars are leaves, and
+dynamic dispatch is not resolved. Macro analysis is limited to kondo and its
+configured hooks. Helper traversal stops at depth six or 128 source vars per
+entry and reports truncation; cycles terminate. An empty path is not evidence
+of an atomic primitive. Analyzer findings accompany the report, while missing
+analysis is a hard error. The inventory is advisory; its regression selftest
+runs in CI when the analyzer, inventory, or task configuration changes.
+
+The coverage summary is also printed to stderr, leaving stdout as EDN. It
+counts depth and node-limit reasons separately (an entry can hit both).
+For a focused review with larger traversal limits:
+
+```sh
+bb native-inventory --entry app.reprs/tabulate-records --max-depth 12 --max-nodes 512 > target/tabulate-inventory.edn
+```
+
+This still analyzes the source corpus to resolve aliases, but includes only
+the selected registration and its visited source vars in the output. Reports
+are generated artifacts; do not commit them. Every entry stays `:unreviewed`
+even when traversal completes: neither a complete nor a truncated path gets
+an automatic atomic/native classification.
+
+### Graph engine
+
 - **Size.** The whole first-party graph is ~4.3k fn-defs / ~6.6k fn
   rows in a full DB; both signatures are one memoised DAG pass (ref
   edges cannot cycle — the write-time constraint guarantees it), so a

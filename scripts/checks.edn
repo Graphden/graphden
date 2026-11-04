@@ -33,6 +33,8 @@
   :relevant ["\\.(clj|cljc|cljs|edn|bb)$"]}
  {:name "splint"        :bb "splint"        :timeout 120000 :group :clj
   :relevant ["\\.(clj|cljc|cljs|edn|bb)$"]}
+ {:name "native-inventory-selftest" :bb "native-inventory-test" :timeout 180000 :group :clj
+  :relevant ["^scripts/native_inventory(?:_test)?\\.clj$" "^\\.clj-kondo/" "^deps\\.edn$" "^bb\\.edn$"]}
  ;; `^bb\.edn$` in every check whose SCAN SET is defined by its `bb`
  ;; task body (a narrowed glob there would otherwise skip the very
  ;; check the edit changed); `^\.cljstyle$` because the extensionless

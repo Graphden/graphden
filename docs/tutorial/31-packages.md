@@ -10,6 +10,19 @@ first-party packages are layered.
 `defbase`, the `impls` map, `namespace tree`, optional package, and
 an **external package pulled by git coord** (`executor-packages.edn`).
 
+## Explore a loaded package in the editor
+
+The interactive lesson uses the already loaded `core.strings.str-upper`.
+Find it in the Explorer, extend it as `tutorial-package-upper` in the
+lesson’s scratch branch, bind your child's `:string` to `package reuse`,
+and Run it to obtain `PACKAGE REUSE`. Return to `str-upper`: its slot
+remains free. Your child reuses the package implementation; its input
+belongs to your child.
+
+This exercise does not install source files or publish a registry version.
+The source-checkout exercise below teaches startup loading; lesson 32
+teaches the separate registry publish/install workflow.
+
 ## What's a package
 
 A package is a directory under `resources/packages/` that groups

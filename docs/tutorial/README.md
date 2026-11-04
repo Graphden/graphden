@@ -82,7 +82,7 @@ of order.
 | 28 | [Grants — who may touch what](28-grants.md) | ✅ written · ▶ interactive |
 | 29 | [Roles — capabilities as a bundle](29-roles.md) | ✅ written · ▶ interactive |
 | 30 | [Apps — publishing a fn as a public site](30-apps.md) | ✅ written · ▶ interactive |
-| 31 | [Packages — namespaces, fns.edn, impls.clj, deps](31-packages.md) | ✅ written |
+| 31 | [Packages — namespaces, fns.edn, impls.clj, deps](31-packages.md) | ✅ written · ▶ interactive |
 | 32 | [Distributing packages — publish, install, update, fork](32-distributing-packages.md) | ✅ written · ▶ interactive |
 | 33 | [Working across organizations](33-working-across-orgs.md) | ✅ written · ▶ interactive |
 | 34 | [Working offline: a local instance, git snapshots, push/pull](34-offline-and-push.md) | ✅ written |
@@ -146,22 +146,23 @@ capture in 09, …), the same thing as fn-defs, and a "what we glossed
 over" list. The tour says so at the hand-over: its last step links to
 the written lesson and says in one line what the text adds, and the
 catalogue repeats that line under every lesson you have marked `✓ done`
-(the `↗` on any row opens the text). The two lessons without a tour are
-listed in the catalogue too, as **text only** rows that open the text —
+(the `↗` on any row opens the text). The lesson without a tour is
+listed in the catalogue too, as a **text only** row that opens the text —
 so the catalogue is the whole tutorial, not just the part the editor can
 walk. The link target is `https://graphden.dev/tutorial/` plus the
 lesson's file name; a deployment serving its own copy of the lessons (a
 translation, an intranet mirror) sets `GRAPHDEN_TUTORIAL_BASE` to it.
 
-Two lessons have no tour: **31** works with package files on disk and startup
-sync; **34** requires a second instance and external deployment tools.
+Lesson **31** explores and reuses a loaded package in a sandbox; package files
+and startup sync remain in its written exercise. Lesson **34** has no tour:
+it requires a second instance and external deployment tools.
 **14** practices live fragment updates through an isolated HTML handler preview;
 **39** practices queue retries and recovery when persistent services are available.
 **41** practices author and consumer on two
 owned branches; **42** practices account token creation, scopes and revocation,
 while external registry and MCP client setup remain in their written lessons.
-Both text-only lessons sit in the chapter their subject belongs to, which is why the ▶
-column is worth reading.
+The text-only lesson sits in its subject’s chapter; the ▶ column marks
+which lessons have an editor exercise.
 
 The organization tours declare what they need (`:requires`): a capability such
 as `manage-users` or `publish-packages`, or a named deployment condition. Lessons

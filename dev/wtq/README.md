@@ -164,8 +164,9 @@ Details that are deliberate:
   checks and provisional browser verdicts run again. The gate checks that visual
   Playwright can launch its Chromium before CI and again before visual, so a
   missing browser cache is a resumable host PRECOND rather than a late suite
-  failure. Disk admission reclaims the downloaded Trivy DB and archives old
-  hidden gate output when needed.
+  failure. Disk admission reclaims the downloaded Trivy DB, archives gate logs
+  older than 24 hours without losing `wt log` access, and, if still short,
+  drops reproducible Docker build cache before refusing the next stage.
   Missing or malformed proof runs the check rather than waiving it. CI preserves canonical resource
   batches (it may split, never combine them); readers follow their measuring
   tests, and the verified build precedes image consumers. Browser admission

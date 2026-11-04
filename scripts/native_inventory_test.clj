@@ -1,4 +1,4 @@
-(ns native-inventory-test
+(ns ^:serial native-inventory-test
   (:require
     [babashka.fs :as fs]
     [babashka.process :as process]
@@ -18,6 +18,20 @@
      (map forwarded values)
      (missing-operation values))
    (def impls {:public-name {:impl implementation :taint-propagate? true}})")
+
+
+(deftest registration-entry-locations-test
+  (let [entries (inventory/registrations "impls.clj"
+                                         (inventory/read-source "(ns sample)\n(def impls\n {:a first\n  :b {:impl second}\n  :c nil})")
+                                         {})]
+    (is (= [{:row 3 :col 6} {:row 4 :col 6} {}]
+           (mapv #(select-keys (:entry-location %) [:row :col]) entries)))
+    (is (= [:registration-value :registration-value nil]
+           (mapv #(get-in % [:entry-location :anchor]) entries)))
+    (is (= {:status :unresolved :reason :no-source-metadata}
+           (:entry-location (last entries))))
+    (is (= [{:row 3 :col 2} {:row 3 :col 2} {:row 3 :col 2}]
+           (mapv #(select-keys (:registration-map-location %) [:row :col]) entries)))))
 
 
 (deftest source-reader-does-not-evaluate-test
@@ -142,6 +156,21 @@
             (is (= 2 (:input-files untracked)))
             (is (true? (:dirty? untracked)))
             (is (not= (:input-sha256 dirty) (:input-sha256 untracked))))))
+      (testing "A late metadata read cannot escape the final identity check"
+        (fs/create-dirs (fs/path root "tools"))
+        (let [registry (str (fs/path root "tools/graph-reachability.edn"))
+              dependencies (str (fs/path root "deps.edn"))
+              original-slurp slurp]
+          (spit registry "{}")
+          (spit dependencies "{}")
+          (with-redefs [inventory/analyze (fn [_root _paths] {:analysis {}})
+                        slurp (fn [path]
+                                (let [value (original-slurp path)]
+                                  (when (= path registry)
+                                    (spit dependencies "{:changed-during-final-read true}"))
+                                  value))]
+            (is (thrown-with-msg? clojure.lang.ExceptionInfo #"inputs changed during analysis"
+                  (inventory/scan root {}))))))
       (finally (fs/delete-tree root)))))
 
 

@@ -163,8 +163,12 @@ It does not evaluate package code, connect to a database, or run graph roots.
 
 The EDN report contains registered graph identities, implementation symbols,
 declared types/effects, registration metadata (including taint), native source
-locations and dependency edges. Each registration has one shortest helper
-path per reachable source var. Paths follow calls **and var values**, so a
+locations and dependency edges. `:entry-location` points to the registration
+value (the implementation symbol or metadata map), with that anchor stated
+explicitly; `:registration-map-location` points to the enclosing map. Values
+without source metadata have an unresolved entry location, not the map's
+location disguised as an exact entry location. Each registration has one
+shortest helper path per reachable source var. Paths follow calls **and var values**, so a
 callback passed to a higher-order function remains visible. These paths show
 static dependencies, not proof that a callback executes. Kondo may also infer
 a call at a callback's source position. Lexically shadowed symbols are not

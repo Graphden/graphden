@@ -75,9 +75,13 @@
     (if (map? value)
       (mapv (fn [[graph-name registration]]
               (let [implementation (if (map? registration) (:impl registration) registration)
-                    definition (get declarations graph-name)]
+                    definition (get declarations graph-name)
+                    entry-position (select-keys (meta registration) [:row :col :end-row :end-col])]
                 {:graph-id [(:namespace declaration) graph-name]
-                 :registration (assoc (select-keys (meta impls-form) [:row :col]) :filename filename)
+                 :registration-map-location (assoc (select-keys (meta value) [:row :col]) :filename filename)
+                 :entry-location (if (:row entry-position)
+                                   (assoc entry-position :filename filename :status :resolved :anchor :registration-value)
+                                   {:status :unresolved :reason :no-source-metadata})
                  :native-namespace ns-name
                  :implementation (when (symbol? implementation)
                                    (if (namespace implementation) implementation
@@ -87,7 +91,8 @@
                  :declaration (select-keys definition [:args :return-type :effects :expects-effects])
                  :declaration-present? (some? definition)}))
             (sort-by (comp str key) value))
-      [{:registration {:filename filename}
+      [{:registration-map-location {:filename filename}
+        :entry-location {:status :unresolved :reason :nonliteral-or-missing-impls}
         :registration-status :unsupported
         :reason :nonliteral-or-missing-impls}])))
 
@@ -235,18 +240,20 @@
                                               (edn/read-string (slurp (str (fs/path (fs/parent path) "fns.edn"))))))
                              paths))
         analyzed (analyze root ["src" "resources/packages"])
+        report (assoc (inventory entries (:analysis analyzed)
+                                 (edn/read-string (slurp (str (fs/path root "tools/graph-reachability.edn"))))
+                                 options)
+                      :analyzer {:name :clj-kondo
+                                 :version (get-in (edn/read-string (slurp (str (fs/path root "deps.edn"))))
+                                                  [:aliases :kondo :extra-deps 'clj-kondo/clj-kondo :mvn/version])
+                                 :findings (:findings analyzed)})
+        ;; All report inputs, including registry and dependency metadata, have
+        ;; been consumed before closing the identity bracket.
         identity-after (source-identity root)]
     (when-not (= identity-before identity-after)
       (throw (ex-info "Inventory inputs changed during analysis; rerun on a stable checkout"
                       {:before identity-before :after identity-after})))
-    (assoc (inventory (vec entries) (:analysis analyzed)
-                      (edn/read-string (slurp (str (fs/path root "tools/graph-reachability.edn"))))
-                      options)
-           :source-identity identity-after
-           :analyzer {:name :clj-kondo
-                      :version (get-in (edn/read-string (slurp (str (fs/path root "deps.edn"))))
-                                       [:aliases :kondo :extra-deps 'clj-kondo/clj-kondo :mvn/version])
-                      :findings (:findings analyzed)})))
+    (assoc report :source-identity identity-after)))
 
 
 (defn cli-options

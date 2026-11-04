@@ -83,6 +83,8 @@
     (cond-> (ctx/create-context {:storage branch-storage
                                  :base-fns (:base-fns base-ctx)
                                  :clock (:clock base-ctx)
+                                 :sql-pool-manager (:sql-pool-manager base-ctx)
+                                 :sql-pool-scope (:sql-pool-scope base-ctx)
                                  :allowed-effects (:allowed-effects base-ctx)
                                  ;; Inherit the executor's org shard — a branch
                                  ;; ctx must compile the same slice of the graph

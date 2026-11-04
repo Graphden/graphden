@@ -1,14 +1,11 @@
 # Tutorial: Periodic API Poll with User-Owned Storage
 
-**Status: needs alignment with the current secret-flow contract.** The
-walkthrough below records an earlier end-to-end composition. Today
-`:sql-exec` and `:sql-query` conservatively propagate the secret password
-mark to their results: the Run pane hides the SQL results promised in
-Steps 4–5, and Step 7's `list-history` cannot flow into `:json-handler`'s
-plain `:jsonb` input. Do not treat the final history endpoint as a current
-working recipe or bypass the marker to make it work. Use the focused
-[lessons](tutorial/README.md) and [SECRETS.md](SECRETS.md) for current
-contracts; the full composition needs a reviewed output design.
+`sql-exec` and `sql-query` retain the secret marker from the database
+password. Their Run results are hidden, and a raw query result cannot feed a
+plain HTTP response. For a response that is meant to be public, use
+`sql-query-public` and name each column that may leave the SQL boundary.
+Unlisted columns are discarded. Review the selected columns and the query
+before publishing the endpoint; the database password is never returned.
 
 Build, end-to-end through the editor UI, a service that:
 
@@ -128,8 +125,8 @@ you against accidental leaks — `(upper (secret-leaf …))` returns a
 
 ## Step 3 — Shared "always pass these creds" helpers
 
-Every SQL call needs `:url`, `:user`, `:password`. On `:sql-exec`
-and `:sql-query` only the **`:password`** slot is secret-aware
+Every SQL call needs `:url`, `:user`, `:password`. On `:sql-exec`,
+`:sql-query` and `:sql-query-public` only the **`:password`** slot is secret-aware
 (`[:secret :text]`) — `:url` and `:user` are plain `:text`, so you
 bind them as literals (a `[:secret :text]` value would be *rejected*
 from a plain slot). Wrap each base fn once so the rest of the graph
@@ -138,11 +135,18 @@ binds only what differs:
 | Name | parent | Bind |
 |---|---|---|
 | `_db-exec` | `:sql-exec` | `:url` = `"jdbc:postgresql://user-postgres:5432/userdb"`, `:user` = `"userapp"`, `:password` = ref `:_db-password` |
-| `_db-query` | `:sql-query` | same three binds |
+| `_db-query-public` | `:sql-query-public` | same three binds |
 
 After this, anything that runs SQL inherits the creds for free.
 The only free args left on `_db-exec` are `:sql` and `:params` —
 exactly what each call site needs to vary.
+
+For PostgreSQL, repeated calls from the same organization, principal, branch,
+destination and credentials reuse a bounded server-managed connection pool.
+The graph never receives a pool handle. A credential change retires the old
+pool after active calls finish. Each returned connection is reset, so a
+temporary table, session setting or open transaction from one call cannot
+affect the next. Anonymous calls use a fresh connection.
 
 ## Step 4 — Create the table (one-time "migration")
 
@@ -150,8 +154,8 @@ exactly what each call site needs to vary.
 |---|---|---|
 | `migrate-up` | `:_db-exec` | `:sql` = `"CREATE TABLE IF NOT EXISTS api_calls (id SERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(), status INT, body TEXT)"`, `:params` = `[]` |
 
-Click `▶ Run` on `migrate-up`. The result pane should show `0`
-(DDL returns no affected rows). The table now exists in
+Click `▶ Run` on `migrate-up`. The call succeeds, but its result is hidden
+because `:sql-exec` retains the password's secret marker. The table now exists in
 `userdb` — you've done a migration without touching `psql`.
 
 Re-running `migrate-up` is safe (`IF NOT EXISTS`).
@@ -204,12 +208,12 @@ literal-keyword value.
 |---|---|---|
 | `poll-tick` | `:_db-exec` | `:sql` = `"INSERT INTO api_calls (status, body) VALUES (?, ?)"`, `:params` = list `[:_resp-status :_resp-body]` |
 
-Hit `▶ Run`. Result should be `1` (one row inserted). Run it a
+Hit `▶ Run`. The call succeeds, but the affected-row count is hidden. Run it a
 couple more times and verify with a quick query:
 
 | Name | parent | Bind |
 |---|---|---|
-| `count-rows` | `:_db-query` | `:sql` = `"SELECT count(*) AS n FROM api_calls"`, `:params` = `[]` |
+| `count-rows` | `:_db-query-public` | `:sql` = `"SELECT count(*) AS n FROM api_calls"`, `:params` = `[]`, `:public-columns` = `["n"]` |
 
 `▶ Run` `count-rows` → list with one row `{:n 3}` (or whatever you
 fired).
@@ -235,7 +239,7 @@ A second HTTP server, on port 8081, with one route.
 
 | Name | parent | Bind |
 |---|---|---|
-| `list-history` | `:_db-query` | `:sql` = `"SELECT id, ts, status, body FROM api_calls ORDER BY ts DESC LIMIT 50"`, `:params` = `[]` |
+| `list-history` | `:_db-query-public` | `:sql` = `"SELECT id, ts, status, body FROM api_calls ORDER BY ts DESC LIMIT 50"`, `:params` = `[]`, `:public-columns` = `["id" "ts" "status" "body"]` |
 | `history-handler` | `:json-handler` | `:data` = ref `:list-history` |
 
 ### 7b. The route + router

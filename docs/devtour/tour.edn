@@ -1213,6 +1213,12 @@
            listening server can therefore execute different branch-specific graphs. This is the
            package-level caller of the branch router explained in the versioning block."
      :see [[:versioning "dispatch*"]]}
+    {:file "resources/packages/web/sql/impls.clj" :defn sql-query-public
+     :say "Executes a caller-owned PostgreSQL SELECT and returns only explicitly named
+           columns. The database password enters a [secret](#term/secret) slot but is
+           consumed at the JDBC boundary. Unlike a raw `:sql-query` result, the
+           allowlisted row maps can enter a plain JSON handler. The author must
+           review the selected columns before exposing the handler."}
     {:file "resources/packages/web/ring-adapter/impls.clj" :defn authenticate-request
      :say "Authenticates the request before page or action execution. This is part of the handler
            chain after routing, separate from later checks of what the authenticated caller may do."}
@@ -1868,6 +1874,12 @@
            ([SSRF](#term/ssrf)). Resolution rejects prohibited local, private, and metadata addresses.
            DNS and socket checks repeat validation at connection time, reducing the risk that an
            address changes between validation and use."}
+    {:ns graphden.clients.sql-pool :defn with-connection
+     :say "Borrows an external PostgreSQL connection from an executor-owned bounded pool.
+           Organization, principal, branch, destination and effective credentials separate
+           pool generations without placing secrets in visible keys. Each call repeats the
+           outbound destination check before borrowing; ROLLBACK and DISCARD ALL clear
+           session state before reuse. A failed reset retires the generation."}
     {:ns graphden.web.hiccup-sanitize :defn sanitize-hiccup
      :say "Sanitizes graph-authored [Hiccup](#term/hiccup) before it enters the editor
            [DOM](#term/hiccup). It allows selected tags and attributes, limits depth and node count,

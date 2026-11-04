@@ -22,6 +22,7 @@
   (:require
     [clojure.string :as str]
     [clojure.tools.logging :as log]
+    [graphden.clients.sql-pool :as sql-pool]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.context :as ectx]
     [graphden.executor.interface :as exec]
@@ -189,12 +190,15 @@
   (let [loaded (when (seq packages) (pkg/load-packages packages))
         base-fns (register-impls-in-memory! loaded extra-base-fns)
         storage (remote/create-remote-storage hub-url token branch org)
+        sql-manager (sql-pool/create-manager)
         ;; No `:executor-orgs`: RemoteStorage already holds ONLY this org's +
         ;; public rows (the hub scoped the bundle server-side), so re-filtering
         ;; in `read-graph` is redundant — and `#{org}` would wrongly drop any
         ;; shared row that happened to carry a non-nil org-id ≠ org.
         ctx (ectx/create-context {:storage storage
                                   :base-fns base-fns
+                                  :sql-pool-manager sql-manager
+                                  :sql-pool-scope (fn [_] {:org org :principal :byo-system})
                                   :byo-executor? true})
         _ (cr/rebuild! ctx)
         handler-fn-id (resolve-handler-fn-id storage handler-fn)
@@ -242,7 +246,7 @@
 (defn stop-byo!
   "Stop a BYO executor handle: SSE source, poll loop, refresh worker, then
    HTTP server."
-  [{:keys [server source refresh-exec poller]}]
+  [{:keys [server source refresh-exec poller ctx]}]
   (when source (remote-sse/stop-source! source))
   (when poller
     (java.util.concurrent.ExecutorService/.shutdownNow
@@ -251,6 +255,7 @@
     (java.util.concurrent.ExecutorService/.shutdown
       ^java.util.concurrent.ExecutorService refresh-exec))
   (when server (server))
+  (when-let [manager (:sql-pool-manager ctx)] (sql-pool/close! manager))
   (log/info "BYO executor stopped"))
 
 

@@ -7,7 +7,7 @@ Configuration, component dependencies, startup, and shutdown.
 
 after: storage, packages
 
-[[file:index.org][index]] · ~21 min
+[[file:index.org][index]] · ~22 min
 
 * 1. -main
 :PROPERTIES:
@@ -96,13 +96,13 @@ Loads core, web, app, [[file:glossary.org::#term/integrant][addon]] packages, an
 :PROPERTIES:
 :CUSTOM_ID: boot/context
 :FILE: src/graphden/system/init/exec.clj
-:LINE: 136
-:MINS: 6.7
+:LINE: 137
+:MINS: 7.1
 :END:
 
 Builds the base [[file:glossary.org::#term/context][execution context]], including [[file:glossary.org::#term/auth][authentication]], request scoping, execution checks, vault access, notifications, and [[file:glossary.org::#term/fleet][fleet]] forwarding. Branch-specific contexts are derived later. ~:compile-storage~ may provide a privileged structural graph view; it must not be confused with organisation-scoped application data reads.
 
-- source :: [[file:../../../src/graphden/system/init/exec.clj::(defmethod ig/init-key :exec/context][src/graphden/system/init/exec.clj:136]]
+- source :: [[file:../../../src/graphden/system/init/exec.clj::(defmethod ig/init-key :exec/context][src/graphden/system/init/exec.clj:137]]
 - see also :: [[file:executor.org::#executor/create-context][create-context]]
 - same file :: [[file:boot.org::#boot/compiled-registry][compiled-registry]]
 - referenced from :: [[file:constellation.org::#constellation/merge-addon][merge-addon]]
@@ -111,13 +111,13 @@ Builds the base [[file:glossary.org::#term/context][execution context]], includi
 :PROPERTIES:
 :CUSTOM_ID: boot/compiled-registry
 :FILE: src/graphden/system/init/exec.clj
-:LINE: 237
+:LINE: 250
 :MINS: 0.9
 :END:
 
 Compiles the graph before serving the first request so the base context starts with a populated [[file:glossary.org::#term/compiled-registry][compiled registry]]. Subsequent graph changes can still invalidate or update it; this startup compilation does not make the registry permanent.
 
-- source :: [[file:../../../src/graphden/system/init/exec.clj::(defmethod ig/init-key :exec/compiled-registry ][src/graphden/system/init/exec.clj:237]]
+- source :: [[file:../../../src/graphden/system/init/exec.clj::(defmethod ig/init-key :exec/compiled-registry ][src/graphden/system/init/exec.clj:250]]
 - see also :: [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:executor.org::#executor/registry][registry]]
 - same file :: [[file:boot.org::#boot/context][context]]
 
@@ -162,10 +162,10 @@ The CLI is a second entry point using the same application artifact. It transfer
 :PROPERTIES:
 :CUSTOM_ID: boot/register-checkpoint-hooks!
 :FILE: src/graphden/crac.clj
-:LINE: 202
+:LINE: 216
 :MINS: 1.3
 :END:
 
 Registers optional [[file:glossary.org::#term/checkpoint][CRaC]] [[file:glossary.org::#term/checkpoint][checkpoint/restore]] hooks. Before a [[file:glossary.org::#term/checkpoint][checkpoint]], schedulers pause and open connections and listeners close; restore resumes them. These hooks do nothing on an ordinary JVM. See [[file:../../../docs/FLEET_RFC.md][fleet checkpoint design]] and ~development/crac/~.
 
-- source :: [[file:../../../src/graphden/crac.clj::(defn register-checkpoint-hooks!][src/graphden/crac.clj:202]]
+- source :: [[file:../../../src/graphden/crac.clj::(defn register-checkpoint-hooks!][src/graphden/crac.clj:216]]

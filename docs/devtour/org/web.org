@@ -7,7 +7,7 @@ Requests, routing, markup, and graph-backed APIs.
 
 after: packages, boot
 
-[[file:index.org][index]] · ~29 min
+[[file:index.org][index]] · ~30 min
 
 * 1. http-server
 :PROPERTIES:
@@ -114,7 +114,19 @@ Delegates a [[file:glossary.org::#term/ring][Ring]] request to the handler for i
 - see also :: [[file:versioning.org::#versioning/dispatch*][dispatch*]]
 - same file :: [[file:web.org::#web/current-branch-router][current-branch-router]]
 
-* 9. authenticate-request
+* 9. sql-query-public
+:PROPERTIES:
+:CUSTOM_ID: web/sql-query-public
+:FILE: resources/packages/web/sql/impls.clj
+:LINE: 153
+:MINS: 1.5
+:END:
+
+Executes a caller-owned PostgreSQL SELECT and returns only explicitly named columns. The database password enters a [[file:glossary.org::#term/secret][secret]] slot but is consumed at the JDBC boundary. Unlike a raw ~:sql-query~ result, the allowlisted row maps can enter a plain JSON handler. The author must review the selected columns before exposing the handler.
+
+- source :: [[file:../../../resources/packages/web/sql/impls.clj::(defbase sql-query-public][resources/packages/web/sql/impls.clj:153]]
+
+* 10. authenticate-request
 :PROPERTIES:
 :CUSTOM_ID: web/authenticate-request
 :FILE: resources/packages/web/ring-adapter/impls.clj
@@ -126,7 +138,7 @@ Authenticates the request before page or action execution. This is part of the h
 
 - source :: [[file:../../../resources/packages/web/ring-adapter/impls.clj::(defbase authenticate-request][resources/packages/web/ring-adapter/impls.clj:12]]
 
-* 10. write-rej
+* 11. write-rej
 :PROPERTIES:
 :CUSTOM_ID: web/write-rej
 :FILE: resources/packages/web/crud-write/impls.clj
@@ -140,7 +152,7 @@ Exposes pre-write validation as one [[file:glossary.org::#term/base-function][ba
 - see also :: [[file:crud.org::#crud/write-rej][write-rej]], [[file:crud.org::#crud/apply-create-core][apply-create-core]]
 - referenced from :: [[file:editor.org::#editor/writeBindingFields][writeBindingFields]]
 
-* 11. form-decode
+* 12. form-decode
 :PROPERTIES:
 :CUSTOM_ID: web/form-decode
 :FILE: resources/packages/web/crud-parse/impls.clj
@@ -152,7 +164,7 @@ Decodes form data and normalizes repeated-key values to the declared text-map re
 
 - source :: [[file:../../../resources/packages/web/crud-parse/impls.clj::(defbase form-decode][resources/packages/web/crud-parse/impls.clj:80]]
 
-* 12. hiccup-element
+* 13. hiccup-element
 :PROPERTIES:
 :CUSTOM_ID: web/hiccup-element
 :FILE: resources/packages/web/html/impls.clj
@@ -167,7 +179,7 @@ Constructs a [[file:glossary.org::#term/hiccup][Hiccup]] element from tag, attri
 - same file :: [[file:web.org::#web/h-raw][h-raw]], [[file:web.org::#web/render-hiccup][render-hiccup]]
 - referenced from :: [[file:editor.org::#editor/bindActionDispatch][bindActionDispatch]], [[file:editor.org::#editor/mount][mount]]
 
-* 13. h-raw
+* 14. h-raw
 :PROPERTIES:
 :CUSTOM_ID: web/h-raw
 :FILE: resources/packages/web/html/impls.clj
@@ -180,7 +192,7 @@ Marks a string as raw [[file:glossary.org::#term/hiccup][Hiccup]] content so tru
 - source :: [[file:../../../resources/packages/web/html/impls.clj::(defbase h-raw][resources/packages/web/html/impls.clj:19]]
 - same file :: [[file:web.org::#web/hiccup-element][hiccup-element]], [[file:web.org::#web/render-hiccup][render-hiccup]]
 
-* 14. render-hiccup
+* 15. render-hiccup
 :PROPERTIES:
 :CUSTOM_ID: web/render-hiccup
 :FILE: resources/packages/web/html/impls.clj
@@ -193,7 +205,7 @@ Serializes a [[file:glossary.org::#term/hiccup][Hiccup]] tree into HTML. Its typ
 - source :: [[file:../../../resources/packages/web/html/impls.clj::(defbase render-hiccup][resources/packages/web/html/impls.clj:14]]
 - same file :: [[file:web.org::#web/hiccup-element][hiccup-element]], [[file:web.org::#web/h-raw][h-raw]]
 
-* 15. pick-encoding-fn
+* 16. pick-encoding-fn
 :PROPERTIES:
 :CUSTOM_ID: web/pick-encoding-fn
 :FILE: resources/packages/web/http/impls.clj
@@ -206,7 +218,7 @@ Chooses response encoding from ~Accept-Encoding~. The surrounding ~:process-resp
 - source :: [[file:../../../resources/packages/web/http/impls.clj::(defbase pick-encoding-fn][resources/packages/web/http/impls.clj:159]]
 - same file :: [[file:web.org::#web/http-server][http-server]], [[file:web.org::#web/realize-request-body][realize-request-body]]
 
-* 16. compatible-type-names
+* 17. compatible-type-names
 :PROPERTIES:
 :CUSTOM_ID: web/compatible-type-names
 :FILE: src/graphden/crud/types_api.clj
@@ -219,7 +231,7 @@ Finds named types that may narrow the expected type, resolving aliases and check
 - source :: [[file:../../../src/graphden/crud/types_api.clj::(defn compatible-type-names][src/graphden/crud/types_api.clj:233]]
 - same file :: [[file:web.org::#web/api-rich-types][api-rich-types]], [[file:web.org::#web/candidate-fit][candidate-fit]]
 
-* 17. api-rich-types
+* 18. api-rich-types
 :PROPERTIES:
 :CUSTOM_ID: web/api-rich-types
 :FILE: src/graphden/crud/types_api.clj
@@ -233,7 +245,7 @@ Shapes the [[file:glossary.org::#term/rich-types][rich-types registry]] into the
 - same file :: [[file:web.org::#web/compatible-type-names][compatible-type-names]], [[file:web.org::#web/candidate-fit][candidate-fit]]
 - referenced from :: [[file:types.org::#types/record-rich-types!][record-rich-types!]]
 
-* 18. candidate-fit
+* 19. candidate-fit
 :PROPERTIES:
 :CUSTOM_ID: web/candidate-fit
 :FILE: src/graphden/crud/types_api.clj
@@ -246,7 +258,7 @@ Ranks already-admissible function candidates by how their parameters fit a calla
 - source :: [[file:../../../src/graphden/crud/types_api.clj::(defn candidate-fit][src/graphden/crud/types_api.clj:664]]
 - same file :: [[file:web.org::#web/compatible-type-names][compatible-type-names]], [[file:web.org::#web/api-rich-types][api-rich-types]]
 
-* 19. sync-fn-defs-branch!
+* 20. sync-fn-defs-branch!
 :PROPERTIES:
 :CUSTOM_ID: web/sync-fn-defs-branch!
 :FILE: resources/packages/storage/branches/impls.clj

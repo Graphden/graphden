@@ -8,6 +8,7 @@
     [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.auth.provider :as auth]
+    [graphden.clients.sql-pool :as sql-pool]
     [graphden.clients.vault :as vault]
     [graphden.crud.fn-execution.lookup :as fn-lookup]
     [graphden.executor.compile-runtime :as cr]
@@ -135,7 +136,7 @@
 
 (defmethod ig/init-key :exec/context
   [_ {:keys [storage vault-client pg-storage base-fns auth-provider request-scope
-             execute-guard app-router verify-domain user-ops
+             execute-guard app-router verify-domain user-ops sql-pool-scope
              my-tokens executor-orgs byo-executor? executor-id notify-listener http-host-limits]}]
   (log/info "Creating executor context...")
   (warn-if-auth-off! auth-provider)
@@ -173,7 +174,10 @@
         ;; provider — a cell command is cross-org platform authority.
         fleet-cmd (when (seq executor-id)
                     (fleet-command/make-command-handler (fleet-command/internal-token)))
-        ctx-opts (cond-> (merge {:storage storage} (shard-opts executor-orgs byo-executor?))
+        manager (sql-pool/create-manager)
+        ctx-opts (cond-> (merge {:storage storage :sql-pool-manager manager}
+                                (shard-opts executor-orgs byo-executor?))
+                   sql-pool-scope (assoc :sql-pool-scope sql-pool-scope)
                    (and base-fns (:base-fns base-fns))
                    (assoc :base-fns (:base-fns base-fns))
                    ;; The auth seam — read by `:authenticate-request` via
@@ -207,23 +211,32 @@
                    fleet-forward (assoc :fleet-forward fleet-forward)
                    ;; Fleet control-plane command seam — same condition.
                    fleet-cmd (assoc :fleet-command fleet-cmd))]
-    (cond-> (-> (exec/create-context ctx-opts)
-                (assoc :notify-emitter emitter))
-      vault-client (assoc :vault vault-client)
-      ;; The LISTEN side of the NOTIFY pair — event-driven SSE
-      ;; (`:sse-stream` :wake-on-writes) registers per-stream
-      ;; callbacks here. Absent in tests without PG wiring.
-      notify-listener (assoc :notify-listener notify-listener)
-      ;; Privileged structural-read storage (§4 org-agnostic compile): the raw
-      ;; PG beneath OrgScoped, re-wrapped for this branch. `rebuild!` reads the
-      ;; fn-graph STRUCTURE through it so the compiled registry contains every
-      ;; org's fns (isolation stays at runtime: org-scoped data reads via
-      ;; `:storage` + the `resolve-fn` / execute-guard gates). `:pg-storage`
-      ;; rides too so `build-branch-ctx` can build a per-branch compile storage.
-      ;; In single-tenant this equals `:storage` (no OrgScoped) → a no-op.
-      pg-storage (assoc :pg-storage pg-storage
-                        :compile-storage (vs/->VersionedStorage
-                                           pg-storage (vs/current-branch-id storage))))))
+    (try
+      (cond-> (-> (exec/create-context ctx-opts)
+                  (assoc :notify-emitter emitter))
+        vault-client (assoc :vault vault-client)
+        ;; The LISTEN side of the NOTIFY pair — event-driven SSE
+        ;; (`:sse-stream` :wake-on-writes) registers per-stream
+        ;; callbacks here. Absent in tests without PG wiring.
+        notify-listener (assoc :notify-listener notify-listener)
+        ;; Privileged structural-read storage (§4 org-agnostic compile): the raw
+        ;; PG beneath OrgScoped, re-wrapped for this branch. `rebuild!` reads the
+        ;; fn-graph STRUCTURE through it so the compiled registry contains every
+        ;; org's fns (isolation stays at runtime: org-scoped data reads via
+        ;; `:storage` + the `resolve-fn` / execute-guard gates). `:pg-storage`
+        ;; rides too so `build-branch-ctx` can build a per-branch compile storage.
+        ;; In single-tenant this equals `:storage` (no OrgScoped) → a no-op.
+        pg-storage (assoc :pg-storage pg-storage
+                          :compile-storage (vs/->VersionedStorage
+                                             pg-storage (vs/current-branch-id storage))))
+      (catch Exception e
+        (sql-pool/close! manager)
+        (throw e)))))
+
+
+(defmethod ig/halt-key! :exec/context [_ context]
+  (when-let [manager (:sql-pool-manager context)]
+    (sql-pool/close! manager)))
 
 
 ;; =============================================================================

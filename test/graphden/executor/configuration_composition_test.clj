@@ -1,9 +1,11 @@
 (ns ^:integration graphden.executor.configuration-composition-test
   "Ordinary stored graphs construct configured callables without a partial
-   primitive. The diagnostic query has SQL's arguments/effects, but no network."
+   primitive. The diagnostic query has SQL's arguments/effects, but no network;
+   the real SQL path also uses the managed executor pool."
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.clients.sql-pool :as sql-pool]
     [graphden.executor.compile-eager :as ce]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.context :as context]
@@ -210,7 +212,8 @@
 (deftest the-same-constructor-works-with-production-sql-query
   (let [base (:storage ga/*bootstrap*)
         storage (vs/switch-branch base (:id (vs/create-branch! base "configuration-real-sql")))
-        ctx (branch-context storage)
+        manager (sql-pool/create-manager {:pool-size 1 :sweep-ms 60000})
+        ctx (assoc (branch-context storage) :sql-pool-manager manager)
         helpers (filterv #(contains? #{:cfg-input-sql :cfg-input-params :cfg-query-constructor}
                                      (:name %))
                          (definitions))
@@ -221,13 +224,17 @@
                     {:name :cfg-real-make-query :parent :cfg-query-constructor
                      :args {:value :cfg-real-query-body}}])
         {:keys [jdbc-url username password]} (pth/get-container-config ga/*container*)]
-    (setup/sync-and-invalidate! ctx storage defs)
-    (check/check-all-defs! defs)
-    (testing "constructing a callable never attempts to open its JDBC URL"
-      (is (fn? (exec/execute ctx (fn-id :cfg-real-make-query)
-                             {:url "jdbc:not-a-driver" :user "unused" :password "unused"}))))
-    (testing "invocation uses the existing PG fixture, with no new runtime or pool"
-      (let [query (exec/execute ctx (fn-id :cfg-real-make-query)
-                                {:url jdbc-url :user username :password password})]
-        (is (= [{:label "parameter-one"}] (query {:sql "SELECT ?::text AS label" :params ["parameter-one"]})))
-        (is (= [{:label "parameter-two"}] (query {:sql "SELECT ?::text AS label" :params ["parameter-two"]})))))))
+    (try
+      (setup/sync-and-invalidate! ctx storage defs)
+      (check/check-all-defs! defs)
+      (testing "constructing a callable never attempts to open its JDBC URL"
+        (is (fn? (exec/execute ctx (fn-id :cfg-real-make-query)
+                               {:url "jdbc:not-a-driver" :user "unused" :password "unused"})))
+        (is (empty? (:entries @(:state manager)))))
+      (testing "invocation uses the managed PostgreSQL pool"
+        (let [query (exec/execute ctx (fn-id :cfg-real-make-query)
+                                  {:url jdbc-url :user username :password password})]
+          (is (= [{:label "parameter-one"}] (query {:sql "SELECT ?::text AS label" :params ["parameter-one"]})))
+          (is (= [{:label "parameter-two"}] (query {:sql "SELECT ?::text AS label" :params ["parameter-two"]})))
+          (is (= 1 (count (:entries @(:state manager)))))))
+      (finally (sql-pool/close! manager)))))

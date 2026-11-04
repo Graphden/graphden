@@ -5,7 +5,7 @@
 
 From stored definitions to callable code and results.
 
-[[file:index.org][index]] · ~91 min
+[[file:index.org][index]] · ~92 min
 
 * 1. execute
 :PROPERTIES:
@@ -43,7 +43,7 @@ Runs a previously compiled [[file:glossary.org::#term/graph-function][graph func
 :CUSTOM_ID: executor/create-context
 :FILE: src/graphden/executor/context.clj
 :LINE: 409
-:MINS: 9.6
+:MINS: 10.2
 :END:
 
 Creates an [[file:glossary.org::#term/context][execution context]]: storage, [[file:glossary.org::#term/base-function][base-function]] implementations, [[file:glossary.org::#term/compiled-registry][compiled registry]], graph caches, and permission/[[file:glossary.org::#term/effect][effect]] checks. The [[file:glossary.org::#term/compiled-registry][compiled registry]] is filled when needed. Two contexts can resolve the same ~fn-id~ differently, for example when they select different branches.

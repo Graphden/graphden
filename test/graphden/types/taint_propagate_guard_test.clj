@@ -36,7 +36,7 @@
    explain each ±1). For each ADDED name ask \"does it pass/transform caller
    content?\" — if yes it needs `:taint-propagate?` and a `golden-tainted`
    entry; a REMOVED name just leaves both sets."
-  #{:_fn-branch-local-seed :_fn-slot-seals
+  #{:_fn-branch-local-seed :_fn-slot-seals :sql-query-public
     ;; Parsing retains caller fields; deletion returns caller receipt IDs.
     :parse-fn-delete-receipts :delete-fn-receipts
     ;; Inheritance commands and their outcomes retain caller-selected content.

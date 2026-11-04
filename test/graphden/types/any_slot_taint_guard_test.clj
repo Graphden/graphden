@@ -58,7 +58,8 @@
    :merge-post-commit! "Invalidates caches and restarts affected services; returns nil."
    :notify-after-write "Invalidates the written entity through the notifier; returns nil."
    :pg-notify "Sends the event through the explicit DB effect; returns nil."
-   :queue-publish "Stores the payload as an explicit DB effect; returns a newly generated UUID."})
+   :queue-publish "Stores the payload as an explicit DB effect; returns a newly generated UUID."
+   :sql-query-public "Explicit SQL publication boundary: :params is plain JSON (nested secret markers fail type checking); only author-allowlisted result columns leave the JDBC call. The password has its own secret slot and is never returned."})
 
 
 ;; ---------------------------------------------------------------------

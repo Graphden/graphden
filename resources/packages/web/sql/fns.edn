@@ -1,10 +1,8 @@
-;; Direct JDBC base functions — execute SQL against any reachable
-;; database with credentials passed per call.
-;;
-;; Built for the secrets-driven tutorial: the user reads connection
-;; params from `:vault-get` and passes them in. NOT for production
-;; multi-call workloads — every call opens a new connection. A
-;; pooled variant can be added later if a use case appears.
+;; Direct JDBC base functions — execute SQL against a caller-owned database.
+;; PostgreSQL connections use an executor-managed bounded pool, keyed by
+;; branch, tenant, principal, destination and effective credentials. The
+;; graph passes URL and credentials, never a pool id. Anonymous calls and
+;; other JDBC drivers retain one-shot connections.
 
 
 {:namespace "web.sql"
@@ -39,7 +37,7 @@
   ;; that just want JSON, `:jsonb` per item is the right shape.
   ;; ---------------------------------------------------------------------
   {:name :sql-query
-   :description "Execute a SELECT and return a list of rows. Each row is a `{column → value}` map (column names lower-snake_case, as Postgres reports them)."
+   :description "Execute a SELECT and return a list of rows. Each row is a `{column → value}` map. The result conservatively retains secret markers from its inputs; use sql-query-public with an explicit column allowlist for values you intend to publish."
    :args {:url {:type :text :description "JDBC URL."}
           :user {:type :text :description "Database user."}
           :password {:type [:secret :text]
@@ -49,4 +47,18 @@
                    :value []
                    :description "Positional parameters for the `?` placeholders. Default empty."}}
    :return-type [:list :jsonb]
+   :effects #{:db :network}}
+
+  {:name :sql-query-public
+   :description "Execute a SELECT and return only the columns explicitly listed as public. Other columns are discarded before the plain result leaves the JDBC boundary. Choose public columns only for data you intend to reveal."
+   :args {:url {:type :text :description "JDBC URL."}
+          :user {:type :text :description "Database user."}
+          :password {:type [:secret :text]
+                     :description "Database password. Consumed by the trusted SQL call; never included in the result."}
+          :sql {:type :text :description "A SELECT statement with ? placeholders. Do not interpolate input into SQL."}
+          :params {:required false :type [:list :jsonb] :value []
+                   :description "Positional values for placeholders."}
+          :public-columns {:type [:list :text]
+                           :description "Required 1–64 exact result column names to publish. Every other column is discarded."}}
+   :return-type [:list :keyword-map]
    :effects #{:db :network}}]}

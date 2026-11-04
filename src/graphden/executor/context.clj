@@ -447,10 +447,14 @@
    - :byo-executor?  When true, this pod is a customer's OWN executor — it may
                 serve the `:byo` orgs in its shard. A HOSTED pod (default,
                 false) refuses any `:byo` org with a 421. See
-                `tenancy.context/byo-org?`."
+                `tenancy.context/byo-org?`.
+   - :sql-pool-manager  Executor-owned external SQL pools, shared by branch contexts.
+   - :sql-pool-scope  Optional `(fn [ctx] {:org ... :principal ...})` seam;
+                required for restricted executions using managed SQL pools."
   [{:keys [storage base-fns clock allowed-effects auth-provider request-scope
            execute-guard app-router verify-domain user-ops
-           my-tokens executor-orgs byo-executor? fleet-forward fleet-command]}]
+           my-tokens executor-orgs byo-executor? fleet-forward fleet-command
+           sql-pool-manager sql-pool-scope]}]
   (validate-context-options! storage)
   (-> (->ExecutionContext storage
                           (or base-fns (registry/get-default-registry))
@@ -469,6 +473,10 @@
       ;; monitor pins its carrier (JDK 21) — see
       ;; `compile-runtime/call-with-invalidation-lock`.
       (assoc :invalidation-lock (java.util.concurrent.locks.ReentrantLock.))
+      ;; Retain branch identity when a read-only execution replaces :storage
+      ;; with a snapshot wrapper. External SQL pool keys must not collapse
+      ;; distinct branches onto the same default identity.
+      (assoc :sql-branch-id (or (:branch-id storage) (:branch storage) :default))
       (assoc :type-recheck-state (atom {:status :idle :generation 0}))
       ;; Fleet placement bookkeeping (docs/FLEET_RFC.md §6.2): the set of cell
       ;; ROOTS this executor has loaded via `compile-runtime/load-cell!`. Lets
@@ -503,6 +511,8 @@
       (cond-> request-scope (assoc :request-scope request-scope))
       ;; Per-namespace execute guard (§4.2) — consulted by `execute`.
       (cond-> execute-guard (assoc :execute-guard execute-guard))
+      (cond-> sql-pool-manager (assoc :sql-pool-manager sql-pool-manager))
+      (cond-> sql-pool-scope (assoc :sql-pool-scope sql-pool-scope))
       ;; App-router seam (§3.4 FaaS) — consulted by the branch-router's
       ;; `dispatch` BEFORE the editor/API flow: a request to a tenant's
       ;; subdomain is served by that org's handler fn (org-scoped + effect-

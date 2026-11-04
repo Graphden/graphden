@@ -26,6 +26,7 @@
    and active only under a CRaC JDK (`-XX:CRaCCheckpointTo` / `-XX:CRaCRestoreFrom`)."
   (:require
     [clojure.tools.logging :as log]
+    [graphden.clients.sql-pool :as sql-pool]
     [graphden.services.reconciler :as recon]
     [graphden.storage.postgres.advisory-lock :as pg-lock]
     [graphden.storage.postgres.connection :as pg-conn]
@@ -118,11 +119,15 @@
     (reset! checkpoint-gate nil)))
 
 
+(declare resume!)
+
+
 (defn quiesce!
   "Close every live socket CRIU can't snapshot: DRAIN the Hikari pool to zero
    connections, close the LISTEN connection, close the advisory-lock
-   connection(s). Best-effort per resource — one failure must not block the
-   checkpoint.
+   connection(s). Most resources are best-effort. An active external SQL
+   lease aborts the checkpoint and restores service state so its socket is
+   never captured.
 
    PAUSES the background periodic schedulers FIRST (before any socket is
    closed) so no tick can reopen a resource mid-quiesce."
@@ -143,6 +148,13 @@
     (try
       (drain-pool! pool 3000)
       (catch Exception e (log/warn e "CRaC: pool drain failed"))))
+  (when-let [manager (:sql-pool-manager (:exec/context system))]
+    (try
+      (sql-pool/quiesce! manager)
+      (catch Exception e
+        (log/warn e "CRaC: external SQL pool drain failed; aborting checkpoint")
+        (resume! system)
+        (throw e))))
   (when-let [listener (:db/notify-listener system)]
     (try
       (pg-conn/close-dedicated! @(:conn-atom listener) "notify-listener")
@@ -173,6 +185,8 @@
           (HikariConfigMXBean/.setMinimumIdle cfg-mx mi))
         (HikariPoolMXBean/.resumePool pool-mx))
       (catch Exception e (log/warn e "CRaC: pool resume failed"))))
+  (when-let [manager (:sql-pool-manager (:exec/context system))]
+    (sql-pool/resume! manager))
   (when-let [holder (:db/service-locks system)]
     (try
       (pg-lock/ensure-live! holder)

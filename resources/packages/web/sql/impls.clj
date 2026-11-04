@@ -1,8 +1,7 @@
 (ns graphden.packages.web.sql.impls
-  "Raw JDBC base functions. A connection per call — keep it simple,
-   tutorial-scale. If pooling is needed later, gate it behind a
-   `:sql-with-pool` variant that takes a pool-id and reuses a
-   datasource cached in the executor context.
+  "Raw JDBC base functions with executor-owned, bounded external pools.
+   The user-facing query/exec signature remains a JDBC URL and credentials;
+   pool ownership and credential generations are internal.
 
    RESTRICTED (tenant/cloud) execution — `*allowed-effects*` non-nil — is
    guarded the same way tenant HTTP egress is: the target host is SSRF-checked
@@ -21,7 +20,9 @@
    a tier that grants metered `:network` (`free` / `network` / `dedicated`) may
    connect to its OWN database; `anonymous` (no `:network`) cannot."
   (:require
+    [clojure.string :as str]
     [graphden.clients.egress :as egress]
+    [graphden.clients.sql-pool :as sql-pool]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
     [next.jdbc :as jdbc]
@@ -58,6 +59,37 @@
     restricted?))
 
 
+(defn- scope-of
+  [ctx restricted?]
+  (let [provider (:sql-pool-scope ctx)
+        scope (when provider (provider ctx))]
+    (when (and restricted? (nil? provider))
+      (throw (ex-info "External SQL pool scope unavailable"
+                      {:type :sql/missing-scope})))
+    (when (and scope
+               (not (and (map? scope) (some? (:org scope))
+                         (some? (:principal scope)))))
+      (throw (ex-info "Invalid external SQL pool scope"
+                      {:type :sql/invalid-scope})))
+    (when (or scope (nil? provider))
+      (assoc (or scope {:org :platform :principal :system})
+             :branch (or (:sql-branch-id ctx)
+                         (:branch-id (:storage ctx))
+                         (:branch (:storage ctx)) :default)))))
+
+
+(defn- with-datasource
+  [ctx restricted? url user password f]
+  (let [manager (:sql-pool-manager ctx)
+        scope (when manager (scope-of ctx restricted?))]
+    (if (and manager scope (str/starts-with? url "jdbc:postgresql:"))
+      (sql-pool/with-connection manager scope url user password f)
+      ;; Anonymous callers, bare test contexts and non-PostgreSQL drivers use
+      ;; a one-shot connection, so session state cannot cross callers.
+      (with-open [conn (jdbc/get-connection (datasource url user password))]
+        (f conn)))))
+
+
 (defbase sql-exec
   [url user password sql params]
   (cr/record-effect! :db)
@@ -70,7 +102,6 @@
   ;; EXTERNAL datasource made safe by the guard below (SSRF + platform-DB
   ;; block), so `:network` is the correct gate. See the ns docstring.
   (let [restricted? (guard-restricted! url)
-        ds (datasource url user password)
         ;; `params` arrives from the fn-graph as a Clojure vector
         ;; (or seq) — JDBC wants a `[sql & params]` vector for the
         ;; first arg to `execute-one!`.
@@ -79,36 +110,64 @@
         ;; DML/DDL can't pin the shared executor.
         opts (cond-> {:return-keys false}
                restricted? (assoc :timeout restricted-timeout-sec))
-        result (jdbc/execute-one! ds stmt opts)]
+        result (with-datasource ctx restricted? url user password
+                 #(jdbc/execute-one! % stmt opts))]
     ;; DDL / DML responses both come back as `{:next.jdbc/update-count N}`
     ;; (DDL is 0). Surface the int so downstream graph code can branch
     ;; on it without record-shape acrobatics.
     (long (or (:next.jdbc/update-count result) 0))))
 
 
-(defbase sql-query
-  [url user password sql params]
+(defn- query-rows
+  [ctx url user password sql params]
   (cr/record-effect! :db)
-  ;; External JDBC connection — outbound network (see `sql-exec`).
   (cr/record-effect! :network)
-  ;; NOT `:raw-sql` (see `sql-exec` + the ns docstring) — external datasource,
-  ;; gated by `:network` and made safe by the egress guard below.
   (let [restricted? (guard-restricted! url)
-        ds (datasource url user password)
         stmt (into [sql] (or params []))
-        ;; A restricted tenant SELECT runs under a query timeout + a server-side
-        ;; row cap (`.setMaxRows`) so it can't pull an unbounded result into the
-        ;; shared executor's heap.
         opts (cond-> {:builder-fn rs/as-unqualified-maps}
                restricted? (assoc :timeout restricted-timeout-sec
                                   :max-rows restricted-max-rows))]
-    ;; `as-unqualified-maps` gives `{:column value}` rather than
-    ;; `{:table/column value}` — easier for downstream `:get` calls.
-    ;; Realise into a vector so the lazy result-set doesn't outlive
-    ;; the connection scope (next.jdbc closes it on return).
-    (vec (jdbc/execute! ds stmt opts))))
+    (with-datasource ctx restricted? url user password
+      #(vec (jdbc/execute! % stmt opts)))))
+
+
+(defbase sql-query
+  [url user password sql params]
+  (query-rows ctx url user password sql params))
+
+
+(defn- public-column-keys
+  "Require an explicit, bounded allowlist. For nonempty results, an absent or
+   misspelled column is refused rather than returning an incomplete row."
+  [columns]
+  (let [columns (when (sequential? columns) (vec (take 65 columns)))]
+    (when-not (and (<= 1 (count columns) 64)
+                   (every? #(and (string? %) (<= 1 (count %) 128)
+                                 (not (str/blank? %))) columns)
+                   (= (count columns) (count (distinct columns))))
+      (throw (ex-info "Expected 1–64 distinct public SQL column names"
+                      {:type :sql/invalid-public-columns})))
+    (mapv keyword columns)))
+
+
+(defbase sql-query-public
+  "Explicitly publish only named columns from a caller-owned SQL result.
+   The graph author chooses the public fields; all other fields are discarded
+   before this plain result leaves the trusted JDBC boundary."
+  [url user password sql params public-columns]
+  (let [keys (public-column-keys public-columns)
+        rows (query-rows ctx url user password sql params)]
+    (mapv (fn [row]
+            (when-not (every? #(contains? row %) keys)
+              (throw (ex-info "Public SQL column missing from result"
+                              {:type :sql/public-column-missing})))
+            (select-keys row keys))
+          rows)))
 
 
 (def impls
   {:sql-exec {:impl sql-exec :taint-propagate? true}
-   :sql-query {:impl sql-query :taint-propagate? true}})
+   :sql-query {:impl sql-query :taint-propagate? true}
+   ;; Deliberate declassification boundary: only explicitly listed columns
+   ;; leave the JDBC call, while the credential slot remains secret-aware.
+   :sql-query-public {:impl sql-query-public}})

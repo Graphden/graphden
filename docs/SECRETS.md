@@ -160,9 +160,11 @@ or marker visibility checks and never supplies caller values as graph captures.
 
 `web/http-*` and `web/sql` also send inputs as side-effects. Mark a sink's
 slot `[:secret :text]` to require its inputs be secret-aware
-(currently `:sql-exec/:password` and `:sql-query/:password`). SQL results
-propagate taint conservatively; accepting a secret input does not imply
-that a sink's result is safe to display.
+(currently `:sql-exec/:password`, `:sql-query/:password` and
+`:sql-query-public/:password`). `:sql-exec` and `:sql-query` propagate
+taint conservatively; accepting a secret input does not imply that a
+sink's result is safe to display. `:sql-query-public` is a separate,
+explicit publication boundary described below.
 
 ## Backend hide at `/api/execute` (T4)
 
@@ -247,11 +249,17 @@ literal too (auto-promote). The SQL impl receives the password value
 at runtime — it's still a string, the marker only affects type-check
 and the result-hide.
 
-If `_my-sql-call`'s return-type doesn't carry the marker, `▶ Run` on
-it returns the actual SQL result normally. If a user composed
-`_my-sql-call`'s **inputs** into the response somehow (e.g., echoing
-the password back), the return type would be tainted and the result
-would be hidden.
+`sql-exec` conservatively propagates the password's marker to its
+affected-row count, so `▶ Run` hides that result. `sql-query` does the
+same for raw rows: a raw query cannot be bound to a plain JSON response.
+To publish selected columns from a caller-owned database, extend
+`sql-query-public` instead, bind `:public-columns` to 1–64 exact names,
+and review the SQL and each selected column. Its impl discards all other
+columns before returning a plain `[:list :keyword-map]`. This deliberate
+declassification does not accept secret-marked query parameters:
+`:params` is `[:list :jsonb]`, and nested secret markers cannot subtype
+that slot. The password remains in its dedicated secret slot and never
+appears in the output.
 
 ## Secret-aware sinks (B: sink-side capability narrowing)
 
@@ -274,6 +282,7 @@ value internally where impl-side trust is the only path:
 | `:http-request` (whole ladder) | `:auth-value` (`[:union :null [:secret :text]]`) | inherited by `:http-get` / `:http-post` / … presets |
 | `:sql-exec` | `:password` (T6) | |
 | `:sql-query` | `:password` (T6) | |
+| `:sql-query-public` | `:password` | Explicit allowlist of published result columns; other columns discarded. |
 | `:vault-put` | `:value` (B) | |
 
 On the HTTP ladder the split lives INSIDE the one primitive:

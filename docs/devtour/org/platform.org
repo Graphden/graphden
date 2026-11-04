@@ -7,7 +7,7 @@ Access policy, safe rendering, monitoring, and remote executors.
 
 after: services
 
-[[file:index.org][index]] · ~28 min
+[[file:index.org][index]] · ~31 min
 
 * 1. platform-tier?
 :PROPERTIES:
@@ -74,7 +74,19 @@ Validates outbound destinations to prevent [[file:glossary.org::#term/ssrf][serv
 
 - source :: [[file:../../../src/graphden/clients/egress.clj::(defn check-target!][src/graphden/clients/egress.clj:90]]
 
-* 6. sanitize-hiccup
+* 6. with-connection
+:PROPERTIES:
+:CUSTOM_ID: platform/with-connection
+:FILE: src/graphden/clients/sql_pool.clj
+:LINE: 188
+:MINS: 2.7
+:END:
+
+Borrows an external PostgreSQL connection from an executor-owned bounded pool. Organization, principal, branch, destination and effective credentials separate pool generations without placing secrets in visible keys. Each call repeats the outbound destination check before borrowing; ROLLBACK and DISCARD ALL clear session state before reuse. A failed reset retires the generation.
+
+- source :: [[file:../../../src/graphden/clients/sql_pool.clj::(defn with-connection][src/graphden/clients/sql_pool.clj:188]]
+
+* 7. sanitize-hiccup
 :PROPERTIES:
 :CUSTOM_ID: platform/sanitize-hiccup
 :FILE: src/graphden/web/hiccup_sanitize.clj
@@ -87,7 +99,7 @@ Sanitizes graph-authored [[file:glossary.org::#term/hiccup][Hiccup]] before it e
 - source :: [[file:../../../src/graphden/web/hiccup_sanitize.clj::(defn sanitize-hiccup][src/graphden/web/hiccup_sanitize.clj:116]]
 - see also :: [[file:crud.org::#crud/render-repr][render-repr]]
 
-* 7. count!
+* 8. count!
 :PROPERTIES:
 :CUSTOM_ID: platform/count!
 :FILE: src/graphden/util/counters.clj
@@ -99,7 +111,7 @@ Increments process-wide event counters. Readers compare two snapshots to obtain 
 
 - source :: [[file:../../../src/graphden/util/counters.clj::(defn count!][src/graphden/util/counters.clj:65]]
 
-* 8. decide
+* 9. decide
 :PROPERTIES:
 :CUSTOM_ID: platform/decide
 :FILE: src/graphden/monitoring/alerts.clj
@@ -111,7 +123,7 @@ Decides whether to raise, resolve, or leave an alert unchanged from interval cou
 
 - source :: [[file:../../../src/graphden/monitoring/alerts.clj::(defn decide][src/graphden/monitoring/alerts.clj:59]]
 
-* 9. start-relay!
+* 10. start-relay!
 :PROPERTIES:
 :CUSTOM_ID: platform/start-relay!
 :FILE: src/graphden/system/sse.clj
@@ -123,7 +135,7 @@ Relays branch and organisation [[file:glossary.org::#term/invalidation][invalida
 
 - source :: [[file:../../../src/graphden/system/sse.clj::(defn start-relay!][src/graphden/system/sse.clj:199]]
 
-* 10. RemoteStorage
+* 11. RemoteStorage
 :PROPERTIES:
 :CUSTOM_ID: platform/RemoteStorage
 :FILE: src/graphden/storage/remote/core.clj
@@ -136,14 +148,14 @@ Implements read-only ~StorageCRUD~ over graph rows fetched from the hub through 
 - source :: [[file:../../../src/graphden/storage/remote/core.clj::(defrecord RemoteStorage][src/graphden/storage/remote/core.clj:138]]
 - see also :: [[file:storage.org::#storage/StorageCRUD][StorageCRUD]]
 
-* 11. start-byo!
+* 12. start-byo!
 :PROPERTIES:
 :CUSTOM_ID: platform/start-byo!
 :FILE: src/graphden/byo.clj
-:LINE: 154
-:MINS: 6.1
+:LINE: 155
+:MINS: 6.3
 :END:
 
 Assembles a customer-hosted executor using remote read-only graph storage, [[file:glossary.org::#term/sse][SSE]] [[file:glossary.org::#term/invalidation][invalidation]], and a local HTTP server. The same execution core runs the downloaded graph while the hub remains responsible for writes.
 
-- source :: [[file:../../../src/graphden/byo.clj::(defn start-byo!][src/graphden/byo.clj:154]]
+- source :: [[file:../../../src/graphden/byo.clj::(defn start-byo!][src/graphden/byo.clj:155]]

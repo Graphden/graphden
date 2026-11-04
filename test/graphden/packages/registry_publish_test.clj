@@ -17,6 +17,8 @@
     [graphden.system.deploy-config :as deploy-config]
     [graphden.tenancy.context :as tc]
     [graphden.test-infra.seams :as ts]
+    [graphden.test-infra.wait :as wait]
+    [org.httpkit.client :as http-client]
     [org.httpkit.server :as http-kit]))
 
 
@@ -424,6 +426,15 @@
         mirror! #(run-named "mirror-remote-package!"
                             {:source stub :pkg-name "bearer.pkg" :version "1.0.0"})]
     (try
+      ;; http-kit may publish the ephemeral port before its accept loop is
+      ;; ready under a loaded CI runner. Prove a real GET before the first
+      ;; mirror dial, then exclude that probe from the bearer observation.
+      (is (wait/wait-for
+            3000
+            #(try
+               (= 200 (:status @(http-client/get (str stub "/ready") {:timeout 300})))
+               (catch Exception _ false))))
+      (reset! seen [])
       (binding [shared/*secret-env-override* {"GRAPHDEN_REGISTRY_TOKEN" "reg-secret"
                                               "GRAPHDEN_HUB_TOKEN" "hub-secret"}]
         (testing "the auth value itself: same origin only"
@@ -442,7 +453,8 @@
           (is (nil? (run-named "remote-auth-value" {:url "https://registry.example/x" :endpoint "other"}))))
         (testing "a caller-chosen source is dialed WITHOUT the registry token"
           (deploy-config/install! {:registry-url "https://registry.example"})
-          (is (= "bearer.pkg" (:mirrored (mirror!))))
+          (let [result (mirror!)]
+            (is (= "bearer.pkg" (:mirrored result)) (pr-str result)))
           (is (= [nil] @seen) "no Authorization header reached the caller's host"))
         (testing "no registry configured → no token anywhere"
           (reset! seen [])

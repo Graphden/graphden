@@ -10,6 +10,8 @@
     [graphden.executor.test-setup :as setup]
     [graphden.system.deploy-config :as deploy-config]
     [graphden.test-infra.seams :as ts]
+    [graphden.test-infra.wait :as wait]
+    [org.httpkit.client :as http-client]
     [org.httpkit.server :as http-kit]))
 
 
@@ -43,12 +45,20 @@
   [handler f]
   (let [captured (atom [])
         wrapped (fn [req]
-                  (let [req (assoc req :body-text (some-> (:body req) slurp))]
-                    (swap! captured conj req)
-                    (handler req)))
+                  (if (= "/ready" (:uri req))
+                    {:status 204}
+                    (let [req (assoc req :body-text (some-> (:body req) slurp))]
+                      (swap! captured conj req)
+                      (handler req))))
         stop (http-kit/run-server wrapped {:port 0})
-        port (:local-port (meta stop))]
-    (try (f (str "http://127.0.0.1:" port) captured)
+        base (str "http://127.0.0.1:" (:local-port (meta stop)))]
+    (try (if (wait/wait-for
+               3000
+               #(try
+                  (= 204 (:status @(http-client/get (str base "/ready") {:timeout 300})))
+                  (catch Exception _ false)))
+           (f base captured)
+           (is false "stub hub did not accept a readiness request"))
          (finally (stop)))))
 
 

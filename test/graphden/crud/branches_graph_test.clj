@@ -1,4 +1,4 @@
-(ns ^{:integration true :serial true} graphden.crud.branches-graph-test
+(ns ^:integration ^:serial graphden.crud.branches-graph-test
   "Graph-path tests for the branches HTTP handlers
    (`:list-branches-handler` / `:get-branch-handler` /
    `:diff-branches-handler` / `:create-branch-handler` /
@@ -809,10 +809,10 @@
             input {:source-branch-id source :target-branch-id target
                    :count (count rows) :rows rows}
             result (with-redefs [dv/diff-branches-view-facts
-                                (fn [_ s t]
-                                  (is (= [source target] [s t]))
-                                  (swap! calls inc)
-                                  input)]
+                                 (fn [_ s t]
+                                   (is (= [source target] [s t]))
+                                   (swap! calls inc)
+                                   input)]
                      (gh/exec-name :diff-branches-view
                                    {:source-branch-id source :target-branch-id target}))
             labels (if (= 5 (count rows)) (mapv second cases)
@@ -852,10 +852,10 @@
     (doseq [facts [[] rows (vec (mapcat identity (repeat 32 rows)))]]
       (let [calls (atom 0)
             result (with-redefs [mrg/branch-local-source-rows
-                                (fn [_ source-id]
-                                  (is (= source source-id))
-                                  (swap! calls inc)
-                                  facts)]
+                                 (fn [_ source-id]
+                                   (is (= source source-id))
+                                   (swap! calls inc)
+                                   facts)]
                      (gh/exec-name :merge-skipped-branch-local {:source-branch-id source}))
             expected (->> facts
                           (map (fn [row] {:entity-name :fn :entity-id (:id row) :fn-name (:name row)}))
@@ -868,9 +868,9 @@
 
 (deftest merge-skipped-graph-retains-effective-inheritance-and-audit-envelope
   (let [parent (sp/create-entity *storage* :fn {:id (random-uuid) :name (uniq "local-parent")
-                                               :parent-ids [] :branch-local? true})
+                                                :parent-ids [] :branch-local? true})
         child (sp/create-entity *storage* :fn {:id (random-uuid) :name (uniq "local-child")
-                                              :parent-ids [(:id parent)]})
+                                               :parent-ids [(:id parent)]})
         ordinary (mk-fn! (uniq "ordinary"))
         target (mk-branch! (uniq "audit-target"))
         source (mk-branch! (uniq "audit-source") (:name target))
@@ -885,8 +885,8 @@
                         (sort-by :fn-name) vec)]
       (is (= expected (gh/exec-name :merge-skipped-branch-local {:source-branch-id source-id})))
       (let [body (json-body (gh/via :merge-branch-handler
-                                   (json-req (str "/api/branches/" (:name target) "/merge")
-                                             {:source (:name source)})))]
+                                    (json-req (str "/api/branches/" (:name target) "/merge")
+                                              {:source (:name source)})))]
         (is (:ok body))
         (is (= {:branch-local (mapv #(-> % (update :entity-name name) (update :entity-id str)) expected)}
                (get-in body [:merge :skipped])))))))
@@ -904,18 +904,23 @@
         reverse-deps {a #{shared hidden} b #{shared} shared #{child}}
         acquire dv/affected-view-facts]
     (doseq [groups [[] [{:fn-id (str b)} {:fn-id (str a)} {:fn-id (str a)}
-                       {:fn-id nil} {:fn-id "junk"}]]]
+                        {:fn-id nil} {:fn-id "junk"}]]]
       (let [calls (atom [])
             storage (reify
                       sp/StorageCRUD
-                      (query-entities [_ entity where]
+                      (query-entities
+                        [_ entity where]
                         (swap! calls conj [:query entity where])
                         (is (= :ns entity))
                         [{:id root-ns :name "app"}
                          {:id leaf-ns :name "visible" :parent-id root-ns}
                          {:id unrelated-ns :name "unrelated"}])
+
+
                       sp/StorageBatchCRUD
-                      (read-entities [_ entity ids]
+
+                      (read-entities
+                        [_ entity ids]
                         (swap! calls conj [:bulk entity (set ids)])
                         (is (= :fn entity))
                         ;; ACL-filtered batch omits hidden; its namespace path
@@ -925,10 +930,10 @@
                                      ids)))
             acquisitions (atom 0)
             result (with-redefs [dv/affected-view-facts
-                                (fn [_ _ supplied-groups]
-                                  (swap! acquisitions inc)
-                                  (is (= groups supplied-groups))
-                                  (acquire storage reverse-deps supplied-groups))]
+                                 (fn [_ _ supplied-groups]
+                                   (swap! acquisitions inc)
+                                   (is (= groups supplied-groups))
+                                   (acquire storage reverse-deps supplied-groups))]
                      (gh/exec-name :diff-affected {:groups groups}))]
         (is (= 1 @acquisitions))
         (if (empty? groups)

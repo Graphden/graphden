@@ -1494,35 +1494,47 @@ run_gate_stage() {
   case "$stage" in
     ci) run_scoped_ci_gate "$wt" "$base_sha" "$ci_receipt" "$ci_expected" ;;
     priority)
-      local wave wave_integration wave_browser
+      local wave wave_integration wave_browser kind integration_ran=0
+      local -a wave_order=(integration browser)
       for wave in manual automatic; do
         if [ "$wave" = manual ]; then
           wave_integration="$MANUAL_INTEGRATION"
           wave_browser="$MANUAL_BROWSER"
+          # A manually requested browser test must precede a later manual
+          # integration test, even though both belong to the same priority wave.
+          [ "$manual_stage" != e2e ] || wave_order=(browser integration)
         else
           wave_integration="$AUTO_INTEGRATION"
           wave_browser="$AUTO_BROWSER"
+          wave_order=(integration browser)
         fi
-        if [ -n "$wave_integration" ]; then
-          step "$wave related integration namespaces"
-          ( cd "$wt" && GRAPHDEN_INTEGRATION_ONLY="$wave_integration" bb test-integration ) \
-            || { echo "FAIL: $wave related integration"; return 1; }
-        fi
-        if [ -n "$wave_browser" ]; then
-          if [ -n "$wave_integration" ]; then
-            step "$wave related browser: host headroom after integration"
-            if ! wait_for_headroom; then
-              WTQ_STAGE_ABORT=1
-              echo "ABORT: related browser headroom admission interrupted"
-              return 1
-            fi
-          fi
-          step "$wave related browser files"
-          ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" WTQ_FLAKE_STRICT=1 \
-              E2E_BASELINE_LOCAL="$E2E_BASELINE_LOCAL" GRAPHDEN_E2E_PRIORITY_BASE="$base_sha" \
-              GRAPHDEN_E2E_ONLY_FILES="$wave_browser" bb test-e2e ) \
-            || { echo "FAIL: $wave related browser"; return 1; }
-        fi
+        for kind in "${wave_order[@]}"; do
+          case "$kind" in
+            integration)
+              if [ -n "$wave_integration" ]; then
+                step "$wave related integration namespaces"
+                ( cd "$wt" && GRAPHDEN_INTEGRATION_ONLY="$wave_integration" bb test-integration ) \
+                  || { echo "FAIL: $wave related integration"; return 1; }
+                integration_ran=1
+              fi ;;
+            browser)
+              if [ -n "$wave_browser" ]; then
+                if [ "$integration_ran" = 1 ]; then
+                  step "$wave related browser: host headroom after integration"
+                  if ! wait_for_headroom; then
+                    WTQ_STAGE_ABORT=1
+                    echo "ABORT: related browser headroom admission interrupted"
+                    return 1
+                  fi
+                fi
+                step "$wave related browser files"
+                ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" WTQ_FLAKE_STRICT=1 \
+                    E2E_BASELINE_LOCAL="$E2E_BASELINE_LOCAL" GRAPHDEN_E2E_PRIORITY_BASE="$base_sha" \
+                    GRAPHDEN_E2E_ONLY_FILES="$wave_browser" bb test-e2e ) \
+                  || { echo "FAIL: $wave related browser"; return 1; }
+              fi ;;
+          esac
+        done
       done ;;
     build)
       step "build the CANDIDATE image from the merged tree"

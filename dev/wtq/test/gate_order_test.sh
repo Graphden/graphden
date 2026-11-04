@@ -164,6 +164,25 @@ WTQ_REPORT_TS=forced-browser-wave
 run_case
 assert_events 'expect,ci,verify,uber,build,image,e2e-early,integration-early,e2e-rest,integration-rest'
 [ "$built_candidate" = 1 ]
+# Both manually requested suites run before the automatic wave, in the order
+# of the first manual suite. The automatic suites still run before full tails.
+TEST_PRIORITY_INTEGRATION=$'graphden.editor.root-migration-integration-test\ngraphden.editor.other-integration-test'
+TEST_PRIORITY_BROWSER=$'edit-ui-components-selective.test.js\nedit-other.test.js'
+WTQ_FIRST_TESTS=browser:edit-ui-components-selective.test.js,integration:graphden.editor.root-migration-integration-test
+WTQ_REPORT_TS=forced-cross-suite-browser-first
+run_case
+assert_events 'expect,ci,verify,uber,build,image,e2e-early,integration-early,integration-early,headroom,e2e-early,e2e-rest,integration-rest'
+FAIL_E2E=1
+: > "$TEST_LOG"
+if gate_suites "$TEST_DIR" 0 0 0 >/dev/null; then
+  echo 'failed manual browser did not stop the priority wave' >&2; exit 1
+fi
+assert_events 'expect,ci,verify,uber,build,image,e2e-early'
+unset FAIL_E2E
+WTQ_FIRST_TESTS=integration:graphden.editor.root-migration-integration-test,browser:edit-ui-components-selective.test.js
+WTQ_REPORT_TS=forced-cross-suite-integration-first
+run_case
+assert_events 'expect,ci,verify,uber,build,image,integration-early,headroom,e2e-early,integration-early,headroom,e2e-early,integration-rest,headroom,e2e-rest'
 unset WTQ_FIRST_TESTS
 unset TEST_PRIORITY_INTEGRATION TEST_PRIORITY_BROWSER
 

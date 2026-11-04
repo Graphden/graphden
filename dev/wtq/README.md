@@ -193,8 +193,10 @@ Details that are deliberate:
   chosen for diagnosis, but is never required before queueing.
   `bb wt merge --first-test=unit:<namespace>` (or `integration`, `runtime`,
   `browser`) moves an explicitly suspected test ahead of derived neighbors
-  within its authoritative suite. Repeat the flag for an ordered prefix;
-  the queued hint survives train retries and bisection. An unknown test is
+  within its authoritative suite. Repeat the flag for a priority prefix;
+  integration and browser run in the order of the first requested suite, with
+  the listed tests ordered within each suite. The queued hint survives train
+  retries and bisection. An unknown test is
   rejected before queueing. The remainder still runs exactly once.
 - **Machine receipts.** The same directory holds `_train-<ts>.report.edn`
   (exact assembled SHA, scope, exit, failed stage, phase durations, queue wait, image ID and

@@ -106,10 +106,10 @@ You were started in one of two ways:
    tests in the one gate, pass `--first-test=unit:<namespace>`,
    `--first-test=integration:<namespace>`, `--first-test=runtime:<file>` or
    `--first-test=browser:<file>` to `bb wt merge`; repeat the flag as needed.
-   The gate runs manual integration/browser choices, then automatically related
-   integration/browser cases, before the remaining cases of either suite. Each
-   namespace/file runs once across those waves. Unit/runtime tests keep their
-   existing ordered CI waves. Do not
+   The gate runs manual integration/browser choices starting with the first
+   requested suite, then automatically related cases, then the remaining cases
+   of either suite. Each namespace/file runs once across those waves.
+   Unit/runtime tests keep their existing ordered CI waves. Do not
    run raw `clojure -M:dev:test -m kaocha.runner`. The wrapper waits while the
    gate is in a heavy phase (`.git/wtq/gate-heavy`) or `MemAvailable` is below
    `WTQ_AGENT_MEM_MIN_MB` (default 3000); `bb wt up` waits the same way.

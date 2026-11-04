@@ -454,6 +454,10 @@
         (testing "a caller-chosen source is dialed WITHOUT the registry token"
           (deploy-config/install! {:registry-url "https://registry.example"})
           (let [result (mirror!)]
+            (when-not (= "bearer.pkg" (:mirrored result))
+              (println "registry-mirror stub diagnostic"
+                       (pr-str {:result (select-keys result [:error :status :source])
+                                :captured-count (count @seen)})))
             (is (= "bearer.pkg" (:mirrored result)) (pr-str result)))
           (is (= [nil] @seen) "no Authorization header reached the caller's host"))
         (testing "no registry configured → no token anywhere"

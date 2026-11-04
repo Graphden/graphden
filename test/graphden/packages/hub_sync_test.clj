@@ -98,16 +98,22 @@
         (let [bundle {:fns [{:name :mine :parent :const :args {:value 2}}]
                       :namespaces [] :secrets [] :secret-paths-included? false}
               r (run-fn :hub-push-bundle! {:hub-url base :target "push/main" :bundle bundle})]
+          (when-not (true? (:ok r))
+            (println "hub-push stub diagnostic"
+                     (pr-str {:result (select-keys r [:error :status :detail])
+                              :captured-count (count @captured)})))
           (is (true? (:ok r)))
           (is (= ["x"] (:fn-ids r)))
-          (let [req (first @captured)]
-            (is (= "/api/import/graph" (:uri req)))
-            (testing "create+prune+target ride the query string"
-              (is (re-find #"create=true" (:query-string req)))
-              (is (re-find #"prune=true" (:query-string req)))
-              (is (re-find #"target=push%2Fmain" (:query-string req))))
-            (testing "the body is the {:fns […]} EDN the import route reads"
-              (is (= [:mine] (mapv :name (:fns (edn/read-string (:body-text req))))))))))))
+          (if-let [req (first @captured)]
+            (do
+              (is (= "/api/import/graph" (:uri req)))
+              (testing "create+prune+target ride the query string"
+                (is (re-find #"create=true" (:query-string req)))
+                (is (re-find #"prune=true" (:query-string req)))
+                (is (re-find #"target=push%2Fmain" (:query-string req))))
+              (testing "the body is the {:fns […]} EDN the import route reads"
+                (is (= [:mine] (mapv :name (:fns (edn/read-string (:body-text req))))))))
+            (is false "the hub stub captured no POST request"))))))
   (testing "hub refusal → hub-import-failed with status + detail as data"
     (with-stub-hub
       (fn [_] {:status 409 :body "{\"ok\":false,\"reason\":\"branch-protected\"}"})

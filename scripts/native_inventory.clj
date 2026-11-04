@@ -5,7 +5,43 @@
     [babashka.process :as process]
     [clojure.edn :as edn]
     [clojure.pprint :as pp]
-    [edamame.core :as reader]))
+    [clojure.string :as str]
+    [edamame.core :as reader])
+  (:import
+    (java.nio.file
+      Files)
+    (java.security
+      MessageDigest)))
+
+
+(defn- git-output
+  [root & args]
+  (str/trim (:out (process/check @(process/process (into ["git"] args)
+                                                   {:dir (str root) :out :string :err :string})))))
+
+
+(defn source-identity
+  "Bind a report to HEAD and actual input bytes, including uncommitted inputs.
+   Kondo caches are excluded; analyzer configuration and hooks are included."
+  [root]
+  (let [paths (->> (concat (mapcat #(fs/glob root %)
+                                   ["src/**" "resources/packages/**" ".clj-kondo/**"])
+                           (map #(fs/path root %) ["deps.edn" "tools/graph-reachability.edn"
+                                                   "scripts/native_inventory.clj"]))
+                   (filter fs/regular-file?)
+                   (remove #(str/includes? (str (fs/relativize root %)) ".clj-kondo/.cache/"))
+                   (sort-by #(str (fs/relativize root %))))
+        digest (MessageDigest/getInstance "SHA-256")]
+    (doseq [path paths]
+      (let [content (Files/readAllBytes path)
+            relative (str (fs/relativize root path))]
+        (MessageDigest/.update digest (String/.getBytes (str relative "\u0000" (alength content) "\u0000") "UTF-8"))
+        (MessageDigest/.update digest content)))
+    {:git-head (git-output root "rev-parse" "HEAD")
+     :git-head-tree (git-output root "rev-parse" "HEAD^{tree}")
+     :dirty? (not (str/blank? (git-output root "status" "--porcelain=v1" "--untracked-files=normal")))
+     :input-files (count paths)
+     :input-sha256 (str/join (map #(format "%02x" (bit-and % 255)) (MessageDigest/.digest digest)))}))
 
 
 (defn read-source
@@ -124,28 +160,35 @@
     (when graph-name (str ns-path "/" (name graph-name)))))
 
 
+(defn- traversal-coverage
+  [entries]
+  {:registrations (count entries)
+   :truncated-entries (count (filter #(get-in % [:helper-paths :truncated?]) entries))
+   :limit-reasons (frequencies (mapcat #(get-in % [:helper-paths :limit-reasons]) entries))})
+
+
 (defn inventory
   "Produce review data, retaining the existing reachability registry as context."
   ([entries analysis reachability] (inventory entries analysis reachability {}))
   ([entries analysis reachability {:keys [entry max-depth max-nodes]
                                    :or {max-depth 6 max-nodes 128}}]
    (let [graph (source-graph analysis)
-         selected (if entry (filterv #(= entry (entry-name %)) entries) entries)
-         _ (when (and entry (empty? selected))
+         _ (when (and entry (not-any? #(= entry (entry-name %)) entries))
              (throw (ex-info "No matching registered graph function" {:entry entry})))
          aliases (into {} (keep (fn [{:keys [from to] ns-alias :alias}]
                                   (when ns-alias [[from (str ns-alias)] to])))
                        (:namespace-usages analysis))
-         entries (mapv (fn [entry]
-                         (let [implementation (:implementation entry)
-                               alias-target (when implementation
-                                              (get aliases [(:native-namespace entry) (namespace implementation)]))
-                               resolved (if alias-target (qualified alias-target (name implementation)) implementation)]
-                           (assoc entry :implementation resolved
-                                  :review-status :unreviewed
-                                  :implementation-status (if (contains? graph resolved) :source :unresolved)
-                                  :helper-paths (helper-paths graph resolved max-depth max-nodes))))
-                       selected)
+         corpus-entries (mapv (fn [entry]
+                                (let [implementation (:implementation entry)
+                                      alias-target (when implementation
+                                                     (get aliases [(:native-namespace entry) (namespace implementation)]))
+                                      resolved (if alias-target (qualified alias-target (name implementation)) implementation)]
+                                  (assoc entry :implementation resolved
+                                         :review-status :unreviewed
+                                         :implementation-status (if (contains? graph resolved) :source :unresolved)
+                                         :helper-paths (helper-paths graph resolved max-depth max-nodes))))
+                              entries)
+         entries (if entry (filterv #(= entry (entry-name %)) corpus-entries) corpus-entries)
          reported-graph (if entry
                           (select-keys graph (mapcat #(map peek (get-in % [:helper-paths :paths])) entries))
                           graph)]
@@ -155,12 +198,11 @@
               :limitations [:static-var-dependencies :dynamic-dispatch-not-resolved
                             :macro-expansion-limited-to-kondo-hooks :no-purity-or-dead-code-verdict]}
       :reachability {:source "tools/graph-reachability.edn" :registry reachability}
-      :coverage {:registrations (count entries)
-                 :source-vars (count graph)
-                 :reported-source-vars (count reported-graph)
-                 :truncated-entries (count (filter #(get-in % [:helper-paths :truncated?]) entries))
-                 :limit-reasons (frequencies (mapcat #(get-in % [:helper-paths :limit-reasons]) entries))
-                 :unsupported-registrations (count (remove #(= :literal (:registration-status %)) entries))}
+      :coverage (assoc (traversal-coverage entries)
+                       :source-vars (count graph)
+                       :reported-source-vars (count reported-graph)
+                       :corpus (traversal-coverage corpus-entries)
+                       :unsupported-registrations (count (remove #(= :literal (:registration-status %)) entries)))
       :entries entries
       :source-graph reported-graph})))
 
@@ -185,16 +227,22 @@
 (defn scan
   "Analyze the current checkout with its pinned kondo and defbase hook."
   [root options]
-  (let [paths (sort-by str (fs/glob root "resources/packages/**/impls.clj"))
-        entries (mapcat (fn [path]
-                          (registrations (str (fs/relativize root path))
-                                         (read-source (slurp (str path)))
-                                         (edn/read-string (slurp (str (fs/path (fs/parent path) "fns.edn"))))))
-                        paths)
-        analyzed (analyze root ["src" "resources/packages"])]
+  (let [identity-before (source-identity root)
+        paths (sort-by str (fs/glob root "resources/packages/**/impls.clj"))
+        entries (vec (mapcat (fn [path]
+                               (registrations (str (fs/relativize root path))
+                                              (read-source (slurp (str path)))
+                                              (edn/read-string (slurp (str (fs/path (fs/parent path) "fns.edn"))))))
+                             paths))
+        analyzed (analyze root ["src" "resources/packages"])
+        identity-after (source-identity root)]
+    (when-not (= identity-before identity-after)
+      (throw (ex-info "Inventory inputs changed during analysis; rerun on a stable checkout"
+                      {:before identity-before :after identity-after})))
     (assoc (inventory (vec entries) (:analysis analyzed)
                       (edn/read-string (slurp (str (fs/path root "tools/graph-reachability.edn"))))
                       options)
+           :source-identity identity-after
            :analyzer {:name :clj-kondo
                       :version (get-in (edn/read-string (slurp (str (fs/path root "deps.edn"))))
                                        [:aliases :kondo :extra-deps 'clj-kondo/clj-kondo :mvn/version])

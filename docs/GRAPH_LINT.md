@@ -188,6 +188,8 @@ runs in CI when the analyzer, inventory, or task configuration changes.
 
 The coverage summary is also printed to stderr, leaving stdout as EDN. It
 counts depth and node-limit reasons separately (an entry can hit both).
+The nested `:coverage :corpus` retains those totals over all registrations,
+even in a targeted report, using the requested traversal limits.
 For a focused review with larger traversal limits:
 
 ```sh
@@ -199,6 +201,15 @@ the selected registration and its visited source vars in the output. Reports
 are generated artifacts; do not commit them. Every entry stays `:unreviewed`
 even when traversal completes: neither a complete nor a truncated path gets
 an automatic atomic/native classification.
+
+`:source-identity` records Git HEAD, its committed tree, an explicit dirty
+flag, and a SHA-256 fingerprint of the actual source/package bytes, analyzer
+configuration/hooks, dependency declaration, reachability registry and
+inventory implementation. The fingerprint includes untracked inputs and
+excludes kondo caches. A dirty report does not claim to describe the committed
+tree. Compare identities before reusing review evidence; a matching HEAD
+alone is insufficient. The scanner compares identity before and after its
+analysis and fails if inputs changed during the run.
 
 ### Graph engine
 

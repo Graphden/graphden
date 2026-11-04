@@ -124,7 +124,8 @@ assert.equal(saved[0].activeBranch, 'review-inheritance');
   assert.equal(ctx._tourCheckPasses(check), false, 'an extending child is not a sibling copy');
   const effects = [];
   const intentCtx = vm.createContext({
-    console, document: {activeElement: null}, installPopoverDismiss() {}, registerActionHandler() {},
+    console, window: {location: {hash: '#original'}},
+    document: {activeElement: null}, installPopoverDismiss() {}, registerActionHandler() {},
     applyInheritancePreview: async () => ({ok: true, committed: true, 'created-fn-id': 'new-identity'}),
     _tourLoadInheritanceCheckSource: async () => { throw new Error('Source verification is unavailable.'); },
     gdToast: message => effects.push(['warning', message]),
@@ -137,5 +138,15 @@ assert.equal(saved[0].activeBranch, 'review-inheritance');
     ['warning', 'Change saved. Source verification is unavailable.'],
     ['refresh'], ['navigate', 'new-identity'],
   ], 'failed lesson proof is a committed warning and preserves refresh plus UUID navigation');
+  effects.length = 0;
+  intentCtx.initGraph = async () => {
+    effects.push(['refresh']);
+    intentCtx.window.location.hash = '#new-selection';
+  };
+  await intentCtx.applyIntentPreview(preview);
+  assert.deepEqual(effects, [
+    ['warning', 'Change saved. Source verification is unavailable.'],
+    ['refresh'],
+  ], 'a late refresh does not navigate away from a newer selection');
   console.log('✓ variation tutorial: UUID staging, branch persistence, safe cleanup, sibling identity check');
 })().catch(error => { console.error(error); process.exitCode = 1; });

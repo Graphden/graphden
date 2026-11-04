@@ -147,6 +147,7 @@ async function applyIntentPreview(preview, proposedName) {
     }
     if (window.location.hash !== viewHash) return;
     await initGraph();
+    if (window.location.hash !== viewHash) return;
     if (result['created-fn-id']) await navigateInheritanceSource(result['created-fn-id'], viewHash);
   } catch (error) {
     gdToast(error.message);

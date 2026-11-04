@@ -4,6 +4,7 @@
    save, rollback and type-publication checks remain in view-save-test."
   (:require
     [cheshire.core :as json]
+    [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.crud.entities :as entities]
     [graphden.crud.test-autorun :as autorun]
@@ -75,22 +76,22 @@
 
 
 (deftest graph-command-normalizes-without-losing-presence-or-identity
-  (let [identity (random-uuid)
+  (let [view-id (random-uuid)
         parsed (parse-command
-                 {:create-id (str identity)
+                 {:create-id (str view-id)
                   :namespace-id nil
                   :name "  saved name  "
                   :filters {:name "   "
-                            :uses [(str identity) identity]
-                            :views [(str identity)]
+                            :uses [(str view-id) view-id]
+                            :views [(str view-id)]
                             :effects [":db" "db"]
                             :kinds [":fn" "fn"]
                             :problems ["lint" ":lint"]
                             :namespaces [" app " "app" " "]
                             :exclude [" secret " ""]
                             :unused false}})]
-    (is (= {:create-id identity :namespace-id nil :name "saved name"
-            :filters {:name nil :uses [identity] :views [identity]
+    (is (= {:create-id view-id :namespace-id nil :name "saved name"
+            :filters {:name nil :uses [view-id] :views [view-id]
                       :effects [:db] :kinds [:fn] :problems [:lint]
                       :namespaces ["app"] :exclude ["secret"] :unused false}}
            parsed))
@@ -98,7 +99,7 @@
                                     :kinds [] :problems [] :namespaces []
                                     :exclude [] :unused false}}
            (parse-command {:name "empty" :filters {}})))
-    (is (= identity (:id (parse-command {:id identity :name "updated" :filters {}}))))
+    (is (= view-id (:id (parse-command {:id view-id :name "updated" :filters {}}))))
     (is (not (contains? (parse-command {:id false :name "new" :filters {}}) :id)))
     (is (contains? (parse-command {:name "new" :namespace-id false :filters {}})
                    :namespace-id))))
@@ -106,21 +107,21 @@
 
 (deftest malformed-command-never-calls-the-atomic-writer
   (let [base {:name "valid" :filters {}}
-        identity (random-uuid)
+        view-id (random-uuid)
         cases [[nil "Save view requires a JSON object"]
                [[] "Save view requires a JSON object"]
-               [(assoc base :id nil :create-id identity) "never both"]
+               [(assoc base :id nil :create-id view-id) "never both"]
                [(dissoc base :filters) "Unknown or missing filter axes"]
                [(assoc base :filters []) "Unknown or missing filter axes"]
                [(assoc base :name 7) "non-empty name"]
                [(assoc base :name "  ") "non-empty name"]
-               [(assoc base :name (apply str (repeat 161 "x"))) "160 characters"]
+               [(assoc base :name (str/join (repeat 161 "x"))) "160 characters"]
                [(assoc-in base [:filters :also] []) "Unknown or missing filter axes"]
                ;; Preserve the native parser's first rejection when two axes fail.
                [(assoc base :filters {:uses "wrong" :exclude "wrong"})
                 ":exclude must contain at most 64 values"]
                [(assoc-in base [:filters :uses] "wrong") "at most 64 values"]
-               [(assoc-in base [:filters :uses] (repeat 65 (str identity))) "at most 64 values"]
+               [(assoc-in base [:filters :uses] (repeat 65 (str view-id))) "at most 64 values"]
                [(assoc-in base [:filters :uses] ["invalid"]) "must be a UUID"]
                [(assoc-in base [:filters :views] [nil]) "must be a UUID"]
                [(assoc-in base [:filters :namespaces] [7]) "at most 512 characters"]
@@ -129,7 +130,7 @@
                [(assoc-in base [:filters :kinds] ["unknown"]) "Unknown kinds value"]
                [(assoc-in base [:filters :problems] ["unknown"]) "Unknown problems value"]
                [(assoc-in base [:filters :name] {}) "at most 512 characters"]
-               [(assoc-in base [:filters :exclude] [(apply str (repeat 513 "x"))]) "at most 512 characters"]
+               [(assoc-in base [:filters :exclude] [(str/join (repeat 513 "x"))]) "at most 512 characters"]
                [(assoc-in base [:filters :unused] nil) "unused must be a boolean"]
                [(assoc base :id "invalid") "must be a UUID"]
                [(assoc base :create-id nil) "must be a UUID"]
@@ -154,7 +155,7 @@
                                          :body (json/generate-string body)}))]
           (is (some? error) (str "Expected typed rejection: " expected))
           (is (and (string? (:reason error))
-                   (.contains ^String (:reason error) expected))
+                   (str/includes? (:reason error) expected))
               (str "Expected reason containing: " expected)))))
     ;; save-explorer-view records :db before forcing its command argument.
     ;; This sentinel proves the writer is never called, not an empty effect trace.

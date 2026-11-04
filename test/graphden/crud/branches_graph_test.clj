@@ -906,6 +906,9 @@
     (doseq [groups [[] [{:fn-id (str b)} {:fn-id (str a)} {:fn-id (str a)}
                         {:fn-id nil} {:fn-id "junk"}]]]
       (let [calls (atom [])
+            unexpected (fn [op]
+                         (throw (ex-info "Unexpected storage call in diff affected test"
+                                         {:op op})))
             storage (reify
                       sp/StorageCRUD
                       (query-entities
@@ -915,6 +918,18 @@
                         [{:id root-ns :name "app"}
                          {:id leaf-ns :name "visible" :parent-id root-ns}
                          {:id unrelated-ns :name "unrelated"}])
+
+                      (query-entities [_ _ _ _] (unexpected :query-entities-opts))
+
+                      (create-entity [_ _ _] (unexpected :create-entity))
+
+                      (read-entity [_ _ _] (unexpected :read-entity))
+
+                      (update-entity [_ _ _ _] (unexpected :update-entity))
+
+                      (delete-entity [_ _ _] (unexpected :delete-entity))
+
+                      (query-latest-per-group [_ _ _ _] (unexpected :query-latest-per-group))
 
 
                       sp/StorageBatchCRUD
@@ -927,7 +942,17 @@
                         ;; must remain nil even though the dependency ID is known.
                         (select-keys {shared {:id shared :namespace-id leaf-ns}
                                       child {:id child :namespace-id unrelated-ns}}
-                                     ids)))
+                                     ids))
+
+                      (create-entities [_ _ _] (unexpected :create-entities))
+
+                      (update-entities [_ _ _] (unexpected :update-entities))
+
+                      (upsert-entities [_ _ _] (unexpected :upsert-entities))
+
+                      (delete-entities [_ _ _] (unexpected :delete-entities))
+
+                      (query-ref-many-owners [_ _ _ _] (unexpected :query-ref-many-owners)))
             acquisitions (atom 0)
             result (with-redefs [dv/affected-view-facts
                                  (fn [_ _ supplied-groups]

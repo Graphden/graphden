@@ -247,11 +247,11 @@ calls, and 4096 projection visits, in addition to the source collection bounds.
 Field names and roles are finite keyword literals. Component bodies retain the
 normal bounded browser ABI rather than the narrower manifest projection ABI.
 
-`POST /api/ui/components/plan` accepts exactly
-`{"component":"account-menu"}`, `{"component":"fn-picker"}`,
-`{"component":"recents"}`, `{"component":"inspector"}`,
-`{"component":"explorer"}`, `{"component":"tutorial-catalog"}`, `{"component":"canvas"}`, or `{"component":"canvas-values"}`. The existing owner/org/branch-scoped `components`
-preference selects the configuration. Each request authorizes manifest source,
+`POST /api/ui/configuration/plan` accepts a single `component` field, for
+example `{"component":"fn-picker"}`. Supported names are the finite component
+contracts in `graphden.editor.component-config/component-contracts`. The
+protected ordinary resolver selects the personal `editor` configuration or the
+shared defaults in the current owner/org/branch scope. Each request authorizes manifest source,
 checks its original secret classification and snapshot provenance, then reads
 and exports only that component's body closure. Other entry targets provide
 authorized identity metadata without loading their bindings. The response

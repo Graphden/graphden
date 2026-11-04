@@ -20,12 +20,6 @@
    :picker-view picker-view})
 
 
-(defbase _ui-components-plan
-  [input]
-  (runtime/record-effect! :db)
-  (components/export-current ctx input))
-
-
 (defbase _editor-configuration-plan
   [input]
   (runtime/record-effect! :db)
@@ -129,7 +123,6 @@
 
 (def impls
   {:ui-components ui-components
-   :_ui-components-plan {:impl _ui-components-plan :taint-propagate? true}
    :_editor-configuration-plan {:impl _editor-configuration-plan :taint-propagate? true}
    ;; No caller values enter this source-authorized, server-selected export.
    :_editor-root-plan _editor-root-plan

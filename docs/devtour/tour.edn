@@ -1400,7 +1400,7 @@
            and emits an ID-based plan for supported primitives; the browser does not resolve graph
            names itself. Shipped plans are generated during development. The generic editable-graph export takes
            a whole snapshot and remains unavailable under tenancy. Personal components instead use
-           `graphden.editor.components/export-current`, which authorizes every source dependency
+           `graphden.editor.components/export-resolved`, which authorizes every source dependency
            and exports only a bounded component plan. See the [graph-backed UI contract](../../resources/packages/app/ui-preview/README.md)."
      :see [[:executor "build-lookups"] [:editor "createRuntime"]]}
 

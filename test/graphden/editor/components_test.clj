@@ -2,7 +2,6 @@
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
-    [graphden.editor.component-config :as config]
     [graphden.editor.components :as components]
     [graphden.editor.config-resolution :as resolution]
     [graphden.executor.browser-snapshot :as snapshot]
@@ -30,52 +29,19 @@
     (is (not (contains? response :retryable)))))
 
 
-(defn- preference-storage
-  [selection]
-  (let [row {:id (random-uuid) :owner-id "alice" :key "components" :value selection}]
-    (reify sp/StorageCRUD
-      (create-entity [_ _ _] (throw (UnsupportedOperationException. "Read-only preference fixture")))
-
-      (update-entity [_ _ _ _] (throw (UnsupportedOperationException. "Read-only preference fixture")))
-
-      (delete-entity [_ _ _] (throw (UnsupportedOperationException. "Read-only preference fixture")))
-
-      (read-entity
-        [_ entity id]
-        (when (and (= :ui-pref entity) (= id (:id row))) row))
-
-      (query-entities
-        [this entity where]
-        (sp/query-entities this entity where {}))
-
-      (query-entities
-        [_ entity where opts]
-        (is (= :ui-pref entity))
-        (is (= {:owner-id "alice" :key "components"} where))
-        (->> [row]
-             (filter #(every? (fn [[field value]] (= value (get % field))) where))
-             (drop (:offset opts 0))
-             (take (:limit opts 1))
-             vec))
-
-      (query-latest-per-group
-        [this entity where _]
-        (sp/query-entities this entity where)))))
-
-
 (deftest selected-identity-is-owner-org-and-branch-scoped
   (let [selection {"fn-id" (str fn-id) "org" "org-a" "branch-id" (str branch-id)}]
     (with-redefs [tenancy/current-user-id (constantly "alice")
                   tenancy/current-org (constantly "org-a")
                   versioned/current-branch-id (constantly branch-id)]
-      (is (= fn-id (components/selected-id (preference-storage selection))))
+      (is (= fn-id (components/selected-id-from-rows {} [{:value selection}])))
       (doseq [changed [(assoc selection "org" "org-b")
                        (assoc selection "branch-id" (str (java.util.UUID/randomUUID)))
                        (assoc selection :fn-id (str fn-id))
                        (assoc selection "fn-id" "not-an-identity")
                        nil]]
         (is (thrown? clojure.lang.ExceptionInfo
-              (components/selected-id (preference-storage changed))))))))
+              (components/selected-id-from-rows {} [{:value changed}])))))))
 
 
 (deftest unpublished-policy-does-not-authorize-export
@@ -100,7 +66,7 @@
   (testing "invalid requests keep the existing opaque refusal and never read source"
     (with-redefs [source/with-snapshot (fn [& _] (throw (AssertionError. "Unexpected source read")))]
       (doseq [input [nil {} {:component "unknown"} {:component "fn-picker" :fn-id fn-id}]]
-        (is (= unavailable (components/export-current {:storage {}} input))))))
+        (is (= unavailable (components/export-resolved {:storage {}} input))))))
   (testing "ACL, invalid source and unknown failures cannot opt into retry by reason alone"
     (doseq [[error status]
             [[(ex-info "private ACL details" {:type :authz/forbidden
@@ -114,7 +80,7 @@
              [(IllegalStateException. "private runtime value") 422]]]
       (with-redefs [source/with-snapshot (fn [& _] (throw error))]
         (is (= (assoc unavailable :http-status status)
-               (components/export-current {:storage {}} {:component "fn-picker"})))))))
+               (components/export-resolved {:storage {}} {:component "fn-picker"})))))))
 
 
 (deftest stale-policy-has-a-bounded-opaque-retry-envelope
@@ -127,14 +93,14 @@
                                          (components/assert-current-policy! storage)
                                          {:ok true})]
       (is (= (assoc unavailable :code "policy-refresh-required" :retryable true :retry-after 1)
-             (components/export-current {:storage {}} {:component "fn-picker"})))
+             (components/export-resolved {:storage {}} {:component "fn-picker"})))
       (is (= 12 @watermark) "Export never advances policy validation to make itself succeed")
       (reset! watermark 13)
       (is (= {:ok true}
-             (components/export-current {:storage {}} {:component "fn-picker"})))
+             (components/export-resolved {:storage {}} {:component "fn-picker"})))
       (reset! epoch nil)
       (is (= (assoc unavailable :code "policy-refresh-required" :retryable true :retry-after 1)
-             (components/export-current {:storage {}} {:component "fn-picker"}))))))
+             (components/export-resolved {:storage {}} {:component "fn-picker"}))))))
 
 
 (deftest original-policy-and-epoch-are-frozen-before-any-snapshot-read
@@ -150,18 +116,18 @@
                                          (swap! events conj :snapshot)
                                          (reset! rich {:replacement :plain})
                                          (f storage (constantly nil)))
-                  components/selected-id (constantly selected)
+                  resolution/capture (fn [_ _ frozen]
+                                       (swap! events conj [:manifest frozen])
+                                       {:id selected :configuration {:fn-picker {:view fn-id}}})
+                  resolution/owned-writable-components (constantly {})
+                  sp/query-entities (constantly [])
                   sp/read-entity (fn [& _] {:id selected})
-                  source/collect-manifest (constantly {})
                   source/collect-namespaces (constantly [])
-                  config/configuration (constantly {:fn-picker {:view fn-id}})
                   components/assert-current-policy! (constantly nil)
-                  snapshot/validate-source! (fn [_ _ frozen]
-                                              (swap! events conj [:manifest frozen]))
                   source/collect-closure (constantly {})
                   snapshot/export-snapshot (fn [_ _ _ frozen]
                                              (swap! events conj [:component frozen]) {:valid true})]
-      (is (:ok (components/export-current ctx {:component "fn-picker"})))
+      (is (:ok (components/export-resolved ctx {:component "fn-picker"})))
       (is (= [:epoch [:capture {:original :secret}] :snapshot
               [:manifest (assoc policy :type-recheck nil)]
               [:component (assoc policy :type-recheck nil)] :epoch] @events)))))
@@ -185,7 +151,7 @@
                                        {:id selected :revision "authoritative-revision"
                                         :configuration {:fn-picker {:view fn-id}}
                                         :snapshot {:graph {} :namespaces []}})
-                  components/selected-id (fn [& _] (throw (AssertionError. "Legacy preference must not select source")))
+                  resolution/owned-writable-components (constantly {})
                   components/assert-current-policy! (constantly nil)
                   sp/read-entity (fn [_ _ id] {:id id})
                   sp/query-entities (fn [actual entity where opts]

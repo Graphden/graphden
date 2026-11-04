@@ -613,3 +613,52 @@
         (is (nil? (sp/read-entity raw :fn helper-id)))
         (is (nil? (sp/read-entity raw :fn anon-id))))
       (finally (sp/close raw)))))
+
+
+(deftest retired-route-chain-is-purged-after-versioned-route-list-update
+  ;; A removed endpoint includes a primitive, lifted anonymous call, handler
+  ;; and route. Older route-list versions must not pin this whole chain.
+  (let [raw (setup/create-test-storage)]
+    (try
+      (let [storage (versioned-storage raw)
+            package (ns-row! raw "retiredapi" nil)
+            names ["plan" "_anon-0123456789abcdef" "handler" "route"]
+            ids (mapv #(records/fn-id "retiredapi" (keyword %)) names)
+            [primitive anon handler route] ids
+            keeper (records/fn-id "retiredapi" :routes)
+            _ (doseq [[name id] (map vector names ids)]
+                (sp/create-entity storage :fn
+                                  {:id id :name name :namespace-id (:id package)
+                                   :parent-ids (if (= id anon) [primitive] [])}))
+            _ (sp/create-entity storage :fn
+                                {:id keeper :name "routes" :namespace-id (:id package) :parent-ids []})
+            slot (setup/create-slot! storage "route-handler" :int)
+            _ (doseq [id [handler route keeper]]
+                (setup/attach-slot! storage id (:id slot) 0))
+            _ (sp/create-entity storage :binding {:fn-id handler :slot-id (:id slot) :ref-fn-id anon})
+            _ (sp/create-entity storage :binding {:fn-id route :slot-id (:id slot) :ref-fn-id handler})
+            route-binding (sp/create-entity storage :binding {:fn-id keeper :slot-id (:id slot)})
+            item (sp/create-entity storage :binding-list-item
+                                   {:binding-id (:id route-binding) :position 0 :ref-fn-id route})
+            packages {:packages [{:name "retiredapi"}]}
+            synced {:routes keeper}
+            opts {:preexisting-fn-ids (set (conj ids keeper))}
+            blocked (pkg-sync/reconcile-moved-identities! storage packages synced (assoc opts :dry-run? true))]
+        (is (= (set names) (set (:kept blocked))) "The live external route reference retains its whole chain")
+        ;; This is the versioned writer operation used when sync retires an
+        ;; item from a list; preserve the prior version instead of SQL cleanup.
+        (binding [vs/*tombstone-delete?* true]
+          (sp/delete-entity storage :binding-list-item (:id item)))
+        (let [before (sp/query-entities raw :binding-list-item-version {:item-id (:id item)})
+              plan (pkg-sync/reconcile-moved-identities! storage packages synced (assoc opts :dry-run? true))]
+          (is (some #(= route (:ref-fn-id %)) before))
+          (is (= (set names) (set (:purgeable plan))))
+          (is (empty? (:kept plan)))
+          (is (every? #(sp/read-entity raw :fn %) ids) "Dry-run leaves identities intact")
+          (pkg-sync/reconcile-moved-identities! storage packages synced opts)
+          (is (every? #(nil? (sp/read-entity raw :fn %)) ids))
+          (is (= keeper (:id (sp/read-entity storage :fn keeper))))
+          (is (= before (sp/query-entities raw :binding-list-item-version {:item-id (:id item)}))
+              "Surviving routes keep their history; it does not retain retired identities")
+          (is (empty? (sp/query-entities storage :binding-list-item {:binding-id (:id route-binding)})))))
+      (finally (sp/close raw)))))

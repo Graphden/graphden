@@ -49,17 +49,6 @@
           :menu-view {:type :fn-ref}
           :picker-view {:type :fn-ref}}
    :return-type :_ui-components-identities}
-  {:name :_ui-components-plan
-   :description "Export one selected personal UI component as an authorized bounded JSON plan. Never evaluates user code or exports the whole graph."
-   :args {:input {:type :jsonb}}
-   :return-type :keyword-map
-   :effects #{:db}}
-  {:name :_ui-components-plan-handler :parent :json-envelope-response
-   :lambda-params [:request]
-   :args {:envelope {:parent :_ui-components-plan :args {:input :parse-json-body}}}}
-  {:name :api-ui-components-plan :parent :app.routes.auth/post
-   :description "Authenticated personal menu/picker plan in the selected organization and branch."
-   :args {:path "/ui/components/plan" :handler :_ui-components-plan-handler}}
   {:name :_editor-configuration-plan
    :description "Export one component selected by the protected ordinary authenticated editor resolver. Default and personal source use the same authorization and snapshot."
    :args {:input {:type :jsonb}} :return-type :keyword-map :effects #{:db}}

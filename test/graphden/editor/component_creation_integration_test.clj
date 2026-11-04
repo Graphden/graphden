@@ -12,8 +12,8 @@
     [graphden.editor.component-bundle :as bundle]
     [graphden.editor.component-config :as config]
     [graphden.editor.component-creation :as creation]
+    [graphden.editor.component-export-fixture :as export-fixture]
     [graphden.editor.component-templates :as templates]
-    [graphden.editor.components :as components]
     [graphden.editor.preference-write :as preferences]
     [graphden.executor.browser-plan :as browser-plan]
     [graphden.executor.browser-snapshot :as snapshot]
@@ -172,7 +172,12 @@
                                                                            [:type :reason :fn-id :fn-name :arg-name
                                                                             :expected :actual :declared :computed])})
                                                (throw error)))))])) watched)]
-    {:result (with-redefs-fn wrappers #(components/export-current ctx {:component component}))
+    {:result (with-redefs-fn wrappers
+               #(export-fixture/export! ctx
+                                        (get-in (first (sp/query-entities (:storage ctx) :ui-pref
+                                                                          {:owner-id "anonymous" :key "components"}))
+                                                [:value :fn-id])
+                                        component))
      :component component :diagnostics @diagnostics}))
 
 
@@ -183,6 +188,12 @@
         manifest (get-in created [:body :manifest])
         id (get-in manifest [:roots :configuration-id])]
     (is (:ok (:body created)) (pr-str created))
+    (let [publication (some #(when (= 'record-imported-fn-types! (:stage %)) %) (:creation-phases created))
+          batches (quot (+ (count (:functions manifest)) 255) 256)]
+      (is (:complete publication) "The imported component types are published synchronously")
+      (doseq [family [:binding :binding-list-item]]
+        (is (<= (get-in publication [:sql-profile family :count] 0) (* 16 batches))
+            (str "Full import owner reads scale with batches: " family))))
     (if-let [prior (first (sp/query-entities storage :ui-pref {:owner-id "anonymous" :key "components"}))]
       (sp/update-entity storage :ui-pref (:id prior)
                         {:value {:fn-id id :branch-id (str (vs/current-branch-id storage)) :org "public"}})
@@ -190,7 +201,7 @@
                         {:owner-id "anonymous" :key "components" :org-id "public"
                          :value {:fn-id id :branch-id (str (vs/current-branch-id storage)) :org "public"}
                          :updated-at (java.time.Instant/now)}))
-    (epoch/seed-watermark! storage)
+    (export-fixture/prepare! ctx id)
     (let [{:keys [result] :as diagnosed} (export-diagnosed ctx "recents")]
       (is (:ok result) (pr-str diagnosed)))
     (let [{:keys [result] :as diagnosed} (export-diagnosed ctx "canvas")]
@@ -533,68 +544,34 @@
                                               :org-id "public" :updated-at (java.time.Instant/now)}))
         ;; Publication updated this ctx's graph/type slices. No concurrent
         ;; writer exists in this serial fixture; certify that exact basis.
-        (epoch/seed-watermark! storage)
-        (doseq [component ["account-menu" "fn-picker" "recents" "inspector"]]
-          (let [queries (atom [])
-                component-roots {"account-menu" [:menu-id :menu-update-id]
-                                 "fn-picker" [:picker-id]
-                                 "recents" [:recents-id :recents-initial-id :recents-update-id]
-                                 "inspector" [:inspector-id :inspector-initial-id :inspector-update-id]}
-                body-ids (into #{} (map #(get-in manifest [:roots %]))
-                               (mapcat val (dissoc component-roots component)))
-                reader (guarded-jdbc-reader jdbc/execute! body-ids (str id) queries)
-                _ (with-redefs [jdbc/execute! reader]
-                    (is (thrown? Exception
-                          (resolution/call-with-fresh-memos
-                            #(sp/query-entities storage :binding {:fn-id (parse-uuid (first body-ids))}))))
-                    (is (some #(and (:body? %) (:retained-target? %)) @queries)))
-                _ (reset! queries [])
-                {:keys [result] :as diagnosed} (with-redefs [jdbc/execute! reader]
-                                                 (export-diagnosed ctx component))]
-            (is (some :retained-root? @queries) "actual selected root metadata was read")
-            (is (not-any? #(and (:body? %) (:retained-target? %)) @queries)
-                "nonselected component identities never cause body reads")
-            (is (:ok result) (pr-str diagnosed))
-            (is (= (str id) (:selection-id result)))
-            (is (= (str id) (get-in result [:roots :configuration-id])))
-            (is (empty? (set/intersection
-                          (into #{} (map :id) (get-in result [:plan :functions]))
-                          (into #{} (mapcat #(map :id (:functions %)))
-                                (remove #{manifest} manifests)))))))))))
-
-
-(deftest legacy-four-slot-preferences-remain-functional-and-missing-components-fallback
-  (let [ctx (:ctx ga/*bootstrap*)
-        storage (:storage ctx)
-        applied (apply-preview (preview))
-        manifest (get-in applied [:body :manifest])
-        publication (some #(when (= 'record-imported-fn-types! (:stage %)) %)
-                          (:creation-phases applied))
-        batches (quot (+ (count (:functions manifest)) 255) 256)
-        root (:path (first (:namespaces manifest)))
-        id (records/fn-id root :legacy-ui)
-        definition {:name :legacy-ui :namespace root :parent :app.ui-components/ui-components
-                    :args {:menu-initial (keyword (str root ".menu") "account-menu-initial")
-                           :menu-update (keyword (str root ".menu") "account-menu-update")
-                           :menu-view (keyword (str root ".menu") "account-menu-view")
-                           :picker-view (keyword (str root ".picker") "picker-view")}}
-        preference {:fn-id (str id) :branch-id (str (vs/current-branch-id storage)) :org "public"}]
-    (is (= 200 (:status applied)))
-    (is (:complete publication) "the full legacy import publishes its types synchronously")
-    (doseq [family [:binding :binding-list-item]]
-      (is (<= (get-in publication [:sql-profile family :count] 0) (* 16 batches))
-          (str "full import owner reads must scale with batches: " family)))
-    ((impls/impl-of :sync-fn-defs-branch!)
-     {:branch-id (vs/current-branch-id storage) :fn-defs [definition]} ctx)
-    (if-let [prior (first (sp/query-entities storage :ui-pref {:owner-id "anonymous" :key "components"}))]
-      (sp/update-entity storage :ui-pref (:id prior) {:value preference})
-      (sp/create-entity storage :ui-pref {:owner-id "anonymous" :key "components" :value preference
-                                          :org-id "public" :updated-at (java.time.Instant/now)}))
-    (epoch/seed-watermark! storage)
-    (doseq [component ["account-menu" "fn-picker"]]
-      (is (:ok (components/export-current ctx {:component component}))))
-    (is (= "component-missing" (:code (components/export-current ctx {:component "recents"}))))
-    (is (= "builtin" (:fallback (components/export-current ctx {:component "recents"}))))))
+        (let [prepared (export-fixture/prepare! ctx id)]
+          (doseq [component ["account-menu" "fn-picker" "recents" "inspector"]]
+            (let [queries (atom [])
+                  component-roots {"account-menu" [:menu-id :menu-update-id]
+                                   "fn-picker" [:picker-id]
+                                   "recents" [:recents-id :recents-initial-id :recents-update-id]
+                                   "inspector" [:inspector-id :inspector-initial-id :inspector-update-id]}
+                  body-ids (into #{} (map #(get-in manifest [:roots %]))
+                                 (mapcat val (dissoc component-roots component)))
+                  reader (guarded-jdbc-reader jdbc/execute! body-ids (str id) queries)
+                  _ (with-redefs [jdbc/execute! reader]
+                      (is (thrown? Exception
+                            (resolution/call-with-fresh-memos
+                              #(sp/query-entities storage :binding {:fn-id (parse-uuid (first body-ids))}))))
+                      (is (some #(and (:body? %) (:retained-target? %)) @queries)))
+                  _ (reset! queries [])
+                  {:keys [result] :as diagnosed} (with-redefs [jdbc/execute! reader]
+                                                   (export-diagnosed ctx component))]
+              (is (some :retained-root? @queries) "actual selected root metadata was read")
+              (is (not-any? #(and (:body? %) (:retained-target? %)) @queries)
+                  "nonselected component identities never cause body reads")
+              (is (:ok result) (pr-str diagnosed))
+              (is (= (str (:id prepared)) (:selection-id result)))
+              (is (= (str (:id prepared)) (get-in result [:roots :configuration-id])))
+              (is (empty? (set/intersection
+                            (into #{} (map :id) (get-in result [:plan :functions]))
+                            (into #{} (mapcat #(map :id (:functions %)))
+                                  (remove #{manifest} manifests))))))))))))
 
 
 (defn- activate-selected

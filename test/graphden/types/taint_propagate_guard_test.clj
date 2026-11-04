@@ -155,7 +155,7 @@
     :http-request :http-server :http-stop   :if :into
     :invalidate-after-write :invalidate-graph-cache :invoke :is-a?
     :json-to-type :jvm-uptime-ms :keys :list :graph-tree :graph-namespace-fns :graph-search
-    :graph-index :graph-subtree :graph-full :graph-fn-defs-subtree :fn-unread-bindings :log-warn
+    :_graph-index-facts :_graph-index-row :graph-subtree :graph-full :graph-fn-defs-subtree :fn-unread-bindings :log-warn
     ;; app/views — the Explorer's filter evaluation: light fn rows (ids,
     ;; names, roles) projected off the graph-cache, never the caller's
     ;; content. Same class as the :graph-* reads.
@@ -237,7 +237,9 @@
    SECRETS.md § T3 set. Before changing this, for each ADDED name ask \"does it
    pass/transform caller content? then it needs `:taint-propagate?`\"; for each
    REMOVED name confirm it genuinely no longer handles content."
-  #{:fork-package-fns :materialize-package-fns :materialize-package-receipt
+  #{;; Row projection preserves caller-provided non-nil content.
+    :_graph-index-row
+    :fork-package-fns :materialize-package-fns :materialize-package-receipt
     ;; Exact identity validation is not a declassification boundary.
     :parse-fn-delete-receipts :delete-fn-receipts
     ;; Uninstall receipts echo the caller's package name.

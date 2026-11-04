@@ -9,6 +9,7 @@
    `src/` namespaces so each base-fn impl stays a minimal primitive."
   (:require
     [graphden.crud.entities :as entities]
+    [graphden.crud.entities.list :as entity-list]
     [graphden.crud.fn-execution.lookup :as fn-exec-lookup]
     [graphden.crud.request :as request]
     [graphden.crud.types-api :as types-api]
@@ -145,10 +146,15 @@
   (entities/graph-search ctx q descriptions?))
 
 
-(defbase graph-index
+(defbase graph-index-facts
   []
   (cr/record-effect! :db)
-  (entities/graph-index ctx))
+  (entity-list/graph-index-facts ctx))
+
+
+(defbase graph-index-row
+  [row]
+  (entity-list/compact-fn-row row))
 
 
 (defbase graph-subtree
@@ -343,7 +349,8 @@
    :graph-tree graph-tree
    :graph-namespace-fns graph-namespace-fns
    :graph-search graph-search
-   :graph-index graph-index
+   :_graph-index-facts graph-index-facts
+   :_graph-index-row {:impl graph-index-row :taint-propagate? true}
    :graph-subtree graph-subtree
    :graph-full graph-full
    :graph-fn-defs-subtree   graph-fn-defs-subtree

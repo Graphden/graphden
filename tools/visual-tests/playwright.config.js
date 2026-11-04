@@ -45,6 +45,12 @@ const CHROMIUM_LAUNCH_ARGS = [
 
 module.exports = defineConfig({
   testDir: './tests',
+  // A cold authenticated editor can spend ~20s rendering its first graph and
+  // another few seconds loading preferences before screenshot comparison.
+  // Under the gate's three parallel viewports, the default 30s test ceiling
+  // ended one otherwise passing screenshot. Keep the graph and screenshot
+  // waits independently bounded in the test/expect configuration.
+  timeout: 60_000,
   retries: 0,
   use: {
     baseURL: BASE_URL,

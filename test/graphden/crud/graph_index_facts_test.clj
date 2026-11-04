@@ -17,12 +17,25 @@
         graph {:fns [{:id own :name "own" :org-id "index-owner" :parent-ids [parent]}
                      {:id foreign :name "foreign" :org-id "other" :parent-ids []}]
                :slots [] :fn-slots [] :bindings [] :list-items []}
-        storage #_{:clj-kondo/ignore [:missing-protocol-method]}
-                (reify sp/StorageCRUD
-                  (query-entities [_ entity where]
+        unexpected (fn [op] (throw (ex-info "Unexpected index storage call" {:op op})))
+        storage (reify sp/StorageCRUD
+                  (query-entities
+                    [_ entity where]
                     (is (= [:ns {}] [entity where]))
                     (swap! reads inc)
-                    []))
+                    [])
+
+                  (query-entities [_ _ _ _] (unexpected :query-entities-opts))
+
+                  (create-entity [_ _ _] (unexpected :create-entity))
+
+                  (read-entity [_ _ _] (unexpected :read-entity))
+
+                  (update-entity [_ _ _ _] (unexpected :update-entity))
+
+                  (delete-entity [_ _ _] (unexpected :delete-entity))
+
+                  (query-latest-per-group [_ _ _ _] (unexpected :query-latest-per-group)))
         ctx {:storage storage :graph-cache (atom graph)}]
     (with-redefs-fn
       {#'entity-list/view-impl-filter (atom #(entity-list/strip-impl-of % #{own}))

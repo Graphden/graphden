@@ -382,20 +382,20 @@
    :description "Lean bulk entry: preserve type and future fields, omit metadata unused by chip and strip paint."
    :parent :dissoc
    :args {:map {:parent :dissoc
-               :args {:map {:parent :dissoc
-                            :args {:map {:parent :dissoc
-                                         :args {:map {:parent :dissoc
-                                                      :args {:map {:parent :dissoc
-                                                                   :args {:map {:parent :dissoc
-                                                                                :args {:map {:parent :dissoc
-                                                                                             :args {:map {:as :entry :type :keyword-map}
-                                                                                                    :key {:value :resolved-bindings}}}
-                                                                                       :key {:value :description}}}
-                                                                          :key {:value :source-file}}}
-                                                             :key {:value :source-line}}}
-                                                :key {:value :tags}}}
-                                   :key {:value :arg-effects}}}
-                      :key {:value :call-time-effects}}}
+                :args {:map {:parent :dissoc
+                             :args {:map {:parent :dissoc
+                                          :args {:map {:parent :dissoc
+                                                       :args {:map {:parent :dissoc
+                                                                    :args {:map {:parent :dissoc
+                                                                                 :args {:map {:parent :dissoc
+                                                                                              :args {:map {:as :entry :type :keyword-map}
+                                                                                                     :key {:value :resolved-bindings}}}
+                                                                                        :key {:value :description}}}
+                                                                           :key {:value :source-file}}}
+                                                              :key {:value :source-line}}}
+                                                 :key {:value :tags}}}
+                                    :key {:value :arg-effects}}}
+                       :key {:value :call-time-effects}}}
           :key {:value :primary-parent}}}
 
   {:name :api-rich-types

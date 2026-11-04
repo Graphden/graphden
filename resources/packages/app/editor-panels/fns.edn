@@ -148,6 +148,7 @@
    :parent :get
    :args {:coll {:as :item} :default nil}}
   {:name :_lint-suppression-key
+   :lambda-params [:item]
    :parent :vec
    :args {:coll [{:parent :str-to-keyword
                   :args {:string {:parent :_lint-suppression-field :args {:key {:value :rule}}}}}
@@ -175,11 +176,14 @@
    :parent :take
    :args {:count {:parent :count :args {:coll :_lint-raw-ids}}
           :coll {:parent :range
-                 :args {:end {:parent :count :args {:coll :_lint-raw-members}}}}}}
+                 :args {:start {:value 0}
+                        :end {:parent :count :args {:coll :_lint-raw-members}}
+                        :step {:value 1}}}}}
   {:name :_lint-member-pair
    :parent :get
    :args {:coll :_lint-raw-members :key {:as :item} :default nil}}
   {:name :_lint-wire-member
+   :lambda-params [:item]
    :parent :zipmap
    :args {:keys [{:value :id} {:value :name} {:value :ns}]
           :vals [{:parent :to-str
@@ -191,6 +195,7 @@
                  {:parent :get
                   :args {:coll :_lint-member-pair :key {:value 0} :default nil}}]}}
   {:name :_lint-wire-finding
+   :lambda-params [:finding]
    :parent :zipmap
    :args {:keys [{:value :rule} {:value :message} {:value :weight} {:value :fn-ids} {:value :fns}]
           :vals [{:parent :name

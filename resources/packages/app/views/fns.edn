@@ -247,40 +247,38 @@
     :then nil,
     :else :_vc-trimmed}}
 
-  {:name :_vc-axis-dispatch,
+  {:name :_vc-candidate-text,
+   :parent :ensure-type,
+   :args {:value :_vc-candidate, :type {:value :text}}}
+
+  {:name :_vc-no-colon,
+   :parent :re-replace,
+   :args {:string :_vc-candidate-text,
+          :pattern "^:", :replacement ""}}
+
+  {:name :_vc-keyword-normalized,
+   :parent :str-to-keyword,
+   :args {:string :_vc-no-colon}}
+
+  {:name :_vc-axis-item,
+   :lambda-params [:candidate],
+   :parent :if,
+   :args {:test :_vc-uuid-axis,
+          :then :_vc-uuid,
+          :else :_vc-text}}
+
+  {:name :_vc-normalized-item,
    :lambda-params [:candidate],
    :parent :if,
    :args
    {:test :_vc-uuid-axis,
-    :then
-    {:parent :_vc-uuid,
-     :args {:candidate :_vc-candidate, :axis :_vc-axis}}}}
-
-  {:name :_vc-axis-item,
-   :parent :_vc-axis-dispatch,
-   :args {:else {:parent :_vc-text,
-                 :args {:candidate :_vc-candidate, :axis :_vc-axis}}}}
-
-  {:name :_vc-normalized-item,
-   :parent :_vc-axis-dispatch,
-   :args
-   {:else
+    :then :_vc-uuid,
+    :else
     {:parent :if,
      :args
      {:test :_vc-keyword-axis,
-      :then
-      {:parent :str-to-keyword,
-       :args
-       {:string
-        {:parent :re-replace,
-         :args
-         {:string
-          {:parent :ensure-type,
-           :args {:value :_vc-candidate, :type {:value :text}}},
-          :pattern "^:",
-          :replacement ""}}}},
-      :else
-      {:parent :_vc-trim-text, :args {:candidate :_vc-candidate}}}}}}
+      :then :_vc-keyword-normalized,
+      :else :_vc-trim-text}}}}
 
   {:name :_vc-non-nil,
    :lambda-params [:candidate],
@@ -289,7 +287,7 @@
 
   {:name :_vc-axis-values,
    :parent :get,
-   :args {:coll :_vc-filters, :key :_vc-axis}}
+   :args {:coll :_vc-filters, :key :_vc-axis, :default nil}}
 
   {:name :_vc-axis-error,
    :parent :str,
@@ -510,9 +508,36 @@
      {:coll {:as :allowed, :type [:list :keyword]},
       :value {:as :candidate, :type :keyword}}}}}
 
+  {:name :_vc-effect-keyword,
+   :lambda-params [:item],
+   :parent :str-to-keyword,
+   :args {:string {:as :item :type :nullable-text}}}
+
   {:name :_vc-effect-keywords,
    :parent :map,
-   :args {:func :str-to-keyword, :coll :declarable-effect-categories}}
+   :args {:func :_vc-effect-keyword, :coll :declarable-effect-categories}}
+
+  {:name :_vc-kind-item,
+   :lambda-params [:candidate],
+   :parent :_vc-enum-item,
+   :args {:allowed [{:value :fn}
+                    {:value :types}
+                    {:value :secrets}
+                    {:value :services}
+                    {:value :apps}
+                    {:value :tests}]}}
+
+  {:name :_vc-problem-item,
+   :lambda-params [:candidate],
+   :parent :_vc-enum-item,
+   :args {:allowed [{:value :failed} {:value :type-errors} {:value :lint}]}}
+
+  {:name :_vc-effect-item,
+   :lambda-params [:candidate],
+   :parent :_vc-enum-item,
+   :args {:allowed {:parent :ensure-type,
+                    :args {:value :_vc-effect-keywords,
+                           :type {:value [:list :keyword]}}}}}
 
   {:name :_vc-check-kinds,
    :parent :if,
@@ -520,16 +545,7 @@
    {:test
     {:parent :every?,
      :args
-     {:pred
-      {:parent :_vc-enum-item,
-       :args
-       {:allowed
-        [{:value :fn}
-         {:value :types}
-         {:value :secrets}
-         {:value :services}
-         {:value :apps}
-         {:value :tests}]}},
+     {:pred :_vc-kind-item,
       :coll :_vc-kinds}},
     :then nil,
     :else {:parent :_vc-reject, :args {:reason "Unknown kinds value"}}}}
@@ -540,11 +556,7 @@
    {:test
     {:parent :every?,
      :args
-     {:pred
-      {:parent :_vc-enum-item,
-       :args
-       {:allowed
-        [{:value :failed} {:value :type-errors} {:value :lint}]}},
+     {:pred :_vc-problem-item,
       :coll :_vc-problems}},
     :then nil,
     :else
@@ -556,14 +568,7 @@
    {:test
     {:parent :every?,
      :args
-     {:pred
-      {:parent :_vc-enum-item,
-       :args
-       {:allowed
-        {:parent :ensure-type,
-         :args
-         {:value :_vc-effect-keywords,
-          :type {:value [:list :keyword]}}}}},
+     {:pred :_vc-effect-item,
       :coll :_vc-effects}},
     :then nil,
     :else {:parent :_vc-reject, :args {:reason "Unknown effects value"}}}}

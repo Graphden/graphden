@@ -1553,6 +1553,7 @@ run_gate_stage() {
                 ( cd "$wt" && GRAPHDEN_INTEGRATION_ONLY="$wave_integration" bb test-integration ) \
                   || { echo "FAIL: $wave related integration"; return 1; }
                 integration_ran=1
+                pending_browser_headroom=1
               fi ;;
             browser)
               if [ -n "$wave_browser" ]; then
@@ -1563,6 +1564,7 @@ run_gate_stage() {
                     echo "ABORT: related browser headroom admission interrupted"
                     return 1
                   fi
+                  pending_browser_headroom=0
                 fi
                 step "$wave related browser files"
                 ( cd "$wt" && GD_IMAGE="$VERIFIED_IMAGE_ID" WTQ_FLAKE_STRICT=1 \
@@ -1743,10 +1745,10 @@ gate_suites() {
     stages+=(build)
   fi
   # Visual and browser E2E boot separate isolated Testcontainers stacks from
-  # the same verified image. Run the short visual suite first so a changed
-  # screenshot cannot fail only after the long browser roster.
-  [ "$NEED_VISUAL" = 1 ] && stages+=(visual)
+  # the same verified image. Related tests precede visual; the short visual
+  # suite still precedes full tails. The resume scheduler keeps this order.
   if [ -n "$PRIORITY_INTEGRATION" ] || [ -n "$PRIORITY_BROWSER" ]; then stages+=(priority); fi
+  [ "$NEED_VISUAL" = 1 ] && stages+=(visual)
   [ "$NEED_E2E" = 1 ] && stages+=(e2e)
   [ "$NEED_INTEGRATION" = 1 ] && stages+=(integration)
   [ "$NEED_FLEET" = 1 ] && stages+=(fleet)

@@ -162,7 +162,7 @@ assert_events 'expect,ci,verify,uber,build,image,integration-early,headroom,e2e-
 WTQ_FIRST_TESTS=browser:edit-ui-components-selective.test.js
 WTQ_REPORT_TS=forced-browser-wave
 run_case
-assert_events 'expect,ci,verify,uber,build,image,e2e-early,integration-early,e2e-rest,integration-rest'
+assert_events 'expect,ci,verify,uber,build,image,e2e-early,integration-early,headroom,e2e-rest,integration-rest'
 [ "$built_candidate" = 1 ]
 # Both manually requested suites run before the automatic wave, in the order
 # of the first manual suite. The automatic suites still run before full tails.
@@ -185,6 +185,38 @@ run_case
 assert_events 'expect,ci,verify,uber,build,image,integration-early,headroom,e2e-early,integration-early,headroom,e2e-early,integration-rest,headroom,e2e-rest'
 unset WTQ_FIRST_TESTS
 unset TEST_PRIORITY_INTEGRATION TEST_PRIORITY_BROWSER
+
+# Related tests must fail before visual, with both producer receipts intact.
+# Browser-first priority and no-priority cases retain the complete roster.
+CASE_VISUAL=1
+TEST_PRIORITY_INTEGRATION=graphden.editor.root-migration-integration-test
+TEST_PRIORITY_BROWSER=edit-ui-components-selective.test.js
+WTQ_REPORT_TS=priority-before-visual
+run_case
+assert_events 'expect,ci,verify,uber,build,image,integration-early,headroom,e2e-early,visual,e2e-rest,integration-rest'
+WTQ_FIRST_TESTS=browser:edit-ui-components-selective.test.js
+WTQ_REPORT_TS=browser-priority-before-visual
+run_case
+assert_events 'expect,ci,verify,uber,build,image,e2e-early,integration-early,headroom,visual,e2e-rest,integration-rest'
+unset WTQ_FIRST_TESTS TEST_PRIORITY_BROWSER
+WTQ_REPORT_TS=integration-priority-red
+FAIL_INTEGRATION=1
+: > "$TEST_LOG"
+if gate_suites "$TEST_DIR" 0 0 0 >/dev/null; then exit 1; fi
+assert_events 'expect,ci,verify,uber,build,image,integration-early'
+receipt="$LOG_DIR/_train-$WTQ_REPORT_TS.stages.edn"
+[ "$(bb scripts/ci_resume_cli.clj status stages "$receipt" priority)" = failed ]
+[ "$(bb scripts/ci_resume_cli.clj status stages "$receipt" visual)" = pending ]
+unset FAIL_INTEGRATION
+WTQ_RESUME_FROM="$LOG_DIR/_train-$WTQ_REPORT_TS"
+WTQ_REPORT_TS=integration-priority-retry
+run_case
+assert_events 'expect,ci,verify,uber,build,image,integration-early,headroom,visual,e2e,integration-rest'
+unset WTQ_RESUME_FROM TEST_PRIORITY_INTEGRATION
+WTQ_REPORT_TS=no-priority-visual
+run_case
+assert_events 'expect,ci,verify,uber,build,image,visual,e2e,integration'
+CASE_VISUAL=0
 
 # A verified remote proof can replace only the integration stage. A missing
 # or refused proof executes the same local integration roster as before.

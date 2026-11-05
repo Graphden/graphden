@@ -41,8 +41,8 @@ packages are LAYERED — each depends only on the ones below it:
 
 `tenancy-admin` is a further package loaded only when the
 multi-tenant addon is active. You can add your own — say
-`mycorp` — and the loader picks it up at startup, no code change
-beyond writing the files.
+`mycorp` — and add it to the startup `:package-names` list; the loader
+then picks it up without changing the loader's code.
 
 ## The shape on disk
 

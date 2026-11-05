@@ -531,6 +531,9 @@
 (deftest two-independent-copies-export-only-the-selected-component
   (let [ctx (:ctx ga/*bootstrap*)
         storage (:storage ctx)
+        ;; This namespace shares storage across tests; start both copies from
+        ;; an unselected graph, regardless of the preceding test order.
+        _ (preferences/write! storage "components" nil false nil)
         manifests (mapv (fn [_] (get-in (apply-preview (preview)) [:body :manifest])) (range 2))
         roots (mapv #(get-in % [:roots :configuration-id]) manifests)]
     (is (apply not= roots))

@@ -21,8 +21,10 @@
   {:name :_sf-row-listed?
    :description "Public AND approved — what an anonymous reader may see."
    :parent :and
-   :args {:values [{:parent :equal? :args {:a {:parent :get :args {:coll {:as :item} :key {:value :public} :default {:value false}}} :b {:value true}}}
-                   {:parent :equal? :args {:a {:parent :to-str :args {:value {:parent :get :args {:coll {:as :item} :key {:value :status} :default {:value "approved"}}}}}
+   ;; The index entries are keyword maps; pin the callback input so filter
+   ;; retains that row shape instead of get's broad collection union.
+   :args {:values [{:parent :equal? :args {:a {:parent :get :args {:coll {:as :item :type :keyword-map} :key {:value :public} :default {:value false}}} :b {:value true}}}
+                   {:parent :equal? :args {:a {:parent :to-str :args {:value {:parent :get :args {:coll {:as :item :type :keyword-map} :key {:value :status} :default {:value "approved"}}}}}
                                            :b {:value "approved"}}}]}}
   ;; Each stage comes as an `-over` fold with `:coll` FREE (the graph's
   ;; tests feed fixture rows) and a live fn pinning the previous stage —

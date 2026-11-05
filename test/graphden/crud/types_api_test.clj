@@ -4,7 +4,7 @@
    handlers call, plus the shared graph-cache loaders and role / rich-type derivations.
 
    The pure helpers (`compute-fn-role`, `json->type`, `describe-mismatch`,
-   `constraint-contains-type-ref?`, `candidate-fit`) need no fixture;
+   `constraint-contains-type-ref?`) need no fixture;
    the rest go through the shared container. The endpoints' parse /
    validate stages and the candidates enumeration are graph fn-defs —
    covered through the handlers in `types-api-graph-test`."
@@ -301,60 +301,6 @@
           (is (true? (:type-row? (get snap :rttr-rec))))
           (is (= "a record row" (:description (get snap :rttr-rec))))))
       (finally (sp/close storage)))))
-
-
-;; ============================================================================
-;; api-rich-types — the HTTP wire-shaping layer over all-rich-types
-;; (lean bulk only; the per-fn ?fn= branch died with its one consumer).
-;; Finding K: docs/PERF_BUDGETS.md.
-;; ============================================================================
-
-(deftest api-rich-types-test
-  (let [storage (setup/create-test-storage)
-        c (test-ctx storage)]
-    (try
-      ;; A record type-row carrying a :description — :description is one
-      ;; of the fields the lean bulk omits, so it is a deterministic
-      ;; probe for the projection without needing a resolved-bindings
-      ;; fixture.
-      (let [rec  (sp/create-entity storage :fn
-                                   {:name "arttr-rec" :parent-ids []
-                                    :description "a described row"})
-            s1   (setup/create-slot! storage "title" :text)
-            s2   (setup/create-slot! storage "count" :int)
-            _    (setup/attach-slot! storage (:id rec) (:id s1) 0)
-            _    (setup/attach-slot! storage (:id rec) (:id s2) 1)
-            full (ta/all-rich-types c)
-            lean (ta/api-rich-types c)]
-        (testing "lean bulk keeps every fn (same key set as the full snapshot)"
-          (is (= (set (keys full)) (set (keys lean)))))
-        (testing "lean bulk strips every omitted field from every entry"
-          (is (every? (fn [e] (not-any? #(contains? e %) ta/bulk-omitted-fields))
-                      (vals lean))))
-        (testing "lean bulk retains the fields the chip/strip paint reads"
-          (let [e (get lean :arttr-rec)]
-            (is (some? e))
-            (is (contains? e :return))
-            (is (not (contains? e :description))))))
-      (finally (sp/close storage)))))
-
-
-;; ============================================================================
-;; candidate-fit — the picker's whole-signature tier (pure). Admission and
-;; the enumeration itself run through the graph handler — see
-;; `types-api-graph-test`.
-;; ============================================================================
-
-(deftest candidate-fit-test
-  (is (= :exact (ta/candidate-fit '[:fn {:item a} b] 1)) "one free arg for a one-arg call")
-  (is (= :ignores (ta/candidate-fit '[:fn {:item a} b] 0)) "a constant drops the item")
-  (is (= :captures (ta/candidate-fit '[:fn {:item a} b] 3)) "two more are captured")
-  (is (= :exact (ta/candidate-fit '[:fn {:acc a :item b} a] 2)) "by-name slot, both names")
-  (is (= :exact (ta/candidate-fit [:fn {} :any] 0)) "nullary in a nullary slot")
-  (is (= :captures (ta/candidate-fit [:fn {} :any] 2)) "frees in a nullary slot are captured")
-  (is (= :exact (ta/candidate-fit :fn-ref 5)) "an identity slot asks no arity")
-  (is (= :exact (ta/candidate-fit :text 0)) "a finished value is ready")
-  (is (= :captures (ta/candidate-fit :text 2)) "a template with frees needs inputs"))
 
 
 ;; ============================================================================

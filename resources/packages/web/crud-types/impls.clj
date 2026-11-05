@@ -79,13 +79,10 @@
     (tcheck/assemble-fn-type (keyword fn-name))))
 
 
-(defbase candidate-fit-fn
-  "Atomic library boundary over `types-api/candidate-fit` — how a
-   candidate's WHOLE signature sits in the slot: `:exact` / `:captures`
-   / `:ignores` (see the src docstring). Ranking only — admissibility
-   stays `:subtype?`'s call."
-  [expected arity]
-  (types-api/candidate-fit expected arity))
+(defbase fn-type-args-fn
+  "Canonical callable argument projection; nil for non-callable types."
+  [type]
+  (types/fn-args type))
 
 
 (defbase fn-ns-index-fn
@@ -178,22 +175,11 @@
   (vec (sort (map name tcheck/known-effect-categories))))
 
 
-(defbase type-name-kinds
-  "Sorted `{:name :kind}` rows for the editor's type-name datalist —
-   named type-rows classified via `compute-fn-role` plus the bare
-   primitives. Single library call into `types-api/type-name-kinds`."
+(defbase _type-name-entries
+  "Acquire scoped picker rows without discarding their canonical type refs."
   []
   (cr/record-effect! :db)
-  (types-api/type-name-kinds ctx))
-
-
-(defbase compatible-type-names
-  "`type-name-kinds` rows filtered to the names that can legally
-   narrow `expected` — one alias-aware `subtype?` sweep server-side.
-   Single library call into `types-api/compatible-type-names`."
-  [expected]
-  (cr/record-effect! :db)
-  (types-api/compatible-type-names ctx expected))
+  (types-api/type-name-entries ctx))
 
 
 (defbase _types-usages-apply
@@ -322,7 +308,7 @@
    :subtype? {:impl subtype?-fn :taint-propagate? true}
    :fn-type? {:impl fn-type?-fn :taint-propagate? true}
    :fn-signature {:impl fn-signature :taint-propagate? true}
-   :candidate-fit {:impl candidate-fit-fn :taint-propagate? true}
+   :fn-type-args {:impl fn-type-args-fn :taint-propagate? true}
    :fn-ns-index fn-ns-index-fn
    :describe-type-mismatch {:impl describe-type-mismatch-fn :taint-propagate? true}
    :classify-literal {:impl classify-literal :taint-propagate? true}
@@ -333,8 +319,7 @@
    :rich-type-of-id rich-type-of-id
    :rule-owner-of-id rule-owner-of-id
    :declarable-effect-categories declarable-effect-categories
-   :type-name-kinds type-name-kinds
-   :compatible-type-names {:impl compatible-type-names :taint-propagate? true}
+   :_type-name-entries _type-name-entries
    :_types-usages-apply _types-usages-apply
    :_apply-create-record-type-body {:impl _apply-create-record-type-body :taint-propagate? true}
    :_apply-create-record-type-rollback {:impl _apply-create-record-type-rollback :taint-propagate? true}

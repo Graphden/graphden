@@ -3,6 +3,7 @@
  :fns
  [{:name :_canvas-values-history-entry :type {:label :text :source-label :text
                                               :kind [:refine :text {:constraint [:in #{"none" "binding-override" "slot"}]}]}}
+  {:name :_canvas-values-history-list :list :_canvas-values-history-entry}
   {:name :_canvas-values-inputs :type {:surface [:refine :text {:constraint [:in #{"value-label" "type-chip" "type-history"}]}]
                                        :label :text :secondary :text :secondary-title :text
                                        :secondary-kind [:refine :text {:constraint [:in #{"none" "refinement" "narrowing"}]}]
@@ -20,7 +21,8 @@
   {:name :_canvas-values-secondary-title :parent :get
    :args {:coll {:as :inputs :type :_canvas-values-inputs} :key {:value :secondary-title} :default ""}}
   {:name :_canvas-values-history :parent :get
-   :args {:coll {:as :inputs :type :_canvas-values-inputs} :key {:value :history} :default {:value []}}}
+   :args {:coll {:as :inputs :type :_canvas-values-inputs} :key {:value :history} :default {:value []}}
+   :return-type :_canvas-values-history-list}
   {:name :_canvas-values-label-tree :parent :hiccup
    :args {:tag "span" :attrs {:value {:class "gd-canvas-values-label"}} :children [:_canvas-values-label]}}
   {:name :_canvas-values-secondary-empty :parent :equal?

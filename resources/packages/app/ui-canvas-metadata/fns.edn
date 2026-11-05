@@ -3,6 +3,7 @@
  "Ordinary passive canvas presentation; native owners retain authority and interaction.",
  :fns
  [{:name :_param, :type {:label :text, :first :bool}}
+  {:name :_param-list :list :_param}
   {:name :_param-label,
    :parent :get,
    :args
@@ -81,7 +82,8 @@
    :args
    {:coll {:as :inputs, :type :_inputs},
     :key {:value :params},
-    :default {:value []}}}
+    :default {:value []}},
+   :return-type :_param-list}
   {:name :_effect,
    :parent :get,
    :args

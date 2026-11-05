@@ -122,9 +122,14 @@ shape), not encoded in the type itself.
 Two cooperating type-system changes ship with this extension:
 
 1. **Free-arg propagation** (`types/check.clj`). `ref-free-args`
-   lifts a HOF-bound ref's free args MINUS the slot's structural
-   call-site arg names. The remainder are captured and surface on
-   the calling fn-def's `:args`. Without this, `:schedule`'s
+   lifts a HOF-bound ref's free args MINUS its authored `:lambda-params`
+   when present, otherwise the slot's structural call-site arg names.
+   An explicit `[]` captures every free arg, including names matching
+   the slot. Callable type checking uses the same authored partition,
+   retaining the parameter types even when their names differ from the
+   slot's names. Locally bound captures do not become public args again;
+   a local rename exposes only its destination name. The remainder
+   surface on the calling fn-def's `:args`. Without this, `:schedule`'s
    computed `:args` would be `{}` and the editor / parser would
    have no way for admins to bind `:cron` / `:fn`.
 

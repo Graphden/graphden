@@ -809,7 +809,7 @@
            the [rich-types registry](#term/rich-types). Compiler decisions, runtime checks, [secret
            redaction](#term/secret), and editor labels read this data. Writes target the active
            branch's registry, so checking one branch does not overwrite another branch's types."
-     :see [[:executor "compile-all"] [:web "api-rich-types"]]}
+     :see [[:executor "compile-all"] [:web "all-rich-types"]]}
     {:ns graphden.executor.registry.core :defn rich-type-of-id
      :say "Looks up [rich type information](#term/rich-types) by function ID. Names may repeat across
            namespaces and are not a unique identity. The remaining name index supports [base
@@ -1277,20 +1277,21 @@
            [graph function](#term/graph-function) decides whether compression is appropriate and
            prepares headers and body. This primitive contains the header-parsing logic shared by that
            composition."}
-    {:ns graphden.crud.types-api :defn compatible-type-names
-     :say "Finds named types that may narrow the expected type, resolving aliases and checking
-           [subtyping](#term/subtype) against each row's canonical namespace identity on the server.
-           Unique selection names retain their bare spelling; collisions are namespace-qualified,
-           including root and materialized namespaces. The picker receives one rendered set of options
-           instead of issuing a separate compatibility request for each type name."}
-    {:ns graphden.crud.types-api :defn api-rich-types
-     :say "Shapes the [rich-types registry](#term/rich-types) into the compact `/api/types` response
-           used by the editor. Fields unnecessary for the bulk listing are omitted; specialized
-           interfaces fetch or render the details they need separately."}
-    {:ns graphden.crud.types-api :defn candidate-fit
-     :say "Ranks already-admissible function candidates by how their parameters fit a callable
-           [slot](#term/slot). `:exact` uses the supplied parameter count, `:captures` needs
-           additional [captured input](#term/capture), and `:ignores` consumes fewer parameters.
+    {:ns graphden.crud.types-api :defn type-name-entries
+     :say "Acquires the scoped picker rows with canonical namespace references kept separate
+           from displayed selection names. The graph's `compatible-type-names` filters those
+           references with subtyping before sharing the `type-name-kinds` wire projection."}
+    {:ns graphden.crud.types-api :defn all-rich-types
+     :say "Acquires the augmented, scoped [rich-types registry](#term/rich-types) snapshot.
+           The graph's `api-rich-types` maps its wire projection over this single snapshot,
+           removing metadata unused by the editor while preserving type fields."}
+    {:file "resources/packages/web/crud-types/impls.clj" :defn fn-type-args-fn
+     :say "Reads a callable type's argument map through the canonical type accessor; non-callable
+           types return nil. The `candidate-fit` composition in
+           [crud-types/fns.edn](../../resources/packages/web/crud-types/fns.edn) counts these arguments
+           and ranks already-admissible candidates: `:exact` matches the supplied count,
+           `:captures` needs additional [captured input](#term/capture), and `:ignores` consumes
+           fewer parameters. Value [slots](#term/slot) compare with zero; identity slots are exact.
            Ranking changes display order, not whether the type checker admits a candidate."}
     {:file "resources/packages/storage/branches/impls.clj" :defn sync-fn-defs-branch!
      :say "Synchronizes function definitions into a specified branch for [MCP](#term/mcp) and
@@ -1421,8 +1422,8 @@
     {:file "resources/packages/app/editor/editor-fn-picker-rank.js" :defn pickerArrange
      :say "Orders function-picker candidates without accessing the [DOM](#term/hiccup) or network.
            Exact-name matches come first, followed by namespace groups and compatibility/fit ranking.
-           Typed searches show all matches; browsing can fold groups. The server's `candidate-fit` in
-           the Web block supplies fit metadata without changing type admissibility."}
+           Typed searches show all matches; browsing can fold groups. The server's `candidate-fit` graph composition, described in
+           the Web block, supplies fit metadata without changing type admissibility."}
 
     {:ns graphden.executor.browser-plan :defn export-plan
      :say "The ordinary account menu, function picker and Explorer navigation trail use bundled graph plans for their local

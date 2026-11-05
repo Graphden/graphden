@@ -173,7 +173,7 @@ Inheritance changes use an authoritative preview followed by one atomic apply. T
 :MINS: 5.0
 :END:
 
-Orders function-picker candidates without accessing the [[file:glossary.org::#term/hiccup][DOM]] or network. Exact-name matches come first, followed by namespace groups and compatibility/fit ranking. Typed searches show all matches; browsing can fold groups. The server's ~candidate-fit~ in the Web block supplies fit metadata without changing type admissibility.
+Orders function-picker candidates without accessing the [[file:glossary.org::#term/hiccup][DOM]] or network. Exact-name matches come first, followed by namespace groups and compatibility/fit ranking. Typed searches show all matches; browsing can fold groups. The server's ~candidate-fit~ graph composition, described in the Web block, supplies fit metadata without changing type admissibility.
 
 - source :: [[file:../../../resources/packages/app/editor/editor-fn-picker-rank.js::function pickerArrange(candidates, opts) {][resources/packages/app/editor/editor-fn-picker-rank.js:122]]
 - referenced from :: [[file:editor.org::#editor/createRuntime][createRuntime]]

@@ -61,7 +61,7 @@
     ;; These commands return selected plans, derived manifests or normalized
     ;; caller fields. Their return values are not declassification boundaries.
     :_ui-components-create-preview :_ui-components-create-apply
-    :parse-view-command :save-explorer-view
+    :save-explorer-view
     ;; Configuration only assembles four UUID identities from narrow :fn-ref
     ;; slots; it neither accepts marked values nor executes the targets.
     :ui-components
@@ -78,7 +78,7 @@
     :_seq-append-load-binding :_seq-move-load-item :_seq-remove-load-item
     :_seq-update-load-item :_slot-effective-type-raw
     :_tests-run-apply :_tests-status-apply
-    :_types-usages-apply :abs :add :all-rich-types :and :api-rich-types
+    :_types-usages-apply :abs :add :all-rich-types :and
     :assert :assert-eq :assert-some :assoc :assoc-in :atom :auth-active?
     :ensure-type :encode-view :as-ui-view
     :authenticate-request :blank? :branch-diagnostics-flat
@@ -117,7 +117,7 @@
     :byte-len :cached-api-routes-js :server-call :call :call-noargs :call-noargs-traced
     :cancel-execution! :case :cell :chain-has-process-effect?
     :classify-literal :closed-enum-of :coalesce :comp
-    :compatible-type-names :concat :cond :conj :cons :const
+    :concat :cond :conj :cons :const
     :constant-time-equal? :constantly :contains? :count
     ;; The tutorial funnel — both bump a counter keyed by a VALIDATED
     ;; lesson id / step index and answer the counter's own name. No caller
@@ -144,9 +144,9 @@
     ;; rows and return bool / count — no caller content in the return.
     :failure-ack :failure-ack-all
     :filter :filter-xf :find-first :fn-signature :fn-type? :first :fix :flatten
-    ;; :candidate-fit ranks a type expression + an arity; :fn-ns-index maps
-    ;; fn-ids to namespace paths — neither passes caller content, no taint.
-    :candidate-fit :fn-ns-index
+    ;; Callable argument projection derives from the supplied type expression.
+    ;; Namespace paths come from the scoped graph snapshot.
+    :fn-type-args :fn-ns-index
     :fn-names-with-tag :fn-return-type :form-decode :fn-stats-raw :fn-type-bound-effects
     :fork-package-fns
     :free-arg-entries :free-arg-slot-map :free-memory :future :get :get-entity
@@ -155,7 +155,7 @@
     :http-request :http-server :http-stop   :if :into
     :invalidate-after-write :invalidate-graph-cache :invoke :is-a?
     :json-to-type :jvm-uptime-ms :keys :list :graph-tree :graph-namespace-fns :graph-search
-    :graph-index :graph-subtree :graph-full :graph-fn-defs-subtree :fn-unread-bindings :log-warn
+    :_graph-index-facts :_graph-index-row :graph-subtree :graph-full :graph-fn-defs-subtree :fn-unread-bindings :log-warn
     ;; app/views — the Explorer's filter evaluation: light fn rows (ids,
     ;; names, roles) projected off the graph-cache, never the caller's
     ;; content. Same class as the :graph-* reads.
@@ -224,7 +224,7 @@
     :try-apply-seq-append :try-apply-seq-move :try-apply-seq-update
     :try-apply-tighten
     :try-apply-update
-    :type-name-kinds :update-entity :update-in :update-keys
+    :_type-name-entries :update-entity :update-in :update-keys
     :update-vals :url-decode :usage-all-org-stats
     :usage-org-daily :usage-org-fn-stats
     :usage-org-summary :utf8-bytes :vals :value-kinds :vault-delete
@@ -237,7 +237,9 @@
    SECRETS.md § T3 set. Before changing this, for each ADDED name ask \"does it
    pass/transform caller content? then it needs `:taint-propagate?`\"; for each
    REMOVED name confirm it genuinely no longer handles content."
-  #{:fork-package-fns :materialize-package-fns :materialize-package-receipt
+  #{;; Row projection preserves caller-provided non-nil content.
+    :_graph-index-row
+    :fork-package-fns :materialize-package-fns :materialize-package-receipt
     ;; Exact identity validation is not a declassification boundary.
     :parse-fn-delete-receipts :delete-fn-receipts
     ;; Uninstall receipts echo the caller's package name.
@@ -262,9 +264,9 @@
     ;; Component plans/manifests and view parse/save outcomes derive from
     ;; caller input, including content inside their wide record slots.
     :_ui-components-create-preview :_ui-components-create-apply
-    :parse-view-command :save-explorer-view
+    :save-explorer-view
     ;; Wide-slot audit: conservatively propagate every content-derived result.
-    :_apply-create-list-type-body :_apply-create-record-type-body :_apply-create-record-type-rollback :_apply-inline-bind-body :_apply-secret-rollback :_apply-update-record-type-body :_apply-update-record-type-rollback :_execute-apply :_layout-build-apply :_layout-place-apply :_layout-strip-facts-apply :_layout-literal-reprs-apply :_parse-layout-body :_rotate-secret-not-owned? :_seq-append-load-binding :_seq-move-load-item :_seq-update-load-item :_tests-run-apply :_tests-status-apply :approvals-report :authenticate-request :_compat-fn-changes :_compat-local-name :branch-lint-raw-findings :brotli-bytes :build-form :byte-count :candidate-fit :classify-literal :closed-enum-of :compatible-type-names :count-tour-event! :count-tour-step! :count-valid-approvals :create-entity :cron-fire-after :decode-row :describe-type-mismatch :diff-value-against-type :dispatch-to-branch :error-boundary-wrap :extract-entity-params :fix :fn-type-bound-effects :gzip-bytes :json-to-type :merge-branch! :middleware :missing-package-dependencies :package-version-materialized? :pg-execute :pg-query :pg-tx :pkg-delete-guard-reason :pkg-write-guard-reason :platform-owned-def? :publish-package-apply :query-entities :query-param :realize-request-body :resolve-fn :resolve-form :ring-create-default-handler :ring-handler :ring-router :secret-path-args :set-branch-archived! :set-branch-require-merge! :set-branch-review-policy! :set-review-state! :slot-shaped-type-row? :sql-exec :sql-query :sse-stream :storage-query-identities :stringify-response-headers :strip-hidden-impl :strip-secret-paths :subtype? :sync-fn-defs-branch! :try-apply-create :try-apply-seq-append :try-apply-seq-move :try-apply-seq-update :try-apply-tighten :try-apply-update :update-entity :utf8-bytes :viewer-path-trace :write-rej
+    :_apply-create-list-type-body :_apply-create-record-type-body :_apply-create-record-type-rollback :_apply-inline-bind-body :_apply-secret-rollback :_apply-update-record-type-body :_apply-update-record-type-rollback :_execute-apply :_layout-build-apply :_layout-place-apply :_layout-strip-facts-apply :_layout-literal-reprs-apply :_parse-layout-body :_rotate-secret-not-owned? :_seq-append-load-binding :_seq-move-load-item :_seq-update-load-item :_tests-run-apply :_tests-status-apply :approvals-report :authenticate-request :_compat-fn-changes :_compat-local-name :branch-lint-raw-findings :brotli-bytes :build-form :byte-count :fn-type-args :classify-literal :closed-enum-of :count-tour-event! :count-tour-step! :count-valid-approvals :create-entity :cron-fire-after :decode-row :describe-type-mismatch :diff-value-against-type :dispatch-to-branch :error-boundary-wrap :extract-entity-params :fix :fn-type-bound-effects :gzip-bytes :json-to-type :merge-branch! :middleware :missing-package-dependencies :package-version-materialized? :pg-execute :pg-query :pg-tx :pkg-delete-guard-reason :pkg-write-guard-reason :platform-owned-def? :publish-package-apply :query-entities :query-param :realize-request-body :resolve-fn :resolve-form :ring-create-default-handler :ring-handler :ring-router :secret-path-args :set-branch-archived! :set-branch-require-merge! :set-branch-review-policy! :set-review-state! :slot-shaped-type-row? :sql-exec :sql-query :sse-stream :storage-query-identities :stringify-response-headers :strip-hidden-impl :strip-secret-paths :subtype? :sync-fn-defs-branch! :try-apply-create :try-apply-seq-append :try-apply-seq-move :try-apply-seq-update :try-apply-tighten :try-apply-update :update-entity :utf8-bytes :viewer-path-trace :write-rej
     :round :ui-pref-write! :ui-pref-compare-write! :url-encode :moderate-package-version! ; marketplace: answer caller content
     ;; registry: the pick / store / import filters echo caller content
     :semver-pick :mirror-store-package-version! :drop-orphan-anon-defs
@@ -389,7 +391,7 @@
 (deftest component-and-view-commands-preserve-and-redact-input-taint
   (let [definitions (:base-fn-defs (loader/load-packages ["app"]))]
     (doseq [primitive [:_editor-configuration-plan :_ui-components-create-preview
-                       :_ui-components-create-apply :parse-view-command :save-explorer-view]]
+                       :_ui-components-create-apply :save-explorer-view]]
       (let [definition (get definitions primitive)
             plain (:args definition)]
         (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})

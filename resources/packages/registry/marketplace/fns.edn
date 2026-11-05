@@ -343,7 +343,11 @@
   {:name :marketplace-review-map
    :description "`{package-name {:count n :avg x}}` over every visible review — one query, aggregated in the graph (`:review-map-over`)."
    :parent :review-map-over
-   :args {:m {:parent :group-by :args {:key-fn :_mkv-package-name :coll :_mk-review-rows}}}}
+   ;; package-review.package-name is required text in the stored schema;
+   ;; query-entities' generic return type does not carry field types.
+   :args {:m {:parent :group-by :args {:key-fn :_mkv-package-name
+                                       :coll {:ref :_mk-review-rows
+                                              :type [:list {:package-name :text}]}}}}}
 
   ;; --- installs → `{name installs}` ---
   {:name :_mk-stat-rows

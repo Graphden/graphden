@@ -714,6 +714,12 @@
   (concealed-list-env (graph-list-env ctx (:storage ctx))))
 
 
+(defn compact-fn-row
+  "Drop nil-valued fields without discarding false, zero or extension fields."
+  [row]
+  (into {} (remove (comp nil? val)) row))
+
+
 (defn- list-scope-index
   "Only `{:fns :namespaces}`, nil-valued fields dropped from each fn
    row. This is a sidebar / picker payload fetched fresh on every editor
@@ -726,7 +732,7 @@
    per-fn detail (with all fields) still comes from the `:subtree`
    fetch on select."
   [{:keys [roled-fns namespaces]}]
-  {:fns (mapv (fn [f] (into {} (remove (comp nil? val)) f)) @roled-fns)
+  {:fns (mapv compact-fn-row @roled-fns)
    :namespaces @namespaces})
 
 
@@ -801,6 +807,14 @@
    `descriptions?`, description matches too, ranked last."
   [ctx q descriptions?]
   (list-scope-search (env ctx) q (boolean descriptions?)))
+
+
+(defn graph-index-facts
+  "One scoped index snapshot, concealed before crossing into graph code.
+   Only index derivations are forced; no reverse-reference index is needed."
+  [ctx]
+  (let [{:keys [roled-fns namespaces]} (env ctx)]
+    (apply-view-impl-filter {:fns @roled-fns :namespaces @namespaces})))
 
 
 (defn graph-index

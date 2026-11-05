@@ -1,7 +1,8 @@
 {:namespace "app.ui-canvas"
  :description "Pure passive canvas presentation. Overlay identity, controls, authorization and geometry remain native."
  :fns
- [{:name :_canvas-inputs :type {:surface [:refine :text {:constraint [:in #{"fn-name" "root-diagnostics" "branch-local" "deep-free"}]}]
+ [{:name :_canvas-deep-free-list :list :text}
+  {:name :_canvas-inputs :type {:surface [:refine :text {:constraint [:in #{"fn-name" "root-diagnostics" "branch-local" "deep-free"}]}]
                                 :name :nullable-text :secret :bool :root :bool
                                 :type-errors :non-negative-int :failed-runs :non-negative-int :lint :non-negative-int
                                 :branch-state [:refine :text {:constraint [:in #{"off" "own" "inherited"}]}]
@@ -26,7 +27,8 @@
   {:name :_canvas-branch-seed :parent :get
    :args {:coll {:as :inputs :type :_canvas-inputs} :key {:value :branch-seed} :default nil}}
   {:name :_canvas-deep-free :parent :get
-   :args {:coll {:as :inputs :type :_canvas-inputs} :key {:value :deep-free} :default {:value []}}}
+   :args {:coll {:as :inputs :type :_canvas-inputs} :key {:value :deep-free} :default {:value []}}
+   :return-type :_canvas-deep-free-list}
   {:name :_canvas-name-text :parent :coalesce
    :args {:value :_canvas-name :default ""}}
   {:name :_canvas-secret-mark :parent :hiccup

@@ -186,7 +186,7 @@
   #{:refinement :list :union :variant :record :fn-type :primitive})
 
 
-(defn- type-name-entries
+(defn type-name-entries
   "Picker rows with an internal identity-preserving type reference.
    Selection spelling stays bare when unique, qualified when ambiguous."
   [ctx]
@@ -221,26 +221,6 @@
     (->> (concat rows prims)
          (sort-by :name)
          (vec))))
-
-
-(defn type-name-kinds
-  "Type-picker names and kinds. Unique names retain their existing spelling;
-   collisions use namespace-qualified selection values, including /name at root."
-  [ctx]
-  (mapv #(dissoc % :type-ref) (type-name-entries ctx)))
-
-
-(defn compatible-type-names
-  "`type-name-kinds` rows filtered by each row's canonical type alias,
-   independently of its display/selection spelling. Uses the same
-   alias-aware predicate `/api/types/compatible` answers per pair.
-   One call replaces the editor's former per-name fan-out (~50
-   parallel POSTs per type-picker open)."
-  [ctx expected]
-  (into []
-        (comp (filter #(types/subtype? (:type-ref %) expected))
-              (map #(dissoc % :type-ref)))
-        (type-name-entries ctx)))
 
 
 (defn project-rich-type-entry
@@ -656,38 +636,10 @@
 ;;
 ;; The endpoints' parse → validate stages (and all of /api/types/compatible
 ;; and the candidates enumeration) are graph fn-defs in
-;; `web/crud-types/fns.edn`; what stays here is the per-row ranking and
+;; `web/crud-types/fns.edn`; what stays here is the
 ;; namespace index the candidates chain calls, and the usages walk.
 
 ;; --- types-candidates — per-row helpers of the graph enumeration.
-
-(defn candidate-fit
-  "How a candidate's WHOLE signature sits in the slot — the picker's
-   ranking, computed from the same registry entry the admissibility
-   check used. `free-arity` is the candidate's remaining free-arg count.
-
-     :exact    fn slot: exactly as many free args as the slot passes
-               per call — nothing captured, nothing dropped. Value
-               slot: a ready value, no free args left to bind.
-     :captures more free args than the slot supplies. Admissible —
-               hof-wrap captures the rest / they surface as free args
-               of the binding fn — but the reader has more to wire.
-     :ignores  fewer than the slot passes (a nullary callee in a
-               1-arg slot): admissible by the positional rule in
-               `fn-args-subtype?`, the per-call value is dropped.
-
-   A `:fn-ref` slot takes an identity — arity is not a question.
-   Ranking only: admissibility stays `subtype?`'s call."
-  [expected free-arity]
-  (cond
-    (= :fn-ref expected) :exact
-    (types/fn-type? expected)
-    (let [k (count (types/fn-args expected))]
-      (cond (= free-arity k) :exact
-            (> free-arity k) :captures
-            :else :ignores))
-    :else (if (zero? free-arity) :exact :captures)))
-
 
 (defn candidate-ns-index
   "fn-id → `{:ns \"dotted.path\" :ns-id \"<uuid>\"}` for every fn the
@@ -888,35 +840,3 @@
    the HTTP wire-shaping (lean bulk / per-fn) lives in `api-rich-types`."
   [ctx]
   (rich-types-with-type-rows ctx))
-
-
-(def bulk-omitted-fields
-  "Per-entry fields dropped from the BULK `/api/types` payload — NO
-   editor code reads any of them off the type registry any more:
-   `:source-file` / `:source-line` / `:tags` / `:arg-effects` /
-   `:call-time-effects` (never read), `:description` (the editor
-   sources descriptions from graph rows), `:resolved-bindings` and
-   `:primary-parent` (their former readers moved server-side — the
-   return-type-rule partial and the layout strip facts read the RAW
-   registry directly). Measured: these
-   were ~57% of the 2.4 MB decoded payload, re-fetched on every mutation,
-   to paint chips for the handful of fns on screen. Kept in bulk:
-   `:return` / `:args` / `:effects` / `:slot-types` / `:nav-types` /
-   `:type-row?` — the fields the bulk chip/strip paint reads for every
-   rendered fn. `:primary-parent` joined the omitted set when the
-   client rule-owner walk that read it moved server-side (layout
-   strip facts). See docs/PERF_BUDGETS.md finding K."
-  [:resolved-bindings :description :source-file :source-line :tags
-   :arg-effects :call-time-effects :primary-parent])
-
-
-(defn api-rich-types
-  "Body of the `api-rich-types` base-fn — the wire-shaping layer over
-   the augmented snapshot: the lean BULK payload the editor loads at
-   boot + after each mutation, with `bulk-omitted-fields` stripped
-   from every entry. The former `?fn=<name>` per-fn FULL-entry branch
-   is gone with its one consumer (the deleted `ensureRichTypeFullEntry`
-   backfill — the return-type-rule popover is a server partial now)."
-  [ctx]
-  (update-vals (rich-types-with-type-rows ctx)
-               #(apply dissoc % bulk-omitted-fields)))

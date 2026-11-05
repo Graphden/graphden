@@ -348,8 +348,11 @@ ranking, not admissibility: a `(item:a) → b` slot admits every
 one-free-arg fn positionally AND every nullary one (the input is
 dropped), so the picker leads with the exact fits, lists the rows
 that leave more to wire next, and folds the constants away
-(`crud.types-api/candidate-fit`, mirrored by the graph's
-`:candidate-fit`; 2026-09-14).
+through the `web.crud/candidate-fit` graph composition in
+`resources/packages/web/crud-types/fns.edn`. Its native `fn-type-args`
+accessor delegates to the canonical `types/fn-args`; graph primitives count
+and compare the arguments and choose the tier. Value slots compare with
+zero arguments, and `:fn-ref` identity slots are always exact.
 
 ### Free argument type propagation
 

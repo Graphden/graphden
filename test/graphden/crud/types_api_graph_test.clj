@@ -19,9 +19,16 @@
     [cheshire.core :as cheshire]
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.crud.type-check :as tc]
+    [graphden.crud.types-api :as ta]
+    [graphden.executor.context :as exec-ctx]
     [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
-    [graphden.test-infra.graph-harness :as gh :refer [*graph*]]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.tenancy.context :as tenancy]
+    [graphden.test-infra.graph-harness :as gh :refer [*graph*]]
+    [graphden.types.check :as check]
+    [graphden.types.core :as types]))
 
 
 (use-fixtures :once
@@ -46,6 +53,40 @@
 ;; =============================================================================
 ;; /api/types/candidates — Phase 5 HOF translation regression coverage
 ;; =============================================================================
+
+(deftest candidate-fit-graph-test
+  (doseq [[expected arity fit]
+          [['[:fn {:item a} b] 1 :exact]
+           ['[:fn {:item a} b] 0 :ignores]
+           ['[:fn {:item a} b] 3 :captures]
+           ['[:fn {:acc a :item b} a] 2 :exact]
+           [[:fn {} :any] 0 :exact]
+           [[:fn {} :any] 2 :captures]
+           [[:fn {:x :int} :text #{:db}] 1 :exact]
+           [[:fn {:x :int} :text #{} #{:jvm-server}] 0 :ignores]
+           [:fn-ref 5 :exact]
+           [:text 0 :exact]
+           [:text 2 :captures]]]
+    (is (= fit (gh/exec-name :candidate-fit {:expected expected :arity arity}))
+        (str expected " / " arity))))
+
+
+(deftest candidate-fit-stored-contract-test
+  (let [{:keys [storage all-name->id]} *graph*]
+    (doseq [nm [:_candidate-fit-args :_candidate-fit-expected-arity
+                :_candidate-fit-arity :_candidate-fit-identity?
+                :_candidate-fit-exact? :_candidate-fit-captures?
+                :candidate-fit]]
+      (let [id (get all-name->id nm)]
+        (is (some? (tc/reconstruct-fn-def storage id)))
+        (is (nil? (tc/type-check-fn-after-mutation! storage id)) (str nm))))
+    (let [rich (registry/rich-type-of-id (get all-name->id :candidate-fit))]
+      (is (= (update-vals {:expected :type-expression :arity :non-negative-int}
+                          types/resolve-alias)
+             (:args rich)))
+      (is (= #{} (:effects rich)))
+      (is (types/subtype? (:return rich) :keyword)))))
+
 
 (deftest types-candidates-expected-any-returns-non-empty-test
   (testing "POST /api/types/candidates {expected: 'any'} → {:ok true :count >0 :candidates [...]}"
@@ -330,3 +371,133 @@
       (is (contains? names "shout") "a concrete one-arg callee is admitted")
       (is (not (contains? names "pair"))
           "a two-arg callee with neither arg named :item does not fit a one-arg slot"))))
+
+
+(deftest picker-policy-projects-after-canonical-filter-test
+  ;; Supply only the acquisition boundary. The real stored graph must capture
+  ;; expected in the predicate, retain order, and remove the internal reference.
+  (let [entries [{:name "a/same" :kind "refinement" :type-ref :a/same}
+                 {:name "b/same" :kind "refinement" :type-ref :b/same}
+                 {:name "int" :kind "primitive" :type-ref :int}]
+        reads (atom 0)]
+    (binding [types/*type-aliases-override*
+              (atom {:a/same [:refine :int [:>= 0]] :b/same :text})]
+      (with-redefs [ta/type-name-entries (fn [_] (swap! reads inc) entries)]
+        (is (= [{:name "a/same" :kind "refinement"}
+                {:name "int" :kind "primitive"}]
+               (gh/exec-name :compatible-type-names {:expected :int})))
+        (is (= 1 @reads) "one acquisition, never one query per candidate")
+        (is (= (mapv #(dissoc % :type-ref) entries)
+               (gh/exec-name :type-name-kinds {})))
+        (is (= [] (gh/exec-name :compatible-type-names {:expected :bool})))))))
+
+
+(deftest rich-type-wire-projection-preserves-unknown-fields-test
+  (let [omitted [:resolved-bindings :description :source-file :source-line
+                 :tags :arg-effects :call-time-effects :primary-parent]
+        full {:alpha (merge (zipmap omitted (repeat "metadata"))
+                            {:return :int :args {} :effects #{} :future-field 42})
+              :beta {:return [:list :text] :slot-types {:value :text}}}
+        reads (atom 0)]
+    (with-redefs [ta/all-rich-types (fn [_] (swap! reads inc) full)]
+      (is (= (update-vals full #(apply dissoc % omitted))
+             (gh/exec-name :api-rich-types {})))
+      (is (= 1 @reads) "wire projection shares one scoped snapshot"))
+    (with-redefs [ta/all-rich-types (constantly {})]
+      (is (= {} (gh/exec-name :api-rich-types {}))))))
+
+
+(deftest rich-type-wire-uses-production-snapshot-test
+  (let [full (gh/exec-name :all-rich-types {})
+        lean (gh/exec-name :api-rich-types {})
+        omitted [:resolved-bindings :description :source-file :source-line
+                 :tags :arg-effects :call-time-effects :primary-parent]]
+    (is (seq full))
+    (is (= (update-vals full #(apply dissoc % omitted)) lean))))
+
+
+(defn- check-stored-type-policies!
+  []
+  (let [{:keys [storage all-name->id]} *graph*]
+    ;; Dependency order matters: ordinary golden clones intentionally do not
+    ;; run the package sweep. Check the persisted definitions, not source copies.
+    (doseq [nm [:_type-name-wire-row :_type-name-compatible?
+                :_type-name-compatible-entries :type-name-kinds
+                :compatible-type-names :_rich-type-wire-entry :api-rich-types]]
+      (let [id (get all-name->id nm)]
+        (is (some? (tc/reconstruct-fn-def storage id)) (str nm " is composed"))
+        (is (nil? (tc/type-check-fn-after-mutation! storage id))
+            (str nm " checks after storage reconstruction"))))))
+
+
+(deftest stored-type-policies-have-precise-contracts-test
+  (check-stored-type-policies!)
+  (doseq [[nm args return]
+          [[:type-name-kinds {} [:list {:name :text :kind :text}]]
+           [:compatible-type-names {:expected :type-expression}
+            [:list {:name :text :kind :text}]]
+           [:api-rich-types {} :keyword-map]]]
+    (let [rich (registry/rich-type-of-id (get (:all-name->id *graph*) nm))]
+      (is (= (update-vals args types/resolve-alias) (:args rich))
+          (str nm " exposes only its public inputs"))
+      (is (types/subtype? (:return rich) return) (str nm " retains its public return"))
+      (is (= #{:db} (:effects rich)) (str nm " retains scoped-read effects")))))
+
+
+(deftest secret-expected-cannot-enter-plain-picker-test
+  (check-stored-type-policies!)
+  (let [source (keyword (gh/uniq "secret-picker-expected"))
+        consumer (keyword (gh/uniq "secret-picker-selection"))]
+    (registry/record-rich-types! source
+                                 {:args {} :return-type [:secret :type-expression]})
+    (is (thrown? clojure.lang.ExceptionInfo
+          (check/check-fn-def! {:name consumer :parent :compatible-type-names
+                                :args {:expected {:ref source}}}))
+        "A secret cannot be bound to the public picker input")))
+
+
+(deftest picker-identity-and-acl-survive-the-complete-graph-test
+  (let [{:keys [storage ctx]} *graph*
+        stem (gh/uniq "picker-type")
+        left (sp/create-entity storage :ns {:name (gh/uniq "picker-a")})
+        hidden (sp/create-entity storage :ns {:name (gh/uniq "picker-z")})
+        int-id (get setup/primitive-fn-ids :int)
+        text-id (get setup/primitive-fn-ids :text)
+        root (sp/create-entity storage :fn
+                               {:name stem :base-fn-id int-id :constraint [:>= 0]})
+        twin (sp/create-entity storage :fn
+                               {:name stem :namespace-id (:id left)
+                                :base-fn-id text-id :constraint [:not= ""]})
+        concealed (sp/create-entity storage :fn
+                                    {:name stem :namespace-id (:id hidden)
+                                     :base-fn-id int-id :constraint [:>= 1]})
+        ids (mapv :id [root twin concealed])
+        root-name (str "/" stem)
+        left-name (str (:name left) "/" stem)
+        hidden-name (str (:name hidden) "/" stem)]
+    (try
+      (exec-ctx/invalidate-graph-cache! ctx ids)
+      (binding [types/*type-aliases-override* (atom (types/aliases-snapshot))
+                tenancy/*seams-override*
+                (atom {:graph-read-filter-fn
+                       #(update % :fns
+                                (fn [rows] (filterv (fn [row] (not= (:id concealed) (:id row))) rows)))})]
+        (types/register-type-alias! (keyword "" stem) [:refine :int [:>= 0]])
+        (types/register-type-alias! (keyword (:name left) stem) [:refine :text [:not= ""]])
+        (types/register-type-alias! (keyword (:name hidden) stem) [:refine :int [:>= 1]])
+        (let [all (gh/exec-name :type-name-kinds {})
+              compatible (gh/exec-name :compatible-type-names {:expected :int})
+              fixture-rows #(filterv (fn [row] (str/includes? (:name row) stem)) %)]
+          (is (= [{:name root-name :kind "refinement"}
+                  {:name left-name :kind "refinement"}]
+                 (fixture-rows all)) "colliding visible rows retain canonical selection spelling")
+          (is (= [{:name root-name :kind "refinement"}] (fixture-rows compatible))
+              "the text twin and concealed int subtype never enter the int picker")
+          (is (= (sort (map :name all)) (map :name all)))
+          (is (not-any? #(= hidden-name (:name %)) all))
+          (is (not-any? #(contains? % :type-ref) (concat all compatible)))))
+      (finally
+        (doseq [id ids] (sp/delete-entity storage :fn id))
+        (sp/delete-entity storage :ns (:id left))
+        (sp/delete-entity storage :ns (:id hidden))
+        (exec-ctx/invalidate-graph-cache! ctx ids)))))

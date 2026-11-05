@@ -844,9 +844,15 @@
       (registry/record-rich-types-raw! (:map ids) :map
                                        {:args {:func cb :coll [:list :any]} :return [:list :any] :effects #{}
                                         :execution #{:jvm-server :browser-main}})
-      (doseq [definition definitions]
-        (check/check-fn-def! (assoc definition :namespace "preview")))
-      (is (= :unknown (:execution (registry/rich-type-of :mapped))))
+      (check/check-fn-def! (assoc (first definitions) :namespace "preview"))
+      (let [check-error (failure #(check/check-fn-def!
+                                    (assoc (second definitions) :namespace "preview")))]
+        (if authored?
+          (is (= :types/check-failed (:type check-error))
+              "An authored two-parameter callback is rejected by the checker")
+          (do
+            (is (nil? check-error))
+            (is (= :unknown (:execution (registry/rich-type-of :mapped)))))))
       (let [error (failure #(export-fixture fixture :mapped))]
         (is (= (if authored? :callable-arity :normalization-failed) (:reason error))))))
   (let [cb [:fn {:item :any} :any :any #{:jvm-server :browser-main}]

@@ -69,6 +69,33 @@
              inner))
 
 
+(defn- visit-more-open?
+  "A ref can be reached with different locally supplied names. Revisit it
+   when this path leaves a name or slot uncovered that every earlier path
+   covered. Intersecting coverage bounds repeat walks, including cycles."
+  [visited key slots names]
+  (let [previous (get @visited key)]
+    (when (or (nil? previous)
+              (not (set/subset? (:slots previous) slots))
+              (not (set/subset? (:names previous) names)))
+      (swap! visited assoc key
+             (if previous
+               {:slots (set/intersection (:slots previous) slots)
+                :names (set/intersection (:names previous) names)}
+               {:slots slots :names names}))
+      true)))
+
+
+(defn- without-self-cover
+  "An env binding supplies sibling refs, but its own ref may need the
+   same name from the caller. Keep an outer or direct cover."
+  [outer-covered direct-covered all-covered key]
+  (if (or (contains? outer-covered key)
+          (contains? direct-covered key))
+    all-covered
+    (disj all-covered key)))
+
+
 (declare ^:private deep-free-ext-names*)
 (declare ^:private deep-free-ext-entries*)
 (declare ^:private hof-lambda-params)
@@ -395,7 +422,7 @@
   [fn-id lookups]
   (let [result (atom [])
         seen (atom #{})
-        visited-fns (atom #{})
+        visited-fns (atom {})
         emit! (fn [n]
                 (when-not (contains? @seen n)
                   (swap! seen conj n)
@@ -430,8 +457,7 @@
                   entry)))
             (walk
               [fid covered outer-renames]
-              (when-not (contains? @visited-fns fid)
-                (swap! visited-fns conj fid)
+              (when (visit-more-open? visited-fns [fid outer-renames] #{} covered)
                 (let [bindings (mapv #(translate % :ext-name outer-renames fid)
                                      (b/collect-bindings fid lookups))
                       env-bindings (mapv #(translate % :env-name outer-renames fid)
@@ -561,7 +587,10 @@
                                (not (:is-fn env-bnd))
                                (:ref-id env-bnd)
                                (not (own-primaries (:env-name env-bnd))))
-                      (walk (:ref-id env-bnd) next-covered next-renames))))))]
+                      (walk (:ref-id env-bnd)
+                            (without-self-cover covered own-primaries next-covered
+                                                (:env-name env-bnd))
+                            next-renames))))))]
       (walk fn-id #{} {}))
     @result))
 
@@ -593,7 +622,7 @@
    (let [result (atom [])
          seen-slots (atom #{})
          seen-names (atom #{})
-         visited-fns (atom #{})
+         visited-fns (atom {})
          ;; Surface entries dedupe by slot-id (two distinct slots sharing a
          ;; name are two holes — #104). A CAPTURE (an entry emitted from
          ;; inside a HOF target, `into-hofs?`) is keyed by NAME: at runtime
@@ -643,8 +672,9 @@
                ;; walk is inside (nil at the surface): a capture names it as
                ;; `:via`, so a reader can say "read inside <target>".
                [fid covered-slots outer-renames covered-names hof-depth hof-root]
-               (when-not (contains? @visited-fns fid)
-                 (swap! visited-fns conj fid)
+               (when (visit-more-open? visited-fns
+                                       [fid outer-renames hof-root (pos? hof-depth)]
+                                       covered-slots covered-names)
                  (let [bindings (b/collect-bindings fid lookups)
                        env-bindings (b/collect-env-bindings fid lookups)
                        captured? (pos? hof-depth)
@@ -787,8 +817,14 @@
                                 (not (own-primary-slots (:slot-id env-bnd))))
                        (if (:is-fn env-bnd)
                          (walk-hof fid env-bnd next-covered-names hof-depth)
-                         (walk (:ref-id env-bnd) next-covered next-renames
-                               next-covered-names hof-depth hof-root)))))))]
+                         (walk (:ref-id env-bnd)
+                               (without-self-cover covered-slots own-primary-slots
+                                                   next-covered (:slot-id env-bnd))
+                               next-renames
+                               (without-self-cover covered-names aliased-names
+                                                   next-covered-names
+                                                   (some-> (:env-name env-bnd) keyword))
+                               hof-depth hof-root)))))))]
        (walk fn-id #{} {} #{} 0 nil))
      @result)))
 

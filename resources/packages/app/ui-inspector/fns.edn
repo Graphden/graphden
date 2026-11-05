@@ -13,6 +13,7 @@
        {:name :_inspector-state :union [:_inspector-chrome-state :_inspector-usages-state]}
        {:name :_inspector-inputs :type {:selected :bool :name :text :namespace :text :description :text :parents [:list :text] :has-return :bool :narrow :bool :surface :text :usages :_inspector-usages-payload}}
        {:name :_inspector-diff-field :type {:name :text :old :text :new :text :show-name :bool}}
+       {:name :_inspector-diff-field-list :list :_inspector-diff-field}
        {:name :_inspector-diff-input :type {:change :text :branch :text :effects :text :local :bool :entity :text :slot :text :position :text :preview :text :fields [:list :_inspector-diff-field]}}
        {:name :_inspector-diff-read :parent :get :args {:coll {:value {}} :key {:value :diff} :default {:as :diff :type [:union :null :_inspector-diff-input]}}}
        {:name :_inspector-diff-default :parent :const :args {:value {:value {:change "modified" :branch "" :effects "" :local false :entity "" :slot "" :position "" :preview "" :fields []}}} :return-type :_inspector-diff-input :return-type-wide? true}
@@ -128,7 +129,7 @@
        {:name :_inspector-surface, :parent :get, :args {:coll {:as :inputs :type :_inspector-inputs}, :key {:value :surface}, :default {:value "chrome"}}}
        {:name :_inspector-usages-surface, :parent :equal?, :args {:a :_inspector-surface, :b "usages"}}
        {:name :_usages-payload, :parent :get, :args {:coll {:as :inputs :type :_inspector-inputs}, :key {:value :usages}, :default {:value {:rows [], :count 0, :truncated false, :reachability {:state "unknown" :path []}}}}}
-       {:name :_usages-rows, :parent :get, :args {:coll :_usages-payload, :key {:value :rows}, :default {:value []}}}
+       {:name :_usages-rows, :parent :get, :args {:coll :_usages-payload, :key {:value :rows}, :default {:value []}}, :return-type :_inspector-usage-rows}
        {:name :_usages-count, :parent :get, :args {:coll :_usages-payload, :key {:value :count}, :default {:value 0}}}
        {:name :_usages-truncated, :parent :get, :args {:coll :_usages-payload, :key {:value :truncated}, :default {:value false}}}
        {:name :_usages-query, :parent :get, :args {:coll {:as :state :type :_inspector-usages-state}, :key {:value :query}, :default {:value ""}}}
@@ -284,7 +285,7 @@
        {:name :_inspector-diff-slot :parent :get :args {:coll :_inspector-diff :key {:value :slot} :default {:value ""}}}
        {:name :_inspector-diff-position :parent :get :args {:coll :_inspector-diff :key {:value :position} :default {:value ""}}}
        {:name :_inspector-diff-preview :parent :get :args {:coll :_inspector-diff :key {:value :preview} :default {:value ""}}}
-       {:name :_inspector-diff-fields :parent :get :args {:coll :_inspector-diff :key {:value :fields} :default {:value []}}}
+       {:name :_inspector-diff-fields :parent :get :args {:coll :_inspector-diff :key {:value :fields} :default {:value []}} :return-type :_inspector-diff-field-list}
        {:name :_inspector-diff-added :parent :equal? :args {:a :_inspector-diff-change :b "added-in-source"}}
        {:name :_inspector-diff-missing :parent :equal? :args {:a :_inspector-diff-change :b "added-in-target"}}
        {:name :_inspector-diff-added-sign :parent :if :args {:test :_inspector-diff-added :then "+" :else "±"}}

@@ -96,6 +96,7 @@
   ;; trace. Raw captured values stay in its popover and never enter this plan.
   {:name :_path-entry
    :type {:fn-id :text :cache-hit :bool :hidden :bool :duration-ms :int}}
+  {:name :_path-entry-list :list :_path-entry}
   {:name :_path-inputs
    :type {:entries [:list :_path-entry] :highlighted-count :int
           :off-canvas-count :int :off-canvas-title :text
@@ -111,7 +112,8 @@
   {:name :_path-entries
    :parent :get
    :args {:coll {:as :inputs :type :_path-inputs}
-          :key {:value :entries} :default {:value []}}}
+          :key {:value :entries} :default {:value []}}
+   :return-type :_path-entry-list}
   {:name :_path-entry-id
    :parent :get :lambda-params [:entry]
    :args {:coll {:as :entry :type :_path-entry}

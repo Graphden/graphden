@@ -59,7 +59,7 @@
               cr/*per-org-aliases-override* (atom {})]
       (cr/register-type-aliases-from-db! graph ::picker paths)
       (testing "semantic checks use precise aliases, while unique spelling and primitives survive"
-        (let [names (into #{} (map :name) (ta/compatible-type-names context :int))]
+        (let [names (into #{} (map :name) (filter #(types/subtype? (:type-ref %) :int) (ta/type-name-entries context)))]
           (is (contains? names "int"))
           (is (contains? names "/_local"))
           (is (contains? names "a/_local"))
@@ -67,7 +67,7 @@
           (is (not (contains? names "b/_local")))
           (is (not (contains? names "text")))))
       (testing "record twins do not use the last bare registration"
-        (let [names (into #{} (map :name) (ta/compatible-type-names context {:n :int}))]
+        (let [names (into #{} (map :name) (filter #(types/subtype? (:type-ref %) {:n :int}) (ta/type-name-entries context)))]
           (is (contains? names "a/_inputs"))
           (is (not (contains? names "b/_inputs"))))
         (is (= {:n {:n :int}} (types/resolve-alias (keyword "" "unique-root-record"))))
@@ -88,7 +88,7 @@
         (binding [tctx/*seams-override*
                   (atom {:graph-read-filter-fn
                          #(update % :fns (fn [rows] (filterv (fn [r] (nil? (:namespace-id r))) rows)))})]
-          (let [names (into #{} (map :name) (ta/type-name-kinds context))]
+          (let [names (into #{} (map :name) (ta/type-name-entries context))]
             (is (contains? names "_local"))
             (is (not (contains? names "a/_local")))))))))
 

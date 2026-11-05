@@ -70,10 +70,48 @@
    :args {:fn-name {:type :keyword-or-text :description "Name of the candidate fn."}}
    :return-type [:union :null :type-expression]}
 
+  {:name :fn-type-args
+   :description "Canonical callable argument map, or nil for a non-callable type expression."
+   :args {:type {:type :type-expression}}
+   :return-type :nullable-keyword-map}
+
+  {:name :_candidate-fit-args
+   :parent :fn-type-args
+   :args {:type {:as :expected :type :type-expression}}}
+
+  {:name :_candidate-fit-expected-arity
+   :parent :count
+   :args {:coll :_candidate-fit-args}}
+
+  {:name :_candidate-fit-arity
+   :parent :const
+   :args {:value {:as :arity :type :non-negative-int}}}
+
+  {:name :_candidate-fit-identity?
+   :parent :equal?
+   :args {:a {:as :expected :type :type-expression}
+          :b {:value :fn-ref}}}
+
+  {:name :_candidate-fit-exact?
+   :parent :equal?
+   :args {:a :_candidate-fit-arity
+          :b :_candidate-fit-expected-arity}}
+
+  {:name :_candidate-fit-captures?
+   :parent :gt
+   :args {:nums [:_candidate-fit-arity :_candidate-fit-expected-arity]}}
+
   {:name :candidate-fit
-   :description "How a candidate's WHOLE signature sits in the slot — the picker's ranking tier. `:exact` (a callable slot: exactly as many free args as the slot passes per call; a value slot: no free args left), `:captures` (more free args — admissible, they surface as free args of the binding fn), `:ignores` (fewer — a nullary callee in a 1-arg slot, admissible by the positional rule, the input is dropped). A `:fn-ref` slot is always `:exact`. Ranking only: admissibility is `:subtype?`'s call."
-   :args {:expected {:type :type-expression :description "The slot's expected type."}
-          :arity {:type :non-negative-int :description "The candidate's remaining free-arg count."}}
+   :description "Picker ranking only; admissibility stays with subtype?. Identity slots are exact. Callable slots compare free arity with their argument count; value slots compare with zero. Extra free arguments capture; fewer arguments ignore the supplied inputs."
+   :parent :cond
+   :args {:clauses
+          [:_candidate-fit-identity?
+           {:value :exact}
+           :_candidate-fit-exact?
+           {:value :exact}
+           :_candidate-fit-captures?
+           {:value :captures}
+           {:value true} {:value :ignores}]}
    :return-type :keyword}
 
   {:name :fn-ns-index
@@ -127,17 +165,49 @@
    :args {}
    :return-type [:list :text]}
 
-  {:name :type-name-kinds
-   :description "Sorted `{:name :kind}` rows for the editor's type-name datalist — named type-rows classified via `compute-fn-role` plus the bare primitives. Backs `/partials/type-name-datalist`."
+  {:name :_type-name-entry-shape
+   :description "Scoped type-picker row before its internal type reference is removed."
+   :type {:name :text :kind :text :type-ref :keyword}}
+
+  {:name :_type-name-wire-shape
+   :description "Public type-picker row."
+   :type {:name :text :kind :text}}
+
+  {:name :_type-name-entries
+   :description "One ACL-filtered, sorted picker snapshot. Selection spelling and canonical type reference remain separate, including colliding root and namespace names."
    :args {}
-   :return-type [:list {:name :text :kind :text}]
+   :return-type [:list :_type-name-entry-shape]
    :effects #{:db}}
 
+  {:name :_type-name-wire-row
+   :parent :dissoc
+   :args {:map {:as :item :type :_type-name-entry-shape}
+          :key {:value :type-ref}}
+   :return-type :_type-name-wire-shape}
+
+  {:name :type-name-kinds
+   :description "Sorted type-picker names and kinds, with qualified selection spelling for collisions."
+   :parent :map
+   :args {:func :_type-name-wire-row
+          :coll :_type-name-entries}}
+
+  {:name :_type-name-compatible?
+   :parent :subtype?
+   :lambda-params [:item]
+   :args {:candidate {:parent :get
+                      :args {:coll {:as :item :type :_type-name-entry-shape}
+                             :key {:value :type-ref} :default nil}}}}
+
+  {:name :_type-name-compatible-entries
+   :parent :filter
+   :args {:pred :_type-name-compatible?
+          :coll :_type-name-entries}}
+
   {:name :compatible-type-names
-   :description "`type-name-kinds` rows filtered to the names that can legally narrow `expected` — one alias-aware `subtype?` sweep. Backs `/partials/compatible-type-options` (replaces the editor's per-name /api/types/compatible fan-out)."
-   :args {:expected {:type :type-expression :description "Type expression candidates must be subtypes of."}}
-   :return-type [:list {:name :text :kind :text}]
-   :effects #{:db}}
+   :description "Filter the shared picker snapshot by canonical type identity before removing internal type refs. Expected is the type candidates must narrow."
+   :parent :map
+   :args {:func :_type-name-wire-row
+          :coll :_type-name-compatible-entries}}
 
   ;; fn-id → registry entry (by id) → :return, all graph-visible. The row
   ;; → name hop below feeds only the callable-shape walk (`:_rsof-*`).

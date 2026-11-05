@@ -9,6 +9,7 @@
    `src/` namespaces so each base-fn impl stays a minimal primitive."
   (:require
     [graphden.crud.entities :as entities]
+    [graphden.crud.entities.list :as entity-list]
     [graphden.crud.fn-execution.lookup :as fn-exec-lookup]
     [graphden.crud.request :as request]
     [graphden.crud.types-api :as types-api]
@@ -145,10 +146,15 @@
   (entities/graph-search ctx q descriptions?))
 
 
-(defbase graph-index
+(defbase graph-index-facts
   []
   (cr/record-effect! :db)
-  (entities/graph-index ctx))
+  (entity-list/graph-index-facts ctx))
+
+
+(defbase graph-index-row
+  [row]
+  (entity-list/compact-fn-row row))
 
 
 (defbase graph-subtree
@@ -185,21 +191,6 @@
   ;; tables. Declared `:effects #{:db}` in fns.edn; mirror at runtime.
   (cr/record-effect! :db)
   (types-api/all-rich-types ctx))
-
-
-(defbase api-rich-types
-  []
-  ;; Wire-shaping layer over the same src helper `all-rich-types` wraps
-  ;; (`rich-types-with-type-rows` — shared PRIVATE helper, not a hidden
-  ;; base-fn→base-fn edge): strips the heavy per-entry fields from the
-  ;; bulk payload. Kept as one base-fn deliberately: this is the
-  ;; measured hot path of finding K (docs/PERF_BUDGETS.md) — re-fetched
-  ;; after every mutation; a per-entry graph HOF strip over ~4000
-  ;; entries would re-add tens of ms per editor round-trip to a path
-  ;; that was fought down 57%. The omitted-field list is the
-  ;; documented contract (`bulk-omitted-fields`).
-  (cr/record-effect! :db)
-  (types-api/api-rich-types ctx))
 
 
 (defbase fn-names-with-tag
@@ -358,7 +349,8 @@
    :graph-tree graph-tree
    :graph-namespace-fns graph-namespace-fns
    :graph-search graph-search
-   :graph-index graph-index
+   :_graph-index-facts graph-index-facts
+   :_graph-index-row {:impl graph-index-row :taint-propagate? true}
    :graph-subtree graph-subtree
    :graph-full graph-full
    :graph-fn-defs-subtree   graph-fn-defs-subtree
@@ -366,7 +358,6 @@
    :strip-hidden-impl {:impl strip-hidden-impl :taint-propagate? true}
    :fn-impl-visible? fn-impl-visible?
    :all-rich-types all-rich-types
-   :api-rich-types api-rich-types
    :fn-names-with-tag fn-names-with-tag
    :query-ref-many-owners query-ref-many-owners
    :value-kinds value-kinds

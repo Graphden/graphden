@@ -202,11 +202,12 @@ Long-running executions (an `:http-get` that hangs, a
 - Programmatically — `POST /api/execute/<id>/cancel` (below).
 
 Cancel sets a flag the executor checks at each ref boundary
-(`*cancel-check*`). Already-running impls don't get
-interrupted in flight, but no new sub-ref starts after cancel
-fires. For most fns this means a clean rollback; for impls
-that spawned external work (HTTP, threads) the cleanup is
-impl-specific.
+(`*cancel-check*`) and requests interruption of the running future.
+Cancellation is best-effort: an interruptible wait can stop, while an
+implementation or external operation may finish before observing it.
+Cancellation does not undo completed database writes, network requests or
+other effects. Any transaction rollback or external-work cleanup belongs
+to the operation that provides it.
 
 ## Programmatic execute
 

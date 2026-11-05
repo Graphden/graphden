@@ -50,6 +50,11 @@ property a caller might care about:
 The category set is closed by design (see [docs/TYPES.md
 § Effect Categories](../TYPES.md#effect-categories)).
 
+Effect declarations describe behavior; they do not grant permission to
+perform it. The runtime's allowed-effects policy can reject an operation.
+Source access, execute permission and backend support are separate checks;
+see [where a callable runs](09-higher-order-functions.md#where-a-callable-runs).
+
 ## Where effects come from
 
 Base-fns DECLARE their effects in `fns.edn`:

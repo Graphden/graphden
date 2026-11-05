@@ -100,6 +100,34 @@ Supplying a callback [[file:glossary.org::#term/free-argument][free argument]] f
 
 An operation involving external state or the environment, such as network access or a database write. Declared effect information supports checks; runtime enforcement checks actual recorded effects against the currently allowed set. A pure function has no such effects.
 
+* Callable execution profile
+:PROPERTIES:
+:CUSTOM_ID: term/execution-profile
+:END:
+
+A backend supporting a callable: jvm-server or browser-main. The canonical type is ~[:fn args ret effects execution]~; unknown support is not proof of either backend. Registered implementations and the trusted browser primitive ABI establish support; purity and authored annotations cannot add it. See [[file:../../../docs/TYPES.md#callable-execution-contracts][callable execution contracts]].
+
+* Authority
+:PROPERTIES:
+:CUSTOM_ID: term/authority
+:END:
+
+Permission to perform an operation for the current account, organization and branch. Source visibility, execute permission and allowed effects are separate checks. Backend [[file:glossary.org::#term/execution-profile][execution support]] does not grant any of these permissions.
+
+* Explicit server call
+:PROPERTIES:
+:CUSTOM_ID: term/server-call
+:END:
+
+core.system/server-call crosses from a browser callable to a server callable explicitly. The current browser implementation accepts a separate asynchronous entry with checked, read-only server operations and statically closed configuration. The browser receives an opaque descriptor; each call rechecks [[file:glossary.org::#term/authority][authority]], context and typed input. See the [[file:../../../resources/packages/app/ui-preview/README.md#explicit-read-only-server-calls][server-call contract]].
+
+* UI view and data
+:PROPERTIES:
+:CUSTOM_ID: term/ui-view
+:END:
+
+web.html/UiView is checked [[file:glossary.org::#term/hiccup][Hiccup]] carrying the ui-view representation marker. as-ui-view constructs that boundary; it does not install DOM behavior or extract form data. encode-view explicitly projects a view back to data, preserving secret and other markers without rewriting callable signatures. Encoding grants neither [[file:glossary.org::#term/authority][authority]] nor [[file:glossary.org::#term/execution-profile][execution support]]. See [[file:../../../docs/TYPES.md#values-and-ui-views][values and UI views]].
+
 * Cache invalidation
 :PROPERTIES:
 :CUSTOM_ID: term/invalidation

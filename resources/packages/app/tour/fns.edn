@@ -2304,9 +2304,42 @@
             {:id "31"
              :slug "packages"
              :chapter "Your organization"
-             :text-only? true
-             :title "Packages — namespaces, fns.edn, impls.clj, deps"
-             :reads "the shape on disk, package.edn, graph declarations vs Clojure implementations, sync at startup, and an external package from its own git repo."}
+             :version 1
+             :title "Packages — explore and reuse"
+             :reads "the on-disk package format, package.edn dependencies, graph declarations vs Clojure implementations, startup sync, and loading an external package from git. These operator actions are separate from this editor exercise."
+             :steps
+             [{:title "Explore an already loaded package"
+               :body "A source package groups modules loaded into graph namespaces at startup. You can explore their functions here without changing package files. This lesson uses core.strings, then creates your own child in this lesson’s sandbox branch. Publishing a registry version is a different workflow, in lesson 32."
+               :target nil
+               :check {:kind "manual"}}
+              {:title "Find the package function"
+               :body "Type `str-upper` in the Explorer filter and click [[str-upper]] in core.strings. The qualified name identifies the strings module of the core package. Its graph card exposes :string; its base implementation lives in the package’s impls.clj."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "str-upper"}}
+              {:title "Reuse without editing the package"
+               :body "On str-upper’s own row click [[⋯]] → [[Extend]], name the child `tutorial-package-upper` and [[Save]]. The child inherits the existing package function; this does not create a source package, copy its implementation, or change its files."
+               :target ".node-overlay[data-fn-name=\"str-upper\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"str-upper\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"extend-fn\"]" ".arg-value-edit-popover"]
+               :check {:kind "fn-parent" :name "tutorial-package-upper" :parent "str-upper"}
+               :creates {:type "fn" :name "tutorial-package-upper"}}
+              {:title "Select your child"
+               :body "Select `tutorial-package-upper` in the Explorer. Bind only on your own child’s card: the package function remains shared."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "tutorial-package-upper"}}
+              {:title "Supply your own input"
+               :body "On tutorial-package-upper click [[+]] beside :string, choose [[Bind literal]], enter `package reuse` and [[Save]]. This value belongs to your child, while the slot comes from core.strings.str-upper."
+               :target ".placeholder-binder[data-fn-name=\"tutorial-package-upper\"][data-arg-name=\"string\"]"
+               :targets [".placeholder-binder[data-fn-name=\"tutorial-package-upper\"][data-arg-name=\"string\"]" ".free-arg-bind-chooser" ".arg-value-edit-popover"]
+               :check {:kind "binding-value" :name "tutorial-package-upper" :slot "string" :value "package reuse"}}
+              {:title "Execute the inherited implementation"
+               :body "On tutorial-package-upper click [[⋯]] → [[▶ Run]], then [[Run]]. The result must be PACKAGE REUSE: the executor uses the loaded package implementation with your saved input."
+               :target ".node-overlay[data-fn-name=\"tutorial-package-upper\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger"
+               :targets [".node-overlay[data-fn-name=\"tutorial-package-upper\"] .ancestor-line[data-level=\"0\"] button.more-actions-trigger" ".row-actions-popover [data-action=\"run-fn\"]" ".execute-run-btn"]
+               :check {:kind "result-value" :value "PACKAGE REUSE"}}
+              {:title "Return to the package function"
+               :body "Find `str-upper` in the Explorer and select it again. Its :string is still free: the input you saved lives on your child. The written lesson now follows this boundary into package.edn, fns.edn and impls.clj; loading new source files requires an operator restart or rebuild, not an editor click."
+               :target "input[placeholder=\"Filter...\"]"
+               :check {:kind "selected" :name "str-upper"}}]}
             {:id "32"
              :slug "distributing-packages"
              :chapter "Your organization"

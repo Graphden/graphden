@@ -2,9 +2,9 @@
 
 **Goal**: by the end of this lesson you can write a fn-def that
 takes another fn as input, understand why `:fn`-typed slots
-behave differently from other slots, and reason about
-closure-capture (why `:request` from an outer Ring handler is
-available inside a deeply-nested callable).
+behave differently from other slots, and distinguish per-invocation
+input (`:request` in a Ring handler) from closure capture (a
+`:threshold` retained by a `:map` callback).
 
 **Concepts introduced**: `:fn`-typed slot, `HOF`,
 `closure-capture`, `lambda-params`, `iterating vs one-shot HOF`.
@@ -13,8 +13,10 @@ available inside a deeply-nested callable).
 
 So far every slot we've seen wanted a VALUE: a literal, a
 ref-fn-id (to invoke and use the result), a sequence of items.
-The executor force-derefs these — by the time the impl runs,
-all args are computed values.
+The executor resolves these when the implementation reads them. Reads are
+lazy: an `if` implementation can leave its unselected branch unevaluated,
+just as Clojure `if` does. A reference used as an ordinary value supplies
+the result of that computation, rather than a callable.
 
 There's a SECOND kind of slot: one that wants a CALLABLE,
 not a value. The slot's type carries `:fn` as its outermost
@@ -31,6 +33,32 @@ to a function whose return type is itself `[:fn …]` is evaluated to obtain
 that returned callable. The implementation then invokes the callable —
 once per element for `:map`, once with no input for `:future`, or as its
 own contract specifies.
+
+## Where a callable runs
+
+The full callable type is `[:fn args ret effects execution]`. An **execution
+profile** identifies a backend: `:jvm-server` for the Clojure executor or
+`:browser-main` for the browser interpreter. The execution field records
+proven support, an unknown contract, or an execution variable. The shorter
+type forms above leave support unknown. A pure Clojure implementation is not
+therefore browser-compatible: the browser needs an implemented primitive ABI
+and a supported composition. Invoking a callback also requires support for
+that invocation; passing a callable as data is a separate operation. See
+[TYPES.md — Callable execution contracts](../TYPES.md#callable-execution-contracts).
+
+**Authority** means permission to perform the operation in the current account,
+organization and branch. It is separate from execution support and effect
+permissions: being able to read a definition does not grant permission to
+execute it, and declaring an effect does not authorize it.
+
+`core.system/server-call` is an explicit browser-to-server call boundary.
+The current browser implementation supports a separate asynchronous entry
+for a checked, read-only server callable with statically closed configuration.
+The exported browser plan contains an opaque descriptor, not the server
+implementation or configured captures. The server checks the current source
+and execute permissions, context and typed input on every call. This is not a
+way to run arbitrary server functions in a browser expression. See the
+[server-call contract](../../resources/packages/app/ui-preview/README.md#explicit-read-only-server-calls).
 
 ## `:map` — the canonical example
 
@@ -101,7 +129,7 @@ and `[:fn {} :text]` fits a slot wanting `[:fn {} :any]`; that is
 what lets a plain const-thunk drive `:future` in
 [Lesson 35](35-services.md).
 
-## Closure-capture: how `:request` propagates
+## Invocation input: how `:request` propagates
 
 This is the tricky part. Consider a Ring handler:
 
@@ -127,21 +155,24 @@ it, and neither does `:get-user`.
 
 Where does `:request` come from? From the HOF call site at the
 top — `:http-server` invokes `:get-user` with `{:request
-<ring-req>}`. The Ring server knows how to capture `:request`
-when it calls the handler.
+<ring-req>}`. This is **call-site input**: a new request supplied
+on each invocation, not a value captured when the handler was prepared.
 
 But how does it get FROM the top call site DOWN INTO
 `:user-id-from-request`, several refs deep?
 
-That's the **closure-capture** mechanism. At wrap time (when
-`:get-user` is bound to the `:handler` slot of `:http-server`),
-graphden walks `:get-user`'s ref-chain transitively and notes
-EVERY free arg name encountered: `:request`, in this case. Each
-of those names becomes a slot on the wrapped callable. At call
-time, the executor supplies them as `{:request <ring-req>}`.
+Free-argument analysis follows the references and exposes `:request` on
+`:get-user`. The handler's callable contract identifies it as a call-site
+parameter, so the request supplied on each call reaches the nested reader.
 
-The user doesn't write any glue — the names propagate
-automatically through ref chains AND through HOF boundaries.
+**Closure capture** supplies a different category of input: a callback's
+free argument that comes from the enclosing caller rather than the HOF's
+per-call arguments. For example, a `:map` callback can receive a new `:item`
+for every element while retaining a `:threshold` supplied by its enclosing
+caller. The executor retains the enclosing inputs when preparing the callable
+and supplies its call-site parameters on each invocation. See
+[CLOSURE_CAPTURE.md](../CLOSURE_CAPTURE.md#specification) for the distinction
+and the parameter-selection rules below.
 
 ## A function that returns a function
 

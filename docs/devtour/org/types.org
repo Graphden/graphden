@@ -80,7 +80,7 @@ Builds a pure boundary validator from the same supported data declaration used b
 :MINS: 1.1
 :END:
 
-A real JVM implementation proves JVM support; the canonical identity-keyed browser primitive ABI adds browser support only for implemented operations. Purity, a familiar name and authored type annotations cannot manufacture execution support.
+A real JVM implementation proves JVM [[file:glossary.org::#term/execution-profile][execution support]]; the canonical identity-keyed browser primitive ABI adds browser support only for implemented operations. Purity, a familiar name and authored type annotations cannot manufacture execution support.
 
 - source :: [[file:../../../src/graphden/executor/capabilities.clj::(defn native-execution][src/graphden/executor/capabilities.clj:63]]
 
@@ -187,7 +187,7 @@ Marks a return type as secret when an input contains a secret and the function's
 :MINS: 1.8
 :END:
 
-Projects explicit encode-view results in data positions: remove only the non-hidden ui-view representation label, preserving secret and other markers. Function signatures remain unchanged because encoding a present value cannot rewrite future callback calls.
+Projects explicit encode-view results in data positions: remove only the non-hidden [[file:glossary.org::#term/ui-view][UI view]] representation label, preserving secret and other markers. Function signatures remain unchanged because encoding a present value cannot rewrite future callback calls.
 
 - source :: [[file:../../../src/graphden/types/core/view.clj::(defn encoded-type][src/graphden/types/core/view.clj:7]]
 
@@ -199,7 +199,7 @@ Projects explicit encode-view results in data positions: remove only the non-hid
 :MINS: 1.2
 :END:
 
-Reports where a UiView enters an intentionally broad any/jsonb data sink, including nested record/list/map paths. The checker retains consumed binding expectations so an inherited, already-bound argument keeps the same diagnostic in its descendants.
+Reports where a [[file:glossary.org::#term/ui-view][UiView]] enters an intentionally broad any/jsonb data sink, including nested record/list/map paths. The checker retains consumed binding expectations so an inherited, already-bound argument keeps the same diagnostic in its descendants.
 
 - source :: [[file:../../../src/graphden/types/view.clj::(defn broad-sink-hints][src/graphden/types/view.clj:68]]
 

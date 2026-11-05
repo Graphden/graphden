@@ -112,6 +112,23 @@ the same blue as a form's submit button (`graphden-components.css`
 styles it since 2026-09-13; before that the class was data with no
 visible effect).
 
+## Data and its view
+
+A value and the UI that displays it have different contracts. For example,
+form state may contain a text value while `view(state)` returns
+`web.html/UiView`: a checked Hiccup value carrying the `:ui-view`
+representation marker. `web.html/as-ui-view` constructs that boundary; it
+does not install event handlers or convert DOM input back into a saved value.
+
+A precise text or color input rejects a view even if its underlying data
+looks compatible. `web.html/encode-view` explicitly projects a view back into
+data, preserving `:secret` and other markers. It neither changes future
+callable signatures nor grants execute permission or browser support. Use
+it when the representation itself is the data you intend to pass, not to
+extract a form's input value. See
+[TYPES.md — Values and UI Views](../TYPES.md#values-and-ui-views) and
+[where a callable runs](09-higher-order-functions.md#where-a-callable-runs).
+
 ## Wiring a click handler
 
 Click behaviour rides on `data-action="X"` attributes that a

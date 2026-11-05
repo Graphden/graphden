@@ -181,7 +181,11 @@ needing pattern-match syntax.
 A slot can also declare it wants a CALLABLE — `[:fn {:item a} b]`,
 a structural fn-type with an arg map and a return type (`a` and `b`
 are type variables), or a NAMED one via `:fn-type`. What that means
-at runtime is [Lesson 09](09-higher-order-functions.md).
+at runtime is [Lesson 09](09-higher-order-functions.md). The full contract
+is `[:fn args ret effects execution]`: effects describe operations involving
+the environment; execution profiles describe which backends support the
+callable. Omitting these fields does not prove purity or browser support.
+See [where a callable runs](09-higher-order-functions.md#where-a-callable-runs).
 
 ## `[:secret T]` — the security marker
 

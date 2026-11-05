@@ -10,6 +10,19 @@ first-party packages are layered.
 `defbase`, the `impls` map, `namespace tree`, optional package, and
 an **external package pulled by git coord** (`executor-packages.edn`).
 
+## Explore a loaded package in the editor
+
+The interactive lesson uses the already loaded `core.strings.str-upper`.
+Find it in the Explorer, extend it as `tutorial-package-upper` in the
+lesson’s scratch branch, bind your child's `:string` to `package reuse`,
+and Run it to obtain `PACKAGE REUSE`. Return to `str-upper`: its slot
+remains free. Your child reuses the package implementation; its input
+belongs to your child.
+
+This exercise does not install source files or publish a registry version.
+The source-checkout exercise below teaches startup loading; lesson 32
+teaches the separate registry publish/install workflow.
+
 ## What's a package
 
 A package is a directory under `resources/packages/` that groups
@@ -28,8 +41,8 @@ packages are LAYERED — each depends only on the ones below it:
 
 `tenancy-admin` is a further package loaded only when the
 multi-tenant addon is active. You can add your own — say
-`mycorp` — and the loader picks it up at startup, no code change
-beyond writing the files.
+`mycorp` — and add it to the startup `:package-names` list; the loader
+then picks it up without changing the loader's code.
 
 ## The shape on disk
 
@@ -132,10 +145,12 @@ fn-name keyword to its impl.
 Two things are required, and forgetting the second is the most
 common mistake:
 
-1. `defbase` turns a Clojure fn into a base-fn impl. Its body
-   should be a SINGLE library call (the "Base Function
-   Philosophy" rule in [CLAUDE.md](../../CLAUDE.md) — anything
-   longer belongs in the graph as a composed fn-def).
+1. `defbase` turns a Clojure fn into a base-fn impl. Keep each
+   primitive focused on one operation; express multi-step composition
+   through fn-defs. Length alone does not decide the boundary: database
+   transactions, cryptography and resource limits may require native
+   implementation. Follow the
+   [package decision matrix](../PACKAGES.md#5-base-function-vs-fn-def-decision-matrix).
 2. The `impls` map (read by the loader) links the fn-def's
    `:name` keyword to the impl. Without an entry, the fn-def in
    `fns.edn` loads with no impl and its consumers fail with a
@@ -144,7 +159,7 @@ common mistake:
 ### Side note: `:effects` on base-fns
 
 Base-fns DECLARE the effect categories they touch — `:effects #{}`
-for a pure fn like the hash, `:effects #{:db}` for `:pg-query`.
+for a pure fn like the hash, `:effects #{:db :raw-sql}` for `:pg-query`.
 The type-checker propagates them transitively so editor effect
 strips show the full set. See [Lesson 16](16-effects-and-secrets.md).
 
@@ -170,6 +185,11 @@ publish / install / update / fork — is [Lesson 32](32-distributing-packages.md
 
 ## Try it
 
+For a source-checkout exercise, first read the
+[worktree contract](../../dev/wtq/AGENT.md), run
+`bb wt claim tutorial-package "Build the tutorial package"`, and change to
+the printed WORKTREE directory. Make the following edits there.
+
 1. Create `resources/packages/mycorp/package.edn`:
 
    ```edn
@@ -193,8 +213,9 @@ publish / install / update / fork — is [Lesson 32](32-distributing-packages.md
    ```
 
 3. Add `"mycorp"` to `:package-names` in
-   `resources/system-dev.edn`, then run `bb rebuild`. After the
-   JVM restarts, the editor's explorer shows `mycorp.hello.greet`.
+   `resources/system-dev.edn`, then run `bb wt up`. Open the isolated
+   instance at the URL it prints; the editor's explorer shows
+   `mycorp.hello.greet`.
    Open `⋯` → `▶ Run`, supply `:name = "world"`, get
    `"Hello, world!"`.
 

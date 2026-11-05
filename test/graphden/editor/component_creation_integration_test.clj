@@ -639,7 +639,11 @@
       (is (= :saved (activate-selected storage added)))
       (is (= "#fed7aa" (:value (sp/read-entity storage :binding (:id binding)))))
       (is (= theme-before (sp/query-entities storage :ui-pref {:owner-id "anonymous" :key "theme"})))
-      (let [{:keys [result] :as diagnosed} (export-diagnosed ctx component)]
+      ;; Selection writes compatibility metadata; the ordinary resolver reads
+      ;; the explicitly prepared personal editor root.
+      (let [prepared (export-fixture/prepare! ctx (get-in added [:roots :configuration-id]))
+            {:keys [result] :as diagnosed} (export-diagnosed ctx component)]
+        (is (= (str (:id prepared)) (get-in result [:roots :configuration-id])))
         (is (:ok result) (pr-str (assoc diagnosed :retained-configuration-id first-config)))
         (is (= picker-id (get-in result [:roots :picker-id])))
         (is (not= first-config (:selection-id result))))
@@ -699,7 +703,13 @@
       (is (= #{"recents"} (set (map :name (rest (:namespaces added))))))
       (is (empty? (set/intersection (set (map :id (:functions full))) (set (map :id (:functions added))))))
       (is (= :saved (activate-selected storage added)))
-      (let [{:keys [result] :as diagnosed} (export-diagnosed ctx "recents")]
+      (let [selection-id (get-in added [:roots :configuration-id])
+            prepared (export-fixture/prepare! ctx selection-id)
+            repeated (export-fixture/prepare! ctx selection-id)
+            {:keys [result] :as diagnosed} (export-diagnosed ctx "recents")]
+        (is (= (:id prepared) (:id repeated)))
+        (is (false? (:created repeated)) "preparing an existing fixture home creates no extra root")
+        (is (= (str (:id prepared)) (get-in result [:roots :configuration-id])))
         (is (:ok result) (pr-str diagnosed))
         (is (= (get-in full [:roots :menu-id]) (get-in result [:roots :menu-id])))
         (is (= (get-in full [:roots :picker-id]) (get-in result [:roots :picker-id])))))))

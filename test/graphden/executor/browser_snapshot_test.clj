@@ -367,7 +367,7 @@
     (testing "a freshly checked map includes the callback definition and closure"
       (let [functions (:functions (export f))]
         (is (some #(= (str callback) (:id %)) functions))
-        (is (some #(= {:kind "closure" :fn (str callback) :lambdaParams [] :translation []}
+        (is (some #(= {:kind "closure" :fn (str callback) :lambdaParams [] :lambdaSlots [] :translation []}
                       (:expr %))
                   (mapcat :args functions)))))
     (testing "original secret output or captured argument cannot become plain"

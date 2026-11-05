@@ -9,12 +9,12 @@
 (use-fixtures :once (impls/impls-fixture "web" "crud-types"))
 
 
-(deftest fn-ns-index-records-its-db-read
-  ;; `:fn-ns-index` declares `:effects #{:db}` and reads every visible fn,
-  ;; but never recorded the effect: a gate that excludes `:db` let it run,
-  ;; and an effect trace did not show the read.
+(deftest candidate-ns-facts-records-its-db-read
+  ;; The `:_candidate-ns-facts` acquisition boundary declares `:db` and
+  ;; records the effect before reading the scoped snapshot. The graph's
+  ;; `:fn-ns-index` now projects over those facts without a direct DB read.
   (let [data (try (binding [cr/*allowed-effects* #{}]
-                    ((impls/impl-of :fn-ns-index) {} nil))
+                    ((impls/impl-of :_candidate-ns-facts) {} nil))
                   nil
                   (catch clojure.lang.ExceptionInfo e (ex-data e)))]
     (is (= :execution/forbidden-effect (:type data)) (pr-str data))

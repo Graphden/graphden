@@ -145,4 +145,22 @@ wait_for grep -q 'MemAvailable 0 MB' "$T/memory.log"
 )
 wait "$low"
 test -f "$T/memory.admitted"
+# Remote proof monitoring may outlive the entire local gate. It must not
+# retain admission while waiting for GitHub after local heavy work finishes.
+source <(sed -n '/^start_remote_integration_proof() {/,/^}/p' "$SRC/wt")
+mkdir -p "$T/cloud/scripts"
+touch "$T/cloud/scripts/core_proof_early.clj"
+mkfifo "$T/remote.release"
+(
+  GRAPHDEN_RESUME_OUT="$T/remote-proof"
+  remote_proof_eligible() { return 0; }
+  remote_proof_cloud_dir() { echo "$T/cloud"; }
+  bb() { "$T/runner" "$T/remote"; }
+  heavy_on integration
+  start_remote_integration_proof "$T" base sha
+  heavy_off
+) > "$T/remote.log"
+wait_for test -f "$T/remote.started"
+flock -xn "$WTQ_DIR/heavy-work.lock" true
+release_test remote
 echo 'admission_test: transition exclusion, focused serialization, exit status, killed holder and orphan protection passed'

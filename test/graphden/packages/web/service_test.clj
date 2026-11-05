@@ -25,39 +25,41 @@
                      :started-at seen-at :seen-at seen-at}))
 
 
-(deftest service-endpoint-primitives-read-a-live-instance-test
+(deftest service-endpoint-primitives-read-safe-instance-facts-test
   (let [storage (setup/create-branch-versioned-test-storage)
         rows-f (impls/impl-of :_service-rows)
-        live-f (impls/impl-of :_live-service-endpoint)
-        ctx {:storage storage}
-        now (java.time.Instant/now)]
+        facts-f (impls/impl-of :_service-instance-facts)
+        ctx {:storage storage :executor-id "local"}
+        now (java.time.Instant/now)
+        now-ms (java.time.Instant/.toEpochMilli now)]
     (try
       (let [svc-fn (setup/create-base-fn! storage "se-listener" :any)
             other-fn (setup/create-base-fn! storage "se-other" :any)
             svc (sp/create-entity storage :service
                                   {:fn-id (:id svc-fn) :enabled? true :restart-policy :always
-                                   :cardinality :per-pod})]
-        (testing "no service row gives no listener candidate"
-          (let [rows (rows-f {:service (:id other-fn)} ctx)]
-            (is (empty? rows))
-            (is (nil? (live-f {:rows rows} ctx)))))
-        (testing "a service row without a live instance is still unavailable"
-          (let [rows (rows-f {:service (:id svc-fn)} ctx)]
-            (is (= 1 (count rows)))
-            (is (nil? (live-f {:rows rows} ctx)))))
-        (let [remote (instance! storage (:id svc) "graphden-2.svc" "graphden-2.svc" 9001 now)]
-          (testing "a live remote copy → host + port + a joined origin url"
-            (is (= {:host "graphden-2.svc" :port 9001 :url "http://graphden-2.svc:9001"}
-                   (live-f {:rows (rows-f {:service (:id svc-fn)} ctx)} ctx))))
-          (testing "this pod's own copy wins over a remote one"
-            (instance! storage (:id svc) "local" "127.0.0.1" 9001 now)
-            (is (= "http://127.0.0.1:9001"
-                   (:url (live-f {:rows (rows-f {:service (:id svc-fn)} ctx)} ctx)))))
-          (testing "a stale heartbeat is not a live copy"
-            (doseq [row (sp/query-entities storage :service-instance {:service-id (:id svc)})]
-              (sp/update-entity storage :service-instance (:id row)
-                                {:seen-at (java.time.Instant/.minusMillis now 120000)}))
-            (is (nil? (live-f {:rows (rows-f {:service (:id svc-fn)} ctx)} ctx))))
+                                   :cardinality :per-pod})
+            facts #(facts-f {:rows (rows-f {:service %} ctx)} ctx)]
+        (testing "missing service rows and instances yield an empty fact cohort"
+          (is (empty? (rows-f {:service (:id other-fn)} ctx)))
+          (is (empty? (:instances (facts (:id other-fn)))))
+          (is (= 1 (count (rows-f {:service (:id svc-fn)} ctx))))
+          (is (empty? (:instances (facts (:id svc-fn))))))
+        (let [remote (instance! storage (:id svc) "remote" "remote.svc" 9001 now)]
+          (testing "scoped facts expose safe scalar fields and capture trusted clock/executor"
+            (let [result (facts (:id svc-fn))]
+              (is (= [{:host "remote.svc" :port 9001 :executor-id "remote" :seen-at-ms now-ms}]
+                     (:instances result)))
+              (is (= "local" (:self-executor-id result)))
+              (is (pos-int? (:stale-after-ms result)))
+              (is (<= now-ms (:now-ms result)))))
+          (instance! storage (:id svc) "local" "127.0.0.1" 9001 now)
+          (is (= #{"local" "remote"} (set (map :executor-id (:instances (facts (:id svc-fn)))))))
+          (testing "freshness is graph policy; the read preserves stale timestamps"
+            (let [stale (java.time.Instant/.minusMillis now 120000)]
+              (doseq [row (sp/query-entities storage :service-instance {:service-id (:id svc)})]
+                (sp/update-entity storage :service-instance (:id row) {:seen-at stale}))
+              (is (= #{(java.time.Instant/.toEpochMilli stale)}
+                     (set (map :seen-at-ms (:instances (facts (:id svc-fn)))))))))
           (sp/delete-entity storage :service-instance (:id remote))))
       (finally (sp/close storage)))))
 

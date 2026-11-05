@@ -3,12 +3,10 @@
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
-    [graphden.executor.composition.deps :as deps]
-    [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
     [graphden.packages.loader :as loader]
-    [graphden.packages.records.parse :as records-parse]
     [graphden.packages.sync :as sync]
+    [graphden.test-infra.type-contract :as type-contract]
     [graphden.types.check :as check]
     [graphden.types.check.narrowing :as narrowing]
     [graphden.types.core :as types]))
@@ -21,29 +19,30 @@
   (fn [test-fn]
     (binding [types/*type-aliases-override* (atom {})]
       (sync/register-type-aliases! (:fn-defs loaded))
-      (exec/with-isolated-rich-types
-        (fn []
-          (doseq [[fn-name fn-def] (:base-fn-defs loaded)]
-            (registry/record-rich-types! fn-name fn-def))
-          (test-fn))))))
+      ;; Do not inherit unswept signatures from other loaded test namespaces.
+      (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
+                registry/*per-org-rich-override* (atom {})]
+        (doseq [[fn-name fn-def] (:base-fn-defs loaded)]
+          (registry/record-rich-types! fn-name fn-def))
+        (test-fn)))))
 
 
 (deftest projection-closures-retain-only-their-public-inputs
-  (let [selected (filterv
-                   (fn [{:keys [name parent]}]
-                     (and name parent
-                          (or (some #(str/starts-with? (clojure.core/name name) %)
-                                    ["_approval-display-" "_approval-reason-" "_approval-approver"
-                                     "_moderation-" "_marketplace-" "_branch-policy-"])
-                              (#{:_branch-comment-created-id :semver-rank :moderation-queue
-                                 :approvals-report :moderate-package-version! :set-branch-policy! :set-branch-review-policy!
-                                 :add-branch-comment!} name))))
-                   (:fn-defs loaded))
-        extra-defs (into {} (map (fn [[n fd]] [n (assoc fd :name n)])) (:base-fn-defs loaded))
-        {:keys [fn-defs name->id]} (records-parse/prepare-module
-                                     selected (sync/compute-all-fn-name-ids loaded) extra-defs)
-        sorted (mapv check/checker-view
-                     (deps/topological-sort fn-defs (constantly false) name->id))]
+  (let [{sorted :fn-defs}
+        (type-contract/prepared-closure
+          loaded
+          (fn [{:keys [name parent]}]
+            (and name parent
+                 (or (some #(str/starts-with? (clojure.core/name name) %)
+                           ["_approval-display-" "_approval-reason-" "_approval-approver"
+                            "_moderation-" "_marketplace-" "_branch-policy-"])
+                     (#{:_branch-comment-created-id :semver-rank :moderation-queue
+                        :approvals-report :moderate-package-version! :set-branch-policy!
+                        :set-branch-review-policy! :add-branch-comment!} name)))))]
+    (is (every? (set (map :name sorted))
+                [:parse-json-body :_request-body :_add-branch-comment-row
+                 :_set-branch-review-policy-row])
+        "Actual cross-module and private dependencies are checked with their consumers")
     ;; Match sync's two passes: seed inferred signatures, then enforce every
     ;; contract with caller refinements and referenced literal returns.
     (binding [check/*ref-return-memo* (atom {})]

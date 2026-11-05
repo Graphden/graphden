@@ -520,9 +520,8 @@
             "Execution mismatch: requires Browser + JVM; callback has no proven runtime."]
            [[:fn {} :int #{} #{:browser-main}] [:fn {} :int #{} [:execution-var 'execution]]
             "Execution mismatch: requires Browser; callback has inferred execution (not yet proven)."]]]
-    (is (= message (gh/exec-name :describe-type-mismatch
-                                 {:expected expected :candidate candidate}))
-        (str expected " / " candidate))))
+    (let [actual (gh/exec-name :describe-type-mismatch {:expected expected :candidate candidate})]
+      (is (= message actual) (str expected " / " candidate)))))
 
 
 (deftest namespace-index-graph-conceals-and-acquires-once-test
@@ -581,6 +580,7 @@
                 :_type-execution-is-unknown? :_type-execution-is-known? :_type-execution-profile-values
                 :_type-execution-empty? :_type-profile-labels :_type-profile-labels-sorted
                 :_type-profile-labels-joined :_type-execution-known-label :_type-execution-label
+                :_mismatch-execution-signatures :_mismatch-execution-labels
                 :_mismatch-expected-text :_mismatch-expected-refined? :_mismatch-expected-primitive?
                 :_mismatch-expected-fn? :_mismatch-expected-constraint :_mismatch-expected-execution
                 :_mismatch-expected-constraint-text :_mismatch-candidate-text :_mismatch-candidate-refined?

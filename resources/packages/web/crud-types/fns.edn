@@ -267,6 +267,7 @@
     :else :_type-profile-labels-joined}}
 
   {:name :_type-execution-label
+   :lambda-params [:signature]
    :parent :cond
    :args
    {:clauses
@@ -276,6 +277,16 @@
      :_type-execution-known-label
      {:value true}
      {:value "inferred execution (not yet proven)"}]}}
+
+  {:name :_mismatch-execution-signatures
+   :parent :list
+   :args {:items [{:as :expected :type :type-expression}
+                  {:as :candidate :type :type-expression}]}}
+
+  {:name :_mismatch-execution-labels
+   :description "Format both signatures through explicit callback invocations; each label owns its argument scope."
+   :parent :map
+   :args {:func :_type-execution-label :coll :_mismatch-execution-signatures}}
 
   {:name :_mismatch-expected-text
    :parent :pr-str
@@ -298,8 +309,8 @@
    :args {:type {:as :expected :type :type-expression}}}
 
   {:name :_mismatch-expected-execution
-   :parent :_type-execution-label
-   :args {:signature {:as :expected :type :type-expression}}}
+   :parent :get
+   :args {:coll :_mismatch-execution-labels :key 0 :default ""}}
 
   {:name :_mismatch-expected-constraint-text
    :parent :pr-str
@@ -326,8 +337,8 @@
    :args {:type {:as :candidate :type :type-expression}}}
 
   {:name :_mismatch-candidate-execution
-   :parent :_type-execution-label
-   :args {:signature {:as :candidate :type :type-expression}}}
+   :parent :get
+   :args {:coll :_mismatch-execution-labels :key 1 :default ""}}
 
   {:name :_mismatch-candidate-constraint-text
    :parent :pr-str

@@ -14,10 +14,11 @@
    The harness does not establish a timing budget or auto-approve a regression."
   (:require
     [clojure.java.io :as io]
-    [clojure.java.shell :as shell]
-    [clojure.pprint :as pprint]
+    [clojure.java.shell :as sh]
+    [clojure.math :as math]
+    [clojure.pprint :as pp]
     [clojure.string :as str]
-    [clojure.test :refer [deftest use-fixtures]]
+    [clojure.test :refer [deftest is use-fixtures]]
     [graphden.crud.types-api :as ta]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.context :as context]
@@ -96,13 +97,13 @@
 
 (defn- allocation-meter
   []
-  (let [bean (ManagementFactory/getThreadMXBean)]
-    (when-not (and (instance? ThreadMXBean bean)
-                   (.isThreadAllocatedMemorySupported ^ThreadMXBean bean))
+  (let [memory-meter (ManagementFactory/getThreadMXBean)]
+    (when-not (and (instance? ThreadMXBean memory-meter)
+                   (ThreadMXBean/.isThreadAllocatedMemorySupported memory-meter))
       (throw (ex-info "Current-thread allocation measurement unavailable" {})))
-    (.setThreadAllocatedMemoryEnabled ^ThreadMXBean bean true)
-    (let [id (.getId (Thread/currentThread))]
-      #(.getThreadAllocatedBytes ^ThreadMXBean bean id))))
+    (ThreadMXBean/.setThreadAllocatedMemoryEnabled memory-meter true)
+    (let [id (Thread/.getId (Thread/currentThread))]
+      #(ThreadMXBean/.getThreadAllocatedBytes memory-meter id))))
 
 
 (defn- measure
@@ -113,7 +114,7 @@
         start (System/nanoTime)
         result (invoke)
         elapsed (- (System/nanoTime) start)
-        bytes (- (allocated) bytes-before)
+        allocated-bytes (- (allocated) bytes-before)
         compile-counts (counters/delta-since counters-before)
         compile-hits (get compile-counts :compile/all-hit 0)
         compile-misses (get compile-counts :compile/all-miss 0)
@@ -128,7 +129,7 @@
     {:elapsed-ns elapsed
      :compile-all-hits compile-hits
      :compile-all-misses compile-misses
-     :current-thread-allocated-bytes bytes
+     :current-thread-allocated-bytes allocated-bytes
      :sql-calls (reduce + 0 (map :calls (vals statements)))
      :sql-read-calls (reduce + 0 (map :calls (filter :read? (vals statements))))
      :sql-rows (reduce + 0 (map :rows (vals statements)))
@@ -140,14 +141,14 @@
   (let [values (vec (sort (map field samples)))
         n (count values)]
     {:min (first values) :median (nth values (quot n 2))
-     :p95 (nth values (min (dec n) (long (Math/ceil (* 0.95 (dec n))))))
+     :p95 (nth values (min (dec n) (long (math/ceil (* 0.95 (dec n))))))
      :max (peek values)}))
 
 
 (deftest compare-native-and-graph-projection
   (let [{:keys [ctx storage all-name->id]} *graph*
-        revision (shell/sh "git" "rev-parse" "HEAD")
-        working-tree (shell/sh "git" "status" "--porcelain")
+        revision (sh/sh "git" "rev-parse" "HEAD")
+        working-tree (sh/sh "git" "status" "--porcelain")
         snapshot (ta/all-rich-types ctx)
         expected (native-projection snapshot)
         baseline-name :benchmark-native-rich-projection
@@ -211,8 +212,10 @@
                                                   [field (distribution samples field)]))]))}
               output (io/file "target/type-policy-benchmark.edn")]
           (io/make-parents output)
-          (spit output (with-out-str (pprint/pprint report)))
-          (println "Benchmark report:" (.getPath output))
-          (pprint/pprint (:warm-summary report))))
+          (spit output (with-out-str (pp/pprint report)))
+          (println "Benchmark report:" (java.io.File/.getPath output))
+          (pp/pprint (:warm-summary report))
+          (is (= :all-measured-results-equal (:parity report)))
+          (is (every? zero? (map :compile-all-misses (concat cold warm))))))
       (finally
         (sp/delete-entity storage :fn (:id baseline))))))

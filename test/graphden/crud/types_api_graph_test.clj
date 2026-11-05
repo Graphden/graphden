@@ -19,7 +19,6 @@
     [cheshire.core :as cheshire]
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.crud.fn-execution.persist :as persist]
     [graphden.crud.type-check :as tc]
     [graphden.crud.types-api :as ta]
     [graphden.executor.context :as exec-ctx]
@@ -75,12 +74,16 @@
 (deftest candidate-fit-stored-contract-test
   (let [{:keys [storage all-name->id]} *graph*]
     (doseq [nm [:_candidate-fit-args :_candidate-fit-expected-arity
-                :_candidate-fit-arity :candidate-fit]]
+                :_candidate-fit-arity :_candidate-fit-identity?
+                :_candidate-fit-exact? :_candidate-fit-captures?
+                :candidate-fit]]
       (let [id (get all-name->id nm)]
         (is (some? (tc/reconstruct-fn-def storage id)))
         (is (nil? (tc/type-check-fn-after-mutation! storage id)) (str nm))))
     (let [rich (registry/rich-type-of-id (get all-name->id :candidate-fit))]
-      (is (= {:expected :type-expression :arity :non-negative-int} (:args rich)))
+      (is (= (update-vals {:expected :type-expression :arity :non-negative-int}
+                          types/resolve-alias)
+             (:args rich)))
       (is (= #{} (:effects rich)))
       (is (types/subtype? (:return rich) :keyword)))))
 
@@ -418,7 +421,8 @@
   (let [{:keys [storage all-name->id]} *graph*]
     ;; Dependency order matters: ordinary golden clones intentionally do not
     ;; run the package sweep. Check the persisted definitions, not source copies.
-    (doseq [nm [:_type-name-wire-row :_type-name-compatible? :type-name-kinds
+    (doseq [nm [:_type-name-wire-row :_type-name-compatible?
+                :_type-name-compatible-entries :type-name-kinds
                 :compatible-type-names :_rich-type-wire-entry :api-rich-types]]
       (let [id (get all-name->id nm)]
         (is (some? (tc/reconstruct-fn-def storage id)) (str nm " is composed"))
@@ -434,26 +438,22 @@
             [:list {:name :text :kind :text}]]
            [:api-rich-types {} :keyword-map]]]
     (let [rich (registry/rich-type-of-id (get (:all-name->id *graph*) nm))]
-      (is (= args (:args rich)) (str nm " exposes only its public inputs"))
+      (is (= (update-vals args types/resolve-alias) (:args rich))
+          (str nm " exposes only its public inputs"))
       (is (types/subtype? (:return rich) return) (str nm " retains its public return"))
       (is (= #{:db} (:effects rich)) (str nm " retains scoped-read effects")))))
 
 
-(deftest secret-expected-taints-picker-selection-test
+(deftest secret-expected-cannot-enter-plain-picker-test
   (check-stored-type-policies!)
   (let [source (keyword (gh/uniq "secret-picker-expected"))
         consumer (keyword (gh/uniq "secret-picker-selection"))]
     (registry/record-rich-types! source
                                  {:args {} :return-type [:secret :type-expression]})
-    (check/check-fn-def! {:name consumer :parent :compatible-type-names
-                          :args {:expected {:ref source}}})
-    (let [rich (registry/rich-type-of consumer)
-          id (:fn-id rich)]
-      (is (types/contains-secret? (:return rich))
-          "Filtering by a secret must taint the selection, even for public rows")
-      (is (= {:status :succeeded :result nil :tainted? true}
-             (persist/redact-outcome id
-                                     {:status :succeeded :result [{:name "int" :kind "primitive"}]}))))))
+    (is (thrown? clojure.lang.ExceptionInfo
+          (check/check-fn-def! {:name consumer :parent :compatible-type-names
+                                :args {:expected {:ref source}}}))
+        "A secret cannot be bound to the public picker input")))
 
 
 (deftest picker-identity-and-acl-survive-the-complete-graph-test

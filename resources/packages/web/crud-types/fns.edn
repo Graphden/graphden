@@ -87,20 +87,29 @@
    :parent :const
    :args {:value {:as :arity :type :non-negative-int}}}
 
+  {:name :_candidate-fit-identity?
+   :parent :equal?
+   :args {:a {:as :expected :type :type-expression}
+          :b {:value :fn-ref}}}
+
+  {:name :_candidate-fit-exact?
+   :parent :equal?
+   :args {:a :_candidate-fit-arity
+          :b :_candidate-fit-expected-arity}}
+
+  {:name :_candidate-fit-captures?
+   :parent :gt
+   :args {:nums [:_candidate-fit-arity :_candidate-fit-expected-arity]}}
+
   {:name :candidate-fit
    :description "Picker ranking only; admissibility stays with subtype?. Identity slots are exact. Callable slots compare free arity with their argument count; value slots compare with zero. Extra free arguments capture; fewer arguments ignore the supplied inputs."
    :parent :cond
    :args {:clauses
-          [{:parent :equal?
-            :args {:a {:as :expected :type :type-expression}
-                   :b {:value :fn-ref}}}
+          [:_candidate-fit-identity?
            {:value :exact}
-           {:parent :equal?
-            :args {:a :_candidate-fit-arity
-                   :b :_candidate-fit-expected-arity}}
+           :_candidate-fit-exact?
            {:value :exact}
-           {:parent :gt
-            :args {:nums [:_candidate-fit-arity :_candidate-fit-expected-arity]}}
+           :_candidate-fit-captures?
            {:value :captures}
            {:value true} {:value :ignores}]}
    :return-type :keyword}
@@ -156,16 +165,25 @@
    :args {}
    :return-type [:list :text]}
 
+  {:name :_type-name-entry-shape
+   :description "Scoped type-picker row before its internal type reference is removed."
+   :type {:name :text :kind :text :type-ref :keyword}}
+
+  {:name :_type-name-wire-shape
+   :description "Public type-picker row."
+   :type {:name :text :kind :text}}
+
   {:name :_type-name-entries
    :description "One ACL-filtered, sorted picker snapshot. Selection spelling and canonical type reference remain separate, including colliding root and namespace names."
    :args {}
-   :return-type [:list {:name :text :kind :text :type-ref :keyword}]
+   :return-type [:list :_type-name-entry-shape]
    :effects #{:db}}
 
   {:name :_type-name-wire-row
    :parent :dissoc
-   :args {:map {:as :item :type {:name :text :kind :text :type-ref :keyword}}
-          :key {:value :type-ref}}}
+   :args {:map {:as :item :type :_type-name-entry-shape}
+          :key {:value :type-ref}}
+   :return-type :_type-name-wire-shape}
 
   {:name :type-name-kinds
    :description "Sorted type-picker names and kinds, with qualified selection spelling for collisions."
@@ -175,17 +193,21 @@
 
   {:name :_type-name-compatible?
    :parent :subtype?
+   :lambda-params [:item]
    :args {:candidate {:parent :get
-                      :args {:coll {:as :item :type {:name :text :kind :text :type-ref :keyword}}
+                      :args {:coll {:as :item :type :_type-name-entry-shape}
                              :key {:value :type-ref} :default nil}}}}
+
+  {:name :_type-name-compatible-entries
+   :parent :filter
+   :args {:pred :_type-name-compatible?
+          :coll :_type-name-entries}}
 
   {:name :compatible-type-names
    :description "Filter the shared picker snapshot by canonical type identity before removing internal type refs. Expected is the type candidates must narrow."
    :parent :map
    :args {:func :_type-name-wire-row
-          :coll {:parent :filter
-                 :args {:pred :_type-name-compatible?
-                        :coll :_type-name-entries}}}}
+          :coll :_type-name-compatible-entries}}
 
   ;; fn-id → registry entry (by id) → :return, all graph-visible. The row
   ;; → name hop below feeds only the callable-shape walk (`:_rsof-*`).

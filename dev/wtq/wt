@@ -545,6 +545,7 @@ cmd_up() {
   # running build against THIS branch's tree — the agent sees its own code.
   yield_to_gate "wt up"
   ( cd "$path" && bb rebuild ) || die "instance build failed — see the output above"
+  heavy_slot_release
 
   echo
   ok "✓ '$name' is live at http://localhost:$GD_PORT_HTTP"
@@ -1272,36 +1273,53 @@ queue_state() {
 #   WTQ_AGENT_MEM_MIN_MB  what an agent's `wt test` / `wt up` / optional diagnostics
 #                         waits for (default 3000: one kaocha JVM or one 2 GB
 #                         `wt up` stack plus slack).
-# and while the gate is in a heavy phase it says so in $GATE_HEAVY; agent-side
-# commands yield until it is gone.
+# Heavy phases and agent commands hold the same exclusive kernel lock for
+# their entire workload. The marker is for observation, never admission.
 GATE_HEAVY="$WTQ_DIR/gate-heavy"
 
 mem_avail_mb() { awk '/^MemAvailable:/{print int($2 / 1024)}' /proc/meminfo; }
 disk_avail_mb() { df -Pm "$WTQ_DIR" | awk 'NR == 2 {print $4}'; }
 int_or() { case "$1" in ''|*[!0-9]*) echo "$2" ;; *) echo "$1" ;; esac; }
 
-# The marker names the phase and the CONDUCTOR's pid ($$ — the same in every
-# subshell of the gate), so a gate that died without its EXIT trap leaves a
-# marker that reads as stale, never as a phase that blocks agents forever.
-heavy_on()  { printf 'phase=%s\npid=%s\nsince=%s\n' "$1" "$$" "$(date +%H:%M:%S)" > "$GATE_HEAVY.tmp" && mv -f "$GATE_HEAVY.tmp" "$GATE_HEAVY"; }
-heavy_off() { rm -f "$GATE_HEAVY"; }
-heavy_live() {   # prints the live phase; false when there is none (or it is stale)
-  local pid phase
-  [ -f "$GATE_HEAVY" ] || return 1
-  pid="$(sed -n 's/^pid=//p' "$GATE_HEAVY" 2>/dev/null)"; phase="$(sed -n 's/^phase=//p' "$GATE_HEAVY" 2>/dev/null)"
-  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 1
-  echo "$phase"
+# fd 6 is inherited by the workload, including an exec'd focused JVM. Closing
+# our copy (never flock -u) keeps an orphaned child protected until it exits.
+# Never unlink this lock file: old and new waiters must use the same inode.
+heavy_slot_acquire() {   # <what>
+  [ "${HEAVY_SLOT_HELD:-0}" = 1 ] && return 0
+  exec 6>"$WTQ_DIR/heavy-work.lock"
+  if ! flock -xn 6; then
+    warn "$1 waits: another focused command or heavy gate phase owns the heavy-work slot (Ctrl-C to give up)"
+    flock -x 6 || die "could not acquire the heavy-work slot"
+  fi
+  HEAVY_SLOT_HELD=1
+}
+heavy_slot_release() {
+  exec 6>&-
+  HEAVY_SLOT_HELD=0
 }
 
-# Agent-side: wait while the gate is in a heavy phase or memory is short.
+heavy_on() {
+  heavy_slot_acquire "landing gate: $1"
+  printf 'phase=%s\npid=%s\nsince=%s\n' "$1" "$BASHPID" "$(date +%H:%M:%S)" > "$GATE_HEAVY.tmp" && mv -f "$GATE_HEAVY.tmp" "$GATE_HEAVY"
+}
+heavy_off() {
+  rm -f "$GATE_HEAVY"
+  heavy_slot_release
+}
+
+# Admission returns WITH the slot held: no check/exec gap, and concurrent
+# agents cannot all spend the same observed memory headroom. Kernel waits
+# replace marker polling; stale markers/PIDs cannot block a later command.
 yield_to_gate() {   # <what>
-  local min poll phase avail said=""
+  local min poll avail said=""
   min="$(int_or "${WTQ_AGENT_MEM_MIN_MB:-}" 3000)"; poll="$(int_or "${WTQ_YIELD_POLL:-}" 15)"
+  [ "$poll" -gt 0 ] || poll=1
   while :; do
-    phase="$(heavy_live || true)"; avail="$(mem_avail_mb)"
-    if [ -z "$phase" ] && [ "$avail" -ge "$min" ]; then return 0; fi
-    local why="${phase:+the landing gate is in a heavy phase ($phase)}"
-    [ "$avail" -lt "$min" ] && why="${why:+$why; }MemAvailable ${avail} MB < ${min} MB"
+    heavy_slot_acquire "$1"
+    avail="$(mem_avail_mb)"
+    if [ "$avail" -ge "$min" ]; then return 0; fi
+    heavy_slot_release
+    local why="MemAvailable ${avail} MB < ${min} MB"
     if [ "$said" != "$why" ]; then warn "$1 waits: $why — retrying every ${poll}s (Ctrl-C to give up)"; said="$why"; fi
     sleep "$poll"
   done
@@ -1910,10 +1928,10 @@ gate_body() {
 "
     _ph_name="$*"
     _ph_t0=$SECONDS
-    # JVM / container heavy phases announce themselves, so agents' `wt test`,
-    # `wt up` and optional focused checks yield instead of starving them.
+    # Drain admitted agent workloads before a heavy phase starts; retain
+    # admission across adjacent heavy phases until a light phase or EXIT.
     case "$*" in
-      "bb ci"*|"build the CANDIDATE"*|"bb test-"*|"TEST STUB"*) heavy_on "$*" ;;
+      "bb ci"*|"build the CANDIDATE"*|"bb test-"*|"manual related "*|"automatic related "*|"TEST STUB"*) heavy_on "$*" ;;
       *) heavy_off ;;
     esac
     echo; echo ">>> $*  [t+$((SECONDS - GATE_T0))s]"
@@ -2797,7 +2815,7 @@ cmd_merge() {
 # =====================================================================
 # Raw `clojure -M:dev:test -m kaocha.runner` from five agents at once, next to
 # a gate booting the e2e stack, is how this host ran out of memory. Same
-# command, but it first waits out the gate's heavy phases and a memory floor.
+# command, holding the shared heavy-work slot through exec and JVM exit.
 cmd_test() {
   [ "$#" -gt 0 ] || die "usage: wt test <kaocha args…>   e.g. wt test --focus graphden.executor.core-test"
   yield_to_gate "wt test"

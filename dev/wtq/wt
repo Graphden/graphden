@@ -1497,8 +1497,10 @@ start_remote_integration_proof() {
   remote_proof_eligible "$wt" "$base_sha" "$sha" || return 0
   cloud="$(remote_proof_cloud_dir)"
   [ -f "$cloud/scripts/core_proof_early.clj" ] || { echo "  remote integration proof unavailable — local fallback"; return 0; }
+  # This background network waiter outlives local phases; it owns no local
+  # heavy workload and must not retain the gate's admission after release.
   (cd "$cloud" && bb core-proof-early "$sha" "$wt") \
-    > "$GRAPHDEN_RESUME_OUT.remote-proof.log" 2>&1 &
+    6>&- > "$GRAPHDEN_RESUME_OUT.remote-proof.log" 2>&1 &
   echo "  exact-SHA GitHub proof started in background (pid $!); integration will use it only after verification"
 }
 

@@ -1392,7 +1392,7 @@
    :parent :filter
    :args {:pred :_pvg-it-component?-cb :coll :_pvg-all-fns}}
 
-  ;; --- enrich (effectful map — ns walk + free-arg lookup) ---
+  ;; --- enrich before sorting (effectful namespace walk only) ---
 
   {:name :_pvg-it-entry
    :parent :rich-type-of-id
@@ -1406,15 +1406,11 @@
                                       :key {:value :effects}
                                       :default {:value []}}}}}}}
 
-  {:name :_pvg-it-frees
-   :parent :free-arg-slot-map
-   :args {:fn-id :_pvg-it-id}}
-
   {:name :_pvg-enrich-cb
-   :description "Row → card map: id / name / ns-path / effect vec / pure? (effects KNOWN and empty — unknown fails closed, same as the single-fn confirm gate) / zero-free? / the row itself (the live render hands it to `:_execute-apply` as the resolved fn-row)."
+   :description "Row → sort/card map: id, name, ns-path, effects, purity and the resolved row. Free args are checked only for cards shown after the cap."
    :parent :zipmap
    :args {:keys [{:value :id} {:value :name} {:value :ns-path}
-                 {:value :effects} {:value :pure?} {:value :zero-free?}
+                 {:value :effects} {:value :pure?}
                  {:value :row}]
           :vals [:_pvg-it-id
                  :_pvg-it-name
@@ -1427,7 +1423,6 @@
                  {:parent :and
                   :args {:values [{:parent :some? :args {:value :_pvg-it-entry}}
                                   {:parent :empty? :args {:coll :_pvg-it-effects}}]}}
-                 {:parent :empty? :args {:coll :_pvg-it-frees}}
                  {:as :item}]}}
 
   {:name :_pvg-enriched
@@ -1469,10 +1464,15 @@
                                                 {:parent :to-str :args {:value :current-branch-id}}]}}
                           :else {:value ""}}}]}}
 
+  {:name :_pvg-card-zero-free?
+   :description "Check free args only after the sorted gallery is capped to visible cards."
+   :parent :empty?
+   :args {:coll {:parent :free-arg-slot-map :args {:fn-id :_pvg-card-id}}}}
+
   {:name :_pvg-card-live?
    :parent :and
    :args {:values [{:parent :get :args {:coll {:as :item} :key {:value :pure?} :default {:value false}}}
-                   {:parent :get :args {:coll {:as :item} :key {:value :zero-free?} :default {:value false}}}]}}
+                   :_pvg-card-zero-free?]}}
 
   {:name :_pvg-card-parsed
    :parent :execute-parsed-record
@@ -1512,7 +1512,7 @@
                       :args {:test :_pvg-card-live?
                              :then {:value ""}
                              :else {:parent :if
-                                    :args {:test {:parent :get :args {:coll {:as :item} :key {:value :zero-free?} :default {:value false}}}
+                                    :args {:test :_pvg-card-zero-free?
                                            :then {:value "has side effects — open to render (confirm gate applies)"}
                                            :else {:value "takes arguments — open, or run via the Run popover"}}}}}]}}
 
@@ -1553,9 +1553,13 @@
                              :attrs {:value {:style "margin-top:8px"}}
                              :children [:_pvg-card-body]}}]}}
 
-  {:name :_pvg-cards
+  {:name :_pvg-cards-raw
    :parent :map
    :args {:func :_pvg-card-cb :coll :_pvg-shown}}
+
+  {:name :_pvg-cards
+   :parent :with-graph-load-memo
+   :args {:body :_pvg-cards-raw}}
 
   {:name :_pvg-overflow-note
    :parent :if

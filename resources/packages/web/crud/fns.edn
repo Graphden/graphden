@@ -264,6 +264,12 @@
    :return-type [:map :keyword :uuid]
    :effects #{:db}}
 
+  {:name :with-graph-load-memo
+   :description "Run one graph body with an epoch-aware branch-load memo. Repeated closure lookups share the branch read; an enclosing memo is reused, otherwise the new memo ends with this call."
+   :args {:body {:type [:fn {} a]}}
+   :return-type a
+   :effects #{:db}}
+
   ;; The same surface with the facts the EDITOR needs per hole — whether
   ;; it is optional (the executor's effective-required at the slot's
   ;; owner), whether it is a closure capture and inside which HOF target.

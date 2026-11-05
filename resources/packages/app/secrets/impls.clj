@@ -82,7 +82,7 @@
 
 
 (def impls
-  {:_create-secret-facts     _create-secret-facts
+  {:_create-secret-facts     {:impl _create-secret-facts :taint-propagate? true}
    :_inline-secret-facts       {:impl _inline-secret-facts :taint-propagate? true}
    :_rollback-secret-failure        {:impl _rollback-secret-failure :taint-propagate? true}
    :_rotate-secret-not-owned?     {:impl _rotate-secret-not-owned? :taint-propagate? true}

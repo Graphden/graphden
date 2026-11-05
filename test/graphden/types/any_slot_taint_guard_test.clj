@@ -45,8 +45,8 @@
 ;; ---------------------------------------------------------------------
 
 (def ^:private allow-list
-  {:_live-service-endpoint "Service rows contribute only their IDs to a branch-scoped live-instance query. The returned host, port, and URL come from fresh instance rows, not from the supplied service-row content."
-   :_editor-root-plan "Request only binds private issuance/session state; checked stored source and a fresh opaque token never echo request content or auth-carrier hashes."
+  {:_service-instance-facts "Input rows contribute only IDs to a scoped instance query; returned instance fields come from fresh storage rows, and clock/executor facts come from server context."
+   :_editor-root-plan-facts "Request only binds private issuance/session state; checked stored source and a fresh opaque token never echo request content or auth-carrier hashes."
    :_reconcile-services-apply "Ignores request content; returns generated started/stopped instance IDs."
    :debug-catch-disarm! "Ignores request content; returns the disarmed status."
    :debug-catch-status "Ignores request content; returns the current org-scoped trap state."
@@ -60,7 +60,9 @@
    :notify-after-write "Invalidates the written entity through the notifier; returns nil."
    :pg-notify "Sends the event through the explicit DB effect; returns nil."
    :queue-publish "Stores the payload as an explicit DB effect; returns a newly generated UUID."
-   :sql-query-public "Explicit SQL publication boundary: :params is plain JSON (nested secret markers fail type checking); only author-allowlisted result columns leave the JDBC call. The password has its own secret slot and is never returned."})
+   :sql-query-public "Explicit SQL publication boundary: :params is plain JSON (nested secret markers fail type checking); only author-allowlisted result columns leave the JDBC call. The password has its own secret slot and is never returned."
+   :_tests-discover "Ignores request content; returns freshly read scoped test identities and package ownership."
+   :_tests-status-facts "Ignores request content; returns freshly read scoped test identities and their current-version execution statuses."})
 
 
 ;; ---------------------------------------------------------------------

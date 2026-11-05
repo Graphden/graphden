@@ -18,7 +18,8 @@
     [graphden.executor.registry.core :as registry]
     [graphden.packages.export :as export]
     [graphden.schema.graph.schema :as graph-schema]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.versioning.storage.resolution :as resolution]))
 
 
 (defbase get-entity
@@ -77,6 +78,14 @@
   (if (some? fn-id)
     (fn-exec-lookup/free-arg-slot-map ctx fn-id)
     {}))
+
+
+(defbase with-graph-load-memo
+  "Run one graph body against a request-local, epoch-aware branch-load memo.
+   This shares the branch read across per-card lookups. A new memo ends with
+   this call; an enclosing scope is reused."
+  [body]
+  (resolution/call-with-graph-load-memo body))
 
 
 (defbase _free-arg-facts
@@ -279,6 +288,7 @@
    :create-entity {:impl create-entity-fn :taint-propagate? true}
    :update-entity {:impl update-entity-fn :taint-propagate? true}
    :free-arg-slot-map free-arg-slot-map
+   :with-graph-load-memo {:impl with-graph-load-memo :taint-propagate? true}
    :_free-arg-facts _free-arg-facts
    :service-blocking-free-args service-blocking-free-args
    :_graph-tree-facts graph-tree-facts

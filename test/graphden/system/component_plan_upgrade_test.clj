@@ -3,6 +3,7 @@
    Uses a fresh fixture DB; no deployed database or external vault is accessed."
   (:require
     [cheshire.core :as json]
+    [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.editor.config-resolution :as resolution]
     [graphden.executor.compile-runtime :as cr]
@@ -72,7 +73,7 @@
                                       :value {:theme "retained"}})
         artifact (sp/create-entity storage :package-version
                                    {:name "upgrade.retained" :version "1.0.0" :ns-root "upgrade-owner"
-                                    :fns [] :dependencies {} :content-hash (apply str (repeat 64 "a"))
+                                    :fns [] :dependencies {} :content-hash (str/join (repeat 64 "a"))
                                     :org-id "upgrade-org" :public? false
                                     :secrets [{:path "fixture-only/retained" :fn-id (str (:id function))}]})]
     (mapv (fn [[entity row]] [entity (:id row) (sp/read-entity storage entity (:id row))])

@@ -179,7 +179,7 @@
         batches (ci-select/canonical-batches real-registry selected)
         first-names (mapv :name (first (:pre batches)))
         emitted (mapcat identity (mapcat batches [:affected :pre :priority :test :post-test]))]
-    (is (= ["clj-kondo" "splint" "cljstyle"] first-names))
+    (is (= ["clj-kondo" "splint" "native-inventory-selftest" "cljstyle"] first-names))
     (is (not-any? #{"compile-dev" "gitleaks"} first-names))
     (is (= (frequencies (map :name selected)) (frequencies (map :name emitted))))
     (doseq [check emitted]

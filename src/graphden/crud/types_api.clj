@@ -12,7 +12,6 @@
 
    Depends on `graphden.crud.request` for request context."
   (:require
-    [clojure.string :as str]
     [graphden.crud.graph-refs :as refs]
     [graphden.crud.request :as request]
     [graphden.executor.compile-runtime :as cr]

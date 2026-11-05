@@ -17,7 +17,8 @@
     [graphden.packages.records.types :as record-types]
     [graphden.types.check :as tcheck]
     [graphden.types.check.literals :as types-lit]
-    [graphden.types.core :as types]))
+    [graphden.types.core :as types]
+    [graphden.types.core.execution :as execution]))
 
 
 (defbase json-to-type-fn
@@ -85,24 +86,50 @@
   (types/fn-args type))
 
 
-(defbase fn-ns-index-fn
-  "Atomic library boundary over `types-api/candidate-ns-index` —
-   fn-id → `{:ns :ns-id}` for every visible fn, computed once per
-   request so the per-candidate callback grouping by namespace is a
-   map lookup."
+(defbase candidate-ns-facts
+  "Scoped acquisition boundary; formatting and selection live in the graph."
   []
   (cr/record-effect! :db)
-  (types-api/candidate-ns-index ctx))
+  (types-api/candidate-ns-facts ctx))
 
 
-(defbase describe-type-mismatch-fn
-  "Atomic library boundary over `types-api/describe-mismatch` —
-   one-line human-readable explanation of why `candidate` ⊄ `expected`.
-   Used by the editor's type-picker tooltip; admins can vary the
-   wording downstream by composing on top, but the dispatch cases
-   themselves are §3.3 algorithm."
+(defbase type-refined?
+  [type]
+  (boolean (types/refine-type? type)))
+
+
+(defbase type-primitive?
+  [type]
+  (boolean (types/primitive? type)))
+
+
+(defbase type-refinement
+  [type]
+  (types/refine-constraint type))
+
+
+(defbase type-execution-known?
+  [type]
+  (set? (types/fn-execution type)))
+
+
+(defbase type-execution-unknown?
+  [type]
+  (= :unknown (types/fn-execution type)))
+
+
+(defbase type-execution-profiles
+  "Canonical profile-set decoding. Non-concrete constraints have no members;
+   the separate known/unknown predicates preserve their distinction."
+  [type]
+  (let [profiles (types/fn-execution type)]
+    (if (set? profiles) (vec profiles) [])))
+
+
+(defbase type-execution-compatible?
+  "Canonical directional execution contract; no duplicate subtype policy."
   [expected candidate]
-  (types-api/describe-mismatch expected candidate))
+  (execution/compatible? (types/fn-execution candidate) (types/fn-execution expected)))
 
 
 (defbase classify-literal
@@ -285,8 +312,14 @@
    :fn-type? {:impl fn-type?-fn :taint-propagate? true}
    :fn-signature {:impl fn-signature :taint-propagate? true}
    :fn-type-args {:impl fn-type-args-fn :taint-propagate? true}
-   :fn-ns-index fn-ns-index-fn
-   :describe-type-mismatch {:impl describe-type-mismatch-fn :taint-propagate? true}
+   :_candidate-ns-facts candidate-ns-facts
+   :_type-refined? {:impl type-refined? :taint-propagate? true}
+   :_type-primitive? {:impl type-primitive? :taint-propagate? true}
+   :_type-refinement {:impl type-refinement :taint-propagate? true}
+   :_type-execution-known? {:impl type-execution-known? :taint-propagate? true}
+   :_type-execution-unknown? {:impl type-execution-unknown? :taint-propagate? true}
+   :_type-execution-profiles {:impl type-execution-profiles :taint-propagate? true}
+   :_type-execution-compatible? {:impl type-execution-compatible? :taint-propagate? true}
    :classify-literal {:impl classify-literal :taint-propagate? true}
    ;; each disagreement row echoes the offending leaf as `:actual`
    :diff-value-against-type {:impl diff-value-against-type :taint-propagate? true}

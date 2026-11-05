@@ -3,7 +3,7 @@
    `/api/types`, `/api/types/candidates` and `/api/types/usages` graph
    handlers call, plus the shared graph-cache loaders and role / rich-type derivations.
 
-   The pure helpers (`compute-fn-role`, `json->type`, `describe-mismatch`,
+   The pure helpers (`compute-fn-role`, `json->type`,
    `constraint-contains-type-ref?`) need no fixture;
    the rest go through the shared container. The endpoints' parse /
    validate stages and the candidates enumeration are graph fn-defs —
@@ -178,38 +178,6 @@
 
 
 ;; ============================================================================
-;; describe-mismatch — pure
-;; ============================================================================
-
-(deftest describe-mismatch-test
-  (testing ":any on either side has a dedicated message"
-    (is (re-find #"subtype of :any" (ta/describe-mismatch :any :int)))
-    (is (re-find #":any is not a subtype" (ta/describe-mismatch :int :any))))
-
-  (testing "refinement expected, plain candidate → constraint-missing message"
-    (is (re-find #"lacks the refinement constraint"
-                 (ta/describe-mismatch [:refine :int [:> 0]] :int))))
-
-  (testing "two primitives → primitive-subtype message"
-    (is (re-find #"not a primitive subtype"
-                 (ta/describe-mismatch :int :text))))
-
-  (testing "two fn-types → signature-mismatch message"
-    (is (re-find #"function signature mismatch"
-                 (ta/describe-mismatch [:fn {:x :int} :int]
-                                       [:fn {} :int]))))
-
-  (testing "two refinements with different constraints → constraints-differ"
-    (is (re-find #"refinement constraints differ"
-                 (ta/describe-mismatch [:refine :int [:> 0]]
-                                       [:refine :int [:> 5]]))))
-
-  (testing "mismatched type kinds fall through to the generic message"
-    (is (re-find #"is not a subtype of"
-                 (ta/describe-mismatch :int [:list :int])))))
-
-
-;; ============================================================================
 ;; constraint-contains-type-ref? — pure
 ;; ============================================================================
 
@@ -300,12 +268,3 @@
           (is (true? (:type-row? (get snap :rttr-rec))))
           (is (= "a record row" (:description (get snap :rttr-rec))))))
       (finally (sp/close storage)))))
-
-
-(deftest execution-mismatch-explains-browser-refusal
-  (is (= "Execution mismatch: requires Browser; callback has JVM."
-         (ta/describe-mismatch [:fn {} :int #{} #{:browser-main}]
-                               [:fn {} :int #{} #{:jvm-server}])))
-  (is (re-find #"no runtime proof"
-               (ta/describe-mismatch [:fn {} :int #{} #{:browser-main}]
-                                     [:fn {} :int #{} :unknown]))))

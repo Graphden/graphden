@@ -1,4 +1,4 @@
-(ns ^:integration graphden.crud.types-api-graph-test
+(ns ^:integration ^:serial graphden.crud.types-api-graph-test
   "Graph-path tests for `/api/types/candidates` + `/api/types/usages` +
    `/api/types/compatible`.
 
@@ -501,3 +501,133 @@
         (sp/delete-entity storage :ns (:id left))
         (sp/delete-entity storage :ns (:id hidden))
         (exec-ctx/invalidate-graph-cache! ctx ids)))))
+
+
+(deftest mismatch-graph-preserves-message-policy-test
+  (doseq [[expected candidate message]
+          [[:any :int "every type is a subtype of :any"]
+           [:int :any ":any is not a subtype of :int — :any can't narrow to a concrete type without an explicit cast"]
+           [[:refine :int [:> 0]] :int ":int lacks the refinement constraint required by [:refine :int [:> 0]]"]
+           [[:refine :int [:> 0]] [:refine :int [:> 5]] "refinement constraints differ — [:> 5] ≠ [:> 0]"]
+           [:int :text ":text is not a primitive subtype of :int"]
+           [[:fn {:x :int} :int] [:fn {} :int] "function signature mismatch — [:fn {} :int] is not a subtype of [:fn {:x :int} :int]"]
+           [:int [:list :int] "[:list :int] is not a subtype of :int"]
+           [[:fn {} :int #{} #{:browser-main}] [:fn {} :int #{} #{:jvm-server}]
+            "Execution mismatch: requires Browser; callback has JVM."]
+           [[:fn {} :int #{} #{:browser-main}] [:fn {} :int #{} :unknown]
+            "Execution mismatch: requires Browser; callback has unknown execution (no runtime proof)."]
+           [[:fn {} :int #{} #{:browser-main :jvm-server}] [:fn {} :int #{} #{}]
+            "Execution mismatch: requires Browser + JVM; callback has no proven runtime."]
+           [[:fn {} :int #{} #{:browser-main}] [:fn {} :int #{} [:execution-var 'execution]]
+            "Execution mismatch: requires Browser; callback has inferred execution (not yet proven)."]]]
+    (let [actual (gh/exec-name :describe-type-mismatch {:expected expected :candidate candidate})]
+      (is (= message actual) (str expected " / " candidate)))))
+
+
+(deftest namespace-index-graph-conceals-and-acquires-once-test
+  (let [{:keys [storage ctx]} *graph*
+        ns-row (sp/create-entity storage :ns {:name (gh/uniq "index-ns")})
+        hidden-ns (sp/create-entity storage :ns {:name (gh/uniq "index-hidden-ns")})
+        visible (sp/create-entity storage :fn {:name (gh/uniq "index-visible")
+                                               :namespace-id (:id ns-row)})
+        concealed (sp/create-entity storage :fn {:name (gh/uniq "index-hidden")
+                                                 :namespace-id (:id hidden-ns)})
+        root (sp/create-entity storage :fn {:name (gh/uniq "index-root")})
+        acquire ta/candidate-ns-facts
+        acquired (atom nil)
+        calls (atom 0)
+        ids (mapv :id [visible concealed root])]
+    (try
+      (exec-ctx/invalidate-graph-cache! ctx ids)
+      (binding [tenancy/*seams-override*
+                (atom {:graph-read-filter-fn
+                       (fn [graph]
+                         (is (some #(= (:id ns-row) (:id %)) (:namespaces graph))
+                             "ACL receives the acquired namespace snapshot")
+                         (update graph :fns
+                                 (fn [rows]
+                                   (filterv (fn [row] (not= (:id concealed) (:id row))) rows))))})]
+        (with-redefs [ta/candidate-ns-facts (fn [context]
+                                              (swap! calls inc)
+                                              (reset! acquired (acquire context)))]
+          (let [result (gh/exec-name :fn-ns-index {})]
+            (is (= {:ns (:name ns-row) :ns-id (str (:id ns-row))}
+                   (get result (:id visible))))
+            (is (not (contains? result (:id concealed))))
+            (is (not (contains? result (:id root))))
+            (is (= 1 @calls) "the HOF callback shares one acquired input")
+            (is (= (:name ns-row) (get-in @acquired [:paths (:id ns-row)])))
+            (is (not (contains? (:paths @acquired) (:id hidden-ns)))
+                "callable facts do not expose hidden-only namespace paths")
+            (is (every? #(= #{:id :namespace-id} (set (keys %))) (:rows @acquired))
+                "raw row content cannot escape through the facts primitive"))))
+      (finally
+        (doseq [id ids] (sp/delete-entity storage :fn id))
+        (sp/delete-entity storage :ns (:id ns-row))
+        (sp/delete-entity storage :ns (:id hidden-ns))
+        (exec-ctx/invalidate-graph-cache! ctx ids)))))
+
+
+(defn- check-stored-type-presentation!
+  []
+  (let [{:keys [storage all-name->id]} *graph*]
+    (doseq [nm [:_candidate-ns-id :_candidate-ns-present? :_candidate-ns-all-rows
+                :_candidate-ns-rows :_candidate-ns-paths :_candidate-ns-path
+                :_candidate-ns-has-path? :_candidate-ns-id-text :_candidate-ns-id-value
+                :_candidate-ns-named-value :_candidate-ns-value :_candidate-ns-key
+                :_candidate-ns-keys :_candidate-ns-values :fn-ns-index
+                :_type-profile-browser? :_type-profile-jvm? :_type-profile-label
+                :_type-execution-is-unknown? :_type-execution-is-known? :_type-execution-profile-values
+                :_type-execution-empty? :_type-profile-labels :_type-profile-labels-sorted
+                :_type-profile-labels-joined :_type-execution-known-label :_type-execution-label
+                :_mismatch-execution-signatures :_mismatch-execution-labels
+                :_mismatch-expected-text :_mismatch-expected-refined? :_mismatch-expected-primitive?
+                :_mismatch-expected-fn? :_mismatch-expected-constraint :_mismatch-expected-execution
+                :_mismatch-expected-constraint-text :_mismatch-candidate-text :_mismatch-candidate-refined?
+                :_mismatch-candidate-primitive? :_mismatch-candidate-fn? :_mismatch-candidate-constraint
+                :_mismatch-candidate-execution :_mismatch-candidate-constraint-text :_mismatch-expected-any?
+                :_mismatch-candidate-any? :_mismatch-candidate-any-text :_mismatch-candidate-unrefined?
+                :_mismatch-missing-refinement? :_mismatch-missing-refinement-text :_mismatch-constraints-differ?
+                :_mismatch-different-refinement? :_mismatch-different-refinement-text :_mismatch-primitive-pair?
+                :_mismatch-primitive-text :_mismatch-execution-compatible? :_mismatch-execution-incompatible?
+                :_mismatch-execution-pair? :_mismatch-execution-text :_mismatch-callable-pair?
+                :_mismatch-callable-text :_mismatch-generic-text :describe-type-mismatch]]
+      (let [id (get all-name->id nm)]
+        (is (some? (tc/reconstruct-fn-def storage id)))
+        (is (nil? (tc/type-check-fn-after-mutation! storage id)) (str nm))))
+    (doseq [[nm args effects result]
+            [[:fn-ns-index {} #{:db} [:map :uuid :keyword-map]]
+             [:describe-type-mismatch {:expected :type-expression :candidate :type-expression}
+              #{} :text]]]
+      (let [rich (registry/rich-type-of-id (get all-name->id nm))]
+        (is (= (update-vals args types/resolve-alias) (:args rich)) (str nm))
+        (is (= effects (:effects rich)) (str nm))
+        (is (types/subtype? (:return rich) result) (str nm))))))
+
+
+(deftest migrated-type-presentation-stored-contract-test
+  (check-stored-type-presentation!))
+
+
+(deftest mismatch-secret-ingress-is-rejected-test
+  (check-stored-type-presentation!)
+  (let [source (keyword (gh/uniq "secret-mismatch-input"))]
+    (registry/record-rich-types! source {:args {} :return-type [:secret :type-expression]})
+    (doseq [slot [:expected :candidate]]
+      (is (thrown? clojure.lang.ExceptionInfo
+            (check/check-fn-def! {:name (keyword (gh/uniq "secret-mismatch"))
+                                  :parent :describe-type-mismatch
+                                  :args (assoc {:expected {:value :int} :candidate {:value :text}}
+                                               slot {:ref source})}))))))
+
+
+(deftest namespace-index-empty-and-pathless-parity-test
+  (with-redefs [ta/candidate-ns-facts (constantly {:rows [] :paths {}})]
+    (is (= {} (gh/exec-name :fn-ns-index {}))))
+  (let [id (random-uuid)
+        ns-id (random-uuid)]
+    (with-redefs [ta/candidate-ns-facts
+                  (constantly {:rows [{:id id :namespace-id ns-id}]
+                               :paths {}})]
+      (is (= {id {:ns-id (str ns-id)}} (gh/exec-name :fn-ns-index {}))
+          "missing namespace tables/paths retain identity, without inventing a path"))))

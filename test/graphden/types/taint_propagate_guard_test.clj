@@ -132,7 +132,7 @@
     :deploy-config
     :current-org-id :current-slot-value :current-time-ms :declarable-effect-categories
     :decode-row :delete-branch! :delete-entity :revive-entity :deref
-    :describe-type-mismatch :detect-conflicts :diff-branches
+    :_type-refined? :_type-primitive? :_type-refinement :_type-execution-known? :_type-execution-unknown? :_type-execution-profiles :_type-execution-compatible? :detect-conflicts :diff-branches
     ;; _diff-view-input returns previews of user-authored binding
     ;; values — same read-projection class as :diff-branches.
     :_diff-affected-facts :_diff-view-input
@@ -146,7 +146,7 @@
     :filter :filter-xf :find-first :fn-signature :fn-type? :first :fix :flatten
     ;; Callable argument projection derives from the supplied type expression.
     ;; Namespace paths come from the scoped graph snapshot.
-    :fn-type-args :fn-ns-index
+    :fn-type-args :_candidate-ns-facts
     :fn-names-with-tag :fn-return-type :form-decode :fn-stats-raw :fn-type-bound-effects
     :fork-package-fns
     :free-arg-entries :free-arg-slot-map :free-memory :future :get :get-entity
@@ -266,7 +266,7 @@
     :_ui-components-create-preview :_ui-components-create-apply
     :save-explorer-view
     ;; Wide-slot audit: conservatively propagate every content-derived result.
-    :_apply-create-list-type-body :_apply-create-record-type-body :_apply-create-record-type-rollback :_apply-inline-bind-body :_apply-secret-rollback :_apply-update-record-type-body :_apply-update-record-type-rollback :_execute-apply :_layout-build-apply :_layout-place-apply :_layout-strip-facts-apply :_layout-literal-reprs-apply :_parse-layout-body :_rotate-secret-not-owned? :_seq-append-load-binding :_seq-move-load-item :_seq-update-load-item :_tests-run-apply :_tests-status-apply :approvals-report :authenticate-request :_compat-fn-changes :_compat-local-name :branch-lint-raw-findings :brotli-bytes :build-form :byte-count :fn-type-args :classify-literal :closed-enum-of :count-tour-event! :count-tour-step! :count-valid-approvals :create-entity :cron-fire-after :decode-row :describe-type-mismatch :diff-value-against-type :dispatch-to-branch :error-boundary-wrap :extract-entity-params :fix :fn-type-bound-effects :gzip-bytes :json-to-type :merge-branch! :middleware :missing-package-dependencies :package-version-materialized? :pg-execute :pg-query :pg-tx :pkg-delete-guard-reason :pkg-write-guard-reason :platform-owned-def? :publish-package-apply :query-entities :query-param :realize-request-body :resolve-fn :resolve-form :ring-create-default-handler :ring-handler :ring-router :secret-path-args :set-branch-archived! :set-branch-require-merge! :set-branch-review-policy! :set-review-state! :slot-shaped-type-row? :sql-exec :sql-query :sse-stream :storage-query-identities :stringify-response-headers :strip-hidden-impl :strip-secret-paths :subtype? :sync-fn-defs-branch! :try-apply-create :try-apply-seq-append :try-apply-seq-move :try-apply-seq-update :try-apply-tighten :try-apply-update :update-entity :utf8-bytes :viewer-path-trace :write-rej
+    :_apply-create-list-type-body :_apply-create-record-type-body :_apply-create-record-type-rollback :_apply-inline-bind-body :_apply-secret-rollback :_apply-update-record-type-body :_apply-update-record-type-rollback :_execute-apply :_layout-build-apply :_layout-place-apply :_layout-strip-facts-apply :_layout-literal-reprs-apply :_parse-layout-body :_rotate-secret-not-owned? :_seq-append-load-binding :_seq-move-load-item :_seq-update-load-item :_tests-run-apply :_tests-status-apply :approvals-report :authenticate-request :_compat-fn-changes :_compat-local-name :branch-lint-raw-findings :brotli-bytes :build-form :byte-count :fn-type-args :classify-literal :closed-enum-of :count-tour-event! :count-tour-step! :count-valid-approvals :create-entity :cron-fire-after :decode-row :_type-refined? :_type-primitive? :_type-refinement :_type-execution-known? :_type-execution-unknown? :_type-execution-profiles :_type-execution-compatible? :diff-value-against-type :dispatch-to-branch :error-boundary-wrap :extract-entity-params :fix :fn-type-bound-effects :gzip-bytes :json-to-type :merge-branch! :middleware :missing-package-dependencies :package-version-materialized? :pg-execute :pg-query :pg-tx :pkg-delete-guard-reason :pkg-write-guard-reason :platform-owned-def? :publish-package-apply :query-entities :query-param :realize-request-body :resolve-fn :resolve-form :ring-create-default-handler :ring-handler :ring-router :secret-path-args :set-branch-archived! :set-branch-require-merge! :set-branch-review-policy! :set-review-state! :slot-shaped-type-row? :sql-exec :sql-query :sse-stream :storage-query-identities :stringify-response-headers :strip-hidden-impl :strip-secret-paths :subtype? :sync-fn-defs-branch! :try-apply-create :try-apply-seq-append :try-apply-seq-move :try-apply-seq-update :try-apply-tighten :try-apply-update :update-entity :utf8-bytes :viewer-path-trace :write-rej
     :round :ui-pref-write! :ui-pref-compare-write! :url-encode :moderate-package-version! ; marketplace: answer caller content
     ;; registry: the pick / store / import filters echo caller content
     :semver-pick :mirror-store-package-version! :drop-orphan-anon-defs

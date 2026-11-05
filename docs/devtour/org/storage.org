@@ -170,13 +170,13 @@ Implements reachable-graph resolution using generic row loaders and [[file:gloss
 :PROPERTIES:
 :CUSTOM_ID: storage/PostgresStorage
 :FILE: src/graphden/storage/postgres/core.clj
-:LINE: 137
+:LINE: 125
 :MINS: 12.9
 :END:
 
 Implements the storage [[file:glossary.org::#term/protocol][protocols]] for PostgreSQL, mostly by delegating each method to a helper. Its ~ExecutionGraph~ implementation selects the optimized PostgreSQL resolver rather than the generic traversal. Read the [[file:glossary.org::#term/protocol][protocol]] headings to distinguish lifecycle, row operations, constraints, and graph resolution.
 
-- source :: [[file:../../../src/graphden/storage/postgres/core.clj::(defrecord PostgresStorage][src/graphden/storage/postgres/core.clj:137]]
+- source :: [[file:../../../src/graphden/storage/postgres/core.clj::(defrecord PostgresStorage][src/graphden/storage/postgres/core.clj:125]]
 
 * 14. do-initialize
 :PROPERTIES:

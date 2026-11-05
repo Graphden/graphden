@@ -65,8 +65,8 @@
   "Core-owned access metadata and a secret declaration are preservation
    sentinels. Private tenancy grant tables require their own addon coverage."
   [storage]
-  (let [namespace (sp/create-entity storage :ns {:name "upgrade-owner" :org-id "upgrade-org"})
-        function (sp/create-entity storage :fn {:name "retained" :namespace-id (:id namespace)
+  (let [namespace-row (sp/create-entity storage :ns {:name "upgrade-owner" :org-id "upgrade-org"})
+        function (sp/create-entity storage :fn {:name "retained" :namespace-id (:id namespace-row)
                                                 :parent-ids [] :org-id "upgrade-org"})
         preference (sp/create-entity storage :ui-pref
                                      {:owner-id "upgrade-owner" :key "theme" :org-id "upgrade-org"
@@ -77,7 +77,7 @@
                                     :org-id "upgrade-org" :public? false
                                     :secrets [{:path "fixture-only/retained" :fn-id (str (:id function))}]})]
     (mapv (fn [[entity row]] [entity (:id row) (sp/read-entity storage entity (:id row))])
-          [[:ns namespace] [:fn function] [:ui-pref preference] [:package-version artifact]])))
+          [[:ns namespace-row] [:fn function] [:ui-pref preference] [:package-version artifact]])))
 
 
 (defn- assert-new-plan!

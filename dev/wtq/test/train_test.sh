@@ -704,24 +704,7 @@ check "one gate ran" eq "$(gates)" lr
 check "red candidate did not land" eval '! on_develop LINTFAIL'
 check "queue is removed after final red" eval '! queued lr'
 
-echo "== wt test yields to a live heavy phase, ignores a stale one"
-new_world yield
-export WTQ_KAOCHA="echo KAOCHA-RAN"
-feature y1 y1.txt x
-sleep 300 & live=$!
-printf 'phase=bb test-e2e\npid=%s\n' "$live" > "$Q/gate-heavy"
-( cd "$WTQ_ROOT/y1" && exec ./dev/wtq/wt test --focus some.ns ) > "$T/test.out" 2>&1 &
-tpid=$!
-sleep 2
-check "waits while the marker's gate is alive" eval "! grep -q KAOCHA-RAN '$T/test.out'"
-check "and says why" grep -q 'heavy phase (bb test-e2e)' "$T/test.out"
-kill "$live"; wait "$live" 2>/dev/null || true
-wait "$tpid"
-check "runs once the marker's pid is gone (stale)" grep -q 'KAOCHA-RAN --focus some.ns' "$T/test.out"
-printf 'phase=bb test-e2e\npid=999999\n' > "$Q/gate-heavy"
-out="$( (cd "$WTQ_ROOT/y1" && timeout 10 ./dev/wtq/wt test x) 2>&1 )"
-check "a stale marker never blocks" grep -q 'KAOCHA-RAN x' <<<"$out"
-unset WTQ_KAOCHA
+bash "$SRC/test/admission_test.sh"
 
 echo
 echo "train_test: $PASS passed, $FAIL failed"

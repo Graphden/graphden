@@ -93,9 +93,33 @@
 
 (deftest related-tests-precede-full-suites-even-after-a-retry-reorders-stages
   (let [ordered ["integration" "e2e" "visual" "priority" "build" "ci"]]
-    (is (= ["ci" "build" "visual" "priority" "integration" "e2e"]
+    (is (= ["ci" "build" "priority" "visual" "integration" "e2e"]
            (resume/stage-dependencies ordered)))
     (is (= (frequencies ordered) (frequencies (resume/stage-dependencies ordered))))))
+
+
+(deftest priority-order-preserves-receipts-and-all-selected-stages
+  (doseq [[roster expected]
+          [[["ci" "build" "visual" "priority" "e2e" "integration" "fleet"]
+            ["ci" "build" "priority" "visual" "e2e" "integration" "fleet"]]
+           [["e2e" "integration" "priority" "visual" "build" "ci"]
+            ["ci" "build" "priority" "visual" "e2e" "integration"]]
+           [["visual" "priority" "ci" "integration"]
+            ["ci" "priority" "visual" "integration"]]
+           [["visual" "e2e" "build" "ci"]
+            ["ci" "build" "visual" "e2e"]]]]
+    (let [dir (fs/create-temp-dir)
+          path (str (fs/path dir "stages.edn"))
+          prior (assoc (hint roster (repeat :passed)) :kind "stages" :sha sha)]
+      (try
+        (let [run (resume/begin! path "stages" sha roster prior true)
+              receipt (report/read-report path)]
+          (is (= (frequencies roster) (frequencies (:roster receipt))))
+          (is (= expected (:roster receipt)))
+          (is (= (zipmap roster (repeat :passed)) (:status receipt)))
+          (is (= (set roster) (set (:credited run))))
+          (is (= expected (resume/stage-dependencies expected))))
+        (finally (fs/delete-tree dir))))))
 
 
 (deftest standalone-retry-is-automatic-and-rejects-rewritten-history

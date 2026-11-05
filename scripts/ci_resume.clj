@@ -107,7 +107,7 @@
 
 
 (defn stage-dependencies
-  "Keep CI and short visual checks first, then related tests before full tails."
+  "Keep CI/build producers first, related tests before visual, then full tails."
   [ordered]
   (let [ordered (if (some #{"ci"} ordered)
                   (into ["ci"] (remove #{"ci"}) ordered)
@@ -120,11 +120,11 @@
                      (cond
                        (#{"e2e" "integration" "fleet"} stage)
                        (cond-> [] build? (conj "build")
-                               (and visual? priority?) (conj "visual")
-                               priority? (conj "priority") true (conj stage))
-                       (= "visual" stage) (cond-> [] build? (conj "build") true (conj stage))
-                       (= "priority" stage) (cond-> [] build? (conj "build")
-                                                    visual? (conj "visual") true (conj stage))
+                               priority? (conj "priority")
+                               (and visual? priority?) (conj "visual") true (conj stage))
+                       (= "visual" stage) (cond-> [] build? (conj "build")
+                                                  priority? (conj "priority") true (conj stage))
+                       (= "priority" stage) (cond-> [] build? (conj "build") true (conj stage))
                        :else [stage]))
                    ordered)))))
 

@@ -12,8 +12,7 @@
 {:namespace "app.test-api"
  :description "Tests API: POST /api/tests/run (run the branch's tests through the execute pipeline), GET /api/tests/status (per-test latest status of the current version) and the SSE ping stream the editor's ✓ tests lens re-primes on."
  :fns
- [
-  {:name :_test-fact
+ [{:name :_test-fact
    :type {:id :uuid :name :text :namespace-id :nullable-uuid :platform? :bool}}
   {:name :_tests-status-batch
    :type {:tests [:list :_test-fact] :statuses [:map :uuid :keyword-map]}}
@@ -133,7 +132,7 @@
                                       :else nil}}}}
           :key {:value :platform?}
           :value {:parent :get :args {:coll {:as :test-row :type :_test-fact}
-                                     :key {:value :platform?} :default false}}}}
+                                      :key {:value :platform?} :default false}}}}
   {:name :_tests-status-apply
    :description "Graph display join over one scoped test/status batch; absent status means the current version has never run."
    :parent :map

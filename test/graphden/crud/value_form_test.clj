@@ -1,5 +1,5 @@
 (ns graphden.crud.value-form-test
-  "Canonical type matching, refinement interpretation and storage resolvers.
+  "Canonical slot navigation and storage resolvers.
    Registry parsing uses a minimal real graph; construction and presentation
    policy is covered through app.forms in value-form-graph-test."
   (:require
@@ -17,15 +17,11 @@
 
 
 ;; Private resolver internals exercised directly.
-(def ^:private collect-bounds     #'vf/collect-bounds)
-(def ^:private numeric-bounds     #'vf/numeric-bounds)
-(def ^:private enum-of            #'vf/enum-of)
 (def ^:private nav-descend        #'vf/nav-descend)
 (def ^:private nav-key-type       #'vf/nav-key-type)
 (def ^:private nav-item-type      #'vf/nav-item-type)
 (def ^:private item-key           #'vf/item-key)
 (def ^:private current-value      #'vf/current-value)
-(def ^:private value-fits?        #'vf/value-fits?)
 (def ^:private registry-pairs     #'vf/registry-pairs)
 (def ^:private inheritance-chain-info #'vf/inheritance-chain-info)
 
@@ -58,127 +54,6 @@
           (is (= (:name c) (:name (get fn-map (:id c))))
               "cached row carries the real fields (batched read populated it)"))
         (finally (sp/close storage))))))
-
-
-;; ============================================================================
-;; pick-form-fn — registry dispatch by subtype, most-specific wins
-;; ============================================================================
-
-(def ^:private registry
-  [[:text "_form-text"] [:int "_form-number"]
-   [:numeric "_form-number"] [:any "_form-json"]])
-
-
-(deftest pick-form-fn-test
-  (testing "the most-specific accepting type wins over wider supertypes"
-    (is (= "_form-number" (vf/pick-form-fn registry :int)))
-    (is (= "_form-text" (vf/pick-form-fn registry :text))))
-  (testing "a refinement dispatches via its base type"
-    (is (= "_form-number" (vf/pick-form-fn registry [:refine :int [:> 0]]))))
-  (testing "no specific match falls through to the :any entry"
-    (is (= "_form-json" (vf/pick-form-fn registry :bool))))
-  (testing "an empty registry yields nil"
-    (is (nil? (vf/pick-form-fn [] :int)))))
-
-
-(deftest pick-form-fn-marker-typed-slot-test
-  ;; A hide-result marker type dispatches to the secret-binding
-  ;; widget via a VECTOR registry key — [:secret :any] accepts any
-  ;; [:secret T] leaf and outranks the :any fallback. The editor JS
-  ;; routes purely on the widget name in the response; no tag names
-  ;; live client-side.
-  (let [reg [[:text "_form-text"] [:any "_form-json"]
-             [[:secret :any] "_form-secret-binding"]]]
-    (is (= "_form-secret-binding" (vf/pick-form-fn reg [:secret :text]))
-        "marker leaf picks the widget row over :any")
-    (is (= "_form-text" (vf/pick-form-fn reg :text))
-        "plain text unaffected")))
-
-
-(deftest exact-form-fn-test
-  ;; The pre-decomposition tier: a form-fn registered for a whole
-  ;; composite type (the hiccup-node union) wins over structural
-  ;; decomposition — but ONLY on exact structural equality, so the
-  ;; generic :any / :jsonb rows can never swallow record / union
-  ;; editors.
-  (let [hiccup-union [:union :null :text :int :float :bool [:list :any]]
-        reg [[:text "_form-text"] [:any "_form-json"]
-             [hiccup-union "_form-hiccup"]]]
-    (testing "the exact composite row matches"
-      (is (= "_form-hiccup" (vf/exact-form-fn reg hiccup-union))))
-    (testing "a member-order permutation still matches — the rich-types
-              registry canonicalizes unions in sorted order"
-      (is (= "_form-hiccup"
-             (vf/exact-form-fn reg [:union :bool :float :int :null :text
-                                    [:list :any]]))))
-    (testing "a merely-compatible type does NOT match — no subtype fallback"
-      (is (nil? (vf/exact-form-fn reg [:union :null :text])))
-      (is (nil? (vf/exact-form-fn reg {:host :text}))))
-    (testing "generic rows only match themselves"
-      (is (= "_form-json" (vf/exact-form-fn reg :any)))
-      (is (nil? (vf/exact-form-fn [[:any "_form-json"]] [:union :int :text]))))))
-
-
-(deftest pick-form-fn-js-source-prefers-textarea-over-text-input-test
-  ;; Block 3.3 — when a slot declares `:js-source`, the registry's
-  ;; `js-source -> _form-js-source` entry must outrank the wider
-  ;; `text -> _form-text` entry. Pin this here so a future
-  ;; registry reorder / rename doesn't silently downgrade JS-body
-  ;; editing to a single-line input.
-  (let [reg [[:text "_form-text"] [:js-source "_form-js-source"]]]
-    (is (= "_form-js-source" (vf/pick-form-fn reg :js-source))
-        "the textarea widget wins for the dedicated alias")
-    (is (= "_form-text" (vf/pick-form-fn reg :text))
-        "the single-line widget still wins for plain :text")))
-
-
-;; ============================================================================
-;; collect-bounds / numeric-bounds — refinement → HTML min/max
-;; ============================================================================
-
-(deftest collect-bounds-test
-  (testing "inclusive bounds pass through"
-    (is (= {:min 1} (collect-bounds [:>= 1] true)))
-    (is (= {:max 100} (collect-bounds [:<= 100] true))))
-  (testing "exclusive bounds nudge by one for an integer base"
-    (is (= {:min 1} (collect-bounds [:> 0] true)))
-    (is (= {:max 99} (collect-bounds [:< 100] true))))
-  (testing "exclusive bounds pass through unchanged for a real base"
-    (is (= {:min 0} (collect-bounds [:> 0] false)))
-    (is (= {:max 100} (collect-bounds [:< 100] false))))
-  (testing "an :and constraint collects both ends"
-    (is (= {:min 1 :max 65535}
-           (collect-bounds [:and [:>= 1] [:<= 65535]] true))))
-  (testing "non-range constraints contribute nothing"
-    (is (= {} (collect-bounds [:= 5] true)))
-    (is (= {} (collect-bounds [:in [1 2 3]] true)))
-    (is (= {} (collect-bounds :not-a-vector true)))))
-
-
-(deftest numeric-bounds-test
-  (testing "a bounded integer refinement yields min + max"
-    (is (= {:min 1 :max 65535}
-           (numeric-bounds [:refine :int [:and [:>= 1] [:<= 65535]]]))))
-  (testing "a non-numeric base yields nil"
-    (is (nil? (numeric-bounds [:refine :text [:= "x"]]))))
-  (testing "a plain type (not a refinement) yields nil"
-    (is (nil? (numeric-bounds :int))))
-  (testing "a refinement with no range bounds yields nil"
-    (is (nil? (numeric-bounds [:refine :int [:in [1 2]]])))))
-
-
-;; ============================================================================
-;; enum-of — closed-enum detection
-;; ============================================================================
-
-(deftest enum-of-test
-  (testing "a closed-enum refinement is recognised"
-    (is (= {:base :keyword :members [:get :post]}
-           (enum-of [:refine :keyword [:in [:get :post]]]))))
-  (testing "a non-:in refinement is not an enum"
-    (is (nil? (enum-of [:refine :int [:> 0]]))))
-  (testing "a plain type is not an enum"
-    (is (nil? (enum-of :int)))))
 
 
 ;; ============================================================================
@@ -276,22 +151,6 @@
       (testing "an unbound free-arg (no ids) has no current value"
         (is (nil? (current-value storage {}))))
       (finally (sp/close storage)))))
-
-
-;; ============================================================================
-;; value-fits? — union active-branch picker
-;; ============================================================================
-
-(deftest value-fits?-test
-  (testing "a literal fits a branch it is a subtype of"
-    (is (true? (boolean (value-fits? 5 :int))))
-    (is (true? (boolean (value-fits? "x" :text)))))
-  (testing "a literal does not fit an unrelated branch"
-    (is (not (value-fits? "x" :int))))
-  (testing "a nil value fits any branch (caller falls back to branch 0)"
-    (is (true? (boolean (value-fits? nil :int)))))
-  (testing "a literal satisfying a refinement fits it"
-    (is (true? (boolean (value-fits? 8080 [:refine :int [:and [:>= 1] [:<= 65535]]]))))))
 
 
 ;; ============================================================================

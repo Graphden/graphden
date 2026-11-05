@@ -753,7 +753,7 @@
                          :coll {:parent :get
                                 :args {:coll {:as :items-by-arg :type [:map :uuid [:list :keyword-map]]}
                                        :key {:parent :get :args {:coll {:as :arg-row :type :keyword-map}
-                                                                :key {:value :id} :default nil}}
+                                                                 :key {:value :id} :default nil}}
                                        :default {:value []}}}}}}}
   {:name :_execution-args
    :parent :map
@@ -766,7 +766,7 @@
    :parent :get
    :args {:coll {:as :fn-ids :type [:map :uuid :nullable-uuid]}
           :key {:parent :get :args {:coll {:as :child :type :keyword-map}
-                                   :key {:value :fn-version-id} :default nil}}
+                                    :key {:value :fn-version-id} :default nil}}
           :default nil}}
   {:name :_execution-child
    :parent :zipmap :lambda-params [:child]

@@ -405,16 +405,16 @@
    :parent :assert-eq
    :args {:actual {:parent :_failure-counts-sorted
                    :args {:rows {:value [{:fn-id #uuid "00000000-0000-0000-0000-000000000001"
-                                         :fn-name "first" :namespace-id nil}
-                                        {:fn-id #uuid "00000000-0000-0000-0000-000000000002"
-                                         :fn-name nil :namespace-id nil}
-                                        {:fn-id #uuid "00000000-0000-0000-0000-000000000001"
-                                         :fn-name "first" :namespace-id nil}]}}}
+                                          :fn-name "first" :namespace-id nil}
+                                         {:fn-id #uuid "00000000-0000-0000-0000-000000000002"
+                                          :fn-name nil :namespace-id nil}
+                                         {:fn-id #uuid "00000000-0000-0000-0000-000000000001"
+                                          :fn-name "first" :namespace-id nil}]}}}
           :expected {:value [{:fn-id #uuid "00000000-0000-0000-0000-000000000001"
-                             :fn-name "first" :namespace-id nil :count 2}
-                            {:fn-id #uuid "00000000-0000-0000-0000-000000000002"
-                             :fn-name "00000000-0000-0000-0000-000000000002"
-                             :namespace-id nil :count 1}]}}}
+                              :fn-name "first" :namespace-id nil :count 2}
+                             {:fn-id #uuid "00000000-0000-0000-0000-000000000002"
+                              :fn-name "00000000-0000-0000-0000-000000000002"
+                              :namespace-id nil :count 1}]}}}
 
   {:name :stylesheet-route-is-a-get-route-at-its-path
    :description "`:stylesheet-route` mounts a GET route at `:path`."

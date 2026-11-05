@@ -130,7 +130,7 @@
         original-parse @#'bundle/parse
         original-sql jdbc/execute!
         original-check check/check-fn-def!
-        original-failure creation/failure-response
+        original-failure creation/failure-facts
         original-shield shield/run!
         watched [[#'creation/plan :plan] [#'creation/create! :create] [#'creation/publish :publish]]
         wrappers (into
@@ -157,7 +157,7 @@
                       (when (identical? owner (Thread/currentThread))
                         (swap! metrics update :caller-type-checks inc))
                       (apply original-check args))
-                    #'creation/failure-response
+                    #'creation/failure-facts
                     (fn [error]
                       (swap! metrics assoc :failure
                              (select-keys (ex-data error) [:type :reason :http-status]))

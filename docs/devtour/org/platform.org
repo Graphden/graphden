@@ -97,7 +97,7 @@ Borrows an external PostgreSQL connection from an executor-owned bounded pool. O
 Sanitizes graph-authored [[file:glossary.org::#term/hiccup][Hiccup]] before it enters the editor [[file:glossary.org::#term/hiccup][DOM]]. It allows selected tags and attributes, limits depth and node count, and converts unsupported content to safe text where possible. Unrepresentable output returns nil.
 
 - source :: [[file:../../../src/graphden/web/hiccup_sanitize.clj::(defn sanitize-hiccup][src/graphden/web/hiccup_sanitize.clj:116]]
-- see also :: [[file:crud.org::#crud/render-repr][render-repr]]
+- see also :: [[file:crud.org::#crud/render-value-repr][render-value-repr]]
 
 * 8. count!
 :PROPERTIES:

@@ -73,7 +73,7 @@
                    {:parent :gte :args {:nums [{:parent :coalesce :args {:value :_live-row-seen :default 0}} :_live-cutoff]}}]}}
   {:name :_live-rank-value :parent :list
    :args {:items [{:parent :if :args {:test {:parent :equal? :args {:a :_live-row-executor :b :_live-self}}
-                                    :then 0 :else 1}}
+                                      :then 0 :else 1}}
                   {:parent :neg :args {:number {:parent :coalesce :args {:value :_live-row-seen :default 0}}}}]}}
   {:name :_live-rank :parent :vec :lambda-params [:row]
    :args {:coll :_live-rank-value}}
@@ -92,10 +92,10 @@
    :description "Prefer this executor's fresh listener, then newest heartbeat. A winning row without host yields nil; it does not retry another row."
    :parent :if
    :args {:test {:parent :and :args {:values [{:parent :some? :args {:value :_live-host}}
-                                            {:parent :some? :args {:value :_live-port}}]}}
+                                              {:parent :some? :args {:value :_live-port}}]}}
           :then {:parent :zipmap :args {:keys [{:value :host} {:value :port} {:value :url}]
-                                       :vals [{:parent :assert-some :args {:value :_live-host}}
-                                              {:parent :assert-some :args {:value :_live-port}} :_live-url]}}
+                                        :vals [{:parent :assert-some :args {:value :_live-host}}
+                                               {:parent :assert-some :args {:value :_live-port}} :_live-url]}}
           :else nil}
    :return-type [:union :null :service-endpoint-shape]}
 

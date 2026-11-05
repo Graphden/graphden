@@ -218,11 +218,11 @@
              {:name "b" :n 2 :extra nil}]
           f (succeeded-body v)]
       (is (tree-string-containing f "repr-record-table")
-          (str "DIAG dt=" (pr-str (vrepr/dispatch-type nil v))
+          (str "DIAG dt=" (pr-str (vrepr/runtime-repr-type v))
                " pairs=" (pr-str (vform/registry-pairs
                                    harness/*context* "_value-repr-registry"))
-               " direct=" (pr-str (try (vrepr/render-repr
-                                         harness/*context* v nil)
+               " direct=" (pr-str (try (exec/execute-by-name harness/*context* "render-value-repr"
+                                                             {:value v :fn-id nil})
                                        (catch Exception e (ex-message e))))))
       (is (in-tree? f "th") "header cells present")
       (is (in-tree? f "name") "column from record keys")
@@ -387,6 +387,38 @@
     (is (= (:edges values) (:edges rendered)))))
 
 
+(deftest preview-selection-is-shared-and-failed-renders-consume-budget
+  (let [color-id (harness/fn-id "color")
+        color-row (sp/read-entity harness/*storage* :fn color-id)
+        type-rows (vals (type-check/chain-fns-by-id harness/*storage* color-row))
+        owner (random-uuid)
+        slot (random-uuid)
+        graph {:fns (conj (vec type-rows) {:id owner})
+               :slots [{:id slot :type-fn-id color-id}]
+               :bindings []}
+        node (fn [v]
+               {:data {:type "arg" :value v
+                       :fnId (str owner) :slotId (str slot)}})
+        nodes (mapv #(node (format "#%06x" %)) (range 65))
+        selected (atom [])
+        rendered (atom [])
+        selector (fn [dispatch]
+                   (swap! selected conj dispatch)
+                   "_repr-color")]
+    (with-redefs [vrepr/render-selected-repr
+                  (fn [_ target value]
+                    (swap! rendered conj [target value])
+                    (throw (ex-info "render failed" {})))]
+      (let [result (vrepr/literal-preview-entries
+                     harness/*context*
+                     {:nodes (into [(first nodes)] nodes)} graph selector)]
+        (is (= 66 (count result)))
+        (is (every? (comp nil? :repr) result))
+        (is (= 1 (count @selected)) "one selection per canonical type")
+        (is (= 64 (count @rendered)) "failures count toward the hard render budget")
+        (is (= 64 (count (distinct @rendered))) "duplicate previews share failed memo entries")))))
+
+
 (deftest shipped-color-specialization-roundtrip
   (let [source (->> (edn/read-string (slurp "resources/packages/core/refinements/fns.edn"))
                     :fns (filter #(= :color-const (:name %))) first
@@ -414,7 +446,7 @@
     (let [builtin (types/resolve-alias :core.refinements/color)
           inline (vform/registry-pairs harness/*context* "_value-inline-repr-registry")
           forms (vform/registry-pairs harness/*context*)]
-      (is (= "_repr-color" (vform/pick-form-fn inline builtin)))
-      (is (nil? (vform/pick-form-fn inline :color)))
-      (is (= "_form-color" (vform/pick-form-fn forms builtin)))
-      (is (not= "_form-color" (vform/pick-form-fn forms :color))))))
+      (is (= "_repr-color" (exec/execute-by-name harness/*context* "form-registry-target" {:registry inline :type-expr builtin})))
+      (is (nil? (exec/execute-by-name harness/*context* "form-registry-target" {:registry inline :type-expr :color})))
+      (is (= "_form-color" (exec/execute-by-name harness/*context* "form-registry-target" {:registry forms :type-expr builtin})))
+      (is (not= "_form-color" (exec/execute-by-name harness/*context* "form-registry-target" {:registry forms :type-expr :color}))))))

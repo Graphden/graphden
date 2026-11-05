@@ -145,8 +145,8 @@
                          :key {:value :failure-status} :default nil}}
           :default {:parent :get
                     :args {:coll {:parent :zipmap
-                           :args {:keys {:value ["forbidden" "quota" "unsupported" "bounded-storage"]}
-                                  :vals {:value [403 429 422 422]}}}
+                                  :args {:keys {:value ["forbidden" "quota" "unsupported" "bounded-storage"]}
+                                         :vals {:value [403 429 422 422]}}}
                            :key :_ui-failure-type :default 500}}}}
   {:name :_component-creation-reason
    :parent :get

@@ -248,8 +248,8 @@
   {:name :_moderation-row-fields :parent :select-keys
    :args {:m {:as :row :type :keyword-map}
           :ks [{:value :id} {:value :name} {:value :version} {:value :kind}
-                 {:value :description} {:value :category} {:value :tags}
-                 {:value :org-id} {:value :published-at} {:value :status}]}}
+               {:value :description} {:value :category} {:value :tags}
+               {:value :org-id} {:value :published-at} {:value :status}]}}
   {:name :_moderation-string :parent :to-str :lambda-params [:existing]
    :args {:value {:as :existing :type :any}}}
   {:name :_moderation-row-id :parent :update-in
@@ -278,17 +278,17 @@
    :args {:value :_marketplace-version-components :default [0 0 0]}}
   {:name :_marketplace-rank-component :parent :min
    :args {:nums [999 {:parent :coalesce
-                     :args {:value {:parent :get
-                                    :args {:coll :_marketplace-rank-components
-                                           :key {:as :index :type :int} :default 0}}
-                            :default 0}}]}
+                      :args {:value {:parent :get
+                                     :args {:coll :_marketplace-rank-components
+                                            :key {:as :index :type :int} :default 0}}
+                             :default 0}}]}
    :return-type :numeric}
   {:name :semver-rank
    :description "major*1000000 + minor*1000 + patch, each capped at 999. Missing or invalid components rank zero; this is not full semver ordering."
    :parent :floor
    :args {:number {:parent :add :args {:nums [{:parent :mul :args {:nums [1000000 {:parent :_marketplace-rank-component :args {:index 0}}]}}
-                 {:parent :mul :args {:nums [1000 {:parent :_marketplace-rank-component :args {:index 1}}]}}
-                 {:parent :_marketplace-rank-component :args {:index 2}}]}}}
+                                              {:parent :mul :args {:nums [1000 {:parent :_marketplace-rank-component :args {:index 1}}]}}
+                                              {:parent :_marketplace-rank-component :args {:index 2}}]}}}
    :return-type :int}
 
   ;; The REMOTE registry's card for a package a mirror is about to copy —

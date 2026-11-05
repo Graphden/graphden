@@ -952,5 +952,5 @@
                                                 :when (and rns (not (under-ns? rns root)))]
                                             nm))))
                               owned-fn-ids)]
-    {:dependency-names (into [] (concat ref-deps constraint-deps))
+    {:dependency-names (vec (concat ref-deps constraint-deps))
      :package-dependency-rows (package-deps-from-namespaces storage dep-namespaces)}))

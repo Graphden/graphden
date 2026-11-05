@@ -56,7 +56,7 @@
   {:name :_export-secret-arg? :parent :and :lambda-params [:entry]
    :args {:values [{:parent :is-a? :args {:value :_export-arg-value :type {:value :map}}}
                    {:parent :contains? :args {:coll {:ref :_export-arg-value :type :keyword-map}
-                                             :key {:value :secret-path}}}]}}
+                                              :key {:value :secret-path}}}]}}
   {:name :_export-secret-entries :parent :filter
    :args {:pred :_export-secret-arg? :coll :_export-arg-entries}}
   {:name :_export-secret-row :parent :zipmap :lambda-params [:entry]
@@ -76,7 +76,7 @@
    :args {:test :_export-secret-arg? :then :_export-stripped-value :else :_export-arg-value}}
   {:name :_export-kept-entry? :parent :not :lambda-params [:entry]
    :args {:value {:parent :and :args {:values [:_export-secret-arg?
-                                              {:parent :empty? :args {:coll :_export-stripped-value}}]}}}}
+                                               {:parent :empty? :args {:coll :_export-stripped-value}}]}}}}
   {:name :_export-kept-entries :parent :filter
    :args {:pred :_export-kept-entry? :coll :_export-arg-entries}}
   {:name :_export-stripped-entry :parent :list :lambda-params [:entry]
@@ -90,7 +90,7 @@
   {:name :_export-stripped-fn :parent :if :lambda-params [:fn-def]
    :args {:test :_export-fn-args
           :then {:parent :if :args {:test {:parent :empty? :args {:coll :_export-stripped-args}}
-                                   :then :_export-without-args :else :_export-with-args}}
+                                    :then :_export-without-args :else :_export-with-args}}
           :else {:as :fn-def :type :keyword-map}}
    :return-type :keyword-map}
   {:name :strip-secret-paths
@@ -124,35 +124,35 @@
    :args {:root {:type :text}}
    :return-type :external-dep-facts-shape
    :effects #{:db}}
-  {:name :_ned-dependency-names
+  {:name :_external-dep-dependency-names
    :parent :get
    :args {:coll :_namespace-external-dep-facts
           :key {:value :dependency-names} :default {:value []}}}
-  {:name :_ned-package-rows
+  {:name :_external-dep-package-rows
    :parent :get
    :args {:coll :_namespace-external-dep-facts
           :key {:value :package-dependency-rows} :default {:value []}}}
-  {:name :_ned-package-key-value
+  {:name :_external-dep-package-key-value
    :parent :list
    :args {:items [{:parent :get :args {:coll {:as :row :type :package-dependency-shape}
                                        :key {:value :name} :default ""}}
                   {:parent :get :args {:coll {:as :row :type :package-dependency-shape}
                                        :key {:value :version} :default ""}}]}}
-  {:name :_ned-package-key
+  {:name :_external-dep-package-key
    :parent :vec
    :lambda-params [:row]
-   :args {:coll :_ned-package-key-value}}
-  {:name :_ned-sorted-packages
+   :args {:coll :_external-dep-package-key-value}}
+  {:name :_external-dep-sorted-packages
    :parent :sort-by
-   :args {:key-fn :_ned-package-key
-          :coll {:parent :distinct :args {:coll :_ned-package-rows}}}}
+   :args {:key-fn :_external-dep-package-key
+          :coll {:parent :distinct :args {:coll :_external-dep-package-rows}}}}
 
   {:name :namespace-external-deps
    :description "External dependency names and published package coordinates for a subtree. One native scoped analysis pass supplies facts; graph composition sorts, removes duplicates and builds this public response."
    :parent :zipmap
    :args {:keys [{:value :dependencies} {:value :package-dependencies}]
-          :vals [{:parent :sort :args {:coll {:parent :distinct :args {:coll :_ned-dependency-names}}}}
-                 :_ned-sorted-packages]
+          :vals [{:parent :sort :args {:coll {:parent :distinct :args {:coll :_external-dep-dependency-names}}}}
+                 :_external-dep-sorted-packages]
           :root {:type :text :description "Dotted root namespace path."}}
    :return-type :external-deps-shape
    :effects #{:db}}
@@ -1441,7 +1441,7 @@
    :args {:values [{:parent :gt :args {:nums [:_materialization-expected 0]}}
                    {:parent :equal? :args {:a :_materialization-expected :b :_materialization-present}}
                    {:parent :or :args {:values [{:parent :not :args {:value :_materialization-body-required}}
-                                               :_materialization-body-present]}}]}
+                                                :_materialization-body-present]}}]}
    :return-type :bool}
 
   {:name :InstallPackageInput

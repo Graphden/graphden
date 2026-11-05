@@ -11,6 +11,7 @@
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.executor.interface :as executor]
+    [graphden.types.check.literals :as literals]
     [graphden.types.core :as types]))
 
 
@@ -75,35 +76,10 @@
   (value-form/registry-pairs ctx))
 
 
-(defbase _form-exact-target
-  [registry type-expr]
-  (value-form/exact-form-fn registry type-expr))
-
-
-(defbase _form-leaf-target
-  [registry type-expr]
-  (value-form/pick-form-fn registry type-expr))
-
-
 (defbase _form-run-target
   [target]
   (cr/record-effect! :db)
   (executor/execute-by-name ctx target {}))
-
-
-(defbase _form-enum
-  [type-expr]
-  (value-form/enum-of type-expr))
-
-
-(defbase _form-bounds
-  [type-expr]
-  (value-form/numeric-bounds type-expr))
-
-
-(defbase _form-value-fits?
-  [value type-expr]
-  (value-form/value-fits? value type-expr))
 
 
 (defbase _slot-type-provenance-facts
@@ -115,10 +91,25 @@
   (value-form/slot-type-provenance-facts (request/require-storage ctx) parsed))
 
 
+(defbase _form-refinement-type? [type-expr]
+  (types/refine-type? type-expr))
+
+
+(defbase _form-refinement-constraint [type-expr]
+  (types/refine-constraint type-expr))
+
+
+(defbase _form-literal-refinement-verdict [value constraint]
+  (literals/literal-satisfies-refinement? value constraint))
+
+
 ;; The package loader pairs each base-fn declared in `fns.edn` with its
 ;; impl by looking up this `impls` map (keyword name -> impl fn).
 (def impls
-  {:_slot-effective-type-raw _slot-effective-type-raw
+  {:_form-refinement-type? {:impl _form-refinement-type? :taint-propagate? true}
+   :_form-refinement-constraint {:impl _form-refinement-constraint :taint-propagate? true}
+   :_form-literal-refinement-verdict {:impl _form-literal-refinement-verdict :taint-propagate? true}
+   :_slot-effective-type-raw _slot-effective-type-raw
    :current-slot-value current-slot-value
    :_form-canonical-type {:impl _form-canonical-type :taint-propagate? true}
    :_form-union-type? {:impl _form-union-type? :taint-propagate? true}
@@ -128,10 +119,5 @@
    :_form-list-element {:impl _form-list-element :taint-propagate? true}
    :_form-refinement-base {:impl _form-refinement-base :taint-propagate? true}
    :_form-registry {:impl _form-registry :taint-propagate? true}
-   :_form-exact-target {:impl _form-exact-target :taint-propagate? true}
-   :_form-leaf-target {:impl _form-leaf-target :taint-propagate? true}
    :_form-run-target {:impl _form-run-target :taint-propagate? true}
-   :_form-enum {:impl _form-enum :taint-propagate? true}
-   :_form-bounds {:impl _form-bounds :taint-propagate? true}
-   :_form-value-fits? {:impl _form-value-fits? :taint-propagate? true}
    :_slot-type-provenance-facts _slot-type-provenance-facts})

@@ -394,14 +394,14 @@
          :key {:value :proposed-name},
          :default nil}}]}},
     :else {:parent :zipmap, :args {:keys [], :vals []}}}}
+  {:name :_inheritance-wire-if-expected-state
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll :_inheritance-wire-body :key {:value :expected-state}}}}}
   {:name :_inheritance-wire-single-expected,
-   :parent :if,
+   :parent :_inheritance-wire-if-expected-state,
    :args
-   {:test
-    {:parent :contains?,
-     :args
-     {:coll :_inheritance-wire-body, :key {:value :expected-state}}},
-    :then
+   {:then
     {:parent :zipmap,
      :args
      {:keys [{:value :expected-state}],
@@ -412,15 +412,14 @@
          :key {:value :expected-state},
          :default nil}}]}},
     :else {:parent :zipmap, :args {:keys [], :vals []}}}}
+  {:name :_inheritance-wire-if-accepted-orphans
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll :_inheritance-wire-body :key {:value :accepted-orphan-binding-ids}}}}}
   {:name :_inheritance-wire-single-orphans,
-   :parent :if,
+   :parent :_inheritance-wire-if-accepted-orphans,
    :args
-   {:test
-    {:parent :contains?,
-     :args
-     {:coll :_inheritance-wire-body,
-      :key {:value :accepted-orphan-binding-ids}}},
-    :then
+   {:then
     {:parent :zipmap,
      :args
      {:keys [{:value :accepted-orphan-binding-ids}],
@@ -616,13 +615,9 @@
    {:keys [{:value :action} {:value :kind} {:value :commands}],
     :vals ["batch" "parent-edge" :_inheritance-wire-batch-parsed]}}
   {:name :_inheritance-wire-batch-expected,
-   :parent :if,
+   :parent :_inheritance-wire-if-expected-state,
    :args
-   {:test
-    {:parent :contains?,
-     :args
-     {:coll :_inheritance-wire-body, :key {:value :expected-state}}},
-    :then
+   {:then
     {:parent :assoc,
      :args
      {:map :_inheritance-wire-batch-base,
@@ -635,14 +630,9 @@
         :default nil}}}},
     :else :_inheritance-wire-batch-base}}
   {:name :_inheritance-wire-batch-assembled,
-   :parent :if,
+   :parent :_inheritance-wire-if-accepted-orphans,
    :args
-   {:test
-    {:parent :contains?,
-     :args
-     {:coll :_inheritance-wire-body,
-      :key {:value :accepted-orphan-binding-ids}}},
-    :then
+   {:then
     {:parent :assoc,
      :args
      {:map :_inheritance-wire-batch-expected,

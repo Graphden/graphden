@@ -7,7 +7,7 @@ Request validation, stored edits, execution results, and views.
 
 after: storage, types
 
-[[file:index.org][index]] · ~61 min
+[[file:index.org][index]] · ~60 min
 
 * 1. extract-entity-params
 :PROPERTIES:
@@ -204,30 +204,30 @@ Stores a completed future's result, error, or cancellation on the execution row.
 - source :: [[file:../../../src/graphden/crud/fn_execution/persist.clj::(defn write-finished!][src/graphden/crud/fn_execution/persist.clj:585]]
 - same file :: [[file:crud.org::#crud/create-pending-with-args!][create-pending-with-args!]]
 
-* 16. render-repr
+* 16. render-value-repr
 :PROPERTIES:
-:CUSTOM_ID: crud/render-repr
-:FILE: src/graphden/crud/value_repr.clj
-:LINE: 173
-:MINS: 2.0
+:CUSTOM_ID: crud/render-value-repr
+:FILE: resources/packages/app/reprs/fns.edn
+:LINE: 80
+:MINS: 1.1
 :END:
 
 Chooses a [[file:glossary.org::#term/graph-function][graph function]] that renders a result value as [[file:glossary.org::#term/hiccup][Hiccup]], using the declared or inferred type and falling back to literal classification. It runs with ~:allowed-effects #{}~ and sanitizes the output before insertion into the editor [[file:glossary.org::#term/hiccup][DOM]]. See [[file:../../../docs/EXECUTION.md][typed result representations]].
 
-- source :: [[file:../../../src/graphden/crud/value_repr.clj::(defn render-repr][src/graphden/crud/value_repr.clj:173]]
+- source :: [[file:../../../resources/packages/app/reprs/fns.edn::{:name :render-value-repr][resources/packages/app/reprs/fns.edn:80]]
 - referenced from :: [[file:platform.org::#platform/sanitize-hiccup][sanitize-hiccup]]
 
 * 17. resolve-form
 :PROPERTIES:
 :CUSTOM_ID: crud/resolve-form
 :FILE: resources/packages/app/forms/fns.edn
-:LINE: 616
+:LINE: 1031
 :MINS: 1.4
 :END:
 
 Converts an effective [[file:glossary.org::#term/slot][slot]] type into a pure form descriptor for a record, list, union, or leaf. The graph composes canonical type facts and bounds recursion depth, so the browser need not reimplement the type grammar.
 
-- source :: [[file:../../../resources/packages/app/forms/fns.edn::{:name :resolve-form,][resources/packages/app/forms/fns.edn:616]]
+- source :: [[file:../../../resources/packages/app/forms/fns.edn::{:name :resolve-form,][resources/packages/app/forms/fns.edn:1031]]
 - same file :: [[file:crud.org::#crud/build-form][build-form]]
 - referenced from :: [[file:editor.org::#editor/enterArgValueEditMode][enterArgValueEditMode]]
 
@@ -235,13 +235,13 @@ Converts an effective [[file:glossary.org::#term/slot][slot]] type into a pure f
 :PROPERTIES:
 :CUSTOM_ID: crud/build-form
 :FILE: resources/packages/app/forms/fns.edn
-:LINE: 1327
+:LINE: 1742
 :MINS: 1.7
 :END:
 
 Renders a form descriptor as [[file:glossary.org::#term/hiccup][Hiccup]]: records become field groups, unions get a choice of variant, and leaf types use the registered form functions. This graph function supplies the renderer policy. ~GET /partials/value-form~ returns this [[file:glossary.org::#term/htmx][server-rendered fragment]], which [[file:glossary.org::#term/htmx][HTMX]] inserts into the inspector. See [[file:../../../docs/PARTIALS.md][partials]].
 
-- source :: [[file:../../../resources/packages/app/forms/fns.edn::{:name :build-form,][resources/packages/app/forms/fns.edn:1327]]
+- source :: [[file:../../../resources/packages/app/forms/fns.edn::{:name :build-form,][resources/packages/app/forms/fns.edn:1742]]
 - same file :: [[file:crud.org::#crud/resolve-form][resolve-form]]
 
 * 19. run-captured!

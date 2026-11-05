@@ -21,10 +21,9 @@
      effects (no rich-types entry) fail closed.
    - Output passes `hiccup-sanitize` before it may be inlined into
      the editor DOM (see that ns for the threat model).
-   - Nothing here ever throws: any failure logs and returns nil, and
-     the result pane falls back to the shape-based panes."
+   - Public graph policy catches render failures and falls back to the
+     shape-based panes; the bounded preview batch memoizes failed renders."
   (:require
-    [clojure.tools.logging :as log]
     [graphden.crud.request :as request]
     [graphden.crud.type-check :as type-check]
     [graphden.crud.value-form :as value-form]
@@ -73,20 +72,12 @@
     (types-lit/classify-literal value)))
 
 
-(defn dispatch-type
-  "Native caller compatibility for declared-first representation dispatch."
-  [declared value]
-  (let [d (some-> declared types/resolve-alias)]
-    (if (and (some? d) (not= :any d)) d (runtime-repr-type value))))
-
-
-(defn render-typed-repr
-  "Render through a preloaded registry using an explicit value type. This
-   shared boundary executes only pure graphs and sanitizes their output."
-  [ctx registry type value]
-  (when-let [fn-name (value-form/pick-form-fn registry type)]
+(defn render-selected-repr
+  "Execute the graph-selected target with effects denied, then sanitize its DOM."
+  [ctx target value]
+  (when target
     (some-> (executor/execute-by-name
-              (assoc ctx :allowed-effects #{}) fn-name {:value value})
+              (assoc ctx :allowed-effects #{}) target {:value value})
             sanitize/sanitize-hiccup)))
 
 
@@ -130,65 +121,34 @@
    canonical slot identities and rejects markers, secret references and invalid
    refinements before any pure sanitized execution. Equal previews share the
    same budget entry, including failed evaluations."
-  [ctx elements graph]
+  [ctx elements graph selector]
   (let [rows (value-form/registry-pairs ctx "_value-inline-repr-registry")
         lookups {:fn-map (into {} (map (juxt :id identity)) (:fns graph))
                  :slot-map (into {} (map (juxt :id identity)) (:slots graph))
                  :binding-by-fn-slot (into {} (map (fn [b] [[(:fn-id b) (:slot-id b)] b]))
                                            (:bindings graph))
                  :chain-cache (atom {})}
-        previews (atom {})]
+        previews (atom {})
+        targets (atom {})]
     (mapv (fn [node]
             (let [{:keys [type value secretRef]} (:data node)
                   info (when (and (= type "arg") (not secretRef))
                          (effective-literal-type (:data node) lookups))
                   t (:type info)
-                  eligible? (and (valid-literal? t value)
-                                 (value-form/pick-form-fn rows t))
+                  target (when (valid-literal? t value)
+                           (if (contains? @targets t)
+                             (get @targets t)
+                             (let [selected (selector {:registry rows :type-expr t})]
+                               (swap! targets assoc t selected)
+                               selected)))
                   k [(:id info) value]
-                  repr (when eligible?
+                  repr (when target
                          (if (contains? @previews k)
                            (get @previews k)
                            (when (< (count @previews) 64)
-                             (let [r (try (render-typed-repr ctx rows t value)
+                             (let [r (try (render-selected-repr ctx target value)
                                           (catch Exception _ nil))]
                                (swap! previews assoc k r)
                                r))))]
               {:node node :repr repr}))
           (:nodes elements))))
-
-
-(defn annotate-literals
-  "Attach bounded compact previews for native layout callers. The package
-   pipeline composes attachment in the graph over the same safe preview batch."
-  [ctx elements graph]
-  (if (false? (:ok elements))
-    elements
-    (assoc elements :nodes
-           (mapv (fn [{:keys [node repr]}]
-                   (cond-> node repr (assoc-in [:data :literalRepr] repr)))
-                 (literal-preview-entries ctx elements graph)))))
-
-
-(defn render-repr
-  "Resolve + execute + sanitize the registered representation of
-   `value` as returned by fn `fn-id`. Returns sanitized hiccup, or
-   nil when: value is nil, no registry row accepts the dispatch type,
-   the target attempts ANY effect, the target's output sanitizes to
-   nothing, or anything throws (logged).
-
-   Purity is enforced by the executor's own effect gate — the repr
-   subtree runs under `:allowed-effects #{}`, so the first
-   `record-effect!` of any category throws `:execution/forbidden-effect`
-   (docs/TENANCY_SEAM.md § Effect gate). Enforcing at the runtime
-   layer (not a registry lookup by NAME) keeps this id-correct per
-   ADR-identity-model and fail-closed by construction."
-  [ctx value fn-id]
-  (try
-    (when (some? value)
-      (when-let [dt (dispatch-type (declared-return-type fn-id) value)]
-        (render-typed-repr ctx (value-form/registry-pairs ctx registry-fn-name)
-                           dt value)))
-    (catch Exception e
-      (log/warn e "value-repr render failed — falling back to shape pane")
-      nil)))

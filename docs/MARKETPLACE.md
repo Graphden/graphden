@@ -498,3 +498,12 @@ unrelated full rebuild (`registry_test`
   browse → apply → review → Settings → rebind → reload.
 - `graphden-tenancy`: `storage_test` (author-owned reviews, owner-scoped
   preferences, platform-write-only counter) and `entity_classification_test`.
+
+## Programmatic materialization
+
+`app.registry/materialize-package-fns` remains the scalar compatibility entry
+for materializing a bundle: it accepts `ns-root`, `version` and `fns`, and
+returns the materialized function count. New callers that need ownership
+receipts use `materialize-package-receipt`, which also returns only the
+namespace rows created by that transaction. Both use the same coupled
+materialization and publication operation.

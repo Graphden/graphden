@@ -43,8 +43,7 @@
 
   {:name :_repr-render-safe
    :description "Pure execution and sanitization of a typed representation; the effect gate and DOM allowlist stay inseparable."
-   :args {:registry {:type [:list :any]}
-          :type {:type [:union :null :type-expression]}
+   :args {:target {:type :nullable-text}
           :value {:type :any}}
    :return-type [:union :null :hiccup-node]}
 
@@ -64,7 +63,9 @@
 
   {:name :_repr-render-selected
    :parent :_repr-render-safe
-   :args {:registry :_repr-registry :type :_repr-value-type :value {:as :value}}}
+   :args {:target {:parent :form-registry-target
+                   :args {:registry :_repr-registry :type-expr :_repr-value-type}}
+          :value {:as :value}}}
 
   {:name :_repr-render-typed
    :parent :if

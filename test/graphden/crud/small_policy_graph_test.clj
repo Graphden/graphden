@@ -15,7 +15,7 @@
 
 (deftest text-policies-preserve-boundaries
   (doseq [[s limit expected] [["abcdef" 3 "abc"] ["ab" 4 "ab"] ["ab" 0 ""]
-                              ["😀" 1 (.substring "😀" 0 1)]]]
+                              ["😀" 1 (String/.substring "😀" 0 1)]]]
     (is (= expected (gh/exec-name :str-clip {:string s :limit limit}))))
   (doseq [[s expected] [[nil false] ["" false] [" \t" false] [" x " true]]]
     (is (= expected (gh/exec-name :non-blank? {:string s}))))

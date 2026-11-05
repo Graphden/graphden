@@ -897,7 +897,7 @@
      :say "Stores a completed future's result, error, or cancellation on the execution row.
            Secret-derived values are [redacted](#term/secret) before persistence so polling sees the
            final safe result."}
-    {:ns graphden.crud.value-repr :defn render-repr
+    {:file "resources/packages/app/reprs/fns.edn" :defn render-value-repr
      :say "Chooses a [graph function](#term/graph-function) that renders a result value as
            [Hiccup](#term/hiccup), using the declared or inferred type and falling back to literal
            classification. It runs with `:allowed-effects #{}` and sanitizes the output before
@@ -1919,7 +1919,7 @@
            [DOM](#term/hiccup). It allows selected tags and attributes, limits depth and node count,
            and converts unsupported content to safe text where possible. Unrepresentable output
            returns nil."
-     :see [[:crud "render-repr"]]}
+     :see [[:crud "render-value-repr"]]}
     {:ns graphden.util.counters :defn count!
      :say "Increments process-wide event counters. Readers compare two snapshots to obtain changes
            over an interval without resetting shared counters, so independent monitoring consumers do

@@ -36,7 +36,7 @@
    explain each ±1). For each ADDED name ask \"does it pass/transform caller
    content?\" — if yes it needs `:taint-propagate?` and a `golden-tainted`
    entry; a REMOVED name just leaves both sets."
-  #{:_branch-comment-limits :_safe-request-error :_csv-escape-cell :_form-canonical-type :_form-union-type? :_form-list-type? :_form-record-type? :_form-union-members :_form-list-element :_form-refinement-base :_form-registry :_form-exact-target :_form-leaf-target :_form-run-target :_form-enum :_form-bounds :_form-value-fits? :_fn-branch-local-seed :_fn-slot-seal-facts :sql-query-public
+  #{:_branch-comment-limits :_safe-request-error :_csv-escape-cell :_form-canonical-type :_form-union-type? :_form-list-type? :_form-record-type? :_form-union-members :_form-list-element :_form-refinement-type? :_form-refinement-constraint :_form-literal-refinement-verdict :_form-refinement-base :_form-registry :_form-run-target :_fn-branch-local-seed :_fn-slot-seal-facts :sql-query-public
     ;; Service rows are server reads; the live endpoint uses their IDs to
     ;; query instance rows. Resolver seams also return server-owned endpoints.
     :_service-rows :_service-instance-facts
@@ -243,9 +243,9 @@
     :_marketplace-version-components :_create-branch-comment :_set-branch-policy
     :_safe-request-error :_csv-escape-cell :_encoding-acceptable?
     :_form-canonical-type :_form-union-type? :_form-list-type? :_form-record-type?
-    :_form-union-members :_form-list-element :_form-refinement-base
-    :_form-registry :_form-exact-target :_form-leaf-target :_form-run-target
-    :_form-enum :_form-bounds :_form-value-fits?
+    :_form-union-members :_form-list-element :_form-refinement-type? :_form-refinement-constraint :_form-literal-refinement-verdict :_form-refinement-base
+    :_form-registry :_form-run-target
+
     :fork-package-fns :materialize-package-receipt
     ;; Exact identity validation is not a declassification boundary.
     :parse-fn-delete-receipts :delete-fn-receipts

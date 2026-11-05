@@ -1,6 +1,7 @@
 (ns graphden.crud.branch-command-policy-graph-test
   "Graph branch input policy and the original public slot ownership."
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.executor.interface :as exec]
     [graphden.storage.protocol.core :as sp]
@@ -92,15 +93,15 @@
                (call "_branch-comment-unanchored-row" {:source-branch-id id :body "  note  "})))
         (is (= :validation-error/comment-too-long
                (failure-kind "add-branch-comment!"
-                             {:source-branch-id id :body (apply str (repeat 10001 "x"))
+                             {:source-branch-id id :body (str/join (repeat 10001 "x"))
                               :entity-name nil :entity-id nil})))
         (let [comment-id (parse-uuid (call "add-branch-comment!"
                                            {:source-branch-id id :body "  note  "
                                             :entity-name nil :entity-id nil}))
-              comment (sp/read-entity harness/*storage* :branch-comment comment-id)]
+              comment-row (sp/read-entity harness/*storage* :branch-comment comment-id)]
           (is (uuid? comment-id))
-          (is (= "trusted" (:author-id comment)))
-          (is (= "  note  " (:body comment))))))))
+          (is (= "trusted" (:author-id comment-row)))
+          (is (= "  note  " (:body comment-row))))))))
 
 
 (deftest public-migrations-retain-owned-slot-identities

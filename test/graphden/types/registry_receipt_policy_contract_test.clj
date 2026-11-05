@@ -30,20 +30,20 @@
 
 (deftest projection-closures-retain-only-their-public-inputs
   (let [selected (conj (filterv
-                   (fn [{:keys [name parent]}]
-                     (and name parent
-                          (or (some #(str/starts-with? (clojure.core/name name) %)
-                                    ["_export-fn-" "_export-arg-" "_export-secret-" "_export-stripped-"
-                                     "_export-kept-" "_export-with-" "_export-without-"
-                                     "_actor-" "_request-owner-present" "_owned-branch-policy"
-                                     "_mirror-" "_package-pin-" "_pin-remove-" "_materialization-"])
-                              (#{:current-user-label :create-owned-branch!
-                                 :secret-path-args :strip-secret-paths :materialize-package-fns :package-version-materialized?
-                                 :package-upsert-pin :package-pin-receipt :remove-package-pin-apply
-                                 :mirror-store-package-version!} name))))
-                   (:fn-defs loaded))
-                         {:name :_registry-policy-mirror-error-reader :parent :get
-                          :args {:coll :mirror-store-package-version! :key {:value :error} :default nil}})
+                         (fn [{:keys [name parent]}]
+                           (and name parent
+                                (or (some #(str/starts-with? (clojure.core/name name) %)
+                                          ["_export-fn-" "_export-arg-" "_export-secret-" "_export-stripped-"
+                                           "_export-kept-" "_export-with-" "_export-without-"
+                                           "_actor-" "_request-owner-present" "_owned-branch-policy"
+                                           "_mirror-" "_package-pin-" "_pin-remove-" "_materialization-"])
+                                    (#{:current-user-label :create-owned-branch!
+                                       :secret-path-args :strip-secret-paths :materialize-package-fns :package-version-materialized?
+                                       :package-upsert-pin :package-pin-receipt :remove-package-pin-apply
+                                       :mirror-store-package-version!} name))))
+                         (:fn-defs loaded))
+                       {:name :_registry-policy-mirror-error-reader :parent :get
+                        :args {:coll :mirror-store-package-version! :key {:value :error} :default nil}})
         extra-defs (into {} (map (fn [[n fd]] [n (assoc fd :name n)])) (:base-fn-defs loaded))
         {:keys [fn-defs name->id]} (records-parse/prepare-module
                                      selected (sync/compute-all-fn-name-ids loaded) extra-defs)

@@ -3,7 +3,6 @@
    live here — URL parsing, query-string parsing, predicate guards, and
    response-envelope wrapping are all graph fn-defs in `fns.edn`."
   (:require
-    [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.crud.branches :as branches]
     [graphden.crud.entities.list :as entity-list]

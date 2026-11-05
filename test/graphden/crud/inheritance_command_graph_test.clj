@@ -1,6 +1,7 @@
 (ns ^:serial graphden.crud.inheritance-command-graph-test
   (:require
     [cheshire.core :as json]
+    [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.crud.inheritance :as inheritance]
     [graphden.crud.inheritance.command :as command]
@@ -37,7 +38,7 @@
                (assoc variation :parent-edge-index 64)
                (assoc variation :parent-edge-index 0.5)
                (assoc variation :proposed-name " ")
-               (assoc variation :proposed-name (apply str (repeat 161 "x")))
+               (assoc variation :proposed-name (str/join (repeat 161 "x")))
                (assoc variation :namespace-id nil :expected-state {:opaque true}
                       :accepted-orphan-binding-ids [] :proposed-fn-id false)
                {:action "batch" :commands [reparent]}
@@ -110,7 +111,7 @@
                                 :target (-> raw-target (dissoc :namespace-path)
                                             (assoc :qualified-name "org.space/target"))}]
                   :targets [{:target (-> raw-target (dissoc :namespace-path)
-                                          (assoc :qualified-name "org.space/target"))
+                                         (assoc :qualified-name "org.space/target"))
                              :source (-> raw-source (dissoc :namespace-path)
                                          (assoc :qualified-name "source"))
                              :allowed false :reason "readable refusal"}]}

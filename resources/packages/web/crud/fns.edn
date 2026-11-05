@@ -299,7 +299,7 @@
                  {:parent :get
                   :args {:coll {:as :via-names :type [:map :uuid :nullable-text]}
                          :key {:parent :get :args {:coll {:as :entry :type :_free-arg-entry-fact}
-                                                  :key {:value :via} :default nil}}
+                                                   :key {:value :via} :default nil}}
                          :default nil}}]}}
   {:name :free-arg-entries
    :description "Public Run/Inspector display rows over the canonical slot surface: keyword name, slot identity, explicit optional/captured flags and capture-target display name. Nil fn-id yields []."
@@ -624,35 +624,32 @@
   {:name :_apply-rejection-status :parent :get
    :args {:coll :_apply-write-rejection :key {:value :status} :default nil}}
   {:name :_apply-http-status :parent :cond
-   :args {:clauses [
-            {:parent :equal? :args {:a :_apply-rejection-kind :b {:value :package}}} 403
-            {:parent :equal? :args {:a :_apply-rejection-kind :b {:value :secret-leaf}}} 403
-            {:parent :equal? :args {:a :_apply-rejection-kind :b {:value :validation}}}
-            {:parent :if :args {:test {:parent :some? :args {:value :_apply-rejection-status}}
-                               :then :_apply-rejection-status :else 400}}
-            {:parent :get :args {:coll :_apply-write-rejection :key {:value :duplicate-key?} :default false}} 409
-            true :_apply-rejection-status]}}
+   :args {:clauses [{:parent :equal? :args {:a :_apply-rejection-kind :b {:value :package}}} 403
+                    {:parent :equal? :args {:a :_apply-rejection-kind :b {:value :secret-leaf}}} 403
+                    {:parent :equal? :args {:a :_apply-rejection-kind :b {:value :validation}}}
+                    {:parent :if :args {:test {:parent :some? :args {:value :_apply-rejection-status}}
+                                        :then :_apply-rejection-status :else 400}}
+                    {:parent :get :args {:coll :_apply-write-rejection :key {:value :duplicate-key?} :default false}} 409
+                    true :_apply-rejection-status]}}
   {:name :_apply-error-message :parent :if
    :args {:test {:parent :equal? :args {:a :_apply-error-code :b {:value :crud/write-failed}}}
           :then {:as :fallback :type :text} :else :_apply-error-code}}
   {:name :_apply-rejection-envelope :parent :if
-   :args {:test {:parent :or :args {:values [
-                  {:parent :some? :args {:value :_apply-http-status}}
-                  {:parent :get :args {:coll :_apply-write-rejection :key {:value :include-null-status?} :default false}}]}}
+   :args {:test {:parent :or :args {:values [{:parent :some? :args {:value :_apply-http-status}}
+                                             {:parent :get :args {:coll :_apply-write-rejection :key {:value :include-null-status?} :default false}}]}}
           :then {:parent :zipmap :args {:keys [{:value :error} {:value :http-status}]
-                                       :vals [:_apply-error-message :_apply-http-status]}}
+                                        :vals [:_apply-error-message :_apply-http-status]}}
           :else {:parent :zipmap :args {:keys [{:value :error}] :vals [:_apply-error-message]}}}}
   {:name :_apply-formatted-outcome :parent :cond
-   :args {:clauses [
-            {:parent :some? :args {:value :_apply-rejection-kind}} :_apply-rejection-envelope
-            {:parent :equal? :args {:a :_apply-error-code :b {:value :crud/sequence-binding-changed}}}
-            {:error "Sequence binding or inherited slot changed; refresh and retry" :http-status 409}
-            {:parent :equal? :args {:a :_apply-error-code :b {:value :crud/sequence-item-missing}}}
-            {:error "Sequence item no longer exists" :http-status 404}
-            {:parent :equal? :args {:a :_apply-error-code :b {:value :crud/write-failed}}}
-            {:parent :assoc :args {:map {:as :outcome :type :keyword-map}
-                                  :key {:value :error} :value {:as :fallback :type :text}}}
-            true {:as :outcome :type :keyword-map}]}}
+   :args {:clauses [{:parent :some? :args {:value :_apply-rejection-kind}} :_apply-rejection-envelope
+                    {:parent :equal? :args {:a :_apply-error-code :b {:value :crud/sequence-binding-changed}}}
+                    {:error "Sequence binding or inherited slot changed; refresh and retry" :http-status 409}
+                    {:parent :equal? :args {:a :_apply-error-code :b {:value :crud/sequence-item-missing}}}
+                    {:error "Sequence item no longer exists" :http-status 404}
+                    {:parent :equal? :args {:a :_apply-error-code :b {:value :crud/write-failed}}}
+                    {:parent :assoc :args {:map {:as :outcome :type :keyword-map}
+                                           :key {:value :error} :value {:as :fallback :type :text}}}
+                    true {:as :outcome :type :keyword-map}]}}
   {:name :_apply-response
    :description "Render a guarded outcome only after the writer has committed or rolled back its truthy error sentinel. Keep optional response keys compatible."
    :parent :ensure-type

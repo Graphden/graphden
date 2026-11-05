@@ -224,7 +224,8 @@
   {:name :_layout-literal-previews
    :description "Bounded canonical safe preview evaluation. Markers, secret references and invalid refinements cannot reach a repr; effect denial and sanitization stay native."
    :args {:elements {:type :_layout-elements-shape}
-          :graph {:type :_graph-snapshot-shape}}
+          :graph {:type :_graph-snapshot-shape}
+          :selector {:type [:fn {:dispatch {:registry [:list :any] :type-expr :type-expression}} :nullable-text #{}]}}
    :return-type [:list {:node :keyword-map :repr [:union :null :hiccup-node]}]}
 
   {:name :_layout-literal-preview-node
@@ -245,7 +246,7 @@
    :parent :assoc
    :args {:map {:as :elements} :key {:value :nodes}
           :value {:parent :map
-                  :args {:func :_layout-attach-literal-preview :coll :_layout-literal-previews}}}}
+                  :args {:func :_layout-attach-literal-preview :coll {:parent :_layout-literal-previews :args {:selector :form-registry-selector}}}}}}
 
   {:name :_layout-literal-reprs-apply
    :description "Pass layout failures through; attach present safe literal previews in graph composition."

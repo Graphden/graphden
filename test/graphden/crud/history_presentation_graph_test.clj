@@ -1,6 +1,7 @@
 (ns ^:serial graphden.crud.history-presentation-graph-test
   "Graph response policy over canonical bounded reads and owned writes."
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.crud.inheritance :as inheritance]
     [graphden.crud.views :as views]
@@ -42,7 +43,7 @@
 
 (deftest restore-guards-and-conflict-policy-stay-outside-owned-operation
   (let [args {:fn-id (random-uuid) :branch-id (random-uuid) :revision 1}
-        token (apply str (repeat 64 "a"))
+        token (str/join (repeat 64 "a"))
         calls (atom 0)]
     (is (true? (call "_history-positive-revision?" {:revision 1})))
     (is (true? (call "_history-restore-args-valid?" args)))

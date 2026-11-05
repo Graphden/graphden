@@ -72,7 +72,8 @@ costs a search, but it should not be stale right after a bake)."
           (insert-file-contents path)
           (goto-char (point-min))
           (forward-line (1- (plist-get step :line)))
-          (unless (looking-at-p (regexp-quote (plist-get step :head)))
+          (unless (looking-at-p (concat "[[:blank:]]*"
+                                        (regexp-quote (plist-get step :head))))
             (push (plist-get step :key) off)))))
     (should (equal off '()))))
 

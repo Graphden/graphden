@@ -1,7 +1,6 @@
 (ns graphden.types.layout-representation-contract-test
   "Check layout, representation and error composition without a whole corpus sweep."
   (:require
-    [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.executor.composition.deps :as deps]
     [graphden.executor.interface :as exec]
@@ -30,12 +29,11 @@
 
 (deftest presentation-closures-have-valid-types
   (let [selected (filterv
-                   (fn [{:keys [name namespace]}]
+                   (fn [{:keys [name] fn-namespace :namespace}]
                      (and name
-                          (or (#{"app.layout" "app.reprs" "web.http-client" "web.errors"} namespace)
-                              (and (= "app.forms" namespace)
-                                   (or (= :slot-type-provenance name)
-                                       (str/starts-with? (clojure.core/name name) "_slot-provenance"))))
+                          (or (#{"app.layout" "app.reprs" "app.forms" "web.http-client" "web.errors"} fn-namespace)
+                              ;; Composed external helpers supply their renamed slots.
+                              (#{:non-blank? :rejected?} name))
                           (not (#{:_layout-api-handler :_layout-api-body} name))))
                    (:fn-defs loaded))
         extra-defs (into {} (map (fn [[n fd]] [n (assoc fd :name n)])) (:base-fn-defs loaded))
@@ -60,6 +58,11 @@
                               [:_layout-literal-reprs-apply #{:elements :graph}]
                               [:slot-type-provenance #{:parsed}]
                               [:render-value-repr #{:value :fn-id}]
+                              [:form-registry-target #{:registry :type-expr}]
+                              [:form-registry-selector #{:dispatch}]
+                              [:_form-exact-target #{:registry :type-expr}]
+                              [:_form-bounds #{:type-expr}]
+                              [:_form-value-fits? #{:value :type-expr}]
                               [:trace-headers #{}]]]
     (is (= expected (set (keys (:args (registry/rich-type-of fn-name)))))
         (str fn-name))))

@@ -35,6 +35,7 @@
     [graphden.packages.records.parse :as records-parse]
     [graphden.packages.records.slot-resolution :as slot-res]
     [graphden.packages.records.types :as record-types]
+    [graphden.packages.type-seed :as type-seed]
     [graphden.services.port-check :as port-check]
     [graphden.storage.graph-writer :as writer]
     [graphden.storage.postgres.graph-epoch :as epoch]
@@ -1207,21 +1208,10 @@
      ;; Refinement aliases are registered earlier in `:exec/base-fns` so
      ;; base-fn arg types (`:port`, `:user-port`, …) resolve to their
      ;; structural form during the base-fn rich-type pass.
-     ;; record-rich-types! validates arg `:type` declarations — those
-     ;; only exist on base-fn-style fn-defs (rare here; composed fn-defs
-     ;; use `:args` for parent BINDINGS, not declarations). Try-each so a
-     ;; few mis-shaped entries don't kill the seed pass; check-all-defs!
-     ;; below recovers the proper computed types via type-inference anyway.
-     (doseq [fd fn-defs]
-       (when-let [fn-name (:name fd)]
-         (try (registry-core/record-rich-types! fn-name fd)
-              (catch Exception e
-                ;; Mis-shaped entries are recoverable by the type-check
-                ;; sweep below — don't block startup, but DEBUG-log so
-                ;; the per-fn cause is available when chasing a
-                ;; downstream sweep failure.
-                (log/debug e "Seed-pass record-rich-types! failed for"
-                           fn-name)))))
+     ;; Composed definitions contain bindings, not argument declarations.
+     ;; The seed adapter preserves their declared return/effects even when
+     ;; a binding cannot be read as a base-function argument specification.
+     (type-seed/seed! fn-defs)
      ;; Type-check in dependency (topological) order: every fn-def is
      ;; checked AFTER the parents and refs it reads, so a SINGLE sweep
      ;; reaches the fixpoint — `check-fn-def!` always sees its
@@ -1254,12 +1244,11 @@
      ;; type-check input so the sweep sees the synthetic refs.
      (let [{expanded-fn-defs :fn-defs :as prepared}
            (records-parse/prepare-module fn-defs extra-name->id extra-defs)]
-       ;; Re-seed rich-types so synthetic anons get a registry entry too.
-       (doseq [fd expanded-fn-defs]
-         (when-let [fn-name (:name fd)]
-           (try (registry-core/record-rich-types! fn-name fd)
-                (catch Exception e
-                  (log/debug e "Re-seed record-rich-types! failed for" fn-name)))))
+       ;; Include synthetic anons, then guard callable declarations before
+       ;; the compiler can mistake a callable producer for a callback body.
+       ;; Ordinary sweep warnings and its allowlist are unchanged.
+       (type-seed/assert-callable-returns! expanded-fn-defs
+                                           (type-seed/seed! expanded-fn-defs))
        (when-not skip-type-check?
          ;; The sweep records its final failure set into the per-branch
          ;; diagnostics store — key it by the branch this sync ran on

@@ -446,7 +446,7 @@
 
 ;; `:install-package` is now a GRAPH fn-def — a `:fix` worklist loop
 ;; over resolve/install ops (see the `:_inst-*` chain in fns.edn). Its
- ;; dependency check, completeness and pin facades compose scoped facts in the graph;
+;; dependency check, completeness and pin facades compose scoped facts in the graph;
 ;; materialize-package-receipt keeps its coupled write and provenance receipt.
 ;; Version resolution composes semver-pick over package-version rows.
 ;; `install-one!` orchestration (guards, depth-first dep order,

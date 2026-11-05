@@ -2,11 +2,11 @@
   (:require
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.executor.test-setup :as setup]
-    [graphden.test-infra.graph-harness :as gh]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.context :as tenancy]
-    [graphden.versioning.storage.core :as vs]
-    [graphden.versioning.merge.core :as policy]))
+    [graphden.test-infra.graph-harness :as gh]
+    [graphden.versioning.merge.core :as policy]
+    [graphden.versioning.storage.core :as vs]))
 
 
 (use-fixtures :once (setup/create-container-fixture)
@@ -46,7 +46,7 @@
         id (:id branch)]
     (try
       (doseq [[input expected] [[" owner " "owner"] ["open" nil] [nil nil] ["  " nil]
-                                 ["\u2003owner\u2003" "owner"] ["\u2003" nil] ["admins" "admins"]]]
+                                ["\u2003owner\u2003" "owner"] ["\u2003" nil] ["admins" "admins"]]]
         (is (= expected (gh/exec-name :set-branch-policy! {:branch-id id :write-policy input})))
         (is (= expected (:write-policy (sp/read-entity storage :branch id)))))
       (doseq [invalid ["everyone" "OWNER"]]
@@ -61,9 +61,9 @@
                            {:branch-id id :required-approvals 3 :allow-self-approval? :keep :approver-ids :keep})))
       (binding [tenancy/*current-principal* {:authenticated? true :user-id "alice"}]
         (let [comment-id (gh/exec-name :add-branch-comment!
-                                     {:source-branch-id id :body "Review" :entity-name nil :entity-id nil})
-              comment (sp/read-entity storage :branch-comment (parse-uuid comment-id))]
+                                       {:source-branch-id id :body "Review" :entity-name nil :entity-id nil})
+              comment-row (sp/read-entity storage :branch-comment (parse-uuid comment-id))]
           (is (= {:author-id "alice" :body "Review" :source-branch-id id}
-                 (select-keys comment [:author-id :body :source-branch-id])))
-          (sp/delete-entity storage :branch-comment (:id comment))))
+                 (select-keys comment-row [:author-id :body :source-branch-id])))
+          (sp/delete-entity storage :branch-comment (:id comment-row))))
       (finally (sp/delete-entity storage :branch id)))))

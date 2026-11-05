@@ -391,8 +391,8 @@ this type", `:_value-repr-registry` (`app/reprs/fns.edn`) answers
 - **Registry** — a `:const` list of `[type-name repr-fn-name]` pairs
   (vector type-name = structural key, `["list" "numeric"]` →
   `[:list :numeric]`), matched most-specific-first by `subtype?` —
-  the same shared-list pattern and matching code
-  (`crud.value-form/pick-form-fn`) as the form registry. Adding a
+  the same shared-list pattern and graph selector
+  (`app.forms/form-registry-target`) as the form registry. Adding a
   repr = one fn-def + one registry row; no Clojure change.
 - **Dispatch type** — the executed fn's declared/inferred RETURN
   type from the id-keyed rich-types registry (`:fn-id` reaches the

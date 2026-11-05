@@ -82,7 +82,7 @@
                     (swap! filters inc)
                     safe-trace)]
       (is (nil? (fn-exec/execution-read-facts ctx (random-uuid))))
-      (is (= 0 @filters) "an absent parent exposes no trace")
+      (is (zero? @filters) "an absent parent exposes no trace")
       (let [facts (fn-exec/execution-read-facts ctx (:id row))]
         (is (= safe-trace (get-in facts [:row :path-trace])))
         (is (= 1 @filters))

@@ -20,7 +20,6 @@
 ;; pattern as `:api-routes :items`. Add a form-fn here to extend the
 ;; system; no executor / resolver change needed.
 
-
 {:namespace "app.forms"
  :description "Type-aware value-edit forms — built-in scalar form-fns (static hiccup control templates) and the type -> form-fn dispatch registry consumed by the /api/value-form resolver."
  :fns
@@ -184,11 +183,10 @@
   ;; ===================================================================
   ;; COMPOSITE structure templates (round-2 decomposition): the
   ;; record/union WRAPPERS the server-side assembler
-  ;; (`crud.value-form/build-form`) renders THROUGH the graph — restyle
+  ;; (`app.forms/build-form`) renders through the graph — restyle
   ;; the composite editors here, exactly like the leaf controls above.
-  ;; The recursion and the type logic (union branch fit, refinement
-  ;; bounds, enum members) stay in Clojure; the graph owns the
-  ;; presentational shells it wraps the computed parts in. Hiccup tags
+  ;; Graph composition owns recursion, union branch fit, refinement
+  ;; bounds and enum members as well as the presentational shells. Hiccup tags
   ;; and attr keys are STRINGS by design (the editor renders this form
   ;; data client-side), same as the leaf consts.
   ;; ===================================================================
@@ -268,7 +266,7 @@
                   {:as :branches :type [:list :hiccup-node]}]}}
 
   {:name :_value-form-registry
-   :description "Type -> form-fn dispatch table for /api/value-form. Each pair is [type-name form-fn-name] (type-name may be a VECTOR for structural keys — the marker row [\"secret\" \"any\"] means [:secret :any]). Leaf types subtype-match, most-specific wins, falling back to _form-json; a COMPOSITE type matches only its exact row (the hiccup-node row) — see `crud.value-form/exact-form-fn`."
+   :description "Type -> form-fn dispatch table for /api/value-form. Each pair is [type-name form-fn-name] (type-name may be a VECTOR for structural keys — the marker row [\"secret\" \"any\"] means [:secret :any]). Leaf types subtype-match, most-specific wins, falling back to _form-json; a COMPOSITE type matches only its exact row (the hiccup-node row) — see `app.forms/_form-exact-target`."
    :parent :const
    :args {:value [["text" "_form-text"]
                   ["core.refinements/color" "_form-color"]
@@ -392,955 +390,1371 @@
   ;; Descriptor and renderer policy are graph compositions. Recursive callable
   ;; projections declare typed literal args so their return contracts seed
   ;; even when the fixture skips the type sweep (no implicit callable wrapping).
-{:name :_form-canonical-type,
- :args {:type-expr {:type :type-expression}},
- :return-type :type-expression}
+  {:name :_form-canonical-type,
+   :args {:type-expr {:type :type-expression}},
+   :return-type :type-expression}
 
-{:name :_form-union-type?,
- :args {:type-expr {:type :type-expression}},
- :return-type :bool}
+  {:name :_form-union-type?,
+   :args {:type-expr {:type :type-expression}},
+   :return-type :bool}
 
-{:name :_form-list-type?,
- :args {:type-expr {:type :type-expression}},
- :return-type :bool}
+  {:name :_form-list-type?,
+   :args {:type-expr {:type :type-expression}},
+   :return-type :bool}
 
-{:name :_form-record-type?,
- :args {:type-expr {:type :type-expression}},
- :return-type :bool}
+  {:name :_form-record-type?,
+   :args {:type-expr {:type :type-expression}},
+   :return-type :bool}
 
-{:name :_form-union-members,
- :args {:type-expr {:type :type-expression}},
- :return-type [:list :type-expression]}
+  {:name :_form-union-members,
+   :args {:type-expr {:type :type-expression}},
+   :return-type [:list :type-expression]}
 
-{:name :_form-list-element,
- :args {:type-expr {:type :type-expression}},
- :return-type :type-expression}
+  {:name :_form-list-element,
+   :args {:type-expr {:type :type-expression}},
+   :return-type :type-expression}
 
-{:name :_form-refinement-base,
- :args {:type-expr {:type :type-expression}},
- :return-type :type-expression}
+  {:name :_form-refinement-base,
+   :args {:type-expr {:type :type-expression}},
+   :return-type :type-expression}
 
-{:name :_form-registry,
- :args {},
- :return-type [:list :any],
- :effects #{:db}}
+  {:name :_form-registry,
+   :args {},
+   :return-type [:list :any],
+   :effects #{:db}}
 
-{:name :_form-exact-target,
- :args
- {:registry {:type [:list :any]}, :type-expr {:type :type-expression}},
- :return-type :nullable-text}
+  {:name :_form-run-target,
+   :args {:target {:type :text}},
+   :return-type :hiccup-node,
+   :effects #{:db}}
 
-{:name :_form-leaf-target,
- :args
- {:registry {:type [:list :any]}, :type-expr {:type :type-expression}},
- :return-type :nullable-text}
+  {:name :_form-refinement-type?,
+   :args {:type-expr {:type :type-expression}},
+   :return-type :bool}
 
-{:name :_form-run-target,
- :args {:target {:type :text}},
- :return-type :hiccup-node,
- :effects #{:db}}
+  {:name :_form-refinement-constraint,
+   :args {:type-expr {:type :type-expression}},
+   :return-type :any}
 
-{:name :_form-enum,
- :args {:type-expr {:type :type-expression}},
- :return-type :nullable-keyword-map}
+  {:name :_form-literal-refinement-verdict,
+   :args {:value {:type :any}, :constraint {:type :any}},
+   :return-type [:union :bool :keyword]}
 
-{:name :_form-bounds,
- :args {:type-expr {:type :type-expression}},
- :return-type :nullable-keyword-map}
+  {:name :_dispatch-pair,
+   :parent :const,
+   :args {:value {:as :pair, :type [:list :any]}}}
 
-{:name :_form-value-fits?,
- :args {:value {:type :any}, :type-expr {:type :type-expression}},
- :return-type :bool}
+  {:name :_dispatch-pair-type,
+   :parent :first,
+   :args {:coll :_dispatch-pair}}
 
-{:name :_descriptor-recursion,
- :parent :get,
- :args
- {:coll {:as :descriptor-state, :type :keyword-map},
-  :key {:value :recur, :type :keyword},
-  :default {:value nil, :type :null}},
- :return-type [:fn {:arg :any} :any]}
-
-{:name :_descriptor-type,
- :parent :_form-canonical-type,
- :args
- {:type-expr
-  {:parent :get,
+  {:name :_dispatch-accepts,
+   :parent :subtype?,
    :args
-   {:coll {:as :input}, :key {:value :type}, :default {:value nil}}}}}
+   {:candidate {:as :type-expr, :type :type-expression},
+    :expected :_dispatch-pair-type},
+   :return-type :bool,
+   :lambda-params [:pair]}
 
-{:name :_descriptor-depth,
- :parent :get,
- :args {:coll {:as :input}, :key {:value :depth}, :default {:value 0}}}
+  {:name :_dispatch-type
+   :parent :const
+   :args {:value {:as :type-expr :type :type-expression}}}
 
-{:name :_descriptor-leaf,
- :parent :zipmap,
- :args
- {:keys [{:value :kind} {:value :type}],
-  :vals [{:value :leaf} :_descriptor-type]},
- :return-type :keyword-map}
-
-{:name :_descriptor-child,
- :parent :invoke,
- :args
- {:func {:ref :_descriptor-recursion, :type [:fn {:arg :any} :any]},
-  :arg
-  {:parent :zipmap,
+  {:name :_dispatch-accepting,
+   :parent :filter,
    :args
-   {:keys [{:value :type} {:value :depth}],
-    :vals
-    [{:as :child-type, :type :type-expression}
-     {:parent :add,
+   {:pred :_dispatch-accepts, :coll {:as :registry, :type [:list :any]}
+    :type-expr :_dispatch-type}}
+
+  {:name :_dispatch-candidate,
+   :parent :const,
+   :args {:value {:as :choice, :type [:list :any]}}}
+
+  {:name :_dispatch-candidate-type,
+   :parent :first,
+   :args {:coll :_dispatch-candidate}}
+
+  {:name :_dispatch-narrower,
+   :parent :subtype?,
+   :args
+   {:candidate :_dispatch-candidate-type,
+    :expected :_dispatch-pair-type},
+   :return-type :bool,
+   :lambda-params [:pair]}
+
+  {:name :_dispatch-most-specific?,
+   :parent :every?,
+   :args
+   {:pred :_dispatch-narrower,
+    :coll :_dispatch-accepting,
+    :choice :_dispatch-candidate},
+   :return-type :bool,
+   :lambda-params [:choice]}
+
+  {:name :_dispatch-most-specific,
+   :parent :first,
+   :args
+   {:coll
+    {:parent :filter,
+     :args
+     {:pred :_dispatch-most-specific?, :coll :_dispatch-accepting}}}}
+
+  {:name :_dispatch-sort-key,
+   :parent :vec,
+   :args
+   {:coll {:parent :list :args {:items
+                                [{:parent :if,
+                                  :args
+                                  {:test
+                                   {:parent :equal?,
+                                    :args {:a :_dispatch-pair-type, :b {:value :any}}},
+                                   :then 1,
+                                   :else 0}}
+                                 {:parent :to-str, :args {:value :_dispatch-pair-type}}]}}},
+   :return-type [:list :any],
+   :lambda-params [:pair]}
+
+  {:name :_dispatch-fallback,
+   :parent :first,
+   :args
+   {:coll
+    {:parent :sort-by,
+     :args {:key-fn :_dispatch-sort-key, :coll :_dispatch-accepting}}}}
+
+  {:name :_dispatch-selected,
+   :parent :coalesce,
+   :args {:value :_dispatch-most-specific, :default :_dispatch-fallback}}
+
+  {:name :form-registry-target,
+   :description "Select the first most-specific accepting registry row; incomparable matches prefer non-any, then alphabetical type order. Shared by forms and safe representations."
+   :parent :get,
+   :args {:coll :_dispatch-selected, :key {:value 1}, :default nil},
+   :return-type :nullable-text}
+
+  {:name :_form-leaf-target, :parent :form-registry-target, :args {}}
+
+  {:name :_dispatch-exact?,
+   :parent :and,
+   :args
+   {:values
+    [{:parent :subtype?,
       :args
-      {:nums
-       [{:parent :get,
+      {:candidate {:as :type-expr, :type :type-expression},
+       :expected :_dispatch-pair-type}}
+     {:parent :subtype?,
+      :args
+      {:candidate :_dispatch-pair-type,
+       :expected {:as :type-expr, :type :type-expression}}}]},
+   :return-type :bool,
+   :lambda-params [:pair]}
+
+  {:name :_form-exact-target,
+   :description "First mutually-subtype registry match, before composite decomposition."
+   :parent :get,
+   :args
+   {:coll
+    {:parent :first,
+     :args
+     {:coll
+      {:parent :filter,
+       :args
+       {:pred :_dispatch-exact?,
+        :type-expr :_dispatch-type,
+        :coll {:as :registry, :type [:list :any]}}}}},
+    :key {:value 1},
+    :default nil},
+   :return-type :nullable-text}
+
+  {:name :_form-dispatch-input,
+   :parent :const,
+   :args
+   {:value
+    {:as :dispatch,
+     :type {:registry [:list :any], :type-expr :type-expression}}}}
+
+  {:name :form-registry-selector,
+   :parent :form-registry-target,
+   :args
+   {:registry
+    {:parent :get,
+     :args
+     {:coll :_form-dispatch-input,
+      :key {:value :registry},
+      :default nil}},
+    :type-expr
+    {:parent :get,
+     :args
+     {:coll :_form-dispatch-input,
+      :key {:value :type-expr},
+      :default nil}}},
+   :return-type :nullable-text,
+   :lambda-params [:dispatch]}
+
+  {:name :_form-policy-constraint,
+   :parent :_form-refinement-constraint,
+   :args {:type-expr {:as :type-expr, :type :type-expression}}}
+
+  {:name :_form-policy-base,
+   :parent :_form-refinement-base,
+   :args {:type-expr {:as :type-expr, :type :type-expression}}}
+
+  {:name :_form-enum,
+   :parent :if,
+   :args
+   {:test
+    {:parent :and,
+     :args
+     {:values
+      [{:parent :_form-refinement-type?,
+        :args {:type-expr {:as :type-expr, :type :type-expression}}}
+       {:parent :is-a?,
+        :args {:value :_form-policy-constraint, :type {:value :vector}}}
+       {:parent :equal?,
+        :args
+        {:a
+         {:parent :get,
+          :args
+          {:coll :_form-policy-constraint,
+           :key {:value 0},
+           :default nil}},
+         :b {:value :in}}}
+       {:parent :is-a?,
+        :args
+        {:value
+         {:parent :get,
+          :args
+          {:coll :_form-policy-constraint,
+           :key {:value 1},
+           :default nil}},
+         :type {:value :sequence}}}]}},
+    :then
+    {:parent :zipmap,
+     :args
+     {:keys [{:value :base} {:value :members}],
+      :vals
+      [:_form-policy-base
+       {:parent :vec,
+        :args
+        {:coll
+         {:parent :get,
+          :args
+          {:coll :_form-policy-constraint,
+           :key {:value 1},
+           :default nil}}}}]}},
+    :else nil},
+   :return-type :nullable-keyword-map}
+
+  {:name :_bounds-input,
+   :parent :const,
+   :args {:value {:as :input, :type :any}}}
+
+  {:name :_bounds-current,
+   :parent :get,
+   :args {:coll :_bounds-input, :key {:value :constraint}, :default nil}}
+
+  {:name :_bounds-current-vector?,
+   :parent :is-a?,
+   :args {:value :_bounds-current, :type {:value :vector}}}
+
+  {:name :_bounds-op,
+   :parent :if,
+   :args
+   {:test :_bounds-current-vector?,
+    :then
+    {:parent :get,
+     :args {:coll :_bounds-current, :key {:value 0}, :default nil}},
+    :else nil}}
+
+  {:name :_bounds-number,
+   :parent :if,
+   :args
+   {:test :_bounds-current-vector?,
+    :then
+    {:parent :get,
+     :args {:coll :_bounds-current, :key {:value 1}, :default nil}},
+    :else nil}}
+
+  {:name :_bounds-int?,
+   :parent :get,
+   :args {:coll :_bounds-input, :key {:value :int?}, :default nil}}
+
+  {:name :_bounds-number?,
+   :parent :is-a?,
+   :args {:value :_bounds-number, :type {:value :numeric}}}
+
+  {:name :_bounds-min,
+   :parent :if,
+   :args
+   {:test
+    {:parent :and,
+     :args
+     {:values
+      [:_bounds-int?
+       {:parent :equal?, :args {:a :_bounds-op, :b {:value :>}}}]}},
+    :then {:parent :add, :args {:nums [:_bounds-number 1]}},
+    :else :_bounds-number}}
+
+  {:name :_bounds-max,
+   :parent :if,
+   :args
+   {:test
+    {:parent :and,
+     :args
+     {:values
+      [:_bounds-int?
+       {:parent :equal?, :args {:a :_bounds-op, :b {:value :<}}}]}},
+    :then {:parent :sub, :args {:nums [:_bounds-number 1]}},
+    :else :_bounds-number}}
+
+  {:name :_bounds-one,
+   :parent :if,
+   :args
+   {:test :_bounds-number?,
+    :then
+    {:parent :cond,
+     :args
+     {:clauses
+      [{:parent :or,
+        :args
+        {:values
+         [{:parent :equal?, :args {:a :_bounds-op, :b {:value :>=}}}
+          {:parent :equal?, :args {:a :_bounds-op, :b {:value :>}}}]}}
+       {:parent :zipmap,
+        :args {:keys [{:value :min}], :vals [:_bounds-min]}}
+       {:parent :or,
+        :args
+        {:values
+         [{:parent :equal?, :args {:a :_bounds-op, :b {:value :<=}}}
+          {:parent :equal?, :args {:a :_bounds-op, :b {:value :<}}}]}}
+       {:parent :zipmap,
+        :args {:keys [{:value :max}], :vals [:_bounds-max]}}
+       true
+       {:value {}}]}},
+    :else {:value {}}}}
+
+  ;; Keep literal argument types explicit: this callable producer must retain
+  ;; its return signature during seed-only boot, before the type sweep.
+  {:name :_bounds-self,
+   :parent :get,
+   :args {:coll {:as :bounds-state :type :keyword-map}
+          :key {:value :recur :type :keyword} :default {:value nil :type :null}}
+   :return-type [:fn {:arg :any} :any]}
+
+  {:name :_bounds-child,
+   :parent :invoke,
+   :args
+   {:func {:ref :_bounds-self :type [:fn {:arg :any} :any]},
+    :arg
+    {:parent :zipmap,
+     :args
+     {:keys [{:value :constraint} {:value :int?}],
+      :vals [{:as :item, :type :any}
+             {:parent :get :args {:coll {:as :bounds-state :type :keyword-map}
+                                  :key {:value :int?} :default nil}}]}}},
+   :return-type :keyword-map,
+   :lambda-params [:item]}
+
+  {:name :_bounds-step,
+   :parent :if,
+   :args
+   {:test {:parent :equal?, :args {:a :_bounds-op, :b {:value :and}}},
+    :then
+    {:parent :coalesce,
+     :args
+     {:value
+      {:parent :merge,
+       :args
+       {:maps
+        {:parent :map,
          :args
-         {:coll {:as :descriptor-state, :type :keyword-map},
-          :key {:value :depth},
-          :default {:value 0}}}
-        1]}}]}}},
- :return-type :keyword-map}
+         {:func :_bounds-child,
+          :coll {:parent :rest, :args {:coll :_bounds-current}}
+          :bounds-state {:parent :assoc
+                         :args {:map :_bounds-input
+                                :key {:value :recur}
+                                :value {:as :self :type [:fn {:arg :any} :any]}}}}}}},
+      :default {:value {}}}},
+    :else :_bounds-one},
+   :return-type :keyword-map,
+   :lambda-params [:input :self]}
 
-{:name :_descriptor-union-branch,
- :parent :zipmap,
- :args
- {:keys [{:value :type} {:value :form}],
-  :vals
-  [{:as :item, :type :type-expression}
-   {:parent :_descriptor-child,
-    :args {:child-type {:as :item, :type :type-expression}}}]},
- :lambda-params [:item],
- :return-type :keyword-map}
+  {:name :_bounds-collected,
+   :parent :fix,
+   :args
+   {:step :_bounds-step,
+    :input
+    {:parent :zipmap,
+     :args
+     {:keys [{:value :constraint} {:value :int?}],
+      :vals
+      [:_form-policy-constraint
+       {:parent :equal?,
+        :args {:a :_form-policy-base, :b {:value :int}}}]}}},
+   :return-type :keyword-map}
 
-{:name :_descriptor-union,
- :parent :zipmap,
- :args
- {:keys [{:value :kind} {:value :type} {:value :branches}],
-  :vals
-  [{:value :union}
-   :_descriptor-type
-   {:parent :vec,
-    :args
-    {:coll
-     {:parent :map,
+  {:name :_bounds-present,
+   :parent :if,
+   :args
+   {:test
+    {:parent :gt,
+     :args
+     {:nums [{:parent :count, :args {:coll :_bounds-collected}} 0]}},
+    :then :_bounds-collected,
+    :else nil},
+   :return-type :nullable-keyword-map}
+
+  {:name :_form-bounds,
+   :description "HTML inclusive numeric hints: integer exclusive bounds shift by one; conjunctions merge in source order, last bound wins. Canonical validation remains authoritative."
+   :parent :if,
+   :args
+   {:test
+    {:parent :and,
+     :args
+     {:values
+      [{:parent :_form-refinement-type?,
+        :args {:type-expr {:as :type-expr, :type :type-expression}}}
+       {:parent :contains?,
+        :args
+        {:coll {:value #{:numeric :int :float}},
+         :key :_form-policy-base}}]}},
+    :then :_bounds-present,
+    :else nil},
+   :return-type :nullable-keyword-map}
+
+  {:name :_form-fit-classified
+   :parent :classify-literal
+   :args {:value {:as :value :type :any}}}
+
+  {:name :_form-fit-actual
+   :parent :if
+   :args {:test {:parent :nil? :args {:value :_form-fit-classified}}
+          :then {:value :any}
+          :else :_form-fit-classified}
+   :return-type :type-expression}
+
+  {:name :_form-fit-verdict,
+   :parent :_form-literal-refinement-verdict,
+   :args
+   {:value {:as :value, :type :any},
+    :constraint :_form-policy-constraint}}
+
+  {:name :_form-value-fits?,
+   :parent :or,
+   :args
+   {:values
+    [{:parent :nil?, :args {:value {:as :value, :type :any}}}
+     {:parent :equal?, :args {:a :_form-fit-actual, :b {:value :any}}}
+     {:parent :equal?,
       :args
-      {:func :_descriptor-union-branch,
-       :coll
-       {:parent :_form-union-members,
+      {:a {:as :type-expr, :type :type-expression}, :b {:value :any}}}
+     {:parent :subtype?,
+      :args
+      {:candidate :_form-fit-actual,
+       :expected {:as :type-expr, :type :type-expression}}}
+     {:parent :and,
+      :args
+      {:values
+       [{:parent :_form-refinement-type?,
+         :args {:type-expr {:as :type-expr, :type :type-expression}}}
+        {:parent :subtype?,
+         :args
+         {:candidate :_form-fit-actual, :expected :_form-policy-base}}
+        {:parent :or,
+         :args
+         {:values
+          [{:parent :equal?, :args {:a :_form-fit-verdict, :b true}}
+           {:parent :equal?,
+            :args {:a :_form-fit-verdict, :b {:value :unknown}}}]}}]}}]},
+   :return-type :bool}
+
+  {:name :_descriptor-recursion,
+   :parent :get,
+   :args
+   {:coll {:as :descriptor-state, :type :keyword-map},
+    :key {:value :recur, :type :keyword},
+    :default {:value nil, :type :null}},
+   :return-type [:fn {:arg :any} :any]}
+
+  {:name :_descriptor-type,
+   :parent :_form-canonical-type,
+   :args
+   {:type-expr
+    {:parent :get,
+     :args
+     {:coll {:as :input}, :key {:value :type}, :default {:value nil}}}}}
+
+  {:name :_descriptor-depth,
+   :parent :get,
+   :args {:coll {:as :input}, :key {:value :depth}, :default {:value 0}}}
+
+  {:name :_descriptor-leaf,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :kind} {:value :type}],
+    :vals [{:value :leaf} :_descriptor-type]},
+   :return-type :keyword-map}
+
+  {:name :_descriptor-child,
+   :parent :invoke,
+   :args
+   {:func {:ref :_descriptor-recursion, :type [:fn {:arg :any} :any]},
+    :arg
+    {:parent :zipmap,
+     :args
+     {:keys [{:value :type} {:value :depth}],
+      :vals
+      [{:as :child-type, :type :type-expression}
+       {:parent :add,
+        :args
+        {:nums
+         [{:parent :get,
+           :args
+           {:coll {:as :descriptor-state, :type :keyword-map},
+            :key {:value :depth},
+            :default {:value 0}}}
+          1]}}]}}},
+   :return-type :keyword-map}
+
+  {:name :_descriptor-union-branch,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :type} {:value :form}],
+    :vals
+    [{:as :item, :type :type-expression}
+     {:parent :_descriptor-child,
+      :args {:child-type {:as :item, :type :type-expression}}}]},
+   :lambda-params [:item],
+   :return-type :keyword-map}
+
+  {:name :_descriptor-union,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :kind} {:value :type} {:value :branches}],
+    :vals
+    [{:value :union}
+     :_descriptor-type
+     {:parent :vec,
+      :args
+      {:coll
+       {:parent :map,
+        :args
+        {:func :_descriptor-union-branch,
+         :coll
+         {:parent :_form-union-members,
+          :args {:type-expr :_descriptor-type}},
+         :descriptor-state
+         {:parent :assoc,
+          :args
+          {:map {:as :input},
+           :key {:value :recur},
+           :value {:as :self, :type [:fn {:arg :any} :any]}}}}}}}]}}
+
+  {:name :_descriptor-list,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :kind} {:value :type} {:value :element}],
+    :vals
+    [{:value :list}
+     :_descriptor-type
+     {:parent :_descriptor-child,
+      :args
+      {:child-type
+       {:parent :_form-list-element,
         :args {:type-expr :_descriptor-type}},
        :descriptor-state
        {:parent :assoc,
         :args
         {:map {:as :input},
          :key {:value :recur},
-         :value {:as :self, :type [:fn {:arg :any} :any]}}}}}}}]}}
+         :value {:as :self, :type [:fn {:arg :any} :any]}}}}}]}}
 
-{:name :_descriptor-list,
- :parent :zipmap,
- :args
- {:keys [{:value :kind} {:value :type} {:value :element}],
-  :vals
-  [{:value :list}
-   :_descriptor-type
-   {:parent :_descriptor-child,
-    :args
-    {:child-type
-     {:parent :_form-list-element,
-      :args {:type-expr :_descriptor-type}},
-     :descriptor-state
-     {:parent :assoc,
-      :args
-      {:map {:as :input},
-       :key {:value :recur},
-       :value {:as :self, :type [:fn {:arg :any} :any]}}}}}]}}
-
-{:name :_descriptor-field-type,
- :parent :get,
- :args
- {:coll {:as :record-type, :type :keyword-map},
-  :key {:as :item, :type :keyword},
-  :default nil}}
-
-{:name :_descriptor-field,
- :parent :zipmap,
- :args
- {:keys [{:value :name} {:value :type} {:value :form}],
-  :vals
-  [{:as :item, :type :keyword}
-   :_descriptor-field-type
-   {:parent :_descriptor-child,
-    :args {:child-type :_descriptor-field-type}}]},
- :lambda-params [:item],
- :return-type :keyword-map}
-
-{:name :_descriptor-record,
- :parent :zipmap,
- :args
- {:keys [{:value :kind} {:value :type} {:value :fields}],
-  :vals
-  [{:value :record}
-   :_descriptor-type
-   {:parent :vec,
-    :args
-    {:coll
-     {:parent :map,
-      :args
-      {:func :_descriptor-field,
-       :coll
-       {:parent :keys,
-        :args {:map {:ref :_descriptor-type, :type :keyword-map}}},
-       :record-type :_descriptor-type,
-       :descriptor-state
-       {:parent :assoc,
-        :args
-        {:map {:as :input},
-         :key {:value :recur},
-         :value {:as :self, :type [:fn {:arg :any} :any]}}}}}}}]}}
-
-{:name :_descriptor-step,
- :parent :cond,
- :args
- {:clauses
-  [{:parent :gt, :args {:nums [:_descriptor-depth 12]}}
-   :_descriptor-leaf
-   {:parent :_form-union-type?, :args {:type-expr :_descriptor-type}}
-   :_descriptor-union
-   {:parent :_form-list-type?, :args {:type-expr :_descriptor-type}}
-   :_descriptor-list
-   {:parent :_form-record-type?, :args {:type-expr :_descriptor-type}}
-   :_descriptor-record
-   true
-   :_descriptor-leaf]},
- :lambda-params [:input :self],
- :return-type :keyword-map}
-
-{:name :resolve-form,
- :parent :fix,
- :args
- {:step :_descriptor-step,
-  :input
-  {:parent :zipmap,
+  {:name :_descriptor-field-type,
+   :parent :get,
    :args
-   {:keys [{:value :type} {:value :depth}],
-    :vals [{:as :type-expr, :type :type-expression} 0]}}},
- :return-type :keyword-map,
- :description
- "Graph descriptor construction over canonical type predicates. Recurses through records, lists and unions; types deeper than 12 become leaf descriptors."}
+   {:coll {:as :record-type, :type :keyword-map},
+    :key {:as :item, :type :keyword},
+    :default nil}}
 
-{:name :_form-label-type,
- :parent :get,
- :args {:coll {:as :input}, :key {:value :type}, :default {:value nil}}}
-
-{:name :_form-label-step,
- :parent :to-str,
- :args
- {:value
-  {:parent :cond,
+  {:name :_descriptor-field,
+   :parent :zipmap,
    :args
-   {:clauses
-    [{:parent :is-a?,
-      :args {:value :_form-label-type, :type {:value :keyword}}}
-     {:parent :name, :args {:value :_form-label-type}}
-     {:parent :_type-refined?, :args {:type :_form-label-type}}
-     {:parent :invoke,
-      :args
-      {:func {:as :self, :type [:fn {:arg :any} :any]},
-       :arg
-       {:parent :zipmap,
-        :args
-        {:keys [{:value :type}],
-         :vals
-         [{:parent :_form-refinement-base,
-           :args {:type-expr :_form-label-type}}]}}}}
-     {:parent :_form-list-type?, :args {:type-expr :_form-label-type}}
-     {:parent :str,
-      :args
-      {:parts
-       ["["
-        {:parent :invoke,
-         :args
-         {:func {:as :self, :type [:fn {:arg :any} :any]},
-          :arg
-          {:parent :zipmap,
-           :args
-           {:keys [{:value :type}],
-            :vals
-            [{:parent :_form-list-element,
-              :args {:type-expr :_form-label-type}}]}}}}
-        "]"]}}
-     {:parent :fn-type?, :args {:type :_form-label-type}}
-     "fn"
-     {:parent :is-a?,
-      :args {:value :_form-label-type, :type {:value :map}}}
-     "record"
-     {:parent :and,
-      :args
-      {:values
-       [{:parent :is-a?,
-         :args {:value :_form-label-type, :type {:value :vector}}}
-        {:parent :is-a?,
-         :args
-         {:value {:parent :first, :args {:coll :_form-label-type}},
-          :type {:value :keyword}}}]}}
-     {:parent :name,
-      :args {:value {:parent :first, :args {:coll :_form-label-type}}}}
-     true
-     {:parent :pr-str, :args {:value :_form-label-type}}]}}},
- :lambda-params [:input :self],
- :return-type :text}
+   {:keys [{:value :name} {:value :type} {:value :form}],
+    :vals
+    [{:as :item, :type :keyword}
+     :_descriptor-field-type
+     {:parent :_descriptor-child,
+      :args {:child-type :_descriptor-field-type}}]},
+   :lambda-params [:item],
+   :return-type :keyword-map}
 
-{:name :_form-type-label,
- :parent :to-str,
- :args
- {:value
-  {:parent :fix,
+  {:name :_descriptor-record,
+   :parent :zipmap,
    :args
-   {:step :_form-label-step,
-    :input
-    {:parent :zipmap,
-     :args
-     {:keys [{:value :type}],
-      :vals [{:as :type-expr, :type :type-expression}]}}}}},
- :return-type :text}
-
-{:name :_control-path-attrs,
- :parent :if,
- :args
- {:test {:parent :empty?, :args {:coll {:as :path, :type :text}}},
-  :then {:value {}},
-  :else
-  {:parent :zipmap,
-   :args
-   {:keys [{:value "data-field-path"}],
-    :vals [{:as :path, :type :text}]}}}}
-
-{:name :_control-label-attrs,
- :parent :if,
- :args
- {:test
-  {:parent :some?, :args {:value {:as :id, :type :nullable-text}}},
-  :then
-  {:parent :zipmap,
-   :args
-   {:keys [{:value "id"}], :vals [{:as :id, :type :nullable-text}]}},
-  :else {:value {}}}}
-
-{:name :_control-location-attrs,
- :parent :merge,
- :args {:maps [:_control-path-attrs :_control-label-attrs]}}
-
-{:name :_control-enum,
- :parent :_form-enum,
- :args {:type-expr {:as :type-expr, :type :type-expression}}}
-
-{:name :_control-option-text,
- :parent :to-str,
- :args {:value {:as :item, :type :any}}}
-
-{:name :_control-option-value,
- :parent :if,
- :args
- {:test
-  {:parent :and,
-   :args
-   {:values
-    [{:parent :equal?,
-      :args
-      {:a
-       {:parent :get,
-        :args
-        {:coll {:as :enum, :type :keyword-map},
-         :key {:value :base},
-         :default {:value nil}}},
-       :b {:value :keyword}}}
-     {:parent :not,
-      :args
-      {:value
-       {:parent :str-starts-with?,
-        :args {:string :_control-option-text, :prefix ":"}}}}]}},
-  :then {:parent :str, :args {:parts [":" :_control-option-text]}},
-  :else :_control-option-text}}
-
-{:name :_control-option,
- :parent :list,
- :args
- {:items
-  ["option"
-   {:parent :zipmap,
-    :args {:keys [{:value "value"}], :vals [:_control-option-value]}}
-   :_control-option-value]},
- :lambda-params [:item],
- :return-type :hiccup-node}
-
-{:name :_control-enum-attrs,
- :parent :merge,
- :args
- {:maps
-  [{:parent :zipmap,
-    :args
-    {:keys
-     [{:value "class"}
-      {:value "data-form-field"}
-      {:value "data-field-kind"}],
-     :vals ["arg-value-edit-input" "" "enum"]}}
-   :_control-location-attrs]}}
-
-{:name :_control-enum-view,
- :parent :vec,
- :args
- {:coll
-  {:parent :concat,
-   :args
-   {:colls
-    [{:parent :list, :args {:items ["select" :_control-enum-attrs]}}
+   {:keys [{:value :kind} {:value :type} {:value :fields}],
+    :vals
+    [{:value :record}
+     :_descriptor-type
      {:parent :vec,
       :args
       {:coll
        {:parent :map,
         :args
-        {:func :_control-option,
+        {:func :_descriptor-field,
          :coll
+         {:parent :keys,
+          :args {:map {:ref :_descriptor-type, :type :keyword-map}}},
+         :record-type :_descriptor-type,
+         :descriptor-state
+         {:parent :assoc,
+          :args
+          {:map {:as :input},
+           :key {:value :recur},
+           :value {:as :self, :type [:fn {:arg :any} :any]}}}}}}}]}}
+
+  {:name :_descriptor-step,
+   :parent :cond,
+   :args
+   {:clauses
+    [{:parent :gt, :args {:nums [:_descriptor-depth 12]}}
+     :_descriptor-leaf
+     {:parent :_form-union-type?, :args {:type-expr :_descriptor-type}}
+     :_descriptor-union
+     {:parent :_form-list-type?, :args {:type-expr :_descriptor-type}}
+     :_descriptor-list
+     {:parent :_form-record-type?, :args {:type-expr :_descriptor-type}}
+     :_descriptor-record
+     true
+     :_descriptor-leaf]},
+   :lambda-params [:input :self],
+   :return-type :keyword-map}
+
+  {:name :resolve-form,
+   :parent :fix,
+   :args
+   {:step :_descriptor-step,
+    :input
+    {:parent :zipmap,
+     :args
+     {:keys [{:value :type} {:value :depth}],
+      :vals [{:as :type-expr, :type :type-expression} 0]}}},
+   :return-type :keyword-map,
+   :description
+   "Graph descriptor construction over canonical type predicates. Recurses through records, lists and unions; types deeper than 12 become leaf descriptors."}
+
+  {:name :_form-label-type,
+   :parent :get,
+   :args {:coll {:as :input}, :key {:value :type}, :default {:value nil}}}
+
+  {:name :_form-label-step,
+   :parent :to-str,
+   :args
+   {:value
+    {:parent :cond,
+     :args
+     {:clauses
+      [{:parent :is-a?,
+        :args {:value :_form-label-type, :type {:value :keyword}}}
+       {:parent :name, :args {:value :_form-label-type}}
+       {:parent :_type-refined?, :args {:type :_form-label-type}}
+       {:parent :invoke,
+        :args
+        {:func {:as :self, :type [:fn {:arg :any} :any]},
+         :arg
+         {:parent :zipmap,
+          :args
+          {:keys [{:value :type}],
+           :vals
+           [{:parent :_form-refinement-base,
+             :args {:type-expr :_form-label-type}}]}}}}
+       {:parent :_form-list-type?, :args {:type-expr :_form-label-type}}
+       {:parent :str,
+        :args
+        {:parts
+         ["["
+          {:parent :invoke,
+           :args
+           {:func {:as :self, :type [:fn {:arg :any} :any]},
+            :arg
+            {:parent :zipmap,
+             :args
+             {:keys [{:value :type}],
+              :vals
+              [{:parent :_form-list-element,
+                :args {:type-expr :_form-label-type}}]}}}}
+          "]"]}}
+       {:parent :fn-type?, :args {:type :_form-label-type}}
+       "fn"
+       {:parent :is-a?,
+        :args {:value :_form-label-type, :type {:value :map}}}
+       "record"
+       {:parent :and,
+        :args
+        {:values
+         [{:parent :is-a?,
+           :args {:value :_form-label-type, :type {:value :vector}}}
+          {:parent :is-a?,
+           :args
+           {:value {:parent :first, :args {:coll :_form-label-type}},
+            :type {:value :keyword}}}]}}
+       {:parent :name,
+        :args {:value {:parent :first, :args {:coll :_form-label-type}}}}
+       true
+       {:parent :pr-str, :args {:value :_form-label-type}}]}}},
+   :lambda-params [:input :self],
+   :return-type :text}
+
+  {:name :_form-type-label,
+   :parent :to-str,
+   :args
+   {:value
+    {:parent :fix,
+     :args
+     {:step :_form-label-step,
+      :input
+      {:parent :zipmap,
+       :args
+       {:keys [{:value :type}],
+        :vals [{:as :type-expr, :type :type-expression}]}}}}},
+   :return-type :text}
+
+  {:name :_control-path-attrs,
+   :parent :if,
+   :args
+   {:test {:parent :empty?, :args {:coll {:as :path, :type :text}}},
+    :then {:value {}},
+    :else
+    {:parent :zipmap,
+     :args
+     {:keys [{:value "data-field-path"}],
+      :vals [{:as :path, :type :text}]}}}}
+
+  {:name :_control-label-attrs,
+   :parent :if,
+   :args
+   {:test
+    {:parent :some?, :args {:value {:as :id, :type :nullable-text}}},
+    :then
+    {:parent :zipmap,
+     :args
+     {:keys [{:value "id"}], :vals [{:as :id, :type :nullable-text}]}},
+    :else {:value {}}}}
+
+  {:name :_control-location-attrs,
+   :parent :merge,
+   :args {:maps [:_control-path-attrs :_control-label-attrs]}}
+
+  {:name :_control-enum,
+   :parent :_form-enum,
+   :args {:type-expr {:as :type-expr, :type :type-expression}}}
+
+  {:name :_control-option-text,
+   :parent :to-str,
+   :args {:value {:as :item, :type :any}}}
+
+  {:name :_control-option-value,
+   :parent :if,
+   :args
+   {:test
+    {:parent :and,
+     :args
+     {:values
+      [{:parent :equal?,
+        :args
+        {:a
          {:parent :get,
           :args
-          {:coll :_control-enum,
-           :key {:value :members},
-           :default {:value []}}},
-         :enum :_control-enum}}}}]}}},
- :return-type :hiccup-node}
-
-{:name :_control-bounds,
- :parent :_form-bounds,
- :args {:type-expr {:as :type-expr, :type :type-expression}}}
-
-{:name :_control-bound-attrs,
- :parent :merge,
- :args
- {:maps
-  [{:parent :if,
-    :args
-    {:test
-     {:parent :some?,
-      :args
-      {:value
-       {:parent :get,
+          {:coll {:as :enum, :type :keyword-map},
+           :key {:value :base},
+           :default {:value nil}}},
+         :b {:value :keyword}}}
+       {:parent :not,
         :args
-        {:coll :_control-bounds,
-         :key {:value :min},
-         :default {:value nil}}}}},
-     :then
+        {:value
+         {:parent :str-starts-with?,
+          :args {:string :_control-option-text, :prefix ":"}}}}]}},
+    :then {:parent :str, :args {:parts [":" :_control-option-text]}},
+    :else :_control-option-text}}
+
+  {:name :_control-option,
+   :parent :list,
+   :args
+   {:items
+    ["option"
      {:parent :zipmap,
+      :args {:keys [{:value "value"}], :vals [:_control-option-value]}}
+     :_control-option-value]},
+   :lambda-params [:item],
+   :return-type :hiccup-node}
+
+  {:name :_control-enum-attrs,
+   :parent :merge,
+   :args
+   {:maps
+    [{:parent :zipmap,
       :args
-      {:keys [{:value "min"}],
-       :vals
-       [{:parent :get,
-         :args
-         {:coll :_control-bounds,
-          :key {:value :min},
-          :default {:value nil}}}]}},
-     :else {:value {}}}}
-   {:parent :if,
-    :args
-    {:test
-     {:parent :some?,
-      :args
-      {:value
-       {:parent :get,
+      {:keys
+       [{:value "class"}
+        {:value "data-form-field"}
+        {:value "data-field-kind"}],
+       :vals ["arg-value-edit-input" "" "enum"]}}
+     :_control-location-attrs]}}
+
+  {:name :_control-enum-view,
+   :parent :vec,
+   :args
+   {:coll
+    {:parent :concat,
+     :args
+     {:colls
+      [{:parent :list, :args {:items ["select" :_control-enum-attrs]}}
+       {:parent :vec,
         :args
-        {:coll :_control-bounds,
-         :key {:value :max},
-         :default {:value nil}}}}},
-     :then
-     {:parent :zipmap,
+        {:coll
+         {:parent :map,
+          :args
+          {:func :_control-option,
+           :coll
+           {:parent :get,
+            :args
+            {:coll :_control-enum,
+             :key {:value :members},
+             :default {:value []}}},
+           :enum :_control-enum}}}}]}}},
+   :return-type :hiccup-node}
+
+  {:name :_control-bounds,
+   :parent :_form-bounds,
+   :args {:type-expr {:as :type-expr, :type :type-expression}}}
+
+  {:name :_control-bound-attrs,
+   :parent :merge,
+   :args
+   {:maps
+    [{:parent :if,
       :args
-      {:keys [{:value "max"}],
+      {:test
+       {:parent :some?,
+        :args
+        {:value
+         {:parent :get,
+          :args
+          {:coll :_control-bounds,
+           :key {:value :min},
+           :default {:value nil}}}}},
+       :then
+       {:parent :zipmap,
+        :args
+        {:keys [{:value "min"}],
+         :vals
+         [{:parent :get,
+           :args
+           {:coll :_control-bounds,
+            :key {:value :min},
+            :default {:value nil}}}]}},
+       :else {:value {}}}}
+     {:parent :if,
+      :args
+      {:test
+       {:parent :some?,
+        :args
+        {:value
+         {:parent :get,
+          :args
+          {:coll :_control-bounds,
+           :key {:value :max},
+           :default {:value nil}}}}},
+       :then
+       {:parent :zipmap,
+        :args
+        {:keys [{:value "max"}],
+         :vals
+         [{:parent :get,
+           :args
+           {:coll :_control-bounds,
+            :key {:value :max},
+            :default {:value nil}}}]}},
+       :else {:value {}}}}]}}
+
+  {:name :_control-extra-attrs,
+   :parent :merge,
+   :args
+   {:maps
+    [{:parent :zipmap,
+      :args
+      {:keys [{:value "data-form-type"}],
        :vals
-       [{:parent :get,
-         :args
-         {:coll :_control-bounds,
-          :key {:value :max},
-          :default {:value nil}}}]}},
-     :else {:value {}}}}]}}
+       [{:parent :to-json-string,
+         :args {:data {:as :type-expr, :type :type-expression}}}]}}
+     :_control-location-attrs
+     :_control-bound-attrs]}}
 
-{:name :_control-extra-attrs,
- :parent :merge,
- :args
- {:maps
-  [{:parent :zipmap,
-    :args
-    {:keys [{:value "data-form-type"}],
-     :vals
-     [{:parent :to-json-string,
-       :args {:data {:as :type-expr, :type :type-expression}}}]}}
-   :_control-location-attrs
-   :_control-bound-attrs]}}
+  {:name :_control-raw,
+   :parent :_form-run-target,
+   :args {:target {:as :target, :type :text}}}
 
-{:name :_control-raw,
- :parent :_form-run-target,
- :args {:target {:as :target, :type :text}}}
+  {:name :_control-second,
+   :parent :get,
+   :args {:coll :_control-raw, :key 1, :default nil}}
 
-{:name :_control-second,
- :parent :get,
- :args {:coll :_control-raw, :key 1, :default nil}}
-
-{:name :_control-merged,
- :parent :if,
- :args
- {:test
-  {:parent :is-a?,
-   :args {:value :_control-raw, :type {:value :vector}}},
-  :then
-  {:parent :if,
+  {:name :_control-merged,
+   :parent :if,
    :args
    {:test
     {:parent :is-a?,
-     :args {:value :_control-second, :type {:value :map}}},
+     :args {:value :_control-raw, :type {:value :vector}}},
     :then
-    {:parent :assoc,
+    {:parent :if,
      :args
-     {:map :_control-raw,
-      :key {:value 1},
-      :value
-      {:parent :merge,
-       :args {:maps [:_control-second :_control-extra-attrs]}}}},
+     {:test
+      {:parent :is-a?,
+       :args {:value :_control-second, :type {:value :map}}},
+      :then
+      {:parent :assoc,
+       :args
+       {:map :_control-raw,
+        :key {:value 1},
+        :value
+        {:parent :merge,
+         :args {:maps [:_control-second :_control-extra-attrs]}}}},
+      :else
+      {:parent :vec,
+       :args
+       {:coll
+        {:parent :concat,
+         :args
+         {:colls
+          [{:parent :list,
+            :args
+            {:items
+             [{:parent :first, :args {:coll :_control-raw}}
+              :_control-extra-attrs]}}
+           {:parent :rest, :args {:coll :_control-raw}}]}}}}}},
+    :else :_control-raw},
+   :return-type :hiccup-node}
+
+  {:name :_control-leaf-target,
+   :parent :coalesce,
+   :args
+   {:value
+    {:parent :_form-leaf-target,
+     :args
+     {:registry :_form-registry,
+      :type-expr {:as :type-expr, :type :type-expression}}},
+    :default "_form-json"}}
+
+  {:name :_form-build-leaf,
+   :parent :if,
+   :args
+   {:test {:parent :some?, :args {:value :_control-enum}},
+    :then :_control-enum-view,
     :else
+    {:parent :_control-merged, :args {:target :_control-leaf-target}}},
+   :return-type :hiccup-node}
+
+  {:name :_render-recursion,
+   :parent :get,
+   :args
+   {:coll {:as :render-state, :type :keyword-map},
+    :key {:value :recur, :type :keyword},
+    :default {:value nil, :type :null}},
+   :return-type [:fn {:arg :any} :any]}
+
+  {:name :_render-form,
+   :parent :get,
+   :args {:coll {:as :input}, :key {:value :form}, :default {:value nil}}}
+
+  {:name :_render-type,
+   :parent :get,
+   :args
+   {:coll :_render-form, :key {:value :type}, :default {:value nil}}}
+
+  {:name :_render-kind,
+   :parent :get,
+   :args
+   {:coll :_render-form, :key {:value :kind}, :default {:value nil}}}
+
+  {:name :_render-path,
+   :parent :get,
+   :args {:coll {:as :input}, :key {:value :path}, :default {:value ""}}}
+
+  {:name :_render-id,
+   :parent :get,
+   :args {:coll {:as :input}, :key {:value :id}, :default {:value nil}}}
+
+  {:name :_render-value,
+   :parent :get,
+   :args
+   {:coll {:as :input}, :key {:value :value}, :default {:value nil}}}
+
+  {:name :_render-exact-target,
+   :parent :if,
+   :args
+   {:test {:parent :equal?, :args {:a :_render-kind, :b {:value :leaf}}},
+    :then nil,
+    :else
+    {:parent :_form-exact-target,
+     :args {:registry :_form-registry, :type-expr :_render-type}}}}
+
+  {:name :_render-exact,
+   :parent :_control-merged,
+   :args
+   {:target {:ref :_render-exact-target, :type :text},
+    :type-expr :_render-type,
+    :path :_render-path,
+    :id :_render-id}}
+
+  {:name :_render-field-name,
+   :parent :name,
+   :args
+   {:value
+    {:parent :get,
+     :args
+     {:coll {:as :field, :type :keyword-map},
+      :key {:value :name},
+      :default {:value nil}}}}}
+
+  {:name :_render-field-path,
+   :parent :if,
+   :args
+   {:test
+    {:parent :blank?,
+     :args
+     {:string
+      {:parent :get,
+       :args
+       {:coll {:as :render-state, :type :keyword-map},
+        :key {:value :path},
+        :default {:value ""}}}}},
+    :then :_render-field-name,
+    :else
+    {:parent :str,
+     :args
+     {:parts
+      [{:parent :get,
+        :args
+        {:coll {:as :render-state, :type :keyword-map},
+         :key {:value :path},
+         :default {:value ""}}}
+       "."
+       :_render-field-name]}}}}
+
+  {:name :_render-field-form,
+   :parent :get,
+   :args
+   {:coll {:as :field, :type :keyword-map},
+    :key {:value :form},
+    :default {:value nil}}}
+
+  {:name :_render-field-id,
+   :parent :if,
+   :args
+   {:test
+    {:parent :or,
+     :args
+     {:values
+      [{:parent :equal?,
+        :args
+        {:a
+         {:parent :get,
+          :args
+          {:coll :_render-field-form,
+           :key {:value :kind},
+           :default {:value nil}}},
+         :b {:value :record}}}
+       {:parent :equal?,
+        :args
+        {:a
+         {:parent :get,
+          :args
+          {:coll :_render-field-form,
+           :key {:value :kind},
+           :default {:value nil}}},
+         :b {:value :union}}}]}},
+    :then nil,
+    :else {:parent :str, :args {:parts ["vf-" :_render-field-path]}}}}
+
+  {:name :_render-parent-value,
+   :parent :get,
+   :args
+   {:coll {:as :render-state, :type :keyword-map},
+    :key {:value :value},
+    :default {:value nil}}}
+
+  {:name :_render-field-key,
+   :parent :str-to-keyword,
+   :args {:string :_render-field-name}}
+
+  {:name :_render-field-value,
+   :parent :if,
+   :args
+   {:test
+    {:parent :is-a?,
+     :args {:value :_render-parent-value, :type {:value :map}}},
+    :then
+    {:parent :if,
+     :args
+     {:test
+      {:parent :contains?,
+       :args {:coll :_render-parent-value, :key :_render-field-key}},
+      :then
+      {:parent :get,
+       :args
+       {:coll :_render-parent-value,
+        :key :_render-field-key,
+        :default nil}},
+      :else
+      {:parent :get,
+       :args
+       {:coll :_render-parent-value,
+        :key :_render-field-name,
+        :default nil}}}},
+    :else nil}}
+
+  {:name :_render-field,
+   :parent :_form-record-field,
+   :args
+   {:field-id :_render-field-id,
+    :field-name :_render-field-name,
+    :control
+    {:parent :invoke,
+     :args
+     {:func {:ref :_render-recursion, :type [:fn {:arg :any} :any]},
+      :arg
+      {:parent :zipmap,
+       :args
+       {:keys
+        [{:value :form} {:value :path} {:value :id} {:value :value}],
+        :vals
+        [:_render-field-form
+         :_render-field-path
+         :_render-field-id
+         :_render-field-value]}}}}},
+   :lambda-params [:field],
+   :return-type :hiccup-node}
+
+  {:name :_render-record,
+   :parent :_form-record-group,
+   :args
+   {:fields
     {:parent :vec,
      :args
      {:coll
-      {:parent :concat,
+      {:parent :map,
        :args
-       {:colls
-        [{:parent :list,
-          :args
-          {:items
-           [{:parent :first, :args {:coll :_control-raw}}
-            :_control-extra-attrs]}}
-         {:parent :rest, :args {:coll :_control-raw}}]}}}}}},
-  :else :_control-raw},
- :return-type :hiccup-node}
+       {:func :_render-field,
+        :coll
+        {:parent :get,
+         :args
+         {:coll :_render-form,
+          :key {:value :fields},
+          :default {:value []}}},
+        :render-state
+        {:parent :assoc,
+         :args
+         {:map {:as :input},
+          :key {:value :recur},
+          :value {:as :self, :type [:fn {:arg :any} :any]}}}}}}}},
+   :return-type :hiccup-node}
 
-{:name :_control-leaf-target,
- :parent :coalesce,
- :args
- {:value
-  {:parent :_form-leaf-target,
+  {:name :_render-branches,
+   :parent :get,
    :args
-   {:registry :_form-registry,
-    :type-expr {:as :type-expr, :type :type-expression}}},
-  :default "_form-json"}}
+   {:coll :_render-form, :key {:value :branches}, :default {:value []}}}
 
-{:name :_form-build-leaf,
- :parent :if,
- :args
- {:test {:parent :some?, :args {:value :_control-enum}},
-  :then :_control-enum-view,
-  :else
-  {:parent :_control-merged, :args {:target :_control-leaf-target}}},
- :return-type :hiccup-node}
-
-{:name :_render-recursion,
- :parent :get,
- :args
- {:coll {:as :render-state, :type :keyword-map},
-  :key {:value :recur, :type :keyword},
-  :default {:value nil, :type :null}},
- :return-type [:fn {:arg :any} :any]}
-
-{:name :_render-form,
- :parent :get,
- :args {:coll {:as :input}, :key {:value :form}, :default {:value nil}}}
-
-{:name :_render-type,
- :parent :get,
- :args
- {:coll :_render-form, :key {:value :type}, :default {:value nil}}}
-
-{:name :_render-kind,
- :parent :get,
- :args
- {:coll :_render-form, :key {:value :kind}, :default {:value nil}}}
-
-{:name :_render-path,
- :parent :get,
- :args {:coll {:as :input}, :key {:value :path}, :default {:value ""}}}
-
-{:name :_render-id,
- :parent :get,
- :args {:coll {:as :input}, :key {:value :id}, :default {:value nil}}}
-
-{:name :_render-value,
- :parent :get,
- :args
- {:coll {:as :input}, :key {:value :value}, :default {:value nil}}}
-
-{:name :_render-exact-target,
- :parent :if,
- :args
- {:test {:parent :equal?, :args {:a :_render-kind, :b {:value :leaf}}},
-  :then nil,
-  :else
-  {:parent :_form-exact-target,
-   :args {:registry :_form-registry, :type-expr :_render-type}}}}
-
-{:name :_render-exact,
- :parent :_control-merged,
- :args
- {:target {:ref :_render-exact-target, :type :text},
-  :type-expr :_render-type,
-  :path :_render-path,
-  :id :_render-id}}
-
-{:name :_render-field-name,
- :parent :name,
- :args
- {:value
-  {:parent :get,
+  {:name :_render-indices,
+   :parent :range,
    :args
-   {:coll {:as :field, :type :keyword-map},
-    :key {:value :name},
-    :default {:value nil}}}}}
+   {:start 0,
+    :end {:parent :count, :args {:coll :_render-branches}},
+    :step 1}}
 
-{:name :_render-field-path,
- :parent :if,
- :args
- {:test
-  {:parent :blank?,
+  {:name :_render-indexed-branch,
+   :parent :get,
    :args
-   {:string
+   {:coll {:as :branches, :type [:list :keyword-map]},
+    :key {:as :branch-index, :type :int},
+    :default nil}}
+
+  {:name :_render-branch-fits?,
+   :parent :_form-value-fits?,
+   :args
+   {:value {:as :current-value, :type :any},
+    :type-expr
     {:parent :get,
      :args
-     {:coll {:as :render-state, :type :keyword-map},
-      :key {:value :path},
-      :default {:value ""}}}}},
-  :then :_render-field-name,
-  :else
-  {:parent :str,
-   :args
-   {:parts
-    [{:parent :get,
-      :args
-      {:coll {:as :render-state, :type :keyword-map},
-       :key {:value :path},
-       :default {:value ""}}}
-     "."
-     :_render-field-name]}}}}
+     {:coll :_render-indexed-branch,
+      :key {:value :type},
+      :default {:value nil}}}},
+   :lambda-params [:branch-index]}
 
-{:name :_render-field-form,
- :parent :get,
- :args
- {:coll {:as :field, :type :keyword-map},
-  :key {:value :form},
-  :default {:value nil}}}
-
-{:name :_render-field-id,
- :parent :if,
- :args
- {:test
-  {:parent :or,
+  {:name :_render-active,
+   :parent :coalesce,
    :args
-   {:values
-    [{:parent :equal?,
+   {:value
+    {:parent :find-first,
+     :args
+     {:pred :_render-branch-fits?,
+      :coll :_render-indices,
+      :branches :_render-branches,
+      :current-value :_render-value}},
+    :default 0}}
+
+  {:name :_render-index-text,
+   :parent :to-str,
+   :args {:value {:as :branch-index, :type :int}}}
+
+  {:name :_render-index-active?,
+   :parent :equal?,
+   :args
+   {:a {:as :branch-index, :type :int},
+    :b {:as :selected-index, :type :int}}}
+
+  {:name :_render-option-attrs,
+   :parent :if,
+   :args
+   {:test :_render-index-active?,
+    :then
+    {:parent :zipmap,
+     :args
+     {:keys [{:value "value"} {:value "selected"}],
+      :vals [:_render-index-text "selected"]}},
+    :else
+    {:parent :zipmap,
+     :args {:keys [{:value "value"}], :vals [:_render-index-text]}}}}
+
+  {:name :_render-option,
+   :parent :list,
+   :args
+   {:items
+    ["option"
+     :_render-option-attrs
+     {:parent :_form-type-label,
       :args
-      {:a
+      {:type-expr
        {:parent :get,
         :args
-        {:coll :_render-field-form,
-         :key {:value :kind},
-         :default {:value nil}}},
-       :b {:value :record}}}
-     {:parent :equal?,
-      :args
-      {:a
-       {:parent :get,
-        :args
-        {:coll :_render-field-form,
-         :key {:value :kind},
-         :default {:value nil}}},
-       :b {:value :union}}}]}},
-  :then nil,
-  :else {:parent :str, :args {:parts ["vf-" :_render-field-path]}}}}
+        {:coll :_render-indexed-branch,
+         :key {:value :type},
+         :default {:value nil}}}}}]},
+   :lambda-params [:branch-index],
+   :return-type :hiccup-node}
 
-{:name :_render-parent-value,
- :parent :get,
- :args
- {:coll {:as :render-state, :type :keyword-map},
-  :key {:value :value},
-  :default {:value nil}}}
+  {:name :_render-union-select,
+   :parent :_form-union-select,
+   :args
+   {:options
+    {:parent :vec,
+     :args
+     {:coll
+      {:parent :map,
+       :args
+       {:func :_render-option,
+        :coll :_render-indices,
+        :branches :_render-branches,
+        :selected-index :_render-active}}}}}}
 
-{:name :_render-field-key,
- :parent :str-to-keyword,
- :args {:string :_render-field-name}}
-
-{:name :_render-field-value,
- :parent :if,
- :args
- {:test
-  {:parent :is-a?,
-   :args {:value :_render-parent-value, :type {:value :map}}},
-  :then
-  {:parent :if,
+  {:name :_render-branch-leaf-type,
+   :parent :if,
    :args
    {:test
-    {:parent :contains?,
-     :args {:coll :_render-parent-value, :key :_render-field-key}},
+    {:parent :equal?,
+     :args
+     {:a
+      {:parent :get,
+       :args
+       {:coll
+        {:parent :get,
+         :args
+         {:coll :_render-indexed-branch,
+          :key {:value :form},
+          :default {:value nil}}},
+        :key {:value :kind},
+        :default {:value nil}}},
+      :b {:value :leaf}}},
     :then
     {:parent :get,
      :args
-     {:coll :_render-parent-value,
-      :key :_render-field-key,
-      :default nil}},
-    :else
-    {:parent :get,
+     {:coll :_render-indexed-branch,
+      :key {:value :type},
+      :default {:value nil}}},
+    :else {:value :any}}}
+
+  {:name :_render-branch,
+   :parent :_form-union-branch,
+   :args
+   {:index :_render-index-text,
+    :active? :_render-index-active?,
+    :control
+    {:parent :_form-build-leaf,
      :args
-     {:coll :_render-parent-value,
-      :key :_render-field-name,
-      :default nil}}}},
-  :else nil}}
+     {:type-expr :_render-branch-leaf-type,
+      :path {:as :path, :type :text},
+      :id nil}}},
+   :lambda-params [:branch-index],
+   :return-type :hiccup-node}
 
-{:name :_render-field,
- :parent :_form-record-field,
- :args
- {:field-id :_render-field-id,
-  :field-name :_render-field-name,
-  :control
-  {:parent :invoke,
+  {:name :_render-union,
+   :parent :_form-union-wrap,
    :args
-   {:func {:ref :_render-recursion, :type [:fn {:arg :any} :any]},
-    :arg
-    {:parent :zipmap,
-     :args
-     {:keys
-      [{:value :form} {:value :path} {:value :id} {:value :value}],
-      :vals
-      [:_render-field-form
-       :_render-field-path
-       :_render-field-id
-       :_render-field-value]}}}}},
- :lambda-params [:field],
- :return-type :hiccup-node}
-
-{:name :_render-record,
- :parent :_form-record-group,
- :args
- {:fields
-  {:parent :vec,
-   :args
-   {:coll
-    {:parent :map,
-     :args
-     {:func :_render-field,
-      :coll
-      {:parent :get,
-       :args
-       {:coll :_render-form,
-        :key {:value :fields},
-        :default {:value []}}},
-      :render-state
-      {:parent :assoc,
-       :args
-       {:map {:as :input},
-        :key {:value :recur},
-        :value {:as :self, :type [:fn {:arg :any} :any]}}}}}}}},
- :return-type :hiccup-node}
-
-{:name :_render-branches,
- :parent :get,
- :args
- {:coll :_render-form, :key {:value :branches}, :default {:value []}}}
-
-{:name :_render-indices,
- :parent :range,
- :args
- {:start 0,
-  :end {:parent :count, :args {:coll :_render-branches}},
-  :step 1}}
-
-{:name :_render-indexed-branch,
- :parent :get,
- :args
- {:coll {:as :branches, :type [:list :keyword-map]},
-  :key {:as :branch-index, :type :int},
-  :default nil}}
-
-{:name :_render-branch-fits?,
- :parent :_form-value-fits?,
- :args
- {:value {:as :current-value, :type :any},
-  :type-expr
-  {:parent :get,
-   :args
-   {:coll :_render-indexed-branch,
-    :key {:value :type},
-    :default {:value nil}}}},
- :lambda-params [:branch-index]}
-
-{:name :_render-active,
- :parent :coalesce,
- :args
- {:value
-  {:parent :find-first,
-   :args
-   {:pred :_render-branch-fits?,
-    :coll :_render-indices,
-    :branches :_render-branches,
-    :current-value :_render-value}},
-  :default 0}}
-
-{:name :_render-index-text,
- :parent :to-str,
- :args {:value {:as :branch-index, :type :int}}}
-
-{:name :_render-index-active?,
- :parent :equal?,
- :args
- {:a {:as :branch-index, :type :int},
-  :b {:as :selected-index, :type :int}}}
-
-{:name :_render-option-attrs,
- :parent :if,
- :args
- {:test :_render-index-active?,
-  :then
-  {:parent :zipmap,
-   :args
-   {:keys [{:value "value"} {:value "selected"}],
-    :vals [:_render-index-text "selected"]}},
-  :else
-  {:parent :zipmap,
-   :args {:keys [{:value "value"}], :vals [:_render-index-text]}}}}
-
-{:name :_render-option,
- :parent :list,
- :args
- {:items
-  ["option"
-   :_render-option-attrs
-   {:parent :_form-type-label,
-    :args
-    {:type-expr
-     {:parent :get,
-      :args
-      {:coll :_render-indexed-branch,
-       :key {:value :type},
-       :default {:value nil}}}}}]},
- :lambda-params [:branch-index],
- :return-type :hiccup-node}
-
-{:name :_render-union-select,
- :parent :_form-union-select,
- :args
- {:options
-  {:parent :vec,
-   :args
-   {:coll
-    {:parent :map,
-     :args
-     {:func :_render-option,
-      :coll :_render-indices,
-      :branches :_render-branches,
-      :selected-index :_render-active}}}}}}
-
-{:name :_render-branch-leaf-type,
- :parent :if,
- :args
- {:test
-  {:parent :equal?,
-   :args
-   {:a
-    {:parent :get,
+   {:select :_render-union-select,
+    :branches
+    {:parent :vec,
      :args
      {:coll
-      {:parent :get,
+      {:parent :map,
        :args
-       {:coll :_render-indexed-branch,
-        :key {:value :form},
-        :default {:value nil}}},
-      :key {:value :kind},
-      :default {:value nil}}},
-    :b {:value :leaf}}},
-  :then
-  {:parent :get,
-   :args
-   {:coll :_render-indexed-branch,
-    :key {:value :type},
-    :default {:value nil}}},
-  :else {:value :any}}}
+       {:func :_render-branch,
+        :coll :_render-indices,
+        :branches :_render-branches,
+        :selected-index :_render-active,
+        :path :_render-path}}}},
+    :active {:parent :to-str, :args {:value :_render-active}}},
+   :return-type :hiccup-node}
 
-{:name :_render-branch,
- :parent :_form-union-branch,
- :args
- {:index :_render-index-text,
-  :active? :_render-index-active?,
-  :control
-  {:parent :_form-build-leaf,
+  {:name :_render-leaf,
+   :parent :_form-build-leaf,
    :args
-   {:type-expr :_render-branch-leaf-type,
-    :path {:as :path, :type :text},
-    :id nil}}},
- :lambda-params [:branch-index],
- :return-type :hiccup-node}
-
-{:name :_render-union,
- :parent :_form-union-wrap,
- :args
- {:select :_render-union-select,
-  :branches
-  {:parent :vec,
-   :args
-   {:coll
-    {:parent :map,
+   {:type-expr
+    {:parent :if,
      :args
-     {:func :_render-branch,
-      :coll :_render-indices,
-      :branches :_render-branches,
-      :selected-index :_render-active,
-      :path :_render-path}}}},
-  :active {:parent :to-str, :args {:value :_render-active}}},
- :return-type :hiccup-node}
+     {:test
+      {:parent :equal?, :args {:a :_render-kind, :b {:value :list}}},
+      :then {:value :any},
+      :else :_render-type}},
+    :path :_render-path,
+    :id :_render-id}}
 
-{:name :_render-leaf,
- :parent :_form-build-leaf,
- :args
- {:type-expr
-  {:parent :if,
+  {:name :_render-step,
+   :parent :cond,
    :args
-   {:test
-    {:parent :equal?, :args {:a :_render-kind, :b {:value :list}}},
-    :then {:value :any},
-    :else :_render-type}},
-  :path :_render-path,
-  :id :_render-id}}
+   {:clauses
+    [{:parent :some?, :args {:value :_render-exact-target}}
+     :_render-exact
+     {:parent :equal?, :args {:a :_render-kind, :b {:value :record}}}
+     :_render-record
+     {:parent :equal?, :args {:a :_render-kind, :b {:value :union}}}
+     :_render-union
+     true
+     :_render-leaf]},
+   :lambda-params [:input :self],
+   :return-type :hiccup-node}
 
-{:name :_render-step,
- :parent :cond,
- :args
- {:clauses
-  [{:parent :some?, :args {:value :_render-exact-target}}
-   :_render-exact
-   {:parent :equal?, :args {:a :_render-kind, :b {:value :record}}}
-   :_render-record
-   {:parent :equal?, :args {:a :_render-kind, :b {:value :union}}}
-   :_render-union
-   true
-   :_render-leaf]},
- :lambda-params [:input :self],
- :return-type :hiccup-node}
-
-{:name :build-form,
- :parent :fix,
- :args
- {:step :_render-step,
-  :input
-  {:parent :zipmap,
+  {:name :build-form,
+   :parent :fix,
    :args
-   {:keys [{:value :form} {:value :path} {:value :id} {:value :value}],
-    :vals
-    [{:as :form, :type :keyword-map}
-     ""
-     nil
-     {:as :current-value, :type :any}]}}},
- :return-type :hiccup-node,
- :description
- "Graph form rendering: exact registry override, recursive record fields, union choice and enum/control attributes. Canonical type interpretation and scoped target execution remain native."}
-
+   {:step :_render-step,
+    :input
+    {:parent :zipmap,
+     :args
+     {:keys [{:value :form} {:value :path} {:value :id} {:value :value}],
+      :vals
+      [{:as :form, :type :keyword-map}
+       ""
+       nil
+       {:as :current-value, :type :any}]}}},
+   :return-type :hiccup-node,
+   :description
+   "Graph form rendering: exact registry override, recursive record fields, union choice and enum/control attributes. Canonical type interpretation and scoped target execution remain native."}
 
   {:name :_build-value-form-descriptor
    :parent :resolve-form

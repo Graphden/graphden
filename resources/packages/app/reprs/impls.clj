@@ -39,8 +39,8 @@
 
 (defbase _repr-render-safe
   "Execute a selected typed representation with effects denied and sanitize its DOM output."
-  [registry type value]
-  (value-repr/render-typed-repr ctx registry type value))
+  [target value]
+  (value-repr/render-selected-repr ctx target value))
 
 
 (defn- fmt2

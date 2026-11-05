@@ -10,7 +10,6 @@
     [graphden.executor.interface :as executor]
     [graphden.executor.registry.core :as registry]
     [graphden.storage.protocol.core :as sp]
-    [graphden.types.check.literals :as types-lit]
     [graphden.types.core :as types]))
 
 
@@ -519,42 +518,6 @@
        []))))
 
 
-(defn pick-form-fn
-  "Most-specific registered form-fn whose type accepts `leaf-type`.
-   `registry` is `[[type-kw fn-name] …]`. Returns the form-fn name
-   (string) or nil. Tie-break for two unrelated accepting types:
-   prefer the non-`:any` one, then alphabetical."
-  [registry leaf-type]
-  (let [accepting (filterv (fn [[t _]] (types/subtype? leaf-type t)) registry)]
-    (when (seq accepting)
-      (let [ts        (mapv first accepting)
-            most-spec (first (filter (fn [c]
-                                       (every? #(types/subtype? c %) ts))
-                                     ts))
-            chosen    (or most-spec
-                          (first (sort-by #(vector (if (= :any %) 1 0) (str %))
-                                          ts)))]
-        (some (fn [[t fn-name]] (when (= t chosen) fn-name)) accepting)))))
-
-
-(defn exact-form-fn
-  "Form-fn registered for EXACTLY this structural type — the
-   pre-decomposition dispatch tier: a form-fn registered for a whole
-   COMPOSITE type wins over structural decomposition (e.g.
-   `hiccup-node`'s EDN textarea over its 6-branch union editor).
-   Matched by MUTUAL `subtype?` (semantic type equality — robust to
-   union-member ordering, which differs between `resolve-alias` and
-   the rich-types registry's canonical form) — never one-way
-   `subtype?`, so the generic `:any` / `:jsonb` fallback rows can't
-   swallow record / union decomposition. nil when no equal row
-   exists."
-  [registry t]
-  (some (fn [[rt fn-name]]
-          (when (and (types/subtype? t rt) (types/subtype? rt t))
-            fn-name))
-        registry))
-
-
 ;; =============================================================================
 ;; Endpoint helpers — the current value at the edit site
 ;; =============================================================================
@@ -571,64 +534,3 @@
                      (sp/read-entity storage :binding))]
     (when (composition-visible? storage (:fn-id bnd))
       (if item-id (:value item) (:value bnd)))))
-
-
-;; =============================================================================
-;; Canonical refinement interpretation and literal fitting
-;; =============================================================================
-
-(defn enum-of
-  "If `t` is a closed-enum refinement `[:refine base [:in members]]`,
-   return `{:base base :members [...]}`, else nil."
-  [t]
-  (when (types/refine-type? t)
-    (let [c (types/refine-constraint t)]
-      (when (and (vector? c) (= :in (first c)) (sequential? (second c)))
-        {:base (types/refine-base t) :members (vec (second c))}))))
-
-
-(defn- collect-bounds
-  "Walk a refinement constraint, collecting `{:min :max}` as INCLUSIVE
-   bounds. Exclusive `>` / `<` are nudged by one for an integer base
-   (HTML `min`/`max` are inclusive); for a real base they pass through
-   as a soft hint — the live type-check stays authoritative."
-  [c int-base?]
-  (cond
-    (not (vector? c))   {}
-    (= :and (first c))  (reduce (fn [acc sub] (merge acc (collect-bounds sub int-base?)))
-                                {} (rest c))
-    :else
-    (let [[op n] c]
-      (if-not (number? n)
-        {}
-        (case op
-          :>= {:min n}
-          :>  {:min (if int-base? (inc n) n)}
-          :<= {:max n}
-          :<  {:max (if int-base? (dec n) n)}
-          {})))))
-
-
-(defn numeric-bounds
-  "`{:min :max}` for a numeric refinement, or nil."
-  [t]
-  (when (types/refine-type? t)
-    (let [base (types/refine-base t)]
-      (when (#{:int :numeric :float} base)
-        (not-empty (collect-bounds (types/refine-constraint t) (= base :int)))))))
-
-
-(defn value-fits?
-  "True when `value` plausibly belongs to type `t` — used to pick a
-   union's initially-active branch. Mirrors the binding type-guard:
-   primitive subtype plus a lenient refinement check. A nil value
-   fits any branch (caller falls back to branch 0)."
-  [value t]
-  (let [actual (or (types-lit/classify-literal value) :any)]
-    (or (nil? value) (= actual :any) (= t :any)
-        (types/subtype? actual t)
-        (and (types/refine-type? t)
-             (types/subtype? actual (types/refine-base t))
-             (let [r (types-lit/literal-satisfies-refinement?
-                       value (types/refine-constraint t))]
-               (or (true? r) (= :unknown r)))))))

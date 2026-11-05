@@ -149,6 +149,16 @@
               :vault-version 2 :failure-type nil
               :occurred-at (java.time.Instant/ofEpochSecond 1)}
         storage (reify sp/StorageCRUD
+                  (create-entity [_ _ _] (throw (UnsupportedOperationException.)))
+
+                  (read-entity [_ _ _] (throw (UnsupportedOperationException.)))
+
+                  (update-entity [_ _ _ _] (throw (UnsupportedOperationException.)))
+
+                  (delete-entity [_ _ _] (throw (UnsupportedOperationException.)))
+
+                  (query-latest-per-group [_ _ _ _] (throw (UnsupportedOperationException.)))
+
                   (query-entities
                     [_ entity where]
                     (swap! calls conj [entity where])

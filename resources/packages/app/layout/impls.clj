@@ -110,8 +110,8 @@
 
 (defbase _layout-literal-previews
   "Evaluate a bounded canonical batch of safe previews, without attaching node fields."
-  [elements graph]
-  (value-repr/literal-preview-entries ctx elements graph))
+  [elements graph selector]
+  (value-repr/literal-preview-entries ctx elements graph selector))
 
 
 ;; === Registry ===

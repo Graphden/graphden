@@ -3,8 +3,8 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.packages.registry-fixture :as rf :refer [run-named]]
-    [graphden.test-infra.seams :as seams]
     [graphden.tenancy.context :as tenancy]
+    [graphden.test-infra.seams :as seams]
     [graphden.versioning.storage.core :as vs]))
 
 
@@ -13,12 +13,12 @@
 
 
 (deftest external-dependency-sort-key-is-comparable
-  (let [keys (mapv #(run-named "_ned-package-key" {:row %})
-                   [{:name "z.pkg" :version "2.0.0"}
-                    {:name "a.pkg" :version "1.0.0"}])]
-    (is (every? vector? keys))
+  (let [sort-keys (mapv #(run-named "_external-dep-package-key" {:row %})
+                        [{:name "z.pkg" :version "2.0.0"}
+                         {:name "a.pkg" :version "1.0.0"}])]
+    (is (every? vector? sort-keys))
     (is (= [["a.pkg" "1.0.0"] ["z.pkg" "2.0.0"]]
-           (vec (sort keys))))))
+           (vec (sort sort-keys))))))
 
 
 (deftest secret-metadata-graph-preserves-order-and-exhaustion-policy

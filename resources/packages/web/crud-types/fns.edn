@@ -309,8 +309,8 @@
    :args {:type {:as :expected :type :type-expression}}}
 
   {:name :_mismatch-expected-execution
-   :parent :get
-   :args {:coll :_mismatch-execution-labels :key 0 :default ""}}
+   :parent :first
+   :args {:coll :_mismatch-execution-labels}}
 
   {:name :_mismatch-expected-constraint-text
    :parent :pr-str
@@ -337,8 +337,8 @@
    :args {:type {:as :candidate :type :type-expression}}}
 
   {:name :_mismatch-candidate-execution
-   :parent :get
-   :args {:coll :_mismatch-execution-labels :key 1 :default ""}}
+   :parent :last
+   :args {:coll :_mismatch-execution-labels}}
 
   {:name :_mismatch-candidate-constraint-text
    :parent :pr-str

@@ -22,7 +22,6 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.context :as tctx]
     [graphden.types.core :as types]
-    [graphden.types.core.execution :as execution]
     [graphden.util.ns-path :as ns-path]
     [graphden.versioning.graph-rows :as graph-rows]))
 
@@ -552,61 +551,6 @@
     :else x))
 
 
-(defn- profile-label
-  [profiles]
-  (cond
-    (= :unknown profiles) "unknown execution (no runtime proof)"
-    (and (set? profiles) (empty? profiles)) "no proven runtime"
-    (set? profiles) (str/join " + " (sort (map {:browser-main "Browser" :jvm-server "JVM"} profiles)))
-    :else "inferred execution (not yet proven)"))
-
-
-(defn describe-mismatch
-  "One-line human-readable explanation for why `candidate` is NOT a
-   subtype of `expected`. Best-effort — the type-checker proper
-   (in graphden.types.check) emits richer contextual messages but
-   they require a binding context we don't have at the API layer.
-
-   For UI use: enough to render \"why is this dimmed in the picker?\"
-   tooltip text. The structured `expected` and `candidate` types
-   accompany this string in the response so the UI can render its
-   own details if it wants to."
-  [expected candidate]
-  (cond
-    (= expected :any)
-    "every type is a subtype of :any"
-
-    (= candidate :any)
-    (str ":any is not a subtype of " (pr-str expected)
-         " — :any can't narrow to a concrete type without an explicit cast")
-
-    (and (types/refine-type? expected) (not (types/refine-type? candidate)))
-    (str (pr-str candidate) " lacks the refinement constraint required by "
-         (pr-str expected))
-
-    (and (types/refine-type? candidate) (types/refine-type? expected)
-         (not= (types/refine-constraint candidate)
-               (types/refine-constraint expected)))
-    (str "refinement constraints differ — "
-         (pr-str (types/refine-constraint candidate))
-         " ≠ " (pr-str (types/refine-constraint expected)))
-
-    (and (types/primitive? candidate) (types/primitive? expected))
-    (str (pr-str candidate) " is not a primitive subtype of " (pr-str expected))
-
-    (and (types/fn-type? candidate) (types/fn-type? expected)
-         (not (execution/compatible? (types/fn-execution candidate) (types/fn-execution expected))))
-    (str "Execution mismatch: requires " (profile-label (types/fn-execution expected))
-         "; callback has " (profile-label (types/fn-execution candidate)) ".")
-
-    (and (types/fn-type? candidate) (types/fn-type? expected))
-    (str "function signature mismatch — "
-         (pr-str candidate) " is not a subtype of " (pr-str expected))
-
-    :else
-    (str (pr-str candidate) " is not a subtype of " (pr-str expected))))
-
-
 (defn constraint-contains-type-ref?
   "Walk a `constraint` payload (`[:union T1 T2 …]`, `[:variant tag1 T1
    tag2 T2 …]`, `[:fn {arg T} ret eff-set]`) and return true if any
@@ -641,26 +585,24 @@
 
 ;; --- types-candidates — per-row helpers of the graph enumeration.
 
-(defn candidate-ns-index
-  "fn-id → `{:ns \"dotted.path\" :ns-id \"<uuid>\"}` for every fn the
-   current org can see — the picker's namespace grouping. Best-effort:
-   a storage without the `:ns` table (minimal test fixtures) yields
-   path-less entries. PUBLIC: `:fn-ns-index` (web/crud-types) is the
-   graph's one boundary over it, closure-captured into the per-row
-   candidate callback so the walk pays for the index once."
+(defn candidate-ns-facts
+  "Acquire the scoped namespace lookup inputs once. Return only visible fn
+   identities and namespace references, plus paths referenced by those rows;
+   never expose the privileged cache, arbitrary row content or lazy handles."
   [ctx]
-  (let [ns-paths (try
-                   (ns-path/path-map
+  (let [namespaces (try
                      (sp/query-entities
-                       (or (:compile-storage ctx) (request/require-storage ctx))
-                       :ns {}))
-                   (catch Exception _ {}))]
-    (into {}
-          (keep (fn [f]
-                  (when-let [ns-id (:namespace-id f)]
-                    [(:id f) (cond-> {:ns-id (str ns-id)}
-                               (get ns-paths ns-id) (assoc :ns (get ns-paths ns-id)))])))
-          (:fns (cached-or-load-graph ctx)))))
+                       (or (:compile-storage ctx) (request/require-storage ctx)) :ns {})
+                     (catch Exception _ []))
+        ;; The ACL path reader must use these rows, not reacquire namespaces
+        ;; per fn from storage while filtering a different graph snapshot.
+        graph (tctx/apply-graph-read-filter
+                (assoc (cached-or-load-graph ctx) :namespaces namespaces))
+        ns-paths (try (ns-path/path-map (:namespaces graph))
+                      (catch Exception _ {}))
+        rows (mapv #(hash-map :id (:id %) :namespace-id (:namespace-id %)) (:fns graph))]
+    {:rows rows
+     :paths (select-keys ns-paths (keep :namespace-id rows))}))
 
 
 ;; --- types-usages — the walk behind the graph's apply stage (find every

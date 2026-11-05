@@ -83,6 +83,8 @@
     :compact :nullable-text,
     :constraint :text,
     :short :text}}
+  {:name :_child-list :list :_child}
+  {:name :_effect-list :list :_effect}
   {:name :_inputs,
    :type
    {:zero :bool,
@@ -184,13 +186,15 @@
    :args
    {:coll {:as :inputs, :type :_inputs},
     :key {:value :children},
-    :default {:value []}}}
+    :default {:value []}},
+   :return-type :_child-list}
   {:name :_effects,
    :parent :get,
    :args
    {:coll {:as :inputs, :type :_inputs},
     :key {:value :effects},
-    :default {:value []}}}
+    :default {:value []}},
+   :return-type :_effect-list}
   {:name :_child-label,
    :parent :get,
    :args

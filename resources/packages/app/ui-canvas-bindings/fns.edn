@@ -12,6 +12,7 @@
      "Require it here"
      "Optional"]}}
   {:name :_entry, :type {:name :text, :first :bool}}
+  {:name :_entry-list :list :_entry}
   {:name :_flag-policy-input
    :type {:surface [:refine :text {:constraint [:in #{"lambda" "branch-local"}]}]
           :declared :bool :names-count :int :own :bool :inherited :bool}}
@@ -204,7 +205,8 @@
    :args
    {:coll {:as :inputs, :type :_inputs},
     :key {:value :entries},
-    :default {:value []}}}
+    :default {:value []}},
+   :return-type :_entry-list}
   {:name :_entry-name,
    :parent :get,
    :args

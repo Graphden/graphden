@@ -998,7 +998,6 @@
                   :api-execute
                   :api-ui-theme-evaluate
                   :api-ui-theme-create-template
-                  :api-ui-components-plan
                   :api-editor-configuration-plan
                   :api-editor-root-plan
                   :api-editor-root-migration-preview

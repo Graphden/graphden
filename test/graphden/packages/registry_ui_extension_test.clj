@@ -3,6 +3,7 @@
   (:require
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.editor.component-config :as config]
+    [graphden.editor.component-export-fixture :as export-fixture]
     [graphden.editor.component-templates :as templates]
     [graphden.editor.components :as components]
     [graphden.executor.browser-source :as source]
@@ -10,7 +11,6 @@
     [graphden.packages.records :as records]
     [graphden.packages.registry-fixture :as rf]
     [graphden.storage.protocol.core :as sp]
-    [graphden.system.branch-router.epoch :as epoch]
     [graphden.test-infra.seams :as seams]
     [graphden.versioning.storage.core :as vs]))
 
@@ -64,8 +64,8 @@
                              :value {:fn-id (str root-id)
                                      :branch-id (str (vs/current-branch-id storage))
                                      :org "public"}})
-          (epoch/seed-watermark! storage)
-          (let [failure components/failure-response
+          (let [prepared (export-fixture/prepare! (:ctx rf/*bootstrap*) root-id)
+                failure components/failure-response
                 diagnostic (atom nil)]
             (with-redefs [components/failure-response
                           (fn [error]
@@ -73,9 +73,12 @@
                             (failure error))]
               (doseq [component ["keymap" "appearance"]]
                 (reset! diagnostic nil)
-                (let [exported (components/export-current (:ctx rf/*bootstrap*)
-                                                          {:component component})]
-                  (is (:ok exported) (str component " " @diagnostic))))))
+                (let [exported (export-fixture/export! (:ctx rf/*bootstrap*) root-id component)]
+                  (is (:ok exported) (str component " " @diagnostic)))))
+            ;; The ordinary root itself retains the installed package. Remove
+            ;; this fixture cohort before checking preference-only pin guards.
+            (binding [vs/*tombstone-delete?* true]
+              (doseq [id (:functions prepared)] (sp/delete-entity storage :fn id))))
           (let [pin (first (sp/query-entities storage :package-install {:package-name name}))
                 own (first (sp/query-entities storage :ui-pref
                                               {:owner-id "anonymous" :key "components"}))

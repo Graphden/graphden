@@ -572,18 +572,26 @@
 (defn- check-stored-type-presentation!
   []
   (let [{:keys [storage all-name->id]} *graph*]
-    (doseq [nm [:_candidate-ns-id :_candidate-ns-present? :_candidate-ns-rows
-                :_candidate-ns-paths :_candidate-ns-path :_candidate-ns-value :_candidate-ns-key
+    (doseq [nm [:_candidate-ns-id :_candidate-ns-present? :_candidate-ns-all-rows
+                :_candidate-ns-rows :_candidate-ns-paths :_candidate-ns-path
+                :_candidate-ns-has-path? :_candidate-ns-id-text :_candidate-ns-id-value
+                :_candidate-ns-named-value :_candidate-ns-value :_candidate-ns-key
                 :_candidate-ns-keys :_candidate-ns-values :fn-ns-index
-                :_type-profile-label :_type-profile-labels :_type-profile-labels-sorted
-                :_type-execution-label
-                :_mismatch-expected-text :_mismatch-expected-refined?
-                :_mismatch-expected-primitive? :_mismatch-expected-fn?
-                :_mismatch-expected-constraint :_mismatch-expected-execution
-                :_mismatch-candidate-text :_mismatch-candidate-refined?
-                :_mismatch-candidate-primitive? :_mismatch-candidate-fn?
-                :_mismatch-candidate-constraint :_mismatch-candidate-execution
-                :describe-type-mismatch]]
+                :_type-profile-browser? :_type-profile-jvm? :_type-profile-label
+                :_type-execution-is-unknown? :_type-execution-is-known? :_type-execution-profile-values
+                :_type-execution-empty? :_type-profile-labels :_type-profile-labels-sorted
+                :_type-profile-labels-joined :_type-execution-known-label :_type-execution-label
+                :_mismatch-expected-text :_mismatch-expected-refined? :_mismatch-expected-primitive?
+                :_mismatch-expected-fn? :_mismatch-expected-constraint :_mismatch-expected-execution
+                :_mismatch-expected-constraint-text :_mismatch-candidate-text :_mismatch-candidate-refined?
+                :_mismatch-candidate-primitive? :_mismatch-candidate-fn? :_mismatch-candidate-constraint
+                :_mismatch-candidate-execution :_mismatch-candidate-constraint-text :_mismatch-expected-any?
+                :_mismatch-candidate-any? :_mismatch-candidate-any-text :_mismatch-candidate-unrefined?
+                :_mismatch-missing-refinement? :_mismatch-missing-refinement-text :_mismatch-constraints-differ?
+                :_mismatch-different-refinement? :_mismatch-different-refinement-text :_mismatch-primitive-pair?
+                :_mismatch-primitive-text :_mismatch-execution-compatible? :_mismatch-execution-incompatible?
+                :_mismatch-execution-pair? :_mismatch-execution-text :_mismatch-callable-pair?
+                :_mismatch-callable-text :_mismatch-generic-text :describe-type-mismatch]]
       (let [id (get all-name->id nm)]
         (is (some? (tc/reconstruct-fn-def storage id)))
         (is (nil? (tc/type-check-fn-after-mutation! storage id)) (str nm))))

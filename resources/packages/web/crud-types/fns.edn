@@ -113,8 +113,12 @@
 
   {:name :_candidate-ns-row :type {:id :uuid :namespace-id :nullable-uuid}}
 
+  {:name :_candidate-ns-path-map :map {:key :uuid :value :text}}
+
+  {:name :_candidate-ns-index-type :map {:key :uuid :value :keyword-map}}
+
   {:name :_candidate-ns-facts-shape
-   :type {:rows [:list :_candidate-ns-row] :paths [:map :uuid :text]}}
+   :type {:rows [:list :_candidate-ns-row] :paths :_candidate-ns-path-map}}
 
   {:name :_candidate-ns-facts
    :args {}
@@ -126,14 +130,18 @@
    :args
    {:coll {:as :row :type :_candidate-ns-row} :key {:value :namespace-id} :default nil}}
 
-  {:name :_candidate-ns-present? :lambda-params [:row] :parent :some? :args {:value :_candidate-ns-id}}
+  {:name :_candidate-ns-present?
+   :lambda-params [:row]
+   :parent :some?
+   :args {:value :_candidate-ns-id}}
+
+  {:name :_candidate-ns-all-rows
+   :parent :get
+   :args {:coll :_candidate-ns-facts :key {:value :rows} :default []}}
 
   {:name :_candidate-ns-rows
    :parent :filter
-   :args
-   {:pred :_candidate-ns-present?
-    :coll
-    {:parent :get :args {:coll :_candidate-ns-facts :key {:value :rows} :default []}}}}
+   :args {:pred :_candidate-ns-present? :coll :_candidate-ns-all-rows}}
 
   {:name :_candidate-ns-paths
    :parent :get
@@ -141,24 +149,29 @@
 
   {:name :_candidate-ns-path
    :parent :get
-   :args {:coll {:as :paths :type [:map :uuid :text]}
-          :key :_candidate-ns-id
-          :default nil}}
+   :args
+   {:coll {:as :paths :type :_candidate-ns-path-map} :key :_candidate-ns-id :default nil}}
+
+  {:name :_candidate-ns-has-path? :parent :some? :args {:value :_candidate-ns-path}}
+
+  {:name :_candidate-ns-id-text :parent :to-str :args {:value :_candidate-ns-id}}
+
+  {:name :_candidate-ns-id-value
+   :parent :zipmap
+   :args {:keys [{:value :ns-id}] :vals [:_candidate-ns-id-text]}}
+
+  {:name :_candidate-ns-named-value
+   :parent :zipmap
+   :args
+   {:keys [{:value :ns-id} {:value :ns}] :vals [:_candidate-ns-id-text :_candidate-ns-path]}}
 
   {:name :_candidate-ns-value
    :lambda-params [:row]
    :parent :if
    :args
-   {:test {:parent :some? :args {:value :_candidate-ns-path}}
-    :then
-    {:parent :zipmap
-     :args
-     {:keys [{:value :ns-id} {:value :ns}]
-      :vals [{:parent :to-str :args {:value :_candidate-ns-id}} :_candidate-ns-path]}}
-    :else
-    {:parent :zipmap
-     :args
-     {:keys [{:value :ns-id}] :vals [{:parent :to-str :args {:value :_candidate-ns-id}}]}}}}
+   {:test :_candidate-ns-has-path?
+    :then :_candidate-ns-named-value
+    :else :_candidate-ns-id-value}}
 
   {:name :_candidate-ns-key
    :lambda-params [:row]
@@ -171,16 +184,14 @@
 
   {:name :_candidate-ns-values
    :parent :map
-   :args
-   {:func :_candidate-ns-value :coll :_candidate-ns-rows
-    :paths :_candidate-ns-paths}}
+   :args {:func :_candidate-ns-value :coll :_candidate-ns-rows :paths :_candidate-ns-paths}}
 
   {:name :fn-ns-index
+   :return-type :_candidate-ns-index-type
    :description
-   "Namespace grouping over one scoped snapshot. Root functions are omitted; unresolved namespace paths retain their identity."
+   "Namespace grouping over one scoped snapshot captured once before row projection."
    :parent :zipmap
-   :args {:keys :_candidate-ns-keys :vals :_candidate-ns-values}
-   :return-type [:map :uuid :keyword-map]}
+   :args {:keys :_candidate-ns-keys :vals :_candidate-ns-values}}
 
   {:name :_type-refined? :args {:type {:type :type-expression}} :return-type :bool}
 
@@ -202,46 +213,67 @@
    :args {:expected {:type :type-expression} :candidate {:type :type-expression}}
    :return-type :bool}
 
+  {:name :_type-profile-browser?
+   :parent :equal?
+   :args {:a {:as :profile :type :keyword} :b {:value :browser-main}}}
+
+  {:name :_type-profile-jvm?
+   :parent :equal?
+   :args {:a {:as :profile :type :keyword} :b {:value :jvm-server}}}
+
   {:name :_type-profile-label
    :lambda-params [:profile]
    :parent :cond
    :args
    {:clauses
-    [{:parent :equal? :args {:a {:as :profile :type :keyword} :b {:value :browser-main}}}
+    [:_type-profile-browser?
      {:value "Browser"}
-     {:parent :equal? :args {:a {:as :profile :type :keyword} :b {:value :jvm-server}}}
+     :_type-profile-jvm?
      {:value "JVM"}
      {:value true}
      {:value nil}]}}
 
+  {:name :_type-execution-is-unknown?
+   :parent :_type-execution-unknown?
+   :args {:type {:as :signature :type :type-expression}}}
+
+  {:name :_type-execution-is-known?
+   :parent :_type-execution-known?
+   :args {:type {:as :signature :type :type-expression}}}
+
+  {:name :_type-execution-profile-values
+   :parent :_type-execution-profiles
+   :args {:type {:as :signature :type :type-expression}}}
+
+  {:name :_type-execution-empty?
+   :parent :empty?
+   :args {:coll :_type-execution-profile-values}}
+
   {:name :_type-profile-labels
    :parent :map
-   :args
-   {:func :_type-profile-label
-    :coll
-    {:parent :_type-execution-profiles :args {:type {:as :type :type :type-expression}}}}}
+   :args {:func :_type-profile-label :coll :_type-execution-profile-values}}
 
   {:name :_type-profile-labels-sorted :parent :sort :args {:coll :_type-profile-labels}}
+
+  {:name :_type-profile-labels-joined
+   :parent :str-join
+   :args {:coll :_type-profile-labels-sorted :separator {:value " + "}}}
+
+  {:name :_type-execution-known-label
+   :parent :if
+   :args
+   {:test :_type-execution-empty?
+    :then {:value "no proven runtime"}
+    :else :_type-profile-labels-joined}}
 
   {:name :_type-execution-label
    :parent :cond
    :args
    {:clauses
-    [{:parent :_type-execution-unknown? :args {:type {:as :type :type :type-expression}}}
+    [:_type-execution-is-unknown?
      {:value "unknown execution (no runtime proof)"}
-     {:parent :_type-execution-known? :args {:type {:as :type :type :type-expression}}}
-     {:parent :if
-      :args
-      {:test
-       {:parent :empty?
-        :args
-        {:coll
-         {:parent :_type-execution-profiles
-          :args {:type {:as :type :type :type-expression}}}}}
-       :then {:value "no proven runtime"}
-       :else
-       {:parent :str-join
-        :args {:coll :_type-profile-labels-sorted :separator {:value " + "}}}}}
+     :_type-execution-is-known?
+     :_type-execution-known-label
      {:value true}
      {:value "inferred execution (not yet proven)"}]}}
 
@@ -267,7 +299,11 @@
 
   {:name :_mismatch-expected-execution
    :parent :_type-execution-label
-   :args {:type {:as :expected :type :type-expression}}}
+   :args {:signature {:as :expected :type :type-expression}}}
+
+  {:name :_mismatch-expected-constraint-text
+   :parent :pr-str
+   :args {:value :_mismatch-expected-constraint}}
 
   {:name :_mismatch-candidate-text
    :parent :pr-str
@@ -291,92 +327,145 @@
 
   {:name :_mismatch-candidate-execution
    :parent :_type-execution-label
-   :args {:type {:as :candidate :type :type-expression}}}
+   :args {:signature {:as :candidate :type :type-expression}}}
+
+  {:name :_mismatch-candidate-constraint-text
+   :parent :pr-str
+   :args {:value :_mismatch-candidate-constraint}}
+
+  {:name :_mismatch-expected-any?
+   :parent :equal?
+   :args {:a {:as :expected :type :type-expression} :b {:value :any}}}
+
+  {:name :_mismatch-candidate-any?
+   :parent :equal?
+   :args {:a {:as :candidate :type :type-expression} :b {:value :any}}}
+
+  {:name :_mismatch-candidate-any-text
+   :parent :str
+   :args
+   {:parts
+    [{:value ":any is not a subtype of "}
+     :_mismatch-expected-text
+     {:value " — :any can't narrow to a concrete type without an explicit cast"}]}}
+
+  {:name :_mismatch-candidate-unrefined?
+   :parent :not
+   :args {:value :_mismatch-candidate-refined?}}
+
+  {:name :_mismatch-missing-refinement?
+   :parent :and
+   :args {:values [:_mismatch-expected-refined? :_mismatch-candidate-unrefined?]}}
+
+  {:name :_mismatch-missing-refinement-text
+   :parent :str
+   :args
+   {:parts
+    [:_mismatch-candidate-text
+     {:value " lacks the refinement constraint required by "}
+     :_mismatch-expected-text]}}
+
+  {:name :_mismatch-constraints-differ?
+   :parent :neq
+   :args {:values [:_mismatch-candidate-constraint :_mismatch-expected-constraint]}}
+
+  {:name :_mismatch-different-refinement?
+   :parent :and
+   :args
+   {:values
+    [:_mismatch-candidate-refined?
+     :_mismatch-expected-refined?
+     :_mismatch-constraints-differ?]}}
+
+  {:name :_mismatch-different-refinement-text
+   :parent :str
+   :args
+   {:parts
+    [{:value "refinement constraints differ — "}
+     :_mismatch-candidate-constraint-text
+     {:value " ≠ "}
+     :_mismatch-expected-constraint-text]}}
+
+  {:name :_mismatch-primitive-pair?
+   :parent :and
+   :args {:values [:_mismatch-candidate-primitive? :_mismatch-expected-primitive?]}}
+
+  {:name :_mismatch-primitive-text
+   :parent :str
+   :args
+   {:parts
+    [:_mismatch-candidate-text
+     {:value " is not a primitive subtype of "}
+     :_mismatch-expected-text]}}
+
+  {:name :_mismatch-execution-compatible?
+   :parent :_type-execution-compatible?
+   :args
+   {:expected {:as :expected :type :type-expression}
+    :candidate {:as :candidate :type :type-expression}}}
+
+  {:name :_mismatch-execution-incompatible?
+   :parent :not
+   :args {:value :_mismatch-execution-compatible?}}
+
+  {:name :_mismatch-execution-pair?
+   :parent :and
+   :args
+   {:values
+    [:_mismatch-candidate-fn? :_mismatch-expected-fn? :_mismatch-execution-incompatible?]}}
+
+  {:name :_mismatch-execution-text
+   :parent :str
+   :args
+   {:parts
+    [{:value "Execution mismatch: requires "}
+     :_mismatch-expected-execution
+     {:value "; callback has "}
+     :_mismatch-candidate-execution
+     {:value "."}]}}
+
+  {:name :_mismatch-callable-pair?
+   :parent :and
+   :args {:values [:_mismatch-candidate-fn? :_mismatch-expected-fn?]}}
+
+  {:name :_mismatch-callable-text
+   :parent :str
+   :args
+   {:parts
+    [{:value "function signature mismatch — "}
+     :_mismatch-candidate-text
+     {:value " is not a subtype of "}
+     :_mismatch-expected-text]}}
+
+  {:name :_mismatch-generic-text
+   :parent :str
+   :args
+   {:parts
+    [:_mismatch-candidate-text {:value " is not a subtype of "} :_mismatch-expected-text]}}
 
   {:name :describe-type-mismatch
-   :description
-   "Mismatch explanation policy over canonical type and execution predicates. The picker compatibility API and provenance share the same graph."
    :return-type :text
+   :description
+   "Shared mismatch explanation policy over canonical type predicates with editable message branches."
    :parent :cond
    :args
    {:clauses
-    [{:parent :equal? :args {:a {:as :expected :type :type-expression} :b {:value :any}}}
+    [:_mismatch-expected-any?
      {:value "every type is a subtype of :any"}
-     {:parent :equal? :args {:a {:as :candidate :type :type-expression} :b {:value :any}}}
-     {:parent :str
-      :args
-      {:parts
-       [{:value ":any is not a subtype of "}
-        :_mismatch-expected-text
-        {:value " — :any can't narrow to a concrete type without an explicit cast"}]}}
-     {:parent :and
-      :args
-      {:values
-       [:_mismatch-expected-refined?
-        {:parent :not :args {:value :_mismatch-candidate-refined?}}]}}
-     {:parent :str
-      :args
-      {:parts
-       [:_mismatch-candidate-text
-        {:value " lacks the refinement constraint required by "}
-        :_mismatch-expected-text]}}
-     {:parent :and
-      :args
-      {:values
-       [:_mismatch-candidate-refined?
-        :_mismatch-expected-refined?
-        {:parent :neq
-         :args {:values [:_mismatch-candidate-constraint :_mismatch-expected-constraint]}}]}}
-     {:parent :str
-      :args
-      {:parts
-       [{:value "refinement constraints differ — "}
-        {:parent :pr-str :args {:value :_mismatch-candidate-constraint}}
-        {:value " ≠ "}
-        {:parent :pr-str :args {:value :_mismatch-expected-constraint}}]}}
-     {:parent :and
-      :args {:values [:_mismatch-candidate-primitive? :_mismatch-expected-primitive?]}}
-     {:parent :str
-      :args
-      {:parts
-       [:_mismatch-candidate-text
-        {:value " is not a primitive subtype of "}
-        :_mismatch-expected-text]}}
-     {:parent :and
-      :args
-      {:values
-       [:_mismatch-candidate-fn?
-        :_mismatch-expected-fn?
-        {:parent :not
-         :args
-         {:value
-          {:parent :_type-execution-compatible?
-           :args
-           {:expected {:as :expected :type :type-expression}
-            :candidate {:as :candidate :type :type-expression}}}}}]}}
-     {:parent :str
-      :args
-      {:parts
-       [{:value "Execution mismatch: requires "}
-        :_mismatch-expected-execution
-        {:value "; callback has "}
-        :_mismatch-candidate-execution
-        {:value "."}]}}
-     {:parent :and :args {:values [:_mismatch-candidate-fn? :_mismatch-expected-fn?]}}
-     {:parent :str
-      :args
-      {:parts
-       [{:value "function signature mismatch — "}
-        :_mismatch-candidate-text
-        {:value " is not a subtype of "}
-        :_mismatch-expected-text]}}
+     :_mismatch-candidate-any?
+     :_mismatch-candidate-any-text
+     :_mismatch-missing-refinement?
+     :_mismatch-missing-refinement-text
+     :_mismatch-different-refinement?
+     :_mismatch-different-refinement-text
+     :_mismatch-primitive-pair?
+     :_mismatch-primitive-text
+     :_mismatch-execution-pair?
+     :_mismatch-execution-text
+     :_mismatch-callable-pair?
+     :_mismatch-callable-text
      {:value true}
-     {:parent :str
-      :args
-      {:parts
-       [:_mismatch-candidate-text
-        {:value " is not a subtype of "}
-        :_mismatch-expected-text]}}]}}
+     :_mismatch-generic-text]}}
 
   {:name :classify-literal
    :description "Infer the structural type expression of a literal Clojure value — `:text`, `:int`, `:bool`, `:keyword`, `:uuid`, `:null`, `[:list T]`, or a record-shape `{k T}` for keyword-keyed maps. nil for shapes the classifier can't decide (caller falls back to `:any`)."

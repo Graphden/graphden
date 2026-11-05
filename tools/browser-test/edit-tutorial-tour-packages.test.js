@@ -37,9 +37,16 @@ const {
     // The lesson advances only after a successful result-value check.
     await waitTourTitle(page, 'Return to the package function');
     await filterAndSelect(page, 'str-upper', 'str-upper');
-    await page.waitForSelector('.placeholder-binder[data-fn-name="str-upper"][data-arg-name="string"]',
+    // Package-owned base fns are read-only: their free input is a Run field,
+    // not a writable placeholder binder. Verify the selected source card.
+    await page.waitForSelector('.node-overlay[data-fn-name="str-upper"] .ancestor-line[data-level="0"]',
       {timeout: 30000});
-    await finishAndDelete(page);
+    await page.waitForFunction(() => window.graphView?.edgeList().some(
+      (edge) => edge.data?.argName === 'string' && edge.data?.isUnset),
+    null, {timeout: 30000, polling: 100});
+    // The final `selected` check advances straight to cleanup once the
+    // source card renders; there is no separate Finish button on this path.
+    await finishAndDelete(page, 20000, {alreadyFinished: true});
     console.log('PASS: lesson31 package reuse + owned sandbox cleanup');
   } catch (error) {
     failed = true;

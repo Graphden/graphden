@@ -78,7 +78,7 @@
     :_seq-append-load-binding :_seq-move-load-item :_seq-remove-load-item
     :_seq-update-load-item :_slot-effective-type-raw
     :_tests-run-apply :_tests-status-apply
-    :_types-usages-apply :abs :add :all-rich-types :and
+    :_types-usages-facts :abs :add :all-rich-types :and
     :assert :assert-eq :assert-some :assoc :assoc-in :atom :auth-active?
     :ensure-type :encode-view :as-ui-view
     :authenticate-request :blank? :branch-diagnostics-flat
@@ -154,7 +154,7 @@
     :h-raw :header-get :heap-committed :heap-max :heap-used :hiccup
     :http-request :http-server :http-stop   :if :into
     :invalidate-after-write :invalidate-graph-cache :invoke :is-a?
-    :json-to-type :jvm-uptime-ms :keys :list :graph-tree :graph-namespace-fns :graph-search
+    :json-to-type :jvm-uptime-ms :keys :list :_graph-tree-facts :graph-namespace-fns :graph-search
     :_graph-index-facts :_graph-index-row :graph-subtree :graph-full :graph-fn-defs-subtree :fn-unread-bindings :log-warn
     ;; app/views — the Explorer's filter evaluation: light fn rows (ids,
     ;; names, roles) projected off the graph-cache, never the caller's

@@ -18,8 +18,8 @@
     [graphden.crud.fn-execution :as fn-exec]
     [graphden.crud.fn-execution.conceal :as conceal]
     [graphden.crud.value-form :as value-form]
-    [graphden.packages.export :as export]
     [graphden.executor.test-setup :as setup]
+    [graphden.packages.export :as export]
     [graphden.storage.protocol.core :as sp]
     [graphden.test-infra.golden-app :as ga]))
 
@@ -227,7 +227,7 @@
 
 (deftest reachability-does-not-expose-a-revoked-root-body
   (let [path #(get-in (usages {:target-id (ga/fn-id :http-server)
-                              :root-id (ga/fn-id :web-server)})
+                               :root-id (ga/fn-id :web-server)})
                       [:reachability :path])]
     (is (some (fn [row] (= "web-server" (:fn-name row))) (path))
         "control: the authorized editor root is on a path to its parent")

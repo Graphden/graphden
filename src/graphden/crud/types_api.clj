@@ -666,14 +666,13 @@
 ;; --- types-usages — the walk behind the graph's apply stage (find every
 ;; place a fn / type-row is referenced).
 
-(defn- usage-namespace-paths
-  "One best-effort namespace acquisition, for graph-side summaries."
+(defn- usage-namespaces
+  "Acquire namespace rows once, before the ACL seam resolves namespace paths."
   [ctx]
   (try
-    (ns-path/path-map
-      (sp/query-entities
-        (or (:compile-storage ctx) (request/require-storage ctx)) :ns {}))
-    (catch Exception _ {})))
+    (vec (sp/query-entities
+           (or (:compile-storage ctx) (request/require-storage ctx)) :ns {}))
+    (catch Exception _ [])))
 
 
 (defn- constraint-links
@@ -717,6 +716,12 @@
          vec)))
 
 
+(defn- usage-link-facts
+  "Total nullable fields at the typed facts boundary; graph formatting omits absent labels."
+  [link]
+  (merge {:target-id nil :slot-name nil :root-kind nil} link))
+
+
 (defn- reachability-facts
   [parsed graph links roots]
   (let [target-id (:target-id parsed)
@@ -728,12 +733,10 @@
               :else :unknown)
      :scope :visible-roots
      :roots (mapv (fn [[id kind label]]
-                    (cond-> {:fn-id id :kind :root :root-kind kind}
-                      label (assoc :slot-name label)))
+                    (usage-link-facts {:fn-id id :kind :root :root-kind kind :slot-name label}))
                   roots)
      :path (mapv (fn [{:keys [fn-id kind slot-name]}]
-                   (cond-> {:fn-id fn-id :kind (or kind :root)}
-                     slot-name (assoc :slot-name slot-name)))
+                   (usage-link-facts {:fn-id fn-id :kind (or kind :root) :slot-name slot-name}))
                  path)
      :origin origin}))
 
@@ -743,11 +746,12 @@
    Shared edge/constraint walks and shortest-path computation stay native.
    Only inert data crosses the boundary; namespace lookup happens once."
   [parsed ctx conceal]
-  (let [graph (conceal (cached-or-load-graph ctx))
+  (let [snapshot (cached-or-load-graph ctx)
+        graph (conceal (assoc snapshot :namespaces (usage-namespaces ctx)))
         fn-by-id (into {} (map (juxt :id identity)) (:fns graph))
         target-id (:target-id parsed)
         target-name (:name (get fn-by-id target-id))
-        paths (usage-namespace-paths ctx)
+        paths (ns-path/path-map (:namespaces graph))
         links (refs/edges graph)
         roots (reachability-roots parsed ctx fn-by-id)]
     {:target-id target-id
@@ -755,13 +759,16 @@
      :visible? (contains? fn-by-id target-id)
      ;; Summaries need identity metadata, never implementation fields from
      ;; the concealed snapshot (including references beyond this slice).
-     :fns (update-vals fn-by-id #(select-keys % [:id :name :role :namespace-id :anonymous-hash]))
+     :fns (update-vals fn-by-id
+                       #(merge {:name nil :role nil :namespace-id nil :anonymous-hash nil}
+                               (select-keys % [:id :name :role :namespace-id :anonymous-hash])))
      :namespace-paths (select-keys paths (keep :namespace-id (vals fn-by-id)))
      ;; Edges may point outside the visible slice. Their IDs are not facts
      ;; an independent graph consumer is authorized to enumerate.
-     :links (filterv #(contains? fn-by-id (:target-id %)) links)
+     :links (into [] (comp (filter #(contains? fn-by-id (:target-id %)))
+                           (map usage-link-facts)) links)
      :constraints (if (contains? fn-by-id target-id)
-                    (vec (constraint-links target-name graph))
+                    (mapv usage-link-facts (constraint-links target-name graph))
                     [])
      :reachability (reachability-facts parsed graph links roots)}))
 

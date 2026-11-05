@@ -301,53 +301,53 @@
    :description "One scoped sidebar snapshot: memoized kinds and diagnostics counted only for visible fn IDs."
    :args {} :return-type :_graph-tree-facts-shape :effects #{:db}}
   {:name :_graph-tree-kinds-value :parent :get
-   :args {:coll :_graph-tree-facts :key :kinds :default {}}}
+   :args {:coll :_graph-tree-facts :key {:value :kinds} :default {}}}
   {:name :_graph-tree-errors-value :parent :get
-   :args {:coll :_graph-tree-facts :key :errors :default {}}}
+   :args {:coll :_graph-tree-facts :key {:value :errors} :default {}}}
   {:name :_graph-tree-namespace-ids :parent :distinct
    :args {:coll {:parent :concat
                  :args {:colls [{:parent :keys :args {:map :_graph-tree-kinds-value}}
                                 {:parent :keys :args {:map :_graph-tree-errors-value}}]}}}}
   {:name :_graph-tree-captured-kinds :parent :get
-   :args {:coll {:as :tree-facts :type :_graph-tree-facts-shape} :key :kinds :default {}}}
+   :args {:coll {:as :tree-facts :type :_graph-tree-facts-shape} :key {:value :kinds} :default {}}}
   {:name :_graph-tree-kind-value :parent :get
    :args {:coll :_graph-tree-captured-kinds :key {:as :namespace-id :type :nullable-uuid}
           :default {:value {:count 0 :types 0 :plain 0}}}}
   {:name :_graph-tree-error-count :parent :get
    :args {:coll {:parent :get
-                 :args {:coll {:as :tree-facts :type :_graph-tree-facts-shape} :key :errors :default {}}}
+                 :args {:coll {:as :tree-facts :type :_graph-tree-facts-shape} :key {:value :errors} :default {}}}
           :key {:as :namespace-id :type :nullable-uuid} :default 0}}
   {:name :_graph-tree-type-count :parent :get
-   :args {:coll :_graph-tree-kind-value :key :types :default 0}}
+   :args {:coll :_graph-tree-kind-value :key {:value :types} :default 0}}
   {:name :_graph-tree-fn-count :parent :get
-   :args {:coll :_graph-tree-kind-value :key :plain :default 0}}
+   :args {:coll :_graph-tree-kind-value :key {:value :plain} :default 0}}
   {:name :_graph-tree-count-row :parent :merge :lambda-params [:namespace-id]
    :args {:maps [{:parent :zipmap
                   :args {:keys [{:value :namespace-id} {:value :count}]
                          :vals [{:as :namespace-id :type :nullable-uuid}
-                                {:parent :get :args {:coll :_graph-tree-kind-value :key :count :default 0}}]}}
+                                {:parent :get :args {:coll :_graph-tree-kind-value :key {:value :count} :default 0}}]}}
                  {:parent :if
                   :args {:test {:parent :or
-                                :args {:values [{:parent :gt :args {:a :_graph-tree-error-count :b 0}}
+                                :args {:values [{:parent :gt :args {:nums [:_graph-tree-error-count 0]}}
                                                 {:parent :not
                                                  :args {:value {:parent :contains?
                                                                 :args {:coll :_graph-tree-captured-kinds
                                                                        :key {:as :namespace-id :type :nullable-uuid}}}}}]}}
-                         :then {:parent :assoc-empty :args {:key :type-error-count :value :_graph-tree-error-count}}
+                         :then {:parent :assoc-empty :args {:key {:value :type-error-count} :value :_graph-tree-error-count}}
                          :else {}}}
                  {:parent :if
-                  :args {:test {:parent :gt :args {:a :_graph-tree-type-count :b 0}}
-                         :then {:parent :assoc-empty :args {:key :type-count :value :_graph-tree-type-count}}
+                  :args {:test {:parent :gt :args {:nums [:_graph-tree-type-count 0]}}
+                         :then {:parent :assoc-empty :args {:key {:value :type-count} :value :_graph-tree-type-count}}
                          :else {}}}
                  {:parent :if
-                  :args {:test {:parent :gt :args {:a :_graph-tree-fn-count :b 0}}
-                         :then {:parent :assoc-empty :args {:key :fn-count :value :_graph-tree-fn-count}}
+                  :args {:test {:parent :gt :args {:nums [:_graph-tree-fn-count 0]}}
+                         :then {:parent :assoc-empty :args {:key {:value :fn-count} :value :_graph-tree-fn-count}}
                          :else {}}}]}}
   {:name :graph-tree
    :description "Sidebar namespaces and kind/diagnostic counts; anonymous-only diagnosed namespaces retain a zero-count row."
    :parent :zipmap
    :args {:keys [{:value :namespaces} {:value :counts}]
-          :vals [{:parent :get :args {:coll :_graph-tree-facts :key :namespaces :default []}}
+          :vals [{:parent :get :args {:coll :_graph-tree-facts :key {:value :namespaces} :default []}}
                  {:parent :map :args {:func :_graph-tree-count-row :coll :_graph-tree-namespace-ids :tree-facts :_graph-tree-facts}}]}
    :return-type {:namespaces [:list :keyword-map] :counts [:list :keyword-map]}}
 

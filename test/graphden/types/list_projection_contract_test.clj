@@ -3,11 +3,14 @@
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
+    [graphden.executor.composition.deps :as deps]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
     [graphden.packages.loader :as loader]
+    [graphden.packages.records.parse :as records-parse]
     [graphden.packages.sync :as sync]
     [graphden.types.check :as check]
+    [graphden.types.check.narrowing :as narrowing]
     [graphden.types.core :as types]))
 
 
@@ -26,15 +29,32 @@
 
 
 (deftest projection-closures-retain-only-their-public-inputs
-  (doseq [definition (:fn-defs loaded)
-          :let [n (:name definition)]
-          :when (and n (:parent definition)
-                     (not (#{:_types-usages-parsed :_types-usages-validation} n))
-                     (or (some #(str/starts-with? (name n) %) ["_graph-tree-" "_types-usage-" "_types-usages-"])
-                         (#{:graph-tree :_types-usages-apply} n)))]
-    (check/check-fn-def! definition))
+  (let [selected (filterv
+                   (fn [{:keys [name parent]}]
+                     (and name parent
+                          (not (#{:_types-usages-parsed :_types-usages-validation} name))
+                          (or (some #(str/starts-with? (clojure.core/name name) %)
+                                    ["_graph-tree-" "_types-usage-" "_types-usages-"])
+                              (#{:assoc-empty :graph-tree :_types-usages-apply} name))))
+                   (:fn-defs loaded))
+        extra-defs (into {} (map (fn [[n fd]] [n (assoc fd :name n)])) (:base-fn-defs loaded))
+        {:keys [fn-defs name->id]} (records-parse/prepare-module
+                                     selected (sync/compute-all-fn-name-ids loaded) extra-defs)
+        sorted (mapv check/checker-view
+                     (deps/topological-sort fn-defs (constantly false) name->id))]
+    ;; Match sync's two passes: seed inferred signatures, then enforce every
+    ;; contract with caller refinements and referenced literal returns.
+    (binding [check/*ref-return-memo* (atom {})]
+      (doseq [definition sorted]
+        (try (check/check-fn-def! definition)
+             (catch clojure.lang.ExceptionInfo _))))
+    (let [caller-narrowings (narrowing/build-caller-narrowings sorted)
+          overrides (narrowing/build-ref-return-overrides sorted)]
+      (binding [check/*ref-return-memo* (atom {})]
+        (doseq [definition sorted]
+          (narrowing/check-fn-def-with-narrowings! definition caller-narrowings overrides)))))
   (doseq [[n expected-args] [[:graph-tree #{}]
-                            [:_types-usages-apply #{:parsed}]]]
+                             [:_types-usages-apply #{:parsed}]]]
     (let [contract (registry/rich-type-of n)]
       (is (= expected-args (set (keys (:args contract)))) (str n))
       (is (= #{:db} (:effects contract)) (str n))))

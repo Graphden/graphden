@@ -126,7 +126,7 @@
           :roots :_types-usage-summaries :path :_types-usage-summaries}}
   {:name :_types-usages-result-shape
    :description "Output of `:_types-usages-apply` — every reference to the target type-row. `:type-fn-id` is the id stringified."
-   :type {:ok :bool :type-fn-id :text :type-name :nullable-text :count :int
+   :type {:ok :bool :type-fn-id :text :type-name :nullable-text :count :non-negative-int
           :truncated? :bool :usages :_types-usage-summaries :reachability :_types-usage-reachability-shape}}
 
   {:name :_id-name-result-shape

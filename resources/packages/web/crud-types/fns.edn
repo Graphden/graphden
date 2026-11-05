@@ -809,7 +809,7 @@
   {:name :_types-usages-response-cap :parent :const :args {:value 400}}
   {:name :_types-usages-summaries :parent :map :return-type :_types-usage-summaries
    :args {:func :_types-usage-summary
-          :coll {:parent :take :args {:count :_types-usages-response-cap :coll :_types-usages-selected-links}}
+          :coll {:parent :take :args {:count 400 :coll :_types-usages-selected-links}}
           :usage-facts :_types-usages-facts}}
   {:name :_types-usages-count :parent :count :args {:coll :_types-usages-selected-links}}
   {:name :_types-usages-reachability-summary :parent :merge :return-type :_types-usage-reachability-shape

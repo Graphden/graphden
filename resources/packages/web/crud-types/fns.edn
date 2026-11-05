@@ -326,7 +326,7 @@
        [:_mismatch-candidate-refined?
         :_mismatch-expected-refined?
         {:parent :neq
-         :args {:a :_mismatch-candidate-constraint :b :_mismatch-expected-constraint}}]}}
+         :args {:values [:_mismatch-candidate-constraint :_mismatch-expected-constraint]}}]}}
      {:parent :str
       :args
       {:parts

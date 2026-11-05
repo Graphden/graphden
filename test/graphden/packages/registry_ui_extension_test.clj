@@ -7,15 +7,26 @@
     [graphden.editor.component-templates :as templates]
     [graphden.editor.components :as components]
     [graphden.executor.browser-source :as source]
+    [graphden.executor.interface :as exec]
+    [graphden.executor.registry.core :as registry-core]
     [graphden.executor.test-setup :as setup]
     [graphden.packages.records :as records]
     [graphden.packages.registry-fixture :as rf]
     [graphden.storage.protocol.core :as sp]
     [graphden.test-infra.seams :as seams]
+    [graphden.test-infra.shared-bootstrap :as sb]
     [graphden.versioning.storage.core :as vs]))
 
 
 (use-fixtures :once seams/isolated-seams-fixture
+  exec/with-isolated-rich-types
+  (fn [f]
+    ;; Personal editor preparation validates the complete built-in closure.
+    ;; The golden clone skips that type sweep, so overlay the cached snapshot
+    ;; before its context is compiled and before the extension is installed.
+    (reset! registry-core/*rich-types-override*
+            (sb/ensure-swept-rich-types! ["core" "web" "app" "registry" "mcp"]))
+    (f))
   (rf/bootstrap-fixture "registry-ui-extension-sender"))
 
 

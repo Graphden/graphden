@@ -28,8 +28,8 @@
 
 (defn- publish-line!
   [line publish!]
-  (let [text (.toString line "UTF-8")]
-    (.reset line)
+  (let [text (java.io.ByteArrayOutputStream/.toString line "UTF-8")]
+    (java.io.ByteArrayOutputStream/.reset line)
     (when (re-find #"(?:unit|integration) (?:progress:|namespace start:)|CI (?:unit|integration) (?:dependency layer|affected layer failed)" text)
       (publish! text))))
 
@@ -46,18 +46,18 @@
                          line (java.io.ByteArrayOutputStream.)]
                      (loop []
                        (let [finished @finished?
-                             available (.available input)]
+                             available (java.io.InputStream/.available input)]
                          (when (pos? available)
-                           (let [n (.read input buffer 0 (min available (alength buffer)))]
+                           (let [n (java.io.InputStream/.read input buffer 0 (min available (alength buffer)))]
                              (when (pos? n)
-                               (locking output (.write output buffer 0 n))
+                               (locking output (java.io.ByteArrayOutputStream/.write output buffer 0 n))
                                (dotimes [i n]
                                  (let [b (aget buffer i)]
                                    (if (= 10 b)
                                      (publish-line! line publish!)
-                                     (.write line (int b))))))))
+                                     (java.io.ByteArrayOutputStream/.write line (int b))))))))
                          (if (and finished (zero? available))
-                           (when (pos? (.size line)) (publish-line! line publish!))
+                           (when (pos? (java.io.ByteArrayOutputStream/.size line)) (publish-line! line publish!))
                            (do (when (zero? available) (Thread/sleep 20))
                                (recur))))))))]
     {:worker worker :output output :finished? finished? :stream stream}))
@@ -67,9 +67,9 @@
   [{:keys [worker output finished? stream]}]
   (reset! finished? true)
   (when (= ::pending (deref worker 5000 ::pending))
-    (try (.close stream)
+    (try (java.io.InputStream/.close stream)
          (finally (future-cancel worker))))
-  (locking output (.toString output "UTF-8")))
+  (locking output (java.io.ByteArrayOutputStream/.toString output "UTF-8")))
 
 
 (defn collected-output

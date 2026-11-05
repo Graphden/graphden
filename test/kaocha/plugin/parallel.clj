@@ -286,7 +286,7 @@
         isolation-vars))
 
 
-(def ^:dynamic *integration-progress* nil)
+(def ^:dynamic *suite-progress* nil)
 
 
 (defn- planned-var-count
@@ -312,8 +312,8 @@
 
 
 (defn- progress-line
-  [{:keys [passed failed total done-ns total-ns active]}]
-  (str "integration progress: " passed "/" total " passed, " failed
+  [{:keys [suite passed failed total done-ns total-ns active]}]
+  (str (name suite) " progress: " passed "/" total " passed, " failed
        " failed, " done-ns "/" total-ns " namespaces; active="
        (if (seq active) (str/join "," (sort active)) "none")))
 
@@ -323,9 +323,14 @@
   (let [test (cond-> test
                (and load-error? (not (::testable/load-error test)))
                (assoc ::testable/skip true))
-        progress (when-not (::testable/skip test) *integration-progress*)
+        progress (when-not (::testable/skip test) *suite-progress*)
+        started (System/nanoTime)
         label (or (some-> (:kaocha.testable/id test) name) "unknown-namespace")]
-    (when progress (swap! progress update :active conj label))
+    (when progress
+      (swap! progress update :active conj label)
+      (capture/bypass
+        (println (str (name (:suite @progress)) " namespace start: " label))
+        (flush)))
     (try
       (let [result (with-bindings (resolve-isolation-vars)
                      (testable/run-testable test test-plan))]
@@ -337,7 +342,14 @@
                                             (update :failed + failed)
                                             (update :done-ns inc)
                                             (update :active disj label))))]
-            (capture/bypass (println (progress-line state)))))
+            (capture/bypass
+              (println (str (progress-line state) "; completed=" label
+                            "; failed-tests="
+                            (str/join "," (keep #(when (result/failed? %)
+                                                   (:kaocha.testable/id %))
+                                                (:kaocha.result/tests result)))
+                            "; elapsed-ms=" (quot (- (System/nanoTime) started) 1000000)))
+              (flush))))
         result)
       (catch Exception error
         (when progress
@@ -464,9 +476,11 @@
         {:keys [layers remaining]} (priority/indexed-layers children layers)
         ordered-results (loop [done [] pending layers index 0]
                           (if-let [layer (first pending)]
-                            (let [_ (println (str "CI " (name suite-id) " dependency layer "
-                                                  (inc index) "/" (count layers) ": "
-                                                  (count layer) " namespaces"))
+                            (let [_ (capture/bypass
+                                      (println (str "CI " (name suite-id) " dependency layer "
+                                                    (inc index) "/" (count layers) ": "
+                                                    (count layer) " namespaces"))
+                                      (flush))
                                   ;; Finish all explicitly requested unit namespaces
                                   ;; before deciding whether to admit the auto/tail wave.
                                   batch (binding [testable/*fail-fast?*
@@ -476,8 +490,10 @@
                                   done (into done batch)]
                               (if (some (comp result/failed? second) batch)
                                 (let [unrun (concat (mapcat identity (rest pending)) remaining)]
-                                  (println (str "CI " (name suite-id) " affected layer failed; "
-                                                (count unrun) " later namespaces skipped"))
+                                  (capture/bypass
+                                    (println (str "CI " (name suite-id) " affected layer failed; "
+                                                  (count unrun) " later namespaces skipped"))
+                                    (flush))
                                   (into done (map (fn [[i t]] [i (assoc t ::testable/skip true)]) unrun)))
                                 (recur done (rest pending) (inc index))))
                             (into done (run-indexed-layer remaining test-plan n load-error?))))]
@@ -499,14 +515,14 @@
         suite-id (:kaocha.testable/id testable)
         layers (priority/namespace-layers encoded suite-id)
         hints (priority/namespace-hints encoded suite-id)
-        progress (when (= :integration suite-id)
-                   (atom {:passed 0 :failed 0
+        progress (when (#{:unit :integration} suite-id)
+                   (atom {:suite suite-id :passed 0 :failed 0
                           :total (transduce (map planned-var-count) + 0 children)
                           :done-ns 0 :total-ns (count (remove ::testable/skip children))
                           :active #{}}))
         _ (when progress
             (capture/bypass (println (progress-line @progress))))
-        results (binding [*integration-progress* progress]
+        results (binding [*suite-progress* progress]
                   (if (seq layers)
                     (run-children-layered children test-plan n layers suite-id
                                           (and (= :unit suite-id)

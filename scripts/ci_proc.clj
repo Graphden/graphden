@@ -26,6 +26,58 @@
       Optional)))
 
 
+(defn- publish-line!
+  [line publish!]
+  (let [text (.toString line "UTF-8")]
+    (.reset line)
+    (when (re-find #"(?:unit|integration) (?:progress:|namespace start:)|CI (?:unit|integration) (?:dependency layer|affected layer failed)" text)
+      (publish! text))))
+
+
+(defn observe-output!
+  "Drain available bytes without waiting for EOF from an inherited pipe.
+   Keep an incremental transcript so bounded cleanup cannot discard it."
+  [stream publish!]
+  (let [output (java.io.ByteArrayOutputStream.)
+        finished? (atom false)
+        worker (future
+                 (with-open [input stream]
+                   (let [buffer (byte-array 4096)
+                         line (java.io.ByteArrayOutputStream.)]
+                     (loop []
+                       (let [finished @finished?
+                             available (.available input)]
+                         (when (pos? available)
+                           (let [n (.read input buffer 0 (min available (alength buffer)))]
+                             (when (pos? n)
+                               (locking output (.write output buffer 0 n))
+                               (dotimes [i n]
+                                 (let [b (aget buffer i)]
+                                   (if (= 10 b)
+                                     (publish-line! line publish!)
+                                     (.write line (int b))))))))
+                         (if (and finished (zero? available))
+                           (when (pos? (.size line)) (publish-line! line publish!))
+                           (do (when (zero? available) (Thread/sleep 20))
+                               (recur))))))))]
+    {:worker worker :output output :finished? finished? :stream stream}))
+
+
+(defn- finish-output!
+  [{:keys [worker output finished? stream]}]
+  (reset! finished? true)
+  (when (= ::pending (deref worker 5000 ::pending))
+    (try (.close stream)
+         (finally (future-cancel worker))))
+  (locking output (.toString output "UTF-8")))
+
+
+(defn collected-output
+  "Stop both readers after exit/cleanup, preserving every byte drained so far."
+  [result stdout stderr]
+  (assoc result :out (finish-output! stdout) :err (finish-output! stderr)))
+
+
 (defn destroy-tree!
   "Forcibly kill the babashka.process `proc` and every descendant of it."
   [proc]

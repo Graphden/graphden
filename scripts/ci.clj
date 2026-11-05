@@ -227,9 +227,12 @@
         cmd (:cmd c)
         timeout-ms (:timeout c)
         started (System/nanoTime)
-        proc (p/process (cond-> {:cmd cmd :out :string :err :string}
+        proc (p/process (cond-> {:cmd cmd}
                           (:extra-env c) (assoc :extra-env (:extra-env c))))
         _ (swap! live-procs conj proc)
+        publish! (fn [line] (println) (println (str check-name ": " line)) (flush))
+        stdout (ci-proc/observe-output! (:out proc) publish!)
+        stderr (ci-proc/observe-output! (:err proc) publish!)
         result (ci-proc/await-active-result proc timeout-ms)
         ;; Wall time of THIS check, recorded whatever the outcome. The run used
         ;; to report one number — total elapsed — which cannot answer "which
@@ -244,7 +247,7 @@
       ;; which is the whole diagnosis. Discarding it made a timeout verdict
       ;; contentless (audit-6); killing only the child made it a `Stream
       ;; closed` runner error instead (ci-proc).
-      (let [r (ci-proc/kill-and-salvage! proc)]
+      (let [r (ci-proc/collected-output (ci-proc/kill-and-salvage! proc) stdout stderr)]
         (swap! results assoc check-name
                {:exit -1
                 :output (str "TIMEOUT after " (quot duration-ms 1000) " s"
@@ -264,7 +267,8 @@
           (when-not info? (reset! failed true))))
 
       :else
-      (let [output (str (:out result) "\n" (:err result))
+      (let [result (ci-proc/collected-output result stdout stderr)
+            output (str (:out result) "\n" (:err result))
             exit (:exit result)
             warnings? (has-warnings? check-name output)]
         (swap! results assoc check-name

@@ -131,6 +131,78 @@
     (is (empty? @live))))
 
 
+(deftest namespace-diagnostics-arrive-before-process-exit-and-survive-timeout
+  (let [proc (p/process {:cmd ["bash" "-c"
+                               "printf 'ordinary output\\nunit namespace start: slow.ns\\nunit progress: 0/1 passed, 1 failed; failed-tests=:slow.ns/red\\n'; sleep 30"]})
+        seen (atom [])
+        ready (promise)
+        publish! (fn [line] (swap! seen conj line) (deliver ready true))
+        stdout (ci-proc/observe-output! (:out proc) publish!)
+        stderr (ci-proc/observe-output! (:err proc) publish!)]
+    (try
+      (is (= true (deref ready 2000 :missing)))
+      (is (= ::pending (deref proc 10 ::pending)))
+      (let [saved (ci-proc/collected-output (ci-proc/kill-and-salvage! proc) stdout stderr)]
+        (is (str/includes? (:out saved) "ordinary output"))
+        (is (str/includes? (:out saved) "failed-tests=:slow.ns/red"))
+        (is (= 2 (count @seen)))
+        (is (every? #(str/starts-with? % "unit ") @seen)))
+      (finally (ci-proc/kill-and-salvage! proc)))))
+
+
+(deftest open-pipe-does-not-hold-reader-after-producer-exits
+  ;; A controllable pipe retains its writer after the subprocess exits, like
+  ;; an inherited descriptor. No EOF is available until this test closes it.
+  (let [input (java.io.PipedInputStream. 65536)
+        output (java.io.PipedOutputStream. input)
+        text (str "unit namespace start: held.pipe\n" (apply str (repeat 9000 "я")))
+        producer (p/process {:cmd ["bash" "-c" "printf 'unit namespace start: held.pipe\\n'; printf '\\321\\217%.0s' {1..9000}; printf 'stderr %.0s' {1..9000} >&2"]
+                             :out output})
+        stdout (ci-proc/observe-output! input (fn [_]))
+        stderr (ci-proc/observe-output! (:err producer) (fn [_]))]
+    (try
+      (is (= 0 (:exit @producer)))
+      (let [result (deref (future (ci-proc/collected-output {:exit 0} stdout stderr)) 2000 ::timeout)]
+        (is (not= ::timeout result))
+        (is (= text (:out result)) "all bytes, including Unicode and a partial final line, survive")
+        (is (= (apply str (repeat 9000 "stderr ")) (:err result)))
+        (is (future-done? (:worker stdout)))
+        (is (future-done? (:worker stderr)))
+        (is (thrown? java.io.IOException (.write output 1)) "the reader closed its pipe"))
+      (finally
+        (.close output)
+        (ci-proc/kill-and-salvage! producer)))))
+
+
+(deftest drain-timeout-retains-transcript-and-closes-pipe-before-cancel
+  (let [input (java.io.PipedInputStream.)
+        output (java.io.PipedOutputStream. input)
+        ready (promise)
+        blocker (java.util.concurrent.CountDownLatch. 1)
+        text "unit namespace start: blocked.publisher\n"
+        stdout (ci-proc/observe-output! input (fn [_] (deliver ready true) (.await blocker)))
+        stderr (ci-proc/observe-output! (java.io.ByteArrayInputStream. (.getBytes "stderr tail" "UTF-8")) (fn [_]))]
+    (try
+      (.write output (.getBytes text "UTF-8"))
+      (is (= true (deref ready 2000 ::timeout)))
+      (let [result (ci-proc/collected-output {:exit 0} stdout stderr)]
+        (is (= text (:out result)))
+        (is (= "stderr tail" (:err result)))
+        (is (future-cancelled? (:worker stdout)))
+        (is (thrown? java.io.IOException (.write output 1))))
+      (finally (.countDown blocker) (.close output)))))
+
+
+(deftest actual-unit-task-enables-fail-fast-only-in-ci
+  (let [probe "(defn clojure [& args] (prn args)) (eval (get-in (read-string (slurp \"bb.edn\")) [:tasks 'test-unit :task]))"]
+    (doseq [[ci? expected?] [[false false] [true true]]]
+      (let [env (cond-> (dissoc (into {} (System/getenv)) "GRAPHDEN_CI_PRIORITY_HINTS")
+                  ci? (assoc "GRAPHDEN_CI_PRIORITY_HINTS" "{}"))
+            result @(p/process {:cmd ["bb" "-e" probe] :env env :out :string :err :string})]
+        (is (= 0 (:exit result)) (:err result))
+        (is (= expected? (str/includes? (:out result) "--fail-fast")))))))
+
+
 (let [{:keys [fail error]} (run-tests 'ci-proc-test)]
   (when (pos? (+ fail error))
     (System/exit 1)))

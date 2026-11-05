@@ -759,7 +759,8 @@
   test-unit
   {:doc "Unit tests only (skips ^:integration). ~4 min (measured: 246 s as a process, 205 s of kaocha wall; the old ~1.5 min was stale). Emits perf/runs/unit.edn — the report `bb perf` gates the suite-wide structural invariants against."
    :task (clojure {:extra-env {"GRAPHDEN_PERF_REPORT" "perf/runs/unit.edn"}}
-                  "-M:dev:test -m kaocha.runner :unit")}
+                  (str "-M:dev:test -m kaocha.runner :unit"
+                       (when (System/getenv "GRAPHDEN_CI_PRIORITY_HINTS") " --fail-fast")))}
 
   test-e2e-org
   {:doc "The organisation tours' e2e guard (tools/browser-test/edit-tutorial-tour-org.test.js) against the LOCAL tenancy stack: boots gdcloud from ../graphden-cloud (the release image graphden-cloud:latest, `bb gdcloud-up` there), signs up + verifies a throwaway account through the executor log (no mailer), runs the guard signed in as it. Needs the sibling graphden-cloud checkout; skips with a message otherwise. Not in `bb ci` — the tenancy stack is a second image; run it after a release or a tour edit."

@@ -30,6 +30,7 @@
 
 (ns ci-priority-schedule-test
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is run-tests]]
     [kaocha.plugin.priority :as priority]
     [kaocha.testable :as testable])
@@ -236,6 +237,30 @@
              (:kaocha.result/tests (if (= red-id :indirect)
                                      (second results)
                                      (last results))))))))
+
+
+(deftest unit-progress-identifies-failure-before-next-namespace-starts
+  (let [writer (java.io.StringWriter.)
+        observations (atom [])
+        children (mapv #(hash-map :kaocha.testable/id %)
+                       [:first.ns :second.ns])]
+    (binding [*out* writer]
+      (with-redefs [priority/namespace-layers (fn [_ _] [])
+                    priority/namespace-hints (fn [_ _] [])
+                    testable/run-testable
+                    (fn [child _]
+                      (swap! observations conj (str writer))
+                      (assoc child :kaocha.result/tests
+                             [{:kaocha.testable/type :kaocha.type/var
+                               :kaocha.testable/id :first.ns/broken
+                               :kaocha.result/count 1 :kaocha.result/fail 1}]))]
+        (testable/-run {:kaocha.testable/type :kaocha.type/clojure.test
+                        :kaocha.testable/id :unit
+                        :kaocha/parallelism 1
+                        :kaocha.test-plan/tests children} nil)))
+    (is (str/includes? (first @observations) "unit namespace start: first.ns"))
+    (is (str/includes? (second @observations) "completed=first.ns; failed-tests=:first.ns/broken"))
+    (is (str/includes? (str writer) "2 failed, 2/2 namespaces; active=none"))))
 
 
 (let [{:keys [fail error]} (run-tests 'ci-priority-schedule-test)]

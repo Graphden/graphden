@@ -289,6 +289,11 @@
                                 "test/graphden/packages/core/hof_test.clj"))
                  ["core" "hof"]))
   (is (= ["graphden.packages.core.hof-test"
+          "graphden.types.branch-market-policy-contract-test"
+          "graphden.types.crud-apply-policy-contract-test"
+          "graphden.types.explorer-view-contract-test"
+          "graphden.types.registry-receipt-policy-contract-test"
+          "graphden.types.small-policy-contract-test"
           "graphden.types.taint-propagate-guard-test"]
          (priority/unit-first
            #{"resources/packages/core/hof/impls.clj"})))

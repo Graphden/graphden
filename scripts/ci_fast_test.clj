@@ -100,6 +100,11 @@
         commands (fast/commands paths true true true)
         jvm (filter #(= ["bb" "wt" "test"] (vec (take 3 %))) commands)]
     (is (= ["bb" "wt" "test" "--focus"
+            "graphden.types.branch-market-policy-contract-test" "--focus"
+            "graphden.types.crud-apply-policy-contract-test" "--focus"
+            "graphden.types.explorer-view-contract-test" "--focus"
+            "graphden.types.registry-receipt-policy-contract-test" "--focus"
+            "graphden.types.small-policy-contract-test" "--focus"
             "graphden.types.taint-propagate-guard-test"]
            (first jvm)))
     (is (= ["bb" "wt" "test" "--focus"

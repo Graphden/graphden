@@ -1995,9 +1995,3 @@
   [t]
   (binding [*execution-freshening* (atom {})]
     (freshen* t (atom {}))))
-
-
-(defn freshen-with-effects
-  "Compatibility name for `freshen`, which preserves all callable contracts."
-  [t]
-  (freshen t))

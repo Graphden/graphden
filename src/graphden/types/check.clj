@@ -1469,12 +1469,9 @@
         ;; the sibling `:arg a` slot was checked against the callee's
         ;; RETURN type — masked for years by the since-removed
         ;; `:empty-map ⊆ record` leniency).
-        ;; `freshen-with-effects` — plain `freshen` drops the effects
-        ;; element at EVERY nesting level (a nested fn-typed arg's
-        ;; concrete set would degrade to `:any` and flip a would-pass
-        ;; slot-effect check into fail); this variant preserves them
-        ;; throughout.
-        (let [fresh (types/freshen-with-effects actual)
+        ;; Freshening preserves effects and execution contracts at every
+        ;; nesting level, including callable arguments.
+        (let [fresh (types/freshen actual)
               actual' (strip-closure-captures expected fresh
                                               (any-ref-name b-form))]
           (check-binding! primary-parent arg-name expected actual' subst fn-name b-form))

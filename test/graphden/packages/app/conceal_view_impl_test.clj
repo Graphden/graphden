@@ -17,9 +17,9 @@
     [graphden.crud.entities :as entities]
     [graphden.crud.fn-execution :as fn-exec]
     [graphden.crud.fn-execution.conceal :as conceal]
-    [graphden.crud.types-api :as types-api]
     [graphden.crud.value-form :as value-form]
     [graphden.packages.export :as export]
+    [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
     [graphden.test-infra.golden-app :as ga]))
 
@@ -212,20 +212,22 @@
             "the provenance / mismatch popovers show no chain")))))
 
 
+(defn- usages
+  [parsed]
+  (setup/exec-with-storage (:ctx ga/*bootstrap*) (:storage ga/*bootstrap*)
+                           (ga/fn-id :_types-usages-apply) {:parsed parsed}))
+
+
 (deftest usages-do-not-list-a-hidden-user
-  (let [users #(set (map :fn-name (:usages (types-api/apply-types-usages
-                                             {:target-id (ga/fn-id :http-server)} (ctx)
-                                             entities/apply-view-impl-filter))))]
+  (let [users #(set (map :fn-name (:usages (usages {:target-id (ga/fn-id :http-server)}))))]
     (is (contains? (users) "web-server") "control")
     (with-filter* (hide-named "web-server")
       #(is (not (contains? (users) "web-server"))))))
 
 
 (deftest reachability-does-not-expose-a-revoked-root-body
-  (let [path #(get-in (types-api/apply-types-usages
-                        {:target-id (ga/fn-id :http-server)
-                         :root-id (ga/fn-id :web-server)}
-                        (ctx) entities/apply-view-impl-filter)
+  (let [path #(get-in (usages {:target-id (ga/fn-id :http-server)
+                              :root-id (ga/fn-id :web-server)})
                       [:reachability :path])]
     (is (some (fn [row] (= "web-server" (:fn-name row))) (path))
         "control: the authorized editor root is on a path to its parent")

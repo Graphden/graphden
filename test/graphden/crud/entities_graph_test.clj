@@ -1134,10 +1134,13 @@
         (is (contains? body :bindings) (pr-str params))))))
 
 
-(deftest graph-index-composition-parity-test
-  (testing "graph projection matches the native index, including order and extension fields"
-    (is (= (entities/graph-index (:ctx *graph*))
-           (gh/exec-name :graph-index {}))))
+(deftest graph-index-projection-test
+  (testing "index ships only namespaces and compact roled fn rows"
+    (let [result (gh/exec-name :graph-index {})]
+      (is (= #{:fns :namespaces} (set (keys result))))
+      (is (seq (:fns result)))
+      (is (every? #(contains? % :role) (:fns result)))
+      (is (every? #(not-any? nil? (vals %)) (:fns result)))))
   (testing "the row callback preserves false, zero and empty values, dropping only nil"
     (is (= {:flag false :count 0 :name "" :parent-ids [] :extension {:v nil}}
            (gh/exec-name :_graph-index-row

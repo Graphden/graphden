@@ -574,25 +574,8 @@
         kinds))))
 
 
-(defn- list-scope-tree
-  "Sidebar init: the namespace list + a per-namespace count of NAMED fns
-   (anonymous fns are never shown as leaves). No fn rows at all — leaves
-   load lazily via `:namespace`. This is the O(namespaces) replacement
-   for the O(all-fns) `:index` pull that the editor fetched on every
-   init AND every post-mutation refresh. Each count row additively
-   carries (when >0):
-   - `:type-error-count` — recorded diagnostics on fns of that
-     namespace, current branch; the sidebar's per-namespace warning chip.
-   - `:type-count` — NAMED type-rows (roles per
-     `types-api/type-lens-roles`).
-   - `:fn-count` — NAMED plain fns: not a type-row, not secret-shaped
-     (parents = exactly a `:secret-shape`-tagged base-fn; those are the
-     secrets lens's kind, resolved in-memory via the registry tag).
-   The kind counts let the sidebar's fn/types lenses keep a
-   not-yet-loaded namespace visible instead of silently hiding every
-   namespace whose leaves were never fetched. (A service-backed or
-   app-routed fn still counts here — the server doesn't classify those
-   kinds; the rare namespace holding ONLY such fns over-shows.)"
+(defn- tree-facts
+  "Acquire memoized kinds and viewer-only diagnostics from one lazy environment."
   [{:keys [base diag-counts namespaces roled-fns rich-snapshot branch-id tree-generation]}]
   (let [ns-of-fn (when (seq @diag-counts)
                    (into {} (map (juxt :id :namespace-id)) (:fns base)))
@@ -609,24 +592,10 @@
                            (update m (get ns-of-fn fid) (fnil + 0) n)
                            m))
                        {} @diag-counts)
-        counts (mapv (fn [[nid {n :count :keys [types plain]}]]
-                       (let [errs (get ns-err nid 0)]
-                         (cond-> {:namespace-id nid :count n}
-                           (pos? errs) (assoc :type-error-count errs)
-                           (pos? types) (assoc :type-count types)
-                           (pos? plain) (assoc :fn-count plain))))
-                     (tree-kinds branch-id base rich-snapshot roled-fns tree-generation))
-        ;; Namespaces whose only diagnosed fns are anonymous still
-        ;; get a chip row (count 0 reads falsy client-side).
-        covered (into #{} (map :namespace-id) counts)
-        extra (into []
-                    (comp (remove (fn [[nid _]] (contains? covered nid)))
-                          (map (fn [[nid errs]]
-                                 {:namespace-id nid :count 0
-                                  :type-error-count errs})))
-                    ns-err)]
+        kinds (tree-kinds branch-id base rich-snapshot roled-fns tree-generation)]
     {:namespaces @namespaces
-     :counts (into counts extra)}))
+     :kinds kinds
+     :errors ns-err}))
 
 
 (defn- list-scope-namespace
@@ -720,22 +689,6 @@
   (into {} (remove (comp nil? val)) row))
 
 
-(defn- list-scope-index
-  "Only `{:fns :namespaces}`, nil-valued fields dropped from each fn
-   row. This is a sidebar / picker payload fetched fresh on every editor
-   refresh (~3900 fns), and most fns leave the majority of columns null
-   (org-id, deleted-at, anonymous-hash, constraint, base-fn-id,
-   element-fn-id, return-type-fn-id…). Serialising `\"x\":null` ~3900×
-   per column was ~25% of the ~1.9 MB response — pure churn on every
-   keep-alive-closed fetch. An absent key reads as `undefined` in the
-   editor's truthy checks exactly like `null`, so no data is lost; the
-   per-fn detail (with all fields) still comes from the `:subtree`
-   fetch on select."
-  [{:keys [roled-fns namespaces]}]
-  {:fns (mapv compact-fn-row @roled-fns)
-   :namespaces @namespaces})
-
-
 (defn- list-scope-subtree
   "Only the fns transitively reachable from `root-id` via inheritance +
    binding refs + binding resolvers + type overrides + list-item refs + own-slot
@@ -789,11 +742,23 @@
 ;; `scope` in `web/crud-routes` (`:all-entities-handler`), and each MCP
 ;; tool binds the one it needs.
 
-(defn graph-tree
-  "`{:namespaces :counts}` — the O(namespaces) sidebar init."
+(defn graph-tree-facts
+  "Data-only sidebar facts; memo generation and concealed diagnostic scope stay native."
   [ctx]
-  (let [generation (:generation (meta @tree-kinds-memo))]
-    (list-scope-tree (assoc (env ctx) :tree-generation generation))))
+  (let [generation (:generation (meta @tree-kinds-memo))
+        {:keys [namespaces kinds errors]} (tree-facts (assoc (env ctx) :tree-generation generation))
+        ;; The installed ACL seam understands namespace-keyed :counts, not
+        ;; arbitrary facts fields. Probe the union once so neither kinds nor
+        ;; anonymous-only diagnostic namespaces can escape its read filter.
+        visible (apply-view-impl-filter
+                  {:namespaces namespaces
+                   :counts (zipmap (concat (keys kinds) (keys errors)) (repeat true))})
+        allowed (set (keys (:counts visible)))
+        visible-counts (fn [counts]
+                         (into {} (filter #(contains? allowed (key %))) counts))]
+    {:namespaces (:namespaces visible)
+     :kinds (visible-counts kinds)
+     :errors (visible-counts errors)}))
 
 
 (defn graph-namespace-fns
@@ -815,12 +780,6 @@
   [ctx]
   (let [{:keys [roled-fns namespaces]} (env ctx)]
     (apply-view-impl-filter {:fns @roled-fns :namespaces @namespaces})))
-
-
-(defn graph-index
-  "`{:fns :namespaces}`, nil fields dropped (CLI / batch)."
-  [ctx]
-  (list-scope-index (env ctx)))
 
 
 (defn graph-subtree

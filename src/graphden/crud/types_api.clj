@@ -666,61 +666,32 @@
 ;; --- types-usages — the walk behind the graph's apply stage (find every
 ;; place a fn / type-row is referenced).
 
-(defn- usage-summary-fn
-  "The per-usage row builder: fn identity + dotted ns path (best-effort
-   — a storage without the `:ns` table, e.g. minimal test fixtures,
-   yields path-less rows) + the anonymous flag (all three anon
-   representations: nil name / deduped `anonymous-hash` row / auto-named
-   `_anon-<hash>` — the client folds these into a count). The ns path
-   lets the Used-by section disambiguate same-named fns and lets
-   navigation to a not-yet-loaded fn resolve by QUALIFIED name."
-  [fn-by-id ctx]
-  (let [ns-paths (try
-                   (ns-path/path-map
-                     (sp/query-entities
-                       (or (:compile-storage ctx) (request/require-storage ctx))
-                       :ns {}))
-                   (catch Exception _ {}))]
-    (fn [fid kind & [extra]]
-      (let [f (get fn-by-id fid)]
-        (merge (cond-> {:fn-id (str fid)
-                        :fn-name (or (:name f) "(anonymous)")
-                        :role (:role f)
-                        :kind kind}
-                 (:namespace-id f)
-                 (assoc :fn-namespace
-                        (not-empty (get ns-paths (:namespace-id f))))
-                 (or (nil? (:name f))
-                     (:anonymous-hash f)
-                     (some-> (:name f) (str/starts-with? "_anon-")))
-                 (assoc :anonymous true))
-               (or extra {}))))))
+(defn- usage-namespace-paths
+  "One best-effort namespace acquisition, for graph-side summaries."
+  [ctx]
+  (try
+    (ns-path/path-map
+      (sp/query-entities
+        (or (:compile-storage ctx) (request/require-storage ctx)) :ns {}))
+    (catch Exception _ {})))
 
 
-(defn- constraint-usages
+(defn- constraint-links
   "Named type references inside recursive constraints are the only incoming
    links that do not carry a target fn-id in a graph row."
-  [target-name {:keys [fns]} fn-summary]
+  [target-name {:keys [fns]}]
   (->> fns
        (filter (fn [f]
                  (and (vector? (:constraint f))
                       target-name
                       (constraint-contains-type-ref? (:constraint f) target-name))))
        (map (fn [f]
-              (fn-summary (:id f)
-                          (case (first (:constraint f))
-                            :union :union-branch
-                            :variant :variant-branch
-                            :fn :fn-type-arg-or-return
-                            :other))))))
-
-
-(def ^:private usages-response-cap
-  "Rows shipped per usages response. The inspector shows 20 per group
-   and the type-expand footer a handful — 400 keeps every consumer's
-   view complete while a :get-scale target stops costing a megabyte
-   per Overview open."
-  400)
+              {:fn-id (:id f)
+               :kind (case (first (:constraint f))
+                       :union :union-branch
+                       :variant :variant-branch
+                       :fn :fn-type-arg-or-return
+                       :other)}))))
 
 
 (defn- reachability-roots
@@ -746,8 +717,8 @@
          vec)))
 
 
-(defn- reachability-result
-  [parsed graph links roots fn-summary]
+(defn- reachability-facts
+  [parsed graph links roots]
   (let [target-id (:target-id parsed)
         path (refs/shortest-path graph (map first roots) target-id links)
         origin (some (fn [[id kind _]] (when (= id (:fn-id (first path))) kind)) roots)]
@@ -757,77 +728,42 @@
               :else :unknown)
      :scope :visible-roots
      :roots (mapv (fn [[id kind label]]
-                    (assoc (fn-summary id :root
-                                       (when label {:slot-name label}))
-                           :root-kind kind))
+                    (cond-> {:fn-id id :kind :root :root-kind kind}
+                      label (assoc :slot-name label)))
                   roots)
      :path (mapv (fn [{:keys [fn-id kind slot-name]}]
-                   (fn-summary fn-id (or kind :root)
-                               (cond-> {}
-                                 slot-name (assoc :slot-name slot-name))))
+                   (cond-> {:fn-id fn-id :kind (or kind :root)}
+                     slot-name (assoc :slot-name slot-name)))
                  path)
      :origin origin}))
 
 
-(defn- apply-types-usages*
-  "`apply-types-usages` over an already-concealed `graph`."
-  [parsed ctx graph]
-  (let [target-id (:target-id parsed)
+(defn types-usages-facts
+  "One concealed snapshot for graph-side incoming-link selection and summaries.
+   Shared edge/constraint walks and shortest-path computation stay native.
+   Only inert data crosses the boundary; namespace lookup happens once."
+  [parsed ctx conceal]
+  (let [graph (conceal (cached-or-load-graph ctx))
         fn-by-id (into {} (map (juxt :id identity)) (:fns graph))
-        target-name (some-> (get fn-by-id target-id) :name)
-        fn-summary (usage-summary-fn fn-by-id ctx)
+        target-id (:target-id parsed)
+        target-name (:name (get fn-by-id target-id))
+        paths (usage-namespace-paths ctx)
         links (refs/edges graph)
-        roots (reachability-roots parsed ctx fn-by-id)
-        usages (if (contains? fn-by-id target-id)
-                 (vec
-                   (concat
-                     (->> links
-                          (filter #(= target-id (:target-id %)))
-                          (map (fn [{:keys [fn-id kind slot-name]}]
-                                 (fn-summary fn-id kind
-                                             (when slot-name {:slot-name slot-name})))))
-                     (constraint-usages target-name graph fn-summary)
-                     (keep (fn [[id kind label]]
-                             (when (and (= id target-id) (#{:route :service} kind))
-                               (fn-summary id (case kind
-                                                :route :route-root
-                                                :service :service-root)
-                                           {:slot-name label})))
-                           roots)))
-                 [])
-        ;; :const-scale targets have hundreds of users; the clients cap
-        ;; their DISPLAY anyway, so don't ship an unbounded list —
-        ;; :count stays the full total and :truncated? says the list is
-        ;; a prefix.
-        limited (into [] (take usages-response-cap) usages)]
-    {:ok true
-     :type-fn-id (str target-id)
-     :type-name (some-> target-name str)
-     :count (count usages)
-     :truncated? (> (count usages) usages-response-cap)
-     :usages limited
-     :reachability (reachability-result parsed graph links roots fn-summary)}))
-
-
-(defn apply-types-usages
-  "Stage 3 of types-usages — walk the graph for every reference to the
-   target fn row. Structural links share `graph-refs/edges` with the editor
-   subtree walker; recursive named constraints add the remaining type links.
-   One walk serves `/api/types/usages` (the type-expand
-   footer) and `/api/fns/usages` (the inspector's Used-by section) —
-   kinds that don't apply to a given target simply come back empty.
-   Reached only after the graph's `types-usages` validation passes
-   (`{:target-id <uuid>}`).
-
-   `conceal` (default `identity`) is a `graph-dump -> graph-dump` pass —
-   the view-impl filter (`crud.entities/apply-view-impl-filter`) — run
-   over the graph BEFORE the walk, so a fn whose composition the viewer
-   may not see is never listed as using the target through its parents
-   or bindings (querying every candidate id would otherwise rebuild its
-   whole edge set)."
-  ([parsed ctx] (apply-types-usages parsed ctx identity))
-  ([parsed ctx conceal]
-   (apply-types-usages* parsed ctx (conceal (cached-or-load-graph ctx)))))
+        roots (reachability-roots parsed ctx fn-by-id)]
+    {:target-id target-id
+     :target-name (some-> target-name str)
+     :visible? (contains? fn-by-id target-id)
+     ;; Summaries need identity metadata, never implementation fields from
+     ;; the concealed snapshot (including references beyond this slice).
+     :fns (update-vals fn-by-id #(select-keys % [:id :name :role :namespace-id :anonymous-hash]))
+     :namespace-paths (select-keys paths (keep :namespace-id (vals fn-by-id)))
+     ;; Edges may point outside the visible slice. Their IDs are not facts
+     ;; an independent graph consumer is authorized to enumerate.
+     :links (filterv #(contains? fn-by-id (:target-id %)) links)
+     :constraints (if (contains? fn-by-id target-id)
+                    (vec (constraint-links target-name graph))
+                    [])
+     :reachability (reachability-facts parsed graph links roots)}))
 
 
 (defn all-rich-types

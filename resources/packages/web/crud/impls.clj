@@ -128,10 +128,10 @@
 ;; runtime effect audit matches the declared `:effects #{:db}`. Which one
 ;; a request wants is graph composition (`:all-entities-handler`).
 
-(defbase graph-tree
+(defbase graph-tree-facts
   []
   (cr/record-effect! :db)
-  (entities/graph-tree ctx))
+  (entity-list/graph-tree-facts ctx))
 
 
 (defbase graph-namespace-fns
@@ -346,7 +346,7 @@
    :free-arg-slot-map free-arg-slot-map
    :free-arg-entries free-arg-entries
    :service-blocking-free-args service-blocking-free-args
-   :graph-tree graph-tree
+   :_graph-tree-facts graph-tree-facts
    :graph-namespace-fns graph-namespace-fns
    :graph-search graph-search
    :_graph-index-facts graph-index-facts

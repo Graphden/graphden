@@ -356,19 +356,6 @@
           (is (contains? dump :slots))
           (is (contains? dump :namespaces))
           (is (every? #(contains? % :role) (:fns dump)))))
-      (testing "scope :index — drops bindings / slots / fn-slots / list-items,"
-        (testing "keeps fns + namespaces; fns still carry :role"
-          (let [_    (setup/create-base-fn! storage "graph-reads-fn-idx")
-                dump (entities/graph-index c)]
-            (is (= #{:fns :namespaces} (set (keys dump)))
-                ":index payload is exactly {:fns :namespaces}")
-            (is (seq (:fns dump)) "fns are still populated")
-            (is (every? #(contains? % :role) (:fns dump))
-                ":role still computed on fns")
-            (is (every? (fn [f] (not-any? nil? (vals f))) (:fns dump))
-                ":index fns carry NO nil-valued fields — they're stripped to
-                 cut ~25-40% of the sidebar payload churn (an absent key
-                 reads as null client-side, full detail comes from :subtree)"))))
       (testing "scope :subtree + root-id — only the BFS closure"
         (let [parent-id (java.util.UUID/randomUUID)
               child-id  (java.util.UUID/randomUUID)
@@ -445,37 +432,6 @@
     ;; write path runs — drop the cache so the loader sees these writes.
     (ctx/invalidate-graph-cache! c)
     (try
-      (testing "scope :tree — {:namespaces :counts} only, NO fn rows"
-        (let [dump (entities/graph-tree c)]
-          (is (= #{:namespaces :counts} (set (keys dump)))
-              ":tree payload is exactly {:namespaces :counts}")
-          (let [count-by (into {} (map (juxt :namespace-id :count)) (:counts dump))
-                types-by (into {} (map (juxt :namespace-id :type-count)) (:counts dump))]
-            (is (= 2 (get count-by ns-a))
-                "ns-a counts its 2 NAMED fns; the anonymous one is excluded")
-            (is (= 2 (get count-by ns-b)))
-            ;; The nil bucket also holds the 14 seeded primitive fn-rows, so
-            ;; assert presence + that r1 lifted the count, not an exact value.
-            (is (contains? count-by nil)
-                "the namespace-less bucket is present in :counts")
-            (is (pos? (get count-by nil)))
-            ;; :type-count — the types-lens payload. Parent-less slot-less
-            ;; named rows classify :primitive (empty type-rows), composed
-            ;; fns are excluded.
-            (is (= 2 (get types-by ns-a))
-                "a1/a2 classify :primitive — counted as type-rows")
-            (is (= 1 (get types-by ns-b))
-                "b1 counts; the composed beta-composed does NOT")
-            (is (pos? (get types-by nil))
-                "the primitives bucket reports its seeded type-rows")
-            ;; :fn-count — the fn-lens payload: named non-type rows.
-            (let [fns-by (into {} (map (juxt :namespace-id :fn-count)) (:counts dump))]
-              (is (nil? (get fns-by ns-a))
-                  "every ns-a row is type-shaped — the zero :fn-count key is omitted")
-              (is (= 1 (get fns-by ns-b))
-                  "the composed beta-composed is the one plain fn in ns-b")
-              (is (pos? (get fns-by nil))
-                  "child-of-a1 (composed) counts in the root bucket")))))
       (testing "scope :namespace — one namespace's light named fns"
         (let [dump (entities/graph-namespace-fns c ns-a)
               ids  (into #{} (map :id) (:fns dump))

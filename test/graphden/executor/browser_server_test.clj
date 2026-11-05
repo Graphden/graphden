@@ -78,15 +78,15 @@
                 :call-target call-target :on-execute on-execute})))))))
 
 
-(deftest only-an-authorized-unchanged-call-receives-the-stale-epoch-code
+(deftest only-an-authorized-unchanged-call-receives-the-exact-stale-proof
   (doseq [stage [:before :after]]
     (fixture
       (fn [{:keys [ctx request input calls on-execute]}]
         (let [invalidate #(swap! (:invalidation-count ctx) inc)]
           (if (= :before stage) (invalidate) (reset! on-execute invalidate))
           (let [result (server/invoke-current ctx request input)]
-            (is (= {:ok false :reason "Server call is unavailable."
-                    :http-status 422 :code "server-call-stale"} result))
+            (is (= {:ok false :failure-type "unsupported" :failure-reason nil
+                    :failure-status nil :server-stale? true} result))
             (is (= (if (= :before stage) 0 1)
                    (count (filter #(= :run (first %)) @calls))))))))))
 
@@ -103,10 +103,10 @@
                             :target (reset! call-target (random-uuid))))]
           (if (= :before stage) (mutate) (reset! on-execute mutate))
           (let [result (server/invoke-current ctx request input)]
-            (is (= (if (= :execute change) 403 422) (:http-status result)))
+            (is (= (if (= :execute change) "forbidden" "unsupported") (:failure-type result)))
             (is (false? (:ok result)))
             (is (nil? (:value result)))
-            (is (not (contains? result :code)))))))))
+            (is (false? (:server-stale? result)))))))))
 
 
 (deftest stale-epoch-does-not-classify-session-or-unverified-policy-failures
@@ -114,8 +114,8 @@
     (fn [{:keys [ctx input]}]
       (swap! (:invalidation-count ctx) inc)
       (let [result (server/invoke-current ctx {:headers {"authorization" "Bearer next-session"}} input)]
-        (is (= 422 (:http-status result)))
-        (is (not (contains? result :code))))))
+        (is (not= "forbidden" (:failure-type result)))
+        (is (false? (:server-stale? result))))))
   (fixture
     (fn [{:keys [ctx request input]}]
       (swap! (:invalidation-count ctx) inc)
@@ -124,8 +124,8 @@
                       (throw (ex-info "Policy unpublished"
                                       {:type :browser-plan/unsupported :reason :policy-refresh-required})))]
         (let [result (server/invoke-current ctx request input)]
-          (is (= 422 (:http-status result)))
-          (is (not (contains? result :code))))))))
+          (is (not= "forbidden" (:failure-type result)))
+          (is (false? (:server-stale? result))))))))
 
 
 (deftest source-issuance-does-not-grant-execution-or-export-captures
@@ -134,7 +134,7 @@
       (is (= #{:token} (set (keys (:descriptor input)))))
       (is (empty? @calls) "source export did not execute or confer an execute grant")
       (reset! allowed? false)
-      (is (= 403 (:http-status (server/invoke-current ctx request input))))
+      (is (= "forbidden" (:failure-type (server/invoke-current ctx request input))))
       (is (= 1 (count @calls)))
       (is (= [:guard false] [(ffirst @calls) (last (first @calls))])))))
 
@@ -187,7 +187,7 @@
     (fn [{:keys [ctx request input allowed? on-execute]}]
       (reset! on-execute #(reset! allowed? false))
       (let [result (server/invoke-current ctx request input)]
-        (is (= 403 (:http-status result)))
+        (is (= "forbidden" (:failure-type result)))
         (is (nil? (:value result))))))
   (fixture
     (fn [{:keys [ctx request input evidence on-execute]}]
@@ -204,7 +204,7 @@
       ;; created snapshot policy can see the target's revoked execute grant.
       (reset! on-execute #(reset! fresh-execute? false))
       (let [result (server/invoke-current ctx request input)]
-        (is (= 403 (:http-status result)))
+        (is (= "forbidden" (:failure-type result)))
         (is (nil? (:value result)))))))
 
 
@@ -225,7 +225,7 @@
         (let [result (server/invoke-current ctx request input)]
           (is (false? (:ok result)))
           (is (nil? (:value result)))
-          (is (not (contains? result :code)))
+          (is (false? (:server-stale? result)))
           (is (= 2 @scopes))))))
   (fixture
     (fn [{:keys [ctx request input calls]}]
@@ -249,7 +249,7 @@
                                             (assoc request :principal {:authenticated? true}) input)]
           (is (false? (:ok result)))
           (is (nil? (:value result)))
-          (is (not (contains? result :code)))))
+          (is (false? (:server-stale? result)))))
       (is (= 1 (count (filter #(= :run (first %)) @calls)))))
     {:principal nil :auth-provider (auth/single-token-provider "first-session")}))
 
@@ -285,7 +285,7 @@
           (let [result (server/invoke-current ctx request input)]
             (is (false? (:ok result)))
             (is (nil? (:value result)))
-            (is (not (contains? result :code)))
+            (is (false? (:server-stale? result)))
             (is (= (if (= :before stage) 0 1)
                    (count (filter #(= :run (first %)) @calls))))))
         {:principal nil :auth-provider provider}))))
@@ -343,7 +343,7 @@
           (let [result (server/invoke-current ctx request input)]
             (is (false? (:ok result)))
             (is (nil? (:value result)))
-            (is (not (contains? result :code)))
+            (is (false? (:server-stale? result)))
             (is (= (if (= :before stage) 0 1)
                    (count (filter #(= :run (first %)) @calls)))))))
       {:auth-provider (reify auth/AuthProvider

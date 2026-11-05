@@ -36,48 +36,50 @@
    explain each ±1). For each ADDED name ask \"does it pass/transform caller
    content?\" — if yes it needs `:taint-propagate?` and a `golden-tainted`
    entry; a REMOVED name just leaves both sets."
-  #{:_fn-branch-local-seed :_fn-slot-seals :sql-query-public
+  #{:_branch-comment-limits :_safe-request-error :_csv-escape-cell :_form-canonical-type :_form-union-type? :_form-list-type? :_form-record-type? :_form-union-members :_form-list-element :_form-refinement-base :_form-registry :_form-exact-target :_form-leaf-target :_form-run-target :_form-enum :_form-bounds :_form-value-fits? :_fn-branch-local-seed :_fn-slot-seal-facts :sql-query-public
     ;; Service rows are server reads; the live endpoint uses their IDs to
     ;; query instance rows. Resolver seams also return server-owned endpoints.
-    :_service-rows :_live-service-endpoint
+    :_service-rows :_service-instance-facts
+    ;; Token parsing derives a boolean from caller header content.
+    :_encoding-acceptable?
     :_temporary-service-endpoint :_addon-service-endpoint
     ;; Parsing retains caller fields; deletion returns caller receipt IDs.
     :parse-fn-delete-receipts :delete-fn-receipts
     ;; Inheritance commands and their outcomes retain caller-selected content.
-    :parse-inheritance-command :preview-inheritance :apply-inheritance
+    :_preview-inheritance-model :_apply-inheritance-operation
     ;; Returns caller entry identities and their selected graph content;
     ;; the exporter is not a declassification boundary.
     :_ui-preview-export :_ui-preview-export-ids
     ;; Personal configuration receipts echo caller-selected graph identities and
     ;; binding values; the protected metadata lookup returns server-owned rows.
-    :_editor-configuration-apply :_editor-configuration-cleanup-preview
-    :_editor-server-call :_editor-root-plan :_editor-root-migration-preview :_editor-root-migration-apply
-    :_editor-configuration-plan :_editor-configuration-prepare
-    :_editor-configuration-preview :_editor-configuration-reconcile
-    :_editor-configuration-reconcile-undo :_editor-configuration-undo
+    :_editor-configuration-apply-outcome :_editor-configuration-cleanup-preview-outcome
+    :_editor-server-call-facts :_editor-root-plan-facts :_editor-root-migration-preview-outcome :_editor-root-migration-apply-outcome
+    :_editor-configuration-plan-facts :_editor-configuration-prepare-outcome
+    :_editor-configuration-preview-outcome :_editor-configuration-reconcile-outcome
+    :_editor-configuration-reconcile-undo-outcome :_editor-configuration-undo-outcome
     :find-function :ui-pref-store-status
     ;; Selected ordinary theme graph and args determine the validated payload.
     :_ui-theme-evaluate :fn-def-id
     ;; These commands return selected plans, derived manifests or normalized
     ;; caller fields. Their return values are not declassification boundaries.
-    :_ui-components-create-preview :_ui-components-create-apply
-    :save-explorer-view
+    :_ui-components-create-preview-facts :_ui-components-create-apply-facts
+    :_save-explorer-view-operation :_save-explorer-view-safe-error
     ;; Configuration only assembles four UUID identities from narrow :fn-ref
     ;; slots; it neither accepts marked values nor executes the targets.
     :ui-components
     :_apply-create-list-type-body :_apply-create-record-type-body
-    :_apply-create-record-type-rollback :_apply-create-secret-body
-    :_apply-inline-bind-body :_apply-secret-rollback
+    :_apply-create-record-type-rollback :_create-secret-facts
+    :_inline-secret-facts :_rollback-secret-failure
     :_apply-update-record-type-body :_apply-update-record-type-rollback
     :_execute-apply :_layout-build-apply :_layout-place-apply
-    :_layout-strip-facts-apply :_layout-literal-reprs-apply :_load-graph-cached :_parse-layout-body
+    :_layout-safe-strip-facts :_layout-literal-previews :_load-graph-cached :_layout-read-json-body :_layout-parse-expansions :_layout-parse-uuid :_layout-value-class
     :_reconcile-services-apply :_rotate-secret-not-owned?
     ;; Rotation consumes a secret, but its result is a Vault version number;
     ;; history returns actor/status metadata only. Neither returns secret data.
-    :_rotate-secret-write :_secret-rotation-history
+    :_rotate-secret-write :_secret-rotation-rows
     :_seq-append-load-binding :_seq-move-load-item :_seq-remove-load-item
     :_seq-update-load-item :_slot-effective-type-raw
-    :_tests-run-apply :_tests-status-apply
+    :_tests-discover :_tests-execute-selected :_tests-status-facts
     :_types-usages-facts :abs :add :all-rich-types :and
     :assert :assert-eq :assert-some :assoc :assoc-in :atom :auth-active?
     :ensure-type :encode-view :as-ui-view
@@ -89,29 +91,29 @@
     ;; IDs, revision and CAS token select stored history. The preview/commit
     ;; enforce source ACL and redact resolver paths; their results are fresh
     ;; server data and do not echo caller argument content.
-    :load-fn-change-events :load-fn-history-diff
-    :preview-fn-history-restore :commit-fn-history-restore
-    ;; :unresolved-failure-counts tallies audit rows per fn — fn ids /
-    ;; names / counts, all server-derived; `days` is a window, not content.
-    :unresolved-failure-counts
-    :_compat-local-name :_compat-fn-changes :brotli-bytes :build-form
+    :_load-fn-change-page :load-fn-history-diff
+    :_preview-fn-history-restore :_commit-fn-history-restore
+    ;; :_unresolved-failure-rows returns only scoped fn identity/name facts;
+    ;; `days` is a window, not caller content.
+    :_unresolved-failure-rows
+    :_compat-local-name :_compat-fn-changes :brotli-bytes
     ;; Marketplace (docs/MARKETPLACE.md): identity + roster reads are
     ;; server-derived; :round / :url-encode / / :ui-pref-write!
     ;; return caller content and carry :taint-propagate?.
     ;; Registry remote / import primitives (the dials and the import
     ;; pipeline are fn-defs over these): the bearer + branch reads are
     ;; server-derived; the bundle filters / pick / store echo caller content.
-    :semver-pick :mirror-store-package-version! :remote-auth-value
-    :branch-by-name :create-owned-branch! :drop-orphan-anon-defs
+    :semver-components :semver-satisfies? :_mirror-store-outcome :remote-auth-value
+    :branch-by-name :_request-public-actor-facts :_create-request-branch :drop-orphan-anon-defs
     :adopt-bundle-identities! :prune-bundle-scope!
-    :current-instant :current-user-id :current-user-label :current-branch-name :loaded-packages
-    :round :rows->csv :semver-rank :ui-pref-write! :ui-pref-compare-write! :ui-prefs-read :url-encode
+    :current-instant :current-user-id :current-branch-name :loaded-packages
+    :round :_marketplace-version-components :ui-pref-write! :ui-pref-compare-write! :_ui-pref-rows :url-encode
     ;; the origin's marketplace card — remote, server-derived data, not the
     ;; caller's content
 
     ;; moderation: the flag and the queue are server-derived; the decision
     ;; answers the row with the operator's note (caller content) → tainted
-    :moderation-on? :moderation-queue :moderate-package-version!
+    :moderation-on? :_moderation-pending-rows :_apply-marketplace-moderation
     ;; Cached read of the fixed build artifact — no caller content.
     :build-hashes-raw :byte-count
     :byte-len :cached-api-routes-js :server-call :call :call-noargs :call-noargs-traced
@@ -123,7 +125,7 @@
     ;; lesson id / step index and answer the counter's own name. No caller
     ;; content passes through, so no `:taint-propagate?`.
     :count-tour-event! :count-tour-step!
-    :counters-snapshot :create-branch! :create-entity :cron-fire-after
+    :counters-snapshot :_create-branch-row :create-entity :cron-fire-after
     :cron-parse :current-branch-id :current-branch-router
     ;; /api/debug/catch — trap admin (runtime state, no caller content).
     :debug-catch-arm! :debug-catch-disarm! :debug-catch-status
@@ -138,8 +140,8 @@
     :_diff-affected-facts :_diff-view-input
     :diff-value-against-type :digest-hex :dispatch-to-branch :dissoc
     :distinct :div :do :drop :empty? :env
-    :encode-unreadable-kws :equal? :error-boundary-wrap :every? :ex-data :execute-trace-rows :viewer-path-trace
-    :ex-info :extract-entity-params
+    :encode-unreadable-kws :equal? :_error-boundary-catch :every? :ex-data :_execute-trace-facts :viewer-path-trace
+    :ex-info :_entity-uri-params :_entity-type-from-string
     ;; :failure-ack / :failure-ack-all mutate acknowledged-at on audit
     ;; rows and return bool / count — no caller content in the return.
     :failure-ack :failure-ack-all
@@ -147,42 +149,42 @@
     ;; Callable argument projection derives from the supplied type expression.
     ;; Namespace paths come from the scoped graph snapshot.
     :fn-type-args :_candidate-ns-facts
-    :fn-names-with-tag :fn-return-type :form-decode :fn-stats-raw :fn-type-bound-effects
+    :fn-names-with-tag :fn-return-type :_form-decode-raw :fn-stats-raw :fn-type-bound-effects
     :fork-package-fns
-    :free-arg-entries :free-arg-slot-map :free-memory :future :get :get-entity
-    :get-execution :get-in :graph-fn-defs :graph-rows :group-by :gt :gte :gzip-bytes
-    :h-raw :header-get :heap-committed :heap-max :heap-used :hiccup
+    :_free-arg-facts :free-arg-slot-map :free-memory :future :get :get-entity
+    :_execution-read-facts :get-in :graph-fn-defs :graph-rows :group-by :gt :gte :gzip-bytes
+    :h-raw :heap-committed :heap-max :heap-used :hiccup
     :http-request :http-server :http-stop   :if :into
     :invalidate-after-write :invalidate-graph-cache :invoke :is-a?
-    :json-to-type :jvm-uptime-ms :keys :list :_graph-tree-facts :graph-namespace-fns :graph-search
-    :_graph-index-facts :_graph-index-row :graph-subtree :graph-full :graph-fn-defs-subtree :fn-unread-bindings :log-warn
+    :json-to-type :jvm-uptime-ms :keys :list :_graph-tree-facts :_project-graph-cohort
+    :_graph-index-facts :graph-subtree :graph-full :graph-fn-defs-subtree :fn-unread-bindings :log-warn
     ;; app/views — the Explorer's filter evaluation: light fn rows (ids,
     ;; names, roles) projected off the graph-cache, never the caller's
     ;; content. Same class as the :graph-* reads.
-    :view-members :explorer-view :explorer-views
+    :_project-view-cohort :_explorer-view-facts
     :loop-until-interrupted :lt :lte :map :map-xf
-    :materialize-package-fns :materialize-package-receipt :max-memory :merge :merge-branch!
+    :materialize-package-receipt :max-memory :merge :merge-branch!
     :merge-post-commit! :_merge-skipped-facts
-    :middleware :missing-package-dependencies :mod :mul :name
-    :namespace-external-deps :neg :neq
-    :nil? :non-blank? :not :notify-after-write :or :os-arch
-    :os-load-average :os-name :os-processors :package-upsert-pin :package-pin-receipt
-    :remove-package-pin-apply
-    :package-version-materialized? :pairs->map :parse-constraint
+    :middleware :_registry-dependency-name :_registry-dependency-rows :mod :mul :name
+    :_namespace-external-dep-facts :neg :neq
+    :nil? :not :notify-after-write :or :os-arch
+    :os-load-average :os-name :os-processors :_package-pin-row
+    :_remove-package-pin-outcome
+    :_package-materialization-facts :pairs->map :parse-constraint
     :parse-edn :parse-graph-edn :parse-int :parse-json :parse-uuid :pg-execute
-    :pg-notify :pg-query :pg-tx :pick-encoding
+    :pg-notify :pg-query :pg-tx
     ;; :pkg-delete-guard-reason reads server rows (fn name via the
     ;; owned registry) — the reason string carries no caller content.
     :pkg-delete-guard-reason :pkg-write-guard-reason
     :position-in :postwalk
-    :pprint-str :pr-str :publish-package-apply :query-entities :query-param :recent-executions
+    :pprint-str :pr-str :publish-package-apply :query-entities :_query-param-raw :recent-executions
     :query-ref-many-owners :quot :range :re-find? :read-resource-bytes :read-resource-or-nil
-    :re-replace :realize-request-body :recent-failures :reduce
+    :re-replace :realize-request-body :_recent-failure-facts :reduce
     ;; :request-capabilities reads the request-scope SEAM (server-derived
     ;; capability names), never caller content — no taint to propagate.
     :request-capabilities
-    :render-hiccup :render-value-repr :repeat :reset :resolve-branch-ref :resolve-fn
-    :resolve-fn-version-id :resolve-form
+    :render-hiccup :_repr-canonical-declared-type :_repr-runtime-type :_repr-render-safe :repeat :reset :_branch-by-id :_branch-by-name :resolve-fn
+    :resolve-fn-version-id
     ;;  returns a server-picked version string off
     ;; the remote list — no caller content flows into the return.
 
@@ -190,43 +192,43 @@
     :rewrite-refs-to-version
     :rich-type-of-id :ring-create-default-handler :ring-handler
     :ring-router
-    :rule-owner-of-id :running-entry :running-state :secret-leaf :secret-path-args :semver-compatible?
+    :rule-owner-of-id :running-entry :running-state :secret-leaf :semver-compatible?
     :queue-publish :queue-take :queue-ack :queue-nack :queue-extend :queue-requeue
     :queue-stats :queue-dead-letters
-    :call-with :call-traced :with-heartbeat :trace-headers
+    :call-with :call-traced :with-heartbeat :_current-execution-trace :_repr-registry
     :select-keys
-    :service-blocking-free-args :set-branch-archived! :set-branch-policy!
-    :set-branch-require-merge! :set-review-state!
+    :service-blocking-free-args :_set-branch-archived-at :_set-branch-policy
+    :set-branch-require-merge! :_set-branch-review-state
     ;; Cached, allow-listed read of a shipped frontend asset — no caller content.
     :shipped-asset
-    :set-branch-review-policy! :approve-proposal! :dismiss-my-approval!
-    :branch-content-stamp :branch-approvals :approvals-report :count-valid-approvals
-    :add-branch-comment! :list-branch-comments
+    :_patch-branch-review-policy :_branch-int-value :approve-proposal! :dismiss-my-approval!
+    :branch-content-stamp :branch-approvals :_approval-rejection :count-valid-approvals
+    :_create-branch-comment :list-branch-comments
     :delete-branch-comment! :sleep :sleep-until-ms
-    :slot-type-provenance :slurp :some :some? :sort :sort-by :sql-exec
+    :_slot-type-provenance-facts :slurp :some :some? :sort :sort-by :sql-exec
     ;; :sse-stream returns the adopted-channel response map; the
     ;; render callable's output goes to the WIRE, never into the
     ;; return value — no taint to propagate (same as :http-server).
     :sse-stream
-    :sql-query :start-all :storage-query-identities :str :str-contains? :str-join
-    :str-clip :str-len :str-lower :str-replace :str-split :str-starts-with?
+    :sql-query :start-all :storage-query-identities :str :str-clip :str-contains? :str-join
+    :str-len :str-lower :str-replace :str-split :str-starts-with?
     :str-to-keyword :str-trim :str-upper
-    :stringify-response-headers :strip-hidden-impl :strip-secret-paths
-    :sub :subs :subtype? :svg-polyline-points :tabulate-records
+    :stringify-response-headers :strip-hidden-impl
+    :sub :subs :subtype? :svg-polyline-points
     :swap :sync-fn-defs-branch! :system-property :take :tenancy-active?
     ;; bool answers over the def's identity / the row's role — no content.
     :platform-owned-def? :slot-shaped-type-row? :fn-impl-visible? :self-approval-allowed?
     :thread-count
     :throw :throwable-class-name :throwable-message :to-json-pretty :to-json-string
-    :to-set :to-str :total-memory :transduce :try :try-apply-create
-    ;; :try-apply-seq-move returns only row ids + positions (never the
+    :to-set :to-str :total-memory :transduce :try :_apply-create-atomic
+    ;; :_apply-seq-move-atomic returns only row ids + positions (never the
     ;; item's content) — no taint to propagate, like seq-update.
-    :try-apply-seq-append :try-apply-seq-move :try-apply-seq-update
+    :_apply-seq-append-atomic :_apply-seq-move-atomic :_apply-seq-update-atomic
     :try-apply-tighten
-    :try-apply-update
+    :_apply-update-atomic
     :_type-name-entries :update-entity :update-in :update-keys
-    :update-vals :url-decode :usage-all-org-stats
-    :usage-org-daily :usage-org-fn-stats
+    :update-vals :url-decode :_usage-all-org-stats-raw
+    :_usage-org-daily-raw :_usage-org-fn-stats-raw
     :usage-org-summary :utf8-bytes :vals :value-kinds :vault-delete
     :vault-get :vault-metadata-get :vault-metadata-put :vault-put :vec
     :version-qualified-ns :withdraw-package-apply :write-rej :zero? :zipmap :min :max :floor :ceil :sqrt :pow :re-groups :re-seq :str-index-of :str-pad-left :str-pad-right :last :partition :partition-by :frequencies :parse-float :base64-encode :base64-decode :random :random-uuid :log :instant-parse :instant-format :instant-plus :with-timeout})
@@ -237,56 +239,63 @@
    SECRETS.md § T3 set. Before changing this, for each ADDED name ask \"does it
    pass/transform caller content? then it needs `:taint-propagate?`\"; for each
    REMOVED name confirm it genuinely no longer handles content."
-  #{;; Row projection preserves caller-provided non-nil content.
-    :_graph-index-row
-    :fork-package-fns :materialize-package-fns :materialize-package-receipt
+  #{:_project-view-cohort :_create-request-branch :_create-branch-row
+    :_marketplace-version-components :_create-branch-comment :_set-branch-policy
+    :_safe-request-error :_csv-escape-cell :_encoding-acceptable?
+    :_form-canonical-type :_form-union-type? :_form-list-type? :_form-record-type?
+    :_form-union-members :_form-list-element :_form-refinement-base
+    :_form-registry :_form-exact-target :_form-leaf-target :_form-run-target
+    :_form-enum :_form-bounds :_form-value-fits?
+    :fork-package-fns :materialize-package-receipt
     ;; Exact identity validation is not a declassification boundary.
     :parse-fn-delete-receipts :delete-fn-receipts
     ;; Uninstall receipts echo the caller's package name.
-    :package-pin-receipt :remove-package-pin-apply :rewrite-refs-to-version
+    :_package-pin-row :_remove-package-pin-outcome :rewrite-refs-to-version
     ;; Parsing echoes command fields; preview/apply derive descriptors and
     ;; outcomes from those fields. None is a declassification boundary.
-    :parse-inheritance-command :preview-inheritance :apply-inheritance
+    :_preview-inheritance-model :_apply-inheritance-operation
     ;; Entry identities select the exported content and also appear in it.
     :_ui-preview-export :_ui-preview-export-ids
     ;; The configuration operations and preference status return caller graph
     ;; identities, values or receipt fields; none declassifies marked content.
-    :_editor-configuration-apply :_editor-configuration-cleanup-preview
+    :_editor-configuration-apply-outcome :_editor-configuration-cleanup-preview-outcome
     ;; Migration proposals and receipts carry caller-selected graph identity;
     ;; validation is not a declassification boundary.
-    :_editor-root-migration-preview :_editor-root-migration-apply
-    :_editor-server-call :_editor-configuration-plan :_editor-configuration-prepare
-    :_editor-configuration-preview :_editor-configuration-reconcile
-    :_editor-configuration-reconcile-undo :_editor-configuration-undo
+    :_editor-root-migration-preview-outcome :_editor-root-migration-apply-outcome
+    :_editor-server-call-facts :_editor-configuration-plan-facts :_editor-configuration-prepare-outcome
+    :_editor-configuration-preview-outcome :_editor-configuration-reconcile-outcome
+    :_editor-configuration-reconcile-undo-outcome :_editor-configuration-undo-outcome
     :ui-pref-store-status
     ;; Selected ordinary theme graph and args determine the validated payload.
     :_ui-theme-evaluate :fn-def-id
     ;; Component plans/manifests and view parse/save outcomes derive from
     ;; caller input, including content inside their wide record slots.
-    :_ui-components-create-preview :_ui-components-create-apply
-    :save-explorer-view
+    :_ui-components-create-preview-facts :_ui-components-create-apply-facts
+    :_save-explorer-view-operation :_save-explorer-view-safe-error
     ;; Wide-slot audit: conservatively propagate every content-derived result.
-    :_apply-create-list-type-body :_apply-create-record-type-body :_apply-create-record-type-rollback :_apply-inline-bind-body :_apply-secret-rollback :_apply-update-record-type-body :_apply-update-record-type-rollback :_execute-apply :_layout-build-apply :_layout-place-apply :_layout-strip-facts-apply :_layout-literal-reprs-apply :_parse-layout-body :_rotate-secret-not-owned? :_seq-append-load-binding :_seq-move-load-item :_seq-update-load-item :_tests-run-apply :_tests-status-apply :approvals-report :authenticate-request :_compat-fn-changes :_compat-local-name :branch-lint-raw-findings :brotli-bytes :build-form :byte-count :fn-type-args :classify-literal :closed-enum-of :count-tour-event! :count-tour-step! :count-valid-approvals :create-entity :cron-fire-after :decode-row :_type-refined? :_type-primitive? :_type-refinement :_type-execution-known? :_type-execution-unknown? :_type-execution-profiles :_type-execution-compatible? :diff-value-against-type :dispatch-to-branch :error-boundary-wrap :extract-entity-params :fix :fn-type-bound-effects :gzip-bytes :json-to-type :merge-branch! :middleware :missing-package-dependencies :package-version-materialized? :pg-execute :pg-query :pg-tx :pkg-delete-guard-reason :pkg-write-guard-reason :platform-owned-def? :publish-package-apply :query-entities :query-param :realize-request-body :resolve-fn :resolve-form :ring-create-default-handler :ring-handler :ring-router :secret-path-args :set-branch-archived! :set-branch-require-merge! :set-branch-review-policy! :set-review-state! :slot-shaped-type-row? :sql-exec :sql-query :sse-stream :storage-query-identities :stringify-response-headers :strip-hidden-impl :strip-secret-paths :subtype? :sync-fn-defs-branch! :try-apply-create :try-apply-seq-append :try-apply-seq-move :try-apply-seq-update :try-apply-tighten :try-apply-update :update-entity :utf8-bytes :viewer-path-trace :write-rej
-    :round :ui-pref-write! :ui-pref-compare-write! :url-encode :moderate-package-version! ; marketplace: answer caller content
-    ;; registry: the pick / store / import filters echo caller content
-    :semver-pick :mirror-store-package-version! :drop-orphan-anon-defs
+    :_apply-create-list-type-body :_apply-create-record-type-body :_apply-create-record-type-rollback :_inline-secret-facts :_rollback-secret-failure :_apply-update-record-type-body :_apply-update-record-type-rollback :_execute-apply :_layout-build-apply :_layout-place-apply :_layout-safe-strip-facts :_layout-literal-previews :_layout-read-json-body :_layout-parse-expansions :_layout-parse-uuid :_layout-value-class :_rotate-secret-not-owned? :_seq-append-load-binding :_seq-move-load-item :_seq-update-load-item :_tests-execute-selected :_approval-rejection :authenticate-request :_compat-fn-changes :_compat-local-name :branch-lint-raw-findings :brotli-bytes :byte-count :fn-type-args :classify-literal :closed-enum-of :count-tour-event! :count-tour-step! :count-valid-approvals :create-entity :cron-fire-after :decode-row :_type-refined? :_type-primitive? :_type-refinement :_type-execution-known? :_type-execution-unknown? :_type-execution-profiles :_type-execution-compatible? :diff-value-against-type :dispatch-to-branch :_error-boundary-catch :_entity-uri-params :_entity-type-from-string :fix :fn-type-bound-effects :gzip-bytes :json-to-type :merge-branch! :middleware :_registry-dependency-name :_registry-dependency-rows :pg-execute :pg-query :pg-tx :pkg-delete-guard-reason :pkg-write-guard-reason :platform-owned-def? :publish-package-apply :query-entities :_query-param-raw :realize-request-body :resolve-fn :ring-create-default-handler :ring-handler :ring-router :_set-branch-archived-at :set-branch-require-merge! :_patch-branch-review-policy :_branch-int-value :_set-branch-review-state :slot-shaped-type-row? :sql-exec :sql-query :sse-stream :storage-query-identities :stringify-response-headers :strip-hidden-impl :subtype? :sync-fn-defs-branch! :_apply-create-atomic :_apply-seq-append-atomic :_apply-seq-move-atomic :_apply-seq-update-atomic :try-apply-tighten :_apply-update-atomic :update-entity :utf8-bytes :viewer-path-trace :write-rej
+    :round :ui-pref-write! :ui-pref-compare-write! :url-encode :_apply-marketplace-moderation ; marketplace: answer caller content
+    ;; Registry parse/match results derive from caller version/constraint text.
+    :semver-components :semver-satisfies? :_package-materialization-facts
+    ;; registry: the store / import filters echo caller content
+    :_mirror-store-outcome :drop-orphan-anon-defs
     :adopt-bundle-identities! :prune-bundle-scope!
     :server-call :abs :add :and :assert :assert-eq :assert-some :assoc :assoc-in :atom :blank? :byte-len :call-with :call :call-traced :with-heartbeat
     :call-noargs :call-noargs-traced :case :cell :coalesce :comp :concat :cond :conj :cons :const
     :constant-time-equal? :constantly :contains? :count :deref :dissoc :distinct :div :do :drop
     :empty? :equal? :every? :ex-data :ex-info :filter :filter-xf :find-first
-    :first :flatten :fn-signature :fn-type? :form-decode :get :get-in :gt
+    :first :flatten :fn-signature :fn-type? :_form-decode-raw :get :get-in :gt
     :gte :group-by :hiccup   :if :into :invoke :is-a? :ensure-type :encode-view :as-ui-view :keys :list :lt :lte
-    :map :map-xf :merge :mod :mul :name :neg :neq :nil? :non-blank? :not :or :pairs->map
+    :map :map-xf :merge :mod :mul :name :neg :neq :nil? :not :or :pairs->map
     :list-branch-comments :parse-edn :parse-graph-edn
     :parse-int :parse-json :parse-uuid
     :position-in :postwalk :pprint-str :pr-str
     :quot :range
-    :re-find? :re-replace :reduce :render-hiccup :render-value-repr :repeat :reset :rest :reverse :rows->csv :select-keys :digest-hex
+    :re-find? :re-replace :reduce :render-hiccup :_repr-canonical-declared-type :_repr-runtime-type :_repr-render-safe :repeat :reset :rest :reverse :select-keys :digest-hex
     :slurp :some :some? :sort :sort-by :str :str-clip :str-contains? :str-join :str-len :str-lower
     :swap
     :str-replace :str-split :str-starts-with? :str-to-keyword :str-trim
-    :str-upper :sub :subs :tabulate-records :take :throw :throwable-class-name :throwable-message
+    :str-upper :sub :subs :take :throw :throwable-class-name :throwable-message
     :to-json-pretty :to-json-string :to-str :transduce :try :update-in :update-keys :update-vals
     :url-decode :vals :vec :zero? :zipmap
     :min :max :floor :ceil :sqrt :pow :re-groups :re-seq :str-index-of :str-pad-left :str-pad-right :last :partition :partition-by :frequencies :parse-float :base64-encode :base64-decode :instant-parse :instant-format :instant-plus :with-timeout})
@@ -371,11 +380,10 @@
 (deftest inheritance-intents-preserve-argument-taint
   (let [definitions (:base-fn-defs (loader/load-packages ["app"]))]
     (doseq [[primitive plain]
-            [[:parse-inheritance-command {:body {:type :jsonb}}]
-             [:preview-inheritance {:command {:type :keyword-map}
-                                    :request {:type :ring-request-shape}}]
-             [:apply-inheritance {:command {:type :keyword-map}
-                                  :request {:type :ring-request-shape}}]]]
+            [[:_preview-inheritance-model {:command {:type :keyword-map}
+                                           :request {:type :ring-request-shape}}]
+             [:_apply-inheritance-operation {:command {:type :keyword-map}
+                                             :request {:type :ring-request-shape}}]]]
       (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
                 registry/*per-org-rich-override* (atom {})]
         (registry/record-rich-types! primitive (get definitions primitive))
@@ -390,8 +398,9 @@
 
 (deftest component-and-view-commands-preserve-and-redact-input-taint
   (let [definitions (:base-fn-defs (loader/load-packages ["app"]))]
-    (doseq [primitive [:_editor-configuration-plan :_ui-components-create-preview
-                       :_ui-components-create-apply :save-explorer-view]]
+    (doseq [primitive [:_editor-configuration-plan-facts :_ui-components-create-preview-facts
+                       :_ui-components-create-apply-facts :_save-explorer-view-operation
+                       :_save-explorer-view-safe-error]]
       (let [definition (get definitions primitive)
             plain (:args definition)]
         (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
@@ -431,7 +440,7 @@
     (doseq [[primitive plain return-type]
             [[:server-call {:func {:type [:fn {:arg :text} :text :any #{:jvm-server}]}
                             :arg {:type :text}} :text]
-             [:_editor-server-call (:args (get definitions :_editor-server-call)) :keyword-map]]]
+             [:_editor-server-call-facts (:args (get definitions :_editor-server-call)) :keyword-map]]]
       (binding [registry/*rich-types-override* (atom {:by-id {} :by-name {}})
                 registry/*per-org-rich-override* (atom {})]
         (registry/record-rich-types! primitive (get definitions primitive))

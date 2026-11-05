@@ -51,6 +51,12 @@
     'catch 'if-let 'when-let 'if-some 'when-some})
 
 
+(def ^:private initializer-binding-forms
+  "Binding vectors whose initializers run before their own name is in scope."
+  #{'let 'let* 'loop 'loop* 'for 'doseq
+    'if-let 'when-let 'if-some 'when-some})
+
+
 (defn- binding-form?
   [form]
   (and (seq? form)
@@ -99,7 +105,25 @@
   "Walk `body`, replacing occurrences of `arg-syms` with their resolve
    expression, while respecting lexical shadowing by binding forms."
   [body arg-sym->key]
-  (letfn [(transform
+  (letfn [(transform-bindings
+            [bindings active]
+            (if (odd? (count bindings))
+              ;; Preserve invalid syntax for the binding macro to reject.
+              [bindings active]
+              (reduce
+                (fn [[result scoped] [binding init]]
+                  (if (and (= :let binding) (vector? init))
+                    (let [[nested scoped'] (transform-bindings init scoped)]
+                      [(conj result binding nested) scoped'])
+                    (let [scoped' (if (symbol? binding) (dissoc scoped binding) scoped)
+                          ;; Keep the existing handling of destructuring syntax;
+                          ;; only a simple bound name changes argument scope.
+                          binding' (if (symbol? binding) binding (transform binding scoped'))]
+                      [(conj result binding' (transform init scoped)) scoped'])))
+                [[] active]
+                (partition 2 bindings))))
+
+          (transform
             [form active]
             (cond
               (empty? active)
@@ -109,6 +133,17 @@
               (if-let [k (get active form)]
                 (resolve-expr k)
                 form)
+
+              (and (seq? form)
+                   (contains? initializer-binding-forms (first form))
+                   (vector? (second form)))
+              (let [[bindings scoped] (transform-bindings (second form) active)
+                    conditional? (#{'if-let 'if-some} (first form))
+                    body (map-indexed
+                           (fn [index expression]
+                             (transform expression (if (and conditional? (pos? index)) active scoped)))
+                           (nnext form))]
+                (with-meta (apply list (first form) bindings body) (meta form)))
 
               (binding-form? form)
               (let [bound (extract-bound-symbols form)

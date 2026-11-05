@@ -149,7 +149,11 @@ row is a **role** — the next lesson, [Lesson 29](29-roles.md).
 (An org owner — or a `manage-grants` holder — on a tenancy-addon
 instance.)
 
-1. Add `carol` to your org `acme` (Lesson 27).
+1. Add `carol` to your org `acme` (Lesson 27). In **Grants**, remove the
+   org-wide `write` grant that invitation supplied, and ensure no role or
+   other broader grant supplies `write` or `admin` over `acme.settings`.
+   Use a namespace outside carol’s personal namespace: its implicit admin
+   permission would also invalidate this narrow-access exercise.
 2. In **Grants**, grant `carol` / `bind-args` / `acme.settings`. As
    carol: editing a binding VALUE under `acme.settings` works;
    renaming the fn or changing its parent is denied — that needs

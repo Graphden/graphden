@@ -57,8 +57,8 @@
 (defn- submit
   [handler input]
   (let [diagnostics (atom [])
-        classify creation/failure-response
-        response (with-redefs [creation/failure-response
+        classify creation/failure-facts
+        response (with-redefs [creation/failure-facts
                                (fn [error]
                                  (swap! diagnostics conj
                                         (assoc (select-keys (ex-data error) [:type :reason :fn-id :http-status])

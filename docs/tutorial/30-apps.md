@@ -14,22 +14,22 @@ the **FaaS sandbox** your app runs in.
 
 This lesson assumes you can compose a fn that returns a web
 response — see [Lesson 10 (Composing pages from
-components)](10-components-and-pages.md), whose `:html-page` /
-`:router` fns are exactly what an app serves.
+components)](10-components-and-pages.md), whose `:html-page-handler` /
+`:router` fns provide the response handlers an app serves.
 
 ## What an app is
 
 An app is nothing new — it's a fn you already know how to build,
-one whose return value is an HTTP response. The same
-`:html-page` you rendered in Lesson 10, or a `:router` that
+one whose return value is an HTTP response. A fully bound
+`:html-page-handler` from Lesson 10, or a `:router` that
 dispatches on the request path, IS an app the moment you give it a
 public address. graphden runs it for you on each request; you
 never run a web server yourself.
 
 Concretely, an app's handler fn is called with the incoming
 request as a free argument (`{:request …}`) and returns a Ring
-response (a status/headers/body map — an `:html-page` produces one
-for you). If you want more than one page, serve a `:router` that
+response (a status/headers/body map — `:html-page-handler` produces one
+for you; `:html-page` alone produces Hiccup). If you want more than one page, serve a `:router` that
 picks a handler by path, exactly like the editor itself does.
 
 ## Apps in the editor

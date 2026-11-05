@@ -88,7 +88,7 @@ per-branch routing) and auth-required. Core:
   (primed from `/api/tests/status`). With the chip on it
   row reveals **▶ Run all** (`POST /api/tests/run`), and the editor
   keeps a LIVE signal open: `GET /partials/tests-stream` pushes a
-  server-time PING on write wakes and a 30 s keepalive (`run-tests!`
+  server-time PING on write wakes and a 30 s keepalive (`run-selected-tests!`
   emits a `test:updated` NOTIFY after EVERY test — so a long suite's
   dots move one by one — and once more after a 2 s settle, covering
   the async terminal-row write); each ping re-primes the status
@@ -102,7 +102,7 @@ per-branch routing) and auth-required. Core:
   branch) — the status dot + label, the assertion's message on a
   failure, and **Run this test**: an htmx `POST
   /partials/inspector-test/run?fn-id=…` that runs the fn through
-  `run-tests!` and renders the section back from the run's own
+  `run-selected-tests!` and renders the section back from the run's own
   result (the status join's terminal row lands asynchronously, so a
   re-read right after the run could still show the previous status).
   Graph-composed in `app/editor-provenance/fns.edn` (`_insp-test-*`)

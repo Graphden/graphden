@@ -125,6 +125,25 @@
         (recur (z/right zloc) (cond-> hits hit (conj hit)))))))
 
 
+(defn- find-fn-def
+  "Locate one named graph fn-def in a package fns.edn. A graph definition
+   is a map inside the package's :fns vector, not a Clojure def form."
+  [src sym file]
+  (loop [zloc (z/of-string src {:track-position? true})
+         hits []]
+    (if (or (nil? zloc) (z/end? zloc))
+      (case (count hits)
+        1 (first hits)
+        0 (throw (ex-info (str "graph fn-def anchor not found: " sym " in " file)
+                          {:sym sym :file file}))
+        (throw (ex-info (str "graph fn-def anchor ambiguous: " sym " in " file)
+                        {:sym sym :file file :count (count hits)})))
+      (let [form (when (= :map (z/tag zloc)) (safe-sexpr zloc))
+            hit (when (= (keyword sym) (:name form))
+                  {:code (z/string zloc) :line (first (z/position zloc))})]
+        (recur (z/next zloc) (cond-> hits hit (conj hit)))))))
+
+
 ;; --- JS anchor resolution --------------------------------------------------
 ;;
 ;; The editor frontend is ~25k lines of plain ES modules concatenated into one
@@ -222,7 +241,7 @@
    {:defn sym} plus EITHER :ns (a src/ namespace, munged to a path) OR :file
    (an explicit repo-relative path — used for package impls under
    resources/packages/, which have namespaces but do not live under src/,
-   and for the editor's `.js` modules).
+   for package graph fn-defs in fns.edn, and for the editor's `.js` modules).
    For a defmethod, set :defn to the method symbol and :dispatch to its
    dispatch value; the step is then labelled by the dispatch's name.
    A `.js` :file resolves through the JS declaration scanner instead of
@@ -243,9 +262,14 @@
       (when (and js? dispatch)
         (throw (ex-info (str ":dispatch is Clojure-only, not valid for " path)
                         {:defn sym})))
-      (-> (if js?
-            (find-js-decl (slurp path) sym path)
-            (find-form (slurp path) sym dispatch path))
+      (-> (cond
+            js? (find-js-decl (slurp path) sym path)
+            (str/ends-with? path "/fns.edn")
+            (do (when dispatch
+                  (throw (ex-info ":dispatch is invalid for a graph fn-def anchor"
+                                  {:file path :defn sym})))
+                (find-fn-def (slurp path) sym path))
+            :else (find-form (slurp path) sym dispatch path))
           (assoc :file path :ns (str (or ns-sym path)) :defn label
                  :lang (if js? "js" "clj"))))))
 

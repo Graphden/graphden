@@ -11,6 +11,7 @@
     [graphden.executor.compile.lookups :as lookups]
     [graphden.executor.registry.core :as registry]
     [graphden.lint.graph :as lint]
+    [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.context :as tenancy]
     [graphden.util.ns-path :as ns-path]
@@ -136,7 +137,7 @@
 (defn- problem-members
   [ctx base]
   {:failed (delay (into #{} (map :fn-id)
-                        (execution-errors/unresolved-failure-counts
+                        (execution-errors/unresolved-failure-rows
                           ctx (or (:pool (:pg-storage ctx))
                                   (:pool (vs/unwrap (:storage ctx))))
                           (tenancy/current-org) 7)))
@@ -189,15 +190,36 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Views saved in the graph — fn-defs extending the `:explorer-view`
-;; base-fn. Listing them (with their bound filters decoded) is a READ
+;; public root. Listing them (with their bound filters decoded) is a READ
 ;; projection over the cached graph, like every other scope here.
 ;; ---------------------------------------------------------------------------
 
 (def explorer-view-base-name
-  "Name of the base-fn a graph-saved view extends. Base-fn names are
-   globally unique (name-keyed impls registry), so the id is resolved
-   over the in-memory graph without a query."
+  "Historical public root name; retained for legacy base installations."
   "explorer-view")
+
+
+(def ^:private explorer-view-id (ids/fn-id "app.views" :explorer-view))
+
+
+(defn explorer-view-root
+  "The installed public view identity, independent of its implementation parents.
+   Legacy base installations remain readable; a same-named
+   arbitrary composition cannot impersonate the shipped root."
+  [fns]
+  (or (some #(when (= explorer-view-id (:id %)) %) fns)
+      (some #(when (and (= explorer-view-base-name (:name %))
+                        (empty? (:parent-ids %))) %) fns)))
+
+
+(defn view-axis-slots
+  "The stable public axes owned by the installed view root. Its internal
+   evaluation parent's slots are not editable filter clauses."
+  [{:keys [fn-map fn-slots-by-fn slot-map]}]
+  (when-let [root (or (get fn-map explorer-view-id)
+                      (explorer-view-root (vals fn-map)))]
+    (into [] (keep #(get slot-map (:slot-id %)))
+          (get fn-slots-by-fn (:id root)))))
 
 
 (declare static-binding-value)
@@ -260,7 +282,9 @@
    Uses compiler binding classification for inheritance/list append/renames.
    Unknown computations are explicit unsupported axes, never dropped filters."
   [indices fn-id]
-  (let [classified (bindings/collect-bindings fn-id indices)
+  (let [classified (if-let [slots (view-axis-slots indices)]
+                     (bindings/collect-slot-bindings fn-id slots indices)
+                     (bindings/collect-bindings fn-id indices))
         values (into {} (map (fn [binding]
                                [(:base-name binding)
                                 (static-binding-value indices binding #{fn-id})])) classified)
@@ -283,15 +307,12 @@
       (seq unsupported) (assoc :unsupported (vec (sort unsupported))))))
 
 
-(defn- explorer-views-decoded
+(defn- decoded-view-facts
   "`list-explorer-views` over an already-built list env (the base graph
    it holds) — what `view-members*` reads for the `:views` axis."
   [{:keys [base]}]
   (let [fns (:fns base)
-        base-id (some #(when (and (= explorer-view-base-name (:name %))
-                                  (empty? (:parent-ids %)))
-                         (:id %))
-                      fns)]
+        base-id (:id (explorer-view-root fns))]
     (if-not base-id
       []
       (let [children-of (reduce (fn [m f] (reduce #(update %1 %2 (fnil conj []) (:id f)) m (:parent-ids f)))
@@ -306,24 +327,36 @@
             indices (lookups/build-lookups base)]
         (->> view-ids
              (keep by-id)
-             (filter :name)
-             (sort-by :name)
              (mapv (fn [f]
                      (merge (select-keys f [:id :name :namespace-id])
                             (decode-view indices (:id f))))))))))
 
 
+(defn- explorer-views-decoded
+  "Native compatibility projection for the internal stored-view evaluator."
+  [env]
+  (->> (decoded-view-facts env) (filter :name) (sort-by :name) vec))
+
+
+(defn explorer-view-facts
+  "Safe decoded descendant facts. Static binding decoding, identity closure
+   and concealment remain one boundary; listing selection/order are external."
+  [ctx]
+  (decoded-view-facts
+    {:base (entity-list/apply-view-impl-filter (types-api/cached-or-load-graph ctx))}))
+
+
 (defn list-explorer-views
-  "Every NAMED fn that extends the `:explorer-view` base-fn (any depth),
+  "Every NAMED fn that extends the `:explorer-view` public root (any depth),
    with its filters decoded — `[{:id :name :namespace-id :filters} …]`,
    the Explorer's \"views saved in the graph\" list (`:filters` carries
    `:also`, the ids of the views it intersects with). Empty when the
-   base-fn isn't loaded (no `app/views` module) or nothing extends it."
+   root isn't loaded (no `app/views` module) or nothing extends it."
   [ctx]
   ;; Over the graph AS THE VIEWER SEES IT: a view the viewer may not see
   ;; the internals of (another org's shared one) lists with no filters —
   ;; its bound axes ARE its composition.
-  (explorer-views-decoded {:base (entity-list/apply-view-impl-filter (types-api/cached-or-load-graph ctx))}))
+  (->> (explorer-view-facts ctx) (filter :name) (sort-by :name) vec))
 
 
 (defn- has-clauses?
@@ -336,20 +369,96 @@
             (some #(has-clauses? by-id % (conj seen view-id)) (:views filters)))))))
 
 
-(defn- expand-view-filters
-  "Flatten intersections before applying any result limit. A visited view is
-   already a conjunct, so cycles and repeated references do not duplicate work."
+(defn- view-clause-cohort
+  "Decode the authorized static view-reference closure once. This only walks
+   identities and serialized bindings; the graph selector decides whether
+   the resulting clauses are active and how to combine their axes."
   [by-id filters]
-  (loop [pending [(normalise-filters filters)] seen #{} expanded [] missing #{} unsupported #{} empty-view? false]
+  (loop [pending [filters] seen #{} expanded [] missing #{} unsupported #{}]
     (if-let [current (first pending)]
       (let [ids (remove seen (:views current))
             found (keep by-id ids)]
         (recur (into (vec (rest pending)) (map (comp normalise-filters :filters)) found)
                (into seen ids) (conj expanded current)
                (into missing (remove by-id ids))
-               (into unsupported (comp (filter :unsupported) (map :id)) found)
-               (or empty-view? (boolean (some #(not (has-clauses? by-id (:id %) #{})) found)))))
-      {:filters expanded :missing-views missing :unsupported-views unsupported :empty-view? empty-view?})))
+               (into unsupported (comp (filter :unsupported) (map :id)) found)))
+      {:filters expanded :referenced-views seen
+       :missing-views missing :unsupported-views unsupported})))
+
+
+(defn- expand-view-filters
+  "Compatibility facade for native callers; registered graph selection uses
+   the data-only cohort and owns the empty/intersection policy itself."
+  [by-id filters]
+  (let [cohort (view-clause-cohort by-id (normalise-filters filters))]
+    (assoc cohort :empty-view?
+           (boolean (some #(not (has-clauses? by-id % #{})) (:referenced-views cohort))))))
+
+
+(defn project-view-cohort
+  "Expose one concealed metadata cohort to a pure graph selector. Stored-view
+   decoding, reverse-reference reachability and scoped diagnostics stay native;
+   the selector owns axis composition and bounded result presentation.
+   Use/diagnostic maps store positive memberships only; unused? is nil when
+   not requested. Unmatched requested tags do not form a row-by-tag matrix."
+  [ctx normalized-filters selector]
+  (let [storage (:storage ctx)
+        env (entity-list/filter-env ctx)
+        base (:base env)
+        by-view (into {} (comp (filter :name) (map (juxt :id identity)))
+                      (decoded-view-facts env))
+        expanded (view-clause-cohort by-view normalized-filters)
+        filters (:filters expanded)
+        rows @(:roled-fns env)
+        by-id (into {} (map (juxt :id identity)) rows)
+        uses (into #{} (mapcat :uses) filters)
+        kinds (into #{} (mapcat :kinds) filters)
+        problems (into #{} (mapcat :problems) filters)
+        kinds-of (when (seq kinds) (select-keys (kind-preds env storage) kinds))
+        memberships (when (seq problems) (problem-members ctx base))
+        problem-ids (into {} (keep (fn [kind]
+                                     (when-let [members (get memberships kind)]
+                                       [kind @members]))) problems)
+        users (into {} (map (fn [target] [target (transitive-user-ids base target)])) uses)
+        paths (when (some #(or (:name %) (seq (:namespaces %)) (seq (:exclude %))) filters)
+                (ns-path/path-map @(:namespaces env)))
+        effects? (boolean (some (comp seq :effects) filters))
+        adj (when (some :unused filters) (reverse-ref-adjacency base))
+        facts (assoc (dissoc expanded :referenced-views)
+                     :missing-views (vec (:missing-views expanded))
+                     :unsupported-views (vec (:unsupported-views expanded))
+                     :limit view-result-cap
+                     :requested-uses (vec uses)
+                     :known-ids (zipmap (keys by-id) (repeat true))
+                     :referenced-clauses (mapv #(-> (view-clause-cohort by-view (normalise-filters (:filters (get by-view %)))) :filters)
+                                               (filter by-view (:referenced-views expanded)))
+                     :rows (mapv (fn [row]
+                                   {:id (:id row) :name (:name row)
+                                    :namespace-path (get paths (:namespace-id row))
+                                    :effects (if effects? (zipmap (:effects (registry/rich-type-of-id (:id row))) (repeat true)) {})
+                                    :kinds (into {} (map (fn [[kind pred]] [kind (boolean (pred row))])) kinds-of)
+                                    :problems (into {} (keep (fn [kind]
+                                                               (when (if (= kind :type-errors)
+                                                                       (pos? (or (:type-error-count row) 0))
+                                                                       (contains? (get problem-ids kind) (:id row)))
+                                                                 [kind true]))) problems)
+                                    :used-targets (into {} (keep (fn [[target members]]
+                                                                   (when (contains? members (:id row))
+                                                                     [target true]))) users)
+                                    :unused? (when adj (empty? (get adj (:id row))))}) rows))
+        rev @(:rev-index env)
+        result (selector facts)
+        selected (:ids result)]
+    (when-not (and (map? result) (sequential? selected)
+                   (boolean? (:truncated? result)) (nat-int? (:total result))
+                   (<= (bounded-count (inc view-result-cap) selected) view-result-cap)
+                   (= (count selected) (count (set selected)))
+                   (every? #(contains? by-id %) selected)
+                   (<= (count selected) (:total result) (count rows)))
+      (throw (ex-info "Invalid view selection" {:type :crud/invalid-graph-selection})))
+    (-> (select-keys result [:total :truncated? :missing :unsupported-views])
+        (assoc :fns (mapv (comp (partial entity-list/light-fn-row rev) by-id) selected))
+        entity-list/apply-view-impl-filter)))
 
 
 (defn view-members

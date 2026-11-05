@@ -1,43 +1,835 @@
-{:namespace "app.inheritance"
- :description "Inheritance intentions: read-only preview and one atomic decorated apply. Ordinary entity PUT keeps its existing semantics."
+{:namespace "app.inheritance",
+ :description
+ "Inheritance intentions: read-only preview and one atomic decorated apply. Ordinary entity PUT keeps its existing semantics.",
  :fns
- [{:name :parse-inheritance-command
-   :description "Validate the wire action and exact UUID use-site; preserve action/kind strings for the editor graph."
-   :args {:body {:type :jsonb :description "Wire JSON; command parsing validates the map and UUID identities."}}
+ [{:name :_inheritance-wire-body,
+   :parent :const,
+   :args {:value {:as :body, :type :jsonb}}}
+  {:name :_inheritance-wire-value,
+   :parent :const,
+   :args {:value {:as :wire-value, :type :any}}}
+  {:name :_inheritance-wire-ids,
+   :parent :const,
+   :args {:value {:as :wire-ids, :type :any}}}
+  {:name :_inheritance-wire-field,
+   :parent :const,
+   :args {:value {:as :wire-field, :type :keyword}}}
+  {:name :_inheritance-wire-error,
+   :parent :throw,
+   :args
+   {:exception
+    {:parent :ex-info,
+     :args
+     {:message {:as :reason, :type :text},
+      :data
+      {:parent :zipmap,
+       :args
+       {:keys [{:value :type} {:value :reason}],
+        :vals
+        [{:value :validation-error/inheritance-command}
+         {:as :reason}]}}}}}}
+  {:name :_inheritance-wire-uuid,
+   :parent :if,
+   :args
+   {:test
+    {:parent :or,
+     :args
+     {:values
+      [{:parent :is-a?,
+        :args {:value :_inheritance-wire-value, :type {:value :uuid}}}
+       {:parent :is-a?,
+        :args
+        {:value :_inheritance-wire-value, :type {:value :text}}}]}},
+    :then
+    {:parent :parse-uuid,
+     :args
+     {:string
+      {:parent :to-str, :args {:value :_inheritance-wire-value}}}},
+    :else nil},
+   :return-type [:union :null :uuid]}
+  {:name :_inheritance-wire-required-uuid,
+   :parent :coalesce,
+   :args
+   {:value :_inheritance-wire-uuid,
+    :default
+    {:parent :_inheritance-wire-error,
+     :args
+     {:reason
+      {:parent :str,
+       :args {:parts [:_inheritance-wire-field " must be a UUID"]}}}}},
+   :return-type :uuid}
+  {:name :_inheritance-wire-uuid-item,
+   :parent :_inheritance-wire-required-uuid,
+   :args
+   {:wire-value {:as :item}, :wire-field :_inheritance-wire-field}}
+  {:name :_inheritance-wire-parsed-ids,
+   :parent :map,
+   :args
+   {:func :_inheritance-wire-uuid-item, :coll :_inheritance-wire-ids}}
+  {:name :_inheritance-wire-uuid-list-unique,
+   :parent :if,
+   :args
+   {:test
+    {:parent :equal?,
+     :args
+     {:a {:parent :count, :args {:coll :_inheritance-wire-parsed-ids}},
+      :b
+      {:parent :count,
+       :args
+       {:coll
+        {:parent :distinct,
+         :args {:coll :_inheritance-wire-parsed-ids}}}}}},
+    :then :_inheritance-wire-parsed-ids,
+    :else
+    {:parent :_inheritance-wire-error,
+     :args
+     {:reason
+      {:parent :str,
+       :args
+       {:parts
+        [:_inheritance-wire-field " contains duplicate UUIDs"]}}}}}}
+  {:name :_inheritance-wire-uuid-list,
+   :parent :if,
+   :args
+   {:test
+    {:parent :is-a?,
+     :args {:value :_inheritance-wire-ids, :type {:value :sequence}}},
+    :then
+    {:parent :if,
+     :args
+     {:test
+      {:parent :lte,
+       :args
+       {:nums
+        [{:parent :count, :args {:coll :_inheritance-wire-ids}} 64]}},
+      :then :_inheritance-wire-uuid-list-unique,
+      :else
+      {:parent :_inheritance-wire-error,
+       :args
+       {:reason
+        {:parent :str,
+         :args
+         {:parts
+          [:_inheritance-wire-field
+           " must be a list of at most 64 UUIDs"]}}}}}},
+    :else
+    {:parent :_inheritance-wire-error,
+     :args
+     {:reason
+      {:parent :str,
+       :args
+       {:parts
+        [:_inheritance-wire-field
+         " must be a list of at most 64 UUIDs"]}}}}},
+   :return-type [:list :uuid]}
+  {:name :_inheritance-wire-action,
+   :parent :get,
+   :args
+   {:coll :_inheritance-wire-body,
+    :key {:value :action},
+    :default nil}}
+  {:name :_inheritance-wire-kind-raw,
+   :parent :get,
+   :args
+   {:coll :_inheritance-wire-body, :key {:value :kind}, :default nil}}
+  {:name :_inheritance-wire-kind,
+   :parent :if,
+   :args
+   {:test :_inheritance-wire-kind-raw,
+    :then :_inheritance-wire-kind-raw,
+    :else "parent-edge"}}
+  {:name :_inheritance-wire-required-fields,
+   :parent :cond,
+   :args
+   {:clauses
+    [{:parent :and,
+      :args
+      {:values
+       [{:parent :equal?,
+         :args {:a :_inheritance-wire-action, :b "reparent"}}
+        {:parent :equal?,
+         :args {:a :_inheritance-wire-kind, :b "parent-edge"}}]}}
+     {:value [:target-fn-id]}
+     {:parent :and,
+      :args
+      {:values
+       [{:parent :equal?,
+         :args {:a :_inheritance-wire-action, :b "candidates"}}
+        {:parent :equal?,
+         :args {:a :_inheritance-wire-kind, :b "parent-edge"}}]}}
+     {:value [:target-fn-id :source-fn-id]}
+     {:parent :and,
+      :args
+      {:values
+       [{:parent :equal?,
+         :args {:a :_inheritance-wire-action, :b "variation"}}
+        {:parent :equal?,
+         :args {:a :_inheritance-wire-kind, :b "parent-edge"}}]}}
+     {:value [:target-fn-id :source-fn-id :expected-parent-id]}
+     {:parent :and,
+      :args
+      {:values
+       [{:parent :equal?,
+         :args {:a :_inheritance-wire-action, :b "variation"}}
+        {:parent :equal?,
+         :args {:a :_inheritance-wire-kind, :b "own-ref"}}]}}
+     {:value
+      [:owner-fn-id
+       :source-fn-id
+       :binding-id
+       :slot-id
+       :expected-old-ref-id]}
+     true
+     {:parent :_inheritance-wire-error,
+      :args {:reason "Unknown inheritance action or use-site kind"}}]}}
+  {:name :_inheritance-wire-required-pair,
+   :parent :list,
+   :args
+   {:items
+    [{:as :item}
+     {:parent :_inheritance-wire-required-uuid,
+      :args
+      {:wire-value
+       {:parent :get,
+        :args
+        {:coll :_inheritance-wire-body,
+         :key {:as :item},
+         :default nil}},
+       :wire-field {:as :item}}}]}}
+  {:name :_inheritance-wire-single-required,
+   :parent :pairs->map,
+   :args
+   {:entries
+    {:parent :map,
+     :args
+     {:func :_inheritance-wire-required-pair,
+      :coll :_inheritance-wire-required-fields}}}}
+  {:name :_inheritance-wire-single-base,
+   :parent :merge,
+   :args
+   {:maps
+    [:_inheritance-wire-single-required
+     {:parent :zipmap,
+      :args
+      {:keys [{:value :action} {:value :kind}],
+       :vals [:_inheritance-wire-action :_inheritance-wire-kind]}}]}}
+  {:name :_inheritance-wire-edge-index-valid,
+   :parent :if,
+   :args
+   {:test
+    {:parent :is-a?,
+     :args {:value :_inheritance-wire-value, :type {:value :int}}},
+    :then
+    {:parent :and,
+     :args
+     {:values
+      [{:parent :gte, :args {:nums [:_inheritance-wire-value 0]}}
+       {:parent :lte, :args {:nums [:_inheritance-wire-value 63]}}]}},
+    :else false}}
+  {:name :_inheritance-wire-edge-index,
+   :parent :if,
+   :args
+   {:test :_inheritance-wire-edge-index-valid,
+    :then :_inheritance-wire-value,
+    :else
+    {:parent :_inheritance-wire-error,
+     :args
+     {:reason "parent-edge-index must be an integer from 0 to 63"}}}}
+  {:name :_inheritance-wire-name-valid,
+   :parent :if,
+   :args
+   {:test
+    {:parent :is-a?,
+     :args {:value :_inheritance-wire-value, :type {:value :text}}},
+    :then
+    {:parent :and,
+     :args
+     {:values
+      [{:parent :not,
+        :args
+        {:value
+         {:parent :blank?, :args {:string :_inheritance-wire-value}}}}
+       {:parent :lte,
+        :args
+        {:nums
+         [{:parent :str-len, :args {:string :_inheritance-wire-value}}
+          160]}}]}},
+    :else false}}
+  {:name :_inheritance-wire-single-parents,
+   :parent :if,
+   :args
+   {:test
+    {:parent :equal?,
+     :args {:a :_inheritance-wire-action, :b "reparent"}},
+    :then
+    {:parent :zipmap,
+     :args
+     {:keys [{:value :parent-ids}],
+      :vals
+      [{:parent :_inheritance-wire-uuid-list,
+        :args
+        {:wire-ids
+         {:parent :get,
+          :args
+          {:coll :_inheritance-wire-body,
+           :key {:value :parent-ids},
+           :default nil}},
+         :wire-field {:value :parent-ids}}}]}},
+    :else {:parent :zipmap, :args {:keys [], :vals []}}}}
+  {:name :_inheritance-wire-single-edge-index,
+   :parent :if,
+   :args
+   {:test
+    {:parent :contains?,
+     :args
+     {:coll :_inheritance-wire-body,
+      :key {:value :parent-edge-index}}},
+    :then
+    {:parent :zipmap,
+     :args
+     {:keys [{:value :parent-edge-index}],
+      :vals
+      [{:parent :_inheritance-wire-edge-index,
+        :args
+        {:wire-value
+         {:parent :get,
+          :args
+          {:coll :_inheritance-wire-body,
+           :key {:value :parent-edge-index},
+           :default nil}}}}]}},
+    :else {:parent :zipmap, :args {:keys [], :vals []}}}}
+  {:name :_inheritance-wire-single-occurrence,
+   :parent :if,
+   :args
+   {:test
+    {:parent :contains?,
+     :args
+     {:coll :_inheritance-wire-body, :key {:value :occurrence-path}}},
+    :then
+    {:parent :zipmap,
+     :args
+     {:keys [{:value :occurrence-path}],
+      :vals
+      [{:parent :_inheritance-wire-uuid-list,
+        :args
+        {:wire-ids
+         {:parent :get,
+          :args
+          {:coll :_inheritance-wire-body,
+           :key {:value :occurrence-path},
+           :default nil}},
+         :wire-field {:value :occurrence-path}}}]}},
+    :else {:parent :zipmap, :args {:keys [], :vals []}}}}
+  {:name :_inheritance-wire-single-proposed-id,
+   :parent :if,
+   :args
+   {:test
+    {:parent :get,
+     :args
+     {:coll :_inheritance-wire-body,
+      :key {:value :proposed-fn-id},
+      :default nil}},
+    :then
+    {:parent :zipmap,
+     :args
+     {:keys [{:value :proposed-fn-id}],
+      :vals
+      [{:parent :_inheritance-wire-required-uuid,
+        :args
+        {:wire-value
+         {:parent :get,
+          :args
+          {:coll :_inheritance-wire-body,
+           :key {:value :proposed-fn-id},
+           :default nil}},
+         :wire-field {:value :proposed-fn-id}}}]}},
+    :else {:parent :zipmap, :args {:keys [], :vals []}}}}
+  {:name :_inheritance-wire-single-namespace,
+   :parent :if,
+   :args
+   {:test
+    {:parent :contains?,
+     :args
+     {:coll :_inheritance-wire-body, :key {:value :namespace-id}}},
+    :then
+    {:parent :zipmap,
+     :args
+     {:keys [{:value :namespace-id}],
+      :vals
+      [{:parent :if,
+        :args
+        {:test
+         {:parent :get,
+          :args
+          {:coll :_inheritance-wire-body,
+           :key {:value :namespace-id},
+           :default nil}},
+         :then
+         {:parent :_inheritance-wire-required-uuid,
+          :args
+          {:wire-value
+           {:parent :get,
+            :args
+            {:coll :_inheritance-wire-body,
+             :key {:value :namespace-id},
+             :default nil}},
+           :wire-field {:value :namespace-id}}},
+         :else nil}}]}},
+    :else {:parent :zipmap, :args {:keys [], :vals []}}}}
+  {:name :_inheritance-wire-single-name,
+   :parent :if,
+   :args
+   {:test
+    {:parent :contains?,
+     :args
+     {:coll :_inheritance-wire-body, :key {:value :proposed-name}}},
+    :then
+    {:parent :zipmap,
+     :args
+     {:keys [{:value :proposed-name}],
+      :vals
+      [{:parent :get,
+        :args
+        {:coll :_inheritance-wire-body,
+         :key {:value :proposed-name},
+         :default nil}}]}},
+    :else {:parent :zipmap, :args {:keys [], :vals []}}}}
+  {:name :_inheritance-wire-single-expected,
+   :parent :if,
+   :args
+   {:test
+    {:parent :contains?,
+     :args
+     {:coll :_inheritance-wire-body, :key {:value :expected-state}}},
+    :then
+    {:parent :zipmap,
+     :args
+     {:keys [{:value :expected-state}],
+      :vals
+      [{:parent :get,
+        :args
+        {:coll :_inheritance-wire-body,
+         :key {:value :expected-state},
+         :default nil}}]}},
+    :else {:parent :zipmap, :args {:keys [], :vals []}}}}
+  {:name :_inheritance-wire-single-orphans,
+   :parent :if,
+   :args
+   {:test
+    {:parent :contains?,
+     :args
+     {:coll :_inheritance-wire-body,
+      :key {:value :accepted-orphan-binding-ids}}},
+    :then
+    {:parent :zipmap,
+     :args
+     {:keys [{:value :accepted-orphan-binding-ids}],
+      :vals
+      [{:parent :_inheritance-wire-uuid-list,
+        :args
+        {:wire-ids
+         {:parent :get,
+          :args
+          {:coll :_inheritance-wire-body,
+           :key {:value :accepted-orphan-binding-ids},
+           :default nil}},
+         :wire-field {:value :accepted-orphan-binding-ids}}}]}},
+    :else {:parent :zipmap, :args {:keys [], :vals []}}}}
+  {:name :_inheritance-wire-single-fields,
+   :parent :merge,
+   :args
+   {:maps
+    [:_inheritance-wire-single-base
+     :_inheritance-wire-single-parents
+     :_inheritance-wire-single-edge-index
+     :_inheritance-wire-single-occurrence
+     :_inheritance-wire-single-proposed-id
+     :_inheritance-wire-single-namespace
+     :_inheritance-wire-single-name
+     :_inheritance-wire-single-expected
+     :_inheritance-wire-single-orphans]}}
+  {:name :_inheritance-wire-single-validated,
+   :parent :cond,
+   :args
+   {:clauses
+    [{:parent :and,
+      :args
+      {:values
+       [{:parent :contains?,
+         :args
+         {:coll :_inheritance-wire-body,
+          :key {:value :parent-edge-index}}}
+        {:parent :not,
+         :args
+         {:value
+          {:parent :and,
+           :args
+           {:values
+            [{:parent :equal?,
+              :args {:a :_inheritance-wire-kind, :b "parent-edge"}}
+             {:parent :or,
+              :args
+              {:values
+               [{:parent :equal?,
+                 :args {:a :_inheritance-wire-action, :b "variation"}}
+                {:parent :equal?,
+                 :args
+                 {:a :_inheritance-wire-action,
+                  :b "candidates"}}]}}]}}}}]}}
+     {:parent :_inheritance-wire-error,
+      :args
+      {:reason
+       "parent-edge-index applies only to a selected parent edge"}}
+     {:parent :and,
+      :args
+      {:values
+       [{:parent :contains?,
+         :args
+         {:coll :_inheritance-wire-body,
+          :key {:value :occurrence-path}}}
+        {:parent :not,
+         :args
+         {:value
+          {:parent :and,
+           :args
+           {:values
+            [{:parent :equal?,
+              :args {:a :_inheritance-wire-action, :b "variation"}}
+             {:parent :equal?,
+              :args
+              {:a :_inheritance-wire-kind, :b "parent-edge"}}]}}}}]}}
+     {:parent :_inheritance-wire-error,
+      :args
+      {:reason
+       "occurrence-path applies only to parent-edge variation"}}
+     {:parent :and,
+      :args
+      {:values
+       [{:parent :equal?,
+         :args {:a :_inheritance-wire-action, :b "variation"}}
+        {:parent :contains?,
+         :args
+         {:coll :_inheritance-wire-body, :key {:value :proposed-name}}}
+        {:parent :not,
+         :args
+         {:value
+          {:parent :_inheritance-wire-name-valid,
+           :args
+           {:wire-value
+            {:parent :get,
+             :args
+             {:coll :_inheritance-wire-body,
+              :key {:value :proposed-name},
+              :default nil}}}}}}]}}
+     {:parent :_inheritance-wire-error,
+      :args
+      {:reason
+       "proposed-name must be a non-empty name of at most 160 characters"}}
+     true
+     :_inheritance-wire-single-fields]}}
+  {:name :_inheritance-wire-single,
+   :parent :do,
+   :args
+   {:steps
+    [:_inheritance-wire-single-required
+     :_inheritance-wire-single-validated]},
+   :return-type :keyword-map,
+   :lambda-params [:body]}
+  {:name :_inheritance-wire-batch-items,
+   :parent :get,
+   :args
+   {:coll :_inheritance-wire-body,
+    :key {:value :commands},
+    :default nil}}
+  {:name :_inheritance-wire-batch-item-valid,
+   :parent :if,
+   :args
+   {:test
+    {:parent :is-a?, :args {:value {:as :item}, :type {:value :map}}},
+    :then
+    {:parent :and,
+     :args
+     {:values
+      [{:parent :or,
+        :args
+        {:values
+         [{:parent :equal?,
+           :args
+           {:a
+            {:parent :get,
+             :args
+             {:coll {:as :item}, :key {:value :action}, :default nil}},
+            :b "reparent"}}
+          {:parent :equal?,
+           :args
+           {:a
+            {:parent :get,
+             :args
+             {:coll {:as :item}, :key {:value :action}, :default nil}},
+            :b "variation"}}]}}
+       {:parent :or,
+        :args
+        {:values
+         [{:parent :nil?,
+           :args
+           {:value
+            {:parent :get,
+             :args
+             {:coll {:as :item}, :key {:value :kind}, :default nil}}}}
+          {:parent :equal?,
+           :args
+           {:a
+            {:parent :get,
+             :args
+             {:coll {:as :item}, :key {:value :kind}, :default nil}},
+            :b "parent-edge"}}]}}
+       {:parent :not,
+        :args
+        {:value
+         {:parent :contains?,
+          :args {:coll {:as :item}, :key {:value :expected-state}}}}}
+       {:parent :not,
+        :args
+        {:value
+         {:parent :contains?,
+          :args
+          {:coll {:as :item},
+           :key {:value :accepted-orphan-binding-ids}}}}}]}},
+    :else false}}
+  {:name :_inheritance-wire-batch-parsed,
+   :parent :map,
+   :args
+   {:func :_inheritance-wire-single,
+    :coll :_inheritance-wire-batch-items}}
+  {:name :_inheritance-wire-batch-target,
+   :parent :get,
+   :args
+   {:coll {:as :item}, :key {:value :target-fn-id}, :default nil}}
+  {:name :_inheritance-wire-batch-targets,
+   :parent :map,
+   :args
+   {:func :_inheritance-wire-batch-target,
+    :coll :_inheritance-wire-batch-parsed}}
+  {:name :_inheritance-wire-batch-base,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :action} {:value :kind} {:value :commands}],
+    :vals ["batch" "parent-edge" :_inheritance-wire-batch-parsed]}}
+  {:name :_inheritance-wire-batch-expected,
+   :parent :if,
+   :args
+   {:test
+    {:parent :contains?,
+     :args
+     {:coll :_inheritance-wire-body, :key {:value :expected-state}}},
+    :then
+    {:parent :assoc,
+     :args
+     {:map :_inheritance-wire-batch-base,
+      :key {:value :expected-state},
+      :value
+      {:parent :get,
+       :args
+       {:coll :_inheritance-wire-body,
+        :key {:value :expected-state},
+        :default nil}}}},
+    :else :_inheritance-wire-batch-base}}
+  {:name :_inheritance-wire-batch-assembled,
+   :parent :if,
+   :args
+   {:test
+    {:parent :contains?,
+     :args
+     {:coll :_inheritance-wire-body,
+      :key {:value :accepted-orphan-binding-ids}}},
+    :then
+    {:parent :assoc,
+     :args
+     {:map :_inheritance-wire-batch-expected,
+      :key {:value :accepted-orphan-binding-ids},
+      :value
+      {:parent :_inheritance-wire-uuid-list,
+       :args
+       {:wire-ids
+        {:parent :get,
+         :args
+         {:coll :_inheritance-wire-body,
+          :key {:value :accepted-orphan-binding-ids},
+          :default nil}},
+        :wire-field {:value :accepted-orphan-binding-ids}}}}},
+    :else :_inheritance-wire-batch-expected}}
+  {:name :_inheritance-wire-batch-size-valid,
+   :parent :if,
+   :args
+   {:test
+    {:parent :is-a?,
+     :args
+     {:value :_inheritance-wire-batch-items,
+      :type {:value :sequence}}},
+    :then
+    {:parent :and,
+     :args
+     {:values
+      [{:parent :gte,
+        :args
+        {:nums
+         [{:parent :count,
+           :args {:coll :_inheritance-wire-batch-items}}
+          1]}}
+       {:parent :lte,
+        :args
+        {:nums
+         [{:parent :count,
+           :args {:coll :_inheritance-wire-batch-items}}
+          16]}}]}},
+    :else false}}
+  {:name :_inheritance-wire-batch,
+   :parent :cond,
+   :args
+   {:clauses
+    [{:parent :not,
+      :args
+      {:value
+       {:parent :or,
+        :args
+        {:values
+         [{:parent :nil?, :args {:value :_inheritance-wire-kind-raw}}
+          {:parent :equal?,
+           :args
+           {:a :_inheritance-wire-kind-raw, :b "parent-edge"}}]}}}}
+     {:parent :_inheritance-wire-error,
+      :args {:reason "Batch supports parent-edge commands only"}}
+     {:parent :not, :args {:value :_inheritance-wire-batch-size-valid}}
+     {:parent :_inheritance-wire-error,
+      :args
+      {:reason
+       "Batch needs 1 to 16 explicit target commands; split a larger change"}}
+     {:parent :not,
+      :args
+      {:value
+       {:parent :every?,
+        :args
+        {:pred :_inheritance-wire-batch-item-valid,
+         :coll :_inheritance-wire-batch-items}}}}
+     {:parent :_inheritance-wire-error,
+      :args
+      {:reason
+       "Batch items must be parent-edge changes without separate preview acceptance"}}
+     {:parent :not,
+      :args
+      {:value
+       {:parent :equal?,
+        :args
+        {:a
+         {:parent :count,
+          :args {:coll :_inheritance-wire-batch-targets}},
+         :b
+         {:parent :count,
+          :args
+          {:coll
+           {:parent :distinct,
+            :args {:coll :_inheritance-wire-batch-targets}}}}}}}}
+     {:parent :_inheritance-wire-error,
+      :args {:reason "Batch target function IDs must be distinct"}}
+     true
+     :_inheritance-wire-batch-assembled]},
    :return-type :keyword-map}
+  {:name :parse-inheritance-command,
+   :description
+   "Validate wire action/kind, required identities, bounded batch syntax and optional fields in graph composition; UUID decoding uses the shared codec.",
+   :parent :if,
+   :args
+   {:test
+    {:parent :is-a?,
+     :args {:value :_inheritance-wire-body, :type {:value :map}}},
+    :then
+    {:parent :if,
+     :args
+     {:test
+      {:parent :equal?,
+       :args {:a :_inheritance-wire-action, :b "batch"}},
+      :then :_inheritance-wire-batch,
+      :else :_inheritance-wire-single}},
+    :else
+    {:parent :_inheritance-wire-error,
+     :args {:reason "An inheritance command must be an object"}},
+    :body {:type :jsonb}},
+   :return-type :keyword-map}
+  {:name :_inheritance-present-descriptor :parent :const :args {:value {:as :descriptor :type :keyword-map}}}
+  {:name :_inheritance-present-descriptor-clean :parent :dissoc :args {:map :_inheritance-present-descriptor :key {:value :namespace-path}}}
+  {:name :_inheritance-present-qualified-name :parent :if :args {:test {:parent :get :args {:coll :_inheritance-present-descriptor :key {:value :namespace-path} :default nil}} :then {:parent :str :args {:parts [{:parent :get :args {:coll :_inheritance-present-descriptor :key {:value :namespace-path} :default nil}} "/" {:parent :get :args {:coll :_inheritance-present-descriptor :key {:value :name} :default nil}}]}} :else {:parent :get :args {:coll :_inheritance-present-descriptor :key {:value :name} :default nil}}}}
+  {:name :_inheritance-present-descriptor-projected :parent :if :args {:test {:parent :contains? :args {:coll :_inheritance-present-descriptor :key {:value :namespace-path}}} :then {:parent :if :args {:test {:parent :get :args {:coll :_inheritance-present-descriptor :key {:value :name} :default nil}} :then {:parent :assoc :args {:map :_inheritance-present-descriptor-clean :key {:value :qualified-name} :value :_inheritance-present-qualified-name}} :else :_inheritance-present-descriptor-clean}} :else :_inheritance-present-descriptor} :return-type :keyword-map}
+  {:name :_inheritance-present-model :parent :const :args {:value {:as :model :type :keyword-map}}}
+  {:name :_inheritance-present-model-descriptor :parent :_inheritance-present-descriptor-projected :args {:descriptor :_inheritance-present-model} :return-type :keyword-map}
+  {:name :_inheritance-present-with-target :parent :if :args {:test {:parent :get :args {:coll :_inheritance-present-model :key {:value :target} :default nil}} :then {:parent :assoc :args {:map :_inheritance-present-model-descriptor :key {:value :target} :value {:parent :_inheritance-present-descriptor-projected :args {:descriptor {:parent :get :args {:coll :_inheritance-present-model :key {:value :target} :default nil}}}}}} :else :_inheritance-present-model-descriptor} :return-type :keyword-map}
+  {:name :_inheritance-present-single :parent :if :args {:test {:parent :get :args {:coll :_inheritance-present-model :key {:value :source} :default nil}} :then {:parent :assoc :args {:map :_inheritance-present-with-target :key {:value :source} :value {:parent :_inheritance-present-descriptor-projected :args {:descriptor {:parent :get :args {:coll :_inheritance-present-model :key {:value :source} :default nil}}}}}} :else :_inheritance-present-with-target} :return-type :keyword-map :lambda-params [:model]}
+  {:name :_inheritance-present-with-candidates :parent :if :args {:test {:parent :contains? :args {:coll :_inheritance-present-model :key {:value :candidates}}} :then {:parent :assoc :args {:map :_inheritance-present-single :key {:value :candidates} :value {:parent :map :args {:func :_inheritance-present-single :coll {:parent :get :args {:coll :_inheritance-present-model :key {:value :candidates} :default nil}}}}}} :else :_inheritance-present-single} :return-type :keyword-map}
+  {:name :_inheritance-present-result :parent :if :args {:test {:parent :contains? :args {:coll :_inheritance-present-model :key {:value :targets}}} :then {:parent :assoc :args {:map :_inheritance-present-with-candidates :key {:value :targets} :value {:parent :map :args {:func :_inheritance-present-single :coll {:parent :get :args {:coll :_inheritance-present-model :key {:value :targets} :default nil}}}}}} :else :_inheritance-present-with-candidates} :return-type :keyword-map}
 
-  {:name :preview-inheritance
-   :description "Authorize the exact use-site and projected graph; return a transient expected-state digest and exact orphan UUIDs. Readable refusals retain source navigation."
-   :args {:command {:type :keyword-map}
-          :request {:type :ring-request-shape :description "Request scope pin."}}
-   :return-type :keyword-map
+  {:name :_preview-inheritance-model,
+   :description
+   "Authorize the exact use-site and projected graph under the writer lock; return safe descriptor facts, a transient expected-state digest and exact orphan UUIDs.",
+   :args
+   {:command {:type :keyword-map},
+    :request
+    {:type :ring-request-shape, :description "Request scope pin."}},
+   :return-type :keyword-map,
    :effects #{:db}}
-
-  {:name :apply-inheritance
-   :description "Repeat preview under the writer lock, atomically create/replace or delete orphans/reparent, then publish after commit."
-   :args {:command {:type :keyword-map}
-          :request {:type :ring-request-shape :description "Request scope pin."}}
-   :return-type :keyword-map
+  {:name :preview-inheritance,
+   :description
+   "Present the locked preview model and readable source navigation from safe descriptor facts.",
+   :parent :_inheritance-present-result,
+   :args {:model :_preview-inheritance-model
+          :command {:type :keyword-map}
+          :request {:type :ring-request-shape}},
+   :return-type :keyword-map}
+  {:name :_apply-inheritance-operation,
+   :description
+   "Repeat preview under the writer lock, atomically create/replace or delete orphans/reparent, then publish after commit.",
+   :args
+   {:command {:type :keyword-map},
+    :request
+    {:type :ring-request-shape, :description "Request scope pin."}},
+   :return-type :keyword-map,
    :effects #{:db}}
-
-  {:name :_inheritance-command
-   :parent :parse-inheritance-command
-   :args {:body {:ref :parse-json-body :type :keyword-map}}}
-
-  {:name :_inheritance-preview
-   :parent :preview-inheritance
+  {:name :apply-inheritance,
+   :description
+   "Reject preview-only candidate commands; otherwise invoke the owned mutation/publication operation.",
+   :parent :if,
+   :args
+   {:test
+    {:parent :equal?,
+     :args
+     {:a
+      {:parent :get,
+       :args
+       {:coll {:as :command}, :key {:value :action}, :default nil}},
+      :b "candidates"}},
+    :then
+    {:value
+     {:ok false,
+      :committed false,
+      :type :validation-error/inheritance-command,
+      :error "Candidates is a preview-only action",
+      :http-status 400}},
+    :else :_apply-inheritance-operation,
+    :command {:type :keyword-map},
+    :request {:type :ring-request-shape}},
+   :return-type :keyword-map}
+  {:name :_inheritance-command,
+   :parent :parse-inheritance-command,
+   :args {:body {:ref :parse-json-body, :type :keyword-map}}}
+  {:name :_inheritance-preview,
+   :parent :preview-inheritance,
    :args {:command :_inheritance-command}}
-
-  {:name :_inheritance-apply
-   :parent :apply-inheritance
+  {:name :_inheritance-apply,
+   :parent :apply-inheritance,
    :args {:command :_inheritance-command}}
-
-  {:name :_inheritance-preview-handler
-   :lambda-params [:request]
-   :parent :json-handler
+  {:name :_inheritance-preview-handler,
+   :lambda-params [:request],
+   :parent :json-handler,
    :args {:data :_inheritance-preview}}
-
-  {:name :_inheritance-apply-handler
-   :lambda-params [:request]
-   :parent :json-envelope-response
+  {:name :_inheritance-apply-handler,
+   :lambda-params [:request],
+   :parent :json-envelope-response,
    :args {:envelope :_inheritance-apply}}]}

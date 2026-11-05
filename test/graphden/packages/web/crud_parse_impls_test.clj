@@ -1,14 +1,6 @@
 (ns graphden.packages.web.crud-parse-impls-test
-  "Unit tests for the `web/crud-parse` base-fn impls — the wire-format
-   boundary every editor form POST crosses before a row is written.
-
-   These four primitives decide what an UNTRUSTED string becomes:
-   a form body → a `{string string}` map, a constraint JSON blob →
-   a keyword-headed type vector, a `:return-type` form field → a FK
-   uuid. Each has a documented soft-failure contract (blank → nil,
-   malformed → pass through rather than throw); a regression there
-   turns a 400 into a 500 on an unauthenticated path, or silently
-   binds the wrong shape into storage."
+  "Unit tests for the web CRUD wire codecs. Graph integration tests cover
+   the form-body fallback and repeated-key policy after Ring decoding."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.packages.records.ids :as ids]
@@ -29,42 +21,19 @@
 
 
 ;; ---------------------------------------------------------------------------
-;; :form-decode — `application/x-www-form-urlencoded` → {string string}
+;; :_form-decode-raw — Ring's `application/x-www-form-urlencoded` codec
 ;; ---------------------------------------------------------------------------
 
-(deftest form-decode-always-answers-a-string-map
+(deftest form-decode-raw-preserves-codec-results
   (testing "ordinary body decodes to string keys and percent-decoded values"
     (is (= {"name" "my fn" "desc" "a+b"}
-           (call :form-decode {:string "name=my%20fn&desc=a%2Bb"}))))
-
-  (testing "a REPEATED key collapses to the LAST occurrence, never a vector"
-    ;; ring returns a vector for a repeated key. Every :parse-form-body
-    ;; consumer binds the result into a `:text` field — a vector there
-    ;; is a type error at the storage boundary, not a parse detail.
-    (let [decoded (call :form-decode {:string "name=first&name=second"})]
-      (is (= {"name" "second"} decoded))
-      (is (string? (get decoded "name")))))
-
-  (testing "a body with no `=` at all decodes to {} — not a bare string"
-    ;; ring hands back the raw string in that case; a string would blow
-    ;; up the `get`-based field readers downstream.
-    (is (= {} (call :form-decode {:string "junk-without-equals"}))))
-
-  (testing "nil / empty body → {} (a GET-shaped request with no body)"
-    (is (= {} (call :form-decode {:string nil})))
-    (is (= {} (call :form-decode {:string ""}))))
-
-  (testing "an EMPTY field is present-and-blank, not absent"
-    ;; The editor clears a text field by submitting it empty; the write
-    ;; path distinguishes \"\" (clear it) from a missing key (leave it).
-    (let [decoded (call :form-decode {:string "description=&name=x"})]
-      (is (contains? decoded "description"))
-      (is (= "" (get decoded "description")))))
-
-  (testing "form keys stay STRINGS — a form body is never keywordized"
-    ;; The JSON body path (`read-json-body`) keywordizes; this one must
-    ;; not, or every form consumer's string lookup misses.
-    (is (= ["name"] (keys (call :form-decode {:string "name=x"}))))))
+           (call :_form-decode-raw {:string "name=my%20fn&desc=a%2Bb"}))))
+  (testing "repeated keys remain vectors until graph policy selects the last"
+    (is (= {"name" ["first" "second"]}
+           (call :_form-decode-raw {:string "name=first&name=second"}))))
+  (testing "a bare string stays bare until the graph fallback"
+    (is (= "junk-without-equals"
+           (call :_form-decode-raw {:string "junk-without-equals"})))))
 
 
 ;; ---------------------------------------------------------------------------
@@ -107,7 +76,23 @@
     ;; A refinement's literal payload (a regex, a sentence) must NOT be
     ;; turned into a keyword.
     (is (= [:= "hello world"] (call :parse-constraint {:raw "[\"=\", \"hello world\"]"})))
+    (is (= [:= "x"] (call :parse-constraint {:raw "[\"=\", \"x\"]"
+                                             :base-ref "text"})))
+    (is (= [:in ["a" "b"]]
+           (call :parse-constraint {:raw "[\"in\", [\"a\", \"b\"]]"
+                                    :base-ref "text"})))
     (is (= [:>= 3.5] (call :parse-constraint {:raw "[\">=\", 3.5]"}))))
+
+  (testing "keyword refinements decode operands without changing text refinements"
+    (is (= [:in [:get :post]]
+           (call :parse-constraint {:raw "[\"in\", [\"get\", \"post\"]]"
+                                    :base-ref "keyword"})))
+    (is (= [:not= :patch]
+           (call :parse-constraint {:raw "[\":not=\", \"patch\"]"
+                                    :base-ref "keyword"})))
+    (is (= [:= ":literal"]
+           (call :parse-constraint {:raw "[\"=\", \":literal\"]"
+                                    :base-ref "text"}))))
 
   (testing "unparseable JSON is swallowed — the raw text comes back, no throw"
     ;; Parse failure must not 500 the form POST; the downstream type

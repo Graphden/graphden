@@ -3,7 +3,8 @@
 ;;
 ;; Each step anchors on {:ns <namespace> :defn <symbol>} — NEVER a line number.
 ;; Variants: {:file "resources/packages/.../impls.clj" :defn <sym>} for package
-;; impls outside src/, and {:defn ig/init-key :dispatch <val>} for a defmethod.
+;; impls, {:file "resources/packages/.../fns.edn" :defn <name>} for graph fn-defs,
+;; and {:defn ig/init-key :dispatch <val>} for a defmethod.
 ;; The generator bakes the anchored form's real source into index.html; CI
 ;; (`bb devtour-check`) fails if an anchor stops resolving or the HTML drifts.
 {:title "Graphden — developer tour"
@@ -415,8 +416,10 @@
            callbacks after those [dynamic bindings](#term/dynamic-binding) had ended."
      :see [[:executor "arg-builder"]]}
     {:file "resources/packages/core/recursion/impls.clj" :defn fix-fn
-     :say "Implements explicit recursion. Direct cycles through `ref-fn-id` are rejected during
-           writes; `:fix` instead passes `{:input … :self …}` to its step function, which may call
+     :say "Implements explicit recursion. Evaluation dependencies must be acyclic: the per-binding
+           write guard rejects longer cycles, and sync-time dependency sorting also rejects bare
+           self-references. Identity-only `:fn-ref` edges do not evaluate their targets.
+           `:fix` instead passes `{:input … :self …}` to its step function, which may call
            `:self`. `*max-recursion-depth*` bounds recursion depth. [Recursion
            design](../../docs/RECURSION.md) explains the alternatives considered."}
     {:ns graphden.executor.compile.renames :defn hof-lambda-params
@@ -820,12 +823,12 @@
    :title "Graph API — reads, writes, and execution"
    :status :toured
    :summary "Request validation, stored edits, execution results, and views."
-   :paths ["src/graphden/crud/"]
+   :paths ["src/graphden/crud/" "resources/packages/web/crud-delete/"]
    :after [:storage :types]
    :steps
-   [{:ns graphden.crud.request :defn extract-entity-params
-     :say "Extracts entity type and ID from an HTTP mutation request. It prefers parsed
-           [Reitit](#term/ring) path parameters and falls back to parsing the request URI."}
+   [{:file "resources/packages/web/crud-delete/fns.edn" :defn extract-entity-params
+     :say "Graph composition selects the entity type and ID from an HTTP mutation request.
+           It prefers parsed [Reitit](#term/ring) path parameters and falls back to the raw URI boundary."}
     {:ns graphden.crud.request :defn read-json-body
      :say "Normalizes a [Ring](#term/ring) request body supplied as text, an input stream, or an
            already parsed value. JSON object keys become Clojure [keywords](#term/edn) for the write
@@ -900,13 +903,14 @@
            classification. It runs with `:allowed-effects #{}` and sanitizes the output before
            insertion into the editor [DOM](#term/hiccup). See [typed result
            representations](../../docs/EXECUTION.md)."}
-    {:ns graphden.crud.value-form :defn resolve-form
+    {:file "resources/packages/app/forms/fns.edn" :defn resolve-form
      :say "Converts an effective [slot](#term/slot) type into a pure form descriptor for a record,
-           list, union, or leaf. It resolves aliases and variants on the server and bounds recursion
+           list, union, or leaf. The graph composes canonical type facts and bounds recursion
            depth, so the browser need not reimplement the type grammar."}
-    {:ns graphden.crud.value-form :defn build-form
+    {:file "resources/packages/app/forms/fns.edn" :defn build-form
      :say "Renders a form descriptor as [Hiccup](#term/hiccup): records become field groups, unions
-           get a choice of variant, and leaf types use the registered form functions. `GET
+           get a choice of variant, and leaf types use the registered form functions. This graph
+           function supplies the renderer policy. `GET
            /partials/value-form` returns this [server-rendered fragment](#term/htmx), which
            [HTMX](#term/htmx) inserts into the inspector. See [partials](../../docs/PARTIALS.md)."}
     {:ns graphden.crud.debug-capture :defn run-captured!
@@ -914,14 +918,14 @@
            armed for its organisation and branch. The interception expires after a limited time.
            Sanitized request and response data are stored as an execution so the existing call-tree
            interface can display the handler run. See [debugging](../../docs/EXECUTION.md)."}
-    {:ns graphden.crud.secrets :defn apply-create-secret-body
+    {:ns graphden.crud.secrets :defn create-secret-facts!
      :say "Claims the secret path and creates its graph rows in one guarded SQL transaction.
            After commit, stores the value and metadata in OpenBao without holding the graph writer.
            The value never enters graph rows. SQL failures roll back and clear their journal entries;
            later Vault failures use compensation for the already committed rows. Request parsing
-           remains composed in `app/secrets/fns.edn`. See [secrets](../../docs/SECRETS.md)."
+           and safe receipt construction remain composed in `app/secrets/fns.edn`. See [secrets](../../docs/SECRETS.md)."
      :see [[:types "taint-with-secret-if-tainted"]]}
-    {:ns graphden.crud.test-runs :defn run-tests!
+    {:ns graphden.crud.test-runs :defn run-selected-tests!
      :say "Runs functions from `tests` namespaces through the ordinary execution API with empty
            arguments; a run passes if it does not throw. Status belongs to the current function
            version, so an edit makes earlier results stale. Each completed test notifies the editor.
@@ -1055,15 +1059,17 @@
            with tagged literals such as `#graphden/ref`. Registered readers restore the original
            [keywords](#term/edn) during import. This step protects the EDN text boundary. JSONB
            storage has a different contract: its JSON reader keywordizes object keys."}
-    {:ns graphden.packages.export :defn external-deps
-     :say "Finds references leaving an exported namespace subtree and records them as dependencies.
-           References into version-qualified package namespaces also produce package dependencies. The
-           surrounding `:export-namespace` [graph function](#term/graph-function) assembles the final
-           bundle."}
-    {:ns graphden.packages.export :defn strip-secret-paths
-     :say "Removes vault paths from shared bundles by default and leaves the corresponding secret
-           arguments free. The `:secrets` manifest tells the installer which values need to be defined
-           locally; publishing a function therefore does not publish its secret locations."}
+    {:file "resources/packages/registry/registry/fns.edn" :defn namespace-external-deps
+     :say "Composes the dependency list for an exported namespace from one scoped native facts read.
+           Structural references and version-qualified package namespaces are both included; the graph
+           sorts and deduplicates names and package coordinates before the surrounding
+           `:export-namespace` [graph function](#term/graph-function) assembles the bundle."}
+    {:file "resources/packages/registry/registry/impls.clj" :defn graph-fn-defs
+     :say "Acquires viewer-concealed function definitions through the safe export codec. The
+           `:secret-path-args` and `:strip-secret-paths` compositions in
+           [registry/fns.edn](../../resources/packages/registry/registry/fns.edn) build the manifest
+           and remove vault paths, leaving exhausted arguments free. The installer sees which values
+           need local definitions without receiving the exporter's secret locations."}
     {:file "resources/packages/registry/registry/impls.clj" :defn publish-package-apply
      :say "Stores a published bundle as an immutable `:package-version` row identified by version and
            content hash. Installation materializes definitions in a version-qualified namespace and
@@ -1074,12 +1080,12 @@
            the global package statistic, using an atomic database upsert; moving an existing
            [pin](#term/semver) to another version does not. See
            [marketplace](../../docs/MARKETPLACE.md)."}
-    {:file "resources/packages/registry/marketplace/impls.clj" :defn moderate-package-version!
-     :say "Applies a platform administrator's moderation decision. The [capability](#term/auth) check
-           is inside the write operation; the read uses platform storage so organisation scoping does
-           not hide another publisher's row. After the change, `tc/notify!` lets the
-           [addon](#term/integrant) notify the publisher. See [marketplace
-           moderation](../../docs/MARKETPLACE.md)."}
+    {:file "resources/packages/registry/marketplace/fns.edn" :defn moderate-package-version!
+     :say "The graph validates and composes a platform administrator's moderation decision. The
+           [capability](#term/auth) check remains inside the native write operation; its read uses
+           platform storage so organisation scoping does not hide another publisher's row. After the
+           change, `tc/notify!` lets the [addon](#term/integrant) notify the publisher. See
+           [marketplace moderation](../../docs/MARKETPLACE.md)."}
     {:ns graphden.packages.loaded :defn install!
      :say "Records the packages actually loaded by this executor, including version, origin, and
            whether they include Clojure implementations. The editor displays this inventory. Packages
@@ -1253,10 +1259,10 @@
            [inheritance](#term/inheritance), override, and closed-list checks remain shared with the
            CRUD implementation."
      :see [[:crud "write-rej"] [:crud "apply-create-core"]]}
-    {:file "resources/packages/web/crud-parse/impls.clj" :defn form-decode
-     :say "Decodes form data and normalizes repeated-key values to the declared text-map result. It
-           uses the form codec rather than a regular expression, avoiding regex input-length limits
-           for large values such as edited assets."}
+    {:file "resources/packages/web/crud-parse/fns.edn" :defn form-decode
+     :say "Composes the native form codec with graph policy: repeated keys keep their last value,
+           and a body without fields becomes an empty text map. The native codec avoids regex
+           input-length limits for large values such as edited assets."}
     {:file "resources/packages/web/html/impls.clj" :defn hiccup-element
      :say "Constructs a [Hiccup](#term/hiccup) element from tag, attributes, and children.
            Graph-composed pages use it to build markup, including `data-action` attributes handled by
@@ -1272,11 +1278,10 @@
      :say "Serializes a [Hiccup](#term/hiccup) tree into HTML. Its type rule propagates [secret
            markings](#term/secret) so rendering a secret-derived value does not remove the information
            needed for [redaction](#term/secret)."}
-    {:file "resources/packages/web/http/impls.clj" :defn pick-encoding-fn
-     :say "Chooses response encoding from `Accept-Encoding`. The surrounding `:process-response`
+    {:file "resources/packages/web/http/impls.clj" :defn encoding-acceptable-fn
+     :say "Parses whether an `Accept-Encoding` token accepts one coding. The surrounding `:process-response`
            [graph function](#term/graph-function) decides whether compression is appropriate and
-           prepares headers and body. This primitive contains the header-parsing logic shared by that
-           composition."}
+           prepares headers and body. The `:pick-encoding` graph chooses brotli, gzip or identity using this parser."}
     {:ns graphden.crud.types-api :defn type-name-entries
      :say "Acquires the scoped picker rows with canonical namespace references kept separate
            from displayed selection names. The graph's `compatible-type-names` filters those
@@ -1805,8 +1810,8 @@
            row and [execution permit](#term/cardinality); restart policy then determines whether to
            restart any exit, only a failure, or neither. Active instances refresh their
            [heartbeats](#term/fleet)."}
-    {:file "resources/packages/web/service/impls.clj" :defn live-service-endpoint
-     :say "Reads the freshest live listener on the caller's branch, preferring this pod. This is one
+    {:file "resources/packages/web/service/impls.clj" :defn service-instance-facts
+     :say "Reads scoped listener rows and captures one clock value on the caller's branch. This is one
            native read beneath the `web.service/:service-endpoint` [graph function](#term/graph-function):
            its bindings in [web/service/fns.edn](../../resources/packages/web/service/fns.edn)
            choose the listener, then a finite HTTP publication, then an addon resolver, and finally

@@ -34,9 +34,9 @@
 ;; The export BUNDLES (`:export-namespace` / `:export-graph`) are graph
 ;; compositions in fns.edn — root-filter, secret-strip policy, and the
 ;; bundle-map assembly are all graph-visible. The primitives below are
-;; what they compose: the records↔EDN codec read, the two pure
-;; secret-path passes, the EDN-wire encoder, and the one cohesive
-;; dependency-analysis pass.
+;; what they compose: the records↔EDN codec read, the EDN-wire encoder,
+;; and the one cohesive dependency-analysis pass. Secret-path scans and
+;; stripping are ordinary graph composition.
 
 (defbase graph-fn-defs
   "The whole stored graph as fn-def maps — `export/export-graph`, the
@@ -49,22 +49,6 @@
   (export/export-graph (request/require-storage ctx) entities/apply-view-impl-filter))
 
 
-(defbase secret-path-args-fn
-  "Manifest of vault-path bindings across fn-defs — one
-   `{:fn <name> :arg <arg>}` per `{:secret-path …}` arg-value. Pure
-   scan (`export/secret-path-args`)."
-  [fn-defs]
-  (export/secret-path-args fn-defs))
-
-
-(defbase strip-secret-paths-fn
-  "fn-defs with vault paths removed — a stripped arg reverts to a FREE
-   secret-typed slot at the importer. Pure pass
-   (`export/strip-secret-paths`)."
-  [fn-defs]
-  (export/strip-secret-paths fn-defs))
-
-
 (defbase encode-unreadable-kws-fn
   "EDN-wire boundary — refs whose qualification isn't spellable as a
    readable keyword (`@`-versioned ns, root ns) become `#graphden/ref`
@@ -75,15 +59,13 @@
   (wire/encode-unreadable-kws value))
 
 
-(defbase namespace-external-deps
-  "Dependency analysis for the subtree rooted at `root` —
-   `{:dependencies [...] :package-dependencies [...]}` via
-   `export/external-deps`: one records read shared by the structural
-   ref closure and the constraint type-name scan (cohesive single-pass
-   analysis, stays one primitive)."
+(defbase _namespace-external-dep-facts
+  "One scoped records read shared by structural refs and constraint types.
+   Returns safe dependency names and registry coordinates; ordering and
+   the public envelope are composed in the graph."
   [root]
   (cr/record-effect! :db)
-  (export/external-deps (request/require-storage ctx) root))
+  (export/external-dep-facts (request/require-storage ctx) root))
 
 
 (defbase current-org-id
@@ -219,22 +201,16 @@
 ;; detail across a few base-fns is ordinary Clojure reuse.
 ;; ---------------------------------------------------------------------------
 
-(defbase missing-package-dependencies
-  "The declared dependency names (a :package-version row's
-   `:dependencies`) NOT present as fns in storage — the shared
-   install / fork / materialize precondition. ONE batched IN-query +
-   set diff; the batch shape (no N+1) is the point of keeping it a
-   single storage predicate. Returns a vector of keyword names
-   (empty = all satisfied)."
-  [dependencies]
+(defbase _registry-dependency-name
+  [dependency]
+  (name dependency))
+
+
+(defbase _registry-dependency-rows
+  "One scoped IN-query; normalization and difference are graph composition."
+  [names]
   (cr/record-effect! :db)
-  (let [storage (request/require-storage ctx)
-        dep-names (mapv name dependencies)
-        present (into #{}
-                      (map :name)
-                      (when (seq dep-names)
-                        (sp/query-entities storage :fn {:name (vec (distinct dep-names))})))]
-    (mapv keyword (distinct (remove present dep-names)))))
+  (sp/query-entities (request/require-storage ctx) :fn {:name names}))
 
 
 ;; Rewrite one bundle fn's namespace so version V of the package rooted at
@@ -271,11 +247,11 @@
     (pkg-sync/sync-bundle! storage materialized)))
 
 
-;; True if `version` is COMPLETELY materialized under its version-qualified
-;; namespace — idempotency guard + cloud public-org skip: OrgScoped read
+;; Batched facts for the graph's materialization completeness predicate:
+;; canonical identities plus representative body existence. OrgScoped read
 ;; returns own+public, so a tenant sees a platform-materialized version and
-;; does NOT re-materialize it into its own org. Shared by the
-;; `:package-version-materialized?` base-fn and the update core.
+;; does NOT re-materialize it into its own org. Install and update use the
+;; same `:package-version-materialized?` graph predicate over these facts.
 ;;
 ;; Completeness, not mere existence: `write-records!` commits the `:fn`
 ;; identity batch BEFORE the `:binding` batch, non-transactionally, so a
@@ -285,37 +261,20 @@
 ;; half-written version. So verify BOTH: every bundle identity present AND
 ;; at least one materialized binding for the fns that carry one (non-empty
 ;; `:args`). A false negative only costs a redundant, safe re-sync.
-(defn- already-materialized?
-  [storage ns-root version fns]
-  (let [fid (fn [f]
-              (ids/fn-id (version-qualified-ns ns-root version (:namespace f))
-                         (:name f)))
-        expected-ids (mapv fid fns)
-        ;; fns that customize a slot (non-empty :args) MUST have ≥1 binding —
-        ;; exactly the body the mid-way write drops after committing identities.
-        body-fn-ids (into [] (comp (filter #(seq (:args %))) (map fid)) fns)]
-    (boolean
-      (and (seq expected-ids)
-           (= (count expected-ids)
-              (count (sp/query-entities storage :fn {:id expected-ids})))
-           (or (empty? body-fn-ids)
-               (seq (sp/query-entities storage :binding {:fn-id body-fn-ids})))))))
-
-
-(defbase package-version-materialized?
-  "True iff `version` of the package rooted at `ns-root` is already
-   visible under its version-qualified namespace — the idempotency
-   guard of reference-install, exposed so the graph install flow can
-   skip the materialize step (and its invalidation) when the version
-   is already there. Under a cloud OrgScoped read a platform-
-   materialized version is visible to the tenant, so the tenant does
-   NOT re-materialize it into its own org. Probes COMPLETENESS
-   (every bundle identity + a representative body row), not the
-   mere existence of one identity — a half-written version reports
-   false so install re-materializes it (re-sync is idempotent)."
+(defbase package-materialization-facts
+  "Canonical identity derivation and scoped batched existence reads."
   [ns-root version fns]
   (cr/record-effect! :db)
-  (already-materialized? (request/require-storage ctx) ns-root version fns))
+  (let [storage (request/require-storage ctx)
+        fid (fn [f] (ids/fn-id (version-qualified-ns ns-root version (:namespace f)) (:name f)))
+        expected-ids (mapv fid fns)
+        body-fn-ids (into [] (comp (filter #(seq (:args %))) (map fid)) fns)
+        present-count (if (seq expected-ids)
+                        (count (sp/query-entities storage :fn {:id expected-ids})) 0)
+        body-present? (and (seq body-fn-ids) (= (count expected-ids) present-count)
+                           (seq (sp/query-entities storage :binding {:fn-id body-fn-ids})))]
+    {:expected (count expected-ids) :present present-count
+     :body-required (boolean (seq body-fn-ids)) :body-present (boolean body-present?)}))
 
 
 (defn- bump-install-stat!
@@ -371,21 +330,14 @@
         pin))))
 
 
-(defbase semver-pick
-  "The highest of `versions` satisfying `spec` — a semver constraint
-   (exact `\"1.2.0\"`, `\">=1.1\"`, `\"~>1.2\"`, …); nil / \"\" / \"latest\"
-   mean \"any\" (the newest). Versions order by parsed `[major minor
-   patch]`; nil when nothing matches. Pure — the ONE pick both the local
-   (`:resolve-package-version`) and the remote (`:resolve-remote-version`)
-   resolution compose, over whichever version list they read. Self-
-   contained constraint-resolution algorithm (same carve-out class as
-   `:pick-encoding`'s RFC negotiation)."
-  [versions spec]
-  (let [constraint (if (contains? #{nil "" "latest"} spec) "*" (str spec))]
-    (->> versions
-         (filter #(and (some? %) (semver/satisfies-constraint? (str %) constraint)))
-         (sort-by #(semver/parse-version (str %)))
-         last)))
+(defbase semver-components
+  [version]
+  (semver/parse-version version))
+
+
+(defbase semver-satisfies?
+  [version constraint]
+  (semver/satisfies-constraint? version constraint))
 
 
 ;; Repoint a project's OWN references from version OLD to version NEW of the
@@ -476,12 +428,6 @@
         :created-namespaces (vec (:created-namespaces (meta mat-ids)))})))
 
 
-(defbase materialize-package-fns
-  [ns-root version fns]
-  (cr/record-effect! :db)
-  (:materialized (materialize-package-receipt! ctx ns-root version fns)))
-
-
 (defbase materialize-package-receipt
   [ns-root version fns]
   (cr/record-effect! :db)
@@ -500,10 +446,9 @@
 
 ;; `:install-package` is now a GRAPH fn-def — a `:fix` worklist loop
 ;; over resolve/install ops (see the `:_inst-*` chain in fns.edn). Its
-;; primitives are the base-fns `:missing-package-dependencies`,
-;; `:package-version-materialized?`, `:materialize-package-fns` and
-;; `:package-upsert-pin` from this file, and the `:resolve-package-version`
-;; fn-def (`:semver-pick` over the name's `:package-version` rows). The former Clojure `install-recursive!` /
+ ;; dependency check, completeness and pin facades compose scoped facts in the graph;
+;; materialize-package-receipt keeps its coupled write and provenance receipt.
+;; Version resolution composes semver-pick over package-version rows.
 ;; `install-one!` orchestration (guards, depth-first dep order,
 ;; short-circuit) lives in the graph where it is visible and per-step
 ;; composable.
@@ -548,14 +493,13 @@
    wins, another org's public name refuses, else insert under the
    REQUESTED `(pkg-name, version)`."
   [storage pkg-name version row origin-url origin]
-  (let [answer {:name pkg-name :version version}
-        holder (delay (shared/foreign-public-holder storage pkg-name))]
+  (let [holder (delay (shared/foreign-public-holder storage pkg-name))]
     (cond
       (seq (sp/query-entities storage :package-version {:name pkg-name :version version}))
-      answer
+      {:outcome "ok"}
 
       @holder
-      (assoc answer :error "name-taken" :holder (str @holder))
+      {:outcome "name-taken" :holder @holder}
 
       (shared/insert-or-exists!
         storage
@@ -569,30 +513,19 @@
                    :public? false
                    :origin (merge {:url origin-url} origin)
                    :published-at (java.time.Instant/now))))
-      answer
+      {:outcome "ok"}
 
       :else
-      (assoc answer :error "version-exists"))))
+      {:outcome "version-exists"})))
 
 
-(defbase mirror-store-package-version!
-  "Store a fetched remote `row` as the LOCAL `:package-version`
-   `(pkg-name, version)` — the REQUESTED key, never the row's own `:name` /
-   `:version` (a remote the caller controls must not choose which release
-   line its copy lands in: install needs no `:publish-packages`, and the
-   key is registry-wide UNIQUE) — idempotent (an existing row wins, nothing
-   is written) — and return `{:name :version}`, plus `:error` when refused:
-   `name-taken` (another org lists the name publicly, docs/MARKETPLACE.md
-   § 2 — a mirror may not join it any more than a publish may) or
-   `version-exists` (the key is held by a row this org cannot see). Run
-   under the package-name lock, like a publish. The only effect of the
-   mirror: the fetch, the decode and every other refusal are the
-   `:mirror-remote-package!` fn-def. The copy keeps the bundle and its
-   marketplace listing, is stamped with this org, is NEVER public (a
-   mirrored copy is not re-published from here), and remembers where it
-   came from: `:origin` = `{:url origin-url}` merged with the origin's
-   read-only signals (`:remote-package-card`; nil = a remote without them —
-   the url alone still marks the row as a mirror)."
+(defbase mirror-store-outcome
+  "Locked mirror write under the REQUESTED name/version, never the remote
+   row's release line. Keep the listing whitelist, org/public/origin stamps,
+   public-name ownership check and insert decision inside the name lock.
+   An existing visible row is a no-op; a foreign public name is refused;
+   an invisible uniqueness conflict returns version-exists. Only safe
+   outcome/holder metadata reaches graph response composition."
   [pkg-name version row origin-url origin]
   (cr/record-effect! :db)
   (let [storage (request/require-storage ctx)
@@ -654,21 +587,26 @@
                             :branch {:name branch-name})))
 
 
-(defbase create-owned-branch!
-  "Create branch `branch-name` off the request's branch, stamping the
-   caller as owner with the `owner` write-policy (the push-branch
-   convention) when a user is bound. Returns the row."
-  [branch-name]
+(defbase request-public-actor-facts
+  "Sanitized display candidates and trusted owner-presence fact."
+  []
+  (tc/current-public-actor-facts))
+
+
+(defbase create-request-branch!
+  "Create and publish under the current principal's actual owner identity."
+  [branch-name write-policy]
   (cr/record-effect! :db)
+  (when-not (contains? #{nil "owner"} write-policy)
+    (throw (ex-info "Invalid owned-branch policy" {:type :branches/invalid-write-policy})))
   (let [storage (request/require-storage ctx)
         uid (str (:user-id tc/*current-principal*))
-        requested-name branch-name]
-    ;; A fresh branch builds lazily; its committed epoch still needs a note.
+        requested-name branch-name
+        policy write-policy]
     (br-epoch/call-with-published-write!
       storage
       #(vs/create-branch! storage requested-name
-                          (cond-> {}
-                            (seq uid) (assoc :owner-id uid :write-policy "owner"))))))
+                          (cond-> {} (seq uid) (assoc :owner-id uid :write-policy policy))))))
 
 
 (defbase drop-orphan-anon-defs
@@ -727,24 +665,17 @@
 ;; the graph install and update flows bind. Returns the branch-id as
 ;; text; the `{:ok …}` envelope is graph composition
 ;; (`:set-package-pin` in fns.edn).
-(defbase package-upsert-pin
+(defbase package-pin-row
+  "Coupled pin write/install-stat boundary; receipt projection is graph policy."
   [pkg-name pkg-version]
   (cr/record-effect! :db)
   (cr/record-effect! :time)
-  (str (:branch-id (upsert-pin! ctx (request/require-storage ctx) pkg-name pkg-version))))
-
-
-(defbase package-pin-receipt
-  [pkg-name pkg-version]
-  (cr/record-effect! :db)
-  (cr/record-effect! :time)
-  (select-keys (upsert-pin! ctx (request/require-storage ctx) pkg-name pkg-version)
-               [:id :package-name :version :branch-id]))
+  (upsert-pin! ctx (request/require-storage ctx) pkg-name pkg-version))
 
 
 ;; `:list-installed-packages` remains graph composition. Uninstall is one
 ;; transaction boundary because its use check must precede the exact delete.
-(defbase remove-package-pin-apply
+(defbase remove-package-pin-outcome
   [pkg-name expected-id]
   (cr/record-effect! :db)
   (writer/call-with-write
@@ -753,27 +684,27 @@
       (let [pin (first (sp/query-entities storage :package-install
                                           {:branch-id (vs/current-branch-id storage)
                                            :package-name pkg-name}))
-            envelope {:ok true :package-name pkg-name :removed (boolean pin)}]
+            absent? (nil? pin)]
         (cond
           (not= (:id pin) expected-id)
-          {:ok false :reason "identity-changed" :http-status 409}
+          "identity-changed"
 
-          (nil? pin) envelope
+          absent? "absent"
 
           :else
           (let [version (first (sp/query-entities storage :package-version
                                                   {:name pkg-name :version (:version pin)}))]
             (if-not version
-              {:ok false :reason "package-source-unavailable" :http-status 409}
+              "package-source-unavailable"
               (let [ids (into #{} (map (fn [f]
                                          (ids/fn-id
                                            (version-qualified-ns (:ns-root version) (:version pin)
                                                                  (:namespace f))
                                            (:name f)))) (:fns version))]
                 (if (or (empty? ids) (pin-usage/in-use? storage ids))
-                  {:ok false :reason "package-in-use" :http-status 409}
+                  "package-in-use"
                   (do (sp/delete-entity storage :package-install (:id pin))
-                      envelope))))))))))
+                      "removed"))))))))))
 
 
 (defbase parse-graph-edn
@@ -794,10 +725,8 @@
    ;; taint-propagate: returns the parsed caller bundle (content passthrough),
    ;; same as core :parse-edn.
    :parse-graph-edn {:impl parse-graph-edn :taint-propagate? true}
-   :secret-path-args {:impl secret-path-args-fn :taint-propagate? true}
-   :strip-secret-paths {:impl strip-secret-paths-fn :taint-propagate? true}
    :encode-unreadable-kws encode-unreadable-kws-fn
-   :namespace-external-deps namespace-external-deps
+   :_namespace-external-dep-facts _namespace-external-dep-facts
    :current-org-id current-org-id
    :tenancy-active? tenancy-active?
    :graph-rows graph-rows
@@ -807,24 +736,25 @@
    :semver-compatible? semver-compatible?
    :withdraw-package-apply withdraw-package-apply
    ;; taint-propagate: answers one of the caller's own version strings.
-   :semver-pick {:impl semver-pick :taint-propagate? true}
-   :missing-package-dependencies {:impl missing-package-dependencies :taint-propagate? true}
-   :package-version-materialized? {:impl package-version-materialized? :taint-propagate? true}
+   :semver-components {:impl semver-components :taint-propagate? true}
+   :semver-satisfies? {:impl semver-satisfies? :taint-propagate? true}
+   :_registry-dependency-name {:impl _registry-dependency-name :taint-propagate? true}
+   :_registry-dependency-rows {:impl _registry-dependency-rows :taint-propagate? true}
+   :_package-materialization-facts {:impl package-materialization-facts :taint-propagate? true}
    :version-qualified-ns version-qualified-ns-fn
    :fork-package-fns {:impl fork-package-fns :taint-propagate? true}
-   :materialize-package-fns {:impl materialize-package-fns :taint-propagate? true}
    :materialize-package-receipt {:impl materialize-package-receipt :taint-propagate? true}
    :rewrite-refs-to-version {:impl rewrite-refs-to-version :taint-propagate? true}
-   :package-upsert-pin package-upsert-pin
-   :package-pin-receipt {:impl package-pin-receipt :taint-propagate? true}
-   :remove-package-pin-apply {:impl remove-package-pin-apply :taint-propagate? true}
+   :_package-pin-row {:impl package-pin-row :taint-propagate? true}
+   :_remove-package-pin-outcome {:impl remove-package-pin-outcome :taint-propagate? true}
    ;; taint-propagate: echoes the caller's pkg-name / version.
-   :mirror-store-package-version! {:impl mirror-store-package-version! :taint-propagate? true}
+   :_mirror-store-outcome {:impl mirror-store-outcome :taint-propagate? true}
    :remote-auth-value remote-auth-value
    ;; taint-propagate: a filtered sub-vector of the caller's own bundle.
    :drop-orphan-anon-defs {:impl drop-orphan-anon-defs :taint-propagate? true}
    :branch-by-name branch-by-name
-   :create-owned-branch! create-owned-branch!
+   :_request-public-actor-facts request-public-actor-facts
+   :_create-request-branch {:impl create-request-branch! :taint-propagate? true}
    ;; taint-propagate: the adopted names are the caller bundle's own :name
    ;; fields — content passthrough (SECRETS.md § T3), like the pruned names.
    :adopt-bundle-identities! {:impl adopt-bundle-identities! :taint-propagate? true}

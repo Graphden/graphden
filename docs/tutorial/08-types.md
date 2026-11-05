@@ -140,13 +140,16 @@ anonymous list-type-row pointing at `:int`.
 ## Unions — "one of these"
 
 ```edn
-{:name :json-value
- :union [:null :bool :int :numeric :text [:list :json-value] :jsonb]}
+{:name :json-scalar
+ :union [:null :bool :int :numeric :text]}
 ```
 
 `:union` writes a fn-row with `:constraint = [:union T1 T2 …]`.
-The type-checker accepts a value as a `:json-value` iff it
-satisfies at least one branch.
+The type-checker accepts a value as a `:json-scalar` iff it
+satisfies at least one branch. Type aliases must have finite expansion:
+self-recursive definitions such as a union containing `[:list :itself]`
+are rejected. For arbitrary JSON data use `:jsonb`; for a known nested
+shape compose finite records and lists.
 
 Inline:
 

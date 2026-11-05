@@ -120,7 +120,8 @@ exactly the affected tests.
 ## What we glossed over
 
 - Statuses are ordinary execution rows (Lesson 15's history) with
-  the standard retention sweep — an untouched suite fades to grey
-  after a week; re-run to refresh.
+  the standard retention sweep — successful rows expire after seven days,
+  failed rows after thirty. A test returns to grey when no matching run
+  remains; re-run to refresh.
 - The HTTP face (`POST /api/tests/run`, `GET /api/tests/status`) and
   the auto-run internals — [TESTS.md](../TESTS.md).

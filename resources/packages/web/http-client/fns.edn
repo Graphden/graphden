@@ -43,9 +43,31 @@
           :headers :text-map
           :body :text}}
 
-  {:name :trace-headers
-   :description "The cross-service trace header for an outbound call — `{\"X-Graphden-Trace\" \"<trace-id>;<execution-id>\"}` when this run is a persisted execution, `{}` otherwise. `:service-get` / `:service-post` merge it in, so the service that answers records the request as an execution linked to this one (docs/EXECUTION.md § Tracing across services)."
+  {:name :_current-execution-trace
+   :description "Snapshot the dynamically bound execution identity, without header policy."
    :args {}
+   :return-type :keyword-map}
+
+  {:name :_trace-execution-id
+   :parent :get
+   :args {:coll :_current-execution-trace :key {:value :id} :default nil}}
+
+  {:name :_trace-header-value
+   :parent :str
+   :args {:parts [{:parent :coalesce
+                   :args {:value {:parent :get
+                                  :args {:coll :_current-execution-trace
+                                         :key {:value :trace-id} :default nil}}
+                          :default :_trace-execution-id}}
+                  ";" :_trace-execution-id]}}
+
+  {:name :trace-headers
+   :description "Outbound cross-service trace headers. A persisted execution supplies X-Graphden-Trace as trace-id;execution-id, falling back to the execution id for the root trace. Without an execution, returns an empty map."
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_trace-execution-id}}
+          :then {:parent :zipmap
+                 :args {:keys ["X-Graphden-Trace"] :vals [:_trace-header-value]}}
+          :else {:value {}}}
    :return-type :text-map}
 
   {:name :http-request

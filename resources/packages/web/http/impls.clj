@@ -16,8 +16,8 @@
    encode TRIGGERS (compressible pattern, min size, brotli quality)
    as graph-visible bound slots. The base-fns here are single library
    calls / boundary coercions (`:gzip-bytes`, `:brotli-bytes`,
-   `:utf8-bytes`, `:byte-count`, `:header-get`) plus one
-   self-contained RFC-negotiation parse (`:pick-encoding`)."
+   `:utf8-bytes`, `:byte-count`) plus Accept-Encoding token parsing.
+   Header lookup fallback and encoding preference are graph policy."
   (:require
     [clojure.java.io :as io]
     [graphden.crud.fn-execution.trace :as trace]
@@ -97,12 +97,6 @@
     resp))
 
 
-(defn- header-ci
-  ^String [headers ^String header-name]
-  (or (get headers (String/.toLowerCase header-name))
-      (get headers header-name)))
-
-
 (defn- encoding-acceptable?
   "True iff `coding` (\"br\" / \"gzip\") is offered in the Accept-Encoding
    header with a NON-zero q-value. `br;q=0` explicitly forbids brotli
@@ -149,25 +143,9 @@
   (stringify-headers response))
 
 
-(defbase header-get
-  "Case-insensitive-ish header lookup — tries the lower-cased name
-   (Ring convention) first, then the exact spelling. nil when absent."
-  [headers header-name]
-  (header-ci headers header-name))
-
-
-(defbase pick-encoding-fn
-  "Content negotiation over `Accept-Encoding` (RFC 7231 §5.3) —
-   returns \"br\" when brotli is acceptable, else \"gzip\" when gzip
-   is, else \"identity\". q=0 forbids a coding; tokens are
-   case-insensitive. Single self-contained parse — the DECISION to
-   encode (and with what thresholds) lives in the graph."
-  [headers]
-  (let [h (header-ci headers "Accept-Encoding")]
-    (cond
-      (encoding-acceptable? h "br")   "br"
-      (encoding-acceptable? h "gzip") "gzip"
-      :else                           "identity")))
+(defbase encoding-acceptable-fn
+  [header coding]
+  (encoding-acceptable? header coding))
 
 
 (defbase utf8-bytes-fn
@@ -307,8 +285,7 @@
    :http-stop http-stop
    :realize-request-body {:impl realize-request-body :taint-propagate? true}
    :stringify-response-headers {:impl stringify-response-headers :taint-propagate? true}
-   :header-get header-get
-   :pick-encoding pick-encoding-fn
+   :_encoding-acceptable? {:impl encoding-acceptable-fn :taint-propagate? true}
    ;; Body-encoding chain — every step is a transform OF the body it is
    ;; handed (bytes / compressed bytes / a length, like `:str-len`), so a
    ;; secret-typed body stays marked through it (SECRETS.md § T3).

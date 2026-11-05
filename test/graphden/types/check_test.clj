@@ -1680,6 +1680,21 @@
           "diagnostic names the offending slot"))))
 
 
+(deftest optional-owned-slots-do-not-relax-inherited-required-slots
+  (registry/record-rich-types! :required-flag
+                               {:args {:flag :bool} :return-type :bool})
+  (check/check-fn-def! {:name :extra-optional :parent :required-flag
+                        :args {:flag true :extra {:type :bool :required false}}})
+  (is (= {:extra :bool} (:args (registry/rich-type-of :extra-optional))))
+  (doseq [binding [{:type :bool :required false}
+                   {:as :flag :type :bool :required false}
+                   {:as :extra :type :bool :required false}]]
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"(?i)widen"
+          (check/check-fn-def! {:name :optional-inherited :parent :required-flag
+                                :args {:flag binding}})))))
+
+
 (deftest binding-required-true-accepted-as-narrowing
   (testing "binding with :required true is accepted — narrowing optional → required is allowed"
     (registry/record-rich-types! :base-with-opt

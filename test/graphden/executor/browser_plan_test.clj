@@ -435,7 +435,7 @@
          base-defs (select-keys (:base-fn-defs loaded)
                                 [:const :if :list :mod :get :equal? :nil? :coalesce :count :map :filter :take :concat
                                  :vals :group-by :partition-by :sort-by :str :str-join :str-starts-with? :str-lower :str-trim
-                                 :blank? :non-blank? :call
+                                 :blank? :non-blank? :call :try :is-a?
                                  :str-contains? :str-clip :hiccup :zipmap :assoc :add :lte])
          type-defs (remove #(or (:parent %) (:parents %)) (:fn-defs loaded))
          primitives (into (vec type-defs) (map (fn [[n d]] (assoc d :name n))) base-defs)]
@@ -530,6 +530,112 @@
           "Target-local bindings never create stale captured slot routes")
       (is (some #(= "caption" (:name %)) translation)
           "Unrelated captures retain their slot translation"))))
+
+
+(deftest existing-plans-without-lambda-slots-retain-ordinary-capture-behavior
+  (let [{:keys [graph impls ids]} (map-fixture)
+        plan (browser/export-plan graph impls {:captured-view (:captured-view ids)}
+                                  {:allow-fn? (constantly true)})
+        old-plan (letfn [(copy-plan
+                           [value]
+                           (cond
+                             (map? value)
+                             (let [node (into {} (map (fn [[key item]] [key (copy-plan item)])) value)]
+                               (if (= "closure" (:kind node)) (dissoc node :lambdaSlots) node))
+                             (sequential? value) (mapv copy-plan value)
+                             :else value))]
+                   (copy-plan plan))
+        results (browser-results old-plan [{:entry :captured-view
+                                            :inputs {:theme false :rows [nil "next"]}}])]
+    (is (not-any? #(and (map? %) (contains? % :lambdaSlots)) (tree-seq coll? seq old-plan)))
+    (is (= [false [[nil false] ["next" false]]]
+           (browser/decode-value (:value (first results)))))))
+
+
+(deftest typed-owned-forwarding-preserves-independent-public-readers
+  (let [{:keys [graph impls ids]}
+        (map-fixture
+          [{:name :first-key :parent :get
+            :args {:coll {:as :first} :key {:value :value} :default nil}}
+           {:name :second-reader :parent :const :args {:value {:as :second}}}
+           {:name :second-key :parent :get
+            :args {:coll :second-reader :key {:value :value} :default nil}}
+           {:name :root :parent :list
+            :args {:items [:first-key :second-key]
+                   :first {:type :keyword-map} :second {:type :keyword-map}}}
+           {:name :once-renamed :parent :root
+            :args {:first {:as :left} :second {:as :right}}}
+           {:name :twice-renamed :parent :once-renamed
+            :args {:left {:as :left-input} :right {:as :right-input}}}])]
+    (assert-differential!
+      graph impls ids
+      [{:entry :root :inputs {:first {:value 1} :second {:value 2}} :expected [1 2]}
+       {:entry :root :inputs {:first {:value nil} :second {:value false}} :expected [nil false]}
+       {:entry :twice-renamed :inputs {:left-input {:value 3} :right-input {:value 4}} :expected [3 4]}])))
+
+
+(deftest typed-owned-slots-forward-without-polluting-sibling-predicates
+  (let [{:keys [graph impls ids]}
+        (map-fixture
+          [{:name :id-valid :parent :is-a?
+            :args {:value {:as :id} :type {:value :text}}}
+           {:name :revision-reader :parent :const :args {:value {:as :revision}}}
+           {:name :revision-valid :parent :is-a?
+            :args {:value :revision-reader :type {:value :int}}}
+           {:name :body :parent :list :args {:items [:id-valid :revision-valid]}}
+           {:name :error :parent :const :args {:value {:value :error}}}
+           {:name :root :parent :try
+            :args {:body :body :on-throw :error :id {:type :text} :revision {:type :int}}}])
+        lookup (assoc (lookups/build-lookups graph) :base-fns impls)
+        compiled (eager/compile-subset lookup {} (map :id (:fns graph)))
+        args (runtime/translate-named-args (:root ids) {:id "identity" :revision 1} lookup)]
+    (is (= [true true] ((get compiled (:root ids)) args {})))
+    (is (= #{"id" "revision"}
+           (into #{} (keep (fn [fs]
+                             (when (= (:fn-id fs) (:root ids))
+                               (:name (some #(when (= (:id %) (:slot-id fs)) %) (:slots graph))))))
+                 (:fn-slots graph))))))
+
+
+(deftest lambda-arguments-shadow-already-populated-shared-reader-slots
+  (let [{:keys [graph impls ids]}
+        (map-fixture
+          [{:name :body-action :parent :get
+            :args {:coll {:as :body} :key {:value :action} :default nil}}
+           {:name :commands :parent :get
+            :args {:coll {:as :body} :key {:value :commands} :default []}}
+           {:name :caption-reader :parent :const :args {:value {:as :caption}}}
+           {:name :inner :parent :list :lambda-params [:body]
+            :args {:items [:body-action :caption-reader]}}
+           {:name :renamed :parent :inner :lambda-params [:input]
+            :args {:body {:as :input}}}
+           {:name :twice-renamed :parent :renamed :lambda-params [:item]
+            :args {:input {:as :item}}}
+           {:name :mapped :parent :map :args {:func :inner :coll :commands}}
+           {:name :mapped-renamed :parent :map :args {:func :twice-renamed :coll :commands}}
+           {:name :root :parent :list
+            :args {:items [:body-action :caption-reader :mapped :body-action]
+                   :caption false}}
+           {:name :renamed-root :parent :list
+            :args {:items [:body-action :caption-reader :mapped-renamed :body-action]
+                   :caption false}}])]
+    (let [control (with-redefs-fn
+                    {#'eager/with-hof-lambda-args (fn [fa args _] (merge fa args))}
+                    #(jvm-results graph impls ids
+                                  [{:entry :renamed-root
+                                    :inputs {:body {:action "batch" :commands [{:action "reparent"}]}}}]))]
+      (is (= ["batch" false [["batch" false]] "batch"]
+             (browser/decode-value (:value (first control))))
+          "Pruning without per-call slot writes leaves the captured source-name stale"))
+    (assert-differential!
+      graph impls ids
+      (vec (for [entry [:root :renamed-root]
+                 [action commands expected] [["batch" [{:action "reparent"} {:action "variation"}]
+                                              [["reparent" false] ["variation" false]]]
+                                             ["outer" [{:action nil} {:action false}]
+                                              [[nil false] [false false]]]]]
+             {:entry entry :inputs {:body {:action action :commands commands}}
+              :expected [action false expected action]})))))
 
 
 (deftest nested-filter-captures-survive-an-intermediate-count-test

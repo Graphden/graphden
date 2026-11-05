@@ -102,7 +102,7 @@
 
 
 ;; =============================================================================
-;; :usage-all-org-stats — the cross-org authorization gate
+;; :_usage-all-org-stats-raw — the cross-org authorization gate
 ;; =============================================================================
 
 (deftest cross-org-stats-are-refused-to-a-tenant-context
@@ -112,10 +112,10 @@
     ;; proves the guard branch ran: the unguarded call returns nil when
     ;; there is no pool, so the two arms are distinguishable even here.
     (binding [tc/*current-org* "acme"]
-      (is (= [] (call :usage-all-org-stats {:days 7 :limit 10})))))
+      (is (= [] (call :_usage-all-org-stats-raw {:days 7 :limit 10})))))
   (testing "the platform tier reaches the unguarded read"
     (binding [tc/*current-org* tc/public-org]
-      (is (nil? (call :usage-all-org-stats {:days 7 :limit 10}))))))
+      (is (nil? (call :_usage-all-org-stats-raw {:days 7 :limit 10}))))))
 
 
 ;; =============================================================================
@@ -128,7 +128,7 @@
     ;; `some?` guard both impls would hand nil straight to the storage
     ;; layer on every malformed URL — the ctx here has no storage at
     ;; all, so reaching it would throw.
-    (is (nil? (call :get-execution {:id nil})))
+    (is (nil? (call :_execution-read-facts {:id nil})))
     (is (nil? (call :cancel-execution! {:id nil})))))
 
 

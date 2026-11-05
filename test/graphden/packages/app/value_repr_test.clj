@@ -186,6 +186,24 @@
                                     {:value "plain" :fn-id nil})))))
 
 
+(deftest tabulate-records-projection-test
+  (let [run #(exec/execute-by-name harness/*context* "tabulate-records"
+                                   {:records %1 :columns %2})
+        id #uuid "123e4567-e89b-12d3-a456-426614174000"]
+    (is (= [["a" "1" "true" "word" (str id) "" "{\"deep\":true}" "[1,2]" ""]
+            ["b" "2.5" "false" "other" "" "" "" "" ""]]
+           (run [{:s "a" :n 1 :b true :k :ns/word :id id :nil nil
+                  :m {:deep true} :xs [1 2]}
+                 {:s "b" :n 2.5 :b false :k :other}]
+                [:s :n :b :k :id :nil :m :xs :missing])))
+    (is (= [["2" "1" "2"] ["4" "3" "4"]]
+           (run [{:a 1 :b 2} {:a 3 :b 4}] [:b :a :b])))
+    (is (vector? (run [] [:a])))
+    (is (every? vector? (run [{:a 1} {:a 2}] [:a])))
+    (is (= [] (run [] [:a])))
+    (is (= [[] []] (run [{:a 1} {:a 2}] [])))))
+
+
 (deftest record-list-table-repr-test
   ;; Self-contained: sync the shipped registry value explicitly — the
   ;; golden template DB is cached per PACKAGE-NAME set (not content)
@@ -356,7 +374,8 @@
                              [(node "#abc") (node "#abc") (node "wrong")
                               (assoc-in (node "#abc") [:data :secretRef] true)])
                 :edges []}
-        rendered (vrepr/annotate-literals harness/*context* values graph)
+        rendered (exec/execute-by-name harness/*context* "_layout-literal-reprs-apply"
+                                       {:elements values :graph graph})
         [first-node second-node invalid-node secret-node] (drop 100 (:nodes rendered))]
     (is (every? #(nil? (get-in % [:data :literalRepr])) (take 100 (:nodes rendered)))
         "same-named unrelated types neither render nor consume the preview budget")

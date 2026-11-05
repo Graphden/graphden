@@ -136,25 +136,6 @@
 
 
 ;; ============================================================================
-;; extract-entity-params
-;; ============================================================================
-
-(deftest extract-entity-params-test
-  (testing "prefers reitit :path-params when present"
-    (is (= {:type-str "fn" :id-str "x" :entity-type :fn}
-           (req/extract-entity-params {:path-params {:type "fn" :id "x"}
-                                       :uri "/ignored"}))))
-
-  (testing "falls back to URI parsing when :path-params absent"
-    (is (= {:type-str "slot" :id-str "y" :entity-type :slot}
-           (req/extract-entity-params {:uri "/api/entities/slot/y"}))))
-
-  (testing "no path-params and no recognisable uri → all nil"
-    (is (= {:type-str nil :id-str nil :entity-type nil}
-           (req/extract-entity-params {})))))
-
-
-;; ============================================================================
 ;; read-json-body
 ;; ============================================================================
 

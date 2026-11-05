@@ -9,6 +9,7 @@
     [graphden.editor.component-config :as config]
     [graphden.editor.component-selection :as selection]
     [graphden.editor.component-templates :as templates]
+    [graphden.editor.components :as components]
     [graphden.executor.browser-contracts :as contracts]
     [graphden.executor.browser-snapshot :as snapshot]
     [graphden.executor.browser-source :as source]
@@ -190,25 +191,10 @@
       (update :functions #(mapv (fn [row] (-> row (update :id str) (update :namespace-id str))) %))))
 
 
-(defn failure-response
-  "Classify a rejected creation without returning exception text or data."
+(defn failure-facts
+  "Sanitize creation refusals before the graph constructs their public response."
   [error]
-  (let [{:keys [http-status type]} (ex-data error)
-        status (or http-status
-                   (cond
-                     (= type :authz/forbidden) 403
-                     (= type :quota/entity-limit) 429
-                     (contains? #{:browser-plan/unsupported :storage-error/candidate-limit
-                                  :storage-error/bounded-query-unsupported} type) 422
-                     :else 500))
-        reason (case status
-                 400 "The UI graph creation request is invalid. Refresh and try Create again."
-                 403 "Choose an available writable namespace for your UI graphs."
-                 409 "The UI graph preview has changed. Refresh and try Create again."
-                 422 "This UI graph template is unavailable. Choose another template or try again later."
-                 429 "Your plan's graph limit has been reached. Free capacity or upgrade your plan before creating UI graphs."
-                 "UI graphs were not created. Try Create again after refreshing.")]
-    {:ok false :committed false :reason reason :http-status status}))
+  (components/failure-facts error))
 
 
 (defn preview
@@ -227,7 +213,7 @@
                                                      (update :root-id str) (assoc :expected-state (:expected-state prepared)))
                                :manifest (wire-manifest (:manifest prepared))}))))
     (catch Exception error
-      (failure-response error))))
+      (failure-facts error))))
 
 
 (defn- create!
@@ -266,8 +252,7 @@
       (router-epoch/note-graph-epoch-validated! storage)
       result
       (catch Exception _
-        (assoc result :publication-warnings
-               [{:reason "Your UI graphs were created. Refresh the editor to reload their derived state."}])))))
+        (assoc result :publication-incomplete? true)))))
 
 
 (defn apply!
@@ -289,5 +274,5 @@
                                                  (refuse! :stale-preview 409))
                                                (create! storage prepared)))))
                      (catch Exception error
-                       (failure-response error)))]
+                       (failure-facts error)))]
         (if (:committed result) (publish ctx storage result) result)))))

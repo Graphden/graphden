@@ -1,34 +1,9 @@
 (ns graphden.crud.value-form
-  "Resolvers + the form renderer behind the type-aware value-form
-   system. The endpoint itself (parse → validate → apply) is the
-   `:value-form-handler` graph fn-def in `app/forms/fns.edn`; its
-   base-fns (`app/forms/impls.clj`) call into this namespace.
-
-   `/api/value-form` answers: \"for the value bound at this
-   binding / fn-slot, give me the editor form\". The flow:
-
-   - `resolve-slot-effective-type` — what type is being edited.
-   - `resolve-form` — pure structural classifier:
-     type -> {:kind :leaf/:record/:list/:union …}.
-   - `pick-form-fn` — leaf type -> form-fn, via the shared
-     `:_value-form-registry` list matched by `subtype?`.
-   - the chosen form-fn is a `:const` holding a static hiccup
-     control template; it is executed and wrapped in a
-     `data-form-root` div carrying the binding ids.
-
-   The endpoint returns `{:ok true :form <hiccup> :value <current>}`;
-   the editor renders the hiccup and fills `:value` into the
-   controls. Composite types recurse: `resolve-form` classifies a
-   slot as `:leaf` / `:record` / `:list` / `:union` and the renderer
-   builds nested sub-forms (per-field, per-element, per-branch). Two
-   bounded fallbacks to a raw JSON editor remain by design: a
-   composite (record / list) branch nested inside a union, and any
-   type past the depth-12 recursion guard.
-
-   Sits alongside `graphden.crud.type-check` in the crud.* layer."
+  "Storage resolvers and canonical type/registry boundaries for value forms.
+   The descriptor tree, depth policy, control attributes, labels and recursive
+   record/union assembly live in app.forms fn-defs. Registry matching uses the
+   canonical subtype relation; literal fitting shares the type checker."
   (:require
-    [cheshire.core :as json]
-    [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.crud.entities.list :as entity-list]
     [graphden.crud.type-check :as tc]
@@ -397,18 +372,11 @@
                        entity-list/impl-visible?))))
 
 
-(defn slot-type-provenance
-  "4-tier resolution chain + inheritance chain for the type at a
-   `(fn-id, slot-id, binding-id)` edit site. Mirrors the editor's
-   `slotTypeProvenance`. Returns nil for list-item rows (`:item-id`
-   present) — their type comes from nav / element logic, not the
-   slot chain. Returns nil for unresolved sites (no resolvable
-   slot / missing `:type-fn-id`).
-
-   When only `:binding-id` is supplied, `:fn-id` and `:slot-id` are
-   resolved off the binding row — same fallback chain
-   `resolve-slot-effective-type` uses, so callers can pass just
-   `{:binding-id …}` and get a valid result."
+(defn slot-type-provenance-facts
+  "Authorized override, unified, reference-return and declared-slot facts plus
+   the inheritance chain. Nil for list items, unresolved sites or concealed
+   composition. Binding-only sites share the effective-type fallback and one
+   batched ancestry lookup; the caller may order facts for presentation."
   [storage {:keys [fn-id slot-id binding-id item-id]}]
   (when-not item-id
     (let [bnd      (when binding-id (sp/read-entity storage :binding binding-id))
@@ -445,22 +413,22 @@
                   ;; Structural keys only — the user-facing tier prose
                   ;; lives graph-side (`:_provenance-tier-labels` in
                   ;; app/editor-provenance).
-                  tiers        [{:key :override
-                                 :type (type-of-fn-id storage override-fid)
+                  facts        {:override
+                                {:type (type-of-fn-id storage override-fid)
                                  :source (when override-fid
                                            (if (:type-override-fn-id bnd)
                                              {:fn-name (:name own-fn) :fn-id fn-id}
                                              (select-keys override [:fn-name :fn-id])))}
-                                {:key :unified
-                                 :type unified
+                                :unified
+                                {:type unified
                                  :source (when (and (some? unified) (:name own-fn))
                                            {:fn-name (:name own-fn) :fn-id fn-id})}
-                                {:key :ref-return
-                                 :type (type-of-fn-id storage (:return-type-fn-id ref-fn))
+                                :ref-return
+                                {:type (type-of-fn-id storage (:return-type-fn-id ref-fn))
                                  :source (when (:name ref-fn)
                                            {:fn-name (:name ref-fn) :fn-id ref-fid})}
-                                {:key :slot
-                                 ;; The same tier-3 rule the resolver applies —
+                                :slot
+                                {;; The same tier-3 rule the resolver applies —
                                  ;; a marker stored as its inner reads as the
                                  ;; marker here too.
                                  :type (let [row-rich (type-fn-rich storage (:type-fn-id slot))
@@ -470,57 +438,29 @@
                                          (if (degraded-projection? declared row-rich)
                                            declared
                                            (type-of-fn-id storage (:type-fn-id slot))))
-                                 :source declaring}]
-                  winner       (some (fn [t] (when (some? (:type t)) (:key t))) tiers)]
-              {:winner winner
-               :tiers tiers
+                                 :source declaring}}]
+              {:facts facts
                :inheritance-chain (or chain [])})))))))
 
 
-(defn resolve-form
-  "Classify a structural type into a form descriptor tree. Pure:
-   alias-resolves the input, desugars variants, then dispatches on
-   structure:
-     record  -> {:kind :record :type T :fields [{:name :type :form} …]}
-     list    -> {:kind :list   :type T :element {…}}
-     union   -> {:kind :union  :type T :branches [{…} …]}
-     leaf    -> {:kind :leaf   :type T}   (primitive / refinement /
-                fn-type / unknown — the endpoint picks ONE form-fn)
-   Every descriptor carries `:type` — the alias-resolved structural
-   type it classified — so `build-form` can try an exact-registry
-   dispatch (a registered form-fn for the WHOLE composite type)
-   before structurally decomposing it.
-   `depth` guards a pathologically deep / recursive record type."
-  ([t] (resolve-form t 0))
-  ([t depth]
-   ;; A text alias (`"text"` — the editor's "as:" chooser sends the type
-   ;; NAME; older wire shapes did too) is the keyword it names. Left as a
-   ;; string it slid past `subtype?` into the registry's structural rows.
-   (let [t  (if (string? t) (keyword t) t)
-         s0 (types/resolve-alias t)
-         s  (if (and (vector? s0) (= :variant (first s0)))
-              (types/desugar-variant s0)
-              s0)]
-     (cond
-       (> depth 12)            {:kind :leaf :type s}
-       (types/union-type? s)   {:kind :union
-                                :type s
-                                :branches (mapv (fn [b]
-                                                  {:type b
-                                                   :form (resolve-form b (inc depth))})
-                                                (types/union-members s))}
-       (types/list-type? s)    {:kind :list
-                                :type s
-                                :element (resolve-form (types/list-elem s)
-                                                       (inc depth))}
-       (types/record-type? s)  {:kind :record
-                                :type s
-                                :fields (mapv (fn [[k v]]
-                                                {:name k
-                                                 :type v
-                                                 :form (resolve-form v (inc depth))})
-                                              s)}
-       :else                   {:kind :leaf :type s}))))
+(defn slot-type-provenance
+  "Native presentation of the same authorized type facts used by the graph."
+  [storage parsed]
+  (when-let [{:keys [facts inheritance-chain]} (slot-type-provenance-facts storage parsed)]
+    (let [tiers (mapv #(assoc (get facts %) :key %) [:override :unified :ref-return :slot])]
+      {:winner (some (fn [tier] (when (some? (:type tier)) (:key tier))) tiers)
+       :tiers tiers
+       :inheritance-chain inheritance-chain})))
+
+
+(defn canonical-form-type
+  "Normalize legacy text aliases and canonical variants at the type boundary.
+   Descriptor construction and its depth policy live in app.forms."
+  [t]
+  (let [resolved (types/resolve-alias (if (string? t) (keyword t) t))]
+    (if (and (vector? resolved) (= :variant (first resolved)))
+      (types/desugar-variant resolved)
+      resolved)))
 
 
 ;; =============================================================================
@@ -634,20 +574,10 @@
 
 
 ;; =============================================================================
-;; Form assembly — leaf controls (with refinement awareness) + composites
+;; Canonical refinement interpretation and literal fitting
 ;; =============================================================================
 
-(defn- merge-attrs
-  "Merge `extra` into the attrs map of a `[tag attrs …]` hiccup vector.
-   Inserts an attrs map when the control has none."
-  [hiccup extra]
-  (cond
-    (not (vector? hiccup))           hiccup
-    (map? (second hiccup))           (assoc hiccup 1 (merge (second hiccup) extra))
-    :else                            (into [(first hiccup) extra] (rest hiccup))))
-
-
-(defn- enum-of
+(defn enum-of
   "If `t` is a closed-enum refinement `[:refine base [:in members]]`,
    return `{:base base :members [...]}`, else nil."
   [t]
@@ -679,7 +609,7 @@
           {})))))
 
 
-(defn- numeric-bounds
+(defn numeric-bounds
   "`{:min :max}` for a numeric refinement, or nil."
   [t]
   (when (types/refine-type? t)
@@ -688,61 +618,7 @@
         (not-empty (collect-bounds (types/refine-constraint t) (= base :int)))))))
 
 
-(defn- build-enum-control
-  "A `<select>` for a closed-enum type. Keyword members are rendered
-   colon-prefixed so the option value round-trips AS a keyword. `id`
-   (when non-nil) links the control to its record-field `<label>`."
-  [path id {:keys [base members]}]
-  (let [kw?  (= base :keyword)
-        opts (mapv (fn [m]
-                     (let [s (str m)
-                           v (if (and kw? (not (str/starts-with? s ":")))
-                               (str ":" s) s)]
-                       ["option" {"value" v} v]))
-                   members)]
-    (into ["select" (cond-> {"class" "arg-value-edit-input"
-                             "data-form-field" ""
-                             "data-field-kind" "enum"}
-                      (seq path) (assoc "data-field-path" path)
-                      id         (assoc "id" id))]
-          opts)))
-
-
-(defn- form-fn-control
-  "Execute form-fn `fn-name` and enrich its control hiccup with the
-   collection path / label id, plus `min`/`max` when `t` is a bounded
-   numeric refinement. Shared by the leaf dispatch and the
-   exact-registry composite tier."
-  [ctx fn-name t path id]
-  (let [control (executor/execute-by-name ctx fn-name {})
-        bounds  (numeric-bounds t)
-        ;; Native HTML `min`/`max` give the browser affordance; the
-        ;; live type-check (`validateLiteralAgainstType`) stays the
-        ;; source of truth, so no `data-field-min/max` mirror.
-        extra   (cond-> {"data-form-type" (json/generate-string t)}
-                  (seq path)    (assoc "data-field-path" path)
-                  id            (assoc "id" id)
-                  (:min bounds) (assoc "min" (:min bounds))
-                  (:max bounds) (assoc "max" (:max bounds)))]
-    (if (seq extra) (merge-attrs control extra) control)))
-
-
-(defn- build-leaf-form
-  "Hiccup control for a leaf (non-composite) type:
-     - closed enum  -> a `<select>` of its members,
-     - otherwise    -> the registry-picked form-fn's control, enriched
-       with `min`/`max` when the type is a bounded numeric refinement.
-   `path` (when non-empty) is threaded onto the control as
-   `data-field-path` so a composite field collects to the right key;
-   `id` (when non-nil) links it to its record-field `<label>`."
-  [ctx t path id]
-  (if-let [enum (enum-of t)]
-    (build-enum-control path id enum)
-    (form-fn-control ctx (or (pick-form-fn (registry-pairs ctx) t) "_form-json")
-                     t path id)))
-
-
-(defn- value-fits?
+(defn value-fits?
   "True when `value` plausibly belongs to type `t` — used to pick a
    union's initially-active branch. Mirrors the binding type-guard:
    primitive subtype plus a lenient refinement check. A nil value
@@ -756,115 +632,3 @@
              (let [r (types-lit/literal-satisfies-refinement?
                        value (types/refine-constraint t))]
                (or (true? r) (= :unknown r)))))))
-
-
-(defn- type-label
-  "Short human label for a union branch's `<option>` — a primitive's
-   name, a refinement's BASE (not the bare word \"refine\"), `[elem]`
-   for a list, `record` / `fn` for composites."
-  [t]
-  (cond
-    (keyword? t)           (name t)
-    (types/refine-type? t) (type-label (types/refine-base t))
-    (types/list-type? t)   (str "[" (type-label (types/list-elem t)) "]")
-    (types/fn-type? t)     "fn"
-    (map? t)               "record"
-    (and (vector? t) (keyword? (first t))) (name (first t))
-    :else                  (pr-str t)))
-
-
-(defn- render-template
-  "Execute one of the `app.forms` composite structure templates
-   (`:_form-record-group` / `:_form-record-field` / `:_form-union-*`)
-   — the presentational shells live in the GRAPH (restyle them there,
-   like the leaf controls); this assembler computes the parts and hands
-   them in."
-  [ctx template-name args]
-  (executor/execute-by-name ctx template-name args))
-
-
-(defn build-form
-  "Recursively assemble the form hiccup for a `resolve-form` descriptor.
-   `path` is the dotted `data-field-path` prefix; `id` (when non-nil)
-   is the control id a record-field `<label for>` points at; `value`
-   is the current value at this path — used to pick a union's active
-   branch.
-
-   A record becomes a labelled fieldset. A union becomes a branch
-   `<select>` plus one sub-form per branch — the backend pre-selects
-   the branch the current value fits, the editor swaps on change; a
-   union branch that is itself composite falls back to a JSON editor.
-   Lists fall back to a JSON editor (items are edited via
-   `/api/sequence/*`).
-
-   A COMPOSITE type with an exact registry row skips decomposition
-   entirely — the registered form-fn IS its editor (e.g.
-   `hiccup-node` -> the EDN textarea instead of a 6-branch union).
-
-   The recursion + type logic (branch fit, labels, bounds) live HERE;
-   the presentational wrappers are graph templates (`render-template`)."
-  [ctx desc path id value]
-  (if-let [fn-name (and (not= :leaf (:kind desc))
-                        (exact-form-fn (registry-pairs ctx) (:type desc)))]
-    (form-fn-control ctx fn-name (:type desc) path id)
-    (case (:kind desc)
-      :record
-      (render-template
-        ctx "_form-record-group"
-        {:fields
-         (mapv (fn [f]
-                 (let [fname  (name (:name f))
-                       fp     (if (str/blank? path) fname (str path "." fname))
-                       ;; A nested record / union is a group — its
-                       ;; label is a heading, not a `<label for>`.
-                       group? (boolean (#{:record :union} (:kind (:form f))))
-                       fid    (when-not group? (str "vf-" fp))
-                       fval   (when (map? value)
-                                (if (contains? value (keyword fname))
-                                  (get value (keyword fname))
-                                  (get value fname)))]
-                   (render-template
-                     ctx "_form-record-field"
-                     {:field-id fid
-                      :field-name fname
-                      :control (build-form ctx (:form f) fp fid fval)})))
-               (:fields desc))})
-
-      :union
-      (let [branches (:branches desc)
-            active   (or (first (keep-indexed
-                                  (fn [i br] (when (value-fits? value (:type br)) i))
-                                  branches))
-                         0)
-            options  (map-indexed
-                       (fn [i br]
-                         ["option" (cond-> {"value" (str i)}
-                                     (= i active) (assoc "selected" "selected"))
-                          (type-label (:type br))])
-                       branches)
-            select   (render-template ctx "_form-union-select"
-                                      {:options (vec options)})
-            ;; Branch controls share `path` and carry no `id` — only the
-            ;; active (visible) branch is collected. A composite branch
-            ;; falls back to a JSON editor.
-            branch-divs
-            (map-indexed
-              (fn [i br]
-                (render-template
-                  ctx "_form-union-branch"
-                  {:index (str i)
-                   :active? (= i active)
-                   :control (build-leaf-form ctx
-                                             (if (= :leaf (:kind (:form br))) (:type br) :any)
-                                             path nil)}))
-              branches)]
-        (render-template ctx "_form-union-wrap"
-                         {:select select
-                          :branches (vec branch-divs)
-                          :active (str active)}))
-
-      :list
-      (build-leaf-form ctx :any path id)
-
-      ;; :leaf
-      (build-leaf-form ctx (:type desc) path id))))

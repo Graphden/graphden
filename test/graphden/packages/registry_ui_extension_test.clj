@@ -76,9 +76,9 @@
                                      :branch-id (str (vs/current-branch-id storage))
                                      :org "public"}})
           (let [prepared (export-fixture/prepare! (:ctx rf/*bootstrap*) root-id)
-                failure components/failure-response
+                failure components/failure-facts
                 diagnostic (atom nil)]
-            (with-redefs [components/failure-response
+            (with-redefs [components/failure-facts
                           (fn [error]
                             (reset! diagnostic (select-keys (ex-data error) [:type :reason :stage]))
                             (failure error))]

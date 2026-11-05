@@ -14,41 +14,24 @@
     [graphden.executor.defbase :refer [defbase]]))
 
 
-(defbase query-param
-  "Pull a named query-string parameter from a Ring request. Tolerates
-   both reitit's enriched `:query-params` shape (string-or-keyword
-   keyed) AND raw http-kit requests that carry only `:query-string`.
-   Returns nil when the parameter is absent.
-
-   Single-library boundary; the multi-source fallback is infra noise
-   not user logic. Admins compose URL-handling primitives over the
-   resulting string."
-  [request param-name]
-  (fn-exec/query-param request param-name))
+(defbase _query-param-raw
+  "Soft URL codec for a raw http-kit query string; enriched-key
+   precedence is graph policy."
+  [query-string param-name]
+  (fn-exec/raw-query-param query-string param-name))
 
 
-(defbase extract-entity-params
-  "Pull `{:type-str :id-str :entity-type}` out of a Ring request.
-   Prefers reitit's `:path-params` (set by enrich-request); falls
-   back to URI segment parsing for the http-kit passthrough path
-   (`:branch-routing-wrap` and friends invoke handlers with the raw
-   request map). `:entity-type` is the canonical keyword for the
-   URL segment (`fn` → `:fn`, …) or nil when the segment doesn't
-   match a known entity type.
+(defbase _entity-uri-params
+  "Parse the exact supported entity-route URI shapes."
+  [uri]
+  (request/parse-uri-segments uri))
 
-   Single-library boundary over `request/extract-entity-params`.
-   The dual-source merge (path-params + URI fallback) is infra
-   compensation for the per-handler-routing variance, not user
-   logic — admins can compose new entity-type→keyword mappings at
-   the graph layer over the resulting `:type-str` field.
 
-   The known-types set comes from the LIVE schema, so an addon's
-   entities (`grant`, `org`, `app`, …) resolve through the same routes
-   as the core ones — hardcoding the core seven left every addon entity
-   with a 400 on the generic delete."
-  [request]
-  (request/extract-entity-params
-    request
+(defbase _entity-type-from-string
+  "Resolve a type against the live schema, including addon entities."
+  [type-str]
+  (request/entity-type-from-string
+    type-str
     (request/schema-entity-types (:storage ctx))))
 
 
@@ -67,7 +50,8 @@
 ;; The package loader pairs each base-fn declared in this module's
 ;; `fns.edn` with its impl by looking up this map (keyword name -> impl).
 (def impls
-  {:query-param {:impl query-param :taint-propagate? true}
+  {:_query-param-raw {:impl _query-param-raw :taint-propagate? true}
    :parse-fn-delete-receipts {:impl parse-fn-delete-receipts :taint-propagate? true}
    :delete-fn-receipts {:impl delete-fn-receipts :taint-propagate? true}
-   :extract-entity-params {:impl extract-entity-params :taint-propagate? true}})
+   :_entity-uri-params {:impl _entity-uri-params :taint-propagate? true}
+   :_entity-type-from-string {:impl _entity-type-from-string :taint-propagate? true}})

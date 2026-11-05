@@ -30,16 +30,18 @@
     [graphden.versioning.storage.merge :as mrg]))
 
 
-(defbase resolve-branch-ref
-  "Look up a branch by ref (UUID string or name). Returns the row, or
-   nil when not found / blank ref / non-string ref. Operates on the
-   unwrapped base storage — branch context flows through the URL /
-   query, not the wrapper. Single library boundary (single delegation
-   to `crud.branches/resolve-branch-ref` over `base-storage`); the
-   semantics are graph-visible at every call site via this base-fn."
+(defbase _branch-by-id
+  "One scoped branch identity read over the base storage."
+  [id]
+  (cr/record-effect! :db)
+  (sp/read-entity (branches/base-storage ctx) :branch id))
+
+
+(defbase _branch-by-name
+  "One scoped exact branch-name lookup over the base storage."
   [ref]
   (cr/record-effect! :db)
-  (branches/resolve-branch-ref (branches/base-storage ctx) ref))
+  (first (sp/query-entities (branches/base-storage ctx) :branch {:name ref})))
 
 
 ;; `:current-branch-id` lives in `storage/branches/impls.clj` so
@@ -117,51 +119,25 @@
   #{"owner" "admins"})
 
 
-(defn- normalize-write-policy
-  "nil/blank/\"open\" → nil; a valid policy string → itself; anything
-   else → `:branches/invalid-write-policy`."
-  [p]
-  (let [p (some-> p str/trim)]
-    (cond
-      (or (nil? p) (= "" p) (= "open" p)) nil
-      (contains? write-policies p) p
-      :else (throw (ex-info (str "invalid write-policy: " p)
-                            {:type :branches/invalid-write-policy
-                             :write-policy p
-                             :valid (conj write-policies "open")})))))
+(defn- checked-write-policy
+  "Mandatory fail-closed domain check. Input spelling/default policy is graph-side."
+  [policy]
+  (when-not (or (nil? policy) (contains? write-policies policy))
+    (throw (ex-info (str "invalid write-policy: " policy)
+                    {:type :branches/invalid-write-policy
+                     :write-policy policy :valid (conj write-policies "open")})))
+  policy)
 
 
-(defbase create-branch!
-  "Single library call over `vs/create-branch!` — write a new branch
-   row off `:branch-name` + `:base-branch-id` (+ the optional
-   `:forbid-invalid?` merge-policy flag, error-tolerance Phase 5, and
-   the optional `:write-policy` protection level) and return the row.
-   The creating principal's stable id is stamped as `:owner-id`
-   whenever one is bound — provenance always, enforcement only when a
-   policy is set. Atomic §3.1 boundary; the response-shape building
-   lives in graph (`:_create-branch-apply` → `:as-json-branch` +
-   `:zipmap` envelope), not here."
-  [branch-name base-branch-id forbid-invalid? write-policy require-merge? branch-id]
+(defbase _create-branch-row
+  "Create with trusted owner stamping and mandatory epoch publication."
+  [branch-name options]
   (cr/record-effect! :db)
-  (let [policy (normalize-write-policy write-policy)
+  (let [create-options (select-keys options [:id :base-branch-id :forbid-invalid? :write-policy :require-merge?])
+        _ (checked-write-policy (:write-policy create-options))
         owner (:user-id tc/*current-principal*)
-        row (vs/create-branch! (request/require-storage ctx)
-                               branch-name
-                               (cond-> {:base-branch-id base-branch-id}
-                                 (some? branch-id)
-                                 (assoc :id branch-id)
-                                 (some? forbid-invalid?)
-                                 (assoc :forbid-invalid? forbid-invalid?)
-                                 (some? owner)
-                                 (assoc :owner-id owner)
-                                 (some? policy)
-                                 (assoc :write-policy policy)
-                                 (some? require-merge?)
-                                 (assoc :require-merge? (boolean require-merge?))))]
-    ;; A fresh branch needs no invalidation (its ctx builds lazily),
-    ;; but the epoch bump must still be NOTED — un-noted it ages past
-    ;; grace and triggers a spurious heal ~10s after every branch
-    ;; creation (audit-7 e2e: recurring mid-suite heals).
+        row (vs/create-branch! (request/require-storage ctx) branch-name
+                               (cond-> create-options owner (assoc :owner-id owner)))]
     (br-epoch/note-graph-epoch-validated! (request/require-storage ctx))
     row))
 
@@ -522,7 +498,7 @@
    :manage-grants); without the addon the write is open, matching the
    rest of single-tenant. Explicit nil IS written (clears back to
    open)."
-  [branch-id write-policy]
+  [branch-id policy]
   (cr/record-effect! :db)
   ;; No graph-epoch bump here (nor in the other branch-row dials below):
   ;; policy / require-merge / review-state / review-policy are read
@@ -531,10 +507,10 @@
   ;; spurious heal 45 s after every flip (the e2e suite's residual
   ;; heals, one per merge, from stage 2b's review-state
   ;; clear, and one per propose / protect click).
-  (let [policy (normalize-write-policy write-policy)]
+  (let [normalized-policy (checked-write-policy policy)]
     (sp/update-entity (branches/base-storage ctx) :branch branch-id
-                      {:write-policy policy})
-    policy))
+                      {:write-policy normalized-policy})
+    normalized-policy))
 
 
 (defbase set-branch-require-merge!
@@ -555,91 +531,52 @@
     flag))
 
 
-(defbase set-branch-archived!
-  "Fold a branch away (`archived?` truthy → `:archived-at` now) or bring
-   it back (falsy → nil). A merge into the source's own base stamps it;
-   opening the branch clears it. Same base-storage write as
-   `set-review-state!` — WHO may is the tenancy authorize-writer's call
-   on the branch row. Returns the flag as stored."
-  [branch-id archived?]
+(defbase _set-branch-archived-at
+  "Authorized timestamp write. Time acquisition and archive command policy are graph-side."
+  [branch-id archived-at]
   (cr/record-effect! :db)
-  (cr/record-effect! :time)
-  (sp/update-entity (branches/base-storage ctx) :branch branch-id
-                    {:archived-at (when archived? (java.time.Instant/now))})
-  (boolean archived?))
+  (sp/update-entity (branches/base-storage ctx) :branch branch-id {:archived-at archived-at})
+  archived-at)
 
 
-(defbase set-review-state!
-  "Set a branch's `:review-state` — the change-proposal handoff. `proposed?`
-   truthy → \"proposed\" (this branch is submitted for review into its base);
-   falsy → nil (withdraw). Writes through the same still-org-scoped base
-   storage as `set-branch-policy!`, so WHO may propose/withdraw is the
-   tenancy authorize-writer's call on the branch row (its owner); without
-   the addon the write is open (single-tenant). Returns the state set
-   (\"proposed\" or nil)."
-  [branch-id proposed?]
+(defbase _set-branch-review-state
+  "Authorized state write with the canonical workflow domain enforced."
+  [branch-id state]
   (cr/record-effect! :db)
-  (let [state (when proposed? "proposed")]
-    (sp/update-entity (branches/base-storage ctx) :branch branch-id
-                      {:review-state state})
-    state))
+  (when-not (or (nil? state) (= "proposed" state))
+    (throw (ex-info "Invalid branch review state" {:type :validation-error/review-state})))
+  (sp/update-entity (branches/base-storage ctx) :branch branch-id {:review-state state})
+  state)
 
 
-(defn- normalize-approver-ids
-  "Coerce the body's `approver-ids` to a vector of user-id strings (the
-   JSONB shape stored on the branch). nil/empty → nil (clears). Rejects a
-   non-sequential value (e.g. a bare string, which `seq` would shred into
-   characters) with a clean 400 rather than storing garbage."
-  [approver-ids]
-  (cond
-    (nil? approver-ids) nil
-    (sequential? approver-ids) (when (seq approver-ids) (mapv str approver-ids))
-    :else (throw (ex-info "approver-ids must be a list of user ids"
-                          {:type :validation-error/approver-ids :value approver-ids}))))
+(defbase _branch-int-value
+  "Canonical checked fixed-width integer conversion."
+  [value]
+  (int value))
 
 
-(defn- normalize-required-approvals
-  "Coerce `required-approvals` to a non-negative int (nil ≡ off). Rejects
-   a negative or non-integer value with a clean 400 instead of silently
-   treating it as off (negative) or 500ing (`(int \"x\")`)."
-  [n]
-  (cond
-    (nil? n) nil
-    ;; JSON integers parse as Long → nat-int?. A float / negative / non-number
-    ;; is a clean rejection (a client sending 2.0 should send 2).
-    (nat-int? n) (int n)
-    :else (throw (ex-info "required-approvals must be a non-negative integer"
-                          {:type :validation-error/required-approvals :value n}))))
-
-
-(defbase set-branch-review-policy!
-  "Set a branch's review policy (the merge TARGET's rules): how many
-   approvals a proposal needs (`required-approvals`), whether the author's
-   own approval counts (`allow-self-approval?`), and an explicit reviewer
-   allow-list (`approver-ids`). PATCH semantics: an arg of `:keep` (the
-   sentinel the route supplies for a JSON key ABSENT from the request
-   body) leaves that column untouched; any other value — including `nil`
-   — sets it (nil/empty clears). This is why the editor's ⚙ menu, which
-   POSTs only `required-approvals` + `allow-self-approval`, no longer wipes
-   an API/MCP-set `approver-ids` allow-list (the audit-2 clobber).
-   Writes through the same still-org-scoped base storage as
-   `set-branch-policy!`, so WHO may set it is the authorize-writer's call.
-   Returns the EFFECTIVE `{:required-approvals :allow-self-approval? :approver-ids}`."
-  [branch-id required-approvals allow-self-approval? approver-ids]
+(defbase _patch-branch-review-policy
+  "Apply only validated review columns through the authorized scoped writer,
+   then read the effective row. Editable input coercion cannot bypass policy domains."
+  [branch-id patch]
   (cr/record-effect! :db)
-  (let [keep? #(= :keep %)
-        row (cond-> {}
-              (not (keep? required-approvals))
-              (assoc :required-approvals (normalize-required-approvals required-approvals))
-              (not (keep? allow-self-approval?))
-              (assoc :allow-self-approval? (when (some? allow-self-approval?)
-                                             (boolean allow-self-approval?)))
-              (not (keep? approver-ids))
-              (assoc :approver-ids (normalize-approver-ids approver-ids)))]
-    (when (seq row)
-      (sp/update-entity (branches/base-storage ctx) :branch branch-id row))
-    (-> (sp/read-entity (branches/base-storage ctx) :branch branch-id)
-        (select-keys [:required-approvals :allow-self-approval? :approver-ids]))))
+  (let [checked-patch (select-keys patch [:required-approvals :allow-self-approval? :approver-ids])
+        required (:required-approvals checked-patch)
+        self? (:allow-self-approval? checked-patch)
+        approvers (:approver-ids checked-patch)]
+    (when-not (or (nil? required) (nat-int? required))
+      (throw (ex-info "required-approvals must be a non-negative integer"
+                      {:type :validation-error/required-approvals :value required})))
+    (when-not (or (nil? self?) (boolean? self?))
+      (throw (ex-info "allow-self-approval must be a boolean"
+                      {:type :validation-error/allow-self-approval})))
+    (when-not (or (nil? approvers)
+                  (and (sequential? approvers) (every? string? approvers)))
+      (throw (ex-info "approver-ids must be a list of user ids"
+                      {:type :validation-error/approver-ids :value approvers})))
+    (when (seq checked-patch)
+      (sp/update-entity (branches/base-storage ctx) :branch branch-id checked-patch))
+    (sp/read-entity (branches/base-storage ctx) :branch branch-id)))
 
 
 (defn- may-approve?
@@ -756,13 +693,11 @@
                           {:source-branch-id source-branch-id})))
 
 
-(defbase approvals-report
-  "Per-row merge-gate verdicts (`merge.core/approvals-report`) —
-   `{:approver-id :counted :reason :stale}` per approval. `approver-ids`
-   arrives as a list; the rule tests membership, hence the set."
-  [stamp target-branch-id approver-ids approvals author-id allow-self?]
-  (merge-policy/approvals-report stamp target-branch-id (set approver-ids)
-                                 approvals author-id allow-self?))
+(defbase approval-rejection
+  "The merge gate's canonical per-approval verdict; display is graph policy."
+  [stamp target-branch-id approver-ids approval author-id allow-self?]
+  (merge-policy/approval-rejection stamp target-branch-id (set approver-ids)
+                                   author-id allow-self? approval))
 
 
 (defbase self-approval-allowed?
@@ -805,18 +740,19 @@
   #{"fn" "fn-slot" "binding" "binding-list-item"})
 
 
-(defbase add-branch-comment!
-  "Record a review comment on proposal branch `source-branch-id` by the
-   current principal (`\"anonymous\"` single-tenant). WHO may comment =
-   whoever can resolve the branch (org-scoped upstream) — a comment is
-   conversation, not a mutation of the branch. Optional `entity-name` +
-   `entity-id` anchor the comment to one diffed graph element (both nil
-   = the general branch thread; a half-anchor or unknown kind is a 400).
-   Rejects a body over `max-comment-body-chars` with
-   `:validation-error/comment-too-long` (400). Returns the new row's id."
-  [source-branch-id body entity-name entity-id]
+(defbase _branch-comment-limits
+  "Mandatory comment resource bound and canonical anchor domain."
+  []
+  {:max max-comment-body-chars :valid comment-anchor-entities})
+
+
+(defbase _create-branch-comment
+  "Constrained current-author insert. Resource caps and anchor domain remain
+   enforced even when graph preflight/row policy is customized."
+  [row]
   (cr/record-effect! :db)
-  (let [text (str body)
+  (let [{:keys [source-branch-id body entity-name entity-id]} row
+        text (str body)
         ename (some-> entity-name str)]
     (when (> (count text) max-comment-body-chars)
       (throw (ex-info (str "Comment too long: " (count text) " chars (max "
@@ -841,14 +777,14 @@
                        :entity-name ename
                        :valid comment-anchor-entities})))
     (let [author (or (:user-id tc/*current-principal*) "anonymous")
-          row (sp/create-entity (branches/base-storage ctx) :branch-comment
-                                (cond-> {:source-branch-id source-branch-id
-                                         :author-id author
-                                         :body text
-                                         :created-at (java.time.Instant/now)}
-                                  ename (assoc :entity-name ename
-                                               :entity-id entity-id)))]
-      (str (:id row)))))
+          inserted (sp/create-entity (branches/base-storage ctx) :branch-comment
+                                     (cond-> {:source-branch-id source-branch-id
+                                              :author-id author
+                                              :body text
+                                              :created-at (java.time.Instant/now)}
+                                       ename (assoc :entity-name ename
+                                                    :entity-id entity-id)))]
+      inserted)))
 
 
 (defbase list-branch-comments
@@ -880,29 +816,32 @@
 
 
 (def impls
-  {:resolve-branch-ref         resolve-branch-ref
+  {:_branch-by-id _branch-by-id
+   :_branch-by-name _branch-by-name
    :diff-branches              diff-branches
    :_diff-view-input           _diff-view-input
    :_diff-affected-facts       diff-affected-facts
-   :create-branch!             create-branch!
+   :_create-branch-row {:impl _create-branch-row :taint-propagate? true}
    :delete-branch!             delete-branch!
    :detect-conflicts           detect-conflicts
    :merge-branch!              {:impl merge-branch! :taint-propagate? true}
    :merge-post-commit!         merge-post-commit!
    :_merge-skipped-facts       merge-skipped-facts
-   :set-branch-policy!         set-branch-policy!
+   :_set-branch-policy         {:impl set-branch-policy! :taint-propagate? true}
    :set-branch-require-merge!  {:impl set-branch-require-merge! :taint-propagate? true}
-   :set-review-state!          {:impl set-review-state! :taint-propagate? true}
-   :set-branch-archived! {:impl set-branch-archived! :taint-propagate? true}
-   :set-branch-review-policy!  {:impl set-branch-review-policy! :taint-propagate? true}
+   :_set-branch-review-state {:impl _set-branch-review-state :taint-propagate? true}
+   :_set-branch-archived-at {:impl _set-branch-archived-at :taint-propagate? true}
+   :_patch-branch-review-policy {:impl _patch-branch-review-policy :taint-propagate? true}
+   :_branch-int-value {:impl _branch-int-value :taint-propagate? true}
    :approve-proposal!          approve-proposal!
    :dismiss-my-approval!       dismiss-my-approval!
    :branch-content-stamp       branch-content-stamp
    :branch-approvals           branch-approvals
-   :approvals-report           {:impl approvals-report :taint-propagate? true}
+   :_approval-rejection        {:impl approval-rejection :taint-propagate? true}
    :count-valid-approvals      {:impl count-valid-approvals :taint-propagate? true}
    :self-approval-allowed?     self-approval-allowed?
    ;; taint-propagate: list returns caller-authored comment bodies.
-   :add-branch-comment!        add-branch-comment!
+   :_create-branch-comment {:impl _create-branch-comment :taint-propagate? true}
+   :_branch-comment-limits _branch-comment-limits
    :list-branch-comments       {:impl list-branch-comments :taint-propagate? true}
    :delete-branch-comment!     delete-branch-comment!})

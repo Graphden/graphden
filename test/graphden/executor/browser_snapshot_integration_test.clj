@@ -9,7 +9,6 @@
     [graphden.crud.entities :as entities]
     [graphden.crud.type-check :as type-check]
     [graphden.editor.components :as components]
-    [graphden.editor.root-plan :as root-plan]
     [graphden.executor.browser-plan :as plan]
     [graphden.executor.browser-preview :as preview]
     [graphden.executor.browser-snapshot :as snapshot]
@@ -28,6 +27,7 @@
     [graphden.tenancy.context :as tenancy]
     [graphden.test-infra.account-menu-cases :as account-menu]
     [graphden.test-infra.golden-app :as ga]
+    [graphden.test-infra.ui-operation-api :as ui-api]
     [graphden.types.check :as check]
     [graphden.types.diagnostics :as diag]
     [graphden.versioning.storage.core :as vs]))
@@ -69,13 +69,13 @@
   [ctx]
   ;; Direct fixture exports omit the real request router's epoch admission.
   (epoch/seed-watermark! (:storage ctx))
-  (root-plan/export-current ctx))
+  (ui-api/export-current ctx))
 
 
 (deftest editor-root-is-selected-from-handler-binding
   (binding [br/*active-router-override* (atom nil)]
     (let [ctx (:ctx ga/*bootstrap*)
-          failure-response components/failure-response
+          failure-response components/failure-facts
           checker check/check-fn-def!
           checked-error (atom nil)
           _ (is (owned/owned-impl? (ids/fn-id "storage.branches" :current-branch-name)
@@ -90,7 +90,7 @@
                                                                     [:type :reason :fn-name :arg :expected :actual :parent-name])
                                                        :message (Exception/.getMessage error)))
                                         (throw error))))
-                               components/failure-response
+                               components/failure-facts
                                (fn [error]
                                  (assoc (failure-response error) :test-error
                                         (assoc (select-keys (ex-data error) [:type :reason :fn-id])
@@ -222,7 +222,7 @@
           result (with-redefs [epoch/validated-watermark (constantly 0)
                                source/collect-closure
                                (fn [& args] (reset! collected? true) (apply collect args))]
-                   (root-plan/export-current (:ctx ga/*bootstrap*)))]
+                   (ui-api/export-current (:ctx ga/*bootstrap*)))]
       (is (= "policy-refresh-required" (:code result)))
       (is (false? @collected?))
       (is (not (contains? result :plan))))))

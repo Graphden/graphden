@@ -1,7 +1,7 @@
 (ns graphden.packages.app-base.prefs.impls
   "Impls for the per-user editor preferences (`:ui-pref`, docs/MARKETPLACE.md
-   § Preferences). Two thin boundary base-fns: the read is the current
-   user's rows as a `{key value}` map, the write an upsert of one key —
+   § Preferences). Native reads return current-owner rows and writes
+   upsert one key; graph composition projects rows into a key/value map —
    both keyed on the OWNER the tenancy seam reports
    (`tenancy.context/current-user-id`), which is the whole reason they are
    impls and not `:query-entities` / `:create-entity` compositions: the
@@ -25,14 +25,12 @@
   (tc/current-user-id))
 
 
-(defbase ui-prefs-read
-  "The current user's preferences as `{key value}` (string keys) — an
-   empty map for a user with none."
+(defbase ui-pref-rows
+  "Current-owner storage boundary; projection is graph policy."
   []
   (cr/record-effect! :db)
-  (let [rows (sp/query-entities (request/require-storage ctx) :ui-pref
-                                {:owner-id (tc/current-user-id)})]
-    (into {} (map (juxt :key :value) rows))))
+  (sp/query-entities (request/require-storage ctx) :ui-pref
+                     {:owner-id (tc/current-user-id)}))
 
 
 (defbase ui-pref-write!
@@ -68,7 +66,7 @@
 
 (def impls
   {:current-user-id current-user-id
-   :ui-prefs-read ui-prefs-read
+   :_ui-pref-rows ui-pref-rows
    ;; taint-propagate: returns the caller's own document back
    :ui-pref-write! {:impl ui-pref-write! :taint-propagate? true}
    :ui-pref-store-status {:impl ui-pref-store-status :taint-propagate? true}

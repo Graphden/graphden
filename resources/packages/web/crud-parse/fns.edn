@@ -30,11 +30,35 @@
                     :args {:string :_request-content-type
                            :substring {:value "application/x-www-form-urlencoded"}}}]}}
 
-  {:name :form-decode
-   :description "Decode an `application/x-www-form-urlencoded` string into a `{string string}` map (ring.util.codec). Library boundary — unlike the graph-composed `:parse-query-string` (query strings are short), a form BODY can be hundreds of KB and must not run through the regex-`:split` input cap."
+  {:name :_form-decode-raw
+   :description "Ring form codec; preserves its raw string and repeated-key vector results for graph normalization."
    :args {:string {:type :nullable-text :description "Raw form-encoded body; nil reads as empty."}}
-   :return-type :text-map
+   :return-type :any
    :effects #{}}
+
+  {:name :_form-decoded
+   :parent :_form-decode-raw
+   :args {:string {:as :string :type :nullable-text}}}
+
+  {:name :_form-decoded-value
+   :parent :if
+   :lambda-params [:value]
+   :args {:test {:parent :is-a?
+                 :args {:value {:as :value} :type {:value :vector}}}
+          :then {:parent :last :args {:coll {:as :value}}}
+          :else {:as :value}}}
+
+  {:name :form-decode
+   :description "Decode a form body to one text value per string key. Graph policy collapses repeated keys to their last value and returns {} for a bare string."
+   :parent :ensure-type
+   :args {:value {:parent :if
+                  :args {:test {:parent :is-a?
+                                :args {:value :_form-decoded :type {:value :map}}}
+                         :then {:parent :update-vals
+                                :args {:m :_form-decoded :f :_form-decoded-value}}
+                         :else {:value {}}}}
+          :type {:value [:map :text :text]}}
+   :return-type :text-map}
 
   {:name :parse-form-body
    :description "Parse an `application/x-www-form-urlencoded` request body into a `{key value}` map. Empty map when body is missing OR content-type doesn't match."
@@ -94,14 +118,9 @@
    :args {:coll [{:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}
                  {:parent :get :args {:coll {:as :item} :key {:value :name} :default nil}}]}}
 
-  ;; Form data parsing helpers
-  ;; --- :resolve-type-fn-id / :parse-constraint — atomic primitives
-  ;; over the fn-create form's complex coercions. resolve-type-fn-id
-  ;; bridges the editor's two-shape `:return-type`/`:base-fn-id`/
-  ;; `:element-fn-id` field (UUID-or-name). parse-constraint runs a
-  ;; recursive keyword-restore walk over the JSON-encoded constraint
-  ;; vector — the recursion is the §3.3 invariant (no atomic graph
-  ;; counterpart without `:fix`).
+  ;; Form data parsing helpers. The UUID/name resolver and constraint
+  ;; codec below are separate candidates for the final L boundary audit;
+  ;; graph recursion (`:fix`) already exists and is not an exemption.
   {:name :resolve-type-fn-id
    :description "Resolve a type-row reference (UUID string OR fn name) to its fn-id. nil on blank input; throws `:crud/unknown-type-ref` when a name doesn't match."
    :args {:v {:type :text :description "Form value — UUID string or type-row fn name."}}
@@ -109,9 +128,12 @@
    :effects #{:db}}
 
   {:name :parse-constraint
-   :description "JSON-parse + recursive keyword-restore for the `:constraint` form field. nil on blank input."
-   :args {:raw {:type :text :description "Raw JSON-encoded constraint string from the form."}}
-   :return-type :jsonb}
+   :description "Decode a JSON constraint with its optional refinement base: operator/type names become keywords, text operands stay strings, keyword operands become keywords."
+   :args {:raw {:type :nullable-text :description "Raw JSON-encoded constraint string from the form."}
+          :base-ref {:type :nullable-text :required false :value nil
+                     :description "Refinement base type name or id, absent on structural type rows."}}
+   :return-type :nullable-jsonb
+   :effects #{:db}}
 
   ;; --- :parse-fn-from-form. The heavy lifter: 10 fields
   ;; with the broadest coercion surface in the CRUD form set.
@@ -337,7 +359,7 @@
           :else {:value {}}}}
 
   {:name :_parse-fn-form-constraint-fragment
-   :description "Parse the JSON-encoded constraint vector via the new `:parse-constraint` primitive (recursive keyword-restore)."
+   :description "Decode a constraint using the submitted refinement base to preserve literal value types."
    :parent :if
    :args {:test {:parent :contains?
                  :args {:coll {:as :form-data} :key {:value :constraint}}}
@@ -347,7 +369,11 @@
                                 :args {:raw {:parent :get
                                              :args {:coll {:as :form-data}
                                                     :key {:value :constraint}
-                                                    :default nil}}}}]}}
+                                                    :default nil}}
+                                       :base-ref {:parent :get
+                                                  :args {:coll {:as :form-data}
+                                                         :key {:value :base-fn-id}
+                                                         :default nil}}}}]}}
           :else {:value {}}}}
 
   ;; --- `:lambda-params` — the callable's call-site parameters, authored

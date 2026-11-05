@@ -10,7 +10,7 @@
 ;; runnable (▶ gives the member list), and
 ;; listed back to every editor by `GET /api/views`.
 ;;
-;; Both the ad-hoc endpoint and the base-fn answer through
+;; Both the ad-hoc endpoint and the saved-view graph answer through
 ;; `crud.entities.views/view-members`; the shape of a member row is the
 ;; `:search` light row.
 {:namespace "app.views"
@@ -20,65 +20,1210 @@
   ;; Base-fns
   ;; ---------------------------------------------------------------------
 
-  {:name :view-members
-   :description "Light rows (`{:fns :total :truncated?}`, the `:search` shape, capped at 500; `:missing {:uses :views}` names ids the graph no longer holds) for every named fn of the current branch view matching ALL the given axes. Axes AND; `kinds` / `namespaces` OR within; `uses` / `effects` AND within (uses ALL of, carries ALL of). An empty filter set is an empty answer. Kinds include apps through the installed org-scoped Apps callback; problems are current branch failed/type-errors/lint predicates. Referenced views are intersected before the final 500-row limit. Evaluated over the graph AS THE VIEWER SEES IT (the view-impl seam): a fn whose composition the viewer may not see matches no `uses` THROUGH its internals and ships with empty `:parent-ids`."
-   :args {:name {:required false :type :nullable-text
-                 :description "Case-insensitive substring of the qualified name."}
-          :views {:required false :type [:list :uuid] :value []
-                  :description "Ids of `:explorer-view` fn-defs; a member is in every one of them too (their axes, recursively through their own `also`)."}
-          :uses {:required false :type [:list :uuid] :value []
-                 :description "Fn ids; a member transitively extends or references every one of them."}
-          :effects {:required false :type [:list :text] :value []
-                    :description "Effect kinds (`io`, `db`, `state`, …) the member's computed footprint carries — all of them. Text, as they arrive over JSON; the evaluator keywordizes."}
-          :kinds {:required false :type [:list :text] :value []
-                  :description "Row kinds (text) — a member is ONE of: `fn`, `types`, `secrets`, `services`, `apps`, `tests`."}
-          :problems {:required false
-                     :type [:list [:refine :text {:constraint [:in #{"failed" "type-errors" "lint"}]}]]
-                     :value []
-                     :description "Current branch problems; matches any selected problem, together with all other axes."}
-          :namespaces {:required false :type [:list :text] :value []
-                       :description "Dotted namespace paths; a member lives in one of them or below (segment match)."}
-          :exclude {:required false :type [:list :text] :value []
-                    :description "Dotted namespace paths a member must NOT live in or below."}
-          :unused {:required false :type :bool :value false
-                   :description "Only fns nothing references or extends."}}
-   :return-type :keyword-map
+  {:name :_view-normalized-clause,
+   :type
+   {:exclude [:list :text],
+    :namespaces [:list :text],
+    :problems [:list :keyword],
+    :name :nullable-text,
+    :unused :bool,
+    :uses [:list :uuid],
+    :effects [:list :keyword],
+    :views [:list :uuid],
+    :kinds [:list :keyword]}}
+
+  {:name :_view-candidate-fact,
+   :type
+   {:id :uuid,
+    :name :nullable-text,
+    :namespace-path :nullable-text,
+    :effects [:map :keyword :bool],
+    :kinds [:map :keyword :bool],
+    :problems [:map :keyword :bool],
+    :used-targets [:map :uuid :bool],
+    :unused? :nullable-bool}}
+
+  {:name :_view-cohort-facts,
+   :type
+   {:rows [:list :_view-candidate-fact],
+    :filters [:list :_view-normalized-clause],
+    :referenced-clauses [:list [:list :_view-normalized-clause]],
+    :missing-views [:list :uuid],
+    :unsupported-views [:list :uuid],
+    :requested-uses [:list :uuid],
+    :known-ids [:map :uuid :bool],
+    :limit :non-negative-int}}
+
+  {:name :_project-view-cohort,
+   :description
+   "Capture canonical concealed metadata and static view-reference geometry; invoke pure graph selection; validate selected identities and annotate at most500 retained rows.",
+   :args
+   {:filters {:type :_view-normalized-clause},
+    :selector
+    {:type [:fn {:facts :_view-cohort-facts} :keyword-map #{}]}},
+   :return-type :keyword-map,
    :effects #{:db}}
+
+  {:name :_view-filter-raw-values,
+   :parent :const,
+   :args {:value {:as :raw-values, :type :any}}}
+
+  {:name :_view-filter-values,
+   :parent :if,
+   :args
+   {:test
+    {:parent :is-a?,
+     :args {:value :_view-filter-raw-values, :type {:value :sequence}}},
+    :then {:ref :_view-filter-raw-values, :type [:list :any]},
+    :else
+    {:parent :if,
+     :args
+     {:test :_view-filter-raw-values,
+      :then {:parent :list, :args {:items [:_view-filter-raw-values]}},
+      :else {:value []}}}},
+   :return-type [:list :any]}
+
+  {:name :_view-filter-text-value,
+   :parent :const,
+   :args {:value {:as :text, :type :any}}}
+
+  {:name :_view-filter-trimmed,
+   :parent :if,
+   :args
+   {:test {:parent :some?, :args {:value :_view-filter-text-value}},
+    :then
+    {:parent :str-trim,
+     :args
+     {:string
+      {:parent :to-str, :args {:value :_view-filter-text-value}}}},
+    :else nil},
+   :return-type :nullable-text}
+
+  {:name :_view-filter-text,
+   :parent :if,
+   :args
+   {:test {:parent :blank?, :args {:string :_view-filter-trimmed}},
+    :then nil,
+    :else :_view-filter-trimmed},
+   :return-type :nullable-text}
+
+  {:name :_view-filter-text-item,
+   :parent :_view-filter-text,
+   :args {:text {:parent :const, :args {:value {:as :item}}}},
+   :return-type :nullable-text,
+   :lambda-params [:item]}
+
+  {:name :_view-filter-keyword-name,
+   :parent :if,
+   :args
+   {:test
+    {:parent :is-a?,
+     :args {:value {:as :item}, :type {:value :keyword}}},
+    :then
+    {:parent :assert-some,
+     :args {:value {:parent :name, :args {:value {:as :item}}}}},
+    :else {:parent :to-str, :args {:value {:as :item}}}},
+   :return-type :text}
+
+  {:name :_view-filter-keyword-text,
+   :parent :if,
+   :args
+   {:test
+    {:parent :str-starts-with?,
+     :args {:string :_view-filter-keyword-name, :prefix ":"}},
+    :then
+    {:parent :subs,
+     :args {:string :_view-filter-keyword-name, :start 1 :end {:parent :str-len :args {:string :_view-filter-keyword-name}}}},
+    :else :_view-filter-keyword-name},
+   :return-type :text}
+
+  {:name :_view-filter-keyword-item,
+   :parent :if,
+   :args
+   {:test {:as :item},
+    :then
+    {:parent :str-to-keyword,
+     :args {:string :_view-filter-keyword-text}},
+    :else nil},
+   :return-type :nullable-keyword,
+   :lambda-params [:item]}
+
+  {:name :_view-filter-uuid-item,
+   :parent :if,
+   :args
+   {:test
+    {:parent :or,
+     :args
+     {:values
+      [{:parent :is-a?, :args {:value {:as :item}, :type {:value :uuid}}}
+       {:parent :is-a?,
+        :args {:value {:as :item}, :type {:value :text}}}]}},
+    :then
+    {:parent :parse-uuid,
+     :args {:string {:parent :to-str, :args {:value {:as :item}}}}},
+    :else nil},
+   :return-type :nullable-uuid,
+   :lambda-params [:item]}
+
+  {:name :_view-filter-present-item?
+   :parent :some? :args {:value {:as :item :type :any}}
+   :return-type :bool :lambda-params [:item]}
+
+  {:name :_view-filter-nonnull-text,
+   :parent :assert-some,
+   :args {:value {:as :item, :type :nullable-text}},
+   :return-type :text,
+   :lambda-params [:item]}
+
+  {:name :_view-filter-nonnull-keyword,
+   :parent :assert-some,
+   :args {:value {:as :item, :type :nullable-keyword}},
+   :return-type :keyword,
+   :lambda-params [:item]}
+
+  {:name :_view-filter-nonnull-uuid,
+   :parent :assert-some,
+   :args {:value {:as :item, :type :nullable-uuid}},
+   :return-type :uuid,
+   :lambda-params [:item]}
+
+  {:name :_view-filter-texts,
+   :parent :distinct,
+   :args
+   {:coll
+    {:parent :map,
+     :args
+     {:func :_view-filter-nonnull-text,
+      :coll
+      {:parent :filter,
+       :args
+       {:pred :_view-filter-present-item?,
+        :coll
+        {:parent :map,
+         :args
+         {:func :_view-filter-text-item,
+          :coll :_view-filter-values}}}}}}},
+   :return-type [:list :text]}
+
+  {:name :_view-filter-keywords,
+   :parent :distinct,
+   :args
+   {:coll
+    {:parent :map,
+     :args
+     {:func :_view-filter-nonnull-keyword,
+      :coll
+      {:parent :filter,
+       :args
+       {:pred :_view-filter-present-item?,
+        :coll
+        {:parent :map,
+         :args
+         {:func :_view-filter-keyword-item,
+          :coll :_view-filter-values}}}}}}},
+   :return-type [:list :keyword]}
+
+  {:name :_view-filter-uuids,
+   :parent :distinct,
+   :args
+   {:coll
+    {:parent :map,
+     :args
+     {:func :_view-filter-nonnull-uuid,
+      :coll
+      {:parent :filter,
+       :args
+       {:pred :_view-filter-present-item?,
+        :coll
+        {:parent :map,
+         :args
+         {:func :_view-filter-uuid-item,
+          :coll :_view-filter-values}}}}}}},
+   :return-type [:list :uuid]}
+
+  {:name :_view-filter-record,
+   :parent :zipmap,
+   :args
+   {:keys
+    [{:value :name}
+     {:value :views}
+     {:value :uses}
+     {:value :effects}
+     {:value :kinds}
+     {:value :problems}
+     {:value :namespaces}
+     {:value :exclude}
+     {:value :unused}],
+    :vals
+    [{:parent :_view-filter-text,
+      :args
+      {:text {:parent :const, :args {:value {:as :name, :type :any}}}}}
+     {:parent :_view-filter-uuids,
+      :args
+      {:raw-values
+       {:parent :const, :args {:value {:as :views, :type :any}}}}}
+     {:parent :_view-filter-uuids,
+      :args
+      {:raw-values
+       {:parent :const, :args {:value {:as :uses, :type :any}}}}}
+     {:parent :_view-filter-keywords,
+      :args
+      {:raw-values
+       {:parent :const, :args {:value {:as :effects, :type :any}}}}}
+     {:parent :_view-filter-keywords,
+      :args
+      {:raw-values
+       {:parent :const, :args {:value {:as :kinds, :type :any}}}}}
+     {:parent :_view-filter-keywords,
+      :args
+      {:raw-values
+       {:parent :const, :args {:value {:as :problems, :type :any}}}}}
+     {:parent :_view-filter-texts,
+      :args
+      {:raw-values
+       {:parent :const, :args {:value {:as :namespaces, :type :any}}}}}
+     {:parent :_view-filter-texts,
+      :args
+      {:raw-values
+       {:parent :const, :args {:value {:as :exclude, :type :any}}}}}
+     {:parent :not,
+      :args
+      {:value
+       {:parent :not, :args {:value {:as :unused, :type :any}}}}}]},
+   :return-type :_view-normalized-clause}
+
+  {:name :_view-select-facts,
+   :parent :const,
+   :args {:value {:as :facts, :type :_view-cohort-facts}}}
+
+  {:name :_view-select-candidate,
+   :parent :const,
+   :args {:value {:as :candidate, :type :_view-candidate-fact}}}
+
+  {:name :_view-select-clause,
+   :parent :const,
+   :args {:value {:as :clause, :type :_view-normalized-clause}}}
+
+  {:name :_view-select-used,
+   :parent :get,
+   :args
+   {:coll
+    {:parent :get,
+     :args
+     {:coll :_view-select-candidate,
+      :key {:value :used-targets},
+      :default nil}},
+    :key {:as :item, :type :uuid},
+    :default false},
+   :return-type :bool,
+   :lambda-params [:item]}
+
+  {:name :_view-select-effect,
+   :parent :get,
+   :args
+   {:coll
+    {:parent :get,
+     :args
+     {:coll :_view-select-candidate,
+      :key {:value :effects},
+      :default nil}},
+    :key {:as :item, :type :keyword},
+    :default false},
+   :return-type :bool,
+   :lambda-params [:item]}
+
+  {:name :_view-select-kind,
+   :parent :get,
+   :args
+   {:coll
+    {:parent :get,
+     :args
+     {:coll :_view-select-candidate,
+      :key {:value :kinds},
+      :default nil}},
+    :key {:as :item, :type :keyword},
+    :default false},
+   :return-type :bool,
+   :lambda-params [:item]}
+
+  {:name :_view-select-problem,
+   :parent :get,
+   :args
+   {:coll
+    {:parent :get,
+     :args
+     {:coll :_view-select-candidate,
+      :key {:value :problems},
+      :default nil}},
+    :key {:as :item, :type :keyword},
+    :default false},
+   :return-type :bool,
+   :lambda-params [:item]}
+
+  {:name :_view-select-qualified-name,
+   :parent :if,
+   :args
+   {:test
+    {:parent :gt,
+     :args
+     {:nums
+      [{:parent :count,
+        :args
+        {:coll
+         {:parent :get,
+          :args
+          {:coll :_view-select-candidate,
+           :key {:value :namespace-path},
+           :default nil}}}}
+       0]}},
+    :then
+    {:parent :str,
+     :args
+     {:parts
+      [{:parent :get,
+        :args
+        {:coll :_view-select-candidate,
+         :key {:value :namespace-path},
+         :default nil}}
+       "."
+       {:parent :get,
+        :args
+        {:coll :_view-select-candidate,
+         :key {:value :name},
+         :default nil}}]}},
+    :else
+    {:parent :to-str,
+     :args
+     {:value
+      {:parent :get,
+       :args
+       {:coll :_view-select-candidate,
+        :key {:value :name},
+        :default nil}}}}}}
+
+  {:name :_view-select-path-want,
+   :parent :coalesce,
+   :args
+   {:value {:parent :str-replace
+            :args {:string {:parent :str-lower, :args {:string {:as :item, :type :text}}}
+                   :match "/" :replacement "."}}
+    :default ""}
+   :return-type :text}
+
+  {:name :_view-select-path-match,
+   :parent :if,
+   :args
+   {:test
+    {:parent :get,
+     :args
+     {:coll :_view-select-candidate,
+      :key {:value :namespace-path},
+      :default nil}},
+    :then
+    {:parent :or,
+     :args
+     {:values
+      [{:parent :equal?,
+        :args
+        {:a
+         {:parent :str-lower,
+          :args
+          {:string
+           {:parent :coalesce,
+            :args
+            {:value
+             {:parent :get,
+              :args
+              {:coll :_view-select-candidate,
+               :key {:value :namespace-path},
+               :default nil}},
+             :default ""}}}},
+         :b :_view-select-path-want}}
+       {:parent :str-starts-with?,
+        :args
+        {:string
+         {:parent :str-lower,
+          :args
+          {:string
+           {:parent :coalesce,
+            :args
+            {:value
+             {:parent :get,
+              :args
+              {:coll :_view-select-candidate,
+               :key {:value :namespace-path},
+               :default nil}},
+             :default ""}}}},
+         :prefix
+         {:parent :str,
+          :args {:parts [:_view-select-path-want "."]}}}}]}},
+    :else false},
+   :return-type :bool,
+   :lambda-params [:item]}
+
+  {:name :_view-select-clause-matches,
+   :parent :and,
+   :args
+   {:values
+    [{:parent :if,
+      :args
+      {:test
+       {:parent :get,
+        :args
+        {:coll :_view-select-clause, :key {:value :name}, :default nil}},
+       :then
+       {:parent :str-contains?,
+        :args
+        {:string
+         {:parent :str-lower,
+          :args {:string :_view-select-qualified-name}},
+         :substring
+         {:parent :str-lower,
+          :args
+          {:string
+           {:parent :coalesce,
+            :args
+            {:value
+             {:parent :get,
+              :args
+              {:coll :_view-select-clause,
+               :key {:value :name},
+               :default nil}},
+             :default ""}}}}}},
+       :else true}}
+     {:parent :if,
+      :args
+      {:test
+       {:parent :gt,
+        :args
+        {:nums
+         [{:parent :count,
+           :args
+           {:coll
+            {:parent :get,
+             :args
+             {:coll :_view-select-clause,
+              :key {:value :uses},
+              :default nil}}}}
+          0]}},
+       :then
+       {:parent :every?,
+        :args
+        {:pred :_view-select-used,
+         :coll
+         {:parent :get,
+          :args
+          {:coll :_view-select-clause,
+           :key {:value :uses},
+           :default nil}}}},
+       :else true}}
+     {:parent :if,
+      :args
+      {:test
+       {:parent :gt,
+        :args
+        {:nums
+         [{:parent :count,
+           :args
+           {:coll
+            {:parent :get,
+             :args
+             {:coll :_view-select-clause,
+              :key {:value :effects},
+              :default nil}}}}
+          0]}},
+       :then
+       {:parent :every?,
+        :args
+        {:pred :_view-select-effect,
+         :coll
+         {:parent :get,
+          :args
+          {:coll :_view-select-clause,
+           :key {:value :effects},
+           :default nil}}}},
+       :else true}}
+     {:parent :if,
+      :args
+      {:test
+       {:parent :gt,
+        :args
+        {:nums
+         [{:parent :count,
+           :args
+           {:coll
+            {:parent :get,
+             :args
+             {:coll :_view-select-clause,
+              :key {:value :kinds},
+              :default nil}}}}
+          0]}},
+       :then
+       {:parent :not,
+        :args
+        {:value
+         {:parent :not,
+          :args
+          {:value
+           {:parent :some,
+            :args
+            {:pred :_view-select-kind,
+             :coll
+             {:parent :get,
+              :args
+              {:coll :_view-select-clause,
+               :key {:value :kinds},
+               :default nil}}}}}}}},
+       :else true}}
+     {:parent :if,
+      :args
+      {:test
+       {:parent :gt,
+        :args
+        {:nums
+         [{:parent :count,
+           :args
+           {:coll
+            {:parent :get,
+             :args
+             {:coll :_view-select-clause,
+              :key {:value :problems},
+              :default nil}}}}
+          0]}},
+       :then
+       {:parent :not,
+        :args
+        {:value
+         {:parent :not,
+          :args
+          {:value
+           {:parent :some,
+            :args
+            {:pred :_view-select-problem,
+             :coll
+             {:parent :get,
+              :args
+              {:coll :_view-select-clause,
+               :key {:value :problems},
+               :default nil}}}}}}}},
+       :else true}}
+     {:parent :if,
+      :args
+      {:test
+       {:parent :gt,
+        :args
+        {:nums
+         [{:parent :count,
+           :args
+           {:coll
+            {:parent :get,
+             :args
+             {:coll :_view-select-clause,
+              :key {:value :namespaces},
+              :default nil}}}}
+          0]}},
+       :then
+       {:parent :not,
+        :args
+        {:value
+         {:parent :not,
+          :args
+          {:value
+           {:parent :some,
+            :args
+            {:pred :_view-select-path-match,
+             :coll
+             {:parent :get,
+              :args
+              {:coll :_view-select-clause,
+               :key {:value :namespaces},
+               :default nil}}}}}}}},
+       :else true}}
+     {:parent :if,
+      :args
+      {:test
+       {:parent :gt,
+        :args
+        {:nums
+         [{:parent :count,
+           :args
+           {:coll
+            {:parent :get,
+             :args
+             {:coll :_view-select-clause,
+              :key {:value :exclude},
+              :default nil}}}}
+          0]}},
+       :then
+       {:parent :not,
+        :args
+        {:value
+         {:parent :not,
+          :args
+          {:value
+           {:parent :not,
+            :args
+            {:value
+             {:parent :some,
+              :args
+              {:pred :_view-select-path-match,
+               :coll
+               {:parent :get,
+                :args
+                {:coll :_view-select-clause,
+                 :key {:value :exclude},
+                 :default nil}}}}}}}}}},
+       :else true}}
+     {:parent :if,
+      :args
+      {:test
+       {:parent :get,
+        :args
+        {:coll :_view-select-clause,
+         :key {:value :unused},
+         :default nil}},
+       :then
+       {:parent :get,
+        :args
+        {:coll :_view-select-candidate,
+         :key {:value :unused?},
+         :default nil}},
+       :else true}}]},
+   :return-type :bool,
+   :lambda-params [:clause]}
+
+  {:name :_view-select-row-matches,
+   :parent :and,
+   :args
+   {:values
+    [{:parent :some?,
+      :args
+      {:value
+       {:parent :get,
+        :args
+        {:coll :_view-select-candidate,
+         :key {:value :name},
+         :default nil}}}}
+     {:parent :not,
+      :args
+      {:value
+       {:parent :str-starts-with?,
+        :args
+        {:string
+         {:parent :get,
+          :args
+          {:coll :_view-select-candidate,
+           :key {:value :name},
+           :default nil}},
+         :prefix "_anon-"}}}}
+     {:parent :every?,
+      :args
+      {:pred :_view-select-clause-matches,
+       :coll
+       {:parent :get,
+        :args
+        {:coll :_view-select-facts,
+         :key {:value :filters},
+         :default nil}}}}]},
+   :return-type :bool,
+   :lambda-params [:candidate]}
+
+  {:name :_view-select-clause-active,
+   :parent :or,
+   :args
+   {:values
+    [{:parent :some?,
+      :args
+      {:value
+       {:parent :get,
+        :args
+        {:coll :_view-select-clause,
+         :key {:value :name},
+         :default nil}}}}
+     {:parent :get,
+      :args
+      {:coll :_view-select-clause, :key {:value :unused}, :default nil}}
+     {:parent :gt,
+      :args
+      {:nums
+       [{:parent :count,
+         :args
+         {:coll
+          {:parent :get,
+           :args
+           {:coll :_view-select-clause,
+            :key {:value :uses},
+            :default nil}}}}
+        0]}}
+     {:parent :gt,
+      :args
+      {:nums
+       [{:parent :count,
+         :args
+         {:coll
+          {:parent :get,
+           :args
+           {:coll :_view-select-clause,
+            :key {:value :effects},
+            :default nil}}}}
+        0]}}
+     {:parent :gt,
+      :args
+      {:nums
+       [{:parent :count,
+         :args
+         {:coll
+          {:parent :get,
+           :args
+           {:coll :_view-select-clause,
+            :key {:value :kinds},
+            :default nil}}}}
+        0]}}
+     {:parent :gt,
+      :args
+      {:nums
+       [{:parent :count,
+         :args
+         {:coll
+          {:parent :get,
+           :args
+           {:coll :_view-select-clause,
+            :key {:value :problems},
+            :default nil}}}}
+        0]}}
+     {:parent :gt,
+      :args
+      {:nums
+       [{:parent :count,
+         :args
+         {:coll
+          {:parent :get,
+           :args
+           {:coll :_view-select-clause,
+            :key {:value :namespaces},
+            :default nil}}}}
+        0]}}
+     {:parent :gt,
+      :args
+      {:nums
+       [{:parent :count,
+         :args
+         {:coll
+          {:parent :get,
+           :args
+           {:coll :_view-select-clause,
+            :key {:value :exclude},
+            :default nil}}}}
+        0]}}]},
+   :return-type :bool,
+   :lambda-params [:clause]}
+
+  {:name :_view-select-empty-closure,
+   :parent :not,
+   :args
+   {:value
+    {:parent :not,
+     :args
+     {:value
+      {:parent :not,
+       :args
+       {:value
+        {:parent :some,
+         :args
+         {:pred :_view-select-clause-active,
+          :coll
+          {:as :item, :type [:list :_view-normalized-clause]}}}}}}}},
+   :return-type :bool,
+   :lambda-params [:item]}
+
+  {:name :_view-select-blocked,
+   :parent :or,
+   :args
+   {:values
+    [{:parent :not,
+      :args
+      {:value
+       {:parent :not,
+        :args
+        {:value
+         {:parent :some,
+          :args
+          {:pred :_view-select-empty-closure,
+           :coll
+           {:parent :get,
+            :args
+            {:coll :_view-select-facts,
+             :key {:value :referenced-clauses},
+             :default nil}}}}}}}}
+     {:parent :gt,
+      :args
+      {:nums
+       [{:parent :count,
+         :args
+         {:coll
+          {:parent :get,
+           :args
+           {:coll :_view-select-facts,
+            :key {:value :missing-views},
+            :default nil}}}}
+        0]}}
+     {:parent :gt,
+      :args
+      {:nums
+       [{:parent :count,
+         :args
+         {:coll
+          {:parent :get,
+           :args
+           {:coll :_view-select-facts,
+            :key {:value :unsupported-views},
+            :default nil}}}}
+        0]}}
+     {:parent :not,
+      :args
+      {:value
+       {:parent :not,
+        :args
+        {:value
+         {:parent :not,
+          :args
+          {:value
+           {:parent :some,
+            :args
+            {:pred :_view-select-clause-active,
+             :coll
+             {:parent :get,
+              :args
+              {:coll :_view-select-facts,
+               :key {:value :filters},
+               :default nil}}}}}}}}}}]},
+   :return-type :bool}
+
+  {:name :_view-select-matches,
+   :parent :if,
+   :args
+   {:test :_view-select-blocked,
+    :then {:value []},
+    :else
+    {:parent :filter,
+     :args
+     {:pred :_view-select-row-matches,
+      :coll
+      {:parent :get,
+       :args
+       {:coll :_view-select-facts,
+        :key {:value :rows},
+        :default nil}}}}},
+   :return-type [:list :_view-candidate-fact]}
+
+  {:name :_view-select-row-id,
+   :parent :get,
+   :args
+   {:coll {:as :item, :type :_view-candidate-fact},
+    :key {:value :id},
+    :default nil},
+   :return-type :uuid,
+   :lambda-params [:item]}
+
+  {:name :_view-select-base,
+   :parent :zipmap,
+   :args
+   {:keys [{:value :ids} {:value :total} {:value :truncated?}],
+    :vals
+    [{:parent :map,
+      :args
+      {:func :_view-select-row-id,
+       :coll
+       {:parent :take,
+        :args
+        {:count
+         {:parent :get,
+          :args
+          {:coll :_view-select-facts,
+           :key {:value :limit},
+           :default nil}},
+         :coll :_view-select-matches}}}}
+     {:parent :count, :args {:coll :_view-select-matches}}
+     {:parent :gt,
+      :args
+      {:nums
+       [{:parent :count, :args {:coll :_view-select-matches}}
+        {:parent :get,
+         :args
+         {:coll :_view-select-facts,
+          :key {:value :limit},
+          :default nil}}]}}]},
+   :return-type {:ids [:list :uuid] :total :non-negative-int :truncated? :bool}}
+
+  {:name :_view-select-missing-use?,
+   :parent :not,
+   :args
+   {:value
+    {:parent :get,
+     :args
+     {:coll
+      {:parent :get,
+       :args
+       {:coll :_view-select-facts,
+        :key {:value :known-ids},
+        :default nil}},
+      :key {:as :item, :type :uuid},
+      :default false}}},
+   :return-type :bool,
+   :lambda-params [:item]}
+
+  {:name :_view-select-missing-use-values,
+   :parent :sort,
+   :args
+   {:coll
+    {:parent :filter,
+     :args
+     {:pred :_view-select-missing-use?,
+      :coll
+      {:parent :get,
+       :args
+       {:coll :_view-select-facts,
+        :key {:value :requested-uses},
+        :default nil}}}}}}
+
+  {:name :_view-select-missing-uses,
+   :parent :if,
+   :args
+   {:test
+    {:parent :gt,
+     :args
+     {:nums
+      [{:parent :count, :args {:coll :_view-select-missing-use-values}}
+       0]}},
+    :then
+    {:parent :zipmap,
+     :args
+     {:keys [{:value :uses}], :vals [:_view-select-missing-use-values]}},
+    :else {:parent :zipmap, :args {:keys [], :vals []}}},
+   :return-type [:union [:map :never :never] {:uses [:list :uuid]}]}
+
+  {:name :_view-select-missing,
+   :parent :if,
+   :args
+   {:test
+    {:parent :gt,
+     :args
+     {:nums
+      [{:parent :count,
+        :args
+        {:coll
+         {:parent :get,
+          :args
+          {:coll :_view-select-facts,
+           :key {:value :missing-views},
+           :default nil}}}}
+       0]}},
+    :then
+    {:parent :assoc,
+     :args
+     {:map :_view-select-missing-uses,
+      :key {:value :views},
+      :value
+      {:parent :sort,
+       :args
+       {:coll
+        {:parent :get,
+         :args
+         {:coll :_view-select-facts,
+          :key {:value :missing-views},
+          :default nil}}}}}},
+    :else :_view-select-missing-uses},
+   :return-type :keyword-map}
+
+  {:name :_view-select-with-missing,
+   :parent :if,
+   :args
+   {:test
+    {:parent :gt,
+     :args
+     {:nums [{:parent :count, :args {:coll :_view-select-missing}} 0]}},
+    :then
+    {:parent :assoc,
+     :args
+     {:map :_view-select-base,
+      :key {:value :missing},
+      :value :_view-select-missing}},
+    :else :_view-select-base},
+   :return-type :keyword-map}
+
+  {:name :_view-select-result,
+   :parent :if,
+   :args
+   {:test
+    {:parent :gt,
+     :args
+     {:nums
+      [{:parent :count,
+        :args
+        {:coll
+         {:parent :get,
+          :args
+          {:coll :_view-select-facts,
+           :key {:value :unsupported-views},
+           :default nil}}}}
+       0]}},
+    :then
+    {:parent :assoc,
+     :args
+     {:map :_view-select-with-missing,
+      :key {:value :unsupported-views},
+      :value
+      {:parent :sort,
+       :args
+       {:coll
+        {:parent :get,
+         :args
+         {:coll :_view-select-facts,
+          :key {:value :unsupported-views},
+          :default nil}}}}}},
+    :else :_view-select-with-missing},
+   :return-type :keyword-map,
+   :lambda-params [:facts]}
+
+  {:name :view-members,
+   :description
+   "Light rows (`{:fns :total :truncated?}`, the `:search` shape, capped at 500; `:missing {:uses :views}` names ids the graph no longer holds) for every named fn of the current branch view matching ALL the given axes. Axes AND; `kinds` / `namespaces` OR within; `uses` / `effects` AND within (uses ALL of, carries ALL of). An empty filter set is an empty answer. Kinds include apps through the installed org-scoped Apps callback; problems are current branch failed/type-errors/lint predicates. Referenced views are intersected before the final 500-row limit. Evaluated over the graph AS THE VIEWER SEES IT (the view-impl seam): a fn whose composition the viewer may not see matches no `uses` THROUGH its internals and ships with empty `:parent-ids`.",
+   :args
+   {:selector :_view-select-result,
+    :exclude
+    {:required false,
+     :type [:list :text],
+     :description
+     "Dotted namespace paths a member must NOT live in or below."},
+    :namespaces
+    {:required false,
+     :type [:list :text],
+     :description
+     "Dotted namespace paths; a member lives in one of them or below (segment match)."},
+    :problems
+    {:required false,
+     :type
+     [:list
+      [:refine
+       :text
+       {:constraint [:in #{"type-errors" "failed" "lint"}]}]],
+     :description
+     "Current branch problems; matches any selected problem, together with all other axes."},
+    :filters :_view-filter-record,
+    :name
+    {:required false,
+     :type :nullable-text,
+     :description "Case-insensitive substring of the qualified name."},
+    :unused
+    {:required false,
+     :type :bool,
+     :description "Only fns nothing references or extends."},
+    :uses
+    {:required false,
+     :type [:list :uuid],
+     :description
+     "Fn ids; a member transitively extends or references every one of them."},
+    :effects
+    {:required false,
+     :type [:list :text],
+     :description
+     "Effect kinds (`io`, `db`, `state`, …) the member's computed footprint carries — all of them. Text, as they arrive over JSON; the evaluator keywordizes."},
+    :views
+    {:required false,
+     :type [:list :uuid],
+     :description
+     "Ids of `:explorer-view` fn-defs; a member is in every one of them too (their axes, recursively through their own `also`)."},
+    :kinds
+    {:required false,
+     :type [:list :text],
+     :description
+     "Row kinds (text) — a member is ONE of: `fn`, `types`, `secrets`, `services`, `apps`, `tests`."}},
+   :return-type :keyword-map,
+   :effects #{:db},
+   :parent :_project-view-cohort}
+
+
+  ;; Keep the public root's owned slot identities: existing stored views bind
+  ;; those slots directly. The private graph only consumes their values.
+  {:name :_explorer-use
+   :parent :const
+   :args {:value {:as :uses :type :fn-ref}}}
+
+  {:name :_explorer-also
+   :parent :const
+   :args {:value {:as :also :type :fn-ref}}}
+
+  {:name :_explorer-uses-all
+   :parent :vec
+   :args {:coll {:as :uses-all :type [:list :uuid]}}}
+
+  {:name :_explorer-also-all
+   :parent :vec
+   :args {:coll {:as :also-all :type [:list :uuid]}}}
+
+  {:name :_explorer-uses
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_explorer-use}}
+          :then {:parent :conj :args {:coll :_explorer-uses-all :item :_explorer-use}}
+          :else :_explorer-uses-all}}
+
+  {:name :_explorer-views
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_explorer-also}}
+          :then {:parent :conj :args {:coll :_explorer-also-all :item :_explorer-also}}
+          :else :_explorer-also-all}}
+
+  {:name :_explorer-members
+   :parent :view-members
+   :args {:uses :_explorer-uses :views :_explorer-views}}
 
   {:name :explorer-view
    :description "A view SAVED IN THE GRAPH — extend this and bind the axes you mean; the Explorer lists every such fn-def (`GET /api/views`) and applies it like a personal view, and ▶ Run answers the member list (`{:fns :truncated?}`). Same evaluation as `:view-members`, Legacy `uses` and `also` remain identity slots. `uses-all` and `also-all` add lists; ordinary const compositions with :fn-ref bindings preserve target identities without executing them. All clauses intersect, and problems are evaluated on the current branch."
-   :args {:name {:required false :type :nullable-text
+   :parent :const
+   :args {:value :_explorer-members
+          :name {:required false :type :nullable-text
                  :description "Case-insensitive substring of the qualified name."}
           :uses {:required false :type :fn-ref
-                 :description "The fn every member transitively extends or references — bound by reference; the impl receives its id."}
-          :uses-all {:required false :type [:list :uuid] :value []
+                 :description "The fn every member transitively extends or references — bound by reference; the graph receives its id."}
+          :uses-all {:required false :type [:list :uuid]
                      :description "Additional identities every member transitively uses. List items may reference const functions with :fn-ref value bindings."}
-          :also-all {:required false :type [:list :uuid] :value []
+          :also-all {:required false :type [:list :uuid]
                      :description "Additional graph view identities whose complete member sets must all match."}
-          :effects {:required false :type [:list :text] :value []
+          :effects {:required false :type [:list :text]
                     :description "Effect kinds the member's footprint carries — all of them."}
-          :kinds {:required false :type [:list :text] :value []
+          :kinds {:required false :type [:list :text]
                   :description "Row kinds — ONE of `fn`, `types`, `secrets`, `services`, `apps`, `tests`."}
           :problems {:required false
                      :type [:list [:refine :text {:constraint [:in #{"failed" "type-errors" "lint"}]}]]
-                     :value []
                      :description "Current branch problems; matches any selected problem, together with all other axes."}
-          :namespaces {:required false :type [:list :text] :value []
+          :namespaces {:required false :type [:list :text]
                        :description "Dotted namespace paths; in one of them or below."}
-          :exclude {:required false :type [:list :text] :value []
+          :exclude {:required false :type [:list :text]
                     :description "Dotted namespace paths NOT in or below."}
-          :unused {:required false :type :bool :value false
+          :unused {:required false :type :bool
                    :description "Only fns nothing references or extends."}
           :also {:required false :type :fn-ref
                  :description "Another `:explorer-view` fn-def, bound by reference — the member set is intersected with its members (that view may `also` a third, and so on: compose views by chaining)."}}
    :return-type :keyword-map
    :effects #{:db}}
 
-  {:name :explorer-views
+  {:name :_explorer-view-facts
    :description "Every named fn-def extending `:explorer-view` on the current branch view, with its bound axes decoded — `[{:id :name :namespace-id :filters} …]`, `:filters` in the `:view-members` argument shape plus `:also` (view ids). The Explorer's \"views in the graph\" list."
    :args {}
    :return-type [:list :keyword-map]
    :effects #{:db}}
+
+  {:name :_explorer-list-row-name
+   :parent :get :args {:coll {:as :item} :key {:value :name} :default nil}}
+  {:name :explorer-views
+   :description "Select named safe decoded view descendants and order them by name."
+   :parent :sort-by
+   :args {:key-fn :_explorer-list-row-name
+          :coll {:parent :filter
+                 :args {:pred {:parent :some? :args {:value :_explorer-list-row-name}}
+                        :coll :_explorer-view-facts}}}
+   :return-type [:list :keyword-map]}
+
 
   ;; ---------------------------------------------------------------------
   ;; GET /api/views — the views saved in the graph
@@ -739,12 +1884,33 @@
      :_vc-check-effects
      :_vc-command-namespace-id]}}
 
-  {:name :save-explorer-view
+  {:name :_save-explorer-view-operation
    :description "Atomically create or update an ordinary explorer-view fn and every filter binding; publish only after commit."
    :args {:command {:type :keyword-map}
           :request {:type :ring-request-shape :description "Request scope pin."}}
    :return-type :keyword-map
    :effects #{:db}}
+
+  {:name :_save-explorer-view-safe-error
+   :description "Canonical safe Save failure body and status."
+   :args {:exception {:type :any}}
+   :return-type :keyword-map}
+  {:name :_save-explorer-view-on-throw
+   :parent :if
+   :args {:test {:parent :equal?
+                 :args {:a {:parent :throwable-class-name :args {:ex {:as :exception}}}
+                        :b "clojure.lang.ExceptionInfo"}}
+          :then {:parent :assoc
+                 :args {:map :_save-explorer-view-safe-error
+                        :key {:value :committed} :value false}}
+          :else {:parent :throw :args {:exception {:as :exception}}}}}
+  {:name :save-explorer-view
+   :description "Owned guarded Save and publication, with graph response mapping over canonical redacted failures."
+   :parent :try
+   :args {:body :_save-explorer-view-operation :on-throw :_save-explorer-view-on-throw
+          :command {:type :keyword-map} :request {:type :ring-request-shape}}
+   :return-type :keyword-map}
+
 
   {:name :_view-save-command
    :parent :parse-view-command

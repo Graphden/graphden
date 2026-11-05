@@ -1,9 +1,7 @@
 (ns graphden.packages.app.secrets.impls
-  "Impls for `app.secrets` endpoints. Each `defbase` is a thin shim
-   that parses the JSON body and delegates to `graphden.crud.secrets`.
-   URL-based parsers live in fns.edn as graph fn-defs composing
-   `:uri-segment-after` + `:parse-uuid` + `:parse-json-body` +
-   `:zipmap`, so they need no defbase shim here."
+  "Native secret write, compensation, ownership and redacted audit boundaries.
+   Parsing, safe receipts and history ordering/cap live in app.secrets fn-defs.
+   Secret values and raw Vault error payloads stay inside the native boundary."
   (:require
     [graphden.crud.request :as request]
     [graphden.crud.secrets :as secrets]
@@ -12,30 +10,30 @@
     [graphden.storage.protocol.core :as sp]))
 
 
-(defbase _apply-create-secret-body
+(defbase _create-secret-facts
   [parsed leaf-id journal]
   (cr/record-effect! :db)
   (cr/record-effect! :network)
-  (secrets/apply-create-secret-body parsed leaf-id journal ctx))
+  (secrets/create-secret-facts! parsed leaf-id journal ctx))
 
 
 ;; --- create-inline-binding ---
 
-(defbase _apply-inline-bind-body
+(defbase _inline-secret-facts
   [parsed journal]
   (cr/record-effect! :db)
   (cr/record-effect! :network)
-  (secrets/apply-create-inline-binding-body parsed journal ctx))
+  (secrets/create-inline-binding-facts! parsed journal ctx))
 
 
-(defbase _apply-secret-rollback
+(defbase _rollback-secret-failure
   "Shared on-throw branch for inline-bind + create-secret. Replays the
    journal in reverse (vault-delete / storage-delete by tag) and
-   builds the rejection envelope."
+   returns redacted failure facts for the graph rejection envelope."
   [journal exception]
   (cr/record-effect! :db)
   (cr/record-effect! :network)
-  (secrets/replay-secret-rollback! journal exception ctx))
+  (secrets/rollback-secret-failure! journal exception ctx))
 
 
 ;; --- rotate-secret ---
@@ -63,21 +61,18 @@
                                      :target-kind target-kind :target-id target-id}))
 
 
-(defbase _secret-rotation-history
-  "Read at most 50 value-free rotation events for one secret or inline binding."
+(defbase _secret-rotation-rows
+  "Scoped history read with a strict value-free projection. Ordering, cap and
+   response envelope are graph policy; raw audit rows never cross this boundary."
   [target-kind target-id]
-  (let [kind-str (if (keyword? target-kind) (name target-kind) (str target-kind))
-        _ (when-not (contains? #{"secret" "binding"} kind-str)
-            (throw (ex-info "Invalid secret rotation target" {:type :secret-rotation/invalid-target})))
-        rows (sp/query-entities (request/require-storage ctx) :secret-rotation
-                                {:target-kind kind-str
-                                 :target-id target-id})]
-    {:ok true
-     :events (->> rows
-                  (sort-by :occurred-at #(compare %2 %1))
-                  (take 50)
-                  (mapv #(select-keys % [:actor-id :actor-label :status
-                                         :vault-version :failure-type :occurred-at])))}))
+  (cr/record-effect! :db)
+  (let [kind-str (if (keyword? target-kind) (name target-kind) (str target-kind))]
+    (when-not (contains? #{"secret" "binding"} kind-str)
+      (throw (ex-info "Invalid secret rotation target" {:type :secret-rotation/invalid-target})))
+    (mapv #(select-keys % [:actor-id :actor-label :status :vault-version
+                           :failure-type :occurred-at])
+          (sp/query-entities (request/require-storage ctx) :secret-rotation
+                             {:target-kind kind-str :target-id target-id}))))
 
 
 ;; --- delete-secret ---
@@ -87,9 +82,9 @@
 
 
 (def impls
-  {:_apply-create-secret-body     _apply-create-secret-body
-   :_apply-inline-bind-body       {:impl _apply-inline-bind-body :taint-propagate? true}
-   :_apply-secret-rollback        {:impl _apply-secret-rollback :taint-propagate? true}
+  {:_create-secret-facts     _create-secret-facts
+   :_inline-secret-facts       {:impl _inline-secret-facts :taint-propagate? true}
+   :_rollback-secret-failure        {:impl _rollback-secret-failure :taint-propagate? true}
    :_rotate-secret-not-owned?     {:impl _rotate-secret-not-owned? :taint-propagate? true}
    :_rotate-secret-write          _rotate-secret-write
-   :_secret-rotation-history      _secret-rotation-history})
+   :_secret-rotation-rows         _secret-rotation-rows})

@@ -22,8 +22,8 @@
    storage, parse a request, build the graph element lists, or
    grid-place them."
   (:require
-    [clojure.string :as str]
     [graphden.crud.entities.list :as entity-list]
+    [graphden.crud.request :as request]
     [graphden.crud.types-api :as types-api]
     [graphden.crud.value-repr :as value-repr]
     [graphden.executor.compile-runtime :as cr]
@@ -60,15 +60,28 @@
   (load-graph-entities ctx))
 
 
-(defbase _parse-layout-body
-  "Single library call — parse the Ring request body into
-   `{:root-id :expansions}`. Thrown by `layout/parse-layout-request`:
-   `JsonParseException` (malformed JSON), `ExceptionInfo` (missing
-   `:root-id`), `IllegalArgumentException` (bad UUID). The graph's
-   `:try` + class-name dispatch in `fns.edn` turns each into the
-   appropriate `{:ok false :error}` shape."
+(defbase _layout-read-json-body
+  "Decode the Ring body with the canonical JSON request codec."
   [request]
-  (layout/parse-layout-request request))
+  (request/read-json-body request))
+
+
+(defbase _layout-parse-expansions
+  "Canonical expansion-spec codec, preserving per-call-site string node ids."
+  [expansions]
+  (layout/parse-expansions expansions))
+
+
+(defbase _layout-parse-uuid
+  "Strict UUID codec; malformed input preserves IllegalArgumentException."
+  [value]
+  (java.util.UUID/fromString value))
+
+
+(defbase _layout-value-class
+  "Host value class for the request's existing diagnostic contract."
+  [value]
+  (Class/.getSimpleName (class value)))
 
 
 (defbase _layout-build-apply
@@ -89,33 +102,19 @@
   (layout/place-elements elements))
 
 
-(defbase _layout-strip-facts-apply
-  "Single library call — annotate every fn-node's `:data` with the
-   strip facts (`:returnTypeAlias` / `:ruleOwner` / `:branchLocal`)
-   the editor's bottom-of-card strips render. See
-   `graphden.layout.strip-facts`."
+(defbase _layout-safe-strip-facts
+  "Compute canonical concealed-chain-safe facts without attaching them to nodes."
   [elements graph]
-  (strip-facts/annotate elements graph))
+  (strip-facts/facts-by-fn elements graph))
 
 
-(defbase _layout-literal-reprs-apply
-  "Attach bounded compact type representations through the shared pure rendering boundary."
+(defbase _layout-literal-previews
+  "Evaluate a bounded canonical batch of safe previews, without attaching node fields."
   [elements graph]
-  (value-repr/annotate-literals ctx elements graph))
+  (value-repr/literal-preview-entries ctx elements graph))
 
 
 ;; === Registry ===
-
-(defn- seal-note
-  "One line for the Inspector row: what is decided on the slot, and by whom."
-  [{:keys [sealedByName listClosedByName requiredByName]} optional?]
-  (str/join " · "
-            (cond-> []
-              sealedByName (conj (str "sealed in " sealedByName))
-              listClosedByName (conj (str "list closed in " listClosedByName))
-              (and optional? requiredByName) (conj (str "required since " requiredByName))
-              (and optional? (not requiredByName)) (conj "optional"))))
-
 
 (defbase _fn-branch-local-seed
   "Whether `fn-id` is branch-local and who made it so — `{:own bool
@@ -132,39 +131,35 @@
         fns-by-id (entity-list/conceal-parents fns-by-id [fn-id]) fn-id))))
 
 
-(defbase _fn-slot-seals
-  "The seals on every slot of `fn-id`'s inheritance chain, keyed by the
-   slot's effective name — the Inspector's Bindings tab prints the
-   `:note` beside each row. Per slot: `:sealed-by` / `:list-closed-by` /
-   `:required-by` (the NAME of the deciding fn, from `edge-seal-fields`
-   — the same walk the canvas lock badge shows, over the chain as the
-   viewer may see it), `:optional?` (declared `:required false`) and
-   the `:note`. One cached graph read."
+(defbase _fn-slot-seal-facts
+  "Read effective slot identities and inherited seals through the viewer's
+   concealed graph. Only authorized names leave the canonical seal walk."
   [fn-id]
-  (when fn-id
+  (if-not fn-id
+    []
     (let [lookups (lgraph/cached-build-lookups
                     (:graph (layout/viewer-graph (load-graph-entities ctx) [fn-id])))
           {:keys [args-by-fn slot-map]} lookups]
-      (into {}
-            (keep (fn [arg]
-                    (let [seals (bh/edge-seal-fields lookups (:id arg))
-                          slot (get slot-map (:slot-id arg))
-                          optional? (false? (:required slot))]
-                      (when (or (seq seals) optional?)
-                        [(keyword (or (:name arg) (:name slot)))
-                         (cond-> {:optional? optional? :note (seal-note seals optional?)}
-                           (:sealedByName seals) (assoc :sealed-by (:sealedByName seals))
-                           (:listClosedByName seals) (assoc :list-closed-by (:listClosedByName seals))
-                           (:requiredByName seals) (assoc :required-by (:requiredByName seals)))]))))
+      (mapv (fn [arg]
+              (let [seals (bh/edge-seal-fields lookups (:id arg))
+                    slot (get slot-map (:slot-id arg))]
+                [(keyword (or (:name arg) (:name slot)))
+                 (cond-> {:optional? (false? (:required slot))}
+                   (:sealedByName seals) (assoc :sealed-by (:sealedByName seals))
+                   (:listClosedByName seals) (assoc :list-closed-by (:listClosedByName seals))
+                   (:requiredByName seals) (assoc :required-by (:requiredByName seals)))]))
             (get args-by-fn fn-id)))))
 
 
 (def impls
   {:_fn-branch-local-seed _fn-branch-local-seed
-   :_fn-slot-seals _fn-slot-seals
+   :_fn-slot-seal-facts _fn-slot-seal-facts
    :_load-graph-cached _load-graph-cached
-   :_parse-layout-body {:impl _parse-layout-body :taint-propagate? true}
+   :_layout-read-json-body {:impl _layout-read-json-body :taint-propagate? true}
+   :_layout-parse-expansions {:impl _layout-parse-expansions :taint-propagate? true}
+   :_layout-parse-uuid {:impl _layout-parse-uuid :taint-propagate? true}
+   :_layout-value-class {:impl _layout-value-class :taint-propagate? true}
    :_layout-build-apply {:impl _layout-build-apply :taint-propagate? true}
-   :_layout-literal-reprs-apply {:impl _layout-literal-reprs-apply :taint-propagate? true}
+   :_layout-literal-previews {:impl _layout-literal-previews :taint-propagate? true}
    :_layout-place-apply {:impl _layout-place-apply :taint-propagate? true}
-   :_layout-strip-facts-apply {:impl _layout-strip-facts-apply :taint-propagate? true}})
+   :_layout-safe-strip-facts {:impl _layout-safe-strip-facts :taint-propagate? true}})

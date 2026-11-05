@@ -5,24 +5,18 @@
     [graphden.executor.defbase :refer [defbase]]))
 
 
-(defbase parse-inheritance-command
-  [body]
-  (inheritance/parse-command body))
-
-
-(defbase preview-inheritance
+(defbase _preview-inheritance-model
   [command _request]
   (cr/record-effect! :db)
   (inheritance/preview ctx command))
 
 
-(defbase apply-inheritance
+(defbase _apply-inheritance-operation
   [command _request]
   (cr/record-effect! :db)
-  (inheritance/apply! ctx command))
+  (inheritance/apply-operation! ctx command))
 
 
 (def impls
-  {:parse-inheritance-command {:impl parse-inheritance-command :taint-propagate? true}
-   :preview-inheritance {:impl preview-inheritance :taint-propagate? true}
-   :apply-inheritance {:impl apply-inheritance :taint-propagate? true}})
+  {:_preview-inheritance-model {:impl _preview-inheritance-model :taint-propagate? true}
+   :_apply-inheritance-operation {:impl _apply-inheritance-operation :taint-propagate? true}})

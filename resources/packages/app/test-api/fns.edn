@@ -3,18 +3,145 @@
 ;; A test is a named fn in a namespace whose dotted path contains the
 ;; segment `tests`; it passes when it executes without a throw
 ;; (`:assert` / `:assert-eq` are the failure vocabulary). Discovery,
-;; the sequential runner and the latest-status join live in
-;; `graphden.crud.test-runs`; this module is the HTTP face — request
-;; parsing as graph composition (the `:_execute-parsed` pattern) over
-;; two thin boundary base-fns. The editor's surfaces (the ✓ tests lens
-;; with its Run-all action, the Inspector's Test section with its
-;; Run-this-test action) are composed over the same two base-fns —
+;; scoped fact acquisition and the sequential runner live in
+;; `graphden.crud.test-runs`. Selection, summaries and status joins are
+;; graph composition. The editor's surfaces (the ✓ tests lens with Run-all
+;; and the Inspector's Run-this-test action) share these graph endpoints —
 ;; `app/editor-provenance/fns.edn` `_insp-test-*`.
 
 {:namespace "app.test-api"
  :description "Tests API: POST /api/tests/run (run the branch's tests through the execute pipeline), GET /api/tests/status (per-test latest status of the current version) and the SSE ping stream the editor's ✓ tests lens re-primes on."
  :fns
- [;; ---------------------------------------------------------------------
+ [
+  {:name :_test-fact
+   :type {:id :uuid :name :text :namespace-id :nullable-uuid :platform? :bool}}
+  {:name :_tests-status-batch
+   :type {:tests [:list :_test-fact] :statuses [:map :uuid :keyword-map]}}
+  {:name :_tests-discover
+   :description "Fresh scoped named test identities and package ownership; no function bodies cross this boundary."
+   :args {:request {:type :ring-request-shape}}
+   :return-type [:list :_test-fact] :effects #{:db}}
+  {:name :_tests-execute-selected
+   :description "Re-read the scoped test cohort and execute explicit selected IDs sequentially under one shared graph-load memo, preserving authority, persistence and notifications. Empty selection runs nothing."
+   :args {:request {:type :ring-request-shape}
+          :selected-ids {:type [:list :uuid]}
+          :timeout-ms {:type :nullable-int}}
+   :return-type [:list :keyword-map] :effects #{:db}}
+  {:name :_tests-status-facts
+   :description "Safe test identities with one batched lookup of their current-version execution statuses."
+   :args {:request {:type :ring-request-shape}}
+   :return-type :_tests-status-batch :effects #{:db}}
+
+  {:name :_tests-row-id
+   :parent :get
+   :lambda-params [:test-row]
+   :args {:coll {:as :test-row :type :_test-fact} :key {:value :id} :default nil}}
+  {:name :_tests-explicit-selection?
+   :parent :not
+   :args {:value {:parent :empty?
+                  :args {:coll {:as :fn-ids :type [:union :null [:list :text]]}}}}}
+  {:name :_tests-requested-ids
+   :parent :map
+   :args {:func :parse-uuid
+          :coll {:parent :coalesce
+                 :args {:value {:as :fn-ids :type [:union :null [:list :text]]}
+                        :default {:value []}}}}}
+  {:name :_tests-requested-id-index
+   :parent :frequencies
+   :args {:coll :_tests-requested-ids}}
+  {:name :_tests-requested?
+   :parent :contains? :lambda-params [:test-row]
+   :args {:coll {:as :requested-index :type [:map :nullable-uuid :int]}
+          :key :_tests-row-id}}
+  {:name :_tests-user-test?
+   :parent :not :lambda-params [:test-row]
+   :args {:value {:parent :get
+                  :args {:coll {:as :test-row :type :_test-fact}
+                         :key {:value :platform?} :default false}}}}
+  {:name :_tests-selected
+   :parent :if
+   :args {:test :_tests-explicit-selection?
+          :then {:parent :filter
+                 :args {:pred :_tests-requested? :coll :_tests-discover
+                        :requested-index :_tests-requested-id-index}}
+          :else {:parent :if
+                 :args {:test {:parent :coalesce
+                               :args {:value {:as :platform? :type :nullable-bool} :default false}}
+                        :then :_tests-discover
+                        :else {:parent :filter
+                               :args {:pred :_tests-user-test? :coll :_tests-discover}}}}}}
+  {:name :_tests-selected-ids
+   :parent :map
+   :args {:func :_tests-row-id :coll :_tests-selected}}
+  {:name :_tests-results
+   :parent :_tests-execute-selected
+   :args {:selected-ids :_tests-selected-ids}}
+  {:name :_tests-result-status
+   :parent :get
+   :lambda-params [:result]
+   :args {:coll {:as :result :type :keyword-map} :key {:value :status} :default nil}}
+  {:name :_tests-result-counts
+   :parent :frequencies
+   :args {:coll {:parent :map :args {:func :_tests-result-status :coll :_tests-results}}}}
+  {:name :_tests-total
+   :parent :count :args {:coll :_tests-results}}
+  {:name :_tests-passed
+   :parent :get
+   :args {:coll :_tests-result-counts :key {:value :succeeded} :default 0}}
+  {:name :_tests-failed
+   :parent :get
+   :args {:coll :_tests-result-counts :key {:value :failed} :default 0}}
+  {:name :_tests-other
+   :parent :sub
+   :args {:nums [:_tests-total :_tests-passed :_tests-failed]}}
+  {:name :_tests-run-apply
+   :description "Graph selection of explicit IDs or non-platform tests, followed by one native sequential memoized run and graph result summary. Nonempty invalid ID lists select nothing; nil/empty means all eligible tests."
+   :parent :zipmap
+   :args {:keys {:value [:total :passed :failed :other :results]}
+          :vals [:_tests-total :_tests-passed :_tests-failed :_tests-other :_tests-results]}
+   :return-type {:total :int :passed :int :failed :int :other :int
+                 :results [:list :keyword-map]}}
+
+  {:name :_tests-status-rows
+   :parent :get
+   :args {:coll :_tests-status-facts :key {:value :tests} :default {:value []}}}
+  {:name :_tests-status-index
+   :parent :get
+   :args {:coll :_tests-status-facts :key {:value :statuses} :default {:value {}}}}
+  {:name :_tests-status-namespace-id
+   :parent :get
+   :args {:coll {:as :test-row :type :_test-fact} :key {:value :namespace-id} :default nil}}
+  {:name :_tests-status-row
+   :parent :assoc
+   :lambda-params [:test-row]
+   :args {:map {:parent :assoc
+                :args {:map {:parent :assoc
+                             :args {:map {:parent :assoc
+                                          :args {:map {:parent :get
+                                                       :args {:coll {:as :statuses :type [:map :uuid :keyword-map]}
+                                                              :key :_tests-row-id :default nil}}
+                                                 :key {:value :fn-id}
+                                                 :value {:parent :to-str :args {:value :_tests-row-id}}}}
+                                    :key {:value :fn-name}
+                                    :value {:parent :get
+                                            :args {:coll {:as :test-row :type :_test-fact}
+                                                   :key {:value :name} :default nil}}}}
+                       :key {:value :namespace-id}
+                       :value {:parent :if
+                               :args {:test {:parent :some? :args {:value :_tests-status-namespace-id}}
+                                      :then {:parent :to-str :args {:value :_tests-status-namespace-id}}
+                                      :else nil}}}}
+          :key {:value :platform?}
+          :value {:parent :get :args {:coll {:as :test-row :type :_test-fact}
+                                     :key {:value :platform?} :default false}}}}
+  {:name :_tests-status-apply
+   :description "Graph display join over one scoped test/status batch; absent status means the current version has never run."
+   :parent :map
+   :args {:func :_tests-status-row :coll :_tests-status-rows
+          :statuses :_tests-status-index}
+   :return-type [:list :keyword-map]}
+
+  ;; ---------------------------------------------------------------------
   ;; POST /api/tests/run — body `{fn-ids?: [uuid-str …], timeout-ms?: int}`
   ;; ---------------------------------------------------------------------
 
@@ -31,19 +158,7 @@
   {:name :_tests-run-platform?
    :parent :get :args {:coll :_tests-run-body :key {:value :platform?} :default nil}}
 
-  {:name :_tests-run-apply
-   :description "Single `test-runs/run-tests!` call — sequential execution of the branch's tests through the standard execute pipeline (effect gating, redaction, per-org caps, persistence), summarised as `{:total :passed :failed :other :results}`. `:request` is unused data-wise but pins the fn to the request scope so the summary is never call-cached across requests."
-   :args {:request {:type :ring-request-shape
-                    :description "The Ring request (scope pin only)."}
-          :fn-ids {:type [:union :null [:list :text]]
-                   :description "Optional fn-id strings — run only these tests; nil = every test on the branch."}
-          :timeout-ms {:type :nullable-int
-                       :description "Per-test deref timeout; nil = 10000 ms. An overrunning test reports `:pending` and its terminal status lands on the execution row asynchronously."}
-          :platform? {:type :nullable-bool
-                      :description "Include the PLATFORM tests (the shipped packages' own `*.tests` self-tests, package-synced this boot) in an all-tests run; nil/false = the org's tests only. An explicit `:fn-ids` subset ignores this."}}
-   :return-type {:total :int :passed :int :failed :int :other :int
-                 :results [:list :keyword-map]}
-   :effects #{:db}}
+
 
   {:name :_tests-run
    :description "The apply stage with the body fields bound — `:request` stays free and unifies with the parse chain's request."
@@ -62,12 +177,7 @@
   ;; GET /api/tests/status
   ;; ---------------------------------------------------------------------
 
-  {:name :_tests-status-apply
-   :description "Single `test-runs/tests-with-statuses` call — every test fn on the current branch joined with the newest execution of its CURRENT version (`:status` nil = never ran since last edit; keying by current version makes an edited test read as stale by construction). `:request` pins the request scope, as in `:_tests-run-apply`."
-   :args {:request {:type :ring-request-shape
-                    :description "The Ring request (scope pin only)."}}
-   :return-type [:list :keyword-map]
-   :effects #{:db}}
+
 
   {:name :tests-status-handler
    :lambda-params [:request]
@@ -78,7 +188,7 @@
   ;; ---------------------------------------------------------------------
   ;; LIVE signal — GET /partials/tests-stream. A PING (server time) over
   ;; SSE: `:wake-on-writes` fires on any graphden_events event (graph
-  ;; writes AND the `test:updated` nudge run-tests! emits after every
+  ;; writes AND the `test:updated` nudge run-selected-tests! emits after every
   ;; test), ~200 ms debounce; `:interval-ms` is the keepalive ceiling.
   ;; The editor keeps this stream open while the ✓ tests lens is active
   ;; and re-primes `/api/tests/status` on each ping, so the Explorer's

@@ -293,15 +293,22 @@
                     :http-status (errors/status-for-ex-data (ex-data e))}}))))
 
 
-(defn apply!
+(defn apply-operation!
+  "Owned mutation and mandatory publication remain inseparable."
   [ctx command]
   (shield/run!
     (fn []
-      (if (= "candidates" (:action command))
-        {:ok false :committed false :type :validation-error/inheritance-command
-         :error "Candidates is a preview-only action" :http-status 400}
-        (let [storage (request/require-storage ctx)
-              result (transact! storage command)]
-          (if (get-in result [:response :ok])
-            (publish! ctx storage result)
-            (:response result)))))))
+      (let [storage (request/require-storage ctx)
+            result (transact! storage command)]
+        (if (get-in result [:response :ok])
+          (publish! ctx storage result)
+          (:response result))))))
+
+
+(defn apply!
+  "Native command facade; graph callers compose preview-only command policy."
+  [ctx command]
+  (if (= "candidates" (:action command))
+    {:ok false :committed false :type :validation-error/inheritance-command
+     :error "Candidates is a preview-only action" :http-status 400}
+    (apply-operation! ctx command)))

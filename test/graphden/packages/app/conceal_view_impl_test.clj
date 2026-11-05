@@ -21,6 +21,7 @@
     [graphden.executor.test-setup :as setup]
     [graphden.packages.export :as export]
     [graphden.storage.protocol.core :as sp]
+    [graphden.test-infra.execution-api :as execution-api]
     [graphden.test-infra.golden-app :as ga]))
 
 
@@ -67,7 +68,7 @@
 
 (defn- stored-entries
   [execution-id]
-  (:entries (:path-trace (fn-exec/get-execution (ctx) (parse-uuid execution-id)))))
+  (:entries (:path-trace (execution-api/get-execution (ctx) (parse-uuid execution-id)))))
 
 
 (def ^:private traced-fn

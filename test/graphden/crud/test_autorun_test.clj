@@ -167,14 +167,14 @@
         release (java.util.concurrent.CountDownLatch. 1)
         shutdown (promise)]
     (with-redefs [test-runs/test-fn-rows (fn [_] test-rows)
-                  test-runs/run-tests! (fn [_ _]
-                                         (deliver entered true)
-                                         (loop []
-                                           (when-not (try
-                                                       (java.util.concurrent.CountDownLatch/.await
-                                                         release 100 java.util.concurrent.TimeUnit/MILLISECONDS)
-                                                       (catch InterruptedException _ false))
-                                             (recur))))]
+                  test-runs/run-selected-tests! (fn [_ _ _]
+                                                  (deliver entered true)
+                                                  (loop []
+                                                    (when-not (try
+                                                                (java.util.concurrent.CountDownLatch/.await
+                                                                  release 100 java.util.concurrent.TimeUnit/MILLISECONDS)
+                                                                (catch InterruptedException _ false))
+                                                      (recur))))]
       (binding [registry/*rich-types-override*
                 (rich-types {:test-a #{} :test-b #{} :test-c #{}})]
         (is (= 1 (autorun/schedule-affected! (hot-ctx) #{:util} :b)))
@@ -224,11 +224,11 @@
    every test row is visible and each run records `{:fn-ids :allowed-effects}`."
   [calls f]
   (with-redefs [test-runs/test-fn-rows (fn [_ctx] test-rows)
-                test-runs/run-tests! (fn [ctx opts]
-                                       (swap! calls conj
-                                              {:fn-ids (vec (:fn-ids opts))
-                                               :allowed-effects (:allowed-effects ctx)})
-                                       {:total (count (:fn-ids opts))})]
+                test-runs/run-selected-tests! (fn [ctx fn-ids _timeout-ms]
+                                                (swap! calls conj
+                                                       {:fn-ids (vec fn-ids)
+                                                        :allowed-effects (:allowed-effects ctx)})
+                                                [])]
     (f)))
 
 

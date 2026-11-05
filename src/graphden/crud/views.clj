@@ -46,20 +46,35 @@
       (seq warnings) (assoc :publication-warnings warnings))))
 
 
-(defn save!
+(defn save-operation!
+  "Owned Save transaction and mandatory publication. A create identity conflict
+   is made opaque before any caller can observe it; response policy is external."
   [ctx command]
   (shield/run!
     (fn []
       (let [storage (request/require-storage ctx)
-            outcome (try {:result (transact! ctx storage command)}
-                         (catch clojure.lang.ExceptionInfo error
-                           {:error (if (and (:create-id command)
-                                            (= :unique-violation (:type (ex-data error))))
-                                     (ex-info "The proposed view identity is unavailable"
-                                              {:type :constraint-violation/unique})
-                                     error)}))]
-        (if-let [error (:error outcome)]
-          (let [body (errors/safe-error-body (:type (ex-data error)) (ex-message error))]
-            (when (:ref body) (log/error error "Save view failed" {:ref (:ref body)}))
-            (assoc body :committed false :http-status (errors/status-for-ex-data (ex-data error))))
-          (publish! ctx storage (:result outcome)))))))
+            result (try (transact! ctx storage command)
+                        (catch clojure.lang.ExceptionInfo error
+                          (throw (if (and (:create-id command)
+                                          (= :unique-violation (:type (ex-data error))))
+                                   (ex-info "The proposed view identity is unavailable"
+                                            {:type :constraint-violation/unique})
+                                   error))))]
+        (publish! ctx storage result)))))
+
+
+(defn safe-save-error
+  "Canonical redaction/status boundary; raw exception details never enter the
+   caller's response model. Internal failures are correlated only in the log."
+  [error]
+  (let [body (errors/safe-error-body (:type (ex-data error)) (ex-message error))]
+    (when (:ref body) (log/error error "Save view failed" {:ref (:ref body)}))
+    (assoc body :http-status (errors/status-for-ex-data (ex-data error)))))
+
+
+(defn save!
+  "Native compatibility facade over the same owned operation and safe error."
+  [ctx command]
+  (try (save-operation! ctx command)
+       (catch clojure.lang.ExceptionInfo error
+         (assoc (safe-save-error error) :committed false))))

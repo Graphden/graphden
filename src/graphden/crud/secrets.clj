@@ -158,14 +158,14 @@
     (throw (ex-info reason {:type :package/owned :http-status 403}))))
 
 
-(defn replay-secret-rollback!
+(defn rollback-secret-failure!
   "Shared rollback callable for the §3.3 secret-write `:try` carve-outs
    (create-secret + create-inline-binding). Walks the journal in
    reverse and undoes each entry by tag: `[:vault-delete <path>]`
    tries `vault/delete-secret`, `[:storage-delete <et> <id>]` tries
    `sp/delete-entity`. Each step is best-effort + logged — replay
    failures don't re-throw, matching the legacy behaviour (the
-   important contract is that the response says `{:ok false}` and
+   important contract is that the graph adds `{:ok false}` and
    no orphan rows linger on the happy path)."
   [journal exception ctx]
   (let [storage (request/require-storage ctx)
@@ -184,8 +184,7 @@
                (catch Exception e (log-rollback-failure et e))))))
     (if (instance? clojure.lang.ExceptionInfo exception)
       (let [data (ex-data exception)]
-        (cond-> {:ok false
-                 :error (or (ex-message exception) (str exception))
+        (cond-> {:error (or (ex-message exception) (str exception))
                  ;; Drop `:body` — a vault error's ex-data carries the raw
                  ;; OpenBao HTTP response text, which is internal noise for
                  ;; the API caller and a theoretical secret-echo vector if a
@@ -194,8 +193,7 @@
           ;; A guard that declared its status (403 package-owned, 409 path
           ;; in use) — read by `:json-envelope-response`.
           (:http-status data) (assoc :http-status (:http-status data))))
-      {:ok false
-       :error (or (ex-message exception) (str exception))})))
+      {:error (or (ex-message exception) (str exception))})))
 
 
 (defn- reserve-secret-rows!
@@ -224,7 +222,7 @@
       result)))
 
 
-(defn apply-create-secret-body
+(defn create-secret-facts!
   "Body of the create-secret `:try`: guarded SQL path claim + fn/binding
    creation, then Vault put + optional metadata outside the writer lock,
    and post-create whole-fn type-check. Records rollback entries on the
@@ -269,18 +267,19 @@
                                         {:path path})
                               false))]
       (tc/type-check-fn-and-dependents! ctx storage fn-id)
-      {:ok true
-       :secret {:id (str fn-id)
-                :name nm
-                :namespace-id (some-> ns-id str)
-                :path path
-                :description description
-                :metadata-stamped? metadata-ok?}})))
+      ;; Only safe committed facts cross into graph presentation. The secret
+      ;; value, Vault response and compensation journal never leave this body.
+      {:id fn-id
+       :name nm
+       :namespace-id ns-id
+       :path path
+       :description description
+       :metadata-stamped? metadata-ok?})))
 
 
-(defn apply-create-inline-binding-body
+(defn create-inline-binding-facts!
   "Body of the inline-bind `:try`: storage create, THEN vault-put — the
-   same order as `apply-create-secret-body`, so a refused binding (the
+   same order as `create-secret-facts!`, so a refused binding (the
    resolver gate, a type rejection, a concurrent duplicate) never touches
    the vault. Refuses a package-synced owner (403) and a path another
    binding references (409) before any write. Records rollback entries on
@@ -308,11 +307,10 @@
     ;; then only ever removes a path THIS request claimed.
     (vault/put-secret vault-client path value)
     (swap! journal conj [:vault-delete path])
-    {:ok true
-     :binding {:id (str binding-id)
-               :fn-id (str fn-id)
-               :slot-id (str slot-id)
-               :path path}}))
+    {:id binding-id
+     :fn-id fn-id
+     :slot-id slot-id
+     :path path}))
 
 
 (defn rotate-secret-not-owned?

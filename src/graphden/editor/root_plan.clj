@@ -98,4 +98,4 @@
        (let [{:keys [type reason]} (ex-data error)]
          (when-not (= reason :policy-refresh-required)
            (log/warn "Editor root export refused" {:type type :reason reason})))
-       (assoc (components/failure-response error) :reason "Editor root is unavailable.")))))
+       (components/failure-facts error)))))

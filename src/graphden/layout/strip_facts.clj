@@ -82,29 +82,39 @@
         named (assoc :seed (:name named))))))
 
 
-(defn annotate
-  "Attach strip facts to every fn-node's `:data` in a built
-   `{:nodes :edges}` element map. `graph` is the layout entity
-   snapshot (`:fns` et al). Non-fn nodes and unknown ids pass
-   through untouched."
+(defn facts-by-fn
+  "Compute authorized metadata facts keyed by visible node fn id. The full
+   snapshot and concealed chain stay inside this boundary; only safe facts
+   leave it. Attachment to node data is presentation policy."
   [elements graph]
   (let [fns-by-id (into {} (map (juxt :id identity)) (:fns graph))
-        node-fn-id #(some-> (get-in % [:data :originalFnId]) parse-uuid)
-        seen-by-id (entity-list/conceal-parents fns-by-id (keep node-fn-id (:nodes elements)))
+        ids (keep #(get-in % [:data :originalFnId]) (:nodes elements))
+        parsed-ids (keep parse-uuid ids)
+        seen-by-id (entity-list/conceal-parents fns-by-id parsed-ids)
         chain-concealed? (partial entity-list/chain-concealed? fns-by-id seen-by-id)]
+    (into {}
+          (keep (fn [id]
+                  (let [fn-id (parse-uuid id)]
+                    (when (get fns-by-id fn-id)
+                      (let [owner (when-not (chain-concealed? fn-id)
+                                    (:name (registry/rule-owner-info-of-id fn-id)))
+                            rt-alias (inherited-return-type-alias fns-by-id fn-id)
+                            bl (viewer-branch-local fns-by-id seen-by-id fn-id)]
+                        [id (cond-> {}
+                              rt-alias (assoc :returnTypeAlias rt-alias)
+                              owner (assoc :ruleOwner owner)
+                              bl (assoc :branchLocal bl))])))))
+          ids)))
+
+
+(defn annotate
+  "Attach authorized strip facts to node data. Native callers share the same
+   fact boundary as the graph-composed layout pipeline."
+  [elements graph]
+  (let [facts (facts-by-fn elements graph)]
     (update elements :nodes
             (fn [nodes]
-              (mapv (fn [n]
-                      (let [fn-id (node-fn-id n)
-                            row (get fns-by-id fn-id)]
-                        (if-not row
-                          n
-                          (let [owner (when-not (chain-concealed? fn-id)
-                                        (:name (registry/rule-owner-info-of-id fn-id)))
-                                rt-alias (inherited-return-type-alias fns-by-id fn-id)
-                                bl (viewer-branch-local fns-by-id seen-by-id fn-id)]
-                            (cond-> n
-                              rt-alias (assoc-in [:data :returnTypeAlias] rt-alias)
-                              owner (assoc-in [:data :ruleOwner] owner)
-                              bl (assoc-in [:data :branchLocal] bl))))))
-                    nodes)))))
+              (mapv (fn [node]
+                      (if-let [fields (not-empty (get facts (get-in node [:data :originalFnId])))]
+                        (update node :data merge fields)
+                        node)) nodes)))))

@@ -167,9 +167,10 @@ async function _tourEnd(nextLessonId = null) {
     _tourDialog({
       title: _tourCopy('branch-title', 'Delete the tutorial branch?'),
       body: _tourCopy('branch-body',
-                      'This lesson ran on its own branch “{branch}”. Deleting it'
-                      + ' removes everything the lesson created and returns you'
-                      + ' to main.', { branch }),
+                      'This lesson ran on its own branch “{branch}”. Cleanup removes'
+                      + ' the resources recorded for this lesson before deleting'
+                      + ' its sandbox branch and returning you to main. Keeping'
+                      + ' the branch lets you continue exploring.', { branch }),
       primary: [_tourCopy('branch-confirm', 'Delete branch & return'),
                 () => rollback(nextLessonId)],
       quiet: [_tourCopy('branch-keep', 'Keep branch'),

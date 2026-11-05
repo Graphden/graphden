@@ -28,16 +28,6 @@
   (atom nil))
 
 
-(defn instance-endpoint
-  "`{:host :port :url}` for a listener instance row, or nil when the copy
-   has no port (a cron loop)."
-  [{:keys [host port]}]
-  (when (and host port)
-    {:host host
-     :port port
-     :url (str "http://" host ":" port)}))
-
-
 (defn seen-at-ms
   "An instance row's heartbeat as epoch millis. The codec hands a
    timestamptz back as whatever the driver produced (`java.sql.Timestamp`
@@ -45,16 +35,6 @@
    them. nil when the row has none."
   [{:keys [seen-at]}]
   (when seen-at (inst-ms seen-at)))
-
-
-(defn live?
-  "Is the instance's heartbeat fresh — `seen-at` within
-   `svc-schema/default-stale-after-ms` of `now-ms`? A crashed pod never
-   deletes its row; a stale heartbeat is how it stops answering."
-  ([row] (live? row (System/currentTimeMillis)))
-  ([row now-ms]
-   (boolean (some-> (seen-at-ms row)
-                    (>= (- now-ms svc-schema/default-stale-after-ms))))))
 
 
 (defn service-rows-for
@@ -69,15 +49,16 @@
              (sp/query-entities storage :service {:fn-id fn-id :enabled? true}))))
 
 
-(defn live-instances-for
-  "The live listener instances of the given service rows, this pod's own
-   copy first (loopback beats a hop), then freshest heartbeat first."
+(defn instance-facts
+  "One branch/owner-scoped heartbeat read and clock capture. Epoch conversion
+   is native; freshness, preference, ordering and endpoint rendering are graph policy."
   [storage rows self-executor-id]
   (let [now-ms (System/currentTimeMillis)
-        ids (mapv :id rows)]
-    (when (seq ids)
-      (->> (sp/query-entities storage :service-instance {:service-id ids})
-           (filter #(and (live? % now-ms) (:port %)))
-           (sort-by (fn [row]
-                      [(if (= self-executor-id (:executor-id row)) 0 1)
-                       (- (seen-at-ms row))]))))))
+        ids (mapv :id rows)
+        instances (if (seq ids) (sp/query-entities storage :service-instance {:service-id ids}) [])]
+    {:now-ms now-ms :stale-after-ms svc-schema/default-stale-after-ms
+     :self-executor-id self-executor-id
+     :instances (mapv (fn [row]
+                        {:host (:host row) :port (:port row)
+                         :executor-id (:executor-id row) :seen-at-ms (seen-at-ms row)})
+                      instances)}))

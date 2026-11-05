@@ -12,6 +12,7 @@
 
    Depends on `graphden.crud.request` for request context."
   (:require
+    [clojure.string :as str]
     [graphden.crud.graph-refs :as refs]
     [graphden.crud.request :as request]
     [graphden.executor.compile-runtime :as cr]
@@ -401,7 +402,7 @@
                 (not (types/alias-registered? (keyword s))))))
 
 
-(defn- keyword-domain?
+(defn keyword-domain?
   "True when a refinement's (already-decoded) base type bottoms out at
    `:keyword` — meaning its constraint operands are keyword values
    (`[:in [:get :post]]`, `[:= :ok]`) rather than string literals.
@@ -416,7 +417,7 @@
     :else false))
 
 
-(defn- json->constraint
+(defn json->constraint
   "Decode the constraint slot of a `[:refine base C]` wire shape.
 
    JSON can't distinguish a keyword from a string, so a blind decode
@@ -436,8 +437,15 @@
   [kw-vals? c]
   (if-not (and (sequential? c) (seq c))
     c
-    (let [op (let [h (first c)] (if (string? h) (keyword h) h))
-          decode-val (fn [v] (if (and kw-vals? (string? v)) (keyword v) v))]
+    (let [op (let [h (first c)]
+               (if (string? h)
+                 (let [name (str/replace-first h #"^:" "")]
+                   (if (= name "!=") :not= (keyword name)))
+                 h))
+          decode-val (fn [v]
+                       (if (and kw-vals? (string? v))
+                         (keyword (str/replace-first v #"^:" ""))
+                         v))]
       (if (logical-constraint-ops op)
         (into [op] (map #(json->constraint kw-vals? %)) (rest c))
         (into [op]

@@ -18,20 +18,20 @@
                   (catch clojure.lang.ExceptionInfo error (ex-data error))))))))
 
 
-(deftest creation-failures-preserve-status-without-exposing-internal-data
-  (doseq [[data expected-status] [[{:http-status 400} 400]
-                                  [{:http-status 409 :type :authz/forbidden} 409]
-                                  [{:type :authz/forbidden} 403]
-                                  [{:type :quota/entity-limit :org "private-org" :entity :fn} 429]
-                                  [{:type :browser-plan/unsupported} 422]
-                                  [{:type :storage-error/candidate-limit} 422]
-                                  [{:type :storage-error/bounded-query-unsupported} 422]
-                                  [{} 500]]]
-    (let [result (creation/failure-response
-                   (ex-info "Internal cause should remain private" (assoc data :private-detail "not public")))]
-      (is (= expected-status (:http-status result)))
-      (is (= #{:ok :committed :http-status :reason} (set (keys result))))
-      (is (false? (:ok result)))
-      (is (false? (:committed result)))
-      (is (not (re-find #"Internal cause|private-detail|not public" (:reason result))))))
-  (is (= 500 (:http-status (creation/failure-response (Exception. "Unexpected failure"))))))
+(deftest creation-failure-facts-never-export-exception-data
+  (doseq [[data expected-kind expected-status]
+          [[{:http-status 400} nil 400]
+           [{:http-status 409 :type :authz/forbidden} "forbidden" 409]
+           [{:type :authz/forbidden} "forbidden" nil]
+           [{:type :quota/entity-limit :org "private-org"} "quota" nil]
+           [{:type :browser-plan/unsupported} "unsupported" nil]
+           [{:type :storage-error/candidate-limit} "bounded-storage" nil]
+           [{:type :storage-error/bounded-query-unsupported} "bounded-storage" nil]
+           [{} nil nil]]]
+    (let [result (creation/failure-facts
+                   (ex-info "Private error" (assoc data :private-detail "not public")))]
+      (is (= {:ok false :failure-type expected-kind :failure-reason nil
+              :failure-status expected-status :server-stale? false} result))))
+  (is (= {:ok false :failure-type nil :failure-reason nil
+          :failure-status nil :server-stale? false}
+         (creation/failure-facts (Exception. "Unexpected failure")))))

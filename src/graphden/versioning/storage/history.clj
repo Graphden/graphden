@@ -120,10 +120,9 @@
      :next-offset (when (> (count rows) limit) (+ offset limit))}))
 
 
-(defn change-groups
-  "Page transactions, keeping all writes from one change-id together. Old
-   rows each form a separate ungrouped entry; no historical snapshot is
-   inferred for them. The query aggregates in PostgreSQL before paging."
+(defn change-group-page
+  "Authorized bounded transaction metadata page, with one lookahead row.
+   No version payloads leave this query. Page projection is caller policy."
   [storage fn-id limit offset]
   (when-let [rows
              (visible-page
@@ -138,6 +137,13 @@
                      "MIN(author_label) AS author_label FROM ("
                      (format event-source-sql %) ") scoped_events "
                      group-order-sql))]
+    {:rows rows :limit limit :offset offset}))
+
+
+(defn change-groups
+  "Native projection of the same bounded safe page used by graph consumers."
+  [storage fn-id limit offset]
+  (when-let [{:keys [rows limit offset]} (change-group-page storage fn-id limit offset)]
     {:groups (mapv group-view (take limit rows))
      :next-offset (when (> (count rows) limit) (+ offset limit))}))
 

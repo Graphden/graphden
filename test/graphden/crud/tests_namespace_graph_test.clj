@@ -20,7 +20,8 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.test-runs :as test-runs]
     [graphden.executor.test-setup :as setup]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.test-infra.test-api :as test-api]))
 
 
 (def ^:dynamic *graph* nil)
@@ -78,7 +79,7 @@
                                      "intentionally-failing-example"}
                                    :name)
                              (test-runs/test-fn-rows (:ctx *graph*))))
-        out (test-runs/run-tests! (:ctx *graph*) {:fn-ids (mapv str wanted)})
+        out (test-api/run-tests! (:ctx *graph*) {:fn-ids (mapv str wanted)})
         by-name (results-by-name out)]
     (testing "a satisfied :assert-eq is a pass"
       (is (= :succeeded (:status (get by-name "addition-sums-its-arguments")))
@@ -112,7 +113,7 @@
   ;; The operands ride `:error-data`, never the message — a secret-tainted
   ;; value must not reach the human-visible string. That split is what makes
   ;; the failure useful AND safe, so pin that the data half is populated.
-  (let [out (test-runs/run-tests!
+  (let [out (test-api/run-tests!
               (:ctx *graph*)
               {:fn-ids [(str (:id (first (filter #(= "intentionally-failing-example"
                                                      (:name %))

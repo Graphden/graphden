@@ -321,13 +321,19 @@
       (l/compute-fn-typed-fn-ids lookups)))
 
 
-(defn- collect-bindings*
-  [fn-id lookups]
-  (let [slots (l/root-slots fn-id lookups)
-        fn-typed-fn-ids (fn-typed-fn-ids-of lookups)
+(defn collect-slot-bindings
+  "Classify an explicit slot surface using the same inherited bindings,
+   identity references and list semantics as executor root arguments."
+  [fn-id slots lookups]
+  (let [fn-typed-fn-ids (fn-typed-fn-ids-of lookups)
         lazy-seq-args (lazy-seq-arg-names fn-id lookups)]
     (mapv #(classify-slot % fn-id lookups fn-typed-fn-ids lazy-seq-args)
           slots)))
+
+
+(defn- collect-bindings*
+  [fn-id lookups]
+  (collect-slot-bindings fn-id (l/root-slots fn-id lookups) lookups))
 
 
 (defn collect-bindings

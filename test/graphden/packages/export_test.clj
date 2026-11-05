@@ -274,30 +274,7 @@
         db-call (first (filter #(= :db-call (:name %)) out))]
     (testing "the secret binding still emits the dedicated wire key"
       (is (= {:secret-path "user-db/password"}
-             (get-in db-call [:args :password]))))
-    (testing "strip and manifest still see it"
-      (is (= [{:fn :db-call :arg :password}] (export/secret-path-args out)))
-      (let [stripped (export/strip-secret-paths out)]
-        (is (not (contains? (:args (first (filter #(= :db-call (:name %))
-                                                  stripped)))
-                            :password)))))))
-
-
-(deftest strip-secret-paths-policy
-  (let [out (export/records->fn-defs (parse/parse-module secret-fixture))]
-    (testing "secret-path-args manifests every vault-path binding"
-      (is (= [{:fn :db-call :arg :password}] (export/secret-path-args out))))
-    (testing "strip removes the arg entry entirely — slot reverts to free"
-      (let [stripped (export/strip-secret-paths out)
-            db-call (first (filter #(= :db-call (:name %)) stripped))]
-        (is (not (contains? (:args db-call) :password)))
-        (is (= {:value "SELECT 1"} (get-in db-call [:args :sql]))
-            "non-secret bindings untouched")))
-    (testing "strip keeps a remainder when the map carried more than the path"
-      (let [defs [{:name :x :namespace "ex" :parent :sink
-                   :args {:password {:secret-path "p" :required true}}}]
-            [stripped] (export/strip-secret-paths defs)]
-        (is (= {:required true} (get-in stripped [:args :password])))))))
+             (get-in db-call [:args :password]))))))
 
 
 ;; =============================================================================

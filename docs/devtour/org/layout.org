@@ -7,7 +7,7 @@ From graph rows and expansion state to nodes, edges, and a grid.
 
 after: web
 
-[[file:index.org][index]] · ~21 min
+[[file:index.org][index]] · ~20 min
 
 * 1. load-graph-entities-uncached
 :PROPERTIES:
@@ -78,11 +78,11 @@ Assigns graph elements to grid columns and rows and reports layout validation re
 :PROPERTIES:
 :CUSTOM_ID: layout/annotate
 :FILE: src/graphden/layout/strip_facts.clj
-:LINE: 85
-:MINS: 2.3
+:LINE: 110
+:MINS: 1.3
 :END:
 
 Attaches computed facts to function nodes: the inherited return-type alias, the [[file:glossary.org::#term/base-function][base function]] owning a return-type rule, and the ancestor responsible for [[file:glossary.org::#term/branch-local][branch-local]] behavior. The editor displays these server-computed facts instead of repeating the same traversals in JavaScript.
 
-- source :: [[file:../../../src/graphden/layout/strip_facts.clj::(defn annotate][src/graphden/layout/strip_facts.clj:85]]
+- source :: [[file:../../../src/graphden/layout/strip_facts.clj::(defn annotate][src/graphden/layout/strip_facts.clj:110]]
 - see also :: [[file:versioning.org::#versioning/effective-branch-local?][effective-branch-local?]]

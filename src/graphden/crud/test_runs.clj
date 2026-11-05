@@ -10,7 +10,7 @@
    § \"Tests are not a new entity or field\".
 
    Three faces, all branch-scoped through the request ctx:
-   - `run-tests!`       — execute tests sequentially through
+   - `run-selected-tests!` — execute explicit test IDs sequentially through
      `fn-execution/apply-execute` (the standard pipeline: effect
      gating, redaction, caps, persistence) and collect per-test
      outcomes. Sequential on purpose: a burst of N parallel submits
@@ -25,7 +25,7 @@
    namespaces (core.tests, web.tests, …) — the platform's self-tests,
    synced into every instance like any other fn-def. They are tests
    like any other (discovered, status-joined, runnable one at a time
-   from the Inspector, listed under the ✓ lens) but `run-tests!`
+   from the Inspector, listed under the ✓ lens) but the app.test-api graph
    SKIPS them unless asked (`:platform? true`): a tenant's [Run all]
    should spend the org's execution budget on the org's tests, and
    the platform suite is the CI anchor's job
@@ -175,14 +175,6 @@
           (select-keys [:status :execution-id :error :error-data])))))
 
 
-(defn- coerce-fn-ids
-  "Request-shape fn-ids (uuid strings) → set of UUIDs; invalid entries
-   drop. nil/empty → nil (meaning \"all tests\")."
-  [fn-ids]
-  (when (seq fn-ids)
-    (into #{} (keep #(if (uuid? %) % (parse-uuid (str %)))) fn-ids)))
-
-
 (defn platform-test-row?
   "True iff `row` is a PLATFORM test — a package-synced fn this boot
    (`packages.owned`), i.e. one of the shipped `*.tests` namespaces'
@@ -191,22 +183,26 @@
   (owned/owned-fn-id? (:id row)))
 
 
-(defn run-tests!
-  "Run every test on the current branch (or the `:fn-ids` subset),
-   sequentially, and summarise:
-   `{:total N :passed N :failed N :other N :results [{…} …]}`.
-   Pass = `:succeeded`; fail = `:failed`; everything else (`:pending`
-   timeout-overrun, `:rejected` type-errors/capacity, `:not-runnable`
-   free args) counts under `:other` with its own `:status`.
+(defn test-facts
+  "Fresh scoped test identities and package membership. Only these public
+   columns cross into selection/status graphs; raw function bodies and parent
+   identities remain native. Discovery is shared with the executor and autorun."
+  [ctx]
+  (mapv (fn [row]
+          {:id (:id row) :name (:name row) :namespace-id (:namespace-id row)
+           :platform? (platform-test-row? row)})
+        (test-fn-rows ctx)))
 
-   Without `:fn-ids`, PLATFORM tests (`platform-test-row?`) are
-   skipped unless `:platform?` is true — an explicit `:fn-ids` subset
-   always runs exactly what it names."
-  [ctx {:keys [fn-ids timeout-ms platform?]}]
-  (let [wanted (coerce-fn-ids fn-ids)
-        rows (cond->> (test-fn-rows ctx)
-               wanted (filter (comp wanted :id))
-               (and (not wanted) (not platform?)) (remove platform-test-row?))
+
+(defn run-selected-tests!
+  "Execute explicit test UUIDs sequentially under one graph-load memo.
+   Re-read the scoped test cohort instead of trusting graph-supplied fn rows.
+   An empty selection runs nothing. Selection/defaults and summary policy live
+   in app.test-api; autorun calls this lifecycle boundary with its already
+   selected affected IDs, without executing an effectful HTTP graph."
+  [ctx fn-ids timeout-ms]
+  (let [wanted (set fn-ids)
+        rows (filter #(contains? wanted (:id %)) (test-fn-rows ctx))
         ;; Nudge SSE listeners (the ✓ tests lens re-primes its status
         ;; cache on each ping) — best-effort, from EVERY run path (button,
         ;; API, auto-run). After EACH test, so a long suite's dots move
@@ -231,17 +227,10 @@
                                            (run-one! ctx row (or timeout-ms default-test-timeout-ms)))]
                               (when nudge! (nudge!))
                               r))
-                          rows)))
-        by-status (frequencies (map :status results))]
+                          rows)))]
     (when (and nudge! (seq results))
       (future (Thread/sleep 2000) (nudge!)))
-    {:total (count results)
-     :passed (get by-status :succeeded 0)
-     :failed (get by-status :failed 0)
-     :other (- (count results)
-               (get by-status :succeeded 0)
-               (get by-status :failed 0))
-     :results results}))
+    results))
 
 
 ;; --- status ---------------------------------------------------------------
@@ -287,19 +276,10 @@
           (latest-execution-rows pool (tc/current-org) (vec (keys vid->fid))))))
 
 
-(defn tests-with-statuses
-  "Discovery + status join, the GET /api/tests/status payload:
-   `[{:fn-id :fn-name :namespace-id :platform? :status :error
-      :execution-id :started-at :finished-at} …]`, name-sorted.
-   `:status` nil = the current version has no recorded run;
-   `:platform?` marks the shipped packages' own self-tests."
+(defn status-facts
+  "One fresh scoped test cohort and its batched current-version statuses.
+   The graph joins these safe facts into the public display rows. Callers
+   cannot widen the execution query with arbitrary function identities."
   [ctx]
-  (let [rows (test-fn-rows ctx)
-        statuses (latest-statuses ctx (mapv :id rows))]
-    (mapv (fn [row]
-            (merge {:fn-id (str (:id row))
-                    :fn-name (:name row)
-                    :namespace-id (some-> (:namespace-id row) str)
-                    :platform? (platform-test-row? row)}
-                   (get statuses (:id row))))
-          rows)))
+  (let [tests (test-facts ctx)]
+    {:tests tests :statuses (latest-statuses ctx (mapv :id tests))}))

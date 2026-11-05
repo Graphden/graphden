@@ -13,9 +13,7 @@
    now register REAL rich-types entries and construct data that makes
    the genuine post-write check fail — writes go to the parallel
    plugin's per-NS-thread `*rich-types-override*` atom (the `:once`
-   `with-isolated-rich-types` fixture covers solo runs). The search
-   cap is a thread-local `binding` of the now-dynamic
-   `entity-list/*default-search-limit*`."
+   `with-isolated-rich-types` fixture covers solo runs)."
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
@@ -432,8 +430,9 @@
     ;; write path runs — drop the cache so the loader sees these writes.
     (ctx/invalidate-graph-cache! c)
     (try
-      (testing "scope :namespace — one namespace's light named fns"
-        (let [dump (entities/graph-namespace-fns c ns-a)
+      (testing "scoped cohort annotates selected rows with whole-graph metadata"
+        (let [dump (select-keys (entity-list/project-graph-cohort
+                                  c (constantly {:ids [a1 a2] :truncated? false}) false false) [:fns])
               ids  (into #{} (map :id) (:fns dump))
               by-id (into {} (map (juxt :id identity)) (:fns dump))]
           (is (= #{a1 a2} ids)
@@ -450,49 +449,8 @@
             (is (not (contains? (by-id a1) :used-as-ref-count))
                 "zero counts are omitted (→ 0 client-side)")
             (is (not (contains? (by-id a2) :used-as-parent-count))))))
-      (testing "scope :namespace with nil namespace-id — the (root) bucket"
-        (let [ids (into #{} (map :id) (:fns (entities/graph-namespace-fns c nil)))]
-          (is (contains? ids r1)
-              "the namespace-less named fn is addressable as the root bucket")
-          (is (not (contains? ids a1)) "namespaced fns are not in the root bucket")
-          (is (not (contains? ids anon)) "the anonymous fn is excluded")))
-      (testing "scope :search — capped, case-insensitive name-substring"
-        (let [dump (entities/graph-search c "widget" false)]
-          (is (= #{a1 b1} (into #{} (map :id) (:fns dump)))
-              "both *-widget fns match across namespaces")
-          (is (false? (:truncated? dump)) "well under the cap")
-          (is (every? #(every? light-fn-keys (keys %)) (:fns dump))
-              "search rows share the light projection")))
-      (testing "scope :search is case-insensitive and matches raw name"
-        (is (= #{a1 a2}
-               (into #{} (map :id)
-                     (:fns (entities/graph-search c "ALPHA" false))))))
-      (testing "scope :search-text adds description matches, ranked after name hits"
-        (let [desc (java.util.UUID/randomUUID)]
-          (sp/create-entity storage :fn {:id desc :name "opaque-name"
-                                         :description "Frobnicates a widget quietly"})
-          (ctx/invalidate-graph-cache! c)
-          (is (not (contains? (into #{} (map :id)
-                                    (:fns (entities/graph-search c "widget" false)))
-                              desc))
-              "the name-only :search scope (sidebar filter) does not match descriptions")
-          (let [dump (entities/graph-search c "widget" true)]
-            (is (contains? (into #{} (map :id) (:fns dump)) desc)
-                "a description-only match is found")
-            (is (= desc (:id (last (:fns dump))))
-                "…but ranked after every name match"))
-          (sp/delete-entity storage :fn desc)
-          (ctx/invalidate-graph-cache! c)))
-      (testing "scope :search with blank / nil q — no matches, not truncated"
-        (let [dump (entities/graph-search c "   " false)]
-          (is (empty? (:fns dump)))
-          (is (false? (:truncated? dump)))))
-      (testing "scope :search caps at the limit and flags :truncated?"
-        ;; Bind the (dynamic) private cap low rather than seed 200+ rows.
-        (binding [entity-list/*default-search-limit* 1]
-          (let [dump (entities/graph-search c "widget" false)]
-            (is (= 1 (count (:fns dump))) "result capped at the limit")
-            (is (true? (:truncated? dump)) "more matched than were returned"))))
+      ;; Search and namespace selection policy runs through the actual graph in
+      ;; search-policy-graph-test; this fixture covers native projection metadata.
       (testing "view-members — the Explorer's structured filter set over the graph"
         ;; A grandchild extends child-of-a1, so `:uses` must walk
         ;; TRANSITIVELY, not one hop.
@@ -796,7 +754,7 @@
   ;; `parent-ids=[<secret-leaf>]` through the generic
   ;; `entities/create-entity` is refused unless the caller sets the
   ;; in-memory `:_admin-secret-create` marker. The admin path
-  ;; (`crud.secrets/apply-create-secret-body`) sets the marker; user-facing
+  ;; (`crud.secrets/create-secret-facts!`) sets the marker; user-facing
   ;; endpoints (`/api/entities/fn` form-post, ad-hoc API clients)
   ;; never do. The marker is also stripped before the row reaches
   ;; storage — verified via the read-back row.
@@ -1791,7 +1749,7 @@
                                                       {:entity-type :binding :type-str "binding" :form-data {:rename-to "events"}
                                                        :entity-data {:fn-id (:id child) :slot-id (:id handlers)}} c))]
                 (doseq [response [refused refused-create]]
-                  (is (= 409 (:http-status response)))
+                  (is (= 409 (get-in response [:write-rejection :status])))
                   (is (re-find #"earlier rename" (:error response))))
                 (is (= before (snapshot)) "historical-name conflict changes no binding, slot or junction")
                 (let [idempotent (publish-rename! (entities/apply-update-core

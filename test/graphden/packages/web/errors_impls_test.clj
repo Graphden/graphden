@@ -1,31 +1,19 @@
 (ns graphden.packages.web.errors-impls-test
-  "Unit tests for the `web/errors` base-fn impls — the two boundaries
-   over the ONE `:type` → HTTP mapping.
-
-   `:error-http-status` is what every response-building fn-def binds
-   its `:status` through, and it is fed a type that may have survived
-   a JSONB round-trip as a STRING: if the string arm regressed, every
-   family would silently answer 500. `:error-boundary-wrap` sits at
-   the very top of the handler chain — it decides whether an uncaught
-   throw reaches the client as its real 4xx with an actionable message
-   or as an opaque 500 that also pages the `:http/server-error`
-   alerter. The message-withholding half is a leak guard: an
-   unwhitelisted exception's text may carry SQL or internal ids."
+  "Graph tests for the top-level exception boundary: mapped author errors,
+   redacted internal errors, retry headers and fatal Error passthrough."
   (:require
     [cheshire.core :as json]
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.test-infra.impls :as impls]))
+    [graphden.executor.interface :as exec]
+    [graphden.test-infra.exec-harness :as harness]))
 
 
-(use-fixtures :once (impls/impls-fixture "web" "errors"))
+(use-fixtures :once (harness/exec-fixture (str (ns-name *ns*))))
 
 
 (defn- call
-  ([kw args] (call kw args nil))
-  ([kw args ctx]
-   ((impls/impl-of kw)
-    (into {} (map (fn [[k v]] [k (delay v)])) args)
-    ctx)))
+  [kw args]
+  (exec/execute-by-name harness/*context* (name kw) args))
 
 
 (deftest error-boundary-turns-a-throw-into-its-mapped-status

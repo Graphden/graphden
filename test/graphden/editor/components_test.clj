@@ -18,12 +18,12 @@
 (def ^:private branch-id (java.util.UUID/randomUUID))
 
 
-(deftest configuration-quota-refusal-retains-rate-limit-status-without-private-data
-  (let [response (components/failure-response
+(deftest configuration-quota-refusal-retains-category-without-private-data
+  (let [response (components/failure-facts
                    (ex-info "PRIVATE quota detail" {:type :quota/entity-limit
                                                     :reason "PRIVATE detail" :owner "PRIVATE owner"}))]
-    (is (= 429 (:http-status response)))
-    (is (= "graph-limit" (:code response)))
+    (is (= "quota" (:failure-type response)))
+    (is (nil? (:failure-status response)))
     (is (false? (:ok response)))
     (is (not (str/includes? (pr-str response) "PRIVATE")))
     (is (not (contains? response :retryable)))))
@@ -58,8 +58,8 @@
 
 
 (def ^:private unavailable
-  {:ok false :reason "Personal UI graph is unavailable. Using built-in components."
-   :http-status 422})
+  {:ok false :failure-type "unsupported" :failure-reason nil
+   :failure-status nil :server-stale? false})
 
 
 (deftest export-refusals-disclose-only-the-exact-retryable-category
@@ -67,7 +67,7 @@
     (with-redefs [source/with-snapshot (fn [& _] (throw (AssertionError. "Unexpected source read")))]
       (doseq [input [nil {} {:component "unknown"} {:component "fn-picker" :fn-id fn-id}]]
         (is (= unavailable (components/export-resolved {:storage {}} input))))))
-  (testing "ACL, invalid source and unknown failures cannot opt into retry by reason alone"
+  (testing "ACL, invalid source and unknown failures retain their distinct safe categories"
     (doseq [[error status]
             [[(ex-info "private ACL details" {:type :authz/forbidden
                                               :reason :policy-refresh-required :fn-id fn-id}) 403]
@@ -79,11 +79,13 @@
                                                          :reason "policy-refresh-required"}) 422]
              [(IllegalStateException. "private runtime value") 422]]]
       (with-redefs [source/with-snapshot (fn [& _] (throw error))]
-        (is (= (assoc unavailable :http-status status)
+        (is (= (assoc unavailable :failure-type (case status 403 "forbidden"
+                                                      (when (= :browser-plan/unsupported (:type (ex-data error))) "unsupported"))
+                      :failure-reason (when (= :policy-refresh-required (:reason (ex-data error))) "policy-refresh-required"))
                (components/export-resolved {:storage {}} {:component "fn-picker"})))))))
 
 
-(deftest stale-policy-has-a-bounded-opaque-retry-envelope
+(deftest stale-policy-exports-only-trusted-freshness-facts
   (let [epoch (atom 13)
         watermark (atom 12)]
     (with-redefs [graph-epoch/epoch-handle identity
@@ -92,14 +94,14 @@
                   source/with-snapshot (fn [storage _]
                                          (components/assert-current-policy! storage)
                                          {:ok true})]
-      (is (= (assoc unavailable :code "policy-refresh-required" :retryable true :retry-after 1)
+      (is (= (assoc unavailable :failure-reason "policy-refresh-required")
              (components/export-resolved {:storage {}} {:component "fn-picker"})))
       (is (= 12 @watermark) "Export never advances policy validation to make itself succeed")
       (reset! watermark 13)
       (is (= {:ok true}
              (components/export-resolved {:storage {}} {:component "fn-picker"})))
       (reset! epoch nil)
-      (is (= (assoc unavailable :code "policy-refresh-required" :retryable true :retry-after 1)
+      (is (= (assoc unavailable :failure-reason "policy-refresh-required")
              (components/export-resolved {:storage {}} {:component "fn-picker"}))))))
 
 

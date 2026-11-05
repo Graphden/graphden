@@ -268,11 +268,44 @@
   ;; it is optional (the executor's effective-required at the slot's
   ;; owner), whether it is a closure capture and inside which HOF target.
   ;; `:free-arg-slot-map` stays the executor-facing projection.
+  {:name :_free-arg-entry-fact
+   :type {:ext-name :keyword :slot-id :uuid :optional? :bool
+          :captured? :nullable-bool :via :nullable-uuid}}
+  {:name :_free-arg-fact-batch
+   :type {:entries [:list :_free-arg-entry-fact]
+          :via-names [:map :uuid :nullable-text]}}
+  {:name :_free-arg-facts
+   :description "Canonical public holes and capture-target names from one scoped executor lookup snapshot. Native slot algebra decides membership, inherited names and requiredness."
+   :args {:fn-id {:type :nullable-uuid}}
+   :return-type :_free-arg-fact-batch :effects #{:db}}
+  {:name :_free-arg-rows
+   :parent :get :args {:coll :_free-arg-facts :key {:value :entries} :default {:value []}}}
+  {:name :_free-arg-via-names
+   :parent :get :args {:coll :_free-arg-facts :key {:value :via-names} :default {:value {}}}}
+  {:name :_free-arg-display-row
+   :parent :zipmap :lambda-params [:entry]
+   :args {:keys {:value [:name :slot-id :optional? :captured? :via]}
+          :vals [{:parent :get :args {:coll {:as :entry :type :_free-arg-entry-fact}
+                                      :key {:value :ext-name} :default nil}}
+                 {:parent :get :args {:coll {:as :entry :type :_free-arg-entry-fact}
+                                      :key {:value :slot-id} :default nil}}
+                 {:parent :get :args {:coll {:as :entry :type :_free-arg-entry-fact}
+                                      :key {:value :optional?} :default false}}
+                 {:parent :coalesce
+                  :args {:value {:parent :get
+                                 :args {:coll {:as :entry :type :_free-arg-entry-fact}
+                                        :key {:value :captured?} :default nil}}
+                         :default false}}
+                 {:parent :get
+                  :args {:coll {:as :via-names :type [:map :uuid :nullable-text]}
+                         :key {:parent :get :args {:coll {:as :entry :type :_free-arg-entry-fact}
+                                                  :key {:value :via} :default nil}}
+                         :default nil}}]}}
   {:name :free-arg-entries
-   :description "`fn-id`'s free args as a list of `{:name :slot-id :optional? :captured? :via}` — one per open hole; `:via` names the HOF target a capture is read inside (nil on the fn's own surface). `[]` when fn-id is nil."
-   :args {:fn-id {:type :nullable-uuid :description "Target fn-id; nil short-circuits to an empty list."}}
-   :return-type [:list {:name :keyword :slot-id :uuid :optional? :bool :captured? :bool :via [:union :null :text]}]
-   :effects #{:db}}
+   :description "Public Run/Inspector display rows over the canonical slot surface: keyword name, slot identity, explicit optional/captured flags and capture-target display name. Nil fn-id yields []."
+   :parent :map
+   :args {:func :_free-arg-display-row :coll :_free-arg-rows :via-names :_free-arg-via-names}
+   :return-type [:list {:name :keyword :slot-id :uuid :optional? :bool :captured? :bool :via :nullable-text}]}
 
   ;; --- :service-blocking-free-args — the service-ability PROJECTION of
   ;; :free-arg-slot-map. Same graph-traversal primitive (§3.3 carve-out),
@@ -351,18 +384,113 @@
                  {:parent :map :args {:func :_graph-tree-count-row :coll :_graph-tree-namespace-ids :tree-facts :_graph-tree-facts}}]}
    :return-type {:namespaces [:list :keyword-map] :counts [:list :keyword-map]}}
 
-  {:name :graph-namespace-fns
-   :description "One namespace's light fn rows (the sidebar's lazy expand); nil `namespace-id` selects the root bucket."
-   :args {:namespace-id {:type :nullable-uuid :description "The namespace whose named fns to return; nil = namespace-less fns."}}
-   :return-type {:fns [:list :keyword-map]}
+  {:name :_graph-candidate-shape
+   :type {:id :uuid :name :nullable-text :namespace-id :nullable-uuid :description :nullable-text}}
+  {:name :_graph-cohort-shape
+   :type {:rows [:list :_graph-candidate-shape] :paths [:map :uuid :text] :limit :non-negative-int}}
+  {:name :_graph-selection-shape
+   :type {:ids [:list :uuid] :truncated? :bool}}
+  {:name :_project-graph-cohort
+   :description "Acquire one authorized candidate cohort, invoke a pure selector over data only, then annotate selected IDs from that same snapshot."
+   :args {:selector {:type [:fn {:cohort :_graph-cohort-shape} :_graph-selection-shape #{}]}
+          :namespaces? {:type :bool}
+          :capped? {:type :bool}}
+   :return-type {:fns [:list :keyword-map] :truncated? :bool}
    :effects #{:db}}
-
+  {:name :_cohort-rows :parent :get
+   :args {:coll {:as :cohort :type :_graph-cohort-shape} :key {:value :rows} :default []}}
+  {:name :_cohort-paths :parent :get
+   :args {:coll {:as :cohort :type :_graph-cohort-shape} :key {:value :paths} :default {}}}
+  {:name :_cohort-limit :parent :get
+   :args {:coll {:as :cohort :type :_graph-cohort-shape} :key {:value :limit} :default 0}}
+  {:name :_cohort-row-id :parent :get
+   :lambda-params [:row]
+   :args {:coll {:as :row :type :_graph-candidate-shape} :key {:value :id} :default nil}}
+  {:name :_cohort-row-name :parent :get
+   :args {:coll {:as :row :type :_graph-candidate-shape} :key {:value :name} :default nil}}
+  {:name :_cohort-row-namespace :parent :get
+   :args {:coll {:as :row :type :_graph-candidate-shape} :key {:value :namespace-id} :default nil}}
+  {:name :_cohort-row-description :parent :get
+   :args {:coll {:as :row :type :_graph-candidate-shape} :key {:value :description} :default nil}}
+  {:name :_search-normalized :parent :str-replace
+   :args {:string {:parent :str-trim
+                   :args {:string {:parent :str-lower
+                                   :args {:string {:parent :coalesce :args {:value {:as :q :type :nullable-text} :default ""}}}}}}
+          :match "/" :replacement "."}}
+  {:name :_search-needle :parent :coalesce
+   :args {:value :_search-normalized :default ""}}
+  {:name :_search-nonblank? :parent :not
+   :args {:value {:parent :equal? :args {:a :_search-needle :b ""}}}}
+  {:name :_search-name :parent :str-lower
+   :args {:string {:parent :coalesce :args {:value :_cohort-row-name :default ""}}}}
+  {:name :_search-path :parent :get
+   :args {:coll :_cohort-paths :key :_cohort-row-namespace :default ""}}
+  {:name :_search-qualified :parent :if
+   :args {:test {:parent :equal? :args {:a :_search-path :b ""}}
+          :then :_search-name
+          :else {:parent :str-lower
+                 :args {:string {:parent :str :args {:parts [:_search-path "." :_cohort-row-name]}}}}}}
+  {:name :_search-description :parent :str-lower
+   :args {:string {:parent :coalesce :args {:value :_cohort-row-description :default ""}}}}
+  {:name :_search-tier-value :parent :if
+   :args {:test {:parent :equal? :args {:a :_search-name :b :_search-needle}}
+          :then 0
+          :else {:parent :if
+                 :args {:test {:parent :str-contains? :args {:string :_search-name :substring :_search-needle}}
+                        :then 1
+                        :else {:parent :if
+                               :args {:test {:parent :str-contains? :args {:string :_search-qualified :substring :_search-needle}}
+                                      :then 2
+                                      :else {:parent :if
+                                             :args {:test {:parent :and
+                                                           :args {:values [{:as :descriptions? :type :bool}
+                                                                           {:parent :str-contains? :args {:string :_search-description :substring :_search-needle}}]}}
+                                                    :then 3 :else 4}}}}}}}
+   :return-type :non-negative-int}
+  {:name :_search-tier :parent :_search-tier-value :lambda-params [:row]}
+  {:name :_search-match? :parent :and
+   :lambda-params [:row]
+   :args {:values [{:parent :some? :args {:value :_cohort-row-name}}
+                   {:parent :lt :args {:nums [:_search-tier-value 4]}}]}}
+  {:name :_search-matches :parent :if
+   :args {:test :_search-nonblank?
+          :then {:parent :filter :args {:pred :_search-match? :coll :_cohort-rows}}
+          :else []}
+   :return-type [:list :_graph-candidate-shape]}
+  {:name :_search-ranked :parent :sort-by
+   :args {:key-fn :_search-tier :coll :_search-matches}}
+  {:name :_search-limited :parent :take
+   :args {:count :_cohort-limit :coll :_search-ranked}}
+  {:name :_search-selection :parent :zipmap
+   :lambda-params [:cohort]
+   :args {:keys [{:value :ids} {:value :truncated?}]
+          :vals [{:parent :map :args {:func :_cohort-row-id :coll :_search-limited}}
+                 {:parent :gt :args {:nums [{:parent :count :args {:coll :_search-matches}} :_cohort-limit]}}]}
+   :return-type :_graph-selection-shape}
   {:name :graph-search
-   :description "Capped light fn rows whose qualified name contains `q` (case-insensitive; `/` reads as `.`). With `descriptions?`, description matches too, ranked last — what the MCP `search-fns` tool asks for."
-   :args {:q {:type :nullable-text :description "The needle; blank → no rows."}
-          :descriptions? {:type :bool :description "Also match descriptions (ranked after name matches)."}}
-   :return-type {:fns [:list :keyword-map]}
-   :effects #{:db}}
+   :description "Rank authorized names before capping: exact, bare substring, qualified substring, then optional description hits. Slash reads as dot; blank returns no rows."
+   :parent :_project-graph-cohort
+   :args {:selector :_search-selection :namespaces? :_search-nonblank? :capped? true}}
+  {:name :_namespace-match? :parent :and
+   :lambda-params [:row]
+   :args {:values [{:parent :some? :args {:value :_cohort-row-name}}
+                   {:parent :equal? :args {:a :_cohort-row-namespace :b {:as :namespace-id :type :nullable-uuid}}}]}}
+  {:name :_namespace-selection :parent :zipmap
+   :lambda-params [:cohort]
+   :args {:keys [{:value :ids} {:value :truncated?}]
+          :vals [{:parent :map
+                  :args {:func :_cohort-row-id
+                         :coll {:parent :filter :args {:pred :_namespace-match? :coll :_cohort-rows}}}}
+                 false]}
+   :return-type :_graph-selection-shape}
+  {:name :_namespace-projection :parent :_project-graph-cohort
+   :args {:selector :_namespace-selection :namespaces? false :capped? false}}
+  {:name :graph-namespace-fns
+   :description "One namespace's named light rows. Nil namespace-id selects the root bucket, never all namespaces."
+   :parent :zipmap
+   :args {:keys [{:value :fns}]
+          :vals [{:parent :get :args {:coll :_namespace-projection :key {:value :fns} :default []}}]}
+   :return-type {:fns [:list :keyword-map]}}
 
   {:name :_graph-index-facts
    :description "One org-scoped, implementation-concealed snapshot of roled fn rows and namespaces. No ctx, delays or reverse-reference index crosses this boundary."
@@ -370,9 +498,26 @@
    :return-type {:fns [:list :keyword-map] :namespaces [:list :keyword-map]}
    :effects #{:db}}
 
+  {:name :_graph-index-key-present?
+   :parent :some?
+   :lambda-params [:key]
+   :args {:value {:parent :get
+                  :args {:coll {:as :row :type :keyword-map}
+                         :key {:as :key :type :keyword}
+                         :default nil}}}}
+
+  {:name :_graph-index-present-keys
+   :parent :filter
+   :args {:pred :_graph-index-key-present?
+          :coll {:parent :keys :args {:map {:as :row :type :keyword-map}}}
+          :row {:as :row}}}
+
   {:name :_graph-index-row
-   :description "Drop nil fields from one fn row; preserve all non-nil fields, including extensions."
-   :args {:row {:type :keyword-map}}
+   :description "Keep every non-nil field of a viewer-safe fn row, including extensions, false and zero."
+   :parent :select-keys
+   :lambda-params [:row]
+   :args {:m {:as :row :type :keyword-map}
+          :ks :_graph-index-present-keys}
    :return-type :keyword-map}
 
   {:name :_graph-index-rows
@@ -470,54 +615,100 @@
   ;; into ONE atomic primitive. The rollback's row-id has to match
   ;; the create's; splitting the pair across graph nodes risks a
   ;; stale-id read.
+  {:name :_apply-error-code :parent :get
+   :args {:coll {:as :outcome :type :keyword-map} :key {:value :error} :default nil}}
+  {:name :_apply-write-rejection :parent :get
+   :args {:coll {:as :outcome :type :keyword-map} :key {:value :write-rejection} :default {}}}
+  {:name :_apply-rejection-kind :parent :get
+   :args {:coll :_apply-write-rejection :key {:value :kind} :default nil}}
+  {:name :_apply-rejection-status :parent :get
+   :args {:coll :_apply-write-rejection :key {:value :status} :default nil}}
+  {:name :_apply-http-status :parent :cond
+   :args {:clauses [
+            {:parent :equal? :args {:a :_apply-rejection-kind :b {:value :package}}} 403
+            {:parent :equal? :args {:a :_apply-rejection-kind :b {:value :secret-leaf}}} 403
+            {:parent :equal? :args {:a :_apply-rejection-kind :b {:value :validation}}}
+            {:parent :if :args {:test {:parent :some? :args {:value :_apply-rejection-status}}
+                               :then :_apply-rejection-status :else 400}}
+            {:parent :get :args {:coll :_apply-write-rejection :key {:value :duplicate-key?} :default false}} 409
+            true :_apply-rejection-status]}}
+  {:name :_apply-error-message :parent :if
+   :args {:test {:parent :equal? :args {:a :_apply-error-code :b {:value :crud/write-failed}}}
+          :then {:as :fallback :type :text} :else :_apply-error-code}}
+  {:name :_apply-rejection-envelope :parent :if
+   :args {:test {:parent :or :args {:values [
+                  {:parent :some? :args {:value :_apply-http-status}}
+                  {:parent :get :args {:coll :_apply-write-rejection :key {:value :include-null-status?} :default false}}]}}
+          :then {:parent :zipmap :args {:keys [{:value :error} {:value :http-status}]
+                                       :vals [:_apply-error-message :_apply-http-status]}}
+          :else {:parent :zipmap :args {:keys [{:value :error}] :vals [:_apply-error-message]}}}}
+  {:name :_apply-formatted-outcome :parent :cond
+   :args {:clauses [
+            {:parent :some? :args {:value :_apply-rejection-kind}} :_apply-rejection-envelope
+            {:parent :equal? :args {:a :_apply-error-code :b {:value :crud/sequence-binding-changed}}}
+            {:error "Sequence binding or inherited slot changed; refresh and retry" :http-status 409}
+            {:parent :equal? :args {:a :_apply-error-code :b {:value :crud/sequence-item-missing}}}
+            {:error "Sequence item no longer exists" :http-status 404}
+            {:parent :equal? :args {:a :_apply-error-code :b {:value :crud/write-failed}}}
+            {:parent :assoc :args {:map {:as :outcome :type :keyword-map}
+                                  :key {:value :error} :value {:as :fallback :type :text}}}
+            true {:as :outcome :type :keyword-map}]}}
+  {:name :_apply-response
+   :description "Render a guarded outcome only after the writer has committed or rolled back its truthy error sentinel. Keep optional response keys compatible."
+   :parent :ensure-type
+   :args {:value :_apply-formatted-outcome :type {:value :keyword-map}}
+   :return-type :keyword-map}
+
+  {:name :_apply-create-parsed :parent :zipmap
+   :args {:keys [{:value :entity-type} {:value :entity-data} {:value :type-str} {:value :form-data}]
+          :vals [{:parent :str-to-keyword :args {:string {:as :entity-type :type :text}}}
+                 {:as :entity-data :type :nullable-keyword-map}
+                 {:as :type-str :type :text} {:as :form-data :type :nullable-keyword-map}]}}
+  {:name :_apply-update-parsed :parent :assoc
+   :args {:map :_apply-create-parsed :key {:value :id-uuid} :value {:as :id-uuid :type :uuid}}}
+  {:name :_apply-create-atomic
+   :description "Guarded create/rename/type-check/rollback; errors remain truthy until rollback completes."
+   :args {:parsed {:type :keyword-map}} :return-type :keyword-map :effects #{:db}}
+  {:name :_apply-update-atomic
+   :description "Guarded update/rename/type-check/rollback; errors remain truthy until rollback completes."
+   :args {:parsed {:type :keyword-map}} :return-type :keyword-map :effects #{:db}}
   {:name :try-apply-create
-   :description "Atomic create-with-rollback unit. Returns `{:created <id>}` on success or `{:error <human-msg>}` on capability-rej / write-failure / post-check rejection. The post-check + rollback for binding mutations live inside; admins extending the validation chain do so AROUND this primitive in graph."
-   :args {:entity-type {:type :text :description "Entity name as text."}
-          :entity-data {:type :nullable-keyword-map :description "Pre-validated row payload. Type accepts `:null` because the apply branch is reached only when validation passed; the runtime contract is non-null."}
-          :type-str {:type :text :description "Original string form of entity-type (`\"fn\"`, `\"binding\"`, …) used to gate rename-slot + post-check dispatch."}
-          :form-data {:type :nullable-keyword-map :description "Original form payload (preserves `:rename-to` / `:list-append` / etc.). Nullable at type level; non-null at runtime."}}
-   :return-type :keyword-map
-   :effects #{:db}}
-
-  ;; Atomic update unit — `sp/update-entity` + conditional Phase-6c
-  ;; rename-slot + the post-write whole-fn type-check for binding-shaped
-  ;; writes (a type failure is a warning; a SECRET-laundering failure
-  ;; restores the touched fields — the create side's carve-out).
+   :description "Assemble the parsed write, execute its atomic core, then format the create fallback."
+   :parent :_apply-response
+   :args {:outcome {:parent :_apply-create-atomic :args {:parsed :_apply-create-parsed}}
+          :fallback {:parent :str :args {:parts ["Failed to create " {:as :type-str :type :text}]}}}
+   :return-type :keyword-map}
   {:name :try-apply-update
-   :description "Atomic update unit. Returns `{:updated <id>}` on success — plus `:type-warnings` when a binding-shaped write landed but the owning fn now fails the aggregate type-check — or `{:error <msg>}` on write failure or a secret-laundering rejection (whose write is rolled back). Rename-slot failure is logged but never escalated."
-   :args {:entity-type {:type :text :description "Entity name as text."}
-          :id-uuid {:type :uuid :description "Target row id."}
-          :entity-data {:type :nullable-keyword-map :description "Pre-validated row patch. Nullable at type level; non-null at runtime."}
-          :type-str {:type :text :description "Original string form of entity-type."}
-          :form-data {:type :nullable-keyword-map :description "Original form payload. Nullable at type level; non-null at runtime."}}
-   :return-type :keyword-map
-   :effects #{:db}}
+   :description "Assemble the parsed write, execute its atomic core, then format the update fallback."
+   :parent :_apply-response
+   :args {:outcome {:parent :_apply-update-atomic :args {:parsed :_apply-update-parsed}}
+          :fallback "Failed to update entity"}
+   :return-type :keyword-map}
 
-  ;; §3.3 sequence-write atomic units. Same `{:created/:updated}` /
-  ;; `{:error}` shape the graph dispatches on.
+  {:name :_apply-seq-append-atomic
+   :description "Refresh and append under one guarded writer."
+   :args {:parsed {:type :_seq-append-parsed-shape} :seq-binding {:type :nullable-keyword-map}}
+   :return-type :keyword-map :effects #{:db}}
+  {:name :_apply-seq-update-atomic
+   :description "Refresh and update under one guarded writer."
+   :args {:parsed {:type :_seq-update-parsed-shape} :item {:type :nullable-keyword-map}}
+   :return-type :keyword-map :effects #{:db}}
+  {:name :_apply-seq-move-atomic
+   :description "Refresh and swap positions under one guarded writer."
+   :args {:parsed {:type :_seq-update-parsed-shape} :item {:type :nullable-keyword-map}}
+   :return-type :keyword-map :effects #{:db}}
   {:name :try-apply-seq-append
-   :description "§3.3 core of sequence-append. Returns `{:created <item-id> :position <int> :fn-id <fn-id>}` (plus `:type-warnings [<diagnostic> …]` when the item landed but the owning fn now fails the aggregate type-check — error-tolerance Phase 3 keeps the row and records a per-branch diagnostic) or `{:error <reason>}`."
-   :args {:parsed {:type :_seq-append-parsed-shape
-                   :description "Parsed POST /api/sequence/append/:fn-id payload (`{:fn-id :body}`)."}
-          :seq-binding {:type :nullable-keyword-map :description "Resolved sequence-binding row (real or synthetic)."}}
-   :return-type :keyword-map
-   :effects #{:db}}
-
+   :description "Render the committed append or stale-binding HTTP rejection after atomic rollback."
+   :parent :_apply-response
+   :args {:outcome :_apply-seq-append-atomic :fallback ""} :return-type :keyword-map}
   {:name :try-apply-seq-update
-   :description "§3.3 core of sequence-update. Returns `{:updated <item-id>}` (plus `:type-warnings [<diagnostic> …]` — same Phase-3 record-or-clear semantics as the binding update core) or `{:error <reason>}`."
-   :args {:parsed {:type :_seq-update-parsed-shape
-                   :description "Parsed PUT /api/sequence/item/:item-id payload."}
-          :item {:type :nullable-keyword-map :description "Pre-read binding-list-item row."}}
-   :return-type :keyword-map
-   :effects #{:db}}
-
+   :description "Render the committed update or missing-item HTTP rejection after atomic rollback."
+   :parent :_apply-response
+   :args {:outcome :_apply-seq-update-atomic :fallback ""} :return-type :keyword-map}
   {:name :try-apply-seq-move
-   :description "§3.3 core of sequence-move. Swaps the item with its up/down neighbour through a free temp position (edge moves are no-op successes). Returns `{:moved <item-id> :position <int>}` (plus `:type-warnings` — Phase-3 record-or-clear) or `{:error <reason>}`."
-   :args {:parsed {:type :_seq-update-parsed-shape
-                   :description "Parsed POST /api/sequence/move/:item-id payload (`{:item-id :body}` — the body carries `{:direction \"up\"|\"down\"}`)."}
-          :item {:type :nullable-keyword-map :description "Pre-read binding-list-item row."}}
-   :return-type :keyword-map
-   :effects #{:db}}
+   :description "Render the committed swap or missing-item HTTP rejection after atomic rollback."
+   :parent :_apply-response
+   :args {:outcome :_apply-seq-move-atomic :fallback ""} :return-type :keyword-map}
 
   {:name :fn-names-with-tag
    :description "Vec of fn-NAMES (as strings) declared with `tag` in their `:tags` set. Used to discover tagged base-fns declaratively — e.g. `(:secret-shape)` resolves to the secret-leaf row's name without hardcoding `\"secret-leaf\"` anywhere. Pure: derefs the in-memory `rich-types-registry` atom, no storage round-trip."

@@ -329,11 +329,10 @@
             (is (= before (counts storage)))))))))
 
 
-(deftest composed-explorer-view-is-not-a-compatible-base-replacement
-  ;; Counterexample for moving the public base into a graph composition:
-  ;; ordinary inherited axes still decode, but discovery and Save require
-  ;; the explorer-view identity to have no parents. A migration must change
-  ;; those contracts together; a runnable wrapper alone is insufficient.
+(deftest unregistered-composed-explorer-view-cannot-impersonate-the-installed-root
+  ;; A same-named composition is not the installed app.views identity.
+  ;; Legacy base installations remain supported, but an arbitrary wrapper
+  ;; cannot redirect listing or Save by claiming the public root's name.
   (let [storage (setup/create-versioned-test-storage 6)]
     (try
       (let [native (setup/create-base-fn! storage "_view-evaluator")

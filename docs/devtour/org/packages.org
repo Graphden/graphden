@@ -7,7 +7,7 @@ Declarations, implementations, synchronization, import, and lint.
 
 after: executor
 
-[[file:index.org][index]] · ~99 min
+[[file:index.org][index]] · ~93 min
 
 * 1. load-packages
 :PROPERTIES:
@@ -237,7 +237,7 @@ Synchronizes packaged definitions into storage, repairs moved identities, remove
 Converts stored graph records back into function definitions for export and distribution. Parsing the exported definitions must reconstruct the same graph: ~parse(export(parse(x))) == parse(x)~. The corpus test verifies this property on actual packages.
 
 - source :: [[file:../../../src/graphden/packages/export.clj::(defn records->fn-defs][src/graphden/packages/export.clj:569]]
-- same file :: [[file:packages.org::#packages/ref-kw][ref-kw]], [[file:packages.org::#packages/external-deps][external-deps]], [[file:packages.org::#packages/strip-secret-paths][strip-secret-paths]]
+- same file :: [[file:packages.org::#packages/ref-kw][ref-kw]]
 
 * 18. ref-kw
 :PROPERTIES:
@@ -250,7 +250,7 @@ Converts stored graph records back into function definitions for export and dist
 Chooses an unqualified [[file:glossary.org::#term/edn][keyword]] for a unique reference name and a namespace-qualified [[file:glossary.org::#term/edn][keyword]] when names repeat. Some version-qualified namespaces produce valid in-memory [[file:glossary.org::#term/edn][keywords]] whose printed form is not valid [[file:glossary.org::#term/edn][EDN]]; the next step handles that text boundary.
 
 - source :: [[file:../../../src/graphden/packages/export.clj::(defn- ref-kw][src/graphden/packages/export.clj:107]]
-- same file :: [[file:packages.org::#packages/records->fn-defs][records->fn-defs]], [[file:packages.org::#packages/external-deps][external-deps]], [[file:packages.org::#packages/strip-secret-paths][strip-secret-paths]]
+- same file :: [[file:packages.org::#packages/records->fn-defs][records->fn-defs]]
 
 * 19. encode-unreadable-kws
 :PROPERTIES:
@@ -264,69 +264,68 @@ Before writing [[file:glossary.org::#term/edn][EDN]] text, replaces otherwise un
 
 - source :: [[file:../../../src/graphden/packages/records/wire.clj::(defn encode-unreadable-kws][src/graphden/packages/records/wire.clj:70]]
 
-* 20. external-deps
+* 20. namespace-external-deps
 :PROPERTIES:
-:CUSTOM_ID: packages/external-deps
-:FILE: src/graphden/packages/export.clj
-:LINE: 927
-:MINS: 4.8
+:CUSTOM_ID: packages/namespace-external-deps
+:FILE: resources/packages/registry/registry/fns.edn
+:LINE: 150
+:MINS: 1.2
 :END:
 
-Finds references leaving an exported namespace subtree and records them as dependencies. References into version-qualified package namespaces also produce package dependencies. The surrounding ~:export-namespace~ [[file:glossary.org::#term/graph-function][graph function]] assembles the final bundle.
+Composes the dependency list for an exported namespace from one scoped native facts read. Structural references and version-qualified package namespaces are both included; the graph sorts and deduplicates names and package coordinates before the surrounding ~:export-namespace~ [[file:glossary.org::#term/graph-function][graph function]] assembles the bundle.
 
-- source :: [[file:../../../src/graphden/packages/export.clj::(defn external-deps][src/graphden/packages/export.clj:927]]
-- same file :: [[file:packages.org::#packages/records->fn-defs][records->fn-defs]], [[file:packages.org::#packages/ref-kw][ref-kw]], [[file:packages.org::#packages/strip-secret-paths][strip-secret-paths]]
+- source :: [[file:../../../resources/packages/registry/registry/fns.edn::{:name :namespace-external-deps][resources/packages/registry/registry/fns.edn:150]]
 
-* 21. strip-secret-paths
+* 21. graph-fn-defs
 :PROPERTIES:
-:CUSTOM_ID: packages/strip-secret-paths
-:FILE: src/graphden/packages/export.clj
-:LINE: 783
-:MINS: 1.9
+:CUSTOM_ID: packages/graph-fn-defs
+:FILE: resources/packages/registry/registry/impls.clj
+:LINE: 41
+:MINS: 1.2
 :END:
 
-Removes vault paths from shared bundles by default and leaves the corresponding secret arguments free. The ~:secrets~ manifest tells the installer which values need to be defined locally; publishing a function therefore does not publish its secret locations.
+Acquires viewer-concealed function definitions through the safe export codec. The ~:secret-path-args~ and ~:strip-secret-paths~ compositions in [[file:../../../resources/packages/registry/registry/fns.edn][registry/fns.edn]] build the manifest and remove vault paths, leaving exhausted arguments free. The installer sees which values need local definitions without receiving the exporter's secret locations.
 
-- source :: [[file:../../../src/graphden/packages/export.clj::(defn strip-secret-paths][src/graphden/packages/export.clj:783]]
-- same file :: [[file:packages.org::#packages/records->fn-defs][records->fn-defs]], [[file:packages.org::#packages/ref-kw][ref-kw]], [[file:packages.org::#packages/external-deps][external-deps]]
+- source :: [[file:../../../resources/packages/registry/registry/impls.clj::(defbase graph-fn-defs][resources/packages/registry/registry/impls.clj:41]]
+- same file :: [[file:packages.org::#packages/publish-package-apply][publish-package-apply]], [[file:packages.org::#packages/upsert-pin!][upsert-pin!]]
 
 * 22. publish-package-apply
 :PROPERTIES:
 :CUSTOM_ID: packages/publish-package-apply
 :FILE: resources/packages/registry/registry/impls.clj
-:LINE: 147
+:LINE: 129
 :MINS: 2.0
 :END:
 
 Stores a published bundle as an immutable ~:package-version~ row identified by version and content hash. Installation materializes definitions in a version-qualified namespace and records a [[file:glossary.org::#term/semver][pin]]. Updating or rolling back changes references to the selected package version.
 
-- source :: [[file:../../../resources/packages/registry/registry/impls.clj::(defbase publish-package-apply][resources/packages/registry/registry/impls.clj:147]]
-- same file :: [[file:packages.org::#packages/upsert-pin!][upsert-pin!]]
+- source :: [[file:../../../resources/packages/registry/registry/impls.clj::(defbase publish-package-apply][resources/packages/registry/registry/impls.clj:129]]
+- same file :: [[file:packages.org::#packages/graph-fn-defs][graph-fn-defs]], [[file:packages.org::#packages/upsert-pin!][upsert-pin!]]
 
 * 23. upsert-pin!
 :PROPERTIES:
 :CUSTOM_ID: packages/upsert-pin!
 :FILE: resources/packages/registry/registry/impls.clj
-:LINE: 347
+:LINE: 306
 :MINS: 2.2
 :END:
 
 Creates or updates an [[file:glossary.org::#term/semver][installation pin]]. Only a new installation increments the global package statistic, using an atomic database upsert; moving an existing [[file:glossary.org::#term/semver][pin]] to another version does not. See [[file:../../../docs/MARKETPLACE.md][marketplace]].
 
-- source :: [[file:../../../resources/packages/registry/registry/impls.clj::(defn- upsert-pin!][resources/packages/registry/registry/impls.clj:347]]
-- same file :: [[file:packages.org::#packages/publish-package-apply][publish-package-apply]]
+- source :: [[file:../../../resources/packages/registry/registry/impls.clj::(defn- upsert-pin!][resources/packages/registry/registry/impls.clj:306]]
+- same file :: [[file:packages.org::#packages/graph-fn-defs][graph-fn-defs]], [[file:packages.org::#packages/publish-package-apply][publish-package-apply]]
 
 * 24. moderate-package-version!
 :PROPERTIES:
 :CUSTOM_ID: packages/moderate-package-version!
-:FILE: resources/packages/registry/marketplace/impls.clj
-:LINE: 54
-:MINS: 3.1
+:FILE: resources/packages/registry/marketplace/fns.edn
+:LINE: 237
+:MINS: 1.0
 :END:
 
-Applies a platform administrator's moderation decision. The [[file:glossary.org::#term/auth][capability]] check is inside the write operation; the read uses platform storage so organisation scoping does not hide another publisher's row. After the change, ~tc/notify!~ lets the [[file:glossary.org::#term/integrant][addon]] notify the publisher. See [[file:../../../docs/MARKETPLACE.md][marketplace moderation]].
+The graph validates and composes a platform administrator's moderation decision. The [[file:glossary.org::#term/auth][capability]] check remains inside the native write operation; its read uses platform storage so organisation scoping does not hide another publisher's row. After the change, ~tc/notify!~ lets the [[file:glossary.org::#term/integrant][addon]] notify the publisher. See [[file:../../../docs/MARKETPLACE.md][marketplace moderation]].
 
-- source :: [[file:../../../resources/packages/registry/marketplace/impls.clj::(defbase moderate-package-version!][resources/packages/registry/marketplace/impls.clj:54]]
+- source :: [[file:../../../resources/packages/registry/marketplace/fns.edn::{:name :moderate-package-version!][resources/packages/registry/marketplace/fns.edn:237]]
 
 * 25. install!
 :PROPERTIES:

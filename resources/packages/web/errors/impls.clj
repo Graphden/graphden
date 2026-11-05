@@ -6,21 +6,19 @@
     [graphden.web.errors :as errors]))
 
 
-(defbase error-boundary-wrap
-  "Ring wrap: any throw from the inner handler becomes its mapped
-   status + safe JSON body (opaque ref for non-author-facing types)
-   instead of an opaque type-losing 500. Library-adapter boundary —
-   the mapping itself lives in `graphden.web.errors`."
-  [handler]
-  (errors/wrap-error-boundary handler))
+(defbase _error-boundary-catch
+  "Catch request Exceptions; delegate response policy to the supplied callback.
+   Java Errors and the successful response pass through untouched."
+  [handler on-error]
+  (errors/wrap-error-boundary handler on-error))
 
 
-;; :json-envelope-response is a GRAPH fn-def now (web/errors/fns.edn) —
-;; status extraction, body strip, JSON serialise (`:to-json-string`) and
-;; the 429 → `Retry-After: 1` header policy all compose over
-;; `:ring-response`, so the retry policy is graph-visible and tunable
-;; instead of a literal nailed into a Clojure impl.
+(defbase _safe-request-error
+  "Log/count a request fault and return only the centrally redacted envelope."
+  [exception]
+  (errors/report-throwable exception))
 
 
 (def impls
-  {:error-boundary-wrap {:impl error-boundary-wrap :taint-propagate? true}})
+  {:_error-boundary-catch {:impl _error-boundary-catch :taint-propagate? true}
+   :_safe-request-error {:impl _safe-request-error :taint-propagate? true}})

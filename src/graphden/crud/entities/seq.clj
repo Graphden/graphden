@@ -498,8 +498,7 @@
     (fn [storage bound-ctx]
       (if-let [current (refresh-append-binding storage (:fn-id parsed) seq-binding)]
         (append-sequence! parsed current bound-ctx)
-        {:error "Sequence binding or inherited slot changed; refresh and retry"
-         :http-status 409}))))
+        {:error :crud/sequence-binding-changed}))))
 
 
 (defn apply-seq-move-core
@@ -511,7 +510,7 @@
     (fn [storage bound-ctx]
       (if-let [current (sp/read-entity storage :binding-list-item (:item-id parsed))]
         (move-sequence! parsed current bound-ctx)
-        {:error "Sequence item no longer exists" :http-status 404}))))
+        {:error :crud/sequence-item-missing}))))
 
 
 (defn apply-seq-update-core
@@ -522,4 +521,4 @@
     (fn [storage bound-ctx]
       (if-let [current (sp/read-entity storage :binding-list-item (:item-id parsed))]
         (update-sequence! parsed current bound-ctx)
-        {:error "Sequence item no longer exists" :http-status 404}))))
+        {:error :crud/sequence-item-missing}))))

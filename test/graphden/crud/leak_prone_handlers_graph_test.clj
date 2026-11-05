@@ -32,6 +32,7 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.test-setup :as setup]
+    [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]
     [graphden.test-infra.graph-harness :as gh :refer [*graph*]]
     [graphden.types.diagnostics :as diag]
@@ -41,6 +42,51 @@
 (use-fixtures :once
   (setup/create-container-fixture)
   (gh/graph-fixture (str (ns-name *ns*))))
+
+
+(deftest query-param-graph-precedence-and-raw-fallback-test
+  (let [read-param (fn [request]
+                     (gh/exec-name :query-param {:request request :param-name "force"}))]
+    (testing "enriched string key wins over keyword and raw values"
+      (is (= "string" (read-param {:query-params {"force" "string" :force "keyword"}
+                                   :query-string "force=raw"}))))
+    (testing "enriched keyword key wins over raw value"
+      (is (= "keyword" (read-param {:query-params {:force "keyword"}
+                                    :query-string "force=raw"}))))
+    (testing "raw fallback decodes and malformed escapes stay raw"
+      (is (= "a b" (read-param {:query-string "force=a%20b"})))
+      (is (= "a%" (read-param {:query-string "force=a%"}))))
+    (testing "missing value returns nil"
+      (is (nil? (read-param {:query-string "other=1"}))))))
+
+
+(deftest form-constraint-graph-preserves-refinement-value-domains-test
+  (let [parse (fn [base raw]
+                (gh/exec-name :_parse-fn-form-constraint-fragment
+                              {:form-data {:base-fn-id base :constraint raw}}))]
+    (is (= {:constraint [:= "x"]}
+           (parse "text" "[\"=\", \"x\"]")))
+    (is (= {:constraint [:in [:get :post]]}
+           (parse "keyword" "[\"in\", [\"get\", \"post\"]]")))
+    (is (= {:constraint [:= :ok]}
+           (parse (str (:keyword (ids/primitive-fn-ids)))
+                  "[\"=\", \"ok\"]")))))
+
+
+(deftest entity-delete-route-graph-prefers-enriched-params-test
+  (let [route (fn [request]
+                (gh/exec-name :extract-entity-params {:request request}))]
+    (is (= {:type-str "fn" :id-str "x" :entity-type :fn}
+           (route {:path-params {:type "fn" :id "x"}
+                   :uri "/api/entities/slot/y"})))
+    (is (= {:type-str "slot" :id-str "y" :entity-type :slot}
+           (route {:uri "/api/entities/slot/y"})))
+    (is (= {:type-str "slot" :id-str nil :entity-type :slot}
+           (route {:uri "/api/entities/slot"})))
+    (is (= {:type-str "unknown" :id-str "x" :entity-type nil}
+           (route {:uri "/api/entities/unknown/x"})))
+    (is (= {:type-str nil :id-str nil :entity-type nil}
+           (route {:path-params {} :uri "/api/entities/slot/y"})))))
 
 
 ;; =============================================================================

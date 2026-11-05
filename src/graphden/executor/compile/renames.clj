@@ -44,10 +44,10 @@
    When an inner walker emits a free for the leaf slot, we need to
    recognise BOTH chain links so the outer rename wins regardless of
    which link the inner classify chose."
-  [fid {:keys [fn-slots-by-fn slot-map]}]
+  [fid {:keys [fn-slots-by-fn slot-map] :as lookups}]
   (reduce (fn [acc fs]
             (let [s (get slot-map (:slot-id fs))]
-              (if-let [src (:source-slot-id s)]
+              (if-let [src (when (l/semantic-rename-slot? s lookups) (:source-slot-id s))]
                 (let [chain (chain-source-slot-ids src slot-map)
                       nm (keyword (:name s))]
                   (reduce (fn [m sid]
@@ -1208,6 +1208,17 @@
     (merge binding-renames cross-tree-renames)))
 
 
+(defn hof-lambda-slot-routes
+  "Reader slots supplied by each invocation, rather than the captured frame.
+   A shared reader may already have an outer value under the same slot ID."
+  [r-fn-id lambda-params lookups]
+  (let [params (set lambda-params)]
+    (into {}
+          (comp (filter #(and (:slot-id %) (params (:ext-name %))))
+                (map (juxt :slot-id :ext-name)))
+          (deep-free-ext-entries r-fn-id lookups))))
+
+
 (defn build-hof-translation
   "Phase 5 — slot-id translation table applied at HOF wrap-time.
 
@@ -1263,7 +1274,12 @@
       (for [fs (get fn-slots-by-fn fn-id [])
             :let [s (get slot-map (:slot-id fs))
                   src (:source-slot-id s)]
-            :when (and src (not (contains? root-ids src)))
+            ;; A typed own declaration can forward an identically named
+            ;; deep slot. Its target's genuine renames perform any further
+            ;; translation; aliasing this full chain here pollutes generic
+            ;; names such as :value shared by independent sibling calls.
+            :when (and src (not (contains? root-ids src))
+                       (l/semantic-rename-slot? s lookups))
             chain-sid (chain-source-slot-ids src slot-map)
             :let [chain-slot (get slot-map chain-sid)
                   chain-name (some-> chain-slot :name keyword)

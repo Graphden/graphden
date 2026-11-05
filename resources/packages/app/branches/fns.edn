@@ -21,11 +21,39 @@
   ;; per-handler defbase shims.
   ;; ---------------------------------------------------------------------
 
+  {:name :_branch-by-id
+   :description "Single scoped exact branch identity read."
+   :args {:id {:type :uuid}}
+   :return-type [:union :null :branch-row-shape] :effects #{:db}}
+  {:name :_branch-by-name
+   :description "Single scoped exact branch-name lookup."
+   :args {:ref {:type :text}}
+   :return-type [:union :null :branch-row-shape] :effects #{:db}}
+  {:name :_branch-ref-input
+   :parent :const :args {:value {:as :ref :type :nullable-text}}}
+  {:name :_branch-ref-id
+   :parent :parse-uuid :args {:string :_branch-ref-input}}
+  {:name :_branch-ref-by-id
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_branch-ref-id}}
+          :then {:parent :_branch-by-id :args {:id {:ref :_branch-ref-id :type :uuid}}}
+          :else nil}}
+  {:name :_branch-ref-named?
+   :parent :if
+   :args {:test {:parent :is-a? :args {:value :_branch-ref-input :type {:value :text}}}
+          :then {:parent :not :args {:value {:parent :blank? :args {:string :_branch-ref-input}}}}
+          :else false}}
+  {:name :_branch-ref-by-name
+   :parent :if
+   :args {:test :_branch-ref-named?
+          :then {:parent :_branch-by-name :args {:ref {:ref :_branch-ref-input :type :text}}}
+          :else nil}}
   {:name :resolve-branch-ref
-   :description "Look up a branch by `:ref` — accepts either a stringified UUID or a branch name. Returns the row, or nil when not found / ref is blank / ref isn't a string. Operates on the unwrapped base storage so reads see across versions."
-   :args {:ref {:type :nullable-text :required false :description "UUID string or branch name. Non-string / blank → nil."}}
-   :return-type [:union :null :branch-row-shape]
-   :effects #{:db}}
+   :description "Resolve a supplied UUID first, then a nonblank exact name, through scoped native identity reads."
+   :parent :coalesce
+   :args {:value :_branch-ref-by-id :default :_branch-ref-by-name
+          :ref {:type :nullable-text :required false}}
+   :return-type [:union :null :branch-row-shape]}
 
   ;; ---------------------------------------------------------------------
   ;; GET /api/branches — list every branch row, ordered by created-at.
@@ -1321,16 +1349,34 @@
   ;; building (envelope + `:as-json-branch` row reshape) is graph
   ;; composition below — admins can swap the envelope or per-row
   ;; shape without touching Clojure.
+  {:name :_create-branch-row
+   :description "Canonical branch creation with trusted owner stamping and epoch publication."
+   :args {:branch-name {:type :text} :options {:type :keyword-map}}
+   :return-type :keyword-map :effects #{:db}}
+  {:name :_branch-create-entries
+   :parent :list :args {:items [{:parent :list :args {:items [{:value :base-branch-id} {:as :base-branch-id :type :uuid}]}}
+                                {:parent :list :args {:items [{:value :id} {:as :branch-id :type :nullable-uuid}]}}
+                                {:parent :list :args {:items [{:value :forbid-invalid?} {:as :forbid-invalid? :type :nullable-bool}]}}
+                                {:parent :list :args {:items [{:value :write-policy} :_branch-policy-normalized]}}
+                                {:parent :list :args {:items [{:value :require-merge?} {:as :require-merge? :type :nullable-bool}]}}]}}
+  {:name :_branch-option-present?
+   :parent :some?
+   :args {:value {:parent :last :args {:coll {:as :item}}}}}
+  {:name :_branch-create-options
+   :parent :pairs->map
+   :args {:entries {:parent :filter
+                    :args {:pred :_branch-option-present? :coll :_branch-create-entries}}}}
   {:name :create-branch!
-   :description "Atomic library boundary over `vs/create-branch!` — writes a new branch row with `:branch-name` + `:base-branch-id` (+ optional `:forbid-invalid?` merge-policy flag and `:write-policy` protection level; the creating principal is stamped as `:owner-id`) and returns the row."
-   :args {:branch-id {:type :nullable-uuid :required false :description "Optional create-only identity UUID; an existing identity is refused."}
-          :branch-name {:type :text :description "New branch's display name."}
-          :base-branch-id {:type :uuid :description "Parent branch's id; the new branch forks from this point."}
-          :forbid-invalid? {:type :nullable-bool :required false :description "Error-tolerance Phase 5 merge policy: truthy → merges INTO this branch are refused while recorded type diagnostics exist on either side. Absent/nil ≡ off."}
-          :write-policy {:type :nullable-text :required false :description "Protected-branch write policy: \"open\" (nil ≡ open — anyone the ordinary grants admit), \"owner\" (branch owner + the org's :manage-grants holders), \"admins\" (:manage-grants holders only). Enforced by the tenancy addon; inert without it."}
-          :require-merge? {:type :nullable-bool :required false :description "Protected-branch 'push only via merge' flag (Stage 2): truthy → direct graph writes are refused, changes land only via merge. Enforced in open core. Absent/nil ≡ off."}}
-   :return-type :keyword-map
-   :effects #{:db}}
+   :description "Assemble optional branch command fields and normalized protection policy; trusted owner stamping and epoch publication remain native."
+   :parent :_create-branch-row
+   :args {:options :_branch-create-options
+          :branch-id {:type :nullable-uuid :required false}
+          :branch-name {:type :text}
+          :base-branch-id {:type :uuid}
+          :forbid-invalid? {:type :nullable-bool :required false}
+          :write-policy {:type :nullable-text :required false}
+          :require-merge? {:type :nullable-bool :required false}}
+   :return-type :keyword-map}
 
   {:name :_create-branch-apply-row
    :description "Stage 1 of the apply — write the branch row off the parsed name + resolved parent. Branch-name is non-null here because the `:_create-branch-name-blank?` guard rejects the request upstream. `:base-branch-id` is asserted non-null because the wrapping `:cond` reaches this arm only when `:_create-branch-parent-missing?` is false (`:resolved-parent` exists)."
@@ -1406,12 +1452,21 @@
   ;; ---------------------------------------------------------------------
 
   ;; --- :set-branch-policy! atomic primitive ---
+  {:name :_branch-policy-input :parent :coalesce
+   :args {:value {:as :write-policy :type :nullable-text} :default ""}}
+  {:name :_branch-policy-trimmed :parent :str-trim :args {:string :_branch-policy-input}}
+  {:name :_branch-policy-normalized :parent :if
+   :args {:test {:parent :or :args {:values [{:parent :equal? :args {:a :_branch-policy-trimmed :b ""}}
+                                             {:parent :equal? :args {:a :_branch-policy-trimmed :b "open"}}]}}
+          :then nil :else :_branch-policy-trimmed}}
+  {:name :_set-branch-policy
+   :description "Authorized branch writer with native canonical-value validation backstop."
+   :args {:branch-id {:type :uuid} :policy {:type :nullable-text}}
+   :return-type :nullable-text :effects #{:db}}
   {:name :set-branch-policy!
-   :description "Atomic library boundary — update `:branch.write-policy` by branch id. Validates the policy value (`:branches/invalid-write-policy` otherwise); \"open\" normalises to nil (cleared). Returns the stored policy (nil when cleared)."
-   :args {:branch-id {:type :uuid :description "Branch id whose policy to set."}
-          :write-policy {:type :nullable-text :description "\"open\" (clear), \"owner\" or \"admins\"."}}
-   :return-type :nullable-text
-   :effects #{:db}}
+   :description "Trim policy text and clear empty/open; the scoped writer validates accepted policy values before mutation."
+   :parent :_set-branch-policy :args {:policy :_branch-policy-normalized}
+   :return-type :nullable-text}
 
   {:name :set-branch-require-merge!
    :description "Atomic library boundary — set `:branch.require-merge?` (bool) by branch id. When true, direct graph writes to the branch are refused (open-core enforcement); changes land only via merge. Returns the stored boolean."
@@ -1420,28 +1475,124 @@
    :return-type :bool
    :effects #{:db}}
 
+  {:name :_set-branch-archived-at
+   :description "Authorized branch archive timestamp write."
+   :args {:branch-id {:type :uuid} :archived-at {:type :any}}
+   :return-type :any :effects #{:db}}
   {:name :set-branch-archived!
-   :description "Atomic library boundary — set `:branch.archived-at` by branch id: truthy `archived?` → now (folded into the popover's \"Merged\" group — a merge into the branch's own base does this), falsy → nil (active again; opening the branch does this). Returns the flag as stored."
-   :args {:branch-id {:type :uuid :description "Branch id to fold away / bring back."}
-          :archived? {:type :any :description "Truthy → archive; falsy → unarchive."}}
-   :return-type :bool
-   :effects #{:db :time}}
+   :description "Choose now/nil for the archive command, then return the stored flag."
+   :parent :some?
+   :args {:value {:parent :_set-branch-archived-at
+                  :args {:archived-at {:parent :if
+                                       :args {:test {:as :archived? :type :any}
+                                              :then :current-instant :else nil}}}}
+          :branch-id {:type :uuid}
+          :archived? {:type :any}}
+   :return-type :bool}
 
+  {:name :_set-branch-review-state
+   :description "Authorized branch state write with canonical workflow-domain enforcement."
+   :args {:branch-id {:type :uuid} :state {:type :nullable-text}}
+   :return-type :nullable-text :effects #{:db}}
   {:name :set-review-state!
-   :description "Atomic library boundary — set `:branch.review-state` by branch id. Truthy `proposed?` → \"proposed\" (submitted for review into its base); falsy → nil (withdraw). Returns the stored state (\"proposed\" or nil)."
-   :args {:branch-id {:type :uuid :description "Branch id whose review-state to set."}
-          :proposed? {:type :any :description "Truthy → propose for review; falsy → withdraw."}}
-   :return-type :nullable-text
-   :effects #{:db}}
+   :description "Choose proposed/nil for the submit/withdraw command, then invoke the authorized setter."
+   :parent :_set-branch-review-state
+   :args {:state {:parent :if
+                  :args {:test {:as :proposed? :type :any} :then "proposed" :else nil}}
+          :branch-id {:type :uuid} :proposed? {:type :any}}
+   :return-type :nullable-text}
+
+  {:name :_branch-int-value
+   :description "Canonical checked fixed-width integer conversion."
+   :args {:value {:type :int}} :return-type :int}
+  {:name :_patch-branch-review-policy
+   :description "Authorized review column PATCH and effective-row read, with fail-closed domain checks."
+   :args {:branch-id {:type :uuid} :patch {:type :keyword-map}}
+   :return-type :nullable-keyword-map :effects #{:db}}
+  {:name :_branch-review-required-input
+   :parent :const :args {:value {:as :required-approvals :type :any}}}
+  {:name :_branch-review-self-input
+   :parent :const :args {:value {:as :allow-self-approval? :type :any}}}
+  {:name :_branch-review-approvers-input
+   :parent :const :args {:value {:as :approver-ids :type :any}}}
+  {:name :_branch-review-error
+   :parent :throw
+   :args {:exception {:parent :ex-info
+                      :args {:message {:as :message}
+                             :data {:parent :zipmap
+                                    :args {:keys [{:value :type} {:value :value}]
+                                           :vals [{:as :kind} {:as :invalid-value}]}}}}}}
+  {:name :_branch-review-required-error
+   :parent :_branch-review-error
+   :args {:message "required-approvals must be a non-negative integer"
+          :kind {:value :validation-error/required-approvals}
+          :invalid-value :_branch-review-required-input}}
+  {:name :_branch-review-approvers-error
+   :parent :_branch-review-error
+   :args {:message "approver-ids must be a list of user ids"
+          :kind {:value :validation-error/approver-ids}
+          :invalid-value :_branch-review-approvers-input}}
+  {:name :_branch-review-required-normalized
+   :parent :cond
+   :args {:clauses [{:parent :nil? :args {:value :_branch-review-required-input}} nil
+                    {:parent :is-a? :args {:value :_branch-review-required-input :type {:value :int}}}
+                    {:parent :if
+                     :args {:test {:parent :gte
+                                   :args {:nums [{:ref :_branch-review-required-input :type :int} 0]}}
+                            :then {:parent :_branch-int-value
+                                   :args {:value {:ref :_branch-review-required-input :type :int}}}
+                            :else :_branch-review-required-error}}
+                    true :_branch-review-required-error]}}
+  {:name :_branch-review-self-normalized
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_branch-review-self-input}}
+          :then {:parent :not :args {:value {:parent :not :args {:value :_branch-review-self-input}}}}
+          :else nil}}
+  {:name :_branch-review-approvers-normalized
+   :parent :cond
+   :args {:clauses [{:parent :nil? :args {:value :_branch-review-approvers-input}} nil
+                    {:parent :is-a? :args {:value :_branch-review-approvers-input :type {:value :sequence}}}
+                    {:parent :if
+                     :args {:test {:parent :empty? :args {:coll :_branch-review-approvers-input}}
+                            :then nil
+                            :else {:parent :map
+                                   :args {:func {:parent :to-str :args {:value {:as :item}}}
+                                          :coll :_branch-review-approvers-input}}}}
+                    true :_branch-review-approvers-error]}}
+  {:name :_branch-review-required-patch
+   :parent :if
+   :args {:test {:parent :equal? :args {:a :_branch-review-required-input :b {:value :keep}}}
+          :then {:value {}}
+          :else {:parent :zipmap
+                 :args {:keys [{:value :required-approvals}] :vals [:_branch-review-required-normalized]}}}}
+  {:name :_branch-review-self-patch
+   :parent :if
+   :args {:test {:parent :equal? :args {:a :_branch-review-self-input :b {:value :keep}}}
+          :then :_branch-review-required-patch
+          :else {:parent :assoc
+                 :args {:map :_branch-review-required-patch
+                        :key {:value :allow-self-approval?} :value :_branch-review-self-normalized}}}}
+  {:name :_branch-review-patch
+   :parent :if
+   :args {:test {:parent :equal? :args {:a :_branch-review-approvers-input :b {:value :keep}}}
+          :then :_branch-review-self-patch
+          :else {:parent :assoc
+                 :args {:map :_branch-review-self-patch
+                        :key {:value :approver-ids} :value :_branch-review-approvers-normalized}}}}
+  {:name :_set-branch-review-policy-row
+   :description "Compose keep-sentinel PATCH semantics and input normalization before the authorized native writer."
+   :parent :_patch-branch-review-policy
+   :args {:patch :_branch-review-patch
+          :branch-id {:type :uuid} :required-approvals {:type :any}
+          :allow-self-approval? {:type :any} :approver-ids {:type :any}}
+   :return-type :nullable-keyword-map}
 
   {:name :set-branch-review-policy!
-   :description "Atomic library boundary — PATCH a branch's review policy (the merge TARGET's rules): `required-approvals` (int, nil=off), `allow-self-approval?` (bool), `approver-ids` (explicit reviewer user-id allow-list). The `:keep` sentinel leaves a column untouched (route supplies it for a body-absent key), so a partial update — the ⚙ menu — can't wipe an API-set allow-list. Returns the effective policy map."
-   :args {:branch-id {:type :uuid :description "Branch id whose review policy to set."}
-          :required-approvals {:type :any :description "How many approvals a merge into this branch needs; nil/0 = off; :keep = leave unchanged."}
-          :allow-self-approval? {:type :any :description "Truthy → the author's own approval counts; :keep = leave unchanged."}
-          :approver-ids {:type :any :description "List of reviewer user-ids allowed to approve, additive to the write-policy role; nil = role-based only; :keep = leave unchanged."}}
-   :return-type :keyword-map
-   :effects #{:db}}
+   :description "Apply a guarded review-policy PATCH and project the effective review fields."
+   :parent :select-keys
+   :args {:m :_set-branch-review-policy-row
+          :ks [{:value :required-approvals} {:value :allow-self-approval?} {:value :approver-ids}]}
+   :return-type :keyword-map}
 
   {:name :approve-proposal!
    :description "Atomic library boundary — record the current principal's approval of proposal branch `source-branch-id` for merge into its base. Enforces WHO-may-approve against the target's write-policy + approver-ids (else :authz/forbidden). Stamps the source content fingerprint for stale-dismissal. Returns the approver id."
@@ -1470,14 +1621,32 @@
    :return-type [:list :keyword-map]
    :effects #{:db}}
 
+  {:name :_approval-rejection
+   :description "Canonical merge-gate predicate for one approval."
+   :args {:stamp {:type :text} :target-branch-id {:type :nullable-uuid}
+          :approver-ids {:type [:list :text]} :approval {:type :keyword-map}
+          :author-id {:type :nullable-text} :allow-self? {:type :bool}}
+   :return-type :nullable-keyword}
+  {:name :_approval-approver :parent :get
+   :args {:coll {:as :approval :type :keyword-map} :key {:value :approver-id} :default nil}}
+  {:name :_approval-reason-text :parent :name :args {:value :_approval-rejection}}
+  {:name :_approval-display-row :parent :zipmap :lambda-params [:approval]
+   :args {:keys [{:value :approver-id} {:value :counted} {:value :reason} {:value :stale}]
+          :vals [:_approval-approver
+                 {:parent :nil? :args {:value :_approval-rejection}}
+                 :_approval-reason-text
+                 {:parent :contains?
+                  :args {:coll {:value {:stale true :other-target true :not-an-approver true}}
+                         :key :_approval-rejection}}]}
+   :return-type {:approver-id :text :counted :bool :reason :nullable-text :stale :bool}}
+  {:name :_approval-display-rows
+   :parent :map
+   :args {:func :_approval-display-row :coll {:as :approvals :type [:list :keyword-map]}}
+   :return-type [:list {:approver-id :text :counted :bool :reason :nullable-text :stale :bool}]}
   {:name :approvals-report
-   :description "Each approval row judged by the merge gate's own rule: `{:approver-id :counted :reason :stale}`. `:counted` false carries a `:reason` (`stale` / `other-target` / `not-an-approver` / `author` — the author's own approval under a strict target); `:stale` marks the first three."
-   :args {:stamp {:type :text :description "The proposal's current content stamp (`:branch-content-stamp`)."}
-          :target-branch-id {:type :nullable-uuid :description "The merge target — the proposal's base branch."}
-          :approver-ids {:type [:list :text] :description "The target's approver allow-list; empty = no restriction."}
-          :approvals {:type [:list :keyword-map] :description "The approval rows (`:branch-approvals`)."}
-          :author-id {:type :nullable-text :description "The proposal's owner."}
-          :allow-self? {:type :bool :description "Whether the author's own approval counts."}}
+   :description "Vector of approval display rows over the merge gate's canonical per-row verdict. Author rejection is not stale."
+   :parent :vec
+   :args {:coll :_approval-display-rows}
    :return-type [:list {:approver-id :text :counted :bool :reason :nullable-text :stale :bool}]}
 
   {:name :self-approval-allowed?
@@ -1595,14 +1764,94 @@
                  :_approval-status-approvers
                  :_approval-status-mine-current?]}}
 
+  {:name :_branch-comment-limits
+   :description "Canonical comment body resource bound and anchor domain."
+   :args {} :return-type :keyword-map}
+  {:name :_create-branch-comment
+   :description "Constrained insert with trusted author/time stamping and mandatory body/row cap and anchor checks."
+   :args {:row {:type :keyword-map}} :return-type :keyword-map :effects #{:db}}
+  {:name :_branch-comment-text
+   :parent :to-str :args {:value {:as :body :type :text}}}
+  {:name :_branch-comment-ename
+   :parent :if
+   :args {:test {:parent :some? :args {:value {:as :entity-name :type :nullable-text}}}
+          :then {:parent :to-str :args {:value {:as :entity-name}}} :else nil}}
+  {:name :_branch-comment-entity-id
+   :parent :const :args {:value {:as :entity-id :type :nullable-uuid}}}
+  {:name :_branch-comment-max
+   :parent :get :args {:coll :_branch-comment-limits :key {:value :max} :default 10000}}
+  {:name :_branch-comment-anchor-domain
+   :parent :get :args {:coll :_branch-comment-limits :key {:value :valid} :default nil}}
+  {:name :_branch-comment-length
+   :parent :str-len :args {:string :_branch-comment-text}}
+  {:name :_branch-comment-too-long
+   :parent :throw
+   :args {:exception {:parent :ex-info
+                      :args {:message {:parent :str
+                                       :args {:parts ["Comment too long: " :_branch-comment-length
+                                                      " chars (max " :_branch-comment-max ")."]}}
+                             :data {:parent :zipmap
+                                    :args {:keys [{:value :type} {:value :max}]
+                                           :vals [{:value :validation-error/comment-too-long}
+                                                  :_branch-comment-max]}}}}}}
+  {:name :_branch-comment-invalid-anchor?
+   :parent :or
+   :args {:values [{:parent :and
+                    :args {:values [{:parent :some? :args {:value :_branch-comment-ename}}
+                                    {:parent :not
+                                     :args {:value {:parent :contains?
+                                                    :args {:coll :_branch-comment-anchor-domain
+                                                           :key :_branch-comment-ename}}}}]}}
+                   {:parent :not
+                    :args {:value {:parent :equal?
+                                   :args {:a {:parent :some? :args {:value :_branch-comment-ename}}
+                                          :b {:parent :some? :args {:value :_branch-comment-entity-id}}}}}}]}}
+  {:name :_branch-comment-invalid-anchor
+   :parent :throw
+   :args {:exception {:parent :ex-info
+                      :args {:message {:parent :str
+                                       :args {:parts ["Invalid comment anchor: "
+                                                      {:parent :pr-str :args {:value :_branch-comment-ename}}
+                                                      " / "
+                                                      {:parent :pr-str :args {:value :_branch-comment-entity-id}}
+                                                      " (need both a known entity kind and an id, or neither)."]}}
+                             :data {:parent :zipmap
+                                    :args {:keys [{:value :type} {:value :entity-name} {:value :valid}]
+                                           :vals [{:value :validation-error/invalid-comment-anchor}
+                                                  :_branch-comment-ename :_branch-comment-anchor-domain]}}}}}}
+  {:name :_branch-comment-unanchored-row
+   :parent :zipmap
+   :args {:keys [{:value :source-branch-id} {:value :body}]
+          :vals [{:as :source-branch-id :type :uuid} :_branch-comment-text]}}
+  {:name :_branch-comment-row
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_branch-comment-ename}}
+          :then {:parent :assoc
+                 :args {:map {:parent :assoc
+                              :args {:map :_branch-comment-unanchored-row
+                                     :key {:value :entity-name} :value :_branch-comment-ename}}
+                        :key {:value :entity-id} :value :_branch-comment-entity-id}}
+          :else :_branch-comment-unanchored-row}}
+  {:name :_branch-comment-validated-row
+   :parent :cond
+   :args {:clauses [{:parent :gt :args {:nums [:_branch-comment-length :_branch-comment-max]}}
+                    :_branch-comment-too-long
+                    :_branch-comment-invalid-anchor? :_branch-comment-invalid-anchor
+                    true :_branch-comment-row]}}
+  {:name :_add-branch-comment-row
+   :description "Compose body/anchor preflight and row policy; the native insert rechecks all hard bounds and stamps the trusted author."
+   :parent :_create-branch-comment
+   :args {:row :_branch-comment-validated-row
+          :source-branch-id {:type :uuid} :body {:type :text}
+          :entity-name {:type :nullable-text} :entity-id {:type :nullable-uuid}}
+   :return-type :keyword-map}
+
+  {:name :_branch-comment-created-id :parent :get
+   :args {:coll :_add-branch-comment-row :key {:value :id} :default nil}}
   {:name :add-branch-comment!
-   :description "Atomic library boundary — record a review comment on proposal `source-branch-id` by the current principal. Optional `entity-name` + `entity-id` anchor the comment to one diffed graph element (fn / fn-slot / binding / binding-list-item); both nil = the general branch thread. Returns the new comment id (text)."
-   :args {:source-branch-id {:type :uuid :description "The proposal (source) branch commented on."}
-          :body {:type :text :description "Comment text."}
-          :entity-name {:type :nullable-text :description "Anchor kind — \"fn\" / \"fn-slot\" / \"binding\" / \"binding-list-item\"; nil = unanchored."}
-          :entity-id {:type :nullable-uuid :description "Anchored entity id; nil = unanchored."}}
-   :return-type :text
-   :effects #{:db}}
+   :description "Create a validated current-author comment within the native cap boundary, then format its new id."
+   :parent :to-str :args {:value :_branch-comment-created-id}
+   :return-type :text}
 
   {:name :list-branch-comments
    :description "RAW :branch-comment rows for proposal `source-branch-id` — one query, unsorted. The wire reshape (oldest-first, key subset, stringified id/timestamp) is graph composition — `:_branch-comments-shaped`."

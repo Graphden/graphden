@@ -1,7 +1,7 @@
 (ns graphden.packages.app.secrets-impls-test
   "Unit tests for the `app/secrets` package's impls — the two arms of
    the secret write path that can be reached without OpenBao: the
-   rotate OWNERSHIP guard and the shared rollback envelope.
+   rotate OWNERSHIP guard and the shared redacted rollback facts.
 
    Both are security decisions:
 
@@ -9,7 +9,7 @@
      tenant and the value of a secret it can merely SEE. Rotate writes
      vault directly, so it bypasses the storage write-guard + RLS that
      `:delete` goes through.
-   - `:_apply-secret-rollback` builds the failure envelope that reaches
+   - `:_rollback-secret-failure` returns the redacted failure facts consumed by
      the API caller. It must drop `:body` from the exception data —
      a vault error's ex-data carries the raw OpenBao HTTP response.
 
@@ -17,12 +17,13 @@
    PLATFORM tier, where every ownership check is a no-op and an
    authorization test passes vacuously.
 
-   The three vault+storage impls (`:_apply-create-secret-body`,
-   `:_apply-inline-bind-body`, and the rollback's REPLAY of vault
+   The three vault+storage impls (`:_create-secret-facts`,
+   `:_inline-secret-facts`, and the rollback's REPLAY of vault
    entries) need a vault and are covered through the real handlers by
    `graphden.crud.secrets-graph-test`."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.context :as tc]
     [graphden.test-infra.impls :as impls]))
 
@@ -90,12 +91,12 @@
 
 
 ;; =============================================================================
-;; :_apply-secret-rollback — the failure envelope
+;; :_rollback-secret-failure — the failure envelope
 ;; =============================================================================
 
 (defn- rollback
   [journal ex]
-  (call :_apply-secret-rollback
+  (call :_rollback-secret-failure
         {:journal (atom journal) :exception ex}
         ;; Storage is only reached for `:storage-delete` journal
         ;; entries; `require-storage` demands the key regardless.
@@ -112,7 +113,7 @@
                                   {:type :vault/write-failed
                                    :status 403
                                    :body "{\"errors\":[\"permission denied\"]}"}))]
-      (is (false? (:ok r)))
+      (is (not (contains? r :ok)))
       (is (= "vault put failed" (:error r)))
       (is (nil? (get-in r [:data :body])))
       (is (= :vault/write-failed (get-in r [:data :type])))
@@ -120,11 +121,11 @@
 
 
 (deftest rollback-envelope-of-a-plain-exception-carries-no-data-key
-  (testing "a non-ExceptionInfo yields {:ok false :error} only"
+  (testing "a non-ExceptionInfo yields {:error} only"
     ;; `(ex-data e)` is nil for a plain exception; emitting `:data nil`
     ;; would put a meaningless null in the JSON response body.
     (let [r (rollback [] (RuntimeException. "boom"))]
-      (is (= {:ok false :error "boom"} r))
+      (is (= {:error "boom"} r))
       (is (not (contains? r :data))))))
 
 
@@ -136,6 +137,26 @@
     ;; this journal entry throws inside the replay.
     (let [r (rollback [[:storage-delete :fn (random-uuid)]]
                       (ex-info "original cause" {:type :secrets/create-failed}))]
-      (is (false? (:ok r)))
+      (is (not (contains? r :ok)))
       (is (= "original cause" (:error r)))
       (is (= :secrets/create-failed (get-in r [:data :type]))))))
+
+
+(deftest history-read-projects-value-free-facts-before-graph-policy
+  (let [id (random-uuid)
+        calls (atom [])
+        safe {:actor-id "actor" :actor-label "Actor" :status "succeeded"
+              :vault-version 2 :failure-type nil
+              :occurred-at (java.time.Instant/ofEpochSecond 1)}
+        storage (reify sp/StorageCRUD
+                  (query-entities
+                    [_ entity where]
+                    (swap! calls conj [entity where])
+                    [(assoc safe :value "private" :body "private" :path "internal")]))]
+    (is (= [safe] (call :_secret-rotation-rows
+                        {:target-kind :secret :target-id id} {:storage storage})))
+    (is (= [[:secret-rotation {:target-kind "secret" :target-id id}]] @calls))
+    (is (thrown? clojure.lang.ExceptionInfo
+          (call :_secret-rotation-rows {:target-kind "other" :target-id id}
+                {:storage storage})))
+    (is (= 1 (count @calls)) "invalid target kinds are rejected before the read")))

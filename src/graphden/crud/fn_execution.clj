@@ -422,79 +422,40 @@
 ;; GET /api/execute/:id — read a row + nested args
 ;; =============================================================================
 
-(defn- args-for-execution
-  [storage execution-id]
-  (let [arg-rows (sp/query-entities storage :fn-execution-arg
-                                    {:execution-id execution-id})
-        ;; Push the arg-id set into storage as a SQL IN clause; the
-        ;; alternative — full-table-scanning :fn-execution-arg-item and
-        ;; grouping in memory — is fine for one row but quadratic when
-        ;; GET /api/execute/:id is hit by the polling loop.
-        item-rows (when (seq arg-rows)
-                    (sp/query-entities storage :fn-execution-arg-item
-                                       {:execution-arg-id (mapv :id arg-rows)}))
-        items-by-arg (group-by :execution-arg-id item-rows)]
-    (mapv (fn [a]
-            (assoc a :items
-                   (->> (get items-by-arg (:id a) [])
-                        (sort-by :position)
-                        vec)))
-          arg-rows)))
-
-
-(defn child-executions
-  "The executions `execution-id` called into over the wire
-   (`:parent-execution-id` = the run), oldest first, each with the fn
-   it ran: `{:id :fn-id :fn-name :status :started-at :finished-at
-   :error}`."
-  [storage execution-id]
-  (let [rows (sort-by #(some-> (:started-at %) inst-ms)
-                      (sp/query-entities storage :fn-execution
-                                         {:parent-execution-id execution-id}))
-        ;; Two batched reads for the whole list (version → fn, fn →
-        ;; name) instead of two point reads per child — this runs on
-        ;; every GET /api/execute/:id poll.
-        version-ids (into [] (comp (keep :fn-version-id) (distinct)) rows)
-        fn-id-by-version (when (seq version-ids)
-                           (update-vals (sp/read-entities storage :fn-version version-ids)
-                                        :fn-id))
-        fn-ids (into [] (comp (keep val) (distinct)) fn-id-by-version)
-        fn-by-id (if (seq fn-ids) (sp/read-entities storage :fn fn-ids) {})]
-    (mapv (fn [row]
-            (let [fn-id (get fn-id-by-version (:fn-version-id row))]
-              {:id (:id row)
-               :fn-id fn-id
-               :fn-name (:name (get fn-by-id fn-id))
-               :status (:status row)
-               :started-at (:started-at row)
-               :finished-at (:finished-at row)
-               :error (:error row)}))
-          rows)))
-
-
-(defn get-execution
-  "Public handler for GET /api/execute/:id — returns the row + nested
-   args list. nil when not found."
+(defn execution-read-facts
+  "Acquire one viewer-safe execution and its scoped related facts.
+   Read-time secret re-redaction and view-impl concealment finish before any
+   trace crosses this boundary. Child rows expose only the existing public
+   summary columns, never their raw traces/results. Batched lookups remain
+   native; argument grouping, ordering and display projection live in the
+   app.execution/get-execution graph. nil when the parent is absent."
   [ctx execution-id]
-  (let [storage (request/require-storage ctx)
-        row (sp/read-entity storage :fn-execution execution-id)]
-    (when row
-      (-> row
-          ;; READ-time re-redaction + view-impl concealment
-          ;; (`viewer-path-trace`).
-          (update :path-trace #(viewer-path-trace storage %))
-          (assoc :args (args-for-execution storage execution-id))
-          ;; The logical base fn behind the frozen fn-version snapshot —
-          ;; drives typed-repr dispatch in the execute-result partial
-          ;; (`:_er-exec-fn-id`). Derived at read time so the historical
-          ;; row itself stays version-pinned.
-          (assoc :fn-id (some->> (:fn-version-id row)
-                                 (sp/read-entity storage :fn-version)
-                                 :fn-id))
-          ;; Cross-service tracing: the executions this run called INTO
-          ;; over the wire (a listener persisted each as a row linked
-          ;; back here) — the call tree continues past the socket.
-          (assoc :children (child-executions storage execution-id))))))
+  (when execution-id
+    (let [storage (request/require-storage ctx)]
+      (when-let [row (sp/read-entity storage :fn-execution execution-id)]
+        (let [safe-row (update row :path-trace #(viewer-path-trace storage %))
+              args (sp/query-entities storage :fn-execution-arg
+                                      {:execution-id execution-id})
+              items (if (seq args)
+                      (sp/query-entities storage :fn-execution-arg-item
+                                         {:execution-arg-id (mapv :id args)}) [])
+              children (mapv #(assoc (select-keys % [:id :fn-version-id :status
+                                                     :started-at :finished-at :error])
+                                     :started-ms (some-> (:started-at %) inst-ms))
+                             (sp/query-entities storage :fn-execution
+                                                {:parent-execution-id execution-id}))
+              version-ids (into [] (comp (keep :fn-version-id) (distinct))
+                                (cons row children))
+              fn-id-by-version (if (seq version-ids)
+                                 (update-vals (sp/read-entities storage :fn-version version-ids) :fn-id)
+                                 {})
+              fn-ids (into [] (comp (keep val) (distinct)) fn-id-by-version)
+              fn-name-by-id (if (seq fn-ids)
+                              (update-vals (sp/read-entities storage :fn fn-ids) :name)
+                              {})]
+          {:row safe-row :arg-rows (vec args) :arg-item-rows (vec items)
+           :child-rows children :fn-id-by-version fn-id-by-version
+           :fn-name-by-id fn-name-by-id})))))
 
 
 ;; =============================================================================
@@ -541,7 +502,7 @@
   (let [fn-id (str (:fn-id e))]
     (cond-> {:seq (:seq e)
              :fn-id fn-id
-             :fn-name (or (get names fn-id) (str (subs fn-id 0 8) "…"))
+             :fn-name (get names fn-id)
              :depth (long (:depth e))
              :cache-hit? (boolean (:cache-hit? e))
              :duration-ms (or (:duration-ms e) 0)}
@@ -554,7 +515,7 @@
 (defn- trace-fn-names
   "`{fn-id-str → name}` for every distinct fn-id in `entries`, resolved
    against the current branch view. A deleted/foreign id simply stays
-   unnamed (the row falls back to the short id)."
+   unnamed (the graph supplies the short-id display fallback)."
   [storage entries]
   (let [ids (into [] (comp (keep :fn-id) (map str) (distinct)
                            (keep request/parse-uuid-or-clear))
@@ -566,7 +527,7 @@
             (sp/query-entities storage :fn {:id ids})))))
 
 
-(defn trace-display-rows
+(defn trace-read-facts
   "Fact payload for one persisted execution's `:path-trace` —
    `{:found? bool :rows […] :truncated? :values-dropped?}`, rows per
    `trace-entry-row`. Entries pass READ-time re-redaction first
@@ -661,29 +622,17 @@
 ;; GET /api/executions parsing (C6 atoms)
 ;; =============================================================================
 
-(defn query-param
-  "Pull a named query-string parameter from `request`, tolerating both
-   reitit's enriched shapes AND raw http-kit requests that haven't
-   gone through the enrich middleware. Values from the raw fallback
-   are URL-decoded so callers see the same shape regardless of which
-   path produced them (reitit's enriched `:query-params` already
-   decodes; the regex-extracted fallback didn't, which broke any
-   handler whose param value carried percent-encoded JSON / spaces /
-   non-ASCII — see `/partials/fn-picker-incompat?expected=%22int%22`
-   parsing as a literal `%22int%22` instead of the JSON string
-   `\"int\"`).
-
-   Also surfaced as the `:query-param` base-fn in
-   `web/crud/impls.clj`."
-  [request param-name]
-  (or (get-in request [:query-params param-name])
-      (get-in request [:query-params (keyword param-name)])
-      (some->> (:query-string request)
-               (re-find (re-pattern (str "(?:^|&)" param-name "=([^&]+)")))
-               second
-               ;; Soft-decode: a malformed percent-escape (`%`, `%zz`)
-               ;; in an untrusted query string must not 500 the handler.
-               request/safe-url-decode)))
+(defn raw-query-param
+  "Decode one named value from an unenriched http-kit query string.
+   The graph chooses enriched string/keyword keys before this fallback.
+   Malformed percent escapes stay raw rather than raising an HTTP 500."
+  [query-string param-name]
+  (some->> query-string
+           (re-find (re-pattern (str "(?:^|&)"
+                                     (java.util.regex.Pattern/quote param-name)
+                                     "=([^&]+)")))
+           second
+           request/safe-url-decode))
 
 
 ;; =============================================================================

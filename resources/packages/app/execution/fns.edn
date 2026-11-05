@@ -714,19 +714,117 @@
                                          :key {:value :id-raw}
                                          :default nil}}]}}]}}
 
-  ;; --- :get-execution / :cancel-execution! — atomic DB primitives.
+  ;; Acquisition is viewer-safe before graph reconstruction starts.
+  {:name :_execution-read-batch
+   :type {:row :keyword-map :arg-rows [:list :keyword-map]
+          :arg-item-rows [:list :keyword-map] :child-rows [:list :keyword-map]
+          :fn-id-by-version [:map :uuid :nullable-uuid]
+          :fn-name-by-id [:map :uuid :nullable-text]}}
+  {:name :_execution-read-facts
+   :description "One scoped execution, re-redacted and concealed for the current viewer, plus batched argument and allowlisted child facts. No raw child traces/results cross this boundary."
+   :args {:id {:type :nullable-uuid}}
+   :return-type [:union :null :_execution-read-batch] :effects #{:db}}
+  {:name :_execution-row
+   :parent :get :args {:coll :_execution-read-facts :key {:value :row} :default nil}}
+  {:name :_execution-arg-rows
+   :parent :get :args {:coll :_execution-read-facts :key {:value :arg-rows} :default {:value []}}}
+  {:name :_execution-item-rows
+   :parent :get :args {:coll :_execution-read-facts :key {:value :arg-item-rows} :default {:value []}}}
+  {:name :_execution-child-rows
+   :parent :get :args {:coll :_execution-read-facts :key {:value :child-rows} :default {:value []}}}
+  {:name :_execution-fn-ids
+   :parent :get :args {:coll :_execution-read-facts :key {:value :fn-id-by-version} :default {:value {}}}}
+  {:name :_execution-fn-names
+   :parent :get :args {:coll :_execution-read-facts :key {:value :fn-name-by-id} :default {:value {}}}}
+  {:name :_execution-item-arg-id
+   :parent :get :lambda-params [:item]
+   :args {:coll {:as :item :type :keyword-map} :key {:value :execution-arg-id} :default nil}}
+  {:name :_execution-item-position
+   :parent :get :lambda-params [:item]
+   :args {:coll {:as :item :type :keyword-map} :key {:value :position} :default nil}}
+  {:name :_execution-items-by-arg
+   :parent :group-by
+   :args {:key-fn :_execution-item-arg-id :coll :_execution-item-rows}}
+  {:name :_execution-arg
+   :parent :assoc :lambda-params [:arg-row]
+   :args {:map {:as :arg-row :type :keyword-map} :key {:value :items}
+          :value {:parent :sort-by
+                  :args {:key-fn :_execution-item-position
+                         :coll {:parent :get
+                                :args {:coll {:as :items-by-arg :type [:map :uuid [:list :keyword-map]]}
+                                       :key {:parent :get :args {:coll {:as :arg-row :type :keyword-map}
+                                                                :key {:value :id} :default nil}}
+                                       :default {:value []}}}}}}}
+  {:name :_execution-args
+   :parent :map
+   :args {:func :_execution-arg :coll :_execution-arg-rows
+          :items-by-arg :_execution-items-by-arg}}
+  {:name :_execution-child-start
+   :parent :get :lambda-params [:child]
+   :args {:coll {:as :child :type :keyword-map} :key {:value :started-ms} :default nil}}
+  {:name :_execution-child-fn-id
+   :parent :get
+   :args {:coll {:as :fn-ids :type [:map :uuid :nullable-uuid]}
+          :key {:parent :get :args {:coll {:as :child :type :keyword-map}
+                                   :key {:value :fn-version-id} :default nil}}
+          :default nil}}
+  {:name :_execution-child
+   :parent :zipmap :lambda-params [:child]
+   :args {:keys {:value [:id :fn-id :fn-name :status :started-at :finished-at :error]}
+          :vals [{:parent :get :args {:coll {:as :child :type :keyword-map} :key {:value :id} :default nil}}
+                 :_execution-child-fn-id
+                 {:parent :get :args {:coll {:as :fn-names :type [:map :uuid :nullable-text]}
+                                      :key :_execution-child-fn-id :default nil}}
+                 {:parent :get :args {:coll {:as :child :type :keyword-map} :key {:value :status} :default nil}}
+                 {:parent :get :args {:coll {:as :child :type :keyword-map} :key {:value :started-at} :default nil}}
+                 {:parent :get :args {:coll {:as :child :type :keyword-map} :key {:value :finished-at} :default nil}}
+                 {:parent :get :args {:coll {:as :child :type :keyword-map} :key {:value :error} :default nil}}]}}
+  {:name :_execution-children
+   :parent :map
+   :args {:func :_execution-child
+          :coll {:parent :sort-by :args {:key-fn :_execution-child-start :coll :_execution-child-rows}}
+          :fn-ids :_execution-fn-ids :fn-names :_execution-fn-names}}
   {:name :get-execution
-   :description "Read a :fn-execution row by id (joined with arg + arg-item rows). nil when id is nil or doesn't resolve."
-   :args {:id {:type :nullable-uuid :description "Target execution id."}}
-   :return-type :nullable-keyword-map
-   :effects #{:db}}
+   :description "Read the viewer-safe execution and compose its ordered nested args, logical fn identity and child summaries. nil for a missing execution."
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_execution-row}}
+          :then {:parent :merge
+                 :args {:maps [:_execution-row
+                               {:parent :zipmap
+                                :args {:keys {:value [:args :fn-id :children]}
+                                       :vals [:_execution-args
+                                              {:parent :get
+                                               :args {:coll :_execution-fn-ids
+                                                      :key {:parent :get :args {:coll :_execution-row :key {:value :fn-version-id} :default nil}}
+                                                      :default nil}}
+                                              :_execution-children]}}]}}
+          :else nil}
+   :return-type :nullable-keyword-map}
 
+  {:name :_recent-failure-facts
+   :args {:days {:type :int} :limit {:type :int}}
+   :return-type [:union :null [:list :keyword-map]] :effects #{:db}}
+  {:name :_recent-failure-display-row
+   :parent :zipmap :lambda-params [:row]
+   :args {:keys {:value [:execution-id :fn-id :fn-name :finished-at :error :error-data]}
+          :vals [{:parent :get :args {:coll {:as :row :type :keyword-map} :key {:value :execution-id} :default nil}}
+                 {:parent :get :args {:coll {:as :row :type :keyword-map} :key {:value :fn-id} :default nil}}
+                 {:parent :coalesce :args {:value {:parent :get :args {:coll {:as :row :type :keyword-map} :key {:value :fn-name} :default nil}} :default {:parent :to-str :args {:value {:parent :get :args {:coll {:as :row :type :keyword-map} :key {:value :fn-id} :default nil}}}}}}
+                 {:parent :if :args {:test {:parent :some? :args {:value {:parent :get :args {:coll {:as :row :type :keyword-map} :key {:value :finished-at} :default nil}}}} :then {:parent :to-str :args {:value {:parent :get :args {:coll {:as :row :type :keyword-map} :key {:value :finished-at} :default nil}}}} :else nil}}
+                 {:parent :get :args {:coll {:as :row :type :keyword-map} :key {:value :error} :default nil}}
+                 {:parent :get :args {:coll {:as :row :type :keyword-map} :key {:value :error-data} :default nil}}]}}
+  {:name :_recent-failure-rows
+   :parent :coalesce
+   :args {:value :_recent-failure-facts :default {:value []}}}
+  {:name :_recent-failure-page
+   :parent :take
+   :args {:count {:as :limit :type [:refine :int [:>= 0]]}
+          :coll :_recent-failure-rows}}
   {:name :recent-failures
-   :description "The CURRENT branch view's UNRESOLVED recent failures (newest first) from the `:fn-execution` audit rows — `[{:execution-id :fn-id :fn-name :finished-at :error :error-data} …]`. A failure counts as unresolved while: it ran on this branch or an ancestor (branch-chain; sibling branches never see each other's failures), its version is STILL what this branch resolves for the fn (a fix / override / delete clears it), no later succeeded run of the same version exists (a clean re-run clears transient failures), and it wasn't dismissed (`:failure-ack`). Error text/data were redacted + scrubbed at write time, so every string is already safe for the org that reads it. Empty when no pool / no failures."
-   :args {:days {:type :int :description "Trailing window in days (e.g. 7)."}
-          :limit {:type :int :description "Row cap (e.g. 50)."}}
-   :return-type [:list :keyword-map]
-   :effects #{:db}}
+   :description "Current scoped unresolved failures: final row cap, fallback name and timestamp display over safe native facts. Nil pool yields an empty list."
+   :parent :map
+   :args {:func :_recent-failure-display-row :coll :_recent-failure-page}
+   :return-type [:list :keyword-map]}
 
   {:name :recent-executions
    :description "The newest `:limit` runs that happened ON the current branch (this branch only — what was verified HERE, not on its ancestors), every status, newest first — `[{:execution-id :fn-id :fn-name :namespace-id :status :started-at :finished-at :traced?} …]`. `:traced?` marks a run that captured its call tree. Backs the review dialog's \"Verified on this branch\" digest. Empty when nothing ran."
@@ -734,11 +832,75 @@
    :return-type [:list :keyword-map]
    :effects #{:db}}
 
+  {:name :_unresolved-failure-rows
+   :description "One bounded, branch-and-org scoped unresolved-failure read with current-version resolution. Returns only safe fn identity/name/namespace facts; no error text/data crosses into graph policy."
+   :args {:days {:type :int :description "Trailing window in days (e.g. 7)."}}
+   :return-type [:union :null [:list :keyword-map]]
+   :effects #{:db}}
+
+  {:name :_failure-fn-id
+   :parent :get
+   :lambda-params [:row]
+   :args {:coll {:as :row :type :keyword-map} :key {:value :fn-id} :default nil}}
+
+  {:name :_failure-groups
+   :parent :group-by
+   :args {:key-fn :_failure-fn-id
+          :coll {:as :rows :type [:list :keyword-map]}}}
+
+  {:name :_failure-cohorts
+   :parent :vals
+   :args {:map :_failure-groups}}
+
+  {:name :_failure-cohort-first
+   :parent :first
+   :args {:coll {:as :cohort :type [:list :keyword-map]}}}
+
+  {:name :_failure-cohort-id
+   :parent :get
+   :args {:coll :_failure-cohort-first :key {:value :fn-id} :default nil}}
+
+  {:name :_failure-cohort-name
+   :parent :coalesce
+   :args {:value {:parent :get
+                  :args {:coll :_failure-cohort-first :key {:value :fn-name} :default nil}}
+          :default {:parent :to-str :args {:value :_failure-cohort-id}}}}
+
+  {:name :_failure-cohort-named
+   :parent :assoc
+   :args {:map :_failure-cohort-first :key {:value :fn-name}
+          :value :_failure-cohort-name}}
+
+  {:name :_failure-cohort-row
+   :parent :assoc
+   :lambda-params [:cohort]
+   :args {:map :_failure-cohort-named :key {:value :count}
+          :value {:parent :count :args {:coll {:as :cohort}}}}}
+
+  {:name :_failure-counted
+   :parent :map
+   :args {:func :_failure-cohort-row :coll :_failure-cohorts}}
+
+  {:name :_failure-count-sort-key
+   :parent :neg
+   :lambda-params [:item]
+   :args {:number {:parent :get
+                   :args {:coll {:as :item} :key {:value :count} :default 0}}}}
+
+  {:name :_failure-counts-sorted
+   :parent :vec
+   :args {:coll {:parent :sort-by
+                 :args {:key-fn :_failure-count-sort-key :coll :_failure-counted}}}}
+
   {:name :unresolved-failure-counts
    :description "Per-fn tally of the CURRENT branch view's UNRESOLVED failures over a trailing window — `[{:fn-id :fn-name :namespace-id :count} …]`, most failures first; the same four-part predicate as `:recent-failures`. The editor's failed-runs lens reads it once (GET /api/failures) and derives the chip / namespace / row counts client-side."
-   :args {:days {:type :int :description "Trailing window in days (e.g. 7)."}}
-   :return-type [:list :keyword-map]
-   :effects #{:db}}
+   :parent :if
+   :args {:test {:parent :nil?
+                 :args {:value :_unresolved-failure-rows}}
+          :then {:value nil}
+          :else {:parent :_failure-counts-sorted
+                 :args {:rows :_unresolved-failure-rows}}}
+   :return-type [:union :null [:list :keyword-map]]}
 
   {:name :_api-failures-data
    :parent :unresolved-failure-counts
@@ -855,25 +1017,93 @@
    :return-type {:runs :int :failed :int :duration-ms-sum :int}
    :effects #{:db}}
 
-  {:name :usage-org-daily
-   :description "Per-day series for the current org over the trailing `:days`, oldest first — `[{:day :runs :failed :duration-ms-sum :runs-pct} …]` (`:runs-pct` = share of the window's busiest day, 0-100 — feeds the panel's CSS bars; `:avg-ms` is graph composition); days with no runs are omitted."
-   :args {:days {:type :int :description "Trailing window in days (e.g. 7)."}}
-   :return-type [:list {:day :text :runs :int :failed :int :duration-ms-sum :int :runs-pct :int}]
+  {:name :_usage-org-daily-raw
+   :description "One bounded, org-scoped SQL read of daily counts; graph composition adds bar percentages."
+   :args {:days {:type :int}}
+   :return-type [:list {:day :text :runs :int :failed :int :duration-ms-sum :int}]
    :effects #{:db}}
+
+  {:name :_usage-org-fn-stats-raw
+   :description "One bounded, org-scoped SQL read of busiest functions with their current display names."
+   :args {:days {:type :int} :limit {:type :int}}
+   :return-type [:list {:fn-id :uuid :fn-name :text :runs :int :failed :int :duration-ms-sum :int}]
+   :effects #{:db}}
+
+  {:name :_usage-all-org-stats-raw
+   :description "Guarded cross-org SQL read; tenant contexts return no rows."
+   :args {:days {:type :int} :limit {:type :int}}
+   :return-type [:list {:org :text :runs :int :failed :int :duration-ms-sum :int}]
+   :effects #{:db}}
+
+  {:name :_usage-pct-run
+   :parent :get
+   :lambda-params [:row]
+   :args {:coll {:as :row :type :keyword-map} :key {:value :runs} :default {:value 0}}}
+
+  {:name :_usage-pct-runs
+   :parent :map
+   :args {:func :_usage-pct-run :coll {:as :rows :type [:list :keyword-map]}}}
+
+  {:name :_usage-pct-max
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_usage-pct-runs}}
+          :then {:value 0}
+          :else {:parent :max :args {:nums :_usage-pct-runs}}}}
+
+  {:name :_usage-pct-row-value
+   :parent :const
+   :args {:value {:as :row :type :keyword-map}}}
+
+  {:name :_usage-pct-row-runs
+   :parent :get
+   :args {:coll :_usage-pct-row-value :key {:value :runs} :default {:value 0}}}
+
+  {:name :_usage-pct-value
+   :parent :if
+   :args {:test {:parent :gt :args {:nums [:_usage-pct-max {:value 0}]}}
+          :then {:parent :floor
+                 :args {:number {:parent :quot
+                                 :args {:dividend {:parent :mul
+                                                   :args {:nums [{:value 100} :_usage-pct-row-runs]}}
+                                        :divisor :_usage-pct-max}}}}
+          :else {:value 0}}}
+
+  {:name :_usage-pct-row
+   :parent :assoc
+   :lambda-params [:row]
+   :args {:map :_usage-pct-row-value
+          :key {:value :runs-pct}
+          :value :_usage-pct-value}}
+
+  {:name :_usage-pct-rows-data
+   :parent :vec
+   :args {:coll {:parent :map
+                 :args {:func :_usage-pct-row
+                        :coll {:as :rows :type [:list :keyword-map]}}}}}
+
+  {:name :_usage-pct-rows
+   :parent :if
+   :args {:test {:parent :nil? :args {:value {:as :rows}}}
+          :then {:value nil}
+          :else :_usage-pct-rows-data}}
+
+  {:name :usage-org-daily
+   :description "Per-day series for the current org over the trailing `:days`, oldest first. Graph composition adds `:runs-pct` from the busiest day; days with no runs are omitted."
+   :parent :_usage-pct-rows
+   :args {:rows :_usage-org-daily-raw}
+   :return-type [:list {:day :text :runs :int :failed :int :duration-ms-sum :int :runs-pct :int}]}
 
   {:name :usage-org-fn-stats
-   :description "Busiest fns for the current org over the trailing `:days`, fn name joined for display — `[{:fn-id :fn-name :runs :failed :duration-ms-sum :runs-pct} …]`, busiest first, capped at `:limit` (`:avg-ms` is graph composition). A since-deleted fn shows its id."
-   :args {:days {:type :int :description "Trailing window in days (e.g. 7)."}
-          :limit {:type :int :description "Row cap (e.g. 20)."}}
-   :return-type [:list {:fn-id :uuid :fn-name :text :runs :int :failed :int :duration-ms-sum :int :runs-pct :int}]
-   :effects #{:db}}
+   :description "Busiest functions for the current org, name joined by the scoped read and graph-computed bar percentages."
+   :parent :_usage-pct-rows
+   :args {:rows :_usage-org-fn-stats-raw}
+   :return-type [:list {:fn-id :uuid :fn-name :text :runs :int :failed :int :duration-ms-sum :int :runs-pct :int}]}
 
   {:name :usage-all-org-stats
-   :description "OPERATOR-only cross-org rollup over the trailing `:days` — `[{:org :runs :failed :duration-ms-sum :runs-pct} …]`, busiest first, capped at `:limit` (`:avg-ms` is graph composition). Impl-side guard: any TENANT context gets `[]` (only the platform context — no org bound, or the platform org itself — sees cross-org counts); counts + durations only, no private data."
-   :args {:days {:type :int :description "Trailing window in days (e.g. 7)."}
-          :limit {:type :int :description "Row cap (e.g. 20)."}}
-   :return-type [:list {:org :text :runs :int :failed :int :duration-ms-sum :int :runs-pct :int}]
-   :effects #{:db}}
+   :description "Operator-only cross-org rollup with graph-computed bar percentages. The native read refuses tenant context before data crosses into graph code."
+   :parent :_usage-pct-rows
+   :args {:rows :_usage-all-org-stats-raw}
+   :return-type [:list {:org :text :runs :int :failed :int :duration-ms-sum :int :runs-pct :int}]}
 
   {:name :cancel-execution!
    :description "Soft-cancel an in-flight execution by id. nil when id is nil or doesn't resolve. Side effects: `:db` (sets `:cancel-requested?` on the persisted row) + `:state` (interrupts the in-process future via `future-cancel`)."
@@ -3350,14 +3580,38 @@
    :return-type :nullable-jsonb
    :effects #{:db}}
 
-  {:name :execute-trace-rows
-   :description "Display payload for one execution's stored trace: `{:found? bool, :rows [{seq, fn-id, fn-name, indent-px, chip, chip-kind, derived?, value-str?, value-truncated?} …], :truncated?, :values-dropped?}` — rows in depth-first call-tree order, fn names joined on the current branch, values re-redacted through the CURRENT registry. Single call over `fn-execution/trace-display-rows` (the tree walk + name join is one cohesive read-shaping algorithm)."
-   :args {:id {:type :nullable-uuid
-               :description "The :fn-execution row id; nil / unknown / traceless → `{:found? false}`."}}
+  {:name :_execute-trace-facts
+   :description "Scoped read-time redaction/concealment, depth-first trace facts and batched nullable names. Display fallback is composed by execute-trace-rows."
+   :args {:id {:type :nullable-uuid}}
    :return-type {:found? :bool :rows [:list :keyword-map]
                  :truncated? [:union :null :bool]
                  :values-dropped? [:union :null :bool]}
    :effects #{:db}}
+  {:name :_trace-fact-rows
+   :parent :get :args {:coll :_execute-trace-facts :key {:value :rows} :default {:value []}}}
+  {:name :_trace-named-row
+   :parent :assoc :lambda-params [:row]
+   :args {:map {:as :row :type :keyword-map} :key {:value :fn-name}
+          :value {:parent :coalesce
+                  :args {:value {:parent :get
+                                 :args {:coll {:as :row :type :keyword-map}
+                                        :key {:value :fn-name} :default nil}}
+                         :default {:parent :str
+                                   :args {:parts [{:parent :subs
+                                                   :args {:string {:parent :to-str
+                                                                   :args {:value {:parent :get
+                                                                                  :args {:coll {:as :row :type :keyword-map}
+                                                                                         :key {:value :fn-id} :default nil}}}}
+                                                          :start 0 :end 8}}
+                                                  "…"]}}}}}}
+  {:name :execute-trace-rows
+   :description "Viewer-safe trace facts with a short-id name fallback. Chips, indent and value rendering remain in the _ptrace-r graph."
+   :parent :assoc
+   :args {:map :_execute-trace-facts :key {:value :rows}
+          :value {:parent :map :args {:func :_trace-named-row :coll :_trace-fact-rows}}}
+   :return-type {:found? :bool :rows [:list :keyword-map]
+                 :truncated? [:union :null :bool]
+                 :values-dropped? [:union :null :bool]}}
 
   {:name :_ptrace-id-raw
    :parent :query-param

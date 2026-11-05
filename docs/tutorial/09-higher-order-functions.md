@@ -233,8 +233,10 @@ result in a function-typed argument. These are ordinary functions and
 references, with normal type and effect checks; they introduce no new
 environment entity. For merge behavior, see
 [configuration and branches](23-branches.md#what-doesnt-merge-branch-local-fn-defs).
-The existing `sql-query` implementation opens a connection per invocation;
-this construction does not add connection pooling.
+The existing `sql-query` implementation borrows an external connection from
+an executor-owned bounded pool when that facility is configured, with scope
+and credential isolation and session reset before reuse. The graph constructor
+does not create or own that pool. See [external SQL pools](../TUTORIAL_API_POLL.md).
 
 ## Iterating vs one-shot
 
@@ -243,7 +245,7 @@ Two HOF flavours interact with closure-capture differently:
 | Flavour | Examples | Per-call input shape |
 |---|---|---|
 | **Iterating** | `:map`, `:filter`, `:update-vals` | The structural slot is named `:item` for sequences (`:map`, `:filter`), `:value` for the map key/value HOFs (`:update-vals`, `:update-keys`), and `:pair` for `:reduce` (the `[acc item]` vector); the callable's own same-named arg (or its single unambiguous free) receives the element |
-| **One-shot** | `:future`, `:assoc-fn`, `:invoke` | The structural slot is named `:arg` (a generic placeholder); the callable **declares** its call-site parameters via `:lambda-params` (`[]` = everything captured) |
+| **One-shot** | `:future`, `:assoc-fn`, `:invoke` | The slot contract determines input: `:future` supplies none (`{}`); `:assoc-fn` and `:invoke` use a generic `:arg`. The callable can declare its call-site parameters via `:lambda-params` (`[]` = everything captured). |
 
 When the callable has several candidate free args and no
 authored `:lambda-params`, the compile refuses with

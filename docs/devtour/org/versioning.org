@@ -258,26 +258,26 @@ Validates conflicts and approval requirements, then writes a ~branch-merge~ reco
 :PROPERTIES:
 :CUSTOM_ID: versioning/merge-transitively!
 :FILE: src/graphden/versioning/merge/core.clj
-:LINE: 308
+:LINE: 288
 :MINS: 4.7
 :END:
 
 Merges missing ancestor branches before the requested source branch, starting with the oldest required ancestor. Each merge passes the same policy checks as a direct merge. The result lists preliminary merges in ~:merged-first~. See [[file:../../../docs/VERSIONING.md][versioning limits]].
 
-- source :: [[file:../../../src/graphden/versioning/merge/core.clj::(defn merge-transitively!][src/graphden/versioning/merge/core.clj:308]]
+- source :: [[file:../../../src/graphden/versioning/merge/core.clj::(defn merge-transitively!][src/graphden/versioning/merge/core.clj:288]]
 - same file :: [[file:versioning.org::#versioning/validate-approval-policy!][validate-approval-policy!]], [[file:versioning.org::#versioning/branch-content-stamp][branch-content-stamp]]
 
 * 21. validate-approval-policy!
 :PROPERTIES:
 :CUSTOM_ID: versioning/validate-approval-policy!
 :FILE: src/graphden/versioning/merge/core.clj
-:LINE: 257
+:LINE: 237
 :MINS: 2.7
 :END:
 
 Enforces a target branch's review policy. Required approvals must be distinct, current, bound to this merge target, and from allowed reviewers when ~:approver-ids~ restricts them. Missing valid approvals produce ~:branch/approval-required~ rather than allowing the merge.
 
-- source :: [[file:../../../src/graphden/versioning/merge/core.clj::(defn validate-approval-policy!][src/graphden/versioning/merge/core.clj:257]]
+- source :: [[file:../../../src/graphden/versioning/merge/core.clj::(defn validate-approval-policy!][src/graphden/versioning/merge/core.clj:237]]
 - same file :: [[file:versioning.org::#versioning/merge-transitively!][merge-transitively!]], [[file:versioning.org::#versioning/branch-content-stamp][branch-content-stamp]]
 
 * 22. branch-content-stamp

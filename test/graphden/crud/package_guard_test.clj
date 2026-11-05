@@ -57,7 +57,7 @@
     (testing "the duplicate answers 409, not 500"
       (let [result (mk)]
         (is (string? (:error result)))
-        (is (= 409 (:http-status result))
+        (is (true? (get-in result [:write-rejection :duplicate-key?]))
             "duplicate (fn-id, slot-id) is a conflict")
         (is (re-find #"(?i)already exists" (:error result))
             "and says so in words the editor can show")))))
@@ -124,7 +124,7 @@
                       :entity-data {:fn-id pkg-id :slot-id (:id slot)}}
                      {:storage storage})]
         (is (string? (:error result)))
-        (is (= 403 (:http-status result)))
+        (is (= :package (get-in result [:write-rejection :kind])))
         (is (= 1 (count (sp/query-entities storage :binding
                                            {:fn-id pkg-id})))
             "no second binding row was written")))

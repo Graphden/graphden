@@ -144,10 +144,20 @@ sides reference:
 {:name :order-placed :parent :queue-publish
  :args {:queue "orders" :delay-ms 0 :payload {:as :payload :type :order-shape}}}
 
-;; consumer handler — the message's payload read as the contract
+;; consumer handler — read the untrusted message payload
 {:name :_order-payload :parent :get
  :args {:coll {:as :message} :key {:value :payload} :default nil}}
+
+;; validate the payload at the consumer boundary
+{:name :checked-order :parent :ensure-type
+ :args {:value :_order-payload
+        :type {:value :order-shape}}}
 ```
+
+Bind your worker’s handler to a composition that consumes `checked-order`.
+The literal type argument selects the same named contract; validation rejects
+a malformed stored payload before the consumer relies on its shape. Merely
+reading `:payload` would not connect the consumer to `order-shape`.
 
 After changing `:order-shape`, inspect the affected compositions' type
 diagnostics. Shared types expose incompatible producer or consumer shapes;

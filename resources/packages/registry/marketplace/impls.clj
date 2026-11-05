@@ -18,13 +18,6 @@
     [graphden.tenancy.context :as tc]))
 
 
-(defbase current-user-label
-  "A public-safe label for the current user (display name / email local
-   part / org / `anonymous`) — what a review is signed with."
-  []
-  (tc/current-user-label))
-
-
 (defbase loaded-packages
   "The executor's loaded-package roster (`graphden.packages.loaded`): one
    row per package `:app/packages` loaded at boot — name, version,
@@ -35,14 +28,10 @@
   (loaded/read-roster))
 
 
-(defbase semver-rank
-  "A version string as one sortable number — `major·10⁶ + minor·10³ +
-   patch` (each component capped at 999) — the pure `:sort-by` key that
-   orders a version list; nil / unparsable → 0."
+(defbase marketplace-version-components
+  "Canonical semver parser boundary; rank encoding is graph policy."
   [version]
-  (let [[ma mi pa] (or (semver/parse-version version) [0 0 0])
-        cap #(min 999 (long (or % 0)))]
-    (+ (* 1000000 (cap ma)) (* 1000 (cap mi)) (cap pa))))
+  (semver/parse-version version))
 
 
 (defbase moderation-on?
@@ -51,9 +40,9 @@
   (shared/moderation-enabled?))
 
 
-(defbase moderate-package-version!
-  "The operator's decision on a pending public listing — `decision` is
-   `approve` or `reject` (with an optional `note` the publisher sees).
+(defbase apply-marketplace-moderation
+  "Apply a canonical approved/rejected status (nil = no transition),
+   with an optional rejection note the publisher sees.
    Gated on the platform-admin right at the deepest effectful core, so no
    route bypasses it; a tenant / org-admin cannot list itself. Reads the
    row through the BASE storage (`vs/unwrap`) — the operator's org-scoped
@@ -68,7 +57,7 @@
    the tenancy addon mails the publisher. Returns the updated row, or nil
    when no such (name, version); throws `:moderation/not-applied` when
    the row was found but the write did not land."
-  [pkg-name pkg-version decision note]
+  [pkg-name pkg-version status note]
   (when-not (tc/current-platform-admin?)
     (throw (ex-info "Moderating a listing requires the platform-admin right."
                     {:type :authz/forbidden :capability :platform-admin})))
@@ -76,45 +65,39 @@
   (cr/record-effect! :time)
   (let [base (shared/platform-base (request/require-storage ctx))
         row (first (sp/query-entities base :package-version {:name pkg-name :version pkg-version}))
-        status (case (str decision) "approve" "approved" "reject" "rejected" nil)]
-    (when (and row status)
+        canonical-status status]
+    (when-not (contains? #{nil "approved" "rejected"} canonical-status)
+      (throw (ex-info "Invalid canonical moderation status"
+                      {:type :validation-error/moderation-status})))
+    (when (and row canonical-status)
       (let [updated (tc/with-org (:org-id row)
                                  (sp/update-entity base :package-version (:id row)
-                                                   {:status status
-                                                    :moderation-note (when (= status "rejected") (some-> note str str/trim not-empty))
+                                                   {:status canonical-status
+                                                    :moderation-note (when (= canonical-status "rejected") (some-> note str str/trim not-empty))
                                                     :moderated-at (java.time.Instant/now)}))]
-        (when-not (= status (:status updated))
+        (when-not (= canonical-status (:status updated))
           (throw (ex-info "The moderation decision did not reach the row."
                           {:type :moderation/not-applied :name pkg-name :version pkg-version :org (:org-id row)})))
         (tc/notify! :package-moderated updated)
         updated))))
 
 
-(defbase moderation-queue
-  "Every listing awaiting a decision, across orgs — the operator's queue.
-   Platform-admin only (the read itself goes through the BASE storage; an
-   org-scoped read would show only the operator's own org). Newest first."
+(defbase moderation-pending-rows
+  "Platform-admin-only cross-org acquisition. Projection stays in graph."
   []
   (when-not (tc/current-platform-admin?)
     (throw (ex-info "The moderation queue requires the platform-admin right."
                     {:type :authz/forbidden :capability :platform-admin})))
   (cr/record-effect! :db)
-  (let [base (shared/platform-base (request/require-storage ctx))]
-    (->> (sp/query-entities base :package-version {:status "pending"})
-         (sort-by :published-at)
-         reverse
-         (mapv #(-> %
-                    (select-keys [:id :name :version :kind :description :category :tags :org-id :published-at :status])
-                    (update :id str)
-                    (update :published-at str))))))
+  (sp/query-entities (shared/platform-base (request/require-storage ctx))
+                     :package-version {:status "pending"}))
 
 
 (def impls
-  {:current-user-label current-user-label
-   :loaded-packages loaded-packages
+  {:loaded-packages loaded-packages
    ;; taint-propagate: answers one of the caller's own version strings
-   :semver-rank semver-rank
+   :_marketplace-version-components {:impl marketplace-version-components :taint-propagate? true}
    :moderation-on? moderation-on?
    ;; taint-propagate: the updated row carries the operator's note
-   :moderate-package-version! {:impl moderate-package-version! :taint-propagate? true}
-   :moderation-queue moderation-queue})
+   :_apply-marketplace-moderation {:impl apply-marketplace-moderation :taint-propagate? true}
+   :_moderation-pending-rows moderation-pending-rows})

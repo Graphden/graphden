@@ -381,6 +381,41 @@
    :args {:actual {:parent :first :args {:coll {:parent :html-page-route :args {:path "/about" :title "T" :body {:value [:p "hi"]} :head {:value []} :scripts {:value []}}}}}
           :expected "/about"}}
 
+  {:name :usage-pct-rows-scale-against-busiest-row
+   :description "The graph computes bounded CSS bar percentages once per cohort, preserving row order and other fields."
+   :parent :assert-eq
+   :args {:actual {:parent :_usage-pct-rows
+                   :args {:rows {:value [{:runs 3 :day "a"}
+                                         {:runs 1 :day "b"}
+                                         {:runs 0 :day "c"}]}}}
+          :expected {:value [{:runs 3 :day "a" :runs-pct 100}
+                             {:runs 1 :day "b" :runs-pct 33}
+                             {:runs 0 :day "c" :runs-pct 0}]}}}
+
+  {:name :usage-pct-rows-handle-empty-and-zero-cohorts
+   :parent :assert-eq
+   :args {:actual {:parent :list
+                   :args {:items [{:parent :_usage-pct-rows :args {:rows {:value []}}}
+                                  {:parent :_usage-pct-rows
+                                   :args {:rows {:value [{:runs 0}]}}}]}}
+          :expected {:value [[] [{:runs 0 :runs-pct 0}]]}}}
+
+  {:name :failure-counts-group-and-sort-safe-facts
+   :description "The failed-runs lens counts only safe scoped fn facts, keeps first-seen tie order and supplies a fallback name."
+   :parent :assert-eq
+   :args {:actual {:parent :_failure-counts-sorted
+                   :args {:rows {:value [{:fn-id #uuid "00000000-0000-0000-0000-000000000001"
+                                         :fn-name "first" :namespace-id nil}
+                                        {:fn-id #uuid "00000000-0000-0000-0000-000000000002"
+                                         :fn-name nil :namespace-id nil}
+                                        {:fn-id #uuid "00000000-0000-0000-0000-000000000001"
+                                         :fn-name "first" :namespace-id nil}]}}}
+          :expected {:value [{:fn-id #uuid "00000000-0000-0000-0000-000000000001"
+                             :fn-name "first" :namespace-id nil :count 2}
+                            {:fn-id #uuid "00000000-0000-0000-0000-000000000002"
+                             :fn-name "00000000-0000-0000-0000-000000000002"
+                             :namespace-id nil :count 1}]}}}
+
   {:name :stylesheet-route-is-a-get-route-at-its-path
    :description "`:stylesheet-route` mounts a GET route at `:path`."
    :parent :assert-eq

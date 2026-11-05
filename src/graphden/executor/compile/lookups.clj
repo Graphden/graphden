@@ -370,6 +370,14 @@
       :else (recur (:source-slot-id (get slot-map src)) (inc depth)))))
 
 
+(defn semantic-rename-slot?
+  "A source FK with an unchanged immediate name forwards slot identity.
+   Only a changed name renames the source chain's name-facing surface."
+  [slot {:keys [slot-map]}]
+  (when-let [source (:source-slot-id slot)]
+    (not= (:name slot) (:name (get slot-map source)))))
+
+
 (defn chain-rename-for-slot
   "The closest-chain RENAME name for `slot-id` at `fn-id`, or nil when
    no fn along the inheritance chain owns a rename-view slot whose
@@ -382,7 +390,8 @@
   [fn-id slot-id {:keys [slot-map fn-slots-by-fn] :as lookups}]
   (some (fn [fid]
           (let [own-slots (->> (active-fn-slots (get fn-slots-by-fn fid []) slot-map)
-                               (keep #(get slot-map (:slot-id %))))]
+                               (keep #(get slot-map (:slot-id %)))
+                               (filter #(semantic-rename-slot? % lookups)))]
             (some-> (first (filter #(rename-chain-reaches?
                                       % slot-id slot-map)
                                    own-slots))

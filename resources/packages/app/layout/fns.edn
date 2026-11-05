@@ -68,15 +68,146 @@
    :return-type :nullable-keyword-map
    :effects #{:db}}
 
-  {:name :_fn-slot-seals
-   :description "Seals on every slot of the fn's chain, by effective slot name — `{:end {:optional? true :sealed-by \"cut\" :list-closed-by … :required-by … :note \"sealed in cut · optional\"}}`; only slots with something to say. The Inspector's Bindings rows read it (same walk as the canvas lock badge). Context-aware (cached graph read)."
+  {:name :_fn-slot-seal-facts
+   :description "Authorized effective slot identities and canonical inherited seal facts, without Inspector wording."
    :args {:fn-id {:type :nullable-uuid :required false}}
-   :return-type :keyword-map
+   :return-type [:list :any]
    :effects #{:db}}
 
-  {:name :_parse-layout-body
-   :description "Single library call — parse the Ring body into `{:root-id :expansions}`. Throws JsonParseException / ExceptionInfo / IllegalArgumentException on bad input; the graph's `:try` catches all three."
+  {:name :_seal-fields
+   :parent :get
+   :args {:coll {:as :item} :key 1 :default {:value {}}}}
+
+  {:name :_seal-sealed-by
+   :parent :get
+   :args {:coll :_seal-fields :key {:value :sealed-by} :default nil}}
+  {:name :_seal-list-closed-by
+   :parent :get
+   :args {:coll :_seal-fields :key {:value :list-closed-by} :default nil}}
+  {:name :_seal-required-by
+   :parent :get
+   :args {:coll :_seal-fields :key {:value :required-by} :default nil}}
+  {:name :_seal-optional?
+   :parent :get
+   :args {:coll :_seal-fields :key {:value :optional?} :default false}}
+
+  {:name :_seal-present?
+   :parent :or
+   :args {:values [:_seal-optional? :_seal-sealed-by :_seal-list-closed-by :_seal-required-by]}}
+
+  {:name :_seal-note-parts
+   :parent :list
+   :args {:items [{:parent :if
+                   :args {:test :_seal-sealed-by
+                          :then {:parent :str :args {:parts ["sealed in " :_seal-sealed-by]}}
+                          :else nil}}
+                  {:parent :if
+                   :args {:test :_seal-list-closed-by
+                          :then {:parent :str :args {:parts ["list closed in " :_seal-list-closed-by]}}
+                          :else nil}}
+                  {:parent :if
+                   :args {:test :_seal-optional?
+                          :then {:parent :if
+                                 :args {:test :_seal-required-by
+                                        :then {:parent :str :args {:parts ["required since " :_seal-required-by]}}
+                                        :else "optional"}}
+                          :else nil}}]}}
+
+  {:name :_seal-note
+   :parent :str-join
+   :args {:coll {:parent :filter
+                 :args {:pred {:parent :some? :args {:value {:as :item}}}
+                        :coll :_seal-note-parts}}
+          :separator " · "}}
+
+  {:name :_seal-entry
+   :parent :list
+   :args {:items [{:parent :get :args {:coll {:as :item} :key 0 :default nil}}
+                  {:parent :assoc
+                   :args {:map :_seal-fields :key {:value :note} :value :_seal-note}}]}}
+
+  {:name :_fn-slot-seals
+   :description "Inspector seals keyed by effective slot name. Authorized facts feed graph-visible filtering and ordered seal/list/required/optional wording."
+   :parent :pairs->map
+   :args {:entries {:parent :map
+                    :args {:func :_seal-entry
+                           :coll {:parent :filter
+                                  :args {:pred :_seal-present? :coll :_fn-slot-seal-facts}}}}}
+   :return-type :keyword-map}
+
+  {:name :_layout-read-json-body
+   :description "Canonical Ring JSON request-body decoder."
    :args {:request {:type :ring-request-shape}}
+   :return-type :any}
+  {:name :_layout-parse-expansions
+   :description "Canonical expansion-spec codec with exact per-call-site string node ids."
+   :args {:expansions {:type [:map :keyword-or-text :any]}}
+   :return-type :text-keyed-map}
+  {:name :_layout-parse-uuid
+   :description "Strict UUID parsing; malformed input throws IllegalArgumentException."
+   :args {:value {:type :text}}
+   :return-type :uuid}
+  {:name :_layout-value-class
+   :description "Host value class name for request diagnostics."
+   :args {:value {:type :any}}
+   :return-type :text}
+
+  {:name :_layout-body-root
+   :parent :get
+   :args {:coll :_layout-read-json-body :key {:value :root-id} :default nil}}
+  {:name :_layout-body-expansions
+   :parent :get
+   :args {:coll :_layout-read-json-body :key {:value :expansions} :default nil}}
+
+  {:name :_layout-request-error
+   :parent :throw
+   :args {:exception {:parent :ex-info
+                      :args {:message {:as :message} :data {:as :data}}}}}
+  {:name :_layout-missing-root-error
+   :parent :_layout-request-error
+   :args {:message "Request body must contain 'root-id'"
+          :data {:value {:type :execution-error/invalid-args}}}}
+  {:name :_layout-root-type-error
+   :parent :_layout-request-error
+   :args {:message "Request body 'root-id' must be a UUID string"
+          :data {:parent :assoc
+                 :args {:map {:value {:type :execution-error/invalid-args}}
+                        :key {:value :got}
+                        :value {:parent :_layout-value-class :args {:value :_layout-body-root}}}}}}
+  {:name :_layout-expansions-type-error
+   :parent :_layout-request-error
+   :args {:message "Request body 'expansions' must be a map of node-id → spec"
+          :data {:parent :assoc
+                 :args {:map {:value {:type :execution-error/invalid-args}}
+                        :key {:value :got}
+                        :value {:parent :_layout-value-class :args {:value :_layout-body-expansions}}}}}}
+
+  {:name :_layout-parsed-body
+   :parent :zipmap
+   :args {:keys [:root-id :expansions]
+          :vals [{:parent :_layout-parse-uuid
+                  :args {:value {:ref :_layout-body-root :type :text}}}
+                 {:parent :_layout-parse-expansions
+                  :args {:expansions {:parent :coalesce
+                                      :args {:value :_layout-body-expansions :default {:value {}}}}}}]}
+   :return-type :_parse-layout-request-shape}
+
+  {:name :_parse-layout-body
+   :description "Graph request policy: require a string root, accept nil/map expansions, then decode UUID and canonical expansion specs. Error class/message contracts remain unchanged."
+   :parent :cond
+   :args {:clauses [{:parent :not :args {:value :_layout-body-root}}
+                    :_layout-missing-root-error
+                    {:parent :not
+                     :args {:value {:parent :is-a?
+                                    :args {:value :_layout-body-root :type {:value :text}}}}}
+                    :_layout-root-type-error
+                    {:parent :not
+                     :args {:value {:parent :or
+                                    :args {:values [{:parent :nil? :args {:value :_layout-body-expansions}}
+                                                    {:parent :is-a?
+                                                     :args {:value :_layout-body-expansions :type {:value :map}}}]}}}}
+                    :_layout-expansions-type-error
+                    true :_layout-parsed-body]}
    :return-type :_parse-layout-request-shape}
 
   {:name :_layout-build-apply
@@ -90,16 +221,73 @@
    :args {:elements {:type :_layout-elements-shape}}
    :return-type :_layout-response-shape}
 
-  {:name :_layout-literal-reprs-apply
-   :description "Attach compact typed literal representations using the graph-held inline repr registry."
+  {:name :_layout-literal-previews
+   :description "Bounded canonical safe preview evaluation. Markers, secret references and invalid refinements cannot reach a repr; effect denial and sanitization stay native."
    :args {:elements {:type :_layout-elements-shape}
           :graph {:type :_graph-snapshot-shape}}
+   :return-type [:list {:node :keyword-map :repr [:union :null :hiccup-node]}]}
+
+  {:name :_layout-literal-preview-node
+   :parent :get
+   :args {:coll {:as :item} :key {:value :node} :default nil}}
+  {:name :_layout-literal-preview-repr
+   :parent :get
+   :args {:coll {:as :item} :key {:value :repr} :default nil}}
+  {:name :_layout-attach-literal-preview
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_layout-literal-preview-repr}}
+          :then {:parent :assoc-in
+                 :args {:m :_layout-literal-preview-node :path [:data :literalRepr]
+                        :v :_layout-literal-preview-repr}}
+          :else :_layout-literal-preview-node}}
+
+  {:name :_layout-literal-reprs-attach
+   :parent :assoc
+   :args {:map {:as :elements} :key {:value :nodes}
+          :value {:parent :map
+                  :args {:func :_layout-attach-literal-preview :coll :_layout-literal-previews}}}}
+
+  {:name :_layout-literal-reprs-apply
+   :description "Pass layout failures through; attach present safe literal previews in graph composition."
+   :parent :if
+   :args {:test :_layout-place-failed? :then {:as :elements}
+          :else :_layout-literal-reprs-attach}
    :return-type :_layout-elements-shape}
 
-  {:name :_layout-strip-facts-apply
-   :description "Single library call — annotate fn-nodes with the strip facts (`:returnTypeAlias` / `:ruleOwner` / `:branchLocal`) the editor's bottom-of-card strips render. See `graphden.layout.strip-facts` for the fact semantics."
+  {:name :_layout-safe-strip-facts
+   :description "Canonical authorized strip facts by visible fn id. Concealed chain names never leave this boundary."
    :args {:elements {:type :_layout-elements-shape}
           :graph {:type :_graph-snapshot-shape}}
+   :return-type :text-keyed-map}
+
+  {:name :_layout-node-strip-facts
+   :parent :get
+   :args {:coll :_layout-safe-strip-facts
+          :key {:parent :get-in
+                :args {:map {:as :item} :path [:data :originalFnId] :default nil}}
+          :default nil}}
+
+  {:name :_layout-node-with-strip-facts
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_layout-node-strip-facts}}
+          :then {:parent :assoc
+                 :args {:map {:as :item}
+                        :key {:value :data}
+                        :value {:parent :merge
+                                :args {:maps [{:parent :get
+                                               :args {:coll {:as :item} :key {:value :data} :default nil}}
+                                              :_layout-node-strip-facts]}}}}
+          :else {:as :item}}}
+
+  {:name :_layout-strip-facts-apply
+   :description "Attach authorized strip facts to node data while retaining all other layout fields."
+   :parent :assoc
+   :args {:map {:as :elements :type :_layout-elements-shape}
+          :key {:value :nodes}
+          :value {:parent :map
+                  :args {:func :_layout-node-with-strip-facts
+                         :coll {:parent :get
+                                :args {:coll {:as :elements} :key {:value :nodes} :default []}}}}}
    :return-type :_layout-elements-shape}
 
   ;; =============================================================================
@@ -165,7 +353,7 @@
                     :_parse-layout-err-rethrow]}}
 
   {:name :_parse-layout-request
-   :description "Parse the internal Ring request body into `{:root-id :expansions}` via a graph `:try` wrapping the single library call. On JsonParseException / ExceptionInfo / IllegalArgumentException the on-throw handler returns `{:ok false :error}`; other exceptions propagate."
+   :description "Parse the internal Ring request body into `{:root-id :expansions}` via graph validation and a `:try` around the decoding codecs. On JsonParseException / ExceptionInfo / IllegalArgumentException the on-throw handler returns `{:ok false :error}`; other exceptions propagate."
    :parent :try
    :args {:body :_parse-layout-body
           :on-throw :_parse-layout-on-throw}}

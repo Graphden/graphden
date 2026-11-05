@@ -356,7 +356,7 @@
     :else 0))
 
 
-(defn- parse-expansions
+(defn parse-expansions
   "Parse raw expansions map from request.
    Keys are graph node-ids (`fn-<...>` strings). Under per-call-site
    scoping a non-root node id has the form `fn-<caller-tag>-<source-arg-id>`

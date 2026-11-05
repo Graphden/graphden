@@ -18,11 +18,20 @@
    :args {}
    :return-type :text}
 
+  {:name :_ui-pref-row-shape :type {:key :text :value :any}}
+  {:name :_ui-pref-rows
+   :description "One current-owner preference read. The owner comes from the tenancy seam, never caller input."
+   :args {} :return-type [:list :_ui-pref-row-shape] :effects #{:db}}
+  {:name :_ui-pref-key :parent :get :lambda-params [:row]
+   :args {:coll {:as :row :type :_ui-pref-row-shape} :key {:value :key} :default nil}}
+  {:name :_ui-pref-value :parent :get :lambda-params [:row]
+   :args {:coll {:as :row :type :_ui-pref-row-shape} :key {:value :value} :default nil}}
   {:name :ui-prefs-read
-   :description "The CURRENT user's preferences as a `{key value}` map (string keys; empty when none). Owner = `tenancy.context/current-user-id`, filtered server-side."
-   :args {}
-   :return-type [:map :text :any]
-   :effects #{:db}}
+   :description "Current user's preferences as a string-keyed map, empty when none. Duplicate keys keep the last stored row."
+   :parent :zipmap
+   :args {:keys {:parent :map :args {:func :_ui-pref-key :coll :_ui-pref-rows}}
+          :vals {:parent :map :args {:func :_ui-pref-value :coll :_ui-pref-rows}}}
+   :return-type [:map :text :any]}
 
   {:name :ui-pref-write!
    :description "Upsert the CURRENT user's preference `:pref-key` → `:pref-value` (any JSON document). Owner-stamped server-side; returns the stored value."

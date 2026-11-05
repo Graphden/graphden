@@ -5,7 +5,6 @@
     [cheshire.core :as json]
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.crud.entities :as entities]
-    [graphden.crud.fn-execution.lookup :as execution]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
     [graphden.layout.data :as data]
@@ -16,6 +15,12 @@
     [graphden.test-infra.graph-harness :refer [form-req]]
     [graphden.test-infra.impls :as impls]
     [graphden.test-infra.wait :as wait]))
+
+
+(defn- free-arg-entries
+  [ctx fn-id]
+  (exec/execute-with-named-args ctx (records/fn-id "web.crud" :free-arg-entries)
+                                {:fn-id fn-id}))
 
 
 (def ^:dynamic *bootstrap* nil)
@@ -39,7 +44,7 @@
         handler-id (records/fn-id nil :queue-lifecycle-handler)
         worker-id (records/fn-id nil :queue-lifecycle-worker)
         slots (into {} (map (juxt :name :slot-id))
-                    (execution/free-arg-entries ctx worker-id))
+                    (free-arg-entries ctx worker-id))
         _ (doseq [[name field] [[:queue (str "value=%22" queue "%22")]
                                 [:handler (str "ref-fn-id=" handler-id)]]]
             (is (= 200 (:status (setup/via-graph
@@ -114,7 +119,7 @@
             [{:name :surface-queue-child :parent :pg-queue-consumer}
              {:name :surface-queue-handler :parent :const :args {:value true}}])
         child (records/fn-id nil :surface-queue-child)
-        entries (execution/free-arg-entries ctx child)
+        entries (free-arg-entries ctx child)
         slots (into {} (map (juxt :name :slot-id)) entries)
         lookups (data/build-lookups (data/load-graph-entities-uncached storage))
         layout (graph/build-graph-elements child {} lookups)
@@ -132,10 +137,10 @@
     (is (every? #(nil? (get-in % [:data :bindingId])) holes))
     (entities/create-entity :binding {:fn-id child :slot-id (:queue slots)
                                       :value "surface-isolated-queue" :value-present true} ctx)
-    (is (= [:handler] (mapv :name (execution/free-arg-entries ctx child))))
+    (is (= [:handler] (mapv :name (free-arg-entries ctx child))))
     (entities/create-entity :binding {:fn-id child :slot-id (:handler slots)
                                       :ref-fn-id (records/fn-id nil :surface-queue-handler)} ctx)
-    (is (empty? (execution/free-arg-entries ctx child)))
+    (is (empty? (free-arg-entries ctx child)))
     (is (empty? (filter #(get-in % [:data :isPlaceholder])
                         (:nodes (graph/build-graph-elements
                                   child {} (data/build-lookups
@@ -155,14 +160,14 @@
         caller (records/fn-id nil :captured-queue-call)
         handler (records/fn-id nil :captured-queue-handler)
         entry (first (filter #(= :handler (:name %))
-                             (execution/free-arg-entries ctx caller)))]
+                             (free-arg-entries ctx caller)))]
     (is (some? entry))
     (is (= 200 (:status (setup/via-graph
                           *bootstrap* :process-create-entity
                           (form-req "/api/entities/binding"
                                     (str "fn-id=" caller "&slot-id=" (:slot-id entry)
                                          "&ref-fn-id=" handler))))))
-    (is (empty? (execution/free-arg-entries ctx caller)))
+    (is (empty? (free-arg-entries ctx caller)))
     (is (= {} (exec/execute ctx caller {}))
         "A CRUD binding on the exposed handler view reaches the same callable as a package binding")))
 
@@ -179,7 +184,7 @@
               :args {:parts [:queue-capture-left :queue-capture-right]}}])
         caller (records/fn-id nil :queue-capture-pair)
         slots (into {} (map (juxt :name :slot-id))
-                    (execution/free-arg-entries ctx caller))
+                    (free-arg-entries ctx caller))
         bind! (fn [name value]
                 (setup/via-graph *bootstrap* :process-create-entity
                                  (form-req "/api/entities/binding"
@@ -187,7 +192,7 @@
                                                 "&value=%22" value "%22"))))]
     (is (= #{:left :right} (set (keys slots))))
     (is (= 200 (:status (bind! :left "l"))))
-    (is (= [:right] (mapv :name (execution/free-arg-entries ctx caller)))
+    (is (= [:right] (mapv :name (free-arg-entries ctx caller)))
         "Binding one view cannot close its sibling's reader of the same primitive slot")
     (is (= 200 (:status (bind! :right "r"))))
     (is (= "LR" (exec/execute ctx caller {})))))

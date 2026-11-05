@@ -62,4 +62,10 @@
            (gh/exec-name :parse-form-body-kw
                          {:request (form-req "path=x&content=a&content=b")}))))
   (testing "a body without any `=` decodes to {} (bare-string guard)"
-    (is (= {} (gh/exec-name :form-decode {:string "justtext"})))))
+    (is (= {} (gh/exec-name :form-decode {:string "justtext"}))))
+  (testing "percent encoding, blank values and string keys survive graph normalization"
+    (is (= {"name" "my fn" "description" ""}
+           (gh/exec-name :form-decode
+                         {:string "name=my%20fn&description="}))))
+  (testing "nil body is an empty map"
+    (is (= {} (gh/exec-name :form-decode {:string nil})))))

@@ -3,6 +3,7 @@
    competing writer commits. No timing assumption substitutes for lock waits."
   (:require
     [clojure.test :refer [deftest is use-fixtures]]
+    [graphden.crud.entities :as entities]
     [graphden.crud.entities.record-type :as record-type]
     [graphden.crud.entities.seq :as sequence]
     [graphden.crud.entities.tighten :as tighten]
@@ -160,14 +161,14 @@
                             #(sp/delete-entity % :binding-list-item (:id stale))
                             #(sequence/apply-seq-update-core
                                {:item-id (:id stale) :body {:value 9}} stale ctx))]
-        (is (= 404 (:http-status update-result)))
+        (is (= :crud/sequence-item-missing (:error update-result)))
         (is (nil? (sp/read-entity storage :binding-list-item (:id stale))))
         (let [append-result (after-competing-write
                               storage
                               #(sp/update-entity % :fn (:id owner) {:parent-ids []})
                               #(sequence/apply-seq-append-core
                                  {:fn-id (:id owner) :body {:value 9}} binding ctx))]
-          (is (= 409 (:http-status append-result)))
+          (is (= :crud/sequence-binding-changed (:error append-result)))
           (is (= 1 (count (sp/query-entities storage :binding-list-item
                                              {:binding-id (:id binding)})))))))))
 
@@ -245,3 +246,27 @@
             (finally
               (jdbc/execute! (tx/datasource storage)
                              ["ALTER TABLE binding_version DROP CONSTRAINT fail_tighten"]))))))))
+
+
+(deftest form-error-sentinels-abort-before-response-formatting
+  (with-storage
+    (fn [storage ctx]
+      (with-redefs-fn
+        {#'entities/apply-create!
+         (fn [parsed bound-ctx]
+           (sp/create-entity (:storage bound-ctx) :fn (:entity-data parsed))
+           {:error :crud/write-failed})}
+        #(is (= {:error :crud/write-failed}
+                (entities/apply-create-core
+                  {:entity-type :fn :entity-data {:name "sentinel-create"}} ctx))))
+      (is (empty? (sp/query-entities storage :fn {:name "sentinel-create"})))
+      (let [row (sp/create-entity storage :fn {:name "sentinel-update"})]
+        (with-redefs-fn
+          {#'entities/apply-update!
+           (fn [parsed bound-ctx]
+             (sp/update-entity (:storage bound-ctx) :fn (:id-uuid parsed) (:entity-data parsed))
+             {:error :crud/write-failed :write-rejection {:kind :storage :include-null-status? true}})}
+          #(is (= :crud/write-failed
+                  (:error (entities/apply-update-core
+                            {:entity-type :fn :id-uuid (:id row) :entity-data {:name "must-rollback"}} ctx)))))
+        (is (= "sentinel-update" (:name (sp/read-entity storage :fn (:id row)))))))))

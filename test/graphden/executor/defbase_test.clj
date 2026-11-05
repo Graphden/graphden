@@ -89,6 +89,72 @@
     (is (= 15 (with-closure {:x 999} nil)))))
 
 
+(defbase identity-initializer [policy]
+  (let [policy (identity policy)] policy))
+
+
+(defbase sequential-initializers [policy later]
+  (let [before policy
+        policy (str policy "!")
+        middle later
+        later (str policy later)]
+    [before policy middle later]))
+
+
+(defbase loop-initializers [x]
+  (loop [x (inc x) seen [x]]
+    (if (pos? x)
+      (recur (dec x) (conj seen x))
+      seen)))
+
+
+(defbase conditional-initializers [x]
+  [(if-let [x x] [:then x] [:else x])
+   (if-some [x x] [:then x] [:else x])
+   (when-let [x x] x)
+   (when-some [x x] x)])
+
+
+(defbase comprehension-initializers [x]
+  (vec (for [x x :let [before x x (inc x)] :when (odd? x)]
+         [before x])))
+
+
+(defbase doseq-initializers [x]
+  (let [seen (atom [])]
+    (doseq [x x :let [next-value (inc x)] :when (odd? next-value)]
+      (swap! seen conj next-value))
+    @seen))
+
+
+(deftest initializers-read-outer-arguments-before-shadowing
+  (doseq [value [nil false "owner"]]
+    (is (= value (identity-initializer {:policy (delay value)} nil))))
+  (is (= ["a" "a!" "b" "a!b"]
+         (sequential-initializers {:policy (delay "a") :later (delay "b")} nil))))
+
+
+(deftest later-loop-initializers-read-earlier-locals
+  (is (= [3 3 2 1] (loop-initializers {:x 2} nil))))
+
+
+(deftest conditional-else-keeps-the-outer-argument-in-scope
+  (doseq [[value expected] [[nil [[:else nil] [:else nil] nil nil]]
+                            [false [[:else false] [:then false] nil false]]
+                            [:present [[:then :present] [:then :present] :present :present]]]]
+    (is (= expected (conditional-initializers {:x (delay value)} nil)))))
+
+
+(deftest comprehension-sources-and-let-qualifiers-have-sequential-scope
+  (is (= [[0 1] [2 3]] (comprehension-initializers {:x [0 1 2]} nil)))
+  (is (= [1 3] (doseq-initializers {:x [0 1 2]} nil))))
+
+
+(deftest malformed-bindings-still-fail-compilation
+  (is (thrown-with-msg? clojure.lang.Compiler$CompilerException #"Syntax error macroexpanding.*let"
+        (eval '(graphden.executor.defbase/defbase malformed [x] (let [x] x))))))
+
+
 (defn- expand-cause
   "Macroexpand, and return the root ExceptionInfo cause if it throws a
    CompilerException (which wraps our ex-info)."

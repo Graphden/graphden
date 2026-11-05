@@ -15,15 +15,15 @@ bottom-of-card strip.
 A slot is FREE on a fn iff no fn in its `:parent-ids` BFS
 closure binds it. The slot is declared somewhere (a base-fn,
 type-row, or rename), but no ancestor has supplied a `:value`
-or `:ref-fn-id` for it. The runtime can't execute the fn
-without that slot being filled — so the CALLER (whoever
-invokes the fn) has to supply it.
+or `:ref-fn-id` for it. For a required slot, the caller must supply that input. An optional
+free slot may be omitted; the implementation supplies its fallback
+([Lesson 07](07-optional-required-sealed.md)).
 
 ```edn
 ;; :str-len is a base-fn declaring :string as a slot.
 {:name :str-len
  :args {:string {:type :text}}
- :return-type :int}
+ :return-type :non-negative-int}
 ```
 
 `:str-len` has ONE slot. No fn binds it (it's a base-fn — there's

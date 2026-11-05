@@ -292,7 +292,4 @@
       (log/warn "Read-only server call refused"
                 {:type :browser-server/refused
                  :reason (if (= :authz/forbidden (:type (ex-data error))) :forbidden :unavailable)})
-      (cond-> {:ok false :reason "Server call is unavailable."
-               :http-status (if (= :authz/forbidden (:type (ex-data error))) 403 422)}
-        (= {:type :browser-plan/unsupported :reason :server-epoch-changed} (ex-data error))
-        (assoc :code "server-call-stale")))))
+      (components/failure-facts error))))

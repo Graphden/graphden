@@ -1,12 +1,27 @@
 {:namespace "web.errors"
  :description "The error-honesty seam: one :type → HTTP status mapping (graphden.web.errors) surfaced to the graph — the top-level error boundary wrap and the status lookup response builders bind through."
  :fns
- [{:name :error-boundary-wrap
-   :description "Ring wrap — catches anything the inner handler throws and answers with the centrally-mapped status + safe JSON body (message only for author-facing type families; opaque ref otherwise, details in the server log). Wire at the TOP of the app chain; JSON-RPC routes are exempt by spec (they answer 200 with in-band errors and never throw through in normal operation)."
-   :args {:handler {:type [:fn {:request :ring-request-shape} :ring-response-shape]
-                    :description "The inner Ring handler to shield."}}
+ [{:name :_safe-request-error
+   :description "Centrally mapped, redacted error envelope. Mandatory logging and server-error counters happen before returning; raw exception details never enter response composition."
+   :args {:exception {:type :any}}
+   :return-type :keyword-map}
+
+  {:name :_error-boundary-catch
+   :description "Exception capture primitive. Successful responses and Java Errors pass through; caught Exceptions invoke the supplied response callback."
+   :args {:handler {:type [:fn {:request :ring-request-shape} :ring-response-shape]}
+          :on-error {:type [:fn {:exception :any} :ring-response-shape]}}
    :return-type [:fn {:request :ring-request-shape} :ring-response-shape]
    :expects-effects #{}}
+
+  {:name :_request-error-response
+   :parent :json-envelope-response
+   :args {:envelope :_safe-request-error}}
+
+  {:name :error-boundary-wrap
+   :description "Top-level Ring exception boundary. Central redaction/logging supplies a safe envelope; graph JSON response composition supplies status, body and retry-header policy."
+   :parent :_error-boundary-catch
+   :args {:on-error :_request-error-response
+          :handler {:type [:fn {:request :ring-request-shape} :ring-response-shape]}}}
 
   ;; ---------------------------------------------------------------------
   ;; :json-envelope-response — GRAPH composition over :ring-response.
@@ -50,14 +65,14 @@
    :args {:a :_jer-status :b {:value 429}}}
 
   {:name :_jer-headers-json
-   :parent :const
-   :args {:value {"Content-Type" "application/json"}}}
+   :parent :zipmap
+   :args {:keys ["Content-Type"] :vals ["application/json"]}}
 
   {:name :_jer-headers-retry
    :description "429 additionally advertises an immediate retry window."
    :parent :assoc
    :args {:map :_jer-headers-json
-          :key {:value :Retry-After}
+          :key {:value "Retry-After"}
           :value {:value "1"}}}
 
   {:name :_jer-headers

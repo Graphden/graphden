@@ -4,11 +4,70 @@
  [;; ---------------------------------------------------------------------
   ;; The SQL boundary is local to this module so the editor's own partial can
   ;; resolve it before the later app.branches module is loaded.
-  {:name :load-fn-change-events
+  {:name :_history-change-group-fact
+   :type {:group_id :uuid :change_id :nullable-uuid :change_revision :nullable-int
+          :created_at :any :branch_id :nullable-text :kinds :text
+          :event_count :int :deleted :bool :author_label :nullable-text}}
+  {:name :_history-change-page-facts
+   :type {:rows [:list :_history-change-group-fact] :limit :int :offset :int}}
+
+  {:name :_load-fn-change-page
    :description "A bounded page of transaction groups for fn, fn-slot, binding and list-item versions; payload values are never included. Nil for an unreadable fn."
    :args {:fn-id {:type :nullable-uuid :required false}
           :limit {:type :int}
           :offset {:type :int}}
+   :return-type [:union :null :_history-change-page-facts]
+   :effects #{:db}}
+
+  {:name :_history-group-row
+   :parent :zipmap
+   :args {:keys [{:value :group-id} {:value :change-id} {:value :change-revision} {:value :created-at} {:value :branch-id} {:value :kinds} {:value :event-count} {:value :deleted?} {:value :author-label} {:value :has-change-id?} {:value :has-change-revision?}]
+          :vals [{:parent :to-str :args {:value {:parent :get :args {:coll {:as :item :type :_history-change-group-fact} :key {:value :group_id} :default nil}}}}
+                 {:parent :if :args {:test {:parent :some? :args {:value {:parent :get :args {:coll {:as :item :type :_history-change-group-fact} :key {:value :change_id} :default nil}}}} :then {:parent :to-str :args {:value {:parent :get :args {:coll {:as :item :type :_history-change-group-fact} :key {:value :change_id} :default nil}}}} :else nil}}
+                 {:parent :get :args {:coll {:as :item :type :_history-change-group-fact} :key {:value :change_revision} :default nil}}
+                 {:parent :to-str :args {:value {:parent :get :args {:coll {:as :item :type :_history-change-group-fact} :key {:value :created_at} :default nil}}}}
+                 {:parent :if :args {:test {:parent :some? :args {:value {:parent :get :args {:coll {:as :item :type :_history-change-group-fact} :key {:value :branch_id} :default nil}}}} :then {:parent :to-str :args {:value {:parent :get :args {:coll {:as :item :type :_history-change-group-fact} :key {:value :branch_id} :default nil}}}} :else nil}}
+                 {:parent :get :args {:coll {:as :item :type :_history-change-group-fact} :key {:value :kinds} :default nil}}
+                 {:parent :get :args {:coll {:as :item :type :_history-change-group-fact} :key {:value :event_count} :default nil}}
+                 {:parent :get :args {:coll {:as :item :type :_history-change-group-fact} :key {:value :deleted} :default nil}}
+                 {:parent :get :args {:coll {:as :item :type :_history-change-group-fact} :key {:value :author_label} :default nil}}
+                 {:parent :some? :args {:value {:parent :get :args {:coll {:as :item :type :_history-change-group-fact} :key {:value :change_id} :default nil}}}}
+                 {:parent :some? :args {:value {:parent :get :args {:coll {:as :item :type :_history-change-group-fact} :key {:value :change_revision} :default nil}}}}]}}
+
+  {:name :_history-page-rows
+   :parent :get
+   :args {:coll :_load-fn-change-page :key {:value :rows} :default []}
+   :return-type [:list :_history-change-group-fact]}
+  {:name :_history-page-limit
+   :parent :get
+   :args {:coll :_load-fn-change-page :key {:value :limit} :default 1}
+   :return-type :int}
+  {:name :_history-page-offset
+   :parent :get
+   :args {:coll :_load-fn-change-page :key {:value :offset} :default 0}
+   :return-type :int}
+  {:name :_history-page-model
+   :parent :zipmap
+   :args {:keys [{:value :groups} {:value :next-offset}]
+          :vals [{:parent :map
+                  :args {:func :_history-group-row
+                         :coll {:parent :take
+                                :args {:count {:ref :_history-page-limit :type :non-negative-int}
+                                       :coll :_history-page-rows}}}}
+                 {:parent :if
+                  :args {:test {:parent :gt
+                                :args {:nums [{:parent :count :args {:coll :_history-page-rows}}
+                                              :_history-page-limit]}}
+                         :then {:parent :add :args {:nums [:_history-page-offset :_history-page-limit]}}
+                         :else nil}}]}}
+
+  {:name :load-fn-change-events
+   :description "A bounded page of transaction groups for fn, fn-slot, binding and list-item versions; payload values are never included. Nil for an unreadable fn."
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_load-fn-change-page}}
+          :then :_history-page-model :else nil
+          :fn-id {:type :nullable-uuid :required false}
+          :limit {:type :int} :offset {:type :int}}
    :return-type [:union :null
                  {:groups [:list {:group-id :text :kinds :text
                                   :branch-id :nullable-text
@@ -17,8 +76,7 @@
                                   :event-count :int
                                   :author-label :nullable-text
                                   :has-change-id? :bool}]
-                  :next-offset :nullable-int}]
-   :effects #{:db}}
+                  :next-offset :nullable-int}]}
 
   {:name :load-fn-history-diff
    :description "Storage boundary for a redacted field diff between two exact graph revisions. Nil for an invalid or unreadable target. The JSON variant is exact or incomplete when legacy provenance prevents a truthful snapshot."
@@ -29,7 +87,7 @@
    :return-type :nullable-jsonb
    :effects #{:db}}
 
-  {:name :preview-fn-history-restore
+  {:name :_preview-fn-history-restore
    :description "Redacted plan for restoring an exact owned-graph revision on the current branch."
    :args {:fn-id {:type :nullable-uuid :required false}
           :branch-id {:type :nullable-uuid :required false}
@@ -37,7 +95,7 @@
    :return-type :nullable-jsonb
    :effects #{:db}}
 
-  {:name :commit-fn-history-restore
+  {:name :_commit-fn-history-restore
    :description "Atomically restore after a preview-token CAS; the storage layer rechecks ACL and dependencies."
    :args {:fn-id {:type :nullable-uuid :required false}
           :branch-id {:type :nullable-uuid :required false}
@@ -45,6 +103,65 @@
           :expected-current {:type :nullable-text :required false}}
    :return-type :nullable-jsonb
    :effects #{:db}}
+
+  {:name :_history-revision
+   :parent :const :args {:value {:as :revision :type :nullable-int}}}
+  {:name :_history-positive-revision?
+   :parent :if
+   :args {:test {:parent :is-a? :args {:value :_history-revision :type {:value :int}}}
+          :then {:parent :gt :args {:nums [{:ref :_history-revision :type :int} 0]}}
+          :else false}}
+  {:name :_history-restore-args-valid?
+   :parent :and
+   :args {:values [{:parent :is-a? :args {:value {:as :fn-id :type :nullable-uuid} :type {:value :uuid}}}
+                   {:parent :is-a? :args {:value {:as :branch-id :type :nullable-uuid} :type {:value :uuid}}}
+                   :_history-positive-revision?]}}
+  {:name :_history-restore-error-kind
+   :parent :get
+   :args {:coll {:parent :ex-data :args {:ex {:as :exception}}}
+          :key {:value :type} :default nil}}
+  {:name :_history-restore-on-throw
+   :parent :if
+   :args {:test {:parent :or :args {:values [{:parent :equal? :args {:a :_history-restore-error-kind :b {:value :history/branch-mismatch}}}
+                                             {:parent :equal? :args {:a :_history-restore-error-kind :b {:value :history/too-large}}}
+                                             {:parent :equal? :args {:a :_history-restore-error-kind :b {:value :history/incomplete-provenance}}}
+                                             {:parent :equal? :args {:a :_history-restore-error-kind :b {:value :history/secret-type-conflict}}}]}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :status} {:value :reason}] :vals [{:value :conflict} :_history-restore-error-kind]}}
+          :else {:parent :throw :args {:exception {:as :exception}}}}}
+  {:name :_history-restore-preview-try
+   :parent :try
+   :args {:body :_preview-fn-history-restore :on-throw :_history-restore-on-throw}}
+  {:name :preview-fn-history-restore
+   :description "Validate restore arguments and map safe conflicts around the canonical redacted preview."
+   :parent :if
+   :args {:test :_history-restore-args-valid? :then :_history-restore-preview-try :else nil
+          :fn-id {:type :nullable-uuid :required false}
+          :branch-id {:type :nullable-uuid :required false}
+          :revision {:type :nullable-int :required false}}
+   :return-type :nullable-jsonb}
+  {:name :_history-restore-token
+   :parent :const :args {:value {:as :expected-current :type :nullable-text}}}
+  {:name :_history-restore-token-valid?
+   :parent :if
+   :args {:test {:parent :is-a? :args {:value :_history-restore-token :type {:value :text}}}
+          :then {:parent :equal?
+                 :args {:a {:parent :str-len :args {:string {:ref :_history-restore-token :type :text}}}
+                        :b 64}}
+          :else false}}
+  {:name :_history-restore-commit-try
+   :parent :try
+   :args {:body :_commit-fn-history-restore :on-throw :_history-restore-on-throw}}
+  {:name :commit-fn-history-restore
+   :description "Validate restore arguments/token and map safe conflicts around exact-token mutation and secret-flow validation."
+   :parent :if
+   :args {:test {:parent :and :args {:values [:_history-restore-args-valid? :_history-restore-token-valid?]}}
+          :then :_history-restore-commit-try :else nil
+          :fn-id {:type :nullable-uuid :required false}
+          :branch-id {:type :nullable-uuid :required false}
+          :revision {:type :nullable-int :required false}
+          :expected-current {:type :nullable-text :required false}}
+   :return-type :nullable-jsonb}
 
   ;; GET /api/fns/:fn-id/history/diff?branch-id=X&from=N&to=M.
   ;; Parse request data in the graph. The storage primitive accepts typed

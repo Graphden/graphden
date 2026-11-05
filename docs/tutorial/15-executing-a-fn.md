@@ -222,16 +222,18 @@ Returns immediately with `{:execution-id "..." :status "pending"}`
 when the fn is long-running; for fast fns the response carries
 the result directly.
 
-Poll status:
+Set `EXECUTION_ID` to the returned execution UUID, then poll status:
 
 ```bash
-curl http://localhost:9002/api/execute/<id> ...
+curl "http://localhost:9002/api/execute/$EXECUTION_ID" \
+  -H "Authorization: Bearer $AUTH_TOKEN"
 ```
 
 Cancel:
 
 ```bash
-curl -X POST http://localhost:9002/api/execute/<id>/cancel ...
+curl -X POST "http://localhost:9002/api/execute/$EXECUTION_ID/cancel" \
+  -H "Authorization: Bearer $AUTH_TOKEN"
 ```
 
 The shape of `:result` mirrors the in-memory return value —

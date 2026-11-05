@@ -1,9 +1,193 @@
 {:namespace "app.ui-components"
  :description "Personal editor components: ordinary identity bindings select bounded graph templates."
  :fns
- [{:name :_editor-root-plan
+ [;; Native operations retain authority, receipt checks and publication. Only
+  ;; safe receipts and finite failure tags reach this shared response policy.
+  {:name :_configuration-outcome
+   :type {:succeeded? :bool :value :nullable-keyword-map
+          :failure-type :nullable-text :failure-reason :nullable-text}}
+  {:name :_configuration-succeeded?
+   :parent :get
+   :args {:coll {:as :outcome :type :_configuration-outcome}
+          :key {:value :succeeded?} :default false}}
+  {:name :_configuration-value
+   :parent :get
+   :args {:coll {:as :outcome :type :_configuration-outcome}
+          :key {:value :value} :default nil}}
+  {:name :_configuration-failure-type
+   :parent :get
+   :args {:coll {:as :outcome :type :_configuration-outcome}
+          :key {:value :failure-type} :default nil}}
+  {:name :_configuration-failure-reason
+   :parent :get
+   :args {:coll {:as :outcome :type :_configuration-outcome}
+          :key {:value :failure-reason} :default nil}}
+  {:name :_configuration-unsupported?
+   :parent :equal?
+   :args {:a :_configuration-failure-type :b "unsupported"}}
+  {:name :_configuration-failure-status
+   :parent :if
+   :args {:test {:parent :equal? :args {:a :_configuration-failure-type :b "forbidden"}}
+          :then 403 :else 422}}
+  {:name :_configuration-default-failure
+   :parent :assoc
+   :args {:map {:value {:ok false :reason "Personal UI graph is unavailable. Using built-in components."}}
+          :key {:value :http-status} :value :_configuration-failure-status}}
+  {:name :_configuration-component-missing
+   :parent :if
+   :args {:test {:parent :and
+                 :args {:values [:_configuration-unsupported?
+                                 {:parent :equal? :args {:a :_configuration-failure-reason :b "component-missing"}}]}}
+          :then {:value {:code "component-missing" :fallback "builtin"}} :else nil}}
+  {:name :_configuration-policy-refresh
+   :parent :if
+   :args {:test {:parent :and
+                 :args {:values [:_configuration-unsupported?
+                                 {:parent :equal? :args {:a :_configuration-failure-reason :b "policy-refresh-required"}}]}}
+          :then {:value {:code "policy-refresh-required" :retryable true :retry-after 1}} :else nil}}
+  {:name :_configuration-quota
+   :parent :if
+   :args {:test {:parent :equal? :args {:a :_configuration-failure-type :b "quota"}}
+          :then {:value {:http-status 429 :code "graph-limit"
+                         :reason "Your organization has reached its graph limit. Free space or change your plan before creating more graphs."}}
+          :else nil}}
+  {:name :_configuration-invalid
+   :parent :if
+   :args {:test {:parent :or
+                 :args {:values [{:parent :equal? :args {:a :_configuration-failure-reason :b "invalid-request"}}
+                                 {:parent :equal? :args {:a :_configuration-failure-type :b "delete-receipts"}}]}}
+          :then {:value {:http-status 400}} :else nil}}
+  {:name :_configuration-stale
+   :parent :if
+   :args {:test {:parent :equal? :args {:a :_configuration-failure-reason :b "stale-configuration"}}
+          :then {:value {:http-status 409 :code "stale-configuration"
+                         :reason "The editor configuration changed. Refresh before selecting another configuration."}}
+          :else nil}}
+  {:name :_configuration-personal-home
+   :parent :if
+   :args {:test {:parent :and
+                 :args {:values [{:parent :or
+                                  :args {:values [:_configuration-unsupported?
+                                                  {:parent :equal? :args {:a :_configuration-failure-type :b "personal-home"}}]}}
+                                 {:parent :equal? :args {:a :_configuration-failure-reason :b "personal-home-unavailable"}}]}}
+          :then {:value {:code "personal-home-unavailable"
+                         :reason "Your deployment has no available personal graph namespace."}}
+          :else nil}}
+  {:name :_configuration-failure
+   :parent :merge
+   :args {:maps [:_configuration-default-failure :_configuration-component-missing
+                 :_configuration-policy-refresh :_configuration-quota
+                 :_configuration-invalid :_configuration-stale :_configuration-personal-home]}}
+  {:name :configuration-result
+   :description "Format an authorized configuration operation's safe outcome. Failures expose only finite native tags; HTTP status, retry and fallback messages are graph policy."
+   :parent :if
+   :args {:test :_configuration-succeeded?
+          :then {:parent :assoc
+                 :args {:map :_configuration-value :key {:value :ok} :value true}}
+          :else :_configuration-failure
+          :outcome {:type :_configuration-outcome}}
+   :return-type :keyword-map}
+
+  ;; Native operations export only safe receipts or finite refusal facts.
+  {:name :_ui-operation-ok?
+   :parent :get :args {:coll {:as :result :type :keyword-map} :key {:value :ok} :default false}}
+  {:name :_ui-operation-value
+   :parent :coalesce :args {:value {:as :result :type :keyword-map} :default {:value {}}}}
+  {:name :_ui-failure-type
+   :parent :get :args {:coll {:as :result :type :keyword-map} :key {:value :failure-type} :default nil}}
+  {:name :_ui-failure-reason
+   :parent :get :args {:coll {:as :result :type :keyword-map} :key {:value :failure-reason} :default nil}}
+  {:name :_ui-failure-outcome
+   :parent :zipmap
+   :args {:keys {:value [:succeeded? :value :failure-type :failure-reason]}
+          :vals [false nil :_ui-failure-type :_ui-failure-reason]}
+   :return-type :_configuration-outcome}
+  {:name :_component-export-failure
+   :parent :merge
+   :args {:maps [{:parent :_configuration-default-failure :args {:outcome :_ui-failure-outcome}}
+                 {:parent :_configuration-component-missing :args {:outcome :_ui-failure-outcome}}
+                 {:parent :_configuration-policy-refresh :args {:outcome :_ui-failure-outcome}}
+                 {:parent :_configuration-quota :args {:outcome :_ui-failure-outcome}}]}}
+  {:name :component-export-result
+   :description "Public component export response over safe native receipts/refusal tags. Invalid source requests remain opaque 422 refusals; only trusted freshness failures request retry."
+   :parent :if
+   :args {:test :_ui-operation-ok? :then :_ui-operation-value :else :_component-export-failure}
+   :return-type :keyword-map}
+  {:name :root-export-result
+   :description "Root export uses the same source refusal policy with its fixed root-specific reason."
+   :parent :if
+   :args {:test :_ui-operation-ok? :then :_ui-operation-value
+          :else {:parent :assoc
+                 :args {:map :_component-export-failure :key {:value :reason}
+                        :value "Editor root is unavailable."}}}
+   :return-type :keyword-map}
+  {:name :server-call-result
+   :description "Map authorized server-call outcomes to the opaque response. Native exact stale proof is required before adding the stale code."
+   :parent :if
+   :args {:test :_ui-operation-ok? :then :_ui-operation-value
+          :else {:parent :merge
+                 :args {:maps [{:parent :assoc
+                                :args {:map {:value {:ok false :reason "Server call is unavailable."}}
+                                       :key {:value :http-status}
+                                       :value {:parent :if
+                                               :args {:test {:parent :equal? :args {:a :_ui-failure-type :b "forbidden"}}
+                                                      :then 403 :else 422}}}}
+                               {:parent :if
+                                :args {:test {:parent :get
+                                              :args {:coll {:as :result :type :keyword-map}
+                                                     :key {:value :server-stale?} :default false}}
+                                       :then {:value {:code "server-call-stale"}} :else nil}}]}}}
+   :return-type :keyword-map}
+  {:name :_component-creation-status
+   :parent :coalesce
+   :args {:value {:parent :get
+                  :args {:coll {:as :result :type :keyword-map}
+                         :key {:value :failure-status} :default nil}}
+          :default {:parent :get
+                    :args {:coll {:parent :zipmap
+                           :args {:keys {:value ["forbidden" "quota" "unsupported" "bounded-storage"]}
+                                  :vals {:value [403 429 422 422]}}}
+                           :key :_ui-failure-type :default 500}}}}
+  {:name :_component-creation-reason
+   :parent :get
+   :args {:coll {:parent :zipmap
+                 :args {:keys {:value [400 403 409 422 429]}
+                        :vals {:value ["The UI graph creation request is invalid. Refresh and try Create again."
+                                       "Choose an available writable namespace for your UI graphs."
+                                       "The UI graph preview has changed. Refresh and try Create again."
+                                       "This UI graph template is unavailable. Choose another template or try again later."
+                                       "Your plan's graph limit has been reached. Free capacity or upgrade your plan before creating UI graphs."]}}}
+          :key :_component-creation-status
+          :default "UI graphs were not created. Try Create again after refreshing."}}
+  {:name :_component-creation-success
+   :parent :if
+   :args {:test {:parent :get
+                 :args {:coll {:as :result :type :keyword-map}
+                        :key {:value :publication-incomplete?} :default false}}
+          :then {:parent :assoc
+                 :args {:map {:parent :dissoc
+                              :args {:map {:as :result :type :keyword-map}
+                                     :key {:value :publication-incomplete?}}}
+                        :key {:value :publication-warnings}
+                        :value {:value [{:reason "Your UI graphs were created. Refresh the editor to reload their derived state."}]}}}
+          :else :_ui-operation-value}}
+  {:name :component-creation-result
+   :description "Map creation failures to their public status/reason, preserving explicit native refusal-status precedence. Committed receipts and publication warnings pass through intact."
+   :parent :if
+   :args {:test :_ui-operation-ok? :then :_component-creation-success
+          :else {:parent :zipmap
+                 :args {:keys {:value [:ok :committed :http-status :reason]}
+                        :vals [false false :_component-creation-status :_component-creation-reason]}}}
+   :return-type :keyword-map}
+
+  {:name :_editor-root-plan-facts
    :description "Export the root HOF selected by the editor handler's protected graph resolver. No client target identity is accepted; every source dependency is authorized in one snapshot."
    :args {:request {:type :ring-request-shape}} :return-type :keyword-map :effects #{:db}}
+  {:name :_editor-root-plan
+   :parent :root-export-result
+   :args {:result :_editor-root-plan-facts}
+   :return-type :keyword-map}
+
   {:name :_editor-root-plan-handler :parent :json-envelope-response
    :lambda-params [:request]
    :args {:envelope :_editor-root-plan}}
@@ -11,7 +195,12 @@
    :args {:path "/ui/root/plan" :handler :_editor-root-plan-handler}}
   {:name :_editor-root-migration-preview
    :description "Read-only proposal to preserve the checked ordinary component selection by reference in a new personal HOF root."
-   :args {:input {:type :jsonb}} :return-type :keyword-map :effects #{:db}}
+   :parent :configuration-result
+   :args {:outcome :_editor-root-migration-preview-outcome}
+   :return-type :keyword-map}
+  {:name :_editor-root-migration-preview-outcome
+   :description "Native authorized operation and finite, redacted failure facts; response policy is graph composition."
+   :args {:input {:type :jsonb}} :return-type :_configuration-outcome :effects #{:db}}
   {:name :_editor-root-migration-preview-handler :parent :json-envelope-response
    :lambda-params [:request]
    :args {:envelope {:parent :_editor-root-migration-preview :args {:input :parse-json-body}}}}
@@ -19,16 +208,26 @@
    :args {:path "/ui/root/migration/preview" :handler :_editor-root-migration-preview-handler}}
   {:name :_editor-root-migration-apply
    :description "Recheck a root migration proposal under current source and ACL, then atomically create only the new personal HOF cohort."
-   :args {:input {:type :jsonb}} :return-type :keyword-map :effects #{:db}}
+   :parent :configuration-result
+   :args {:outcome :_editor-root-migration-apply-outcome}
+   :return-type :keyword-map}
+  {:name :_editor-root-migration-apply-outcome
+   :description "Native authorized operation and finite, redacted failure facts; response policy is graph composition."
+   :args {:input {:type :jsonb}} :return-type :_configuration-outcome :effects #{:db}}
   {:name :_editor-root-migration-apply-handler :parent :json-envelope-response
    :lambda-params [:request]
    :args {:envelope {:parent :_editor-root-migration-apply :args {:input :parse-json-body}}}}
   {:name :api-editor-root-migration-apply :parent :app.routes.auth/post
    :args {:path "/ui/root/migration/apply" :handler :_editor-root-migration-apply-handler}}
-  {:name :_editor-server-call
+  {:name :_editor-server-call-facts
    :description "Reauthorize an opaque server descriptor and execute its read-only typed target. No caller-provided target or captures are accepted."
    :args {:request {:type :ring-request-shape} :input {:type :jsonb}}
    :return-type :keyword-map :effects #{:db}}
+  {:name :_editor-server-call
+   :parent :server-call-result
+   :args {:result :_editor-server-call-facts}
+   :return-type :keyword-map}
+
   {:name :_editor-server-call-handler :parent :json-envelope-response
    :lambda-params [:request]
    :args {:envelope {:parent :_editor-server-call :args {:input :parse-json-body}}}}
@@ -49,9 +248,14 @@
           :menu-view {:type :fn-ref}
           :picker-view {:type :fn-ref}}
    :return-type :_ui-components-identities}
-  {:name :_editor-configuration-plan
+  {:name :_editor-configuration-plan-facts
    :description "Export one component selected by the protected ordinary authenticated editor resolver. Default and personal source use the same authorization and snapshot."
    :args {:input {:type :jsonb}} :return-type :keyword-map :effects #{:db}}
+  {:name :_editor-configuration-plan
+   :parent :component-export-result
+   :args {:result :_editor-configuration-plan-facts}
+   :return-type :keyword-map}
+
   {:name :_editor-configuration-plan-handler :parent :json-envelope-response
    :lambda-params [:request]
    :args {:envelope {:parent :_editor-configuration-plan :args {:input :parse-json-body}}}}
@@ -59,7 +263,12 @@
    :args {:path "/ui/configuration/plan" :handler :_editor-configuration-plan-handler}}
   {:name :_editor-configuration-prepare
    :description "Explicitly prepare the owner's ordinary editor root, preserving legacy configuration by reference. Creates no component closure copy."
-   :args {:input {:type :jsonb}} :return-type :keyword-map :effects #{:db}}
+   :parent :configuration-result
+   :args {:outcome :_editor-configuration-prepare-outcome}
+   :return-type :keyword-map}
+  {:name :_editor-configuration-prepare-outcome
+   :description "Native authorized operation and finite, redacted failure facts; response policy is graph composition."
+   :args {:input {:type :jsonb}} :return-type :_configuration-outcome :effects #{:db}}
   {:name :_editor-configuration-prepare-handler :parent :json-envelope-response
    :lambda-params [:request]
    :args {:envelope {:parent :_editor-configuration-prepare :args {:input :parse-json-body}}}}
@@ -67,7 +276,12 @@
    :args {:path "/ui/configuration/prepare" :handler :_editor-configuration-prepare-handler}}
   {:name :_editor-configuration-preview
    :description "Read-only preparation of exact original receipts and a scoped source proof before any configuration write."
-   :args {:input {:type :jsonb}} :return-type :keyword-map :effects #{:db}}
+   :parent :configuration-result
+   :args {:outcome :_editor-configuration-preview-outcome}
+   :return-type :keyword-map}
+  {:name :_editor-configuration-preview-outcome
+   :description "Native authorized operation and finite, redacted failure facts; response policy is graph composition."
+   :args {:input {:type :jsonb}} :return-type :_configuration-outcome :effects #{:db}}
   {:name :_editor-configuration-preview-handler :parent :json-envelope-response
    :lambda-params [:request]
    :args {:envelope {:parent :_editor-configuration-preview :args {:input :parse-json-body}}}}
@@ -75,7 +289,12 @@
    :args {:path "/ui/configuration/preview" :handler :_editor-configuration-preview-handler}}
   {:name :_editor-configuration-undo
    :description "Atomically undo one exact LIFO activation receipt: delete only its new identities and restore the previous root's versioned name after fresh source and write checks."
-   :args {:input {:type :jsonb}} :return-type :keyword-map :effects #{:db}}
+   :parent :configuration-result
+   :args {:outcome :_editor-configuration-undo-outcome}
+   :return-type :keyword-map}
+  {:name :_editor-configuration-undo-outcome
+   :description "Native authorized operation and finite, redacted failure facts; response policy is graph composition."
+   :args {:input {:type :jsonb}} :return-type :_configuration-outcome :effects #{:db}}
   {:name :_editor-configuration-undo-handler :parent :json-envelope-response
    :lambda-params [:request]
    :args {:envelope {:parent :_editor-configuration-undo :args {:input :parse-json-body}}}}
@@ -83,7 +302,12 @@
    :args {:path "/ui/configuration/undo" :handler :_editor-configuration-undo-handler}}
   {:name :_editor-configuration-apply
    :description "Revalidate the exact preview under current source, policy and revision expectations, then atomically create the planned ordinary graph."
-   :args {:input {:type :jsonb}} :return-type :keyword-map :effects #{:db}}
+   :parent :configuration-result
+   :args {:outcome :_editor-configuration-apply-outcome}
+   :return-type :keyword-map}
+  {:name :_editor-configuration-apply-outcome
+   :description "Native authorized operation and finite, redacted failure facts; response policy is graph composition."
+   :args {:input {:type :jsonb}} :return-type :_configuration-outcome :effects #{:db}}
   {:name :_editor-configuration-apply-handler :parent :json-envelope-response
    :lambda-params [:request]
    :args {:envelope {:parent :_editor-configuration-apply :args {:input :parse-json-body}}}}
@@ -91,7 +315,12 @@
    :args {:path "/ui/configuration/apply" :handler :_editor-configuration-apply-handler}}
   {:name :_editor-configuration-reconcile
    :description "Read-only confirmation of an original uncertain receipt. Never recreates, deletes or adopts changed source."
-   :args {:input {:type :jsonb}} :return-type :keyword-map :effects #{:db}}
+   :parent :configuration-result
+   :args {:outcome :_editor-configuration-reconcile-outcome}
+   :return-type :keyword-map}
+  {:name :_editor-configuration-reconcile-outcome
+   :description "Native authorized operation and finite, redacted failure facts; response policy is graph composition."
+   :args {:input {:type :jsonb}} :return-type :_configuration-outcome :effects #{:db}}
   {:name :_editor-configuration-reconcile-handler :parent :json-envelope-response
    :lambda-params [:request]
    :args {:envelope {:parent :_editor-configuration-reconcile :args {:input :parse-json-body}}}}
@@ -99,7 +328,12 @@
    :args {:path "/ui/configuration/reconcile" :handler :_editor-configuration-reconcile-handler}}
   {:name :_editor-configuration-reconcile-undo
    :description "Read-only confirmation of staged undo postconditions. Exact scoped restored source and absent cohort are required; no mutation or new source certificate."
-   :args {:input {:type :jsonb}} :return-type :keyword-map :effects #{:db}}
+   :parent :configuration-result
+   :args {:outcome :_editor-configuration-reconcile-undo-outcome}
+   :return-type :keyword-map}
+  {:name :_editor-configuration-reconcile-undo-outcome
+   :description "Native authorized operation and finite, redacted failure facts; response policy is graph composition."
+   :args {:input {:type :jsonb}} :return-type :_configuration-outcome :effects #{:db}}
   {:name :_editor-configuration-reconcile-undo-handler :parent :json-envelope-response
    :lambda-params [:request]
    :args {:envelope {:parent :_editor-configuration-reconcile-undo :args {:input :parse-json-body}}}}
@@ -107,18 +341,33 @@
    :args {:path "/ui/configuration/reconcile-undo" :handler :_editor-configuration-reconcile-undo-handler}}
   {:name :_editor-configuration-cleanup-preview
    :description "Read-only exact deletion proposal for visible consent. Retain original IDs and restore anchor; current source revisions are a new reviewed decision, not an amended creation receipt."
-   :args {:input {:type :jsonb}} :return-type :keyword-map :effects #{:db}}
+   :parent :configuration-result
+   :args {:outcome :_editor-configuration-cleanup-preview-outcome}
+   :return-type :keyword-map}
+  {:name :_editor-configuration-cleanup-preview-outcome
+   :description "Native authorized operation and finite, redacted failure facts; response policy is graph composition."
+   :args {:input {:type :jsonb}} :return-type :_configuration-outcome :effects #{:db}}
   {:name :_editor-configuration-cleanup-preview-handler :parent :json-envelope-response
    :lambda-params [:request]
    :args {:envelope {:parent :_editor-configuration-cleanup-preview :args {:input :parse-json-body}}}}
   {:name :api-editor-configuration-cleanup-preview :parent :app.routes.auth/post
    :args {:path "/ui/configuration/cleanup-preview" :handler :_editor-configuration-cleanup-preview-handler}}
-  {:name :_ui-components-create-preview
+  {:name :_ui-components-create-preview-facts
    :description "Reserve a create-only fixed-template manifest for exact recovery. This does not create graph rows."
    :args {:input {:type :jsonb}} :return-type :keyword-map :effects #{:db}}
-  {:name :_ui-components-create-apply
+  {:name :_ui-components-create-preview
+   :parent :component-creation-result
+   :args {:result :_ui-components-create-preview-facts}
+   :return-type :keyword-map}
+
+  {:name :_ui-components-create-apply-facts
    :description "Atomically create the unchanged authorized fixed-template manifest. Never revives an existing identity."
    :args {:input {:type :jsonb}} :return-type :keyword-map :effects #{:db}}
+  {:name :_ui-components-create-apply
+   :parent :component-creation-result
+   :args {:result :_ui-components-create-apply-facts}
+   :return-type :keyword-map}
+
   {:name :_ui-components-create-preview-handler :parent :json-envelope-response
    :lambda-params [:request]
    :args {:envelope {:parent :_ui-components-create-preview :args {:input :parse-json-body}}}}

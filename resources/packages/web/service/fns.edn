@@ -43,11 +43,61 @@
    :return-type [:list :keyword-map]
    :effects #{:db}}
 
-  {:name :_live-service-endpoint
-   :description "Best live listener from the enabled service rows, or nil. Native heartbeat query and ordering."
+  {:name :_service-instance-shape
+   :type {:host :nullable-text :port [:union :null :port]
+          :executor-id :nullable-text :seen-at-ms :nullable-int}}
+  {:name :_service-instance-facts-shape
+   :type {:instances [:list :_service-instance-shape]
+          :now-ms :int :stale-after-ms :int :self-executor-id :text}}
+  {:name :_service-instance-facts
+   :description "One scoped instance batch and clock capture; no caller-selected owner or executor identity."
    :args {:rows {:type [:list :keyword-map]}}
-   :return-type [:union :null :service-endpoint-shape]
+   :return-type :_service-instance-facts-shape
    :effects #{:db}}
+  {:name :_live-instances :parent :get
+   :args {:coll :_service-instance-facts :key {:value :instances} :default []}}
+  {:name :_live-self :parent :get
+   :args {:coll {:as :instance-facts :type :_service-instance-facts-shape} :key {:value :self-executor-id} :default "local"}}
+  {:name :_live-cutoff :parent :sub
+   :args {:nums [{:parent :get :args {:coll {:as :instance-facts :type :_service-instance-facts-shape} :key {:value :now-ms} :default 0}}
+                 {:parent :get :args {:coll {:as :instance-facts :type :_service-instance-facts-shape} :key {:value :stale-after-ms} :default 45000}}]}}
+  {:name :_live-row-seen :parent :get
+   :args {:coll {:as :row :type :_service-instance-shape} :key {:value :seen-at-ms} :default nil}}
+  {:name :_live-row-port :parent :get
+   :args {:coll {:as :row :type :_service-instance-shape} :key {:value :port} :default nil}}
+  {:name :_live-row-executor :parent :get
+   :args {:coll {:as :row :type :_service-instance-shape} :key {:value :executor-id} :default nil}}
+  {:name :_live-fresh? :parent :and :lambda-params [:row]
+   :args {:values [{:parent :some? :args {:value :_live-row-seen}}
+                   {:parent :some? :args {:value :_live-row-port}}
+                   {:parent :gte :args {:nums [{:parent :coalesce :args {:value :_live-row-seen :default 0}} :_live-cutoff]}}]}}
+  {:name :_live-rank-value :parent :list
+   :args {:items [{:parent :if :args {:test {:parent :equal? :args {:a :_live-row-executor :b :_live-self}}
+                                    :then 0 :else 1}}
+                  {:parent :neg :args {:number {:parent :coalesce :args {:value :_live-row-seen :default 0}}}}]}}
+  {:name :_live-rank :parent :vec :lambda-params [:row]
+   :args {:coll :_live-rank-value}}
+  {:name :_live-preferred :parent :first
+   :args {:coll {:parent :sort-by
+                 :args {:key-fn :_live-rank :instance-facts :_service-instance-facts
+                        :coll {:parent :filter :args {:pred :_live-fresh? :coll :_live-instances :instance-facts :_service-instance-facts}}}}}}
+  {:name :_live-host :parent :get
+   :args {:coll :_live-preferred :key {:value :host} :default nil}}
+  {:name :_live-port :parent :get
+   :args {:coll :_live-preferred :key {:value :port} :default nil}}
+  {:name :_live-url :parent :str
+   :args {:parts ["http://" :_live-host ":" :_live-port]}
+   :return-type :url}
+  {:name :_live-service-endpoint
+   :description "Prefer this executor's fresh listener, then newest heartbeat. A winning row without host yields nil; it does not retry another row."
+   :parent :if
+   :args {:test {:parent :and :args {:values [{:parent :some? :args {:value :_live-host}}
+                                            {:parent :some? :args {:value :_live-port}}]}}
+          :then {:parent :zipmap :args {:keys [{:value :host} {:value :port} {:value :url}]
+                                       :vals [{:parent :assert-some :args {:value :_live-host}}
+                                              {:parent :assert-some :args {:value :_live-port}} :_live-url]}}
+          :else nil}
+   :return-type [:union :null :service-endpoint-shape]}
 
   {:name :_temporary-service-endpoint
    :description "Deployment's finite HTTP publication lookup, or nil. Native resolver seam."

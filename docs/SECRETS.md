@@ -148,7 +148,7 @@ diagnostic's type-carrying keys (`:expected`/`:actual`/`:declared`/
 | `core/refinements` | The `:ensure-*` narrowers (`:ensure-positive-int`, `:ensure-non-empty-text`) preserve taint structurally — refinement impls carry no `:taint-propagate?` flag. |
 | `web/html` | `:render-hiccup` / `:hiccup` propagate — they serialize/assemble a tree whose `[:list :any]` arm (and `:hiccup`'s `:any` attr values) can carry a secret. `:h-raw` is bare — its `:string` input can't accept a `[:secret :text]`. |
 | `web/vault` | `:secret-leaf` declares `[:secret :text]` return directly. |
-| `app/reprs` | `:render-value-repr` and `:tabulate-records` propagate — their record/`:any` inputs can carry a marked value and the output (repr hiccup / cell strings) derives from it. `:svg-polyline-points` (`[:list :numeric]` slot) and `:fn-return-type` (id in, type expr out) are bare — taint can't enter. |
+| `app/reprs` | `:render-value-repr` propagates — its `:any` input can carry a marked value and the repr hiccup derives from it. `:tabulate-records` is graph composition; its `map`/`get`/formatting/`vec` primitives retain markers from record content through the cell strings. `:svg-polyline-points` (`[:list :numeric]` slot) and `:fn-return-type` (id in, type expr out) are bare — taint can't enter. |
 
 The editor's `:_editor-server-call` propagates request/input markers: a typed,
 projected result can still derive from caller content or a marked callback return.
@@ -218,11 +218,15 @@ fn-def whose `parent-ids` is exactly `[:secret-leaf]`. Each entry:
   delete-without-vault-cleanup hole.
 
 `Create` form (path + value + name + description + namespace) opens
-the same path: atomic vault-put + graphden fn-def create through
+the same path: a journalled SQL reservation followed by a Vault write through
 `POST /api/secrets` (`:create-secret-handler` in
 `app/secrets/fns.edn`; the journalled write body is
-`crud.secrets/apply-create-secret-body`). Rolls back via
-`replay-secret-rollback!` if any step fails.
+`crud.secrets/create-secret-facts!`). Rolls back via
+`rollback-secret-failure!` if any step fails. The native operations return
+only safe committed facts or redacted error facts; `app.secrets` composes
+the public success and failure envelopes. Rotation history keeps its scoped
+read and value-free projection native, with stable newest-first ordering and
+the 50-event response cap composed in the graph.
 
 ## Composing in user-graph
 
@@ -458,7 +462,7 @@ layered redaction:
    entity` (via `secret-leaf-capability-rej`) refuses any `:fn`
    create whose `:parent-ids` contains the `:secret-leaf` row UNLESS the data
    carries the `:_admin-secret-create` marker, which only
-   `crud.secrets/apply-create-secret-body` sets (and strips before the row
+   `crud.secrets/create-secret-facts!` sets (and strips before the row
    reaches storage). The Secrets-panel admin path continues to
    work; everything else gets a 409 / 400 with a pointer to
    `/api/secrets`. The orthogonal "write any secret from user-graph
@@ -542,7 +546,7 @@ The Secrets-panel admin flow writes new secrets with this shape:
     passthrough whose `:in` slot is `[:secret :text]`. The impl
     just returns its arg; the executor's `:resolved-value` case
     has already dereferenced via vault by the time the impl runs.
-- `crud.secrets/apply-create-secret-body` (the `POST /api/secrets` write) writes
+- `crud.secrets/create-secret-facts!` (the `POST /api/secrets` write) writes
     `parent-ids=[<secret-leaf-id>]` + a binding with
     `:resolver-fn-id=<vault-get>` + `:value=<path>`.
 - The delete / rotate handlers (`:_delete-secret-data`,
@@ -557,8 +561,8 @@ The Secrets-panel admin flow writes new secrets with this shape:
 - Editor `isSecretFn` (in `editor-secrets.js`) renders the 🔒
     badge on every fn-def whose `parent-ids` is exactly
     `[:secret-leaf]`.
-- `crud.secrets/apply-create-secret-body` explicitly calls
-    `tc/type-check-fn-after-mutation!` on the new fn-def so its
+- `crud.secrets/create-secret-facts!` explicitly calls
+    `tc/type-check-fn-and-dependents!` on the new fn-def so its
     inherited `[:secret :text]` return-type lands in the rich-
     types registry; otherwise `tainted-fn?` wouldn't see the
     marker and T4's redaction wouldn't fire.
@@ -594,7 +598,7 @@ On submit the form POSTs to `/api/secret-bindings` (sibling to
 `/api/secrets/*` — separate path to avoid reitit's
 `/secrets/:fn-id` literal-vs-param conflict). The handler
 (`:create-inline-binding-handler`, whose journalled write is
-`graphden.crud.secrets/apply-create-inline-binding-body`) does:
+`graphden.crud.secrets/create-inline-binding-facts!`) does:
 
 1. Validate `fn-id` + `slot-id` exist; reject if a binding already
    exists on `(fn-id, slot-id)`. A package-synced owner fn is refused

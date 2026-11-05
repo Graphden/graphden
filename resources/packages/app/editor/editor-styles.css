@@ -657,6 +657,7 @@ body[data-surface="build"].sidebar-collapsed .sidebar-expand-floating {
 .auth-lock-btn.auth-chip {
   width: auto; min-width: 26px; border-color: transparent; padding: 2px;
 }
+.auth-lock-btn.auth-chip.auth-lock-open { background: transparent; }
 .auth-lock-btn.auth-chip:hover { background: transparent; }
 .auth-lock-btn.auth-chip.auth-lock-open:hover .auth-avatar { filter: brightness(1.1); }
 .auth-avatar {

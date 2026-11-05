@@ -7,7 +7,7 @@ Reconciliation, service discovery, tracing, and executor placement.
 
 after: executor
 
-[[file:index.org][index]] · ~57 min
+[[file:index.org][index]] · ~56 min
 
 * 1. extend-builder
 :PROPERTIES:
@@ -111,17 +111,17 @@ Checks service handles for liveness and exit status. A stopped instance loses it
 
 - source :: [[file:../../../src/graphden/services/liveness.clj::(defn check-liveness!][src/graphden/services/liveness.clj:119]]
 
-* 9. live-service-endpoint
+* 9. service-instance-facts
 :PROPERTIES:
-:CUSTOM_ID: services/live-service-endpoint
+:CUSTOM_ID: services/service-instance-facts
 :FILE: resources/packages/web/service/impls.clj
 :LINE: 20
-:MINS: 1.2
+:MINS: 1.0
 :END:
 
-Reads the freshest live listener on the caller's branch, preferring this pod. This is one native read beneath the ~web.service/:service-endpoint~ [[file:glossary.org::#term/graph-function][graph function]]: its bindings in [[file:../../../resources/packages/web/service/fns.edn][web/service/fns.edn]] choose the listener, then a finite HTTP publication, then an addon resolver, and finally ~:service/not-running~. The ~:fn-ref~ argument passes identity without executing the named function.
+Reads scoped listener rows and captures one clock value on the caller's branch. This is one native read beneath the ~web.service/:service-endpoint~ [[file:glossary.org::#term/graph-function][graph function]]: its bindings in [[file:../../../resources/packages/web/service/fns.edn][web/service/fns.edn]] choose the listener, then a finite HTTP publication, then an addon resolver, and finally ~:service/not-running~. The ~:fn-ref~ argument passes identity without executing the named function.
 
-- source :: [[file:../../../resources/packages/web/service/impls.clj::(defbase live-service-endpoint][resources/packages/web/service/impls.clj:20]]
+- source :: [[file:../../../resources/packages/web/service/impls.clj::(defbase service-instance-facts][resources/packages/web/service/impls.clj:20]]
 
 * 10. publish!
 :PROPERTIES:

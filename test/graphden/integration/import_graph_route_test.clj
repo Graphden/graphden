@@ -490,19 +490,19 @@
 
 
 (deftest import-branch-create-does-not-certify-argument-writes-or-failed-create
-  (let [create! (requiring-resolve 'graphden.packages.app.registry.impls/create-owned-branch!)
+  (let [create! (requiring-resolve 'graphden.packages.app.registry.impls/create-request-branch!)
         branch-name (str "imp/scoped-" (random-uuid))
         argument-epoch (atom nil)
         caller-log (atom [])]
     (binding [epoch/*request-bump-log* caller-log]
       (let [row (create! {:branch-name (delay (reset! argument-epoch (epoch/bump! *storage* :fn))
-                                              branch-name)} *ctx*)
+                                              branch-name) :write-policy "owner"} *ctx*)
             branch-epoch (epoch/current (epoch/epoch-handle *storage*))
             ledger (:graph-epoch-local (epoch/epoch-handle *storage*))]
         (is (= branch-name (:name row)))
         (is (= [@argument-epoch] @caller-log))
         (is (false? (:noted? (get @ledger @argument-epoch))))
         (is (true? (:noted? (get @ledger branch-epoch))))
-        (is (thrown? Exception (create! {:branch-name branch-name} *ctx*)))
+        (is (thrown? Exception (create! {:branch-name branch-name :write-policy "owner"} *ctx*)))
         (is (false? (:noted? (get @ledger @argument-epoch)))
             "even the failed create must not drain the caller's earlier writes")))))

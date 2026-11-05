@@ -55,17 +55,30 @@
    :return-type :ring-response-shape}
 
   {:name :header-get
-   :description "Case-insensitive-ish header lookup — tries the lower-cased name (Ring convention) first, then the exact spelling. nil when absent."
-   :args {:headers {:type [:union :null :text-map]
-                    :description "Header map (string keys)."}
-          :header-name {:type :text
-                        :description "Header name, e.g. `Content-Type`."}}
+   :description "Try the lowercase header key first, then the exact spelling; nil when absent. This is not a case-insensitive scan."
+   :parent :coalesce
+   :args {:value {:parent :get
+                  :args {:coll {:as :headers :type [:union :null :text-map]}
+                         :key {:parent :str-lower :args {:string {:as :header-name :type :text}}}
+                         :default nil}}
+          :default {:parent :get
+                    :args {:coll {:as :headers :type [:union :null :text-map]}
+                           :key {:as :header-name :type :text} :default nil}}}
    :return-type :nullable-text}
 
+  {:name :_encoding-acceptable?
+   :description "Parse Accept-Encoding tokens and q=0 exclusions for one coding; token matching is case-insensitive."
+   :args {:header {:type :nullable-text} :coding {:type :text}}
+   :return-type :bool}
+  {:name :_accept-encoding :parent :header-get :args {:header-name "Accept-Encoding"}}
   {:name :pick-encoding
-   :description "Content negotiation over `Accept-Encoding` (RFC 7231 §5.3): returns `br` when brotli is acceptable (non-zero q), else `gzip`, else `identity`. Self-contained RFC parse — the DECISION to encode (and its thresholds) is composed in the graph (`:encode-response`)."
-   :args {:headers {:type [:union :null :text-map]
-                    :description "Request header map."}}
+   :description "Prefer acceptable br, then gzip, otherwise identity. q=0 excludes a coding."
+   :parent :if
+   :args {:test {:parent :_encoding-acceptable? :args {:header :_accept-encoding :coding "br"}}
+          :then "br"
+          :else {:parent :if
+                 :args {:test {:parent :_encoding-acceptable? :args {:header :_accept-encoding :coding "gzip"}}
+                        :then "gzip" :else "identity"}}}
    :return-type :text}
 
   {:name :utf8-bytes

@@ -7,7 +7,6 @@
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.accounts.crypto :as crypto]
     [graphden.editor.components :as components]
-    [graphden.editor.root-plan :as root-plan]
     [graphden.executor.browser-plan :as wire]
     [graphden.executor.browser-server :as server]
     [graphden.executor.browser-server-source :as server-source]
@@ -26,6 +25,7 @@
     [graphden.system.branch-router.recheck :as recheck]
     [graphden.tenancy.context :as tenancy]
     [graphden.test-infra.golden-app :as ga]
+    [graphden.test-infra.ui-operation-api :as ui-api]
     [graphden.versioning.storage.core :as versioned]))
 
 
@@ -112,7 +112,7 @@
                                                            {:fn-id handler :slot-id root-slot
                                                             :ref-fn-id (:ref-fn-id binding)}))))
               descriptor (get descriptors [query (ids/slot-id (ids/fn-id "core.system" :server-call) :func)])
-              result (server/invoke-current ctx request {:descriptor descriptor
+              result (ui-api/invoke-current ctx request {:descriptor descriptor
                                                          :input (wire/encode-value {:query ""})})]
           (is (true? (:ok result)) (pr-str result))
           (when (:ok result)
@@ -147,12 +147,12 @@
                  :body {:private [:secret content]} :query-params {"private" content}}
         target (ids/fn-id "app.ui-account-menu" :_account-menu-branch-query)
         _ (epoch/seed-watermark! (:storage ctx))
-        failure components/failure-response
-        result (with-redefs [components/failure-response
+        failure components/failure-facts
+        result (with-redefs [components/failure-facts
                              (fn [error]
                                (assoc (failure error) :diagnostic
                                       (select-keys (ex-data error) [:type :reason :fn-id :slot-id :arg :name])))]
-                 (root-plan/export-current ctx request))]
+                 (ui-api/export-current ctx request))]
     (is (:ok result) (pr-str result))
     (when (:ok result)
       (let [serialized (json/generate-string (:plan result))
@@ -173,7 +173,7 @@
         (is (zero? (:exit invoked)) (:err invoked))
         (when (zero? (:exit invoked))
           (let [input (json/parse-string (:out invoked) true)
-                response (server/invoke-current ctx request input)]
+                response (ui-api/invoke-current ctx request input)]
             (is (= #{:token} (set (keys (:descriptor input)))))
             (is (:ok response) (pr-str response))
             (is (= {:label "Branch" :branch-name "main"} (some-> (:value response) wire/decode-value)))))))))
@@ -196,7 +196,7 @@
        {:branch-id (versioned/current-branch-id storage)
         :fn-defs [{:name :editor-root :namespace home-name :parent :app.ui-config/editor-root}]} ctx)
       (epoch/seed-watermark! storage)
-      (let [result (root-plan/export-current ctx request)
+      (let [result (ui-api/export-current ctx request)
             descriptor (some (fn [value]
                                (when (map? value)
                                  (let [fields (into {} (filter (comp keyword? key)) value)]
@@ -212,14 +212,14 @@
                           (fn [row & _]
                             (when (= root (:id row))
                               (throw (ex-info "Revoked root" {:type :authz/forbidden})))))]
-            (let [response (server/invoke-current ctx request
+            (let [response (ui-api/invoke-current ctx request
                                                   {:descriptor descriptor
                                                    :input (wire/encode-value {:query ""})})]
               (is (= 403 (:http-status response)))
               (is (nil? (:value response)))))
           (sp/update-entity storage :fn root {:name "retired-editor-root"})
           (epoch/seed-watermark! storage)
-          (let [response (server/invoke-current ctx request
+          (let [response (ui-api/invoke-current ctx request
                                                 {:descriptor descriptor
                                                  :input (wire/encode-value {:query ""})})]
             (is (false? (:ok response)))

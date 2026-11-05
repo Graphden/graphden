@@ -7,7 +7,6 @@
    Split out of `crud.entities` as the one purely-read topic in that
    tree: no write path calls into it and it calls into none of them."
   (:require
-    [clojure.string :as str]
     [graphden.crud.graph-refs :as refs]
     [graphden.crud.request :as request]
     [graphden.crud.secret-shape :as secret-shape]
@@ -449,7 +448,7 @@
    whole point of moving the filter server-side. `:truncated?` in the
    response tells the client more matched than were returned.
 
-   Dynamic (and public — `entities-test` binds it from another ns) so
+   Dynamic (and public — graph policy tests bind it from another ns) so
    tests can `binding` it low, thread-local, instead of a
    process-global `with-redefs` — it's a cold constant read on the
    search path, so the Var deref costs nothing that matters."
@@ -457,11 +456,9 @@
 
 
 ;; --- the graph reads' per-scope projections ----------------------------------
-;; One shared lazily-realised env (`graph-list-env`) + one defn- per scope
-;; (round-3 readability split of the former 6-branch cond body). Each branch
-;; forces only the delays it needs. (The :tree scope projects no fn rows,
-;; but since the per-ns :type-count it does realise `roled-fns` — a cheap
-;; in-memory classification pass, no extra I/O.)
+;; The native environment retains graph/registry snapshots and projection
+;; capabilities. Graph policies receive data-only facts, and scoped selection
+;; annotates only chosen rows from the retained environment.
 
 (defn- graph-list-env
   "Shared lazy environment for the per-scope projections: the cached
@@ -598,62 +595,6 @@
      :errors ns-err}))
 
 
-(defn- list-scope-namespace
-  "Lazy per-namespace expand: light rows for one namespace's named fns.
-   A `nil` `namespace-id` intentionally selects the \"(root)\" bucket —
-   the namespace-less fns the sidebar renders under its `(primitives)`
-   node — since `nil = (:namespace-id f)` matches them."
-  [{:keys [base rev-index role-of]} namespace-id]
-  {:fns (into []
-              (comp (filter #(and (:name %) (= namespace-id (:namespace-id %))))
-                    (map (comp (partial light-fn-row @rev-index) role-of)))
-              (:fns base))})
-
-
-(defn- list-scope-search
-  "Server-side filter: case-insensitive substring on each fn's QUALIFIED
-   dotted name (`core.logic.assert-eq`; a root fn is its bare name), so
-   a bare-name, a namespace-prefixed, and a namespace-only needle all
-   match; with `descriptions?` (the `:search-text` scope) also — ranked
-   last — on the fn's `:description`, so a caller who knows the CONCEPT
-   but not the name (an AI over `search-fns`) still lands. The editor's
-   sidebar filter keeps the name-only `:search` scope: its rows must all
-   visibly carry the needle. `/` in the needle normalizes to `.` — the canonical
-   `ns.path/name` spelling the rest of the product prints is accepted
-   verbatim. Capped at `*default-search-limit*` (light rows already
-   carry `:description`, so a description hit shows WHY it matched).
-   Replaces the client-side scan over the (former) full-fns mirror in
-   the sidebar filter box, the fn / namespace / MI-reparent pickers,
-   and name→id resolution."
-  [{:keys [base rev-index role-of namespaces]} q descriptions?]
-  (let [needle (some-> q str/lower-case str/trim not-empty
-                       (str/replace "/" "."))
-        paths (when needle (ns-path/path-map @namespaces))
-        qualified (fn [f]
-                    (let [p (get paths (:namespace-id f))]
-                      (if (seq p) (str p "." (:name f)) (:name f))))
-        ;; Rank BEFORE capping: an exact-name hit must survive the cap even
-        ;; when a short needle also matches a whole namespace's worth of
-        ;; qualified names (`str` matches everything under `core.strings`).
-        tier (fn [f]
-               (let [n (str/lower-case (:name f))]
-                 (cond
-                   (= n needle) 0
-                   (str/includes? n needle) 1
-                   (str/includes? (str/lower-case (qualified f)) needle) 2
-                   (and descriptions?
-                        (str/includes? (str/lower-case (or (:description f) "")) needle)) 3)))
-        matches (when needle
-                  (->> (:fns base)
-                       (keep #(when (:name %)
-                                (when-let [t (tier %)] [t %])))
-                       (sort-by first)
-                       (mapv second)))
-        limited (into [] (take *default-search-limit*) matches)]
-    {:fns (mapv (comp (partial light-fn-row @rev-index) role-of) limited)
-     :truncated? (boolean (and needle (> (count matches) *default-search-limit*)))}))
-
-
 (defn- concealed-list-env
   "`env` over the graph AS THE CURRENT VIEWER MAY SEE IT (the view-impl
    seam): a fn whose composition is hidden keeps its signature and loses
@@ -681,12 +622,6 @@
   "Shared graph projections over the current viewer's visible composition."
   [ctx]
   (concealed-list-env (graph-list-env ctx (:storage ctx))))
-
-
-(defn compact-fn-row
-  "Drop nil-valued fields without discarding false, zero or extension fields."
-  [row]
-  (into {} (remove (comp nil? val)) row))
 
 
 (defn- list-scope-subtree
@@ -761,17 +696,37 @@
      :errors (visible-counts errors)}))
 
 
-(defn graph-namespace-fns
-  "`{:fns}` — one namespace's light rows (nil = the root bucket)."
-  [ctx namespace-id]
-  (list-scope-namespace (env ctx) namespace-id))
-
-
-(defn graph-search
-  "`{:fns}` — capped light rows whose qualified name contains `q`; with
-   `descriptions?`, description matches too, ranked last."
-  [ctx q descriptions?]
-  (list-scope-search (env ctx) q (boolean descriptions?)))
+(defn project-graph-cohort
+  "Run a pure data selector over one authorized snapshot, then annotate only
+   its selected IDs. The callback cannot observe context, implementations,
+   bindings, delays or hidden rows. Metadata is captured before invocation;
+   cache replacement during selection cannot change the projected cohort."
+  [ctx selector namespaces? capped?]
+  (let [{:keys [base namespaces role-of rev-index rich-snapshot diag-counts]} (env ctx)
+        visible (tctx/apply-graph-read-filter
+                  (cond-> base namespaces? (assoc :namespaces @namespaces)))
+        rows (:fns visible)
+        by-id (into {} (map (juxt :id identity)) rows)
+        limit (if capped? *default-search-limit* (count rows))
+        facts {:rows (mapv #(zipmap [:id :name :namespace-id :description]
+                                    ((juxt :id :name :namespace-id :description) %)) rows)
+               :paths (if namespaces? (ns-path/path-map (:namespaces visible)) {})
+               :limit limit}
+        rev @rev-index
+        _ @rich-snapshot
+        _ @diag-counts
+        selected (selector facts)
+        ids (:ids selected)]
+    (when-not (and (map? selected) (sequential? ids)
+                   (boolean? (:truncated? selected))
+                   (<= (bounded-count (inc limit) ids) limit)
+                   (= (count ids) (count (set ids)))
+                   (every? #(contains? by-id %) ids))
+      (throw (ex-info "Invalid graph selection"
+                      {:type :crud/invalid-graph-selection})))
+    (let [projected (mapv (comp (partial light-fn-row rev) role-of by-id) ids)]
+      (assoc (apply-view-impl-filter {:fns projected})
+             :truncated? (:truncated? selected)))))
 
 
 (defn graph-index-facts

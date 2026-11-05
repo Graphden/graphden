@@ -35,29 +35,6 @@
     @v))
 
 
-(deftest secret-path-args-lists-every-vault-binding
-  (let [fn-defs [{:name :db-url :args {:url {:secret-path "kv/db#url"}}}
-                 {:name :plain :args {:n {:value 1}}}
-                 {:name :two :args {:a {:secret-path "kv/a"} :b {:secret-path "kv/b"}}}]
-        out (call :secret-path-args {:fn-defs fn-defs})]
-    (testing "one entry per secret-path arg, naming the fn and the arg"
-      (is (= #{{:fn :db-url :arg :url} {:fn :two :arg :a} {:fn :two :arg :b}}
-             (set out))))
-    (testing "a fn-def with no vault binding contributes nothing"
-      (is (not-any? #(= :plain (:fn %)) out)))
-    (testing "an empty bundle yields an empty manifest"
-      (is (empty? (call :secret-path-args {:fn-defs []}))))))
-
-
-(deftest strip-secret-paths-reverts-the-arg-to-a-free-slot
-  (let [fn-defs [{:name :db-url :args {:url {:secret-path "kv/db#url"} :n {:value 1}}}]
-        [stripped] (call :strip-secret-paths {:fn-defs fn-defs})]
-    (testing "the vault path does not travel with the exported bundle"
-      (is (nil? (get-in stripped [:args :url :secret-path]))))
-    (testing "the other args are untouched"
-      (is (= {:value 1} (get-in stripped [:args :n]))))))
-
-
 (deftest encode-unreadable-kws-tags-refs-edn-cannot-spell
   (testing "a version-qualified namespace becomes a tagged literal"
     (let [out (call :encode-unreadable-kws {:value {:parent (keyword "mycorp@1-0-0" "greet")}})]

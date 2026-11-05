@@ -972,6 +972,20 @@
      :graphden.executor/lambda-params (vec lambda-params)}))
 
 
+(defn- with-hof-lambda-args
+  "Per-call values also overwrite reader-slot routes across rename chains.
+   Name-only merging cannot shadow an existing captured source-name alias."
+  [fa lambda-args lambda-slots]
+  (if lambda-args
+    (reduce-kv (fn [args slot-id param]
+                 (if (contains? lambda-args param)
+                   (assoc args slot-id (get lambda-args param))
+                   args))
+               (merge fa lambda-args)
+               lambda-slots)
+    fa))
+
+
 (defn- hof-wrap
   "Root-binding HOF: returns a `(fn [fa ctx])` whose call yields the
    callable. The callable closes over `fa` (the wrap-time snapshot of
@@ -984,12 +998,12 @@
    into R's slot-id namespace — required for cross-fn rename cascades
    (e.g. `:method-map :handler` rename slot → `:assoc-handler :handler`
    rename slot have different ids) to survive the wrap."
-  [child lambda-params translation ref-id]
+  [child lambda-params translation lambda-slots ref-id]
   (fn [fa ctx]
-    (let [fa* (apply-hof-translation fa translation)]
+    (let [fa* (apply-hof-translation (apply dissoc fa (keys lambda-slots)) translation)]
       (tagged-callable ref-id lambda-params
                        (fn [lambda-args]
-                         (child (if lambda-args (merge fa* lambda-args) fa*) ctx))))))
+                         (child (with-hof-lambda-args fa* lambda-args lambda-slots) ctx))))))
 
 
 (defn- compile-time-value-root?
@@ -1137,8 +1151,9 @@
         ;; impl invokes it directly.
         (and is-fn (not produces-callable?))
         (let [lambda-params (r/hof-lambda-params ref-id slot-id bnd fn-id lookups)
-              translation (r/build-hof-translation ref-id lambda-params lookups)]
-          (hof-wrap child lambda-params translation ref-id))
+              translation (r/build-hof-translation ref-id lambda-params lookups)
+              lambda-slots (r/hof-lambda-slot-routes ref-id lambda-params lookups)]
+          (hof-wrap child lambda-params translation lambda-slots ref-id))
 
         ;; Two collapse into one — both want "invoke child with the
         ;; caller's env, wrap in a thunk for short-circuit":
@@ -1246,12 +1261,15 @@
         ;; not have populated yet at construction).
         (and is-fn (not produces-callable?))
         (let [lambda-params (r/hof-lambda-params ref-id slot-id env-bnd fn-id lookups)
-              translation (r/build-hof-translation ref-id lambda-params lookups)]
+              translation (r/build-hof-translation ref-id lambda-params lookups)
+              lambda-slots (r/hof-lambda-slot-routes ref-id lambda-params lookups)]
           (fn [fa-ref fa ctx]
             (tagged-callable ref-id lambda-params
                              (fn [lambda-args]
-                               (let [fa* (apply-hof-translation (binding-scope @fa-ref fa env-name) translation)]
-                                 (child (if lambda-args (merge fa* lambda-args) fa*)
+                               (let [fa* (apply-hof-translation
+                                           (apply dissoc (binding-scope @fa-ref fa env-name) (keys lambda-slots))
+                                           translation)]
+                                 (child (with-hof-lambda-args fa* lambda-args lambda-slots)
                                         ctx))))))
 
         ;; Target evaluates to a callable (`:_router` → reitit

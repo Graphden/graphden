@@ -158,10 +158,9 @@
          :ref ref}))))
 
 
-(defn response-for-throwable
-  "Ring response for an uncaught throwable: mapped status, safe JSON
-   body, full details to the server log keyed by the body's ref (when
-   withheld)."
+(defn report-throwable
+  "Log/count an uncaught throwable and return its mapped status plus safe
+   body envelope. Withheld details stay in the server log, keyed by ref."
   [^Throwable t]
   (let [data (ex-data t)
         type-kw (:type data)
@@ -179,21 +178,29 @@
       (log/error t "unhandled request error" {:ref (:ref body) :type type-kw})
       (log/warn "request error" {:type type-kw :status status
                                  :message (Throwable/.getMessage t)}))
+    (assoc body :http-status status)))
+
+
+(defn response-for-throwable
+  "Native Ring response over the same logged and redacted error envelope."
+  [t]
+  (let [envelope (report-throwable t)
+        status (:http-status envelope)]
     {:status status
      :headers (cond-> {"Content-Type" "application/json"}
                 (= 429 status) (assoc "Retry-After" "1"))
-     :body (json/generate-string body)}))
+     :body (json/generate-string (dissoc envelope :http-status))}))
 
 
 (defn wrap-error-boundary
   "Ring wrap: catch anything the inner handler throws and answer with
    the mapped status + safe body. Interrupt flags pass through
    untouched (pool hygiene is the abort-shield's concern)."
-  [handler]
-  (fn [req]
-    (try
-      (handler req)
-      ;; Exception, not Throwable — java.lang.Error (OOM, linkage)
-      ;; must keep crashing the process, per repo convention.
-      (catch Exception t
-        (response-for-throwable t)))))
+  ([handler] (wrap-error-boundary handler response-for-throwable))
+  ([handler on-error]
+   (fn [req]
+     (try
+       (handler req)
+       ;; Error (OOM, linkage) must keep crashing the process.
+       (catch Exception t
+         (on-error t))))))

@@ -145,9 +145,8 @@
           ;; `:allowed-effects #{}` — the runtime backstop; a hidden
           ;; effect throws instead of firing, and the test records as
           ;; failed. Static selection already excluded declared-effect
-          ;; tests. run-tests! itself emits the `test:updated` nudge.
-          (test-runs/run-tests! (assoc ctx :allowed-effects #{})
-                                {:fn-ids capped})))
+          ;; tests. run-selected-tests! itself emits the `test:updated` nudge.
+          (test-runs/run-selected-tests! (assoc ctx :allowed-effects #{}) capped nil)))
       (when-not (try-release! key)
         (recur)))
     (catch InterruptedException _

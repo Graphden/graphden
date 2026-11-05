@@ -44,14 +44,60 @@
    :return-type [:list :keyword-map]
    :effects #{:db}}
 
+  {:name :_export-fn-args :parent :get
+   :args {:coll {:as :fn-def :type :keyword-map} :key {:value :args} :default nil}}
+  {:name :_export-fn-name :parent :get
+   :args {:coll {:as :fn-def :type :keyword-map} :key {:value :name} :default nil}}
+  {:name :_export-arg-entries :parent :into :args {:to [] :from :_export-fn-args}}
+  {:name :_export-arg-key :parent :get
+   :args {:coll {:as :entry :type [:list :any]} :key 0 :default nil}}
+  {:name :_export-arg-value :parent :get
+   :args {:coll {:as :entry :type [:list :any]} :key 1 :default nil}}
+  {:name :_export-secret-arg? :parent :and :lambda-params [:entry]
+   :args {:values [{:parent :is-a? :args {:value :_export-arg-value :type {:value :map}}}
+                   {:parent :contains? :args {:coll {:ref :_export-arg-value :type :keyword-map}
+                                             :key {:value :secret-path}}}]}}
+  {:name :_export-secret-entries :parent :filter
+   :args {:pred :_export-secret-arg? :coll :_export-arg-entries}}
+  {:name :_export-secret-row :parent :zipmap :lambda-params [:entry]
+   :args {:keys [{:value :fn} {:value :arg}] :vals [:_export-fn-name :_export-arg-key]}
+   :return-type :secret-arg-ref}
+  {:name :_export-fn-secrets :parent :map :lambda-params [:fn-def]
+   :args {:func :_export-secret-row :coll :_export-secret-entries}}
   {:name :secret-path-args
-   :description "Manifest of vault-path bindings across `:fn-defs` — one `{:fn <name> :arg <arg>}` per `{:secret-path …}` arg-value. Pure scan; what an importer must re-define when the paths are stripped."
-   :args {:fn-defs {:type [:list :keyword-map] :description "fn-def maps to scan."}}
+   :description "Manifest the fn/arg identities of every secret-path binding; paths themselves never enter the manifest."
+   :parent :concat
+   :args {:colls {:parent :map :args {:func :_export-fn-secrets :coll {:as :fn-defs :type [:list :keyword-map]}}}}
    :return-type [:list :secret-arg-ref]}
 
+  {:name :_export-stripped-value :parent :dissoc
+   :args {:map {:ref :_export-arg-value :type :keyword-map} :key {:value :secret-path}}}
+  {:name :_export-kept-value :parent :if
+   :args {:test :_export-secret-arg? :then :_export-stripped-value :else :_export-arg-value}}
+  {:name :_export-kept-entry? :parent :not :lambda-params [:entry]
+   :args {:value {:parent :and :args {:values [:_export-secret-arg?
+                                              {:parent :empty? :args {:coll :_export-stripped-value}}]}}}}
+  {:name :_export-kept-entries :parent :filter
+   :args {:pred :_export-kept-entry? :coll :_export-arg-entries}}
+  {:name :_export-stripped-entry :parent :list :lambda-params [:entry]
+   :args {:items [:_export-arg-key :_export-kept-value]}}
+  {:name :_export-stripped-args :parent :pairs->map
+   :args {:entries {:parent :map :args {:func :_export-stripped-entry :coll :_export-kept-entries}}}}
+  {:name :_export-with-args :parent :assoc
+   :args {:map {:as :fn-def :type :keyword-map} :key {:value :args} :value :_export-stripped-args}}
+  {:name :_export-without-args :parent :dissoc
+   :args {:map {:as :fn-def :type :keyword-map} :key {:value :args}}}
+  {:name :_export-stripped-fn :parent :if :lambda-params [:fn-def]
+   :args {:test :_export-fn-args
+          :then {:parent :if :args {:test {:parent :empty? :args {:coll :_export-stripped-args}}
+                                   :then :_export-without-args :else :_export-with-args}}
+          :else {:as :fn-def :type :keyword-map}}
+   :return-type :keyword-map}
   {:name :strip-secret-paths
-   :description "`:fn-defs` with vault paths removed — a stripped arg reverts to a FREE secret-typed slot at the importer (never share a vault path silently). Pure pass."
-   :args {:fn-defs {:type [:list :keyword-map] :description "fn-def maps to strip."}}
+   :description "Strip secret-path keys, remove exhausted arg bindings, and drop an empty args map. Other metadata and values are preserved."
+   :parent :vec
+   :args {:coll {:parent :map
+                 :args {:func :_export-stripped-fn :coll {:as :fn-defs :type [:list :keyword-map]}}}}
    :return-type [:list :keyword-map]}
 
   {:name :encode-unreadable-kws
@@ -69,9 +115,45 @@
    :type {:dependencies [:list :keyword]
           :package-dependencies [:list :package-dependency-shape]}}
 
+  {:name :external-dep-facts-shape
+   :type {:dependency-names [:list :keyword]
+          :package-dependency-rows [:list :package-dependency-shape]}}
+
+  {:name :_namespace-external-dep-facts
+   :description "One scoped analysis pass over structural refs and constraint names, plus registry coordinate lookups."
+   :args {:root {:type :text}}
+   :return-type :external-dep-facts-shape
+   :effects #{:db}}
+  {:name :_ned-dependency-names
+   :parent :get
+   :args {:coll :_namespace-external-dep-facts
+          :key {:value :dependency-names} :default {:value []}}}
+  {:name :_ned-package-rows
+   :parent :get
+   :args {:coll :_namespace-external-dep-facts
+          :key {:value :package-dependency-rows} :default {:value []}}}
+  {:name :_ned-package-key-value
+   :parent :list
+   :args {:items [{:parent :get :args {:coll {:as :row :type :package-dependency-shape}
+                                       :key {:value :name} :default ""}}
+                  {:parent :get :args {:coll {:as :row :type :package-dependency-shape}
+                                       :key {:value :version} :default ""}}]}}
+  {:name :_ned-package-key
+   :parent :vec
+   :lambda-params [:row]
+   :args {:coll :_ned-package-key-value}}
+  {:name :_ned-sorted-packages
+   :parent :sort-by
+   :args {:key-fn :_ned-package-key
+          :coll {:parent :distinct :args {:coll :_ned-package-rows}}}}
+
   {:name :namespace-external-deps
-   :description "Dependency analysis for the subtree rooted at `:root` — `{:dependencies [fn-name-kw …] :package-dependencies [{:name :version} …]}`. One records read shared by the structural ref closure and the constraint type-name scan; cohesive single-pass analysis, stays one primitive."
-   :args {:root {:type :text :description "Dotted root namespace path."}}
+   :description "External dependency names and published package coordinates for a subtree. One native scoped analysis pass supplies facts; graph composition sorts, removes duplicates and builds this public response."
+   :parent :zipmap
+   :args {:keys [{:value :dependencies} {:value :package-dependencies}]
+          :vals [{:parent :sort :args {:coll {:parent :distinct :args {:coll :_ned-dependency-names}}}}
+                 :_ned-sorted-packages]
+          :root {:type :text :description "Dotted root namespace path."}}
    :return-type :external-deps-shape
    :effects #{:db}}
 
@@ -524,11 +606,53 @@
   ;; update / pin graph compositions build on.
   ;; ---------------------------------------------------------------------
 
+  {:name :semver-components
+   :description "Canonical parsed major/minor/patch tuple; retains components above 999 and the shared parser's prefix/suffix behavior."
+   :args {:version {:type :text}}
+   :return-type [:list :nullable-int]}
+
+  {:name :semver-satisfies?
+   :description "Canonical semver constraint predicate; selection and defaults are graph policy."
+   :args {:version {:type :text} :constraint {:type :text}}
+   :return-type :bool}
+
+  {:name :_semver-constraint
+   :parent :if
+   :return-type :text
+   :args {:test {:parent :or
+                 :args {:values [{:parent :nil? :args {:value {:as :spec :type :nullable-text}}}
+                                 {:parent :equal? :args {:a {:as :spec :type :nullable-text} :b ""}}
+                                 {:parent :equal? :args {:a {:as :spec :type :nullable-text} :b "latest"}}]}}
+          :then "*"
+          :else {:parent :to-str :args {:value {:as :spec :type :nullable-text}}}}}
+
+  {:name :_semver-item-text
+   :parent :to-str
+   :args {:value {:as :item :type :any}}}
+
+  {:name :_semver-matches?
+   :parent :and
+   :lambda-params [:item]
+   :args {:values [{:parent :some? :args {:value {:as :item :type :any}}}
+                   {:parent :semver-satisfies?
+                    :args {:version :_semver-item-text
+                           :constraint {:as :constraint :type :text}}}]}}
+
+  {:name :_semver-key
+   :parent :semver-components
+   :lambda-params [:item]
+   :args {:version :_semver-item-text}}
+
   {:name :semver-pick
-   :description "The highest of `:versions` satisfying `:spec` (exact / semver constraint `>=1.1` `~>1.2` / `latest`; nil or \"\" = any), ordered by parsed `[major minor patch]`; nil when nothing matches. Pure — the ONE pick the local (`:resolve-package-version`) and the remote (`:resolve-remote-version`) resolution both compose."
-   :args {:versions {:type [:list :any] :description "Candidate version strings (nil entries are skipped)."}
-          :spec {:type :nullable-text :description "Exact version, a semver constraint (`>=1.1`, `~>1.2`), `latest`, or nil (any)."}}
-   :return-type :nullable-text}
+   :description "Graph selection of the highest version satisfying spec. Nil/empty/latest mean any; nil candidates are skipped, stable tuple order preserves the last equal-ranked candidate and the original winning value. Shared by local and remote resolution."
+   :parent :last
+   :return-type :nullable-text
+   :args {:coll {:parent :sort-by
+                 :args {:key-fn :_semver-key
+                        :coll {:parent :filter
+                               :args {:pred :_semver-matches?
+                                      :constraint :_semver-constraint
+                                      :coll {:as :versions :type [:list :any]}}}}}}}
 
   {:name :_pkg-row-version
    :description "One `:package-version` row's (or remote index entry's) `:version`."
@@ -738,11 +862,53 @@
           :to {:type :text :description "Candidate version."}}
    :return-type :bool}
 
-  {:name :missing-package-dependencies
-   :description "The declared dependency names NOT present as fns in storage — ONE batched IN-query + set diff (the batch shape, no N+1, is why this stays a single storage predicate). Empty vector = all satisfied."
-   :args {:dependencies {:type [:list :jsonb] :description "A :package-version row's `:dependencies`."}}
-   :return-type [:list :keyword]
+  {:name :_registry-dependency-name
+   :description "Strict Clojure Named conversion for declared dependency identifiers."
+   :args {:dependency {:type :jsonb}}
+   :return-type :text}
+
+  {:name :_registry-dependency-rows
+   :description "One scoped storage IN-query for dependency names; graph code decides when to query and how to project the result."
+   :args {:names {:type [:list :text]}}
+   :return-type [:list :keyword-map]
    :effects #{:db}}
+
+  {:name :_registry-dependency-names
+   :parent :vec
+   :return-type [:list :text]
+   :args {:coll {:parent :distinct
+                 :args {:coll {:parent :map
+                               :args {:func :_registry-dependency-name
+                                      :coll {:as :dependencies :type [:list :jsonb]}}}}}}}
+
+  {:name :_registry-present-names
+   :parent :to-set
+   :args {:coll {:parent :map
+                 :args {:func {:parent :get
+                               :args {:coll {:as :item :type :keyword-map}
+                                      :key {:value :name} :default nil}}
+                        :coll {:parent :_registry-dependency-rows
+                               :args {:names :_registry-dependency-names}}}}}}
+
+  {:name :_registry-dependency-missing?
+   :parent :not
+   :lambda-params [:item]
+   :args {:value {:parent :contains?
+                  :args {:coll {:as :present-names :type [:list :nullable-text]}
+                         :key {:as :item :type :text}}}}}
+
+  {:name :missing-package-dependencies
+   :description "Graph dependency-name normalization, deduplication and ordered set difference over one scoped IN-query; empty input performs no query."
+   :parent :if
+   :return-type [:list :keyword]
+   :args {:test {:parent :empty? :args {:coll :_registry-dependency-names}}
+          :then []
+          :else {:parent :map
+                 :args {:func :str-to-keyword
+                        :coll {:parent :filter
+                               :args {:pred :_registry-dependency-missing?
+                                      :present-names :_registry-present-names
+                                      :coll :_registry-dependency-names}}}}}}
 
   {:name :fork-package-fns
    :description "Fork apply-core: sync a bundle's fns into the graph AT THEIR ORIGINAL namespace (copy-on-write) + delta-invalidate — a coupled write+invalidation pair. Returns the forked fn count."
@@ -751,12 +917,10 @@
    :effects #{:db}}
 
   {:name :materialize-package-fns
-   :description "Materialize apply-core: sync a bundle's fns ONCE under `<ns-root>@<version>` (idempotent) + delta-invalidate — a coupled write+invalidation pair. Returns the materialized fn count."
-   :args {:ns-root {:type :text :description "Package ns-root."}
-          :version {:type :text :description "Concrete version."}
-          :fns {:type [:list :jsonb] :description "The bundle's fn-defs."}}
-   :return-type :int
-   :effects #{:db}}
+   :description "Legacy scalar facade over the coupled materialization receipt."
+   :parent :get
+   :args {:coll :materialize-package-receipt :key {:value :materialized} :default 0}
+   :return-type :int}
 
   {:name :materialize-package-receipt
    :description "Materialize and publish the bundle, returning the count and only namespace rows actually created inside the materialization transaction. Existing namespaces are never claimed."
@@ -1212,12 +1376,12 @@
   ;; (branch-scoped) target graph. Body `{:name :version}`.
   ;; ---------------------------------------------------------------------
 
-  {:name :package-version-materialized?
-   :description "True iff the version is already visible under its version-qualified namespace — the reference-install idempotency guard (a platform-materialized version seen through an OrgScoped read counts, so a tenant never re-materializes it). One storage read probing the first fn's deterministic id."
+  {:name :_package-materialization-facts
+   :description "Canonical version identities and scoped batched existence facts; body lookup runs only when every identity is present."
    :args {:ns-root {:type :text :description "Package ns-root."}
           :version {:type :text :description "Concrete version."}
-          :fns {:type [:list :jsonb] :description "The bundle's fn-defs (the first one is probed)."}}
-   :return-type :bool
+          :fns {:type [:list :jsonb] :description "The bundle's fn-defs, including body-bearing definitions."}}
+   :return-type {:expected :int :present :int :body-required :bool :body-present :bool}
    :effects #{:db}}
 
   ;; ---------------------------------------------------------------------
@@ -1263,6 +1427,23 @@
 
   ;; Type-row exposing the input slots at a stable owner (same idiom as
   ;; `:BranchChainInput` — NOT propagated frees through the `:fix` step).
+  {:name :_materialization-expected :parent :get
+   :args {:coll :_package-materialization-facts :key {:value :expected} :default 0}}
+  {:name :_materialization-present :parent :get
+   :args {:coll :_package-materialization-facts :key {:value :present} :default 0}}
+  {:name :_materialization-body-required :parent :get
+   :args {:coll :_package-materialization-facts :key {:value :body-required} :default false}}
+  {:name :_materialization-body-present :parent :get
+   :args {:coll :_package-materialization-facts :key {:value :body-present} :default false}}
+  {:name :package-version-materialized?
+   :description "Complete only when the bundle is nonempty, every canonical identity exists, and any required body has a representative binding."
+   :parent :and
+   :args {:values [{:parent :gt :args {:nums [:_materialization-expected 0]}}
+                   {:parent :equal? :args {:a :_materialization-expected :b :_materialization-present}}
+                   {:parent :or :args {:values [{:parent :not :args {:value :_materialization-body-required}}
+                                               :_materialization-body-present]}}]}
+   :return-type :bool}
+
   {:name :InstallPackageInput
    :description "Type-row exposing the `:pkg-name` / `:pkg-version` input slots of `:install-package`."
    :type {:pkg-name :text
@@ -1947,7 +2128,7 @@
           :vals [{:value true} {:as :pkg-name} :_pkgv-resolved :_mat-vq-ns :_mat-count]}}
 
   {:name :materialize-package-version
-   :description "Sync a published version's fns ONCE under a version-qualified namespace (`<ns-root>@<sanitized-version>`) so versions coexist and callers reference them instead of copying rows. Org-neutral (current scope). Idempotent. Pure graph :cond over the shared `:_pkgv-*` guard prefix; the apply core (`:materialize-package-fns`) is the coupled sync+invalidate unit."
+   :description "Sync a published version's fns ONCE under a version-qualified namespace (`<ns-root>@<sanitized-version>`) so versions coexist and callers reference them instead of copying rows. Org-neutral (current scope). Idempotent. Pure graph :cond over the shared `:_pkgv-*` guard prefix; the receipt boundary (`:materialize-package-receipt`) keeps sync and invalidation together."
    :parent :cond
    :args {:clauses [:_pkgv-row-nil?     :_pkgv-err-not-found
                     :_pkgv-missing-any? :_pkgv-err-missing
@@ -1964,24 +2145,43 @@
   ;; Base-fns backing reference-install + the editor's installed list.
   ;; ---------------------------------------------------------------------
 
-  {:name :package-upsert-pin
-   :description "Upsert the single pin row for `(current-branch, :pkg-name)` → `:pkg-version`. Returns the branch-id as text. Shared with the install / update apply cores."
-   :args {:pkg-name {:type :text :description "Package name to pin."}
-          :pkg-version {:type :text :description "Version to pin the package at."}}
-   :return-type :text
-   :effects #{:db :time}}
-
-  {:name :package-pin-receipt
-   :description "Upsert this branch's pin and return the actual written row identity. Updating a pin preserves its UUID."
+  {:name :_package-pin-row-shape
+   :type {:id :uuid :package-name :text :version :text :branch-id :uuid :installed-at :any}}
+  {:name :_package-pin-row
+   :description "Write one current-branch pin with its install-stat update; return the committed row."
    :args {:pkg-name {:type :text} :pkg-version {:type :text}}
-   :return-type {:id :uuid :package-name :text :version :text :branch-id :uuid}
-   :effects #{:db :time}}
-
-  {:name :remove-package-pin-apply
-   :description "Under the graph writer, recheck the exact branch pin, reject installed graph consumers and owner theme/root selections, then unpin atomically."
+   :return-type :_package-pin-row-shape :effects #{:db :time}}
+  {:name :_package-pin-branch :parent :get
+   :args {:coll :_package-pin-row :key {:value :branch-id} :default nil}}
+  {:name :package-upsert-pin
+   :description "Upsert this branch's package pin and return its branch id as text."
+   :parent :to-str :args {:value :_package-pin-branch}
+   :return-type :text}
+  {:name :package-pin-receipt
+   :description "Upsert the pin and project the written row's actual identity; updates preserve its UUID."
+   :parent :select-keys
+   :args {:m :_package-pin-row
+          :ks [{:value :id} {:value :package-name} {:value :version} {:value :branch-id}]}
+   :return-type {:id :uuid :package-name :text :version :text :branch-id :uuid}}
+  {:name :_remove-package-pin-outcome
+   :description "Under graph writer, recheck the exact pin identity and use before deleting; return its safe outcome."
    :args {:pkg-name {:type :text} :expected-id {:type :nullable-uuid}}
-   :return-type :keyword-map
-   :effects #{:db}}
+   :return-type :text :effects #{:db}}
+  {:name :_pin-remove-success? :parent :or
+   :args {:values [{:parent :equal? :args {:a :_remove-package-pin-outcome :b "removed"}}
+                   {:parent :equal? :args {:a :_remove-package-pin-outcome :b "absent"}}]}}
+  {:name :_pin-remove-success :parent :zipmap
+   :args {:keys [{:value :ok} {:value :package-name} {:value :removed}]
+          :vals [true {:as :pkg-name :type :text}
+                 {:parent :equal? :args {:a :_remove-package-pin-outcome :b "removed"}}]}}
+  {:name :_pin-remove-error :parent :zipmap
+   :args {:keys [{:value :ok} {:value :reason} {:value :http-status}]
+          :vals [false :_remove-package-pin-outcome 409]}}
+  {:name :remove-package-pin-apply
+   :description "Project the safe outcome of the exact-identity uninstall into its public response."
+   :parent :if
+   :args {:test :_pin-remove-success? :then :_pin-remove-success :else :_pin-remove-error}
+   :return-type :keyword-map}
 
   {:name :_pin-branch-text
    :parent :package-upsert-pin
@@ -3041,11 +3241,21 @@
    :return-type :nullable-keyword-map
    :effects #{:db}}
 
+  {:name :_request-public-actor-facts
+   :description "Sanitized current-user display candidates and owner presence; no full email or raw principal."
+   :args {} :return-type {:display :nullable-text :email-local :nullable-text :org :nullable-text :owner-present :bool}}
+  {:name :_request-owner-present :parent :get
+   :args {:coll :_request-public-actor-facts :key {:value :owner-present} :default false}}
+  {:name :_owned-branch-policy :parent :if
+   :args {:test :_request-owner-present :then "owner" :else nil}}
+  {:name :_create-request-branch
+   :description "Stamp the actual current owner and publish the branch epoch within the native create boundary."
+   :args {:branch-name {:type :nullable-text} :write-policy {:type :nullable-text}}
+   :return-type :keyword-map :effects #{:db}}
   {:name :create-owned-branch!
-   :description "Create branch `:branch-name` off the request's branch, stamping the caller as owner with the `owner` write-policy when a user is bound (the push-branch convention). Returns the row."
-   :args {:branch-name {:type :nullable-text :description "Branch name."}}
-   :return-type :keyword-map
-   :effects #{:db}}
+   :description "Protect a branch with owner policy when this request has a user identity; the writer stamps that trusted identity."
+   :parent :_create-request-branch :args {:write-policy :_owned-branch-policy}
+   :return-type :keyword-map}
 
   {:name :drop-orphan-anon-defs
    :description "`:fn-defs` without the exporter-lifted `_anon-*` defs no kept def still reaches — the hygiene step after a partition dropped some owners (syncing those orphans flooded the target with duplicate anonymous identities). Pure."
@@ -3274,8 +3484,8 @@
                         :else {:value nil}}}}}
 
   ;; --- :mirror-remote-package! -----------------------------------------
-  {:name :mirror-store-package-version!
-   :description "The mirror's one write: store a fetched remote `:row` as the LOCAL `:package-version` (`:pkg-name`, `:version`) — the REQUESTED name and version, never the row's own (a remote cannot pick the release line its copy lands in) — idempotent (an existing row wins), never public, stamped with this org and `:origin` = `{:url :origin-url}` ∪ the `:origin` signals. Serialised under the package-name lock like a publish, and refused as data like one: `{:error \"name-taken\" :holder}` when another org lists the name publicly, `{:error \"version-exists\"}` when the key is held by a row this org cannot see. Returns `{:name :version}` on success."
+  {:name :_mirror-store-outcome
+   :description "Under the package-name lock, use the requested key, enforce public-name ownership and controlled local stamps, then return safe outcome/holder metadata."
    :args {:pkg-name {:type :text :description "Package name."}
           :version {:type :nullable-text :description "The concrete version fetched."}
           :row {:type :keyword-map :description "The remote's `:package-version` row (its EDN face)."}
@@ -3283,6 +3493,33 @@
           :origin {:type :nullable-keyword-map :required false :value nil :description "The origin's card snapshot (`:remote-package-card`); nil = url only."}}
    :return-type :keyword-map
    :effects #{:db}}
+
+  {:name :_mirror-outcome-code :parent :get
+   :args {:coll :_mirror-store-outcome :key {:value :outcome} :default nil}}
+  {:name :_mirror-version-text :parent :to-str
+   :args {:value {:as :version :type :nullable-text}}}
+  {:name :_mirror-answer :parent :zipmap
+   :args {:keys [{:value :name} {:value :version}]
+          :vals [{:as :pkg-name :type :text} :_mirror-version-text]}}
+  {:name :_mirror-error :parent :assoc
+   :args {:map :_mirror-answer :key {:value :error} :value :_mirror-outcome-code}}
+  {:name :_mirror-holder :parent :to-str
+   :args {:value {:parent :get :args {:coll :_mirror-store-outcome :key {:value :holder} :default nil}}}}
+  {:name :_mirror-name-held :parent :assoc
+   :args {:map :_mirror-error :key {:value :holder} :value :_mirror-holder}}
+  {:name :_mirror-response
+   :description "Project the locked, authority-checked mirror result into the requested name/version envelope."
+   :parent :cond
+   :args {:clauses [{:parent :equal? :args {:a :_mirror-outcome-code :b "name-taken"}} :_mirror-name-held
+                    {:parent :equal? :args {:a :_mirror-outcome-code :b "ok"}} :_mirror-answer
+                    true :_mirror-error]}
+   :return-type :keyword-map}
+
+  {:name :mirror-store-package-version!
+   :description "The mirror's response map has optional error/holder fields; preserve that public map contract after projecting the locked outcome."
+   :parent :ensure-type
+   :args {:value :_mirror-response :type {:value :keyword-map}}
+   :return-type :keyword-map}
 
   {:name :_mrp-url
    :parent :str

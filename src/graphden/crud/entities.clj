@@ -85,7 +85,7 @@
    base-fn (declared via `:tags #{:admin-only-vault}` in
    `web/vault/fns.edn`; see `secret-shape/find-admin-only-vault-base-fn-ids`),
    UNLESS the data carries `:_admin-secret-create true`. The admin
-   path (`crud.secrets/apply-create-secret-body`) sets the marker and strips
+   path (`crud.secrets/create-secret-facts!`) sets the marker and strips
    it before calling the storage layer; any other path (the
    generic `/api/entities/fn` endpoint, ad-hoc API clients, etc.)
    reaches this gate WITHOUT the marker and gets bounced through
@@ -520,7 +520,7 @@
   (let [cap-rej (when (= entity-type :fn)
                   (secret-leaf-capability-rej storage entity-data))]
     (cond
-      cap-rej {:error (:reason cap-rej) :http-status 403}
+      cap-rej {:error (:reason cap-rej) :write-rejection {:kind :secret-leaf}}
       :else (try
               {:created (:id (sp/create-entity storage entity-type entity-data))}
               (catch Exception e
@@ -535,9 +535,9 @@
                 ;; `(fn-id, slot-id)`) then read as an internal error and
                 ;; paged as one. It is a conflict: the row is already there.
                 {:error (humanise-create-exception e entity-type entity-data type-str)
-                 :http-status (if (duplicate-key-ex? e)
-                                409
-                                (web-errors/status-for-ex-data (ex-data e)))})))))
+                 :write-rejection {:kind :storage
+                                   :duplicate-key? (duplicate-key-ex? e)
+                                   :status (web-errors/status-for-ex-data (ex-data e))}})))))
 
 
 (defn- rename-root-slot-id
@@ -723,9 +723,9 @@
         pkg-reason (pkg-guard/write-rejection storage entity-type entity-data)
         rej (validation/write-rej storage entity-type entity-data)
         create-result (cond
-                        pkg-reason {:error pkg-reason :http-status 403}
-                        rename-rej {:error (:reason rename-rej) :http-status (:http-status rename-rej)}
-                        rej {:error (:reason rej) :http-status 400}
+                        pkg-reason {:error pkg-reason :write-rejection {:kind :package}}
+                        rename-rej {:error (:reason rename-rej) :write-rejection {:kind :validation :status (:http-status rename-rej)}}
+                        rej {:error (:reason rej) :write-rejection {:kind :validation}}
                         :else (try-create-or-error storage entity-type entity-data type-str))]
     (if (:created create-result)
       ;; The renamed-view slot lands BEFORE the type check. The checker
@@ -755,13 +755,11 @@
             (:diagnostic rej) (assoc :type-warnings [(:diagnostic rej)])
             (pos? (or (:dependent-type-warning-count rej) 0))
             (assoc :dependent-type-warning-count (:dependent-type-warning-count rej)))))
-      ;; Preserve the error's :http-status (409 collisions, 403
-      ;; capability — the central web.errors mapping) alongside the
-      ;; human message.
-      (cond-> {:error (or (:error create-result)
-                          (str "Failed to create " type-str))}
-        (:http-status create-result)
-        (assoc :http-status (:http-status create-result))))))
+      ;; Keep the rejection truthy until the transaction aborts. The graph
+      ;; renders HTTP status and fallback text after the guarded write returns.
+      (cond-> {:error (or (:error create-result) :crud/write-failed)}
+        (:write-rejection create-result)
+        (assoc :write-rejection (:write-rejection create-result))))))
 
 
 (defn- forward-rename-slot-on-update!
@@ -856,11 +854,14 @@
                                   (web-errors/status-for-ex-data (ex-data e)))
                          nil)))]
     (if-not updated
-      {:error (or pkg-reason (:reason rej) @error-msg "Failed to update entity")
-       :http-status (cond
-                      (or pkg-reason (= :capability/secret-leaf-restricted (:type rej))) 403
-                      rej (or (:http-status rej) 400)
-                      :else @error-status)}
+      {:error (or pkg-reason (:reason rej) @error-msg :crud/write-failed)
+       :write-rejection {:kind (cond
+                                 pkg-reason :package
+                                 (= :capability/secret-leaf-restricted (:type rej)) :secret-leaf
+                                 rej :validation
+                                 :else :storage)
+                         :status (if rej (:http-status rej) @error-status)
+                         :include-null-status? true}}
       (let [;; Renamed-view slot BEFORE the type check — same reason as in
             ;; `apply-create-core`: the checker must see the rename it is
             ;; about to record.
@@ -911,7 +912,8 @@
 (defn apply-create-core
   "Create a form entity and optional rename rows atomically. Revalidate the
    current structure under the writer; keep ordinary type warnings, roll back
-   secret-flow failures. Returns the existing created/error envelope."
+   secret-flow failures. Returns a guarded created/error outcome; `:write-rejection` contains safe
+   facts for the graph response, never raw exceptions."
   [parsed ctx]
   (apply-form-write apply-create! parsed ctx))
 
@@ -919,7 +921,8 @@
 (defn apply-update-core
   "Update a form entity and optional rename rows atomically. Partial PUTs
    recover owner fields under the writer; secret rejection restores all SQL
-   history. Ordinary type errors still warn and persist."
+   history. Ordinary type errors still warn and persist. Failure outcomes keep
+   `:error` truthy until rollback; the graph renders their safe rejection facts."
   [parsed ctx]
   (apply-form-write apply-update! parsed ctx))
 
@@ -957,8 +960,6 @@
 (def concealed-export-rows     entity-list/concealed-export-rows)
 (def viewer-rich-entry         entity-list/viewer-rich-entry)
 (def viewer-rule-owner         entity-list/viewer-rule-owner)
-(def graph-namespace-fns       entity-list/graph-namespace-fns)
-(def graph-search              entity-list/graph-search)
 (def graph-subtree             entity-list/graph-subtree)
 (def graph-full                entity-list/graph-full)
 (def view-members              views/view-members)

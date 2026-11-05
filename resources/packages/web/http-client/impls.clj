@@ -12,7 +12,6 @@
   (:require
     [clojure.string :as str]
     [graphden.clients.egress :as egress]
-    [graphden.crud.fn-execution.trace :as trace]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
     [org.httpkit.client :as http])
@@ -202,15 +201,12 @@
       (dial-platform* m url hs body timeout-ms))))
 
 
-(defbase trace-headers
-  "The cross-service trace header for an outbound call — `{\"X-Graphden-
-   Trace\" \"<trace>;<execution>\"}` under a persisted run, `{}` otherwise.
-   Merged into `:service-get` / `:service-post`'s headers so the callee
-   links the request it handles to this execution."
+(defbase _current-execution-trace
+  "Snapshot the dynamically bound persisted execution identity."
   []
-  (trace/trace-headers))
+  (select-keys cr/*execution* [:id :trace-id]))
 
 
 (def impls
   {:http-request http-request
-   :trace-headers trace-headers})
+   :_current-execution-trace _current-execution-trace})

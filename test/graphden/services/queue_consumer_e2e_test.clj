@@ -5,7 +5,6 @@
    nacking the one it throws on — retry counted, error kept."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.crud.fn-execution :as fn-exec]
     [graphden.crud.fn-execution.lookup :as lookup]
     [graphden.crud.fn-execution.persist :as persist]
     [graphden.executor.compile-runtime :as cr]
@@ -13,6 +12,7 @@
     [graphden.packages.records :as records]
     [graphden.services.reconciler :as recon]
     [graphden.storage.protocol.core :as sp]
+    [graphden.test-infra.execution-api :as execution-api]
     [graphden.test-infra.impls :as impls]
     [graphden.test-infra.wait :as wait]))
 
@@ -90,8 +90,8 @@
                 traced (binding [cr/*execution* {:id parent-id :trace-id parent-id}]
                          (publish! "{\"order\":42}"))]
             (wait/wait-for drain-ms #(nil? (sp/read-entity storage :queue-message traced)))
-            (wait/wait-for drain-ms #(seq (:children (fn-exec/get-execution ctx parent-id))))
-            (let [children (:children (fn-exec/get-execution ctx parent-id))
+            (wait/wait-for drain-ms #(seq (:children (execution-api/get-execution ctx parent-id))))
+            (let [children (:children (execution-api/get-execution ctx parent-id))
                   child-row (some->> children first :id (sp/read-entity storage :fn-execution))]
               (is (= 1 (count children)))
               (is (= "qe-handle" (:fn-name (first children))) "the consumer's handler fn")
@@ -99,7 +99,7 @@
               (is (= parent-id (:trace-id child-row)))
               (is (= parent-id (:parent-execution-id child-row)))
               (is (= {:order 42} (:result child-row)))
-              (let [args (:args (fn-exec/get-execution ctx (:id child-row)))]
+              (let [args (:args (execution-api/get-execution ctx (:id child-row)))]
                 (is (= 1 (count args)) "one persisted arg — the handler's `message`")
                 (is (= (str traced) (str (get-in (first args) [:value :id])))
                     "the message is the persisted argument"))))

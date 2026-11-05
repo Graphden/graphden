@@ -208,24 +208,21 @@
 ;; query-param — raw-fallback URL decode must not throw on bad input
 ;; ============================================================================
 
-(deftest query-param-test
-  (testing "enriched :query-params (string + keyword key) win"
-    (is (= "v" (fn-exec/query-param {:query-params {"p" "v"}} "p")))
-    (is (= "v" (fn-exec/query-param {:query-params {:p "v"}} "p"))))
-
-  (testing "raw :query-string fallback is URL-decoded"
+(deftest raw-query-param-test
+  (testing "raw query-string codec is URL-decoded"
     (is (= "hello world"
-           (fn-exec/query-param {:query-string "p=hello%20world"} "p"))))
+           (fn-exec/raw-query-param "p=hello%20world" "p"))))
 
-  (testing "malformed percent-escape in the raw fallback fails soft (no 500)"
-    ;; A lone `%` / bad hex used to bubble IllegalArgumentException up as a
-    ;; 500. `safe-url-decode` now returns the raw match instead.
-    (is (= "a%" (fn-exec/query-param {:query-string "p=a%"} "p")))
-    (is (= "%zz" (fn-exec/query-param {:query-string "p=%zz"} "p"))))
+  (testing "malformed percent escapes fail soft"
+    (is (= "a%" (fn-exec/raw-query-param "p=a%" "p")))
+    (is (= "%zz" (fn-exec/raw-query-param "p=%zz" "p"))))
 
-  (testing "absent param → nil"
-    (is (nil? (fn-exec/query-param {:query-string "other=1"} "p")))
-    (is (nil? (fn-exec/query-param {} "p")))))
+  (testing "parameter names are literal regex text"
+    (is (= "yes" (fn-exec/raw-query-param "pXq=no&p.q=yes" "p.q"))))
+
+  (testing "absent parameter returns nil"
+    (is (nil? (fn-exec/raw-query-param "other=1" "p")))
+    (is (nil? (fn-exec/raw-query-param nil "p")))))
 
 
 ;; ============================================================================
@@ -386,12 +383,17 @@
         kids [(run-fn! f2) (run-fn! f1)]]
     (doseq [k kids]
       (sp/update-entity storage :fn-execution k {:parent-execution-id parent}))
-    (testing "every child, oldest first, with the fn it ran"
-      (is (= [[(first kids) (:id f2) "my-test-add-child-two"]
-              [(second kids) (:id f1) "my-test-add-child-one"]]
-             (mapv (juxt :id :fn-id :fn-name) (fn-exec/child-executions storage parent)))))
-    (testing "a run that called nothing has no children"
-      (is (= [] (fn-exec/child-executions storage (first kids)))))))
+    (testing "child facts resolve each version with only public columns"
+      (let [{:keys [child-rows fn-id-by-version fn-name-by-id]}
+            (fn-exec/execution-read-facts c parent)]
+        (is (= (set kids) (set (map :id child-rows))))
+        (is (= #{(:id f1) (:id f2)}
+               (set (map #(get fn-id-by-version (:fn-version-id %)) child-rows))))
+        (is (= {(:id f1) "my-test-add-child-one" (:id f2) "my-test-add-child-two"}
+               fn-name-by-id))
+        (is (every? #(not-any? (set (keys %)) [:result :path-trace :error-data]) child-rows))))
+    (testing "a run that called nothing has no child facts"
+      (is (= [] (:child-rows (fn-exec/execution-read-facts c (first kids))))))))
 
 
 (deftest usage-rollup-bump-and-read-roundtrip-test
@@ -426,24 +428,21 @@
              (exec-stats/org-summary pool nil 7)))
       (is (= {:runs 1 :failed 0 :duration-ms-sum 1} (exec-stats/org-summary pool "acme" 7))
           "acme sees only its own"))
-    (testing "org-daily — per-day series, org-scoped, raw sums + bar pct"
+    (testing "org-daily — per-day series, org-scoped raw sums"
       (let [rows (exec-stats/org-daily pool nil 7)]
         (is (= 1 (count rows)) "all three bumps share today's bucket")
-        (is (= {:runs 3 :failed 1 :duration-ms-sum 35 :runs-pct 100}
-               (select-keys (first rows) [:runs :failed :duration-ms-sum :runs-pct])))
+        (is (= {:runs 3 :failed 1 :duration-ms-sum 35}
+               (select-keys (first rows) [:runs :failed :duration-ms-sum])))
         (is (string? (:day (first rows))))))
     (testing "org-fn-stats-named — busiest fns with the name join, raw sums"
       (let [rows (exec-stats/org-fn-stats-named pool nil 7 20)]
         (is (= [fn-id] (mapv :fn-id rows)))
-        (is (= {:runs 3 :failed 1 :duration-ms-sum 35 :runs-pct 100}
-               (select-keys (first rows) [:runs :failed :duration-ms-sum :runs-pct])))
+        (is (= {:runs 3 :failed 1 :duration-ms-sum 35}
+               (select-keys (first rows) [:runs :failed :duration-ms-sum])))
         (is (contains? (first rows) :fn-name))))
-    (testing "org-all-stats — cross-org operator read, busiest first, bar pct
-              relative to the busiest org"
+    (testing "org-all-stats — cross-org operator read, busiest first"
       (let [rows (exec-stats/org-all-stats pool 7 20)]
         (is (= ["public" "acme"] (mapv :org rows)))
-        (is (= [100 33] (mapv :runs-pct rows))
-            "acme's 1 run vs public's 3 → 33%")
         (is (= {:runs 3 :failed 1 :duration-ms-sum 35}
                (select-keys (first rows) [:runs :failed :duration-ms-sum])))))
     (testing "retention sweep deletes old buckets only"
@@ -483,25 +482,28 @@
                     :args {:a 1 :b "boom"}
                     :timeout-ms 5000 :persist? true})]
     (is (= :failed (:status result)))
-    (let [rows (exec-errors/recent-unresolved-failures
+    (let [rows (exec-errors/recent-unresolved-failure-facts
                  c (:pool @shared-storage) nil 7 10)]
       (is (= 1 (count rows)) "exactly the one failure listed")
       (let [row (first rows)]
+        (is (= #{:execution-id :fn-id :fn-name :finished-at :error :error-data}
+               (set (keys row))) "only allowlisted facts leave the scoped query")
         (is (= (:id composed) (:fn-id row)) "joined back to the LOGICAL fn id")
         (is (str/includes? (str (:fn-name row)) "my-test-add-errlog")
             "display name joined from the fn row")
         (is (seq (str (:error row))) "carries the error text")
         (is (some? (:execution-id row)) "carries the row id (dismiss target)")))
-    (testing "the per-fn tally behind the failed-runs lens counts the same run"
-      (let [counts (exec-errors/unresolved-failure-counts c (:pool @shared-storage) nil 7)
-            row (first (filter #(= (:id composed) (:fn-id %)) counts))]
-        (is (= 1 (:count row)))
+    (testing "the safe facts behind the graph tally contain the same run"
+      (let [rows (exec-errors/unresolved-failure-rows c (:pool @shared-storage) nil 7)
+            matching (filter #(= (:id composed) (:fn-id %)) rows)
+            row (first matching)]
+        (is (= 1 (count matching)))
         (is (str/includes? (str (:fn-name row)) "my-test-add-errlog"))
         (is (contains? row :namespace-id) "carries the namespace for the per-ns chip")))
     (testing "another org's read sees nothing (explicit org filter)"
-      (is (empty? (exec-errors/recent-unresolved-failures
+      (is (empty? (exec-errors/recent-unresolved-failure-facts
                     c (:pool @shared-storage) "acme" 7 10)))
-      (is (empty? (exec-errors/unresolved-failure-counts
+      (is (empty? (exec-errors/unresolved-failure-rows
                     c (:pool @shared-storage) "acme" 7))))))
 
 
@@ -517,7 +519,7 @@
                  (apply-and-await!
                    c {:fn-id (:id composed) :args {:a 1 :b b}
                       :timeout-ms 5000 :persist? true}))
-        listed (fn [] (exec-errors/recent-unresolved-failures c pool nil 7 10))]
+        listed (fn [] (exec-errors/recent-unresolved-failure-facts c pool nil 7 10))]
     (testing "a later succeeded run of the SAME version clears the failure"
       (is (= :failed (:status (run-b! "boom"))))
       (is (= 1 (count (listed))))
@@ -565,7 +567,7 @@
         child-ctx (ctx-of child-storage)
         sibling-ctx (ctx-of sibling-storage)
         pool (:pool base)
-        listed (fn [ctx] (exec-errors/recent-unresolved-failures ctx pool nil 7 10))
+        listed (fn [ctx] (exec-errors/recent-unresolved-failure-facts ctx pool nil 7 10))
         fail-on! (fn [ctx]
                    (apply-and-await!
                      ctx {:fn-id (:id composed) :args {:a 1 :b "boom"}
@@ -895,17 +897,17 @@
                  :timeout-ms 5000 :persist? true})
         exec-id (some-> (:execution-id sub) java.util.UUID/fromString)]
     (try
-      (let [row (fn-exec/get-execution c exec-id)]
+      (let [{:keys [row arg-rows]} (fn-exec/execution-read-facts c exec-id)]
         (testing "row carries the bookkeeping fields"
           (is (some? row))
           (is (= :succeeded (:status row)))
           (is (= 30 (:result row)))
           (is (some? (:fn-version-id row))))
-        (testing "nested args list reflects what was submitted"
-          (is (= 2 (count (:args row))))
-          (is (= #{10 20} (set (map :value (:args row)))))))
+        (testing "argument facts reflect what was submitted"
+          (is (= 2 (count arg-rows)))
+          (is (= #{10 20} (set (map :value arg-rows))))))
       (testing "missing id → nil"
-        (is (nil? (fn-exec/get-execution c (random-uuid)))))
+        (is (nil? (fn-exec/execution-read-facts c (random-uuid)))))
       (finally nil))))
 
 
@@ -1665,7 +1667,7 @@
           (is (some? (entry-of (:path-trace row))))
           (is (not (:path-truncated? (:path-trace row))))))
       (testing "status read (GET /api/execute/:id) returns it additively"
-        (is (some? (entry-of (:path-trace (fn-exec/get-execution c exec-id))))))
+        (is (some? (entry-of (:path-trace (:row (fn-exec/execution-read-facts c exec-id)))))))
       (finally nil))))
 
 
@@ -1881,14 +1883,13 @@
                 ":position monotonic 0..N-1")
             (is (= [10 20 30] (mapv :value items))
                 "item :values preserve input order"))))
-      (testing "GET endpoint stitches items into :args[*].items"
-        (let [row (fn-exec/get-execution c exec-id)
-              args (:args row)
-              list-arg (->> args (filter #(nil? (:value %))) first)]
+      (testing "read facts keep list items scoped to the acquired argument IDs"
+        (let [{:keys [arg-rows arg-item-rows]} (fn-exec/execution-read-facts c exec-id)
+              list-arg (first (filter #(nil? (:value %)) arg-rows))]
           (is (some? list-arg))
-          (is (= 3 (count (:items list-arg))))
-          (is (= [10 20 30] (mapv :value (:items list-arg)))
-              "items array on the response carries positional order")))
+          (is (= 3 (count arg-item-rows)))
+          (is (= #{(:id list-arg)} (set (map :execution-arg-id arg-item-rows))))
+          (is (= #{10 20 30} (set (map :value arg-item-rows))))))
       (finally nil))))
 
 
@@ -2436,15 +2437,20 @@
       (setup/create-composed-fn! storage (str "t-" suffix) (:id base)))))
 
 
+(defn- native-statuses-by-name
+  [ctx]
+  (let [{:keys [tests statuses]} (test-runs/status-facts ctx)]
+    (into {} (map (fn [{:keys [id name]}] [name (get statuses id)])) tests)))
+
+
 (defn- await-terminal-statuses
-  "Poll `tests-with-statuses` until every fn in `names` reports a
+  "Poll current-version native status facts until every fn in `names` reports a
    TERMINAL status (or 10 s passes) — inline successes may still have
    their row finalised by the async `record-completion!` writer."
   [ctx names]
   (let [deadline (+ (System/currentTimeMillis) 10000)]
     (loop []
-      (let [by-name (into {} (map (juxt :fn-name identity))
-                          (test-runs/tests-with-statuses ctx))
+      (let [by-name (native-statuses-by-name ctx)
             terminal? (fn [n]
                         (contains? #{"succeeded" "failed" "cancelled"}
                                    (str (:status (get by-name n)))))]
@@ -2491,17 +2497,16 @@
           "the `_`-private helper inside the tests ns is scaffolding, not a test"))
 
     (testing "status before any run — every test present, status nil"
-      (let [sts (test-runs/tests-with-statuses c)]
+      (let [sts (vals (native-statuses-by-name c))]
         (is (= 3 (count sts)))
         (is (every? (comp nil? :status) sts))))
 
     (testing "run — pass / fail / not-runnable buckets"
-      (let [out (test-runs/run-tests! c {})]
-        (is (= 3 (:total out)))
-        (is (= 1 (:passed out)))
-        (is (= 1 (:failed out)))
-        (is (= 1 (:other out)))
-        (let [by-name (into {} (map (juxt :fn-name identity)) (:results out))]
+      (let [out (test-runs/run-selected-tests!
+                  c [(:id passing) (:id failing) (:id unrunnable)
+                     (:id outside) (:id helper) (:id passing)] nil)]
+        (is (= 3 (count out)) "native boundary rechecks test membership and deduplicates")
+        (let [by-name (into {} (map (juxt :fn-name identity)) out)]
           (is (= :succeeded (:status (get by-name "t-pass"))))
           (is (= :failed (:status (get by-name "t-fail"))))
           (is (str/includes? (str (:error (get by-name "t-fail"))) "assert-eq")
@@ -2510,10 +2515,11 @@
           (is (str/includes? (str (:error (get by-name "my-test-add-unrun"))) "a, b")
               "unbound args are named"))))
 
-    (testing "run — :fn-ids subset (uuid strings, the wire shape)"
-      (let [out (test-runs/run-tests! c {:fn-ids [(str (:id passing))]})]
-        (is (= 1 (:total out)))
-        (is (= 1 (:passed out)))))
+    (testing "run — explicit UUID subset and empty selection"
+      (let [out (test-runs/run-selected-tests! c [(:id passing)] nil)]
+        (is (= 1 (count out)))
+        (is (= :succeeded (:status (first out))))
+        (is (= [] (test-runs/run-selected-tests! c [] nil)))))
 
     (testing "status after the run — latest execution per current version"
       (let [by-name (await-terminal-statuses c ["t-pass" "t-fail"])]
@@ -2526,8 +2532,7 @@
 
     (testing "editing a test rolls its version — status honestly resets to nil"
       (sp/update-entity storage :fn (:id passing) {:description "edited"})
-      (let [by-name (into {} (map (juxt :fn-name identity))
-                          (test-runs/tests-with-statuses c))]
+      (let [by-name (native-statuses-by-name c)]
         (is (nil? (:status (get by-name "t-pass")))
             "stale-by-construction: the new version has no recorded run")
         (is (= "failed" (str (:status (get by-name "t-fail"))))
@@ -2546,9 +2551,9 @@
                                     :args {:a 2 :b 3}
                                     :timeout-ms 5000 :persist? true})
         eid (some-> (:execution-id result) parse-uuid)
-        row (fn-exec/get-execution c eid)]
+        facts (fn-exec/execution-read-facts c eid)]
     (is (some? eid) "persisted run returns an execution id")
-    (is (= (:id composed) (:fn-id row))
+    (is (= (:id composed) (get (:fn-id-by-version facts) (:fn-version-id (:row facts))))
         "read-time join back to the LOGICAL fn id")))
 
 
@@ -2583,7 +2588,7 @@
         _ (apply-and-await! c {:fn-id (:id composed) :args {:a 1 :b "boom"}
                                :timeout-ms 5000 :persist? true})
         name-of (fn [rows] (:fn-name (first (filter #(= (str (:id composed)) (str (:fn-id %))) rows))))]
-    (is (= "post-rename-add" (name-of (exec-errors/recent-unresolved-failures c pool nil 7 10))))
-    (is (= "post-rename-add" (name-of (exec-errors/unresolved-failure-counts c pool nil 7))))
+    (is (= "post-rename-add" (name-of (exec-errors/recent-unresolved-failure-facts c pool nil 7 10))))
+    (is (= "post-rename-add" (name-of (exec-errors/unresolved-failure-rows c pool nil 7))))
     (is (= "post-rename-add" (name-of (exec-errors/recent-executions c pool nil 20))))
     (is (= "post-rename-add" (name-of (exec-stats/org-fn-stats-named pool nil 7 50))))))

@@ -1,12 +1,12 @@
 (ns graphden.editor.component-export-fixture
   "Exercise imported component selections through ordinary personal roots."
   (:require
-    [graphden.editor.components :as components]
     [graphden.editor.config-preparation :as preparation]
     [graphden.graph.metadata :as metadata]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router.epoch :as epoch]
-    [graphden.tenancy.context :as tenancy]))
+    [graphden.tenancy.context :as tenancy]
+    [graphden.test-infra.ui-operation-api :as ui-api]))
 
 
 (defn with-home
@@ -37,4 +37,4 @@
 
 (defn export!
   [ctx selection-id component]
-  (with-home selection-id #(components/export-resolved ctx {:component component})))
+  (with-home selection-id #(ui-api/export-resolved ctx {:component component})))

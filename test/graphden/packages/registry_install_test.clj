@@ -113,30 +113,32 @@
   ;; no body (write-records! commits the :fn batch before the :binding batch,
   ;; non-transactionally). Probing only the identity would report TRUE and make
   ;; install SKIP the (idempotent) re-materialize, freezing the half-written
-  ;; version. The guard must verify bodies too. Both helpers are private —
-  ;; reached through the registry impls ns the golden bootstrap loaded.
+  ;; version. The graph guard must verify bodies too; the setup uses the
+  ;; canonical identity/materialization helpers the golden bootstrap loaded.
   (let [st (storage)
         impls-ns 'graphden.packages.app.registry.impls
-        already-materialized? @(ns-resolve impls-ns 'already-materialized?)
         materialize-fns! @(ns-resolve impls-ns 'materialize-fns!)
         version-qualified-ns @(ns-resolve impls-ns 'version-qualified-ns)
         ns-root "amat.demo"
         version "3.1.0"
         ;; :const carries a :value binding — the body row a mid-way write drops.
         bundle [{:namespace ns-root :name :amat-leaf :parent :const :args {:value 42}}]
+        complete? (fn [ns-root version bundle]
+                    (rf/run-named "package-version-materialized?"
+                                  {:ns-root ns-root :version version :fns bundle}))
         fid (ids/fn-id (version-qualified-ns ns-root version ns-root) :amat-leaf)]
     (testing "before any write → not materialized"
-      (is (false? (already-materialized? st ns-root version bundle))))
+      (is (false? (complete? ns-root version bundle))))
     (materialize-fns! st ns-root version bundle)
     (testing "after a complete materialize → materialized"
-      (is (true? (already-materialized? st ns-root version bundle)))
+      (is (true? (complete? ns-root version bundle)))
       (is (seq (sp/query-entities st :binding {:fn-id fid})) "binding body present"))
     (testing "identity kept but bindings dropped (mid-way write) → NOT materialized"
       (doseq [b (sp/query-entities st :binding {:fn-id fid})]
         (sp/delete-entity st :binding (:id b)))
       (is (seq (sp/query-entities st :fn {:id fid})) "identity row still present")
       (is (empty? (sp/query-entities st :binding {:fn-id fid})) "bindings gone")
-      (is (false? (already-materialized? st ns-root version bundle))
+      (is (false? (complete? ns-root version bundle))
           "missing body → not complete, so install re-materializes"))))
 
 

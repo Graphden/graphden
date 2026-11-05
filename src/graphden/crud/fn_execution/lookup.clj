@@ -178,24 +178,22 @@
   (into {} (map (juxt :ext-name :slot-id)) entries))
 
 
-(defn free-arg-entries
-  "The public free-arg surface of `fn-id` as the editor reads it: a
-   vector of `{:name kw :slot-id uuid :optional? bool :captured? bool
-   :via text|nil}` — one per open hole (`surface/public-free-entries`),
-   `:via` the NAME of the HOF target a closure capture is read inside
-   (nil for the fn's own surface). The Run form folds the optional
-   ones, the inspector says which are captures and where. Same walk
-   as `free-arg-slot-map`, so the two never disagree."
+(defn free-arg-facts
+  "Canonical public holes and the names of their capture targets, from one
+   executor lookup snapshot. Slot membership, inherited renames, requiredness
+   and capture algebra remain surface/public-free-entries' responsibility.
+   Only these safe columns cross into the free-arg-entries display graph."
   [ctx fn-id]
-  (let [storage (request/require-storage ctx)
-        lookups (executor-lookups ctx storage fn-id)]
-    (mapv (fn [{:keys [ext-name slot-id optional? captured? via]}]
-            {:name (keyword ext-name)
-             :slot-id slot-id
-             :optional? (boolean optional?)
-             :captured? (boolean captured?)
-             :via (some->> via (get (:fn-by-id lookups)) :name)})
-          (surface/public-free-entries fn-id lookups))))
+  (if-not fn-id
+    {:entries [] :via-names {}}
+    (let [storage (request/require-storage ctx)
+          lookups (executor-lookups ctx storage fn-id)
+          entries (surface/public-free-entries fn-id lookups)
+          via-ids (into #{} (keep :via) entries)]
+      {:entries (mapv (fn [{:keys [ext-name slot-id optional? captured? via]}]
+                        {:ext-name ext-name :slot-id slot-id :optional? optional?
+                         :captured? captured? :via via}) entries)
+       :via-names (into {} (map (fn [id] [id (:name (get (:fn-map lookups) id))])) via-ids)})))
 
 
 (defn free-arg-slot-map

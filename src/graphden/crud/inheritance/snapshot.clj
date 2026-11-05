@@ -51,14 +51,14 @@
 
 
 (defn descriptors
+  "Return scoped identity/name facts for preview presentation. The package
+   graph derives qualified names from these safe facts."
   [storage fn-rows]
   (let [paths (ns-path/path-map (sp/query-entities storage :ns {}))]
     (into {} (map (fn [row]
-                    [(:id row) (cond-> (select-keys row [:id :name :namespace-id])
-                                 (:name row)
-                                 (assoc :qualified-name
-                                        (if-let [path (get paths (:namespace-id row))]
-                                          (str path "/" (:name row)) (:name row))))])) fn-rows)))
+                    [(:id row) (assoc (select-keys row [:id :name :namespace-id])
+                                      :namespace-path (get paths (:namespace-id row)))]))
+          fn-rows)))
 
 
 (defn- canonical

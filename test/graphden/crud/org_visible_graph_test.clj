@@ -12,7 +12,6 @@
    precisely that no storage round-trip is involved on a cache hit."
   (:require
     [clojure.test :refer [deftest is testing]]
-    [graphden.crud.entities :as entities]
     [graphden.crud.entities.list :as listing]
     [graphden.crud.types-api :as ta]
     [graphden.executor.registry.core :as registry]
@@ -116,15 +115,13 @@
   (let [ctx {:graph-cache (atom full-graph)
              :storage empty-ns-storage}]
     (binding [diag/*diagnostics-override* (atom {})]
-      (testing ":search cannot find a foreign org's fn"
+      (testing "candidate cohort cannot expose foreign rows"
         (tctx/with-org "bcorp"
-                       (let [{:keys [fns]} (entities/graph-search
-                                             ctx "acme" false)]
-                         (is (empty? fns) "substring search over foreign names finds nothing"))
-                       (let [{:keys [fns]} (entities/graph-search
-                                             ctx "bcorp-own" false)]
-                         (is (= [(str b-fn-id)] (mapv (comp str :id) fns))
-                             "own fns still resolve"))))
+                       (listing/project-graph-cohort
+                         ctx (fn [cohort]
+                               (is (not-any? #(= a-fn-id (:id %)) (:rows cohort)))
+                               (is (some #(= b-fn-id (:id %)) (:rows cohort)))
+                               {:ids [] :truncated? false}) false true)))
       (testing ":tree diag counts ignore foreign fn-ids in the shared bucket"
         (diag/record! nil a-fn-id [{:message "acme's broken fn"}])
         (tctx/with-org "bcorp"

@@ -1161,8 +1161,8 @@
 
    1. `:required false` — descendants may narrow optional → required,
       but never widen a required slot back to optional. The slot's
-      own `:required` on the base-fn declaration is the only way to
-      declare optionality.
+      own `:required` on a new slot declaration sets its optionality;
+      it does not relax an inherited slot with the same name.
 
    2. `:type T` where T is NOT a subtype of the inherited slot type —
       descendants may narrow a wider type (e.g. `:int` → `:positive-
@@ -1172,12 +1172,14 @@
    `parent-args` is the parent's resolved free-arg type map (the
    inherited slot types). nil entries (slot not in parent) skip the
    type check — they're not narrowings of anything."
-  [{fn-name :name :as fn-def} parent-name parent-args]
+  [{fn-name :name :as fn-def} parent-name parent-args own-declarations]
   (doseq [[arg-name b-form] (:args fn-def)]
     (when (map? b-form)
       ;; (1) required widening.
       (when (and (contains? b-form :required)
-                 (false? (:required b-form)))
+                 (false? (:required b-form))
+                 (not (and (contains? own-declarations arg-name)
+                           (not (contains? parent-args arg-name)))))
         (throw-widening!
           fn-name parent-name arg-name b-form :required
           (str "bindings cannot widen `:required true` back to false. "
@@ -2676,7 +2678,7 @@
           (check-effect-categories! fn-def)
           (check-unknown-slots! fn-def primary-parent parent-args parent-info own-declarations)
           (check-ref-type-overrides! fn-def primary-parent)
-          (check-binding-monotonicity! fn-def primary-parent parent-args)
+          (check-binding-monotonicity! fn-def primary-parent parent-args own-declarations)
           (check-branch-local-monotonicity! fn-def)
           (let [;; Effective parent-args includes resolved bindings from
                 ;; further up the chain — gives rules a transitive view of

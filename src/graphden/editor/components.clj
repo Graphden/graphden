@@ -117,20 +117,26 @@
                :custom-components (resolution/owned-writable-components storage resolved))))))
 
 
-(defn failure-response
-  "Finite source failure envelope. No exception message, source or identity is
-   returned; only a trusted policy-freshness refusal may request a retry."
+(defn failure-facts
+  "Finite native refusal facts. No message, identity, arbitrary reason or
+   exception data crosses into response graphs. The exact server-stale proof
+   must remain native: extra exception data must never acquire retry semantics."
   [error]
-  (let [{:keys [type reason]} (ex-data error)]
-    (cond-> {:ok false :reason "Personal UI graph is unavailable. Using built-in components."
-             :http-status (if (= :authz/forbidden type) 403 422)}
-      (and (= :browser-plan/unsupported type) (= :component-missing reason))
-      (assoc :code "component-missing" :fallback "builtin")
-      (and (= :browser-plan/unsupported type) (= :policy-refresh-required reason))
-      (assoc :code "policy-refresh-required" :retryable true :retry-after 1)
-      (= :quota/entity-limit type)
-      (assoc :http-status 429 :code "graph-limit"
-             :reason "Your organization has reached its graph limit. Free space or change your plan before creating more graphs."))))
+  (let [{:keys [type reason http-status] :as data} (ex-data error)]
+    {:ok false
+     :failure-type (case type
+                     :authz/forbidden "forbidden"
+                     :quota/entity-limit "quota"
+                     :browser-plan/unsupported "unsupported"
+                     :storage-error/candidate-limit "bounded-storage"
+                     :storage-error/bounded-query-unsupported "bounded-storage"
+                     nil)
+     :failure-reason (case reason
+                       :component-missing "component-missing"
+                       :policy-refresh-required "policy-refresh-required"
+                       nil)
+     :failure-status (when (integer? http-status) http-status)
+     :server-stale? (= {:type :browser-plan/unsupported :reason :server-epoch-changed} data)}))
 
 
 (defn export-resolved
@@ -146,4 +152,4 @@
         (source/with-snapshot (request/require-storage ctx)
                               #(export-in-snapshot ctx component %1 %2 policy epoch))))
     (catch Exception error
-      (failure-response error))))
+      (failure-facts error))))

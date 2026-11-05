@@ -144,6 +144,8 @@
            (ta/json->type ["refine" "text" ["not=" ""]])))
     (is (= [:refine :text [:= "x"]]
            (ta/json->type ["refine" "text" ["=" "x"]])))
+    (is (= [:refine :text [:not= ":literal"]]
+           (ta/json->type ["refine" "text" [":not=" ":literal"]])))
     (is (= [:refine :text [:matches "^[a-z]+$"]]
            (ta/json->type ["refine" "text" ["matches" "^[a-z]+$"]])))
     (is (= [:refine :int [:and [:>= 1] [:<= 5]]]
@@ -158,6 +160,8 @@
              ["refine" "keyword" ["in" ["get" "post" "delete"]]])))
     (is (= [:refine :keyword [:= :ok]]
            (ta/json->type ["refine" "keyword" ["=" "ok"]])))
+    (is (= [:refine :keyword [:= :ok]]
+           (ta/json->type ["refine" "keyword" [":=" ":ok"]])))
     ;; A refinement OF a keyword-refinement: the base resolves to
     ;; `:keyword` only by recursing through the nested `[:refine …]`.
     (is (= [:refine [:refine :keyword [:in [:get :post]]] [:not= :patch]]

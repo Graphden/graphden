@@ -217,7 +217,7 @@
    :args {:path "/partials/inspector-lint/suppress" :handler :_partial-inspector-lint-suppress-handler}}
 
   {:name :partial-inspector-test-run
-   :description "POST /partials/inspector-test/run?fn-id=F — the Inspector's Run-this-test: one `run-tests!` over the fn through the standard execute pipeline, responds with the fn's refreshed Test section rendered from the run's own result. Auth-required."
+   :description "POST /partials/inspector-test/run?fn-id=F — the Inspector's Run-this-test: one `run-selected-tests!` over the fn through the standard execute pipeline, responds with the fn's refreshed Test section rendered from the run's own result. Auth-required."
    :parent :post
    :args {:path "/partials/inspector-test/run" :handler :_partial-inspector-test-run-handler}}
 

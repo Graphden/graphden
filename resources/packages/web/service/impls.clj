@@ -17,14 +17,11 @@
   (endpoint/service-rows-for (request/require-storage ctx) service))
 
 
-(defbase live-service-endpoint
-  "The preferred live listener, if any; row and heartbeat reads stay native."
+(defbase service-instance-facts
+  "One scoped instance read; ordering and rendering stay in the graph."
   [rows]
   (cr/record-effect! :db)
-  (some-> (endpoint/live-instances-for (request/require-storage ctx)
-                                       rows (or (:executor-id ctx) "local"))
-          first
-          endpoint/instance-endpoint))
+  (endpoint/instance-facts (request/require-storage ctx) rows (or (:executor-id ctx) "local")))
 
 
 (defbase temporary-service-endpoint
@@ -45,6 +42,6 @@
 
 (def impls
   {:_service-rows service-rows
-   :_live-service-endpoint live-service-endpoint
+   :_service-instance-facts service-instance-facts
    :_temporary-service-endpoint temporary-service-endpoint
    :_addon-service-endpoint addon-service-endpoint})

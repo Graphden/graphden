@@ -91,7 +91,7 @@
                         {:entity-type :binding :type-str "binding" :form-data {}
                          :entity-data {:fn-id (:id child) :slot-id (:id slot) :value "override"}}
                         ctx))]
-        (is (= 400 (:http-status result)))
+        (is (= :validation (get-in result [:write-rejection :kind])))
         (is (string? (:error result)))
         (is (empty? (sp/query-entities storage :binding {:fn-id (:id child)})))))))
 
@@ -114,7 +114,7 @@
                             (try (entities/update-entity :binding (:id binding) {:value "after"} ctx)
                                  (catch clojure.lang.ExceptionInfo e (ex-data e)))))]
             (if form?
-              (is (= 400 (:http-status result)))
+              (is (= :validation (get-in result [:write-rejection :kind])))
               (is (= :constraint-violation/value-override (:type result))))
             (is (= "before" (:value (sp/read-entity storage :binding (:id binding)))))))))))
 
@@ -199,12 +199,12 @@
                               (deref row-release 15000 :timeout)
                               (binding [entities/*create-entity-override* nil]
                                 (entities/create-entity et data bound-ctx)))]
-                    (secrets/apply-create-inline-binding-body parsed (atom []) ctx)))]
+                    (secrets/create-inline-binding-facts! parsed (atom []) ctx)))]
             (try
               (is (true? (deref row-entered 10000 :timeout)))
               (let [second-write (future
                                    (try
-                                     (secrets/apply-create-inline-binding-body
+                                     (secrets/create-inline-binding-facts!
                                        (assoc parsed :fn-id (:id other)) (atom []) ctx)
                                      :unexpected-success
                                      (catch clojure.lang.ExceptionInfo e (:type (ex-data e)))))]
@@ -222,7 +222,7 @@
                   (finally (future-cancel second-write))))
               (is (= 1 @calls))
               (deliver vault-release true)
-              (is (true? (:ok (deref first-write 10000 :timeout))))
+              (is (uuid? (:id (deref first-write 10000 :timeout))))
               (is (empty? (sp/query-entities storage :binding {:fn-id (:id other)})))
               (finally
                 (deliver row-release true)
@@ -245,7 +245,7 @@
                       (binding [entities/*create-entity-override* nil]
                         (entities/create-entity entity-type data bound-ctx))))]
           (is (thrown-with-msg? clojure.lang.ExceptionInfo #"injected binding failure"
-                (secrets/apply-create-secret-body
+                (secrets/create-secret-facts!
                   {:nm "must-roll-back" :path "failed/path" :value "hidden"}
                   (:id parent) journal ctx))))
         (is (empty? @journal))
@@ -263,7 +263,7 @@
             error (binding [vault/*impl-override*
                             {:put-secret (fn [& _]
                                            (throw (ex-info "Vault unavailable" {:type :vault/write-failed})))}]
-                    (try (secrets/apply-create-secret-body
+                    (try (secrets/create-secret-facts!
                            {:nm "committed-before-vault" :path "vault/failure" :value "hidden"}
                            (:id parent) journal ctx)
                          nil
@@ -273,6 +273,6 @@
         (let [fn-id (nth (first @journal) 2)]
           (is (= "committed-before-vault" (:name (sp/read-entity storage :fn fn-id))))
           (is (= 1 (count (sp/query-entities storage :binding {:fn-id fn-id}))))
-          (is (false? (:ok (secrets/replay-secret-rollback! journal error ctx))))
+          (is (= "Vault unavailable" (:error (secrets/rollback-secret-failure! journal error ctx))))
           (is (nil? (sp/read-entity storage :fn fn-id)))
           (is (empty? (sp/query-entities storage :binding {:fn-id fn-id}))))))))

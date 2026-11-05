@@ -1696,7 +1696,7 @@
   ;; Present only when the selected fn IS a test on this branch (it has a
   ;; `/api/tests/status` row): its status dot + label, the assertion's
   ;; error on a failure, and [Run this test] — a POST to the inspector's
-  ;; own route that runs the fn through `run-tests!` and renders THIS
+  ;; own route that runs the fn through `run-selected-tests!` and renders THIS
   ;; section back from the run's result (swap target `.gd-insp-test`).
   ;; Parametrised by `:row` so both readers (the status join on a fresh
   ;; detail, the run's own result after the POST — the terminal
@@ -1796,7 +1796,7 @@
 
   ;; --- the inspector-side run route ------------------------------------
   {:name :_insp-test-run-applied
-   :description "One `run-tests!` over the selected fn (nil timeout = the runner's default)."
+   :description "One `run-selected-tests!` over the selected fn (nil timeout = the runner's default)."
    :parent :_tests-run-apply
    :args {:fn-ids {:parent :vec :args {:coll [:_insp-lint-id-str]}}
           :timeout-ms {:value nil}

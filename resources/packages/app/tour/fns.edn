@@ -172,7 +172,7 @@
             :cleanup-done "Tutorial items deleted"
             :cleanup-failed "Kept: {items} — the server refused; delete by hand or check the error log"
             :branch-title "Delete the tutorial branch?"
-            :branch-body "This lesson ran on its own branch “{branch}”. Deleting it removes everything the lesson created and returns you to main — the full rollback. Keeping it lets you continue exploring on the branch."
+            :branch-body "This lesson ran on its own branch “{branch}”. Cleanup removes the resources recorded for this lesson before deleting its sandbox branch and returning you to main. Keeping the branch lets you continue exploring."
             :branch-confirm "Delete branch & return"
             :branch-keep "Keep branch"
             :branch-done "Tutorial branch deleted"
@@ -2343,13 +2343,13 @@
             {:id "32"
              :slug "distributing-packages"
              :chapter "Your organization"
-             :version 1
+             :version 2
              :requires "publish-packages"
              :title "Packages"
              :reads "with lesson 31, covers the on-disk package format (package.edn, fns.edn, impls.clj) and sync at startup."
              :steps
              [{:title "Sharing more than one fn"
-               :body "A package is a namespace frozen at a version and put in the registry. Installing one is a PIN — a row saying “this branch uses hello 1.0.0” — not a copy, so an update is a pin change and a rollback is the same move backwards."
+               :body "A package is a namespace frozen at a version and put in the registry. Installing it materializes the versioned functions and records this branch’s chosen version in a PIN. Updating or rolling back selects another version and rewrites your project’s references to it; it does not create an editable fork."
                :target nil
                :check {:kind "manual"}}
               {:title "A namespace to publish"
@@ -2381,8 +2381,8 @@
                :targets ["#gd-pkg-chip" "[data-packages-panel]"]
                :check {:kind "dom" :selector "[data-packages-panel] .packages-uninstall"}
                :creates {:type "ns" :name "mycorp@1-0-0"}}
-              {:title "A pin, not a copy"
-               :body "The installed row carries a version box and ↑: type another version and press it to move the pin — that is what an update and a rollback both are. [[Fork]] is the other door: it copies the fns in so you can edit them, and writes no pin — it is for a package whose namespace is not built into this instance (the written lesson 41)."
+              {:title "A pin and versioned references"
+               :body "The installed row carries a version box and ↑: type another version and press it to materialize that version if needed, rewrite your project’s own references and move the pin. An older version rolls back through the same steps. [[Fork]] is the other door: it copies the fns in so you can edit them, and writes no pin — it is for a package whose namespace is not built into this instance (the written lesson 41)."
                :target "[data-packages-panel]"
                :check {:kind "manual"}}
               {:title "Uninstall"
@@ -2390,7 +2390,7 @@
                :target "[data-packages-panel] .packages-uninstall"
                :check {:kind "dom-absent" :selector "[data-packages-panel] .packages-uninstall"}}
               {:title "That's distribution"
-               :body "Publish freezes, install pins, fork copies. Click [[Finish]] to clean up."
+               :body "Publish freezes a version; install materializes it and records a pin; update rewrites your references; fork makes editable copies. Click [[Finish]] to clean up."
                :target nil
                :check {:kind "manual"}}]}
             {:id "33"

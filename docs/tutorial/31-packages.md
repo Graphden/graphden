@@ -104,7 +104,7 @@ Each module's `fns.edn` is a map with a `:namespace`, a
   ;; A fn-def composing the base-fn above
   {:name :login-route
    :parent :json-handler
-   :args  {:body :build-login-response}}]}
+   :args  {:data :build-login-response}}]}
 ```
 
 `:namespace` is a STRING and is the FULL namespace path — it does
@@ -120,7 +120,7 @@ Inside `:fns`, each map is either:
   `impls.clj`, or
 - a **fn-def** — `:parent` / `:parents` + `:args` binding the
   parent's slots. Pure composition, no Clojure. (Lessons
-  [01](01-fn-defs.md)–[04](05-free-arguments.md).)
+  [01](01-fn-defs.md)–[05](05-free-arguments.md).)
 
 ## `impls.clj` — Clojure code
 

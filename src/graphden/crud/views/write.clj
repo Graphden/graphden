@@ -96,7 +96,7 @@
 (defn- target!
   [ctx {:keys [id create-id name namespace-id] :as command} indices]
   (let [storage (:storage ctx)
-        base (or (root-named indices views/explorer-view-base-name)
+        base (or (views/explorer-view-root (vals (:fn-map indices)))
                  (command/reject! "The explorer-view function is not installed"))
         existing (when id (sp/read-entity storage :fn id))
         _ (when (and id (not-any? #{(:id base)} (lookups/inheritance-chain* id indices)))
@@ -188,7 +188,7 @@
 (defn- assert-targets!
   [indices filters]
   (let [known (:fn-map indices)
-        base-id (:id (root-named indices views/explorer-view-base-name))]
+        base-id (:id (views/explorer-view-root (vals (:fn-map indices))))]
     (doseq [id (concat (:uses filters) (:views filters))]
       (when-not (contains? known id) (command/reject! "A referenced function is no longer readable")))
     (doseq [id (:views filters)]
@@ -236,10 +236,11 @@
         _ (when (:unsupported previous)
             (command/reject! "Edit this view's computed clauses on the graph; saving chips would discard them"))
         owner (target! ctx command indices)
-        ;; A new fn is needed in the lookup only for its inherited root slots.
+        ;; Include a newly created view in the lookup used for its bindings.
         indices (if (:id command) indices
                     (lookups/build-lookups (update before :fns conj owner)))
-        slots (slot-map indices (:id owner))
+        slots (into {} (map (juxt (comp keyword :name) :id))
+                    (views/view-axis-slots indices))
         old (views/normalise-filters (:filters previous))
         changed (filter #(not= (clause-value (get old %)) (clause-value (get filters %))) (keys filters))
         adapters (reduce (fn [rows axis]

@@ -30,12 +30,12 @@
       (:pool (vs/unwrap (:storage ctx)))))
 
 
-(defbase unresolved-failure-counts
+(defbase _unresolved-failure-rows
   [days]
   ;; The failed-runs LENS's data: the same unresolved predicate as
-  ;; `recent-failures`, tallied per fn — one read the editor caches.
+  ;; `recent-failures`, reduced to safe identity/name facts for graph tally.
   (cr/record-effect! :db)
-  (exec-errors/unresolved-failure-counts ctx (stats-pool ctx) (tc/current-org) days))
+  (exec-errors/unresolved-failure-rows ctx (stats-pool ctx) (tc/current-org) days))
 
 
 (defbase resolve-fn
@@ -84,16 +84,12 @@
   (fn-exec/apply-execute ctx parsed fn-row))
 
 
-(defbase get-execution
-  "Read a `:fn-execution` row by id, with all child arg + arg-item
-   rows folded in. Returns nil when the id doesn't resolve.
-
-   Single-library boundary over `fn-exec/get-execution` — the
-   multi-row read + tree-shape reconstruction is the §3.3 invariant
-   carve-out."
+(defbase _execution-read-facts
+  "Scoped batched acquisition; read-time redaction/concealment and child
+   allowlisting complete before these facts enter graph composition."
   [id]
   (cr/record-effect! :db)
-  (when (some? id) (fn-exec/get-execution ctx id)))
+  (fn-exec/execution-read-facts ctx id))
 
 
 (defbase cancel-execution!
@@ -173,13 +169,13 @@
   (get @recon/running service-id))
 
 
-(defbase recent-failures
+(defbase _recent-failure-facts
   [days limit]
   ;; Branch-scoped UNRESOLVED failures (error text/data already write-side
   ;; redacted + scrubbed), newest first — see the four-part unresolved
   ;; predicate in the `crud.fn-execution.errors` ns docstring.
   (cr/record-effect! :db)
-  (exec-errors/recent-unresolved-failures ctx (stats-pool ctx) (tc/current-org) days limit))
+  (exec-errors/recent-unresolved-failure-facts ctx (stats-pool ctx) (tc/current-org) days limit))
 
 
 (defbase recent-executions
@@ -233,7 +229,7 @@
   (exec-stats/org-summary (stats-pool ctx) (tc/current-org) days))
 
 
-(defbase usage-org-daily
+(defbase _usage-org-daily-raw
   [days]
   ;; Per-day series for the org over the window — the Stats panel's trend
   ;; bars. Same org-scoping + privacy contract as `usage-org-summary`.
@@ -241,7 +237,7 @@
   (exec-stats/org-daily (stats-pool ctx) (tc/current-org) days))
 
 
-(defbase usage-org-fn-stats
+(defbase _usage-org-fn-stats-raw
   [days limit]
   ;; Busiest fns for the org over the window, fn NAME joined for display.
   ;; Same org-scoping + privacy contract; a since-deleted fn shows its id.
@@ -249,7 +245,7 @@
   (exec-stats/org-fn-stats-named (stats-pool ctx) (tc/current-org) days limit))
 
 
-(defbase usage-all-org-stats
+(defbase _usage-all-org-stats-raw
   [days limit]
   ;; Cross-org rollup — the platform context (no tenant org bound, or the
   ;; platform org itself) OR a holder of the `:view-all-stats` platform right
@@ -269,15 +265,15 @@
 ;; from the request scope inside the ns.
 
 
-(defbase execute-trace-rows
+(defbase _execute-trace-facts
   "Display payload for one execution's stored `:path-trace` — the
    depth-first call tree the `/partials/execute-trace` panel renders.
-   Single call over `fn-exec/trace-display-rows` (READ-time
+   Single call over `fn-exec/trace-read-facts` (READ-time
    re-redaction + tree reassembly + name join are one cohesive
    read-shaping algorithm — the §3.3 invariant carve-out)."
   [id]
   (cr/record-effect! :db)
-  (fn-exec/trace-display-rows ctx id))
+  (fn-exec/trace-read-facts ctx id))
 
 
 (defbase viewer-path-trace
@@ -322,15 +318,15 @@
 
 
 (def impls
-  {:unresolved-failure-counts unresolved-failure-counts
+  {:_unresolved-failure-rows _unresolved-failure-rows
    :resolve-fn                 {:impl resolve-fn :taint-propagate? true}
-   :execute-trace-rows         execute-trace-rows
+   :_execute-trace-facts _execute-trace-facts
    :viewer-path-trace          {:impl viewer-path-trace :taint-propagate? true}
    :debug-catch-arm!           debug-catch-arm!
    :debug-catch-disarm!        debug-catch-disarm!
    :debug-catch-status         debug-catch-status
    :_execute-apply             {:impl _execute-apply :taint-propagate? true}
-   :get-execution              get-execution
+   :_execution-read-facts      _execution-read-facts
    :cancel-execution!          cancel-execution!
    :resolve-fn-version-id      resolve-fn-version-id
    :_reconcile-services-apply  _reconcile-services-apply
@@ -338,10 +334,10 @@
    :running-state              running-state
    :fn-stats-raw fn-stats-raw
    :usage-org-summary usage-org-summary
-   :usage-org-daily usage-org-daily
-   :usage-org-fn-stats usage-org-fn-stats
-   :usage-all-org-stats usage-all-org-stats
-   :recent-failures recent-failures
+   :_usage-org-daily-raw _usage-org-daily-raw
+   :_usage-org-fn-stats-raw _usage-org-fn-stats-raw
+   :_usage-all-org-stats-raw _usage-all-org-stats-raw
+   :_recent-failure-facts _recent-failure-facts
    :recent-executions          recent-executions
    :failure-ack failure-ack
    :failure-ack-all failure-ack-all})

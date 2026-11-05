@@ -625,6 +625,43 @@
                           :columns {:value [:org :runs :note]}}}
           :expected "org,runs,note\nacme,3,\"a, \"\"quoted\"\" one\"\nbeta,0,"}}
 
+  {:name :rows->csv-keeps-mixed-key-fallback-and-newlines
+   :description "False/zero retain the historical truthiness rule; a runtime string-keyed row with a newline is quoted."
+   :parent :assert-eq
+   :args {:actual {:parent :rows->csv
+                   :args {:rows {:parent :list
+                                 :args {:items [{:value {:a false :b 0}}
+                                                {:parent :parse-json
+                                                 :args {:string "{\"a\":false,\"b\":\"line\\nbreak\"}"
+                                                        :keywordize false}}
+                                                {:value {}}]}}
+                          :columns {:value [:a :b]}}}
+          :expected "a,b\n,0\nfalse,\"line\nbreak\"\n,"}}
+
+  {:name :csv-string-key-false-is-readable
+   :parent :assert-eq
+   :args {:actual {:parent :get
+                   :args {:coll {:parent :parse-json
+                                 :args {:string "{\"a\":false}" :keywordize false}}
+                          :key "a" :default nil}}
+          :expected {:value false}}}
+
+  {:name :csv-fallback-keeps-false
+   :parent :assert-eq
+   :args {:actual {:parent :_csv-fallback-cell
+                   :args {:row {:parent :parse-json
+                                :args {:string "{\"a\":false}" :keywordize false}}
+                          :column {:value :a}}}
+          :expected {:value false}}}
+
+  {:name :csv-selection-keeps-false
+   :parent :assert-eq
+   :args {:actual {:parent :_csv-selected-cell
+                   :args {:row {:parent :parse-json
+                                :args {:string "{\"a\":false}" :keywordize false}}
+                          :column {:value :a}}}
+          :expected {:value false}}}
+
   {:name :keyword-and-string-convert-both-ways
    :description "`:str-to-keyword` `\"foo\"` is `:foo`; `:name` gives `\"foo\"` back; `:to-str` keeps the colon."
    :parent :assert-eq

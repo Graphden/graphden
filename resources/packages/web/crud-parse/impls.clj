@@ -12,8 +12,11 @@
     [clojure.string :as str]
     [graphden.crud.request :as request]
     [graphden.crud.type-check :as tc]
+    [graphden.crud.types-api :as types-api]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
+    [graphden.storage.protocol.core :as sp]
+    [graphden.types.core :as types]
     [ring.util.codec :as codec]))
 
 
@@ -34,66 +37,57 @@
   (tc/resolve-type-fn-id (request/require-storage ctx) v))
 
 
+(defn- constraint-base-type
+  "Resolve the optional refinement base so JSON string operands keep their domain."
+  [ctx base-ref]
+  (when-not (str/blank? base-ref)
+    (if-let [id (request/parse-uuid-or-clear base-ref)]
+      (do
+        (cr/record-effect! :db)
+        (let [storage (request/require-storage ctx)]
+          (some->> (sp/read-entity storage :fn id)
+                   (tc/type-fn->rich-type storage)
+                   types/resolve-alias)))
+      (types/resolve-alias (keyword (str/replace-first base-ref #"^:" ""))))))
+
+
 (defbase parse-constraint
-  "JSON-parse a constraint-shape string and recursively re-keywordise
-   constraint-head identifiers (`:union`, `:variant`, `:and`, `:or`,
-   `:>=`, etc.) plus type-name members (`:null`, `:int`, …) so the
-   downstream type-checker sees Clojure keywords.
-
-   Returns nil on blank input. On non-blank input that fails to parse
-   as JSON, returns the raw string unchanged (parse failure is
-   swallowed) — `parse-string-strict`, not `parse-string`, because the
-   latter parses a top-level ARRAY lazily: a truncated one (an
-   unterminated JSON array) then threw its JsonParseException out of
-   the `re-kw` walk, PAST the catch, and an untrusted constraint field
-   became a 500 + a paged `:http/server-error` instead of a 400.
-
-   Kept as ONE base-fn deliberately — NOT for lack of recursion
-   (`:fix` shipped; the walk WOULD express as a graph): this is a
-   self-contained wire-format parser (JSON string → typed constraint
-   vector), the same carve-out class as `:pick-encoding`'s RFC
-   negotiation. The keyword-detection regex is the editor-side wire
-   contract and must not vary per user — splitting it across graph
-   nodes would hand out exactly the tuning surface the contract
-   forbids."
-  [raw]
+  "Strict JSON wire decoder. Operator heads and structural type names become
+   keywords; refinement values keep the domain of their base type. A failed
+   JSON parse stays raw for the write validator to reject without an HTTP 500."
+  [raw base-ref]
   (when-not (str/blank? raw)
     (let [parsed (try (json/parse-string-strict raw)
-                      (catch Exception _ raw))]
-      (letfn [(re-kw
+                      (catch Exception _ raw))
+          keyword-values? (types-api/keyword-domain?
+                            (constraint-base-type ctx base-ref))]
+      (letfn [(structural-token
                 [x]
                 (cond
-                  (and (string? x)
-                       (or (str/starts-with? x ":")
-                           (re-matches #"[a-zA-Z][a-zA-Z0-9_-]*" x)
-                           (re-matches #"[!<>=]+" x)))
-                  ;; `!=` is how a hand-typed constraint spells the
-                  ;; op; the checker's name (`base-allowed-ops`) is
-                  ;; `:not=`, and the write rejected the other one.
-                  (let [k (keyword (str/replace-first x #"^:" ""))]
-                    (if (= k :!=) :not= k))
-                  (or (vector? x) (sequential? x)) (mapv re-kw x)
-                  :else x))]
-        (re-kw parsed)))))
+                  (string? x) (keyword (str/replace-first x #"^:" ""))
+                  (sequential? x) (mapv structural-token x)
+                  :else x))
+              (decode
+                [x]
+                (if-not (and (sequential? x) (seq x))
+                  x
+                  (let [op (first (types-api/json->constraint false [(first x)]))]
+                    (cond
+                      (#{:union :variant :fn :list :map :tuple} op)
+                      (into [op] (map structural-token) (rest x))
+
+                      (#{:and :or :not} op)
+                      (into [op] (map decode) (rest x))
+
+                      :else (types-api/json->constraint keyword-values? x)))))]
+        (decode parsed)))))
 
 
-(defbase form-decode
-  "Decode an `application/x-www-form-urlencoded` string into a
-   `{string string}` map (`ring.util.codec/form-decode`). Single
-   library boundary — no regex, so large bodies (a 200KB asset
-   override) don't hit `*max-regex-input-length*`. A body without any
-   `=` decodes to a bare string — coerced to `{}`.
-
-   ring returns a VECTOR for a repeated key; a form field is one value,
-   so collapse to the LAST occurrence — matching the `:parse-query-string`
-   contract this replaced (`Repeated keys collapse to last`) and keeping
-   the declared `:text-map` return honest. Otherwise every `:parse-form-body`
-   consumer could receive a vector where it expects a string."
+(defbase _form-decode-raw
+  "Ring's form codec only. It returns a string for a body without `=`,
+   and vector values for repeated keys; graph policy normalizes both."
   [string]
-  (let [decoded (codec/form-decode (or string ""))]
-    (if (map? decoded)
-      (reduce-kv (fn [m k v] (assoc m k (if (vector? v) (peek v) v))) {} decoded)
-      {})))
+  (codec/form-decode (or string "")))
 
 
 ;; === Registry ===
@@ -104,4 +98,4 @@
 (def impls
   {:resolve-type-fn-id resolve-type-fn-id
    :parse-constraint parse-constraint
-   :form-decode {:impl form-decode :taint-propagate? true}})
+   :_form-decode-raw {:impl _form-decode-raw :taint-propagate? true}})

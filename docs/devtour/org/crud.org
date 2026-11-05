@@ -7,33 +7,31 @@ Request validation, stored edits, execution results, and views.
 
 after: storage, types
 
-[[file:index.org][index]] · ~69 min
+[[file:index.org][index]] · ~61 min
 
 * 1. extract-entity-params
 :PROPERTIES:
 :CUSTOM_ID: crud/extract-entity-params
-:FILE: src/graphden/crud/request.clj
-:LINE: 128
-:MINS: 1.5
+:FILE: resources/packages/web/crud-delete/fns.edn
+:LINE: 48
+:MINS: 1.1
 :END:
 
-Extracts entity type and ID from an HTTP mutation request. It prefers parsed [[file:glossary.org::#term/ring][Reitit]] path parameters and falls back to parsing the request URI.
+Graph composition selects the entity type and ID from an HTTP mutation request. It prefers parsed [[file:glossary.org::#term/ring][Reitit]] path parameters and falls back to the raw URI boundary.
 
-- source :: [[file:../../../src/graphden/crud/request.clj::(defn extract-entity-params][src/graphden/crud/request.clj:128]]
-- same file :: [[file:crud.org::#crud/read-json-body][read-json-body]]
+- source :: [[file:../../../resources/packages/web/crud-delete/fns.edn::{:name :extract-entity-params][resources/packages/web/crud-delete/fns.edn:48]]
 
 * 2. read-json-body
 :PROPERTIES:
 :CUSTOM_ID: crud/read-json-body
 :FILE: src/graphden/crud/request.clj
-:LINE: 147
+:LINE: 128
 :MINS: 2.2
 :END:
 
 Normalizes a [[file:glossary.org::#term/ring][Ring]] request body supplied as text, an input stream, or an already parsed value. JSON object keys become Clojure [[file:glossary.org::#term/edn][keywords]] for the write handlers.
 
-- source :: [[file:../../../src/graphden/crud/request.clj::(defn read-json-body][src/graphden/crud/request.clj:147]]
-- same file :: [[file:crud.org::#crud/extract-entity-params][extract-entity-params]]
+- source :: [[file:../../../src/graphden/crud/request.clj::(defn read-json-body][src/graphden/crud/request.clj:128]]
 
 * 3. resolve-branch-ref
 :PROPERTIES:
@@ -105,13 +103,13 @@ On failure, traverses the creation journal backward and attempts to delete each 
 :PROPERTIES:
 :CUSTOM_ID: crud/apply-create-core
 :FILE: src/graphden/crud/entities.clj
-:LINE: 911
-:MINS: 1.4
+:LINE: 912
+:MINS: 1.5
 :END:
 
 Repeats structural validation under the semantic writer guard, then creates the row, optional rename view, and checks the resulting function in one SQL transaction. Binding writes follow rename views only within the edited function's inheritance. A view belonging to a separately captured call retains its slot UUID and argument name; following it into that call would bind a different argument. See the [[file:../../../docs/adr/ADR-inherited-rename-surface.md][inherited rename design]]. Ordinary type errors keep the edit and return ~:type-warnings~; an optional rename failure rolls back its savepoint without losing the binding. [[file:glossary.org::#term/secret][Secret-flow]] rejection rolls back the whole SQL change, independently of the diagnostics store. See [[file:../../../docs/SECRETS.md][secrets]].
 
-- source :: [[file:../../../src/graphden/crud/entities.clj::(defn apply-create-core][src/graphden/crud/entities.clj:911]]
+- source :: [[file:../../../src/graphden/crud/entities.clj::(defn apply-create-core][src/graphden/crud/entities.clj:912]]
 - same file :: [[file:crud.org::#crud/create-entity][create-entity]]
 - referenced from :: [[file:web.org::#web/write-rej][write-rej]]
 
@@ -210,40 +208,40 @@ Stores a completed future's result, error, or cancellation on the execution row.
 :PROPERTIES:
 :CUSTOM_ID: crud/render-repr
 :FILE: src/graphden/crud/value_repr.clj
-:LINE: 163
+:LINE: 173
 :MINS: 2.0
 :END:
 
 Chooses a [[file:glossary.org::#term/graph-function][graph function]] that renders a result value as [[file:glossary.org::#term/hiccup][Hiccup]], using the declared or inferred type and falling back to literal classification. It runs with ~:allowed-effects #{}~ and sanitizes the output before insertion into the editor [[file:glossary.org::#term/hiccup][DOM]]. See [[file:../../../docs/EXECUTION.md][typed result representations]].
 
-- source :: [[file:../../../src/graphden/crud/value_repr.clj::(defn render-repr][src/graphden/crud/value_repr.clj:163]]
+- source :: [[file:../../../src/graphden/crud/value_repr.clj::(defn render-repr][src/graphden/crud/value_repr.clj:173]]
 - referenced from :: [[file:platform.org::#platform/sanitize-hiccup][sanitize-hiccup]]
 
 * 17. resolve-form
 :PROPERTIES:
 :CUSTOM_ID: crud/resolve-form
-:FILE: src/graphden/crud/value_form.clj
-:LINE: 480
-:MINS: 3.5
+:FILE: resources/packages/app/forms/fns.edn
+:LINE: 616
+:MINS: 1.4
 :END:
 
-Converts an effective [[file:glossary.org::#term/slot][slot]] type into a pure form descriptor for a record, list, union, or leaf. It resolves aliases and variants on the server and bounds recursion depth, so the browser need not reimplement the type grammar.
+Converts an effective [[file:glossary.org::#term/slot][slot]] type into a pure form descriptor for a record, list, union, or leaf. The graph composes canonical type facts and bounds recursion depth, so the browser need not reimplement the type grammar.
 
-- source :: [[file:../../../src/graphden/crud/value_form.clj::(defn resolve-form][src/graphden/crud/value_form.clj:480]]
+- source :: [[file:../../../resources/packages/app/forms/fns.edn::{:name :resolve-form,][resources/packages/app/forms/fns.edn:616]]
 - same file :: [[file:crud.org::#crud/build-form][build-form]]
 - referenced from :: [[file:editor.org::#editor/enterArgValueEditMode][enterArgValueEditMode]]
 
 * 18. build-form
 :PROPERTIES:
 :CUSTOM_ID: crud/build-form
-:FILE: src/graphden/crud/value_form.clj
-:LINE: 786
-:MINS: 5.8
+:FILE: resources/packages/app/forms/fns.edn
+:LINE: 1327
+:MINS: 1.7
 :END:
 
-Renders a form descriptor as [[file:glossary.org::#term/hiccup][Hiccup]]: records become field groups, unions get a choice of variant, and leaf types use the registered form functions. ~GET /partials/value-form~ returns this [[file:glossary.org::#term/htmx][server-rendered fragment]], which [[file:glossary.org::#term/htmx][HTMX]] inserts into the inspector. See [[file:../../../docs/PARTIALS.md][partials]].
+Renders a form descriptor as [[file:glossary.org::#term/hiccup][Hiccup]]: records become field groups, unions get a choice of variant, and leaf types use the registered form functions. This graph function supplies the renderer policy. ~GET /partials/value-form~ returns this [[file:glossary.org::#term/htmx][server-rendered fragment]], which [[file:glossary.org::#term/htmx][HTMX]] inserts into the inspector. See [[file:../../../docs/PARTIALS.md][partials]].
 
-- source :: [[file:../../../src/graphden/crud/value_form.clj::(defn build-form][src/graphden/crud/value_form.clj:786]]
+- source :: [[file:../../../resources/packages/app/forms/fns.edn::{:name :build-form,][resources/packages/app/forms/fns.edn:1327]]
 - same file :: [[file:crud.org::#crud/resolve-form][resolve-form]]
 
 * 19. run-captured!
@@ -258,75 +256,75 @@ Runs the next matching HTTP request with tracing when a one-shot debugger interc
 
 - source :: [[file:../../../src/graphden/crud/debug_capture.clj::(defn run-captured!][src/graphden/crud/debug_capture.clj:299]]
 
-* 20. apply-create-secret-body
+* 20. create-secret-facts!
 :PROPERTIES:
-:CUSTOM_ID: crud/apply-create-secret-body
+:CUSTOM_ID: crud/create-secret-facts!
 :FILE: src/graphden/crud/secrets.clj
-:LINE: 227
-:MINS: 4.2
+:LINE: 225
+:MINS: 4.3
 :END:
 
-Claims the secret path and creates its graph rows in one guarded SQL transaction. After commit, stores the value and metadata in OpenBao without holding the graph writer. The value never enters graph rows. SQL failures roll back and clear their journal entries; later Vault failures use compensation for the already committed rows. Request parsing remains composed in ~app/secrets/fns.edn~. See [[file:../../../docs/SECRETS.md][secrets]].
+Claims the secret path and creates its graph rows in one guarded SQL transaction. After commit, stores the value and metadata in OpenBao without holding the graph writer. The value never enters graph rows. SQL failures roll back and clear their journal entries; later Vault failures use compensation for the already committed rows. Request parsing and safe receipt construction remain composed in ~app/secrets/fns.edn~. See [[file:../../../docs/SECRETS.md][secrets]].
 
-- source :: [[file:../../../src/graphden/crud/secrets.clj::(defn apply-create-secret-body][src/graphden/crud/secrets.clj:227]]
+- source :: [[file:../../../src/graphden/crud/secrets.clj::(defn create-secret-facts!][src/graphden/crud/secrets.clj:225]]
 - see also :: [[file:types.org::#types/taint-with-secret-if-tainted][taint-with-secret-if-tainted]]
 
-* 21. run-tests!
+* 21. run-selected-tests!
 :PROPERTIES:
-:CUSTOM_ID: crud/run-tests!
+:CUSTOM_ID: crud/run-selected-tests!
 :FILE: src/graphden/crud/test_runs.clj
-:LINE: 194
-:MINS: 4.0
+:LINE: 197
+:MINS: 3.2
 :END:
 
 Runs functions from ~tests~ namespaces through the ordinary execution API with empty arguments; a run passes if it does not throw. Status belongs to the current function version, so an edit makes earlier results stale. Each completed test notifies the editor. Tests owned by shipped packages are excluded from the default user test run. See [[file:../../../docs/TESTS.md][tests]].
 
-- source :: [[file:../../../src/graphden/crud/test_runs.clj::(defn run-tests!][src/graphden/crud/test_runs.clj:194]]
+- source :: [[file:../../../src/graphden/crud/test_runs.clj::(defn run-selected-tests!][src/graphden/crud/test_runs.clj:197]]
 
 * 22. schedule-affected!
 :PROPERTIES:
 :CUSTOM_ID: crud/schedule-affected!
 :FILE: src/graphden/crud/test_autorun.clj
-:LINE: 182
+:LINE: 181
 :MINS: 3.1
 :END:
 
 Finds tests affected by a write through reverse dependencies. It selects tests with no [[file:glossary.org::#term/effect][effects]], combines closely spaced requests into one delayed run, and runs them with conveyed [[file:glossary.org::#term/dynamic-binding][dynamic bindings]]. ~:allowed-effects #{}~ enforces the no-effects restriction during execution as well.
 
-- source :: [[file:../../../src/graphden/crud/test_autorun.clj::(defn schedule-affected!][src/graphden/crud/test_autorun.clj:182]]
+- source :: [[file:../../../src/graphden/crud/test_autorun.clj::(defn schedule-affected!][src/graphden/crud/test_autorun.clj:181]]
 
 * 23. graph-list-env
 :PROPERTIES:
 :CUSTOM_ID: crud/graph-list-env
 :FILE: src/graphden/crud/entities/list.clj
-:LINE: 466
+:LINE: 463
 :MINS: 3.3
 :END:
 
 Builds a shared lazy read environment over the graph cache. Separate projections produce namespace trees, function lists, searches, subtrees, or a full graph listing. Server-assigned roles distinguish types from functions. This is the shared data source behind editor list refreshes.
 
-- source :: [[file:../../../src/graphden/crud/entities/list.clj::(defn- graph-list-env][src/graphden/crud/entities/list.clj:466]]
+- source :: [[file:../../../src/graphden/crud/entities/list.clj::(defn- graph-list-env][src/graphden/crud/entities/list.clj:463]]
 
 * 24. view-members
 :PROPERTIES:
 :CUSTOM_ID: crud/view-members
 :FILE: src/graphden/crud/entities/views.clj
-:LINE: 355
+:LINE: 464
 :MINS: 2.6
 :END:
 
 Evaluates graph filters for the Explorer and saved graph views. Filter dimensions are combined with AND; ~:uses~ follows reverse dependencies by function ID, and ~:views~ intersects other views with a cycle check. Ad-hoc filtering and the saved ~:explorer-view~ function use this same evaluator. Problems come from current-branch diagnostics, failures and lint; apps use the installed org-scoped route reader. Intersections run before the final result limit, so a nested view never loses later matches.
 
-- source :: [[file:../../../src/graphden/crud/entities/views.clj::(defn view-members][src/graphden/crud/entities/views.clj:355]]
+- source :: [[file:../../../src/graphden/crud/entities/views.clj::(defn view-members][src/graphden/crud/entities/views.clj:464]]
 
 * 25. save!
 :PROPERTIES:
 :CUSTOM_ID: crud/save!
 :FILE: src/graphden/crud/views.clj
-:LINE: 49
-:MINS: 2.0
+:LINE: 75
+:MINS: 1.3
 :END:
 
 Saves a complete filter set as an ordinary explorer-view function and bindings. The owned writer transaction repeats authorization and validation before applying every row. Existing scalar identity slots remain valid; additional references are lists of const compositions with fn-ref bindings, so targets are named without being executed. Unrepresentable inherited or computed clauses reject the whole write. Cache invalidation and notifications happen after commit, and a publication failure is reported as committed rather than pretending the database rolled back.
 
-- source :: [[file:../../../src/graphden/crud/views.clj::(defn save!][src/graphden/crud/views.clj:49]]
+- source :: [[file:../../../src/graphden/crud/views.clj::(defn save!][src/graphden/crud/views.clj:75]]

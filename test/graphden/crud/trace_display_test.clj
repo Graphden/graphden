@@ -1,6 +1,6 @@
 (ns graphden.crud.trace-display-test
   "Pure unit tests for the trace display shaping behind
-   `/partials/execute-trace` (`fn-execution/trace-display-rows`'s
+   `/partials/execute-trace` (`fn-execution/trace-read-facts`'s
    private halves): the depth-first tree reassembly from
    `:seq`/`:parent-seq` and the per-row FACT projection (the display
    policy — chips, indent, pretty-print — is graph composition in
@@ -62,9 +62,8 @@
       ;; string on the way out.
       (is (= "secret" (:hidden (entry-row {} (assoc base :hidden "secret")))))
       (is (= "unknown-type" (:hidden (entry-row {} (assoc base :hidden :unknown-type))))))
-    (testing "unnamed id falls back to the short form"
-      (is (= (str (subs id 0 8) "…")
-             (:fn-name (entry-row {} (assoc base :cache-hit? true))))))
+    (testing "unnamed id stays a nullable fact for graph display policy"
+      (is (nil? (:fn-name (entry-row {} (assoc base :cache-hit? true))))))
     (testing "captured value rides RAW with the presence flag; derived marker too"
       (let [row (entry-row {} (assoc base :cache-hit? false :duration-ms 1
                                      :value {:a 1} :value-hidden "secret-derived"))]

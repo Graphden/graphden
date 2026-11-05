@@ -7,33 +7,33 @@ Requests, routing, markup, and graph-backed APIs.
 
 after: packages, boot
 
-[[file:index.org][index]] · ~30 min
+[[file:index.org][index]] · ~29 min
 
 * 1. http-server
 :PROPERTIES:
 :CUSTOM_ID: web/http-server
 :FILE: resources/packages/web/http/impls.clj
-:LINE: 233
+:LINE: 211
 :MINS: 4.8
 :END:
 
 Starts an http-kit listener with the composed [[file:glossary.org::#term/ring][Ring]] handler on a configured port and records network/process [[file:glossary.org::#term/effect][effects]]. This [[file:glossary.org::#term/base-function][base function]] manages the listener; surrounding request and response behavior is composed in ~web/http/fns.edn~.
 
-- source :: [[file:../../../resources/packages/web/http/impls.clj::(defbase http-server][resources/packages/web/http/impls.clj:233]]
-- same file :: [[file:web.org::#web/realize-request-body][realize-request-body]], [[file:web.org::#web/pick-encoding-fn][pick-encoding-fn]]
+- source :: [[file:../../../resources/packages/web/http/impls.clj::(defbase http-server][resources/packages/web/http/impls.clj:211]]
+- same file :: [[file:web.org::#web/realize-request-body][realize-request-body]], [[file:web.org::#web/encoding-acceptable-fn][encoding-acceptable-fn]]
 
 * 2. realize-request-body
 :PROPERTIES:
 :CUSTOM_ID: web/realize-request-body
 :FILE: resources/packages/web/http/impls.clj
-:LINE: 137
+:LINE: 131
 :MINS: 0.7
 :END:
 
 Reads an incoming request body completely so graph handlers receive reusable data rather than a stream that can be consumed only once.
 
-- source :: [[file:../../../resources/packages/web/http/impls.clj::(defbase realize-request-body][resources/packages/web/http/impls.clj:137]]
-- same file :: [[file:web.org::#web/http-server][http-server]], [[file:web.org::#web/pick-encoding-fn][pick-encoding-fn]]
+- source :: [[file:../../../resources/packages/web/http/impls.clj::(defbase realize-request-body][resources/packages/web/http/impls.clj:131]]
+- same file :: [[file:web.org::#web/http-server][http-server]], [[file:web.org::#web/encoding-acceptable-fn][encoding-acceptable-fn]]
 
 * 3. ring-handler-fn
 :PROPERTIES:
@@ -155,14 +155,14 @@ Exposes pre-write validation as one [[file:glossary.org::#term/base-function][ba
 * 12. form-decode
 :PROPERTIES:
 :CUSTOM_ID: web/form-decode
-:FILE: resources/packages/web/crud-parse/impls.clj
-:LINE: 80
-:MINS: 1.6
+:FILE: resources/packages/web/crud-parse/fns.edn
+:LINE: 51
+:MINS: 1.3
 :END:
 
-Decodes form data and normalizes repeated-key values to the declared text-map result. It uses the form codec rather than a regular expression, avoiding regex input-length limits for large values such as edited assets.
+Composes the native form codec with graph policy: repeated keys keep their last value, and a body without fields becomes an empty text map. The native codec avoids regex input-length limits for large values such as edited assets.
 
-- source :: [[file:../../../resources/packages/web/crud-parse/impls.clj::(defbase form-decode][resources/packages/web/crud-parse/impls.clj:80]]
+- source :: [[file:../../../resources/packages/web/crud-parse/fns.edn::{:name :form-decode][resources/packages/web/crud-parse/fns.edn:51]]
 
 * 13. hiccup-element
 :PROPERTIES:
@@ -205,43 +205,43 @@ Serializes a [[file:glossary.org::#term/hiccup][Hiccup]] tree into HTML. Its typ
 - source :: [[file:../../../resources/packages/web/html/impls.clj::(defbase render-hiccup][resources/packages/web/html/impls.clj:14]]
 - same file :: [[file:web.org::#web/hiccup-element][hiccup-element]], [[file:web.org::#web/h-raw][h-raw]]
 
-* 16. pick-encoding-fn
+* 16. encoding-acceptable-fn
 :PROPERTIES:
-:CUSTOM_ID: web/pick-encoding-fn
+:CUSTOM_ID: web/encoding-acceptable-fn
 :FILE: resources/packages/web/http/impls.clj
-:LINE: 159
-:MINS: 1.3
+:LINE: 146
+:MINS: 0.7
 :END:
 
-Chooses response encoding from ~Accept-Encoding~. The surrounding ~:process-response~ [[file:glossary.org::#term/graph-function][graph function]] decides whether compression is appropriate and prepares headers and body. This primitive contains the header-parsing logic shared by that composition.
+Parses whether an ~Accept-Encoding~ token accepts one coding. The surrounding ~:process-response~ [[file:glossary.org::#term/graph-function][graph function]] decides whether compression is appropriate and prepares headers and body. The ~:pick-encoding~ graph chooses brotli, gzip or identity using this parser.
 
-- source :: [[file:../../../resources/packages/web/http/impls.clj::(defbase pick-encoding-fn][resources/packages/web/http/impls.clj:159]]
+- source :: [[file:../../../resources/packages/web/http/impls.clj::(defbase encoding-acceptable-fn][resources/packages/web/http/impls.clj:146]]
 - same file :: [[file:web.org::#web/http-server][http-server]], [[file:web.org::#web/realize-request-body][realize-request-body]]
 
 * 17. type-name-entries
 :PROPERTIES:
 :CUSTOM_ID: web/type-name-entries
 :FILE: src/graphden/crud/types_api.clj
-:LINE: 187
+:LINE: 188
 :MINS: 2.8
 :END:
 
 Acquires the scoped picker rows with canonical namespace references kept separate from displayed selection names. The graph's ~compatible-type-names~ filters those references with subtyping before sharing the ~type-name-kinds~ wire projection.
 
-- source :: [[file:../../../src/graphden/crud/types_api.clj::(defn type-name-entries][src/graphden/crud/types_api.clj:187]]
+- source :: [[file:../../../src/graphden/crud/types_api.clj::(defn type-name-entries][src/graphden/crud/types_api.clj:188]]
 - same file :: [[file:web.org::#web/all-rich-types][all-rich-types]]
 
 * 18. all-rich-types
 :PROPERTIES:
 :CUSTOM_ID: web/all-rich-types
 :FILE: src/graphden/crud/types_api.clj
-:LINE: 717
+:LINE: 725
 :MINS: 1.1
 :END:
 
 Acquires the augmented, scoped [[file:glossary.org::#term/rich-types][rich-types registry]] snapshot. The graph's ~api-rich-types~ maps its wire projection over this single snapshot, removing metadata unused by the editor while preserving type fields.
 
-- source :: [[file:../../../src/graphden/crud/types_api.clj::(defn all-rich-types][src/graphden/crud/types_api.clj:717]]
+- source :: [[file:../../../src/graphden/crud/types_api.clj::(defn all-rich-types][src/graphden/crud/types_api.clj:725]]
 - same file :: [[file:web.org::#web/type-name-entries][type-name-entries]]
 - referenced from :: [[file:types.org::#types/record-rich-types!][record-rich-types!]]
 

@@ -439,6 +439,8 @@
       }
       function closure(value, frame) {
         const captured = {slots: new Map(frame.slots), names: new Map(frame.names)};
+        // Per-call lambda arguments shadow a shared reader already populated outside the closure.
+        for (const slot of value.lambdaSlots || []) captured.slots.delete(slot);
         for (const {slot, name} of value.translation) {
           if (!captured.slots.has(slot) && captured.names.has(name)) {
             const item = captured.names.get(name);
@@ -448,8 +450,11 @@
           }
         }
         const invoke = (item) => {
-          const invocation = {slots: captured.slots, names: new Map(captured.names)};
-          if (value.lambdaParams.length) invocation.names.set(value.lambdaParams[0], item);
+          const invocation = {slots: new Map(captured.slots), names: new Map(captured.names)};
+          if (value.lambdaParams.length) {
+            invocation.names.set(value.lambdaParams[0], item);
+            for (const slot of value.lambdaSlots || []) invocation.slots.set(slot, item);
+          }
           return call(value.fn, invocation);
         };
         return new GraphClosure(invoke, (item, budget = null) => {

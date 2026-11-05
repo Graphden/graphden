@@ -349,21 +349,25 @@
       d)))
 
 
-(defn current-user-label
-  "A PUBLIC-safe label for the current user — what a review is signed
-   with: the account's display name (unless it is an email address), else
-   the local part of its email (never the whole address), else the
-   principal's org, else `anonymous`."
+(defn current-public-actor-facts
+  "Safe current-principal display candidates. Never return a full email,
+   raw user record or caller-selected owner identity."
   []
   (let [p *current-principal*
         user (:user p)
-        display (public-display-name (or (:display-name user) (:display-name p)))
         email (or (:email p) (:primary-email user))]
-    (cond
-      display display
-      (seq (str email)) (first (str/split (str email) #"@" 2))
-      (seq (str (:org p))) (str (:org p))
-      :else "anonymous")))
+    {:display (public-display-name (or (:display-name user) (:display-name p)))
+     :email-local (when (seq (str email)) (first (str/split (str email) #"@" 2)))
+     :org (when (seq (str (:org p))) (str (:org p)))
+     :owner-present (boolean (seq (str (:user-id p))))}))
+
+
+(defn current-user-label
+  "A public-safe label used by native audit/stamp writers. Graph clients
+   compose their display fallback over the same sanitized actor facts."
+  []
+  (let [{:keys [display email-local org]} (current-public-actor-facts)]
+    (or display email-local org "anonymous")))
 
 
 (defn org-from-principal

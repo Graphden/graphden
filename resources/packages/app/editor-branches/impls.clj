@@ -9,12 +9,12 @@
     [graphden.versioning.storage.restore :as restore]))
 
 
-(defbase load-fn-change-events
+(defbase _load-fn-change-page
   "One bounded page of change metadata for a fn and its owned graph rows."
   [fn-id limit offset]
   (cr/record-effect! :db)
   (when fn-id
-    (history/change-groups (request/require-storage ctx) fn-id limit offset)))
+    (history/change-group-page (request/require-storage ctx) fn-id limit offset)))
 
 
 (defbase load-fn-history-diff
@@ -32,52 +32,30 @@
           (throw e))))))
 
 
-(def ^:private restore-conflicts
-  #{:history/branch-mismatch :history/too-large :history/incomplete-provenance
-    :history/secret-type-conflict})
-
-
-(defn- report-restore-conflict
-  [f]
-  (try
-    (f)
-    (catch clojure.lang.ExceptionInfo e
-      (let [kind (:type (ex-data e))]
-        (if (contains? restore-conflicts kind)
-          {:status :conflict :reason kind}
-          (throw e))))))
-
-
-(defbase preview-fn-history-restore
-  "Redacted restore plan for one readable function on its current branch."
+(defbase _preview-fn-history-restore
+  "Canonical scoped restore preview with snapshot, redaction and exact token."
   [fn-id branch-id revision]
   (cr/record-effect! :db)
-  (when (and (uuid? fn-id) (uuid? branch-id) (pos-int? revision))
-    (report-restore-conflict
-      #(restore/preview (request/require-storage ctx) fn-id branch-id revision))))
+  (restore/preview (request/require-storage ctx) fn-id branch-id revision))
 
 
-(defbase commit-fn-history-restore
-  "Apply an exact preview token in one guarded graph transaction."
+(defbase _commit-fn-history-restore
+  "Exact-token transaction and publication, retaining secret-flow validation."
   [fn-id branch-id revision expected-current]
   (cr/record-effect! :db)
-  (when (and (uuid? fn-id) (uuid? branch-id) (pos-int? revision)
-             (string? expected-current) (= 64 (count expected-current)))
-    (report-restore-conflict
-      #(restore/apply-restore! (request/require-storage ctx)
-                               fn-id branch-id revision expected-current
-                               (fn [storage owner-id]
-                                 (let [result (type-check/type-check-fn-and-dependents!
-                                                ctx storage owner-id
-                                                {:reject-secret? true})]
-                                   (when (:secret? result)
-                                     (throw (ex-info "Restore violates secret type flow"
-                                                     {:type :history/secret-type-conflict})))
-                                   (some? (:diagnostic result))))))))
+  (restore/apply-restore! (request/require-storage ctx)
+                          fn-id branch-id revision expected-current
+                          (fn [storage owner-id]
+                            (let [result (type-check/type-check-fn-and-dependents!
+                                           ctx storage owner-id {:reject-secret? true})]
+                              (when (:secret? result)
+                                (throw (ex-info "Restore violates secret type flow"
+                                                {:type :history/secret-type-conflict})))
+                              (some? (:diagnostic result))))))
 
 
 (def impls
-  {:load-fn-change-events load-fn-change-events
+  {:_load-fn-change-page _load-fn-change-page
    :load-fn-history-diff load-fn-history-diff
-   :preview-fn-history-restore preview-fn-history-restore
-   :commit-fn-history-restore commit-fn-history-restore})
+   :_preview-fn-history-restore _preview-fn-history-restore
+   :_commit-fn-history-restore _commit-fn-history-restore})

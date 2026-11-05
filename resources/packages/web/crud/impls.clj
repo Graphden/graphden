@@ -79,15 +79,11 @@
     {}))
 
 
-(defbase free-arg-entries
-  "The editor's view of `fn-id`'s free-arg surface — `lookup/free-arg-entries`
-   (name, slot-id, optional?, captured?, the HOF target a capture is read
-   inside). `[]` for nil fn-id."
+(defbase _free-arg-facts
+  "One canonical public slot surface and its safe capture-target names."
   [fn-id]
   (cr/record-effect! :db)
-  (if (some? fn-id)
-    (fn-exec-lookup/free-arg-entries ctx fn-id)
-    []))
+  (fn-exec-lookup/free-arg-facts ctx fn-id))
 
 
 (defbase service-blocking-free-args
@@ -134,27 +130,16 @@
   (entity-list/graph-tree-facts ctx))
 
 
-(defbase graph-namespace-fns
-  [namespace-id]
+(defbase project-graph-cohort
+  [selector namespaces? capped?]
   (cr/record-effect! :db)
-  (entities/graph-namespace-fns ctx namespace-id))
-
-
-(defbase graph-search
-  [q descriptions?]
-  (cr/record-effect! :db)
-  (entities/graph-search ctx q descriptions?))
+  (entity-list/project-graph-cohort ctx selector namespaces? capped?))
 
 
 (defbase graph-index-facts
   []
   (cr/record-effect! :db)
   (entity-list/graph-index-facts ctx))
-
-
-(defbase graph-index-row
-  [row]
-  (entity-list/compact-fn-row row))
 
 
 (defbase graph-subtree
@@ -238,86 +223,36 @@
 ;; `rejected?` (below) is shared with every other `:if` handler.
 
 
-(defbase try-apply-create
-  "§3.3 atomic core of the create-apply flow: capability gate +
-   `sp/create-entity` + Phase-6c rename-slot side-effect + post-
-   create whole-fn type-check. Returns a uniform `{:created <id>}`
-   on success — plus `:type-warnings [<diagnostic> …]` when the write
-   landed but the owning fn now fails the aggregate type-check
-   (error-tolerance Phase 2: the row is KEPT, the failure recorded as
-   a per-branch diagnostic) — or `{:error <human-msg>}` on a write
-   failure (cap-gate, storage error).
-
-   The outer graph composition runs the STRUCTURAL rejection clauses
-   (validation, secret-fn guard) BEFORE this primitive fires, then
-   dispatches on the returned shape and runs invalidate / notify /
-   response."
-  [entity-type entity-data type-str form-data]
+(defbase _apply-create-atomic
+  "The guarded create, rename, type-check and rollback share one writer."
+  [parsed]
   (cr/record-effect! :db)
-  (entities/apply-create-core {:entity-type (keyword entity-type)
-                               :entity-data entity-data
-                               :type-str type-str
-                               :form-data form-data}
-                              ctx))
+  (entities/apply-create-core parsed ctx))
 
 
-(defbase try-apply-update
-  "Atomic core of the update-apply flow: `sp/update-entity` +
-   rename-slot side-effect (binding writes only) + post-write
-   whole-fn type-check for binding-shaped updates. Returns a uniform
-   `{:updated <id>}` on success — plus `:type-warnings [<diagnostic>
-   …]` when the write landed but the owning fn now fails the
-   aggregate type-check (error-tolerance Phase 2: recorded as a
-   per-branch diagnostic, never rolled back) — or `{:error <msg>}`
-   on write failure. Rename-slot failure is logged but never
-   escalated (the binding row is still useful without the renamed
-   view).
-
-   This IS the `_apply` stage of the already-decomposed
-   parse→validate→apply update flow (C2-C4): the write, its
-   error-envelope, and the write-dependent rename-slot side effect
-   are one coupled unit — the same class as the other `_apply` cores
-   this file keeps."
-  [entity-type id-uuid entity-data type-str form-data]
+(defbase _apply-update-atomic
+  "The guarded update, rename, type-check and rollback share one writer."
+  [parsed]
   (cr/record-effect! :db)
-  (entities/apply-update-core {:entity-type (keyword entity-type)
-                               :id-uuid id-uuid
-                               :entity-data entity-data
-                               :type-str type-str
-                               :form-data form-data}
-                              ctx))
+  (entities/apply-update-core parsed ctx))
 
 
-;; === Sequence operations ===
-
-
-;; `:_seq-append-fn-id-invalid?` / `:_seq-append-body-invalid?` are
-;; now graph fn-defs — see fns.edn.
-
-
-(defbase try-apply-seq-append
-  "§3.3 core of sequence-append: materialise synthetic binding,
-   compute next position, run pre-write validation, write the row.
-   Returns `{:created <item-id> :position <int> :fn-id <fn-id>}` or
-   `{:error <reason>}` (pre-write rejection)."
+(defbase _apply-seq-append-atomic
+  "Refresh the binding and apply or reject under the same writer."
   [parsed seq-binding]
   (cr/record-effect! :db)
   (entities/apply-seq-append-core parsed seq-binding ctx))
 
 
-(defbase try-apply-seq-update
-  "§3.3 core of sequence-update: resolve payload, run pre-write
-   validation, write the row. Returns `{:updated <item-id>}` or
-   `{:error <reason>}`."
+(defbase _apply-seq-update-atomic
+  "Refresh the item and apply or reject under the same writer."
   [parsed item]
   (cr/record-effect! :db)
   (entities/apply-seq-update-core parsed item ctx))
 
 
-(defbase try-apply-seq-move
-  "§3.3 core of sequence-move: swap the item with its up/down
-   neighbour through a free temp position. Returns
-   `{:moved <item-id> :position <int>}` or `{:error <reason>}`."
+(defbase _apply-seq-move-atomic
+  "Refresh the item and swap positions under the same writer."
   [parsed item]
   (cr/record-effect! :db)
   (entities/apply-seq-move-core parsed item ctx))
@@ -344,13 +279,11 @@
    :create-entity {:impl create-entity-fn :taint-propagate? true}
    :update-entity {:impl update-entity-fn :taint-propagate? true}
    :free-arg-slot-map free-arg-slot-map
-   :free-arg-entries free-arg-entries
+   :_free-arg-facts _free-arg-facts
    :service-blocking-free-args service-blocking-free-args
    :_graph-tree-facts graph-tree-facts
-   :graph-namespace-fns graph-namespace-fns
-   :graph-search graph-search
+   :_project-graph-cohort project-graph-cohort
    :_graph-index-facts graph-index-facts
-   :_graph-index-row {:impl graph-index-row :taint-propagate? true}
    :graph-subtree graph-subtree
    :graph-full graph-full
    :graph-fn-defs-subtree   graph-fn-defs-subtree
@@ -361,8 +294,8 @@
    :fn-names-with-tag fn-names-with-tag
    :query-ref-many-owners query-ref-many-owners
    :value-kinds value-kinds
-   :try-apply-create {:impl try-apply-create :taint-propagate? true}
-   :try-apply-update {:impl try-apply-update :taint-propagate? true}
-   :try-apply-seq-append {:impl try-apply-seq-append :taint-propagate? true}
-   :try-apply-seq-update {:impl try-apply-seq-update :taint-propagate? true}
-   :try-apply-seq-move {:impl try-apply-seq-move :taint-propagate? true}})
+   :_apply-create-atomic {:impl _apply-create-atomic :taint-propagate? true}
+   :_apply-update-atomic {:impl _apply-update-atomic :taint-propagate? true}
+   :_apply-seq-append-atomic {:impl _apply-seq-append-atomic :taint-propagate? true}
+   :_apply-seq-update-atomic {:impl _apply-seq-update-atomic :taint-propagate? true}
+   :_apply-seq-move-atomic {:impl _apply-seq-move-atomic :taint-propagate? true}})

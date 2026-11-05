@@ -219,26 +219,6 @@
        count))
 
 
-(defn approvals-report
-  "Per-row verdicts for the reviewer-facing status view — one
-   `{:approver-id :counted :reason :stale}` per approval row, judged by
-   the SAME `approval-rejection` the merge gate counts with, so a row the
-   gate ignores (the author's own approval under a strict target
-   included) never reads as valid. `:reason` is the rejection's name, nil
-   when counted; `:stale` keeps its wire meaning — the approval no longer
-   applies to this content / target / allow-list (the author case is not
-   stale, it is `:reason \"author\"`)."
-  [current-stamp target-branch-id approver-ids approvals author-id allow-self?]
-  (mapv (fn [a]
-          (let [why (approval-rejection current-stamp target-branch-id approver-ids
-                                        author-id allow-self? a)]
-            {:approver-id (:approver-id a)
-             :counted (nil? why)
-             :reason (some-> why name)
-             :stale (contains? #{:stale :other-target :not-an-approver} why)}))
-        approvals))
-
-
 (defn count-valid-approvals
   "How many DISTINCT, non-stale, target-bound, allow-list-satisfying
    approvals the proposal `source-branch-id` currently has toward a merge

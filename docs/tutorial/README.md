@@ -71,7 +71,7 @@ of order.
 | 22 | [Filters and views — look at the part of the graph you mean](22-workspaces.md) | ✅ written · ▶ interactive |
 | 23 | [Branches — fork, edit, diff, merge](23-branches.md) | ✅ written · ▶ interactive |
 | 24 | [Review — propose, approve, protected merge](24-review.md) | ✅ written · ▶ interactive |
-| 25 | [Editing the editor: asset overrides](25-asset-overrides.md) | ✅ written · ▶ interactive |
+| 25 | [Editing the editor: personal UI graphs](25-asset-overrides.md) | ✅ written · ▶ interactive |
 | 26 | [Version history: what changed, and going back](26-version-history.md) | ✅ written · ▶ interactive |
 
 ### Your organization
@@ -99,7 +99,9 @@ of order.
 open the editor with `?tutorial=NN` (the landing demo link does this for
 Lesson 01), or pick “Interactive tutorial” in the account-chip menu —
 in an organization workspace the lesson runs on its own `tutorial-NN-*`
-branch, and ending it offers branch deletion = full rollback. The tour's
+branch. Ending it offers cleanup of recorded lesson resources before deleting
+that branch; branch deletion alone does not remove registry pins, package
+versions, apps, or tokens. The tour's
 step scripts live in the graph (`app.tour/_tour-lessons`) and are
 drift-guarded by `tools/browser-test/edit-tutorial-tour*.test.js` —
 keep the written lesson's “Try it” section and the tour steps in

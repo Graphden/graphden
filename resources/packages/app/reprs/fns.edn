@@ -26,20 +26,115 @@
                   :description "fn id — UUID, or its string form."}}
    :return-type [:union :null :type-expression]}
 
-  {:name :render-value-repr
-   :description "Registered representation of `value` as returned by fn `fn-id` — resolves the repr fn through :_value-repr-registry (declared return type first, literal classification fallback; most-specific `subtype?` match), verifies it is pure, executes it with `{:value value}`, and sanitizes the resulting hiccup. nil when no repr applies or anything fails — callers fall back to shape-based rendering. Kept atomic like :build-form: the dispatch+verify+sanitize pipeline is the safety boundary, and the extensibility seam is the registry itself."
-   :args {:value {:type :any
-                  :description "The runtime value to represent. Polymorphic by design — the registry decides."}
-          :fn-id {:type [:union :null :uuid :text]
-                  :description "Id of the fn that produced the value — drives declared-return-type dispatch. nil falls back to literal classification."}}
+  {:name :_repr-canonical-declared-type
+   :description "Canonical alias resolution, without declared/runtime selection policy."
+   :args {:declared {:type [:union :null :type-expression]}}
+   :return-type [:union :null :type-expression]}
+
+  {:name :_repr-runtime-type
+   :description "Canonical runtime literal/record-list shape classification."
+   :args {:value {:type :any}}
+   :return-type [:union :null :type-expression]}
+
+  {:name :_repr-registry
+   :description "Read the representation registry in the caller's execution scope."
+   :args {}
+   :return-type [:list :any]}
+
+  {:name :_repr-render-safe
+   :description "Pure execution and sanitization of a typed representation; the effect gate and DOM allowlist stay inseparable."
+   :args {:registry {:type [:list :any]}
+          :type {:type [:union :null :type-expression]}
+          :value {:type :any}}
    :return-type [:union :null :hiccup-node]}
+
+  {:name :_repr-declared-type
+   :parent :_repr-canonical-declared-type
+   :args {:declared {:parent :fn-return-type :args {:fn-id {:as :fn-id}}}}}
+
+  {:name :_repr-value-type
+   :parent :if
+   :args {:test {:parent :and
+                 :args {:values [{:parent :some? :args {:value :_repr-declared-type}}
+                                 {:parent :not
+                                  :args {:value {:parent :equal?
+                                                 :args {:a :_repr-declared-type :b {:value :any}}}}}]}}
+          :then :_repr-declared-type
+          :else {:parent :_repr-runtime-type :args {:value {:as :value}}}}}
+
+  {:name :_repr-render-selected
+   :parent :_repr-render-safe
+   :args {:registry :_repr-registry :type :_repr-value-type :value {:as :value}}}
+
+  {:name :_repr-render-typed
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_repr-value-type}}
+          :then :_repr-render-selected :else nil}}
+
+  {:name :_repr-render-present
+   :parent :if
+   :args {:test {:parent :some? :args {:value {:as :value}}}
+          :then :_repr-render-typed :else nil}}
+
+  {:name :render-value-repr
+   :description "Render a present value through its declared or runtime type and the scoped repr registry. Missing or failed representations fall back to nil; execution denies effects and sanitizes output."
+   :parent :try
+   :args {:body :_repr-render-present
+          :on-throw {:parent :const :args {:value nil}}
+          :value {:type :any}
+          :fn-id {:type [:union :null :uuid :text]}}
+   :return-type [:union :null :hiccup-node]}
+
+  {:name :_tabulate-cell-value
+   :parent :get
+   :args {:coll {:as :record :type :keyword-map}
+          :key {:as :column :type :keyword}
+          :default nil}}
+
+  {:name :_tabulate-cell-scalar?
+   :parent :or
+   :args {:values [{:parent :is-a? :args {:value :_tabulate-cell-value :type {:value :null}}}
+                   {:parent :is-a? :args {:value :_tabulate-cell-value :type {:value :text}}}
+                   {:parent :is-a? :args {:value :_tabulate-cell-value :type {:value :numeric}}}
+                   {:parent :is-a? :args {:value :_tabulate-cell-value :type {:value :bool}}}
+                   {:parent :is-a? :args {:value :_tabulate-cell-value :type {:value :uuid}}}]}}
+
+  {:name :_tabulate-cell
+   :description "One column of the captured record: bare keyword name, scalar text, or structured JSON."
+   :parent :cond
+   :lambda-params [:column]
+   :args {:clauses [{:parent :is-a? :args {:value :_tabulate-cell-value :type {:value :keyword}}}
+                    {:parent :to-str :args {:value {:parent :name :args {:value :_tabulate-cell-value}}}}
+                    :_tabulate-cell-scalar?
+                    {:parent :to-str :args {:value :_tabulate-cell-value}}
+                    true
+                    {:parent :to-json-string :args {:data :_tabulate-cell-value}}]}}
+
+  {:name :_tabulate-columns
+   :parent :map
+   :args {:func :_tabulate-cell
+          :coll {:as :columns :type [:list :keyword]}}}
+
+  {:name :_tabulate-record
+   :parent :const
+   :args {:value {:as :row :type :keyword-map}}}
+
+  {:name :_tabulate-row
+   :description "Project the current record into a vector, capturing ordered columns from the table call."
+   :parent :vec
+   :lambda-params [:row]
+   :args {:record :_tabulate-record
+          :coll :_tabulate-columns}}
+
+  {:name :_tabulate-rows
+   :parent :map
+   :args {:func :_tabulate-row
+          :coll {:as :records :type [:list :keyword-map]}}}
 
   {:name :tabulate-records
    :description "Project a list of keyword-keyed records onto ordered `columns` as display strings — `[[cell ...] ...]`, one row per record, a missing key an empty cell; structured values render as their JSON. The record-table repr's pure data half."
-   :args {:records {:type [:list :keyword-map]
-                    :description "The records to tabulate, in order."}
-          :columns {:type [:list :keyword]
-                    :description "Ordered column keys."}}
+   :parent :vec
+   :args {:coll :_tabulate-rows}
    :return-type [:list [:list :text]]}
 
   {:name :svg-polyline-points

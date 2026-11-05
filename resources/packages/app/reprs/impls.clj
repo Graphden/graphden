@@ -4,11 +4,12 @@
    `graphden.crud.value-repr`, mirroring how app/forms delegates to
    `crud.value-form`) plus the sparkline geometry primitive."
   (:require
-    [cheshire.core :as cheshire]
     [clojure.math :as math]
     [clojure.string :as str]
+    [graphden.crud.value-form :as value-form]
     [graphden.crud.value-repr :as value-repr]
-    [graphden.executor.defbase :refer [defbase]]))
+    [graphden.executor.defbase :refer [defbase]]
+    [graphden.types.core :as types]))
 
 
 (defbase fn-return-type-fn
@@ -18,31 +19,28 @@
   (value-repr/declared-return-type fn-id))
 
 
-(defbase render-value-repr
-  "Resolve + purity-check + execute + sanitize the registered repr of
-   `value` (see `crud.value-repr/render-repr`). Kept atomic like
-   `:build-form`: the dispatch pipeline is the safety boundary; the
-   extensibility seam is the `:_value-repr-registry` fn-def."
-  [value fn-id]
-  (value-repr/render-repr ctx value fn-id))
+(defbase _repr-canonical-declared-type
+  "Resolve aliases in a declared type without selecting dispatch policy."
+  [declared]
+  (some-> declared types/resolve-alias))
 
 
-(defn- cell-str
-  "Display string for one table cell — simple scalars verbatim,
-   anything structured as its JSON."
-  [v]
-  (if (or (nil? v) (string? v) (number? v) (boolean? v) (keyword? v) (uuid? v))
-    (str (if (keyword? v) (name v) v))
-    (cheshire/generate-string v)))
+(defbase _repr-runtime-type
+  "Canonical runtime shape classification, preserving heterogeneous record lists."
+  [value]
+  (value-repr/runtime-repr-type value))
 
 
-(defbase tabulate-records
-  "Project `records` onto ordered `columns` as display strings —
-   `[[cell …] …]`, one row per record, a missing key an empty cell.
-   Pure tabular projection (the record-table repr's data half; the
-   hiccup half stays in the graph)."
-  [records columns]
-  (mapv (fn [r] (mapv #(cell-str (get r %)) columns)) records))
+(defbase _repr-registry
+  "Read the representation registry in the caller's execution context."
+  []
+  (value-form/registry-pairs ctx value-repr/registry-fn-name))
+
+
+(defbase _repr-render-safe
+  "Execute a selected typed representation with effects denied and sanitize its DOM output."
+  [registry type value]
+  (value-repr/render-typed-repr ctx registry type value))
 
 
 (defn- fmt2
@@ -78,16 +76,14 @@
 
 ;; The package loader pairs each base-fn declared in `fns.edn` with its
 ;; impl by looking up this `impls` map (keyword name -> impl fn).
-;; `:render-value-repr` propagates marker taint (SECRETS.md § T3): its
-;; `:value` slot is `:any`, so a `[:secret T]` CAN reach it, and the
-;; returned hiccup derives from that content — the flag keeps the
-;; output marked so hide-at-sink still fires. The other two can't
-;; carry taint: `:fn-return-type` passes an id, not content, and
-;; `:svg-polyline-points`' `[:list :numeric]` slot rejects
-;; secret-marked input outright (same rationale as `:h-raw`).
+;; Repr inputs can carry caller content or a secret marker, so the
+;; decode/classify/render seams propagate taint (SECRETS.md § T3).
+;; `:fn-return-type` passes an id, `:_repr-registry` reads server data,
+;; and numeric polyline points cannot carry secret-marked input.
 (def impls
   {:fn-return-type fn-return-type-fn
-   :render-value-repr {:impl render-value-repr :taint-propagate? true}
-   ;; content-passing (record values → cell strings) — SECRETS.md § T3
-   :tabulate-records {:impl tabulate-records :taint-propagate? true}
+   :_repr-canonical-declared-type {:impl _repr-canonical-declared-type :taint-propagate? true}
+   :_repr-runtime-type {:impl _repr-runtime-type :taint-propagate? true}
+   :_repr-registry _repr-registry
+   :_repr-render-safe {:impl _repr-render-safe :taint-propagate? true}
    :svg-polyline-points svg-polyline-points})

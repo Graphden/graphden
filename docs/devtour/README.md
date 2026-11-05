@@ -239,11 +239,15 @@ pick the one that actually executes the layer you changed.
 Anchors resolve by Clojure namespace munging (`graphden.executor.interface` →
 `src/graphden/executor/interface.clj`) and match any top-level `def`-form
 (`defn`, `defn-`, `def`, `defbase`, `defprotocol`, `defrecord`, …) whose name
-symbol equals `:defn`. Two variants:
+symbol equals `:defn`. Other anchors:
 
 - **`:file`** instead of `:ns` — an explicit repo-relative path, for package
   impls under `resources/packages/` (they have namespaces but do not live under
   `src/`): `{:file "resources/packages/web/http/impls.clj" :defn http-server …}`.
+- **A package `fns.edn` `:file`** — selects the unique graph fn-def map whose
+  `:name` matches `:defn`, so a toured policy step shows its stored graph source:
+  `{:file "resources/packages/app/forms/fns.edn" :defn resolve-form …}`.
+  Ambiguous or missing names fail the bake.
 - **`:dispatch`** — anchor a `defmethod` by its dispatch value; the step is
   then labelled by the dispatch's name:
   `{:ns graphden.tenancy.addon :defn ig/init-key :dispatch :tenancy/request-scope …}`.

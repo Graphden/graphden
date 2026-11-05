@@ -209,7 +209,11 @@ Acceptance: `bb test` green; `app/page/fns.edn` `:as :page-body` removed (page w
 The hybrid runtime fa described in § 4 + Phase 4 / 5 is the FINAL design, not a transitional state. Two key spaces (slot-id + name) serve different needs:
 
 - slot-id keys distinguish structural ambiguity at the BOUNDARY (caller-side names that could land in two different consumers — the #104 collision class).
-- name keys cover DYNAMIC writes: env-binding values, HOF lambda-args, `apply-rename-aliases` cross-fn cascades. There's no structural ambiguity in these — a value flows under one name, set per call.
+- name keys cover dynamic env-binding values and cross-fn aliases. HOF invocation arguments also write their callback-side reader slot IDs: `{reader-slot-id -> lambda-name}` routes overwrite any value captured from an outer invocation of the same shared reader. A name-only merge or pruning alone is insufficient across multi-hop renames. Unrelated captures remain unchanged, and presence checks preserve nil and false.
+
+An owned slot whose immediate source has the same name is structural forwarding, not a semantic rename. Its slot ID and source FK remain intact; name-facing walks, public surface aliases and runtime alias generation do not rename the rest of its source chain. A genuine cross-name rename still translates that chain. This prevents a declared input from filling a generic `value` or `coll` route belonging to a sibling computation.
+
+Browser plans carry optional `lambdaSlots` metadata for the same per-call routing. Existing plans without that field retain their previous behavior; regenerate built-in and published plans with the updated compiler when shipping this runtime change.
 
 An alternative was considered (env-builder slot-id-only + cross-fn rename slot-id translation + readers drop name fallback) and dropped. Two attempts failed at runtime; the marginal benefit (closing 2 remaining `:on-throw :const` workaround sites) didn't justify the multi-day risk.
 

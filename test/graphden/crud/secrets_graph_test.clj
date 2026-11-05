@@ -599,3 +599,32 @@
         (is (thrown-with-msg? clojure.lang.ExceptionInfo
                               #"only be written by their domain operation"
               (thunk)))))))
+
+
+(deftest rotation-history-policy-preserves-stable-newest-first-page
+  (let [events (mapv (fn [i]
+                       {:actor-id (str i) :actor-label (str "actor-" i)
+                        :status "succeeded" :vault-version i :failure-type nil
+                        :occurred-at (java.time.Instant/ofEpochSecond (quot i 3))})
+                     (range 63))
+        expected (vec (take 50 (sort-by :occurred-at #(compare %2 %1) events)))
+        run #(exec/execute-by-name *ctx* "_secret-history-page" {:events %})]
+    (is (= expected (run events)))
+    (is (= ["60" "61" "62"] (mapv :actor-id (take 3 (run events))))
+        "equal timestamps retain the native stable sort's input order")
+    (is (= [] (run [])))))
+
+
+(deftest rollback-response-wraps-only-redacted-native-facts
+  ;; The journal is produced inside the graph, just like the real :try path;
+  ;; a raw Atom supplied as a free arg would be dereferenced by the executor.
+  (setup/sync-and-invalidate!
+    *ctx* *storage*
+    [{:name :secret-rollback-envelope-test :parent :_apply-secret-rollback
+      :args {:journal {:parent :atom :args {:initial-value {:value []}}}}}])
+  (let [response (exec/execute-by-name *ctx* "secret-rollback-envelope-test"
+                                       {:exception (ex-info "refused" {:type :secrets/path-in-use
+                                                                       :http-status 409
+                                                                       :body "private-vault-response"})})]
+    (is (= {:ok false :error "refused" :data {:type :secrets/path-in-use}
+            :http-status 409} response))))

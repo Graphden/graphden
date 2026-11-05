@@ -231,6 +231,7 @@
       (when (> (count params) 1) (reject! :callable-arity context))
       {:kind "closure" :fn (str ref-id)
        :lambdaParams (mapv wire-name params)
+       :lambdaSlots (mapv str (sort-by str (keys (r/hof-lambda-slot-routes ref-id params lookups))))
        :translation (mapv (fn [[sid n]] {:slot (str sid) :name (wire-name n)})
                           (sort-by (comp str key) translation))})))
 

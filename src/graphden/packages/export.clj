@@ -767,46 +767,10 @@
 ;; what must be defined. `include-secret-paths?` opts back in for
 ;; org-internal migration (same vault topology on both ends).
 
-(defn secret-path-args
-  "Manifest of vault-path bindings across exported fn-defs — one
-   `{:fn <fn-name> :arg <arg-name>}` entry per `{:secret-path …}`
-   arg-value. This is what an importer must re-define (each listed arg
-   is a `[:secret …]`-typed slot that will surface as a free arg when
-   the path is stripped)."
-  [fn-defs]
-  (vec (for [fd fn-defs
-             [arg v] (:args fd)
-             :when (and (map? v) (contains? v :secret-path))]
-         {:fn (:name fd) :arg arg})))
-
-
-(defn strip-secret-paths
-  "Remove vault paths from exported fn-defs. A `{:secret-path …}`
-   arg-value loses its `:secret-path` key; when nothing else remains the
-   arg entry is dropped entirely, so the slot reverts to a FREE arg of
-   its (secret-typed) slot — the type system then surfaces 'needs a
-   secret defined' at the importer's side instead of silently carrying
-   the exporter's vault topology."
-  [fn-defs]
-  (mapv (fn [fd]
-          (if-let [args (:args fd)]
-            (let [args' (into {}
-                              (keep (fn [[k v]]
-                                      (if (and (map? v) (contains? v :secret-path))
-                                        (when-let [rest-v (not-empty (dissoc v :secret-path))]
-                                          [k rest-v])
-                                        [k v])))
-                              args)]
-              (if (seq args') (assoc fd :args args') (dissoc fd :args)))
-            fd))
-        fn-defs))
-
-
 ;; The whole-graph migration BUNDLE (formerly `export-graph-bundle`) is
 ;; GRAPH composition now — registry/registry/fns.edn `:export-graph`
 ;; assembles `{:fns :namespaces :secrets :secret-paths-included?}` from
-;; the primitives here (`export-graph`, `secret-path-args`,
-;; `strip-secret-paths`, `records.wire/encode-unreadable-kws`).
+;; the safe export codec and graph-composed secret manifest/strip passes.
 
 
 ;; =============================================================================
@@ -878,19 +842,17 @@
    (no `@`) yield nothing — those fns are always present, not a package dep.
    Best-effort on ns-root sharing: if several packages publish the same
    (ns-root, version), the first registry match is used (they materialise the
-   same rows). Returned sorted + de-duped."
+   same rows). Ordering and duplicate removal belong to the graph caller."
   [storage namespaces]
-  (vec
-    (sort-by (juxt :name :version)
-             (into #{}
-                   (comp (keep versioned-ns->root+version)
-                         (distinct)
-                         (keep (fn [{:keys [ns-root version]}]
-                                 (when-let [pv (first (sp/query-entities
-                                                        storage :package-version
-                                                        {:ns-root ns-root :version version}))]
-                                   {:name (:name pv) :version (:version pv)}))))
-                   namespaces))))
+  (into []
+        (comp (keep versioned-ns->root+version)
+              (distinct)
+              (keep (fn [{:keys [ns-root version]}]
+                      (when-let [pv (first (sp/query-entities
+                                             storage :package-version
+                                             {:ns-root ns-root :version version}))]
+                        {:name (:name pv) :version (:version pv)}))))
+        namespaces))
 
 
 ;; The publishable BUNDLE for a subtree (formerly `export-namespace`)
@@ -924,11 +886,11 @@
       :else (or (first (remove #(under-ns? % root) nss)) (first nss)))))
 
 
-(defn external-deps
-  "Dependency analysis for the namespace subtree rooted at `root`:
+(defn external-dep-facts
+  "Dependency analysis facts for the namespace subtree rooted at `root`:
 
-     {:dependencies         [fn-name-kw …]        ; sorted
-      :package-dependencies [{:name :version} …]} ; registry-resolved
+     {:dependency-names        [fn-name-kw …]
+      :package-dependency-rows [{:name :version} …]}
 
    `:dependencies` — fn NAMES referenced from inside the subtree but
    DEFINED outside it (excluding primitives): structural fn-id refs
@@ -939,8 +901,8 @@
    fns live under (drives recursive install).
 
    ONE records read + index shared by the ref closure and the
-   constraint scan — a cohesive single-pass analysis; the bundle
-   assembly around it is graph composition."
+   constraint scan. Sorting, de-duplication and the public envelope are
+   graph composition."
   [storage root]
   (let [ctx (index-records (graph->records storage))
         owned-fn-ids (into #{}
@@ -990,5 +952,5 @@
                                                 :when (and rns (not (under-ns? rns root)))]
                                             nm))))
                               owned-fn-ids)]
-    {:dependencies (vec (sort (into ref-deps constraint-deps)))
-     :package-dependencies (package-deps-from-namespaces storage dep-namespaces)}))
+    {:dependency-names (into [] (concat ref-deps constraint-deps))
+     :package-dependency-rows (package-deps-from-namespaces storage dep-namespaces)}))

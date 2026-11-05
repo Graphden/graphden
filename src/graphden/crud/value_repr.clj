@@ -63,18 +63,21 @@
        (every? #(and (map? %) (seq %) (every? keyword? (keys %))) v)))
 
 
+(defn runtime-repr-type
+  "Canonical runtime shape for representation dispatch. A heterogeneous
+   keyword-map list retains its record-list shape rather than losing fields
+   through the general literal classifier's least upper bound."
+  [value]
+  (if (record-list? value)
+    [:list [:map :keyword :any]]
+    (types-lit/classify-literal value)))
+
+
 (defn dispatch-type
-  "The type repr dispatch runs on: the alias-resolved declared type
-   when it says something (`nil`/`:any` don't), else the runtime
-   value's shape — a keyword-map list dispatches as
-   `[:list [:map :keyword :any]]`, everything else via the literal
-   classifier. nil when nothing knows."
+  "Native caller compatibility for declared-first representation dispatch."
   [declared value]
   (let [d (some-> declared types/resolve-alias)]
-    (cond
-      (and (some? d) (not= :any d)) d
-      (record-list? value) [:list [:map :keyword :any]]
-      :else (types-lit/classify-literal value))))
+    (if (and (some? d) (not= :any d)) d (runtime-repr-type value))))
 
 
 (defn render-typed-repr
@@ -122,42 +125,49 @@
                          value (types/refine-constraint t)))))))
 
 
+(defn literal-preview-entries
+  "Bounded safe previews paired with their source nodes. Eligibility uses
+   canonical slot identities and rejects markers, secret references and invalid
+   refinements before any pure sanitized execution. Equal previews share the
+   same budget entry, including failed evaluations."
+  [ctx elements graph]
+  (let [rows (value-form/registry-pairs ctx "_value-inline-repr-registry")
+        lookups {:fn-map (into {} (map (juxt :id identity)) (:fns graph))
+                 :slot-map (into {} (map (juxt :id identity)) (:slots graph))
+                 :binding-by-fn-slot (into {} (map (fn [b] [[(:fn-id b) (:slot-id b)] b]))
+                                           (:bindings graph))
+                 :chain-cache (atom {})}
+        previews (atom {})]
+    (mapv (fn [node]
+            (let [{:keys [type value secretRef]} (:data node)
+                  info (when (and (= type "arg") (not secretRef))
+                         (effective-literal-type (:data node) lookups))
+                  t (:type info)
+                  eligible? (and (valid-literal? t value)
+                                 (value-form/pick-form-fn rows t))
+                  k [(:id info) value]
+                  repr (when eligible?
+                         (if (contains? @previews k)
+                           (get @previews k)
+                           (when (< (count @previews) 64)
+                             (let [r (try (render-typed-repr ctx rows t value)
+                                          (catch Exception _ nil))]
+                               (swap! previews assoc k r)
+                               r))))]
+              {:node node :repr repr}))
+          (:nodes elements))))
+
+
 (defn annotate-literals
-  "Attach compact typed representations to visible literal nodes. Read the
-   graph registry once, reuse equal previews, and bound distinct executions.
-   Secret/resolver values and invalid refinements never reach a repr graph."
+  "Attach bounded compact previews for native layout callers. The package
+   pipeline composes attachment in the graph over the same safe preview batch."
   [ctx elements graph]
   (if (false? (:ok elements))
     elements
-    (let [rows (value-form/registry-pairs ctx "_value-inline-repr-registry")
-          lookups {:fn-map (into {} (map (juxt :id identity)) (:fns graph))
-                   :slot-map (into {} (map (juxt :id identity)) (:slots graph))
-                   :binding-by-fn-slot (into {} (map (fn [b] [[(:fn-id b) (:slot-id b)] b]))
-                                             (:bindings graph))
-                   :chain-cache (atom {})}
-          previews (atom {})]
-      (update elements :nodes
-              (fn [nodes]
-                (mapv
-                  (fn [node]
-                    (let [{:keys [type value secretRef]} (:data node)
-                          info (when (and (= type "arg") (not secretRef))
-                                 (effective-literal-type (:data node) lookups))
-                          t (:type info)
-                          eligible? (and (valid-literal? t value)
-                                         (value-form/pick-form-fn rows t))
-                          k [(:id info) value]]
-                      (if-not eligible?
-                        node
-                        (let [repr (if (contains? @previews k)
-                                     (get @previews k)
-                                     (when (< (count @previews) 64)
-                                       (let [r (try (render-typed-repr ctx rows t value)
-                                                    (catch Exception _ nil))]
-                                         (swap! previews assoc k r)
-                                         r)))]
-                          (cond-> node repr (assoc-in [:data :literalRepr] repr))))))
-                  nodes))))))
+    (assoc elements :nodes
+           (mapv (fn [{:keys [node repr]}]
+                   (cond-> node repr (assoc-in [:data :literalRepr] repr)))
+                 (literal-preview-entries ctx elements graph)))))
 
 
 (defn render-repr

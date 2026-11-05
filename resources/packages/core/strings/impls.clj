@@ -201,19 +201,13 @@
   (str/join separator coll))
 
 
-(defbase rows->csv-fn [rows columns]
-  ;; RFC 4180: a field holding a comma, a quote or a newline is quoted,
-  ;; quotes doubled. Rows are maps keyed by keyword OR string (a literal row
-  ;; travelling through JSONB arrives string-keyed).
-  (let [cell (fn [v]
-               (let [s (str (if (nil? v) "" v))]
-                 (if (re-find #"[,\"\n]" s)
-                   (str "\"" (str/replace s "\"" "\"\"") "\"")
-                   s)))
-        col-name (fn [c] (if (keyword? c) (name c) (str c)))
-        line (fn [vals] (str/join "," (map cell vals)))]
-    (str/join "\n" (cons (line (map col-name columns))
-                         (map (fn [row] (line (map #(or (get row %) (get row (col-name %))) columns))) rows)))))
+(defbase _csv-escape-cell [value]
+  ;; RFC 4180 quoting is a codec primitive; row selection and line assembly
+  ;; live in the graph.
+  (let [s (str (if (nil? value) "" value))]
+    (if (re-find #"[,\"\n]" s)
+      (str "\"" (str/replace s "\"" "\"\"") "\"")
+      s)))
 
 
 (defbase str-to-keyword-fn [string]
@@ -296,14 +290,6 @@
 
 (defbase blank?-fn [string]
   (str/blank? string))
-
-
-(defbase non-blank?-fn
-  "True iff `:string` is non-blank. Required-slot 1-arg companion to
-   `:blank?` so it can serve as a `:filter` / `:some` HOF predicate
-   (optional slots aren't bound as HOF lambda-params)."
-  [string]
-  (not (str/blank? string)))
 
 
 (defbase url-decode-fn [string]
@@ -432,14 +418,13 @@
    :str-trim           {:impl str-trim-fn           :taint-propagate? true}
    :str-split          {:impl str-split-fn          :taint-propagate? true}
    :str-join           {:impl str-join-fn           :taint-propagate? true}
-   :rows->csv          {:impl rows->csv-fn          :taint-propagate? true}
+   :_csv-escape-cell   {:impl _csv-escape-cell      :taint-propagate? true}
    :str-to-keyword     {:impl str-to-keyword-fn     :return-type-rule str-to-keyword-return-rule :taint-propagate? true}
    :pr-str             {:impl pr-str-fn             :taint-propagate? true}
    :pprint-str         {:impl pprint-str-fn         :taint-propagate? true}
    :to-str             {:impl to-str-fn             :taint-propagate? true}
    :name               {:impl name-fn               :return-type-rule name-return-rule :taint-propagate? true}
    :blank?             {:impl blank?-fn             :taint-propagate? true}
-   :non-blank?         {:impl non-blank?-fn         :taint-propagate? true}
    :url-decode         {:impl url-decode-fn         :taint-propagate? true}
    :str-contains?      {:impl str-contains?-fn      :taint-propagate? true}
    :str-starts-with?   {:impl str-starts-with?-fn   :taint-propagate? true}

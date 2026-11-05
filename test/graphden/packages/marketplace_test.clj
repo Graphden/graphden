@@ -10,6 +10,7 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
     [graphden.packages.loaded :as loaded]
+    [graphden.packages.registry-shared :as registry-shared]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.deploy-config :as deploy-config]
     [graphden.tenancy.context :as tc]
@@ -574,6 +575,7 @@
       (tc/install-platform-admin-fn! (constantly true))
       (try
         (let [queue (run-named :moderation-queue {})]
+          (is (vector? queue))
           (is (= ["mod.theme"] (map :name queue)) "only the pending row is queued")
           (is (= "acme-mod" (:org-id (first queue)))))
         (let [html (:body (setup/via-graph *bootstrap* :_partial-moderation-queue-handler {:request-method :get :headers {}}))]
@@ -619,3 +621,67 @@
       (deploy-config/install! {})
       (tc/install-notify-fn! nil)
       (tc/install-org-cap-fn! nil))))
+
+
+(deftest semver-rank-preserves-caps-parser-defaults-and-suffixes
+  (doseq [[version expected] [[nil 0] ["invalid" 0] ["v1.2.3-rc1" 1002003]
+                              ["1" 1000000] ["1.2" 1002000]
+                              ["1000.1001.1002" 999999999]
+                              ["1.999999999999999999999.3" 1000003]]]
+    (is (= expected (run-named :semver-rank {:version version})))))
+
+
+(deftest moderation-flag-is-the-canonical-publish-policy
+  (try
+    (binding [tc/*current-org* "moderation-flag-tenant"]
+      (doseq [[setting expected] [[nil false] ["" false] [false false] [true true]
+                                  [0 false] [1 true] ["1" true] [" TRUE " true]
+                                  ["YeS" true] ["on" false] ["0" false] ["approve" false]]]
+        (deploy-config/install! {:marketplace-moderation setting})
+        (is (= expected (run-named :moderation-on? {})))
+        (is (= (if expected "pending" "approved")
+               (:status (registry-shared/version-row
+                          "moderation-flag" "1.0.0" {:fns []} true nil))))))
+    (finally (deploy-config/install! {}))))
+
+
+(deftest moderation-transition-keeps-authority-write-verification-and-notify-together
+  (let [name (str "moderation-policy-" (random-uuid))
+        row (sp/create-entity (storage) :package-version
+                              {:name name :version "1.0.0" :ns-root "moderation-policy"
+                               :fns [] :dependencies [] :content-hash "policy"
+                               :org-id "publisher-org" :public? true :status "pending"})
+        events (atom [])
+        args {:pkg-name name :pkg-version "1.0.0"}]
+    (tc/install-platform-admin-fn! nil)
+    (tc/install-notify-fn! (fn [event payload] (swap! events conj [event payload])))
+    (try
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"platform-admin"
+            (run-named :moderate-package-version! (assoc args :decision "approve"))))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"platform-admin"
+            (run-named :_apply-marketplace-moderation (assoc args :status "approved"))))
+      (is (= "pending" (:status (sp/read-entity (storage) :package-version (:id row)))))
+      (is (empty? @events))
+      (tc/install-platform-admin-fn! (constantly true))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Invalid canonical moderation status"
+            (run-named :_apply-marketplace-moderation (assoc args :status "unexpected"))))
+      (binding [tc/*current-org* "operator-org"]
+        (let [rejected (run-named :moderate-package-version!
+                                  (assoc args :decision "reject" :note "  Needs contrast  "))]
+          (is (= ["rejected" "Needs contrast" "publisher-org"]
+                 ((juxt :status :moderation-note :org-id) rejected)))
+          (is (= [[:package-moderated rejected]] @events)))
+        (let [approved (run-named :moderate-package-version! (assoc args :decision "approve"))]
+          (is (= ["approved" nil "publisher-org"]
+                 ((juxt :status :moderation-note :org-id) approved)))
+          (is (= [:package-moderated approved] (last @events)))))
+      (doseq [unknown ["maybe" "Approve" " approve "]]
+        (is (nil? (run-named :moderate-package-version! (assoc args :decision unknown)))))
+      (is (nil? (run-named :moderate-package-version!
+                           (assoc args :pkg-version "missing" :decision "approve"))))
+      (is (= 2 (count @events)))
+      (is (= "approved" (:status (sp/read-entity (storage) :package-version (:id row)))))
+      (finally
+        (tc/install-notify-fn! nil)
+        (tc/install-platform-admin-fn! nil)
+        (sp/delete-entity (storage) :package-version (:id row))))))

@@ -110,54 +110,41 @@
              rows)))
 
 
-(defn recent-unresolved-failures
-  "The viewing branch's UNRESOLVED recent failures, newest first —
-   `[{:execution-id :fn-id :fn-name :finished-at :error :error-data} …]`
-   (see the ns docstring for the four-part unresolved predicate).
-   `org` nil → \"public\" (platform / single-tenant). `days` default 7,
-   `limit` default 50."
+(defn recent-unresolved-failure-facts
+  "Bounded branch/org-scoped current failures. The current-version and
+   acknowledgement predicate stays native; only allowlisted, write-redacted
+   fields leave this boundary. Graph policy owns final cap and display codecs."
   [ctx pool org days limit]
   (when pool
-    (let [storage (:storage ctx)
-          limit (int (or limit 50))
-          chain (viewing-branch-chain storage)
+    (let [limit (int (or limit 50))
+          chain (viewing-branch-chain (:storage ctx))
           rows (candidate-failures pool org days (min 400 (* limit 4)) chain)]
-      (into []
-            (comp (map (fn [r]
-                         {:execution-id (:id r)
-                          :fn-id (:fn_id r)
-                          :fn-name (or (:fn_name r) (some-> (:fn_id r) str))
-                          :finished-at (some-> (:finished_at r) str)
-                          :error (:error r)
-                          :error-data (:error_data r)}))
-                  (take limit))
+      (mapv (fn [r]
+              {:execution-id (:id r)
+               :fn-id (:fn_id r)
+               :fn-name (:fn_name r)
+               :finished-at (:finished_at r)
+               :error (:error r)
+               :error-data (:error_data r)})
             (still-current-filter ctx rows)))))
 
 
-(defn unresolved-failure-counts
-  "Per-fn tally of the viewing branch's UNRESOLVED failures — the same
-   four-part predicate as `recent-unresolved-failures`, aggregated:
-   `[{:fn-id :fn-name :namespace-id :count} …]`, most failures first.
-   Feeds the editor's failed-runs lens (chip / namespace / row counts)
-   through one JSON read the client caches, so the sidebar's tree
-   payload stays at its one-SQL budget. `days` default 7; the
-   candidate fetch is capped at 2000 rows (an org with more unresolved
-   failures in a week has a bigger problem than a count)."
+(defn unresolved-failure-rows
+  "Safe, scoped facts for the viewing branch's UNRESOLVED failures.
+   The four-part predicate and batched current-version check stay native.
+   Only fn identity/name/namespace leave this read boundary; the graph
+   groups and counts them for the failed-runs lens. The candidate fetch
+   is capped at 2000 rows."
   [ctx pool org days]
   (when pool
     (let [chain (viewing-branch-chain (:storage ctx))
           rows (still-current-filter
                  ctx (candidate-failures pool org days 2000 chain))]
-      (->> rows
-           (group-by :fn_id)
-           (map (fn [[fid rs]]
-                  (let [r (first rs)]
-                    {:fn-id fid
-                     :fn-name (or (:fn_name r) (str fid))
-                     :namespace-id (:namespace_id r)
-                     :count (count rs)})))
-           (sort-by (comp - :count))
-           vec))))
+      (mapv (fn [r]
+              {:fn-id (:fn_id r)
+               :fn-name (:fn_name r)
+               :namespace-id (:namespace_id r)})
+            rows))))
 
 
 ;; =============================================================================

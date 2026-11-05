@@ -24,9 +24,9 @@
    :return-type :non-negative-int}
 
   {:name :str-clip
-   :description "String truncated to at most `:limit` characters — `(subs s 0 (min (count s) limit))`. The size-cap primitive for storing or forwarding untrusted text; unlike bare `:subs` it never throws on a short input."
+   :description "Bounded UTF-16 string clipping primitive. Both :string and :limit remain public inherited slots for saved graph descendants."
    :args {:string {:type :text :description "String to clip."}
-          :limit {:type :non-negative-int :description "Maximum length in characters."}}
+          :limit {:type :non-negative-int :description "Maximum UTF-16 code units."}}
    :return-type :text}
 
   {:name :byte-len
@@ -64,10 +64,73 @@
           :separator {:required false :type :text :value "" :description "Inserted between every pair. Defaults to empty."}}
    :return-type :text}
 
+  {:name :_csv-escape-cell
+   :description "One RFC 4180 field: stringify nil as empty, double quotes and quote fields containing comma, quote or newline. The escaping codec remains atomic."
+   :args {:value {:type :any}}
+   :return-type :text}
+
+  {:name :_csv-column-name-value
+   :parent :if
+   :args {:test {:parent :is-a? :args {:value {:as :column} :type {:value :keyword}}}
+          :then {:parent :name :args {:value {:as :column}}}
+          :else {:parent :to-str :args {:value {:as :column}}}}}
+
+  {:name :_csv-column-name
+   :parent :_csv-column-name-value
+   :lambda-params [:column]}
+
+  {:name :_csv-header
+   :parent :str-join
+   :args {:coll {:parent :map
+                 :args {:func :_csv-escape-cell
+                        :coll {:parent :map
+                               :args {:func :_csv-column-name
+                                      :coll {:as :columns :type [:list :any]}}}}}
+          :separator {:value ","}}}
+
+  {:name :_csv-current-row
+   :parent :const
+   :args {:value {:as :row :type :any}}}
+
+  {:name :_csv-primary-cell
+   :parent :get
+   :args {:coll :_csv-current-row :key {:as :column} :default nil}}
+
+  {:name :_csv-fallback-cell
+   :parent :get
+   :args {:coll :_csv-current-row :key :_csv-column-name-value :default nil}}
+
+  {:name :_csv-selected-cell
+   :description "Preserve the historical truthy primary-key lookup before falling back to the text column name."
+   :parent :if
+   :args {:test :_csv-primary-cell
+          :then :_csv-primary-cell
+          :else :_csv-fallback-cell}}
+
+  {:name :_csv-row-cell
+   :parent :_csv-escape-cell
+   :lambda-params [:column]
+   :args {:value :_csv-selected-cell}}
+
+  {:name :_csv-row-line
+   :parent :str-join
+   :lambda-params [:row]
+   :args {:row :_csv-current-row
+          :coll {:parent :map
+                 :args {:func :_csv-row-cell
+                        :coll {:as :columns :type [:list :any]}}}
+          :separator {:value ","}}}
+
+  {:name :_csv-data-lines
+   :parent :map
+   :args {:func :_csv-row-line
+          :coll {:as :rows :type [:list :any]}}}
+
   {:name :rows->csv
-   :description "Maps → one CSV text: a header line of `:columns` (keyword names) then one line per row, RFC 4180 quoting (a field holding a comma, a quote or a newline is quoted, quotes doubled). Rows may be keyword- or string-keyed."
-   :args {:rows {:type [:list :any] :description "The rows — maps, read by the column keys."}
-          :columns {:type [:list :any] :description "Column keys in order; their names form the header."}}
+   :description "Maps → one CSV text: a header line of `:columns` (keyword names) then one line per row, RFC 4180 quoting (a field holding a comma, a quote or a newline is quoted, quotes doubled). Rows may be keyword- or string-keyed. Row/column projection and line assembly are graph composition; only field escaping is a native codec."
+   :parent :str-join
+   :args {:coll {:parent :cons :args {:item :_csv-header :coll :_csv-data-lines}}
+          :separator {:value "\n"}}
    :return-type :text}
 
   {:name :str-to-keyword
@@ -169,8 +232,10 @@
    :return-type :bool}
 
   {:name :non-blank?
-   :description "True iff the string is non-blank. Required-slot 1-arg companion to `:blank?` — graphden's HOF wrap treats `:required false` slots as 0-lambda-param (variadic-ignore), which would make `(filter :blank? coll)` keep every element instead of filtering. Use this when you need a blank-check as a `:filter` / `:some` predicate."
-   :args {:string {:type :text :description "String to test."}}
+   :lambda-params [:string]
+   :description "True iff the string is non-blank. The string slot is required so this predicate binds each element when used by filter or some."
+   :parent :not
+   :args {:value {:parent :blank? :args {:string {:type :text :required true}}}}
    :return-type :bool}
 
   {:name :url-decode

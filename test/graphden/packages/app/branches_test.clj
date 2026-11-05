@@ -1,5 +1,5 @@
 (ns graphden.packages.app.branches-test
-  "Unit tests for `app.branches`' request normalisers and its approval
+  "Unit tests for `app.branches`' canonical approval
    predicate — the decisions the branch write-path makes BEFORE it
    touches storage.
 
@@ -30,57 +30,6 @@
   (let [v (ns-resolve 'graphden.packages.app.branches.impls sym)]
     (assert v (str "no such var: " sym))
     @v))
-
-
-(defn- err-type
-  [f & args]
-  (:type (ex-data (try (apply f args) nil (catch Exception e e)))))
-
-
-;; ---------------------------------------------------------------------
-;; normalisers — the clean-refusal boundary
-;; ---------------------------------------------------------------------
-
-(deftest normalize-write-policy-maps-open-to-nil-and-refuses-junk
-  (let [f (priv 'normalize-write-policy)]
-    (testing "nil / blank / \"open\" all mean the same thing: no policy row"
-      (is (nil? (f nil)))
-      (is (nil? (f "")))
-      (is (nil? (f "   ")))
-      (is (nil? (f "open"))))
-    (testing "a known policy passes through, trimmed"
-      (is (= "owner" (f "owner")))
-      (is (= "owner" (f "  owner  ")))
-      (is (= "admins" (f "admins"))))
-    (testing "anything else is a clean refusal, not a stored value"
-      (is (= :branches/invalid-write-policy (err-type f "everyone")))
-      (is (= :branches/invalid-write-policy (err-type f "OWNER"))))))
-
-
-(deftest normalize-approver-ids-refuses-a-bare-string
-  (let [f (priv 'normalize-approver-ids)]
-    (testing "nil and an empty list clear the allow-list"
-      (is (nil? (f nil)))
-      (is (nil? (f []))))
-    (testing "a list of ids becomes a vector of strings"
-      (is (= ["u1" "u2"] (f ["u1" "u2"])))
-      (is (= ["1" "2"] (f [1 2])) "ids are stringified for the JSONB column"))
-    (testing "a BARE STRING is refused — `seq` would shred it into characters"
-      (is (= :validation-error/approver-ids (err-type f "u1")))
-      (is (= :validation-error/approver-ids (err-type f {:u "1"}))))))
-
-
-(deftest normalize-required-approvals-refuses-negative-and-non-int
-  (let [f (priv 'normalize-required-approvals)]
-    (testing "nil means the requirement is off"
-      (is (nil? (f nil))))
-    (testing "a non-negative integer passes through"
-      (is (zero? (f 0)))
-      (is (= 2 (f 2))))
-    (testing "negative and non-integer are refused, not silently treated as off"
-      (is (= :validation-error/required-approvals (err-type f -1)))
-      (is (= :validation-error/required-approvals (err-type f "2")))
-      (is (= :validation-error/required-approvals (err-type f 1.5))))))
 
 
 ;; ---------------------------------------------------------------------

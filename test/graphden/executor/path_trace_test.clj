@@ -621,7 +621,7 @@
         inner (random-uuid)
         trace (ce/new-path-trace {:capture-values? true})
         ;; The child is `(fn [fa ctx])`; the wrap yields `(fn [fa ctx]) → callable`.
-        wrap (hof-wrap (fn [fa _ctx] (str "up:" (get fa "item"))) ["item"] {} inner)]
+        wrap (hof-wrap (fn [fa _ctx] (str "up:" (get fa "item"))) ["item"] {} {} inner)]
     (with-classes {}
       (binding [cr/*path-trace* trace
                 ce/*traced-fn-ids* (atom ce/trace-all)]
@@ -643,7 +643,7 @@
 
 (deftest hof-callable-silent-when-untraced-test
   (let [inner (random-uuid)
-        wrap (hof-wrap (fn [fa _ctx] (get fa "item")) ["item"] {} inner)
+        wrap (hof-wrap (fn [fa _ctx] (get fa "item")) ["item"] {} {} inner)
         calls (atom 0)]
     (with-redefs [ce/record-path-entry! (fn [& _] (swap! calls inc))]
       (is (= ["a"] (mapv (wrap {} {}) ["a"]))))
@@ -663,7 +663,8 @@
         child (fn [fa _ctx] (str "up:" (get fa "item")))]
     (with-redefs [r/cache-projection-frees (fn [_ _] [])
                   r/hof-lambda-params (fn [& _] ["item"])
-                  r/build-hof-translation (fn [& _] {})]
+                  r/build-hof-translation (fn [& _] {})
+                  r/hof-lambda-slot-routes (fn [& _] {})]
       (let [build (env-arg-builder owner env-bnd {inner child} {:fn-map {}})
             callable (build (volatile! {}) {} {})]
         (is (= {:graphden.executor/fn-id inner
@@ -679,3 +680,22 @@
            (mapv #(select-keys (frame-of %) [:fn-id :cache-hit? :value])
                  (entries trace)))
         "one fresh frame per call of the env-bound callable")))
+
+
+(deftest env-hof-routes-overwrite-reader-ids-without-mutating-captures
+  (let [owner (random-uuid) inner (random-uuid)
+        reader (random-uuid) captured (random-uuid)
+        snapshot (volatile! {reader "outer" "item" "outer" "caption" false})
+        env-bnd {:kind :ref :ref-id inner :is-fn true :produces-callable? false
+                 :slot-id (random-uuid) :env-name "callback"}
+        child (fn [fa _] [(get fa reader) (get fa captured)])]
+    (with-redefs [r/cache-projection-frees (fn [& _] [])
+                  r/hof-lambda-params (fn [& _] ["item"])
+                  r/build-hof-translation (fn [& _] {captured "caption"})
+                  r/hof-lambda-slot-routes (fn [& _] {reader "item"})]
+      (let [build (env-arg-builder owner env-bnd {inner child} {:fn-map {}})
+            callable (build snapshot {} {})]
+        (is (= [[nil false] [false false] ["new" false]]
+               (mapv callable [nil false "new"])))
+        (is (= "outer" (get @snapshot reader)))
+        (is (false? (get @snapshot "caption")))))))

@@ -15,107 +15,120 @@
 
 
 (defbase ui-components
+  ;; Structural identity constructor: component-config/entries validates the
+  ;; exact owned fn-ref slot IDs without executing a graph. Composing this
+  ;; record would change that authority schema for stored legacy selections.
   [menu-initial menu-update menu-view picker-view]
   {:menu-initial menu-initial :menu-update menu-update :menu-view menu-view
    :picker-view picker-view})
 
 
-(defbase _editor-configuration-plan
+(defbase _editor-configuration-plan-facts
   [input]
   (runtime/record-effect! :db)
   (components/export-resolved ctx input))
 
 
-(defbase _editor-root-plan
+(defbase _editor-root-plan-facts
   [request]
   (runtime/record-effect! :db)
   (root-plan/export-current ctx request))
 
 
-(defbase _editor-server-call
+(defbase _editor-server-call-facts
   [request input]
   (runtime/record-effect! :db)
   (server/invoke-current ctx request input))
 
 
-(defn- configuration-result
+(defn- configuration-outcome
+  "Capture the native operation without exporting a Throwable, message, identity
+   or arbitrary ex-data. Only finite public failure tags cross into the graph;
+   response policy lives in configuration-result. Success receipts are unchanged."
   [operation ctx input]
   (try
-    (assoc (operation ctx input) :ok true)
+    {:succeeded? true :value (operation ctx input)
+     :failure-type nil :failure-reason nil}
     (catch Exception error
-      (cond-> (components/failure-response error)
-        (or (= :invalid-request (:reason (ex-data error)))
-            (= :validation-error/delete-receipts (:type (ex-data error)))) (assoc :http-status 400)
-        (= :stale-configuration (:reason (ex-data error)))
-        (assoc :http-status 409 :code "stale-configuration"
-               :reason "The editor configuration changed. Refresh before selecting another configuration.")
-        (and (contains? #{:personal-home/unavailable :browser-plan/unsupported} (:type (ex-data error)))
-             (= :personal-home-unavailable (:reason (ex-data error))))
-        (assoc :code "personal-home-unavailable"
-               :reason "Your deployment has no available personal graph namespace.")))))
+      (let [{:keys [type reason]} (ex-data error)]
+        {:succeeded? false :value nil
+         :failure-type (case type
+                         :authz/forbidden "forbidden"
+                         :browser-plan/unsupported "unsupported"
+                         :quota/entity-limit "quota"
+                         :validation-error/delete-receipts "delete-receipts"
+                         :personal-home/unavailable "personal-home"
+                         nil)
+         :failure-reason (case reason
+                           :invalid-request "invalid-request"
+                           :stale-configuration "stale-configuration"
+                           :personal-home-unavailable "personal-home-unavailable"
+                           :component-missing "component-missing"
+                           :policy-refresh-required "policy-refresh-required"
+                           nil)}))))
 
 
-(defbase _editor-root-migration-preview
+(defbase _editor-root-migration-preview-outcome
   [input]
   (runtime/record-effect! :db)
-  (configuration-result root-migration/preview! ctx input))
+  (configuration-outcome root-migration/preview! ctx input))
 
 
-(defbase _editor-root-migration-apply
+(defbase _editor-root-migration-apply-outcome
   [input]
   (runtime/record-effect! :db)
-  (configuration-result root-migration/apply! ctx input))
+  (configuration-outcome root-migration/apply! ctx input))
 
 
-(defbase _editor-configuration-prepare
+(defbase _editor-configuration-prepare-outcome
   [input]
   (runtime/record-effect! :db)
-  (configuration-result preparation/prepare! ctx input))
+  (configuration-outcome preparation/prepare! ctx input))
 
 
-(defbase _editor-configuration-preview
+(defbase _editor-configuration-preview-outcome
   [input]
   (runtime/record-effect! :db)
-  (configuration-result activation/preview! ctx input))
+  (configuration-outcome activation/preview! ctx input))
 
 
-(defbase _editor-configuration-undo
+(defbase _editor-configuration-undo-outcome
   [input]
   (runtime/record-effect! :db)
-  (configuration-result undo/undo! ctx input))
+  (configuration-outcome undo/undo! ctx input))
 
 
-(defbase _editor-configuration-apply
+(defbase _editor-configuration-apply-outcome
   [input]
   (runtime/record-effect! :db)
-  (configuration-result activation/apply-proposal! ctx input))
+  (configuration-outcome activation/apply-proposal! ctx input))
 
 
-(defbase _editor-configuration-reconcile
+(defbase _editor-configuration-reconcile-outcome
   [input]
   (runtime/record-effect! :db)
-  (configuration-result receipts/reconcile! ctx input))
+  (configuration-outcome receipts/reconcile! ctx input))
 
 
-(defbase _editor-configuration-reconcile-undo
+(defbase _editor-configuration-reconcile-undo-outcome
   [input]
   (runtime/record-effect! :db)
-  (configuration-result receipts/reconcile-undo! ctx input))
+  (configuration-outcome receipts/reconcile-undo! ctx input))
 
 
-(defbase _editor-configuration-cleanup-preview
+(defbase _editor-configuration-cleanup-preview-outcome
   [input]
   (runtime/record-effect! :db)
-  (configuration-result receipts/cleanup-preview! ctx input))
+  (configuration-outcome receipts/cleanup-preview! ctx input))
 
 
-(defbase _ui-components-create-preview
+(defbase _ui-components-create-preview-facts
   [input]
   (runtime/record-effect! :db)
   (creation/preview ctx input))
 
 
-(defbase _ui-components-create-apply
+(defbase _ui-components-create-apply-facts
   [input]
   (runtime/record-effect! :db)
   (creation/apply! ctx input))
@@ -123,18 +136,18 @@
 
 (def impls
   {:ui-components ui-components
-   :_editor-configuration-plan {:impl _editor-configuration-plan :taint-propagate? true}
+   :_editor-configuration-plan-facts {:impl _editor-configuration-plan-facts :taint-propagate? true}
    ;; No caller values enter this source-authorized, server-selected export.
-   :_editor-root-plan _editor-root-plan
-   :_editor-root-migration-preview {:impl _editor-root-migration-preview :taint-propagate? true}
-   :_editor-root-migration-apply {:impl _editor-root-migration-apply :taint-propagate? true}
-   :_editor-server-call {:impl _editor-server-call :taint-propagate? true}
-   :_editor-configuration-prepare {:impl _editor-configuration-prepare :taint-propagate? true}
-   :_editor-configuration-preview {:impl _editor-configuration-preview :taint-propagate? true}
-   :_editor-configuration-reconcile {:impl _editor-configuration-reconcile :taint-propagate? true}
-   :_editor-configuration-reconcile-undo {:impl _editor-configuration-reconcile-undo :taint-propagate? true}
-   :_editor-configuration-cleanup-preview {:impl _editor-configuration-cleanup-preview :taint-propagate? true}
-   :_editor-configuration-undo {:impl _editor-configuration-undo :taint-propagate? true}
-   :_editor-configuration-apply {:impl _editor-configuration-apply :taint-propagate? true}
-   :_ui-components-create-preview {:impl _ui-components-create-preview :taint-propagate? true}
-   :_ui-components-create-apply {:impl _ui-components-create-apply :taint-propagate? true}})
+   :_editor-root-plan-facts _editor-root-plan-facts
+   :_editor-root-migration-preview-outcome {:impl _editor-root-migration-preview-outcome :taint-propagate? true}
+   :_editor-root-migration-apply-outcome {:impl _editor-root-migration-apply-outcome :taint-propagate? true}
+   :_editor-server-call-facts {:impl _editor-server-call-facts :taint-propagate? true}
+   :_editor-configuration-prepare-outcome {:impl _editor-configuration-prepare-outcome :taint-propagate? true}
+   :_editor-configuration-preview-outcome {:impl _editor-configuration-preview-outcome :taint-propagate? true}
+   :_editor-configuration-reconcile-outcome {:impl _editor-configuration-reconcile-outcome :taint-propagate? true}
+   :_editor-configuration-reconcile-undo-outcome {:impl _editor-configuration-reconcile-undo-outcome :taint-propagate? true}
+   :_editor-configuration-cleanup-preview-outcome {:impl _editor-configuration-cleanup-preview-outcome :taint-propagate? true}
+   :_editor-configuration-undo-outcome {:impl _editor-configuration-undo-outcome :taint-propagate? true}
+   :_editor-configuration-apply-outcome {:impl _editor-configuration-apply-outcome :taint-propagate? true}
+   :_ui-components-create-preview-facts {:impl _ui-components-create-preview-facts :taint-propagate? true}
+   :_ui-components-create-apply-facts {:impl _ui-components-create-apply-facts :taint-propagate? true}})

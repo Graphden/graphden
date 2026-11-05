@@ -34,8 +34,8 @@
                      (and name parent
                           (not (#{:_types-usages-parsed :_types-usages-validation} name))
                           (or (some #(str/starts-with? (clojure.core/name name) %)
-                                    ["_graph-tree-" "_types-usage-" "_types-usages-"])
-                              (#{:assoc-empty :graph-tree :_types-usages-apply} name))))
+                                    ["_graph-tree-" "_types-usage-" "_types-usages-" "_cohort-" "_search-" "_namespace-"])
+                              (#{:assoc-empty :graph-tree :_types-usages-apply :graph-search :graph-namespace-fns} name))))
                    (:fn-defs loaded))
         extra-defs (into {} (map (fn [[n fd]] [n (assoc fd :name n)])) (:base-fn-defs loaded))
         {:keys [fn-defs name->id]} (records-parse/prepare-module
@@ -54,10 +54,12 @@
         (doseq [definition sorted]
           (narrowing/check-fn-def-with-narrowings! definition caller-narrowings overrides)))))
   (doseq [[n expected-args] [[:graph-tree #{}]
-                             [:_types-usages-apply #{:parsed}]]]
+                             [:_types-usages-apply #{:parsed}]
+                             [:graph-search #{:q :descriptions?}]
+                             [:graph-namespace-fns #{:namespace-id}]]]
     (let [contract (registry/rich-type-of n)]
       (is (= expected-args (set (keys (:args contract)))) (str n))
       (is (= #{:db} (:effects contract)) (str n))))
-  (doseq [n [:_types-usage-incoming? :_types-usage-target-root? :_types-usage-summary :_graph-tree-count-row]]
+  (doseq [n [:_types-usage-incoming? :_types-usage-target-root? :_types-usage-summary :_graph-tree-count-row :_search-selection :_namespace-selection]]
     (is (empty? (:effects (registry/rich-type-of n)))
         (str n " captures inert facts rather than rereading storage for every row"))))

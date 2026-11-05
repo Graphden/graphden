@@ -25,61 +25,23 @@
     ctx)))
 
 
-(deftest query-param-reads-both-request-shapes
-  (testing "reitit's enriched :query-params wins, string OR keyword keyed"
-    (is (= "1" (call :query-param {:request {:query-params {"force" "1"}}
-                                   :param-name "force"})))
-    (is (= "1" (call :query-param {:request {:query-params {:force "1"}}
-                                   :param-name "force"}))))
-
-  (testing "a raw http-kit request falls back to :query-string, URL-DECODED"
-    ;; The branch-routing passthrough never goes through enrich-request;
-    ;; without the fallback every `?force=1` delete silently ignored the flag.
-    (is (= "a b" (call :query-param {:request {:query-string "force=a%20b"}
-                                     :param-name "force"}))))
-
-  (testing "a malformed percent-escape fails soft instead of 500-ing"
-    (is (= "a%" (call :query-param {:request {:query-string "force=a%"}
-                                    :param-name "force"}))))
-
-  (testing "absent parameter → nil (not \"\" — the caller tests presence)"
-    (is (nil? (call :query-param {:request {:query-string "other=1"}
-                                  :param-name "force"})))
-    (is (nil? (call :query-param {:request {} :param-name "force"})))))
+(deftest query-param-raw-decodes-a-soft-fallback
+  (testing "raw query values are URL-decoded"
+    (is (= "a b" (call :_query-param-raw {:query-string "force=a%20b"
+                                          :param-name "force"}))))
+  (testing "malformed escapes stay raw"
+    (is (= "a%" (call :_query-param-raw {:query-string "force=a%"
+                                         :param-name "force"}))))
+  (testing "absent parameters return nil"
+    (is (nil? (call :_query-param-raw {:query-string "other=1"
+                                       :param-name "force"})))
+    (is (nil? (call :_query-param-raw {:query-string nil
+                                       :param-name "force"})))))
 
 
-(deftest extract-entity-params-prefers-path-params-then-parses-the-uri
-  ;; ctx has no :storage, so `schema-entity-types` answers nil and only
-  ;; the CORE entity types resolve — the documented degraded mode.
-  (testing "reitit's :path-params win when present"
-    (is (= {:type-str "fn" :id-str "abc" :entity-type :fn}
-           (call :extract-entity-params
-                 {:request {:path-params {:type "fn" :id "abc"}
-                            :uri "/api/entities/slot/other"}}))))
-
-  (testing "no :path-params → the URI segments are parsed instead"
-    ;; This is the http-kit passthrough path; dropping it makes every
-    ;; delete reached through :branch-routing-wrap a 400.
-    (is (= {:type-str "binding" :id-str "xyz" :entity-type :binding}
-           (call :extract-entity-params
-                 {:request {:uri "/api/entities/binding/xyz"}}))))
-
-  (testing "a collection URI yields a type with no id"
-    (let [r (call :extract-entity-params {:request {:uri "/api/entities/slot"}})]
-      (is (= "slot" (:type-str r)))
-      (is (nil? (:id-str r)))
-      (is (= :slot (:entity-type r)))))
-
-  (testing "an UNKNOWN segment keeps :type-str but resolves :entity-type to nil"
-    ;; The handler's 400 hangs off :entity-type being nil; if the segment
-    ;; were coerced to a keyword blindly, an arbitrary URL segment would
-    ;; reach storage as an entity-type.
-    (let [r (call :extract-entity-params {:request {:uri "/api/entities/wat/1"}})]
-      (is (= "wat" (:type-str r)))
-      (is (nil? (:entity-type r)))))
-
-  (testing "an unrecognised URI shape → all nil, never a throw"
-    (is (= {:type-str nil :id-str nil :entity-type nil}
-           (call :extract-entity-params {:request {:uri "/"}})))
-    (is (= {:type-str nil :id-str nil :entity-type nil}
-           (call :extract-entity-params {:request {}})))))
+(deftest entity-route-primitives-keep-uri-and-schema-boundaries
+  (is (= {:type-str "binding" :id-str "xyz"}
+         (call :_entity-uri-params {:uri "/api/entities/binding/xyz"})))
+  (is (nil? (call :_entity-uri-params {:uri nil})))
+  (is (= :binding (call :_entity-type-from-string {:type-str "binding"})))
+  (is (nil? (call :_entity-type-from-string {:type-str "unknown"}))))

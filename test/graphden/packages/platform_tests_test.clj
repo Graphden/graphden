@@ -7,7 +7,7 @@
    Those fn-defs are the graph's analogue of a unit suite for the
    fn-def layer: `docs/TESTS.md` § Platform tests. Nothing else runs
    them — a tenant's [Run all] skips platform tests by design (the
-   `:platform?` flag on `test-runs/run-tests!`), so this test IS the
+   `:platform?` flag on `test-api/run-tests!`), so this test IS the
    gate: a platform test that fails, or that cannot run (an unbound
    free arg, a recorded type error), reds the suite here.
 
@@ -30,7 +30,8 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry-core]
     [graphden.executor.test-setup :as setup]
-    [graphden.test-infra.shared-bootstrap :as sb]))
+    [graphden.test-infra.shared-bootstrap :as sb]
+    [graphden.test-infra.test-api :as test-api]))
 
 
 (def ^:private package-set
@@ -75,7 +76,7 @@
       (is (= (count rows) (count platform))
           (str "non-platform tests in a package bundle: "
                (pr-str (map :name (remove test-runs/platform-test-row? rows))))))
-    (let [out (test-runs/run-tests! (:ctx *graph*) {:platform? true})]
+    (let [out (test-api/run-tests! (:ctx *graph*) {:platform? true})]
       (testing "the platform suite runs in full"
         (is (= (count platform) (:total out))))
       (testing "and every test passes — no failed, no not-runnable, no rejected"
@@ -85,9 +86,9 @@
 
 (deftest platform-tests-are-flagged-and-skipped-by-default
   (testing "the status join flags platform rows"
-    (let [rows (test-runs/tests-with-statuses (:ctx *graph*))]
+    (let [rows (test-api/tests-with-statuses (:ctx *graph*))]
       (is (seq rows))
       (is (every? :platform? rows))))
   (testing "a default (org) run skips them — nothing else is on this branch"
-    (let [out (test-runs/run-tests! (:ctx *graph*) {})]
+    (let [out (test-api/run-tests! (:ctx *graph*) {})]
       (is (zero? (:total out))))))

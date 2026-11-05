@@ -1,22 +1,7 @@
 (ns graphden.crud.value-form-test
-  "Parallel-safe: no `with-redefs`. The registry-parse test that used
-   to stub `exec/execute-by-name` (a per-execute hot-path fn — root
-   rebind pinned this NS `^:serial`) now seeds a REAL
-   `_value-form-registry` const row through `forms-ctx` and reads it
-   back through the executor, JSONB roundtrip included
-   (serial-reduction cluster B).
-
-   Tests for `graphden.crud.value-form` — the `/api/value-form`
-   resolver: structural classification, form-fn dispatch, refinement
-   extraction, the storage-backed
-   slot-type resolution, and the ctx-backed form assembly.
-
-   Pure helpers need no fixture; the storage-backed resolvers go
-   through the shared container. The ctx-backed assembly (registry-
-   pairs / build-leaf-form) runs
-   against a minimal in-test forms package — a `vf-const` identity
-   base-fn plus the leaf form-fn `:const` rows + the dispatch
-   registry — built by `forms-ctx`."
+  "Canonical type matching, refinement interpretation and storage resolvers.
+   Registry parsing uses a minimal real graph; construction and presentation
+   policy is covered through app.forms in value-form-graph-test."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.value-form :as vf]
@@ -35,17 +20,13 @@
 (def ^:private collect-bounds     #'vf/collect-bounds)
 (def ^:private numeric-bounds     #'vf/numeric-bounds)
 (def ^:private enum-of            #'vf/enum-of)
-(def ^:private merge-attrs        #'vf/merge-attrs)
-(def ^:private build-enum-control #'vf/build-enum-control)
 (def ^:private nav-descend        #'vf/nav-descend)
 (def ^:private nav-key-type       #'vf/nav-key-type)
 (def ^:private nav-item-type      #'vf/nav-item-type)
 (def ^:private item-key           #'vf/item-key)
 (def ^:private current-value      #'vf/current-value)
 (def ^:private value-fits?        #'vf/value-fits?)
-(def ^:private type-label         #'vf/type-label)
 (def ^:private registry-pairs     #'vf/registry-pairs)
-(def ^:private build-leaf-form    #'vf/build-leaf-form)
 (def ^:private inheritance-chain-info #'vf/inheritance-chain-info)
 
 
@@ -77,68 +58,6 @@
           (is (= (:name c) (:name (get fn-map (:id c))))
               "cached row carries the real fields (batched read populated it)"))
         (finally (sp/close storage))))))
-
-
-;; ============================================================================
-;; resolve-form — pure structural classifier
-;; ============================================================================
-
-(deftest resolve-form-leaf-test
-  (testing "primitives classify as leaf"
-    (is (= {:kind :leaf :type :int} (vf/resolve-form :int)))
-    (is (= {:kind :leaf :type :text} (vf/resolve-form :text))))
-  (testing "a refinement is a single leaf — it dispatches to ONE form-fn"
-    (is (= {:kind :leaf :type [:refine :int [:> 0]]}
-           (vf/resolve-form [:refine :int [:> 0]])))))
-
-
-(deftest resolve-form-list-test
-  (is (= {:kind :list :type [:list :int] :element {:kind :leaf :type :int}}
-         (vf/resolve-form [:list :int]))))
-
-
-(deftest resolve-form-record-test
-  (let [r (vf/resolve-form {:host :text :port :int})]
-    (is (= :record (:kind r)))
-    (is (= {:host :text :port :int} (:type r))
-        "composite descriptor carries its resolved type for exact dispatch")
-    (is (= #{:host :port} (set (map :name (:fields r)))))
-    (let [host (first (filter #(= :host (:name %)) (:fields r)))]
-      (is (= {:kind :leaf :type :text} (:form host))))))
-
-
-(deftest resolve-form-union-test
-  (let [u (vf/resolve-form [:union :int :text])]
-    (is (= :union (:kind u)))
-    (is (= [:union :int :text] (:type u))
-        "composite descriptor carries its resolved type for exact dispatch")
-    (testing "each branch keeps its raw type AND its resolved form"
-      (is (= #{:int :text} (set (map :type (:branches u)))))
-      (is (= #{{:kind :leaf :type :int} {:kind :leaf :type :text}}
-             (set (map :form (:branches u))))))))
-
-
-(deftest resolve-form-nested-test
-  (testing "record field that is itself a list recurses"
-    (let [r (vf/resolve-form {:tags [:list :text]})
-          tags (first (:fields r))]
-      (is (= :record (:kind r)))
-      (is (= {:kind :list :type [:list :text] :element {:kind :leaf :type :text}}
-             (:form tags))))))
-
-
-(deftest resolve-form-variant-test
-  (testing "a tagged variant desugars to a union of record branches"
-    (let [r (vf/resolve-form [:variant :ok :text :err :text])]
-      (is (= :union (:kind r)))
-      (is (= 2 (count (:branches r))))
-      (is (every? #(= :record (:kind (:form %))) (:branches r))))))
-
-
-(deftest resolve-form-depth-guard-test
-  (testing "past the recursion-depth guard any type collapses to a leaf"
-    (is (= {:kind :leaf :type {:host :text}}
-           (vf/resolve-form {:host :text} 13)))))
 
 
 ;; ============================================================================
@@ -262,48 +181,6 @@
     (is (nil? (enum-of :int)))))
 
 
-(deftest build-enum-control-test
-  (testing "a keyword-base enum renders colon-prefixed option values"
-    (let [sel (build-enum-control "" nil {:base :keyword :members ["get" "post"]})]
-      (is (= "select" (first sel)))
-      (is (= {"class" "arg-value-edit-input"
-              "data-form-field" ""
-              "data-field-kind" "enum"}
-             (second sel)))
-      (is (= [["option" {"value" ":get"} ":get"]
-              ["option" {"value" ":post"} ":post"]]
-             (drop 2 sel)))))
-  (testing "keyword members already colon-prefixed are left alone"
-    (is (= ["option" {"value" ":get"} ":get"]
-           (nth (build-enum-control "" nil {:base :keyword :members [:get]}) 2))))
-  (testing "a non-keyword base keeps member values verbatim"
-    (is (= [["option" {"value" "a"} "a"] ["option" {"value" "b"} "b"]]
-           (drop 2 (build-enum-control "" nil {:base :text :members ["a" "b"]})))))
-  (testing "path and id are threaded onto the <select>"
-    (let [attrs (second (build-enum-control "status" "vf-status"
-                                            {:base :text :members ["x"]}))]
-      (is (= "status" (get attrs "data-field-path")))
-      (is (= "vf-status" (get attrs "id"))))))
-
-
-;; ============================================================================
-;; merge-attrs — attribute injection into a control hiccup
-;; ============================================================================
-
-(deftest merge-attrs-test
-  (testing "merges into an existing attrs map"
-    (is (= ["input" {"type" "text" "id" "x"}]
-           (merge-attrs ["input" {"type" "text"}] {"id" "x"}))))
-  (testing "inserts an attrs map when the control carries none"
-    (is (= ["input" {"id" "x"}]
-           (merge-attrs ["input"] {"id" "x"}))))
-  (testing "a child-only control keeps its child"
-    (is (= ["span" {"id" "x"} "txt"]
-           (merge-attrs ["span" "txt"] {"id" "x"}))))
-  (testing "a non-vector passes through untouched"
-    (is (= "x" (merge-attrs "x" {"id" "y"})))))
-
-
 ;; ============================================================================
 ;; nav-typed sequence helpers — per-position type walk
 ;; ============================================================================
@@ -415,23 +292,6 @@
     (is (true? (boolean (value-fits? nil :int)))))
   (testing "a literal satisfying a refinement fits it"
     (is (true? (boolean (value-fits? 8080 [:refine :int [:and [:>= 1] [:<= 65535]]]))))))
-
-
-(deftest type-label-test
-  (testing "a primitive shows its name"
-    (is (= "int" (type-label :int))))
-  (testing "a refinement shows its BASE — not the bare word \"refine\""
-    (is (= "int" (type-label [:refine :int [:> 0]]))))
-  (testing "a list shows [elem]"
-    (is (= "[text]" (type-label [:list :text]))))
-  (testing "composites get a short word"
-    (is (= "record" (type-label {:a :int})))
-    (is (= "fn" (type-label [:fn {} :int]))))
-  (testing "any other constructor vector shows its head keyword"
-    (is (= "union" (type-label [:union :int :text])))
-    (is (= "map" (type-label [:map :keyword :int]))))
-  (testing "an unclassifiable value falls back to pr-str"
-    (is (= "5" (type-label 5)))))
 
 
 ;; ============================================================================
@@ -555,7 +415,7 @@
 
 
 ;; ============================================================================
-;; ctx-backed form assembly — registry-pairs / build-leaf-form, driven
+;; Registry parsing, driven
 ;; against a minimal in-storage forms package.
 ;; ============================================================================
 
@@ -592,12 +452,6 @@
      (exec/create-context {:storage storage}))))
 
 
-(defn- in-tree?
-  "True when value `x` appears anywhere in the nested hiccup `form`."
-  [form x]
-  (boolean (some #(= x %) (tree-seq coll? seq form))))
-
-
 (deftest registry-pairs-test
   (testing "reads :_value-form-registry into [[type-kw fn-name] …] pairs"
     (let [storage (setup/create-test-storage)]
@@ -632,44 +486,6 @@
       (try
         (is (= [] (registry-pairs (exec/create-context {:storage storage}))))
         (finally (sp/close storage))))))
-
-
-(deftest build-leaf-form-test
-  (let [storage (setup/create-test-storage)]
-    (try
-      (let [ctx (forms-ctx storage)]
-        (testing "a primitive picks its registered form-fn control"
-          (let [c (build-leaf-form ctx :int "" nil)]
-            (is (= "input" (first c)))
-            (is (in-tree? c "number"))))
-        (testing "a type with no registered form-fn falls back to _form-json"
-          (is (= "textarea" (first (build-leaf-form ctx :bool "" nil)))))
-        (testing "a bounded numeric refinement threads HTML min / max"
-          (let [c (build-leaf-form ctx [:refine :int [:and [:>= 1] [:<= 65535]]]
-                                   "" nil)]
-            (is (= 1 (get (second c) "min")))
-            (is (= 65535 (get (second c) "max")))))
-        (testing "a closed-enum refinement renders a <select>, not an input"
-          (let [c (build-leaf-form ctx [:refine :keyword [:in [:get :post]]]
-                                   "" nil)]
-            (is (= "select" (first c)))
-            (is (= "enum" (get (second c) "data-field-kind")))))
-        (testing "a non-empty path is threaded onto the control"
-          (is (= "host" (get (second (build-leaf-form ctx :int "host" nil))
-                             "data-field-path")))))
-      (finally (sp/close storage)))))
-
-
-;; `build-form`'s composite arms render through the app.forms graph
-;; structure templates now — covered on the golden clone in
-;; `graphden.crud.value-form-graph-test`, together with the
-;; `:value-form-handler` endpoint (which exercises the leaf path).
-
-
-(deftest resolve-form-text-alias-test
-  (testing "a type NAME as a string (the editor's \"as:\" chooser) classifies like the keyword"
-    (is (= (vf/resolve-form :text) (vf/resolve-form "text")))
-    (is (= :leaf (:kind (vf/resolve-form "int"))))))
 
 
 (deftest resolve-slot-effective-type-degraded-marker-test

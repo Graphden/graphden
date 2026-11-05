@@ -8,7 +8,6 @@
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.crud.fn-execution :as fn-exec]
     [graphden.crud.fn-execution.lookup :as lookup]
     [graphden.crud.fn-execution.persist :as persist]
     [graphden.executor.compile-runtime :as cr]
@@ -20,6 +19,7 @@
     [graphden.services.endpoint :as endpoint]
     [graphden.services.reconciler :as recon]
     [graphden.storage.protocol.core :as sp]
+    [graphden.test-infra.execution-api :as execution-api]
     [graphden.types.check :as types-check])
   (:import
     (java.net
@@ -172,7 +172,7 @@
               parent-id (:id parent)]
           (binding [cr/*execution* {:id parent-id :trace-id parent-id}]
             (is (= {:orders [1 2 3]} (exec/execute ctx fetch-id {}))))
-          (let [children (:children (fn-exec/get-execution ctx parent-id))
+          (let [children (:children (execution-api/get-execution ctx parent-id))
                 child-row (some->> children first :id (sp/read-entity storage :fn-execution))]
             (is (= 1 (count children)))
             (is (= "_e2e-orders-ring" (:fn-name (first children))) "the listener's handler fn")

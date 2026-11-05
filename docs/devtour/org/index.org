@@ -21,13 +21,13 @@ The same source generates this standalone page, the Emacs data, and the Org read
 - [[file:storage.org][Storage — schemas and graph reads]] (19 · ~65 min) :: Protocols, rows, traversal, and change notifications.
 - [[file:versioning.org][Branches — versions and merges]] (26 · ~105 min) :: Branch-specific reads, conflict detection, and cache refresh.
 - [[file:types.org][Types — validation and inference]] (24 · ~95 min) :: Type expressions, compatibility, inference, and secret markings.
-- [[file:crud.org][Graph API — reads, writes, and execution]] (25 · ~69 min) :: Request validation, stored edits, execution results, and views.
-- [[file:packages.org][Packages — loading and distribution]] (31 · ~99 min) :: Declarations, implementations, synchronization, import, and lint.
+- [[file:crud.org][Graph API — reads, writes, and execution]] (25 · ~61 min) :: Request validation, stored edits, execution results, and views.
+- [[file:packages.org][Packages — loading and distribution]] (31 · ~93 min) :: Declarations, implementations, synchronization, import, and lint.
 - [[file:boot.org][Boot — starting the system]] (12 · ~22 min) :: Configuration, component dependencies, startup, and shutdown.
-- [[file:web.org][Web — HTTP handlers and rendering]] (20 · ~30 min) :: Requests, routing, markup, and graph-backed APIs.
-- [[file:layout.org][Layout — graph structure and coordinates]] (6 · ~21 min) :: From graph rows and expansion state to nodes, edges, and a grid.
+- [[file:web.org][Web — HTTP handlers and rendering]] (20 · ~29 min) :: Requests, routing, markup, and graph-backed APIs.
+- [[file:layout.org][Layout — graph structure and coordinates]] (6 · ~20 min) :: From graph rows and expansion state to nodes, edges, and a grid.
 - [[file:editor.org][Editor — browser behavior]] (57 · ~189 min) :: Loading, graph-backed controls, actions, forms, and preferences.
-- [[file:services.org][Services — instances and placement]] (22 · ~57 min) :: Reconciliation, service discovery, tracing, and executor placement.
+- [[file:services.org][Services — instances and placement]] (22 · ~56 min) :: Reconciliation, service discovery, tracing, and executor placement.
 - [[file:platform.org][Platform — extension interfaces and isolation]] (12 · ~31 min) :: Access policy, safe rendering, monitoring, and remote executors.
 - [[file:accounts.org][Accounts — identity and sessions]] (5 · ~16 min) :: Sign-in, account linking, tokens, and second-factor validation.
 - [[file:constellation.org][Repositories — composition and release boundaries]] (8 · ~9 min) :: Core, addons, external packages, and revision consistency.

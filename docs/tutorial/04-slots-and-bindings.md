@@ -15,8 +15,8 @@ value)`, graphden couldn't:
 
 - Let two fn-defs share a slot identity. Inheritance would have
   to walk by NAME, which breaks when ancestors rename.
-- Express a value that lives in TWO places (parent binds it,
-  child overrides it).
+- Keep bindings on different functions separate while they target the
+  same slot (for example, two children each bind their own value).
 - Express sequence bindings like `:list-append` cleanly.
 
 So the data model splits the concern across four entities (plus one
@@ -73,11 +73,12 @@ The exception is **renames** (next section).
 
 ## Renames — when the name has to change
 
-Say you have:
+The existing `core.strings/str-len` base function declares:
 
 ```edn
 {:name :str-len
- :args {:string {:type :text}}}
+ :args {:string {:type :text}}
+ :return-type :non-negative-int}
 ```
 
 …and you want a descendant `:hello-len` that runs

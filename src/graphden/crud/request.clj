@@ -125,25 +125,6 @@
         :else {}))))
 
 
-(defn extract-entity-params
-  "Extracts type-str, id-str, entity-type from request. Prefers
-   reitit's `:path-params` when present; falls back to URI parsing
-   (the handler is sometimes reached with the raw http-kit request
-   that hasn't been through reitit's `enrich-request`).
-
-   `known` — the live schema's entity-type set, so an addon's entities
-   resolve too. Omit it and only the core types do."
-  ([request] (extract-entity-params request nil))
-  ([request known]
-   (let [pp (:path-params request)
-         rp (when (nil? pp) (parse-uri-segments (:uri request)))
-         type-str (or (:type pp) (:type-str rp))
-         id-str (or (:id pp) (:id-str rp))]
-     {:type-str type-str
-      :id-str id-str
-      :entity-type (entity-type-from-string type-str known)})))
-
-
 (defn read-json-body
   "Pull the JSON body off a Ring request whether it arrives as a
    string, an InputStream, or already-parsed Clojure data. Returns

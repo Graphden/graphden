@@ -222,26 +222,26 @@ Chooses response encoding from ~Accept-Encoding~. The surrounding ~:process-resp
 :PROPERTIES:
 :CUSTOM_ID: web/type-name-entries
 :FILE: src/graphden/crud/types_api.clj
-:LINE: 189
+:LINE: 188
 :MINS: 2.8
 :END:
 
 Acquires the scoped picker rows with canonical namespace references kept separate from displayed selection names. The graph's ~compatible-type-names~ filters those references with subtyping before sharing the ~type-name-kinds~ wire projection.
 
-- source :: [[file:../../../src/graphden/crud/types_api.clj::(defn type-name-entries][src/graphden/crud/types_api.clj:189]]
+- source :: [[file:../../../src/graphden/crud/types_api.clj::(defn type-name-entries][src/graphden/crud/types_api.clj:188]]
 - same file :: [[file:web.org::#web/all-rich-types][all-rich-types]]
 
 * 18. all-rich-types
 :PROPERTIES:
 :CUSTOM_ID: web/all-rich-types
 :FILE: src/graphden/crud/types_api.clj
-:LINE: 833
+:LINE: 718
 :MINS: 1.1
 :END:
 
 Acquires the augmented, scoped [[file:glossary.org::#term/rich-types][rich-types registry]] snapshot. The graph's ~api-rich-types~ maps its wire projection over this single snapshot, removing metadata unused by the editor while preserving type fields.
 
-- source :: [[file:../../../src/graphden/crud/types_api.clj::(defn all-rich-types][src/graphden/crud/types_api.clj:833]]
+- source :: [[file:../../../src/graphden/crud/types_api.clj::(defn all-rich-types][src/graphden/crud/types_api.clj:718]]
 - same file :: [[file:web.org::#web/type-name-entries][type-name-entries]]
 - referenced from :: [[file:types.org::#types/record-rich-types!][record-rich-types!]]
 
@@ -249,13 +249,13 @@ Acquires the augmented, scoped [[file:glossary.org::#term/rich-types][rich-types
 :PROPERTIES:
 :CUSTOM_ID: web/fn-type-args-fn
 :FILE: resources/packages/web/crud-types/impls.clj
-:LINE: 82
+:LINE: 83
 :MINS: 1.0
 :END:
 
 Reads a callable type's argument map through the canonical type accessor; non-callable types return nil. The ~candidate-fit~ composition in [[file:../../../resources/packages/web/crud-types/fns.edn][crud-types/fns.edn]] counts these arguments and ranks already-admissible candidates: ~:exact~ matches the supplied count, ~:captures~ needs additional [[file:glossary.org::#term/capture][captured input]], and ~:ignores~ consumes fewer parameters. Value [[file:glossary.org::#term/slot][slots]] compare with zero; identity slots are exact. Ranking changes display order, not whether the type checker admits a candidate.
 
-- source :: [[file:../../../resources/packages/web/crud-types/impls.clj::(defbase fn-type-args-fn][resources/packages/web/crud-types/impls.clj:82]]
+- source :: [[file:../../../resources/packages/web/crud-types/impls.clj::(defbase fn-type-args-fn][resources/packages/web/crud-types/impls.clj:83]]
 
 * 20. sync-fn-defs-branch!
 :PROPERTIES:

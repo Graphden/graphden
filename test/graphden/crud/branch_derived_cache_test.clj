@@ -60,7 +60,7 @@
 (defn- read-both!
   [ctx]
   (lint/lint-branch ctx #{})
-  (entity-list/graph-tree ctx))
+  (entity-list/graph-tree-facts ctx))
 
 
 (defn- lint-entries
@@ -94,7 +94,7 @@
   (doseq [[ns-name work-name read! forget! cached?]
           [['graphden.lint.graph 'full-state #(lint/lint-branch % #{})
             lint/forget-branch! #(seq (lint-entries %))]
-           ['graphden.crud.entities.list 'ns-kind-counts entity-list/graph-tree
+           ['graphden.crud.entities.list 'ns-kind-counts entity-list/graph-tree-facts
             entity-list/forget-branch! #(contains? @(tree-memo) %)]]]
     (testing (str ns-name)
       (let [branch-id (random-uuid) ctx (context branch-id)

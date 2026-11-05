@@ -696,11 +696,141 @@
           :then {:parent :const :args {:value {:ok false :error "Request body must include valid 'type-fn-id'"}}}
           :else {:value nil}}}
 
+  {:name :_types-usage-link
+   :type {:fn-id :uuid :kind :keyword :target-id :nullable-uuid
+          :slot-name :nullable-text :root-kind [:union :null :keyword]}}
+  {:name :_types-usage-links :list :_types-usage-link}
+  {:name :_types-usage-fn-facts
+   :type {:id :uuid :name :nullable-text :role [:union :null :keyword]
+          :namespace-id :nullable-uuid :anonymous-hash :nullable-text}}
+  {:name :_types-usage-fn-index :map {:key :uuid :value :_types-usage-fn-facts}}
+  {:name :_types-usage-namespace-paths :map {:key :uuid :value :text}}
+  {:name :_types-usage-reachability-facts
+   :type {:state :keyword :scope :keyword :origin [:union :null :keyword]
+          :roots :_types-usage-links :path :_types-usage-links}}
+  {:name :_types-usages-facts-shape
+   :type {:target-id :nullable-uuid :target-name :nullable-text :visible? :bool
+          :fns :_types-usage-fn-index :namespace-paths :_types-usage-namespace-paths
+          :links :_types-usage-links :constraints :_types-usage-links :reachability :_types-usage-reachability-facts}}
+  {:name :_types-usages-facts
+   :description "One concealed scoped snapshot: structural edges, recursive constraint links and bounded-root shortest path."
+   :args {:parsed {:type :_types-usages-parsed-shape}}
+   :return-type :_types-usages-facts-shape :effects #{:db}}
+  {:name :_types-usages-target-id :parent :get
+   :args {:coll :_types-usages-facts :key {:value :target-id} :default nil}}
+  {:name :_types-usages-target-name :parent :get
+   :args {:coll :_types-usages-facts :key {:value :target-name} :default nil}}
+  {:name :_types-usages-visible :parent :get
+   :args {:coll :_types-usages-facts :key {:value :visible?} :default false}}
+  {:name :_types-usages-links :parent :get
+   :args {:coll :_types-usages-facts :key {:value :links} :default []}}
+  {:name :_types-usages-constraints :parent :get
+   :args {:coll :_types-usages-facts :key {:value :constraints} :default []}}
+  {:name :_types-usages-reachability :parent :get
+   :args {:coll :_types-usages-facts :key {:value :reachability} :default {}}}
+  {:name :_types-usage-fn-id :parent :get
+   :args {:coll {:as :usage :type :_types-usage-link} :key {:value :fn-id} :default nil}}
+  {:name :_types-usage-fn :parent :get
+   :args {:coll {:parent :get :args {:coll {:as :usage-facts :type :_types-usages-facts-shape} :key {:value :fns} :default {}}}
+          :key :_types-usage-fn-id :default {}}}
+  {:name :_types-usage-name :parent :get
+   :args {:coll :_types-usage-fn :key {:value :name} :default nil}}
+  {:name :_types-usage-role :parent :get
+   :args {:coll :_types-usage-fn :key {:value :role} :default nil}}
+  {:name :_types-usage-namespace-id :parent :get
+   :args {:coll :_types-usage-fn :key {:value :namespace-id} :default nil}}
+  {:name :_types-usage-anonymous-hash :parent :get
+   :args {:coll :_types-usage-fn :key {:value :anonymous-hash} :default nil}}
+  {:name :_types-usage-display-name :parent :coalesce
+   :args {:value :_types-usage-name :default "(anonymous)"}}
+  {:name :_types-usage-namespace :parent :get
+   :args {:coll {:parent :get :args {:coll {:as :usage-facts :type :_types-usages-facts-shape} :key {:value :namespace-paths} :default {}}}
+          :key :_types-usage-namespace-id :default nil}}
+  {:name :_types-usage-root-kind :parent :get
+   :args {:coll {:as :usage :type :_types-usage-link} :key {:value :root-kind} :default nil}}
+  {:name :_types-usage-kind :parent :get
+   :args {:coll {:as :usage :type :_types-usage-link} :key {:value :kind} :default nil}}
+  {:name :_types-usage-slot-name :parent :get
+   :args {:coll {:as :usage :type :_types-usage-link} :key {:value :slot-name} :default nil}}
+  {:name :_types-usage-summary :parent :merge :lambda-params [:usage] :return-type :_types-usage-summary-shape
+   :args {:maps [{:parent :zipmap
+                  :args {:keys [{:value :fn-id} {:value :fn-name} {:value :role} {:value :kind}]
+                         :vals [{:parent :to-str :args {:value :_types-usage-fn-id}}
+                                :_types-usage-display-name :_types-usage-role :_types-usage-kind]}}
+                 {:parent :if
+                  :args {:test {:parent :some? :args {:value :_types-usage-slot-name}}
+                         :then {:parent :assoc-empty :args {:key {:value :slot-name} :value :_types-usage-slot-name}}
+                         :else {}}}
+                 {:parent :if
+                  :args {:test {:parent :some? :args {:value :_types-usage-root-kind}}
+                         :then {:parent :assoc-empty :args {:key {:value :root-kind} :value :_types-usage-root-kind}}
+                         :else {}}}
+                 {:parent :if
+                  :args {:test {:parent :some? :args {:value :_types-usage-namespace-id}}
+                         :then {:parent :assoc-empty
+                                :args {:key {:value :fn-namespace}
+                                       :value {:parent :if
+                                               :args {:test {:parent :equal? :args {:a :_types-usage-namespace :b ""}}
+                                                      :then nil :else :_types-usage-namespace}}}}
+                         :else {}}}
+                 {:parent :if
+                  :args {:test {:parent :or
+                                :args {:values [{:parent :nil? :args {:value :_types-usage-name}}
+                                                :_types-usage-anonymous-hash
+                                                {:parent :str-starts-with?
+                                                 :args {:string {:parent :coalesce :args {:value :_types-usage-name :default ""}}
+                                                        :prefix "_anon-"}}]}}
+                         :then {:value {:anonymous true}} :else {}}}]}}
+  {:name :_types-usage-incoming? :parent :equal? :lambda-params [:usage]
+   :args {:a {:parent :get :args {:coll {:as :usage :type :_types-usage-link} :key {:value :target-id} :default nil}}
+          :b {:as :target-id :type :nullable-uuid}}}
+  {:name :_types-usage-target-root? :parent :and :lambda-params [:usage]
+   :args {:values [{:parent :equal? :args {:a :_types-usage-fn-id :b {:as :target-id :type :nullable-uuid}}}
+                   {:parent :or
+                    :args {:values [{:parent :equal? :args {:a :_types-usage-root-kind :b {:value :route}}}
+                                    {:parent :equal? :args {:a :_types-usage-root-kind :b {:value :service}}}]}}]}}
+  {:name :_types-usage-root-link :parent :assoc :lambda-params [:usage]
+   :args {:map {:parent :assoc :args {:map {:as :usage :type :_types-usage-link} :key {:value :root-kind} :value nil}}
+          :key {:value :kind}
+          :value {:parent :if
+                  :args {:test {:parent :equal? :args {:a :_types-usage-root-kind :b {:value :route}}}
+                         :then {:value :route-root} :else {:value :service-root}}}}}
+  {:name :_types-usage-roots :parent :get
+   :args {:coll :_types-usages-reachability :key {:value :roots} :default []}}
+  {:name :_types-usages-selected-links :parent :if :return-type :_types-usage-links
+   :args {:test :_types-usages-visible
+          :then {:parent :concat
+                 :args {:colls [{:parent :filter :args {:pred :_types-usage-incoming? :coll :_types-usages-links :target-id :_types-usages-target-id}}
+                                :_types-usages-constraints
+                                {:parent :map
+                                 :args {:func :_types-usage-root-link
+                                        :coll {:parent :filter :args {:pred :_types-usage-target-root? :coll :_types-usage-roots :target-id :_types-usages-target-id}}}}]}}
+          :else []}}
+  {:name :_types-usages-response-cap :parent :const :args {:value 400}}
+  {:name :_types-usages-summaries :parent :map :return-type :_types-usage-summaries
+   :args {:func :_types-usage-summary
+          :coll {:parent :take :args {:count 400 :coll :_types-usages-selected-links}}
+          :usage-facts :_types-usages-facts}}
+  {:name :_types-usages-count :parent :count :args {:coll :_types-usages-selected-links}}
+  {:name :_types-usages-reachability-summary :parent :merge :return-type :_types-usage-reachability-shape
+   :args {:maps [:_types-usages-reachability
+                 {:parent :zipmap
+                  :args {:keys [{:value :roots} {:value :path}]
+                         :vals [{:parent :map :args {:func :_types-usage-summary :coll :_types-usage-roots :usage-facts :_types-usages-facts}}
+                                {:parent :map
+                                 :args {:func :_types-usage-summary :usage-facts :_types-usages-facts
+                                        :coll {:parent :get :args {:coll :_types-usages-reachability :key {:value :path} :default []}}}}]}}]}}
   {:name :_types-usages-apply
-   :description "Stage 3 of types-usages — walk the graph for every reference to the target type-row. Returns `{:ok :type-fn-id :type-name :count :usages}` where each usage's `kind ∈ {:base-of :element-of :return-of :slot-of :binding-of :union-branch :variant-branch}`. Reached only after validation passes."
-   :args {:parsed {:type :_types-usages-parsed-shape :description "Output of `:_types-usages-parsed`."}}
-   :return-type :_types-usages-result-shape
-   :effects #{:db}}
+   :description "Select incoming links, summarize identities and build the capped usages/reachability response over one concealed snapshot."
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :type-fn-id} {:value :type-name} {:value :count}
+                 {:value :truncated?} {:value :usages} {:value :reachability}]
+          :vals [true {:parent :to-str :args {:value :_types-usages-target-id}} :_types-usages-target-name
+                 :_types-usages-count
+                 {:parent :gt :args {:nums [:_types-usages-count :_types-usages-response-cap]}}
+                 :_types-usages-summaries
+                 :_types-usages-reachability-summary]}
+   :return-type :_types-usages-result-shape}
 
   ;; --- type-row compound handler primitives. The handlers themselves
   ;; are `:if` graph fn-defs below; these base-fns are the parse /

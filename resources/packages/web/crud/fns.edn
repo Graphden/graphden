@@ -118,10 +118,16 @@
    :description "Output of `:_types-candidates-apply` — the enumeration of fns whose return type is a subtype of `expected`."
    :type {:ok :bool :expected :type-expression :count :non-negative-int :candidates [:list :any]}}
 
+  {:name :_types-usage-summary-shape
+   :type {:fn-id :text :fn-name :text :role [:union :null :keyword] :kind :keyword}}
+  {:name :_types-usage-summaries :list :_types-usage-summary-shape}
+  {:name :_types-usage-reachability-shape
+   :type {:state :keyword :scope :keyword :origin [:union :null :keyword]
+          :roots :_types-usage-summaries :path :_types-usage-summaries}}
   {:name :_types-usages-result-shape
    :description "Output of `:_types-usages-apply` — every reference to the target type-row. `:type-fn-id` is the id stringified."
-   :type {:ok :bool :type-fn-id :text :type-name :text :count :int :usages :jsonb
-          :reachability :jsonb}}
+   :type {:ok :bool :type-fn-id :text :type-name :nullable-text :count :non-negative-int
+          :truncated? :bool :usages :_types-usage-summaries :reachability :_types-usage-reachability-shape}}
 
   {:name :_id-name-result-shape
    :description "The success payload of a type-row create / update — the new row's id (stringified) and name."
@@ -286,11 +292,64 @@
   ;; shared graph-cache. Every fn row carries a `:role` (Types vs
   ;; Functions decided server-side); `GET /api/graph/entities` picks one
   ;; by its `scope` (`:all-entities-handler`), each MCP tool binds its own.
+  {:name :_graph-tree-kind :type {:count :int :types :int :plain :int}}
+  {:name :_graph-tree-kinds :map {:key :nullable-uuid :value :_graph-tree-kind}}
+  {:name :_graph-tree-errors :map {:key :nullable-uuid :value :int}}
+  {:name :_graph-tree-facts-shape
+   :type {:namespaces [:list :keyword-map] :kinds :_graph-tree-kinds :errors :_graph-tree-errors}}
+  {:name :_graph-tree-facts
+   :description "One scoped sidebar snapshot: memoized kinds and diagnostics counted only for visible fn IDs."
+   :args {} :return-type :_graph-tree-facts-shape :effects #{:db}}
+  {:name :_graph-tree-kinds-value :parent :get
+   :args {:coll :_graph-tree-facts :key {:value :kinds} :default {}}}
+  {:name :_graph-tree-errors-value :parent :get
+   :args {:coll :_graph-tree-facts :key {:value :errors} :default {}}}
+  {:name :_graph-tree-namespace-ids :parent :distinct
+   :args {:coll {:parent :concat
+                 :args {:colls [{:parent :keys :args {:map :_graph-tree-kinds-value}}
+                                {:parent :keys :args {:map :_graph-tree-errors-value}}]}}}}
+  {:name :_graph-tree-captured-kinds :parent :get
+   :args {:coll {:as :tree-facts :type :_graph-tree-facts-shape} :key {:value :kinds} :default {}}}
+  {:name :_graph-tree-kind-value :parent :get
+   :args {:coll :_graph-tree-captured-kinds :key {:as :namespace-id :type :nullable-uuid}
+          :default {:value {:count 0 :types 0 :plain 0}}}}
+  {:name :_graph-tree-error-count :parent :get
+   :args {:coll {:parent :get
+                 :args {:coll {:as :tree-facts :type :_graph-tree-facts-shape} :key {:value :errors} :default {}}}
+          :key {:as :namespace-id :type :nullable-uuid} :default 0}}
+  {:name :_graph-tree-type-count :parent :get
+   :args {:coll :_graph-tree-kind-value :key {:value :types} :default 0}}
+  {:name :_graph-tree-fn-count :parent :get
+   :args {:coll :_graph-tree-kind-value :key {:value :plain} :default 0}}
+  {:name :_graph-tree-count-row :parent :merge :lambda-params [:namespace-id]
+   :args {:maps [{:parent :zipmap
+                  :args {:keys [{:value :namespace-id} {:value :count}]
+                         :vals [{:as :namespace-id :type :nullable-uuid}
+                                {:parent :get :args {:coll :_graph-tree-kind-value :key {:value :count} :default 0}}]}}
+                 {:parent :if
+                  :args {:test {:parent :or
+                                :args {:values [{:parent :gt :args {:nums [:_graph-tree-error-count 0]}}
+                                                {:parent :not
+                                                 :args {:value {:parent :contains?
+                                                                :args {:coll :_graph-tree-captured-kinds
+                                                                       :key {:as :namespace-id :type :nullable-uuid}}}}}]}}
+                         :then {:parent :assoc-empty :args {:key {:value :type-error-count} :value :_graph-tree-error-count}}
+                         :else {}}}
+                 {:parent :if
+                  :args {:test {:parent :gt :args {:nums [:_graph-tree-type-count 0]}}
+                         :then {:parent :assoc-empty :args {:key {:value :type-count} :value :_graph-tree-type-count}}
+                         :else {}}}
+                 {:parent :if
+                  :args {:test {:parent :gt :args {:nums [:_graph-tree-fn-count 0]}}
+                         :then {:parent :assoc-empty :args {:key {:value :fn-count} :value :_graph-tree-fn-count}}
+                         :else {}}}]}}
   {:name :graph-tree
-   :description "Sidebar init — the namespace list plus a per-namespace count of named fns (`:counts`, with `:type-count` / `:fn-count` / `:type-error-count` where >0). No fn rows: leaves load lazily through `:graph-namespace-fns`."
-   :args {}
-   :return-type {:namespaces [:list :keyword-map] :counts [:list :keyword-map]}
-   :effects #{:db}}
+   :description "Sidebar namespaces and kind/diagnostic counts; anonymous-only diagnosed namespaces retain a zero-count row."
+   :parent :zipmap
+   :args {:keys [{:value :namespaces} {:value :counts}]
+          :vals [{:parent :get :args {:coll :_graph-tree-facts :key {:value :namespaces} :default []}}
+                 {:parent :map :args {:func :_graph-tree-count-row :coll :_graph-tree-namespace-ids :tree-facts :_graph-tree-facts}}]}
+   :return-type {:namespaces [:list :keyword-map] :counts [:list :keyword-map]}}
 
   {:name :graph-namespace-fns
    :description "One namespace's light fn rows (the sidebar's lazy expand); nil `namespace-id` selects the root bucket."

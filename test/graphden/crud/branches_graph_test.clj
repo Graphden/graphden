@@ -562,7 +562,7 @@
         lint-entry? #(some (fn [[[_ bid _] _]] (= id bid)) @lint-cache)]
     (try
       (graph-lint/lint-branch ctx #{})
-      (entity-list/graph-tree ctx)
+      (entity-list/graph-tree-facts ctx)
       (is (lint-entry?))
       (is (contains? @tree-cache id))
       (let [body (json-body (gh/via :delete-branch-handler

@@ -13,6 +13,7 @@
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.crud.entities :as entities]
+    [graphden.crud.entities.list :as listing]
     [graphden.crud.types-api :as ta]
     [graphden.executor.registry.core :as registry]
     [graphden.storage.protocol.core :as sp]
@@ -127,12 +128,12 @@
       (testing ":tree diag counts ignore foreign fn-ids in the shared bucket"
         (diag/record! nil a-fn-id [{:message "acme's broken fn"}])
         (tctx/with-org "bcorp"
-                       (let [{:keys [counts]} (entities/graph-tree ctx)]
-                         (is (every? (comp nil? :type-error-count) counts)
+                       (let [{:keys [errors]} (listing/graph-tree-facts ctx)]
+                         (is (empty? errors)
                              "no phantom per-namespace error chip from a foreign org's fn")))
         (tctx/with-org "acme"
-                       (let [{:keys [counts]} (entities/graph-tree ctx)]
-                         (is (= 1 (reduce + 0 (keep :type-error-count counts)))
+                       (let [{:keys [errors]} (listing/graph-tree-facts ctx)]
+                         (is (= 1 (reduce + 0 (vals errors)))
                              "the owning org still sees its own count")))))))
 
 

@@ -182,35 +182,11 @@
   (types-api/type-name-entries ctx))
 
 
-(defbase _types-usages-apply
-  "Stage 3 of types-usages — walk the graph for every reference to the
-   target fn row. Returns `{:ok :type-fn-id :type-name :count :usages}`
-   where `:usages` is a vec of `{:fn-id :fn-name :role :kind …}` entries
-   spanning the type plane (`:base-of`, `:element-of`, `:return-of`,
-   `:union-branch` / `:variant-branch` / `:fn-type-arg-or-return`
-   constraint uses, `:slot-of`, `:binding-of`) AND the composition
-   plane (`:parent-of` children, `:ref-of` binding/list-item refs,
-   `:resolver-of`) — one walk serves /api/types/usages and the
-   /api/fns/usages alias behind the inspector's Used-by section.
-
-   §3.3 algorithm — the constraint-uses category requires
-   `constraint-contains-type-ref?` which is a RECURSIVE walk into
-   nested `[:union …]` / `[:variant …]` / `[:fn args ret]` /
-   `[:refine base [:and …]]` constraint vectors — a cycle-tracking
-   shared-state walk, the §3.3 carve-out proper (unchanged by `:fix`
-   shipping: `:fix` gives structural recursion, not shared
-   cycle-state across mutually-recursive walks). Decomposing the 5
-   non-recursive categories independently would split the response
-   shape across Clojure + graph and double the round-trip cost
-   (each category needs the cached-graph snapshot) without giving
-   admins meaningful tuning surface for the recursive one.
-
-   The sibling `parse-constraint` defbase stays one unit for a
-   different reason — it is a self-contained wire-format parse
-   contract (see its docstring)."
+(defbase _types-usages-facts
+  "Acquire one concealed usage snapshot, including shared constraint/path walks."
   [parsed]
   (cr/record-effect! :db)
-  (types-api/apply-types-usages parsed ctx entities/apply-view-impl-filter))
+  (types-api/types-usages-facts parsed ctx entities/apply-view-impl-filter))
 
 
 ;; === Type-row compound handlers ===
@@ -320,7 +296,7 @@
    :rule-owner-of-id rule-owner-of-id
    :declarable-effect-categories declarable-effect-categories
    :_type-name-entries _type-name-entries
-   :_types-usages-apply _types-usages-apply
+   :_types-usages-facts _types-usages-facts
    :_apply-create-record-type-body {:impl _apply-create-record-type-body :taint-propagate? true}
    :_apply-create-record-type-rollback {:impl _apply-create-record-type-rollback :taint-propagate? true}
    :_apply-create-list-type-body {:impl _apply-create-list-type-body :taint-propagate? true}

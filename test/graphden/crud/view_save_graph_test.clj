@@ -1,4 +1,4 @@
-(ns ^:integration ^:serial graphden.crud.view-save-graph-test
+(ns ^:integration ^:serial ^#:ci{:package-source-modules #{["app" "views"]}} graphden.crud.view-save-graph-test
   "Save view through the shipped HTTP graph and execute the saved composition.
    Full-app graph execution belongs to integration; small-graph transactional
    save, rollback and type-publication checks remain in view-save-test."
@@ -61,18 +61,6 @@
   (let [{:keys [ctx storage all-name->id]} ga/*bootstrap*]
     (setup/exec-with-storage ctx storage (get all-name->id :parse-view-command)
                              {:body body})))
-
-
-(defn- view-command-error
-  [f]
-  (try
-    (f)
-    nil
-    (catch clojure.lang.ExceptionInfo exception
-      ;; The executor may add call-site context around the original rejection.
-      (some #(when (= :validation-error/view-command (:type (ex-data %)))
-               (ex-data %))
-            (take-while some? (iterate ex-cause exception))))))
 
 
 (deftest graph-command-normalizes-without-losing-presence-or-identity
@@ -143,22 +131,23 @@
                       [:fn :fn-version :binding :binding-version
                        :binding-list-item :binding-list-item-version])
         before (counts)]
-    (with-redefs [views/save!
+    (with-redefs [views/save-operation!
                   (fn [& _]
                     (swap! save-calls inc)
                     (throw (ex-info "Save must never run for rejected input" {})))]
       (doseq [[body expected] cases]
-        (let [error (view-command-error
-                      #(setup/via-graph graph :api-view-save-handler
+        (let [response (setup/via-graph graph :api-view-save-handler
                                         {:uri "/api/views/save" :request-method :post
                                          :headers {"content-type" "application/json"}
-                                         :body (json/generate-string body)}))]
-          (is (some? error) (str "Expected typed rejection: " expected))
-          (is (and (string? (:reason error))
-                   (str/includes? (:reason error) expected))
+                                         :body (json/generate-string body)})
+              result (json/parse-string (:body response) true)]
+          (is (= 400 (:status response)) (str "Expected HTTP 400 for " (pr-str body)))
+          (is (= "validation-error/view-command" (:error result)))
+          (is (false? (:committed result)))
+          (is (str/includes? (:message result) expected)
               (str "Expected reason containing: " expected)))))
-    ;; save-explorer-view records :db before forcing its command argument.
-    ;; This sentinel proves the writer is never called, not an empty effect trace.
+    ;; The operation records :db before forcing its command argument. The spy
+    ;; proves rejected commands never reach the writer, regardless of effects.
     (is (zero? @save-calls) "Rejected commands must never reach the atomic writer")
     (is (= before (counts)) "Rejected commands cannot write identity/version rows")))
 

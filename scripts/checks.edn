@@ -122,8 +122,9 @@
  ;; :version, or readers who finished it are never told it changed
  ;; (scripts/tour_versions.clj; the record is test/resources/tour-versions.edn).
  {:name "tour-versions" :bb "tour-versions-check" :timeout 30000 :group :docs
-  :relevant ["^resources/packages/app/tour/fns\\.edn$" "^test/resources/tour-versions\\.edn$"
-             "^scripts/tour_versions\\.clj$"]}
+  :relevant ["^resources/packages/app/tour/fns\\.edn$" "^resources/packages/app/editor/editor-tour-end\\.js$"
+             "^test/resources/tour-versions\\.edn$"
+             "^scripts/tour_versions\\.clj$" "^tools/browser-test/.*\\.test\\.js$"]}
  {:name "tour-versions-selftest" :bb "tour-versions-test" :timeout 30000 :group :docs
   :relevant ["^scripts/tour_versions(_test)?\\.clj$" "^bb\\.edn$"]}
  {:name "devtour"       :bb "devtour-check" :timeout  60000 :group :docs

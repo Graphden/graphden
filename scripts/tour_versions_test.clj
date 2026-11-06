@@ -58,6 +58,15 @@
   (is (empty? (problems [] {"gone" {:version 1 :steps "fp"}}))))
 
 
+(deftest browser-title-must-exist-in-lesson-steps
+  (let [titles #{"A pin and versioned references"}]
+    (is (empty? (tv/browser-title-problems
+                  titles [["tour.test.js" "A pin and versioned references"]])))
+    (is (str/includes?
+          (first (tv/browser-title-problems titles [["tour.test.js" "A pin, not a copy"]]))
+          "tour.test.js"))))
+
+
 (let [{:keys [fail error]} (run-tests 'tour-versions-test)]
   (when (pos? (+ fail error))
     (System/exit 1)))

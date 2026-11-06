@@ -29,6 +29,7 @@
 (ns tour-versions
   (:require
     [clojure.edn :as edn]
+    [clojure.java.io :as io]
     [clojure.string :as str])
   (:import
     (java.security
@@ -37,6 +38,12 @@
 
 (def ^:private lessons-edn "resources/packages/app/tour/fns.edn")
 (def ^:private record-edn "test/resources/tour-versions.edn")
+(def ^:private browser-tests-dir "tools/browser-test")
+(def ^:private tour-end-js "resources/packages/app/editor/editor-tour-end.js")
+(def ^:private tour-title-call
+  (re-pattern "waitTourTitle\\(\\s*page\\s*,\\s*(['\"])(.*?)\\1"))
+(def ^:private dialog-title
+  (re-pattern "title:\\s*_tourCopy\\([^,]+,\\s*(['\"])(.*?)\\1"))
 
 
 (defn- lessons
@@ -126,11 +133,35 @@
              " re-read), or `bb tour-versions` if the edit was cosmetic")))))
 
 
+(defn browser-title-problems
+  "Literal browser expectations must name a current lesson or completion-dialog title."
+  [titles title-refs]
+  (for [[path title] title-refs
+        :when (not (contains? titles title))]
+    (str path ": waitTourTitle expects missing tour title " (pr-str title))))
+
+
+(defn- current-titles
+  [ls]
+  (into (into #{} (map :title) (mapcat :steps ls))
+        (map (fn [[_ _ title]] title))
+        (re-seq dialog-title (slurp tour-end-js))))
+
+
+(defn- browser-title-refs
+  []
+  (for [file (file-seq (io/file browser-tests-dir))
+        :when (and (.isFile file) (str/ends-with? (.getName file) ".test.js"))
+        [_ _ title] (re-seq tour-title-call (slurp file))]
+    [(.getPath file) title]))
+
+
 (defn- check
   []
   (let [ls (map #(assoc % :fingerprint (fingerprint %)) (lessons))
         recorded (try (edn/read-string (slurp record-edn)) (catch Exception _ {}))
-        ps (problems ls recorded)]
+        ps (concat (problems ls recorded)
+                   (browser-title-problems (current-titles ls) (browser-title-refs)))]
     (if (seq ps)
       (do (doseq [p ps] (println (str "✗ " p)))
           (println (str "tour-versions-check FAILED (" (count ps) ")"))

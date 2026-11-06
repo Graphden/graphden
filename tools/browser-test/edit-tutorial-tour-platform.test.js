@@ -166,7 +166,7 @@ const {trackPublications, walkLesson35} = require('./tutorial-http-helpers');
       page.off('response', onInstallResp);
       page.off('request', onPkgRequest);
     }
-    await waitTourTitle(page, 'A pin, not a copy', 150000);
+    await waitTourTitle(page, 'A pin and versioned references', 150000);
     assert(await clickTourButton(page, 'Next'), 'lesson 32 pin Next');
     await waitTourTitle(page, 'Uninstall');
     await page.evaluate(() => {

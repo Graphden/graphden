@@ -527,6 +527,8 @@
           (throw (ex-info "Expected ns form" {:path path})))
         {:name name
          :package-impl-consumer? (boolean (:ci/package-impl-consumer (meta name)))
+         :all-test-source-consumer? (boolean (:ci/all-test-source-consumer (meta name)))
+         :all-core-source-consumer? (boolean (:ci/all-core-source-consumer (meta name)))
          :deps (into (->> (drop 2 form)
                           (filter #(and (seq? %) (#{:require :use :require-macros} (first %))))
                           (mapcat rest)
@@ -555,6 +557,10 @@
                   (assoc-in [:by-name (:name entry)] path)
                   (cond-> (:package-impl-consumer? entry)
                     (update :package-impl-consumers (fnil conj #{}) (:name entry)))
+                  (cond-> (:all-test-source-consumer? entry)
+                    (update :all-test-source-consumers (fnil conj #{}) (:name entry)))
+                  (cond-> (:all-core-source-consumer? entry)
+                    (update :all-core-source-consumers (fnil conj #{}) (:name entry)))
                   (update :package-consumers
                           (fn [consumers]
                             (reduce (fn [r [package module]]
@@ -574,7 +580,8 @@
                                     consumers (:deps entry)))))))
           {:by-path {} :by-name {} :reverse {} :package-consumers {}
            :package-fn-consumers {}
-           :package-impl-consumers #{}}
+           :package-impl-consumers #{}
+           :all-test-source-consumers #{} :all-core-source-consumers #{}}
           (clojure-files)))
 
 
@@ -601,7 +608,8 @@
   [changed kind]
   (when changed
     (try
-      (let [{:keys [by-path package-consumers package-fn-consumers package-impl-consumers]
+      (let [{:keys [by-path package-consumers package-fn-consumers package-impl-consumers
+                    all-test-source-consumers all-core-source-consumers]
              consumers :reverse}
             (namespace-graph)
             sources (->> changed
@@ -627,7 +635,22 @@
                                                 %)
                                              changed)
                                    package-impl-consumers)
-            distances (dependency-distances consumers
+            implicit-edges (reduce
+                             (fn [edges path]
+                               (if-let [source (get-in by-path [path :name])]
+                                 (cond
+                                   (str/starts-with? path "test/")
+                                   (update edges source (fnil into #{})
+                                           all-test-source-consumers)
+
+                                   (str/starts-with? path "src/")
+                                   (update edges source (fnil into #{})
+                                           all-core-source-consumers)
+
+                                   :else edges)
+                                 edges))
+                             {} changed)
+            distances (dependency-distances (merge-with into consumers implicit-edges)
                                             (into sources
                                                   (concat package-sources package-impl-sources)))
             test-entries (->> by-path

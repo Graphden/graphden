@@ -1,4 +1,4 @@
-(ns graphden.open-core-seam-test
+(ns ^:ci/all-core-source-consumer graphden.open-core-seam-test
   "Guard for the open-core split: the vars the private `graphden-tenancy`
    addon reaches in THIS repo (`tools/open-core-seam.edn`) must all still
    resolve.

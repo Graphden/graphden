@@ -47,6 +47,15 @@
            (frequencies (priority/browser-order changed))))))
 
 
+(deftest dynamic-source-readers-enter-early-unit-layers
+  (is (some #{"graphden.test-hygiene-guard-test"}
+            (second (priority/unit-layers
+                      #{"test/graphden/types/branch_market_policy_contract_test.clj"}))))
+  (is (some #{"graphden.open-core-seam-test"}
+            (first (priority/unit-layers
+                     #{"src/graphden/crud/fn_execution.clj"})))))
+
+
 (deftest matching-editor-stem-prioritizes-related-browser-files
   (let [ordered (priority/browser-order
                   #{"resources/packages/app/editor/editor-secrets.js"})]
@@ -253,14 +262,17 @@
   (let [layers (priority/unit-layers
                  #{"src/graphden/types/core.clj"
                    "test/graphden/types/core_test.clj"})]
-    (is (= ["graphden.types.core-test"] (first layers)))
+    (is (some #{"graphden.types.core-test"} (first layers)))
+    (is (some #{"graphden.open-core-seam-test"} (second layers)))
     (is (some #{"graphden.types.check-test"} (second layers))))
-  (is (= [] (priority/unit-first #{"test/graphden/e2e_test.clj"})))
-  (is (= [] (priority/unit-first #{"test/graphden/perf/scenarios_test.clj"})))
-  (is (= [] (priority/unit-first #{"test/graphden/accounts/routes_test.clj"})))
-  (is (= [] (priority/unit-first #{"test/graphden/storage/postgres/constraints_test.clj"})))
+  (doseq [path ["test/graphden/e2e_test.clj"
+                "test/graphden/perf/scenarios_test.clj"
+                "test/graphden/accounts/routes_test.clj"
+                "test/graphden/storage/postgres/constraints_test.clj"]]
+    (is (= ["graphden.test-hygiene-guard-test"]
+           (priority/unit-first #{path})) path))
   (is (= [] (priority/unit-first #{"src/graphden/no_such_file.clj"})))
-  (is (= 4 (count (priority/unit-first
+  (is (= 5 (count (priority/unit-first
                     #{"test/graphden/types/core_test.clj"
                       "test/graphden/types/check_test.clj"
                       "test/graphden/types/rules_test.clj"

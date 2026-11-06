@@ -1,4 +1,4 @@
-(ns graphden.test-hygiene-guard-test
+(ns ^:ci/all-test-source-consumer graphden.test-hygiene-guard-test
   "Mechanical rules about the TESTS themselves, enforced by reading them.
 
    Two rules today, both from the test audit.

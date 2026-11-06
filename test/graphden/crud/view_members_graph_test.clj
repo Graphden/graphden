@@ -161,7 +161,7 @@
                    {:id hidden :name (str label "-owner") :parent-ids [target]}
                    {:id caller :name (str label "-caller") :parent-ids [hidden]}]]
         (sp/create-entity storage :fn row))
-      (context/invalidate-graph-cache! harness/*context*)
+      (context/invalidate-graph-cache! harness/*context* [target hidden caller])
       (reset! entity-list/view-impl-filter nil)
       (is (= #{hidden caller} (set (map :id (:fns (call "view-members" {:uses [target]}))))))
       (reset! entity-list/view-impl-filter #(entities/strip-impl-of % #{hidden}))
@@ -182,7 +182,9 @@
         outer (setup/create-composed-fn! storage (str prefix "-outer") root)]
     (setup/bind-value! storage (:id inner) (ids/slot-id root :namespaces) [prefix])
     (setup/bind-value! storage (:id outer) (ids/slot-id root :also-all) [(:id inner)])
-    (context/invalidate-graph-cache! harness/*context*)
+    (context/invalidate-graph-cache!
+      harness/*context*
+      (into [(:id inner) (:id outer)] (map :id rows)))
     (let [initial (call "view-members" {:views [(:id outer)]})
           selected (set (map :id (:fns initial)))
           omitted (first (remove #(selected (:id %)) rows))

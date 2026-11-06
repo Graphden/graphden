@@ -330,7 +330,7 @@
 
 (deftest declared-package-source-consumer-runs-before-late-integration
   (let [entry (#'priority/namespace-entry
-                "test/graphden/executor/compile_packages_test.clj")]
+               "test/graphden/executor/compile_packages_test.clj")]
     (is (contains? (:packages entry) ["web" "http"]))
     (is (contains? (:fn-packages entry) ["web" "http"])))
   (doseq [source ["resources/packages/web/http/fns.edn"

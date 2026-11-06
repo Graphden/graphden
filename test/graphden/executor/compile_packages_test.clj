@@ -1,5 +1,4 @@
-(ns ^:integration ^{:ci/package-source-modules #{["web" "http"]}}
-  graphden.executor.compile-packages-test
+(ns ^:integration ^#:ci{:package-source-modules #{["web" "http"]}} graphden.executor.compile-packages-test
   "Compile + execute the executor against the REAL package graph.
 
    The `graphden.executor.compile*` namespaces carry deep branches —

@@ -25,7 +25,9 @@ test.beforeEach(async ({ page }) => {
 //  - One additional rAF so its first frame has been committed
 async function waitForGraphRendered(page) {
   // Edges are SVG now; a rendered path means /api/graph/layout returned and drew.
-  await page.waitForSelector('#edge-lines path', { state: 'attached', timeout: 20_000 });
+  // The three viewport workers can share a cold layout compile. Keep this
+  // inside the suite's 60s test budget, leaving time for theme and screenshot.
+  await page.waitForSelector('#edge-lines path', { state: 'attached', timeout: 45_000 });
   // The editor can draw a read-only graph before its stored bearer has been
   // accepted. Capturing then records the sign-in card instead of the editor
   // that the gate exercises. Wait for the same authenticated state in every

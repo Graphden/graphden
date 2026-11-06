@@ -1,4 +1,4 @@
-(ns graphden.id-resolution-guard-test
+(ns ^:ci/all-core-source-consumer graphden.id-resolution-guard-test
   "Mechanical guard for the project's core identity rule:
 
      'Internal mechanisms resolve/match/dispatch by stable ID (uuid),

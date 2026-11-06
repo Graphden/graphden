@@ -1,4 +1,4 @@
-(ns graphden.packages.graph-entry-points-test
+(ns ^:ci/all-core-source-consumer graphden.packages.graph-entry-points-test
   "Guard for the Clojure → graph boundary registered in
    `tools/graph-reachability.edn`.
 

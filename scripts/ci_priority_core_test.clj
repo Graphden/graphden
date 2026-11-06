@@ -51,9 +51,13 @@
   (is (some #{"graphden.test-hygiene-guard-test"}
             (second (priority/unit-layers
                       #{"test/graphden/types/branch_market_policy_contract_test.clj"}))))
-  (is (some #{"graphden.open-core-seam-test"}
-            (first (priority/unit-layers
-                     #{"src/graphden/crud/fn_execution.clj"})))))
+  (let [first-layer (first (priority/unit-layers
+                             #{"src/graphden/crud/fn_execution.clj"}))]
+    (doseq [guard ["graphden.open-core-seam-test"
+                   "graphden.id-resolution-guard-test"
+                   "graphden.large-forms-guard-test"
+                   "graphden.packages.graph-entry-points-test"]]
+      (is (some #{guard} first-layer) guard))))
 
 
 (deftest matching-editor-stem-prioritizes-related-browser-files
@@ -300,7 +304,8 @@
   (is (contains? (:fn-packages (#'priority/namespace-entry
                                 "test/graphden/packages/core/hof_test.clj"))
                  ["core" "hof"]))
-  (is (= ["graphden.packages.core.hof-test"
+  (is (= ["graphden.large-forms-guard-test"
+          "graphden.packages.core.hof-test"
           "graphden.types.branch-market-policy-contract-test"
           "graphden.types.crud-apply-policy-contract-test"
           "graphden.types.explorer-view-contract-test"

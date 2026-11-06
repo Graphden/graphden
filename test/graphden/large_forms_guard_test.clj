@@ -1,4 +1,4 @@
-(ns graphden.large-forms-guard-test
+(ns ^:ci/all-core-source-consumer ^:ci/package-impl-consumer graphden.large-forms-guard-test
   "Mechanical half of the project's decomposition rule:
 
      A top-level form of 100 lines or more is either SPLIT, or its

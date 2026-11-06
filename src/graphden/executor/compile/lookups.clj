@@ -375,7 +375,10 @@
    Only a changed name renames the source chain's name-facing surface."
   [slot {:keys [slot-map]}]
   (when-let [source (:source-slot-id slot)]
-    (not= (:name slot) (:name (get slot-map source)))))
+    ;; Both rows are selected by stable slot ID. Their names are compared
+    ;; only to decide whether this edge changes the external slot label.
+    (let [source-name (:name (get slot-map source))]
+      (not= (:name slot) source-name))))
 
 
 (defn chain-rename-for-slot

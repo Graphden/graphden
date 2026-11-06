@@ -222,7 +222,17 @@
 
   (testing "absent parameter returns nil"
     (is (nil? (fn-exec/raw-query-param "other=1" "p")))
-    (is (nil? (fn-exec/raw-query-param nil "p")))))
+    (is (nil? (fn-exec/raw-query-param nil "p"))))
+
+  (testing "tenancy preview's Clojure seam keeps enriched-key precedence"
+    (is (= "string" (fn-exec/query-param
+                      {:query-params {"p" "string" :p "keyword"}
+                       :query-string "p=raw"} "p")))
+    (is (= "keyword" (fn-exec/query-param
+                       {:query-params {:p "keyword"}
+                        :query-string "p=raw"} "p")))
+    (is (= "raw value" (fn-exec/query-param
+                         {:query-string "p=raw%20value"} "p")))))
 
 
 ;; ============================================================================

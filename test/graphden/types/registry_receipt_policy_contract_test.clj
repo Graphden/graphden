@@ -28,7 +28,7 @@
           (test-fn))))))
 
 
-(deftest projection-closures-retain-only-their-public-inputs
+(deftest registry-receipt-projection-closures-retain-only-their-public-inputs
   (let [selected (conj (filterv
                          (fn [{:keys [name parent]}]
                            (and name parent

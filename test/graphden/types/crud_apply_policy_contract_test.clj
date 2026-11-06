@@ -27,7 +27,7 @@
           (test-fn))))))
 
 
-(deftest projection-closures-retain-only-their-public-inputs
+(deftest crud-apply-projection-closures-retain-only-their-public-inputs
   (let [selected (filterv
                    (fn [{:keys [name parent]}]
                      (and parent (#{:_apply-error-code :_apply-write-rejection :_apply-rejection-kind :_apply-rejection-status

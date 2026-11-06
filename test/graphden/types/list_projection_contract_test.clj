@@ -28,7 +28,7 @@
           (test-fn))))))
 
 
-(deftest projection-closures-retain-only-their-public-inputs
+(deftest list-projection-closures-retain-only-their-public-inputs
   (let [selected (filterv
                    (fn [{:keys [name parent]}]
                      (and name parent

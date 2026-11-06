@@ -635,6 +635,16 @@
            request/safe-url-decode))
 
 
+(defn query-param
+  "Read a parameter for the tenancy preview route, which runs in Clojure
+   before the package graph handles a request. Package routes use the
+   graph-composed `web.crud/query-param` instead."
+  [request param-name]
+  (or (get-in request [:query-params param-name])
+      (get-in request [:query-params (keyword param-name)])
+      (raw-query-param (:query-string request) param-name)))
+
+
 ;; =============================================================================
 ;; POST /api/execute/:id/cancel
 ;; =============================================================================

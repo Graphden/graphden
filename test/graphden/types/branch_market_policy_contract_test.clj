@@ -27,7 +27,7 @@
         (test-fn)))))
 
 
-(deftest projection-closures-retain-only-their-public-inputs
+(deftest branch-market-projection-closures-retain-only-their-public-inputs
   (let [{sorted :fn-defs}
         (type-contract/prepared-closure
           loaded

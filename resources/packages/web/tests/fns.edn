@@ -30,15 +30,19 @@
   ;; =========================================================================
 
   ;; A Ring response reduced to the four facts every response test pins:
-  ;; `[status content-type cache-control body]`. Header keys are keywords
-  ;; at runtime — the content-type fn-defs bind them as JSONB literals and
-  ;; the `:http-server` adapter stringifies once on the way to http-kit.
+  ;; `[status content-type cache-control body]`. JSONB literal maps yield
+  ;; keyword keys; graph-built maps may keep string keys. The HTTP adapter
+  ;; stringifies both forms on the way to http-kit.
   {:name :_wt-resp-sig
    :description "Signature of a Ring response — `[status Content-Type Cache-Control body]` — so a response test pins both axes and the body with one literal vector."
    :parent :vec
    :args {:coll [{:parent :get :args {:coll {:as :resp} :key {:value :status} :default nil}}
-                 {:parent :get-in :args {:map {:as :resp} :path [{:value :headers} {:value :Content-Type}] :default nil}}
-                 {:parent :get-in :args {:map {:as :resp} :path [{:value :headers} {:value :Cache-Control}] :default nil}}
+                 {:parent :coalesce
+                  :args {:value {:parent :get-in :args {:map {:as :resp} :path [{:value :headers} {:value :Content-Type}] :default nil}}
+                         :default {:parent :get-in :args {:map {:as :resp} :path [{:value :headers} {:value "Content-Type"}] :default nil}}}}
+                 {:parent :coalesce
+                  :args {:value {:parent :get-in :args {:map {:as :resp} :path [{:value :headers} {:value :Cache-Control}] :default nil}}
+                         :default {:parent :get-in :args {:map {:as :resp} :path [{:value :headers} {:value "Cache-Control"}] :default nil}}}}
                  {:parent :get :args {:coll {:as :resp} :key {:value :body} :default nil}}]
           :resp {:type [:map :any :any] :description "The Ring response under test. Typed as a plain map, not `:ring-response-shape`: a response built inline computes `:status :int`, which cannot be proved to satisfy the shape's `[:refine :int [:and [:>= 100] [:<= 599]]]`, and this helper only reads three keys."}}}
 
@@ -752,7 +756,7 @@
    :parent :assert-eq
    :args {:actual {:parent :get-in
                    :args {:map {:parent :json-envelope-response :args {:envelope {:value {:http-status 429}}}}
-                          :path [{:value :headers} {:value :Retry-After}] :default nil}}
+                          :path [{:value :headers} {:value "Retry-After"}] :default nil}}
           :expected "1"}}
 
   {:name :json-envelope-response-defaults-to-an-empty-200

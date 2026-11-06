@@ -70,6 +70,19 @@
         "the tour's three reading paths are all baked from tour.edn")))
 
 
+(deftest public-contract-guard-runs-before-the-full-suites
+  (let [selected (run-names #{"resources/packages/registry/marketplace/fns.edn"})
+        batches (ci-select/canonical-batches real-registry real-registry)
+        affected (set (map :name (mapcat identity (:affected batches))))]
+    (is (contains? selected "public-contract"))
+    (is (contains? affected "public-contract"))
+    (is (not (contains? (run-names #{"docs/example.md"}) "public-contract")))
+    (is (every? (run-names #{"scripts/public_contract.clj"})
+                ["public-contract" "public-contract-selftest"]))
+    (is (every? (run-names #{"src/graphden/packages/records/parse.clj"})
+                ["public-contract" "public-contract-selftest"]))))
+
+
 ;; ---------------------------------------------------------------------------
 ;; validate-registry! rejections
 ;; ---------------------------------------------------------------------------

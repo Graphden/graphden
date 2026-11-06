@@ -44,6 +44,15 @@
   :relevant ["\\.(clj|cljc|cljs|edn|bb)$" "^\\.cljstyle$"]}
  {:name "syntax"       :bb "syntax"       :timeout 120000 :group :infra :stage :affected
   :relevant ["\\.(js|mjs|cjs|json)$" "^scripts/ci_fast" "^bb\\.edn$"]}
+ ;; Saved descendant bindings refer to root-owned slot UUIDs. A base->graph
+ ;; extraction can break those while fresh named calls and type-sweep pass.
+ ;; Parser-only Babashka check: fail before the JVM suites or image build.
+ {:name "public-contract" :bb "public-contract-check" :timeout 120000 :group :clj :stage :affected
+  :relevant ["^resources/packages/.+/fns\\.edn$" "^scripts/public_contract" "^src/graphden/packages/records"
+             "^src/graphden/packages/rebase\\.clj$" "^bb\\.edn$" "^scripts/checks\\.edn$"]}
+ {:name "public-contract-selftest" :bb "public-contract-test" :timeout 30000 :group :infra :stage :affected
+  :relevant ["^scripts/public_contract" "^src/graphden/packages/records" "^src/graphden/packages/rebase\\.clj$"
+             "^bb\\.edn$" "^scripts/checks\\.edn$"]}
  {:name "ui-target-lint" :bb "ui-target-lint" :timeout 30000 :group :web
   :relevant ["^src/" "^resources/packages/" "^tools/ui-target-lint(?:\\.test)?\\.mjs$"
              "^scripts/ui_target_lint(?:_test)?\\.clj$" "^package(-lock)?\\.json$" "^bb\\.edn$"]}

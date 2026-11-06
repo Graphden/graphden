@@ -378,6 +378,14 @@
   {:doc "Graph linters over the first-party package corpus (no DB): duplicate definitions (exact and after private-helper expansion), unreferenced / unreachable private fn-defs, shadowed overrides, siblings to extract a parent from, over-deep chains. Warnings fail unless allowlisted in graphden.lint.corpus/allowed-warnings; a stale allowlist entry fails too. --similar adds informational structural template candidates. ~10s."
    :task (apply clojure "-M:dev -m graphden.lint.corpus" *command-line-args*)}
 
+  public-contract-check
+  {:doc "Early public package OWN slot UUID/requiredness guard; reports declared type/lambda/return deltas without claiming subtype compatibility. Uses --base REF or GRAPHDEN_CI_SINCE (standalone default HEAD^); --candidate REF compares committed trees. No JVM, DB or impl loading."
+   :task (apply shell "bb" "--classpath" "src:scripts" "scripts/public_contract.clj" *command-line-args*)}
+
+  public-contract-test
+  {:doc "Parser and Git regression tests for the early public package contract guard."
+   :task (shell "bb" "--classpath" "src:scripts" "scripts/public_contract_test.clj")}
+
   native-inventory
   {:doc "Advisory EDN inventory of registered base functions and native helper dependencies (no DB or package evaluation)."
    :task (apply shell "bb" "scripts/native_inventory.clj" *command-line-args*)}

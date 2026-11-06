@@ -333,7 +333,11 @@ async function openVersionHistory(page) {
       console.error('  screenshot: /tmp/edit-tutorial-tour-history-fail.png');
     } catch (_) { /* page may be gone */ }
   } finally {
-    await hardCleanup(page);
+    // Both successful lessons already ran Finish → Delete. The runner checks
+    // for leaked graph entities; a second full sweep of every tutorial name
+    // kept this file alive after PASS until its 300-second cap killed it.
+    try { await page.close(); } catch (_) { /* page may already be gone */ }
+    if (failed) await hardCleanup(page);
     await browser.close();
   }
   process.exit(failed ? 1 : 0);

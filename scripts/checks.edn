@@ -85,7 +85,9 @@
  ;; checks.edn shape/regex validity + the canonical path→check drift table.
  {:name "support-bundle-test" :bb "support-bundle-test" :timeout 30000 :group :infra
   :relevant ["^scripts/support_bundle" "^bb\\.edn$"]}
- {:name "ci-selftest"   :bb "ci-test"       :timeout  60000 :group :infra
+ ;; The full priority/runner fixture suite takes ~114s on this host; 60s
+ ;; (120s under the gate's global multiplier) clipped healthy runs at 119–120s.
+ {:name "ci-selftest"   :bb "ci-test"       :timeout 120000 :group :infra
   :relevant ["^scripts/ci" "^scripts/checks\\.edn$" "^bb\\.edn$"]}
  {:name "markdownlint"  :bb "markdownlint"  :timeout  60000 :group :docs
   :relevant ["\\.md$" "^\\.markdownlint" "^bb\\.edn$"]}

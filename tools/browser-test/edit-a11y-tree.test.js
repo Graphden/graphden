@@ -345,21 +345,24 @@ const rowInfo = () => {
              'clearing the filters is announced too: "' + lens.cleared.said + '"');
     }
 
-    const search = await page.evaluate(async () => {
-      if (typeof onSearchInput !== 'function') return {skip: true};
-      const read = () => (document.getElementById('gd-a11y-announcer')?.textContent || '').trim();
-      onSearchInput('http');
-      await new Promise((r) => setTimeout(r, 1400));
-      const found = read();
-      onSearchInput('');
-      await new Promise((r) => setTimeout(r, 600));
-      return {skip: false, found, cleared: read()};
-    });
-    if (!search.skip) {
-      assert(/match/i.test(search.found),
-             'a search announces its result count: "' + search.found + '"');
-      assert(/cleared/i.test(search.cleared),
-             'and clearing it says so: "' + search.cleared + '"');
+    const searchAvailable = await page.evaluate(() => typeof onSearchInput === 'function');
+    if (searchAvailable) {
+      await page.evaluate(() => onSearchInput('http'));
+      await page.waitForFunction(() => /Search "http" — \d+ matches?/.test(
+        document.getElementById('gd-a11y-announcer')?.textContent || ''),
+      null, {timeout: 30000, polling: 100});
+      const found = await page.evaluate(() =>
+        (document.getElementById('gd-a11y-announcer')?.textContent || '').trim());
+      await page.evaluate(() => onSearchInput(''));
+      await page.waitForFunction(() => /Search cleared/.test(
+        document.getElementById('gd-a11y-announcer')?.textContent || ''),
+      null, {timeout: 10000, polling: 100});
+      const cleared = await page.evaluate(() =>
+        (document.getElementById('gd-a11y-announcer')?.textContent || '').trim());
+      assert(/match/i.test(found),
+             'a search announces its result count: "' + found + '"');
+      assert(/cleared/i.test(cleared),
+             'and clearing it says so: "' + cleared + '"');
     }
 
     assert(pageErrors.length === 0, 'no page errors: ' + JSON.stringify(pageErrors));

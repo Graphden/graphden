@@ -29,20 +29,15 @@
 #     the whole gate. A file that fails all retries remains red and stops the
 #     suite at that file.
 #   * The run as a whole is DEGRADED — and a strict leak verdict drops
-#     to report-only — when the host starved the stack: at
-#     least THRASH_MIN_FILES files ran slow against THEIR OWN baseline
-#     (e2e-baseline.tsv: median seconds per file from green gate runs; slow
-#     = the passing attempt took > SLOW_FACTOR × baseline and at least
-#     SLOW_MIN_EXTRA seconds over it; a file with no baseline yet falls back
-#     to the absolute THRASH_FILE_SECS; every limit is capped just under
-#     PER_TEST_TIMEOUT, which no attempt can outlast), or THRASH_MIN_FLAKED
-#     different files needed an ENVIRONMENT-signed retry (one of its
-#     failures carried a signature above). A retry whose failures were all
-#     real candidates does not count: two real races in one train used to
-#     read as host jitter and drop both strict verdicts. The old rule — any
-#     3 files over an absolute 150 s — fired on every healthy run once
-#     three tour files grew past it, so strict mode silently did nothing
-#     for weeks.
+#     to report-only — only when THRASH_MIN_FLAKED different files needed
+#     an ENVIRONMENT-signed retry (one of its failures carried a signature
+#     above). Slow files alone are reported, never taken as proof of host
+#     starvation: a stale assertion or expensive test cleanup can be slow
+#     on a healthy host. A retry whose failures were all real candidates
+#     does not count.
+#   * Slow-file reporting compares each passing attempt with its own median
+#     in e2e-baseline.tsv. A file without a baseline uses THRASH_FILE_SECS;
+#     the limit is capped below PER_TEST_TIMEOUT.
 #     Refresh the baseline after a suite change with
 #       node e2e-baseline.js <gate log>... > e2e-baseline.tsv
 #   * A file is retried up to 5 times, except that two CONSECUTIVE real
@@ -555,7 +550,7 @@ HEAP_HWM_MIB=0      # executor heap high-water (docker stats), MiB — INFO ONLY
                     # the cap regardless of pressure (the "executor memory" note at the end
                     # of this file measured a FLAT after-GC live-set), so ~1.7GiB is normal.
 THRASH_FILE_SECS=${THRASH_FILE_SECS:-150}   # slow limit for a file with NO baseline yet (cap is 300s)
-THRASH_MIN_FILES=${THRASH_MIN_FILES:-3}     # this many slow files (vs own baseline) => degraded run
+THRASH_MIN_FILES=${THRASH_MIN_FILES:-3}     # this many slow files => diagnostic banner only
 THRASH_MIN_FLAKED=${THRASH_MIN_FLAKED:-2}   # OR this many DIFFERENT files whose retry was
                                             # ENVIRONMENT-signed (probe dead / full rebuild /
                                             # starved host). Real-candidate retries do not
@@ -576,7 +571,7 @@ REMAINING_FILES=""
 run_is_degraded() {
   local env_count=0 x
   for x in $ENV_FLAKED; do env_count=$((env_count+1)); done
-  [ "$DEGRADED_FILES" -ge "$THRASH_MIN_FILES" ] || [ "$env_count" -ge "$THRASH_MIN_FLAKED" ]
+  [ "$env_count" -ge "$THRASH_MIN_FLAKED" ]
 }
 # The single-operator personal home is durable account state, like the stock
 # graph loaded at boot. Personalization creates it on first use; counting that
@@ -842,7 +837,7 @@ for f in $FILES; do
   if [ -n "$judged_secs" ] && [ "$judged_secs" -gt "$file_limit" ]; then
     DEGRADED_FILES=$((DEGRADED_FILES+1))
     SLOW_FILES="$SLOW_FILES $f(${judged_secs}s>${file_limit}s)"
-    echo "  (slow: ${judged_secs}s vs this file's limit ${file_limit}s — counts toward DEGRADED)" >&2
+    echo "  (slow: ${judged_secs}s vs this file's limit ${file_limit}s — diagnostic only)" >&2
   fi
   file_mib="$(printf '%s' "$FILE_MEM" | awk '{v=$0; g=(v ~ /GiB/); sub(/[A-Za-z].*/,"",v); if (v+0>0) printf "%d", (g? v*1024 : v+0); else print 0}')"
   if [ "${file_mib:-0}" -gt "$HEAP_HWM_MIB" ] 2>/dev/null; then HEAP_HWM_MIB="$file_mib"; fi
@@ -949,9 +944,8 @@ if [ -n "$REMAINING_FILES" ]; then
 fi
 
 # --- run-level thrash decision (see the state block before the loop) ---
-# The run is DEGRADED when the host was starving the stack: several files ran far
-# past their OWN baseline, or several different files needed an environment-
-# signed retry. Under those conditions a strict leak can be abort collateral.
+# An environment-signed retry across several files can make a strict leak
+# sample unreliable. Slow files alone cannot downgrade a leak verdict.
 DEGRADED=0
 FLAKED_COUNT=0
 for _x in $ENV_FLAKED; do FLAKED_COUNT=$((FLAKED_COUNT+1)); done
@@ -1010,12 +1004,12 @@ fi
 if [ -n "$FAILED_NAMES" ]; then
   echo "  failed:$FAILED_NAMES" >&2
 fi
+if [ "$DEGRADED_FILES" -ge "$THRASH_MIN_FILES" ]; then
+  echo "  ⚠ SLOW FILES: ${DEGRADED_FILES} past their own baseline:${SLOW_FILES}; diagnostic only; executor heap high-water ${HEAP_HWM_MIB}MiB (info)." >&2
+fi
 if [ "$DEGRADED" = 1 ]; then
-  echo "  ⚠ ENVIRONMENT DEGRADED: ${DEGRADED_FILES} file(s) ran past ${SLOW_FACTOR}x their baseline:${SLOW_FILES:- none}; ${FLAKED_COUNT} file(s) needed an environment-signed retry; executor heap high-water ${HEAP_HWM_MIB}MiB (info)." >&2
+  echo "  ⚠ ENVIRONMENT DEGRADED: ${FLAKED_COUNT} file(s) needed an environment-signed retry." >&2
   echo "    Strict leak verdicts were downgraded to report-only; retry-passes remain passes." >&2
-  if [ "$FAIL" != "0" ]; then
-    echo "    A file HARD-failed above: the host is too starved to judge it. Free RAM (e.g. 'docker stop graphden-executor' to drop the demo stack) and re-run on a quiet host — do NOT read this as a branch regression." >&2
-  fi
 fi
 
 # The profile. Read it before optimising anything: the suite's 45 minutes were

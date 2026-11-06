@@ -51,7 +51,7 @@
              (= Connection/TRANSACTION_REPEATABLE_READ
                 (Connection/.getTransactionIsolation ^Connection connection)))
       (binding [*reconstruction-reads* {:storage storage :org (tc/current-org)
-                                        :entries (atom {}) :owners (atom nil)}]
+                                        :entries (atom {}) :rows (atom {}) :owners (atom nil)}]
         (f))
       (f))))
 
@@ -107,6 +107,27 @@
       nil)))
 
 
+(defn- reconstruction-row-read
+  "Share individual rows and absent IDs across overlapping batch/single reads.
+   Retain each identity once for this snapshot, rather than caching every
+   argument vector and exhausting the query memo halfway through an import."
+  [scope storage operation entity argument]
+  (let [rows (:rows scope)
+        ids (if (= operation :one) [argument] (vec (distinct argument)))
+        known (get @rows entity)
+        missing (filterv #(not (contains? known %)) ids)]
+    (when (seq missing)
+      (let [fetched (if (= operation :one)
+                      {argument (sp/read-entity storage entity argument)}
+                      (sp/read-entities storage entity missing))
+            complete (into {} (map #(vector % (get fetched %))) missing)]
+        (swap! rows update entity merge complete)))
+    (let [known (get @rows entity)]
+      (if (= operation :one)
+        (get known argument)
+        (into {} (keep (fn [id] (when-let [row (get known id)] [id row]))) ids)))))
+
+
 (defn- reconstruction-read
   [storage operation entity argument]
   (let [fetch (fn []
@@ -121,6 +142,8 @@
                      (prefetched-owner-query @(:owners scope) entity argument))]
     (cond
       (some? prefetched) prefetched
+      (and scoped? (#{:one :many} operation) (#{:fn :slot} entity))
+      (reconstruction-row-read scope storage operation entity argument)
       (and scoped? (#{:fn :slot :fn-slot} entity))
       (let [key [operation entity argument]
             entries (:entries scope)]

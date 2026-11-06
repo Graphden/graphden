@@ -665,7 +665,8 @@
                               (sort-by (juxt first second)))]
         (->> test-entries
              (partition-by first)
-             (mapv (fn [layer] (mapv second layer)))))
+             (mapv (fn [layer]
+                     {:depth (ffirst layer) :names (mapv second layer)}))))
       (catch Exception e
         (println (str "⚠ Clojure namespace graph unavailable: " (ex-message e)
                       " — running the full suite without early hints"))
@@ -676,26 +677,31 @@
 
 
 (defn- bounded-layers
-  "Keep the highest-ranked automatic namespaces in the early wave. The gate
-   runs the untouched full roster as the exact complement."
+  "Keep every changed test and direct consumer, then at most limit deeper
+   namespaces. Use graph distance, not layer position: source-only changes
+   have no distance-zero test layer. The full roster's complement runs later."
   [layers limit]
   (loop [remaining limit, result [], layers layers]
-    (if (or (zero? remaining) (empty? layers))
+    (if (empty? layers)
       result
-      (let [selected (vec (take remaining (first layers)))]
-        (recur (- remaining (count selected))
-               (conj result selected)
-               (rest layers))))))
+      (let [{:keys [depth names]} (first layers)
+            direct? (<= depth 1)
+            selected (if direct? names (vec (take remaining names)))]
+        (if (empty? selected)
+          result
+          (recur (if direct? remaining (- remaining (count selected)))
+                 (conj result selected)
+                 (rest layers)))))))
 
 
 (defn unit-layers
   [changed]
-  (test-layers changed :unit))
+  (when changed (mapv :names (test-layers changed :unit))))
 
 
 (defn integration-layers
   [changed]
-  (test-layers changed :integration))
+  (when changed (mapv :names (test-layers changed :integration))))
 
 
 (defn unit-first
@@ -729,7 +735,7 @@
                                 automatic))))
          unit-groups (layers :unit (unit-layers changed))
          integration-groups (layers :integration
-                                    (bounded-layers (integration-layers changed)
+                                    (bounded-layers (test-layers changed :integration)
                                                     automatic-early-limit))]
      {:runtime (vec (distinct (concat (map #(str "tools/runtime-test/" %)
                                            (get manual :runtime []))

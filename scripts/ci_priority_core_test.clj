@@ -26,7 +26,9 @@
                 :integration ["graphden.crud.branches-graph-test"]}
         plan (priority/plan changed manual)]
     (is (> (count (priority/integration-first changed)) 20))
-    (is (= 20 (count (:integration plan))))
+    (is (= (+ (count (first (priority/integration-layers changed))) 20)
+           (count (:integration plan)))
+        "all direct consumers precede the bounded transitive wave")
     (is (= "graphden.crud.branches-graph-test" (first (:integration plan))))
     (is (= 21 (count (:browser plan)))
         "the manual choice is additional to the bounded automatic wave")
@@ -36,6 +38,100 @@
     (is (> (count (priority/browser-order changed)) (count (:browser plan))))
     (is (= (count (:integration plan))
            (count (distinct (:integration plan)))))))
+
+
+(defn- fixture-test-names
+  [prefix n]
+  (mapv #(format "demo.%s-%02d-test" prefix %) (range n)))
+
+
+(defn- fixture-test-path
+  [name]
+  (str "test/" (str/replace name #"[.-]" {"." "/" "-" "_"}) ".clj"))
+
+
+(defn- fixture-priority-plans
+  "Exercise the public planner against real namespace forms in an isolated repo."
+  [requests]
+  (let [dir (fs/create-temp-dir {:prefix "priority-distance-"})
+        scripts (str (fs/absolutize "scripts"))
+        files (into {"src/demo/source.clj" "(ns demo.source)"
+                     "src/demo/no_direct.clj" "(ns demo.no-direct)"
+                     "src/demo/mid.clj" "(ns demo.mid (:require [demo.source] [demo.no-direct]))"
+                     "src/demo/deep.clj" "(ns demo.deep (:require [demo.mid]))"}
+                    (for [[prefix n dependency] [["changed" 25 nil]
+                                                 ["direct" 25 "demo.source"]
+                                                 ["indirect" 10 "demo.mid"]
+                                                 ["deep" 15 "demo.deep"]
+                                                 ["unrelated" 1 nil]]
+                          name (fixture-test-names prefix n)]
+                      [(fixture-test-path name)
+                       (str "(ns ^{:integration true"
+                            (when (= prefix "changed")
+                              " :ci/package-source-modules #{[\"demo\" \"module\"]}")
+                            "} " name
+                            (when dependency (str " (:require [" dependency "])"))
+                            ") (deftest example-test (is true))")]))]
+    (try
+      (doseq [[path body] files]
+        (let [file (fs/path dir path)]
+          (fs/create-dirs (fs/parent file))
+          (spit (str file) body)))
+      (let [result (p/shell {:dir (str dir) :out :string :err :string :continue true}
+                            "bb" "-cp" scripts "-e"
+                            (str "(require '[ci-priority-core :as p]) "
+                                 "(prn (mapv (fn [[changed manual]] "
+                                 "{:plan (p/plan changed (p/manual-hints manual)) "
+                                 ":all (p/integration-first changed)}) "
+                                 (pr-str requests) "))"))]
+        (when-not (zero? (:exit result))
+          (throw (ex-info "Priority fixture process failed" result)))
+        (edn/read-string (:out result)))
+      (finally (fs/delete-tree dir)))))
+
+
+(deftest early-wave-preserves-changed-and-direct-tests-beyond-twenty
+  (let [changed (fixture-test-names "changed" 25)
+        direct (fixture-test-names "direct" 25)
+        indirect (fixture-test-names "indirect" 10)
+        deep (fixture-test-names "deep" 15)
+        paths (set (map fixture-test-path changed))
+        [{mixed :plan all :all} {source-only :plan} {test-only :plan}]
+        (fixture-priority-plans
+          [[(conj paths "src/demo/source.clj")
+            "integration:demo.direct-24-test,integration:demo.deep-14-test,integration:demo.direct-24-test"]
+           [#{"src/demo/source.clj"} nil]
+           [paths nil]])]
+    (is (= [["demo.direct-24-test"] ["demo.deep-14-test"] changed
+            (vec (butlast direct)) indirect (subvec deep 0 10)]
+           (:integration-layers mixed))
+        "manual order and dedup survive; only the deeper namespaces spend the limit")
+    (is (= (vec (concat changed direct indirect deep)) all)
+        "the complete dependency roster stays unbounded")
+    (is (= (mapcat identity (:integration-layers mixed)) (:integration mixed)))
+    (is (= (count (:integration mixed)) (count (distinct (:integration mixed)))))
+    (is (= [direct indirect (subvec deep 0 10)] (:integration-layers source-only))
+        "source-only changes start at actual distance one, with no changed-test layer")
+    (is (= [changed] (:integration-layers test-only))
+        "all directly changed tests remain early even without source changes")))
+
+
+(deftest missing-nearby-test-layers-do-not-promote-deeper-consumers
+  (let [[{:keys [plan all]}]
+        (fixture-priority-plans [[#{"src/demo/no_direct.clj"} nil]])
+        indirect (fixture-test-names "indirect" 10)
+        deep (fixture-test-names "deep" 15)]
+    (is (= [indirect (subvec deep 0 10)] (:integration-layers plan))
+        "the first visible layer is distance two, so the shared limit applies")
+    (is (= (vec (concat indirect deep)) all))))
+
+
+(deftest explicit-package-consumers-are-not-truncated
+  (doseq [{:keys [plan]}
+          (fixture-priority-plans
+            [[#{"resources/packages/demo/module/fns.edn"} nil]
+             [#{"resources/packages/demo/module/impls.clj"} nil]])]
+    (is (= (fixture-test-names "changed" 25) (:integration plan)))))
 
 
 (deftest changed-browser-test-runs-first-but-unknown-editor-keeps-all

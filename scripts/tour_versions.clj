@@ -40,10 +40,14 @@
 (def ^:private record-edn "test/resources/tour-versions.edn")
 (def ^:private browser-tests-dir "tools/browser-test")
 (def ^:private tour-end-js "resources/packages/app/editor/editor-tour-end.js")
+
+
 (def ^:private tour-title-call
-  (re-pattern "waitTourTitle\\(\\s*page\\s*,\\s*(['\"])(.*?)\\1"))
+  #"waitTourTitle\(\s*page\s*,\s*(['\"])(.*?)\1")
+
+
 (def ^:private dialog-title
-  (re-pattern "title:\\s*_tourCopy\\([^,]+,\\s*(['\"])(.*?)\\1"))
+  #"title:\s*_tourCopy\([^,]+,\s*(['\"])(.*?)\1")
 
 
 (defn- lessons
@@ -151,9 +155,10 @@
 (defn- browser-title-refs
   []
   (for [file (file-seq (io/file browser-tests-dir))
-        :when (and (.isFile file) (str/ends-with? (.getName file) ".test.js"))
+        :when (and (java.io.File/.isFile file)
+                   (str/ends-with? (java.io.File/.getName file) ".test.js"))
         [_ _ title] (re-seq tour-title-call (slurp file))]
-    [(.getPath file) title]))
+    [(java.io.File/.getPath file) title]))
 
 
 (defn- check

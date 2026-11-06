@@ -54,16 +54,22 @@
                      :description "Response whose header keys may be keywords."}}
    :return-type :ring-response-shape}
 
+  ;; Keep :headers on the root :get slot. Putting both lookups under
+  ;; :coalesce makes a nested process-response force its own env thunk.
   {:name :header-get
    :description "Try the lowercase header key first, then the exact spelling; nil when absent. This is not a case-insensitive scan."
-   :parent :coalesce
-   :args {:value {:parent :get
-                  :args {:coll {:as :headers :type [:union :null :text-map]}
-                         :key {:parent :str-lower :args {:string {:as :header-name :type :text}}}
-                         :default nil}}
-          :default {:parent :get
-                    :args {:coll {:as :headers :type [:union :null :text-map]}
-                           :key {:as :header-name :type :text} :default nil}}}
+   :parent :get
+   :args {:coll {:as :headers :type [:union :null :text-map]}
+          :key {:parent :if
+                :args {:test {:parent :get
+                              :args {:coll {:as :headers :type [:union :null :text-map]}
+                                     :key {:parent :str-lower
+                                           :args {:string {:as :header-name :type :text}}}
+                                     :default nil}}
+                       :then {:parent :str-lower
+                              :args {:string {:as :header-name :type :text}}}
+                       :else {:as :header-name :type :text}}}
+          :default nil}
    :return-type :nullable-text}
 
   {:name :_encoding-acceptable?

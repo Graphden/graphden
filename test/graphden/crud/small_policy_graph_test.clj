@@ -32,6 +32,7 @@
 
 (deftest http-lookup-and-encoding-policy
   (doseq [[headers key expected] [[nil "X-Test" nil] [{"x-test" "lower" "X-Test" "exact"} "X-Test" "lower"]
+                                  [{"x-test" nil "X-Test" "exact"} "X-Test" "exact"]
                                   [{"X-Test" "exact"} "X-Test" "exact"]
                                   [{"X-TEST" "other"} "X-Test" nil]]]
     (is (= expected (gh/exec-name :header-get {:headers headers :header-name key}))))

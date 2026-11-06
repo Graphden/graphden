@@ -1,4 +1,5 @@
-(ns ^:integration graphden.executor.compile-packages-test
+(ns ^:integration ^{:ci/package-source-modules #{["web" "http"]}}
+  graphden.executor.compile-packages-test
   "Compile + execute the executor against the REAL package graph.
 
    The `graphden.executor.compile*` namespaces carry deep branches —
@@ -212,6 +213,15 @@
                             (java.io.ByteArrayInputStream. (:body out)))]
              (slurp in)))
         "the encoded body round-trips to the single run's payload")))
+
+
+(deftest app-health-handler-through-wrap-chain-test
+  (let [response (run "_app-cached"
+                      {:request {:request-method :get
+                                 :uri "/health"
+                                 :headers {"accept-encoding" "gzip"}}})]
+    (is (= 200 (:status response)))
+    (is (= "close" (get-in response [:headers "Connection"])))))
 
 
 ;; ============================================================================

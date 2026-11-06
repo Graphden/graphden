@@ -522,7 +522,8 @@
     (binding [*read-eval* false]
       (let [form (read {:read-cond :allow :features #{:clj :bb}} reader)
             name (when (and (seq? form) (= 'ns (first form))) (second form))
-            links (literal-links (slurp path))]
+            links (literal-links (slurp path))
+            source-modules (or (:ci/package-source-modules (meta name)) #{})]
         (when-not (symbol? name)
           (throw (ex-info "Expected ns form" {:path path})))
         {:name name
@@ -535,8 +536,8 @@
                           (mapcat libspec-names)
                           set)
                      (:deps links))
-         :packages (:packages links)
-         :fn-packages (:fn-packages links)}))))
+         :packages (into (:packages links) source-modules)
+         :fn-packages (into (:fn-packages links) source-modules)}))))
 
 
 (defn- clojure-files

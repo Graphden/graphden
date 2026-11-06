@@ -328,6 +328,18 @@
       "a package graph edit must prioritize tests using its impls fixture"))
 
 
+(deftest declared-package-source-consumer-runs-before-late-integration
+  (let [entry (#'priority/namespace-entry
+                "test/graphden/executor/compile_packages_test.clj")]
+    (is (contains? (:packages entry) ["web" "http"]))
+    (is (contains? (:fn-packages entry) ["web" "http"])))
+  (doseq [source ["resources/packages/web/http/fns.edn"
+                  "resources/packages/web/http/impls.clj"]]
+    (is (some #{"graphden.executor.compile-packages-test"}
+              (priority/integration-first #{source}))
+        source)))
+
+
 (deftest runtime-order-preserves-full-roster-once
   (let [all (priority/runtime-order nil)
         changed #{"tools/runtime-test/undo-journal.test.js"}

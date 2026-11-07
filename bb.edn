@@ -428,6 +428,10 @@
   {:doc "CI guard for the developer code-tour: every tour.edn anchor still resolves to a unique form AND docs/devtour/index.html matches a fresh regeneration (fails if source drifted from the baked tour). Fix with `bb devtour`."
    :task (binding [*command-line-args* ["check"]] (load-file "scripts/devtour.clj"))}
 
+  builtin-plans-check
+  {:doc "Verify checked-in browser plans against package graphs and the browser-plan exporter before broad tests."
+   :task (clojure "-M:dev" "tools/ui_preview/generate_builtin_plans.clj" "--check")}
+
   devtour-emacs
   {:doc "The emacs reading path for the developer code-tour (docs/devtour/devtour.el): every step's anchor resolves in the LIVE file, navigation/progress/see-also work, the eldoc annotation names the step at point, the org tree's links reach this checkout, and the org-protocol handler opens a file at a line. Batch ert, ~1s. SKIPS when emacs is not installed (GitHub CI) — like pkg-copy-sync, it guards the box a developer actually reads the tour on."
    :task (if-not (fs/which "emacs")

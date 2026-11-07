@@ -53,6 +53,14 @@
  {:name "public-contract-selftest" :bb "public-contract-test" :timeout 30000 :group :infra :stage :affected
   :relevant ["^scripts/public_contract" "^src/graphden/packages/records" "^src/graphden/packages/rebase\\.clj$"
              "^bb\\.edn$" "^scripts/checks\\.edn$"]}
+ ;; The exporter and browser VM feed checked-in plans. Check their exact bytes
+ ;; after lint, before the broad unit suite can discover stale assets late.
+ {:name "builtin-plans-sync" :bb "builtin-plans-check" :timeout 180000 :group :priority
+  :relevant ["^src/graphden/executor/browser_plan\\.clj$"
+             "^src/graphden/executor/compile/" "^resources/packages/.+/(fns\\.edn|impls\\.clj)$"
+             "^resources/packages/app/ui-preview/(browser-runtime\\.js|builtin-plans\\.(json|js))$"
+             "^tools/ui_preview/(builtin_plans|generate_builtin_plans)\\.clj$"
+             "^bb\\.edn$" "^scripts/checks\\.edn$"]}
  {:name "ui-target-lint" :bb "ui-target-lint" :timeout 30000 :group :web
   :relevant ["^src/" "^resources/packages/" "^tools/ui-target-lint(?:\\.test)?\\.mjs$"
              "^scripts/ui_target_lint(?:_test)?\\.clj$" "^package(-lock)?\\.json$" "^bb\\.edn$"]}

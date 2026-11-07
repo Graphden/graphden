@@ -60,6 +60,8 @@
         focused (fn [commands]
                   (first (filter #(= ["bb" "wt" "test"] (vec (take 3 %))) commands)))]
     (is (= "graphden.editor.component-bundle-test" (nth (focused ui-commands) 4)))
+    (is (some #{["clojure" "-M:dev" "tools/ui_preview/generate_builtin_plans.clj" "--check"]}
+              browser-commands))
     (is (= ["bb" "wt" "test" "--focus" browser-test]
            (focused browser-commands)))))
 

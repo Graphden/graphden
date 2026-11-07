@@ -186,6 +186,14 @@
              (get batches wave))))))
 
 
+(deftest browser-plan-exporter-checks-baked-assets-before-broad-unit
+  (let [selected (:run (ci-select/partition-checks
+                         real-registry {:changed #{"src/graphden/executor/browser_plan.clj"}}))
+        batches (ci-select/canonical-batches real-registry selected)]
+    (is (some #{"builtin-plans-sync"} (map :name (mapcat identity (:priority batches)))))
+    (is (some #{"tests-unit"} (map :name (mapcat identity (:test batches)))))))
+
+
 (deftest deps-scope-does-not-compress-heavy-checks
   (let [selected (->> (:run (ci-select/partition-checks real-registry {:changed #{"deps.edn"}}))
                       (mapv #(assoc % :cmd ["bb" (:bb %)])))

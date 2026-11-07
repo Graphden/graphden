@@ -129,7 +129,9 @@
   {:name :rows->csv
    :description "Maps → one CSV text: a header line of `:columns` (keyword names) then one line per row, RFC 4180 quoting (a field holding a comma, a quote or a newline is quoted, quotes doubled). Rows may be keyword- or string-keyed. Row/column projection and line assembly are graph composition; only field escaping is a native codec."
    :parent :str-join
-   :args {:coll {:parent :cons :args {:item :_csv-header :coll :_csv-data-lines}}
+   :args {:rows {:type [:list :any]}
+          :columns {:type [:list :any]}
+          :coll {:parent :cons :args {:item :_csv-header :coll :_csv-data-lines}}
           :separator {:value "\n"}}
    :return-type :text}
 
@@ -235,7 +237,8 @@
    :lambda-params [:string]
    :description "True iff the string is non-blank. The string slot is required so this predicate binds each element when used by filter or some."
    :parent :not
-   :args {:value {:parent :blank? :args {:string {:type :text :required true}}}}
+   :args {:string {:type :text}
+          :value {:parent :blank? :args {:string {:type :text :required true}}}}
    :return-type :bool}
 
   {:name :url-decode

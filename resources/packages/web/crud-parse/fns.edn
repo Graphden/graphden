@@ -51,7 +51,8 @@
   {:name :form-decode
    :description "Decode a form body to one text value per string key. Graph policy collapses repeated keys to their last value and returns {} for a bare string."
    :parent :ensure-type
-   :args {:value {:parent :if
+   :args {:string {:type :nullable-text}
+          :value {:parent :if
                   :args {:test {:parent :is-a?
                                 :args {:value :_form-decoded :type {:value :map}}}
                          :then {:parent :update-vals

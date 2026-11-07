@@ -183,6 +183,35 @@
         (is (= #{"Alice" 30} (set (vals by-slot))))))))
 
 
+(deftest composed-own-slot-bridges-direct-parent-reader
+  (let [defs [{:namespace "test" :name :reader
+               :args {:input {:type :text}}}
+              {:namespace "test" :name :public
+               :parent :reader :args {:input {:type :text}}}]
+        slots (filter #(= :slot (:kind %)) (r/parse-module defs))
+        public-slot (some #(when (= (r/slot-id (r/fn-id "test" :public) :input)
+                                    (:id %)) %) slots)]
+    (is (= (r/slot-id (r/fn-id "test" :reader) :input)
+           (:source-slot-id public-slot))
+        "A saved rename of the public slot must reach the direct parent reader")))
+
+
+(deftest composed-own-slot-prefers-ref-tree-reader
+  (let [defs [{:namespace "test" :name :parent
+               :args {:input {:type :text} :value {:type :text}}}
+              {:namespace "test" :name :inner
+               :args {:input {:type :text}}}
+              {:namespace "test" :name :public
+               :parent :parent
+               :args {:input {:type :text} :value :inner}}]
+        slots (filter #(= :slot (:kind %)) (r/parse-module defs))
+        public-slot (some #(when (= (r/slot-id (r/fn-id "test" :public) :input)
+                                    (:id %)) %) slots)]
+    (is (= (r/slot-id (r/fn-id "test" :inner) :input)
+           (:source-slot-id public-slot))
+        "The existing ref-tree bridge keeps precedence over an inherited slot")))
+
+
 ;; -----------------------------------------------------------------------------
 ;; Inline anonymous composite — appears as field type
 

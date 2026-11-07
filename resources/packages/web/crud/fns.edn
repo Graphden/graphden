@@ -310,7 +310,8 @@
   {:name :free-arg-entries
    :description "Public Run/Inspector display rows over the canonical slot surface: keyword name, slot identity, explicit optional/captured flags and capture-target display name. Nil fn-id yields []."
    :parent :map
-   :args {:func :_free-arg-display-row :coll :_free-arg-rows :via-names :_free-arg-via-names}
+   :args {:fn-id {:type :nullable-uuid}
+          :func :_free-arg-display-row :coll :_free-arg-rows :via-names :_free-arg-via-names}
    :return-type [:list {:name :keyword :slot-id :uuid :optional? :bool :captured? :bool :via :nullable-text}]}
 
   ;; --- :service-blocking-free-args — the service-ability PROJECTION of
@@ -476,7 +477,9 @@
   {:name :graph-search
    :description "Rank authorized names before capping: exact, bare substring, qualified substring, then optional description hits. Slash reads as dot; blank returns no rows."
    :parent :_project-graph-cohort
-   :args {:selector :_search-selection :namespaces? :_search-nonblank? :capped? true}}
+   :args {:q {:type :nullable-text}
+          :descriptions? {:type :bool}
+          :selector :_search-selection :namespaces? :_search-nonblank? :capped? true}}
   {:name :_namespace-match? :parent :and
    :lambda-params [:row]
    :args {:values [{:parent :some? :args {:value :_cohort-row-name}}
@@ -494,7 +497,8 @@
   {:name :graph-namespace-fns
    :description "One namespace's named light rows. Nil namespace-id selects the root bucket, never all namespaces."
    :parent :zipmap
-   :args {:keys [{:value :fns}]
+   :args {:namespace-id {:type :nullable-uuid}
+          :keys [{:value :fns}]
           :vals [{:parent :get :args {:coll :_namespace-projection :key {:value :fns} :default []}}]}
    :return-type {:fns [:list :keyword-map]}}
 
@@ -678,13 +682,22 @@
   {:name :try-apply-create
    :description "Assemble the parsed write, execute its atomic core, then format the create fallback."
    :parent :_apply-response
-   :args {:outcome {:parent :_apply-create-atomic :args {:parsed :_apply-create-parsed}}
+   :args {:type-str {:type :text}
+          :entity-type {:type :text}
+          :entity-data {:type :nullable-keyword-map}
+          :form-data {:type :nullable-keyword-map}
+          :outcome {:parent :_apply-create-atomic :args {:parsed :_apply-create-parsed}}
           :fallback {:parent :str :args {:parts ["Failed to create " {:as :type-str :type :text}]}}}
    :return-type :keyword-map}
   {:name :try-apply-update
    :description "Assemble the parsed write, execute its atomic core, then format the update fallback."
    :parent :_apply-response
-   :args {:outcome {:parent :_apply-update-atomic :args {:parsed :_apply-update-parsed}}
+   :args {:entity-type {:type :text}
+          :id-uuid {:type :uuid}
+          :entity-data {:type :nullable-keyword-map}
+          :type-str {:type :text}
+          :form-data {:type :nullable-keyword-map}
+          :outcome {:parent :_apply-update-atomic :args {:parsed :_apply-update-parsed}}
           :fallback "Failed to update entity"}
    :return-type :keyword-map}
 
@@ -703,15 +716,21 @@
   {:name :try-apply-seq-append
    :description "Render the committed append or stale-binding HTTP rejection after atomic rollback."
    :parent :_apply-response
-   :args {:outcome :_apply-seq-append-atomic :fallback ""} :return-type :keyword-map}
+   :args {:parsed {:type :_seq-append-parsed-shape}
+          :seq-binding {:type :nullable-keyword-map}
+          :outcome :_apply-seq-append-atomic :fallback ""} :return-type :keyword-map}
   {:name :try-apply-seq-update
    :description "Render the committed update or missing-item HTTP rejection after atomic rollback."
    :parent :_apply-response
-   :args {:outcome :_apply-seq-update-atomic :fallback ""} :return-type :keyword-map}
+   :args {:parsed {:type :_seq-update-parsed-shape}
+          :item {:type :nullable-keyword-map}
+          :outcome :_apply-seq-update-atomic :fallback ""} :return-type :keyword-map}
   {:name :try-apply-seq-move
    :description "Render the committed swap or missing-item HTTP rejection after atomic rollback."
    :parent :_apply-response
-   :args {:outcome :_apply-seq-move-atomic :fallback ""} :return-type :keyword-map}
+   :args {:parsed {:type :_seq-update-parsed-shape}
+          :item {:type :nullable-keyword-map}
+          :outcome :_apply-seq-move-atomic :fallback ""} :return-type :keyword-map}
 
   {:name :fn-names-with-tag
    :description "Vec of fn-NAMES (as strings) declared with `tag` in their `:tags` set. Used to discover tagged base-fns declaratively — e.g. `(:secret-shape)` resolves to the secret-leaf row's name without hardcoding `\"secret-leaf\"` anywhere. Pure: derefs the in-memory `rich-types-registry` atom, no storage round-trip."

@@ -135,7 +135,9 @@
   {:name :tabulate-records
    :description "Project a list of keyword-keyed records onto ordered `columns` as display strings — `[[cell ...] ...]`, one row per record, a missing key an empty cell; structured values render as their JSON. The record-table repr's pure data half."
    :parent :vec
-   :args {:coll :_tabulate-rows}
+   :args {:records {:type [:list :keyword-map]}
+          :columns {:type [:list :keyword]}
+          :coll :_tabulate-rows}
    :return-type [:list [:list :text]]}
 
   {:name :svg-polyline-points

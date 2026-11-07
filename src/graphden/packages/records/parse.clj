@@ -730,7 +730,8 @@
         exposed-names (slot-res/collect-exposed-names binding-map own-ref defs-by-name)
         ;; PB' own-slot decls — emit the slot/fn-slot rows. Then
         ;; enrich each top-level slot with a `:source-slot-id` link
-        ;; if the same name exists deeper in the ref-tree. The link
+        ;; if the same name exists deeper in the ref-tree or an inherited
+        ;; parent. The link
         ;; makes the PB' own-slot behave as a rename-view of the
         ;; underlying base-fn / rename slot — `chain-source-slot-ids`
         ;; reaches the deep slot through this FK, so downstream HOF
@@ -738,25 +739,37 @@
         ;; rename-chain working (consumer bindings route to PB'
         ;; own-slots; without this bridge the rename mechanism would
         ;; shortcircuit). The walk seeds `resolve-slot-owner-strict`
-        ;; from each ref-target so the OWN PB' decl on `fn-def`
-        ;; doesn't Pass-1-hit itself. Inline-composite anon slots
+        ;; from each ref-target or parent so the OWN PB' decl on `fn-def`
+        ;; doesn't Pass-1-hit itself. Ref targets win when both paths
+        ;; expose a name; multiple distinct parent sources are ambiguous.
+        ;; Inline-composite anon slots
         ;; (emitted recursively for `{:type {…}}` shapes) skip the
         ;; enrichment — they aren't reachable through ref-targets and
         ;; would mis-link.
         own-slot-records
         (when (seq own-slot-map)
           (let [pb-slot-name-set (set (keys own-slot-map))
+                parent-targets (or (seq (:parents fn-def))
+                                   (when-let [parent (:parent fn-def)] [parent]))
                 find-deep-source
                 (fn [arg-name]
-                  (some (fn [ref-name]
+                  (let [source-id
+                        (fn [target-name]
                           (when-let [[owner-name owner-arg]
                                      (slot-res/resolve-slot-owner-strict
-                                       ref-name arg-name defs-by-name #{})]
+                                       target-name arg-name defs-by-name #{})]
                             (when-let [owner-fn-id
                                        (resolve-owner-fn-id
                                          owner-name name->id defs-by-name)]
                               (ids/slot-id owner-fn-id owner-arg))))
-                        (slot-res/ref-targets-of fn-def defs-by-name)))]
+                        ref-source (some source-id (slot-res/ref-targets-of fn-def defs-by-name))]
+                    (or ref-source
+                        (let [parent-sources (into #{} (keep source-id) parent-targets)]
+                          (when (> (count parent-sources) 1)
+                            (throw (ex-info "Ambiguous inherited source for own slot"
+                                            {:fn (:name fn-def) :slot arg-name
+                                             :source-slot-ids parent-sources})))
+                          (first parent-sources)))))]
             (mapv (fn [r]
                     (let [arg-name (some-> (:name r) keyword)]
                       (if (and (= :slot (:kind r))

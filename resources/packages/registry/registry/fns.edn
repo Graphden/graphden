@@ -67,7 +67,8 @@
   {:name :secret-path-args
    :description "Manifest the fn/arg identities of every secret-path binding; paths themselves never enter the manifest."
    :parent :concat
-   :args {:colls {:parent :map :args {:func :_export-fn-secrets :coll {:as :fn-defs :type [:list :keyword-map]}}}}
+   :args {:fn-defs {:type [:list :keyword-map]}
+          :colls {:parent :map :args {:func :_export-fn-secrets :coll {:as :fn-defs :type [:list :keyword-map]}}}}
    :return-type [:list :secret-arg-ref]}
 
   {:name :_export-stripped-value :parent :dissoc
@@ -96,7 +97,8 @@
   {:name :strip-secret-paths
    :description "Strip secret-path keys, remove exhausted arg bindings, and drop an empty args map. Other metadata and values are preserved."
    :parent :vec
-   :args {:coll {:parent :map
+   :args {:fn-defs {:type [:list :keyword-map]}
+          :coll {:parent :map
                  :args {:func :_export-stripped-fn :coll {:as :fn-defs :type [:list :keyword-map]}}}}
    :return-type [:list :keyword-map]}
 
@@ -647,7 +649,9 @@
    :description "Graph selection of the highest version satisfying spec. Nil/empty/latest mean any; nil candidates are skipped, stable tuple order preserves the last equal-ranked candidate and the original winning value. Shared by local and remote resolution."
    :parent :last
    :return-type :nullable-text
-   :args {:coll {:parent :sort-by
+   :args {:versions {:type [:list :any]}
+          :spec {:type :nullable-text}
+          :coll {:parent :sort-by
                  :args {:key-fn :_semver-key
                         :coll {:parent :filter
                                :args {:pred :_semver-matches?
@@ -901,7 +905,8 @@
    :description "Graph dependency-name normalization, deduplication and ordered set difference over one scoped IN-query; empty input performs no query."
    :parent :if
    :return-type [:list :keyword]
-   :args {:test {:parent :empty? :args {:coll :_registry-dependency-names}}
+   :args {:dependencies {:type [:list :jsonb]}
+          :test {:parent :empty? :args {:coll :_registry-dependency-names}}
           :then []
           :else {:parent :map
                  :args {:func :str-to-keyword
@@ -919,7 +924,10 @@
   {:name :materialize-package-fns
    :description "Legacy scalar facade over the coupled materialization receipt."
    :parent :get
-   :args {:coll :materialize-package-receipt :key {:value :materialized} :default 0}
+   :args {:ns-root {:type :text}
+          :version {:type :text}
+          :fns {:type [:list :jsonb]}
+          :coll :materialize-package-receipt :key {:value :materialized} :default 0}
    :return-type :int}
 
   {:name :materialize-package-receipt
@@ -1438,7 +1446,10 @@
   {:name :package-version-materialized?
    :description "Complete only when the bundle is nonempty, every canonical identity exists, and any required body has a representative binding."
    :parent :and
-   :args {:values [{:parent :gt :args {:nums [:_materialization-expected 0]}}
+   :args {:ns-root {:type :text}
+          :version {:type :text}
+          :fns {:type [:list :jsonb]}
+          :values [{:parent :gt :args {:nums [:_materialization-expected 0]}}
                    {:parent :equal? :args {:a :_materialization-expected :b :_materialization-present}}
                    {:parent :or :args {:values [{:parent :not :args {:value :_materialization-body-required}}
                                                 :_materialization-body-present]}}]}
@@ -2155,12 +2166,16 @@
    :args {:coll :_package-pin-row :key {:value :branch-id} :default nil}}
   {:name :package-upsert-pin
    :description "Upsert this branch's package pin and return its branch id as text."
-   :parent :to-str :args {:value :_package-pin-branch}
+   :parent :to-str :args {:pkg-name {:type :text}
+          :pkg-version {:type :text}
+          :value :_package-pin-branch}
    :return-type :text}
   {:name :package-pin-receipt
    :description "Upsert the pin and project the written row's actual identity; updates preserve its UUID."
    :parent :select-keys
-   :args {:m :_package-pin-row
+   :args {:pkg-name {:type :text}
+          :pkg-version {:type :text}
+          :m :_package-pin-row
           :ks [{:value :id} {:value :package-name} {:value :version} {:value :branch-id}]}
    :return-type {:id :uuid :package-name :text :version :text :branch-id :uuid}}
   {:name :_remove-package-pin-outcome
@@ -2180,7 +2195,9 @@
   {:name :remove-package-pin-apply
    :description "Project the safe outcome of the exact-identity uninstall into its public response."
    :parent :if
-   :args {:test :_pin-remove-success? :then :_pin-remove-success :else :_pin-remove-error}
+   :args {:pkg-name {:type :text}
+          :expected-id {:type :nullable-uuid}
+          :test :_pin-remove-success? :then :_pin-remove-success :else :_pin-remove-error}
    :return-type :keyword-map}
 
   {:name :_pin-branch-text
@@ -3254,7 +3271,8 @@
    :return-type :keyword-map :effects #{:db}}
   {:name :create-owned-branch!
    :description "Protect a branch with owner policy when this request has a user identity; the writer stamps that trusted identity."
-   :parent :_create-request-branch :args {:write-policy :_owned-branch-policy}
+   :parent :_create-request-branch :args {:branch-name {:type :nullable-text}
+          :write-policy :_owned-branch-policy}
    :return-type :keyword-map}
 
   {:name :drop-orphan-anon-defs
@@ -3518,7 +3536,12 @@
   {:name :mirror-store-package-version!
    :description "The mirror's response map has optional error/holder fields; preserve that public map contract after projecting the locked outcome."
    :parent :ensure-type
-   :args {:value :_mirror-response :type {:value :keyword-map}}
+   :args {:pkg-name {:type :text}
+          :version {:type :nullable-text}
+          :row {:type :keyword-map}
+          :origin-url {:type :text}
+          :origin {:type :nullable-keyword-map, :required false}
+          :value :_mirror-response :type {:value :keyword-map}}
    :return-type :keyword-map}
 
   {:name :_mrp-url

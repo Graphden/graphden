@@ -236,8 +236,13 @@
    :effects #{:db :time}}
   {:name :moderate-package-version!
    :description "Map approve/reject to a canonical moderation transition. The native writer keeps authorization, target-org scope, note normalization and successful-write notification together. Unknown decisions return nil after the same authority check."
-   :parent :_apply-marketplace-moderation
-   :args {:status :_moderation-canonical-status}
+   :parent :const
+   :args {:pkg-name {:type :text}
+          :pkg-version {:type :text}
+          :decision {:type :text}
+          :note {:type :nullable-text, :required false}
+          :value {:parent :_apply-marketplace-moderation
+                  :args {:status :_moderation-canonical-status}}}
    :return-type :nullable-keyword-map}
 
   {:name :_moderation-pending-rows
@@ -286,7 +291,8 @@
   {:name :semver-rank
    :description "major*1000000 + minor*1000 + patch, each capped at 999. Missing or invalid components rank zero; this is not full semver ordering."
    :parent :floor
-   :args {:number {:parent :add :args {:nums [{:parent :mul :args {:nums [1000000 {:parent :_marketplace-rank-component :args {:index 0}}]}}
+   :args {:version {:type :nullable-text}
+          :number {:parent :add :args {:nums [{:parent :mul :args {:nums [1000000 {:parent :_marketplace-rank-component :args {:index 0}}]}}
                                               {:parent :mul :args {:nums [1000 {:parent :_marketplace-rank-component :args {:index 1}}]}}
                                               {:parent :_marketplace-rank-component :args {:index 2}}]}}}
    :return-type :int}

@@ -48,7 +48,8 @@
   {:name :extract-entity-params
    :description "Project a delete route's type/id after enriched path-params or raw URI selection; unknown entity types stay nil."
    :parent :zipmap
-   :args {:keys [{:value :type-str} {:value :id-str} {:value :entity-type}]
+   :args {:request {:type :ring-request-shape}
+          :keys [{:value :type-str} {:value :id-str} {:value :entity-type}]
           :vals [:_entity-type-str
                  :_entity-id-str
                  {:parent :_entity-type-from-string
@@ -85,7 +86,9 @@
   {:name :query-param
    :description "Read a named query-string parameter from a Ring request. Returns nil when absent."
    :parent :coalesce
-   :args {:value :_query-param-string-key
+   :args {:request {:type :ring-request-shape}
+          :param-name {:type :text}
+          :value :_query-param-string-key
           :default {:parent :coalesce
                     :args {:value :_query-param-keyword-key
                            :default :_query-param-fallback}}}

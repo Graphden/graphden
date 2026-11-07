@@ -59,7 +59,8 @@
   {:name :header-get
    :description "Try the lowercase header key first, then the exact spelling; nil when absent. This is not a case-insensitive scan."
    :parent :get
-   :args {:coll {:as :headers :type [:union :null :text-map]}
+   :args {:header-name {:type :text}
+          :coll {:as :headers :type [:union :null :text-map]}
           :key {:parent :if
                 :args {:test {:parent :get
                               :args {:coll {:as :headers :type [:union :null :text-map]}
@@ -80,7 +81,8 @@
   {:name :pick-encoding
    :description "Prefer acceptable br, then gzip, otherwise identity. q=0 excludes a coding."
    :parent :if
-   :args {:test {:parent :_encoding-acceptable? :args {:header :_accept-encoding :coding "br"}}
+   :args {:headers {:type [:union :null :text-map]}
+          :test {:parent :_encoding-acceptable? :args {:header :_accept-encoding :coding "br"}}
           :then "br"
           :else {:parent :if
                  :args {:test {:parent :_encoding-acceptable? :args {:header :_accept-encoding :coding "gzip"}}

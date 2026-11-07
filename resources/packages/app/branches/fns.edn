@@ -1465,7 +1465,9 @@
    :return-type :nullable-text :effects #{:db}}
   {:name :set-branch-policy!
    :description "Trim policy text and clear empty/open; the scoped writer validates accepted policy values before mutation."
-   :parent :_set-branch-policy :args {:policy :_branch-policy-normalized}
+   :parent :_set-branch-policy :args {:branch-id {:type :uuid}
+          :write-policy {:type :nullable-text}
+          :policy :_branch-policy-normalized}
    :return-type :nullable-text}
 
   {:name :set-branch-require-merge!
@@ -1590,7 +1592,11 @@
   {:name :set-branch-review-policy!
    :description "Apply a guarded review-policy PATCH and project the effective review fields."
    :parent :select-keys
-   :args {:m :_set-branch-review-policy-row
+   :args {:branch-id {:type :uuid}
+          :required-approvals {:type :any}
+          :allow-self-approval? {:type :any}
+          :approver-ids {:type :any}
+          :m :_set-branch-review-policy-row
           :ks [{:value :required-approvals} {:value :allow-self-approval?} {:value :approver-ids}]}
    :return-type :keyword-map}
 
@@ -1646,7 +1652,13 @@
   {:name :approvals-report
    :description "Vector of approval display rows over the merge gate's canonical per-row verdict. Author rejection is not stale."
    :parent :vec
-   :args {:coll :_approval-display-rows}
+   :args {:stamp {:type :text}
+          :target-branch-id {:type :nullable-uuid}
+          :approver-ids {:type [:list :text]}
+          :approvals {:type [:list :keyword-map]}
+          :author-id {:type :nullable-text}
+          :allow-self? {:type :bool}
+          :coll :_approval-display-rows}
    :return-type [:list {:approver-id :text :counted :bool :reason :nullable-text :stale :bool}]}
 
   {:name :self-approval-allowed?
@@ -1850,7 +1862,11 @@
    :args {:coll :_add-branch-comment-row :key {:value :id} :default nil}}
   {:name :add-branch-comment!
    :description "Create a validated current-author comment within the native cap boundary, then format its new id."
-   :parent :to-str :args {:value :_branch-comment-created-id}
+   :parent :to-str :args {:source-branch-id {:type :uuid}
+          :body {:type :text}
+          :entity-name {:type :nullable-text}
+          :entity-id {:type :nullable-uuid}
+          :value :_branch-comment-created-id}
    :return-type :text}
 
   {:name :list-branch-comments

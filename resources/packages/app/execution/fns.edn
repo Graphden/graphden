@@ -787,7 +787,8 @@
   {:name :get-execution
    :description "Read the viewer-safe execution and compose its ordered nested args, logical fn identity and child summaries. nil for a missing execution."
    :parent :if
-   :args {:test {:parent :some? :args {:value :_execution-row}}
+   :args {:id {:type :nullable-uuid}
+          :test {:parent :some? :args {:value :_execution-row}}
           :then {:parent :merge
                  :args {:maps [:_execution-row
                                {:parent :zipmap
@@ -823,7 +824,9 @@
   {:name :recent-failures
    :description "Current scoped unresolved failures: final row cap, fallback name and timestamp display over safe native facts. Nil pool yields an empty list."
    :parent :map
-   :args {:func :_recent-failure-display-row :coll :_recent-failure-page}
+   :args {:days {:type :int}
+          :limit {:type :int}
+          :func :_recent-failure-display-row :coll :_recent-failure-page}
    :return-type [:list :keyword-map]}
 
   {:name :recent-executions
@@ -895,7 +898,8 @@
   {:name :unresolved-failure-counts
    :description "Per-fn tally of the CURRENT branch view's UNRESOLVED failures over a trailing window — `[{:fn-id :fn-name :namespace-id :count} …]`, most failures first; the same four-part predicate as `:recent-failures`. The editor's failed-runs lens reads it once (GET /api/failures) and derives the chip / namespace / row counts client-side."
    :parent :if
-   :args {:test {:parent :nil?
+   :args {:days {:type :int}
+          :test {:parent :nil?
                  :args {:value :_unresolved-failure-rows}}
           :then {:value nil}
           :else {:parent :_failure-counts-sorted
@@ -1090,19 +1094,24 @@
   {:name :usage-org-daily
    :description "Per-day series for the current org over the trailing `:days`, oldest first. Graph composition adds `:runs-pct` from the busiest day; days with no runs are omitted."
    :parent :_usage-pct-rows
-   :args {:rows :_usage-org-daily-raw}
+   :args {:days {:type :int}
+          :rows :_usage-org-daily-raw}
    :return-type [:list {:day :text :runs :int :failed :int :duration-ms-sum :int :runs-pct :int}]}
 
   {:name :usage-org-fn-stats
    :description "Busiest functions for the current org, name joined by the scoped read and graph-computed bar percentages."
    :parent :_usage-pct-rows
-   :args {:rows :_usage-org-fn-stats-raw}
+   :args {:days {:type :int}
+          :limit {:type :int}
+          :rows :_usage-org-fn-stats-raw}
    :return-type [:list {:fn-id :uuid :fn-name :text :runs :int :failed :int :duration-ms-sum :int :runs-pct :int}]}
 
   {:name :usage-all-org-stats
    :description "Operator-only cross-org rollup with graph-computed bar percentages. The native read refuses tenant context before data crosses into graph code."
    :parent :_usage-pct-rows
-   :args {:rows :_usage-all-org-stats-raw}
+   :args {:days {:type :int}
+          :limit {:type :int}
+          :rows :_usage-all-org-stats-raw}
    :return-type [:list {:org :text :runs :int :failed :int :duration-ms-sum :int :runs-pct :int}]}
 
   {:name :cancel-execution!
@@ -3607,7 +3616,8 @@
   {:name :execute-trace-rows
    :description "Viewer-safe trace facts with a short-id name fallback. Chips, indent and value rendering remain in the _ptrace-r graph."
    :parent :assoc
-   :args {:map :_execute-trace-facts :key {:value :rows}
+   :args {:id {:type :nullable-uuid}
+          :map :_execute-trace-facts :key {:value :rows}
           :value {:parent :map :args {:func :_trace-named-row :coll :_trace-fact-rows}}}
    :return-type {:found? :bool :rows [:list :keyword-map]
                  :truncated? [:union :null :bool]

@@ -93,12 +93,12 @@
       (is (= [arg-node stale] out))
       (is (= stale (get out 1)))))
   (testing "edges are never touched by the annotation pass"
-    (let [elements {:nodes [] :edges [{:data {:source "a" :target "b"}}]}]
-      (let [out (call :_layout-strip-facts-apply
-                      {:elements elements :graph {:fns []}})]
-        (is (= [] (:nodes out)))
-        (is (vector? (:nodes out)))
-        (is (= (:edges elements) (:edges out)))))))
+    (let [elements {:nodes [] :edges [{:data {:source "a" :target "b"}}]}
+          out (call :_layout-strip-facts-apply
+                    {:elements elements :graph {:fns []}})]
+      (is (= [] (:nodes out)))
+      (is (vector? (:nodes out)))
+      (is (= (:edges elements) (:edges out))))))
 
 
 (deftest trace-header-graph-follows-dynamic-execution

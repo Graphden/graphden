@@ -80,10 +80,10 @@
    - `changed-fn-ids` names every fn whose OWN rows moved; a binding write
      carries its owning fn-id. So re-reading those fns' fn-slots / bindings /
      list-items is sufficient — nothing else can have changed.
-   - a `slot` is an immutable global identity (CLAUDE.md: atomic
-     `(name, type-fn-id)`, immutable post-create) and is SHARED across fns. So
-     slots may only be ADDED here, never removed: another fn may still point at
-     one this fn just dropped.
+   - a `slot` is a shared global identity, but package sync can update its
+     `:source-slot-id` forwarding link while preserving its UUID. Refresh the
+     changed fns' current own slots by ID; keep other cached slots because
+     another fn may still point at a slot this fn just dropped.
 
    A fn that was deleted simply does not come back from storage, and its rows
    are filtered out. On a cold cache this is a no-op — the next read loads
@@ -148,17 +148,20 @@
             stale-binding-ids (into #{}
                                     (comp (filter of-changed?) (map :id))
                                     (:bindings cached))
-            ;; Slots: add-only. Immutable identities, shared across fns.
-            known-slots (into #{} (map :id) (:slots cached))
-            missing-slot-ids (into [] (comp (map :slot-id) (remove known-slots) (distinct))
-                                   fresh-fn-slots)
-            extra-slots (if (seq missing-slot-ids)
-                          (vec (vals (sp/read-entities storage :slot missing-slot-ids)))
-                          [])]
+            ;; An existing slot's forwarding source can change on a public
+            ;; base-to-graph upgrade. Re-read current owned slots, including
+            ;; UUIDs already in the cache, and replace those rows by ID.
+            current-slot-ids (into [] (comp (map :slot-id) (distinct)) fresh-fn-slots)
+            current-slot-id-set (set current-slot-ids)
+            current-slots (if (seq current-slot-ids)
+                            (vec (vals (sp/read-entities storage :slot current-slot-ids)))
+                            [])]
         (reset! cache
                 {:fns (into (filterv #(not (contains? ids (:id %))) (:fns cached))
                             fresh-fns)
-                 :slots (into (:slots cached) extra-slots)
+                 :slots (into (filterv #(not (contains? current-slot-id-set (:id %)))
+                                       (:slots cached))
+                              current-slots)
                  :fn-slots (into (filterv (complement of-changed?) (:fn-slots cached))
                                  fresh-fn-slots)
                  :bindings (into (filterv (complement of-changed?) (:bindings cached))

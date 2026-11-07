@@ -63,7 +63,8 @@
            ["app.registry" :create-owned-branch! :branch-name :text]]]
     (let [old {:namespace module :name fn-name
                :args {input-name {:type input-type}} :return-type :int}
-          reader (assoc old :name :_input-reader)
+          reader (assoc old :name :_input-reader
+                        :args {:different-input {:type input-type}})
           new (assoc old :parent :_input-reader)
           id (records/fn-id module fn-name)
           report (contract/compare-definitions [reader old] [reader new])]
@@ -77,7 +78,16 @@
       (testing "This guard only introduces the bridge requirement on base->graph conversion"
         (is (empty? (:breaking (contract/compare-definitions
                                  [reader new]
-                                 [reader (assoc new :lambda-params [input-name])]))))))))
+                                 [reader (assoc new :lambda-params [input-name])])))))
+      (testing "A direct parent with the matching reader now receives a source link"
+        (let [matching-reader (assoc old :name :_matching-reader)
+              linked (assoc old :parent :_matching-reader)
+              report (contract/compare-definitions [matching-reader old]
+                                                   [matching-reader linked])]
+          (is (empty? (:breaking report)))
+          (is (= (records/slot-id (records/fn-id module :_matching-reader) input-name)
+                 (get-in report [:new id :slots (records/slot-id id input-name)
+                                 :source-slot-id]))))))))
 
 
 (deftest output-record-fields-are-not-public-input-slots

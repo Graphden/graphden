@@ -81,3 +81,35 @@
       (is (contains? (cr/free-arg-accepted-names ctx fresh-id) :target-branch)))
     (testing "saved descendant retains the same accepted name"
       (is (contains? (cr/free-arg-accepted-names ctx saved-id) :target-branch)))))
+
+
+(deftest saved-direct-parent-rename-delivers-runtime-value
+  (let [ctx harness/*context*
+        storage harness/*storage*
+        base {:namespace "test.contract" :name :public-join
+              :args {:coll {:type [:list :any]}} :return-type :text}
+        graph (assoc base :parent :str-join
+                     :args {:coll {:type [:list :any]}
+                            :separator ","})
+        child (fn [name]
+                {:name name :parent :test.contract/public-join
+                 :args {:coll {:as :items}}})
+        public-slot-id (ids/slot-id (ids/fn-id "test.contract" :public-join) :coll)
+        cached-slot #(some (fn [slot] (when (= public-slot-id (:id slot)) slot))
+                           (:slots @(:graph-cache ctx)))
+        saved-id (ids/fn-id nil :saved-public-join)
+        fresh-id (ids/fn-id nil :fresh-public-join)]
+    (harness/sync! [base (child :saved-public-join)])
+    (is (contains? (cr/free-arg-accepted-names ctx saved-id) :items))
+    (is (nil? (:source-slot-id (cached-slot))))
+    (harness/sync! [graph])
+    (let [persisted-source (:source-slot-id (sp/read-entity storage :slot public-slot-id))]
+      (is (some? persisted-source))
+      (is (= persisted-source (:source-slot-id (cached-slot)))
+          "Delta invalidation refreshes the existing public slot's source link"))
+    (harness/sync! [(child :fresh-public-join)])
+    (testing "both saved and fresh renames reach the direct parent reader"
+      (is (= "saved,values" (exec/execute-with-named-args ctx saved-id
+                                                          {:items ["saved" "values"]})))
+      (is (= "fresh,values" (exec/execute-with-named-args ctx fresh-id
+                                                          {:items ["fresh" "values"]}))))))

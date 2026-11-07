@@ -69,11 +69,13 @@
     {:fn-id id
      :name (keyword (:namespace definition) (name (:name definition)))
      :source-file (:source-file definition)
+     :base-fn? (and (empty? (:parent-ids root)) (some? (:return-type-fn-id root)))
+     :composed? (boolean (seq (:parent-ids root)))
      :slots (into {} (map (fn [slot-id]
                             (let [slot (get slots slot-id)]
                               (when-not slot
                                 (throw (ex-info "Parser did not emit an own slot" {:fn-id id :slot-id slot-id})))
-                              [slot-id (select-keys slot [:name :type-fn-id :required])])))
+                              [slot-id (select-keys slot [:name :type-fn-id :required :source-slot-id])])))
                   own-ids)
      :lambda-params (:lambda-params root)
      :return-type-fn-id (:return-type-fn-id root)}))
@@ -119,8 +121,9 @@
 
 
 (defn contract-changes
-  "Report exact declared-contract deltas. Only proven identity cuts and
-   optional-to-required own-slot changes fail this first-stage guard.
+  "Report exact declared-contract deltas. Identity cuts, optional-to-required
+   own slots and missing source links after base->graph extraction fail.
+   Source-link presence does not prove complete runtime reader reachability.
    Type, lambda and return changes require review, not guessed subtyping;
    a new own slot may merely expose a previously inherited input."
   [old new]
@@ -128,6 +131,12 @@
         (if (nil? new)
           [{:kind :public-fn-removed :severity :breaking}]
           (concat (slot-changes (:slots old) (:slots new))
+                  (when (and (:base-fn? old) (:composed? new))
+                    (for [id (sort-by str (keys (:slots old)))
+                          :let [slot (get-in new [:slots id])]
+                          :when (and slot (nil? (:source-slot-id slot)))]
+                      {:kind :own-slot-source-missing :severity :breaking
+                       :slot-id id :slot-name (:name slot)}))
                   (remove nil?
                           [(field-change :lambda-params-changed :lambda-params old new)
                            (field-change :return-type-changed :return-type-fn-id old new)])))))
@@ -227,7 +236,7 @@
                "—" (:checked report) "changed public roots")
       (doseq [change (:changes report)] (prn change))
       (println "public-contract:" (if (seq (:breaking report)) "FAIL" "PASS")
-               "—" (count (:breaking report)) "identity/requiredness breaks;"
+               "—" (count (:breaking report)) "identity/requiredness/source-link breaks;"
                "own declarations only, not full surface/subtype compatibility")
       (if (seq (:breaking report)) 1 0))
     (catch Exception error

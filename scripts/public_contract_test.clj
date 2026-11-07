@@ -25,7 +25,12 @@
 
 (def composed-rank
   {:namespace "app.marketplace" :name :semver-rank
-   :parent :_rank-reader :lambda-params [:version] :return-type :int})
+   :parent :identity :args {:value :_rank-reader}
+   :lambda-params [:version] :return-type :int})
+
+
+(def preserved-rank
+  (update composed-rank :args merge (:args rank)))
 
 
 (defn- compare-rank
@@ -45,10 +50,34 @@
              :slot-id slot :slot-name "version"}]
            (:breaking report)))
     (testing "The same public own slot bridges to the new graph implementation"
-      (let [preserved (compare-rank (assoc composed-rank :args (:args rank)))]
+      (let [preserved (compare-rank preserved-rank)]
         (is (= 1 (:checked preserved)))
         (is (empty? (:changes preserved)))
-        (is (contains? (get-in preserved [:new id :slots]) slot))))))
+        (is (contains? (get-in preserved [:new id :slots]) slot))
+        (is (some? (get-in preserved [:new id :slots slot :source-slot-id])))))))
+
+
+(deftest preserving-an-input-uuid-without-a-source-link-is-rejected
+  (doseq [[module fn-name input-name input-type]
+          [["app.branches" :set-branch-policy! :branch-id :uuid]
+           ["app.registry" :create-owned-branch! :branch-name :text]]]
+    (let [old {:namespace module :name fn-name
+               :args {input-name {:type input-type}} :return-type :int}
+          reader (assoc old :name :_input-reader)
+          new (assoc old :parent :_input-reader)
+          id (records/fn-id module fn-name)
+          report (contract/compare-definitions [reader old] [reader new])]
+      (is (= [{:fn-id id :function (keyword module (name fn-name)) :source-file nil
+               :kind :own-slot-source-missing :severity :breaking
+               :slot-id (records/slot-id id input-name) :slot-name (name input-name)}]
+             (:breaking report)))
+      (testing "An existing base slot needs no forwarding link"
+        (is (empty? (:breaking (contract/compare-definitions
+                                 [old] [(assoc old :lambda-params [input-name])])))))
+      (testing "This guard only introduces the bridge requirement on base->graph conversion"
+        (is (empty? (:breaking (contract/compare-definitions
+                                 [reader new]
+                                 [reader (assoc new :lambda-params [input-name])]))))))))
 
 
 (deftest output-record-fields-are-not-public-input-slots
@@ -93,7 +122,7 @@
 
 (deftest newly-exposed-own-input-is-not-proven-new-required-input
   (let [old [identity-definition reader-definition composed-rank]
-        new [identity-definition reader-definition (assoc composed-rank :args (:args rank))]
+        new [identity-definition reader-definition preserved-rank]
         report (contract/compare-definitions old new)]
     (is (= [:own-slot-added] (mapv :kind (:changes report))))
     (is (empty? (:breaking report)))))
@@ -146,7 +175,7 @@
                                         :extra-env {"GRAPHDEN_CI_SINCE" base}})]
           (is (= 1 (:exit result)) (:err result))
           (is (str/includes? (:out result) ":own-slot-removed")))
-        (write-package! root [identity-definition reader-definition (assoc composed-rank :args (:args rank))])
+        (write-package! root [identity-definition reader-definition preserved-rank])
         (is (empty? (:breaking (contract/check-revisions root base nil))))
         (is (= [:own-slot-removed]
                (mapv :kind (:breaking (contract/check-revisions root base "HEAD"))))))

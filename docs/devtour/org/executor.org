@@ -42,13 +42,13 @@ Runs a previously compiled [[file:glossary.org::#term/graph-function][graph func
 :PROPERTIES:
 :CUSTOM_ID: executor/create-context
 :FILE: src/graphden/executor/context.clj
-:LINE: 409
+:LINE: 412
 :MINS: 10.2
 :END:
 
 Creates an [[file:glossary.org::#term/context][execution context]]: storage, [[file:glossary.org::#term/base-function][base-function]] implementations, [[file:glossary.org::#term/compiled-registry][compiled registry]], graph caches, and permission/[[file:glossary.org::#term/effect][effect]] checks. The [[file:glossary.org::#term/compiled-registry][compiled registry]] is filled when needed. Two contexts can resolve the same ~fn-id~ differently, for example when they select different branches.
 
-- source :: [[file:../../../src/graphden/executor/context.clj::(defn create-context][src/graphden/executor/context.clj:409]]
+- source :: [[file:../../../src/graphden/executor/context.clj::(defn create-context][src/graphden/executor/context.clj:412]]
 - same file :: [[file:executor.org::#executor/fill-graph-cache!][fill-graph-cache!]]
 - referenced from :: [[file:executor.org::#executor/execute][execute]], [[file:versioning.org::#versioning/build-branch-ctx][build-branch-ctx]], [[file:boot.org::#boot/context][context]]
 
@@ -56,13 +56,13 @@ Creates an [[file:glossary.org::#term/context][execution context]]: storage, [[f
 :PROPERTIES:
 :CUSTOM_ID: executor/fill-graph-cache!
 :FILE: src/graphden/executor/context.clj
-:LINE: 362
+:LINE: 365
 :MINS: 2.4
 :END:
 
 Loads the graph cache while protecting concurrent writes. Before reading storage, the loader records the [[file:glossary.org::#term/invalidation][invalidation]] [[file:glossary.org::#term/invalidation][epoch]], a counter incremented when data changes. It installs its result under a lock only if that counter is unchanged; otherwise an older read could overwrite the graph installed by a newer write.
 
-- source :: [[file:../../../src/graphden/executor/context.clj::(defn fill-graph-cache!][src/graphden/executor/context.clj:362]]
+- source :: [[file:../../../src/graphden/executor/context.clj::(defn fill-graph-cache!][src/graphden/executor/context.clj:365]]
 - same file :: [[file:executor.org::#executor/create-context][create-context]]
 
 * 5. registry

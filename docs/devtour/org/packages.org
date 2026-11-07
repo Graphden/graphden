@@ -7,7 +7,7 @@ Declarations, implementations, synchronization, import, and lint.
 
 after: executor
 
-[[file:index.org][index]] · ~92 min
+[[file:index.org][index]] · ~93 min
 
 * 1. load-packages
 :PROPERTIES:
@@ -105,13 +105,13 @@ Reads a module's [[file:glossary.org::#term/edn][EDN]] definitions while retaini
 :PROPERTIES:
 :CUSTOM_ID: packages/prepare-module
 :FILE: src/graphden/packages/records/parse.clj
-:LINE: 1158
+:LINE: 1171
 :MINS: 3.2
 :END:
 
 Prepares the module shared by production composition and its type sweep. References resolve within their namespace before dependency sorting, and inline functions expand before checker identities are attached. The public ~parse-module~ entry uses these same indexes to resolve inherited [[file:glossary.org::#term/slot][slot]] ownership before emitting stored rows.
 
-- source :: [[file:../../../src/graphden/packages/records/parse.clj::(defn prepare-module][src/graphden/packages/records/parse.clj:1158]]
+- source :: [[file:../../../src/graphden/packages/records/parse.clj::(defn prepare-module][src/graphden/packages/records/parse.clj:1171]]
 - same file :: [[file:packages.org::#packages/parse-composed][parse-composed]]
 
 * 9. parse-composed
@@ -119,7 +119,7 @@ Prepares the module shared by production composition and its type sweep. Referen
 :CUSTOM_ID: packages/parse-composed
 :FILE: src/graphden/packages/records/parse.clj
 :LINE: 696
-:MINS: 6.6
+:MINS: 7.5
 :END:
 
 Parses a composed function's parents and arguments. A bound argument creates a [[file:glossary.org::#term/binding][binding]] to an inherited [[file:glossary.org::#term/slot][slot]]; a type-only argument declaration can add an own [[file:glossary.org::#term/slot][slot]]. ~resolve-slot-owner~ determines which ancestor owns the targeted [[file:glossary.org::#term/slot][slot]].
@@ -268,13 +268,13 @@ Before writing [[file:glossary.org::#term/edn][EDN]] text, replaces otherwise un
 :PROPERTIES:
 :CUSTOM_ID: packages/namespace-external-deps
 :FILE: resources/packages/registry/registry/fns.edn
-:LINE: 150
+:LINE: 152
 :MINS: 1.2
 :END:
 
 Composes the dependency list for an exported namespace from one scoped native facts read. Structural references and version-qualified package namespaces are both included; the graph sorts and deduplicates names and package coordinates before the surrounding ~:export-namespace~ [[file:glossary.org::#term/graph-function][graph function]] assembles the bundle.
 
-- source :: [[file:../../../resources/packages/registry/registry/fns.edn::{:name :namespace-external-deps][resources/packages/registry/registry/fns.edn:150]]
+- source :: [[file:../../../resources/packages/registry/registry/fns.edn::{:name :namespace-external-deps][resources/packages/registry/registry/fns.edn:152]]
 
 * 21. graph-fn-defs
 :PROPERTIES:
@@ -320,7 +320,7 @@ Creates or updates an [[file:glossary.org::#term/semver][installation pin]]. Onl
 :CUSTOM_ID: packages/moderate-package-version!
 :FILE: resources/packages/registry/marketplace/fns.edn
 :LINE: 237
-:MINS: 1.0
+:MINS: 1.3
 :END:
 
 The graph validates and composes a platform administrator's moderation decision. The [[file:glossary.org::#term/auth][capability]] check remains inside the native write operation; its read uses platform storage so organisation scoping does not hide another publisher's row. After the change, ~tc/notify!~ lets the [[file:glossary.org::#term/integrant][addon]] notify the publisher. See [[file:../../../docs/MARKETPLACE.md][marketplace moderation]].

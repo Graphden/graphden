@@ -14,7 +14,7 @@ after: storage, types
 :CUSTOM_ID: crud/extract-entity-params
 :FILE: resources/packages/web/crud-delete/fns.edn
 :LINE: 48
-:MINS: 1.1
+:MINS: 1.2
 :END:
 
 Graph composition selects the entity type and ID from an HTTP mutation request. It prefers parsed [[file:glossary.org::#term/ring][Reitit]] path parameters and falls back to the raw URI boundary.
@@ -235,13 +235,13 @@ Converts an effective [[file:glossary.org::#term/slot][slot]] type into a pure f
 :PROPERTIES:
 :CUSTOM_ID: crud/build-form
 :FILE: resources/packages/app/forms/fns.edn
-:LINE: 1742
-:MINS: 1.7
+:LINE: 1743
+:MINS: 1.8
 :END:
 
 Renders a form descriptor as [[file:glossary.org::#term/hiccup][Hiccup]]: records become field groups, unions get a choice of variant, and leaf types use the registered form functions. This graph function supplies the renderer policy. ~GET /partials/value-form~ returns this [[file:glossary.org::#term/htmx][server-rendered fragment]], which [[file:glossary.org::#term/htmx][HTMX]] inserts into the inspector. See [[file:../../../docs/PARTIALS.md][partials]].
 
-- source :: [[file:../../../resources/packages/app/forms/fns.edn::{:name :build-form,][resources/packages/app/forms/fns.edn:1742]]
+- source :: [[file:../../../resources/packages/app/forms/fns.edn::{:name :build-form,][resources/packages/app/forms/fns.edn:1743]]
 - same file :: [[file:crud.org::#crud/resolve-form][resolve-form]]
 
 * 19. run-captured!

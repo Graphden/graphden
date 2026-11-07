@@ -157,7 +157,7 @@ Exposes pre-write validation as one [[file:glossary.org::#term/base-function][ba
 :CUSTOM_ID: web/form-decode
 :FILE: resources/packages/web/crud-parse/fns.edn
 :LINE: 51
-:MINS: 1.3
+:MINS: 1.4
 :END:
 
 Composes the native form codec with graph policy: repeated keys keep their last value, and a body without fields becomes an empty text map. The native codec avoids regex input-length limits for large values such as edited assets.

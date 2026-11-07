@@ -1195,15 +1195,6 @@
                     {:type :compile/unsupported-kind :binding bnd}))))
 
 
-(defn- env-binding-route-ids
-  "Slot identities a lexical env binding owns. Stop at the first source
-   outside this fn's inheritance closure so an unrelated reader that
-   happens to have the same name keeps its captured value."
-  [{:keys [slot-id]} owned-slot-ids {:keys [slot-map]}]
-  (into [slot-id]
-        (l/scoped-source-slot-ids (get slot-map slot-id) slot-map owned-slot-ids)))
-
-
 (defn- binding-scope
   "The env an env-binding named `env-name` evaluates in: the merged
    env `env`, with its name and slot routes restored to the caller's
@@ -1341,13 +1332,8 @@
          keys-vec (mapv :base-name enriched)
          n (count builders)
          env-bnds (b/collect-env-bindings fn-id lookups)
-         owned-slot-ids (when (seq env-bnds)
-                          (into #{}
-                                (mapcat (fn [fid]
-                                          (map :slot-id
-                                               (get-in lookups [:fn-slots-by-fn fid]))))
-                                (l/inheritance-chain* fn-id lookups)))
-         env-route-ids (mapv #(env-binding-route-ids % owned-slot-ids lookups)
+         owned-slot-ids (when (seq env-bnds) (l/fn-owned-slot-ids fn-id lookups))
+         env-route-ids (mapv #(l/env-binding-route-ids % owned-slot-ids lookups)
                              env-bnds)
          env-builders (mapv (fn [env-bnd route-ids]
                               (env-arg-builder fn-id env-bnd route-ids

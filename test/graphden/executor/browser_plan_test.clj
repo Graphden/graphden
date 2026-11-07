@@ -478,6 +478,21 @@
       (is (= "closure" (get-in (function-entry plan (get ids :root)) [:args 0 :expr :kind]))))))
 
 
+(deftest typed-facade-env-shadows-populated-reader-slot-in-browser
+  (let [{:keys [graph impls ids]}
+        (map-fixture
+          [{:name :reader :parent :const :args {:value {:as :x}}}
+           {:name :facade :parent :list
+            :args {:x {:type :any} :items [:reader]}}
+           {:name :override :parent :facade :args {:x "B"}}
+           {:name :forwarding-facade :parent :facade :args {:x {:type :any}}}
+           {:name :nested-override :parent :forwarding-facade :args {:x "C"}}
+           {:name :root :parent :list :args {:items [:reader :override :nested-override]}}])]
+    (assert-differential! graph impls ids
+                          [{:entry :root :inputs {:x "A"}
+                            :expected ["A" ["B"] ["C"]]}])))
+
+
 (deftest local-environment-shadows-captured-slot-translations
   (let [{:keys [graph impls ids]}
         (map-fixture

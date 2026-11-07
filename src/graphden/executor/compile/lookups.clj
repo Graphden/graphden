@@ -343,6 +343,23 @@
       :else (recur (conj ids source) (:source-slot-id (get slot-map source)) (conj seen source)))))
 
 
+(defn env-binding-route-ids
+  "Slot identities a lexical env binding owns, including its first
+   captured reader. Other captured readers retain their caller value."
+  [{:keys [slot-id]} owned-slot-ids {:keys [slot-map]}]
+  (into [slot-id]
+        (scoped-source-slot-ids (get slot-map slot-id) slot-map owned-slot-ids)))
+
+
+(defn fn-owned-slot-ids
+  "Slot identities on a function's inheritance closure."
+  [fn-id lookups]
+  (into #{}
+        (mapcat (fn [ancestor]
+                  (map :slot-id (get-in lookups [:fn-slots-by-fn ancestor]))))
+        (inheritance-chain* fn-id lookups)))
+
+
 (defn active-fn-slots
   "Own junctions whose slots are not the direct source of another own view.
    Historical rename rows retain their identity but cease to expose inputs.

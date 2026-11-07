@@ -497,20 +497,29 @@
           const fn = functions.get(fnId);
           if (!fn) throw new Error('Missing browser graph function: ' + fnId);
           // Transparent pure calls share the immutable incoming frame and its memo.
-          // Aliases and local bindings still require an isolated names map.
+          // Aliases and local bindings require isolated maps for lexical shadowing.
           const frame = fn.aliases.length || fn.env.length
-            ? {slots: incoming.slots, names: new Map(incoming.names)} : incoming;
+            ? {slots: fn.env.length ? new Map(incoming.slots) : incoming.slots,
+              names: new Map(incoming.names)} : incoming;
           for (const {fromName, toName} of fn.aliases) if (frame.names.has(fromName) && !frame.names.has(toName)) frame.names.set(toName, frame.names.get(fromName));
           const aliasedNames = fn.env.length ? new Map(frame.names) : null;
+          const envRoutes = fn.env.length
+            ? new Map(fn.env.map(({name, routes}) => [name, routes || []])) : null;
           function sourceScope(name) {
-            const scope = {slots: frame.slots, names: new Map(frame.names)};
+            const scope = {slots: new Map(frame.slots), names: new Map(frame.names)};
             if (aliasedNames.has(name)) scope.names.set(name, aliasedNames.get(name));
             else scope.names.delete(name);
+            for (const slot of envRoutes.get(name) || []) {
+              if (incoming.slots.has(slot)) scope.slots.set(slot, incoming.slots.get(slot));
+              else scope.slots.delete(slot);
+            }
             return scope;
           }
-          for (const binding of fn.env) frame.names.set(binding.name, new Thunk(() => {
-            return expr(binding.expr, sourceScope(binding.name));
-          }));
+          for (const binding of fn.env) {
+            const value = new Thunk(() => expr(binding.expr, sourceScope(binding.name)));
+            frame.names.set(binding.name, value);
+            for (const slot of binding.routes || []) frame.slots.set(slot, value);
+          }
           const args = new Map(fn.args.map((arg) => [arg.name, new Thunk(() =>
             expr(arg.expr, arg.sourceName ? sourceScope(arg.sourceName) : frame))]));
           const operation = primitives.get(fn.primitive);

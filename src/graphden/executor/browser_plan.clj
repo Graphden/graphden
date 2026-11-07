@@ -282,6 +282,7 @@
         primitive (:id root)
         bindings (b/collect-bindings fid lookups)
         env (b/collect-env-bindings fid lookups)
+        owned-slot-ids (when (seq env) (l/fn-owned-slot-ids fid lookups))
         ;; Mirror compile-eager: only a duplicate root/env ref reads the
         ;; caller's same-name value, not an unrelated local env ref.
         env-source-refs (into #{}
@@ -297,6 +298,7 @@
             :env (mapv (fn [entry]
                          {:name (wire-name (:env-name entry))
                           :slot (str (:slot-id entry))
+                          :routes (mapv str (l/env-binding-route-ids entry owned-slot-ids lookups))
                           :expr (binding-expr entry fid lookups (assoc context :env-binding? true))})
                        env)
             :args (mapv (fn [entry]

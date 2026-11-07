@@ -27,16 +27,23 @@
              :author_label "author" :unselected "not published"}
         page {:rows [row row row] :limit 2 :offset 10}]
     (with-redefs [history/change-group-page (fn [& _] page)]
-      (is (= {:groups [{:group-id (str id) :change-id nil :change-revision nil
-                        :created-at (str stamp) :branch-id (str id) :kinds "fn"
-                        :event-count 2 :deleted? false :author-label "author"
-                        :has-change-id? false :has-change-revision? false}
-                       {:group-id (str id) :change-id nil :change-revision nil
-                        :created-at (str stamp) :branch-id (str id) :kinds "fn"
-                        :event-count 2 :deleted? false :author-label "author"
-                        :has-change-id? false :has-change-revision? false}]
-              :next-offset 12}
-             (call "load-fn-change-events" {:fn-id id :limit 2 :offset 10}))))
+      (let [result (call "load-fn-change-events" {:fn-id id :limit 2 :offset 10})]
+        (is (vector? (:groups result)))
+        (is (= (str id) (get-in result [:groups 1 :group-id])))
+        (is (= {:groups [{:group-id (str id) :change-id nil :change-revision nil
+                          :created-at (str stamp) :branch-id (str id) :kinds "fn"
+                          :event-count 2 :deleted? false :author-label "author"
+                          :has-change-id? false :has-change-revision? false}
+                         {:group-id (str id) :change-id nil :change-revision nil
+                          :created-at (str stamp) :branch-id (str id) :kinds "fn"
+                          :event-count 2 :deleted? false :author-label "author"
+                          :has-change-id? false :has-change-revision? false}]
+                :next-offset 12}
+               result))))
+    (with-redefs [history/change-group-page (fn [& _] {:rows [] :limit 2 :offset 0})]
+      (let [result (call "load-fn-change-events" {:fn-id id :limit 2 :offset 0})]
+        (is (vector? (:groups result)))
+        (is (= {:groups [] :next-offset nil} result))))
     (with-redefs [history/change-group-page (fn [& _] nil)]
       (is (nil? (call "load-fn-change-events" {:fn-id id :limit 2 :offset 0}))))))
 

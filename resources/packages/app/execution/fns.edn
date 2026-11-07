@@ -756,9 +756,10 @@
                                                                  :key {:value :id} :default nil}}
                                        :default {:value []}}}}}}}
   {:name :_execution-args
-   :parent :map
-   :args {:func :_execution-arg :coll :_execution-arg-rows
-          :items-by-arg :_execution-items-by-arg}}
+   :parent :vec
+   :args {:coll {:parent :map
+                 :args {:func :_execution-arg :coll :_execution-arg-rows
+                        :items-by-arg :_execution-items-by-arg}}}}
   {:name :_execution-child-start
    :parent :get :lambda-params [:child]
    :args {:coll {:as :child :type :keyword-map} :key {:value :started-ms} :default nil}}
@@ -780,10 +781,11 @@
                  {:parent :get :args {:coll {:as :child :type :keyword-map} :key {:value :finished-at} :default nil}}
                  {:parent :get :args {:coll {:as :child :type :keyword-map} :key {:value :error} :default nil}}]}}
   {:name :_execution-children
-   :parent :map
-   :args {:func :_execution-child
-          :coll {:parent :sort-by :args {:key-fn :_execution-child-start :coll :_execution-child-rows}}
-          :fn-ids :_execution-fn-ids :fn-names :_execution-fn-names}}
+   :parent :vec
+   :args {:coll {:parent :map
+                 :args {:func :_execution-child
+                        :coll {:parent :sort-by :args {:key-fn :_execution-child-start :coll :_execution-child-rows}}
+                        :fn-ids :_execution-fn-ids :fn-names :_execution-fn-names}}}}
   {:name :get-execution
    :description "Read the viewer-safe execution and compose its ordered nested args, logical fn identity and child summaries. nil for a missing execution."
    :parent :if
@@ -823,10 +825,11 @@
           :coll :_recent-failure-rows}}
   {:name :recent-failures
    :description "Current scoped unresolved failures: final row cap, fallback name and timestamp display over safe native facts. Nil pool yields an empty list."
-   :parent :map
+   :parent :vec
    :args {:days {:type :int}
           :limit {:type :int}
-          :func :_recent-failure-display-row :coll :_recent-failure-page}
+          :coll {:parent :map
+                 :args {:func :_recent-failure-display-row :coll :_recent-failure-page}}}
    :return-type [:list :keyword-map]}
 
   {:name :recent-executions
@@ -3618,7 +3621,8 @@
    :parent :assoc
    :args {:id {:type :nullable-uuid}
           :map :_execute-trace-facts :key {:value :rows}
-          :value {:parent :map :args {:func :_trace-named-row :coll :_trace-fact-rows}}}
+          :value {:parent :vec
+                  :args {:coll {:parent :map :args {:func :_trace-named-row :coll :_trace-fact-rows}}}}}
    :return-type {:found? :bool :rows [:list :keyword-map]
                  :truncated? [:union :null :bool]
                  :values-dropped? [:union :null :bool]}}

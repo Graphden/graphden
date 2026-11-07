@@ -54,10 +54,12 @@
                    (swap! calls conj sql))
                  (jdbc/execute! conn sql opts))]
     (binding [pg-util/*jdbc-override* {:execute! query!}]
-      (is (= [:selection-missing-a :selection-missing-b]
-             (run-graph "missing-package-dependencies"
-                        {:dependencies [:add missing-a :add
-                                        :qualified/selection-missing-a missing-b]})))
+      (let [result (run-graph "missing-package-dependencies"
+                              {:dependencies [:add missing-a :add
+                                              :qualified/selection-missing-a missing-b]})]
+        (is (= [:selection-missing-a :selection-missing-b] result))
+        (is (vector? result))
+        (is (= :selection-missing-b (get result 1))))
       (is (= 1 (count @calls)) "one IN-query, not one query per dependency")
       (is (= 1 (count (filter #{missing-a} (rest (first @calls)))))
           "duplicate and qualified spellings normalize before the read"))
@@ -70,7 +72,9 @@
                     {:execute! (fn [conn sql opts]
                                  (swap! reads inc)
                                  (jdbc/execute! conn sql opts))}]
-            (is (= [] (exec/execute-with-named-args harness/*context* id {:dependencies []}))))
+            (let [result (exec/execute-with-named-args harness/*context* id {:dependencies []})]
+              (is (= [] result))
+              (is (vector? result))))
           (is (zero? @reads)))))))
 
 

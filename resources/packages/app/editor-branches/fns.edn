@@ -49,11 +49,12 @@
   {:name :_history-page-model
    :parent :zipmap
    :args {:keys [{:value :groups} {:value :next-offset}]
-          :vals [{:parent :map
-                  :args {:func :_history-group-row
-                         :coll {:parent :take
-                                :args {:count {:ref :_history-page-limit :type :non-negative-int}
-                                       :coll :_history-page-rows}}}}
+          :vals [{:parent :vec
+                  :args {:coll {:parent :map
+                                :args {:func :_history-group-row
+                                       :coll {:parent :take
+                                              :args {:count {:ref :_history-page-limit :type :non-negative-int}
+                                                     :coll :_history-page-rows}}}}}}
                  {:parent :if
                   :args {:test {:parent :gt
                                 :args {:nums [{:parent :count :args {:coll :_history-page-rows}}

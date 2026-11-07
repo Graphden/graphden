@@ -1789,9 +1789,10 @@
           :key {:value :key} :value {:as :item}}}
 
   {:name :_slot-provenance-tiers
-   :parent :map
-   :args {:func :_slot-provenance-tier
-          :coll {:value [:override :unified :ref-return :slot]}}}
+   :parent :vec
+   :args {:coll {:parent :map
+                 :args {:func :_slot-provenance-tier
+                        :coll {:value [:override :unified :ref-return :slot]}}}}}
 
   {:name :_slot-provenance-tier-winner
    :parent :if

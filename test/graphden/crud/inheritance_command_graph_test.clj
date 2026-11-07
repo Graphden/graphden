@@ -72,6 +72,30 @@
       (is (= [(command/parse-command wire) (command/parse-command wire)] @seen)))))
 
 
+(deftest parsed-command-lists-retain-vector-indexing
+  (let [target (random-uuid) source (random-uuid) orphan (random-uuid)
+        parse #(exec/execute-by-name harness/*context* "parse-inheritance-command" {:body %})
+        reparent {:action "reparent" :target-fn-id (str target) :parent-ids [(str source)]}
+        variation {:action "variation" :target-fn-id (str target) :source-fn-id (str source)
+                   :expected-parent-id (str source) :occurrence-path [(str target) (str source)]
+                   :accepted-orphan-binding-ids [(str orphan)]}
+        result (parse variation)
+        batch (parse {:action "batch" :commands [reparent]})]
+    (is (vector? (:occurrence-path result)))
+    (is (= source (get-in result [:occurrence-path 1])))
+    (is (vector? (:accepted-orphan-binding-ids result)))
+    (is (= orphan (get-in result [:accepted-orphan-binding-ids 0])))
+    (is (vector? (:commands batch)))
+    (is (vector? (get-in batch [:commands 0 :parent-ids])))
+    (is (= source (get-in batch [:commands 0 :parent-ids 0])))
+    (doseq [[input field] [[(assoc reparent :parent-ids []) :parent-ids]
+                           [(assoc variation :occurrence-path []) :occurrence-path]
+                           [(assoc variation :accepted-orphan-binding-ids []) :accepted-orphan-binding-ids]]]
+      (let [items (get (parse input) field)]
+        (is (vector? items))
+        (is (empty? items))))))
+
+
 (deftest parser-reader-probes
   (let [id (random-uuid) text (str id)
         input {:action "reparent" :target-fn-id text :parent-ids []}
@@ -118,10 +142,19 @@
         call #(exec/execute-by-name harness/*context* %1 %2)]
     (is (= expected (call "_inheritance-present-result" {:model raw})))
     (with-redefs [inheritance/preview (fn [_ _] raw)]
-      (is (= expected
-             (call "preview-inheritance"
-                   {:command {:action "reparent"}
-                    :request {:request-method :post :uri "/api/inheritance/preview"}}))))
+      (let [result (call "preview-inheritance"
+                         {:command {:action "reparent"}
+                          :request {:request-method :post :uri "/api/inheritance/preview"}})]
+        (is (= expected result))
+        (is (vector? (:candidates result)))
+        (is (vector? (:targets result)))
+        (is (= source-id (get-in result [:candidates 0 :id])))
+        (is (= target-id (get-in result [:targets 0 :target :id])))))
+    (with-redefs [inheritance/preview (fn [_ _] {:ok true :candidates [] :targets []})]
+      (let [result (call "preview-inheritance" {:command {} :request {}})]
+        (doseq [field [:candidates :targets]]
+          (is (vector? (get result field)))
+          (is (empty? (get result field))))))
     (is (= {:name nil :namespace-id nil}
            (call "_inheritance-present-descriptor-projected"
                  {:descriptor {:name nil :namespace-id nil :namespace-path "org.space"}})))))

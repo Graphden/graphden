@@ -130,8 +130,13 @@
         slot-id (:slot-id (first (sp/query-entities harness/*storage* :fn-slot {:fn-id fn-id})))
         parsed {:fn-id fn-id :slot-id slot-id}]
     (is (some? slot-id))
-    (is (= (value-form/slot-type-provenance harness/*storage* parsed)
-           (call :slot-type-provenance {:parsed parsed})))
+    (let [native (value-form/slot-type-provenance harness/*storage* parsed)
+          composed (call :slot-type-provenance {:parsed parsed})]
+      (is (= native composed))
+      (is (vector? (:tiers native)))
+      (is (vector? (:tiers composed)))
+      (is (= :override (get-in composed [:tiers 0 :key])))
+      (is (= :slot (get-in composed [:tiers 3 :key]))))
     (is (nil? (call :slot-type-provenance {:parsed (assoc parsed :item-id (random-uuid))}))))
   (is (nil? (call :slot-type-provenance {:parsed {}}))))
 

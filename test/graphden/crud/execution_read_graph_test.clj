@@ -45,6 +45,10 @@
       (let [out (api/get-execution (:ctx *graph*) eid)]
         (is (= row (dissoc out :args :fn-id :children)))
         (is (= fid (:fn-id out)))
+        (is (vector? (:args out)))
+        (is (vector? (:children out)))
+        (is (= 10 (get-in out [:args 0 :items 0 :value])))
+        (is (= child-fn (get-in out [:children 0 :fn-id])))
         (is (= [(assoc (first args) :items (vec (sort-by :position items)))
                 (assoc (second args) :items [])] (:args out)))
         (is (= [{:id child-a :fn-id child-fn :fn-name "child" :status :failed
@@ -53,6 +57,17 @@
                  :started-at "later" :finished-at nil :error nil}]
                (:children out)))
         (is (= 1 @calls) "one scoped acquisition for the whole composed response")))))
+
+
+(deftest execution-without-arguments-or-children-retains-empty-vectors-test
+  (with-redefs [fn-exec/execution-read-facts
+                (fn [_ _]
+                  {:row {:status :succeeded} :arg-rows [] :arg-item-rows []
+                   :child-rows [] :fn-id-by-version {} :fn-name-by-id {}})]
+    (let [result (api/get-execution (:ctx *graph*) (random-uuid))]
+      (doseq [field [:args :children]]
+        (is (vector? (get result field)))
+        (is (empty? (get result field)))))))
 
 
 (deftest missing-execution-stays-nil-test

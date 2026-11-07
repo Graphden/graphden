@@ -309,9 +309,11 @@
                          :default nil}}]}}
   {:name :free-arg-entries
    :description "Public Run/Inspector display rows over the canonical slot surface: keyword name, slot identity, explicit optional/captured flags and capture-target display name. Nil fn-id yields []."
-   :parent :map
+   :parent :vec
    :args {:fn-id {:type :nullable-uuid}
-          :func :_free-arg-display-row :coll :_free-arg-rows :via-names :_free-arg-via-names}
+          :coll {:parent :map
+                 :args {:func :_free-arg-display-row :coll :_free-arg-rows
+                        :via-names :_free-arg-via-names}}}
    :return-type [:list {:name :keyword :slot-id :uuid :optional? :bool :captured? :bool :via :nullable-text}]}
 
   ;; --- :service-blocking-free-args — the service-ability PROJECTION of

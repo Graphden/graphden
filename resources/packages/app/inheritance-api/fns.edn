@@ -63,9 +63,10 @@
    :args
    {:wire-value {:as :item}, :wire-field :_inheritance-wire-field}}
   {:name :_inheritance-wire-parsed-ids,
-   :parent :map,
+   :parent :vec,
    :args
-   {:func :_inheritance-wire-uuid-item, :coll :_inheritance-wire-ids}}
+   {:coll {:parent :map,
+           :args {:func :_inheritance-wire-uuid-item, :coll :_inheritance-wire-ids}}}}
   {:name :_inheritance-wire-uuid-list-unique,
    :parent :if,
    :args
@@ -596,10 +597,11 @@
            :key {:value :accepted-orphan-binding-ids}}}}}]}},
     :else false}}
   {:name :_inheritance-wire-batch-parsed,
-   :parent :map,
+   :parent :vec,
    :args
-   {:func :_inheritance-wire-single,
-    :coll :_inheritance-wire-batch-items}}
+   {:coll {:parent :map,
+           :args {:func :_inheritance-wire-single,
+                  :coll :_inheritance-wire-batch-items}}}}
   {:name :_inheritance-wire-batch-target,
    :parent :get,
    :args
@@ -753,8 +755,8 @@
   {:name :_inheritance-present-model-descriptor :parent :_inheritance-present-descriptor-projected :args {:descriptor :_inheritance-present-model} :return-type :keyword-map}
   {:name :_inheritance-present-with-target :parent :if :args {:test {:parent :get :args {:coll :_inheritance-present-model :key {:value :target} :default nil}} :then {:parent :assoc :args {:map :_inheritance-present-model-descriptor :key {:value :target} :value {:parent :_inheritance-present-descriptor-projected :args {:descriptor {:parent :get :args {:coll :_inheritance-present-model :key {:value :target} :default nil}}}}}} :else :_inheritance-present-model-descriptor} :return-type :keyword-map}
   {:name :_inheritance-present-single :parent :if :args {:test {:parent :get :args {:coll :_inheritance-present-model :key {:value :source} :default nil}} :then {:parent :assoc :args {:map :_inheritance-present-with-target :key {:value :source} :value {:parent :_inheritance-present-descriptor-projected :args {:descriptor {:parent :get :args {:coll :_inheritance-present-model :key {:value :source} :default nil}}}}}} :else :_inheritance-present-with-target} :return-type :keyword-map :lambda-params [:model]}
-  {:name :_inheritance-present-with-candidates :parent :if :args {:test {:parent :contains? :args {:coll :_inheritance-present-model :key {:value :candidates}}} :then {:parent :assoc :args {:map :_inheritance-present-single :key {:value :candidates} :value {:parent :map :args {:func :_inheritance-present-single :coll {:parent :get :args {:coll :_inheritance-present-model :key {:value :candidates} :default nil}}}}}} :else :_inheritance-present-single} :return-type :keyword-map}
-  {:name :_inheritance-present-result :parent :if :args {:test {:parent :contains? :args {:coll :_inheritance-present-model :key {:value :targets}}} :then {:parent :assoc :args {:map :_inheritance-present-with-candidates :key {:value :targets} :value {:parent :map :args {:func :_inheritance-present-single :coll {:parent :get :args {:coll :_inheritance-present-model :key {:value :targets} :default nil}}}}}} :else :_inheritance-present-with-candidates} :return-type :keyword-map}
+  {:name :_inheritance-present-with-candidates :parent :if :args {:test {:parent :contains? :args {:coll :_inheritance-present-model :key {:value :candidates}}} :then {:parent :assoc :args {:map :_inheritance-present-single :key {:value :candidates} :value {:parent :vec :args {:coll {:parent :map :args {:func :_inheritance-present-single :coll {:parent :get :args {:coll :_inheritance-present-model :key {:value :candidates} :default nil}}}}}}}} :else :_inheritance-present-single} :return-type :keyword-map}
+  {:name :_inheritance-present-result :parent :if :args {:test {:parent :contains? :args {:coll :_inheritance-present-model :key {:value :targets}}} :then {:parent :assoc :args {:map :_inheritance-present-with-candidates :key {:value :targets} :value {:parent :vec :args {:coll {:parent :map :args {:func :_inheritance-present-single :coll {:parent :get :args {:coll :_inheritance-present-model :key {:value :targets} :default nil}}}}}}}} :else :_inheritance-present-with-candidates} :return-type :keyword-map}
 
   {:name :_preview-inheritance-model,
    :description

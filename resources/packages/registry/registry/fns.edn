@@ -908,12 +908,13 @@
    :args {:dependencies {:type [:list :jsonb]}
           :test {:parent :empty? :args {:coll :_registry-dependency-names}}
           :then []
-          :else {:parent :map
-                 :args {:func :str-to-keyword
-                        :coll {:parent :filter
-                               :args {:pred :_registry-dependency-missing?
-                                      :present-names :_registry-present-names
-                                      :coll :_registry-dependency-names}}}}}}
+          :else {:parent :vec
+                 :args {:coll {:parent :map
+                               :args {:func :str-to-keyword
+                                      :coll {:parent :filter
+                                             :args {:pred :_registry-dependency-missing?
+                                                    :present-names :_registry-present-names
+                                                    :coll :_registry-dependency-names}}}}}}}}
 
   {:name :fork-package-fns
    :description "Fork apply-core: sync a bundle's fns into the graph AT THEIR ORIGINAL namespace (copy-on-write) + delta-invalidate — a coupled write+invalidation pair. Returns the forked fn count."

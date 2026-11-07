@@ -36,7 +36,9 @@
     (is (false? (get-in by-name [:coll :optional?])))
     (is (every? false? (map :captured? rows)))
     (is (every? nil? (map :via rows))))
-  (is (= [] (display nil)))
+  (let [rows (display nil)]
+    (is (= [] rows))
+    (is (vector? rows)))
   (is (= {:entries [] :via-names {}} (lookup/free-arg-facts {} nil))))
 
 
@@ -69,6 +71,9 @@
                     {:entries [{:ext-name :outer :slot-id slot :optional? true
                                 :captured? nil :via target}]
                      :via-names {target "target"}})]
-      (is (= [{:name :outer :slot-id slot :optional? true :captured? false :via "target"}]
-             (display (random-uuid))))
+      (let [rows (display (random-uuid))]
+        (is (= [{:name :outer :slot-id slot :optional? true :captured? false :via "target"}]
+               rows))
+        (is (vector? rows))
+        (is (= slot (get-in rows [0 :slot-id]))))
       (is (= 1 @calls)))))

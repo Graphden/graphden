@@ -35,18 +35,25 @@
                   (fn [_ _ _ days limit]
                     (swap! calls conj [days limit])
                     [row (assoc row :fn-name "second" :finished-at nil)])]
-      (is (= [{:execution-id eid :fn-id fid :fn-name (str fid)
-               :finished-at "2026-11-05T12:00:00Z" :error "redacted" :error-data {:safe true}}]
-             (display 1)))
+      (let [rows (display 1)]
+        (is (= [{:execution-id eid :fn-id fid :fn-name (str fid)
+                 :finished-at "2026-11-05T12:00:00Z" :error "redacted" :error-data {:safe true}}]
+               rows))
+        (is (vector? rows))
+        (is (= eid (get-in rows [0 :execution-id]))))
       (is (= [[7 1]] @calls))
       (is (= "second" (:fn-name (second (display 2)))))
       (is (nil? (:finished-at (second (display 2)))))
-      (is (= [] (display 0))))))
+      (let [rows (display 0)]
+        (is (= [] rows))
+        (is (vector? rows))))))
 
 
 (deftest absent-pool-has-an-empty-public-result-test
   (with-redefs [errors/recent-unresolved-failure-facts (fn [& _] nil)]
-    (is (= [] (display 10)))))
+    (let [rows (display 10)]
+      (is (= [] rows))
+      (is (vector? rows)))))
 
 
 (deftest trace-name-fallback-preserves-all-safe-facts-test
@@ -63,8 +70,11 @@
                      {:id (random-uuid)})]
         (is (= (assoc payload :rows [(assoc row :fn-name (str (subs fid 0 8) "…"))
                                      (assoc row :fn-name "named")]) result))
+        (is (vector? (:rows result)))
+        (is (= "named" (get-in result [:rows 1 :fn-name])))
         (is (= 1 @calls))))
     (with-redefs [fn-exec/trace-read-facts (fn [_ _] {:found? false :rows []})]
-      (is (= {:found? false :rows []}
-             (exec/execute-with-named-args
-               (:ctx *graph*) (ids/fn-id "app.execution" :execute-trace-rows) {:id nil}))))))
+      (let [result (exec/execute-with-named-args
+                     (:ctx *graph*) (ids/fn-id "app.execution" :execute-trace-rows) {:id nil})]
+        (is (= {:found? false :rows []} result))
+        (is (vector? (:rows result)))))))

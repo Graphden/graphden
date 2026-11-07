@@ -20,6 +20,7 @@
     [graphden.services.reconciler :as recon]
     [graphden.storage.protocol.core :as sp]
     [graphden.test-infra.execution-api :as execution-api]
+    [graphden.test-infra.type-contract :as type-contract]
     [graphden.types.check :as types-check])
   (:import
     (java.net
@@ -35,9 +36,11 @@
       ;; Golden bootstraps skip the package type sweep. This test asserts
       ;; inherited effects, so check the service composition before syncing
       ;; the consumer fn; production performs the full sweep at boot.
-      (types-check/check-all-defs!
-        (filterv #(= "web.service" (:namespace %))
-                 (:fn-defs (loader/load-packages ["web"]))))
+      (let [{:keys [fn-defs]}
+            (type-contract/prepared-closure
+              (loader/load-packages ["web"])
+              #(= "web.service" (:namespace %)))]
+        (types-check/check-all-defs! fn-defs))
       (t))))
 
 

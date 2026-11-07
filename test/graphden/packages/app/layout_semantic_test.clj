@@ -89,12 +89,16 @@
     (let [arg-node {:data {:id "arg-1" :type "arg"}}
           stale (fn-node (random-uuid))
           out (annotate [arg-node stale] [{:id (random-uuid) :name "unrelated"}])]
-      (is (= [arg-node stale] out))))
+      (is (vector? out) "node annotation keeps the indexed layout contract")
+      (is (= [arg-node stale] out))
+      (is (= stale (get out 1)))))
   (testing "edges are never touched by the annotation pass"
     (let [elements {:nodes [] :edges [{:data {:source "a" :target "b"}}]}]
-      (is (= (:edges elements)
-             (:edges (call :_layout-strip-facts-apply
-                           {:elements elements :graph {:fns []}})))))))
+      (let [out (call :_layout-strip-facts-apply
+                      {:elements elements :graph {:fns []}})]
+        (is (= [] (:nodes out)))
+        (is (vector? (:nodes out)))
+        (is (= (:edges elements) (:edges out)))))))
 
 
 (deftest trace-header-graph-follows-dynamic-execution

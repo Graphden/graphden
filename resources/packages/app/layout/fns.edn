@@ -245,8 +245,10 @@
   {:name :_layout-literal-reprs-attach
    :parent :assoc
    :args {:map {:as :elements} :key {:value :nodes}
-          :value {:parent :map
-                  :args {:func :_layout-attach-literal-preview :coll {:parent :_layout-literal-previews :args {:selector :form-registry-selector}}}}}}
+          :value {:parent :vec
+                  :args {:coll {:parent :map
+                                :args {:func :_layout-attach-literal-preview
+                                       :coll {:parent :_layout-literal-previews :args {:selector :form-registry-selector}}}}}}}}
 
   {:name :_layout-literal-reprs-apply
    :description "Pass layout failures through; attach present safe literal previews in graph composition."
@@ -285,10 +287,11 @@
    :parent :assoc
    :args {:map {:as :elements :type :_layout-elements-shape}
           :key {:value :nodes}
-          :value {:parent :map
-                  :args {:func :_layout-node-with-strip-facts
-                         :coll {:parent :get
-                                :args {:coll {:as :elements} :key {:value :nodes} :default []}}}}}
+          :value {:parent :vec
+                  :args {:coll {:parent :map
+                                :args {:func :_layout-node-with-strip-facts
+                                       :coll {:parent :get
+                                              :args {:coll {:as :elements} :key {:value :nodes} :default []}}}}}}}
    :return-type :_layout-elements-shape}
 
   ;; =============================================================================

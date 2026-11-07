@@ -377,6 +377,8 @@
         rendered (exec/execute-by-name harness/*context* "_layout-literal-reprs-apply"
                                        {:elements values :graph graph})
         [first-node second-node invalid-node secret-node] (drop 100 (:nodes rendered))]
+    (is (vector? (:nodes rendered)) "literal preview attachment keeps indexed layout nodes")
+    (is (= first-node (get-in rendered [:nodes 100])))
     (is (every? #(nil? (get-in % [:data :literalRepr])) (take 100 (:nodes rendered)))
         "same-named unrelated types neither render nor consume the preview budget")
     (is (in-tree? (get-in first-node [:data :literalRepr]) "#abc")
@@ -384,7 +386,11 @@
     (is (= (get-in first-node [:data :literalRepr]) (get-in second-node [:data :literalRepr])))
     (is (nil? (get-in invalid-node [:data :literalRepr])))
     (is (nil? (get-in secret-node [:data :literalRepr])))
-    (is (= (:edges values) (:edges rendered)))))
+    (is (= (:edges values) (:edges rendered)))
+    (let [empty-rendered (exec/execute-by-name harness/*context* "_layout-literal-reprs-apply"
+                                               {:elements {:nodes [] :edges []} :graph graph})]
+      (is (= [] (:nodes empty-rendered)))
+      (is (vector? (:nodes empty-rendered))))))
 
 
 (deftest preview-selection-is-shared-and-failed-renders-consume-budget

@@ -14,6 +14,8 @@
 ;;   :post-test                    — reads what the test wave WROTE (`bb perf`
 ;;                                   grades perf/runs/*.edn), so it cannot share
 ;;                                   a wave with the runs it grades
+;;   :exclusive true               — its batch runs alone; keep the original
+;;                                   batch boundaries for every scoped run
 ;;   :info                         — non-blocking (a warning never fails the run)
 ;;
 ;; `:relevant` — diff-scoping (the landing gate's `bb ci --since <ref>`): a
@@ -201,7 +203,10 @@
  {:name "tests-unit"    :bb "test-unit"     :timeout 1080000 :group :test
   :relevant ["^src/" "^test/" "^resources/" "^scripts/" "^external-packages/"
              "^(bb|deps|tests)\\.edn$" "^build\\.clj$" "^dev-resources/" "^development/src/"]}
- {:name "tests-perf"    :bb "test-perf"     :timeout 300000 :group :test
+ ;; A full-corpus bootstrap precedes the measured SQL scenarios. Run this
+ ;; alone before the broad unit wave: a semantic/perf failure must not leave
+ ;; thousands of unit tests running on an already red candidate.
+ {:name "tests-perf"    :bb "test-perf"     :timeout 600000 :group :priority :exclusive true
   :relevant ["^src/" "^test/" "^resources/" "^scripts/" "^external-packages/"
              "^(bb|deps|tests)\\.edn$" "^build\\.clj$" "^dev-resources/" "^development/src/" "^perf/"]}
  {:name "perf"          :bb "perf"          :timeout  60000 :group :post-test

@@ -43,6 +43,8 @@
                         {:check c})))
       (when (and (contains? c :stage) (not= :affected (:stage c)))
         (throw (ex-info (str ctx ": :stage must be :affected") {:check c})))
+      (when (and (contains? c :exclusive) (not (true? (:exclusive c))))
+        (throw (ex-info (str ctx ": :exclusive must be true") {:check c})))
       (when-some [rel (:relevant c)]
         (when-not (and (vector? rel) (every? string? rel))
           (throw (ex-info (str ctx ": :relevant must be a vector of regex strings") {:check c})))
@@ -67,7 +69,9 @@
 
 (defn canonical-batches
   "Preserve full-registry wave/batch boundaries when selecting fewer checks.
-   Scoping must not pack formerly separate heavy checks into one batch. Return
+   Scoping must not pack formerly separate heavy checks into one batch. An
+   :exclusive check splits its original batch on both sides before scoping,
+   so it never overlaps another check even when selected alone. Return
    selected objects (including :cmd), not the registry's command-less entries."
   [registry checks]
   (let [selected (into {} (map (juxt :name identity)) checks)
@@ -83,6 +87,8 @@
             [wave (->> registry
                        (filter #(= wave (wave-key %)))
                        (partition-all 8)
+                       (mapcat #(partition-by (fn [check]
+                                                (when (:exclusive check) (:name check))) %))
                        (keep (fn [batch]
                                (let [members (into [] (keep #(get selected (:name %))) batch)]
                                  (when (seq members) members))))

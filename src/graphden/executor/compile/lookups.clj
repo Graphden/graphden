@@ -343,12 +343,21 @@
       :else (recur (conj ids source) (:source-slot-id (get slot-map source)) (conj seen source)))))
 
 
+(declare effective-reader-slot-id)
+
+
 (defn env-binding-route-ids
-  "Slot identities a lexical env binding owns, including its first
-   captured reader. Other captured readers retain their caller value."
-  [{:keys [slot-id]} owned-slot-ids {:keys [slot-map]}]
-  (into [slot-id]
-        (scoped-source-slot-ids (get slot-map slot-id) slot-map owned-slot-ids)))
+  "Slot identities a lexical env binding shadows. Besides its source chain,
+   an inherited primitive's same-name free root slot is part of this local
+   scope even when the env slot has no explicit source link to it. Other
+   captured readers retain their caller values."
+  [fn-id {:keys [slot-id env-name]} root-bindings owned-slot-ids {:keys [slot-map] :as lookups}]
+  (vec (distinct (concat [slot-id]
+                         (scoped-source-slot-ids (get slot-map slot-id) slot-map owned-slot-ids)
+                         (into [] (comp (filter #(and (= :free (:kind %))
+                                                      (= env-name (:ext-name %))))
+                                        (map #(effective-reader-slot-id fn-id (:slot-id %) lookups)))
+                               root-bindings)))))
 
 
 (defn fn-owned-slot-ids

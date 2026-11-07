@@ -14,6 +14,21 @@
 (use-fixtures :once (setup/create-container-fixture))
 
 
+(deftest lexical-routes-shadow-effective-free-reader-only
+  (let [roots [{:kind :free :base-name :value :ext-name :payload :slot-id :raw}
+               {:kind :free :base-name :payload :ext-name :other :slot-id :other}
+               {:kind :value :ext-name :payload :slot-id :literal}
+               {:kind :ref :ext-name :payload :slot-id :reference}]
+        env {:env-name :payload :slot-id :local}
+        lookups {:slot-map {:local {:id :local}}}]
+    (with-redefs [l/effective-reader-slot-id (fn [_ slot-id _]
+                                               (is (= :raw slot-id))
+                                               :renamed)]
+      (is (= [:local :renamed]
+             (l/env-binding-route-ids :fn env roots #{:local} lookups))
+          "the renamed reader is shadowed; its raw and unrelated slots are not"))))
+
+
 (deftest no-rename-falls-back-to-chain-leaf-test
   (testing "fn without renames → reader uses the chain-leaf slot-id"
     (let [storage (setup/create-test-storage)]

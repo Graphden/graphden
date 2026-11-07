@@ -100,6 +100,7 @@
     (is (rejects? [(assoc ok :group :tst)]) "typo'd :group")
     (is (rejects? [(assoc ok :relevant ["[unclosed"])]) "bad regex")
     (is (rejects? [(assoc ok :relevant "\\.clj$")]) ":relevant must be a vector")
+    (is (rejects? [(assoc ok :exclusive false)]) ":exclusive must be true")
     (is (rejects? [ok (assoc ok :group :web)]) "duplicate names")))
 
 
@@ -180,10 +181,12 @@
         affected (filter #(= :affected (:stage %)) selected)]
     (is (= (mapv vec (partition-all 8 affected)) (:affected batches)))
     (is (= (mapv vec (partition-all 8 pre)) (:pre batches)))
-    (doseq [wave [:priority :test :post-test]]
+    (doseq [wave [:test :post-test]]
       (is (= (mapv vec (partition-all 8 (filter #(and (= wave (:group %))
                                                       (not= :affected (:stage %))) selected)))
-             (get batches wave))))))
+             (get batches wave))))
+    (is (= [["builtin-plans-sync"] ["tests-perf"]]
+           (mapv #(mapv :name %) (:priority batches))))))
 
 
 (deftest browser-plan-exporter-checks-baked-assets-before-broad-unit
@@ -192,6 +195,30 @@
         batches (ci-select/canonical-batches real-registry selected)]
     (is (some #{"builtin-plans-sync"} (map :name (mapcat identity (:priority batches)))))
     (is (some #{"tests-unit"} (map :name (mapcat identity (:test batches)))))))
+
+
+(deftest perf-scenarios-finish-before-broad-unit
+  (let [selected (:run (ci-select/partition-checks
+                         real-registry {:changed #{"src/graphden/executor/compile/lookups.clj"}}))
+        batches (ci-select/canonical-batches real-registry selected)
+        perf-batch (first (filter #(some (fn [c] (= "tests-perf" (:name c))) %)
+                                  (:priority batches)))]
+    (is (= ["tests-perf"] (mapv :name perf-batch))
+        "the full-corpus perf check has an exclusive batch")
+    (is (= ["builtin-plans-sync" "tests-perf"]
+           (mapv :name (mapcat identity (:priority batches)))))
+    (is (some #{"tests-unit"} (map :name (mapcat identity (:test batches)))))))
+
+
+(deftest exclusive-check-does-not-merge-neighbour-batches-when-scoped-out
+  (let [registry (mapv (fn [name]
+                         {:name name :group :priority :exclusive (= name "x")})
+                       ["a" "b" "x" "c" "d"])
+        names (fn [selected]
+                (mapv #(mapv :name %) (:priority (ci-select/canonical-batches registry selected))))]
+    (is (= [["a" "b"] ["x"] ["c" "d"]] (names registry)))
+    (is (= [["a" "b"] ["c" "d"]]
+           (names (filterv #(not= "x" (:name %)) registry))))))
 
 
 (deftest deps-scope-does-not-compress-heavy-checks

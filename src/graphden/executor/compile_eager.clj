@@ -1333,7 +1333,7 @@
          n (count builders)
          env-bnds (b/collect-env-bindings fn-id lookups)
          owned-slot-ids (when (seq env-bnds) (l/fn-owned-slot-ids fn-id lookups))
-         env-route-ids (mapv #(l/env-binding-route-ids % owned-slot-ids lookups)
+         env-route-ids (mapv #(l/env-binding-route-ids fn-id % enriched owned-slot-ids lookups)
                              env-bnds)
          env-builders (mapv (fn [env-bnd route-ids]
                               (env-arg-builder fn-id env-bnd route-ids

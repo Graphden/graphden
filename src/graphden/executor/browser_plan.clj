@@ -298,7 +298,7 @@
             :env (mapv (fn [entry]
                          {:name (wire-name (:env-name entry))
                           :slot (str (:slot-id entry))
-                          :routes (mapv str (l/env-binding-route-ids entry owned-slot-ids lookups))
+                          :routes (mapv str (l/env-binding-route-ids fid entry bindings owned-slot-ids lookups))
                           :expr (binding-expr entry fid lookups (assoc context :env-binding? true))})
                        env)
             :args (mapv (fn [entry]

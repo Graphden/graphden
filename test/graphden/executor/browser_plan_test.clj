@@ -493,6 +493,30 @@
                             :expected ["A" ["B"] ["C"]]}])))
 
 
+(deftest sibling-assoc-values-retain-independent-references
+  (let [{:keys [graph impls ids]}
+        (map-fixture
+          [{:name :assoc-empty :parent :assoc :args {:map {}}}
+           {:name :secret-name :parent :const :args {:value "secret-leaf"}}
+           {:name :where :parent :assoc-empty
+            :args {:key {:value :name} :value :secret-name}}
+           {:name :status-map :parent :assoc-empty
+            :args {:key {:value :status} :value 200}}
+           {:name :status-reader :parent :assoc
+            :args {:value {:as :status :type :int}}}
+           {:name :outer-status :parent :status-reader
+            :args {:map :where :key {:value :status} :status 200}}
+           {:name :response :parent :assoc
+            :args {:map :status-map :key {:value :body} :value :where}}])]
+    (assert-differential! graph impls ids
+                          [{:entry :where :inputs {}
+                            :expected {:name "secret-leaf"}}
+                           {:entry :outer-status :inputs {}
+                            :expected {:name "secret-leaf" :status 200}}
+                           {:entry :response :inputs {}
+                            :expected {:status 200 :body {:name "secret-leaf"}}}])))
+
+
 (deftest local-environment-shadows-captured-slot-translations
   (let [{:keys [graph impls ids]}
         (map-fixture

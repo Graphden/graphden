@@ -17,7 +17,8 @@
 
 (def ^:private stub-info
   {:leaf {:resolved-bindings {} :return :int}
-   :mid  {:resolved-bindings {:x {:ref :leaf}} :return :text}})
+   :mid  {:resolved-bindings {:x {:ref :leaf}} :return :text
+          :return-type-rule (fn [_ static] static)}})
 
 
 (defn- with-counted-compute
@@ -95,3 +96,38 @@
             ;; key) but nested :leaf short-circuits on the override
             ;; inside `effective-ref-return` = 1.
             (is (= 3 @calls))))))))
+
+
+(deftest fixed-return-skips-unused-nested-binding-inference
+  (let [reads (atom 0)
+        info {:fixed-base {:return :any}
+              :mid {:return :text :resolved-bindings {:x {:ref :expensive}}}}]
+    (with-redefs [reg/root-base-fn-name (fn [name] (if (= name :mid) :fixed-base name))
+                  reg/rich-type-of (fn [name]
+                                     (when (= name :expensive) (swap! reads inc))
+                                     (get info name))]
+      (doseq [memo [nil (atom {})]]
+        (binding [tc/*ref-return-memo* memo]
+          (is (= :text (err* :mid {} #{} 0)))
+          (is (zero? @reads) "fixed returns do not need nested binding types"))))))
+
+
+(deftest recursive-return-preserves-rules-taint-and-any-fallback
+  (let [bindings {:value {:ref :leaf}}
+        info {:leaf {:return [:secret :int]}
+              :rule-root {:return :any :return-type-rule (fn [_ _] :any)}
+              :taint-root {:return :text :taint-propagate? true}
+              :tainted-rule-root {:return :any :return-type-rule (fn [_ _] :any)
+                                  :taint-propagate? true}
+              :mid {:return :text :resolved-bindings bindings}
+              :tainted {:return :text :resolved-bindings bindings}
+              :tainted-rule {:return :text :resolved-bindings bindings}}
+        roots {:mid :rule-root :tainted :taint-root :tainted-rule :tainted-rule-root}]
+    (with-redefs [reg/root-base-fn-name #(get roots % %)
+                  reg/rich-type-of #(get info %)]
+      (is (= :text (err* :mid {} #{} 0))
+          "a rule yielding :any retains the composed ref's static return")
+      (is (= [:secret :text] (err* :tainted {} #{} 0))
+          "a fixed return still inspects bindings when taint propagates")
+      (is (= [:secret :any] (err* :tainted-rule {} #{} 0))
+          "taint is applied before the :any fallback"))))

@@ -1833,7 +1833,8 @@
          effective-ref-return
          effective-ref-return*
          effective-ref-return-uncached
-         signature-return)
+         signature-return
+         rule-return)
 
 
 ;; `signature-return` is PUBLIC: it is the declared-signature engine's
@@ -1899,23 +1900,17 @@
 (defn- effective-ref-return-uncached
   [ref-name caller-bindings seen depth]
   (when-let [info (registry/rich-type-of ref-name)]
-    (let [seen' (conj seen ref-name)
-          ref-bindings (:resolved-bindings info {})
-          combined (merge caller-bindings ref-bindings)
-          inner-info (into {}
-                           (map (fn [[k v]]
-                                  [k {:type (effective-binding-type v combined seen' (inc depth))
-                                      :value (:value v)}]))
-                           combined)
-          root-base (registry/root-base-fn-name ref-name)
-          static (or (:return info) :any)
-          root-entry (registry/rich-type-of root-base)
-          structural (if-let [rule (:return-type-rule root-entry)]
-                       (rule inner-info static)
-                       (signature-return root-entry inner-info static))
-          recomputed (if (:taint-propagate? root-entry)
-                       (types/taint-with-secret-if-tainted inner-info structural)
-                       structural)]
+    (let [static (or (:return info) :any)
+          recomputed (rule-return
+                       ref-name
+                       #(let [seen' (conj seen ref-name)
+                              combined (merge caller-bindings (:resolved-bindings info {}))]
+                          (into {}
+                                (map (fn [[k v]]
+                                       [k {:type (effective-binding-type v combined seen' (inc depth))
+                                           :value (:value v)}]))
+                                combined))
+                       static)]
       (if (= recomputed :any) static recomputed))))
 
 

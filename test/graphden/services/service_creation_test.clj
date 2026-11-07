@@ -4,7 +4,6 @@
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is use-fixtures]]
-    [graphden.crud.entities :as entities]
     [graphden.executor.test-setup :as setup]
     [graphden.packages.records :as records]
     [graphden.storage.protocol.core :as sp]
@@ -39,9 +38,10 @@
         id (random-uuid)
         form {:create-id (str id) :fn-id (str fn-id) :enabled? "false"
               :restart-policy "never" :cardinality "singleton"}
-        create #(entities/apply-create-core
-                  {:entity-type :service :type-str "service" :form-data %
-                   :entity-data (parsed :parse-service-create-from-form %)} ctx)]
+        create #(setup/exec-with-storage
+                  ctx storage (golden/fn-id :try-apply-create)
+                  {:entity-type "service" :type-str "service" :form-data %
+                   :entity-data (parsed :parse-service-create-from-form %)})]
     (try
       (is (= id (:created (create form))))
       (let [original (sp/read-entity storage :service id)

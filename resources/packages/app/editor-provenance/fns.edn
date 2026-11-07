@@ -903,6 +903,7 @@
            :call-traced "Declared signature — the bound callable's return: b (the trace hop persists the call, the value is the callee's)."
            :server-call "Declared signature — the server callable's return: b. The browser receives only an opaque call descriptor; source and captures stay on the server."
            :with-heartbeat "Declared signature — the body's return: a (the beat's value is discarded)."
+           :with-graph-load-memo "Declared signature — the body's return: a (the branch-load memo changes lookup reuse, not the returned value)."
            :with-timeout "Declared signature — the body's return: a (a deadline miss throws, it never widens the type)."
            :try "Declared signature — body's type unioned with the handler's: [:union a b]."
            :vec "Declared signature — container changes, element type preserved: [:list a] → [:list a]."

@@ -1195,14 +1195,26 @@
                     {:type :compile/unsupported-kind :binding bnd}))))
 
 
+(defn- env-binding-route-ids
+  "Slot identities a lexical env binding owns. Stop at the first source
+   outside this fn's inheritance closure so an unrelated reader that
+   happens to have the same name keeps its captured value."
+  [{:keys [slot-id]} owned-slot-ids {:keys [slot-map]}]
+  (into [slot-id]
+        (l/scoped-source-slot-ids (get slot-map slot-id) slot-map owned-slot-ids)))
+
+
 (defn- binding-scope
   "The env an env-binding named `env-name` evaluates in: the merged
-   env `env`, with `env-name` restored to the caller's `fa` value (or
-   absent when the caller gave none). See `env-arg-builder`."
-  [env fa env-name]
-  (if-let [e (find fa env-name)]
-    (assoc env env-name (val e))
-    (dissoc env env-name)))
+   env `env`, with its name and slot routes restored to the caller's
+   `fa` values (or absent when the caller gave none). A binding must
+   not force its own thunk through a source-slot UUID."
+  [env fa env-name route-ids]
+  (reduce (fn [scope key]
+            (if-let [entry (find fa key)]
+              (assoc scope key (val entry))
+              (dissoc scope key)))
+          env (cons env-name route-ids)))
 
 
 (defn- env-arg-builder
@@ -1223,7 +1235,7 @@
    `:b`'s own free arg is also `:x` reads `:b`'s `:x` from the caller,
    the lexical meaning; reading the shared env there made the thunk
    force itself (an NPE out of the half-realized delay)."
-  [fn-id {:keys [env-name] :as env-bnd} child-callables lookups]
+  [fn-id {:keys [env-name] :as env-bnd} route-ids child-callables lookups]
   (case (:kind env-bnd)
     ;; Identity edge through an env-binding — same as the root-slot
     ;; case: the value is the target's id, no child, no thunk.
@@ -1242,9 +1254,9 @@
                               items)]
       (if lazy-seq?
         (fn [fa-ref fa ctx]
-          (map (fn [b] (delay (b (binding-scope @fa-ref fa env-name) ctx))) item-builders))
+          (map (fn [b] (delay (b (binding-scope @fa-ref fa env-name route-ids) ctx))) item-builders))
         (fn [fa-ref fa ctx]
-          (lazy-seq-of-values item-builders (binding-scope @fa-ref fa env-name) ctx))))
+          (lazy-seq-of-values item-builders (binding-scope @fa-ref fa env-name route-ids) ctx))))
 
     :ref
     (let [{:keys [ref-id is-fn produces-callable? slot-id]} env-bnd
@@ -1267,7 +1279,7 @@
             (tagged-callable ref-id lambda-params
                              (fn [lambda-args]
                                (let [fa* (apply-hof-translation
-                                           (apply dissoc (binding-scope @fa-ref fa env-name) (keys lambda-slots))
+                                           (apply dissoc (binding-scope @fa-ref fa env-name route-ids) (keys lambda-slots))
                                            translation)]
                                  (child (with-hof-lambda-args fa* lambda-args lambda-slots)
                                         ctx))))))
@@ -1277,16 +1289,16 @@
         ;; path: don't hof-wrap a positional callable.
         produces-callable?
         (fn [fa-ref fa ctx]
-          (rt/thunk (fn [] (call-with-cache ref-id ref-frees ref-name child (binding-scope @fa-ref fa env-name) ctx))))
+          (rt/thunk (fn [] (call-with-cache ref-id ref-frees ref-name child (binding-scope @fa-ref fa env-name route-ids) ctx))))
 
         :else
         (let [renames (r/build-ref-renames ref-id fn-id lookups)]
           (if (empty? renames)
             (fn [fa-ref fa ctx]
-              (rt/thunk (fn [] (call-with-cache ref-id ref-frees ref-name child (binding-scope @fa-ref fa env-name) ctx))))
+              (rt/thunk (fn [] (call-with-cache ref-id ref-frees ref-name child (binding-scope @fa-ref fa env-name route-ids) ctx))))
             (fn [fa-ref fa ctx]
               (rt/thunk (fn []
-                          (let [scope (binding-scope @fa-ref fa env-name)]
+                          (let [scope (binding-scope @fa-ref fa env-name route-ids)]
                             (call-with-cache
                               ref-id ref-frees ref-name child
                               (reduce-kv (fn [acc cn cln] (assoc acc cn (get scope cln)))
@@ -1329,9 +1341,20 @@
          keys-vec (mapv :base-name enriched)
          n (count builders)
          env-bnds (b/collect-env-bindings fn-id lookups)
-         env-builders (mapv #(env-arg-builder fn-id % child-callables lookups)
-                            env-bnds)
+         owned-slot-ids (when (seq env-bnds)
+                          (into #{}
+                                (mapcat (fn [fid]
+                                          (map :slot-id
+                                               (get-in lookups [:fn-slots-by-fn fid]))))
+                                (l/inheritance-chain* fn-id lookups)))
+         env-route-ids (mapv #(env-binding-route-ids % owned-slot-ids lookups)
+                             env-bnds)
+         env-builders (mapv (fn [env-bnd route-ids]
+                              (env-arg-builder fn-id env-bnd route-ids
+                                               child-callables lookups))
+                            env-bnds env-route-ids)
          env-names (mapv :env-name env-bnds)
+         env-routes-by-name (zipmap env-names env-route-ids)
          ;; A root ref may duplicate its own env initializer (html-page body).
          ;; Match the target too: a different env ref with the same name
          ;; (method-map handler) must remain visible to the root ref.
@@ -1399,9 +1422,13 @@
                        (let [fa-ref (volatile! fa)
                              merged (loop [m fa, i 0]
                                       (if (< i env-n)
-                                        (recur (assoc m (nth env-names i)
-                                                      ((nth env-builders i) fa-ref fa ctx))
-                                               (inc i))
+                                        (let [value ((nth env-builders i) fa-ref fa ctx)
+                                              routes (nth env-route-ids i)]
+                                          (recur (reduce (fn [scope route-id]
+                                                           (assoc scope route-id value))
+                                                         (assoc m (nth env-names i) value)
+                                                         routes)
+                                                 (inc i)))
                                         m))]
                          (vreset! fa-ref merged)
                          merged))]
@@ -1413,7 +1440,8 @@
                                ext-name (:ext-name entry)
                                scope (if (and (= :ref (:kind entry))
                                               (env-source-refs [ext-name (:ref-id entry)]))
-                                       (binding-scope fa' fa ext-name)
+                                       (binding-scope fa' fa ext-name
+                                                      (get env-routes-by-name ext-name))
                                        fa')]
                            (recur (assoc! acc name ((nth builders i) scope ctx))
                                   (inc i)))

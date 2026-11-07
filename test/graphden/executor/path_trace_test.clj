@@ -665,7 +665,7 @@
                   r/hof-lambda-params (fn [& _] ["item"])
                   r/build-hof-translation (fn [& _] {})
                   r/hof-lambda-slot-routes (fn [& _] {})]
-      (let [build (env-arg-builder owner env-bnd {inner child} {:fn-map {}})
+      (let [build (env-arg-builder owner env-bnd [] {inner child} {:fn-map {}})
             callable (build (volatile! {}) {} {})]
         (is (= {:graphden.executor/fn-id inner
                 :graphden.executor/lambda-params ["item"]}
@@ -693,7 +693,7 @@
                   r/hof-lambda-params (fn [& _] ["item"])
                   r/build-hof-translation (fn [& _] {captured "caption"})
                   r/hof-lambda-slot-routes (fn [& _] {reader "item"})]
-      (let [build (env-arg-builder owner env-bnd {inner child} {:fn-map {}})
+      (let [build (env-arg-builder owner env-bnd [] {inner child} {:fn-map {}})
             callable (build snapshot {} {})]
         (is (= [[nil false] [false false] ["new" false]]
                (mapv callable [nil false "new"])))

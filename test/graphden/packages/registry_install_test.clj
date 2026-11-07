@@ -390,6 +390,9 @@
     (is (not (pinned? "bdep.pkg")) "B unpinned before installing A")
     (is (true? (:ok (install! "adep.pkg" "1.0.0"))) "A installs")
     (is (pinned? "adep.pkg") "A is pinned")
+    (is (seq (sp/query-entities (storage) :package-install
+                                {:package-name "bdep.pkg"}))
+        "B has a persisted pin after recursive install")
     (is (pinned? "bdep.pkg")
         "B was recursively pulled + re-pinned as a side effect of installing A")))
 

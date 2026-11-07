@@ -60,6 +60,21 @@ async function cleanupTourNamespaces(page) {
 }
 
 
+async function existingCleanupNames(page, candidates, getIndex = () => api(page, 'GET', '/api/graph/entities?scope=index')) {
+  try {
+    const index = await getIndex();
+    if (!Array.isArray(index?.fns)) throw new Error('graph index has no fns array');
+    const present = new Set(index.fns.map((row) => row.name));
+    return candidates.filter((name) => present.has(name));
+  } catch (error) {
+    // Cleanup is recovery: a failed index request must never be treated as
+    // proof that the graph is empty. Fall back to the exhaustive name probes.
+    console.warn('tutorial cleanup index unavailable; scanning names:', error.message);
+    return candidates;
+  }
+}
+
+
 async function hardCleanup(page) {
   // Belt for a mid-test failure: remove the tutorial fn + ns via the API
   // so the runner's leak counter stays clean even when the tour's own
@@ -123,7 +138,7 @@ async function hardCleanup(page) {
     });
   } catch (_) { /* page may not be on the editor yet */ }
   for (let pass = 0; pass < 2; pass++) {
-    for (const nm of leftovers) {
+    for (const nm of await existingCleanupNames(page, leftovers)) {
       await retryingDelete(() => deleteFnByName(page, nm));
     }
   }
@@ -1802,7 +1817,7 @@ async function setFnDescription(page, fnName, text) {
 
 module.exports = {
   NS_NAME, FN_NAME,
-  retryingDelete, hardCleanup, closeTourBrowser, tourTitle, tourWhere, waitTourTitle, settleTourRing, clickTourButton,
+  retryingDelete, existingCleanupNames, hardCleanup, closeTourBrowser, tourTitle, tourWhere, waitTourTitle, settleTourRing, clickTourButton,
   openTutorialCatalog,
   waitUntil, tourProgress, clickTourAdvance,
   installSpotlightAudit,

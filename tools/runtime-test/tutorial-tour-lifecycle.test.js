@@ -1,7 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const {closeTourBrowser} = require('../browser-test/tutorial-tour-helpers');
+const {closeTourBrowser, existingCleanupNames} = require('../browser-test/tutorial-tour-helpers');
 
 async function main() {
   const events = [];
@@ -25,6 +25,21 @@ async function main() {
     throw new Error('cleanup failed');
   }), /cleanup failed/);
   assert.deepEqual(events, ['page', 'recover', 'browser'], 'browser closes even if recovery fails');
+
+  const names = ['tutorial-b', 'tutorial-a', 'other'];
+  assert.deepEqual(await existingCleanupNames(page, names, async () => ({
+    fns: [{name: 'tutorial-a'}, {name: 'tutorial-b'}]
+  })), ['tutorial-b', 'tutorial-a'], 'index filters absent names without changing deletion order');
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  try {
+    assert.deepEqual(await existingCleanupNames(page, names, async () => ({status: 503})), names,
+      'an invalid index falls back to the exhaustive sweep');
+    assert.deepEqual(await existingCleanupNames(page, names, async () => { throw new Error('offline'); }), names,
+      'a failed index request also falls back to the exhaustive sweep');
+  } finally {
+    console.warn = originalWarn;
+  }
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1; });

@@ -174,13 +174,18 @@
       (let [storage (request/require-storage ctx)
             et (keyword entity-type)
             publish? (owns-publication? storage)
+            generated-fn-id? (and (= et :fn) (nil? (:id data)))
             data (cond-> data
                    (and (= et :fn) (nil? (:id data))) (assoc :id (random-uuid)))
             _ (reject-generic-audit-write! et)
             result (writer/with-write [storage {:entity et :rows [data]}]
                                       (res/call-with-fresh-memos
                                         (fn []
-                                          (assert-write-valid! storage et data proven-acyclic?)
+                                          ;; A newly generated fn has no incoming edges in the
+                                          ;; existing graph, so its new outgoing edges cannot
+                                          ;; close a cycle. Keep every other write guard.
+                                          (assert-write-valid! storage et data
+                                                               (or proven-acyclic? generated-fn-id?))
                                           (sp/create-entity storage et (dissoc data :_admin-secret-create)))))]
         (when publish? (publish-write! ctx storage et result))
         result))))

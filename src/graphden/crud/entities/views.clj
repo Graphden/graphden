@@ -222,6 +222,45 @@
           (get fn-slots-by-fn (:id root)))))
 
 
+(defn view-axis-aliases
+  "Public view axes and the source identities an ordinary binding write can
+   target. Stop at the captured-reader boundary, as the generic write path
+   does; following every source would conflate independent graph inputs."
+  [indices fn-id]
+  (let [owned (lookups/fn-owned-slot-ids fn-id indices)
+        slot-map (:slot-map indices)]
+    (into {}
+          (map (fn [slot]
+                 [(keyword (:name slot))
+                  (vec (cons (:id slot)
+                             (lookups/scoped-source-slot-ids slot slot-map owned)))]))
+          (view-axis-slots indices))))
+
+
+(defn- project-axis-bindings
+  "Classify public and canonical source bindings as one axis per owner.
+   Preserve binding IDs so inherited list append still reads its original
+   items. Duplicate aliases on one owner are ambiguous, never last-wins."
+  [indices fn-id aliases]
+  (let [chain (lookups/inheritance-chain* fn-id indices)
+        original (:binding-by-fn-slot indices)]
+    (reduce-kv
+      (fn [{:keys [projected ambiguous] :as result} axis ids]
+        (let [public-id (first ids)
+              rows (mapcat (fn [fid]
+                             (let [found (keep #(get original [fid %]) ids)]
+                               (map (fn [row] [fid row]) found))) chain)
+              duplicates (->> rows (group-by first) vals (filter next) seq)]
+          (if duplicates
+            (assoc result :ambiguous (conj ambiguous axis))
+            (assoc result :projected
+                   (reduce (fn [acc [fid row]]
+                             (assoc acc [fid public-id] (assoc row :slot-id public-id)))
+                           projected rows)))))
+      {:projected original :ambiguous #{}}
+      aliases)))
+
+
 (declare static-binding-value)
 
 
@@ -282,14 +321,18 @@
    Uses compiler binding classification for inheritance/list append/renames.
    Unknown computations are explicit unsupported axes, never dropped filters."
   [indices fn-id]
-  (let [classified (if-let [slots (view-axis-slots indices)]
-                     (bindings/collect-slot-bindings fn-id slots indices)
+  (let [slots (view-axis-slots indices)
+        {:keys [projected ambiguous]} (project-axis-bindings indices fn-id
+                                                             (view-axis-aliases indices fn-id))
+        classified (if slots
+                     (bindings/collect-slot-bindings fn-id slots
+                                                     (assoc indices :binding-by-fn-slot projected))
                      (bindings/collect-bindings fn-id indices))
         values (into {} (map (fn [binding]
                                [(:base-name binding)
                                 (static-binding-value indices binding #{fn-id})])) classified)
-        unsupported (into [] (keep (fn [[axis value]]
-                                     (when-not (supported-axis-value? axis value) axis))) values)
+        unsupported (into (vec ambiguous) (keep (fn [[axis value]]
+                                                  (when-not (supported-axis-value? axis value) axis))) values)
         values (apply dissoc values unsupported)
         refs (fn [scalar multiple]
                (into [] (comp (map identity-value) (distinct))

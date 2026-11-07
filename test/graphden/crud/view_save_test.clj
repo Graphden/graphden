@@ -73,6 +73,22 @@
         (sp/query-entities storage :fn {})))
 
 
+(deftest save-replaces-canonical-source-binding-of-manually-authored-view
+  (with-storage
+    (fn [storage ctx {:keys [id slots]}]
+      (let [source (setup/create-slot! storage "name" :text)
+            _ (sp/update-entity storage :slot (:name slots) {:source-slot-id (:id source)})
+            view (setup/create-composed-fn! storage "manual-view" id)
+            _ (setup/bind-value! storage (:id view) (:id source) "old")
+            result (save! ctx {:id (:id view) :name "manual-view"
+                               :filters {:name "new"}})
+            own (sp/query-entities storage :binding {:fn-id (:id view)})]
+        (is (true? (:committed result)) (pr-str result))
+        (is (= "new" (get-in result [:view :filters :name])))
+        (is (= #{(:name slots)} (set (map :slot-id own)))
+            "the old source binding is gone and Save owns one public clause")))))
+
+
 (deftest create-id-is-create-only-and-never-revives-an-existing-identity
   (with-storage
     (fn [storage ctx _]

@@ -243,6 +243,9 @@ function _afterChange(announce, kindsOnly) {
   if (typeof gdSyncViewChip === 'function') gdSyncViewChip();
   if (gdServerAxesActive()) _fetchViewMembers();
   else {
+    // A request from the previous set may still be in flight. Clearing its
+    // server axes must retire that response before it can repopulate the tree.
+    _viewSeq += 1;
     _viewMembers = undefined;
     _viewTotal = null;
     _viewMissing = null;

@@ -5,9 +5,12 @@
     [clojure.set :as set]
     [clojure.test :refer [deftest is use-fixtures]]
     [graphden.crud.entities :as entities]
+    [graphden.crud.entities.views :as read-views]
+    [graphden.executor.compile.lookups :as lookups]
     [graphden.executor.context :as context]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
+    [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.context :as tenancy]
     [graphden.types.diagnostics :as diagnostics]
@@ -34,6 +37,57 @@
 (defn- member-ids
   [ctx filters]
   (into #{} (map :id) (:fns (entities/view-members ctx filters))))
+
+
+(deftest public-and-source-view-axis-bindings-share-one-inherited-clause
+  (let [root-id (random-uuid)
+        parent-id (random-uuid)
+        child-id (random-uuid)
+        target-a (random-uuid)
+        target-b (random-uuid)
+        public-name (random-uuid)
+        source-name (random-uuid)
+        public-also (random-uuid)
+        source-also (random-uuid)
+        public-also-all (random-uuid)
+        source-also-all (random-uuid)
+        parent-list-id (random-uuid)
+        child-list-id (random-uuid)
+        indices (lookups/build-lookups
+                  {:fns [{:id root-id :name "explorer-view" :parent-ids []}
+                         {:id parent-id :name "parent-view" :parent-ids [root-id]}
+                         {:id child-id :name "child-view" :parent-ids [parent-id]}]
+                   :slots [{:id source-name :name "name"}
+                           {:id public-name :name "name" :source-slot-id source-name}
+                           {:id source-also :name "also" :type-fn-id ids/fn-ref-type-id}
+                           {:id public-also :name "also" :type-fn-id ids/fn-ref-type-id
+                            :source-slot-id source-also}
+                           {:id source-also-all :name "also-all"}
+                           {:id public-also-all :name "also-all" :source-slot-id source-also-all}]
+                   :fn-slots [{:fn-id root-id :slot-id public-name :position 0}
+                              {:fn-id root-id :slot-id public-also :position 1}
+                              {:fn-id root-id :slot-id public-also-all :position 2}]
+                   :bindings [{:id (random-uuid) :fn-id parent-id :slot-id public-name
+                               :value "parent" :value-present true}
+                              {:id (random-uuid) :fn-id child-id :slot-id source-name
+                               :value "child" :value-present true}
+                              {:id (random-uuid) :fn-id child-id :slot-id source-also
+                               :ref-fn-id target-b}
+                              {:id parent-list-id :fn-id parent-id :slot-id public-also-all
+                               :list-append true}
+                              {:id child-list-id :fn-id child-id :slot-id source-also-all
+                               :list-append true}]
+                   :list-items [{:id (random-uuid) :binding-id parent-list-id :position 0 :value target-a}
+                                {:id (random-uuid) :binding-id child-list-id :position 0 :value target-b}]})]
+    (is (= {:name "parent" :also [target-a]}
+           (:filters (read-views/decode-view indices parent-id))))
+    (is (= {:name "child" :also [target-b target-a]}
+           (:filters (read-views/decode-view indices child-id))))
+    (let [conflict (assoc-in indices [:binding-by-fn-slot [child-id public-name]]
+                             {:id (random-uuid) :fn-id child-id :slot-id public-name
+                              :value "other" :value-present true})]
+      (is (= [:name] (:unsupported (read-views/decode-view conflict child-id)))
+          "two aliases of one axis on the same view cannot silently override"))))
 
 
 (deftest nested-view-intersection-happens-before-the-result-cap

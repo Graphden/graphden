@@ -142,8 +142,8 @@
 
 
 (defn- reusable-identities
-  [indices owner-id slot-id]
-  (let [binding (get-in indices [:binding-by-fn-slot [owner-id slot-id]])]
+  [indices owner-id slot-ids]
+  (let [binding (some #(get-in indices [:binding-by-fn-slot [owner-id %]]) slot-ids)]
     (into {}
           (keep (fn [item]
                   (when-let [ref (:ref-fn-id item)]
@@ -153,14 +153,14 @@
 
 
 (defn- bind-identities!
-  [ctx indices slots owner axis target-ids fresh-owner?]
+  [ctx indices slots aliases owner axis target-ids fresh-owner?]
   (let [storage (:storage ctx)
         [legacy list-axis] (case axis :uses [:uses :uses-all] :views [:also :also-all])
         list-slot (or (get slots list-axis) (command/reject! "This deployment cannot save all view references"))
         const-row (or (root-named indices "const") (command/reject! "The const function is not installed"))
         const-spec {:const-id (:id const-row) :value-slot (get (slot-map indices (:id const-row)) :value)}
-        reusable (reusable-identities indices (:id owner) list-slot)]
-    (remove-own-axis! storage (:id owner) [(get slots legacy) list-slot])
+        reusable (reusable-identities indices (:id owner) (get aliases list-axis))]
+    (remove-own-axis! storage (:id owner) (concat (get aliases legacy) (get aliases list-axis)))
     (let [binding-row (create! ctx :binding {:fn-id (:id owner) :slot-id list-slot :list-append true})]
       (mapv (fn [position target-id]
               (let [existing (get reusable target-id)
@@ -178,10 +178,10 @@
 
 
 (defn- bind-value!
-  [ctx slots owner axis value]
+  [ctx slots aliases owner axis value]
   (let [sid (or (get slots axis) (command/reject! (str "Missing view slot: " (name axis))))
         value (if (contains? #{:kinds :problems :effects} axis) (mapv name value) value)]
-    (remove-own-axis! (:storage ctx) (:id owner) [sid])
+    (remove-own-axis! (:storage ctx) (:id owner) (get aliases axis))
     (create! ctx :binding {:fn-id (:id owner) :slot-id sid :value value :value-present true})))
 
 
@@ -241,13 +241,14 @@
                     (lookups/build-lookups (update before :fns conj owner)))
         slots (into {} (map (juxt (comp keyword :name) :id))
                     (views/view-axis-slots indices))
+        aliases (views/view-axis-aliases indices (:id owner))
         old (views/normalise-filters (:filters previous))
         changed (filter #(not= (clause-value (get old %)) (clause-value (get filters %))) (keys filters))
         adapters (reduce (fn [rows axis]
                            (if (contains? #{:uses :views} axis)
-                             (into rows (bind-identities! ctx indices slots owner axis (get filters axis)
+                             (into rows (bind-identities! ctx indices slots aliases owner axis (get filters axis)
                                                           (nil? (:id command))))
-                             (do (bind-value! ctx slots owner axis (get filters axis)) rows)))
+                             (do (bind-value! ctx slots aliases owner axis (get filters axis)) rows)))
                          [] changed)
         after (graph storage)
         actual (model (lookups/build-lookups after) owner)]

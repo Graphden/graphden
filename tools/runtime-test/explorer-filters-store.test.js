@@ -161,6 +161,21 @@ const chipLabels = chips => chips.children.map(chip => chip.children[0].children
     assert(announced.some((m) => /1 functions match/.test(m)), 'announced the count');
   });
 
+  await test('clearing server axes retires an in-flight members response', async () => {
+    const {ctx, updates} = filtersCtx();
+    let release;
+    ctx.authFetch = () => new Promise(resolve => { release = resolve; });
+    ctx.gdAddUses({id: 'old-id', name: 'old'});
+    assert(ctx.gdViewMembers() === null, 'old members request is pending');
+    ctx.gdClearFilters();
+    assert(ctx.gdViewMembers() === undefined, 'clear returns to the unfiltered tree');
+    const count = updates.length;
+    release({ok: true, json: async () => ({fns: [{id: 'stale-id'}]})});
+    await tick();
+    assert(ctx.gdViewMembers() === undefined && updates.length === count,
+      'late members response cannot repopulate or rerender the cleared tree');
+  });
+
   await test('views: save names the set, apply restores it, delete forgets it, clear detaches', async () => {
     const { ctx, b, store } = filtersCtx();
     ctx.gdToggleKind('services');

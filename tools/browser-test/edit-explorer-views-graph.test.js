@@ -99,14 +99,16 @@ const PROBE_FN = 'e2e-uses-const-probe-' + RUN_ID;
     await page.click('#gd-ws-chip');
     await page.waitForSelector('#gd-ws-pop .gd-views-apply[aria-label="Apply view ' + VIEW_A + ' from the graph"]', {timeout: 15000});
     await page.click('#gd-ws-pop .gd-views-apply[aria-label="Apply view ' + VIEW_A + ' from the graph"]');
-    await page.waitForFunction(() => Array.isArray(gdViewMembers()) && gdViewMembers().length > 0,
-      null, {timeout: 30000, polling: 200});
+    await page.waitForFunction(({name, ids}) =>
+      gdActiveViewName() === name && Array.isArray(gdViewMembers())
+      && JSON.stringify(gdViewMembers().map(fn => fn.id).sort()) === JSON.stringify(ids),
+    {name: VIEW_A, ids: before}, {timeout: 30000, polling: 200});
     const applied = await page.evaluate(() => ({
       chip: document.querySelector('#gd-ws-chip b')?.textContent,
       chips: [...document.querySelectorAll('#gd-filter-chips .kind-label')].map((e) => e.textContent).sort(),
       members: gdViewMembers().map((f) => f.id).sort(),
     }));
-    assert(applied.chip === VIEW_A, 'the chip names the applied graph view');
+    assert(applied.chip === VIEW_A, 'the chip names the applied graph view: ' + applied.chip);
     assert(applied.chips.join('|') === ['in app', 'uses core.logic.const', 'fx network'].sort().join('|'),
       'the same chips come back: ' + applied.chips.join('|'));
     assert(JSON.stringify(applied.members) === JSON.stringify(before),
@@ -128,17 +130,39 @@ const PROBE_FN = 'e2e-uses-const-probe-' + RUN_ID;
     const slots = await page.evaluate(async (id) => {
       const r = await authFetch(API.api_graph_entities + '?scope=subtree&root-id=' + id);
       const d = await r.json();
-      return Object.fromEntries(d.slots.map((s) => [s.name, s.id]));
+      const byId = new Map(d.slots.map(slot => [slot.id, slot]));
+      return Object.fromEntries(d['fn-slots'].filter(link => link['fn-id'] === id)
+        .map(link => byId.get(link['slot-id']))
+        .filter(Boolean)
+        .map(slot => [slot.name, slot.id]));
     }, evId);
-    await api(page, 'POST', '/api/entities/fn', 'name=' + VIEW_B + '&parent-ids=' + evId);
-    await page.waitForTimeout(800);
+    assert(slots.also && slots.name, 'public explorer-view owns the also and name slots');
+    const createdView = await api(page, 'POST', '/api/entities/fn', 'name=' + VIEW_B + '&parent-ids=' + evId);
+    assert(!(createdView.status >= 400) && createdView.ok !== false,
+      'second view creation accepted: ' + JSON.stringify(createdView).slice(0, 200));
     const bId = (await api(page, 'GET', '/api/graph/entities?scope=search&q=' + VIEW_B)).fns
       .find((f) => f.name === VIEW_B)?.id;
     assert(bId, 'the second view fn was created');
     if (bId) ownedViews.add(bId);
-    await api(page, 'POST', '/api/entities/binding', 'fn-id=' + bId + '&slot-id=' + slots.also + '&ref-fn-id=' + a.id);
-    await api(page, 'POST', '/api/entities/binding', 'fn-id=' + bId + '&slot-id=' + slots.name + '&value=' + encodeURIComponent('"handler"'));
-    await page.waitForTimeout(800);
+    const alsoWrite = await api(page, 'POST', '/api/entities/binding',
+      'fn-id=' + bId + '&slot-id=' + slots.also + '&ref-fn-id=' + a.id);
+    const nameWrite = await api(page, 'POST', '/api/entities/binding',
+      'fn-id=' + bId + '&slot-id=' + slots.name + '&value=' + encodeURIComponent('"handler"'));
+    assert(!(alsoWrite.status >= 400) && alsoWrite.ok !== false,
+      'second view also binding accepted: ' + JSON.stringify(alsoWrite).slice(0, 200));
+    assert(!(nameWrite.status >= 400) && nameWrite.ok !== false,
+      'second view name binding accepted: ' + JSON.stringify(nameWrite).slice(0, 200));
+    const listedB = (await api(page, 'GET', '/api/views')).find(view => view.id === bId);
+    if (!listedB?.filters?.also?.includes(a.id) || listedB?.filters?.name !== 'handler') {
+      const bGraph = await api(page, 'GET', '/api/graph/entities?scope=subtree&root-id=' + bId);
+      console.log('Second view diagnostic:', JSON.stringify({
+        listedB, slotIds: {also: slots.also, name: slots.name},
+        ownFns: (bGraph.fns || []).filter(row => row.id === bId),
+        ownBindings: (bGraph.bindings || []).filter(row => row['fn-id'] === bId),
+      }));
+    }
+    assert(listedB?.filters?.also?.includes(a.id) && listedB?.filters?.name === 'handler',
+      'second view graph read decodes also and name: ' + JSON.stringify(listedB?.filters));
     const expected = await api(page, 'POST', '/api/views/members', {name: 'handler', views: [a.id]});
     const expectedIds = (expected.fns || []).map((f) => f.id).sort();
     assert(expectedIds.length > 0 && expectedIds.length < before.length,
@@ -150,8 +174,10 @@ const PROBE_FN = 'e2e-uses-const-probe-' + RUN_ID;
     await page.click('#gd-ws-chip');
     await page.waitForSelector('#gd-ws-pop .gd-views-apply[aria-label="Apply view ' + VIEW_B + ' from the graph"]', {timeout: 15000});
     await page.click('#gd-ws-pop .gd-views-apply[aria-label="Apply view ' + VIEW_B + ' from the graph"]');
-    await page.waitForFunction(() => Array.isArray(gdViewMembers()) && gdViewMembers().length > 0,
-      null, {timeout: 30000, polling: 200});
+    await page.waitForFunction(({name, ids}) =>
+      gdActiveViewName() === name && Array.isArray(gdViewMembers())
+      && JSON.stringify(gdViewMembers().map(fn => fn.id).sort()) === JSON.stringify(ids),
+    {name: VIEW_B, ids: expectedIds}, {timeout: 30000, polling: 200});
     const composed = await page.evaluate(() => ({
       chips: [...document.querySelectorAll('#gd-filter-chips .kind-label')].map((e) => e.textContent).sort(),
       members: gdViewMembers().map((f) => f.id).sort(),
@@ -269,7 +295,9 @@ const PROBE_FN = 'e2e-uses-const-probe-' + RUN_ID;
     await page.evaluate(() => gdClearFilters());
     await page.evaluate(({id, name}) => gdApplyView({name: 'e2e-dangling', filters: {uses: [{id, name}]}}),
       {id: deletedProbeId, name: PROBE_FN});
-    await page.waitForFunction(() => Array.isArray(gdViewMembers()), null, {timeout: 30000, polling: 200});
+    await page.waitForFunction(() => Array.isArray(gdViewMembers()) && gdViewMembers().length === 0
+      && gdViewMissing().uses.length === 1,
+    null, {timeout: 30000, polling: 200});
     const dangling = await page.evaluate(() => {
       const chip = document.querySelector('#gd-filter-chips .gd-filter-chip');
       return { cls: chip?.className, label: chip?.getAttribute('aria-label'), members: gdViewMembers().length,
@@ -283,8 +311,9 @@ const PROBE_FN = 'e2e-uses-const-probe-' + RUN_ID;
     // The cap, said in the tree: "uses const" alone is over 500 on this graph.
     await page.evaluate(() => gdClearFilters());
     await page.evaluate((id) => gdAddUses({id, name: 'const'}), constId);
-    await page.waitForFunction(() => Array.isArray(gdViewMembers()) && gdViewMembers().length > 0,
-      null, {timeout: 30000, polling: 200});
+    await page.waitForFunction(() => Array.isArray(gdViewMembers()) && gdViewMembers().length === 500
+      && gdViewTotal() > 500,
+    null, {timeout: 30000, polling: 200});
     const capped = await page.evaluate(() => ({
       total: gdViewTotal(), shown: gdViewMembers().length,
       note: [...document.querySelectorAll('#entity-list .loading')].map((e) => e.textContent).find((t) => /matching fns/.test(t)) || '',

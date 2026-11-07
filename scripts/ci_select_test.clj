@@ -185,7 +185,7 @@
       (is (= (mapv vec (partition-all 8 (filter #(and (= wave (:group %))
                                                       (not= :affected (:stage %))) selected)))
              (get batches wave))))
-    (is (= [["builtin-plans-sync"] ["tests-perf"]]
+    (is (= [["builtin-plans-sync"] ["type-sweep"] ["tests-perf"]]
            (mapv #(mapv :name %) (:priority batches))))))
 
 
@@ -219,6 +219,15 @@
     (is (= [["a" "b"] ["x"] ["c" "d"]] (names registry)))
     (is (= [["a" "b"] ["c" "d"]]
            (names (filterv #(not= "x" (:name %)) registry))))))
+
+
+(deftest type-sweep-runs-alone-before-broad-suites
+  (let [selected (:run (ci-select/partition-checks
+                         real-registry {:changed #{"src/graphden/types/check.clj"}}))
+        batches (ci-select/canonical-batches real-registry selected)]
+    (is (= [["type-sweep"] ["tests-perf"]]
+           (mapv #(mapv :name %) (:priority batches))))
+    (is (some #{"tests-unit"} (map :name (mapcat identity (:test batches)))))))
 
 
 (deftest deps-scope-does-not-compress-heavy-checks

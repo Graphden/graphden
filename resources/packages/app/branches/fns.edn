@@ -1466,8 +1466,8 @@
   {:name :set-branch-policy!
    :description "Trim policy text and clear empty/open; the scoped writer validates accepted policy values before mutation."
    :parent :_set-branch-policy :args {:branch-id {:type :uuid}
-          :write-policy {:type :nullable-text}
-          :policy :_branch-policy-normalized}
+                                      :write-policy {:type :nullable-text}
+                                      :policy :_branch-policy-normalized}
    :return-type :nullable-text}
 
   {:name :set-branch-require-merge!
@@ -1863,10 +1863,10 @@
   {:name :add-branch-comment!
    :description "Create a validated current-author comment within the native cap boundary, then format its new id."
    :parent :to-str :args {:source-branch-id {:type :uuid}
-          :body {:type :text}
-          :entity-name {:type :nullable-text}
-          :entity-id {:type :nullable-uuid}
-          :value :_branch-comment-created-id}
+                          :body {:type :text}
+                          :entity-name {:type :nullable-text}
+                          :entity-id {:type :nullable-uuid}
+                          :value :_branch-comment-created-id}
    :return-type :text}
 
   {:name :list-branch-comments

@@ -1032,7 +1032,7 @@
    :parent :fix,
    :args
    {:type-expr {:type :type-expression}
-          :step :_descriptor-step,
+    :step :_descriptor-step,
     :input
     {:parent :zipmap,
      :args
@@ -1744,8 +1744,8 @@
    :parent :fix,
    :args
    {:form {:type :keyword-map}
-          :current-value {:type :any}
-          :step :_render-step,
+    :current-value {:type :any}
+    :step :_render-step,
     :input
     {:parent :zipmap,
      :args

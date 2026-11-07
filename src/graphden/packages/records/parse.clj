@@ -693,6 +693,49 @@
     (into [binding-row] item-rows)))
 
 
+(defn- own-slot-source-id
+  "Find the inherited source of an own slot. A ref-tree source wins;
+   otherwise a direct parent must supply at most one distinct slot."
+  [fn-def arg-name name->id defs-by-name]
+  (let [source-id (fn [target-name]
+                    (when-let [[owner-name owner-arg]
+                               (slot-res/resolve-slot-owner-strict
+                                 target-name arg-name defs-by-name #{})]
+                      (when-let [owner-fn-id
+                                 (resolve-owner-fn-id owner-name name->id defs-by-name)]
+                        (ids/slot-id owner-fn-id owner-arg))))
+        ref-source (some source-id (slot-res/ref-targets-of fn-def defs-by-name))]
+    (or ref-source
+        (let [parent-targets (or (seq (:parents fn-def))
+                                 (when-let [parent (:parent fn-def)] [parent]))
+              parent-sources (into #{} (keep source-id) parent-targets)]
+          (when (> (count parent-sources) 1)
+            (throw (ex-info "Ambiguous inherited source for own slot"
+                            {:fn (:name fn-def) :slot arg-name
+                             :source-slot-ids parent-sources})))
+          (first parent-sources)))))
+
+
+(defn- emit-composed-own-slots
+  "Emit own slot rows and bridge top-level slots to their inherited source.
+   Inline composite slots have no top-level own name and stay unlinked."
+  [fn-def own-id own-slot-map name->id defs-by-name]
+  (when (seq own-slot-map)
+    (let [own-names (set (keys own-slot-map))]
+      (mapv (fn [row]
+              (let [arg-name (some-> (:name row) keyword)]
+                (if (and (= :slot (:kind row))
+                         (contains? own-names arg-name)
+                         (nil? (:source-slot-id row)))
+                  (if-let [source-id (own-slot-source-id
+                                       fn-def arg-name name->id defs-by-name)]
+                    (cond-> row
+                      (not= source-id (:id row)) (assoc :source-slot-id source-id))
+                    row)
+                  row)))
+            (emit-composite-records own-id own-slot-map name->id)))))
+
+
 (defn- parse-composed
   "Composed fn-def: `:parent` (single) or `:parents` (multi). Each
    `:args` entry becomes a binding row on the inherited slot it
@@ -728,59 +771,10 @@
         own-slot-map (into {} own-slot-args)
         binding-map (into {} binding-args)
         exposed-names (slot-res/collect-exposed-names binding-map own-ref defs-by-name)
-        ;; PB' own-slot decls — emit the slot/fn-slot rows. Then
-        ;; enrich each top-level slot with a `:source-slot-id` link
-        ;; if the same name exists deeper in the ref-tree or an inherited
-        ;; parent. The link
-        ;; makes the PB' own-slot behave as a rename-view of the
-        ;; underlying base-fn / rename slot — `chain-source-slot-ids`
-        ;; reaches the deep slot through this FK, so downstream HOF
-        ;; callbacks with `{:as :item}` renames keep their full
-        ;; rename-chain working (consumer bindings route to PB'
-        ;; own-slots; without this bridge the rename mechanism would
-        ;; shortcircuit). The walk seeds `resolve-slot-owner-strict`
-        ;; from each ref-target or parent so the OWN PB' decl on `fn-def`
-        ;; doesn't Pass-1-hit itself. Ref targets win when both paths
-        ;; expose a name; multiple distinct parent sources are ambiguous.
-        ;; Inline-composite anon slots
-        ;; (emitted recursively for `{:type {…}}` shapes) skip the
-        ;; enrichment — they aren't reachable through ref-targets and
-        ;; would mis-link.
-        own-slot-records
-        (when (seq own-slot-map)
-          (let [pb-slot-name-set (set (keys own-slot-map))
-                parent-targets (or (seq (:parents fn-def))
-                                   (when-let [parent (:parent fn-def)] [parent]))
-                find-deep-source
-                (fn [arg-name]
-                  (let [source-id
-                        (fn [target-name]
-                          (when-let [[owner-name owner-arg]
-                                     (slot-res/resolve-slot-owner-strict
-                                       target-name arg-name defs-by-name #{})]
-                            (when-let [owner-fn-id
-                                       (resolve-owner-fn-id
-                                         owner-name name->id defs-by-name)]
-                              (ids/slot-id owner-fn-id owner-arg))))
-                        ref-source (some source-id (slot-res/ref-targets-of fn-def defs-by-name))]
-                    (or ref-source
-                        (let [parent-sources (into #{} (keep source-id) parent-targets)]
-                          (when (> (count parent-sources) 1)
-                            (throw (ex-info "Ambiguous inherited source for own slot"
-                                            {:fn (:name fn-def) :slot arg-name
-                                             :source-slot-ids parent-sources})))
-                          (first parent-sources)))))]
-            (mapv (fn [r]
-                    (let [arg-name (some-> (:name r) keyword)]
-                      (if (and (= :slot (:kind r))
-                               (contains? pb-slot-name-set arg-name)
-                               (nil? (:source-slot-id r)))
-                        (if-let [deep-sid (find-deep-source arg-name)]
-                          (cond-> r
-                            (not= deep-sid (:id r)) (assoc :source-slot-id deep-sid))
-                          r)
-                        r)))
-                  (emit-composite-records own-id own-slot-map name->id))))
+        ;; The source bridge keeps public own-slot UUIDs stable while
+        ;; execution follows the inherited rename chain.
+        own-slot-records (emit-composed-own-slots
+                           fn-def own-id own-slot-map name->id defs-by-name)
         binding+items (mapv #(build-binding-and-items own-id own-ref %
                                                       name->id defs-by-name)
                             binding-map)

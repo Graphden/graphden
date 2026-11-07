@@ -2167,8 +2167,8 @@
   {:name :package-upsert-pin
    :description "Upsert this branch's package pin and return its branch id as text."
    :parent :to-str :args {:pkg-name {:type :text}
-          :pkg-version {:type :text}
-          :value :_package-pin-branch}
+                          :pkg-version {:type :text}
+                          :value :_package-pin-branch}
    :return-type :text}
   {:name :package-pin-receipt
    :description "Upsert the pin and project the written row's actual identity; updates preserve its UUID."
@@ -3272,7 +3272,7 @@
   {:name :create-owned-branch!
    :description "Protect a branch with owner policy when this request has a user identity; the writer stamps that trusted identity."
    :parent :_create-request-branch :args {:branch-name {:type :nullable-text}
-          :write-policy :_owned-branch-policy}
+                                          :write-policy :_owned-branch-policy}
    :return-type :keyword-map}
 
   {:name :drop-orphan-anon-defs

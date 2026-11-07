@@ -14,7 +14,7 @@
 const {chromium} = require('playwright');
 const {assert, newContext, api} = require('./edit-test-helpers');
 const {
-  hardCleanup, waitTourTitle, clickTourButton, filterAndSelect,
+  hardCleanup, closeTourBrowser, waitTourTitle, clickTourButton, filterAndSelect,
   runViaRowActions, tourWhere, extendViaRowActions, bindFirstPlaceholder,
   bindFnRefPlaceholder, finishAndDelete, runWithEffectAck, waitTourClosed,
   openRowActionsFor, bindPlaceholderOn, extendInPlace,
@@ -208,7 +208,6 @@ const {
     }
     console.log('  lesson 18: walked + cleaned (pipeline + path + tree + peek + trail)');
 
-    console.log('PASS');
   } catch (err) {
     failed = true;
     console.error('FAIL:', err.message);
@@ -229,8 +228,8 @@ const {
       console.error('  screenshot: /tmp/edit-tutorial-tour-ux-trace.test-fail.png');
     } catch (_) { /* page may be gone */ }
   } finally {
-    await hardCleanup(page);
-    await browser.close();
+    await closeTourBrowser(browser, page, failed);
   }
+  if (!failed) console.log('PASS');
   process.exit(failed ? 1 : 0);
 })();

@@ -4,7 +4,7 @@
 const {chromium} = require('playwright');
 const {assert, newContext, api} = require('./edit-test-helpers');
 const {
-  hardCleanup, waitTourTitle, settleTourRing, filterAndSelect,
+  hardCleanup, closeTourBrowser, waitTourTitle, settleTourRing, filterAndSelect,
   clickTourButton, tourTitle, tourWhere, openTutorialCatalog,
 } = require('./tutorial-tour-helpers');
 
@@ -476,7 +476,6 @@ const {
     await page.evaluate(() => { localStorage.removeItem('graphden.tour'); });
     checkpoint('funnel: started + step counters moved on /metrics');
 
-    console.log('PASS');
   } catch (err) {
     failed = true;
     console.error('FAIL:', err.message);
@@ -486,8 +485,8 @@ const {
       console.error('  screenshot: /tmp/edit-tutorial-tour-picker-fail.png');
     } catch (_) { /* page may be gone */ }
   } finally {
-    await hardCleanup(page);
-    await browser.close();
+    await closeTourBrowser(browser, page, failed);
   }
+  if (!failed) console.log('PASS');
   process.exit(failed ? 1 : 0);
 })();

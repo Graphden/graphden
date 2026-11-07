@@ -192,6 +192,20 @@ async function hardCleanup(page) {
 }
 
 
+async function closeTourBrowser(browser, page, failed, recover = hardCleanup) {
+  // A successful lesson has already removed its own exact receipts. The
+  // broad name sweep is recovery for a failed walkthrough, not a second
+  // teardown: it can exceed the browser file's wall-clock cap after PASS.
+  // Close the editor first so its live polling cannot delay Node-side DELETEs.
+  try { await page.close(); } catch (_) { /* page may already be gone */ }
+  try {
+    if (failed) await recover(page);
+  } finally {
+    await browser.close();
+  }
+}
+
+
 function tourTitle(page) {
   return page.evaluate(() => {
     const t = document.querySelector('#gd-tour-pop .gd-tour-title');
@@ -1788,7 +1802,7 @@ async function setFnDescription(page, fnName, text) {
 
 module.exports = {
   NS_NAME, FN_NAME,
-  retryingDelete, hardCleanup, tourTitle, tourWhere, waitTourTitle, settleTourRing, clickTourButton,
+  retryingDelete, hardCleanup, closeTourBrowser, tourTitle, tourWhere, waitTourTitle, settleTourRing, clickTourButton,
   openTutorialCatalog,
   waitUntil, tourProgress, clickTourAdvance,
   installSpotlightAudit,

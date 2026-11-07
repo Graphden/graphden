@@ -12,7 +12,7 @@
 const {chromium} = require('playwright');
 const {assert, newContext, api} = require('./edit-test-helpers');
 const {
-  NS_NAME, FN_NAME, hardCleanup, waitTourTitle, settleTourRing, clickTourButton,
+  NS_NAME, FN_NAME, hardCleanup, closeTourBrowser, waitTourTitle, settleTourRing, clickTourButton,
   filterAndSelect, extendViaRowActions, bindFirstPlaceholder,
   pickIncompatFnRef, pickAnyway, removeUseSiteBinding, waitClickable,
   createBranchViaChip, switchBranchViaChip, editBoundValue, runViaRowActions,
@@ -225,7 +225,6 @@ const {
       'tour cleanup deleted both review branches');
     console.log('  lesson 24: walked + cleaned (refused → comment/reply → approved → stale → reapproved; branches cleaned)');
 
-    console.log('PASS');
   } catch (err) {
     failed = true;
     console.error('FAIL:', err.message);
@@ -248,8 +247,8 @@ const {
         console.error('Scroll fixture cleanup failed:', err.message);
       }
     }
-    await hardCleanup(page);
-    await browser.close();
+    await closeTourBrowser(browser, page, failed);
   }
+  if (!failed) console.log('PASS');
   process.exit(failed ? 1 : 0);
 })();

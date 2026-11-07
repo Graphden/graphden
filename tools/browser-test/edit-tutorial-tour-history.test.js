@@ -19,7 +19,7 @@
 const {chromium} = require('playwright');
 const {assert, newContext, api} = require('./edit-test-helpers');
 const {
-  hardCleanup, waitTourTitle, clickTourButton, tourWhere, filterAndSelect,
+  hardCleanup, closeTourBrowser, waitTourTitle, clickTourButton, tourWhere, filterAndSelect,
   extendViaRowActions, openRowActionsFor, finishAndDelete, openOperateSection, setFnDescription,
   waitUntil,
 } = require('./tutorial-tour-helpers');
@@ -323,7 +323,6 @@ async function openVersionHistory(page) {
     await finishAndDelete(page);
     console.log('  lesson 19: walked — a persisted failure under the ✕ lens + Runs tab, the ⚠ and ⚐ lenses');
 
-    console.log('PASS');
   } catch (err) {
     failed = true;
     console.error('FAIL:', err.message);
@@ -333,12 +332,8 @@ async function openVersionHistory(page) {
       console.error('  screenshot: /tmp/edit-tutorial-tour-history-fail.png');
     } catch (_) { /* page may be gone */ }
   } finally {
-    // Both successful lessons already ran Finish → Delete. The runner checks
-    // for leaked graph entities; a second full sweep of every tutorial name
-    // kept this file alive after PASS until its 300-second cap killed it.
-    try { await page.close(); } catch (_) { /* page may already be gone */ }
-    if (failed) await hardCleanup(page);
-    await browser.close();
+    await closeTourBrowser(browser, page, failed);
   }
+  if (!failed) console.log('PASS');
   process.exit(failed ? 1 : 0);
 })();

@@ -5,7 +5,7 @@ const {chromium} = require('playwright');
 const {assert, newContext} = require('./edit-test-helpers');
 const {handlerPreviewTestOptions} = require('./handler-preview-test-options');
 const {
-  hardCleanup, waitTourTitle, clickTourButton, filterAndSelect,
+  hardCleanup, closeTourBrowser, waitTourTitle, clickTourButton, filterAndSelect,
   extendViaRowActions, finishAndDelete, bindPlaceholderOn,
   runWithEffectAck, editBoundValue, tourWhere,
 } = require('./tutorial-tour-helpers');
@@ -61,15 +61,15 @@ const {
     } finally {
       await external.close();
     }
-    console.log('PASS: lesson 38 resolved, requested, edited, requested again, stopped and cleaned');
   } catch (error) {
     failed = true;
     console.error(error.stack || error);
     console.error('Tour at failure: ' + await tourWhere(page));
   } finally {
-    try { await cleanup(); await hardCleanup(page); }
+    try { await cleanup(); }
     catch (error) { failed = true; console.error(error); }
-    await browser.close();
+    await closeTourBrowser(browser, page, failed);
   }
+  if (!failed) console.log('PASS: lesson 38 resolved, requested, edited, requested again, stopped and cleaned');
   process.exit(failed ? 1 : 0);
 })();

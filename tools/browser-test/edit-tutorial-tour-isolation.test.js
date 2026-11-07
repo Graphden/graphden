@@ -4,7 +4,7 @@
 const {chromium} = require('playwright');
 const {assert, newContext, api} = require('./edit-test-helpers');
 const {
-  NS_NAME, FN_NAME, hardCleanup, waitTourTitle, clickTourButton,
+  NS_NAME, FN_NAME, hardCleanup, closeTourBrowser, waitTourTitle, clickTourButton,
   bindFirstPlaceholder, runViaRowActions, appendSeqItemViaEdge,
   createRootNamespace, createFnInNamespace, setParentViaStrip,
   tourTitle, tourWhere,
@@ -184,7 +184,6 @@ const {
       + JSON.stringify((leftOver.branches || []).map((b) => b.name)) + ')');
     console.log('  handoff: a parked lesson opens isolated on the next load, once');
 
-    console.log('PASS');
   } catch (err) {
     failed = true;
     console.error('FAIL:', err.message);
@@ -194,8 +193,8 @@ const {
       console.error('  screenshot: /tmp/edit-tutorial-tour-isolation-fail.png');
     } catch (_) { /* page may be gone */ }
   } finally {
-    await hardCleanup(page);
-    await browser.close();
+    await closeTourBrowser(browser, page, failed);
   }
+  if (!failed) console.log('PASS');
   process.exit(failed ? 1 : 0);
 })();

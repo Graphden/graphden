@@ -4,7 +4,7 @@
 const {chromium} = require('playwright');
 const {assert, newContext, api} = require('./edit-test-helpers');
 const {
-  hardCleanup, waitTourTitle, clickTourButton, filterAndSelect,
+  hardCleanup, closeTourBrowser, waitTourTitle, clickTourButton, filterAndSelect,
   extendViaRowActions, bindFirstPlaceholder, editBoundValue,
   appendSeqItemViaEdge, bindFnRefPlaceholder, createRootNamespace,
   createFnInNamespace, setParentViaStrip, finishAndDelete, tourWhere,
@@ -119,7 +119,6 @@ const {
     await finishAndDelete(page);
     console.log('  lesson 17: walked + cleaned');
 
-    console.log('PASS');
   } catch (err) {
     failed = true;
     console.error('FAIL:', err.message);
@@ -129,8 +128,8 @@ const {
       console.error('  screenshot: /tmp/edit-tutorial-tour-tests-fail.png');
     } catch (_) { /* page may be gone */ }
   } finally {
-    await hardCleanup(page);
-    await browser.close();
+    await closeTourBrowser(browser, page, failed);
   }
+  if (!failed) console.log('PASS');
   process.exit(failed ? 1 : 0);
 })();

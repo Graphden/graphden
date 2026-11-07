@@ -15,7 +15,7 @@ const {chromium} = require('playwright');
 const fs = require('node:fs');
 const {assert, newContext, api, nodeApi} = require('./edit-test-helpers');
 const {
-  hardCleanup, waitTourTitle, clickTourButton, filterAndSelect,
+  hardCleanup, closeTourBrowser, waitTourTitle, clickTourButton, filterAndSelect,
   runViaRowActions, tourWhere, extendViaRowActions, bindFirstPlaceholder,
   bindFnRefPlaceholder, finishAndDelete, runWithEffectAck, waitTourClosed,
   openRowActionsFor, bindPlaceholderOn, extendInPlace,
@@ -365,7 +365,6 @@ const {
     assert(!viewsAfterCleanup.some(view => view.id === viewId), 'lesson cleanup removed the exact created view');
     console.log('  lesson 22: created, edited both conditions, ran and cleaned exact UUID');
 
-    console.log('PASS');
   } catch (err) {
     failed = true;
     console.error('FAIL:', err.message);
@@ -398,8 +397,8 @@ const {
         console.error('Exact saved view cleanup incomplete; retained receipt: ' + viewReceiptPath);
       }
     }
-    await hardCleanup(page);
-    await browser.close();
+    await closeTourBrowser(browser, page, failed);
   }
+  if (!failed) console.log('PASS');
   process.exit(failed ? 1 : 0);
 })();

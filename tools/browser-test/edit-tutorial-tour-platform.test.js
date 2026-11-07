@@ -20,7 +20,7 @@ const {chromium} = require('playwright');
 const {assert, newContext, api} = require('./edit-test-helpers');
 const {handlerPreviewTestOptions} = require('./handler-preview-test-options');
 const {
-  hardCleanup, waitTourTitle, clickTourButton, filterAndSelect,
+  hardCleanup, closeTourBrowser, waitTourTitle, clickTourButton, filterAndSelect,
   createRootNamespace, createFnInNamespace, setParentViaStrip,
   finishAndDelete, tourWhere, openOperateSection, waitTourClosed, openTutorialCatalog,
 } = require('./tutorial-tour-helpers');
@@ -179,7 +179,6 @@ const {trackPublications, walkLesson35} = require('./tutorial-http-helpers');
     await finishAndDelete(page);
     console.log('  lesson 32: walked + cleaned (published, pinned, unpinned)');
 
-    console.log('PASS');
   } catch (err) {
     failed = true;
     console.error('FAIL:', err.message);
@@ -191,8 +190,8 @@ const {trackPublications, walkLesson35} = require('./tutorial-http-helpers');
   } finally {
     try { await cleanupPublications(); }
     catch (error) { failed = true; console.error(error); }
-    await hardCleanup(page);
-    await browser.close();
+    await closeTourBrowser(browser, page, failed);
   }
+  if (!failed) console.log('PASS');
   process.exit(failed ? 1 : 0);
 })();

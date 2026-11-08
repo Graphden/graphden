@@ -1545,7 +1545,10 @@ run_gate_stage() {
         else
           wave_integration="$AUTO_INTEGRATION"
           wave_browser="$AUTO_BROWSER"
-          wave_order=(integration browser)
+          # Browser files often expose UI regressions much faster than the
+          # broad related integration roster. Preserve manual priorities,
+          # then run both automatic suites once with browser first.
+          wave_order=(browser integration)
         fi
         for kind in "${wave_order[@]}"; do
           case "$kind" in

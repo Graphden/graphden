@@ -1,4 +1,4 @@
-(ns graphden.packages.app.value-repr-test
+(ns ^:serial graphden.packages.app.value-repr-test
   "Typed value representations in the execute-result body — the
    `:_value-repr-registry` dispatch (`app/reprs`), the component-
    preview clause, and the safety properties: repr purity enforcement

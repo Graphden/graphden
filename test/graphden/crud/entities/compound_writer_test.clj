@@ -1,4 +1,4 @@
-(ns ^:integration graphden.crud.entities.compound-writer-test
+(ns ^:integration ^:serial graphden.crud.entities.compound-writer-test
   "Compound writes against real PostgreSQL: rollback and reads after a
    competing writer commits. No timing assumption substitutes for lock waits."
   (:require

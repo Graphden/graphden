@@ -20,13 +20,15 @@
                {:kind :value :ext-name :payload :slot-id :literal}
                {:kind :ref :ext-name :payload :slot-id :reference}]
         env {:env-name :payload :slot-id :local}
-        lookups {:slot-map {:local {:id :local}}}]
-    (with-redefs [l/effective-reader-slot-id (fn [_ slot-id _]
-                                               (is (= :raw slot-id))
-                                               :renamed)]
-      (is (= [:local :renamed]
-             (l/env-binding-route-ids :fn env roots #{:local} lookups))
-          "the renamed reader is shadowed; its raw and unrelated slots are not"))))
+        lookups {:fn-map {:fn {:id :fn :parent-ids []}}
+                 :fn-slots-by-fn {:fn [{:fn-id :fn :slot-id :renamed}]}
+                 :slot-map {:local {:id :local}
+                            :raw {:id :raw :name "value"}
+                            :renamed {:id :renamed :name "payload" :source-slot-id :raw}}}]
+    (is (= :renamed (l/effective-reader-slot-id :fn :raw lookups)))
+    (is (= [:local :renamed]
+           (l/env-binding-route-ids :fn env roots #{:local} lookups))
+        "the renamed reader is shadowed; its raw and unrelated slots are not")))
 
 
 (deftest no-rename-falls-back-to-chain-leaf-test

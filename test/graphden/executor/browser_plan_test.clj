@@ -1,4 +1,4 @@
-(ns graphden.executor.browser-plan-test
+(ns ^:serial graphden.executor.browser-plan-test
   "Export real fn-def records without a database or a second source language."
   (:require
     [cheshire.core :as json]

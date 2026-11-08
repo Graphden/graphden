@@ -307,6 +307,17 @@
            (frequencies (priority/browser-order changed))))))
 
 
+(deftest narrow-changed-browser-helper-precedes-broad-helper
+  (let [changed #{"tools/browser-test/tutorial-tour-helpers.js"
+                  "tools/browser-test/tutorial-ui-components-helpers.js"
+                  "resources/packages/app/forms/fns.edn"}
+        positions (zipmap (priority/browser-first changed) (range))
+        early (:browser (priority/plan changed))]
+    (is (some #{"edit-ui-components.test.js"} early))
+    (is (< (positions "edit-ui-components.test.js")
+           (positions "edit-tutorial-tour.test.js")))))
+
+
 (deftest row-actions-owner-contract-prioritizes-its-browser-consumers
   (let [source "resources/packages/app/editor/editor-row-actions.js"
         early (priority/browser-first #{source})

@@ -425,6 +425,13 @@
                            (str/ends-with? % ".js"))
           changed-editor-js (sort (filter editor-js? changed))
           changed-other (sort (remove editor-js? changed))
+          changed-helper-groups (for [path changed-other
+                                      :when (re-matches #"tools/browser-test/[^/]+\.js" path)
+                                      :when (not (re-matches #"tools/browser-test/edit-[^/]+\.test\.js" path))
+                                      :let [files (browser-local-consumers browser-files
+                                                                           #{(str (fs/file-name path))})]
+                                      :when (seq files)]
+                                  [path files])
           source-consumers (fn [path]
                              (cond
                                (re-matches #"tools/browser-test/edit-[^/]+\.test\.js" path)
@@ -452,6 +459,8 @@
                   sort
                   (filter #(re-matches #"tools/browser-test/edit-[^/]+\.test\.js" %))
                   (map (comp str fs/file-name)))
+             (mapcat second (sort-by (fn [[path files]] [(count files) path])
+                                     changed-helper-groups))
              (mapcat #(precise-component-consumers browser-files graph %)
                      (sort changed))
              ;; Direct editor modules are stronger evidence than generic API

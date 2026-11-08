@@ -6,6 +6,7 @@
     [ci-select]
     [clojure.edn :as edn]
     [clojure.java.io :as io]
+    [clojure.set :as set]
     [clojure.string :as str]))
 
 
@@ -275,16 +276,38 @@
         []))))
 
 
+(defn- route-handler-paths
+  "Literal route paths indexed by their named handler. A package containing
+   the handler owns the browser impact even when the route lives elsewhere."
+  []
+  (reduce (fn [paths file]
+            (reduce (fn [paths {:keys [args]}]
+                      (let [{:keys [path handler]} args]
+                        (if (and (keyword? handler) (string? path)
+                                 (str/starts-with? path "/"))
+                          (update paths handler (fnil conj #{}) (str "/api" path))
+                          paths)))
+                    paths (:fns (edn/read-string (slurp (str file))))))
+          {} (fs/glob "resources/packages" "**/fns.edn")))
+
+
+(def ^:private cached-route-handler-paths
+  (memoize (fn [_root] (route-handler-paths))))
+
+
 (defn- package-api-paths
-  "Read literal HTTP declarations, excluding ordinary resource path arguments."
-  [definitions]
-  (->> (:fns (edn/read-string (slurp definitions)))
-       (keep (fn [{:keys [args]}]
-               (let [path (:path args)]
-                 (when (and (contains? args :handler) (string? path)
-                            (str/starts-with? path "/"))
-                   (str "/api" path)))))
-       set))
+  "Read literal routes and routes whose handler is defined by this package."
+  [definitions handler-links?]
+  (let [fns (:fns (edn/read-string (slurp definitions)))
+        handler-paths (when handler-links?
+                        (cached-route-handler-paths (str (fs/cwd))))]
+    (set (concat
+           (keep (fn [{:keys [args]}]
+                   (let [path (:path args)]
+                     (when (and (contains? args :handler) (string? path)
+                                (str/starts-with? path "/"))
+                       (str "/api" path)))) fns)
+           (mapcat #(get handler-paths (:name %)) fns)))))
 
 
 (defn- literal-api-consumer?
@@ -301,35 +324,81 @@
           paths)))
 
 
+(defn- api-consumer?
+  [paths source generated?]
+  (or (literal-api-consumer? paths source)
+      (and generated?
+           (some (fn [path]
+                   (when-not (str/includes? path ":")
+                     (str/includes? source
+                                    (str "api_" (str/replace (subs path 5) #"[^A-Za-z0-9]+" "_")))))
+                 paths))))
+
+
+(defn- editor-api-selector-consumers
+  "A browser test or local helper that uses two of the editor API consumer's
+   data attributes observes the returned DOM contract. One shared attribute
+   alone is too common to establish a useful early-test link."
+  [browser-files sources script]
+  (let [contracts (set (re-seq #"data-[a-z][a-z0-9-]{4,}" (get sources script "")))
+        matches (->> sources
+                     (keep (fn [[file source]]
+                             (when (and (str/starts-with? file "tools/browser-test/")
+                                        (<= 2 (count (set/intersection
+                                                       contracts
+                                                       (set (re-seq #"data-[a-z][a-z0-9-]{4,}" source))))))
+                               (str (fs/file-name file)))))
+                     sort)
+        tests (set browser-files)]
+    (concat (filter tests matches)
+            (mapcat (fn [helper]
+                      (let [consumers (browser-local-consumers browser-files #{helper})]
+                        (when (<= (count consumers) 15) consumers)))
+                    (remove tests matches)))))
+
+
 (defn- browser-api-consumers
   "Follow backend dependencies to declared literal HTTP paths, then direct
-   browser consumers and transitive local helper importers."
-  [browser-files path]
+   browser consumers, local helper importers and editor source consumers."
+  [browser-files graph path]
   (let [modules (if (re-matches #"resources/packages/[^/]+/[^/]+/(?:fns\.edn|impls\.clj)" path)
                   [path]
                   (source-api-modules path))
-        sources (into {} (map (fn [file] [(str (fs/file-name file)) (slurp (str file))]))
-                      (fs/glob "tools/browser-test" "*.js"))
+        sources (:sources graph)
         tests (set browser-files)]
     (mapcat
       (fn [module-path]
         (let [definitions (str/replace module-path #"(?:fns\.edn|impls\.clj)$" "fns.edn")]
           (when (fs/exists? definitions)
-            (let [paths (package-api-paths definitions)
+            (let [paths (package-api-paths definitions
+                                           (str/starts-with? path "resources/packages/"))
                   consumers (->> sources
                                  (keep (fn [[file source]]
-                                         (when (literal-api-consumer? paths source) file)))
+                                         (when (api-consumer? paths source
+                                                              (str/starts-with? path "resources/packages/"))
+                                           file)))
                                  sort)
-                  direct (filter tests consumers)
+                  direct (filter #(contains? tests (str (fs/file-name %))) consumers)
                   ;; Common cleanup helpers mention many APIs; their whole
                   ;; importer fanout is weaker evidence than a direct call.
-                  helper-groups (for [helper (remove tests consumers)
-                                      :let [files (browser-local-consumers browser-files #{helper})]
+                  helper-groups (for [helper consumers
+                                      :when (str/starts-with? helper "tools/browser-test/")
+                                      :when (not (contains? tests (str (fs/file-name helper))))
+                                      :let [files (browser-local-consumers browser-files
+                                                                           #{(str (fs/file-name helper))})]
                                       :when (<= (count files) 15)]
-                                  [helper files])]
-              (concat direct
+                                  [helper files])
+                  editor-groups (for [script consumers
+                                      :when (and (str/starts-with? path "resources/packages/")
+                                                 (str/starts-with? script "resources/packages/"))
+                                      :let [files (editor-api-selector-consumers browser-files sources script)]
+                                      :when (seq files)]
+                                  [script files])]
+              (concat (map (comp str fs/file-name) direct)
                       (mapcat second (sort-by (fn [[helper files]] [(count files) helper])
-                                              helper-groups)))))))
+                                              helper-groups))
+                      (mapcat second (sort-by (fn [[script files]] [(count files) script])
+                                              editor-groups)))))))
       modules)))
 
 
@@ -388,7 +457,7 @@
              ;; Direct editor modules are stronger evidence than generic API
              ;; roots or shared package graphs, which often reach every file.
              (mapcat source-consumers changed-editor-js)
-             (mapcat #(browser-api-consumers browser-files %) (sort changed))
+             (mapcat #(browser-api-consumers browser-files graph %) (sort changed))
              (mapcat source-consumers changed-other))
            distinct
            (filter #(fs/exists? (str "tools/browser-test/" %)))

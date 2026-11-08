@@ -297,6 +297,16 @@
              (frequencies (priority/browser-order #{source}))) source))))
 
 
+(deftest package-handler-route-impact-reaches-value-form-browser-walk
+  (let [changed #{"resources/packages/app/forms/fns.edn"}
+        early (:browser (priority/plan changed))]
+    (is (some #{"edit-ui-components.test.js"} early)
+        "the form package owns the route handler even though the route is declared elsewhere")
+    (is (some #{"edit-color-values.test.js"} early))
+    (is (= (frequencies (priority/browser-order nil))
+           (frequencies (priority/browser-order changed))))))
+
+
 (deftest row-actions-owner-contract-prioritizes-its-browser-consumers
   (let [source "resources/packages/app/editor/editor-row-actions.js"
         early (priority/browser-first #{source})

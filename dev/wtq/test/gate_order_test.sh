@@ -155,8 +155,20 @@ TEST_PRIORITY_INTEGRATION=graphden.editor.root-migration-integration-test
 TEST_PRIORITY_BROWSER=edit-ui-components-selective.test.js
 WTQ_REPORT_TS=related-wave
 run_case
-assert_events 'expect,ci,verify,uber,build,image,integration-early,headroom,e2e-early,e2e-rest,integration-rest'
+assert_events 'expect,ci,verify,uber,build,image,e2e-early,integration-early,headroom,e2e-rest,integration-rest'
 [ "$built_candidate" = 1 ]
+
+# An automatically related UI failure must stop before the broad integration
+# roster; its browser receipt is a real failed check, not a scheduling hint.
+WTQ_REPORT_TS=auto-browser-red
+FAIL_E2E=1
+: > "$TEST_LOG"
+if gate_suites "$TEST_DIR" 0 0 0 >/dev/null; then
+  echo 'failed automatic browser did not stop before integration' >&2; exit 1
+fi
+assert_events 'expect,ci,verify,uber,build,image,e2e-early'
+[ "$(bb scripts/ci_resume_cli.clj status stages "$LOG_DIR/_train-$WTQ_REPORT_TS.stages.edn" priority)" = failed ]
+unset FAIL_E2E
 
 # A forced browser file beats automatically related integration namespaces.
 WTQ_FIRST_TESTS=browser:edit-ui-components-selective.test.js
@@ -171,7 +183,7 @@ TEST_PRIORITY_BROWSER=$'edit-ui-components-selective.test.js\nedit-other.test.js
 WTQ_FIRST_TESTS=browser:edit-ui-components-selective.test.js,integration:graphden.editor.root-migration-integration-test
 WTQ_REPORT_TS=forced-cross-suite-browser-first
 run_case
-assert_events 'expect,ci,verify,uber,build,image,e2e-early,integration-early,integration-early,headroom,e2e-early,e2e-rest,integration-rest'
+assert_events 'expect,ci,verify,uber,build,image,e2e-early,integration-early,headroom,e2e-early,integration-early,headroom,e2e-rest,integration-rest'
 FAIL_E2E=1
 : > "$TEST_LOG"
 if gate_suites "$TEST_DIR" 0 0 0 >/dev/null; then
@@ -182,7 +194,7 @@ unset FAIL_E2E
 WTQ_FIRST_TESTS=integration:graphden.editor.root-migration-integration-test,browser:edit-ui-components-selective.test.js
 WTQ_REPORT_TS=forced-cross-suite-integration-first
 run_case
-assert_events 'expect,ci,verify,uber,build,image,integration-early,headroom,e2e-early,integration-early,headroom,e2e-early,integration-rest,headroom,e2e-rest'
+assert_events 'expect,ci,verify,uber,build,image,integration-early,headroom,e2e-early,headroom,e2e-early,integration-early,integration-rest,headroom,e2e-rest'
 unset WTQ_FIRST_TESTS
 unset TEST_PRIORITY_INTEGRATION TEST_PRIORITY_BROWSER
 
@@ -193,7 +205,7 @@ TEST_PRIORITY_INTEGRATION=graphden.editor.root-migration-integration-test
 TEST_PRIORITY_BROWSER=edit-ui-components-selective.test.js
 WTQ_REPORT_TS=priority-before-visual
 run_case
-assert_events 'expect,ci,verify,uber,build,image,integration-early,headroom,e2e-early,visual,e2e-rest,integration-rest'
+assert_events 'expect,ci,verify,uber,build,image,e2e-early,integration-early,headroom,visual,e2e-rest,integration-rest'
 WTQ_FIRST_TESTS=browser:edit-ui-components-selective.test.js
 WTQ_REPORT_TS=browser-priority-before-visual
 run_case

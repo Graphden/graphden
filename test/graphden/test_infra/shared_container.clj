@@ -183,16 +183,46 @@
   (reset! created-storages #{}))
 
 
+(def ^:private stop-timeout-ms 30000)
+
+
+(defn- stop-with-timeout!
+  "Bound a Docker client stop call. Its worker is daemonized so a stuck client
+   cannot hold the completed test JVM open; Testcontainers' Ryuk reclaims the
+   container when that JVM exits. Return ::timeout only after interrupting the
+   worker, and propagate an ordinary stop failure to the caller."
+  [stop-fn timeout-ms]
+  (let [result (promise)
+        worker (doto (Thread. ^Runnable
+                      (fn []
+                        (deliver result
+                                 (try (stop-fn)
+                                      nil
+                                      (catch Exception e e))))
+                              "graphden-test-postgres-stop")
+                 (Thread/.setDaemon true))]
+    (Thread/.start worker)
+    (let [outcome (deref result timeout-ms ::timeout)]
+      (cond
+        (= ::timeout outcome) (do (Thread/.interrupt worker) ::timeout)
+        (instance? Throwable outcome) (throw outcome)
+        :else nil))))
+
+
 (defn stop-container!
   "Stops the shared container if running.
    Called by kaocha hooks plugin after all tests complete.
    No-op in external-PG mode — we don't own that lifecycle."
   []
   (when-let [container @container-atom]
-    (log/info "Stopping shared PostgreSQL test container...")
-    (PostgreSQLContainer/.stop container)
-    (reset! container-atom nil)
-    (log/info "Shared PostgreSQL container stopped")))
+    (when (compare-and-set! container-atom container nil)
+      (log/info "Stopping shared PostgreSQL test container...")
+      (if (= ::timeout
+             (stop-with-timeout! #(PostgreSQLContainer/.stop container)
+                                 stop-timeout-ms))
+        (log/warn "Docker client did not finish stopping shared PostgreSQL within"
+                  stop-timeout-ms "ms; Ryuk will reclaim it at JVM exit")
+        (log/info "Shared PostgreSQL container stopped")))))
 
 
 (defn running?

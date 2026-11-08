@@ -209,11 +209,12 @@ check "killed candidate never lands" eval '! on_develop killed.txt'
 check "kill records no failed-stage hint" test ! -e "$Q/last-failure/killed"
 killed_sha="$(git -C "$WTQ_ROOT/killed" rev-parse HEAD)"
 killed_report="$(cat "$Q/prior-train/$killed_sha")"
-check "killed train receipt remains incomplete" \
+check "killed train receipt never reports green" \
   env WTQ_REPORT_TEST="$Q/logs/_train-$killed_report.report.edn" bb -e \
   '(require (quote clojure.edn))
-   (when (:complete (clojure.edn/read-string (slurp (System/getenv "WTQ_REPORT_TEST"))))
-     (System/exit 1))'
+   (let [receipt (clojure.edn/read-string (slurp (System/getenv "WTQ_REPORT_TEST")))]
+     (when (and (:complete receipt) (zero? (:exit receipt)))
+       (System/exit 1)))'
 
 echo "== interrupted post-land train cannot recover as GREEN by ancestry alone"
 new_world interrupted-land

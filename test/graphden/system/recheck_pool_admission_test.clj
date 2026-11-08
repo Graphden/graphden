@@ -63,6 +63,38 @@
         (deref holder 2000 ::timeout)))))
 
 
+(deftest queued-targeted-admission-precedes-retrying-recovery
+  (let [datasource (Object.)
+        entered (promise)
+        release (promise)
+        waiter-thread (promise)
+        order (atom [])
+        holder (future
+                 (tx/try-with-background-admission
+                   datasource #(do (deliver entered true) @release)))]
+    (try
+      (is (true? (deref entered 10000 ::timeout)))
+      (let [targeted (future
+                       (deliver waiter-thread (Thread/currentThread))
+                       (tx/with-background-admission
+                         datasource #(swap! order conj :targeted)))]
+        (is (eventually? #(when-let [^Thread thread (deref waiter-thread 0 nil)]
+                            (= java.lang.Thread$State/WAITING (Thread/.getState thread))))
+            "targeted work has joined the fair admission queue")
+        (let [recovery (future
+                         (loop []
+                           (or (tx/try-with-background-admission
+                                 datasource #(swap! order conj :recovery))
+                               (do (Thread/sleep 1) (recur)))))]
+          (deliver release true)
+          (is (not= ::timeout (deref targeted 10000 ::timeout)))
+          (is (not= ::timeout (deref recovery 10000 ::timeout)))
+          (is (= [:targeted :recovery] @order))))
+      (finally
+        (deliver release true)
+        (deref holder 10000 ::timeout)))))
+
+
 (deftest two-recovery-contexts-leave-a-foreground-connection
   (let [storage (pg/create-storage (assoc (pth/get-container-config *container*) :pool-size 2))
         schema (ig/init-key :db/schema {})

@@ -1073,8 +1073,7 @@
             (throw (ex-info "Controlled recovery admission was not acquired"
                             {:type :test/admission-barrier-unavailable}))))
         (let [merged (dispatch {:method :post :path "/api/branches/main/merge"
-                                :body {:source feat}})
-              deadline (+ (System/nanoTime) 15000000000)]
+                                :body {:source feat}})]
           (ok-200 merged "merge while recovery admission is busy")
           (is (true? (:ok (parse-json merged))))
           (is (false? (present?)) "targeted type check cannot publish before admission")
@@ -1085,14 +1084,15 @@
             (is (false? (:rich-by-id? snapshot)) "the target slice has not recorded the merged id"))
           (deliver release true)
           (is (= :released (deref holder 5000 ::timeout)) "the recovery permit was released")
-          (let [published? (loop []
+          (let [deadline (+ (System/nanoTime) 15000000000)
+                published? (loop []
                              (cond
                                (present?) true
                                (>= (System/nanoTime) deadline) false
                                :else (do (Thread/sleep 25) (recur))))
                 snapshot (merged-type-snapshot moved @latest)]
             (println "merge admission barrier: after release" (pr-str snapshot))
-            (is published? (str "publication within the original 15s window: " (pr-str snapshot)))
+            (is published? (str "publication within 15s after admission release: " (pr-str snapshot)))
             (is (= 200 (:status @latest)))
             (is (:rich-by-id? snapshot))))
         (finally

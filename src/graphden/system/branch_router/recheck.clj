@@ -287,19 +287,15 @@
                                                 :status status}
                                                details)))))]
     (try
-      (loop []
-        (if-not (current-recheck-generation? ctx generation)
-          (report! :cancelled {:outcome :cancelled})
-          (when-not (lifecycle/try-with-recovery-admission
-                      (:storage ctx)
-                      (fn []
-                        (vreset! admitted-after (elapsed))
-                        (if (current-recheck-generation? ctx generation)
-                          (report! :checked (check-targeted-types! ctx branch-id fn-ids))
-                          (report! :cancelled {:outcome :cancelled}))
-                        true))
-            (Thread/sleep 50)
-            (recur))))
+      (if-not (current-recheck-generation? ctx generation)
+        (report! :cancelled {:outcome :cancelled})
+        (lifecycle/with-recovery-admission
+          (:storage ctx)
+          (fn []
+            (vreset! admitted-after (elapsed))
+            (if (current-recheck-generation? ctx generation)
+              (report! :checked (check-targeted-types! ctx branch-id fn-ids))
+              (report! :cancelled {:outcome :cancelled})))))
       (catch Exception error
         (report! :failed {:outcome :failed :exception-class (Class/.getName (class error))})
         (throw error)))))

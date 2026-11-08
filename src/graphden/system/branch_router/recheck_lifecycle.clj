@@ -20,20 +20,37 @@
 (def ^:private unpooled-permit (java.util.concurrent.Semaphore. 1 true))
 
 
+(defn- pooled-datasource
+  [storage]
+  (when-let [datasource (tx/datasource storage)]
+    ;; Admission must precede every recovery snapshot. A connection-backed
+    ;; storage cannot release its caller-owned connection while waiting.
+    (when (instance? java.sql.Connection datasource)
+      (throw (ex-info "Recovery admission requires a pooled storage"
+                      {:type :recheck/admission-requires-pool})))
+    (tx/assert-owns-commit! storage)
+    datasource))
+
+
 (defn try-with-recovery-admission
   "Run a background storage pass only when its pool has a spare recovery
    permit. A busy result owns no JDBC resource; callers retry outside it."
   [storage f]
-  (if-let [datasource (tx/datasource storage)]
+  (if-let [datasource (pooled-datasource storage)]
+    (tx/try-with-background-admission datasource f)
+    (when (java.util.concurrent.Semaphore/.tryAcquire
+            unpooled-permit 0 java.util.concurrent.TimeUnit/MILLISECONDS)
+      (try (f) (finally (java.util.concurrent.Semaphore/.release unpooled-permit))))))
+
+
+(defn with-recovery-admission
+  "Queue targeted work behind the active recovery without holding JDBC or a
+   context lock. Unlike a retrying probe, a queued waiter retains FIFO order."
+  [storage f]
+  (if-let [datasource (pooled-datasource storage)]
+    (tx/with-background-admission datasource f)
     (do
-      ;; Admission must precede every recovery snapshot. A connection-backed
-      ;; storage cannot release its caller-owned connection when busy.
-      (when (instance? java.sql.Connection datasource)
-        (throw (ex-info "Recovery admission requires a pooled storage"
-                        {:type :recheck/admission-requires-pool})))
-      (tx/assert-owns-commit! storage)
-      (tx/try-with-background-admission datasource f))
-    (when (java.util.concurrent.Semaphore/.tryAcquire unpooled-permit)
+      (java.util.concurrent.Semaphore/.acquire unpooled-permit)
       (try (f) (finally (java.util.concurrent.Semaphore/.release unpooled-permit))))))
 
 
@@ -143,36 +160,49 @@
                               targets before after last-batch?))))))
 
 
+(defn- check-batches!
+  [ctx branch-id expected batches check-batch]
+  (loop [remaining (if (seq batches) batches [[]])]
+    (when (let [state @(:type-recheck-state ctx)]
+            (and (= (:generation expected) (:generation state))
+                 (not (:cancelled? state))))
+      (let [batch (first remaining)
+            outcome (try-with-recovery-admission
+                      (:storage ctx)
+                      #(if (current? ctx expected)
+                         (if (publish-staged! ctx branch-id batch expected
+                                              (stage ctx branch-id batch check-batch)
+                                              (nil? (next remaining)))
+                           :published
+                           :stale)
+                         :stale))]
+        (case outcome
+          :published (if (next remaining) (recur (next remaining)) true)
+          :stale nil
+          (do (Thread/sleep 50) (recur remaining)))))))
+
+
 (defn run-pass!
   "Discover/order once, then check contiguous dependency-ordered batches.
-   Every batch releases its snapshot before a short conditional publication."
+   Release the physical pool's background permit after discovery and each
+   batch so a queued targeted check can publish between long recoveries."
   [ctx branch-id generation discover check-batch]
-  ;; One recovery pass per physical pool, across branch contexts and all
-  ;; phases. Busy admission leaves no connection or context lock behind;
-  ;; work! retries after its outside-resource backoff. In particular, two
-  ;; discovery snapshots cannot consume both slots of a two-connection pool.
-  (try-with-recovery-admission
-    (:storage ctx)
-    (fn []
-      (when (let [state @(:type-recheck-state ctx)]
-              (and (= generation (:generation state)) (not (:cancelled? state))))
-        (let [expected (token ctx generation)
-              ids (binding [branch-local/*storage-caches-override* (atom {})]
-                    (resolution/call-with-fresh-memos #(vec (discover ctx))))
-              batches (vec (partition-all batch-size ids))]
-          (swap! (:type-recheck-state ctx)
-                 #(if (= generation (:generation %))
-                    (assoc % :status :running :pending-ids (set ids) :failed-ids #{}) %))
-          (if (empty? batches)
-            (publish-staged! ctx branch-id [] expected (stage ctx branch-id [] check-batch) true)
-            (loop [remaining batches]
-              (when (current? ctx expected)
-                (let [batch (first remaining)
-                      staged (stage ctx branch-id batch check-batch)]
-                  (when (publish-staged! ctx branch-id batch expected staged (= 1 (count remaining)))
-                    (if (next remaining)
-                      (do (Thread/yield) (recur (next remaining)))
-                      true)))))))))))
+  ;; Admission still precedes every snapshot. Busy discovery returns nil and
+  ;; work! retries; busy batches retain their ordered IDs and epoch proof.
+  (when-let [{:keys [expected batches]}
+             (try-with-recovery-admission
+               (:storage ctx)
+               (fn []
+                 (when (let [state @(:type-recheck-state ctx)]
+                         (and (= generation (:generation state)) (not (:cancelled? state))))
+                   (let [expected (token ctx generation)
+                         ids (binding [branch-local/*storage-caches-override* (atom {})]
+                               (resolution/call-with-fresh-memos #(vec (discover ctx))))]
+                     (swap! (:type-recheck-state ctx)
+                            #(if (= generation (:generation %))
+                               (assoc % :status :running :pending-ids (set ids) :failed-ids #{}) %))
+                     {:expected expected :batches (vec (partition-all batch-size ids))}))))]
+    (check-batches! ctx branch-id expected batches check-batch)))
 
 
 (defn- work!

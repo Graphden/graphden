@@ -83,6 +83,22 @@
          (finally (Semaphore/.release permit)))))))
 
 
+(defn with-background-admission
+  "Queue a background task fairly without holding a connection. Use for
+   targeted work that must run after the current owner, even while other
+   background workers are retrying nonblocking admission."
+  [datasource f]
+  (let [{:keys [^Semaphore permit retired?]} (background-admission datasource)]
+    (when @retired?
+      (throw (ex-info "Background storage has retired" {:type :storage/background-retired})))
+    (Semaphore/.acquire permit)
+    (try
+      (when @retired?
+        (throw (ex-info "Background storage has retired" {:type :storage/background-retired})))
+      (f)
+      (finally (Semaphore/.release permit)))))
+
+
 (defn retire-background-admission!
   "Prevent queued work from entering a closing pool, then drain its active
    background task before the physical datasource closes. Never interrupts

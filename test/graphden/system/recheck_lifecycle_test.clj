@@ -42,6 +42,47 @@
       (is (empty? (:pending-ids @(:type-recheck-state ctx)))))))
 
 
+(deftest queued-targeted-check-runs-between-recovery-batches
+  (let [ctx (context)
+        ids (mapv (fn [_] (random-uuid)) (range 501))
+        first-entered (promise)
+        release-first (promise)
+        waiter-thread (promise)
+        order (atom [])]
+    (binding [diagnostics/*diagnostics-override* (atom {})]
+      (let [worker (future
+                     (lifecycle/run-pass!
+                       ctx nil 1 (constantly ids)
+                       (fn [ctx branch-id batch]
+                         (swap! order conj (count batch))
+                         (when (= 500 (count batch))
+                           (deliver first-entered true)
+                           @release-first)
+                         (record ctx branch-id batch))))]
+        (try
+          (is (true? (deref first-entered 10000 ::timeout)))
+          (let [targeted (future
+                           (deliver waiter-thread (Thread/currentThread))
+                           (lifecycle/with-recovery-admission
+                             (:storage ctx) #(swap! order conj :targeted)))]
+            (is (instance? Thread (deref waiter-thread 10000 nil)))
+            (let [^Thread thread (deref waiter-thread 0 nil)]
+              (is (loop [deadline (+ (System/nanoTime) 10000000000)]
+                    (cond
+                      (= java.lang.Thread$State/WAITING (Thread/.getState thread)) true
+                      (>= (System/nanoTime) deadline) false
+                      :else (do (Thread/sleep 25) (recur deadline))))
+                  "targeted work queued before the first batch releases admission"))
+            (deliver release-first true)
+            (is (not= ::timeout (deref targeted 10000 ::timeout))))
+          (is (true? (deref worker 10000 ::timeout)))
+          (is (= [500 :targeted 1] @order))
+          (is (= 501 (count (:by-id @(:rich-types-atom ctx)))))
+          (finally
+            (deliver release-first true)
+            (deref worker 10000 ::timeout)))))))
+
+
 (deftest a-write-during-snapshot-check-cannot-publish-stale-checker-state
   (let [ctx (context)
         id (random-uuid)

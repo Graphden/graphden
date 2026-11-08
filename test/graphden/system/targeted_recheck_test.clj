@@ -40,7 +40,7 @@
         completed (promise)]
     (binding [log/*logger-factory* (capture-factory lines terminal)]
       (with-redefs [type-check/type-check-fn-after-mutation! checker
-                    lifecycle/try-with-recovery-admission
+                    lifecycle/with-recovery-admission
                     (fn [_ callback]
                       (try (admission callback)
                            (finally (deliver completed true))))]

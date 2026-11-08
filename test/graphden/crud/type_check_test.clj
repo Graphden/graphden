@@ -1,4 +1,4 @@
-(ns graphden.crud.type-check-test
+(ns ^:serial graphden.crud.type-check-test
   "Tests for `graphden.crud.type-check` — the save-time type guards
    and type-row chain walkers behind the web/crud endpoints.
 

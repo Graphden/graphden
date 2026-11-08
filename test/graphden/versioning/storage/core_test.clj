@@ -274,11 +274,12 @@
   ;; each path, and that a normal merge + delete still succeed unchanged.)
   (let [base  (base-storage)
         v     (vs/wrap-with-versioning base)
+        original-lock mrg/lock-branches!
         calls (atom [])]
     (try
-      (with-redefs [mrg/lock-branches! (fn [_storage & bids]
+      (with-redefs [mrg/lock-branches! (fn [storage & bids]
                                          (swap! calls conj (vec bids))
-                                         nil)]
+                                         (apply original-lock storage bids))]
         (testing "merge-branch! locks source + target inside the tx"
           (let [feature (vs/create-branch! v "lock-merge-feat")
                 target  (vs/current-branch-id v)]

@@ -154,7 +154,16 @@ async function bindPersonalMenuTheme(page, entry, accent, background) {
   await binder.click();
   await page.getByRole('button', {name: 'Bind literal', exact: true}).click();
   const form = page.locator('.arg-value-edit-popover');
-  await form.locator('[data-form-field][data-field-path="accent"]').waitFor({state: 'visible', timeout: 60000});
+  try {
+    await form.locator('[data-form-field][data-field-path="accent"]').waitFor({state: 'visible', timeout: 60000});
+  } catch (error) {
+    const fields = await form.evaluate(el => [...el.querySelectorAll('[data-form-field], [data-form-widget]')]
+      .map(field => ({tag: field.tagName, kind: field.getAttribute('data-field-kind'),
+        path: field.getAttribute('data-field-path'), widget: field.getAttribute('data-form-widget'),
+        visible: !!field.getClientRects().length}))).catch(() => []);
+    console.error(JSON.stringify({diagnostic: 'personal-theme-form-fields', fields}));
+    throw error;
+  }
   assert(await form.locator('input[type="color"]').count() === 2,
     'the inherited theme record retains both canonical color widgets');
   await form.locator('[data-form-field][data-field-path="accent"]').fill(accent);

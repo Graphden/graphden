@@ -1121,13 +1121,13 @@
   {:name :_control-path-attrs,
    :parent :if,
    :args
-   {:test {:parent :empty?, :args {:coll {:as :path, :type :text}}},
+   {:test {:parent :empty?, :args {:coll {:as :form-path, :type :text}}},
     :then {:value {}},
     :else
     {:parent :zipmap,
      :args
      {:keys [{:value "data-field-path"}],
-      :vals [{:as :path, :type :text}]}}}}
+      :vals [{:as :form-path, :type :text}]}}}}
 
   {:name :_control-label-attrs,
    :parent :if,
@@ -1401,7 +1401,7 @@
    :args
    {:target {:ref :_render-exact-target, :type :text},
     :type-expr :_render-type,
-    :path :_render-path,
+    :form-path :_render-path,
     :id :_render-id}}
 
   {:name :_render-field-name,
@@ -1689,7 +1689,7 @@
     {:parent :_form-build-leaf,
      :args
      {:type-expr :_render-branch-leaf-type,
-      :path {:as :path, :type :text},
+      :form-path {:as :form-path, :type :text},
       :id nil}}},
    :lambda-params [:branch-index],
    :return-type :hiccup-node}
@@ -1708,7 +1708,7 @@
         :coll :_render-indices,
         :branches :_render-branches,
         :selected-index :_render-active,
-        :path :_render-path}}}},
+        :form-path :_render-path}}}},
     :active {:parent :to-str, :args {:value :_render-active}}},
    :return-type :hiccup-node}
 
@@ -1722,7 +1722,7 @@
       {:parent :equal?, :args {:a :_render-kind, :b {:value :list}}},
       :then {:value :any},
       :else :_render-type}},
-    :path :_render-path,
+    :form-path :_render-path,
     :id :_render-id}}
 
   {:name :_render-step,

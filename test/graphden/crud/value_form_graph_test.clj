@@ -33,7 +33,7 @@
 
 (defn- build-enum-control
   [path id {:keys [base members]}]
-  (graph-call "_control-enum-view" {:type-expr [:refine base [:in members]] :path path :id id}))
+  (graph-call "_control-enum-view" {:type-expr [:refine base [:in members]] :form-path path :id id}))
 
 
 (defn- type-label
@@ -43,7 +43,7 @@
 
 (defn- build-leaf-form
   [_ctx t path id]
-  (graph-call "_form-build-leaf" {:type-expr t :path path :id id}))
+  (graph-call "_form-build-leaf" {:type-expr t :form-path path :id id}))
 
 
 (defn- in-tree?
@@ -168,6 +168,48 @@
     (is (in-tree? form "HEX color"))
     (is (in-tree? form "Alpha (0–255)"))
     (is (some #(and (map? %) (contains? % "data-form-type")) (tree-seq coll? seq form)))))
+
+
+(defn- bound-theme-slot!
+  []
+  (let [storage harness/*storage*
+        slot (setup/create-slot! storage "theme" (harness/fn-id "_account-menu-theme"))
+        owner (setup/create-base-fn! storage (str "vfh-theme-" (random-uuid)))]
+    (setup/bind-value! storage (:id owner) (:id slot)
+                       {:accent "#7c3aed" :canvas-background "#f5f3ff"})))
+
+
+(defn- color-field-paths
+  [form]
+  (->> (tree-seq coll? seq form)
+       (filter vector?)
+       (keep (fn [node]
+               (let [attrs (second node)]
+                 (when (= "color" (:data-form-widget attrs))
+                   (:data-field-path attrs)))))
+       set))
+
+
+(deftest value-form-handler-record-field-paths-test
+  (let [binding (bound-theme-slot!)
+        {:keys [ok form]} (value-form! {:binding-id (str (:id binding))})]
+    (is (true? ok))
+    (is (= #{"accent" "canvas-background"} (color-field-paths form)))))
+
+
+(deftest value-form-route-binds-handler-test
+  (let [binding (bound-theme-slot!)
+        route (graph-call "api-value-form" {})
+        handler (get-in (second route) ["post" "handler"])]
+    (is (= "/value-form" (first route)))
+    (is (ifn? handler))
+    (let [response (handler {:uri "/api/value-form" :request-method :post
+                             :headers {"content-type" "application/json"}
+                             :body (cheshire/generate-string {:binding-id (str (:id binding))})})
+          result (cheshire/parse-string (str (:body response)) true)]
+      (is (true? (:ok result)))
+      (is (= #{"accent" "canvas-background"}
+             (color-field-paths (:form result)))))))
 
 
 (deftest resolve-form-leaf-test
@@ -309,7 +351,7 @@
     (doseq [[suffix _ expected] controls]
       (is (= expected (graph-call "_control-merged"
                                   {:target (str "form-test-" suffix)
-                                   :type-expr :int :path "" :id "new"}))))))
+                                   :type-expr :int :form-path "" :id "new"}))))))
 
 
 (deftest selected-form-target-preserves-effect-denial

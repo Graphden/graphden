@@ -64,8 +64,5 @@
             ;; ref must be gone before the template DB itself drops), the
             ;; golden templates, and finally shut the container down.
             ;; Order matters — DROP needs a live cluster.
-            (sc/close-all-storages!)
-            (sc/drop-all-ns-databases!)
-            (sb/drop-all-golden-databases!)
-            (sc/stop-container!)
+            (sc/finish-suite! sb/drop-all-golden-databases!)
             result))

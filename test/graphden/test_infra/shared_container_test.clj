@@ -5,7 +5,7 @@
 
 
 (deftest container-stop-is-bounded-after-all-tests-pass
-  (let [stop! @#'shared/stop-with-timeout!
+  (let [stop! @#'shared/run-bounded-cleanup!
         interrupted (promise)]
     (is (nil? (stop! (constantly nil) 1000)))
     (is (thrown-with-msg? IllegalStateException #"stop failed"

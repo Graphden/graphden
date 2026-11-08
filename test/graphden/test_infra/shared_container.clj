@@ -162,6 +162,9 @@
   (atom #{}))
 
 
+(def ^:private teardown-progress (atom nil))
+
+
 (defn register-storage!
   "Record `storage` for suite-end close. Returns `storage` so it can wrap
    a create call inline. Idempotent (set semantics)."
@@ -178,7 +181,11 @@
   (let [handles @created-storages]
     (when (seq handles)
       (log/info "Closing" (count handles) "tracked test storages"))
-    (doseq [s handles]
+    (doseq [[index s] (map-indexed vector handles)]
+      (reset! teardown-progress {:phase :close-storage
+                                 :index (inc index)
+                                 :total (count handles)
+                                 :identity (System/identityHashCode s)})
       (try (sp/close s) (catch Exception e (log/debug e "close-all-storages!")))))
   (reset! created-storages #{}))
 
@@ -186,11 +193,10 @@
 (def ^:private stop-timeout-ms 30000)
 
 
-(defn- stop-with-timeout!
-  "Bound a Docker client stop call. Its worker is daemonized so a stuck client
-   cannot hold the completed test JVM open; Testcontainers' Ryuk reclaims the
-   container when that JVM exits. Return ::timeout only after interrupting the
-   worker, and propagate an ordinary stop failure to the caller."
+(defn- run-bounded-cleanup!
+  "Bound a cleanup call. Its worker is daemonized so a stuck Docker client or
+   connection close cannot hold the completed test JVM open. Return ::timeout
+   only after interrupting the worker; propagate an ordinary failure."
   [stop-fn timeout-ms]
   (let [result (promise)
         worker (doto (Thread. ^Runnable
@@ -218,8 +224,8 @@
     (when (compare-and-set! container-atom container nil)
       (log/info "Stopping shared PostgreSQL test container...")
       (if (= ::timeout
-             (stop-with-timeout! #(PostgreSQLContainer/.stop container)
-                                 stop-timeout-ms))
+             (run-bounded-cleanup! #(PostgreSQLContainer/.stop container)
+                                   stop-timeout-ms))
         (log/warn "Docker client did not finish stopping shared PostgreSQL within"
                   stop-timeout-ms "ms; Ryuk will reclaim it at JVM exit")
         (log/info "Shared PostgreSQL container stopped")))))
@@ -400,9 +406,35 @@
         (with-open [conn (jdbc/get-connection {:jdbcUrl jdbc-url
                                                :user username
                                                :password password})]
-          (doseq [db dbs]
+          (doseq [[index db] (map-indexed vector dbs)]
+            (reset! teardown-progress {:phase :drop-namespace-db
+                                       :index (inc index)
+                                       :total (count dbs)})
             (drop-one-ns-database! conn db))))
       (reset! ns-databases-atom #{}))))
+
+
+(defn finish-suite!
+  "Run all post-test cleanup within one budget. A hung Hikari close or Docker
+   stop must not turn a fully passed suite into a 28-minute CI timeout. When
+   cleanup overruns, the JVM's Testcontainers Ryuk owns container reclamation;
+   clear our handle so the shutdown hook cannot repeat the blocked cleanup."
+  [drop-golden!]
+  (reset! teardown-progress {:phase :close-storage})
+  (if (= ::timeout
+         (run-bounded-cleanup!
+           #(do (close-all-storages!)
+                (reset! teardown-progress {:phase :drop-namespace-dbs})
+                (drop-all-ns-databases!)
+                (reset! teardown-progress {:phase :drop-golden-dbs})
+                (drop-golden!)
+                (reset! teardown-progress {:phase :stop-container})
+                (stop-container!))
+           120000))
+    (do (reset! container-atom nil)
+        (log/warn "Shared test teardown exceeded 120s at" @teardown-progress
+                  "; Ryuk will reclaim the container at JVM exit"))
+    (reset! teardown-progress nil)))
 
 
 ;; =============================================================================
@@ -446,6 +478,10 @@
     (fn []
       (when (running?)
         (log/info "JVM shutdown: stopping shared PostgreSQL container")
-        (try (drop-all-ns-databases!)
-             (catch Exception _ nil))
-        (stop-container!)))))
+        (when (= ::timeout
+                 (run-bounded-cleanup!
+                   #(do (try (drop-all-ns-databases!)
+                             (catch Exception _ nil))
+                        (stop-container!))
+                   30000))
+          (log/warn "JVM shutdown cleanup exceeded 30s; Ryuk will reclaim the container"))))))

@@ -424,8 +424,9 @@
 
 
 (defn- declared-free-args
-  "Owned free slots are argument declarations, even without a binding row.
-   Inherited junctions and rename views are handled by their existing paths."
+  "Owned free slots and unbound inherited type views are declarations.
+   A view's source name is the parent argument; its own name and type are the
+   authored `:as`/`:type` shape. Bound views are handled by binding-shape*."
   [own-fn-slots parent-fn-slots own-bindings slot-by-id fn-by-id]
   (let [parent-slot-ids (set (map :slot-id parent-fn-slots))
         bound-slot-ids (set (map :slot-id own-bindings))]
@@ -433,14 +434,18 @@
           (keep (fn [fs]
                   (let [sid (:slot-id fs)
                         slot (get slot-by-id sid)
+                        source-id (:source-slot-id slot)
+                        source (get slot-by-id source-id)
                         row (get fn-by-id (:type-fn-id slot))]
-                    (when (and slot (not (:source-slot-id slot))
+                    (when (and slot (or (nil? source-id) source)
                                (not (contains? parent-slot-ids sid))
-                               (not (contains? bound-slot-ids sid)))
-                      [(keyword (:name slot))
-                       {:type (or (row->type-kw row)
-                                  (when (:constraint row)
-                                    (rich-type-from-row row fn-by-id)))}]))))
+                               (not (contains? bound-slot-ids sid))
+                               (not (contains? bound-slot-ids source-id)))
+                      [(keyword (:name (or source slot)))
+                       (cond-> {:type (or (row->type-kw row)
+                                          (when (:constraint row)
+                                            (rich-type-from-row row fn-by-id)))}
+                         source-id (assoc :as (keyword (:name slot))))]))))
           own-fn-slots)))
 
 

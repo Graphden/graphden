@@ -260,6 +260,22 @@
                  (:args (tc/reconstruct-fn-def storage (:id child))))))
         (finally (sp/close storage)))))
 
+  (testing "an unbound inherited type view keeps its source and narrowed type"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [base (setup/create-base-fn! storage "rfd-view-parent")
+              source (setup/create-slot! storage "handlers" :any)
+              _ (setup/attach-slot! storage (:id base) (:id source) 0)
+              child (setup/create-composed-fn! storage "rfd-view-child" (:id base))
+              view (sp/create-entity storage :slot
+                                     {:name "handlers"
+                                      :source-slot-id (:id source)
+                                      :type-fn-id (ids/primitive-fn-id :int)})]
+          (setup/attach-slot! storage (:id child) (:id view) 0)
+          (is (= {:handlers {:as :handlers :type :int}}
+                 (:args (tc/reconstruct-fn-def storage (:id child))))))
+        (finally (sp/close storage)))))
+
   (testing "ref binding surfaces as the bound fn's name keyword"
     (let [storage (setup/create-test-storage)]
       (try

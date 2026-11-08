@@ -191,13 +191,12 @@
  {:name "tests-js"      :bb "staged-js-rest" :timeout  60000 :group :test
   :relevant ["\\.(js|mjs)$" "^tools/runtime-test/" "^tools/browser-test/run-edit-tests\\.sh$"
              "^bb\\.edn$" "^scripts/(ci_staged|ci_select|ci_resume)\\.clj$" "^scripts/checks\\.edn$"]}
- ;; The priority scheduler serializes the graph-owned builtin-plan namespace
- ;; inside a later dependency layer. Its measured 323s plus the registry layer
- ;; left <12% headroom at 900s; two C3 trains reached that ceiling while still
- ;; running tests. The 18m normal ceiling now extends only while this check's
- ;; process tree is using CPU, up to a hard 28m cap. A quiet hang still ends
- ;; at 18m. Split the expensive dependency layer before increasing either cap.
- {:name "tests-unit"    :bb "test-unit"     :timeout 1080000 :group :test
+ ;; The 375-namespace unit suite now completes its assertions in about 25m on
+ ;; this host. Two L trains reached the old 28m hard cap during shared-resource
+ ;; teardown after 2972/2973 tests had passed. Teardown itself is now bounded
+ ;; at 120s; give the measured suite a 28m normal ceiling and let the CI
+ ;; process-tree activity guard extend it to 38m only while work continues.
+ {:name "tests-unit"    :bb "test-unit"     :timeout 1680000 :group :test
   :relevant ["^src/" "^test/" "^resources/" "^scripts/" "^external-packages/"
              "^(bb|deps|tests)\\.edn$" "^build\\.clj$" "^dev-resources/" "^development/src/"]}
  ;; A full-corpus bootstrap precedes the measured SQL scenarios. Run this

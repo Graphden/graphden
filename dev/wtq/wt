@@ -686,21 +686,35 @@ archive_gate_logs() {
 }
 
 ensure_disk_headroom() {
-  local minimum available
+  local stage="${1:-unknown}" minimum available before cleanup_attempted=0 previous_delta=unknown
   minimum="$(int_or "${WTQ_DISK_MIN_MB:-}" 12000)"
   available="$(disk_avail_mb)"
-  [ "$available" -ge "$minimum" ] && return 0
-  warn "disk free ${available} MB < ${minimum} MB — reclaiming disposable caches and archiving old logs"
-  gc_gate_leftovers
-  available="$(disk_avail_mb)"
-  if [ "$available" -lt "$minimum" ]; then
-    # The age-bounded prune above preserves recently used build layers. When
-    # they are the last reclaimable bytes, rebuild them instead of aborting a
-    # train before CI (observed after several adjacent full gates).
-    info "Dropping remaining reproducible Docker build cache ..."
-    docker builder prune -a -f >/dev/null 2>&1 || true
-    available="$(disk_avail_mb)"
+  before="$available"
+  if [ -n "${WTQ_DISK_LAST_FREE_MB:-}" ]; then
+    previous_delta=$((available - WTQ_DISK_LAST_FREE_MB))
   fi
+  # These are observed host deltas, including concurrent activity, not a
+  # forecast or attribution to the preceding stage. Reuse admission samples.
+  printf 'disk headroom: stage=%s phase=before-cleanup free_mb=%s minimum_mb=%s previous_stage=%s previous_stage_delta_mb=%s\n' \
+    "$stage" "$available" "$minimum" "${WTQ_DISK_LAST_STAGE:-none}" "$previous_delta"
+  if [ "$available" -lt "$minimum" ]; then
+    cleanup_attempted=1
+    warn "disk free ${available} MB < ${minimum} MB — reclaiming disposable caches and archiving old logs"
+    gc_gate_leftovers
+    available="$(disk_avail_mb)"
+    if [ "$available" -lt "$minimum" ]; then
+      # The age-bounded prune above preserves recently used build layers. When
+      # they are the last reclaimable bytes, rebuild them instead of aborting a
+      # train before CI (observed after several adjacent full gates).
+      info "Dropping remaining reproducible Docker build cache ..."
+      docker builder prune -a -f >/dev/null 2>&1 || true
+      available="$(disk_avail_mb)"
+    fi
+  fi
+  printf 'disk headroom: stage=%s phase=after-cleanup free_mb=%s minimum_mb=%s cleanup_attempted=%s reclaimed_mb=%s\n' \
+    "$stage" "$available" "$minimum" "$cleanup_attempted" "$((available - before))"
+  WTQ_DISK_LAST_STAGE="$stage"
+  WTQ_DISK_LAST_FREE_MB="$available"
   if [ "$available" -lt "$minimum" ]; then
     warn "disk free ${available} MB < ${minimum} MB after cleanup — stop before a doomed stage"
     return 1
@@ -1639,6 +1653,7 @@ visual_browser_ready() {
 
 gate_suites() {
   local wt="$1" no_e2e="$2" no_fleet="$3" no_visual="$4"
+  local WTQ_DISK_LAST_STAGE="" WTQ_DISK_LAST_FREE_MB=""
 
   step "scope: what this change needs"
   classify_changes "$wt"
@@ -1830,7 +1845,7 @@ gate_suites() {
       echo "ABORT: visual Chromium disappeared after preflight; restore it before resuming."
       return 3
     fi
-    ensure_disk_headroom || { echo "ABORT: insufficient disk for $stage"; return 3; }
+    ensure_disk_headroom "$stage" || { echo "ABORT: insufficient disk for $stage"; return 3; }
     # An E2E roster leaves enough time for the independent GitHub CI to
     # finish before integration. A resumed browser stage can reattach to its
     # durable request instead of dispatching a second run.

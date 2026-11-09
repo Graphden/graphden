@@ -4,7 +4,7 @@
   (:require
     [graphden.input.context :as context]
     [graphden.input.core :as input]
-    [graphden.input.descriptor :as descriptor]
+    [graphden.input.inheritance :as inheritance]
     [graphden.input.rows :as rows]
     [graphden.types.check.literals :as literals]
     [graphden.types.core :as types]
@@ -40,7 +40,8 @@
                             {:mode :unresolved :reason :resolver-analysis-required}
                             {:mode :literal :actual-type (literals/classify-literal (:value expression))})
                    :projection {:mode :unresolved :reason :projection-analysis-required})]
-    {:address [scope path] :binding-id (:id row) :expression expression
+    {:address [scope path] :binding-id (:id row) :origin-fn-id (:origin-fn-id row)
+     :expression expression
      :expected-type expected :reference dispatch}))
 
 
@@ -80,11 +81,18 @@
           (mapcat #(container-obligations % scope (conj path (:id %)))) (:fields node))))
 
 
+(defn- substitute-node
+  [node substitution]
+  (cond-> (update node :type #(types/resolve substitution %))
+    (:fields node) (update :fields #(mapv (fn [field] (substitute-node field substitution)) %))
+    (:alternatives node) (update :alternatives #(mapv (partial types/resolve substitution) %))))
+
+
 (defn analyze-input
   "Analyze a declared input and its local rows. Supply the real checker as
    :check-expression (graphden.types.check/check-input-binding). Its absence
    is explicit deferred evidence. This first slice reports closure coverage
-   gaps for parents, scoped overlays and evaluated refs instead of claiming
+   gaps for scoped overlays and evaluated refs instead of claiming
    recursive availability. Missing required fields and incomplete checking
    are separate outputs. All effective/residual values remain recomputable."
   ([ctx fn-id] (analyze-input ctx fn-id {}))
@@ -92,10 +100,9 @@
    (context/call-with-types
      ctx
      (fn []
-       (let [contract (descriptor/resolve-contract ctx fn-id)
+       (let [{:keys [contract bindings declaration-order]} (inheritance/declared-view ctx fn-id)
              scope [fn-id []]
-             owned (->> (:bindings ctx) vals (filter #(= fn-id (:fn-id %)))
-                        (map rows/normalize) (sort-by (comp str :id)) vec)
+             owned (mapv rows/normalize bindings)
              local (filterv #(empty? (:scope-path %)) owned)
              entries (mapv #(classify-entry ctx scope contract %) (filter rows/occupied? local))
              state (into {} (map (fn [{:keys [address binding-id expression expected-type]}]
@@ -108,7 +115,6 @@
              checked (check-entries entries check-expression)
              obligations (container-obligations (:descriptor remaining) scope [])
              closure-gaps (cond-> []
-                            (seq (get-in ctx [:fns fn-id :parent-ids])) (conj :inheritance-analysis-required)
                             (some #(seq (:scope-path %)) owned) (conj :scoped-analysis-required)
                             (some #(some (fn [k] (some? (get % k)))
                                          [:required :terminal :type-override-fn-id]) owned)
@@ -124,11 +130,13 @@
                                        (when (= :deferred (:status proof))
                                          {:code (:reason proof) :address address})))
                                (:proofs checked))]
-         {:fn-id fn-id :declared-contract contract
-          :effective-contract (when (empty? closure-gaps) contract)
-          :remaining-contract (:descriptor remaining)
+         {:fn-id fn-id :declared-contract contract :declaration-order declaration-order
+          :effective-contract (when (empty? closure-gaps) (substitute-node contract (:substitution checked)))
+          :remaining-contract (substitute-node (:descriptor remaining) (:substitution checked))
           :required-addresses (mapv #(vector scope %) (:missing remaining))
-          :bindings (into {} (map (juxt :address identity)) entries)
+          :bindings (into {} (map (fn [entry]
+                                    [(:address entry)
+                                     (update entry :expected-type #(types/resolve (:substitution checked) %))])) entries)
           :substitution (:substitution checked) :proofs (:proofs checked)
           :obligations obligations
           :diagnostics diagnostics

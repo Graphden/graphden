@@ -702,10 +702,21 @@
    :title "Types — validation and inference"
    :status :toured
    :summary "Type expressions, compatibility, inference, and secret markings."
-   :paths ["src/graphden/types/"]
+   :paths ["src/graphden/types/" "src/graphden/input/"]
    :after [:executor]
    :steps
-   [{:ns graphden.types.core.shapes :defn primitives
+   [{:ns graphden.input.core :defn bind-input
+     :say "The structured-input transition begins with a pure binding algebra, not yet used by
+           production execution. A partial record binds declared child fields; a whole value or
+           reference occupies its subtree. Stable field paths reject overlapping bindings without
+           executing references. Expected types remain available for later value/HOF classification."
+     :see [[:types "remaining-input"]]}
+    {:ns graphden.input.core :defn remaining-input
+     :say "Describes locally missing fields and occupancy while retaining original rich types and
+           constraints. Optional fields remain bindable without preventing invocation; partially
+           filling an optional record activates its required children. Reference dependencies are
+           returned separately: no local missing fields does not prove the whole graph is ready."}
+    {:ns graphden.types.core.shapes :defn primitives
      :say "Lists primitive value types and the special types `:any` and `:never`. `:any` accepts every
            type; `:never` has no values. Compound types such as lists, records, and functions build on
            this vocabulary."}

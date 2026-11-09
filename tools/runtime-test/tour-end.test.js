@@ -501,6 +501,25 @@ const finishedOn = (id, extra) => {
     assert(!w.calls.some((c) => /^DELETE /.test(c)), 'the retained branch is untouched');
   });
 
+  await test('direct service lesson waits locally for quota and rejects unsupported plans', async () => {
+    for (const supported of [true, false]) {
+      const w = makeWorld({state: null, branch: 'main'});
+      vm.runInContext('_tourLessons.lessons[0].requires = "services"', w.ctx);
+      let release;
+      let rendered = false;
+      w.ctx.gdWaitForServicePlan = () => new Promise(resolve => { release = resolve; });
+      w.ctx.gdServicesManageable = () => supported;
+      w.ctx._tourRenderStep = () => { rendered = true; };
+      w.ctx._tourArm = () => {};
+      const starting = w.ctx.startTutorial('01');
+      for (let i = 0; i < 20 && !release; i++) await Promise.resolve();
+      assert(!rendered, 'direct lesson does not begin before quota resolves');
+      release(true);
+      assert(await starting === supported, 'direct lesson respects the resolved plan');
+      assert(rendered === supported, 'only a supported plan enters the service lesson');
+    }
+  });
+
   await test('legacy branch metadata restores context but never proves ownership', async () => {
     const saved = {lessonId: '01', step: 1, branch: 'tutorial-legacy-kept',
       created: [{type: 'fn', name: 'lesson-owned'}]};

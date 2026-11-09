@@ -155,3 +155,19 @@ corpus conversion. Temporary adapters have a removal stage; the final system
 has one canonical model. Fresh install and history-preserving upgrade both
 must work before removal. The previous name-based propagation and versioned
 parent-set decisions are not implicitly reopened by this change.
+
+## Source inventory
+
+Run `bb scripts/structured_input_inventory.clj --repo core .` to snapshot the
+canonical package sources without executing their implementations. Additional
+repositories are explicit repeated `--repo LABEL PATH` arguments; the tool
+does not discover sibling or private repositories. Output contains source
+checksums and Git identities, relative file paths, module coverage and syntax
+counts. It excludes build copies, external mirrors and saved database graphs.
+
+The inventory distinguishes syntactic candidates from resolved meaning:
+bare keywords and vectors cannot be classified as refs/append without their
+target contracts. A full semantic migrator must use resolved graphs, not
+these counts as an oracle. The fast inventory selftest runs in the affected
+CI stage before JVM suites; it is not a replacement for corpus migration
+or database/history validation.

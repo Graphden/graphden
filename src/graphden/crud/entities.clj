@@ -141,7 +141,7 @@
 
 (defn- assert-write-valid!
   [storage entity-type data proven-acyclic?]
-  (when (and (= :fn entity-type) (contains? data :input-type-fn-id))
+  (when (and (= :fn entity-type) (some? (:input-type-fn-id data)))
     (throw (ex-info "Input contracts are not editable through the public API yet"
                     {:type :authz/forbidden})))
   (when-let [rej (or (when (= entity-type :fn)

@@ -11,6 +11,9 @@
     [graphden.versioning.storage.input :as input-storage]
     [graphden.versioning.storage.resolution :as resolution])
   (:import
+    (java.io
+      PushbackReader
+      StringReader)
     (java.sql
       Timestamp)
     (java.time
@@ -50,8 +53,14 @@
 
 (defn decode
   [text]
-  (edn/read-string {:readers {'graphden/instant #(Instant/parse %)
-                              'graphden/timestamp #(Timestamp/from (Instant/parse %))}} text))
+  (with-open [reader (PushbackReader. (StringReader. text))]
+    (let [eof (Object.)
+          opts {:eof eof :readers {'graphden/instant #(Instant/parse %)
+                                   'graphden/timestamp #(Timestamp/from (Instant/parse %))}}
+          artifact (edn/read opts reader)]
+      (when (or (identical? eof artifact) (not (identical? eof (edn/read opts reader))))
+        (throw (ex-info "Expected exactly one migration artifact" {:type :input/invalid-artifact})))
+      artifact)))
 
 
 (defn- check-artifact!

@@ -10,12 +10,17 @@
       StandardCharsets)
     (java.security
       MessageDigest)
+    (java.sql
+      Timestamp)
+    (java.time
+      Instant)
     (java.util
       UUID)))
 
 
 (def snapshot-entities
   [:ns :fn :slot :fn-slot :binding :binding-list-item
+   :trait :binding-trait
    :branch :branch-merge :branch-approval :branch-comment
    :fn-version :fn-slot-version :binding-version :binding-list-item-version
    :input-binding :input-binding-version])
@@ -31,10 +36,12 @@
 (defn- canonical
   [value]
   (cond
-    (map? value) (into (sorted-map-by #(compare (pr-str %1) (pr-str %2)))
-                       (map (fn [[k v]] [k (canonical v)])) value)
-    (set? value) (vec (sort-by pr-str (map canonical value)))
-    (sequential? value) (mapv canonical value)
+    (map? value) [:map (vec (sort-by (comp pr-str first)
+                                     (map (fn [[k v]] [(canonical k) (canonical v)]) value)))]
+    (set? value) [:set (vec (sort-by pr-str (map canonical value)))]
+    (sequential? value) [:sequence (mapv canonical value)]
+    (instance? Timestamp value) [:timestamp (str (.toInstant ^Timestamp value))]
+    (instance? Instant value) [:instant (str value)]
     :else value))
 
 
@@ -75,7 +82,7 @@
 (defn- exceptions
   [snapshot fns executable-ids memberships]
   (let [bindings (concat (:binding snapshot) (:binding-version snapshot))
-        items (set (map :binding-id (:binding-list-item snapshot)))
+        items (set (map :binding-id (concat (:binding-list-item snapshot) (:binding-list-item-version snapshot))))
         fields (into {} (map (juxt :id identity)) (:slot snapshot))]
     (vec
       (distinct
@@ -84,6 +91,12 @@
                     (seq (:input-binding-version snapshot))
                     (some :input-type-fn-id (:fn snapshot)))
             [(issue :already-structured-input :snapshot nil)])
+          (for [association (:binding-trait snapshot)]
+            (issue :binding-trait-policy :binding (:binding-id association)))
+          (for [version (:fn-version snapshot)
+                :when (and (:return-type-fn-id version)
+                           (not (contains? executable-ids (:fn-id version))))]
+            (issue :historical-contract-role :fn (:fn-id version)))
           (for [b bindings
                 :when (or (:list-append b) (:list-closed b)
                           (contains? items (or (:binding-id b) (:id b))))]
@@ -175,8 +188,8 @@
         fns (into {} (map (juxt :id identity)) (:fn snapshot))
         executable-ids (into #{} (comp (filter executable?) (map :id)) (:fn snapshot))
         by-owner (group-by :fn-id (:fn-slot snapshot))
-        memberships (into {} (map (fn [id] [id (vec (mapcat by-owner (closure fns id)))])) executable-ids)
-        problems (exceptions snapshot fns executable-ids memberships)
+        memberships (into (sorted-map) (map (fn [id] [id (vec (mapcat by-owner (sort-by str (closure fns id))))])) executable-ids)
+        problems (vec (sort-by pr-str (exceptions snapshot fns executable-ids memberships)))
         descriptors (mapv #(descriptor-row (get fns %)) (sort-by str executable-ids))
         descriptor-versions (mapv descriptor-version (filter #(contains? executable-ids (:fn-id %)) (:fn-version snapshot)))
         copied-members (vec (membership-copies fns memberships))
@@ -216,7 +229,7 @@
                   merged (merge all
                                 (into {} (map (juxt :id identity)) (get changes entity))
                                 (into {} (map (juxt :id identity)) (get additions entity)))]
-              (assoc snapshot entity (vec (vals merged)))))
+              (assoc snapshot entity (vec (sort-by (comp str :id) (vals merged))))))
           source (set/union (set (keys changes)) (set (keys additions)))))
 
 
@@ -224,8 +237,10 @@
   "Read projection, never a second writer. New partial paths cannot be
    represented by a legacy slot and fail explicitly instead of flattening."
   [row]
-  (when-not (and (empty? (:scope-path row)) (= 1 (count (:target-path row))))
-    (throw (ex-info "A nested v2 binding has no legacy projection"
+  (when-not (and (empty? (:scope-path row)) (= 1 (count (:target-path row)))
+                 (contains? #{nil "value" "ref"} (:expression-kind row))
+                 (nil? (:projection-scope-path row)) (nil? (:projection-path row)))
+    (throw (ex-info "This v2 binding has no legacy projection"
                     {:type :input/no-legacy-projection})))
   (assoc (select-keys row (conj (set (keys graph-schema/binding-fields)) :id))
          :slot-id (first (:target-path row))))

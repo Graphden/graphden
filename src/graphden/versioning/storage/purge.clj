@@ -13,6 +13,7 @@
    reverse."
   (:require
     [clojure.tools.logging :as log]
+    [graphden.input.references :as input-refs]
     [graphden.storage.protocol.core :as sp]
     [graphden.versioning.identity-repair :as idrepair]
     [graphden.versioning.storage.resolution :as res]))
@@ -108,7 +109,7 @@
                                           base-storage :fn :parent-ids id))))
                          candidates)
                    retained)]
-    (into [] (remove (or retained #{})) candidates)))
+    (into [] (remove (into (or retained #{}) (input-refs/retained-ids base-storage entity-name candidates))) candidates)))
 
 
 ;; =============================================================================
@@ -211,7 +212,7 @@
         dead (dead-on-every-branch base-storage entity-name candidates branch-ids)
         referenced (if (and (= :fn entity-name) (seq dead))
                      (set (keys (idrepair/inbound-refs-many base-storage dead)))
-                     #{})]
+                     (input-refs/retained-ids base-storage entity-name dead))]
     (filterv #(and (contains? dead %) (not (contains? referenced %))) candidates)))
 
 

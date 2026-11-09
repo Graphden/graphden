@@ -37,14 +37,18 @@
 
 (defn- scoped-owner
   [{:keys [fns bindings]} row scope]
-  (reduce (fn [owner edge-id]
-            (let [edge (get bindings edge-id)]
-              (when-not (and edge (= "ref" (:expression-kind edge))
-                             (empty? (:scope-path edge))
-                             (contains? (ancestor-ids fns owner) (:fn-id edge)))
-                (reject! :invalid-scope))
-              (:ref-fn-id edge)))
-          (:fn-id row) scope))
+  (first
+    (reduce (fn [[owner prefix] edge-id]
+              (let [edge (some-> (get bindings edge-id) rows/normalize)
+                    declaration? (and (empty? (:scope-path edge))
+                                      (contains? (ancestor-ids fns owner) (:fn-id edge)))
+                    overlay? (and (= prefix (:scope-path edge))
+                                  (contains? (ancestor-ids fns (:fn-id row)) (:fn-id edge)))]
+                (when-not (and edge (= "ref" (:expression-kind edge))
+                               (or declaration? overlay?))
+                  (reject! :invalid-scope))
+                [(:ref-fn-id edge) (conj prefix edge-id)]))
+            [(:fn-id row) []] scope)))
 
 
 (defn- resolve-path!
@@ -84,7 +88,10 @@
 (defn validate-view!
   "Each definition includes inherited occupied paths; shared diamond origins
    deduplicate, independent intersecting bindings conflict. Type fits remain
-   the checker stage's concern. No ref evaluation occurs here."
+   the checker stage's concern. Recursive referenced availability is NOT
+   expanded here: this is structural storage validation, not the effective
+   remaining-input calculation. Public v2 writers stay disabled until that
+   closure checker exists. No ref evaluation occurs here."
   [{:keys [fns bindings] :as view}]
   (let [normalized (mapv #(validate-row! view %) (vals bindings))
         by-owner (group-by :fn-id normalized)]

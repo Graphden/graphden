@@ -65,5 +65,25 @@
 
 
 (deftest new-nested-bindings-have-no-fake-legacy-projection-test
-  (is (thrown? clojure.lang.ExceptionInfo
-        (migration/legacy-binding {:scope-path [] :target-path [(random-uuid) (random-uuid)]}))))
+  (doseq [row [{:scope-path [] :target-path [(random-uuid) (random-uuid)]}
+               {:scope-path [] :target-path [(random-uuid)] :expression-kind "projection"
+                :projection-scope-path [] :projection-path [(random-uuid)]}
+               {:scope-path [] :target-path [(random-uuid)] :expression-kind "unknown"}]]
+    (is (thrown? clojure.lang.ExceptionInfo (migration/legacy-binding row)))))
+
+
+(deftest fingerprints-retain-collection-kind-and-submillisecond-time-test
+  (let [source (fixture)
+        changed-time (update-in source [:fn-version 0 :created-at]
+                                #(Timestamp/from (.plusNanos (.toInstant ^Timestamp %) 1)))]
+    (is (not= (migration/fingerprint source) (migration/fingerprint changed-time)))
+    (is (not= (migration/fingerprint (assoc-in source [:binding 0 :value] #{1 2}))
+              (migration/fingerprint (assoc-in source [:binding 0 :value] [1 2]))))
+    (is (not= (migration/fingerprint (assoc-in source [:binding 0 :value] {:k 1}))
+              (migration/fingerprint (assoc-in source [:binding 0 :value] [:map [[:k 1]]]))))))
+
+
+(deftest artifact-reader-requires-exactly-one-safe-form-test
+  (doseq [text ["" "{} {}" "{} trailing" "#unknown/tag {}" "#=(+ 1 2)"]]
+    (is (thrown? RuntimeException (offline/decode text))))
+  (is (= {} (offline/decode "{} ; trailing comment\n"))))

@@ -82,6 +82,8 @@
     (assoc base
            :complete true
            :exit exit
+           :outcome (when (zero? exit)
+                      (if (= :validate (:mode base)) :validated :landed))
            :failed-stage (when (= 1 exit)
                            (some->> (re-seq #"(?m)^WTQ_FAILED_STAGE=(ci|build|e2e|visual|integration|fleet)$" output)
                                     last second keyword))
@@ -97,9 +99,11 @@
 
 (defn- base
   [sha queue-ms]
-  (let [admission-ms (parse-long (or (System/getenv "WTQ_ADMISSION_MS") "0"))]
+  (let [admission-ms (parse-long (or (System/getenv "WTQ_ADMISSION_MS") "0"))
+        mode (if (= "validate" (System/getenv "WTQ_GATE_MODE")) :validate :land)]
     {:schema 1 :complete false :sha sha
-     :command ["bb" "wt" "merge"]
+     :mode mode
+     :command ["bb" "wt" (if (= :validate mode) "validate" "merge")]
      :wait {:reason :merge-train-queue
             :duration-ms (parse-long queue-ms)
             :admission (when (pos? admission-ms)
@@ -118,6 +122,8 @@
       ("landed" "landed-image") (let [receipt (edn/read-string (slurp path))]
                                   (when-not (and (= 1 (:schema receipt))
                                                  (true? (:complete receipt))
+                                                 (not= :validate (:mode receipt))
+                                                 (not= :validated (:outcome receipt))
                                                  (zero? (or (:exit receipt) -1))
                                                  (string? (:sha receipt)))
                                     (throw (ex-info "Train did not complete successfully" {:path path})))

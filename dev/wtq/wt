@@ -40,6 +40,12 @@
 #                          --first-test: repeatable priority within the full
 #                          unit/integration/runtime/browser test suite
 #                          --deploy: also reset the develop DB schema on landing
+#   wt validate [--first-test=kind:name] [--no-e2e] [--no-fleet] [--no-visual]
+#                          same gate for one cumulative feature branch; VALIDATED
+#                          retains the branch without landing, promotion or release
+#                          --worktree=/path: validate a pinned worktree with
+#                          this harness, without changing its committed source
+#                          (also: wt merge --validate-only)
 #   wt test <kaocha args>  focused tests — waits while the gate is in a heavy
 #                          phase or memory is short, then runs kaocha
 #   wt soon [minutes]      (inside a worktree) "I will enqueue within N minutes"
@@ -795,9 +801,7 @@ cmd_new() {
   git show-ref --verify --quiet "refs/heads/$branch" && die "branch already exists: $branch"
 
   info "Refreshing $TARGET from origin ..."
-  git -C "$MAIN_WT" fetch --quiet origin || warn "fetch failed (offline?) — using local $TARGET"
-  # fast-forward local target to origin if possible (never rewrite)
-  git -C "$MAIN_WT" merge --ff-only "origin/$TARGET" --quiet 2>/dev/null || true
+  refresh_target
 
   mkdir -p "$WTQ_ROOT"
   info "Creating $branch off $TARGET at $path ..."
@@ -1142,17 +1146,18 @@ VERIFIED_IMAGE_ID=""
 
 # gate_body's "not a verdict" exit: $TARGET moved under the gate, re-queue.
 RC_TARGET_MOVED=6
-FINAL_VERDICTS=" GREEN FAIL CONFLICT PRECOND STALE LANDED_STALE "
+FINAL_VERDICTS=" GREEN VALIDATED FAIL CONFLICT PRECOND STALE LANDED_STALE "
 is_final() { case "$FINAL_VERDICTS" in *" $1 "*) return 0 ;; esac; return 1; }
 verdict_rc() {
   case "$1" in
-    GREEN) echo 0 ;; CONFLICT) echo 2 ;; PRECOND) echo 3 ;;
+    GREEN|VALIDATED) echo 0 ;; CONFLICT) echo 2 ;; PRECOND) echo 3 ;;
     LANDED_STALE) echo 4 ;; STALE) echo 5 ;; *) echo 1 ;;
   esac
 }
 verdict_msg() {
   local nm="$2"
   case "$1" in
+    VALIDATED)    echo "✓ validated without landing. Keep the feature branch and worktree for the next stage." ;;
     GREEN)        echo "✓ landed. You can now:  bb wt drop $nm" ;;
     CONFLICT)     echo "↩ merge conflict with $TARGET — merge $TARGET into your branch, resolve, commit, re-run 'bb wt merge'." ;;
     PRECOND)      echo "↩ precondition failed (dirty tree / detached HEAD / unacknowledged rule change) — see 'bb wt log $nm'." ;;
@@ -1209,7 +1214,7 @@ decide() {   # <name> <verdict> <train> <detail>
 }
 
 # Load an entry into the M_* maps the conductor works from.
-declare -A M_SHA M_BRANCH M_WT M_NO_E2E M_NO_FLEET M_NO_VISUAL M_DEPLOY M_RELEASE M_TRAIN_TS M_FIRST_TESTS
+declare -A M_SHA M_BRANCH M_WT M_NO_E2E M_NO_FLEET M_NO_VISUAL M_DEPLOY M_RELEASE M_TRAIN_TS M_FIRST_TESTS M_MODE
 load_entry() {
   local n="$1"
   M_SHA[$n]="$(qget "$n" sha)";            M_BRANCH[$n]="$(qget "$n" branch)"
@@ -1218,6 +1223,8 @@ load_entry() {
   M_DEPLOY[$n]="$(qget "$n" deploy)";      M_RELEASE[$n]="$(qget "$n" release)"
   M_TRAIN_TS[$n]="$(qget "$n" train_ts)"
   M_FIRST_TESTS[$n]="$(qget "$n" first_tests)"
+  M_MODE[$n]="$(qget "$n" mode)"
+  M_MODE[$n]="${M_MODE[$n]:-land}"
 }
 
 # A process killed after fast-forward but before promotion/receipt completion
@@ -1975,7 +1982,9 @@ gate_body() {
   trap 'phase_summary; heavy_off' EXIT
 
   [ -z "$(git -C "$wt" status --porcelain)" ] || { echo "ABORT: train worktree dirty after assembly."; return 3; }
-  [ -z "$(git -C "$MAIN_WT" status --porcelain --untracked-files=no)" ] || { echo "ABORT: main worktree ($MAIN_WT) has uncommitted TRACKED changes — it must stay clean on $TARGET."; return 3; }
+  if [ "${WTQ_GATE_MODE:-land}" != validate ]; then
+    [ -z "$(git -C "$MAIN_WT" status --porcelain --untracked-files=no)" ] || { echo "ABORT: main worktree ($MAIN_WT) has uncommitted TRACKED changes — it must stay clean on $TARGET."; return 3; }
+  fi
   git -C "$wt" merge-base --is-ancestor "$TARGET" HEAD \
     || { echo "REQUEUE: $TARGET moved after the train was assembled — it no longer sits on top of it."; return "$RC_TARGET_MOVED"; }
 
@@ -1986,6 +1995,17 @@ gate_body() {
     gate_suites "$wt" "$no_e2e" "$no_fleet" "$no_visual" || return $?
   fi
 
+  if [ "${WTQ_GATE_MODE:-land}" = validate ]; then
+    git -C "$wt" merge-base --is-ancestor "$TARGET" HEAD \
+      || { echo "REQUEUE: $TARGET moved during validation — candidate must be assembled again"; return "$RC_TARGET_MOVED"; }
+    # Retain the exact assembled commit when the next train resets _train.
+    # A proof ref alone is not a pass: the completed receipt is authoritative.
+    git -C "$wt" update-ref "refs/wtq/validated/$WTQ_REPORT_TS" HEAD "" \
+      || { echo "ABORT: could not retain the validated candidate"; return 3; }
+    echo "=== VALIDATED: [ $members ] — $TARGET unchanged; feature worktrees retained ==="
+    return 0
+  fi
+  owner_hold_active && { echo "ABORT: owner hold forbids landing on $TARGET; use 'bb wt validate'"; return 3; }
   step "land: fast-forward $TARGET -> $branch"
   # The train contains $TARGET as ancestor (it was assembled on top of it, and
   # checked again above) and the queue lock keeps other GATES off $TARGET
@@ -2122,7 +2142,13 @@ prepare_train_wt() {
   git -C "$TRAIN_WT" checkout -q -B "$TRAIN_BRANCH" "$TARGET" || return 1
 }
 
+owner_hold_active() { [ -e "$WTQ_DIR/owner-hold-develop" ]; }
+
 refresh_target() {
+  if owner_hold_active; then
+    echo "(owner hold — using local $TARGET without refreshing the main checkout)"
+    return 0
+  fi
   git -C "$MAIN_WT" fetch --quiet origin 2>/dev/null || echo "(fetch failed — using local $TARGET)"
   git -C "$MAIN_WT" merge --ff-only --quiet "origin/$TARGET" 2>/dev/null || true
 }
@@ -2168,6 +2194,7 @@ select_train() {
   # The lowest segment key first: "<id>.0…" before "<id>.1…" — depth-first.
   seg="$(for n in $(queued_names); do qget "$n" seg; done | grep -v '^$' | LC_ALL=C sort | head -n1 || true)"
 
+  if [ "${WTQ_CONDUCT_MODE:-land}" = validate ]; then seg=""; fi
   if [ -n "$seg" ]; then
     local members=() id budget_max budget_used
     mapfile -t members < <(names_in_seg "$seg")
@@ -2206,6 +2233,8 @@ select_train() {
   state_lock
   governance_paths
   for n in $(names_in_seg ""); do
+    s="$(qget "$n" mode)"
+    [ "${s:-land}" = "${WTQ_CONDUCT_MODE:-land}" ] || continue
     [ "${#SEL[@]}" -lt "$TRAIN_MAX" ] || break
     # NEEDS-ACK: its author has not seen a rule change develop made. It keeps
     # its place and is skipped until `wt ack` (re-checked on every selection).
@@ -2213,6 +2242,12 @@ select_train() {
       qset "$n" needs_ack 1; continue
     fi
     [ -z "$(qget "$n" needs_ack)" ] || qset "$n" needs_ack ""
+    # Validation gates one cumulative branch. Bisection relies on landing the
+    # green half, so validation members must never join a landing train.
+    if [ "$(qget "$n" mode)" = validate ]; then
+      if [ "${#SEL[@]}" -eq 0 ]; then SEL=("$n"); fi
+      break
+    fi
     # A branch that changes the rules travels alone (see the header).
     if [ -n "$(git -C "$MAIN_WT" diff --name-only "$TARGET...$(qget "$n" sha)" -- "${GOV_PATHS[@]}" 2>/dev/null)" ]; then
       if [ "${#SEL[@]}" -eq 0 ]; then SEL=("$n"); fi
@@ -2272,6 +2307,16 @@ train_cycle() {
 train_run() {
   local id="$1" ts="$2" log="$3"
   local n="${#SEL[@]}" seg="$SEL_SEG"
+  local WTQ_GATE_MODE="${M_MODE[${SEL[0]}]}"
+  export WTQ_GATE_MODE
+  if [ "$WTQ_GATE_MODE" != validate ]; then
+    if owner_hold_active; then
+      local held
+      for held in "${SEL[@]}"; do decide "$held" PRECOND "$ts" "owner hold forbids landing; use 'bb wt validate'"; done
+      return 20
+    fi
+    refresh_target
+  fi
   echo "=== train $ts: [ ${SEL[*]} ]${seg:+  (bisection of $id, segment ${seg#*.})} ==="
 
   # 1. Each member must still be exactly what its author queued.
@@ -2302,7 +2347,7 @@ train_run() {
       state_lock; qset "$m" needs_ack 1; qset "$m" seg ""; qset "$m" state queued; state_unlock
       continue
     fi
-    if git -C "$MAIN_WT" merge-base --is-ancestor "${M_SHA[$m]}" "$TARGET"; then
+    if [ "$WTQ_GATE_MODE" != validate ] && git -C "$MAIN_WT" merge-base --is-ancestor "${M_SHA[$m]}" "$TARGET"; then
       if { [ -n "${M_TRAIN_TS[$m]}" ] || [ -f "$PRIOR_TRAIN_DIR/${M_SHA[$m]}" ]; } \
         && ! prior_train_complete "$m"; then
         decide "$m" LANDED_STALE "$ts" "already in $TARGET, but its prior train did not complete promotion/receipt — repair the release state; do not re-gate"; continue
@@ -2446,7 +2491,9 @@ train_run() {
   stop_sampler
   if ! bb "$SCRIPT_DIR/report.clj" finish "$report" "$(git -C "$TRAIN_WT" rev-parse HEAD)" "$queue_ms" "$gate_out" "$ci_report" "$resources" "$grc"; then
     warn "train receipt could not be completed: $report (incomplete is never pass)"
-    [ "$grc" = 0 ] && grc=4
+    if [ "$grc" = 0 ]; then
+      if [ "$WTQ_GATE_MODE" = validate ]; then grc=3; else grc=4; fi
+    fi
   else
     report_complete=1
   fi
@@ -2472,6 +2519,10 @@ train_run() {
   local landed; landed="$(git -C "$MAIN_WT" rev-parse "$TARGET")"
   case "$grc" in
     0)
+      if [ "$WTQ_GATE_MODE" = validate ]; then
+        for m in "${gated[@]}"; do decide "$m" VALIDATED "$ts" "validated at refs/wtq/validated/$ts; $TARGET unchanged"; done
+        return 0
+      fi
       for m in "${gated[@]}"; do decide "$m" GREEN "$ts" "landed in $TARGET@${landed:0:8}"; done
       [ "$release" = 1 ] && printf '%s\n' "$landed" > "$WTQ_DIR/release-pending"
       # First half green → the second half is the rest of the very tree that
@@ -2569,6 +2620,7 @@ record_e2e_baseline() {   # <gate output> <train ts>
 conductor_has_work() {
   local own="$1" own_sha="$2" n
   [ "$(qget "$own" sha)" = "$own_sha" ] && return 0
+  [ "${WTQ_CONDUCT_MODE:-land}" = validate ] && return 1
   for n in $(queued_names); do [ -n "$(qget "$n" seg)" ] && return 0; done
   return 1
 }
@@ -2593,6 +2645,9 @@ prune_finished_bisections() {
 
 conduct() {
   local own="$1" own_sha="$2" guard=0 rc n
+  local WTQ_CONDUCT_MODE
+  WTQ_CONDUCT_MODE="$(qget "$own" mode)"
+  WTQ_CONDUCT_MODE="${WTQ_CONDUCT_MODE:-land}"
   # Whoever held the lock before us is gone (the lock is ours now), so an entry
   # still marked "in train" belongs to a train that died mid-gate: requeue it.
   state_lock
@@ -2604,7 +2659,6 @@ conduct() {
     prune_finished_bisections
     conductor_has_work "$own" "$own_sha" || return 0
     wait_for_headroom
-    refresh_target
     rc=0; train_cycle || rc=$?
     case "$rc" in
       0)  : ;;
@@ -2707,7 +2761,7 @@ report_verdict() {   # <name> -> prints the verdict, returns its rc
   v="$(cut -f1 "$RESULT_DIR/$name")"; rc="$(cut -f2 "$RESULT_DIR/$name")"; detail="$(cut -f6 "$RESULT_DIR/$name")"
   echo
   say "RESULT: $v${detail:+ — $detail}"
-  if [ "$v" = GREEN ]; then ok "$(verdict_msg "$v" "$name")"; else warn "$(verdict_msg "$v" "$name")"; fi
+  if [ "$v" = GREEN ] || [ "$v" = VALIDATED ]; then ok "$(verdict_msg "$v" "$name")"; else warn "$(verdict_msg "$v" "$name")"; fi
   return "$rc"
 }
 
@@ -2728,10 +2782,12 @@ queue_refused() {   # <name> <branch> <sha> <why> — PRECOND, never queued
 }
 
 cmd_merge() {
-  local no_e2e=0 deploy=0 no_fleet=0 no_visual=0 release=0
-  local first_tests=""
+  local no_e2e=0 deploy=0 no_fleet=0 no_visual=0 release=0 mode=land
+  local first_tests="" candidate_wt=""
   for a in "$@"; do
     case "$a" in
+      --validate-only) mode=validate ;;
+      --worktree=*) candidate_wt="${a#--worktree=}"; [ -n "$candidate_wt" ] || die "--worktree requires a path" ;;
       --no-e2e) no_e2e=1 ;;
       --no-fleet) no_fleet=1 ;;
       --no-visual) no_visual=1 ;;
@@ -2746,7 +2802,17 @@ cmd_merge() {
       *) die "unknown flag '$a' (wt merge [--first-test=kind:name] [--no-e2e] [--no-fleet] [--no-visual] [--deploy] [--release])" ;;
     esac
   done
+  if [ "$mode" = validate ] && { [ "$deploy" = 1 ] || [ "$release" = 1 ]; }; then
+    die "validation cannot deploy or release; omit --deploy and --release"
+  fi
   local wt; wt="$(git rev-parse --show-toplevel)"
+  if [ -n "$candidate_wt" ]; then
+    [ "$mode" = validate ] || die "--worktree is supported only with validate"
+    wt="$(cd "$candidate_wt" && pwd -P)" || die "worktree does not exist: $candidate_wt"
+    [ "$(git -C "$wt" rev-parse --show-toplevel)" = "$wt" ] || die "--worktree must name a worktree root"
+    [ "$(git -C "$wt" rev-parse --path-format=absolute --git-common-dir)" = "$COMMON_DIR" ] \
+      || die "--worktree must belong to this harness's repository"
+  fi
   [ "$wt" != "$MAIN_WT" ]  || die "run 'wt merge' from a feature worktree, not the main checkout."
   [ "$wt" != "$TRAIN_WT" ] || die "the train worktree is the queue's own — run 'wt merge' from a feature worktree."
   # FG-1 at the door: a detached HEAD has no branch to land.
@@ -2758,6 +2824,10 @@ cmd_merge() {
   MY_NAME="$name"; MY_SHA="$sha"
 
   rm -f "$RESULT_DIR/$name"   # this run's verdict starts now
+  if [ "$mode" != validate ] && owner_hold_active; then
+    queue_refused "$name" "$branch" "$sha" "owner hold forbids landing; use 'bb wt validate'"
+    return 3
+  fi
 
   # Enqueue the clean committed candidate without a duplicate full lint/CI.
   # The assembled immutable train runs every selected check once, quick first.
@@ -2784,7 +2854,7 @@ cmd_merge() {
       "$name" "$branch" "$sha" "$wt" "$(date +%s%N)" "$$"
     printf 'no_e2e=%s\nno_fleet=%s\nno_visual=%s\ndeploy=%s\nrelease=%s\n' \
       "$no_e2e" "$no_fleet" "$no_visual" "$deploy" "$release"
-    printf 'first_tests=%s\n' "$first_tests"
+    printf 'first_tests=%s\nmode=%s\n' "$first_tests" "$mode"
   } > "$tmp"
   mv -f "$tmp" "$(qfile "$name")"
   rm -f "$RESULT_DIR/$name" "$SOON_DIR/$name"
@@ -2819,7 +2889,7 @@ cmd_merge() {
         : > "$HOLDER"
       fi
       flock -u 9 || true      # release for the next in line
-      if [ -s "$WTQ_DIR/release-pending" ]; then
+      if [ "$mode" != validate ] && ! owner_hold_active && [ -s "$WTQ_DIR/release-pending" ]; then
         local rsha; rsha="$(cat "$WTQ_DIR/release-pending")"; rm -f "$WTQ_DIR/release-pending"
         release_chain "$rsha"
       fi
@@ -2877,6 +2947,7 @@ main() {
     kickoff) cmd_kickoff "$@" ;;
     list|ls) cmd_list  "$@" ;;
     merge|land) cmd_merge "$@" ;;
+    validate) cmd_merge --validate-only "$@" ;;
     soon)   cmd_soon   "$@" ;;
     test)   cmd_test   "$@" ;;
     up)     cmd_up     "$@" ;;

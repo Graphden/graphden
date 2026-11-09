@@ -216,6 +216,45 @@ You were started in one of two ways:
    main checkout first (you cannot delete the worktree you are standing in),
    then `bb wt drop <name>`. Report done.
 
+## Validation without landing
+
+When the owner requests validation before approving integration, use
+`bb wt validate` (alias: `bb wt merge --validate-only`). It uses the same
+serialized queue, heavy-work admission, suite selection and receipt checks.
+The result is **VALIDATED**, exit 0, rather than GREEN: the candidate passed
+its selected checks, but was not merged. Existing explicit suite-skip flags
+remain scoped results and are recorded as such.
+
+Each validation train contains one cumulative feature branch. Merge earlier
+reviewed feature commits into that branch before queueing the next stage;
+`develop` need not advance. Validation reads the local target ref without
+fetching or fast-forwarding the main checkout. It never promotes an image,
+updates the demo, consumes a pending release, or drops a worktree. Keep the
+feature branch and worktree. The exact assembled candidate is retained at
+`refs/wtq/validated/<train>` alongside the completed receipt; that receipt
+cannot serve as evidence that anything landed.
+
+To validate an older pinned candidate using a newer harness, without changing
+its source SHA, run the newer executable explicitly:
+
+```bash
+/path/to/new-harness/dev/wtq/wt validate --worktree=/path/to/pinned-worktree
+```
+
+Both worktrees must share the same Git repository. The pinned worktree must
+be clean and attached to its feature branch. This selects the pinned worktree,
+not the harness worktree. Exact-candidate interrupted/PRECOND receipts may
+reuse proven passes with the same SHA, base, roster and artifact checks as a
+normal retry; switching the final action to validation does not invalidate
+those passes. A changed candidate or missing proof still requires its checks.
+
+An owner hold at the shared Git directory's `wtq/owner-hold-develop` blocks
+normal landing before admission and again before fast-forwarding, and stops
+`new`/`claim` from refreshing the target checkout. It does not grant permission
+to remove the hold or discard branches. Validation can run while the main
+checkout has tracked edits: it preserves them and gates the clean candidate.
+`--deploy` and `--release` are rejected with validation.
+
 ## Notes
 
 - The train is built on the **latest** `develop`, so you are always validated

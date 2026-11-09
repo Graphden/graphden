@@ -90,6 +90,7 @@
     [graphden.types.check.markers :as markers]
     [graphden.types.check.provenance :as provenance]
     [graphden.types.core :as types]
+    [graphden.types.reference :as reference]
     [graphden.types.view :as view]))
 
 
@@ -216,27 +217,7 @@
    `:call-time-effects` subset, so the picker could disagree with
    `check-binding!` about the very bind it was offering."
   [fn-name]
-  (when-let [info (registry/rich-type-of fn-name)]
-    (let [ret (or (:return info) :any)
-          ;; `:effects` is unconditionally stored — by record-rich-types!
-          ;; AND record-rich-types-raw! (both default `#{}` for pure
-          ;; fns post-P8). Direct lookup is safe.
-          ;;
-          ;; `:call-time-effects` (when present) is the per-invocation
-          ;; subset — bound-arg ref-effects subtracted. HOF slots
-          ;; (`:filter :pred #{}`, `:map :func #{}`) measure against
-          ;; per-invocation purity, NOT against the fn's full
-          ;; construction-time effect set; prefer the call-time
-          ;; subset when recorded. Falls back to `:effects` for
-          ;; base-fns / older raw entries without the split.
-          eff (or (:call-time-effects info) (:effects info))]
-      (if-let [signature (types/callable-signature ret)]
-        ;; Producer-of-callable: the inner fn-type already carries
-        ;; whatever effects-constraint the slot declared. We can't
-        ;; meaningfully inject the producer's own effects here.
-        signature
-        (types/make-fn-type (or (:args info) {}) ret eff
-                            (get info :execution :unknown))))))
+  (reference/callable-contract (registry/rich-type-of fn-name)))
 
 
 (defn- has-type-var?

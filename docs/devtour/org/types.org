@@ -7,7 +7,7 @@ Type expressions, compatibility, inference, and secret markings.
 
 after: executor
 
-[[file:index.org][index]] · ~102 min
+[[file:index.org][index]] · ~107 min
 
 * 1. bind-input
 :PROPERTIES:
@@ -61,7 +61,45 @@ Compares original source forms with a prepared legacy module to plan supported r
 
 - source :: [[file:../../../src/graphden/input/source.clj::(defn plan-module][src/graphden/input/source.clj:254]]
 
-* 5. primitives
+* 5. parse-module-v2
+:PROPERTIES:
+:CUSTOM_ID: types/parse-module-v2
+:FILE: src/graphden/input/module.clj
+:LINE: 146
+:MINS: 1.7
+:END:
+
+Reads an explicitly versioned source module with caller-resolved declarations and namespace contexts. It retains authored input metadata and origin ledgers, returning validated input-binding rows without registry or storage writes. Partial required fields are legal; structural validation does not prove types or graph readiness.
+
+- source :: [[file:../../../src/graphden/input/module.clj::(defn parse-module-v2][src/graphden/input/module.clj:146]]
+- same file :: [[file:types.org::#types/emit-module-v2][emit-module-v2]]
+
+* 6. emit-module-v2
+:PROPERTIES:
+:CUSTOM_ID: types/emit-module-v2
+:FILE: src/graphden/input/module.clj
+:LINE: 187
+:MINS: 1.4
+:END:
+
+Exports offline definitions using the same declared descriptors and identity callbacks. Re-parsing detects changed binding origins or declaration context. Rich declarations remain intact; source formatting and comments belong to the separate CST writer.
+
+- source :: [[file:../../../src/graphden/input/module.clj::(defn emit-module-v2][src/graphden/input/module.clj:187]]
+- same file :: [[file:types.org::#types/parse-module-v2][parse-module-v2]]
+
+* 7. require-legacy!
+:PROPERTIES:
+:CUSTOM_ID: types/require-legacy!
+:FILE: src/graphden/input/format.clj
+:LINE: 12
+:MINS: 1.7
+:END:
+
+Keeps format 2 outside the production loader. Unsupported headers and mixed structured definition keys fail during the entire package closure's preflight, before any impl executes. Absent/version-1 headers still use legacy semantics; same-named argument fields and literal map keys remain ordinary data.
+
+- source :: [[file:../../../src/graphden/input/format.clj::(defn require-legacy!][src/graphden/input/format.clj:12]]
+
+* 8. primitives
 :PROPERTIES:
 :CUSTOM_ID: types/primitives
 :FILE: src/graphden/types/core/shapes.clj
@@ -74,7 +112,7 @@ Lists primitive value types and the special types ~:any~ and ~:never~. ~:any~ ac
 - source :: [[file:../../../src/graphden/types/core/shapes.clj::(def primitives][src/graphden/types/core/shapes.clj:23]]
 - same file :: [[file:types.org::#types/child-types][child-types]], [[file:types.org::#types/taint-with-secret-if-tainted][taint-with-secret-if-tainted]]
 
-* 6. child-types
+* 9. child-types
 :PROPERTIES:
 :CUSTOM_ID: types/child-types
 :FILE: src/graphden/types/core/shapes.clj
@@ -87,7 +125,7 @@ Returns the nested types inside each compound type: records, lists, maps, tuples
 - source :: [[file:../../../src/graphden/types/core/shapes.clj::(defn child-types][src/graphden/types/core/shapes.clj:485]]
 - same file :: [[file:types.org::#types/primitives][primitives]], [[file:types.org::#types/taint-with-secret-if-tainted][taint-with-secret-if-tainted]]
 
-* 7. well-formed?
+* 10. well-formed?
 :PROPERTIES:
 :CUSTOM_ID: types/well-formed?
 :FILE: src/graphden/types/core.clj
@@ -100,7 +138,7 @@ Validates the syntax of type expressions before later checker stages use them. C
 - source :: [[file:../../../src/graphden/types/core.clj::(defn well-formed?][src/graphden/types/core.clj:173]]
 - same file :: [[file:types.org::#types/make-union][make-union]], [[file:types.org::#types/desugar-variant][desugar-variant]], [[file:types.org::#types/subtype?][subtype?]], [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/unify][unify]], [[file:types.org::#types/strip-null][strip-null]]
 
-* 8. assert-finite!
+* 11. assert-finite!
 :PROPERTIES:
 :CUSTOM_ID: types/assert-finite!
 :FILE: src/graphden/types/expansion.clj
@@ -112,7 +150,7 @@ Bounds source type expansion before alias resolution or variant/union normalizat
 
 - source :: [[file:../../../src/graphden/types/expansion.clj::(defn assert-finite!][src/graphden/types/expansion.clj:13]]
 
-* 9. build
+* 12. build
 :PROPERTIES:
 :CUSTOM_ID: types/build
 :FILE: src/graphden/types/validator.clj
@@ -124,7 +162,7 @@ Builds a pure boundary validator from the same supported data declaration used b
 
 - source :: [[file:../../../src/graphden/types/validator.clj::(defn build][src/graphden/types/validator.clj:160]]
 
-* 10. native-execution
+* 13. native-execution
 :PROPERTIES:
 :CUSTOM_ID: types/native-execution
 :FILE: src/graphden/executor/capabilities.clj
@@ -136,7 +174,7 @@ A real JVM implementation proves JVM [[file:glossary.org::#term/execution-profil
 
 - source :: [[file:../../../src/graphden/executor/capabilities.clj::(defn native-execution][src/graphden/executor/capabilities.clj:63]]
 
-* 11. make-union
+* 14. make-union
 :PROPERTIES:
 :CUSTOM_ID: types/make-union
 :FILE: src/graphden/types/core.clj
@@ -149,7 +187,7 @@ Normalizes a union type: flattens nested unions, removes duplicates and ~:never~
 - source :: [[file:../../../src/graphden/types/core.clj::(defn make-union][src/graphden/types/core.clj:250]]
 - same file :: [[file:types.org::#types/well-formed?][well-formed?]], [[file:types.org::#types/desugar-variant][desugar-variant]], [[file:types.org::#types/subtype?][subtype?]], [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/unify][unify]], [[file:types.org::#types/strip-null][strip-null]]
 
-* 12. desugar-variant
+* 15. desugar-variant
 :PROPERTIES:
 :CUSTOM_ID: types/desugar-variant
 :FILE: src/graphden/types/core.clj
@@ -162,7 +200,7 @@ Converts a variant declaration into a union of records whose tag field has a fix
 - source :: [[file:../../../src/graphden/types/core.clj::(defn desugar-variant][src/graphden/types/core.clj:353]]
 - same file :: [[file:types.org::#types/well-formed?][well-formed?]], [[file:types.org::#types/make-union][make-union]], [[file:types.org::#types/subtype?][subtype?]], [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/unify][unify]], [[file:types.org::#types/strip-null][strip-null]]
 
-* 13. subtype?
+* 16. subtype?
 :PROPERTIES:
 :CUSTOM_ID: types/subtype?
 :FILE: src/graphden/types/core.clj
@@ -176,7 +214,7 @@ Tests whether every value allowed by ~actual~ is also allowed by ~expected~. Its
 - same file :: [[file:types.org::#types/well-formed?][well-formed?]], [[file:types.org::#types/make-union][make-union]], [[file:types.org::#types/desugar-variant][desugar-variant]], [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/unify][unify]], [[file:types.org::#types/strip-null][strip-null]]
 - referenced from :: [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/taint-with-secret-if-tainted][taint-with-secret-if-tainted]]
 
-* 14. constraint-implies?
+* 17. constraint-implies?
 :PROPERTIES:
 :CUSTOM_ID: types/constraint-implies?
 :FILE: src/graphden/types/core.clj
@@ -190,7 +228,7 @@ Checks whether one [[file:glossary.org::#term/subtype][refinement condition]] im
 - see also :: [[file:types.org::#types/subtype?][subtype?]]
 - same file :: [[file:types.org::#types/well-formed?][well-formed?]], [[file:types.org::#types/make-union][make-union]], [[file:types.org::#types/desugar-variant][desugar-variant]], [[file:types.org::#types/subtype?][subtype?]], [[file:types.org::#types/unify][unify]], [[file:types.org::#types/strip-null][strip-null]]
 
-* 15. unify
+* 18. unify
 :PROPERTIES:
 :CUSTOM_ID: types/unify
 :FILE: src/graphden/types/core.clj
@@ -203,7 +241,7 @@ Checks whether one [[file:glossary.org::#term/subtype][refinement condition]] im
 - source :: [[file:../../../src/graphden/types/core.clj::(defn unify][src/graphden/types/core.clj:1741]]
 - same file :: [[file:types.org::#types/well-formed?][well-formed?]], [[file:types.org::#types/make-union][make-union]], [[file:types.org::#types/desugar-variant][desugar-variant]], [[file:types.org::#types/subtype?][subtype?]], [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/strip-null][strip-null]]
 
-* 16. strip-null
+* 19. strip-null
 :PROPERTIES:
 :CUSTOM_ID: types/strip-null
 :FILE: src/graphden/types/core.clj
@@ -216,7 +254,7 @@ Removes null from a top-level union; a type containing only null becomes ~:never
 - source :: [[file:../../../src/graphden/types/core.clj::(defn strip-null][src/graphden/types/core.clj:330]]
 - same file :: [[file:types.org::#types/well-formed?][well-formed?]], [[file:types.org::#types/make-union][make-union]], [[file:types.org::#types/desugar-variant][desugar-variant]], [[file:types.org::#types/subtype?][subtype?]], [[file:types.org::#types/constraint-implies?][constraint-implies?]], [[file:types.org::#types/unify][unify]]
 
-* 17. taint-with-secret-if-tainted
+* 20. taint-with-secret-if-tainted
 :PROPERTIES:
 :CUSTOM_ID: types/taint-with-secret-if-tainted
 :FILE: src/graphden/types/core/shapes.clj
@@ -231,7 +269,7 @@ Marks a return type as secret when an input contains a secret and the function's
 - same file :: [[file:types.org::#types/primitives][primitives]], [[file:types.org::#types/child-types][child-types]]
 - referenced from :: [[file:crud.org::#crud/create-secret-facts!][create-secret-facts!]]
 
-* 18. encoded-type
+* 21. encoded-type
 :PROPERTIES:
 :CUSTOM_ID: types/encoded-type
 :FILE: src/graphden/types/core/view.clj
@@ -243,7 +281,7 @@ Projects explicit encode-view results in data positions: remove only the non-hid
 
 - source :: [[file:../../../src/graphden/types/core/view.clj::(defn encoded-type][src/graphden/types/core/view.clj:7]]
 
-* 19. broad-sink-hints
+* 22. broad-sink-hints
 :PROPERTIES:
 :CUSTOM_ID: types/broad-sink-hints
 :FILE: src/graphden/types/view.clj
@@ -255,7 +293,7 @@ Reports where a [[file:glossary.org::#term/ui-view][UiView]] enters an intention
 
 - source :: [[file:../../../src/graphden/types/view.clj::(defn broad-sink-hints][src/graphden/types/view.clj:68]]
 
-* 20. classify-literal
+* 23. classify-literal
 :PROPERTIES:
 :CUSTOM_ID: types/classify-literal
 :FILE: src/graphden/types/check/literals.clj
@@ -267,7 +305,7 @@ Infers a structural type from a literal Clojure value, including collections, re
 
 - source :: [[file:../../../src/graphden/types/check/literals.clj::(defn classify-literal][src/graphden/types/check/literals.clj:39]]
 
-* 21. check-binding!
+* 24. check-binding!
 :PROPERTIES:
 :CUSTOM_ID: types/check-binding!
 :FILE: src/graphden/types/check.clj
@@ -280,7 +318,7 @@ Checks one [[file:glossary.org::#term/binding][binding]]'s actual type against t
 - source :: [[file:../../../src/graphden/types/check.clj::(defn- check-binding!][src/graphden/types/check.clj:518]]
 - same file :: [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/rule-return][rule-return]], [[file:types.org::#types/check-fn-def!][check-fn-def!]], [[file:types.org::#types/check-all-defs!][check-all-defs!]]
 
-* 22. fits?
+* 25. fits?
 :PROPERTIES:
 :CUSTOM_ID: types/fits?
 :FILE: src/graphden/types/check/gradual.clj
@@ -292,7 +330,7 @@ Checks assignment direction after [[file:glossary.org::#term/unification][unific
 
 - source :: [[file:../../../src/graphden/types/check/gradual.clj::(defn fits?][src/graphden/types/check/gradual.clj:244]]
 
-* 23. signature-return
+* 26. signature-return
 :PROPERTIES:
 :CUSTOM_ID: types/signature-return
 :FILE: src/graphden/types/check.clj
@@ -305,7 +343,7 @@ Infers a return type from a [[file:glossary.org::#term/unification][polymorphic 
 - source :: [[file:../../../src/graphden/types/check.clj::(defn signature-return][src/graphden/types/check.clj:2278]]
 - same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/rule-return][rule-return]], [[file:types.org::#types/check-fn-def!][check-fn-def!]], [[file:types.org::#types/check-all-defs!][check-all-defs!]]
 
-* 24. rule-return
+* 27. rule-return
 :PROPERTIES:
 :CUSTOM_ID: types/rule-return
 :FILE: src/graphden/types/check.clj
@@ -318,7 +356,7 @@ Chooses return-type inference for the root [[file:glossary.org::#term/base-funct
 - source :: [[file:../../../src/graphden/types/check.clj::(defn rule-return][src/graphden/types/check.clj:2334]]
 - same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/check-fn-def!][check-fn-def!]], [[file:types.org::#types/check-all-defs!][check-all-defs!]]
 
-* 25. check-fn-def!
+* 28. check-fn-def!
 :PROPERTIES:
 :CUSTOM_ID: types/check-fn-def!
 :FILE: src/graphden/types/check.clj
@@ -332,7 +370,7 @@ Checks one function definition against its parents and inherited [[file:glossary
 - same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/rule-return][rule-return]], [[file:types.org::#types/check-all-defs!][check-all-defs!]]
 - referenced from :: [[file:crud.org::#crud/type-check-fn-after-mutation!][type-check-fn-after-mutation!]]
 
-* 26. check-all-defs!
+* 29. check-all-defs!
 :PROPERTIES:
 :CUSTOM_ID: types/check-all-defs!
 :FILE: src/graphden/types/check.clj
@@ -346,7 +384,7 @@ Checks definitions in [[file:glossary.org::#term/topological-order][dependency o
 - same file :: [[file:types.org::#types/check-binding!][check-binding!]], [[file:types.org::#types/signature-return][signature-return]], [[file:types.org::#types/rule-return][rule-return]], [[file:types.org::#types/check-fn-def!][check-fn-def!]]
 - referenced from :: [[file:packages.org::#packages/sync-fn-entities-from-packages!][sync-fn-entities-from-packages!]]
 
-* 27. record-rich-types!
+* 30. record-rich-types!
 :PROPERTIES:
 :CUSTOM_ID: types/record-rich-types!
 :FILE: src/graphden/executor/registry/core.clj
@@ -360,7 +398,7 @@ Stores each function's computed argument types, return type, and [[file:glossary
 - see also :: [[file:executor.org::#executor/compile-all][compile-all]], [[file:web.org::#web/all-rich-types][all-rich-types]]
 - same file :: [[file:types.org::#types/rich-type-of-id][rich-type-of-id]]
 
-* 28. rich-type-of-id
+* 31. rich-type-of-id
 :PROPERTIES:
 :CUSTOM_ID: types/rich-type-of-id
 :FILE: src/graphden/executor/registry/core.clj

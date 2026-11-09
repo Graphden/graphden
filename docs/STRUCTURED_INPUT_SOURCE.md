@@ -76,15 +76,79 @@ rendering the whole syntax tree again. `plan` checks source and target
 checksums; `apply-text` returns text only. A second application to the exact
 target is a no-op, and a stale or inconsistent patch is rejected.
 
+## Offline version 2 module reader
+
+`graphden.input.module/parse-module-v2` accepts a module map and
+`{:context-for resolver}`. The module must carry `:input-format 2`:
+
+```clojure
+{:input-format 2
+ :namespace "orders"
+ :fns [{:name :invoice
+        :parent :invoice-template
+        :bind {:customer {:name "Alice"}
+               :options [:value {:ref "ordinary data"}]}}]}
+```
+
+The resolver receives each original definition with its module namespace
+attached. It must provide a frozen, verified context:
+
+| Context key | Required meaning |
+| --- | --- |
+| `:fn-id` | UUID from `records.ids/fn-id` for the source namespace/name |
+| `:scope` | `[fn-id []]`, the definition's root input occurrence |
+| `:input-type-id` | UUID matching the owner's `:input-type-fn-id` declaration |
+| `:contract` | Resolved **declared** input descriptor, with UUID field identities |
+| `:name->id` | Namespace-resolved keyword → UUID map, without ambiguous sentinels |
+| `:binding-id` | Pure `(fn [scope field-id-path] ...)` returning the preserved origin UUID |
+| `:declaration-records` | Validated declaration rows, including the owner `:fn` row |
+| `:origin-ledger` | Opaque provenance map retained with the parsed definition |
+
+Type-only declarations require their source owner, declaration rows and origin
+ledger, with no callable contract. A shared input-type declaration already in
+the resolver's frozen graph need not be repeated in the returned records.
+This source API deliberately requires name-derived owner UUIDs; migration of
+arbitrary database-owned identities needs a separate provenance adapter.
+
+The result contains `:module` metadata, `:definitions` with original `:source`,
+declared `:contract`, parsed `:expression`, `:binding-state`, `:bindings` and
+origin ledger, plus combined `:records`. Rich `:input` declarations and top-level
+definition metadata are retained. The reader validates structural shapes,
+addresses, binding origins and occupancy before returning any result. It does
+not write records, register types, execute refs, or convert declarations into
+legacy `:args`.
+
+Missing required fields are allowed in a partial definition. Documented default
+values remain annotations. This structural validation does **not** prove value
+or ref type compatibility, graph readiness, or value/HOF/callable dispatch.
+Resolving declarations, inheritance and names belongs to the caller; union
+arms are never chosen by this reader.
+
+`emit-module-v2` accepts the parsed result and the same context options. It
+emits explicit partial/value/ref syntax, preserves declarations and metadata,
+and reparses to verify declaration and binding-origin stability. Formatting
+and comments remain the responsibility of the CST writer. Parsed output and
+origin ledgers can contain literal payloads; do not print them in summary logs.
+
+The production loader accepts only absent or explicit version 1 headers.
+It rejects version 2, unknown headers and top-level definition `:input`, `:bind`
+or `:configure` keys before any implementation in the resolved package closure
+is evaluated. Legacy arguments and literal maps may still use those names.
+Preflight snapshots package metadata and every module's parsed source per load
+call; processing consumes that same snapshot without rereading source files.
+
 ## Focused verification
 
 ```sh
 bb structured-input-inventory-test
 bb structured-input-cst-test
 bb structured-input-dry-run-test
+bb structured-input-module-test
 ```
 
-The JVM suites `graphden.input.core-test`, `graphden.input.syntax-test` and
-`graphden.input.source-test` cover binding laws, expression interpretation and
-legacy semantic classification. These focused checks do not replace the
-native landing gate or the eventual whole-corpus execution comparison.
+The JVM suites `graphden.input.core-test`, `graphden.input.syntax-test`,
+`graphden.input.source-test` and `graphden.input.module-test` cover binding laws,
+expression interpretation, legacy semantic classification and offline module
+round trips. `graphden.packages.input-format-test` verifies the production
+boundary and preflight using tiny synthetic packages. These focused checks do
+not replace the native landing gate or whole-corpus execution comparison.

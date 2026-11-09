@@ -7,19 +7,19 @@ Declarations, implementations, synchronization, import, and lint.
 
 after: executor
 
-[[file:index.org][index]] · ~90 min
+[[file:index.org][index]] · ~89 min
 
 * 1. load-packages
 :PROPERTIES:
 :CUSTOM_ID: packages/load-packages
 :FILE: src/graphden/packages/loader.clj
-:LINE: 653
-:MINS: 5.2
+:LINE: 672
+:MINS: 5.4
 :END:
 
 Loads configured packages in [[file:glossary.org::#term/topological-order][dependency order]] and combines their module definitions into ~:base-fn-defs~, ~:fn-defs~, and ~:namespaces~. Boot uses these results to populate the stored graph and implementation registry.
 
-- source :: [[file:../../../src/graphden/packages/loader.clj::(defn load-packages][src/graphden/packages/loader.clj:653]]
+- source :: [[file:../../../src/graphden/packages/loader.clj::(defn load-packages][src/graphden/packages/loader.clj:672]]
 - same file :: [[file:packages.org::#packages/resolve-dependencies][resolve-dependencies]], [[file:packages.org::#packages/validate-dep-constraints!][validate-dep-constraints!]], [[file:packages.org::#packages/load-single-package][load-single-package]], [[file:packages.org::#packages/process-module][process-module]], [[file:packages.org::#packages/base-fn?][base-fn?]], [[file:packages.org::#packages/load-module-fns][load-module-fns]], [[file:packages.org::#packages/load-impls-via-eval][load-impls-via-eval]], [[file:packages.org::#packages/fn-def->base-fn-def][fn-def->base-fn-def]], [[file:packages.org::#packages/sync-namespaces!][sync-namespaces!]]
 - referenced from :: [[file:boot.org::#boot/packages][packages]], [[file:constellation.org::#constellation/read-manifest][read-manifest]]
 
@@ -27,78 +27,78 @@ Loads configured packages in [[file:glossary.org::#term/topological-order][depen
 :PROPERTIES:
 :CUSTOM_ID: packages/resolve-dependencies
 :FILE: src/graphden/packages/loader.clj
-:LINE: 610
-:MINS: 2.9
+:LINE: 647
+:MINS: 1.7
 :END:
 
 Orders packages by their declared dependencies using [[file:glossary.org::#term/reachable-graph][depth-first search]] ([[file:glossary.org::#term/reachable-graph][DFS]]). Transitive dependencies are included, so a package's required primitives load before functions that use them.
 
-- source :: [[file:../../../src/graphden/packages/loader.clj::(defn resolve-dependencies][src/graphden/packages/loader.clj:610]]
+- source :: [[file:../../../src/graphden/packages/loader.clj::(defn resolve-dependencies][src/graphden/packages/loader.clj:647]]
 - same file :: [[file:packages.org::#packages/load-packages][load-packages]], [[file:packages.org::#packages/validate-dep-constraints!][validate-dep-constraints!]], [[file:packages.org::#packages/load-single-package][load-single-package]], [[file:packages.org::#packages/process-module][process-module]], [[file:packages.org::#packages/base-fn?][base-fn?]], [[file:packages.org::#packages/load-module-fns][load-module-fns]], [[file:packages.org::#packages/load-impls-via-eval][load-impls-via-eval]], [[file:packages.org::#packages/fn-def->base-fn-def][fn-def->base-fn-def]], [[file:packages.org::#packages/sync-namespaces!][sync-namespaces!]]
 
 * 3. validate-dep-constraints!
 :PROPERTIES:
 :CUSTOM_ID: packages/validate-dep-constraints!
 :FILE: src/graphden/packages/loader.clj
-:LINE: 589
+:LINE: 602
 :MINS: 1.8
 :END:
 
 Checks each package's declared [[file:glossary.org::#term/semver][semantic-version constraints]] against the available [[file:glossary.org::#term/edn][classpath]] packages. A mismatch stops boot with ~:packages/version-conflict~, before missing or incompatible definitions can cause later loading errors.
 
-- source :: [[file:../../../src/graphden/packages/loader.clj::(defn- validate-dep-constraints!][src/graphden/packages/loader.clj:589]]
+- source :: [[file:../../../src/graphden/packages/loader.clj::(defn- validate-dep-constraints!][src/graphden/packages/loader.clj:602]]
 - same file :: [[file:packages.org::#packages/load-packages][load-packages]], [[file:packages.org::#packages/resolve-dependencies][resolve-dependencies]], [[file:packages.org::#packages/load-single-package][load-single-package]], [[file:packages.org::#packages/process-module][process-module]], [[file:packages.org::#packages/base-fn?][base-fn?]], [[file:packages.org::#packages/load-module-fns][load-module-fns]], [[file:packages.org::#packages/load-impls-via-eval][load-impls-via-eval]], [[file:packages.org::#packages/fn-def->base-fn-def][fn-def->base-fn-def]], [[file:packages.org::#packages/sync-namespaces!][sync-namespaces!]]
 
 * 4. load-single-package
 :PROPERTIES:
 :CUSTOM_ID: packages/load-single-package
 :FILE: src/graphden/packages/loader.clj
-:LINE: 528
-:MINS: 2.3
+:LINE: 543
+:MINS: 2.2
 :END:
 
 Reads one package's ~package.edn~ and loads its listed modules. The result combines the [[file:glossary.org::#term/base-function][base-function]] definitions and composed function definitions from those modules.
 
-- source :: [[file:../../../src/graphden/packages/loader.clj::(defn- load-single-package][src/graphden/packages/loader.clj:528]]
+- source :: [[file:../../../src/graphden/packages/loader.clj::(defn- load-single-package][src/graphden/packages/loader.clj:543]]
 - same file :: [[file:packages.org::#packages/load-packages][load-packages]], [[file:packages.org::#packages/resolve-dependencies][resolve-dependencies]], [[file:packages.org::#packages/validate-dep-constraints!][validate-dep-constraints!]], [[file:packages.org::#packages/process-module][process-module]], [[file:packages.org::#packages/base-fn?][base-fn?]], [[file:packages.org::#packages/load-module-fns][load-module-fns]], [[file:packages.org::#packages/load-impls-via-eval][load-impls-via-eval]], [[file:packages.org::#packages/fn-def->base-fn-def][fn-def->base-fn-def]], [[file:packages.org::#packages/sync-namespaces!][sync-namespaces!]]
 
 * 5. process-module
 :PROPERTIES:
 :CUSTOM_ID: packages/process-module
 :FILE: src/graphden/packages/loader.clj
-:LINE: 469
+:LINE: 472
 :MINS: 3.7
 :END:
 
 Loads a module's ~fns.edn~ and ~impls.clj~, then separates [[file:glossary.org::#term/base-function][base functions]] requiring implementations from composed functions and type declarations. This is where the two module files are combined.
 
-- source :: [[file:../../../src/graphden/packages/loader.clj::(defn- process-module][src/graphden/packages/loader.clj:469]]
+- source :: [[file:../../../src/graphden/packages/loader.clj::(defn- process-module][src/graphden/packages/loader.clj:472]]
 - same file :: [[file:packages.org::#packages/load-packages][load-packages]], [[file:packages.org::#packages/resolve-dependencies][resolve-dependencies]], [[file:packages.org::#packages/validate-dep-constraints!][validate-dep-constraints!]], [[file:packages.org::#packages/load-single-package][load-single-package]], [[file:packages.org::#packages/base-fn?][base-fn?]], [[file:packages.org::#packages/load-module-fns][load-module-fns]], [[file:packages.org::#packages/load-impls-via-eval][load-impls-via-eval]], [[file:packages.org::#packages/fn-def->base-fn-def][fn-def->base-fn-def]], [[file:packages.org::#packages/sync-namespaces!][sync-namespaces!]]
 
 * 6. base-fn?
 :PROPERTIES:
 :CUSTOM_ID: packages/base-fn?
 :FILE: src/graphden/packages/loader.clj
-:LINE: 362
+:LINE: 365
 :MINS: 1.1
 :END:
 
 Classifies an entry as a [[file:glossary.org::#term/base-function][base function]] when it has no parent declarations and is not a type row. [[file:glossary.org::#term/base-function][Base functions]] require a host implementation; composed definitions inherit their implementation through parents.
 
-- source :: [[file:../../../src/graphden/packages/loader.clj::(defn- base-fn?][src/graphden/packages/loader.clj:362]]
+- source :: [[file:../../../src/graphden/packages/loader.clj::(defn- base-fn?][src/graphden/packages/loader.clj:365]]
 - same file :: [[file:packages.org::#packages/load-packages][load-packages]], [[file:packages.org::#packages/resolve-dependencies][resolve-dependencies]], [[file:packages.org::#packages/validate-dep-constraints!][validate-dep-constraints!]], [[file:packages.org::#packages/load-single-package][load-single-package]], [[file:packages.org::#packages/process-module][process-module]], [[file:packages.org::#packages/load-module-fns][load-module-fns]], [[file:packages.org::#packages/load-impls-via-eval][load-impls-via-eval]], [[file:packages.org::#packages/fn-def->base-fn-def][fn-def->base-fn-def]], [[file:packages.org::#packages/sync-namespaces!][sync-namespaces!]]
 
 * 7. load-module-fns
 :PROPERTIES:
 :CUSTOM_ID: packages/load-module-fns
 :FILE: src/graphden/packages/loader.clj
-:LINE: 210
-:MINS: 1.9
+:LINE: 211
+:MINS: 2.1
 :END:
 
 Reads a module's [[file:glossary.org::#term/edn][EDN]] definitions while retaining source file and line information. Later validation and type errors use those locations to identify the authored definition.
 
-- source :: [[file:../../../src/graphden/packages/loader.clj::(defn- load-module-fns][src/graphden/packages/loader.clj:210]]
+- source :: [[file:../../../src/graphden/packages/loader.clj::(defn- load-module-fns][src/graphden/packages/loader.clj:211]]
 - same file :: [[file:packages.org::#packages/load-packages][load-packages]], [[file:packages.org::#packages/resolve-dependencies][resolve-dependencies]], [[file:packages.org::#packages/validate-dep-constraints!][validate-dep-constraints!]], [[file:packages.org::#packages/load-single-package][load-single-package]], [[file:packages.org::#packages/process-module][process-module]], [[file:packages.org::#packages/base-fn?][base-fn?]], [[file:packages.org::#packages/load-impls-via-eval][load-impls-via-eval]], [[file:packages.org::#packages/fn-def->base-fn-def][fn-def->base-fn-def]], [[file:packages.org::#packages/sync-namespaces!][sync-namespaces!]]
 
 * 8. prepare-module
@@ -159,26 +159,26 @@ Represents ~{Y {:as :X}}~ by creating an own rename [[file:glossary.org::#term/s
 :PROPERTIES:
 :CUSTOM_ID: packages/load-impls-via-eval
 :FILE: src/graphden/packages/loader.clj
-:LINE: 270
+:LINE: 273
 :MINS: 2.5
 :END:
 
 Evaluates ~impls.clj~ forms in a namespace and reads its ~impls~ map from function names to Clojure implementations. During coverage tests, an already instrumented namespace can be reused so those calls remain visible to the coverage tool.
 
-- source :: [[file:../../../src/graphden/packages/loader.clj::(defn- load-impls-via-eval][src/graphden/packages/loader.clj:270]]
+- source :: [[file:../../../src/graphden/packages/loader.clj::(defn- load-impls-via-eval][src/graphden/packages/loader.clj:273]]
 - same file :: [[file:packages.org::#packages/load-packages][load-packages]], [[file:packages.org::#packages/resolve-dependencies][resolve-dependencies]], [[file:packages.org::#packages/validate-dep-constraints!][validate-dep-constraints!]], [[file:packages.org::#packages/load-single-package][load-single-package]], [[file:packages.org::#packages/process-module][process-module]], [[file:packages.org::#packages/base-fn?][base-fn?]], [[file:packages.org::#packages/load-module-fns][load-module-fns]], [[file:packages.org::#packages/fn-def->base-fn-def][fn-def->base-fn-def]], [[file:packages.org::#packages/sync-namespaces!][sync-namespaces!]]
 
 * 13. fn-def->base-fn-def
 :PROPERTIES:
 :CUSTOM_ID: packages/fn-def->base-fn-def
 :FILE: src/graphden/packages/loader.clj
-:LINE: 386
+:LINE: 389
 :MINS: 4.6
 :END:
 
 Combines an ~fns.edn~ declaration with its Clojure implementation. Argument types, return type, [[file:glossary.org::#term/effect][effects]], and implementation become one [[file:glossary.org::#term/base-function][base-function]] registry entry.
 
-- source :: [[file:../../../src/graphden/packages/loader.clj::(defn- fn-def->base-fn-def][src/graphden/packages/loader.clj:386]]
+- source :: [[file:../../../src/graphden/packages/loader.clj::(defn- fn-def->base-fn-def][src/graphden/packages/loader.clj:389]]
 - see also :: [[file:executor.org::#executor/resolve-impl][resolve-impl]]
 - same file :: [[file:packages.org::#packages/load-packages][load-packages]], [[file:packages.org::#packages/resolve-dependencies][resolve-dependencies]], [[file:packages.org::#packages/validate-dep-constraints!][validate-dep-constraints!]], [[file:packages.org::#packages/load-single-package][load-single-package]], [[file:packages.org::#packages/process-module][process-module]], [[file:packages.org::#packages/base-fn?][base-fn?]], [[file:packages.org::#packages/load-module-fns][load-module-fns]], [[file:packages.org::#packages/load-impls-via-eval][load-impls-via-eval]], [[file:packages.org::#packages/sync-namespaces!][sync-namespaces!]]
 
@@ -200,13 +200,13 @@ A concrete arithmetic [[file:glossary.org::#term/base-function][base function]]:
 :PROPERTIES:
 :CUSTOM_ID: packages/sync-namespaces!
 :FILE: src/graphden/packages/loader.clj
-:LINE: 732
+:LINE: 754
 :MINS: 4.8
 :END:
 
 Creates the stored namespace hierarchy, such as ~core~ and ~core.arithmetic~, and returns a map from namespace paths to IDs. Function synchronization uses these IDs to place each definition in its namespace. Metadata also records only namespace IDs actually created by this synchronization. Package installation returns those IDs alongside the pin and version identities, so lesson cleanup can remove its own resources without claiming pre-existing namespaces by name.
 
-- source :: [[file:../../../src/graphden/packages/loader.clj::(defn sync-namespaces!][src/graphden/packages/loader.clj:732]]
+- source :: [[file:../../../src/graphden/packages/loader.clj::(defn sync-namespaces!][src/graphden/packages/loader.clj:754]]
 - see also :: [[file:executor.org::#executor/sync-fns-to-storage!][sync-fns-to-storage!]]
 - same file :: [[file:packages.org::#packages/load-packages][load-packages]], [[file:packages.org::#packages/resolve-dependencies][resolve-dependencies]], [[file:packages.org::#packages/validate-dep-constraints!][validate-dep-constraints!]], [[file:packages.org::#packages/load-single-package][load-single-package]], [[file:packages.org::#packages/process-module][process-module]], [[file:packages.org::#packages/base-fn?][base-fn?]], [[file:packages.org::#packages/load-module-fns][load-module-fns]], [[file:packages.org::#packages/load-impls-via-eval][load-impls-via-eval]], [[file:packages.org::#packages/fn-def->base-fn-def][fn-def->base-fn-def]]
 - referenced from :: [[file:editor.org::#editor/gdTourRecordPackageInstall][gdTourRecordPackageInstall]]

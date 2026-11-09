@@ -171,14 +171,18 @@
       (registry/record-rich-types! id (:name d) d))
     ;; First check the authored forms: their marker/type annotations must veto
     ;; export even when a storage representation deliberately erases them.
-    (doseq [id ordered :let [d (get by-id id)] :when (or (:parent d) (:parents d))]
-      (check/check-fn-def! (assoc d :fn-id id)))
+    ;; Dependencies are final within each topological pass. Reconstructed rows
+    ;; can change those signatures, so no memo may cross the pass boundary.
+    (binding [check/*ref-return-memo* (atom {})]
+      (doseq [id ordered :let [d (get by-id id)] :when (or (:parent d) (:parents d))]
+        (check/check-fn-def! (assoc d :fn-id id))))
     (let [authored (snapshot/capture-policy @registry/*rich-types-override*)]
       ;; Certify the exact reconstructed rows used by the existing snapshot
       ;; exporter, without manufacturing or weakening its provenance metadata.
-      (doseq [id ordered]
-        (when-let [d (type-check/reconstruct-fn-def storage id)]
-          (check/check-fn-def! d)))
+      (binding [check/*ref-return-memo* (atom {})]
+        (doseq [id ordered]
+          (when-let [d (type-check/reconstruct-fn-def storage id)]
+            (check/check-fn-def! d))))
       (let [checked (snapshot/capture-policy @registry/*rich-types-override*)]
         (update checked :classes
                 #(into {} (map (fn [[id visibility]]

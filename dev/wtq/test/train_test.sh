@@ -141,6 +141,155 @@ check "the interrupted receipt remains incomplete" \
    (when (:complete (clojure.edn/read-string (slurp (System/getenv "WTQ_REPORT_TEST"))))
      (System/exit 1))'
 
+echo "== validation retains a pinned candidate, without touching main or releasing"
+new_world validation
+feature validate-wtqtest a.txt a
+validation_sha="$(git -C "$REPO" rev-parse feature/validate-wtqtest)"
+validation_base="$(git -C "$REPO" rev-parse develop)"
+# A remote-tracking tip ahead of develop would be merged by refresh_target,
+# even if fetch failed. Validation must never enter that path.
+git -C "$REPO" update-ref refs/remotes/origin/develop "$validation_sha"
+printf 'owner staged edit\n' > "$REPO/f.txt"
+git -C "$REPO" add f.txt
+printf 'owner unstaged edit\n' >> "$REPO/g.txt"
+validation_index="$(git -C "$REPO" write-tree)"
+validation_status="$(git -C "$REPO" status --porcelain)"
+printf 'pending release\n' > "$Q/release-pending"
+merge_bg validate-wtqtest --validate-only
+finish validate-wtqtest
+check "validation exits zero" eq "$(rc_of validate-wtqtest)" 0
+check "success is VALIDATED, never GREEN" eq "$(verdict validate-wtqtest)" VALIDATED
+check "validation leaves develop unchanged despite newer remote" eq "$(git -C "$REPO" rev-parse develop)" "$validation_base"
+check "validation preserves main index" eq "$(git -C "$REPO" write-tree)" "$validation_index"
+check "validation preserves tracked working edits" eq "$(git -C "$REPO" status --porcelain)" "$validation_status"
+check "validation preserves pending release" eq "$(cat "$Q/release-pending")" 'pending release'
+check "validation ran the complete stub once" eq "$(gates)" validate-wtqtest
+check "validation retains the feature worktree" test -d "$WTQ_ROOT/validate-wtqtest"
+check "validation cannot authorize drop" eval '! wt_main drop validate-wtqtest >/dev/null 2>&1'
+validation_ts="$(cut -f5 "$Q/results/validate-wtqtest")"
+check "validated proof ref retains exact candidate" eq "$(git -C "$REPO" rev-parse "refs/wtq/validated/$validation_ts")" "$validation_sha"
+check "validation receipt records mode, command and outcome" \
+  env WTQ_REPORT_TEST="$Q/logs/_train-$validation_ts.report.edn" bb -e \
+  '(require (quote clojure.edn))
+   (let [r (clojure.edn/read-string (slurp (System/getenv "WTQ_REPORT_TEST")))]
+     (when-not (and (:complete r) (= 0 (:exit r)) (= :validate (:mode r))
+                   (= :validated (:outcome r)) (= ["bb" "wt" "validate"] (:command r)))
+       (System/exit 1)))'
+for report_mode in landed landed-image; do
+  if bb "$SRC/report.clj" "$report_mode" "$Q/logs/_train-$validation_ts.report.edn" >/dev/null 2>&1; then
+    fail "validation receipt must not authorize $report_mode"
+  else pass "validation receipt cannot authorize $report_mode"; fi
+done
+# shellcheck disable=SC2016  # eval expands the fixture path
+check "validation rejects deploy" eval '! (cd "$WTQ_ROOT/validate-wtqtest" && ./dev/wtq/wt validate --deploy) >/dev/null 2>&1'
+# shellcheck disable=SC2016  # eval expands the fixture path
+check "validation rejects release" eval '! (cd "$WTQ_ROOT/validate-wtqtest" && ./dev/wtq/wt validate --release) >/dev/null 2>&1'
+
+# A new stage can inherit the validated branch without develop advancing.
+touch "$Q/owner-hold-develop"
+wt_main new validate-next >/dev/null 2>&1
+git -C "$WTQ_ROOT/validate-next" merge --ff-only feature/validate-wtqtest >/dev/null
+printf 'next\n' > "$WTQ_ROOT/validate-next/next.txt"
+git -C "$WTQ_ROOT/validate-next" add next.txt
+git -C "$WTQ_ROOT/validate-next" commit -qm 'feat: next stage'
+merge_bg validate-next --validate-only
+finish validate-next
+check "cumulative stage validates" eq "$(verdict validate-next)" VALIDATED
+check "claim and second validation keep target fixed under hold" eq "$(git -C "$REPO" rev-parse develop)" "$validation_base"
+check "original proof survives train reset" eq "$(git -C "$REPO" rev-parse "refs/wtq/validated/$validation_ts")" "$validation_sha"
+check "later candidate includes earlier stage" git -C "$REPO" merge-base --is-ancestor "$validation_sha" feature/validate-next
+merge_bg validate-next
+finish validate-next
+check "ordinary landing refuses owner hold before gate" eq "$(rc_of validate-next)" 3
+check "owner hold admits no additional gate" eq "$(wc -l < "$STUB_LOG" | tr -d ' ')" 2
+
+# A pinned candidate can use a newer harness without changing its source SHA.
+echo "== explicit worktree uses the harness, not the pinned candidate's runner"
+new_world external-harness
+feature pinned a.txt a
+printf '#!/usr/bin/env bash\nexit 97\n' > "$WTQ_ROOT/pinned/dev/wtq/wt"
+git -C "$WTQ_ROOT/pinned" add dev/wtq/wt
+git -C "$WTQ_ROOT/pinned" commit -qm 'test: old runner'
+pinned_sha="$(git -C "$REPO" rev-parse feature/pinned)"
+if wt_main validate --worktree="$WTQ_ROOT/pinned" > "$T/pinned.out" 2>&1; then
+  pass "external harness validates pinned worktree"
+else fail "external harness validates pinned worktree"; cat "$T/pinned.out"; fi
+check "external harness queued intended member" eq "$(gates)" pinned
+check "external harness leaves pinned source SHA unchanged" eq "$(git -C "$REPO" rev-parse feature/pinned)" "$pinned_sha"
+check "external harness returns VALIDATED for intended member" eq "$(verdict pinned)" VALIDATED
+# shellcheck disable=SC2016  # eval expands the fixture path
+check "override is unavailable for landing" eval '! wt_main merge --worktree="$WTQ_ROOT/pinned" >/dev/null 2>&1'
+
+# A late owner decision preserves the exact successful checks for validation.
+echo "== landing PRECOND can resume as validation with unchanged candidate"
+new_world validate-resume
+mkdir -p "$REPO/scripts"
+cp "$SRC/../../scripts/ci_resume.clj" "$SRC/../../scripts/ci_resume_cli.clj" "$SRC/../../scripts/ci_report.clj" "$REPO/scripts/"
+printf '{:paths ["scripts"]}\n' > "$REPO/bb.edn"
+git -C "$REPO" add scripts bb.edn
+git -C "$REPO" commit -qm 'test: exact receipt support'
+feature resume a.txt a
+resume_base="$(git -C "$REPO" rev-parse develop)"
+cat > "$WTQ_GATE_STUB" <<'EOF'
+#!/usr/bin/env bash
+set -eu
+q="$(git rev-parse --git-common-dir)/wtq"
+sha="$(git rev-parse HEAD)"
+base="$(git rev-parse develop)"
+prefix="$q/logs/_train-$WTQ_REPORT_TS"
+if [ -n "${WTQ_REUSE_FROM:-}" ]; then
+  printf 'credited %s\n' "$WTQ_REUSE_FROM" >> "$STUB_LOG"
+else
+  echo checked >> "$STUB_LOG"
+fi
+printf '{:schema 1 :sha "%s" :scope {:since "%s"}}\n' "$sha" "$base" > "$prefix.ci-expected.edn"
+printf '{:schema 1 :kind "stages" :sha "%s" :roster ["ci"] :status {"ci" :passed}}\n' "$sha" > "$prefix.stages.edn"
+printf 'feature/resume\t%s\t%s\tci\t%s\n' "$sha" "$base" "$prefix" > "$q/last-failure/resume"
+touch "$q/owner-hold-develop"
+EOF
+merge_bg resume
+finish resume
+check "late hold returns PRECOND" eq "$(verdict resume)" PRECOND
+check "late hold leaves main checkout clean" eq "$(git -C "$REPO" status --porcelain)" ''
+check "late hold leaves target unchanged" eq "$(git -C "$REPO" rev-parse develop)" "$resume_base"
+resume_ts="$(cut -f5 "$Q/results/resume")"
+merge_bg resume --validate-only
+finish resume
+check "landing checkpoint resumes as VALIDATED" eq "$(verdict resume)" VALIDATED
+check "exact candidate checks are credited across mode change" eq "$(gates)" "$(printf 'checked\ncredited %s' "$Q/logs/_train-$resume_ts")"
+check "validation releases heavy admission" test ! -e "$Q/gate-heavy"
+
+echo "== validation conductor never lands queued members and gates one branch at a time"
+new_world validation-partition
+feature legacy legacy.txt legacy
+feature vfirst first.txt first
+feature vsecond second.txt second
+partition_base="$(git -C "$REPO" rev-parse develop)"
+hold_lock
+# A live old-format landing entry has no mode field. It must remain pending,
+# even when validation owns the conductor; no landing waiter exists here.
+printf 'name=legacy\nbranch=feature/legacy\nsha=%s\nwt=%s\nts=1\npid=%s\nstate=queued\n' \
+  "$(git -C "$REPO" rev-parse feature/legacy)" "$WTQ_ROOT/legacy" "$$" > "$Q/queue/legacy"
+merge_bg vfirst --validate-only
+wait_for 20 queued vfirst
+merge_bg vsecond --validate-only
+wait_for 20 queued vsecond
+release_lock
+finish vfirst vsecond
+check "first validation succeeds" eq "$(verdict vfirst)" VALIDATED
+check "second validation succeeds" eq "$(verdict vsecond)" VALIDATED
+check "validation trains contain exactly one candidate each" eq "$(gates)" "$(printf 'vfirst\nvsecond')"
+check "validation conductor leaves legacy landing queued" queued legacy
+check "validation conductor never lands another member" eq "$(git -C "$REPO" rev-parse develop)" "$partition_base"
+# The simulated legacy waiter is finished; it must not affect the next case.
+rm "$Q/queue/legacy"
+feature vred BAD bad
+merge_bg vred --validate-only
+finish vred
+check "failed validation remains FAIL" eq "$(verdict vred)" FAIL
+check "failed validation does not land" eq "$(git -C "$REPO" rev-parse develop)" "$partition_base"
+check "failed validation retains no success ref" eq "$(git -C "$REPO" for-each-ref --format='%(refname)' refs/wtq/validated | wc -l | tr -d ' ')" 2
+
 echo "== single branch: a train of one behaves like the old gate"
 new_world single
 feature solo-wtqtest a.txt a

@@ -447,6 +447,17 @@ CASE_BUILD=1 CASE_E2E=1 CASE_VISUAL=1 CASE_INTEGRATION=1 CASE_FLEET=1
 run_case
 assert_events 'expect,verify,e2e,integration,fleet'
 [ "$built_candidate" = 1 ]
+# A completed landing checkpoint remains usable when only the final action
+# changes to validation: exact pass/image checks still run before credit.
+cp "$RESUME_SOURCE.stages.edn" "$RESUME_SOURCE.interrupted.edn"
+WTQ_GATE_MODE=validate
+WTQ_REPORT_TS=resume-validation
+printf '%s\n' '{:schema 1 :kind "stages" :sha "0000000000000000000000000000000000000001" :roster ["ci" "build" "visual" "e2e" "integration" "fleet"] :status {"ci" :passed "build" :passed "visual" :passed "e2e" :passed "integration" :passed "fleet" :passed}}' > "$RESUME_SOURCE.stages.edn"
+run_case
+assert_events 'expect,verify'
+unset WTQ_GATE_MODE
+# Restore the interrupted roster for the missing-image case.
+mv "$RESUME_SOURCE.interrupted.edn" "$RESUME_SOURCE.stages.edn"
 FAIL_RESTORE_IMAGE=1
 WTQ_REPORT_TS=resume-image-missing
 run_case

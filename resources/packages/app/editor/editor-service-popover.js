@@ -145,20 +145,36 @@ function presentServicePopover(el, anchorEl) {
 // the platform endpoints. The reliable tenant signal is the quota plan slug —
 // nil for the public org, a real slug for a tenant — primed once at startup.
 let _tenantPlanTier; // undefined = not primed; null = public/single-tenant; slug otherwise
+let _tenantPlanPending = null;
+let _tenantPlanSession = null;
 
-async function primeTenantPlan() {
+function primeTenantPlan() {
+  const session = serviceSessionKey();
+  if (_tenantPlanTier !== undefined && _tenantPlanSession === session) return Promise.resolve(true);
+  if (_tenantPlanPending?.session === session) return _tenantPlanPending.promise;
+  _tenantPlanTier = undefined;
   const request = ++_tenantPlanRequest;
   const epoch = _serviceAuthEpoch;
-  const session = serviceSessionKey();
+  const pending = {session};
+  pending.promise = readTenantPlan(request, epoch, session).finally(() => {
+    if (_tenantPlanPending === pending) _tenantPlanPending = null;
+  });
+  _tenantPlanPending = pending;
+  return pending.promise;
+}
+
+async function readTenantPlan(request, epoch, session) {
   let tier = null;
   if (typeof API === 'object' && typeof API.api_orgs_quota !== 'undefined') {
     try {
       const r = await authFetch(API.api_orgs_quota, {method: 'GET'});
-      if (r?.ok) tier = (await r.json())?.plan || null;
-    } catch (_) { /* the current session retains the platform fallback */ }
+      if (!r?.ok) return false;
+      tier = (await r.json())?.plan || null;
+    } catch (_) { return false; }
   }
   if (request !== _tenantPlanRequest || epoch !== _serviceAuthEpoch || session !== serviceSessionKey()) return false;
   _tenantPlanTier = tier;
+  _tenantPlanSession = session;
   return true;
 }
 
@@ -175,6 +191,9 @@ function tenantServiceMode() { return _tenantPlanTier === 'dedicated'; }
 // === API helpers ===========================================================
 
 async function fetchServices() {
+  if (_tenantPlanTier === undefined || _tenantPlanSession !== serviceSessionKey()) {
+    if (!await primeTenantPlan()) return null;
+  }
   const listUrl = isRealTenant() ? API.api_orgs_services : API.api_services;
   try {
     const r = await authFetch(listUrl, { method: 'GET' });
@@ -486,10 +505,9 @@ async function refreshServiceInstances(el, serviceId, context) {
 
 async function showTenantServicePopover(el, fnEntity, anchorEl, context) {
   try {
-    const cache = await fetchServices();
+    const cache = await refreshServicesCache(context);
     if (!serviceContextCurrent(context)) return;
     if (!Array.isArray(cache?.services)) throw new Error('Service lookup unavailable');
-    servicesCache = cache;
     const svc = getServiceForFnId(context.fnId);
     const branch = await serviceBranchForDialog(svc, context);
     if (!serviceContextCurrent(context)) return;
@@ -520,6 +538,11 @@ async function showServicePopover(fnEntity, anchorEl) {
     branch: typeof getCurrentBranchName === 'function' ? getCurrentBranchName() : null};
   servicePopoverContext = context;
   el.textContent = '';
+  if (_tenantPlanTier === undefined || _tenantPlanSession !== serviceSessionKey()) {
+    const ready = await primeTenantPlan();
+    if (!serviceContextCurrent(context)) return;
+    if (!ready) { showServiceError(el, anchorEl, 'Service plan unavailable'); return; }
+  }
   if (isRealTenant()) {
     // A tenant never reaches the platform server partial (it reads the
     // tenant-forbidden :service). Dedicated tier → the management form; any
@@ -687,6 +710,8 @@ window.addEventListener?.('gd-auth-changed', () => {
   _serviceCacheRequest++;
   _tenantPlanRequest++;
   _tenantPlanTier = undefined;
+  _tenantPlanPending = null;
+  _tenantPlanSession = null;
   hideServicePopover();
   servicesCache = null;
 });
@@ -704,4 +729,5 @@ window.refreshServicesCache = refreshServicesCache;
 // single-tenant self-host always can. Exported because the tutorial gates its
 // services lesson on it — a lesson nobody on this plan can finish is worse
 // than one that says so up front.
-window.gdServicesManageable = () => !isRealTenant() || tenantServiceMode();
+window.gdServicesManageable = () => _tenantPlanTier !== undefined
+  && _tenantPlanSession === serviceSessionKey() && (!isRealTenant() || tenantServiceMode());

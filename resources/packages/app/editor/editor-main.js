@@ -617,6 +617,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (bootHash.startsWith('@') && typeof gdRouteSurfaceHash === 'function') {
     gdRouteSurfaceHash(decodeURIComponent(bootHash));
   }
+  // Resolve the cookie identity before taking the graph's auth epoch. The
+  // initial probe invalidates anonymous state but does not start another load.
+  if (window.gdAccountsReady) await window.gdAccountsReady;
   // Top-level catch so a failed initial /api/graph/entities load (network
   // outage, 5xx, branch-router error) shows a user-visible error in the
   // header instead of leaving the editor silently broken with just an

@@ -1539,15 +1539,40 @@
   ;; (the SELECT against `:fn` identity table) and `:branch-chain`
   ;; (the parent chain to scan).
   {:name :_list-services-fn-rows
-   :description "Stage 2a — all `:fn` rows visible on the current branch."
+   :description "Stage 2a — resolve only service functions on the current branch, with both identities and versions restricted to the service fn-ids."
    :parent :resolve-fn-rows
    :args {:identities :_list-services-fn-identities
+          :version-rows :_list-services-fn-versions
           :branch-chain :current-branch-chain}}
+
+  {:name :_list-services-fn-ids
+   :description "Distinct function identities referenced by the visible service rows; empty services produce an empty IN filter."
+   :parent :distinct
+   :args {:coll {:parent :map
+                 :args {:func :_list-services-fn-id
+                        :coll :_list-services-rows}}}}
+
+  {:name :_list-services-fn-id
+   :parent :get
+   :args {:coll {:as :item}
+          :key {:value :fn-id}
+          :default nil}}
 
   {:name :_list-services-fn-identities
    :parent :storage-query-identities
    :args {:entity-type {:value "fn"}
-          :where {:value {}}}}
+          :where {:parent :assoc
+                  :args {:map {:value {}}
+                         :key {:value :id}
+                         :value :_list-services-fn-ids}}}}
+
+  {:name :_list-services-fn-versions
+   :description "Decoded versions for service functions on the current branch chain. Uses the same storage boundary as the identity query; unrelated function versions never enter the resolver."
+   :parent :storage-query-identities
+   :args {:entity-type {:value "fn-version"}
+          :where {:parent :zipmap
+                  :args {:keys {:value [:fn-id :branch-id]}
+                         :vals [:_list-services-fn-ids :current-branch-chain]}}}}
 
   {:name :_list-services-fn-id-name-pairs
    :description "Stage 2b — map the per-fn `[:id :name]` builder over every fn row."

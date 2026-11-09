@@ -36,6 +36,7 @@ const json = (body, status = 200) => ({
 // return a function (called at fetch time) to act mid-flight.
 function boot({ routes, accounts = false, tenancyClass = false, renderGraph = () => {} }) {
   const calls = { popover: [], entityList: 0, href: null, requery: 0, events: [], inlineClosed: 0 };
+  const listeners = {};
   const oldChip = {attrs: {}, setAttribute(key, value) { this.attrs[key] = value; }};
   const surfaces = Object.fromEntries(['graph-container', 'gd-inspector', 'entity-list'].map(id => [id, {
     inert: false, attrs: {},
@@ -49,7 +50,7 @@ function boot({ routes, accounts = false, tenancyClass = false, renderGraph = ()
     API: { api_graph_entities: '/api/graph/entities', api_types: '/api/types', api_value_kinds: '/api/value-kinds' },
     location: { pathname: '/', search: '', hash: '#app.x',
                 set href(v) { calls.href = v; }, get href() { return calls.href; } },
-    document: { addEventListener() {}, getElementById: id => surfaces[id] || null,
+    document: { addEventListener: (name, fn) => { listeners[name] = fn; }, getElementById: id => surfaces[id] || null,
                 querySelectorAll: () => [oldChip], body: { classList: { contains: (c) => tenancyClass && c === 'gd-tenancy' } } },
     hideAllInlineHosts: () => { calls.inlineClosed += 1; },
     buildLookups: (g) => ({ fnMap: new Map(g.fns.map((f) => [f.id, f])) }),
@@ -77,7 +78,7 @@ function boot({ routes, accounts = false, tenancyClass = false, renderGraph = ()
     return Promise.resolve(typeof r === 'function' ? r() : r);
   };
   vm.runInContext(SRC, ctx, { filename: 'editor-main.js' });
-  return { ctx, calls, rowActions, oldChip, surfaces };
+  return { ctx, calls, rowActions, oldChip, surfaces, listeners };
 }
 
 const TREE = { namespaces: [{ id: 'ns1', name: 'app' }], counts: [] };
@@ -223,6 +224,32 @@ function racingRoutes(ctxRef, typesBody) {
   await ten.ctx.initGraph();
   assert(ten.calls.href === null, 'tenancy class without accounts: no redirect to a /login that does not exist');
   assert(ten.calls.popover.length === 1, 'tenancy class without accounts: admin popover');
+
+  console.log(' cookie boot waits for identity and makes one graph/type request');
+  {
+    const requested = [];
+    const b = boot({ routes: url => {
+      requested.push(url);
+      return json(url.includes('scope=tree') ? TREE : {});
+    }});
+    b.ctx.location.hash = '';
+    b.ctx.initPrefsLate = () => {};
+    let finishAuth;
+    b.ctx.initAuthLock = () => {
+      b.ctx.gdAccountsReady = new Promise(resolve => { finishAuth = resolve; });
+    };
+    let tutorialReady;
+    const ready = new Promise(resolve => { tutorialReady = resolve; });
+    b.ctx.maybeStartTutorial = tutorialReady;
+    const booting = b.listeners.DOMContentLoaded();
+    assert(requested.length === 0, 'no graph requests before cookie identity is known');
+    finishAuth(true);
+    await booting;
+    await ready;
+    assert(requested.filter(url => url.includes('scope=tree')).length === 1, 'one initial tree request');
+    assert(requested.filter(url => url === '/api/types').length === 1, 'one initial types request');
+    assert(b.calls.entityList === 1, 'initial Explorer is painted once');
+  }
 
   console.log(' a description save drops the row-actions HTML it was baked into');
   {

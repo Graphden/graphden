@@ -30,7 +30,7 @@
   [snapshot]
   (let [context (merge {:fns {} :fields {} :members {} :bindings {}
                         :type-bodies {} :signatures {} :aliases {} :alias-ids {}
-                        :markers (shapes/markers-snapshot)
+                        :markers (shapes/markers-snapshot) :snapshot-id (random-uuid)
                         :field-default-required? false} snapshot)]
     (doseq [key [:fns :fields :members :bindings :type-bodies :signatures :aliases :alias-ids :markers]]
       (when-not (map? (get context key))

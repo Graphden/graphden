@@ -61,3 +61,18 @@
            (reference/call-site-contract expected actual {:lambda-params [:value]})))
     (is (= [:fn {} :bool :any :unknown]
            (reference/call-site-contract [:fn {} :bool :any] actual {})))))
+
+
+(deftest callable-parameter-selection-retains-explicit-empty-and-positional-rules-test
+  (let [base {:structural-names [:item] :free-names [:value :configuration]
+              :candidate-names [:value] :own-names #{:value}}]
+    (is (= [:value] (reference/select-call-site-params base)))
+    (is (= [] (reference/select-call-site-params (assoc base :declared []))))
+    (is (= [:item] (reference/select-call-site-params (assoc base :free-names [:item :configuration]))))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Ambiguous"
+          (reference/select-call-site-params (assoc base :candidate-names [:configuration]))))
+    (is (= [] (reference/select-call-site-params
+                {:structural-names [] :free-names (delay (throw (Exception. "unneeded walk")))})))
+    (is (= [:right :left]
+           (reference/select-call-site-params
+             {:structural-names [:left :right] :free-names [:right :configuration :left]})))))

@@ -11,6 +11,7 @@
     [graphden.input.projections :as projections]
     [graphden.input.rows :as rows]
     [graphden.input.scopes :as scopes]
+    [graphden.input.surface :as surface]
     [graphden.input.variables :as variables]
     [graphden.types.check.literals :as literals]
     [graphden.types.core :as types]
@@ -143,4 +144,5 @@
                (analyze-input ctx target (assoc options :scope scope :additional-rows overlays))))
            (projections/prepare)
            (checking/check-graph (:check-expression options))
-           (projections/apply-demands))))))
+           (projections/apply-demands)
+           (as-> graph (assoc graph :public-input (surface/project ctx graph))))))))

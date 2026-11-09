@@ -11,7 +11,8 @@ supplies namespace-resolved aliases and alias-to-type IDs; missing names never
 fall back to the process registry. The context captures marker policy. A future
 caller-owned cache must include graph epoch, branch/revision and type/marker
 policy in its snapshot identity; a function row version alone is insufficient.
-There is no shared analysis cache yet.
+There is no shared analysis cache yet. Contexts without an explicit snapshot ID
+receive a fresh context token; callers must not reuse it for changed snapshot data.
 
 `descriptor/resolve-contract` resolves the function's authored `input-type-fn-id`
 using existing type expansion and shape primitives. Field IDs come from declared
@@ -74,8 +75,18 @@ Graph reference cycles and projection cycles (including cycles crossing referenc
 uses) are rejected. This preserves the existing DAG invariant and the `:fix`
 recursion model; it does not introduce recursive graph semantics.
 
-This implementation does not yet complete callable capture routing, public input
-projection, or runtime execution. Unsupported callable routes retain diagnostics
+The derived `:public-input` surface exposes typed nested fields with authored
+names. A bound reference field becomes a `:reference-inputs` group: its children
+are the referenced function's remaining inputs, never its result fields. The
+route ledger retains source addresses, field origins, result addresses and kinds.
+Completion constraints stay separate from a pruned residual record shape.
+`surface/bind-input` requires the same frozen snapshot identity and resolves
+through these routes before invoking the existing syntax/algebra. It cannot
+rebind a reference result or an occupied child. This API is separate from source
+`:bind`; source parsing continues to use authored declarations.
+
+This implementation does not yet complete callable capture routing or runtime
+execution. Unsupported callable routes retain diagnostics
 and incomplete coverage. Wrapped identity or
 callable policies that lack an adapter are diagnosed rather than evaluated in
 the wrong mode. Reference cycles are rejected; they are never treated as empty input. A locally empty remaining record is not proof that the graph is

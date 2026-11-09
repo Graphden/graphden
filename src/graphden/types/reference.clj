@@ -99,3 +99,26 @@
       actual
       (types/make-fn-type final-args (types/fn-ret actual) final-effects
                           (types/fn-execution actual)))))
+
+
+(defn select-call-site-params
+  "The existing runtime's deterministic lambda selection, over resolved names.
+   Authored declarations are validated by the caller. Collections may be delays
+   so zero-argument/explicit cases do not force unrelated graph walks."
+  [{:keys [structural-names declared free-names candidate-names own-names ambiguous!]}]
+  (cond
+    (some? declared) declared
+    (nil? structural-names) (vec (force candidate-names))
+    (empty? structural-names) []
+    (= 1 (count structural-names))
+    (let [name (first structural-names)]
+      (if (some #{name} (force free-names))
+        [name]
+        (let [candidates (vec (force candidate-names))]
+          (cond
+            (empty? candidates) []
+            (and (= 1 (count candidates)) (contains? (set (force own-names)) (first candidates))) candidates
+            ambiguous! (ambiguous! candidates)
+            :else (throw (ex-info "Ambiguous callable parameters; declare lambda-params"
+                                  {:type :compile/ambiguous-lambda-params :candidates candidates}))))))
+    :else (filterv (set structural-names) (force free-names))))

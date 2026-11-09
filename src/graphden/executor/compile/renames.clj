@@ -14,7 +14,8 @@
     [clojure.set :as set]
     [graphden.executor.compile.bindings :as b]
     [graphden.executor.compile.lookups :as l]
-    [graphden.executor.registry.core :as reg]))
+    [graphden.executor.registry.core :as reg]
+    [graphden.types.reference :as reference]))
 
 
 (defn chain-source-slot-ids
@@ -1072,86 +1073,23 @@
   (let [structural-args (slot-structural-call-site-args slot-id b-row f-fn-id
                                                         lookups)
         declared (declared-lambda-params r-fn-id lookups)]
-    (cond
-      ;; Authored `:lambda-params` — the fn-def SAYS what its call-site
-      ;; parameters are; no inference. `[]` = everything captured.
-      (some? declared)
-      declared
-
-      ;; Bare `:fn` keyword slot — no structural shape to constrain
-      ;; on. Falls back to alpha-equiv: a deep-free of R is a
-      ;; lambda-param iff nothing on F's chain supplies a value for
-      ;; it; everything else is captured at wrap time.
-      (nil? structural-args)
-      (alpha-equiv-lambda-params r-fn-id f-fn-id lookups)
-
-      ;; 0-arg structural slot — variadic-ignore wrap; everything
-      ;; captured (cron / future / loop-until-interrupted case).
-      (zero? (count structural-args))
-      []
-
-      ;; 1-arg structural slot — structural name when R declares it;
-      ;; otherwise alpha-equivalent positional unification, which is
-      ;; SOUND only when it is unambiguous:
-      ;;
-      ;; - ITERATION slots (`:item`, `:value`, `:pair`, `:acc`,
-      ;;   `:request`, …): exactly ONE non-captured free → that is the
-      ;;   positional parameter (`:filter :pred :some?`); zero frees →
-      ;;   variadic-ignore. MULTIPLE candidates would mean guessing
-      ;;   which free receives the element — refuse and demand an
-      ;;   authored `:lambda-params`.
-      ;; - ONE-SHOT slots (structural name `:arg` — `:call`, `:invoke`,
-      ;;   route handlers): a surviving candidate is NOT trustworthy —
-      ;;   the real-world repro (`/api/branches` handler chains) has
-      ;;   exactly one candidate (`:storage-query`) that is semantically
-      ;;   CAPTURED through a dynamic env chain static subtraction
-      ;;   can't see; wrapping it as the parameter overwrites the
-      ;;   captured callable with the request map. The retired
-      ;;   global-env-name heuristic guessed its way around this;
-      ;;   now the author states it: `:lambda-params []` (captured-only)
-      ;;   or `[name]`.
-      (= 1 (count structural-args))
-      (let [structural-name (first structural-args)
-            r-frees (deep-free-ext-names r-fn-id lookups)]
-        (if (some #{structural-name} r-frees)
-          [structural-name]
-          (let [a (alpha-equiv-lambda-params r-fn-id f-fn-id lookups)
-                fn-name-of (fn [id] (some-> (get (:fn-map lookups) id) :name))]
-            (cond
-              (empty? a) []
-              ;; Unambiguous single candidate that is R's OWN declared
-              ;; slot — accepted (the `:call :str-upper` bread-and-
-              ;; butter and `:filter :pred :some?` iteration case).
-              (and (= 1 (count a))
-                   (contains? (own-slot-names r-fn-id lookups) (first a)))
-              a
-              ;; No declaration, multiple (or untrusted) candidates —
-              ;; REFUSE. The pre-`:lambda-params` legacy guess
-              ;; (one-shot slots dropping to variadic-ignore when every
-              ;; candidate was somewhere an env-binding name) is
-              ;; RETIRED: every callable the packaged graph landed here
-              ;; with now declares `:lambda-params`, so arriving means
-              ;; a genuinely ambiguous new composition — and guessing
-              ;; silently wired `/api/branches`-class bugs (a captured
-              ;; callable overwritten by the request map). The error
-              ;; names the candidates; the author states the contract.
-              :else
-              (throw (ex-info
-                       (str "ambiguous lambda-params for callable "
-                            (fn-name-of r-fn-id)
-                            " (used by " (fn-name-of f-fn-id) ") — "
-                            "declare :lambda-params on the callable "
-                            "fn-def; candidates: " (pr-str (vec a))
-                            " ([] = everything captured)")
-                       {:type :compile/ambiguous-lambda-params
-                        :fn (fn-name-of r-fn-id)
-                        :caller (fn-name-of f-fn-id)
-                        :candidates (vec a)}))))))
-
-      ;; Map-callable structural slot — names must match. Sub free
-      ;; args outside structural-args are captured.
-      :else
-      (filterv structural-args (deep-free-ext-names r-fn-id lookups)))))
+    (reference/select-call-site-params
+      {:structural-names structural-args :declared declared
+       :free-names (delay (deep-free-ext-names r-fn-id lookups))
+       :candidate-names (delay (alpha-equiv-lambda-params r-fn-id f-fn-id lookups))
+       :own-names (delay (own-slot-names r-fn-id lookups))
+       :ambiguous! (fn [candidates]
+                     (let [fn-name-of (fn [id] (some-> (get (:fn-map lookups) id) :name))]
+                       (throw (ex-info
+                                (str "ambiguous lambda-params for callable "
+                                     (fn-name-of r-fn-id)
+                                     " (used by " (fn-name-of f-fn-id) ") — "
+                                     "declare :lambda-params on the callable "
+                                     "fn-def; candidates: " (pr-str candidates)
+                                     " ([] = everything captured)")
+                                {:type :compile/ambiguous-lambda-params
+                                 :fn (fn-name-of r-fn-id) :caller (fn-name-of f-fn-id)
+                                 :candidates candidates}))))})))
 
 
 (defn build-ref-renames

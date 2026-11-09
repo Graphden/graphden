@@ -772,6 +772,20 @@
            Metadata changes keep the token; persistent edits preserve untouched cells. Compiler
            integration must retain existing sharing for ordinary value-equal inputs and never
            let diagnostic value capture force deferred fields merely to describe a result."}
+    {:ns graphden.input.ir :defn lower-checked
+     :say "Lowers the checked fixture subset into address-keyed execution operations. Snapshot and
+           checker coverage must agree; unsupported closures or consumption obligations reject.
+           Base implementation and argument-ID paths are explicit caller-resolved provenance,
+           not inferred from the input contract alone."}
+    {:ns graphden.input.compile :defn compile-checked
+     :say "Builds a fixture closure for the existing execute entry point. Invocation-local cells
+           preserve unread fields and pass actual values through the outer-thunk base ABI once.
+           Dependencies reuse the existing memo, effect, cancellation and trace machinery.
+           Production legacy lowering stays active until the canonical compiler covers all kinds."}
+    {:ns graphden.input.capture :defn safe-value?
+     :say "Admits bounded eager data before optional trace serialization. Deferred map views,
+           lazy sequences and unknown objects fail closed without a value read; capture therefore
+           cannot execute a field that the base implementation never selected."}
     {:ns graphden.input.descriptor :defn resolve-contract
      :say "Resolves an authored input declaration inside a frozen type snapshot. Stable field IDs
            come from memberships; aliases retain those identities, marker/refinement obligations

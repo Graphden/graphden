@@ -1,8 +1,9 @@
 # Structured input runtime foundation
 
 `graphden.input.runtime` is an isolated JVM foundation. The production
-compiler still builds legacy arguments; no package or execution path uses
-these record views yet. Native tests are required: Babashka cannot create the
+compiler still builds legacy arguments. The isolated checked-plan fixture
+compiler below uses these views without activating a package format. Native
+tests are required: Babashka cannot create the
 `APersistentMap`/`AMapEntry` proxy subclasses used here.
 
 ## Cells and record lookup
@@ -72,16 +73,75 @@ may read the map directly and keep their existing byte/depth budgets.
 
 `diagnostic-summary` returns only kind and field count. Diagnostics must use
 this instead of printing or serializing a deferred record. In particular,
-`compile-eager/render-captured-value` currently calls the streaming JSON size
-counter; enabling record views requires a nonforcing policy there first.
-Optional tracing must not execute an otherwise unused field.
+`compile-eager/render-captured-value` admits only bounded eager data before
+calling the streaming JSON size counter. Deferred values receive the existing
+truncated-value marker. This also prevents capture from realizing an ordinary
+lazy sequence. Optional tracing must not execute an otherwise unused field.
 
 Escaping results also need an explicit policy: consume server/JSON output
 while its execution/snapshot context is valid. Do not capture every dynamic
 binding with a blanket `bound-fn`: long-lived HOF handlers must enter fresh
 request scopes, following the existing request-call-cache and capture rules.
-The foundation neither captures dynamic request identity nor selects HOF,
-callable-producing-ref, ordinary ref or identity-ref dispatch.
+The record foundation neither captures dynamic request identity nor selects
+reference dispatch. The fixture compiler consumes checked dispatch below.
+
+## Checked-plan fixture compiler
+
+`graphden.input.compile/compile-checked` returns the existing executor closure
+ABI `(fn [address-values ctx])`. Its options contain a frozen analysis context
+and an explicit resolved base implementation table:
+
+```clojure
+{:context frozen-context
+ :implementations {target-id {:base-fn-id base-id
+                              :impl resolved-base-function
+                              :argument-paths {:base-argument [field-id]}}}}
+```
+
+Input analysis does not resolve a composed function's base implementation.
+The caller supplies that mapping; public field renames do not change the base
+ABI. The fixture closure is installed only in a test registry and called via
+`compile-runtime/execute`. It uses that entry point's authorization, effect and
+cancellation boundaries. Dependencies enter the existing `call-with-cache`
+through `compile-eager/invoke-compiled`, preserving its tracing, always-fresh
+policy and target-ID-based effect eviction. There is no second execute driver.
+As with the existing executor, the compiled registry and active rich-type
+registry must refer to the same snapshot. Tests bind an isolated rich-type
+registry for trace policy; compilation never publishes it globally. Missing
+registry entries retain the existing fail-closed hidden trace behavior.
+
+`input.ir/lower-checked` requires checked recursive coverage and the same
+snapshot ID. It lowers literals, identity refs, evaluated refs, callable
+producers, structural records, exact-address projections and derived input
+routes. Free leaf addresses remain invocation parameters. Whole record inputs,
+projection into an opaque producer's descendant, graph-callable closures and
+sequence builders are not supported by this slice. Container obligations are
+rejected. Supported primitive `:value-type`/`:field-read` obligations run through
+the existing validator inside the once-cell; failed reads are memoized too.
+
+`input.frame/instantiate` allocates and freezes the complete cell table before
+any field can execute. A base implementation receives a plain map of outer
+runtime thunks. This extra boundary is intentional: `defbase` resolves an outer
+thunk exactly once, so an Atom, Delay or marked callable returned by a reference
+is passed through unchanged. Nested structured records remain lookup views.
+Optional absence, explicit nil and false are distinct. No default is invented.
+
+Memo keys are built without field reads. Known eager literal/parameter values
+retain value equality, with their field guard type. A computed occurrence is
+identified by its authored binding ID, target and transitive input keys. Its
+fresh runtime cell address is not a call specialization: otherwise two uses of
+one named parent containing its own reference would repeat the parent's effect.
+Scoped overrides change actual input keys; the use path is not a blanket cache
+partition. The fixture refuses unknown/lazy input key shapes or inputs exceeding
+the eager-data admission budget instead of silently replacing equality with a
+fresh identity and repeating effects. Supporting additional external value
+domains requires an explicit key representation.
+
+This is preparation for a shared canonical compiler, not completed runtime
+migration. The production legacy compiler is still the oracle. Future work must
+normalize its slot/ref/sequence/HOF inputs into the same IR, finish closures and
+consumption obligations, and remove the parallel lowering paths before runtime
+migration can be considered complete.
 
 ## Later browser parity
 

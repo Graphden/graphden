@@ -25,6 +25,7 @@
     [graphden.executor.compile.renames :as r]
     [graphden.executor.registry.core :as reg]
     [graphden.executor.runtime :as rt]
+    [graphden.input.capture :as input-capture]
     [graphden.util.counters :as counters]
     [graphden.util.json-size :as json-size]))
 
@@ -311,6 +312,19 @@
   5000)
 
 
+(defn invocation-context
+  "Reuse the enclosing execution memo, honor per-request/worker overrides,
+   and preserve cache-less handler construction. Shared by closure builders;
+   authorization, effects and cancellation remain execute's responsibility."
+  [ctx]
+  (let [request-cache *request-call-cache*]
+    (cond
+      (and request-cache (not (identical? (::call-cache ctx) request-cache)))
+      (assoc ctx ::call-cache request-cache)
+      (or (::call-cache ctx) (skip-cache-priming-key ctx)) ctx
+      :else (assoc ctx ::call-cache (java.util.HashMap.)))))
+
+
 (def ^:private single-fire-effect-cats
   "Side-effecting effect categories whose within-execute single-fire
    RELIES on the call-cache. A fn-def that pulls a side-effecting ref
@@ -445,12 +459,15 @@
    through the SAME safety machinery as `:result` persistence (the
    streaming JSON byte counter): within `max-captured-value-bytes` →
    `{:value v, value-bytes-key n}`; oversize or unserializable →
-   `{:value-truncated? true}` (no value — nothing partial leaks).
+   `{:value-truncated? true}` (no value — nothing partial leaks). Only
+   bounded eager data is admitted: optional capture must not become the
+   first consumer of a deferred record or sequence.
    NEVER called for secret-touching fns — their branch in
    `path-traced-call` records `{:hidden :secret}` without
    reading the value at all (constraint 4)."
   [v]
-  (if-some [n (json-size/json-bytes-up-to v max-captured-value-bytes)]
+  (if-some [n (when (input-capture/safe-value? v)
+                (json-size/json-bytes-up-to v max-captured-value-bytes))]
     {:value v value-bytes-key n}
     {:value-truncated? true}))
 
@@ -743,6 +760,18 @@
                (evict-preserving-effectful! cache effectful-ref?))
              (java.util.HashMap/.put cache k (if (nil? v) ::nil v))
              v)))))))
+
+
+(defn invoke-compiled
+  "Invoke a canonical compiled dependency through the existing trace/memo
+   seam. The caller supplies a non-forcing input key and an actual scoped
+   specialization, never a public record view. Target ID remains the key head
+   so effectful eviction and always-fresh policy retain their meaning.
+   This is not an authorization or execute entry point."
+  [{:keys [target-id specialization input-key name]} child ctx]
+  (call-with-cache target-id nil name
+                   (fn [_ ctx] (child ctx))
+                   {::canonical-input [specialization input-key]} ctx))
 
 
 (defn- has-impl?
@@ -1380,24 +1409,7 @@
                  ;;    through such a handler also runs cache-less (every `:ref`
                  ;;    a fresh call) — correct + per-principal, trading away
                  ;;    within-request memo for these low-traffic admin routes.
-                 ctx (let [rc *request-call-cache*]
-                       (cond
-                         ;; Per-scope override active (an `:http-server`
-                         ;; request or `:future` worker bound a fresh cache):
-                         ;; install ITS map, overriding any build-time cache
-                         ;; this ctx captured — that captured map is shared by
-                         ;; every invocation of a build-time handler and races
-                         ;; a CME under concurrency. Idempotent for nested runs
-                         ;; (ctx already carries `rc` → the next clause returns
-                         ;; it unchanged).
-                         (and rc (not (identical? (::call-cache ctx) rc)))
-                         (assoc ctx ::call-cache rc)
-
-                         (or (::call-cache ctx) (skip-cache-priming-key ctx))
-                         ctx
-
-                         :else
-                         (assoc ctx ::call-cache (java.util.HashMap.))))
+                 ctx (invocation-context ctx)
                  fa (r/apply-rename-aliases fa rename-aliases)
                  ;; The `fa-ref` volatile ONLY exists so env-binding delays can
                  ;; read the post-merge map at force time (forward references

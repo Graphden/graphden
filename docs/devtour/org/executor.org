@@ -5,7 +5,7 @@
 
 From stored definitions to callable code and results.
 
-[[file:index.org][index]] · ~89 min
+[[file:index.org][index]] · ~88 min
 
 * 1. execute
 :PROPERTIES:
@@ -153,13 +153,13 @@ Classifies the root [[file:glossary.org::#term/slot][slots]] through ~classify-s
 :PROPERTIES:
 :CUSTOM_ID: executor/compile-all
 :FILE: src/graphden/executor/compile_eager.clj
-:LINE: 1618
+:LINE: 1630
 :MINS: 4.7
 :END:
 
 Compiles functions in [[file:glossary.org::#term/topological-order][dependency order]]: a referenced function must be available before a caller uses it. The process cache is keyed by graph structure, [[file:glossary.org::#term/base-function][base-function]] implementations, and [[file:glossary.org::#term/rich-types][rich type information]]. Types affect whether a referenced function is passed as a callable or evaluated, so different type information must not share the same compiled result.
 
-- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn compile-all][src/graphden/executor/compile_eager.clj:1618]]
+- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn compile-all][src/graphden/executor/compile_eager.clj:1630]]
 - see also :: [[file:executor.org::#executor/compile-fn][compile-fn]]
 - same file :: [[file:executor.org::#executor/compile-fn][compile-fn]], [[file:executor.org::#executor/arg-builder][arg-builder]], [[file:executor.org::#executor/resolve-impl][resolve-impl]], [[file:executor.org::#executor/call-with-cache][call-with-cache]], [[file:executor.org::#executor/hof-wrap][hof-wrap]]
 - referenced from :: [[file:executor.org::#executor/rebuild!][rebuild!]], [[file:types.org::#types/record-rich-types!][record-rich-types!]]
@@ -168,13 +168,13 @@ Compiles functions in [[file:glossary.org::#term/topological-order][dependency o
 :PROPERTIES:
 :CUSTOM_ID: executor/compile-fn
 :FILE: src/graphden/executor/compile_eager.clj
-:LINE: 1301
-:MINS: 9.8
+:LINE: 1330
+:MINS: 8.8
 :END:
 
 Builds one runtime [[file:glossary.org::#term/closure][closure]] ~(fn [fa ctx])~. It prepares argument builders, [[file:glossary.org::#term/binding][bindings]] to inputs outside the root's slots, and name aliases at compile time. At execution time the [[file:glossary.org::#term/closure][closure]] assembles the argument map from caller input and those builders, then calls ~(impl args ctx)~.
 
-- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn compile-fn][src/graphden/executor/compile_eager.clj:1301]]
+- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn compile-fn][src/graphden/executor/compile_eager.clj:1330]]
 - see also :: [[file:executor.org::#executor/arg-builder][arg-builder]], [[file:executor.org::#executor/resolve-impl][resolve-impl]]
 - same file :: [[file:executor.org::#executor/compile-all][compile-all]], [[file:executor.org::#executor/arg-builder][arg-builder]], [[file:executor.org::#executor/resolve-impl][resolve-impl]], [[file:executor.org::#executor/call-with-cache][call-with-cache]], [[file:executor.org::#executor/hof-wrap][hof-wrap]]
 - referenced from :: [[file:executor.org::#executor/compile-all][compile-all]]
@@ -183,13 +183,13 @@ Builds one runtime [[file:glossary.org::#term/closure][closure]] ~(fn [fa ctx])~
 :PROPERTIES:
 :CUSTOM_ID: executor/arg-builder
 :FILE: src/graphden/executor/compile_eager.clj
-:LINE: 1069
+:LINE: 1098
 :MINS: 8.8
 :END:
 
 Builds a [[file:glossary.org::#term/thunk][deferred computation]] for one argument. Values are constants; [[file:glossary.org::#term/free-argument][free arguments]] read caller input by [[file:glossary.org::#term/slot][slot]] ID with a name fallback; references use [[file:glossary.org::#term/thunk][thunks]] or delays; sequences compute their elements lazily. A base implementation therefore evaluates only the arguments it reads, which permits short-circuiting conditionals.
 
-- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn- arg-builder][src/graphden/executor/compile_eager.clj:1069]]
+- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn- arg-builder][src/graphden/executor/compile_eager.clj:1098]]
 - see also :: [[file:executor.org::#executor/resolve-arg][resolve-arg]]
 - same file :: [[file:executor.org::#executor/compile-all][compile-all]], [[file:executor.org::#executor/compile-fn][compile-fn]], [[file:executor.org::#executor/resolve-impl][resolve-impl]], [[file:executor.org::#executor/call-with-cache][call-with-cache]], [[file:executor.org::#executor/hof-wrap][hof-wrap]]
 - referenced from :: [[file:executor.org::#executor/execute][execute]], [[file:executor.org::#executor/collect-bindings][collect-bindings]], [[file:executor.org::#executor/compile-fn][compile-fn]], [[file:executor.org::#executor/resolve-arg][resolve-arg]], [[file:executor.org::#executor/map-fn][map-fn]]
@@ -198,13 +198,13 @@ Builds a [[file:glossary.org::#term/thunk][deferred computation]] for one argume
 :PROPERTIES:
 :CUSTOM_ID: executor/resolve-impl
 :FILE: src/graphden/executor/compile_eager.clj
-:LINE: 814
+:LINE: 843
 :MINS: 1.0
 :END:
 
 Finds the root [[file:glossary.org::#term/base-function][base function]]'s Clojure implementation in ~lookups[:base-fns]~ by name. A missing registration raises ~:compile/missing-impl~. This lookup connects a stored graph definition to executable host code.
 
-- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn- resolve-impl][src/graphden/executor/compile_eager.clj:814]]
+- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn- resolve-impl][src/graphden/executor/compile_eager.clj:843]]
 - see also :: [[file:executor.org::#executor/defbase][defbase]]
 - same file :: [[file:executor.org::#executor/compile-all][compile-all]], [[file:executor.org::#executor/compile-fn][compile-fn]], [[file:executor.org::#executor/arg-builder][arg-builder]], [[file:executor.org::#executor/call-with-cache][call-with-cache]], [[file:executor.org::#executor/hof-wrap][hof-wrap]]
 - referenced from :: [[file:executor.org::#executor/compile-fn][compile-fn]], [[file:packages.org::#packages/fn-def->base-fn-def][fn-def->base-fn-def]]
@@ -256,13 +256,13 @@ An effectful primitive calls this before touching external state. It rejects an 
 :PROPERTIES:
 :CUSTOM_ID: executor/call-with-cache
 :FILE: src/graphden/executor/compile_eager.clj
-:LINE: 706
+:LINE: 723
 :MINS: 3.1
 :END:
 
 Caches referenced-function results during one top-level execution. The key includes the referenced function ID and the relevant [[file:glossary.org::#term/free-argument][free arguments]]; a sentinel distinguishes a cached nil from a missing entry. Reusing a result avoids evaluating the same dependency repeatedly within that call.
 
-- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn- call-with-cache][src/graphden/executor/compile_eager.clj:706]]
+- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn- call-with-cache][src/graphden/executor/compile_eager.clj:723]]
 - same file :: [[file:executor.org::#executor/compile-all][compile-all]], [[file:executor.org::#executor/compile-fn][compile-fn]], [[file:executor.org::#executor/arg-builder][arg-builder]], [[file:executor.org::#executor/resolve-impl][resolve-impl]], [[file:executor.org::#executor/hof-wrap][hof-wrap]]
 
 * 19. map-fn
@@ -323,13 +323,13 @@ Distinguishes a callback from a constructor that returns a callback. A reference
 :PROPERTIES:
 :CUSTOM_ID: executor/hof-wrap
 :FILE: src/graphden/executor/compile_eager.clj
-:LINE: 989
+:LINE: 1018
 :MINS: 1.8
 :END:
 
 Prepares an ordinary referenced function as a callable. The wrapper captures the current input values and execution context; its declared callback parameters receive values at each invocation. This is the runtime counterpart of ~:lambda-params~, with no separate environment object in the stored graph. Callable constructors take the evaluation path described by ~ref-produces-callable?~ instead.
 
-- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn- hof-wrap][src/graphden/executor/compile_eager.clj:989]]
+- source :: [[file:../../../src/graphden/executor/compile_eager.clj::(defn- hof-wrap][src/graphden/executor/compile_eager.clj:1018]]
 - see also :: [[file:executor.org::#executor/hof-lambda-params][hof-lambda-params]], [[file:executor.org::#executor/ref-produces-callable?][ref-produces-callable?]]
 - same file :: [[file:executor.org::#executor/compile-all][compile-all]], [[file:executor.org::#executor/compile-fn][compile-fn]], [[file:executor.org::#executor/arg-builder][arg-builder]], [[file:executor.org::#executor/resolve-impl][resolve-impl]], [[file:executor.org::#executor/call-with-cache][call-with-cache]]
 

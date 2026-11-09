@@ -117,3 +117,18 @@
         error (try (analysis/analyze-input ctx child) (catch clojure.lang.ExceptionInfo e e))]
     (is (= :unknown-field (:code (ex-data error))))
     (is (= [field old-child] (:path (ex-data error))))))
+
+
+(deftest subtype-promotion-does-not-authorize-removing-an-inherited-marker-test
+  (doseq [marker [:secret :ui-view]]
+    (let [{:keys [base child field context]} (fixture)
+          marked-type (random-uuid)
+          text (:text (ids/primitive-fn-ids))
+          ctx (-> context
+                  (assoc-in [:markers :ui-view] {:hide-result? true})
+                  (assoc-in [:type-bodies marked-type] [marker :text])
+                  (assoc-in [:fields field :type-fn-id] marked-type)
+                  (with-rows [(row base field {:required true})
+                              (row child field {:type-override-fn-id text})]))
+          error (try (analysis/analyze-input ctx child) (catch clojure.lang.ExceptionInfo e e))]
+      (is (= :marker-stripping (:code (ex-data error)))))))

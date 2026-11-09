@@ -5,6 +5,7 @@
     [graphden.input.descriptor :as descriptor]
     [graphden.input.inheritance :as inheritance]
     [graphden.input.variables :as variables]
+    [graphden.types.check.markers :as markers]
     [graphden.types.core :as types]))
 
 
@@ -39,6 +40,8 @@
           address [scope (:target-path row)]
           variables? (or (types/type-any? types/type-var? expected)
                          (types/type-any? types/type-var? actual))]
+      (when-not (markers/preserved? expected actual)
+        (context/reject! :marker-stripping {:address address}))
       (when (and (not variables?) (not (types/subtype? actual expected)))
         (context/reject! :type-widening {:address address}))
       {:node (merge (dissoc node :fields :alternatives) override)

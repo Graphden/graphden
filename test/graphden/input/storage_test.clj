@@ -1,4 +1,4 @@
-(ns ^:integration graphden.input.storage-test
+(ns ^:integration ^{:clj-kondo/config (quote {:lint-as {graphden.input.storage-test/with-storage clojure.core/let}})} graphden.input.storage-test
   "Real PostgreSQL checks of offline v2 storage, using the normal decorators."
   (:require
     [clojure.test :refer [deftest is use-fixtures]]
@@ -43,9 +43,9 @@
 
 
 (defmacro ^:private with-storage
-  [[sym] & body]
-  `(let [~sym (base-storage)]
-     (try ~@body (finally (sp/close ~sym)))))
+  [[sym init] & body]
+  `(let [~sym ~init]
+     (try (let [result# (do ~@body)] result#) (finally (sp/close ~sym)))))
 
 
 (defn- seed!
@@ -78,7 +78,7 @@
 
 
 (deftest persisted-roundtrip-and-offline-admission-test
-  (with-storage [base]
+  (with-storage [base (base-storage)]
     (let [v (vs/wrap-with-versioning base)
           {:keys [owner input user name] :as ids} (seed! v)
           row (literal ids [user name] nil)
@@ -94,7 +94,7 @@
 
 
 (deftest single-bulk-and-inherited-overlaps-test
-  (with-storage [base]
+  (with-storage [base (base-storage)]
     (let [v (vs/wrap-with-versioning base)
           {:keys [owner input user name email] :as ids} (seed! v)
           first-row (literal ids [user name] "Alice")
@@ -116,7 +116,7 @@
 
 
 (deftest branch-merge-prefix-conflicts-are-atomic-test
-  (with-storage [base]
+  (with-storage [base (base-storage)]
     (let [v (vs/wrap-with-versioning base)
           {:keys [user name] :as ids} (seed! v)
           branch (vs/create-branch! v "nested")
@@ -129,7 +129,7 @@
 
 
 (deftest sibling-merge-tombstone-and-branch-reclamation-test
-  (with-storage [base]
+  (with-storage [base (base-storage)]
     (let [v (vs/wrap-with-versioning base)
           {:keys [user name email] :as ids} (seed! v)
           branch (vs/create-branch! v "nested")
@@ -146,7 +146,7 @@
 
 
 (deftest concurrent-prefix-binds-have-one-winner-test
-  (with-storage [base]
+  (with-storage [base (base-storage)]
     (let [v (vs/wrap-with-versioning base)
           {:keys [user name] :as ids} (seed! v)
           start (promise)
@@ -159,7 +159,7 @@
 
 
 (deftest offline-artifact-preserves-history-and-restores-test
-  (with-storage [base]
+  (with-storage [base (base-storage)]
     (let [v (vs/wrap-with-versioning base)
           t (sp/create-entity v :fn {:name "text"})
           f (sp/create-entity v :fn {:name "legacy" :return-type-fn-id (:id t)})
@@ -187,7 +187,7 @@
 
 
 (deftest edit-and-remove-require-the-current-version-test
-  (with-storage [base]
+  (with-storage [base (base-storage)]
     (let [v (vs/wrap-with-versioning base)
           {:keys [user name] :as ids} (seed! v)
           row (sp/create-entity v :input-binding (literal ids [user name] "before"))
@@ -203,7 +203,7 @@
 
 
 (deftest historical-membership-tombstone-test
-  (with-storage [base]
+  (with-storage [base (base-storage)]
     (let [v (vs/wrap-with-versioning base)
           t (sp/create-entity v :fn {:name "text"})
           f (sp/create-entity v :fn {:name "legacy" :return-type-fn-id (:id t)})
@@ -223,7 +223,7 @@
 
 
 (deftest branch-only-binding-reclamation-test
-  (with-storage [base]
+  (with-storage [base (base-storage)]
     (let [v (vs/wrap-with-versioning base)
           {:keys [user name] :as ids} (seed! v)
           branch (vs/create-branch! v "temporary")
@@ -236,7 +236,7 @@
 
 
 (deftest scoped-reference-origins-remain-shared-and-protected-test
-  (with-storage [base]
+  (with-storage [base (base-storage)]
     (let [v (vs/wrap-with-versioning base)
           {:keys [owner input user name email] :as ids} (seed! v)
           target (sp/create-entity v :fn {:name "shared" :input-type-fn-id input})
@@ -253,13 +253,21 @@
       (is (= #{user name} (input-refs/retained-ids base :slot [user name])))
       (is (= #{(:id (first edges))} (input-refs/retained-ids base :input-binding [(:id (first edges))])))
       (is (seq (identity-repair/inbound-refs-many base #{owner (:id target)})))
+      (let [nested-ref (sp/create-entity v :input-binding
+                                         {:fn-id owner :scope-path [(:id (first edges))]
+                                          :target-path [user email] :expression-kind "ref"
+                                          :ref-fn-id (:id target)})
+            nested-use (assoc (literal ids [user name] "nested")
+                              :scope-path [(:id (first edges)) (:id nested-ref)])]
+        (sp/create-entity v :input-binding nested-use)
+        (is (= "nested" (:value (sp/read-entity v :input-binding (:id nested-use))))))
       (is (= :input/invalid-row
              (attempt #(sp/create-entity v :input-binding
                                          (assoc (literal ids [user email] "bad") :scope-path [(random-uuid)]))))))))
 
 
 (deftest artifact-refuses-stale-source-and-stale-restore-test
-  (with-storage [base]
+  (with-storage [base (base-storage)]
     (let [v (vs/wrap-with-versioning base)
           artifact (offline/artifact (offline/snapshot base))]
       (sp/create-entity v :fn {:name "changed"})
@@ -290,3 +298,15 @@
         (is (nil? (:input-type-fn-id (sp/read-entity v :fn (:id original)))))
         (is (= [] (sp/query-entities base :input-binding {}))))
       (finally (sp/close base)))))
+
+
+(deftest inherited-terminal-metadata-seals-descendant-paths-test
+  (with-storage [base (base-storage)]
+    (let [v (vs/wrap-with-versioning base)
+          {:keys [owner input user name] :as ids} (seed! v)
+          child (sp/create-entity v :fn {:name "child" :parent-ids [owner] :input-type-fn-id input})]
+      (sp/create-entity v :input-binding
+                        {:fn-id owner :scope-path [] :target-path [user] :terminal true})
+      (is (= :input/invalid-row
+             (attempt #(sp/create-entity v :input-binding
+                                         (assoc (literal ids [user name] "blocked") :fn-id (:id child)))))))))

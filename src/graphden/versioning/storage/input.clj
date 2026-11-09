@@ -57,6 +57,9 @@
         input-id (:input-type-fn-id owner)]
     (when-not (and input-id (contains? fns input-id))
       (reject! :missing-input-contract))
+    (doseq [entity [owner (get fns input-id)]]
+      (when-not (or (nil? (:org-id entity)) (= (:org-id row) (:org-id entity)))
+        (reject! :invalid-reference)))
     (reduce (fn [type-id field-id]
               (doseq [entity [(get fns type-id) (get fields field-id)]]
                 (when-not (and entity (or (nil? (:org-id entity))
@@ -96,8 +99,8 @@
   (let [normalized (mapv #(validate-row! view %) (vals bindings))
         by-owner (group-by :fn-id normalized)]
     (doseq [fn-id (keys fns)]
-      (let [ancestors (disj (ancestor-ids fns fn-id) fn-id)
-            inherited (mapcat by-owner ancestors)
+      (let [parent-ids (disj (ancestor-ids fns fn-id) fn-id)
+            inherited (mapcat by-owner parent-ids)
             own (get by-owner fn-id)]
         (doseq [seal (filter :terminal inherited)
                 row own

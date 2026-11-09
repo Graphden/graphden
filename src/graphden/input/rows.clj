@@ -30,6 +30,11 @@
         row (-> row
                 (update :scope-path uuid-path)
                 (update :target-path uuid-path))]
+    (when (or (and (not= "value" kind)
+                   (or (some? (:value row)) (some? (:resolver-fn-id row))))
+              (and (not= "projection" kind)
+                   (or (some? (:projection-path row)) (some? (:projection-scope-path row)))))
+      (reject! :invalid-expression))
     (when-not (case kind
                 nil (and (not (:value-present row)) (nil? (:ref-fn-id row)))
                 "value" (and (true? (:value-present row)) (nil? (:ref-fn-id row)))
@@ -54,12 +59,12 @@
   "Build occupancy keyed by owner/use scope and field path. Metadata alone
    does not occupy a field. Reuse the stage-one overlap and origin laws."
   [rows]
-  (reduce (fn [state row]
+  (reduce (fn [occupancy row]
             (let [row (normalize row)]
               (if-not (occupied? row)
-                state
+                occupancy
                 (input/merge-bindings
-                  state
+                  occupancy
                   {[[(:fn-id row) (:scope-path row)] (:target-path row)]
                    {:binding-id (:id row)
                     :expression (select-keys row [:expression-kind :value :value-present

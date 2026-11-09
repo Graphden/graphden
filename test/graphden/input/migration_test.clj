@@ -55,6 +55,7 @@
         sources [(assoc-in source [:binding 0 :list-append] true)
                  (assoc-in source [:slot 0 :source-slot-id] (random-uuid))
                  (assoc-in source [:binding 0 :slot-id] (random-uuid))
+                 (assoc-in source [:binding 0 :value-present] false)
                  (assoc-in source [:fn-slot-version 0 :fn-id] (random-uuid))]]
     (doseq [unsupported sources]
       (let [artifact (offline/artifact unsupported)]
@@ -75,7 +76,7 @@
 (deftest fingerprints-retain-collection-kind-and-submillisecond-time-test
   (let [source (fixture)
         changed-time (update-in source [:fn-version 0 :created-at]
-                                #(Timestamp/from (.plusNanos (.toInstant ^Timestamp %) 1)))]
+                                #(Timestamp/from (Instant/.plusNanos (Timestamp/.toInstant %) 1)))]
     (is (not= (migration/fingerprint source) (migration/fingerprint changed-time)))
     (is (not= (migration/fingerprint (assoc-in source [:binding 0 :value] #{1 2}))
               (migration/fingerprint (assoc-in source [:binding 0 :value] [1 2]))))
@@ -87,3 +88,15 @@
   (doseq [text ["" "{} {}" "{} trailing" "#unknown/tag {}" "#=(+ 1 2)"]]
     (is (thrown? RuntimeException (offline/decode text))))
   (is (= {} (offline/decode "{} ; trailing comment\n"))))
+
+
+(deftest artifact-and-origin-identity-ignore-repl-print-limits-test
+  (let [source (fixture)
+        artifact (offline/artifact source)
+        encoded (offline/encode artifact)
+        origin (migration/derived-id :example [1 2 3])]
+    (binding [*print-length* 1 *print-level* 1 *print-meta* true *print-readably* false]
+      (is (= (:source-fingerprint (:plan artifact)) (migration/fingerprint source)))
+      (is (= artifact (offline/artifact source)))
+      (is (= encoded (offline/encode artifact)))
+      (is (= origin (migration/derived-id :example [1 2 3]))))))

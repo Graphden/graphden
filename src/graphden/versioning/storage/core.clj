@@ -33,8 +33,8 @@
    It is independently usable: VersionedStorage(BaseStorage) works without any cache.
    CachedStorage(VersionedStorage(BaseStorage)) works via simple stacking."
   (:require
-    [graphden.input.access :as input-access]
     [graphden.http-host.lease :as http-lease]
+    [graphden.input.access :as input-access]
     [graphden.storage.graph-writer :as writer]
     [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.core :as sp]

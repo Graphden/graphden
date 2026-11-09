@@ -464,7 +464,25 @@
    :paths ["src/graphden/storage/" "src/graphden/schema/"]
    :after [:executor]
    :steps
-   [{:ns graphden.storage.protocol.core :defn Storage
+   [{:ns graphden.schema.input.schema :defn extend-builder
+     :say "Adds the inactive structured-input storage: stable UUID field paths and a separate
+           input-binding entity. Functions point to existing record-type descriptors through a
+           versioned input-type field. Production continues using v1; generic public access to
+           these entities remains denied. See the [offline storage contract](../../docs/STRUCTURED_INPUT_STORAGE.md)."}
+    {:ns graphden.input.offline :defn apply!
+     :say "Rehearses an additive migration on a stopped database copy. The artifact preserves raw
+           history, shared binding origins and exact timestamps. Apply verifies its plan and source
+           fingerprint under the graph writer lock, checks every branch, and commits atomically.
+           Unsupported semantic forms block the complete artifact; this does not enable a new
+           production writer. Restore refuses to erase changes made after the rehearsal."
+     :see [[:storage "validate-view!"]]}
+    {:ns graphden.versioning.storage.input :defn validate-view!
+     :say "Checks scoped field paths and occupied-prefix conflicts among supplied rows, including
+           inherited origins. The offline writer and merge transaction call this validator under
+           locks. It deliberately leaves recursive reference availability, type/HOF classification
+           and execution to later transition stages; it is not the effective remaining-input calculation."
+     :see [[:types "remaining-input"]]}
+    {:ns graphden.storage.protocol.core :defn Storage
      :say "Defines the storage lifecycle [protocol](#term/protocol): initialize a backend with a data
            schema, then close its resources when finished. Row operations and reachable-graph queries
            are separate [protocols](#term/protocol) shown next."}

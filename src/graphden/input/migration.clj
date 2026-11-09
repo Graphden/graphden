@@ -3,6 +3,7 @@
    Unsupported semantic forms are explicit exceptions, never dropped values."
   (:require
     [clojure.set :as set]
+    [clojure.string :as str]
     [graphden.input.rows :as input-rows]
     [graphden.schema.graph.schema :as graph-schema])
   (:import
@@ -26,21 +27,30 @@
    :input-binding :input-binding-version])
 
 
+(defn stable-edn
+  "Complete readable data, independent of a caller's REPL print settings."
+  [value]
+  (binding [*print-length* nil *print-level* nil *print-meta* false
+            *print-readably* true *print-dup* false *print-namespace-maps* false]
+    (pr-str value)))
+
+
 (defn derived-id
   "Pinned namespace spelling makes generated identities repeatable across hosts."
   [kind & origins]
   (UUID/nameUUIDFromBytes
-    (.getBytes (pr-str (into [:graphden/structured-input-v2 kind] origins)) StandardCharsets/UTF_8)))
+    (String/.getBytes (stable-edn (into [:graphden/structured-input-v2 kind] origins)) StandardCharsets/UTF_8)))
 
 
 (defn- canonical
   [value]
   (cond
-    (map? value) [:map (vec (sort-by (comp pr-str first)
+    (map? value) [:map (vec (sort-by (comp stable-edn first)
                                      (map (fn [[k v]] [(canonical k) (canonical v)]) value)))]
-    (set? value) [:set (vec (sort-by pr-str (map canonical value)))]
+    (set? value) [:set (vec (sort-by stable-edn (map canonical value)))]
+    (vector? value) [:vector (mapv canonical value)]
     (sequential? value) [:sequence (mapv canonical value)]
-    (instance? Timestamp value) [:timestamp (str (.toInstant ^Timestamp value))]
+    (instance? Timestamp value) [:timestamp (str (Timestamp/.toInstant value))]
     (instance? Instant value) [:instant (str value)]
     :else value))
 
@@ -56,9 +66,9 @@
                                                          (input-rows/normalize %)
                                                          %)) records))]))
                    snapshot)
-        bytes (.digest (MessageDigest/getInstance "SHA-256")
-                       (.getBytes (pr-str (canonical rows)) StandardCharsets/UTF_8))]
-    (apply str (map #(format "%02x" (bit-and 255 %)) bytes))))
+        digest-bytes (MessageDigest/.digest (MessageDigest/getInstance "SHA-256")
+                                            (String/.getBytes (stable-edn (canonical rows)) StandardCharsets/UTF_8))]
+    (str/join (map #(format "%02x" (bit-and 255 %)) digest-bytes))))
 
 
 (defn- closure
@@ -104,6 +114,11 @@
           (for [b bindings
                 :when (not (contains? executable-ids (:fn-id b)))]
             (issue :non-executable-binding :binding (or (:binding-id b) (:id b))))
+          (for [b bindings
+                :when (or (and (:value-present b) (:ref-fn-id b))
+                          (and (not (:value-present b))
+                               (or (some? (:value b)) (some? (:resolver-fn-id b)))))]
+            (issue :inconsistent-legacy-expression :binding (or (:binding-id b) (:id b))))
           (for [b bindings
                 :let [available (set (map :slot-id (get memberships (:fn-id b))))]
                 :when (not (contains? available (:slot-id b)))]
@@ -189,7 +204,7 @@
         executable-ids (into #{} (comp (filter executable?) (map :id)) (:fn snapshot))
         by-owner (group-by :fn-id (:fn-slot snapshot))
         memberships (into (sorted-map) (map (fn [id] [id (vec (mapcat by-owner (sort-by str (closure fns id))))])) executable-ids)
-        problems (vec (sort-by pr-str (exceptions snapshot fns executable-ids memberships)))
+        problems (vec (sort-by stable-edn (exceptions snapshot fns executable-ids memberships)))
         descriptors (mapv #(descriptor-row (get fns %)) (sort-by str executable-ids))
         descriptor-versions (mapv descriptor-version (filter #(contains? executable-ids (:fn-id %)) (:fn-version snapshot)))
         copied-members (vec (membership-copies fns memberships))
@@ -217,8 +232,8 @@
 
 (defn binding-origin
   "Parser callback lookup. Scope is [owner-fn-id use-path], never a global name."
-  [plan scope path]
-  (get-in plan [:mapping :binding-origins [scope path]]))
+  [migration-plan scope path]
+  (get-in migration-plan [:mapping :binding-origins [scope path]]))
 
 
 (defn target-snapshot

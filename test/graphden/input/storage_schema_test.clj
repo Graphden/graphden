@@ -8,7 +8,8 @@
     [graphden.schema.malli.core :as malli]
     [graphden.schema.protocol.protocol :as schema]
     [graphden.schema.versioned.schema :as versioned]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.versioning.storage.input :as input-storage]))
 
 
 (deftest mirrors-and-identity-fields-test
@@ -49,4 +50,15 @@
             (rows/state [row (assoc row :id (random-uuid) :target-path [field child])]))))
     (testing "A repeated shared origin deduplicates"
       (is (= 1 (count (rows/state [row row])))))
-    (is (= nil (get-in (rows/state [row]) [[[owner []] [field]] :expression :value])))))
+    (is (nil? (get-in (rows/state [row]) [[[owner []] [field]] :expression :value])))))
+
+
+(deftest root-binding-cannot-reference-a-foreign-input-contract-test
+  (let [owner (random-uuid) descriptor (random-uuid)
+        view {:fns {owner {:id owner :org-id "mine" :input-type-fn-id descriptor}
+                    descriptor {:id descriptor :org-id "other"}}
+              :fields {} :members {} :bindings {}}
+        row {:id (random-uuid) :fn-id owner :org-id "mine" :scope-path [] :target-path []
+             :expression-kind "value" :value-present true :value {}}]
+    (is (thrown? clojure.lang.ExceptionInfo (input-storage/validate-row! view row)))
+    (is (= row (input-storage/validate-row! (assoc-in view [:fns descriptor :org-id] nil) row)))))

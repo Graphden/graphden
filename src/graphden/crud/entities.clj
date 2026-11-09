@@ -19,7 +19,6 @@
    `graphden.packages.*` package: the rendering code that does stays
    in `web/crud/impls.clj`."
   (:require
-    [graphden.input.access :as input-access]
     [clojure.set]
     [clojure.string :as str]
     [clojure.tools.logging :as log]
@@ -36,6 +35,7 @@
     [graphden.crud.type-check :as tc]
     [graphden.crud.validation :as validation]
     [graphden.executor.registry.core :as registry]
+    [graphden.input.access :as input-access]
     [graphden.packages.records :as records]
     [graphden.storage.graph-writer :as writer]
     [graphden.storage.protocol.core :as sp]

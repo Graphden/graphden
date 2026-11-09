@@ -44,11 +44,11 @@
 
 (defn encode
   "Safe EDN retains Instant precision; reader evaluation is never enabled."
-  [artifact]
-  (pr-str (walk/postwalk #(cond
-                            (instance? Timestamp %) (tagged-literal 'graphden/timestamp (str (.toInstant ^Timestamp %)))
-                            (instance? Instant %) (tagged-literal 'graphden/instant (str %))
-                            :else %) artifact)))
+  [migration-artifact]
+  (migration/stable-edn (walk/postwalk #(cond
+                                          (instance? Timestamp %) (tagged-literal 'graphden/timestamp (str (Timestamp/.toInstant %)))
+                                          (instance? Instant %) (tagged-literal 'graphden/instant (str %))
+                                          :else %) migration-artifact)))
 
 
 (defn decode
@@ -57,10 +57,10 @@
     (let [eof (Object.)
           opts {:eof eof :readers {'graphden/instant #(Instant/parse %)
                                    'graphden/timestamp #(Timestamp/from (Instant/parse %))}}
-          artifact (edn/read opts reader)]
-      (when (or (identical? eof artifact) (not (identical? eof (edn/read opts reader))))
+          decoded (edn/read opts reader)]
+      (when (or (identical? eof decoded) (not (identical? eof (edn/read opts reader))))
         (throw (ex-info "Expected exactly one migration artifact" {:type :input/invalid-artifact})))
-      artifact)))
+      decoded)))
 
 
 (defn- check-artifact!
@@ -104,8 +104,8 @@
 (defn apply!
   "Apply one checked artifact atomically. Exact target retries are no-ops.
    All preconditions run under the ordinary global semantic writer lock."
-  [storage {:keys [plan target-fingerprint] :as artifact}]
-  (check-artifact! artifact)
+  [storage {:keys [plan target-fingerprint] :as migration-artifact}]
+  (check-artifact! migration-artifact)
   (binding [access/*offline?* true]
     (writer/with-write [storage :fn]
                        (let [current (migration/fingerprint (snapshot storage))]
@@ -124,8 +124,8 @@
 
 (defn restore!
   "Exact rehearsal rollback. Refuse to erase any edits made after migration."
-  [storage {:keys [plan source target-fingerprint] :as artifact}]
-  (check-artifact! artifact)
+  [storage {:keys [plan source target-fingerprint] :as migration-artifact}]
+  (check-artifact! migration-artifact)
   (binding [access/*offline?* true]
     (writer/with-write [storage :fn]
                        (assert-fingerprint! target-fingerprint (migration/fingerprint (snapshot storage)))

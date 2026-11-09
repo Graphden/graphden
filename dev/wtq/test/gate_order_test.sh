@@ -455,6 +455,34 @@ WTQ_REPORT_TS=resume-validation
 printf '%s\n' '{:schema 1 :kind "stages" :sha "0000000000000000000000000000000000000001" :roster ["ci" "build" "visual" "e2e" "integration" "fleet"] :status {"ci" :passed "build" :passed "visual" :passed "e2e" :passed "integration" :passed "fleet" :passed}}' > "$RESUME_SOURCE.stages.edn"
 run_case
 assert_events 'expect,verify'
+# Completed validation is also reusable by the landing mode, which must still
+# independently verify CI and restore the exact image before crediting consumers.
+WTQ_GATE_MODE=land
+WTQ_REPORT_TS=validated-to-land
+run_case
+assert_events 'expect,verify'
+# A missing CI receipt reruns CI without discarding independent suite proofs.
+mv "$RESUME_SOURCE.ci.edn" "$RESUME_SOURCE.saved-ci.edn"
+WTQ_REPORT_TS=validated-missing-ci
+run_case
+assert_events 'expect,ci,verify'
+mv "$RESUME_SOURCE.saved-ci.edn" "$RESUME_SOURCE.ci.edn"
+# A missing image proof reruns build and every image consumer, while exact CI
+# and integration remain reusable. No artifact cache substitutes for the check.
+mv "$RESUME_SOURCE.image.tsv" "$RESUME_SOURCE.saved-image.tsv"
+WTQ_REPORT_TS=validated-missing-image
+run_case
+for event in uber build image visual e2e fleet; do grep -qx "$event" "$TEST_LOG"; done
+if grep -Eq '^(ci|integration)$' "$TEST_LOG"; then exit 1; fi
+mv "$RESUME_SOURCE.saved-image.tsv" "$RESUME_SOURCE.image.tsv"
+# Even an all-passed successful validation cannot reuse a different stage roster.
+cp "$RESUME_SOURCE.stages.edn" "$RESUME_SOURCE.all-passed.edn"
+sed 's/ "fleet"//; s/ "fleet" :passed//' "$RESUME_SOURCE.stages.edn" > "$RESUME_SOURCE.changed.edn"
+mv "$RESUME_SOURCE.changed.edn" "$RESUME_SOURCE.stages.edn"
+WTQ_REPORT_TS=validated-roster-changed
+run_case
+assert_events 'expect,ci,verify,uber,build,image,fleet,headroom,visual,e2e,integration'
+mv "$RESUME_SOURCE.all-passed.edn" "$RESUME_SOURCE.stages.edn"
 unset WTQ_GATE_MODE
 # Restore the interrupted roster for the missing-image case.
 mv "$RESUME_SOURCE.interrupted.edn" "$RESUME_SOURCE.stages.edn"

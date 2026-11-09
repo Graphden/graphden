@@ -259,6 +259,64 @@ check "landing checkpoint resumes as VALIDATED" eq "$(verdict resume)" VALIDATED
 check "exact candidate checks are credited across mode change" eq "$(gates)" "$(printf 'checked\ncredited %s' "$Q/logs/_train-$resume_ts")"
 check "validation releases heavy admission" test ! -e "$Q/gate-heavy"
 
+echo "== successful validation supplies exact proof to validation and approved landing"
+new_world validated-proof
+feature approved a.txt a
+approval_base="$(git -C "$REPO" rev-parse develop)"
+approved_sha="$(git -C "$REPO" rev-parse feature/approved)"
+cat > "$WTQ_GATE_STUB" <<'EOF'
+#!/usr/bin/env bash
+set -eu
+q="$(git rev-parse --git-common-dir)/wtq"
+sha="$(git rev-parse HEAD)"
+base="$(git rev-parse develop)"
+prefix="$q/logs/_train-$WTQ_REPORT_TS"
+if [ -n "${WTQ_REUSE_FROM:-}" ]; then echo credited >> "$STUB_LOG"
+else echo checked >> "$STUB_LOG"; fi
+printf '{:schema 1 :sha "%s" :scope {:since "%s"}}\n' "$sha" "$base" > "$prefix.ci-expected.edn"
+EOF
+touch "$Q/owner-hold-develop"
+merge_bg approved --validate-only
+finish approved
+check "initial validation succeeds" eq "$(verdict approved)" VALIDATED
+check "successful validation clears its failure hint" test ! -e "$Q/last-failure/approved"
+merge_bg approved --validate-only
+finish approved
+check "successful validation repeats as VALIDATED" eq "$(verdict approved)" VALIDATED
+check "repeat validation reuses proof without a failure hint" eq "$(gates)" "$(printf 'checked\ncredited')"
+check "repeat validation does not land" eq "$(git -C "$REPO" rev-parse develop)" "$approval_base"
+# Approval applies ONLY to this throwaway repository. The real owner hold
+# outside ROOT_T is never accessed by these tests.
+rm "$Q/owner-hold-develop"
+merge_bg approved
+finish approved
+check "approved landing succeeds as GREEN" eq "$(verdict approved)" GREEN
+check "approved landing reuses validation without repeated suite work" eq "$(gates)" "$(printf 'checked\ncredited\ncredited')"
+check "approved landing advances target to exact validated SHA" eq "$(git -C "$REPO" rev-parse develop)" "$approved_sha"
+
+# Changing the candidate or base cannot consume a successful proof.
+echo "== successful validation credit requires the unchanged candidate and base"
+feature amended b.txt b
+# Retain the same proof-writing stub while a new feature advances through
+# two genuinely different commits.
+merge_bg amended --validate-only
+finish amended
+amended_first="$(git -C "$REPO" rev-parse feature/amended)"
+printf 'c\n' > "$WTQ_ROOT/amended/c.txt"
+git -C "$WTQ_ROOT/amended" add c.txt
+git -C "$WTQ_ROOT/amended" commit -qm 'feat: amended candidate'
+merge_bg amended --validate-only
+finish amended
+check "changed candidate runs checks again" eq "$(tail -2 "$STUB_LOG")" "$(printf 'checked\nchecked')"
+# Advance only the temp target to an ancestor of the still-pinned candidate:
+# the assembled SHA stays identical, but the independent selection base does not.
+git -C "$REPO" merge --ff-only feature/approved >/dev/null
+git -C "$REPO" merge --ff-only "$amended_first" >/dev/null
+merge_bg amended --validate-only
+finish amended
+check "changed base runs checks despite unchanged candidate SHA" eq "$(tail -1 "$STUB_LOG")" checked
+check "changed-base validation remains unlanded" eq "$(git -C "$REPO" rev-parse develop)" "$amended_first"
+
 echo "== validation conductor never lands queued members and gates one branch at a time"
 new_world validation-partition
 feature legacy legacy.txt legacy

@@ -246,7 +246,14 @@ be clean and attached to its feature branch. This selects the pinned worktree,
 not the harness worktree. Exact-candidate interrupted/PRECOND receipts may
 reuse proven passes with the same SHA, base, roster and artifact checks as a
 normal retry; switching the final action to validation does not invalidate
-those passes. A changed candidate or missing proof still requires its checks.
+those passes. A successful VALIDATED receipt can also supply credit to a
+subsequent validation or an owner-approved landing of that exact candidate.
+The queue rechecks the retained candidate, base, selected roster, CI receipt
+and image proof. It uses only the immediately preceding train, never an older
+success behind a newer failure. Missing or changed proof reruns the affected
+checks; a changed candidate or stage roster requires fresh checks. Validation
+proof is never itself evidence of landing, and an owner hold still blocks
+landing before admission.
 
 An owner hold at the shared Git directory's `wtq/owner-hold-develop` blocks
 normal landing before admission and again before fast-forwarding, and stops

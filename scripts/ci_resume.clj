@@ -10,6 +10,21 @@
 (def statuses #{:pending :running :passed :failed})
 
 
+(defn valid-external-proof?
+  "Validate the shape and candidate identity of a reverified hosted receipt.
+   This is not a substitute for the release controller's live verification."
+  [proof sha]
+  (and (= 1 (:schema proof)) (= sha (:sha proof))
+       (= :green (:status proof)) (= :hosted-integration (:source proof))
+       (= {:suite :integration :scope :full} (:coverage proof))
+       (= (str "refs/heads/release-proof/" sha) (:ref proof))
+       (pos-int? (:run-id proof))
+       (re-matches #"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                   (or (:request-id proof) ""))
+       (zero? (get proof :exit -1))
+       (number? (:duration-ms proof)) (<= 0 (:duration-ms proof))))
+
+
 (defn valid-receipt?
   [receipt kind]
   (let [{:keys [schema roster status sha]} receipt]
@@ -156,7 +171,9 @@
   (locking state
     (when-not (and (contains? (:status @state) id) (statuses status))
       (throw (ex-info "Unknown progress check/status" {:id id :status status})))
-    (swap! state assoc-in [:status id] status)
+    (swap! state (fn [receipt]
+                   (cond-> (assoc-in receipt [:status id] status)
+                     (not= :passed status) (update :proof dissoc id))))
     (report/write-atomic! path @state)))
 
 

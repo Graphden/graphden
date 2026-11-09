@@ -343,8 +343,8 @@
          own-bindings (sp/query-entities base :binding {:fn-id fn-id})
          own-binding-ids (into #{} (map :id) own-bindings)
          by-binding (fn [entity key-field]
-                      (filter #(contains? own-binding-ids (key-field %))
-                              (sp/query-entities base entity {})))]
+                      (when (seq own-binding-ids)
+                        (sp/query-entities base entity {key-field own-binding-ids})))]
      (zap! :binding-list-item-version
            (by-binding :binding-list-item-version :binding-id))
      (zap! :binding-list-item (by-binding :binding-list-item :binding-id))
@@ -353,8 +353,8 @@
      (let [own-fn-slots (sp/query-entities base :fn-slot {:fn-id fn-id})
            own-fs-ids (into #{} (map :id) own-fn-slots)]
        (zap! :fn-slot-version
-             (filter #(contains? own-fs-ids (:fn-slot-id %))
-                     (sp/query-entities base :fn-slot-version {})))
+             (when (seq own-fs-ids)
+               (sp/query-entities base :fn-slot-version {:fn-slot-id own-fs-ids})))
        (zap! :fn-slot own-fn-slots))
      (zap! :fn-version (sp/query-entities base :fn-version {:fn-id fn-id}))
      (zap! :fn [{:id fn-id}])

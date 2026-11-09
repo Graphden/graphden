@@ -58,7 +58,8 @@ const {assert, newContext, BASE} = require('./edit-test-helpers');
     const selected = await page.evaluate(() => graphData.fns.find(fn => fn.name === 'sub'
       && lookups.nsPathMap.get(fn['namespace-id']) === 'core.arithmetic')?.id);
     assert(selected, 'search resolves the intended arithmetic function');
-    const row = page.locator('#entity-list .entity-item[data-fn-id="' + selected + '"]');
+    // Exact search matches also appear in the namespace tree; use the pinned match.
+    const row = page.locator('#entity-list .entity-item[aria-level="1"][data-fn-id="' + selected + '"]');
     await row.click();
     assert(await page.evaluate(id => selectedFnId === id && !gdGraphEditsReady(), selected),
       'function selection works without enabling editing');

@@ -75,11 +75,24 @@
     :else nil))
 
 
+(def ^:private binding-bookkeeping
+  #{:kind :id :fn-id :slot-id :org-id :value :value-present :ref-fn-id})
+
+
+(def ^:private binding-policy-columns
+  #{:type-override-fn-id :required :terminal :description :resolver-fn-id
+    :list-append :list-closed :override-kind})
+
+
 (defn- binding-policy
+  "Retain every non-bookkeeping column. Known absent policies are omitted;
+   unknown columns survive even when nil so new semantics cannot go unnoticed."
   [binding]
-  (into {} (remove (comp nil? val))
-        (select-keys binding [:type-override-fn-id :required :terminal
-                              :description :resolver-fn-id :list-append :list-closed])))
+  (into {}
+        (remove (fn [[column value]]
+                  (or (contains? binding-bookkeeping column)
+                      (and (contains? binding-policy-columns column) (nil? value)))))
+        binding))
 
 
 (defn- argument-ledger
@@ -116,6 +129,8 @@
         (mapcat (fn [[arg value]]
                   (when (map? value)
                     (cond-> []
+                      (contains? value :secret-path)
+                      (conj (blocker source :secret-path-binding-required [:args arg]))
                       (contains? value :as)
                       (conj (blocker source :rename-projection-required [:args arg]))
                       (types/own-slot-declaration? value)
@@ -135,7 +150,8 @@
 (defn- argument-blockers
   [source entry ancestor-ids]
   (let [{:keys [source-path origin expression policy target]} entry
-        problem #(blocker source % source-path)]
+        problem #(blocker source % source-path)
+        unknown-columns (vec (sort (remove binding-policy-columns (keys policy))))]
     ;; The owner identity is checked separately from the binding's own fn-id:
     ;; binding rows can address free inputs in an arbitrary referenced graph.
     (cond-> []
@@ -147,6 +163,10 @@
       (conj (problem :list-builder-required))
       (:resolver-fn-id policy)
       (conj (problem :resolver-binding-required))
+      (contains? policy :override-kind)
+      (conj (problem :legacy-override-kind-required))
+      (seq unknown-columns)
+      (conj (assoc (problem :unsupported-binding-columns) :columns unknown-columns))
       (some #(contains? policy %) [:type-override-fn-id :required :terminal :description])
       (conj (problem :binding-metadata-required))
       (and (= :binding (:kind entry)) (nil? expression)

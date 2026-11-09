@@ -201,6 +201,22 @@ function makeWorld(opts) {
 // --- the reading history ----------------------------------------------------
 
 (async () => {
+  await test('service catalogue waits for quota before deciding plan support', async () => {
+    for (const supported of [true, false]) {
+      const w = makeWorld({lessons: {lessons: [{id: '36', title: 'Services', steps: [{}], requires: 'services'}]}});
+      let release;
+      let known = false;
+      w.ctx.gdWaitForServicePlan = () => new Promise(resolve => { release = () => { known = true; resolve(true); }; });
+      w.ctx.gdServicesManageable = () => known && supported;
+      const opening = w.ctx.openTutorialMenu();
+      for (let i = 0; i < 30 && !release; i++) await Promise.resolve();
+      assert(!w.pop.classList.contains('gd-tour-visible'), 'pending quota does not display a false plan restriction');
+      release();
+      await opening;
+      assert(w.row('36').querySelector('button').disabled === !supported,
+        supported ? 'dedicated plan enables the service lesson' : 'known unsupported plan keeps the lesson restricted');
+    }
+  });
   await test('the history records the edition finished, and an empty one is no key at all', () => {
     const w = makeWorld();
     w.ctx._tourMarkDone('01', 1);

@@ -371,6 +371,8 @@ async function startTutorialIsolated(lessonId, ticket = _tourStartTicket()) {
   // scratch-branch isolation — double-wrapping broke its own "main
   // never saw it" beat and leaked the scratch branch.
   const lesson = (lessons.lessons || []).find((l) => l.id === lessonId);
+  if (lesson?.requires === 'services'
+      && !await _tourPrepareServiceLesson(lesson, () => _tourStartCurrent(ticket))) return false;
   if (lesson?.['in-place']) return startTutorial(lessonId, null, null, null, ticket);
   if (!canBranch || !onMain) return startTutorial(lessonId, null, null, null, ticket);
   const branch = 'tutorial-' + lessonId + '-'

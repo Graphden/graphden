@@ -145,13 +145,13 @@ Stages a create-only publication UUID before sending the request. The graph part
 :PROPERTIES:
 :CUSTOM_ID: editor/_tourTrackHttpPublication
 :FILE: resources/packages/app/editor/editor-tour-session.js
-:LINE: 436
+:LINE: 438
 :MINS: 1.1
 :END:
 
 Records the exact lease, handler, namespace, branch, lesson session, and principal before publication. Cleanup can revoke that lease after its lesson branches disappear without guessing identity from a name or deleting another account's publication.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-tour-session.js::function _tourTrackHttpPublication(id, fn) {][resources/packages/app/editor/editor-tour-session.js:436]]
+- source :: [[file:../../../resources/packages/app/editor/editor-tour-session.js::function _tourTrackHttpPublication(id, fn) {][resources/packages/app/editor/editor-tour-session.js:438]]
 
 * 12. applyInheritancePreview
 :PROPERTIES:
@@ -404,13 +404,13 @@ Runs the selected root HOF's tutorial catalogue callback over browser-local disp
 :PROPERTIES:
 :CUSTOM_ID: editor/openTutorialMenu
 :FILE: resources/packages/app/editor/editor-tour-picker.js
-:LINE: 331
-:MINS: 16.9
+:LINE: 347
+:MINS: 17.1
 :END:
 
 Owns the tutorial catalogue's local reading history, requirement checks, stable filter and Read/Unmark controls. The root callback filters lessons and partitions adjacent chapter runs after filtering; native actions recheck membership and context. Root replacement retires pending fetches, painted rows and the render receipt.
 
-- source :: [[file:../../../resources/packages/app/editor/editor-tour-picker.js::async function openTutorialMenu() {][resources/packages/app/editor/editor-tour-picker.js:331]]
+- source :: [[file:../../../resources/packages/app/editor/editor-tour-picker.js::async function openTutorialMenu() {][resources/packages/app/editor/editor-tour-picker.js:347]]
 - see also :: [[file:editor.org::#editor/mountCatalog][mountCatalog]], [[file:editor.org::#editor/createRuntime][createRuntime]]
 - referenced from :: [[file:editor.org::#editor/mountCatalog][mountCatalog]]
 

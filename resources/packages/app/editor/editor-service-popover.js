@@ -165,7 +165,8 @@ function primeTenantPlan() {
 
 async function readTenantPlan(request, epoch, session) {
   let tier = null;
-  if (typeof API === 'object' && typeof API.api_orgs_quota !== 'undefined') {
+  const selfHosted = typeof graphdenTenancyActive === 'function' && !graphdenTenancyActive();
+  if (!selfHosted && typeof API === 'object' && typeof API.api_orgs_quota !== 'undefined') {
     try {
       const r = await authFetch(API.api_orgs_quota, {method: 'GET'});
       if (!r?.ok) return false;
@@ -723,6 +724,7 @@ window.getServiceForFnId = getServiceForFnId;
 window.serviceBadgeState = serviceBadgeState;
 window.loadServicesEager = loadServicesEager;
 window.refreshServicesCache = refreshServicesCache;
+window.gdWaitForServicePlan = primeTenantPlan;
 
 // May this session manage services at all? The dedicated tier can (own
 // cgroup-limited pod); a free / network tenant cannot, and the platform or a

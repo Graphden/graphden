@@ -237,6 +237,19 @@ const popover = (doc) => doc.querySelector('.service-popover');
   }
 
   console.log(' service consumers wait for their shared tenant plan without platform fallback');
+  {
+    const t = boot();
+    vm.runInContext('_tenantPlanTier = undefined', t.ctx);
+    t.ctx.API.api_orgs_quota = '/api/orgs/quota';
+    t.ctx.graphdenTenancyActive = () => false;
+    const fetch = t.ctx.authFetch;
+    const urls = [];
+    t.ctx.authFetch = (url, opts) => { urls.push(url); return fetch(url, opts); };
+    await t.ctx.showServicePopover({id: 'f1'}, t.anchor);
+    assert(!urls.includes('/api/orgs/quota') && urls.some(url => url.startsWith('/partials/service-popover')),
+      'explicit self-host capability skips an addon quota URL and opens platform services');
+    assert(t.ctx.gdServicesManageable(), 'self-host services remain available');
+  }
   for (const consumer of ['dialog', 'list']) {
     const t = boot();
     const requests = tenant(t);

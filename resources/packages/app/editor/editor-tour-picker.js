@@ -246,6 +246,22 @@ const REQUIRE_SIGNALS = {
   },
 };
 
+// Service availability is local async metadata, independent of graph readiness.
+async function _tourWaitForRequirements(lessons) {
+  if (!lessons.some(lesson => lesson.requires === 'services')) return true;
+  return typeof window.gdWaitForServicePlan === 'function' && await window.gdWaitForServicePlan();
+}
+
+async function _tourPrepareServiceLesson(lesson, current) {
+  const ready = await _tourWaitForRequirements([lesson]);
+  if (!current()) return false;
+  const allowed = ready && _tourRequirement(lesson).allowed;
+  if (!allowed && typeof gdToast === 'function') {
+    gdToast(ready ? 'This lesson needs ' + _tourRequirement(lesson).phrase : 'Service plan unavailable');
+  }
+  return allowed;
+}
+
 // Can this session run the lesson? → `{allowed, phrase, short}`.
 function _tourRequirement(lesson) {
   const need = lesson.requires;
@@ -349,7 +365,10 @@ async function openTutorialMenu() {
   _tourCatalogClose = closePending;
   window.gdTourCatalogClose = closePending;
   let lessons;
-  try { [lessons] = await Promise.all([_tourFetchLessons(), preparing]); }
+  try {
+    [lessons] = await Promise.all([_tourFetchLessons(), preparing]);
+    if (!await _tourWaitForRequirements(lessons?.lessons || [])) throw new Error('Service plan unavailable');
+  }
   catch (error) {
     const owned = _tourCatalogClose === closePending;
     closePending();

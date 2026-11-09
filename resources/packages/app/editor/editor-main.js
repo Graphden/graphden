@@ -554,7 +554,7 @@ async function initGraph({progressive = false} = {}) {
       boot.finish(true);
       // The shell/subtree installed during navigation stay intact. Repaint
       // annotations; layout waits locally for types before sizing its nodes.
-      repaintExplorer();
+      updateEntityList(graphData);
       syncProgressiveGraphFence();
       if (typeof gdWaitForSelectionRender === 'function') await gdWaitForSelectionRender();
       else await navigation;

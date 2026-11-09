@@ -1354,9 +1354,12 @@
    :steps
    [{:file "resources/packages/app/editor/editor-main.js" :defn initGraph
      :say "Initializes the editor's plain JavaScript modules, concatenated in a fixed order. It first
-           requests the namespace tree to determine [authentication](#term/auth) state, then starts
-           secondary loads; function details load on demand. A 401 opens sign-in. See the [module
-           map](../../docs/EDITOR_MODULES.md)."
+           requests the namespace tree to determine [authentication](#term/auth) state. Boot exposes
+           Explorer navigation as soon as the tree arrives; metadata keeps editing fenced while
+           selected subtrees and layouts load. Card sizing waits for fresh types locally, and
+           services annotate the Explorer in the background. Mutation refreshes retain the full
+           fence; gdWaitForGraphReady never means only tree-ready. A 401 opens sign-in. See the
+           [module map](../../docs/EDITOR_MODULES.md)."
      :see [[:editor "authFetch"]]}
 
     {:file "resources/packages/app/editor/editor-data.js" :defn buildLookups

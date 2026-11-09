@@ -744,6 +744,17 @@
            It retains rich declarations and binding origins, while reporting unsupported list,
            rename, ref-scope and policy forms as explicit blockers. A completed report does not
            prove runtime equivalence or authorize dropping an unsupported definition."}
+    {:ns graphden.input.descriptor :defn resolve-contract
+     :say "Resolves an authored input declaration inside a frozen type snapshot. Stable field IDs
+           come from memberships; aliases retain those identities, marker/refinement obligations
+           survive, and ambiguous union roots are rejected. This descriptor never stores generated
+           reference dependencies or the remaining input back into the declaration."}
+    {:ns graphden.input.analysis :defn analyze-effective-input
+     :say "Builds an offline graph of evaluated reference uses. Each use has a binding-ID scope;
+           scoped overlays must fit its target's unoccupied fields. Identity refs do not import
+           target inputs, and callable producers expose constructor inputs. Required addresses and
+           explicit diagnostics distinguish supported analysis from unresolved capture, projection,
+           metadata and recursion cases. Production execution remains on its existing path."}
     {:ns graphden.types.core.shapes :defn primitives
      :say "Lists primitive value types and the special types `:any` and `:never`. `:any` accepts every
            type; `:never` has no values. Compound types such as lists, records, and functions build on

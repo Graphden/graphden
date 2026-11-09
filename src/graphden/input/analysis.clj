@@ -6,6 +6,7 @@
     [graphden.input.core :as input]
     [graphden.input.inheritance :as inheritance]
     [graphden.input.rows :as rows]
+    [graphden.input.scopes :as scopes]
     [graphden.types.check.literals :as literals]
     [graphden.types.core :as types]
     [graphden.types.reference :as reference]))
@@ -96,13 +97,13 @@
    recursive availability. Missing required fields and incomplete checking
    are separate outputs. All effective/residual values remain recomputable."
   ([ctx fn-id] (analyze-input ctx fn-id {}))
-  ([ctx fn-id {:keys [check-expression]}]
+  ([ctx fn-id {:keys [check-expression scope additional-rows]}]
    (context/call-with-types
      ctx
      (fn []
        (let [{:keys [contract bindings declaration-order]} (inheritance/declared-view ctx fn-id)
-             scope [fn-id []]
-             owned (mapv rows/normalize bindings)
+             scope (or scope [fn-id []])
+             owned (mapv #(rows/normalize (assoc % :fn-id fn-id)) (concat bindings additional-rows))
              local (filterv #(empty? (:scope-path %)) owned)
              entries (mapv #(classify-entry ctx scope contract %) (filter rows/occupied? local))
              state (into {} (map (fn [{:keys [address binding-id expression expected-type]}]
@@ -131,6 +132,7 @@
                                          {:code (:reason proof) :address address})))
                                (:proofs checked))]
          {:fn-id fn-id :declared-contract contract :declaration-order declaration-order
+          :scoped-rows (filterv #(seq (:scope-path %)) owned)
           :effective-contract (when (empty? closure-gaps) (substitute-node contract (:substitution checked)))
           :remaining-contract (substitute-node (:descriptor remaining) (:substitution checked))
           :required-addresses (mapv #(vector scope %) (:missing remaining))
@@ -144,3 +146,17 @@
           :coverage {:declared-structure true :local-occupancy true
                      :recursive-availability (empty? closure-gaps)
                      :type-checker (boolean check-expression)}})))))
+
+
+(defn analyze-effective-input
+  "Resolve value-producing reference uses into a derived scope graph. Each
+   occurrence retains the shared target declaration and binding-ID use path.
+   Scoped overlays are checked against target occupancy. Callable capture
+   routing and recursive cycles remain explicit incomplete coverage; identity
+   references never traverse their target. This is an offline analysis API."
+  ([ctx fn-id] (analyze-effective-input ctx fn-id {}))
+  ([ctx fn-id options]
+   (scopes/analyze
+     fn-id
+     (fn [target scope overlays]
+       (analyze-input ctx target (assoc options :scope scope :additional-rows overlays))))))

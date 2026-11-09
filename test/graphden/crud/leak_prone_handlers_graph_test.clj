@@ -252,7 +252,7 @@
 ;; Originally the `_list-services-rows :parent :list-entities` site that
 ;; surfaced the leak (per the memory). Migrated to direct `:pg-query`
 ;; chain in Block 1 Step 2; the surviving `:_list-services-fn-identities`
-;; pin is still load-bearing for the same closure-capture reason.
+;; bound service-ID predicate is still load-bearing for the same closure-capture reason.
 
 (deftest list-services-handler-returns-services-without-leak-test
   (testing "GET /api/services returns the services list — no `:where`-via-closure leak"
@@ -263,7 +263,7 @@
           body (cheshire/parse-string (:body response) true)]
       (is (= 200 (:status response))
           "happy path returns 200; if 500 with `Unknown field 'request-method'`,
-           the `:where {:value {}}` pin on `:_list-services-fn-identities`
+           the bound `:where` predicate on `:_list-services-fn-identities`
            was removed and the Ring request map leaked into the storage
            query")
       (is (vector? (:services body))

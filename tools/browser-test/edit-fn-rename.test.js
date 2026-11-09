@@ -32,7 +32,7 @@ const NEW = 'test-fn-rename-new';
 
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + ORIG);
     await page.waitForFunction(
-      () => graphReady()
+      () => graphReady() && gdGraphEditsReady()
             && !!document.querySelector('button.more-actions-trigger')
             && !graph.animating,
       null,

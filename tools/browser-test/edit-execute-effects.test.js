@@ -22,7 +22,7 @@ async function openExecutePopoverFor(page, fnNameHash) {
   await page.goto('about:blank');
   await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + fnNameHash);
   await page.waitForFunction(
-    () => graphReady()
+    () => graphReady() && gdGraphEditsReady()
           && !!document.querySelector('button.more-actions-trigger')
           && !graph.animating,
     null,

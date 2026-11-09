@@ -961,19 +961,12 @@ async function createFnInNamespace(page, nsName, fnName) {
     const arrow = target?.querySelector('.ns-arrow');
     return arrow && /▼/.test(arrow.textContent || '');
   }, nsName, {timeout: 15000, polling: 100});
-  // Find-and-click in ONE poll: the tree rebuilds when the expanded
-  // namespace's fns land, and a one-shot lookup could miss the row.
-  await page.waitForFunction((path) => {
-    const target = document.querySelector('.ns-header[data-ns-path="' + path + '"]');
-    const plus = target?.querySelector('.ns-plus-btn');
-    if (!plus) return false;
-    // A root created after the tree has grown sits at the Explorer's bottom
-    // edge, and the `+` menu opens BELOW its row — off-screen, where a click
-    // waits 45s and fails. Centre the row first; a reader scrolls, so does this.
-    target.scrollIntoView({block: 'center'});
-    plus.click();
-    return true;
-  }, nsName, {timeout: 15000, polling: 100});
+  // A new row can appear while its save refresh still makes actions inert.
+  // Let a real click await actionability and re-resolve any rebuilt row.
+  // Keep the row centered so the menu below it stays inside the Explorer.
+  const namespace = page.locator('.ns-header[data-ns-path="' + nsName + '"]');
+  await namespace.evaluate(row => row.scrollIntoView({block: 'center'}));
+  await namespace.locator('.ns-plus-btn').click({timeout: 15000});
   await page.waitForSelector('.create-menu', {timeout: 10000});
   await page.click('.create-menu-item[data-type="fn"]');
   await submitInlineRow(page, fnName);
@@ -1289,10 +1282,9 @@ async function openAccountSettings(page) {
 async function createRecordType(page, nsPath, typeName, fields) {
   await page.waitForSelector('.ns-header[data-ns-path="' + nsPath + '"]',
     {timeout: 30000});
-  await page.evaluate((path) => {
-    const h = document.querySelector('.ns-header[data-ns-path="' + path + '"]');
-    h.querySelector('.ns-plus-btn').click();
-  }, nsPath);
+  const namespace = page.locator('.ns-header[data-ns-path="' + nsPath + '"]');
+  await namespace.evaluate(row => row.scrollIntoView({block: 'center'}));
+  await namespace.locator('.ns-plus-btn').click({timeout: 15000});
   await page.waitForSelector('.create-menu [data-type="type"]', {timeout: 15000});
   await page.evaluate(() => {
     document.querySelector('.create-menu [data-type="type"]').click();

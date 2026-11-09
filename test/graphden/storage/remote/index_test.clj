@@ -94,6 +94,11 @@
 (deftype CountedValue
   [value comparisons]
 
+  clojure.lang.IDeref
+
+  (deref [_] value)
+
+
   Object
 
   (hashCode [_] (hash value))
@@ -103,7 +108,7 @@
     [_ other]
     (swap! comparisons inc)
     (and (instance? CountedValue other)
-         (= value (.-value ^CountedValue other)))))
+         (= value @other))))
 
 
 (defn- lookup-comparisons

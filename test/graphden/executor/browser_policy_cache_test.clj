@@ -50,8 +50,8 @@
                              (snapshot/capture-policy rich)))
                          (range 7))]
           (try
-            (is (= true (deref all-entered 10000 ::timeout)))
-            (is (= true (deref classifying 10000 ::timeout)))
+            (is (true? (deref all-entered 10000 ::timeout)))
+            (is (true? (deref classifying 10000 ::timeout)))
             (deliver release true)
             (is (every? #(= :plain (get-in (deref % 10000 {}) [:classes id])) jobs))
             (is (= 2 @calls) "concurrent misses must not repeat the full registry scan")

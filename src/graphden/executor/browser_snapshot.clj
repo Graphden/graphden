@@ -114,14 +114,17 @@
                     (let [entry {:rich rich :flags flags
                                  :policy (delay (capture-policy-for rich (:by-id rich) flags))}]
                       (reset! captured-policy entry)
-                      entry))))]
+                      entry))))
+        succeeded? (volatile! false)]
     ;; Compute outside the cache lock; another source can proceed independently.
     ;; A failed computation must not poison this input pair for later requests.
     (try
-      @(:policy entry)
-      (catch Throwable error
-        (compare-and-set! captured-policy entry nil)
-        (throw error)))))
+      (let [result @(:policy entry)]
+        (vreset! succeeded? true)
+        result)
+      (finally
+        (when-not @succeeded?
+          (compare-and-set! captured-policy entry nil))))))
 
 
 (defn capture-context-policy

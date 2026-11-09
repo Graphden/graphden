@@ -24,6 +24,18 @@
         ;; The addon owns grant semantics. This fixture reads its policy store
         ;; on each seam call, making fresh authority observable without SQL.
         policy-store (reify sp/StorageCRUD
+                       (create-entity [_ _ _] (throw (UnsupportedOperationException.)))
+
+                       (read-entity [_ _ _] (throw (UnsupportedOperationException.)))
+
+                       (update-entity [_ _ _ _] (throw (UnsupportedOperationException.)))
+
+                       (delete-entity [_ _ _] (throw (UnsupportedOperationException.)))
+
+                       (query-latest-per-group [_ _ _ _] (throw (UnsupportedOperationException.)))
+
+                       (query-entities [_ _ _ _] (throw (UnsupportedOperationException.)))
+
                        (query-entities
                          [_ _ where]
                          (swap! counts update :policy-reads inc)

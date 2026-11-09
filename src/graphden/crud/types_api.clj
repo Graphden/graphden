@@ -128,6 +128,18 @@
             :else (recur (inc attempt))))))))
 
 
+(defn- visible-rich-snapshot
+  "Project a registry snapshot through an already authorized graph."
+  [snapshot graph org]
+  (if (tctx/platform-tier? org)
+    snapshot
+    (let [visible (into #{} (comp (map :name) (filter some?) (map keyword))
+                        (:fns graph))]
+      (into {}
+            (filter (fn [[k _]] (contains? visible (keyword (name k)))))
+            snapshot))))
+
+
 (defn org-visible-rich-snapshot
   "The NAME-keyed rich-type snapshot restricted to names the current
    principal may read — the registry equivalent of the filtered graph
@@ -148,13 +160,9 @@
         org (tctx/current-org)]
     (if (tctx/platform-tier? org)
       snap
-      (let [visible (into #{}
-                          (comp (map :name) (filter some?) (map keyword))
-                          (:fns (tctx/apply-graph-read-filter
-                                  (cached-or-load-graph ctx))))]
-        (into {}
-              (filter (fn [[k _]] (contains? visible (keyword (name k)))))
-              snap)))))
+      (visible-rich-snapshot snap
+                             (tctx/apply-graph-read-filter (cached-or-load-graph ctx))
+                             org))))
 
 
 (defn compute-fn-role
@@ -238,12 +246,10 @@
 
 
 (defonce ^:private rich-types-with-type-rows-cache
-  ;; Single-entry identity-keyed cache. Holds `[raw-snapshot graph result]`.
-  ;; Both inputs are atom-deref'd values that stay reference-stable
-  ;; between their respective invalidations (rich-types registry
-  ;; reset / graph-cache reload), so adjacent
-  ;; `/api/types/candidates` calls during one mutation window hit
-  ;; the cache. Cache miss is the same cost as the uncached path.
+  ;; One pure derivation: [registry source org authorized-graph result].
+  ;; Source identities detect graph/registry replacement. Fresh authorization
+  ;; runs BEFORE lookup; full graph equality also detects a changed principal,
+  ;; grant revocation, or a changed read filter without any graph mutation.
   (atom nil))
 
 
@@ -260,21 +266,19 @@
    up `:port` → expect `[:refine :int [:and [:>= 1] [:<= 65535]]]`,
    so we expose the structural form alongside the existing entries."
   [ctx]
-  (let [raw-snapshot (org-visible-rich-snapshot ctx)
-        graph (tctx/apply-graph-read-filter (cached-or-load-graph ctx))
-        ;; The org rides the identity key: `cached-or-load-graph` now
-        ;; returns a per-org SLICE (fresh vectors per read for tenants),
-        ;; so `identical?` on the slice would never hit for them. Keying
-        ;; on the org + the raw cache identity keeps single-tenant hits
-        ;; reference-stable and gives adjacent same-org tenant calls a
-        ;; hit window too (last-org-wins single entry, deliberately small).
+  (let [snapshot (registry/rich-types-snapshot)
+        source (cached-or-load-graph ctx)
+        ;; Use ONE current authorization decision for the registry and all
+        ;; structural rows. Rechecking twice duplicates namespace/policy reads.
+        graph (tctx/apply-graph-read-filter source)
         org (tctx/current-org)
-        raw (or (exec-ctx/cached-graph ctx) graph)
-        [cs cg co cr] @rich-types-with-type-rows-cache]
-    (if (and (identical? cs raw-snapshot) (identical? cg raw) (= co org))
-      cr
-      (let [result (rich-types-with-type-rows-uncached raw-snapshot graph)]
-        (reset! rich-types-with-type-rows-cache [raw-snapshot raw org result])
+        [cs cg co authorized result] @rich-types-with-type-rows-cache]
+    (if (and (identical? cs snapshot) (identical? cg source)
+             (= co org) (= authorized graph))
+      result
+      (let [visible (visible-rich-snapshot snapshot graph org)
+            result (rich-types-with-type-rows-uncached visible graph)]
+        (reset! rich-types-with-type-rows-cache [snapshot source org graph result])
         result))))
 
 

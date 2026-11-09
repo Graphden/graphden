@@ -1935,6 +1935,8 @@
            downloading the entire bundle."}
     {:ns graphden.storage.remote.core :defn RemoteStorage
      :say "Implements read-only `StorageCRUD` over graph rows fetched from the hub through HTTP.
+           Lazy lookup indexes belong to the same immutable snapshot as the rows, so repeated
+           owner lookups avoid full-table scans and refresh cannot mix query generations.
            Writes are rejected. `refresh!` replaces the in-memory bundle, and the [SSE](#term/sse)
            relay described above triggers refresh after [invalidation](#term/invalidation) events."
      :see [[:storage "StorageCRUD"]]}

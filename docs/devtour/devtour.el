@@ -247,6 +247,7 @@
       (with-current-buffer buf
         (goto-char (point-min))
         (forward-line (1- (plist-get step :line)))
+        (skip-chars-forward " \t")
         ;; The baked line is a hint; the head line is the anchor, exactly like
         ;; the generator's symbol lookup — so an edit above the form is harmless.
         (unless (looking-at-p (regexp-quote head))
@@ -254,7 +255,7 @@
                          (goto-char (point-min))
                          (search-forward head nil t))))
             (if found
-                (progn (goto-char found) (beginning-of-line))
+                (goto-char (- found (length head)))
               (message "devtour: anchor `%s' not found in %s — run `bb devtour'"
                        head (plist-get step :file)))))
         (when (fboundp 'pulse-momentary-highlight-one-line)

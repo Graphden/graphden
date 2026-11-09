@@ -1,3 +1,4 @@
+const {waitForEditorReady} = require('./editor-readiness');
 const {installDiagnostics, httpFailure, errorKind, route, status} = require('./safe-diagnostics');
 
 // Shared helpers for the editor-edit e2e suite. Each promoted test
@@ -207,6 +208,7 @@ async function newContext(chromium, opts = {}) {
   // not a precondition, and a page without the explorer (the login screen)
   // must not cost every test a hard 30s.
   await page.waitForSelector('#entity-list', {timeout: 15000}).catch(() => {});
+  await waitForEditorReady(page, {allowAuthWall: true});
   return { browser, page, diagnostics };
 }
 
@@ -789,7 +791,7 @@ async function closeInspectorSheet(page) {
   return true;
 }
 
-module.exports = { assert, deepEqual, newContext, api, getEntities, clickWhenHtmxReady, closeInspectorSheet,
+module.exports = { assert, deepEqual, newContext, waitForEditorReady, api, getEntities, clickWhenHtmxReady, closeInspectorSheet,
                    nodeApi, nodeApiJson, openBranchPopover, openOperate,
                    synthArgs, waitFor, waitForServerHealthy,
                    deleteFnByName, deleteBranches, submitInlineRow, AUTH, BASE };

@@ -36,17 +36,30 @@ function gdNavigateToFn(fnId, qname) {
 }
 
 let _navigationEpoch = 0;
-let _selectionRender = Promise.resolve();
-function gdInvalidateNavigation() { _navigationEpoch++; }
+let _navigationWork = Promise.resolve();
+let _navigationChanged = Promise.resolve();
+let _wakeNavigation = () => {};
+function beginNavigation() {
+  _wakeNavigation();
+  _navigationChanged = new Promise(resolve => { _wakeNavigation = resolve; });
+  return ++_navigationEpoch;
+}
+function gdInvalidateNavigation() {
+  beginNavigation();
+  _navigationWork = Promise.resolve();
+}
 async function gdWaitForSelectionRender() {
   let current;
-  do { current = _selectionRender; await current; } while (current !== _selectionRender);
+  do {
+    current = _navigationWork;
+    await Promise.race([current, _navigationChanged]);
+  } while (current !== _navigationWork);
 }
 window.gdInvalidateNavigation = gdInvalidateNavigation;
 window.gdWaitForSelectionRender = gdWaitForSelectionRender;
 
 function selectFn(fnId, updateHistory = true) {
-  _navigationEpoch++;
+  beginNavigation();
   // Re-selecting the SAME root — what every write's `loadGraphData` does —
   // keeps the canvas as the reader left it: unfolded cards stay unfolded,
   // dragged cards stay put. Only a change of root folds everything
@@ -98,8 +111,8 @@ function selectFn(fnId, updateHistory = true) {
     window.gdAnnounce(getQualifiedFnName(fn) + ' selected');
   }
 
-  _selectionRender = Promise.resolve(renderGraph(true));
-  return _selectionRender;
+  _navigationWork = Promise.resolve(renderGraph(true));
+  return _navigationWork;
 }
 
 // No selection at all — the state a fresh load without a hash shows: an
@@ -119,7 +132,7 @@ function gdClearSelection() {
   if (graphData && typeof updateEntityList === 'function') updateEntityList(graphData);
   if (typeof gdInspectorRender === 'function') gdInspectorRender(null);
   try { window.history.pushState(null, '', '#'); } catch (_) { /* file:// */ }
-  renderGraph(false);
+  _navigationWork = Promise.resolve(renderGraph(false));
 }
 window.gdClearSelection = gdClearSelection;
 
@@ -139,7 +152,7 @@ window.gdClearSelection = gdClearSelection;
 // genuine miss still reports itself.
 async function selectJustCreatedFn(name, tries = 12, gapMs = 250) {
   if (!name) return;
-  const epoch = ++_navigationEpoch;
+  const epoch = beginNavigation();
   for (let i = 0; i < tries; i++) {
     if (epoch !== _navigationEpoch) return;
     if (typeof resolveFnByName !== 'function') break;
@@ -153,8 +166,12 @@ async function selectJustCreatedFn(name, tries = 12, gapMs = 250) {
 window.selectJustCreatedFn = selectJustCreatedFn;
 
 
-async function selectFnByName(name, updateHistory = true) {
-  const epoch = ++_navigationEpoch;
+function selectFnByName(name, updateHistory = true) {
+  _navigationWork = resolveFnSelection(name, updateHistory, beginNavigation());
+  return _navigationWork;
+}
+
+async function resolveFnSelection(name, updateHistory, epoch) {
   const current = () => epoch === _navigationEpoch;
   if (!graphData) return;
   // Identity bookmarks retain ordinary navigation across renamed functions.

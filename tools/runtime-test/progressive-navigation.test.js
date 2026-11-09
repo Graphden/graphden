@@ -37,7 +37,12 @@ function navigation() {
   {
     const n = navigation();
     const old = n.ctx.selectFnByName('alpha');
+    let ready = false;
+    const waiting = n.ctx.gdWaitForSelectionRender().then(() => { ready = true; });
     await n.ctx.selectFn('B');
+    await flush();
+    assert.equal(ready, true, 'superseded unresolved name lookup does not hold current readiness');
+    await waiting;
     n.pending.get('alpha')({id: 'A', name: 'alpha'});
     await old;
     assert.equal(n.ctx.selectedFnId, 'B');

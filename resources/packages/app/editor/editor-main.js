@@ -458,12 +458,14 @@ function repaintExplorer() {
  */
 async function initGraph({progressive = false} = {}) {
   const endRefresh = beginGraphRefresh();
+  let current = () => true;
+  let boot = null;
   try {
     const authEpoch = _graphAuthEpoch;
     resetGraphCaches();
     const typesEpoch = _subtreeResetEpoch;
-    const current = () => authEpoch === _graphAuthEpoch && typesEpoch === _subtreeResetEpoch;
-    const boot = progressive ? {ready: false, treeReady: false} : null;
+    current = () => authEpoch === _graphAuthEpoch && typesEpoch === _subtreeResetEpoch;
+    boot = progressive ? {ready: false, treeReady: false} : null;
     if (boot) {
       boot.metadata = new Promise(resolve => { boot.finish = resolve; });
       _progressiveGraph = boot;
@@ -473,9 +475,14 @@ async function initGraph({progressive = false} = {}) {
     const entResp = await fetch(API.api_graph_entities + '?scope=tree');
     if (!current()) return;
     if (entResp.status === 401) {
+      if (boot) boot.finish(false);
       clearAuthPassword();
+      // Clearing our own rejected credential emits gd-auth-changed. Only a
+      // further auth change while awaiting accounts should cancel this wall.
+      const wallEpoch = _graphAuthEpoch;
+      const wallGraphEpoch = _subtreeResetEpoch;
       if (window.gdAccountsReady) await window.gdAccountsReady;
-      if (!current()) return;
+      if (wallEpoch !== _graphAuthEpoch || wallGraphEpoch !== _subtreeResetEpoch) return;
       if (typeof graphdenAccountsMode === 'function' && graphdenAccountsMode()) {
         const next = location.pathname + location.search + location.hash;
         location.href = '/login?next=' + encodeURIComponent(next);
@@ -549,8 +556,8 @@ async function initGraph({progressive = false} = {}) {
       // annotations; layout waits locally for types before sizing its nodes.
       repaintExplorer();
       syncProgressiveGraphFence();
-      await navigation;
       if (typeof gdWaitForSelectionRender === 'function') await gdWaitForSelectionRender();
+      else await navigation;
     } else {
       if (!await installGraphShell(tree, typeResp, onBadTypes, authEpoch, typesEpoch)) return;
       repaintExplorer();
@@ -558,6 +565,9 @@ async function initGraph({progressive = false} = {}) {
     }
     if (!current()) return;
     if (typeof refreshQuotaBadge === 'function') refreshQuotaBadge();
+  } catch (error) {
+    if (boot) boot.finish(false);
+    if (current()) throw error;
   } finally {
     endRefresh();
   }

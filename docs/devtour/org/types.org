@@ -35,7 +35,7 @@ Describes locally missing fields and occupancy while retaining original rich typ
 
 - source :: [[file:../../../src/graphden/input/core.clj::(defn remaining-input][src/graphden/input/core.clj:185]]
 - same file :: [[file:types.org::#types/bind-input][bind-input]]
-- referenced from :: [[file:types.org::#types/bind-input][bind-input]]
+- referenced from :: [[file:storage.org::#storage/validate-view!][validate-view!]], [[file:types.org::#types/bind-input][bind-input]]
 
 * 3. parse-expression
 :PROPERTIES:

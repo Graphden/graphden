@@ -11,6 +11,7 @@
    - migration.clj - Schema migration logic
    - crud.clj - CRUD operations"
   (:require
+    [graphden.input.access :as input-access]
     [graphden.storage.graph-writer :as writer]
     [graphden.storage.postgres.codec :as codec]
     [graphden.storage.postgres.crud :as crud]
@@ -255,6 +256,7 @@
 
   (delete-entity
     [this entity-name id]
+    (input-access/assert-write! entity-name {})
     (writer/with-write [this entity-name]
                        (let [pool (:pool this)]
                          (evict-slot-rows! slot-row-cache entity-name [id])
@@ -339,6 +341,7 @@
 
   (delete-entities
     [this entity-name ids]
+    (input-access/assert-write! entity-name {})
     (writer/with-write [this entity-name]
                        (let [pool (:pool this)
                              deleted (crud/delete-entities pool entity-name ids)]

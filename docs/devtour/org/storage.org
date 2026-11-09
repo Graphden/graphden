@@ -7,50 +7,89 @@ Protocols, rows, traversal, and change notifications.
 
 after: executor
 
-[[file:index.org][index]] · ~65 min
+[[file:index.org][index]] · ~70 min
 
-* 1. Storage
+* 1. extend-builder
+:PROPERTIES:
+:CUSTOM_ID: storage/extend-builder
+:FILE: src/graphden/schema/input/schema.clj
+:LINE: 70
+:MINS: 0.8
+:END:
+
+Adds the inactive structured-input storage: stable UUID field paths and a separate input-binding entity. Functions point to existing record-type descriptors through a versioned input-type field. Production continues using v1; generic public access to these entities remains denied. See the [[file:../../../docs/STRUCTURED_INPUT_STORAGE.md][offline storage contract]].
+
+- source :: [[file:../../../src/graphden/schema/input/schema.clj::(defn extend-builder][src/graphden/schema/input/schema.clj:70]]
+
+* 2. apply!
+:PROPERTIES:
+:CUSTOM_ID: storage/apply!
+:FILE: src/graphden/input/offline.clj
+:LINE: 104
+:MINS: 2.0
+:END:
+
+Rehearses an additive migration on a stopped database copy. The artifact preserves raw history, shared binding origins and exact timestamps. Apply verifies its plan and source fingerprint under the graph writer lock, checks every branch, and commits atomically. Unsupported semantic forms block the complete artifact; this does not enable a new production writer. Restore refuses to erase changes made after the rehearsal.
+
+- source :: [[file:../../../src/graphden/input/offline.clj::(defn apply!][src/graphden/input/offline.clj:104]]
+- see also :: [[file:storage.org::#storage/validate-view!][validate-view!]]
+
+* 3. validate-view!
+:PROPERTIES:
+:CUSTOM_ID: storage/validate-view!
+:FILE: src/graphden/versioning/storage/input.clj
+:LINE: 91
+:MINS: 2.2
+:END:
+
+Checks scoped field paths and occupied-prefix conflicts among supplied rows, including inherited origins. The offline writer and merge transaction call this validator under locks. It deliberately leaves recursive reference availability, type/HOF classification and execution to later transition stages; it is not the effective remaining-input calculation.
+
+- source :: [[file:../../../src/graphden/versioning/storage/input.clj::(defn validate-view!][src/graphden/versioning/storage/input.clj:91]]
+- see also :: [[file:types.org::#types/remaining-input][remaining-input]]
+- referenced from :: [[file:storage.org::#storage/apply!][apply!]]
+
+* 4. Storage
 :PROPERTIES:
 :CUSTOM_ID: storage/Storage
 :FILE: src/graphden/storage/protocol/core.clj
-:LINE: 79
+:LINE: 80
 :MINS: 1.0
 :END:
 
 Defines the storage lifecycle [[file:glossary.org::#term/protocol][protocol]]: initialize a backend with a data schema, then close its resources when finished. Row operations and reachable-graph queries are separate [[file:glossary.org::#term/protocol][protocols]] shown next.
 
-- source :: [[file:../../../src/graphden/storage/protocol/core.clj::(defprotocol Storage][src/graphden/storage/protocol/core.clj:79]]
+- source :: [[file:../../../src/graphden/storage/protocol/core.clj::(defprotocol Storage][src/graphden/storage/protocol/core.clj:80]]
 - same file :: [[file:storage.org::#storage/StorageCRUD][StorageCRUD]], [[file:storage.org::#storage/ExecutionGraph][ExecutionGraph]]
 
-* 2. StorageCRUD
+* 5. StorageCRUD
 :PROPERTIES:
 :CUSTOM_ID: storage/StorageCRUD
 :FILE: src/graphden/storage/protocol/core.clj
-:LINE: 115
+:LINE: 116
 :MINS: 3.3
 :END:
 
 Defines row operations such as ~read-entity~, ~query-entities~, and ~create-entity~. These [[file:glossary.org::#term/protocol][protocol]] methods let graph code read and write entities without depending on a concrete database implementation.
 
-- source :: [[file:../../../src/graphden/storage/protocol/core.clj::(defprotocol StorageCRUD][src/graphden/storage/protocol/core.clj:115]]
+- source :: [[file:../../../src/graphden/storage/protocol/core.clj::(defprotocol StorageCRUD][src/graphden/storage/protocol/core.clj:116]]
 - same file :: [[file:storage.org::#storage/Storage][Storage]], [[file:storage.org::#storage/ExecutionGraph][ExecutionGraph]]
 - referenced from :: [[file:storage.org::#storage/resolve-execution-graph][resolve-execution-graph]], [[file:platform.org::#platform/RemoteStorage][RemoteStorage]]
 
-* 3. ExecutionGraph
+* 6. ExecutionGraph
 :PROPERTIES:
 :CUSTOM_ID: storage/ExecutionGraph
 :FILE: src/graphden/storage/protocol/core.clj
-:LINE: 288
+:LINE: 289
 :MINS: 0.9
 :END:
 
 Defines ~resolve-execution-graph~: given a root function ID, return the [[file:glossary.org::#term/reachable-graph][reachable graph]] and its indexes. Generic and PostgreSQL implementations follow below. This is a separate API from the executor's full-registry rebuild, which currently queries the graph entity tables through ~StorageCRUD~.
 
-- source :: [[file:../../../src/graphden/storage/protocol/core.clj::(defprotocol ExecutionGraph][src/graphden/storage/protocol/core.clj:288]]
+- source :: [[file:../../../src/graphden/storage/protocol/core.clj::(defprotocol ExecutionGraph][src/graphden/storage/protocol/core.clj:289]]
 - see also :: [[file:executor.org::#executor/rebuild!][rebuild!]]
 - same file :: [[file:storage.org::#storage/Storage][Storage]], [[file:storage.org::#storage/StorageCRUD][StorageCRUD]]
 
-* 4. DataSchema
+* 7. DataSchema
 :PROPERTIES:
 :CUSTOM_ID: storage/DataSchema
 :FILE: src/graphden/schema/protocol/protocol.clj
@@ -62,7 +101,7 @@ Defines how consumers inspect entity declarations, fields, and field types such 
 
 - source :: [[file:../../../src/graphden/schema/protocol/protocol.clj::(defprotocol DataSchema][src/graphden/schema/protocol/protocol.clj:28]]
 
-* 5. MalliDataSchema
+* 8. MalliDataSchema
 :PROPERTIES:
 :CUSTOM_ID: storage/MalliDataSchema
 :FILE: src/graphden/schema/malli/core.clj
@@ -75,19 +114,19 @@ Implements ~DataSchema~ with immutable maps of entities, enums, entity UUIDs, an
 - source :: [[file:../../../src/graphden/schema/malli/core.clj::(defrecord MalliDataSchema][src/graphden/schema/malli/core.clj:12]]
 - see also :: [[file:boot.org::#boot/postgres][postgres]]
 
-* 6. extend-builder
+* 9. extend-builder
 :PROPERTIES:
-:CUSTOM_ID: storage/extend-builder
+:CUSTOM_ID: storage/extend-builder~2
 :FILE: src/graphden/schema/graph/schema.clj
-:LINE: 641
-:MINS: 11.4
+:LINE: 643
+:MINS: 11.5
 :END:
 
 Declares the graph entities, their fields, reference edges, and uniqueness constraints. The schema builder turns these declarations into database tables and indexes. Retired-field declarations prevent obsolete columns such as ~binding.rename-to~ from being recreated.
 
-- source :: [[file:../../../src/graphden/schema/graph/schema.clj::(defn extend-builder][src/graphden/schema/graph/schema.clj:641]]
+- source :: [[file:../../../src/graphden/schema/graph/schema.clj::(defn extend-builder][src/graphden/schema/graph/schema.clj:643]]
 
-* 7. valid-type?
+* 10. valid-type?
 :PROPERTIES:
 :CUSTOM_ID: storage/valid-type?
 :FILE: src/graphden/schema/fields/types.clj
@@ -99,7 +138,7 @@ Checks actual field values against declared storage types. Known types have pred
 
 - source :: [[file:../../../src/graphden/schema/fields/types.clj::(defn valid-type?][src/graphden/schema/fields/types.clj:160]]
 
-* 8. ExecutionGraphResult
+* 11. ExecutionGraphResult
 :PROPERTIES:
 :CUSTOM_ID: storage/ExecutionGraphResult
 :FILE: src/graphden/storage/protocol/graph.clj
@@ -112,7 +151,7 @@ Defines the resolved execution-graph result: entity collections together with in
 - source :: [[file:../../../src/graphden/storage/protocol/graph.clj::(defrecord ExecutionGraphResult][src/graphden/storage/protocol/graph.clj:86]]
 - same file :: [[file:storage.org::#storage/->execution-graph][->execution-graph]], [[file:storage.org::#storage/process-fn-node][process-fn-node]], [[file:storage.org::#storage/resolve-execution-graph-bfs][resolve-execution-graph-bfs]]
 
-* 9. ->execution-graph
+* 12. ->execution-graph
 :PROPERTIES:
 :CUSTOM_ID: storage/->execution-graph
 :FILE: src/graphden/storage/protocol/graph.clj
@@ -126,7 +165,7 @@ Assembles an execution-graph result and its lookup indexes from loaded entity co
 - same file :: [[file:storage.org::#storage/ExecutionGraphResult][ExecutionGraphResult]], [[file:storage.org::#storage/process-fn-node][process-fn-node]], [[file:storage.org::#storage/resolve-execution-graph-bfs][resolve-execution-graph-bfs]]
 - referenced from :: [[file:storage.org::#storage/resolve-execution-graph~2][resolve-execution-graph]]
 
-* 10. process-fn-node
+* 13. process-fn-node
 :PROPERTIES:
 :CUSTOM_ID: storage/process-fn-node
 :FILE: src/graphden/storage/protocol/graph.clj
@@ -140,7 +179,7 @@ Collects the outgoing references of one function: parents, type references, and 
 - same file :: [[file:storage.org::#storage/ExecutionGraphResult][ExecutionGraphResult]], [[file:storage.org::#storage/->execution-graph][->execution-graph]], [[file:storage.org::#storage/resolve-execution-graph-bfs][resolve-execution-graph-bfs]]
 - referenced from :: [[file:storage.org::#storage/reachable-fns-sql][reachable-fns-sql]]
 
-* 11. resolve-execution-graph-bfs
+* 14. resolve-execution-graph-bfs
 :PROPERTIES:
 :CUSTOM_ID: storage/resolve-execution-graph-bfs
 :FILE: src/graphden/storage/protocol/graph.clj
@@ -153,7 +192,7 @@ Traverses the [[file:glossary.org::#term/reachable-graph][reachable graph]] [[fi
 - source :: [[file:../../../src/graphden/storage/protocol/graph.clj::(defn resolve-execution-graph-bfs][src/graphden/storage/protocol/graph.clj:176]]
 - same file :: [[file:storage.org::#storage/ExecutionGraphResult][ExecutionGraphResult]], [[file:storage.org::#storage/->execution-graph][->execution-graph]], [[file:storage.org::#storage/process-fn-node][process-fn-node]]
 
-* 12. resolve-execution-graph
+* 15. resolve-execution-graph
 :PROPERTIES:
 :CUSTOM_ID: storage/resolve-execution-graph
 :FILE: src/graphden/storage/protocol/generic_graph.clj
@@ -166,19 +205,19 @@ Implements reachable-graph resolution using generic row loaders and [[file:gloss
 - source :: [[file:../../../src/graphden/storage/protocol/generic_graph.clj::(defn resolve-execution-graph][src/graphden/storage/protocol/generic_graph.clj:36]]
 - see also :: [[file:storage.org::#storage/StorageCRUD][StorageCRUD]]
 
-* 13. PostgresStorage
+* 16. PostgresStorage
 :PROPERTIES:
 :CUSTOM_ID: storage/PostgresStorage
 :FILE: src/graphden/storage/postgres/core.clj
-:LINE: 125
-:MINS: 12.9
+:LINE: 126
+:MINS: 13.1
 :END:
 
 Implements the storage [[file:glossary.org::#term/protocol][protocols]] for PostgreSQL, mostly by delegating each method to a helper. Its ~ExecutionGraph~ implementation selects the optimized PostgreSQL resolver rather than the generic traversal. Read the [[file:glossary.org::#term/protocol][protocol]] headings to distinguish lifecycle, row operations, constraints, and graph resolution.
 
-- source :: [[file:../../../src/graphden/storage/postgres/core.clj::(defrecord PostgresStorage][src/graphden/storage/postgres/core.clj:125]]
+- source :: [[file:../../../src/graphden/storage/postgres/core.clj::(defrecord PostgresStorage][src/graphden/storage/postgres/core.clj:126]]
 
-* 14. do-initialize
+* 17. do-initialize
 :PROPERTIES:
 :CUSTOM_ID: storage/do-initialize
 :FILE: src/graphden/storage/postgres/migration.clj
@@ -190,7 +229,7 @@ Compares the declared schema with stored metadata and applies the required datab
 
 - source :: [[file:../../../src/graphden/storage/postgres/migration.clj::(defn do-initialize][src/graphden/storage/postgres/migration.clj:286]]
 
-* 15. reachable-fns-sql
+* 18. reachable-fns-sql
 :PROPERTIES:
 :CUSTOM_ID: storage/reachable-fns-sql
 :FILE: src/graphden/storage/postgres/graph.clj
@@ -204,7 +243,7 @@ Builds a [[file:glossary.org::#term/cte][recursive SQL]] [[file:glossary.org::#t
 - see also :: [[file:storage.org::#storage/process-fn-node][process-fn-node]]
 - same file :: [[file:storage.org::#storage/resolve-execution-graph~2][resolve-execution-graph]]
 
-* 16. resolve-execution-graph
+* 19. resolve-execution-graph
 :PROPERTIES:
 :CUSTOM_ID: storage/resolve-execution-graph~2
 :FILE: src/graphden/storage/postgres/graph.clj
@@ -218,7 +257,7 @@ Runs the [[file:glossary.org::#term/cte][recursive query]] for reachable functio
 - see also :: [[file:storage.org::#storage/->execution-graph][->execution-graph]]
 - same file :: [[file:storage.org::#storage/reachable-fns-sql][reachable-fns-sql]]
 
-* 17. candidate-ids
+* 20. candidate-ids
 :PROPERTIES:
 :CUSTOM_ID: storage/candidate-ids
 :FILE: src/graphden/storage/bounded_query.clj
@@ -230,7 +269,7 @@ Loads a limited set of identity IDs before reading their values. The optional ~S
 
 - source :: [[file:../../../src/graphden/storage/bounded_query.clj::(defn candidate-ids][src/graphden/storage/bounded_query.clj:37]]
 
-* 18. make-emitter
+* 21. make-emitter
 :PROPERTIES:
 :CUSTOM_ID: storage/make-emitter
 :FILE: src/graphden/storage/postgres/notify.clj
@@ -244,7 +283,7 @@ Creates the write-notification sender. After a write, it sends ~pg_notify~ throu
 - see also :: [[file:crud.org::#crud/notify-after-write!][notify-after-write!]]
 - same file :: [[file:storage.org::#storage/create-listener][create-listener]]
 
-* 19. create-listener
+* 22. create-listener
 :PROPERTIES:
 :CUSTOM_ID: storage/create-listener
 :FILE: src/graphden/storage/postgres/notify.clj

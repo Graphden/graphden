@@ -34,6 +34,7 @@
    CachedStorage(VersionedStorage(BaseStorage)) works via simple stacking."
   (:require
     [graphden.http-host.lease :as http-lease]
+    [graphden.input.access :as input-access]
     [graphden.storage.graph-writer :as writer]
     [graphden.storage.postgres.graph-epoch :as epoch]
     [graphden.storage.protocol.core :as sp]
@@ -43,6 +44,7 @@
     [graphden.tenancy.context :as tenancy-context]
     [graphden.types.diagnostics :as diag]
     [graphden.versioning.branch-local :as bl]
+    [graphden.versioning.storage.input :as input-storage]
     [graphden.versioning.storage.merge :as mrg]
     [graphden.versioning.storage.purge :as purge]
     [graphden.versioning.storage.resolution :as res]
@@ -148,6 +150,9 @@
    or a raw storage write. Cleared AFTER the write so a concurrent reader
    cannot re-cache the pre-write value."
   [base-storage entity-name write!]
+  (when (contains? input-access/offline-entities entity-name)
+    (input-access/assert-write! entity-name {})
+    (uniq/xact-lock! (tx/datasource base-storage) ["structured-input-bindings"]))
   (let [result (with-bump* base-storage entity-name write!)]
     (when (= :fn entity-name)
       (bl/invalidate! base-storage))
@@ -257,6 +262,7 @@
                                                     (assoc data :id id))
         do-create!
         (fn [st]
+          (input-storage/check-collisions! st branch-id entity-name [normalized])
           (uniq/check-list-item-position-collision! st branch-id entity-name normalized)
           (uniq/check-fn-name-collision! st branch-id entity-name normalized)
           (uniq/check-resource-override-path-collision! st branch-id entity-name normalized)
@@ -324,7 +330,8 @@
    - `:position?` — a `:binding-list-item` position / binding move can
      land on a `(binding-id, position)` another item holds."
   [entity-name data merged]
-  {:name? (boolean (and (= :fn entity-name)
+  {:input? (= :input-binding entity-name)
+   :name? (boolean (and (= :fn entity-name)
                         (:name merged)
                         (or (contains? data :name)
                             (contains? data :namespace-id))))
@@ -373,15 +380,17 @@
             ;; no-ops because version-data-fields-only diffing returns
             ;; equal and create-version-record! is skipped.
             non-versioned-data (apply dissoc data version-data-fields)
-            {:keys [name? path? position?]} (collision-writes entity-name data merged)]
+            {:keys [name? path? position? input?]} (collision-writes entity-name data merged)]
         ;; Serialize on (ns, name) for a rename/move, on the path for an
         ;; override re-point and on the owning binding for a list-item
         ;; position move — the keys the create path locks. Taken after the
         ;; row lock (the order every write path uses: branch → row →
         ;; collision), so no two transactions wait on each other in a cycle.
-        (when (or name? path? position?)
+        (when (or name? path? position? input?)
           (uniq/xact-lock! (tx/datasource st)
                            [(uniq/collision-lock-key branch-id entity-name merged)]))
+        (when input?
+          (input-storage/check-collisions! st branch-id entity-name [shape]))
         (when name?
           (uniq/check-fn-name-collision! st branch-id entity-name shape))
         (when position?
@@ -462,6 +471,7 @@
                        :colliding-item-ids (mapv :id items)}))))
   ;; Against-storage resolved-view checks, each batched over the whole
   ;; batch (and a no-op for the entity types it doesn't apply to).
+  (input-storage/check-collisions! st branch-id entity-name shapes)
   (uniq/check-list-item-position-collisions! st branch-id entity-name shapes)
   (uniq/check-fn-name-collisions! st branch-id entity-name shapes)
   (uniq/check-resource-override-path-collisions! st branch-id entity-name shapes))
@@ -1363,7 +1373,7 @@
    pass then runs once more for the fns those slots released."
   [st branch-id own-ids-by-entity own-fn-slot-rows]
   (let [own (fn [e] (vec (get own-ids-by-entity e)))
-        _ (doseq [e [:binding-list-item :binding]]
+        _ (doseq [e [:input-binding :binding-list-item :binding]]
             (purge-versionless! st branch-id e (own e)))
         purged-fs (purge-versionless! st branch-id :fn-slot (own :fn-slot))
         _ (purge-versionless! st branch-id :resource-override (own :resource-override))

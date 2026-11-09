@@ -15,7 +15,7 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext, api, getEntities, deleteFnByName,
+const {assert, newContext, waitForEditorReady, api, getEntities, deleteFnByName,
        waitForServerHealthy} = require('./edit-test-helpers');
 
 
@@ -32,6 +32,7 @@ async function cleanup(page) {
 
 
 async function openTypeCreate(page, nsName) {
+  await waitForEditorReady(page);
   await page.evaluate((name) => {
     const headers = Array.from(document.querySelectorAll('.ns-header'));
     const target = headers.find(

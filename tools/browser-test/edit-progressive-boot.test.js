@@ -93,9 +93,9 @@ const {assert, newContext, BASE} = require('./edit-test-helpers');
     assert(await page.evaluate(() => !richTypes.obsoleteBoot && !servicesCache?.services?.some(s => s.id === 'obsolete-service')),
       'late metadata and services cannot repopulate the invalidated session');
     assert(writes === 0, 'navigation and pending commands made no mutation requests');
-    console.log('PASS progressive Explorer, delayed selection and authorization epochs');
   } finally {
     releaseName(); releaseTypes(); releaseServices();
     await browser.close();
   }
+  console.log('PASS progressive Explorer, delayed selection and authorization epochs');
 })().catch(error => { console.error(error); process.exitCode = 1; });

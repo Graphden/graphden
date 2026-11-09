@@ -559,7 +559,8 @@ async function filterAndSelect(page, filterText, fnName) {
 // child of str-upper. Masked until 2026-09-24 by a flat 650 ms sleep after
 // every tour title; `ownerName` null + `root` = whatever the root card is.
 async function waitForRenderedCanvas(page, timeout = 90000) {
-  await page.waitForFunction(() => graphTypesReady() && graphRenderReady(),
+  await page.waitForFunction(() => graphTypesReady() && graphRenderReady()
+    && (typeof gdGraphEditsReady !== 'function' || gdGraphEditsReady()),
     null, {timeout, polling: 100});
 }
 

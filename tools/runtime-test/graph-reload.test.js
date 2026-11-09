@@ -331,6 +331,40 @@ function racingRoutes(ctxRef, typesBody) {
     assert(Object.values(b.surfaces).every(el => !el.inert), 'retry restores original surface state');
   }
 
+  console.log(' stale tree failures are silent and current failures settle metadata waiters');
+  {
+    let rejectOld;
+    let old = true;
+    const b = boot({routes: url => url.includes('scope=tree') && old
+      ? new Promise((_, reject) => { rejectOld = reject; })
+      : json(url.includes('scope=tree') ? TREE : {})});
+    b.ctx.location.hash = '';
+    const pending = b.ctx.initGraph();
+    b.ctx.window.dispatchEvent(new Event('gd-auth-changed'));
+    old = false;
+    await b.ctx.initGraph();
+    rejectOld(new Error('obsolete tree offline'));
+    let rejected = false;
+    try { await pending; } catch (_) { rejected = true; }
+    assert(!rejected, 'old tree rejection cannot create a fatal banner in the new session');
+  }
+  for (const reply of [json({}, 503), json(new Error('bad tree JSON'))]) {
+    const b = boot({routes: url => url.includes('scope=tree') ? reply : json({})});
+    b.ctx.location.hash = '';
+    const pending = b.ctx.initGraph({progressive: true});
+    const metadata = b.ctx.gdWaitForGraphMetadata();
+    let rejected = false;
+    try { await pending; } catch (_) { rejected = true; }
+    assert(rejected && await metadata === false, 'tree failure settles local metadata waiter false');
+    assert(!b.ctx.gdGraphEditsReady(), 'tree failure keeps mutations closed');
+  }
+  {
+    const b = boot({routes: unauthorized, accounts: true});
+    b.ctx.clearAuthPassword = () => b.ctx.window.dispatchEvent(new Event('gd-auth-changed'));
+    await b.ctx.initGraph({progressive: true});
+    assert(b.calls.href?.startsWith('/login?next='), 'clearing our rejected credential still opens the auth wall');
+  }
+
   console.log(' a description save drops the row-actions HTML it was baked into');
   {
     const tctx = vm.createContext({

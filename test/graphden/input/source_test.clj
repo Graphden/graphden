@@ -1,4 +1,4 @@
-(ns graphden.input.source-test
+(ns ^:serial graphden.input.source-test
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.input.source :as source]
@@ -240,3 +240,39 @@
     (is (contains? (codes (result report :new-field)) :own-field-declaration-required))
     (is (contains? (codes (result report :annotated)) :binding-metadata-required))
     (is (not (contains? (result report :annotated) :proposed)))))
+
+
+(deftest secret-path-resolution-never-becomes-a-literal-path
+  (let [resolver {:name :vault-get :namespace "web.vault" :args {:value :text}
+                  :return-type :text}
+        definitions [base resolver
+                     {:name :secret :namespace "demo" :parent :sink
+                      :args {:x {:secret-path "private/vault/path"}}}
+                     {:name :data :namespace "demo" :parent :sink
+                      :args {:x {:value {:secret-path "ordinary data"}}}}]
+        report (plan definitions)
+        secret (result report :secret)]
+    (is (contains? (codes secret) :secret-path-binding-required))
+    (is (not (contains? secret :proposed)))
+    (is (= (ids/fn-id "web.vault" :vault-get)
+           (get-in secret [:legacy :arguments 0 :policy :resolver-fn-id])))
+    (is (not (.contains (pr-str (:blockers report)) "private/vault/path")))
+    (is (= [:value {:secret-path "ordinary data"}]
+           (get-in (result report :data) [:proposed :bind :x])))))
+
+
+(deftest unhandled-emitted-binding-columns-block-the-proposal
+  ;; Exercise schema evolution at the public legacy-parser boundary. This
+  ;; namespace is serial because with-redefs changes that parser's root var.
+  (let [definitions [base {:name :child :namespace "demo" :parent :sink :args {:x "stored"}}]
+        context (prepared definitions)
+        emit parse/parse-prepared-module]
+    (doseq [[column value expected] [[:override-kind :secret-path :legacy-override-kind-required]
+                                     [:future-policy nil :unsupported-binding-columns]]]
+      (with-redefs [parse/parse-prepared-module
+                    (fn [module]
+                      (mapv #(cond-> % (= :binding (:kind %)) (assoc column value)) (emit module)))]
+        (let [planned (result (source/plan-module definitions context) :child)]
+          (is (contains? (codes planned) expected))
+          (is (not (contains? planned :proposed)))
+          (is (contains? (get-in planned [:legacy :arguments 0 :policy]) column)))))))

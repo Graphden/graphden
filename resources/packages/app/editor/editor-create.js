@@ -362,21 +362,36 @@ function buildFnRowButtons(actionsEl, fnId, fnName) {
 // =============================================================================
 
 let activeChildMenu = null;
+let stopChildMenuObservation = null;
 
 function openChildCreateMenu(anchorEl, parentNsId, parentNsPath) {
   closeChildCreateMenu();
   const menu = window.gdAuthoringCreateMenu();
-  // Position fixed under the anchor.
-  const rect = anchorEl.getBoundingClientRect();
   menu.style.position = 'fixed';
-  menu.style.top = (rect.bottom + 4) + 'px';
-  menu.style.left = rect.left + 'px';
   menu.style.right = 'auto';
   menu.style.zIndex = '300';
   menu.setAttribute('role', 'menu');
   menu.setAttribute('aria-label', 'Create in ' + (parentNsPath || 'this namespace'));
   document.body.appendChild(menu);
   activeChildMenu = menu;
+  const place = () => {
+    const viewport = window.visualViewport;
+    const left = viewport?.offsetLeft || 0;
+    const top = viewport?.offsetTop || 0;
+    const width = viewport?.width || window.innerWidth;
+    const height = viewport?.height || window.innerHeight;
+    const rect = anchorEl.getBoundingClientRect();
+    if (!anchorEl.isConnected || rect.right < left || rect.bottom < top
+        || rect.left > left + width || rect.top > top + height) {
+      closeChildCreateMenu();
+      return;
+    }
+    menu.style.minWidth = Math.min(180, Math.max(0, width - 8)) + 'px';
+    menu.style.maxWidth = Math.max(0, width - 8) + 'px';
+    anchorBelowClamped(menu, anchorEl, {margin: 4, display: 'flex', constrainHeight: true, viewport});
+  };
+  stopChildMenuObservation = observePopoverAnchor(menu, anchorEl, place);
+  place();
   // A menu the keyboard can leave: focus lands on the first item, Escape
   // closes it and returns focus to the `+` that opened it (consumed, so a
   // running tour does not end). ↑ / ↓ walk the items.
@@ -386,17 +401,17 @@ function openChildCreateMenu(anchorEl, parentNsId, parentNsPath) {
       e.preventDefault();
       e.stopPropagation();
       closeChildCreateMenu();
-      if (anchorEl && typeof anchorEl.focus === 'function') anchorEl.focus();
+      focusSafely(anchorEl);
       return;
     }
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
       const i = items.indexOf(document.activeElement);
       const n = items.length;
-      items[((i < 0 ? 0 : i) + (e.key === 'ArrowDown' ? 1 : n - 1)) % n].focus();
+      focusSafely(items[((i < 0 ? 0 : i) + (e.key === 'ArrowDown' ? 1 : n - 1)) % n]);
     }
   });
-  setTimeout(() => { if (items[0] && activeChildMenu === menu) items[0].focus(); }, 0);
+  setTimeout(() => { if (items[0] && activeChildMenu === menu) focusSafely(items[0]); }, 0);
 
   menu.querySelectorAll('.create-menu-item').forEach((btn) => {
     btn.addEventListener('click', (e) => {
@@ -429,6 +444,8 @@ function openChildCreateMenu(anchorEl, parentNsId, parentNsPath) {
 }
 
 function closeChildCreateMenu() {
+  if (stopChildMenuObservation) stopChildMenuObservation();
+  stopChildMenuObservation = null;
   if (activeChildMenu) {
     activeChildMenu.remove();
     activeChildMenu = null;

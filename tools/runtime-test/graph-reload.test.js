@@ -35,7 +35,7 @@ const json = (body, status = 200) => ({
 // A fresh editor-main per case. `routes(url)` answers fetches; a route may
 // return a function (called at fetch time) to act mid-flight.
 function boot({ routes, accounts = false, tenancyClass = false, renderGraph = () => {} }) {
-  const calls = { popover: [], entityList: 0, href: null, requery: 0, events: [], inlineClosed: 0 };
+  const calls = { popover: [], entityList: 0, href: null, requery: 0, viewInvalidations: 0, events: [], inlineClosed: 0 };
   const listeners = {};
   const windowListeners = new Map();
   const actions = {inert: false};
@@ -58,6 +58,7 @@ function boot({ routes, accounts = false, tenancyClass = false, renderGraph = ()
     buildLookups: (g) => ({ fnMap: new Map(g.fns.map((f) => [f.id, f])) }),
     updateEntityList: () => { calls.entityList += 1; },
     requerySearch: () => { calls.requery += 1; },
+    gdInvalidateSharedViews: () => { calls.viewInvalidations += 1; },
     clearAuthPassword() {},
     openAuthPopover: (msg) => { calls.popover.push(msg); },
     graphdenAccountsMode: () => accounts,
@@ -290,6 +291,8 @@ function racingRoutes(ctxRef, typesBody) {
     assert(b.ctx.graphTypesReady(), 'late types preserve the already installed subtree');
     assert(b.ctx.gdGraphEditsReady() && !b.actions.inert, 'fresh metadata releases mutation actions');
     assert(ready, 'full readiness does not wait for service badges');
+    assert(b.calls.requery === 1, 'metadata annotations do not repeat the initial search refresh');
+    assert(b.calls.viewInvalidations === 1, 'metadata annotations do not invalidate unchanged shared views');
     finishServices();
   }
 

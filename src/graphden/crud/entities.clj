@@ -19,6 +19,7 @@
    `graphden.packages.*` package: the rendering code that does stays
    in `web/crud/impls.clj`."
   (:require
+    [graphden.input.access :as input-access]
     [clojure.set]
     [clojure.string :as str]
     [clojure.tools.logging :as log]
@@ -71,12 +72,14 @@
 
 (defn list-entities
   [entity-type where ctx]
+  (input-access/assert-public-access! (keyword entity-type))
   (vec (sp/query-entities (request/require-storage ctx)
                           (keyword entity-type) (or where {}))))
 
 
 (defn get-entity
   [entity-type id ctx]
+  (input-access/assert-public-access! (keyword entity-type))
   (sp/read-entity (request/require-storage ctx) (keyword entity-type) id))
 
 
@@ -130,6 +133,7 @@
 
 (defn- reject-generic-audit-write!
   [entity-type]
+  (input-access/assert-public-access! entity-type)
   (when (contains? immutable-operational-entities entity-type)
     (throw (ex-info "Audit records can only be written by their domain operation"
                     {:type :authz/forbidden :entity-type entity-type}))))
@@ -137,6 +141,9 @@
 
 (defn- assert-write-valid!
   [storage entity-type data proven-acyclic?]
+  (when (and (= :fn entity-type) (contains? data :input-type-fn-id))
+    (throw (ex-info "Input contracts are not editable through the public API yet"
+                    {:type :authz/forbidden})))
   (when-let [rej (or (when (= entity-type :fn)
                        (secret-leaf-capability-rej storage data))
                      (validation/write-rej storage entity-type data proven-acyclic?))]

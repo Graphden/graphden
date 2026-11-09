@@ -184,7 +184,11 @@
      in `vts/mirror-config`).
    - `:slot` is intentionally absent: slots are immutable post-create
      (changing the (name, type-fn-id) pair = creating a new slot)."
-  {:fn {:version-entity :fn-version
+  {:input-binding {:version-entity :input-binding-version
+                   :version-id-field :input-binding-id
+                   :version-data-fields (vts/version-data-fields :input-binding)
+                   :candidate-bound-keys #{:fn-id :ref-fn-id :type-override-fn-id}}
+   :fn {:version-entity :fn-version
         :version-id-field :fn-id
         :version-data-fields (vts/version-data-fields :fn)
         :candidate-bound-keys #{:name :anonymous-hash :base-fn-id
@@ -263,7 +267,7 @@
   [base-storage binding-fn-ids entity-name entity-id version-row]
   (case entity-name
     :fn entity-id
-    (:fn-slot :binding) (:fn-id version-row)
+    (:fn-slot :binding :input-binding) (:fn-id version-row)
     :binding-list-item (when-let [bid (:binding-id version-row)]
                          (if (contains? binding-fn-ids bid)
                            (get binding-fn-ids bid)

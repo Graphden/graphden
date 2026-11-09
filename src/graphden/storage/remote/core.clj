@@ -99,6 +99,48 @@
 ;; In-memory query matching
 ;; =============================================================================
 
+(def ^:private indexed-fields
+  #{:id :fn-id :binding-id :slot-id :namespace-id :name})
+
+
+(defn- field-index
+  [rows field]
+  (reduce-kv (fn [index position row]
+               (update index (get row field) (fnil conj []) position))
+             {} rows))
+
+
+(defn- indexed-snapshot
+  "Attach bounded, lazy indexes to this immutable bundle, retaining its shape.
+   Table identities detect callers replacing rows while inheriting old metadata."
+  [rows]
+  (let [indexes (::indexes (meta rows))]
+    (if (and indexes (= (count rows) (count indexes))
+             (every? (fn [[entity table]] (identical? table (:source (get indexes entity)))) rows))
+      rows
+      (with-meta (or rows {})
+        (assoc (meta rows) ::indexes
+               (into {}
+                     (map (fn [[entity table]]
+                            (let [ordered (vec table)]
+                              [entity {:source table :ordered ordered
+                                       :fields (into {} (map (fn [field]
+                                                               [field (delay (field-index ordered field))]))
+                                                     indexed-fields)}])))
+                     rows))))))
+
+
+(defn- snapshot-rows
+  "Read one generation. Also support the public constructor and direct rows resets."
+  [rows]
+  (loop []
+    (let [current @rows
+          indexed (indexed-snapshot current)]
+      (if (or (identical? current indexed) (compare-and-set! rows current indexed))
+        indexed
+        (recur)))))
+
+
 (defn- compile-where
   [where]
   (mapv (fn [[k v]] [k (if (vector? v) (set v) v)]) where))
@@ -115,10 +157,44 @@
           where))
 
 
+(defn- candidate-rows
+  [rows entity compiled]
+  (let [{:keys [ordered fields]} (get (::indexes (meta rows)) entity)
+        choices (keep (fn [[field value]]
+                        (when-let [index (get fields field)]
+                          (let [index @index
+                                buckets (if (set? value)
+                                          (keep index value)
+                                          [(get index value [])])]
+                            {:size (reduce + 0 (map count buckets)) :buckets buckets})))
+                      compiled)]
+    (if (seq choices)
+      (let [{:keys [buckets]} (apply min-key :size choices)
+            ;; Each row has one field value, so distinct membership buckets
+            ;; are disjoint. Positions preserve duplicates and bundle order.
+            positions (if (= 1 (count buckets)) (first buckets) (sort (mapcat identity buckets)))]
+        (map #(nth ordered %) positions))
+      (get rows entity))))
+
+
+(defn- matching-rows
+  [rows entity compiled]
+  (filter #(matches? compiled %) (candidate-rows rows entity compiled)))
+
+
 (defn- query-rows
   [rows entity where]
-  (let [compiled (compile-where where)]
-    (filterv #(matches? compiled %) (get rows entity))))
+  (vec (matching-rows rows entity (compile-where where))))
+
+
+(defn- identity-candidates
+  [rows entity where max-candidates]
+  (let [compiled (compile-where (bounded/candidate-where entity where max-candidates))
+        candidates (into [] (comp (filter #(matches? compiled %)) (take (inc max-candidates)))
+                         (candidate-rows rows entity compiled))]
+    (bounded/check-candidate-count! candidates max-candidates)
+    (with-meta (mapv #(select-keys % [:id :org-id]) candidates)
+      {::sp/candidate-count (count candidates)})))
 
 
 (defn- read-only!
@@ -143,7 +219,7 @@
   (create-entity [_ _ _] (read-only! "create-entity"))
 
 
-  (read-entity [_ entity id] (first (query-rows @rows entity {:id id})))
+  (read-entity [_ entity id] (first (query-rows (snapshot-rows rows) entity {:id id})))
 
 
   (update-entity [_ _ _ _] (read-only! "update-entity"))
@@ -152,7 +228,7 @@
   (delete-entity [_ _ _] (read-only! "delete-entity"))
 
 
-  (query-entities [_ entity where] (query-rows @rows entity where))
+  (query-entities [_ entity where] (query-rows (snapshot-rows rows) entity where))
 
 
   (query-entities
@@ -170,7 +246,7 @@
     ;; the mechanism). Latest per group-cols tuple by :created-at. `:created-at`
     ;; is a `#inst` (java.util.Date), so compare by `inst-ms` — `max-key` over
     ;; a raw Date-vs-0 mix would throw ClassCastException.
-    (->> (query-rows @rows entity where)
+    (->> (query-rows (snapshot-rows rows) entity where)
          (group-by (apply juxt group-cols))
          (vals)
          (mapv (fn [group]
@@ -186,22 +262,18 @@
     (when version-source
       (throw (ex-info "Snapshot has no version-history candidate source"
                       {:type :storage-error/bounded-query-unsupported :entity-name entity})))
-    (let [candidate-where (compile-where (bounded/candidate-where entity where max-candidates))
-          candidates (->> (get @rows entity)
-                          (filter #(matches? candidate-where %))
-                          (take (inc max-candidates))
-                          vec)]
-      (bounded/check-candidate-count! candidates max-candidates)
-      (with-meta (mapv #(select-keys % [:id :org-id]) candidates)
-        {::sp/candidate-count (count candidates)})))
+    (identity-candidates (snapshot-rows rows) entity where max-candidates))
 
 
   (query-bounded-entities
-    [this entity where max-candidates]
-    (let [candidates (sp/query-identity-candidates this entity where nil max-candidates)
-          compiled (compile-where where)
-          ids (set (map :id candidates))]
-      (with-meta (filterv #(and (contains? ids (:id %)) (matches? compiled %)) (get @rows entity))
+    [_ entity where max-candidates]
+    (let [snapshot (snapshot-rows rows)
+          candidates (identity-candidates snapshot entity where max-candidates)
+          ids (set (map :id candidates))
+          ;; Candidate budget and resolved rows must come from the SAME refresh
+          ;; generation; organization predicates remain after candidate counting.
+          compiled (compile-where where)]
+      (with-meta (filterv #(matches? compiled %) (candidate-rows snapshot entity [[:id ids]]))
         (meta candidates))))
 
 
@@ -215,7 +287,7 @@
   ;; vector here would blow up `vals` in `executor.context`.
   (read-entities
     [_ entity ids]
-    (into {} (map (juxt :id identity)) (query-rows @rows entity {:id (vec ids)})))
+    (into {} (map (juxt :id identity)) (query-rows (snapshot-rows rows) entity {:id (vec ids)})))
 
 
   (update-entities [_ _ _] (read-only! "update-entities"))
@@ -284,7 +356,7 @@
                            {}
                            bundle-key->entity)
                 bundle)]
-     (->RemoteStorage (atom rows) hub-url token branch))))
+     (->RemoteStorage (atom (indexed-snapshot rows)) hub-url token branch))))
 
 
 (defn create-remote-storage
@@ -301,7 +373,7 @@
      (log/info "RemoteStorage bootstrapped"
                {:hub hub-url :branch branch :org org
                 :counts (into {} (map (fn [[k v]] [k (count v)])) rows)})
-     (cond-> (->RemoteStorage (atom rows) hub-url token branch)
+     (cond-> (->RemoteStorage (atom (indexed-snapshot rows)) hub-url token branch)
        org (assoc :org org)))))
 
 
@@ -312,7 +384,7 @@
    blip doesn't blank the executor's graph."
   [{:keys [rows hub-url token branch org]}]
   (try
-    (reset! rows (fetch-graph-rows hub-url token branch org))
+    (reset! rows (indexed-snapshot (fetch-graph-rows hub-url token branch org)))
     (log/info "RemoteStorage refreshed" {:hub hub-url :branch branch})
     true
     (catch Exception e

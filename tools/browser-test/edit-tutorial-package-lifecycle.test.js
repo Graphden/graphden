@@ -10,8 +10,10 @@ const {
 } = require('./tutorial-tour-helpers');
 
 async function publish(page, version) {
+  // Saving the preceding binding can still be refreshing the graph. A real
+  // click waits for the namespace actions to leave their inert state.
   await page.locator('.ns-header[data-ns-path="tutorial-greetings"] .ns-publish-btn')
-    .dispatchEvent('click');
+    .click();
   await page.fill('#gd-nspub-name', 'tutorial-greet');
   await page.fill('#gd-nspub-version', version);
   await page.locator('#gd-nspub-go').dispatchEvent('click');
@@ -179,7 +181,15 @@ async function ledger(page) {
       console.error('Retained exact receipt ledger:', JSON.stringify(saved));
       await page.evaluate(async () => { if (_tourState) await _tourEnd(); }).catch(() => {});
       if (await page.getByRole('button', {name: 'Delete them', exact: true}).isVisible().catch(() => false)) {
-        await page.getByRole('button', {name: 'Delete them', exact: true}).click().catch(() => {});
+        try {
+          await page.getByRole('button', {name: 'Delete them', exact: true}).click();
+          // The click only starts async deletion. Keep the page alive until
+          // production cleanup confirms success by closing the dialog.
+          await page.waitForFunction(() => !document.querySelector('#gd-tour-pop'),
+            null, {timeout: 20000});
+        } catch (cleanupError) {
+          console.error('Exact receipt cleanup did not finish:', cleanupError.message);
+        }
       }
     }
     await browser.close();

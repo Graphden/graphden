@@ -14,6 +14,23 @@ policy in its snapshot identity; a function row version alone is insufficient.
 There is no shared analysis cache yet. Contexts without an explicit snapshot ID
 receive a fresh context token; callers must not reuse it for changed snapshot data.
 
+The separate `signatures/infer-use` adapter feeds canonical scoped facts into
+`types.check/infer-input-signature`. It requires explicit implementation
+provenance: `{:base-fn-id UUID :root-entry frozen-entry :argument-paths
+{ABI-key [field-ID ...]}}`. These paths also serve the compiler; implementation
+functions are never invoked during analysis. Whole and partial literal records
+remain data, and projections retain their source-cell identity. Root signature
+variables are instantiated separately and joined to input types through the
+existing directional checker. The adapter returns substitutions and proofs for
+the graph checker to reconcile; invoking it alone does not complete analysis.
+
+Existing return rules can read other rich signatures. The adapter therefore
+binds both global and tenant registry views to isolated snapshot data. Derived
+use IDs distinguish repeated targets inside that view and are never persisted.
+The common return-rule, effect, declaration and execution-support policies are
+reused. Integration of this adapter into reference classification remains
+separate work; current graph coverage does not certify inferred signatures.
+
 `descriptor/resolve-contract` resolves the function's authored `input-type-fn-id`
 using existing type expansion and shape primitives. Field IDs come from declared
 memberships. Repeated record occurrences can share child IDs because their full

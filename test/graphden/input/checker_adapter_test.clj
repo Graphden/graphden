@@ -41,6 +41,19 @@
     (is (= 2 (count (:by-id @ambient))))))
 
 
+(deftest frozen-signature-free-input-and-return-share-the-engine-solution-test
+  (let [result (check/infer-input-signature
+                 {:fn-id (random-uuid)
+                  :root-entry {:fn-id (random-uuid) :args {:value 'implementation-a}
+                               :return 'implementation-a :effects #{}}
+                  :bindings-info {:value {:type 'authored-input-a}}
+                  :argument-effects {:value #{}} :free-arguments [:value]
+                  :signature-view {:by-id {} :by-name {}}})]
+    (is (= 'authored-input-a (:return result)))
+    (is (= 'authored-input-a (get (:substitution result) 'implementation-a)))
+    (is (= :deferred (get-in result [:argument-proofs :value :status])))))
+
+
 (deftest structured-literal-uses-the-existing-directional-checker-test
   (let [input {:address [[(random-uuid) []] [(random-uuid)]]
                :expected :int :actual :int :expression {:kind :value :value 12}}]

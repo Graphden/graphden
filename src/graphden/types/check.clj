@@ -2476,6 +2476,24 @@
     recorded))
 
 
+(defn- check-signature-arguments
+  [root-entry bindings-info]
+  (when-not (= (set (keys (:args root-entry))) (set (keys bindings-info)))
+    (throw (ex-info "Structured signature requires every implementation argument"
+                    {:type :input/unresolved-contract :code :signature-argument-mismatch})))
+  (reduce-kv
+    (fn [{:keys [substitution] :as result} argument info]
+      (let [proof (check-input-binding
+                    {:address (:address info) :expected (get-in root-entry [:args argument])
+                     :actual (:type info) :substitution substitution
+                     :expression (if (:value-present info)
+                                   {:kind :value :value (:value info)}
+                                   {:kind :type-fact})})]
+        (-> result (assoc :substitution (:substitution proof))
+            (assoc-in [:proofs argument] proof))))
+    {:substitution {} :proofs {}} bindings-info))
+
+
 (defn infer-input-signature
   "Run existing return, effect, declaration and execution policies for one
    structured-input use. Facts are keyed by explicit implementation ABI keys;
@@ -2491,10 +2509,12 @@
                     {:type :input/unresolved-contract :code :signature-evidence-required})))
   (binding [registry/*rich-types-override* (atom signature-view)
             registry/*per-org-rich-override* (atom {})]
-    (let [computed (rule-return-for-entry root-entry bindings-info
-                                          (or static-return (:return root-entry)))
+    (let [{:keys [substitution proofs]} (check-signature-arguments root-entry bindings-info)
+          static-return (types/resolve substitution (or static-return (:return root-entry)))
+          computed (types/resolve substitution (rule-return-for-entry root-entry bindings-info static-return))
           effects (compute-effects argument-effects root-entry)
           result {:return (enforce-declared-return! fn-id declaration computed)
+                  :substitution substitution :argument-proofs proofs
                   :effects effects
                   :arg-effects argument-effects
                   :call-time-effects (compute-call-time-effects argument-effects root-entry free-arguments)

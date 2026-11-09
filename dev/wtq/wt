@@ -2485,6 +2485,20 @@ train_run() {
     reuse_from="$resume_from"
     echo "  exact-candidate interrupted checkpoint: $reuse_from"
   fi
+  # Successful validation has no failed-stage pointer. Read its own proof
+  # separately; a red/landed receipt must never become validation pass credit.
+  # Only the immediately preceding train may supply proof: a newer failure
+  # must not be hidden by reaching back to an older successful validation.
+  local validated_prefix="$LOG_DIR/_train-$previous_train_ts" validated_sha
+  validated_sha="$(git -C "$TRAIN_WT" rev-parse HEAD)"
+  if [ -z "$reuse_from" ] && [ -n "$previous_train_ts" ] \
+     && [ "$(git -C "$MAIN_WT" rev-parse --verify -q "refs/wtq/validated/$previous_train_ts" || true)" = "$validated_sha" ] \
+     && bb "$SCRIPT_DIR/report.clj" validated "$validated_prefix.report.edn" \
+          "$validated_prefix.ci-expected.edn" "$validated_sha" "$gate_base" >/dev/null 2>&1; then
+    resume_from="$validated_prefix"
+    reuse_from="$validated_prefix"
+    echo "  exact-candidate successful validation checkpoint: $reuse_from"
+  fi
   start_sampler "$resources"
   ( WTQ_PROGRESS_MEMBERS=("${gated[@]}"); WTQ_RESUME_FROM="$resume_from" WTQ_REUSE_FROM="$reuse_from" WTQ_FIRST_STAGE="$first_stage" WTQ_FIRST_TESTS="$first_tests" WTQ_REPORT_TS="$ts" gate_body "$TRAIN_WT" "$no_e2e" "$deploy" "$no_fleet" "$no_visual" "${gated[@]}" ) 2>&1 | tee "$gate_out"
   grc="${PIPESTATUS[0]}"

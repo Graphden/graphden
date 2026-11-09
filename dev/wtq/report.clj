@@ -111,12 +111,33 @@
                           :duration-ms admission-ms})}}))
 
 
+(defn- validated-candidate!
+  "A successful validation can supply pass credit, never a landed verdict.
+   Stage roster, CI and image proofs must still be verified by the caller."
+  [path expected-path sha base-sha]
+  (let [receipt (edn/read-string (slurp path))
+        expected (edn/read-string (slurp expected-path))]
+    (when-not (and (string? sha) (re-matches #"[0-9a-f]{40}" sha)
+                   (= 1 (:schema receipt) (:schema expected))
+                   (true? (:complete receipt))
+                   (= 0 (:exit receipt))
+                   (= :validate (:mode receipt))
+                   (= :validated (:outcome receipt))
+                   (nil? (:failed-stage receipt))
+                   (= sha (:sha receipt) (:sha expected))
+                   (= base-sha (get-in expected [:scope :since])))
+      (throw (ex-info "No exact successful validation proof" {:path path})))
+    (println sha)))
+
+
 (defn -main
   [& args]
-  (let [[mode path sha queue-ms & remaining] args]
+  (let [[mode path & args] args]
     (case mode
-      "init" (write-atomic! path (base sha queue-ms))
-      "finish" (let [[gate-output ci-path resources exit] remaining]
+      "init" (let [[sha queue-ms] args]
+               (write-atomic! path (base sha queue-ms)))
+      "validated" (apply validated-candidate! path args)
+      "finish" (let [[sha queue-ms gate-output ci-path resources exit] args]
                  (write-atomic! path (report (base sha queue-ms) (slurp gate-output)
                                              ci-path resources (parse-long exit))))
       ("landed" "landed-image") (let [receipt (edn/read-string (slurp path))]
